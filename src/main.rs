@@ -5,6 +5,7 @@
 
 mod agent;
 mod gate;
+mod judge;
 mod record;
 mod verdict;
 mod worktree;
@@ -30,6 +31,8 @@ struct Cli {
 enum Cmd {
     /// Run one isolated, gated agent run against a target repo.
     Run(RunArgs),
+    /// Judge: read-only FP-triage of analyzer findings -> fp-verdicts.json overlay.
+    Judge(judge::JudgeArgs),
 }
 
 #[derive(Args)]
@@ -73,6 +76,7 @@ struct RunArgs {
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Run(a) => run(a),
+        Cmd::Judge(a) => judge::run(&a),
     }
 }
 
@@ -159,6 +163,7 @@ fn execute(
 
     let meta = RunMeta {
         schema: 1,
+        kind: "run".to_string(),
         run_id: run_id.to_string(),
         target: target.to_string(),
         repo: repo.to_string_lossy().to_string(),

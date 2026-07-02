@@ -12,6 +12,7 @@ use crate::verdict::{StepVerdict, Verdict};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RunMeta {
     pub schema: u32,
+    pub kind: String,
     pub run_id: String,
     pub target: String,
     pub repo: String,
@@ -41,7 +42,7 @@ pub struct RunRecord {
 impl RunRecord {
     pub fn create(runs_dir: &Path, target: &str, run_id: &str) -> Result<RunRecord> {
         let dir = runs_dir.join(target).join(run_id);
-        std::fs::create_dir_all(dir.join("gate"))?;
+        std::fs::create_dir_all(&dir)?;
         Ok(RunRecord { dir })
     }
 
@@ -61,6 +62,16 @@ impl RunRecord {
 
     pub fn write_diff(&self, d: &str) -> Result<()> {
         std::fs::write(self.dir.join("diff.patch"), d)?;
+        Ok(())
+    }
+
+    pub fn write_text(&self, name: &str, s: &str) -> Result<()> {
+        std::fs::write(self.dir.join(name), s)?;
+        Ok(())
+    }
+
+    pub fn write_json<T: Serialize>(&self, name: &str, v: &T) -> Result<()> {
+        std::fs::write(self.dir.join(name), serde_json::to_string_pretty(v)?)?;
         Ok(())
     }
 
