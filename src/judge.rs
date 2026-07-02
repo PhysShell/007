@@ -10,7 +10,7 @@ use sha1::{Digest, Sha1};
 use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::record::RunRecord;
 
@@ -285,9 +285,25 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
             .unwrap_or_default();
         let fif_json = serde_json::to_string_pretty(&fif)?;
 
-        let src_path = repo.join(file);
+        // Confine reads to the repo root: an absolute or `../` path smuggled into
+        // findings.json must not pull arbitrary files into the prompt — that is another
+        // exfil channel the tool sandbox can't stop. `repo` is already canonicalized.
+        let src_path = match repo.join(file).canonicalize() {
+            Ok(p) if p.starts_with(&repo) => p,
+            Ok(p) => {
+                eprintln!(
+                    "[o7 judge] warn: {file} resolves outside --repo ({}) — skipped",
+                    p.display()
+                );
+                continue;
+            }
+            Err(e) => {
+                eprintln!("[o7 judge] warn: {file}: cannot resolve source ({e}) — skipped");
+                continue;
+            }
+        };
         let src = std::fs::read_to_string(&src_path)
-            .with_context(|| format!("reading source {} (is it local?)", src_path.display()))?;
+            .with_context(|| format!("reading source {}", src_path.display()))?;
 
         let prompt = template
             .replace("{{RUBRIC}}", &rubric)
@@ -328,17 +344,34 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
         let paired: Vec<(String, &RawVerdict)> = if raws.len() == fif.len() {
             raws.iter()
                 .zip(fif.iter())
-                .map(|(rv, rep)| {
-                    // Trust the position, but sanity-check the echoed tuple and warn
-                    // (don't drop) if the model reordered/merged despite the contract.
-                    if rv.path != rep.path || rv.line != rep.line || rv.rule != rep.rule {
-                        eprintln!(
-                            "[o7 judge] warn: {file}: verdict ({}, {}, {}) != finding \
-                             ({}, {}, {}) at the same position — pairing by position anyway",
-                            rv.path, rv.line, rv.rule, rep.path, rep.line, rep.rule
-                        );
+                .filter_map(|(rv, rep)| {
+                    // Position is trustworthy only when the echoed tuple matches: that
+                    // both confirms the model kept order and is the only way to split a
+                    // message-collision (identical tuple, distinct finding_id). On a
+                    // mismatch the model reordered/merged — trusting position here would
+                    // silently attach the verdict to the WRONG finding_id, so recover by
+                    // key instead, and skip if even that is unknown.
+                    if rv.path == rep.path && rv.line == rep.line && rv.rule == rep.rule {
+                        return Some((rep.id.clone(), rv));
                     }
-                    (rep.id.clone(), rv)
+                    let key = (rv.path.clone(), rv.line, rv.rule.clone());
+                    match key_to_id.get(&key) {
+                        Some(id) => {
+                            eprintln!(
+                                "[o7 judge] warn: {file}: verdict ({}, {}, {}) out of position \
+                                 — recovered by key, not position",
+                                rv.path, rv.line, rv.rule
+                            );
+                            Some((id.clone(), rv))
+                        }
+                        None => {
+                            eprintln!(
+                                "[o7 judge] warn: {file}: verdict for unknown finding {key:?} \
+                                 — skipped"
+                            );
+                            None
+                        }
+                    }
                 })
                 .collect()
         } else {
@@ -438,10 +471,14 @@ fn call_claude(
     prompt: &str,
     model: &str,
 ) -> Result<(String, Option<String>, Option<f64>)> {
-    let out = Command::new("claude")
+    use std::io::Write as _;
+    // Feed the prompt (whole source file included) via stdin, not argv: a large file
+    // would blow the OS argument-size limit before claude starts, and argv is readable
+    // in local process listings (`ps`), leaking proprietary source. `claude -p` with no
+    // prompt argument reads it from stdin.
+    let mut child = Command::new("claude")
         .current_dir(cwd)
         .arg("-p")
-        .arg(prompt)
         .arg("--model")
         .arg(model)
         .arg("--permission-mode")
@@ -453,8 +490,18 @@ fn call_claude(
         .arg("--strict-mcp-config")
         .arg("--output-format")
         .arg("json")
-        .output()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .context("spawning `claude` (installed? logged in? on PATH?)")?;
+    child
+        .stdin
+        .take()
+        .context("claude stdin unavailable")?
+        .write_all(prompt.as_bytes())
+        .context("writing prompt to claude stdin")?;
+    let out = child.wait_with_output().context("waiting for `claude`")?;
     if !out.status.success() {
         anyhow::bail!("claude failed: {}", String::from_utf8_lossy(&out.stderr));
     }
