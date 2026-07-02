@@ -59,3 +59,6 @@ judge), memory layer, policy/ignore engine, container egress hardening.
 
 Sibling project (parked, separate): **sandboy** — WASM/WIT plugin surface, lives
 in Own.NET. Not part of `007`.
+
+## P.S.
+o7 is for 🫡 mirrored :)
