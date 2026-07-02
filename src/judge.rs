@@ -544,3 +544,49 @@ fn sanitize(s: &str) -> String {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finding_id_is_stable_and_16_hex() {
+        let a = finding_id("ViewModels/MixedViewModel.cs", "OWN001", "event 'QuoteReceived' ...");
+        let b = finding_id("ViewModels/MixedViewModel.cs", "OWN001", "event 'QuoteReceived' ...");
+        assert_eq!(a, b, "same inputs -> same id");
+        assert_eq!(a.len(), 16, "id is 16 hex chars");
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn finding_id_splits_on_message_same_tuple() {
+        // The collision case: same (path, rule) — and same line at the call site —
+        // but different message must yield DISTINCT ids, or one overlay entry is lost.
+        let quote = finding_id("ViewModels/MixedViewModel.cs", "OWN001", "'QuoteReceived' subscribed");
+        let down = finding_id("ViewModels/MixedViewModel.cs", "OWN001", "'Disconnected' subscribed");
+        assert_ne!(quote, down, "different message -> different finding_id");
+    }
+
+    #[test]
+    fn finding_id_depends_on_path_and_rule() {
+        let base = finding_id("a.cs", "OWN001", "m");
+        assert_ne!(base, finding_id("b.cs", "OWN001", "m"), "path matters");
+        assert_ne!(base, finding_id("a.cs", "OWN-TIMER", "m"), "rule matters");
+    }
+
+    #[test]
+    fn extract_json_array_tolerates_fences_and_prose() {
+        let s = "sure, here:\n```json\n[{\"class\":\"real\"}]\n```\nhope that helps";
+        assert_eq!(
+            extract_json_array(s).as_deref(),
+            Some("[{\"class\":\"real\"}]")
+        );
+        assert_eq!(extract_json_array("no array here").as_deref(), None);
+    }
+
+    #[test]
+    fn sanitize_keeps_only_path_safe_chars() {
+        assert_eq!(sanitize("ViewModels/Mixed.cs"), "ViewModels_Mixed_cs");
+        assert_eq!(sanitize("a b\\c"), "a_b_c");
+    }
+}
