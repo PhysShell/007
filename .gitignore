@@ -3,3 +3,11 @@
 /.worktrees
 /.direnv
 .envrc
+
+# judge proof-kit outputs — embed proprietary source, never commit
+/judge/proof.*
+/judge/*.verdicts.json
+
+# local commit/PR scratch (not committed)
+/.commit-msg
+/.pr-body.md
