@@ -1,0 +1,5 @@
+/target
+/runs
+/.worktrees
+/.direnv
+.envrc

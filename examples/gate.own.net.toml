@@ -1,0 +1,27 @@
+# Example gate manifest for Own.NET.
+# Copy to  Own.NET/.007/gate.toml  and tune. Steps run via `bash -lc` in the
+# worktree, top to bottom. Faithful to Own.NET/AGENTS.md (lint = ruff + mypy;
+# regression = python tests/run_tests.py).
+schema = 1
+
+[[gate]]
+name = "ruff"
+cmd = "ruff check ."
+required = true
+
+[[gate]]
+name = "mypy-ownlang"
+cmd = "mypy ownlang"
+required = true
+
+[[gate]]
+name = "regression"
+cmd = "python tests/run_tests.py"
+required = true
+
+# Phase 2 — OwnAudit's Windows-bound gates get tagged and run on the host:
+# [[gate]]
+# name = "roslyn-inject"
+# cmd  = "pwsh -File Run-Roslyn.ps1"
+# env  = "windows"
+# required = true
