@@ -464,8 +464,9 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
 /// needed: `--tools ""` disables every built-in tool (closed-by-default, so no
 /// current or future tool can run) and `--strict-mcp-config` refuses any ambient
 /// MCP server — a prompt-injection payload in the judged file gets no read /
-/// network / exfil path. `bypassPermissions` keeps the headless run from blocking
-/// on a prompt. Returns (result text, session_id, cost).
+/// network / exfil path. With no tools available there is no permission prompt to
+/// block a headless run, so no `--permission-mode` override is needed — and passing
+/// `bypassPermissions` would refuse to run as root. Returns (result text, session_id, cost).
 fn call_claude(
     cwd: &Path,
     prompt: &str,
@@ -481,10 +482,10 @@ fn call_claude(
         .arg("-p")
         .arg("--model")
         .arg(model)
-        .arg("--permission-mode")
-        .arg("bypassPermissions")
         // Read-only by construction: no built-in tools, no ambient MCP servers.
-        // The file is already in the prompt, so classification needs no tool call.
+        // The file is already in the prompt, so classification needs no tool call —
+        // and with no tools there is no permission prompt to hang on, so no
+        // permission-mode override is needed (bypassPermissions also refuses root).
         .arg("--tools")
         .arg("")
         .arg("--strict-mcp-config")
