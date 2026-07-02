@@ -318,23 +318,61 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
         let raws: Vec<RawVerdict> =
             serde_json::from_str(&arr).with_context(|| format!("parsing verdicts for {file}"))?;
 
-        for rv in raws {
-            let key = (rv.path.clone(), rv.line, rv.rule.clone());
-            let id = match key_to_id.get(&key) {
-                Some(id) => id.clone(),
-                None => {
-                    eprintln!("[o7 judge] warn: verdict for unknown finding {key:?} — skipped");
-                    continue;
-                }
-            };
+        // The prompt mandates "one object per finding above, in the same order",
+        // so pair verdicts to findings positionally when the counts match. That is
+        // the only reliable identity: two findings sharing (path, line, rule) but
+        // differing in `message` have distinct `finding_id`s, yet `RawVerdict` never
+        // echoes `message` back — so a (path, line, rule) tuple lookup is lossy by
+        // construction and silently drops one. Fall back to the tuple map only when
+        // the model breaks the count contract.
+        let paired: Vec<(String, &RawVerdict)> = if raws.len() == fif.len() {
+            raws.iter()
+                .zip(fif.iter())
+                .map(|(rv, rep)| {
+                    // Trust the position, but sanity-check the echoed tuple and warn
+                    // (don't drop) if the model reordered/merged despite the contract.
+                    if rv.path != rep.path || rv.line != rep.line || rv.rule != rep.rule {
+                        eprintln!(
+                            "[o7 judge] warn: {file}: verdict ({}, {}, {}) != finding \
+                             ({}, {}, {}) at the same position — pairing by position anyway",
+                            rv.path, rv.line, rv.rule, rep.path, rep.line, rep.rule
+                        );
+                    }
+                    (rep.id.clone(), rv)
+                })
+                .collect()
+        } else {
+            eprintln!(
+                "[o7 judge] warn: {file}: model returned {} verdict(s) for {} finding(s) \
+                 — pairing by (path, line, rule) key instead of position",
+                raws.len(),
+                fif.len()
+            );
+            raws.iter()
+                .filter_map(|rv| {
+                    let key = (rv.path.clone(), rv.line, rv.rule.clone());
+                    match key_to_id.get(&key) {
+                        Some(id) => Some((id.clone(), rv)),
+                        None => {
+                            eprintln!(
+                                "[o7 judge] warn: verdict for unknown finding {key:?} — skipped"
+                            );
+                            None
+                        }
+                    }
+                })
+                .collect()
+        };
+
+        for (id, rv) in paired {
             *by_class.entry(rv.class.clone()).or_default() += 1;
             verdicts.insert(
                 id.clone(),
                 VerdictOut {
-                    class: rv.class,
+                    class: rv.class.clone(),
                     confidence: rv.confidence,
-                    reason: rv.reason,
-                    evidence: rv.evidence,
+                    reason: rv.reason.clone(),
+                    evidence: rv.evidence.clone(),
                     lines: lines_by_id.get(&id).cloned().unwrap_or_default(),
                 },
             );
@@ -389,8 +427,12 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
     Ok(())
 }
 
-/// Read-only claude call. Whole file is in the prompt; deny mutation and bypass
-/// prompts so a headless run never hangs. Returns (result text, session_id, cost).
+/// Read-only claude call. The whole file is already in the prompt, so no tool is
+/// needed: `--tools ""` disables every built-in tool (closed-by-default, so no
+/// current or future tool can run) and `--strict-mcp-config` refuses any ambient
+/// MCP server — a prompt-injection payload in the judged file gets no read /
+/// network / exfil path. `bypassPermissions` keeps the headless run from blocking
+/// on a prompt. Returns (result text, session_id, cost).
 fn call_claude(
     cwd: &Path,
     prompt: &str,
@@ -404,12 +446,11 @@ fn call_claude(
         .arg(model)
         .arg("--permission-mode")
         .arg("bypassPermissions")
-        .arg("--disallowedTools")
-        .arg("Write")
-        .arg("--disallowedTools")
-        .arg("Edit")
-        .arg("--disallowedTools")
-        .arg("Bash")
+        // Read-only by construction: no built-in tools, no ambient MCP servers.
+        // The file is already in the prompt, so classification needs no tool call.
+        .arg("--tools")
+        .arg("")
+        .arg("--strict-mcp-config")
         .arg("--output-format")
         .arg("json")
         .output()
