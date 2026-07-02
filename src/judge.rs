@@ -464,8 +464,10 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
 /// needed: `--tools ""` disables every built-in tool (closed-by-default, so no
 /// current or future tool can run) and `--strict-mcp-config` refuses any ambient
 /// MCP server — a prompt-injection payload in the judged file gets no read /
-/// network / exfil path. `bypassPermissions` keeps the headless run from blocking
-/// on a prompt. Returns (result text, session_id, cost).
+/// network / exfil path. `--permission-mode default` is passed explicitly so the run
+/// never inherits an ambient `bypassPermissions` default (which refuses to run as
+/// root); with no tools there is nothing to prompt for, so `default` never blocks a
+/// headless run. Returns (result text, session_id, cost).
 fn call_claude(
     cwd: &Path,
     prompt: &str,
@@ -481,10 +483,12 @@ fn call_claude(
         .arg("-p")
         .arg("--model")
         .arg(model)
+        // Pin an explicit non-bypass mode so we never inherit an ambient
+        // `permissions.defaultMode = bypassPermissions` (which refuses to run as root).
         .arg("--permission-mode")
-        .arg("bypassPermissions")
+        .arg("default")
         // Read-only by construction: no built-in tools, no ambient MCP servers.
-        // The file is already in the prompt, so classification needs no tool call.
+        // With no tools there is nothing to prompt for, so `default` never hangs.
         .arg("--tools")
         .arg("")
         .arg("--strict-mcp-config")
@@ -542,4 +546,50 @@ fn sanitize(s: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finding_id_is_stable_and_16_hex() {
+        let a = finding_id("ViewModels/MixedViewModel.cs", "OWN001", "event 'QuoteReceived' ...");
+        let b = finding_id("ViewModels/MixedViewModel.cs", "OWN001", "event 'QuoteReceived' ...");
+        assert_eq!(a, b, "same inputs -> same id");
+        assert_eq!(a.len(), 16, "id is 16 hex chars");
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn finding_id_splits_on_message_same_tuple() {
+        // The collision case: same (path, rule) — and same line at the call site —
+        // but different message must yield DISTINCT ids, or one overlay entry is lost.
+        let quote = finding_id("ViewModels/MixedViewModel.cs", "OWN001", "'QuoteReceived' subscribed");
+        let down = finding_id("ViewModels/MixedViewModel.cs", "OWN001", "'Disconnected' subscribed");
+        assert_ne!(quote, down, "different message -> different finding_id");
+    }
+
+    #[test]
+    fn finding_id_depends_on_path_and_rule() {
+        let base = finding_id("a.cs", "OWN001", "m");
+        assert_ne!(base, finding_id("b.cs", "OWN001", "m"), "path matters");
+        assert_ne!(base, finding_id("a.cs", "OWN-TIMER", "m"), "rule matters");
+    }
+
+    #[test]
+    fn extract_json_array_tolerates_fences_and_prose() {
+        let s = "sure, here:\n```json\n[{\"class\":\"real\"}]\n```\nhope that helps";
+        assert_eq!(
+            extract_json_array(s).as_deref(),
+            Some("[{\"class\":\"real\"}]")
+        );
+        assert_eq!(extract_json_array("no array here").as_deref(), None);
+    }
+
+    #[test]
+    fn sanitize_keeps_only_path_safe_chars() {
+        assert_eq!(sanitize("ViewModels/Mixed.cs"), "ViewModels_Mixed_cs");
+        assert_eq!(sanitize("a b\\c"), "a_b_c");
+    }
 }

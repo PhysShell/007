@@ -1,0 +1,11 @@
+{
+  "tool": "own-check",
+  "findings": [
+    {"tool":"own-check","path":"ViewModels/EventLeakViewModel.cs","line":14,"rule":"OWN001","category_name":"event-lifetime","message":"event 'QuoteReceived' subscribed (handler 'OnQuote') but never detached; instance is rooted by the publisher for its lifetime"},
+    {"tool":"own-check","path":"ViewModels/TimerLeakViewModel.cs","line":13,"rule":"OWN-TIMER","category_name":"timer-lifetime","message":"System.Threading.Timer created and stored in '_timer' but never Dispose()d; the TimerQueue keeps the callback target alive"},
+    {"tool":"own-check","path":"ViewModels/CleanViewModel.cs","line":17,"rule":"OWN001","category_name":"event-lifetime","message":"event 'QuoteReceived' subscribed (handler 'OnQuote') but never detached"},
+    {"tool":"own-check","path":"ViewModels/CleanViewModel.cs","line":18,"rule":"OWN-TIMER","category_name":"timer-lifetime","message":"System.Threading.Timer created and stored in '_timer' but never Dispose()d"},
+    {"tool":"own-check","path":"ViewModels/MixedViewModel.cs","line":15,"rule":"OWN001","category_name":"event-lifetime","message":"event 'QuoteReceived' subscribed (handler 'OnQuote') but never detached"},
+    {"tool":"own-check","path":"ViewModels/MixedViewModel.cs","line":15,"rule":"OWN001","category_name":"event-lifetime","message":"event 'Disconnected' subscribed (handler 'OnDown') but never detached"}
+  ]
+}
