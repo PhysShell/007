@@ -27,8 +27,10 @@ out="$(mktemp)"
 live="$("$bin" judge --repo "$here" --findings "$here/findings.json" \
          --rubric "$rubric" --out "$out" 2>&1)"
 echo "$live"
-grep -q '"real": 4' <<<"$live" && grep -q '"false_positive": 2' <<<"$live" \
-  || { echo "FAIL: expected {real:4, false_positive:2}" >&2; exit 1; }
+if ! grep -q '"real": 4' <<<"$live" || ! grep -q '"false_positive": 2' <<<"$live"; then
+  echo "FAIL: expected {real:4, false_positive:2}" >&2
+  exit 1
+fi
 n="$(python3 -c "import json,sys;print(len(json.load(open('$out'))['verdicts']))")"
 [ "$n" = "6" ] || { echo "FAIL: expected 6 verdicts in overlay, got $n" >&2; exit 1; }
 echo "[proof] PASS (6/6 verdicts; both collision ids survived)"
