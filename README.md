@@ -57,6 +57,9 @@ Full decision record: see `../.claude` memory (`007-harness-design`). Locked MVP
 deferred (design with real run records): consensus (claude+codex race + cross-family
 judge), memory layer, policy/ignore engine, container egress hardening.
 
+Security layers (what's real, what's absent, and the triggers for
+Cedar/Verus/Kani/fuzz plus the `run`/gate sandbox slot): `docs/security-layers.md`.
+
 Sibling project (parked, separate): **sandboy** — WASM/WIT plugin surface, lives
 in Own.NET. Not part of `007`.
 
