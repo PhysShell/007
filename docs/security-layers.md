@@ -17,7 +17,7 @@ missing layer worth building.
 | **allowlist / closed world** | *what can be invoked at all* | ✅ `judge` — `call_claude` uses `--tools ""` + `--strict-mcp-config` (closed world; no built-in tool, no ambient MCP). ⚠️ `run` — `agent.rs::DENY` is still a **deny-list** (`Bash(rm -rf*)`, `git reset --hard`, …), which the code itself flags as "not a sandbox — command obfuscation can slip it." |
 | **path confinement + `canonicalize`** | confused-deputy via *arguments* (`../../../etc/passwd`, symlinks) | ✅ `judge` — `repo.join(file).canonicalize()` then `starts_with(&repo)`, skip-with-warning. Canonicalize **before** the prefix check is load-bearing (else symlink bypass). Residual **TOCTOU** between canonicalize and open remains — only a real sandbox layer closes it, not a string check. |
 | **stdin instead of argv** | argv is world-readable (`/proc/*/cmdline`, `ps`), hits shell history/logs, has a size limit | ✅ `judge` — the prompt (whole source file) goes via piped stdin, not `-p <arg>`. |
-| **worktree isolation** | blast radius for *writes* | ✅ `run` — `worktree.rs` runs the agent in a throwaway `git worktree`; the main checkout is untouchable. Note: this bounds **writes to the tree**, not network egress or reads elsewhere on the box. |
+| **worktree isolation** | cleanup + *convention*, **not** a boundary | ⚠️ `run` — `worktree.rs` runs the agent/gate with `current_dir(worktree)`. That sets the process **cwd**, which is *not* confinement: an unsandboxed command can still write outside the tree via absolute or `..` paths, read anything the user can, and reach the network. It helps well-behaved tools stay put and makes teardown a `git worktree remove` — it does **not** make the main checkout untouchable against untrusted code. |
 | **syscall sandbox (WASI/Wasmtime, container)** | the only true deny-by-default *boundary* (capability I/O) | ❌ **absent in 007.** The agent runs under `bypassPermissions` with no syscall confinement. Wasmtime lives in the **parked, separate** sibling `sandboy` (Own.NET), not here. |
 | **typed tool surface (MCP schemas)** | arg validation before execution | ❌ N/A — 007 consumes external CLIs (`claude`, `git`, `bash`); it does not publish its own MCP tools. |
 | **structured audit log** | forensics / replay (not defense) | ✅ `record.rs` → `meta.json`, `diff.patch`, `agent.stdout`, `gate/*.log`. |
@@ -25,13 +25,16 @@ missing layer worth building.
 ## The gap the layer list understates
 
 `o7 run` executes **arbitrary `bash -lc <cmd>` from the target repo's
-`.007/gate.toml`** (`gate.rs`), in the worktree. If a target repo is not fully
-trusted, gate steps are attacker-controlled code execution, bounded only by the
-worktree **for writes**; it does not bound network egress or host filesystem
-reads. Combined with
-the agent itself running unsandboxed under `bypassPermissions`, this — not policy
-engines or proof assistants — is 007's sharpest present-day trust boundary. The
-real "sandbox slot" is here in `run`/gate, **not** in `judge` (already closed-world).
+`.007/gate.toml`** (`gate.rs`), with `current_dir` set to the worktree. If a
+target repo is not fully trusted, gate steps are attacker-controlled code
+execution — and `current_dir(worktree)` is **not** a confinement boundary: a step
+can write outside the tree via absolute or `..` paths, read anything the user can,
+and reach the network. So the worktree bounds **neither** writes (against
+adversarial paths) nor reads nor egress — it is cleanup convenience, not a
+sandbox. Combined with the agent itself running unsandboxed under
+`bypassPermissions`, this — not policy engines or proof assistants — is 007's
+sharpest present-day trust boundary. The real "sandbox slot" is here in
+`run`/gate, **not** in `judge` (already closed-world).
 
 Decision needed (deferred until untrusted target repos are in scope): trust model
 for `.007/gate.toml` and the agent — container egress hardening (already on the
