@@ -503,8 +503,20 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
                 continue;
             }
         };
-        let src = std::fs::read_to_string(&src_path)
-            .with_context(|| format!("reading source {}", src_path.display()))?;
+        // A per-file read failure (invalid UTF-8, permissions, a directory path)
+        // must skip that file and be counted, not abort the batch — same contract
+        // as the resolve/parse skips above (CodeRabbit).
+        let src = match std::fs::read_to_string(&src_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "[o7 judge] warn: {file}: reading source failed ({e}) — skipped ({})",
+                    src_path.display()
+                );
+                files_skipped += 1;
+                continue;
+            }
+        };
 
         let prompt = template
             .replace("{{RUBRIC}}", &rubric)

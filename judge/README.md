@@ -31,6 +31,7 @@ findings.json — staleness guard), model, run_id, verdicts}`, where `verdicts` 
    `generated_from` (Phase 2, inside the `o7 judge` subcommand).
 
 ## Files here
+
 | file | owner | what |
 |---|---|---|
 | `prompt.template.md` | 007 | judge prompt; slots `{{RUBRIC}} {{FILE_PATH}} {{FILE_CONTENT}} {{FINDINGS_IN_FILE}}` |
