@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::agent::Engine;
 use crate::record::RunRecord;
 
 // ---------- findings.json (own-check shape) ----------
@@ -131,45 +132,62 @@ struct JudgeMeta {
 }
 
 // ---------- backend agent provider ----------
+//
+// The judge dispatches to two subprocess CLIs, both subscription-auth, no API
+// keys: `claude -p` (Claude Max) and `codex exec` (ChatGPT, via `codex login`).
+// The backend is the shared `agent::Engine`; `--provider` selects it (or `auto`
+// infers it from the model id via `model_family`).
 
-/// Which subprocess CLI backs a judge call. Both use subscription auth, no API
-/// keys: `claude -p` (Claude Max) and `codex exec` (ChatGPT, via `codex login`).
-/// Chosen by `--provider`, or inferred from the model id under `auto`.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Provider {
+/// Which vendor a model id belongs to. Single source of truth for BOTH
+/// `--provider auto` routing and the `--provider codex` footgun guard, so the
+/// two can never drift (they used to be two separate hardcoded lists). Prefix
+/// matching — not exact — so versioned aliases (`opus-4.5`, `gpt-5.5`) classify
+/// correctly. `opus`/`sonnet`/... are tested before the `o1`/`o3`/... OpenAI
+/// prefixes, so `opus` resolves to Claude, not the `o`-series.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Family {
     Claude,
-    Codex,
+    OpenAI,
+    /// Unrecognized id — auto-routes to Claude (the historical default) but is
+    /// NOT blocked by the codex guard, so an explicit `--provider codex --model
+    /// <new-openai-id>` still works before we've taught this list the new name.
+    Unknown,
 }
 
-impl Provider {
-    fn label(self) -> &'static str {
-        match self {
-            Provider::Claude => "claude",
-            Provider::Codex => "codex",
-        }
+fn model_family(model: &str) -> Family {
+    let m = model.to_ascii_lowercase();
+    if m.starts_with("claude")
+        || m.starts_with("opus")
+        || m.starts_with("sonnet")
+        || m.starts_with("haiku")
+        || m.starts_with("fable")
+        || m.starts_with("mythos")
+    {
+        Family::Claude
+    } else if m.starts_with("gpt")
+        || m.starts_with("o1")
+        || m.starts_with("o3")
+        || m.starts_with("o4")
+        || m.starts_with("o5")
+        || m.contains("codex")
+    {
+        Family::OpenAI
+    } else {
+        Family::Unknown
     }
 }
 
 /// Resolve `--provider` (`claude` | `codex` | `auto`) against the model id.
-/// `auto` routes OpenAI-family ids (gpt*, o1/o3/o4*, *codex*) to codex and
-/// everything else (opus, sonnet, haiku, ...) to claude.
-fn resolve_provider(flag: &str, model: &str) -> Result<Provider> {
+/// `auto` routes OpenAI-family ids to codex and everything else (incl. unknown
+/// ids) to claude, using the shared `model_family` classifier.
+fn resolve_provider(flag: &str, model: &str) -> Result<Engine> {
     match flag.to_ascii_lowercase().as_str() {
-        "claude" => Ok(Provider::Claude),
-        "codex" => Ok(Provider::Codex),
-        "auto" => {
-            let m = model.to_ascii_lowercase();
-            let openai = m.starts_with("gpt")
-                || m.starts_with("o1")
-                || m.starts_with("o3")
-                || m.starts_with("o4")
-                || m.contains("codex");
-            Ok(if openai {
-                Provider::Codex
-            } else {
-                Provider::Claude
-            })
-        }
+        "claude" => Ok(Engine::Claude),
+        "codex" => Ok(Engine::Codex),
+        "auto" => Ok(match model_family(model) {
+            Family::OpenAI => Engine::Codex,
+            Family::Claude | Family::Unknown => Engine::Claude,
+        }),
         other => anyhow::bail!("unknown --provider '{other}' (want: claude | codex | auto)"),
     }
 }
@@ -237,15 +255,14 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
     let provider = resolve_provider(&a.provider, &a.model)?;
     // The default model is `opus` (claude), so `--provider codex` with no `--model`
     // would ship a Claude-family name to codex and 400. Catch that footgun early with
-    // a hint instead of a raw upstream error.
-    if provider == Provider::Codex {
-        let m = a.model.to_ascii_lowercase();
-        if m.starts_with("claude") || m == "opus" || m == "sonnet" || m == "haiku" || m == "fable" || m == "mythos" {
-            anyhow::bail!(
-                "--provider codex needs an OpenAI model (e.g. --model gpt-5.5), got '{}'",
-                a.model
-            );
-        }
+    // a hint instead of a raw upstream error. `model_family` is the SAME classifier
+    // that drives auto-routing, so the guard can't drift from it — and it prefix-
+    // matches, so a versioned alias like `opus-4.5` is still caught.
+    if provider == Engine::Codex && model_family(&a.model) == Family::Claude {
+        anyhow::bail!(
+            "--provider codex needs an OpenAI model (e.g. --model gpt-5.5), got '{}'",
+            a.model
+        );
     }
 
     // Dedupe -> reps keyed by finding_id (first-seen order preserved).
@@ -532,14 +549,14 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
 /// same `(result_text, session_id, cost_usd)` shape; codex has no single-envelope
 /// session/cost on a subscription, so those come back `None`.
 fn call_agent(
-    provider: Provider,
+    provider: Engine,
     cwd: &Path,
     prompt: &str,
     model: &str,
 ) -> Result<(String, Option<String>, Option<f64>)> {
     match provider {
-        Provider::Claude => call_claude(cwd, prompt, model),
-        Provider::Codex => call_codex(cwd, prompt, model),
+        Engine::Claude => call_claude(cwd, prompt, model),
+        Engine::Codex => call_codex(cwd, prompt, model),
     }
 }
 
@@ -554,8 +571,10 @@ fn call_agent(
 /// - `-` reads the prompt from stdin, not argv: a large embedded source file would
 ///   blow the OS arg-size limit and argv is world-readable in `ps` (source leak).
 /// - `--output-last-message <FILE>`: codex writes ONLY the agent's final message
-///   there. We read that instead of scraping stdout, which also carries codex's
-///   session preamble (a stray `[` in it could fool `extract_json_array`).
+///   there. We read that and ONLY that — stdout is discarded (`Stdio::null`),
+///   because it also carries codex's session preamble whose stray `[` could fool
+///   `extract_json_array`. If the file comes back empty we fail loud rather than
+///   fall back to stdout (see below).
 /// - `--skip-git-repo-check` so a non-git scan root never hard-fails; `--ephemeral`
 ///   so a 150-call batch doesn't litter session history; `--color never` for clean
 ///   logs.
@@ -591,7 +610,11 @@ fn call_codex(
         .arg(&last_msg)
         .arg("-") // read the prompt from stdin
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
+        // We read the answer from `--output-last-message`, never from stdout, so
+        // discard stdout instead of buffering codex's whole session transcript in
+        // memory per call — and it removes one pipe that could fill and deadlock the
+        // stdin write below.
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
         .context("spawning `codex` (installed? `codex login` done? on PATH?)")?;
@@ -606,12 +629,20 @@ fn call_codex(
         let _ = std::fs::remove_file(&last_msg);
         anyhow::bail!("codex failed: {}", String::from_utf8_lossy(&out.stderr));
     }
-    // Prefer the isolated final message; fall back to stdout if `-o` wrote nothing.
-    let text = match std::fs::read_to_string(&last_msg) {
-        Ok(s) if !s.trim().is_empty() => s,
-        _ => String::from_utf8_lossy(&out.stdout).to_string(),
-    };
+    let text = std::fs::read_to_string(&last_msg).unwrap_or_default();
     let _ = std::fs::remove_file(&last_msg);
+    // Do NOT fall back to scraping stdout when the final-message file is empty:
+    // codex's stdout carries the session preamble/event log, and a stray `[` in it
+    // fools `extract_json_array` into slicing a bogus "array" out of log text —
+    // silently-wrong verdicts, the exact hazard `--output-last-message` exists to
+    // avoid. An empty final message means no usable answer, so fail loud; the caller
+    // persists raw output and (with batch resilience) skips just this file.
+    if text.trim().is_empty() {
+        anyhow::bail!(
+            "codex produced no final message (--output-last-message empty); \
+             refusing to scrape stdout as verdicts"
+        );
+    }
     Ok((text, None, None))
 }
 
@@ -785,6 +816,55 @@ mod tests {
             "'Disconnected' subscribed",
         );
         assert_ne!(quote, down, "different message -> different finding_id");
+    }
+
+    #[test]
+    fn model_family_classifies_versioned_aliases() {
+        // The guard-bypass fix: prefix match, not exact — so a dated alias still
+        // classifies as its family (exact `== "opus"` let `opus-4.5` slip to codex).
+        assert_eq!(model_family("opus"), Family::Claude);
+        assert_eq!(model_family("opus-4.5"), Family::Claude);
+        assert_eq!(model_family("claude-sonnet-5"), Family::Claude);
+        assert_eq!(model_family("Sonnet"), Family::Claude); // case-insensitive
+        assert_eq!(model_family("gpt-5.5"), Family::OpenAI);
+        assert_eq!(model_family("o3-mini"), Family::OpenAI);
+        assert_eq!(model_family("gpt-5-codex"), Family::OpenAI);
+        // `opus` is tested before the `o`-series, so it never falls to OpenAI.
+        assert_eq!(model_family("mystery-model"), Family::Unknown);
+    }
+
+    #[test]
+    fn resolve_provider_and_guard() {
+        // auto routing follows the family; unknown ids default to claude.
+        assert_eq!(
+            resolve_provider("auto", "opus-4.5").ok(),
+            Some(Engine::Claude)
+        );
+        assert_eq!(
+            resolve_provider("auto", "gpt-5.5").ok(),
+            Some(Engine::Codex)
+        );
+        assert_eq!(
+            resolve_provider("auto", "mystery").ok(),
+            Some(Engine::Claude)
+        );
+        // explicit flags win regardless of model.
+        assert_eq!(resolve_provider("codex", "opus").ok(), Some(Engine::Codex));
+        assert_eq!(
+            resolve_provider("claude", "gpt-5.5").ok(),
+            Some(Engine::Claude)
+        );
+        assert!(resolve_provider("nonsense", "opus").is_err());
+        // The footgun guard fires for a versioned Claude alias under codex — the
+        // exact case the old `== "opus"` check let through.
+        let is_guarded = |m: &str| {
+            resolve_provider("codex", m).ok() == Some(Engine::Codex)
+                && model_family(m) == Family::Claude
+        };
+        assert!(is_guarded("opus-4.5"));
+        assert!(is_guarded("haiku-3.5"));
+        assert!(!is_guarded("gpt-5.5"));
+        assert!(!is_guarded("some-new-openai-id")); // unknown → not blocked
     }
 
     #[test]

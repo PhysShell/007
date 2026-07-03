@@ -72,12 +72,20 @@ o7 judge \
   --findings ../OwnAudit/oracle/fixtures/findings.json \
   --rubric   ../OwnAudit/docs/fp-judge/rubric.md \
   --out      ../OwnAudit/artifacts/fp-verdicts.json
-# --dry-run : print files/ids/calls, no claude   |  --only <path> : one file
-# --max-files N : cap cost                        |  --model : default opus
+# --dry-run : print files/ids/calls, no backend  |  --only <path> : one file
+# --max-files N : cap cost   |  --model : default opus  |  --provider claude|codex|auto
 ```
 Writes the overlay to `--out` (for the domain report) **and** a judge run-record to
 `runs/<target>/judge-<id>/` (overlay + per-file raw output + `meta.json` with
-`by_class`, cost, session ids). Read-only: `bypassPermissions` + `Write/Edit/Bash`
-denied. Start with `--dry-run`, then `--only <one file>` to sanity-check, then the
-full set.
+`provider`, `by_class`, cost, session ids). Start with `--dry-run`, then
+`--only <one file>` to sanity-check, then the full set.
+
+**Read-only, but the two backends differ.** The default **claude** backend runs
+closed-world — `--tools ""` + `--strict-mcp-config`, no built-in tool and no ambient
+MCP — so a prompt-injection payload in a judged file has no read/network/exfil path.
+The **codex** backend (`--provider codex`) runs `--sandbox read-only`, which denies
+**writes** but does **not** disable network (codex has no one-flag equivalent). So
+under `--provider codex` a payload still can't write, but could reach the network —
+prefer the claude backend when judging untrusted source, and see
+[`docs/security-layers.md`](../docs/security-layers.md).
 
