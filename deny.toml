@@ -1,0 +1,38 @@
+# cargo-deny — supply-chain gate. Run: `cargo deny check`
+# Docs: https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+version = 2
+yanked = "deny"
+# Add RUSTSEC ids here (with a reason) only when a fix is genuinely unavailable.
+ignore = []
+
+[licenses]
+version = 2
+# Permissive licenses only. A copyleft dep must be an explicit, reasoned decision.
+# Superset of what the tree uses today; not-yet-encountered entries are fine.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
+unused-allowed-license = "allow"
+
+# 007 is a private, unpublished harness (publish = false) — it needs no license.
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "warn"   # duplicate versions are noise, not a build-breaker yet
+wildcards = "deny"           # `foo = "*"` is unpinnable supply-chain risk
+
+[sources]
+unknown-registry = "deny"    # crates.io only
+unknown-git = "deny"

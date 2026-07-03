@@ -199,6 +199,8 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
         findings_total += 1;
         let id = finding_id(&f.path, &f.rule, &f.message);
         if let Some(&i) = idx.get(&id) {
+            // `i` was just stored in `idx` for this id → always < reps.len().
+            #[allow(clippy::indexing_slicing)]
             reps[i].lines.push(f.line);
         } else {
             idx.insert(id.clone(), reps.len());
@@ -279,6 +281,8 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
     let mut cost_any = false;
 
     for (fi, file) in files.iter().enumerate() {
+        // `by_file` only ever stores valid indices into `reps`.
+        #[allow(clippy::indexing_slicing)]
         let fif: Vec<&Rep> = by_file
             .get(file)
             .map(|ids| ids.iter().map(|&i| &reps[i]).collect())

@@ -3,6 +3,7 @@ name = "o7"
 version = "0.1.0"
 edition = "2021"
 description = "007 — private harness: one isolated, gated agent run over a target repo"
+publish = false
 
 [[bin]]
 name = "o7"
@@ -17,9 +18,25 @@ anyhow = "1"
 sha1 = "0.10"
 sha2 = "0.10"
 
-# `kani` is a cfg set by `cargo kani`; register it so stable builds don't warn.
+# Lints. Curated to pass `clippy --all-targets -D warnings` clean on today's code
+# (ratchet, not a blast): the broad pedantic/nursery families are deliberately
+# left off — see docs/verification.md for the tracked follow-ups.
 [lints.rust]
+# `kani` is a cfg set by `cargo kani`; register it so stable builds don't warn.
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+unsafe_code = "forbid"        # no unsafe in the tree; lock that invariant in
+unreachable_pub = "deny"      # a `pub` nothing can reach is a lie in the API
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+# Restriction lints that are already clean here — keep the discipline enforced.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"     # panic-on-index; the two proven-safe slices carry a justified #[allow]
 
 [dev-dependencies]
 proptest = "1"

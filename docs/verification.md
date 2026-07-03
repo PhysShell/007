@@ -52,3 +52,40 @@ slice-boundary safety being exactly Kani's sweet spot.
 > the session's egress policy blocks (HTTP 403). The proofs are authored and ready;
 > run them where the Kani bundle is reachable. `cfg(kani)` is registered in
 > `Cargo.toml` (`[lints.rust] unexpected_cfgs`) so stable builds stay warning-free.
+
+## Static analysis & supply chain
+
+### Lints (`[lints]` in `Cargo.toml`)
+
+Enforced by `cargo clippy --all-targets` (the nix `flake check` runs it with
+`-D warnings`). Curated to pass **clean today** — a ratchet, not a blast, per the
+project's own "false positive is worse than a miss" directive:
+
+- `unsafe_code = "forbid"` — there is no `unsafe` in the tree; locked in.
+- `unreachable_pub = "deny"`, `rust_2018_idioms = "deny"`.
+- clippy restriction set that is already clean: `unwrap_used`, `expect_used`,
+  `panic`, `dbg_macro`, `todo`, `unimplemented`, `indexing_slicing`.
+- The only two index sites (`reps[i]` over internally-stored indices) carry a
+  justified `#[allow(clippy::indexing_slicing)]` documenting the in-bounds invariant.
+
+### Supply chain (`deny.toml`)
+
+    cargo deny check
+
+Gates advisories (RUSTSEC, yanked crates), a permissive-only license allow-list,
+`wildcards = "deny"`, and crates.io-only sources.
+
+### Deliberately deferred (the ratchet)
+
+Left off on purpose — turning these on wholesale today produces fatigue, not signal:
+
+- clippy `pedantic` + `nursery` — ~59 warnings on the current tree (mostly
+  `missing_errors_doc`, name-repetition, `must_use`). Adopt at `warn` with a
+  baseline, or fix in slices.
+- `missing_debug_implementations`, `arithmetic_side_effects` — noisy on the
+  internal structs / counters; enable per-slice.
+- `print_stdout` — **N/A**: `o7` is a CLI, stdout is the product.
+- Next tools (highest ROI first): `cargo-mutants` (do the tests actually assert?),
+  `cargo-semver-checks` (once the lib API is consumed), `cargo-udeps`,
+  `cargo-hack --feature-powerset`, and CodeQL/Semgrep in Actions across the
+  (public) sibling repos.
