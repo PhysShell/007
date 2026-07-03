@@ -11,9 +11,13 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # codex — OpenAI's Rust CLI, the `--provider codex` backend for `o7 judge`.
+    # Deliberately NOT `follows`-ing our nixpkgs: codex is built/tested against its
+    # own nixpkgs-unstable pin; forcing it onto 25.05 risks a broken rebuild.
+    codex-cli.url = "github:PhysShell/codex-cli-nix";
   };
 
-  outputs = { self, nixpkgs, flake-utils, crane, rust-overlay }:
+  outputs = { self, nixpkgs, flake-utils, crane, rust-overlay, codex-cli }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -55,14 +59,18 @@
         apps.default = flake-utils.lib.mkApp { drv = o7; };
 
         devShells.default = pkgs.mkShell {
-          packages = with pkgs; [
+          packages = (with pkgs; [
             rustToolchain
             cargo-deny
             cargo-audit
             git
             jq
+          ]) ++ [
+            # Native `bin/codex` from github:PhysShell/codex-cli-nix.
+            codex-cli.packages.${system}.default
           ];
-          # `claude` / `codex` are external (npm + subscription auth) — not vendored here.
+          # `claude` is external (npm + Claude Max). `codex` is provided above but
+          # still needs `codex login` once (ChatGPT subscription, no API key).
         };
 
         checks = {

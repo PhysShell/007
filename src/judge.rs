@@ -1,7 +1,8 @@
 //! `o7 judge` — read-only FP-triage of analyzer findings.
 //!
-//! Per-file whole-file `claude -p`, classify each finding (real / false_positive /
-//! uncertain), assemble the `fp-verdicts.json` overlay per the domain contract
+//! Per-file whole-file backend call (`claude -p` or `codex exec`), classify each
+//! finding (real / false_positive / uncertain), assemble the `fp-verdicts.json`
+//! overlay per the domain contract
 //! (OwnAudit/docs/fp-judge/verdict-contract.md). Never edits, never gates.
 
 use anyhow::{Context, Result};
@@ -119,6 +120,7 @@ struct JudgeMeta {
     target: String,
     findings: String,
     generated_from: String,
+    provider: &'static str,
     model: String,
     files_judged: usize,
     findings_total: usize,
@@ -126,6 +128,50 @@ struct JudgeMeta {
     by_class: BTreeMap<String, usize>,
     session_ids: Vec<String>,
     cost_usd: Option<f64>,
+}
+
+// ---------- backend agent provider ----------
+
+/// Which subprocess CLI backs a judge call. Both use subscription auth, no API
+/// keys: `claude -p` (Claude Max) and `codex exec` (ChatGPT, via `codex login`).
+/// Chosen by `--provider`, or inferred from the model id under `auto`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Provider {
+    Claude,
+    Codex,
+}
+
+impl Provider {
+    fn label(self) -> &'static str {
+        match self {
+            Provider::Claude => "claude",
+            Provider::Codex => "codex",
+        }
+    }
+}
+
+/// Resolve `--provider` (`claude` | `codex` | `auto`) against the model id.
+/// `auto` routes OpenAI-family ids (gpt*, o1/o3/o4*, *codex*) to codex and
+/// everything else (opus, sonnet, haiku, ...) to claude.
+fn resolve_provider(flag: &str, model: &str) -> Result<Provider> {
+    match flag.to_ascii_lowercase().as_str() {
+        "claude" => Ok(Provider::Claude),
+        "codex" => Ok(Provider::Codex),
+        "auto" => {
+            let m = model.to_ascii_lowercase();
+            let openai = m.starts_with("gpt")
+                || m.starts_with("o1")
+                || m.starts_with("o3")
+                || m.starts_with("o4")
+                || m.contains("codex");
+            Ok(if openai {
+                Provider::Codex
+            } else {
+                Provider::Claude
+            })
+        }
+        other => anyhow::bail!("unknown --provider '{other}' (want: claude | codex | auto)"),
+    }
 }
 
 #[derive(clap::Args)]
@@ -142,9 +188,12 @@ pub struct JudgeArgs {
     /// Prompt template.
     #[arg(long, default_value = "judge/prompt.template.md")]
     pub template: PathBuf,
-    /// Model.
+    /// Model. `opus`/`sonnet` -> claude; `gpt*`/`o*`/`*codex*` -> codex.
     #[arg(long, default_value = "opus")]
     pub model: String,
+    /// Backend agent CLI: `claude` | `codex` | `auto` (infer from --model).
+    #[arg(long, default_value = "auto")]
+    pub provider: String,
     /// Overlay output path (fp-verdicts.json). Also written into the run-record.
     #[arg(long)]
     pub out: Option<PathBuf>,
@@ -160,7 +209,7 @@ pub struct JudgeArgs {
     /// Cap files judged (cost control; 0 = all).
     #[arg(long, default_value_t = 0)]
     pub max_files: usize,
-    /// Plan only — print files/ids/calls, do not call claude.
+    /// Plan only — print files/ids/calls, do not call the backend.
     #[arg(long)]
     pub dry_run: bool,
 }
@@ -185,6 +234,19 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
         .with_context(|| format!("reading {}", a.rubric.display()))?;
     let template = std::fs::read_to_string(&a.template)
         .with_context(|| format!("reading {}", a.template.display()))?;
+    let provider = resolve_provider(&a.provider, &a.model)?;
+    // The default model is `opus` (claude), so `--provider codex` with no `--model`
+    // would ship a Claude-family name to codex and 400. Catch that footgun early with
+    // a hint instead of a raw upstream error.
+    if provider == Provider::Codex {
+        let m = a.model.to_ascii_lowercase();
+        if m.starts_with("claude") || m == "opus" || m == "sonnet" || m == "haiku" || m == "fable" || m == "mythos" {
+            anyhow::bail!(
+                "--provider codex needs an OpenAI model (e.g. --model gpt-5.5), got '{}'",
+                a.model
+            );
+        }
+    }
 
     // Dedupe -> reps keyed by finding_id (first-seen order preserved).
     let mut reps: Vec<Rep> = Vec::new();
@@ -262,8 +324,9 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
             println!("  {n:>3}  {f}");
         }
         println!(
-            "[o7 judge] dry-run: {} claude call(s) would run",
-            files.len()
+            "[o7 judge] dry-run: {} {} call(s) would run",
+            files.len(),
+            provider.label()
         );
         return Ok(());
     }
@@ -322,7 +385,7 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
             fif.len()
         );
 
-        let (result_text, sid, cost) = call_claude(&repo, &prompt, &a.model)?;
+        let (result_text, sid, cost) = call_agent(provider, &repo, &prompt, &a.model)?;
         if let Some(s) = sid {
             session_ids.push(s);
         }
@@ -334,7 +397,7 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
         rec.write_text(&format!("raw.{}.txt", sanitize(file)), &result_text)?;
 
         let arr = extract_json_array(&result_text)
-            .with_context(|| format!("no JSON array in claude output for {file}"))?;
+            .with_context(|| format!("no JSON array in {} output for {file}", provider.label()))?;
         let raws: Vec<RawVerdict> =
             serde_json::from_str(&arr).with_context(|| format!("parsing verdicts for {file}"))?;
 
@@ -440,6 +503,7 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
         target,
         findings: a.findings.to_string_lossy().to_string(),
         generated_from,
+        provider: provider.label(),
         model: a.model.clone(),
         files_judged: files.len(),
         findings_total,
@@ -462,6 +526,93 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
     println!("[o7 judge] overlay -> {overlay_at}");
     println!("[o7 judge] record -> {}", rec.dir.display());
     Ok(())
+}
+
+/// Dispatch one read-only judge call to the selected backend. Both return the
+/// same `(result_text, session_id, cost_usd)` shape; codex has no single-envelope
+/// session/cost on a subscription, so those come back `None`.
+fn call_agent(
+    provider: Provider,
+    cwd: &Path,
+    prompt: &str,
+    model: &str,
+) -> Result<(String, Option<String>, Option<f64>)> {
+    match provider {
+        Provider::Claude => call_claude(cwd, prompt, model),
+        Provider::Codex => call_codex(cwd, prompt, model),
+    }
+}
+
+/// Read-only `codex exec` call — the ChatGPT-subscription backend (`codex login`),
+/// mirror of `call_claude`. Flags pinned against codex-cli 0.142.5:
+/// - `--sandbox read-only`: codex's native no-write mode. The whole source file is
+///   already in the prompt, so the model needs no tools; even if a prompt-injection
+///   payload in the judged file coaxed a shell command, the sandbox denies the
+///   write. (Unlike the claude path we don't also hard-disable network here — codex
+///   has no one-flag equivalent — but read-only + nothing-to-do keeps the blast
+///   radius to reads.)
+/// - `-` reads the prompt from stdin, not argv: a large embedded source file would
+///   blow the OS arg-size limit and argv is world-readable in `ps` (source leak).
+/// - `--output-last-message <FILE>`: codex writes ONLY the agent's final message
+///   there. We read that instead of scraping stdout, which also carries codex's
+///   session preamble (a stray `[` in it could fool `extract_json_array`).
+/// - `--skip-git-repo-check` so a non-git scan root never hard-fails; `--ephemeral`
+///   so a 150-call batch doesn't litter session history; `--color never` for clean
+///   logs.
+///
+/// codex on a subscription emits no per-call dollar-cost / session envelope, so
+/// those come back `None`.
+fn call_codex(
+    cwd: &Path,
+    prompt: &str,
+    model: &str,
+) -> Result<(String, Option<String>, Option<f64>)> {
+    use std::io::Write as _;
+    // Unique temp path for codex's final-message output (`-o`). Runtime clock +
+    // pid is plenty unique for a serial judge loop; we delete it right after.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let last_msg =
+        std::env::temp_dir().join(format!("o7-codex-{}-{nanos}.txt", std::process::id()));
+
+    let mut child = Command::new("codex")
+        .current_dir(cwd)
+        .arg("exec")
+        .arg("--model")
+        .arg(model)
+        .arg("--sandbox")
+        .arg("read-only")
+        .arg("--skip-git-repo-check")
+        .arg("--ephemeral")
+        .arg("--color")
+        .arg("never")
+        .arg("--output-last-message")
+        .arg(&last_msg)
+        .arg("-") // read the prompt from stdin
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("spawning `codex` (installed? `codex login` done? on PATH?)")?;
+    child
+        .stdin
+        .take()
+        .context("codex stdin unavailable")?
+        .write_all(prompt.as_bytes())
+        .context("writing prompt to codex stdin")?;
+    let out = child.wait_with_output().context("waiting for `codex`")?;
+    if !out.status.success() {
+        let _ = std::fs::remove_file(&last_msg);
+        anyhow::bail!("codex failed: {}", String::from_utf8_lossy(&out.stderr));
+    }
+    // Prefer the isolated final message; fall back to stdout if `-o` wrote nothing.
+    let text = match std::fs::read_to_string(&last_msg) {
+        Ok(s) if !s.trim().is_empty() => s,
+        _ => String::from_utf8_lossy(&out.stdout).to_string(),
+    };
+    let _ = std::fs::remove_file(&last_msg);
+    Ok((text, None, None))
 }
 
 /// Read-only claude call. The whole file is already in the prompt, so no tool is
@@ -604,8 +755,16 @@ mod tests {
 
     #[test]
     fn finding_id_is_stable_and_16_hex() {
-        let a = finding_id("ViewModels/MixedViewModel.cs", "OWN001", "event 'QuoteReceived' ...");
-        let b = finding_id("ViewModels/MixedViewModel.cs", "OWN001", "event 'QuoteReceived' ...");
+        let a = finding_id(
+            "ViewModels/MixedViewModel.cs",
+            "OWN001",
+            "event 'QuoteReceived' ...",
+        );
+        let b = finding_id(
+            "ViewModels/MixedViewModel.cs",
+            "OWN001",
+            "event 'QuoteReceived' ...",
+        );
         assert_eq!(a, b, "same inputs -> same id");
         assert_eq!(a.len(), 16, "id is 16 hex chars");
         assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
@@ -615,8 +774,16 @@ mod tests {
     fn finding_id_splits_on_message_same_tuple() {
         // The collision case: same (path, rule) — and same line at the call site —
         // but different message must yield DISTINCT ids, or one overlay entry is lost.
-        let quote = finding_id("ViewModels/MixedViewModel.cs", "OWN001", "'QuoteReceived' subscribed");
-        let down = finding_id("ViewModels/MixedViewModel.cs", "OWN001", "'Disconnected' subscribed");
+        let quote = finding_id(
+            "ViewModels/MixedViewModel.cs",
+            "OWN001",
+            "'QuoteReceived' subscribed",
+        );
+        let down = finding_id(
+            "ViewModels/MixedViewModel.cs",
+            "OWN001",
+            "'Disconnected' subscribed",
+        );
         assert_ne!(quote, down, "different message -> different finding_id");
     }
 
