@@ -97,11 +97,19 @@ struct VerdictOut {
 
 // ---------- raw judge output (per prompt.template.md) ----------
 
+// Every field defaults: the model occasionally drops an echo field (`rule` seen
+// missing on real runs). A missing field must NOT abort parsing of the whole array
+// — identity is recovered by position (see the pairing logic), and a verdict with
+// an empty `class` is skipped downstream rather than crashing the batch.
 #[derive(Deserialize)]
 struct RawVerdict {
+    #[serde(default)]
     path: String,
+    #[serde(default)]
     line: i64,
+    #[serde(default)]
     rule: String,
+    #[serde(default)]
     class: String,
     #[serde(default)]
     confidence: f64,
@@ -240,7 +248,13 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
     // a hint instead of a raw upstream error.
     if provider == Provider::Codex {
         let m = a.model.to_ascii_lowercase();
-        if m.starts_with("claude") || m == "opus" || m == "sonnet" || m == "haiku" || m == "fable" || m == "mythos" {
+        if m.starts_with("claude")
+            || m == "opus"
+            || m == "sonnet"
+            || m == "haiku"
+            || m == "fable"
+            || m == "mythos"
+        {
             anyhow::bail!(
                 "--provider codex needs an OpenAI model (e.g. --model gpt-5.5), got '{}'",
                 a.model
@@ -396,10 +410,28 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
 
         rec.write_text(&format!("raw.{}.txt", sanitize(file)), &result_text)?;
 
-        let arr = extract_json_array(&result_text)
-            .with_context(|| format!("no JSON array in {} output for {file}", provider.label()))?;
-        let raws: Vec<RawVerdict> =
-            serde_json::from_str(&arr).with_context(|| format!("parsing verdicts for {file}"))?;
+        // A malformed output for ONE file must not abort the whole batch (a 116-file
+        // run shouldn't die on file 3). The raw text is already persisted above, so
+        // warn, skip this file, and keep going — the overlay records what succeeded.
+        let arr = match extract_json_array(&result_text) {
+            Some(a) => a,
+            None => {
+                eprintln!(
+                    "[o7 judge] warn: {file}: no JSON array in {} output — skipped (raw saved)",
+                    provider.label()
+                );
+                continue;
+            }
+        };
+        let raws: Vec<RawVerdict> = match serde_json::from_str(&arr) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!(
+                    "[o7 judge] warn: {file}: parsing verdicts failed ({e}) — skipped (raw saved)"
+                );
+                continue;
+            }
+        };
 
         // The prompt mandates "one object per finding above, in the same order",
         // so pair verdicts to findings positionally when the counts match. That is
@@ -411,15 +443,16 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
         let paired: Vec<(String, &RawVerdict)> = if raws.len() == fif.len() {
             raws.iter()
                 .zip(fif.iter())
-                .filter_map(|(rv, rep)| {
-                    // Position is trustworthy only when the echoed tuple matches: that
-                    // both confirms the model kept order and is the only way to split a
-                    // message-collision (identical tuple, distinct finding_id). On a
-                    // mismatch the model reordered/merged — trusting position here would
-                    // silently attach the verdict to the WRONG finding_id, so recover by
-                    // key instead, and skip if even that is unknown.
+                .map(|(rv, rep)| {
+                    // Counts match, so the model honored "one object per finding, in
+                    // order". Position is the primary identity — it's the only way to
+                    // split a message-collision (same tuple, distinct finding_id). The
+                    // echoed tuple is a cross-check: matches rep -> confirmed; matches a
+                    // DIFFERENT known finding -> the model reordered, recover by key;
+                    // matches nothing (dropped/garbled echo) -> fall back to position.
+                    // Either way every verdict is placed (never dropped), so `.map`.
                     if rv.path == rep.path && rv.line == rep.line && rv.rule == rep.rule {
-                        return Some((rep.id.clone(), rv));
+                        return (rep.id.clone(), rv);
                     }
                     let key = (rv.path.clone(), rv.line, rv.rule.clone());
                     match key_to_id.get(&key) {
@@ -429,14 +462,18 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
                                  — recovered by key, not position",
                                 rv.path, rv.line, rv.rule
                             );
-                            Some((id.clone(), rv))
+                            (id.clone(), rv)
                         }
                         None => {
+                            // Echo matches no known finding — almost always a dropped
+                            // or garbled echo field (e.g. missing `rule`), not a real
+                            // reorder. Counts match, so position is the best identity.
                             eprintln!(
-                                "[o7 judge] warn: {file}: verdict for unknown finding {key:?} \
-                                 — skipped"
+                                "[o7 judge] warn: {file}: verdict echo ({}, {}, {:?}) matches no \
+                                 finding — assigning by position to {}",
+                                rv.path, rv.line, rv.rule, rep.id
                             );
-                            None
+                            (rep.id.clone(), rv)
                         }
                     }
                 })
@@ -465,6 +502,13 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
         };
 
         for (id, rv) in paired {
+            // A verdict with no class is unusable (the model dropped the one field
+            // that matters). Count it as `_malformed` for the summary, don't record it.
+            if rv.class.is_empty() {
+                *by_class.entry("_malformed".to_string()).or_default() += 1;
+                eprintln!("[o7 judge] warn: {file}: empty class for {id} — not recorded");
+                continue;
+            }
             *by_class.entry(rv.class.clone()).or_default() += 1;
             verdicts.insert(
                 id.clone(),
