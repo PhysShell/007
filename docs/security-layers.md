@@ -27,7 +27,8 @@ missing layer worth building.
 `o7 run` executes **arbitrary `bash -lc <cmd>` from the target repo's
 `.007/gate.toml`** (`gate.rs`), in the worktree. If a target repo is not fully
 trusted, gate steps are attacker-controlled code execution, bounded only by the
-worktree — which does **not** contain network or filesystem reads. Combined with
+worktree **for writes**; it does not bound network egress or host filesystem
+reads. Combined with
 the agent itself running unsandboxed under `bypassPermissions`, this — not policy
 engines or proof assistants — is 007's sharpest present-day trust boundary. The
 real "sandbox slot" is here in `run`/gate, **not** in `judge` (already closed-world).
