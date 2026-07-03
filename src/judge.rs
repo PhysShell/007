@@ -592,4 +592,56 @@ mod tests {
         assert_eq!(sanitize("ViewModels/Mixed.cs"), "ViewModels_Mixed_cs");
         assert_eq!(sanitize("a b\\c"), "a_b_c");
     }
+
+    // ---- property tests: the pure functions must hold on arbitrary input,
+    // including untrusted bytes (finding messages, the model's raw output). ----
+
+    use proptest::prelude::*;
+
+    proptest! {
+        /// `finding_id` never panics and always yields 16 lowercase hex chars,
+        /// for any path/rule/message (incl. newlines, control chars, unicode).
+        #[test]
+        fn prop_finding_id_shape(p in "(?s).*", r in "(?s).*", m in "(?s).*") {
+            let id = finding_id(&p, &r, &m);
+            prop_assert_eq!(id.len(), 16);
+            prop_assert!(id.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()));
+        }
+
+        /// Same inputs → same id (the domain contract both sides rely on).
+        #[test]
+        fn prop_finding_id_deterministic(p in "(?s).*", r in "(?s).*", m in "(?s).*") {
+            prop_assert_eq!(finding_id(&p, &r, &m), finding_id(&p, &r, &m));
+        }
+
+        /// The dedup-critical property: on the same (path, rule), a different
+        /// `message` must produce a different `finding_id` — else the overlay
+        /// silently drops a verdict (the bug the collision-fix guards).
+        #[test]
+        fn prop_finding_id_splits_on_message(
+            p in "(?s).*", r in "(?s).*", m1 in "(?s).*", m2 in "(?s).*"
+        ) {
+            prop_assume!(m1 != m2);
+            prop_assert_ne!(finding_id(&p, &r, &m1), finding_id(&p, &r, &m2));
+        }
+
+        /// `extract_json_array` never panics on arbitrary model output, and when
+        /// it returns Some the slice is bracket-delimited.
+        #[test]
+        fn prop_extract_json_array_safe(s in "(?s).*") {
+            if let Some(arr) = extract_json_array(&s) {
+                prop_assert!(arr.starts_with('['));
+                prop_assert!(arr.ends_with(']'));
+            }
+        }
+
+        /// `sanitize` output is path-safe (used to build filenames from findings
+        /// paths) and is a 1:1 char map — never panics, never changes length.
+        #[test]
+        fn prop_sanitize_is_path_safe(s in "(?s).*") {
+            let out = sanitize(&s);
+            prop_assert!(out.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+            prop_assert_eq!(out.chars().count(), s.chars().count());
+        }
+    }
 }
