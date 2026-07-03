@@ -38,6 +38,10 @@ Domain hands: `--repo <STS source root>` + `--findings <STS-210 findings.json>` 
 - STS **source must be local** on this box (whole-file context).
 - Overwrites the oracle overlay at that `--out`. Domain's report merges only the
   overlay whose `generated_from` == current `findings.json` (staleness guard).
+- **Perf:** the per-file `claude` calls are independent — add a bounded `--jobs N`
+  worker pool here (sequential today = sum of ~198 call latencies; parallel ≈ max
+  per batch, near-linear speedup). Ordering-safe (pairing is per-file). Design:
+  `docs/performance.md`.
 
 ## Domain (OwnAudit agent) — parallel, its lane
 1. Consumer: report/dashboard loads `fp-verdicts.json`, verifies `generated_from`,

@@ -43,7 +43,13 @@ impl GateManifest {
     pub fn load(path: &Path) -> Result<GateManifest> {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("reading gate manifest {}", path.display()))?;
-        toml::from_str(&text).with_context(|| format!("parsing gate manifest {}", path.display()))
+        Self::parse(&text).with_context(|| format!("parsing gate manifest {}", path.display()))
+    }
+
+    /// Parse a gate manifest from TOML text. Entry point for fuzzing the
+    /// untrusted-config parser without touching the filesystem.
+    pub fn parse(text: &str) -> Result<GateManifest> {
+        toml::from_str(text).context("parsing gate manifest TOML")
     }
 
     /// Run every step in `workdir`, writing per-step logs into `gate_out`.

@@ -3,22 +3,17 @@
 //! loop: worktree at <base> -> agent full-auto -> gate manifest -> verdict
 //!       -> harvest run record into the private store.
 
-mod agent;
-mod gate;
-mod judge;
-mod record;
-mod verdict;
-mod worktree;
-
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use agent::Engine;
-use gate::GateManifest;
-use record::{RunMeta, RunRecord};
-use verdict::Verdict;
+use o7::agent::{self, Engine};
+use o7::gate::GateManifest;
+use o7::judge;
+use o7::record::{RunMeta, RunRecord};
+use o7::verdict::Verdict;
+use o7::worktree;
 
 #[derive(Parser)]
 #[command(name = "o7", version, about = "007 — one isolated, gated agent run")]
