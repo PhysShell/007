@@ -51,7 +51,7 @@ struct Rep {
 }
 
 /// Line-independent identity — matches the domain contract exactly.
-fn finding_id(path: &str, rule: &str, message: &str) -> String {
+pub fn finding_id(path: &str, rule: &str, message: &str) -> String {
     let mut h = Sha1::new();
     h.update(path.as_bytes());
     h.update([0x1f]);
@@ -530,13 +530,21 @@ fn call_claude(
 }
 
 /// Slice the first `[ .. ]` out of the model's text (tolerates ```json fences / stray prose).
-fn extract_json_array(s: &str) -> Option<String> {
+pub fn extract_json_array(s: &str) -> Option<String> {
     let start = s.find('[')?;
     let end = s.rfind(']')?;
     (end > start).then(|| s[start..=end].to_string())
 }
 
-fn sanitize(s: &str) -> String {
+/// Parse an own-check `findings.json` from raw bytes and return the finding
+/// count. A stable entry point for fuzzing the untrusted-input deserializer
+/// without exposing the internal `FindingsFile` shape.
+pub fn parse_findings_json(bytes: &[u8]) -> Result<usize> {
+    let ff: FindingsFile = serde_json::from_slice(bytes)?;
+    Ok(ff.findings.len())
+}
+
+pub fn sanitize(s: &str) -> String {
     s.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
@@ -546,6 +554,44 @@ fn sanitize(s: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Kani proofs — bounded, symbolic "never panics / holds for all inputs" checks
+/// on the string helpers (slice-boundary safety is exactly Kani's sweet spot).
+/// Compiled only under `cargo kani`; invisible to normal builds.
+#[cfg(kani)]
+mod kani_proofs {
+    use super::{extract_json_array, sanitize};
+
+    /// `extract_json_array` must never panic — the `s[start..=end]` slice has to
+    /// land on char boundaries for *any* input (bounded here for tractability).
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn extract_json_array_never_panics() {
+        let bytes: [u8; 4] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= bytes.len());
+        if let Ok(s) = core::str::from_utf8(&bytes[..len]) {
+            if let Some(arr) = extract_json_array(s) {
+                assert!(arr.as_bytes().first() == Some(&b'['));
+                assert!(arr.as_bytes().last() == Some(&b']'));
+            }
+        }
+    }
+
+    /// `sanitize` must never panic and must only emit path-safe bytes.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn sanitize_is_panic_free_and_path_safe() {
+        let bytes: [u8; 4] = kani::any();
+        let len: usize = kani::any();
+        kani::assume(len <= bytes.len());
+        if let Ok(s) = core::str::from_utf8(&bytes[..len]) {
+            for c in sanitize(s).chars() {
+                assert!(c.is_ascii_alphanumeric() || c == '-' || c == '_');
+            }
+        }
+    }
 }
 
 #[cfg(test)]

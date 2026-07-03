@@ -17,6 +17,10 @@ anyhow = "1"
 sha1 = "0.10"
 sha2 = "0.10"
 
+# `kani` is a cfg set by `cargo kani`; register it so stable builds don't warn.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
 [dev-dependencies]
 proptest = "1"
 

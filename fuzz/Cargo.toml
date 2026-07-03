@@ -1,0 +1,35 @@
+[package]
+name = "o7-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.o7]
+path = ".."
+
+[[bin]]
+name = "extract_json_array"
+path = "fuzz_targets/extract_json_array.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "findings_json"
+path = "fuzz_targets/findings_json.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gate_toml"
+path = "fuzz_targets/gate_toml.rs"
+test = false
+doc = false
+bench = false

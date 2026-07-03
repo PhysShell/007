@@ -44,7 +44,7 @@ deferred list) or a WASI boundary (the sandboy direction) belong here.
 
 007's critical code is **glue** — orchestration, parsing, file ops. The high-ROI
 tools operate on the real untrusted-input surfaces that exist today, in ascending
-effort:
+effort (now wired — see `docs/verification.md` for how to run each):
 
 - **`proptest`** — pure-function invariants: `finding_id` stability + the
   different-message-same-tuple split, `Overlay` serialize→deserialize round-trip,
