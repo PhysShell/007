@@ -98,18 +98,24 @@ struct VerdictOut {
 
 // ---------- raw judge output (per prompt.template.md) ----------
 
-// Every field defaults: the model occasionally drops an echo field (`rule` seen
-// missing on real runs). A missing field must NOT abort parsing of the whole array
-// — identity is recovered by position (see the pairing logic), and a verdict with
-// an empty `class` is skipped downstream rather than crashing the batch.
+// The model occasionally drops an echo field (`rule` seen missing on real runs).
+// A missing field must NOT abort parsing of the whole array. The echo fields are
+// `Option` — NOT blanket-defaulted — so the pairing logic can tell "the model
+// omitted this" (absent -> trust position) from "the model asserted a value"
+// (present -> a real cross-check / reorder signal). A blanket `default` collapses
+// both into ""/0 and feeds fabricated values into identity matching, which — since
+// `Finding.line` also defaults to 0 — can key-match a real line-0 finding and
+// misattribute the verdict. `class` is the one load-bearing field: kept a plain
+// String and validated against the schema enum downstream (empty / unknown ->
+// counted malformed, never written to the overlay).
 #[derive(Deserialize)]
 struct RawVerdict {
     #[serde(default)]
-    path: String,
+    path: Option<String>,
     #[serde(default)]
-    line: i64,
+    line: Option<i64>,
     #[serde(default)]
-    rule: String,
+    rule: Option<String>,
     #[serde(default)]
     class: String,
     #[serde(default)]
@@ -118,6 +124,96 @@ struct RawVerdict {
     reason: String,
     #[serde(default)]
     evidence: String,
+}
+
+/// Valid verdict classes, per `judge/fp-verdicts.schema.json` (the overlay
+/// contract). Anything else — empty, wrong-case, hyphenated, prose — is malformed
+/// and must not reach the overlay, or the domain merge fails schema validation on
+/// a run `o7` already reported as successful.
+fn normalized_class(class: &str) -> Option<&'static str> {
+    match class {
+        "real" => Some("real"),
+        "false_positive" => Some("false_positive"),
+        "uncertain" => Some("uncertain"),
+        _ => None,
+    }
+}
+
+/// Pair a file's raw verdicts to finding ids.
+///
+/// The prompt mandates "one object per finding above, in the same order", so when
+/// counts match **position is the identity**: it is the only thing that can split a
+/// message-collision (same `(path,line,rule)`, distinct `finding_id`) and — because
+/// each finding appears once — it never assigns two verdicts to one id. The echoed
+/// tuple is used only as a *cross-check*: a COMPLETE echo that lands at the wrong
+/// position is surfaced as a warning (possible reorder), but we still trust
+/// position. Silently repairing by key (the old behaviour) could map two verdicts
+/// onto one id and drop another — the bug this replaces.
+///
+/// When counts DON'T match, position is meaningless, so fall back to key recovery,
+/// dropping any verdict whose complete echo matches no finding.
+///
+/// Pure (no I/O): returns the pairing plus human-readable warnings, so it is unit-
+/// and property-testable like the repo's other model-output parsers.
+fn pair_verdicts<'a>(
+    raws: &'a [RawVerdict],
+    fif: &[&Rep],
+    key_to_id: &BTreeMap<(String, i64, String), String>,
+) -> (Vec<(String, &'a RawVerdict)>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let echo = |rv: &RawVerdict| match (rv.path.as_deref(), rv.line, rv.rule.as_deref()) {
+        (Some(p), Some(l), Some(r)) => Some((p.to_string(), l, r.to_string())),
+        _ => None,
+    };
+
+    if raws.len() == fif.len() {
+        let paired = raws
+            .iter()
+            .zip(fif.iter())
+            .map(|(rv, rep)| {
+                if let Some(key) = echo(rv) {
+                    let at_position = key.0 == rep.path && key.1 == rep.line && key.2 == rep.rule;
+                    if !at_position && key_to_id.contains_key(&key) {
+                        warnings.push(format!(
+                            "verdict echo ({}, {}, {}) matches a different finding than its \
+                             position ({}) — trusting position per the ordered-output contract",
+                            key.0, key.1, key.2, rep.id
+                        ));
+                    }
+                }
+                (rep.id.clone(), rv)
+            })
+            .collect();
+        (paired, warnings)
+    } else {
+        warnings.push(format!(
+            "model returned {} verdict(s) for {} finding(s) — pairing by (path, line, rule) key \
+             instead of position",
+            raws.len(),
+            fif.len()
+        ));
+        let paired = raws
+            .iter()
+            .filter_map(|rv| match echo(rv) {
+                Some(key) => match key_to_id.get(&key) {
+                    Some(id) => Some((id.clone(), rv)),
+                    None => {
+                        warnings.push(format!(
+                            "verdict for unknown finding ({}, {}, {}) — skipped",
+                            key.0, key.1, key.2
+                        ));
+                        None
+                    }
+                },
+                None => {
+                    warnings
+                        .push("verdict with incomplete echo and mismatched count — skipped".into());
+                    None
+                }
+            })
+            .collect();
+        (paired, warnings)
+    }
 }
 
 // ---------- judge run-record meta ----------
@@ -132,6 +228,12 @@ struct JudgeMeta {
     provider: &'static str,
     model: String,
     files_judged: usize,
+    /// Files slated to run but skipped (unreadable source / malformed output /
+    /// backend failure). `> 0` means the overlay is PARTIAL and the run exits
+    /// non-zero — coverage automation must read this, not just the exit code.
+    files_skipped: usize,
+    /// Verdicts dropped for an invalid `class` (empty / not in the schema enum).
+    findings_malformed: usize,
     findings_total: usize,
     ids_total: usize,
     by_class: BTreeMap<String, usize>,
@@ -367,6 +469,11 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
     let mut session_ids: Vec<String> = Vec::new();
     let mut cost_total = 0f64;
     let mut cost_any = false;
+    // Coverage bookkeeping: a file skipped for ANY reason (unreadable source,
+    // malformed output, backend failure) leaves its findings unjudged. Count both so
+    // the overlay/meta can't silently pass as complete.
+    let mut files_skipped = 0usize;
+    let mut findings_malformed = 0usize;
 
     for (fi, file) in files.iter().enumerate() {
         // `by_file` only ever stores valid indices into `reps`.
@@ -387,10 +494,12 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
                     "[o7 judge] warn: {file} resolves outside --repo ({}) — skipped",
                     p.display()
                 );
+                files_skipped += 1;
                 continue;
             }
             Err(e) => {
                 eprintln!("[o7 judge] warn: {file}: cannot resolve source ({e}) — skipped");
+                files_skipped += 1;
                 continue;
             }
         };
@@ -410,7 +519,19 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
             fif.len()
         );
 
-        let (result_text, sid, cost) = call_agent(provider, &repo, &prompt, &a.model)?;
+        // A per-file failure must not abort the whole batch (a 116-file run shouldn't
+        // die on file 3), but every skip is COUNTED (files_skipped) and forces a
+        // non-zero exit at the end — a silently-partial overlay is worse than a loud
+        // one. A hard backend failure (not logged in, empty codex message) skips this
+        // file too; if it's systemic every file skips and the run exits non-zero.
+        let (result_text, sid, cost) = match call_agent(provider, &repo, &prompt, &a.model) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("[o7 judge] warn: {file}: backend call failed ({e}) — skipped");
+                files_skipped += 1;
+                continue;
+            }
+        };
         if let Some(s) = sid {
             session_ids.push(s);
         }
@@ -421,9 +542,8 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
 
         rec.write_text(&format!("raw.{}.txt", sanitize(file)), &result_text)?;
 
-        // A malformed output for ONE file must not abort the whole batch (a 116-file
-        // run shouldn't die on file 3). The raw text is already persisted above, so
-        // warn, skip this file, and keep going — the overlay records what succeeded.
+        // The raw text is already persisted above, so on a malformed output warn,
+        // skip this file, and keep going — the overlay records what succeeded.
         let arr = match extract_json_array(&result_text) {
             Some(a) => a,
             None => {
@@ -431,6 +551,7 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
                     "[o7 judge] warn: {file}: no JSON array in {} output — skipped (raw saved)",
                     provider.label()
                 );
+                files_skipped += 1;
                 continue;
             }
         };
@@ -440,91 +561,35 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
                 eprintln!(
                     "[o7 judge] warn: {file}: parsing verdicts failed ({e}) — skipped (raw saved)"
                 );
+                files_skipped += 1;
                 continue;
             }
         };
 
-        // The prompt mandates "one object per finding above, in the same order",
-        // so pair verdicts to findings positionally when the counts match. That is
-        // the only reliable identity: two findings sharing (path, line, rule) but
-        // differing in `message` have distinct `finding_id`s, yet `RawVerdict` never
-        // echoes `message` back — so a (path, line, rule) tuple lookup is lossy by
-        // construction and silently drops one. Fall back to the tuple map only when
-        // the model breaks the count contract.
-        let paired: Vec<(String, &RawVerdict)> = if raws.len() == fif.len() {
-            raws.iter()
-                .zip(fif.iter())
-                .map(|(rv, rep)| {
-                    // Counts match, so the model honored "one object per finding, in
-                    // order". Position is the primary identity — it's the only way to
-                    // split a message-collision (same tuple, distinct finding_id). The
-                    // echoed tuple is a cross-check: matches rep -> confirmed; matches a
-                    // DIFFERENT known finding -> the model reordered, recover by key;
-                    // matches nothing (dropped/garbled echo) -> fall back to position.
-                    // Either way every verdict is placed (never dropped), so `.map`.
-                    if rv.path == rep.path && rv.line == rep.line && rv.rule == rep.rule {
-                        return (rep.id.clone(), rv);
-                    }
-                    let key = (rv.path.clone(), rv.line, rv.rule.clone());
-                    match key_to_id.get(&key) {
-                        Some(id) => {
-                            eprintln!(
-                                "[o7 judge] warn: {file}: verdict ({}, {}, {}) out of position \
-                                 — recovered by key, not position",
-                                rv.path, rv.line, rv.rule
-                            );
-                            (id.clone(), rv)
-                        }
-                        None => {
-                            // Echo matches no known finding — almost always a dropped
-                            // or garbled echo field (e.g. missing `rule`), not a real
-                            // reorder. Counts match, so position is the best identity.
-                            eprintln!(
-                                "[o7 judge] warn: {file}: verdict echo ({}, {}, {:?}) matches no \
-                                 finding — assigning by position to {}",
-                                rv.path, rv.line, rv.rule, rep.id
-                            );
-                            (rep.id.clone(), rv)
-                        }
-                    }
-                })
-                .collect()
-        } else {
-            eprintln!(
-                "[o7 judge] warn: {file}: model returned {} verdict(s) for {} finding(s) \
-                 — pairing by (path, line, rule) key instead of position",
-                raws.len(),
-                fif.len()
-            );
-            raws.iter()
-                .filter_map(|rv| {
-                    let key = (rv.path.clone(), rv.line, rv.rule.clone());
-                    match key_to_id.get(&key) {
-                        Some(id) => Some((id.clone(), rv)),
-                        None => {
-                            eprintln!(
-                                "[o7 judge] warn: verdict for unknown finding {key:?} — skipped"
-                            );
-                            None
-                        }
-                    }
-                })
-                .collect()
-        };
+        let (paired, warnings) = pair_verdicts(&raws, &fif, &key_to_id);
+        for w in warnings {
+            eprintln!("[o7 judge] warn: {file}: {w}");
+        }
 
         for (id, rv) in paired {
-            // A verdict with no class is unusable (the model dropped the one field
-            // that matters). Count it as `_malformed` for the summary, don't record it.
-            if rv.class.is_empty() {
-                *by_class.entry("_malformed".to_string()).or_default() += 1;
-                eprintln!("[o7 judge] warn: {file}: empty class for {id} — not recorded");
+            // Validate `class` against the schema enum — not just non-empty. A wrong-
+            // case / hyphenated / prose class is malformed: count it (a first-class
+            // counter, NOT a magic `by_class` key that could collide with a model-
+            // emitted class) and keep it out of the overlay, so the domain merge never
+            // sees a value the overlay schema forbids.
+            let Some(class) = normalized_class(&rv.class) else {
+                findings_malformed += 1;
+                eprintln!(
+                    "[o7 judge] warn: {file}: invalid class {:?} for {id} — not recorded",
+                    rv.class
+                );
                 continue;
-            }
-            *by_class.entry(rv.class.clone()).or_default() += 1;
+            };
+            *by_class.entry(class.to_string()).or_default() += 1;
             verdicts.insert(
                 id.clone(),
                 VerdictOut {
-                    class: rv.class.clone(),
+                    class: class.to_string(),
                     confidence: rv.confidence,
                     reason: rv.reason.clone(),
                     evidence: rv.evidence.clone(),
@@ -560,7 +625,10 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
         generated_from,
         provider: provider.label(),
         model: a.model.clone(),
-        files_judged: files.len(),
+        // Honest coverage: judged = slated minus skipped, not the planned count.
+        files_judged: files.len() - files_skipped,
+        files_skipped,
+        findings_malformed,
         findings_total,
         ids_total: reps.len(),
         by_class: by_class.clone(),
@@ -570,6 +638,9 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
     rec.write_json("meta.json", &meta)?;
 
     println!("[o7 judge] {run_id}: {by_class:?}");
+    if findings_malformed > 0 {
+        println!("[o7 judge] {findings_malformed} malformed verdict(s) dropped (invalid class)");
+    }
     if cost_any {
         println!("[o7 judge] cost ~${cost_total:.4}");
     }
@@ -580,6 +651,18 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
         .unwrap_or_else(|| rec.dir.join("fp-verdicts.json").display().to_string());
     println!("[o7 judge] overlay -> {overlay_at}");
     println!("[o7 judge] record -> {}", rec.dir.display());
+
+    // The overlay + meta are on disk (they record the partial result and the skip
+    // count); now surface the partial coverage as a non-zero exit so a wrapper /
+    // dashboard can't read a silently-incomplete triage as a clean, complete run.
+    if files_skipped > 0 {
+        anyhow::bail!(
+            "{files_skipped} of {} file(s) skipped — overlay is PARTIAL; \
+             see the warnings above and raw.*.txt in {}",
+            files.len(),
+            rec.dir.display()
+        );
+    }
     Ok(())
 }
 
@@ -978,5 +1061,165 @@ mod tests {
             prop_assert!(out.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
             prop_assert_eq!(out.chars().count(), s.chars().count());
         }
+
+        /// The core pairing invariant that the misattribution/overwrite fixes rest
+        /// on: when verdict count == finding count, every verdict is placed by
+        /// POSITION — so the paired ids equal the findings' ids in order, EXACTLY,
+        /// no matter what the model echoed (complete, dropped, or reordered). This
+        /// rules out both the dropped-verdict and duplicate-id-overwrite bugs.
+        #[test]
+        fn prop_pair_counts_match_is_positional_bijection(mask in any::<u32>(), take in 1usize..=7) {
+            let lines = [10i64, 20, 30, 40, 50, 60, 70];
+            let reps: Vec<Rep> = lines
+                .iter()
+                .take(take)
+                .enumerate()
+                .map(|(i, &l)| test_rep(&format!("id{i}"), "a.cs", l, "OWN001"))
+                .collect();
+            let fif: Vec<&Rep> = reps.iter().collect();
+            let k = test_ktoi(&reps);
+            // Each verdict either echoes its finding faithfully or drops the whole
+            // echo (Option::None) — both must still land on the positional id.
+            let raws: Vec<RawVerdict> = reps
+                .iter()
+                .enumerate()
+                .map(|(i, r)| {
+                    if (mask >> i) & 1 == 1 {
+                        test_raw(None, None, None, "real")
+                    } else {
+                        test_raw(Some(&r.path), Some(r.line), Some(&r.rule), "real")
+                    }
+                })
+                .collect();
+            let (paired, _warn) = pair_verdicts(&raws, &fif, &k);
+            let got: Vec<&str> = paired.iter().map(|(id, _)| id.as_str()).collect();
+            let want: Vec<&str> = reps.iter().map(|r| r.id.as_str()).collect();
+            prop_assert_eq!(got, want);
+        }
+    }
+
+    // ---- pairing + class validation (the batch-resilience core) ----
+
+    fn test_rep(id: &str, path: &str, line: i64, rule: &str) -> Rep {
+        Rep {
+            id: id.into(),
+            path: path.into(),
+            line,
+            rule: rule.into(),
+            category_name: String::new(),
+            message: String::new(),
+            lines: vec![line],
+        }
+    }
+
+    fn test_raw(
+        path: Option<&str>,
+        line: Option<i64>,
+        rule: Option<&str>,
+        class: &str,
+    ) -> RawVerdict {
+        RawVerdict {
+            path: path.map(Into::into),
+            line,
+            rule: rule.map(Into::into),
+            class: class.into(),
+            confidence: 0.0,
+            reason: String::new(),
+            evidence: String::new(),
+        }
+    }
+
+    fn test_ktoi(reps: &[Rep]) -> BTreeMap<(String, i64, String), String> {
+        reps.iter()
+            .map(|r| ((r.path.clone(), r.line, r.rule.clone()), r.id.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn pair_dropped_echo_keeps_position() {
+        // The real observed failure: the model drops `rule` on one verdict. Counts
+        // match, so both must still land on their positional ids — no misattribution.
+        let reps = vec![
+            test_rep("idA", "a.cs", 1, "OWN001"),
+            test_rep("idB", "a.cs", 2, "OWN001"),
+        ];
+        let fif: Vec<&Rep> = reps.iter().collect();
+        let k = test_ktoi(&reps);
+        let raws = vec![
+            test_raw(Some("a.cs"), Some(1), Some("OWN001"), "real"),
+            test_raw(Some("a.cs"), Some(2), None, "false_positive"), // dropped rule
+        ];
+        let (paired, _w) = pair_verdicts(&raws, &fif, &k);
+        let ids: Vec<&str> = paired.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, vec!["idA", "idB"]);
+    }
+
+    #[test]
+    fn pair_reorder_never_overwrites_or_drops() {
+        // The duplicate-id-overwrite bug: model reorders echoes (pos0 echoes B,
+        // pos1 echoes A). Position is trusted, so each id appears exactly once and
+        // none is dropped; the reorder is surfaced as a warning, not silently
+        // "repaired" by key (which mapped two verdicts to one id).
+        let reps = vec![
+            test_rep("idA", "a.cs", 1, "OWN001"),
+            test_rep("idB", "a.cs", 2, "OWN001"),
+        ];
+        let fif: Vec<&Rep> = reps.iter().collect();
+        let k = test_ktoi(&reps);
+        let raws = vec![
+            test_raw(Some("a.cs"), Some(2), Some("OWN001"), "real"), // echoes B
+            test_raw(Some("a.cs"), Some(1), Some("OWN001"), "false_positive"), // echoes A
+        ];
+        let (paired, warnings) = pair_verdicts(&raws, &fif, &k);
+        let ids: Vec<&str> = paired.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["idA", "idB"],
+            "position trusted, no overwrite/drop"
+        );
+        assert!(!warnings.is_empty(), "reorder is surfaced, not silent");
+    }
+
+    #[test]
+    fn pair_count_mismatch_recovers_by_key() {
+        let reps = vec![
+            test_rep("idA", "a.cs", 1, "OWN001"),
+            test_rep("idB", "a.cs", 2, "OWN001"),
+        ];
+        let fif: Vec<&Rep> = reps.iter().collect();
+        let k = test_ktoi(&reps);
+        // One verdict for two findings -> key path; echoes B.
+        let raws = vec![test_raw(Some("a.cs"), Some(2), Some("OWN001"), "real")];
+        let (paired, _w) = pair_verdicts(&raws, &fif, &k);
+        assert_eq!(paired.len(), 1);
+        assert_eq!(paired.first().map(|(id, _)| id.as_str()), Some("idB"));
+    }
+
+    #[test]
+    fn pair_count_mismatch_skips_unknown_and_incomplete() {
+        let reps = vec![test_rep("idA", "a.cs", 1, "OWN001")];
+        let fif: Vec<&Rep> = reps.iter().collect();
+        let k = test_ktoi(&reps);
+        // Two verdicts for one finding -> key path. One matches no finding, one has
+        // an incomplete echo — both dropped, none misattributed.
+        let raws = vec![
+            test_raw(Some("a.cs"), Some(9), Some("OWN999"), "real"), // unknown
+            test_raw(None, None, None, "real"),                      // incomplete
+        ];
+        let (paired, _w) = pair_verdicts(&raws, &fif, &k);
+        assert!(paired.is_empty());
+    }
+
+    #[test]
+    fn normalized_class_enforces_schema_enum() {
+        assert_eq!(normalized_class("real"), Some("real"));
+        assert_eq!(normalized_class("false_positive"), Some("false_positive"));
+        assert_eq!(normalized_class("uncertain"), Some("uncertain"));
+        // Everything else is malformed — never written to the overlay.
+        assert_eq!(normalized_class(""), None);
+        assert_eq!(normalized_class("Real"), None);
+        assert_eq!(normalized_class("false-positive"), None);
+        assert_eq!(normalized_class("fp"), None);
+        assert_eq!(normalized_class("_malformed"), None);
     }
 }
