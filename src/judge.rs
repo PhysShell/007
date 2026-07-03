@@ -739,13 +739,22 @@ fn call_codex(
         .stderr(Stdio::piped())
         .spawn()
         .context("spawning `codex` (installed? `codex login` done? on PATH?)")?;
-    child
-        .stdin
-        .take()
-        .context("codex stdin unavailable")?
-        .write_all(prompt.as_bytes())
-        .context("writing prompt to codex stdin")?;
+    // Write the prompt, but do NOT `?`-return on failure yet: if codex died early
+    // (bad flag, not logged in) the write hits EPIPE, and returning here would both
+    // leave the child unreaped AND discard its stderr (the real reason). Drop stdin
+    // to send EOF, always `wait_with_output` (which reaps), then report the write
+    // error together with codex's stderr.
+    let mut stdin = child.stdin.take().context("codex stdin unavailable")?;
+    let write_res = stdin.write_all(prompt.as_bytes());
+    drop(stdin);
     let out = child.wait_with_output().context("waiting for `codex`")?;
+    if let Err(e) = write_res {
+        let _ = std::fs::remove_file(&last_msg);
+        anyhow::bail!(
+            "writing prompt to codex stdin failed ({e}); codex stderr: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
     if !out.status.success() {
         let _ = std::fs::remove_file(&last_msg);
         anyhow::bail!("codex failed: {}", String::from_utf8_lossy(&out.stderr));
