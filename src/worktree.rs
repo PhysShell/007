@@ -29,6 +29,19 @@ pub fn rev_parse(dir: &Path, refname: &str) -> Result<String> {
     Ok(run_git(dir, &["rev-parse", refname])?.trim().to_string())
 }
 
+/// Absolute path of the shared `.git` dir backing `worktree`. A linked
+/// worktree is not self-contained — its index/HEAD live under
+/// `.git/worktrees/<name>` and objects/refs in the shared store — so a sandbox
+/// that rw-binds only the worktree breaks every `git` op inside it. This is
+/// what the sandbox must additionally bind.
+pub fn git_common_dir(worktree: &Path) -> Result<std::path::PathBuf> {
+    let out = run_git(
+        worktree,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    Ok(std::path::PathBuf::from(out.trim()))
+}
+
 fn run_git(dir: &Path, args: &[&str]) -> Result<String> {
     let out = Command::new("git")
         .args(args)

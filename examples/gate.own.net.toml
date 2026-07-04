@@ -2,6 +2,12 @@
 # Copy to  Own.NET/.007/gate.toml  and tune. Steps run via `bash -lc` in the
 # worktree, top to bottom. Faithful to Own.NET/AGENTS.md (lint = ruff + mypy;
 # regression = python tests/run_tests.py).
+#
+# Steps execute inside the o7 sandbox with NO network and no $HOME (secrets
+# invisible; the worktree is the only writable path). Anything that must fetch
+# (pip/cargo/npm) needs its cache pre-warmed and bound via `--sandbox-ro`/
+# `--sandbox-rw`, or vendored deps. Tools hidden by the /home blanket (a venv,
+# a ~/.local toolchain) come back with `--sandbox-ro <path>`.
 schema = 1
 
 [[gate]]

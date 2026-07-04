@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::path::Path;
-use std::process::Command;
 
+use crate::sandbox::{Profile, Sandbox};
 use crate::verdict::{StepVerdict, Verdict};
 
 /// `.007/gate.toml` — the per-target-repo gate manifest.
@@ -52,9 +52,11 @@ impl GateManifest {
         toml::from_str(text).context("parsing gate manifest TOML")
     }
 
-    /// Run every step in `workdir`, writing per-step logs into `gate_out`.
+    /// Run every step inside `sandbox` (cwd = its worktree; [`Profile::Gate`]:
+    /// no network, no agent state — a hostile `gate.toml` can run code but not
+    /// exfiltrate or touch secrets), writing per-step logs into `gate_out`.
     /// Returns per-step verdicts (feed to `Verdict::reduce`).
-    pub fn run(&self, workdir: &Path, gate_out: &Path) -> Result<Vec<StepVerdict>> {
+    pub fn run(&self, sandbox: &Sandbox, gate_out: &Path) -> Result<Vec<StepVerdict>> {
         std::fs::create_dir_all(gate_out)?;
         let mut out = Vec::new();
 
@@ -77,10 +79,10 @@ impl GateManifest {
             }
 
             println!("[o7]   gate: {} :: {}", step.name, step.cmd);
-            let result = Command::new("bash")
+            let result = sandbox
+                .command("bash", Profile::Gate)
                 .arg("-lc")
                 .arg(&step.cmd)
-                .current_dir(workdir)
                 .output();
 
             let (verdict, exit_code, combined) = match result {

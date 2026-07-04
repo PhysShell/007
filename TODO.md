@@ -5,6 +5,11 @@ Where we stopped + the exact next step. Updated 2026-07-02 (leaving for the day)
 ## Built & working
 - **`o7 run`** — one isolated gated agent run (WSL worktree → full-auto claude →
   gate manifest → harvest). Scaffolded; not yet exercised on a real coding task.
+- **`o7 run` OS sandbox** (`src/sandbox.rs`) — agent + gate steps confined via
+  bubblewrap (ro root, `$HOME` blanked, env cleared, worktree-only writes; gates
+  offline). Default `auto` hard-errors without bwrap; `--sandbox none` is
+  explicit + loud. E2E-verified with in-sandbox adversarial probes. ADR + claim
+  map + residual ledger: `docs/opencode-postmortem.md`.
 - **`o7 judge`** — read-only FP-triage. **Verified working**: produced a
   contract-conforming `fp-verdicts.json` on the oracle with grounded reasoning.
 - Contract reconciled to the domain's source of truth:
@@ -52,7 +57,10 @@ Domain hands: `--repo <STS source root>` + `--findings <STS-210 findings.json>` 
 ## Backlog (deferred — design with real data)
 - `o7 run` first real exercise on an Own.NET coding task.
 - consensus (claude+codex race + cross-family judge), memory layer.
-- OwnAudit Windows gates (`env: windows`), container egress hardening.
+- OwnAudit Windows gates (`env: windows`).
+- Agent-profile egress allowlist (API host only) + fine-grained `.git` binds —
+  the two residuals in `docs/opencode-postmortem.md`; trigger: untrusted target
+  repos.
 
 ## Build (nix devShell)
 `cargo build` (regenerates `Cargo.lock` — judge added `sha1`/`sha2`) →

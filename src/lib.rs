@@ -8,5 +8,6 @@ pub mod agent;
 pub mod gate;
 pub mod judge;
 pub mod record;
+pub mod sandbox;
 pub mod verdict;
 pub mod worktree;

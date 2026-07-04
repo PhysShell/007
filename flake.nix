@@ -65,6 +65,8 @@
             cargo-audit
             git
             jq
+            # OS boundary for `o7 run` (agent + gate steps) — see src/sandbox.rs.
+            bubblewrap
           ]) ++ [
             # Native `bin/codex` from github:PhysShell/codex-cli-nix.
             codex-cli.packages.${system}.default

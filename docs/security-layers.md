@@ -14,31 +14,31 @@ missing layer worth building.
 
 | Layer | Answers | In 007 today |
 | --- | --- | --- |
-| **allowlist / closed world** | *what can be invoked at all* | ✅ `judge --provider claude` (default) — `call_claude` uses `--tools ""` + `--strict-mcp-config` (closed world; no built-in tool, no ambient MCP, no read/network/exfil path). ⚠️ `judge --provider codex` — `call_codex` runs `--sandbox read-only`: writes are denied, but **network is not** (codex has no one-flag equivalent), so a prompt-injection payload can't write yet still has a network path — the closed-world guarantee holds for the claude backend only; prefer it on untrusted source. ⚠️ `run` — `agent.rs::DENY` is still a **deny-list** (`Bash(rm -rf*)`, `git reset --hard`, …), which the code itself flags as "not a sandbox — command obfuscation can slip it." |
+| **allowlist / closed world** | *what can be invoked at all* | ✅ `judge --provider claude` (default) — `call_claude` uses `--tools ""` + `--strict-mcp-config` (closed world; no built-in tool, no ambient MCP, no read/network/exfil path). ⚠️ `judge --provider codex` — `call_codex` runs `--sandbox read-only`: writes are denied, but **network is not** (codex has no one-flag equivalent), so a prompt-injection payload can't write yet still has a network path — the closed-world guarantee holds for the claude backend only; prefer it on untrusted source. ✅ `run` — `agent.rs::DENY` remains a **deny-list** ("not a sandbox — command obfuscation can slip it") but is now defense-in-depth *behind* the OS boundary in `sandbox.rs`, not the boundary itself. |
 | **path confinement + `canonicalize`** | confused-deputy via *arguments* (`../../../etc/passwd`, symlinks) | ✅ `judge` — `repo.join(file).canonicalize()` then `starts_with(&repo)`, skip-with-warning. Canonicalize **before** the prefix check is load-bearing (else symlink bypass). Residual **TOCTOU** between canonicalize and open remains — only a real sandbox layer closes it, not a string check. |
 | **stdin instead of argv** | argv is world-readable (`/proc/*/cmdline`, `ps`), hits shell history/logs, has a size limit | ✅ `judge` — the prompt (whole source file) goes via piped stdin, not `-p <arg>`. |
-| **worktree isolation** | cleanup + *convention*, **not** a boundary | ⚠️ `run` — `worktree.rs` runs the agent/gate with `current_dir(worktree)`. That sets the process **cwd**, which is *not* confinement: an unsandboxed command can still write outside the tree via absolute or `..` paths, read anything the user can, and reach the network. It helps well-behaved tools stay put and makes teardown a `git worktree remove` — it does **not** make the main checkout untouchable against untrusted code. |
-| **syscall sandbox (WASI/Wasmtime, container)** | the only true deny-by-default *boundary* (capability I/O) | ❌ **absent in 007.** The agent runs under `bypassPermissions` with no syscall confinement. Wasmtime lives in the **parked, separate** sibling `sandboy` (Own.NET), not here. |
+| **worktree isolation** | cleanup + *convention*, **not** a boundary | ⚠️ `run` — `worktree.rs` runs the agent/gate with `current_dir(worktree)`. That sets the process **cwd**, which is *not* confinement: an unsandboxed command can still write outside the tree via absolute or `..` paths, read anything the user can, and reach the network. It helps well-behaved tools stay put and makes teardown a `git worktree remove` — it does **not** make the main checkout untouchable against untrusted code. The property it *implies* is delivered by the sandbox layer below, which mounts the worktree as the only writable surface. |
+| **syscall sandbox (namespaces / WASI / container)** | the only true deny-by-default *boundary* (capability I/O) | ✅ `run` — `sandbox.rs` wraps the agent **and every gate step** in bubblewrap: read-only root, tmpfs over `/home`/`/root`/`/tmp` (secrets invisible), worktree + shared `.git` as the only rw surface, `--clearenv` + env allowlist, `--unshare-all` (network re-shared for the agent profile only; gate steps offline). Default `--sandbox auto` **hard-errors** without bwrap — opting out is explicit (`--sandbox none`) and loudly warned. Residual ledger: `docs/opencode-postmortem.md`. Wasmtime still lives in the **parked, separate** sibling `sandboy` (Own.NET), not here. |
 | **typed tool surface (MCP schemas)** | arg validation before execution | ❌ N/A — 007 consumes external CLIs (`claude`, `git`, `bash`); it does not publish its own MCP tools. |
 | **structured audit log** | forensics / replay (not defense) | ✅ `record.rs` → `meta.json`, `diff.patch`, `agent.stdout`, `gate/*.log`. |
 
-## The gap the layer list understates
+## The gap the layer list understated — now closed
 
 `o7 run` executes **arbitrary `bash -lc <cmd>` from the target repo's
-`.007/gate.toml`** (`gate.rs`), with `current_dir` set to the worktree. If a
-target repo is not fully trusted, gate steps are attacker-controlled code
-execution — and `current_dir(worktree)` is **not** a confinement boundary: a step
-can write outside the tree via absolute or `..` paths, read anything the user can,
-and reach the network. So the worktree bounds **neither** writes (against
-adversarial paths) nor reads nor egress — it is cleanup convenience, not a
-sandbox. Combined with the agent itself running unsandboxed under
-`bypassPermissions`, this — not policy engines or proof assistants — is 007's
-sharpest present-day trust boundary. The real "sandbox slot" is here in
-`run`/gate, **not** in `judge` (already closed-world).
+`.007/gate.toml`** (`gate.rs`). Historically that ran with only
+`current_dir(worktree)` — which is *not* a confinement boundary — so an
+untrusted target repo meant attacker-controlled code execution with the user's
+full read/write/network reach. That was 007's sharpest trust boundary, and the
+OpenCode CVE fallout (`docs/opencode-postmortem.md`) is what pulled the fix
+forward: the "sandbox slot" is now **filled** by `sandbox.rs`. Gate steps run
+offline in the bwrap boundary (code execution ≠ exfiltration: no `$HOME`, no
+env tokens, no network); the agent runs in the same boundary with only the API
+network re-shared. `current_dir(worktree)` is back to being what it always
+was — a convention, now backed by a namespace that makes it true.
 
-Decision needed (deferred until untrusted target repos are in scope): trust model
-for `.007/gate.toml` and the agent — container egress hardening (already on the
-deferred list) or a WASI boundary (the sandboy direction) belong here.
+Still deferred, with triggers recorded in the postmortem's residual ledger:
+egress allowlisting for the agent profile (container egress hardening) and
+fine-grained `.git` binds once untrusted target repos are actually in scope.
 
 ## Verification: buy it, don't build it
 
@@ -79,5 +79,8 @@ effort (now wired — see `docs/verification.md` for how to run each):
   Kani + fuzz + proptest = yes) are correct for 007.
 - The reason is **not** "Wasmtime + Cedar already secure the stack" — neither is
   in 007. It is that 007 is glue, so property/fuzz/bounded-model testing of the
-  parsers and pure functions is the whole ROI, and the sandbox layer is **not yet
-  built** — its place is `run`/gate, not `judge`.
+  parsers and pure functions is the whole ROI. The sandbox layer is **built**
+  where it belongs — `run`/gate (`sandbox.rs`, bubblewrap) — while `judge` stays
+  closed-world by construction; what remains open is the residual ledger in
+  `docs/opencode-postmortem.md` (agent egress allowlist, fine-grained `.git`
+  binds), each with its trigger recorded.
