@@ -57,14 +57,21 @@ Full decision record: see `../.claude` memory (`007-harness-design`). Locked MVP
 deferred (design with real run records): consensus (claude+codex race + cross-family
 judge), memory layer, policy/ignore engine, container egress hardening.
 
+Loop design (`o7 run` mapped to the nine-field loop-engineering canvas, and where
+the deferred loop parts — control loop, ledger, sandbox slot — attach):
+`docs/loop-canvas.md`.
+
 Security layers (what's real, what's absent, and the triggers for
 Cedar/Verus/Kani/fuzz plus the `run`/gate sandbox slot): `docs/security-layers.md`.
 Verification harnesses (proptest/fuzz/Kani) + lints: `docs/verification.md`.
 Performance (007 is subprocess-bound — the only lever is parallel judge calls):
 `docs/performance.md`.
 
-Sibling project (parked, separate): **sandboy** — WASM/WIT plugin surface, lives
-in Own.NET. Not part of `007`.
+Sibling project (separate, in Own.NET): **sandboy** — a Landlock + seccomp
+*wrap-the-child* confinement (`sandboy run --policy step.toml -- <cmd>`), the
+least-privilege-per-command layer for the `run`/gate sandbox slot that
+`docs/security-layers.md` marks as missing. Not yet wired into `o7`; not part of
+the `007` binary.
 
 ## P.S.
 o7 is for 🫡 mirrored :)
