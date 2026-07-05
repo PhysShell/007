@@ -62,6 +62,9 @@ Cedar/Verus/Kani/fuzz plus the `run`/gate sandbox slot): `docs/security-layers.m
 Verification harnesses (proptest/fuzz/Kani) + lints: `docs/verification.md`.
 Performance (007 is subprocess-bound — the only lever is parallel judge calls):
 `docs/performance.md`.
+Workflow scripting (what to take from CoStrict-style strict workflows, what to
+defer, and the v1 scope — flat `workflow.toml`, no DAG/skills/multi-provider
+yet): `docs/workflow-scripting.md`.
 
 Sibling project (parked, separate): **sandboy** — WASM/WIT plugin surface, lives
 in Own.NET. Not part of `007`.
