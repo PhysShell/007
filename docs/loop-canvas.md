@@ -46,7 +46,7 @@ parts have a named home.
 | 5 | **State** — what persists between runs, and who may write it | `runs/<target>/<run-id>/`: `task.md`, `meta.json` (`RunMeta`), `agent.stdout`, `diff.patch`, `gate/*.log` (`record.rs`). Append-only archive. | It is an **archive, not a state machine**: `RunMeta` has no `task_hash`, `diff_hash`, or normalized `failure_signature`, so there is no cross-run index for dedup / retry / "has this failed before?" queries. A `runs/index.*` ledger *over* the existing per-run dirs is new infra, and it is what unblocks **Control**. |
 | 6 | **Limits** — token/cost budget, max iterations, circuit breaker, no-progress detection | `--max-turns` caps the agent (`main.rs` → `agent.rs`). | No gate/agent **timeout**, no cost cap, no max-diff-size, no per-step log-size cap, no max-retries (there is no retry yet). A hung gate step blocks the run and can produce an unbounded log. These are per-step manifest fields waiting to be added. |
 | 7 | **Control** — after the gate: continue / retry-with-feedback / repair / escalate / pause / stop / ship | A single exit code from `Verdict::reduce`: `PASS` → `0`, else `1`. | The entire control layer is absent — one run, one verdict, done. `o7 loop` (feed gate logs + diff summary back, retry with a bound, stop on repeated `failure_signature`) lives here, and it **depends on** the ledger in **State** to detect no-progress. |
-| 8 | **Observability** — can any run be reconstructed after the fact? | Strong forensic record: `meta.json` + `diff.patch` + `agent.stdout` + `gate/*.log`; per-step `StepVerdict` with exit codes. | Not yet machine-legible for a loop: no per-step **durations/cost** in the record, no `failure_signature`, no changed-files list, and **no sandbox-enforcement evidence** (whether confinement was fully/partially/not enforced). `sandboy --report` is the missing evidence source. |
+| 8 | **Observability** — can any run be reconstructed after the fact? | Strong forensic record: `meta.json` + `diff.patch` + `agent.stdout` + `gate/*.log`; per-step `StepVerdict` with exit codes. | Not yet machine-legible for a loop: no per-step **durations/cost** in the record, no `failure_signature`, no changed-files list, and **no sandbox-enforcement evidence** (whether confinement was fully/partially/not enforced). `sandboy --report` (not yet implemented) is the missing evidence source. |
 | 9 | **Model & Prompt** — the swappable engine, chosen last | `--engine claude|codex`, `--model <id>`; the judge path already abstracts the provider (`judge.rs`). | Healthy: the engine is a flag, not baked into loop logic. **Keep it that way** — model choice must stay downstream of the harness, per the canvas. |
 
 ## The `run`/gate sandbox slot, and the `sandboy` contract
@@ -67,14 +67,22 @@ sandboy run --policy <step-policy> -- bash -lc '<step.cmd>'
 Landlock and seccomp both survive the `execve`, so the wrapped step and everything
 it spawns inherit the cage. That is exactly the **Actions** boundary the canvas
 asks for, per gate step (a `fmt` step gets RO toolchain + no network; a `test`
-step gets a writable target dir + port 443). Its optional machine-readable report
-is the **Observability** evidence field 8 wants.
+step gets a writable target dir + port 443). A machine-readable report (a
+proposed `sandboy --report`, not yet implemented) is the **Observability**
+evidence field 8 wants.
 
-Wiring is a per-step `sandbox_policy` on `GateStep` (not yet added — `GateStep` is
-`name`/`cmd`/`required`/`env` today, and the parser tolerates unknown fields on
-purpose, so the field is forward-compatible when it lands). See
-`docs/security-layers.md` and `Own.NET/sandboy/README.md` for the two sides of
-the contract.
+Wiring is a per-step `sandbox_policy` on `GateStep` — not yet added (`GateStep` is
+`name`/`cmd`/`required`/`env` today). The manifest parser tolerates unknown
+fields, which keeps *benign* additions forward-compatible — but a sandbox policy
+is a **security control**, and there that same tolerance is a **fail-open** trap:
+an older `o7` that predates the field would silently ignore a target repo's
+`sandbox_policy` and run the step as bare `bash -lc` under `bypassPermissions` —
+precisely the confinement the field exists to add. So it must **fail closed**:
+gate it behind a manifest `schema` bump (or an explicit presence check) so a
+runner that sees a `sandbox_policy` it cannot enforce **refuses the step** rather
+than running it unconfined — per `security-layers.md`, "a deny is decoration if
+we call the tool before asking." See `docs/security-layers.md` and
+`Own.NET/sandboy/README.md` for the two sides of the contract.
 
 ## Roadmap, by cost (descriptive, not committed)
 
@@ -86,7 +94,9 @@ Ordered so no floor is built on an un-sandboxed one below it:
 - **Floor 1 — Actions/Limits/Observability at the gate.** Extend `GateStep` with
   `sandbox_policy` + `timeout_sec`; run steps through `sandboy` when a policy is
   set (legacy bare `bash` otherwise, loudly warned); emit a `sandboy --report`
-  JSON into `gate/<step>.sandbox.json`.
+  JSON into `gate/<step>.sandbox.json`. Gate the security field behind a manifest
+  `schema` bump so an older `o7` **fails closed** — refusing a step that carries a
+  `sandbox_policy` it cannot enforce, never silently running it bare.
 - **Floor 2 — State/Control.** A `runs/` ledger (`task_hash`, `diff_hash`,
   `failure_signature`) over the existing per-run dirs; then `o7 loop` with
   max-retries + no-progress detection keyed on the normalized signature.
