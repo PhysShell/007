@@ -53,6 +53,8 @@ Domain hands: `--repo <STS source root>` + `--findings <STS-210 findings.json>` 
 - `o7 run` first real exercise on an Own.NET coding task.
 - consensus (claude+codex race + cross-family judge), memory layer.
 - OwnAudit Windows gates (`env: windows`), container egress hardening.
+- Agent-papers digest reconciliation (claims ledger / `o7 eval`, replay +
+  meta-tools) — recorded, not scheduled: `docs/agent-papers-backlog-2026.md`.
 
 ## Build (nix devShell)
 `cargo build` (regenerates `Cargo.lock` — judge added `sha1`/`sha2`) →
