@@ -409,8 +409,14 @@ package policies
 // steps/ruff.cue
 package policies
 
-policy: #NoNet & { name: "ruff" }
+policy: #NoNet
 ```
+
+(`name` isn't a `#Policy` field and stays out of the exported object — `#Policy`
+is a closed CUE definition, so unifying in an undeclared field like
+`{ name: "ruff" }` would fail to export. The step name is already carried by
+the filename and by `.007/gate.toml`'s own `name = "ruff"`; it has no reason to
+also live inside the sandbox confinement object.)
 
 Authoring pipeline — CUE is compile-time only, the two runtime consumers never
 see it:
