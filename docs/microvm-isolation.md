@@ -24,7 +24,7 @@ proposal starts from, and it is verified against the current tree:
 | `current_dir(workdir)` is the *only* confinement — no write/read/egress boundary | ✅ | `src/gate.rs:80`, `src/worktree.rs` (git worktree add/remove only sets cwd) |
 | the agent itself runs unsandboxed under `bypassPermissions` | ✅ | `src/agent.rs:66-75` — comment there even says "safe only because the worktree contains the blast radius", which `security-layers.md` already flags as false against adversarial paths |
 | the deny-list (`DENY` in `agent.rs`) is defense-in-depth, not a boundary | ✅ | `src/agent.rs:33-44`, docstring says so explicitly |
-| "the real sandbox slot is `run`/gate, not `judge`" | ✅ | `judge` is already closed-world (`--tools ""`, `--strict-mcp-config`, canonicalize+prefix check); `run` is the open door |
+| "the real sandbox slot is `run`/gate, not `judge`" | ⚠️ | true for `judge --provider claude` — closed-world (`--tools ""`, `--strict-mcp-config`, canonicalize+prefix check). **Not** true for `judge --provider codex`: `call_codex` runs `--sandbox read-only` (`src/judge.rs:698-702`), which denies writes but **not network** — a prompt-injection payload still has an egress path there. `run` remains the bigger open door either way, but this roadmap's isolation work shouldn't skip codex-backed `judge` runs on untrusted source. |
 
 So this proposal is not introducing a new problem — it is proposing the next
 layer for a gap 007 already named and deferred (`security-layers.md` §"gap
