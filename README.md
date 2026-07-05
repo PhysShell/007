@@ -63,6 +63,9 @@ Verification harnesses (proptest/fuzz/Kani) + lints: `docs/verification.md`.
 Performance (007 is subprocess-bound — the only lever is parallel judge calls):
 `docs/performance.md`.
 
+Which agent-research papers are worth transplanting here vs. Own.NET (and which
+are already spiked / in flight): `docs/paper-transplant-map.md`.
+
 Sibling project (parked, separate): **sandboy** — WASM/WIT plugin surface, lives
 in Own.NET. Not part of `007`.
 
