@@ -53,6 +53,9 @@ Domain hands: `--repo <STS source root>` + `--findings <STS-210 findings.json>` 
 - `o7 run` first real exercise on an Own.NET coding task.
 - consensus (claude+codex race + cross-family judge), memory layer.
 - OwnAudit Windows gates (`env: windows`), container egress hardening.
+- Zero Trust Phase 1 (`docs/zero-trust-framework.md`): wire `gate.rs` through
+  Sandboy instead of bare `bash -lc`, add the `[permissions]` capability block
+  (`deny_unknown_fields`), first CUE→`gate.lock.json` compile step.
 
 ## Build (nix devShell)
 `cargo build` (regenerates `Cargo.lock` — judge added `sha1`/`sha2`) →
