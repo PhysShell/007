@@ -83,15 +83,17 @@ pipeline can be applied blindly.
 
 ## Measured results (o200k, auto alphabet, corpus in `qodec/corpus/`)
 
-With prefix-aware mining (see "BWT lineage" below):
+With prefix-aware mining (see "BWT lineage" below) and nested dictionary
+entries (a later phrase may contain an earlier alias; reverse-order decode
+expands both):
 
 | sample | best codec | cold Δ | warm Δ | roundtrip |
 |---|---|---:|---:|---|
-| build-log.txt (msbuild, repeated warnings) | squeeze | **+41.9%** | +53.0% | byte |
-| stacktrace.txt (.NET async spam) | mine | +18.0% | **+52.7%** | byte |
-| findings.json (12 uniform findings) | squeeze | +31.1% | +46.7% | semantic |
-| rg-output.txt | mine | +19.3% | +34.2% | byte |
-| git-diff.txt | mine | +7.9% | +23.6% | byte |
+| build-log.txt (msbuild, repeated warnings) | squeeze | **+46.4%** | +71.6% (mine) | byte |
+| stacktrace.txt (.NET async spam) | mine | +18.8% | **+54.9%** | byte |
+| findings.json (12 uniform findings) | squeeze | +32.6% | +49.2% | semantic |
+| rg-output.txt | mine | +27.0% | +52.0% | byte |
+| git-diff.txt | mine | +8.1% | +25.7% | byte |
 | prose.md (unique text — control) | any | −4.2% (raw fallback) | 0.0% | byte |
 
 Cross-check under `cl100k` reproduces the ordering, so the effect is not one
@@ -101,24 +103,28 @@ tokenizer's quirk.
 
 | payload | tok in | cold Δ | warm Δ |
 |---|---:|---:|---:|
-| verbose cargo build log (this crate) | 1323 | +20.3% | **+50.0%** |
-| grep over Own.NET `rust/` (150 hits) | 3089 | **+31.8%** | +36.1% |
-| `find` file listing over Own.NET (200 paths) | 3070 | +27.2% | +27.9% |
-| ChatGPT conversation transcript (30 KB slice) | 5861 | +15.1% | +37.0% |
-| Own.NET `git diff --stat` (15 commits) | 1436 | +5.6% | +9.4% |
-| Own.NET `git diff` (docs-heavy, mostly prose) | 4644 | +2.4% | +5.8% |
+| `find` file listing over Own.NET (200 paths) | 3070 | **+44.9%** | +49.4% |
+| grep over Own.NET `rust/` (150 hits) | 3089 | +40.8% | +46.5% |
+| verbose cargo build log (this crate) | 1323 | +20.6% | **+50.5%** |
+| ChatGPT conversation transcript (30 KB slice) | 5861 | +16.1% | +38.4% |
+| Own.NET `git diff --stat` (15 commits) | 1436 | +6.6% | +11.8% |
+| Own.NET `git diff` (docs-heavy, mostly prose) | 4644 | +2.4% | +5.9% |
 | OwnAudit oracle findings.json (tiny, nested) | 294 | raw fallback | 0.0% |
 
 Pattern: tool output and transcripts (what agents actually exchange) sit in
 the +20–50% band; unique prose and tiny payloads honestly fall back.
 
-**The alphabet finding.** The same bench with `--alphabet sigil` (ASCII-style
-`§0`, `§1` — 2 tokens each under o200k) collapses the wins: stacktrace drops
-from +16.9% to +1.7% cold; git-diff and rg-output stop paying entirely.
-Single CJK glyphs cost 1 token and nearly all of `mine`'s margin lives in
-that difference. The "metalanguage over Unicode" intuition was right — with
-the correction that the alphabet must be *probed per tokenizer* (`码` is
-1 token under o200k, but `堆` is 2; `qodec aliases` shows the live table).
+**The alphabet finding (corrected after PR #26 review).** Single CJK glyphs
+(1 token under o200k) beat sigil-indexed aliases (`§05` — 2 tokens) on every
+sample, but the gap is a steady few points, not the dramatic collapse first
+measured: build log +46.4% (glyph-led auto) vs +43.6% (sigil-only) cold,
+rg-output +27.0% vs +17.5%. The original "sigils barely work" numbers were an
+artifact of a char-reservation bug that capped sigil mode at one dictionary
+entry (caught by CodeRabbit). The refined finding: the alias alphabet is a
+per-occurrence multiplier — 1-token aliases are strictly better and must be
+*probed per tokenizer* (`码` is 1 token under o200k, but `堆` is 2;
+`qodec aliases` shows the live table) — while fixed-width sigils are the
+correct overflow once cheap glyphs run out.
 
 Reading the two columns:
 
@@ -157,8 +163,9 @@ The BWT insight (group by context; repetition ignores human-visible
 boundaries) transplants to token space as: **candidate discovery must not be
 limited to word boundaries.** First installment is in: `segment_prefixes`
 mines separator-aligned prefixes *inside* words (`rust/src/`, `Legacy.UI.`,
-namespace chains), which took the `find` listing from raw-fallback to +27%
-and real grep output from +5.6% to +31.8% cold. The rest of the ladder:
+namespace chains), which together with nested dictionary entries took the
+`find` listing from raw-fallback to +44.9% and real grep output from +5.6%
+to +40.8% cold. The rest of the ladder:
 
 - a proper suffix-array/-automaton miner over raw substrings (all repeats,
   any boundary, CPU-heavier — the classic ratio-vs-time trade);

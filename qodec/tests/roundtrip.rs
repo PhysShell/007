@@ -107,6 +107,88 @@ fn toon_roundtrips_uniform_array_semantically() -> Result<()> {
 }
 
 #[test]
+fn sigil_mode_commits_multiple_entries() -> Result<()> {
+    // CodeRabbit review on PR #26: char-level reservation blocked the shared
+    // sigil after the first commit, capping sigil mode at one dictionary
+    // entry. Fixed-width indices (§00..§99) make the pool fully usable.
+    let meter = Bpe::o200k()?;
+    let mut text = String::new();
+    for i in 0..12 {
+        text.push_str(&format!(
+            "component_{} at System.Threading.Dispatcher.Invoke handles slot_{} without ConfigureAwait(false)\n",
+            i % 3,
+            i % 4
+        ));
+    }
+    let encoded = encode(&text, CodecKind::Mine, &meter, Alphabet::Sigil);
+    let c = qodec::container::parse(&encoded)?;
+    anyhow::ensure!(
+        c.codec == "mine",
+        "expected mine container, got {}",
+        c.codec
+    );
+    anyhow::ensure!(
+        c.legend.len() >= 2,
+        "sigil pool must supply multiple aliases, got {} entries",
+        c.legend.len()
+    );
+    roundtrip_bytes(&text, CodecKind::Mine, &meter)?;
+    // Force the sigil+digit ambiguity: alias directly followed by a literal
+    // digit (segment prefix ends at '/', digit starts the next segment).
+    let mut hostile = String::new();
+    for i in 0..10 {
+        hostile.push_str(&format!(
+            "assets/generated/2026/{i}/report.bin assets/generated/2026/{i}/index.bin\n"
+        ));
+    }
+    roundtrip_bytes(&hostile, CodecKind::Mine, &meter)
+}
+
+#[test]
+fn squeeze_never_loses_to_the_raw_floor() -> Result<()> {
+    // CodeRabbit review on PR #26: squeeze compared stage2 only against
+    // stage1, so mining a raw container's overhead could beat stage1 while
+    // still losing to the original text. Squeeze must fall back to raw.
+    let meter = Bpe::o200k()?;
+    for text in ["tiny\n", "a b\n", "{\"k\": 1}\n"] {
+        let encoded = encode(text, CodecKind::Squeeze, &meter, Alphabet::Auto);
+        let raw_floor = meter.count(&qodec::container::raw(text));
+        anyhow::ensure!(
+            meter.count(&encoded) <= raw_floor,
+            "squeeze artifact for {text:?} exceeds the raw floor"
+        );
+        roundtrip_bytes(text, CodecKind::Squeeze, &meter)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn parse_tolerates_crlf_converted_artifact() -> Result<()> {
+    // CodeRabbit review on PR #26: a container converted to CRLF in transit
+    // (git autocrlf, clipboards) failed to parse entirely. Header, legend
+    // and boundary now strip an optional trailing `\r`; the mine body is
+    // verbatim, so decode yields the CRLF-converted original.
+    let meter = Bpe::o200k()?;
+    let mut text = String::new();
+    for name in [
+        "Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta", "Eta", "Theta",
+    ] {
+        text.push_str(&format!(
+            "src/Legacy.UI/ViewModels/{name}ViewModel.cs uses ConfigureAwait(false) and CancellationToken cancellationToken\n"
+        ));
+    }
+    let encoded = encode(&text, CodecKind::Mine, &meter, Alphabet::Auto);
+    anyhow::ensure!(encoded.starts_with("%q1 mine"), "expected mine container");
+    let converted = encoded.replace('\n', "\r\n");
+    let back = decode(&converted)?;
+    anyhow::ensure!(
+        back == text.replace('\n', "\r\n"),
+        "CRLF-converted artifact must decode to the CRLF-converted original"
+    );
+    Ok(())
+}
+
+#[test]
 fn toon_preserves_empty_object_rows() -> Result<()> {
     // Codex review finding on PR #26: `[{}, {}, ...]` encodes as empty row
     // lines after the `[]` keys line; decode must not confuse them with the

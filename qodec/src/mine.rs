@@ -6,14 +6,16 @@
 //! than the legend line it adds. Gain is measured, never modeled — BPE merge
 //! boundaries make byte-level estimates lie.
 //!
-//! Losslessness argument: aliases are built from chars absent from the input
-//! (checked at pool build) and disjoint from each other (reserved set), and a
-//! later candidate never contains an earlier alias's chars. Decoding replaces
-//! aliases back in reverse commit order, which exactly inverts the sequence
-//! of `str::replace` calls.
+//! Losslessness argument: alias chars are absent from the original input
+//! (checked at pool build), pool entries are unique, and sigil aliases use
+//! fixed-width indices so no alias is a prefix of another. Therefore at each
+//! encode step k the alias `a_k` cannot already occur in the text, and
+//! `replace(a_k -> phrase_k)` exactly inverts `replace(phrase_k -> a_k)`.
+//! Decoding in reverse commit order then inverts the whole sequence — which
+//! also makes *nested* dictionary entries legal: a later phrase may contain
+//! an earlier alias, and it expands on a later decode pass.
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use anyhow::{bail, Result};
 
@@ -53,18 +55,17 @@ pub fn encode(text: &str, meter: &dyn TokenMeter, opts: &MineOptions) -> String 
     }
 
     let mut pool = AliasPool::build(opts.alphabet, meter, text);
-    let mut reserved: HashSet<char> = HashSet::new();
     let mut legend: Vec<(String, String)> = Vec::new();
     let mut current = text.to_string();
     let mut current_tokens = meter.count(&current) as i64;
 
     while legend.len() < opts.max_entries {
-        let Some((alias, _alias_cost)) = pool.take(&reserved) else {
+        let Some((alias, _alias_cost)) = pool.take() else {
             break;
         };
 
         let mut best: Option<(String, String, i64)> = None; // (phrase, replaced, gain)
-        for phrase in ranked_candidates(&current, &reserved) {
+        for phrase in ranked_candidates(&current) {
             let replaced = current.replace(&phrase, &alias);
             let legend_line = format!("{alias}={phrase}\n");
             let gain =
@@ -78,7 +79,6 @@ pub fn encode(text: &str, meter: &dyn TokenMeter, opts: &MineOptions) -> String 
             Some((phrase, replaced, gain)) if gain > opts.min_gain => {
                 current_tokens = meter.count(&replaced) as i64;
                 current = replaced;
-                reserved.extend(alias.chars());
                 legend.push((alias, phrase));
             }
             _ => break,
@@ -129,7 +129,7 @@ pub fn decode(c: &Container) -> Result<String> {
 ///   repeat as *prefixes* (`src/a/b/One.cs` vs `src/a/b/Two.cs`), which whole
 ///   words never expose. This is the cheap end of the BWT/suffix-array
 ///   insight: repetition ignores token boundaries, so the miner must too.
-fn ranked_candidates(text: &str, reserved: &HashSet<char>) -> Vec<String> {
+fn ranked_candidates(text: &str) -> Vec<String> {
     let mut tally: HashMap<&str, usize> = HashMap::new();
 
     for line in text.split('\n') {
@@ -161,10 +161,8 @@ fn ranked_candidates(text: &str, reserved: &HashSet<char>) -> Vec<String> {
         }
     }
 
-    let mut ranked: Vec<(&str, usize)> = tally
-        .into_iter()
-        .filter(|(span, count)| *count >= 2 && !span.chars().any(|ch| reserved.contains(&ch)))
-        .collect();
+    let mut ranked: Vec<(&str, usize)> =
+        tally.into_iter().filter(|(_, count)| *count >= 2).collect();
     ranked.sort_by(|a, b| (b.1 * b.0.len(), b.0).cmp(&(a.1 * a.0.len(), a.0)));
     ranked
         .into_iter()

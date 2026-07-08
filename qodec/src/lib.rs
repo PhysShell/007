@@ -57,18 +57,34 @@ pub fn encode(text: &str, kind: CodecKind, meter: &dyn TokenMeter, alphabet: Alp
         CodecKind::Toon => toon::encode(text, meter),
         CodecKind::Squeeze => {
             let stage1 = if serde_json::from_str::<serde_json::Value>(text).is_ok() {
-                toon::encode(text, meter)
+                let tooned = toon::encode(text, meter);
+                // toon may fall back on non-table JSON — pretty-printed JSON
+                // with repeated lines can still benefit from RLE.
+                if container::parse(&tooned)
+                    .ok()
+                    .is_none_or(|c| c.codec == "raw")
+                {
+                    fold::encode(text, meter)
+                } else {
+                    tooned
+                }
             } else {
                 fold::encode(text, meter)
             };
             // Mine over the full stage-1 container (headers, legends, rows —
             // repeated paths inside cells are fair game).
             let stage2 = mine::encode(&stage1, meter, &mine_opts);
-            // Keep whichever artifact measures cheaper.
-            if meter.count(&stage2) < meter.count(&stage1) {
+            let best = if meter.count(&stage2) < meter.count(&stage1) {
                 stage2
             } else {
                 stage1
+            };
+            // Final acceptance vs the *original* — mining a raw container's
+            // overhead can beat stage1 while still losing to the input.
+            if meter.count(&best) < meter.count(text) {
+                best
+            } else {
+                container::raw(text)
             }
         }
     }
@@ -76,12 +92,15 @@ pub fn encode(text: &str, kind: CodecKind, meter: &dyn TokenMeter, alphabet: Alp
 
 /// Decode one container layer.
 pub fn decode_once(text: &str) -> Result<String> {
-    let c = container::parse(text)?;
+    decode_container(&container::parse(text)?)
+}
+
+fn decode_container(c: &container::Container) -> Result<String> {
     match c.codec.as_str() {
-        "raw" => Ok(c.body),
-        "mine" => mine::decode(&c),
-        "fold" => fold::decode(&c),
-        "toon" => toon::decode(&c),
+        "raw" => Ok(c.body.clone()),
+        "mine" => mine::decode(c),
+        "fold" => fold::decode(c),
+        "toon" => toon::decode(c),
         other => bail!("unknown codec {other:?} in container"),
     }
 }
@@ -92,9 +111,9 @@ pub fn decode_once(text: &str) -> Result<String> {
 pub fn decode(text: &str) -> Result<String> {
     let mut current = text.to_string();
     loop {
-        if container::parse(&current).is_err() {
-            return Ok(current);
+        match container::parse(&current) {
+            Ok(c) => current = decode_container(&c)?,
+            Err(_) => return Ok(current),
         }
-        current = decode_once(&current)?;
     }
 }

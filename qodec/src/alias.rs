@@ -58,6 +58,13 @@ const GLYPHS: &[char] = &[
 
 /// Rare marker chars for sigil-indexed aliases; the first one absent from the
 /// input text is chosen, so aliases can never collide with source content.
+///
+/// Sigil indices are **fixed-width** (`§00`–`§99`): no alias is a prefix of
+/// another, and since `§` never occurs in the original text, every `§` in an
+/// encoded body starts exactly one three-char alias — a literal digit that
+/// happens to follow an alias belongs to the data, and exact-string
+/// replacement can never misread it. (CodeRabbit review on PR #26: variable-
+/// width indices made every later sigil alias unusable or ambiguous.)
 const SIGILS: &[char] = &['§', '¤', 'µ', '†', '‡', '¬', 'ø', 'þ'];
 
 pub struct AliasPool {
@@ -87,8 +94,8 @@ impl AliasPool {
 
         if matches!(alphabet, Alphabet::Auto | Alphabet::Sigil) {
             if let Some(&sigil) = SIGILS.iter().find(|c| !present.contains(c)) {
-                for i in 0..200usize {
-                    let alias = format!("{sigil}{i}");
+                for i in 0..100usize {
+                    let alias = format!("{sigil}{i:02}");
                     let cost = meter.count(&alias);
                     entries.push((alias, cost));
                 }
@@ -100,16 +107,12 @@ impl AliasPool {
         Self { entries, next: 0 }
     }
 
-    /// Hand out the next cheapest alias whose chars are still unreserved.
-    pub fn take(&mut self, reserved: &HashSet<char>) -> Option<(String, usize)> {
-        while let Some((alias, cost)) = self.entries.get(self.next) {
-            self.next += 1;
-            if alias.chars().any(|c| reserved.contains(&c)) {
-                continue;
-            }
-            return Some((alias.clone(), *cost));
-        }
-        None
+    /// Hand out the next cheapest unused alias. Pool entries are unique, so
+    /// sequential handout is all the collision avoidance aliases need.
+    pub fn take(&mut self) -> Option<(String, usize)> {
+        let entry = self.entries.get(self.next).cloned();
+        self.next += 1;
+        entry
     }
 }
 
@@ -132,7 +135,7 @@ pub fn probe_table(meter: &dyn TokenMeter, top: usize) -> Vec<ProbeRow> {
         .collect();
     for &s in SIGILS {
         for i in [0usize, 7, 42] {
-            let alias = format!("{s}{i}");
+            let alias = format!("{s}{i:02}");
             rows.push(ProbeRow {
                 cost: meter.count(&alias),
                 alias,

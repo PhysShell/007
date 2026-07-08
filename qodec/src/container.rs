@@ -76,6 +76,10 @@ pub fn parse(text: &str) -> Result<Container> {
         let start = offset;
         offset += line.len();
         let trimmed = line.strip_suffix('\n').unwrap_or(line);
+        // Tolerate CRLF-converted artifacts (git autocrlf, clipboards):
+        // emit never writes `\r`, and no legend value can end with one, so
+        // stripping it only rescues externally-converted containers.
+        let trimmed = trimmed.strip_suffix('\r').unwrap_or(trimmed);
 
         if header.is_none() {
             let rest = trimmed
