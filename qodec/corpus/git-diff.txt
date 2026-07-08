@@ -1,0 +1,43 @@
+diff --git a/src/Legacy.UI/ViewModels/UserEditorViewModel.cs b/src/Legacy.UI/ViewModels/UserEditorViewModel.cs
+index 3f81a2c..9d47e10 100644
+--- a/src/Legacy.UI/ViewModels/UserEditorViewModel.cs
++++ b/src/Legacy.UI/ViewModels/UserEditorViewModel.cs
+@@ -40,7 +40,7 @@ namespace Legacy.UI.ViewModels
+         public async Task SaveAsync(CancellationToken cancellationToken)
+         {
+             Validate();
+-            await _userService.SaveAsync(CurrentUser, cancellationToken);
++            await _userService.SaveAsync(CurrentUser, cancellationToken).ConfigureAwait(false);
+             await _auditLogger.LogAsync("User saved", cancellationToken).ConfigureAwait(false);
+         }
+diff --git a/src/Legacy.UI/ViewModels/ReportViewModel.cs b/src/Legacy.UI/ViewModels/ReportViewModel.cs
+index 71c9b04..2ab8f33 100644
+--- a/src/Legacy.UI/ViewModels/ReportViewModel.cs
++++ b/src/Legacy.UI/ViewModels/ReportViewModel.cs
+@@ -41,9 +41,9 @@ namespace Legacy.UI.ViewModels
+         public async Task GenerateAsync(CancellationToken cancellationToken)
+         {
+             var criteria = BuildCriteria();
+-            var report = _reportService.Generate(criteria).GetAwaiter().GetResult();
++            var report = await _reportService.GenerateAsync(criteria, cancellationToken).ConfigureAwait(false);
+             Report = report;
+-            OnPropertyChanged(nameof(Report));
++            OnPropertyChanged(nameof(Report));
+         }
+diff --git a/src/Legacy.Core/Services/ReportService.cs b/src/Legacy.Core/Services/ReportService.cs
+index be22f10..0c11d92 100644
+--- a/src/Legacy.Core/Services/ReportService.cs
++++ b/src/Legacy.Core/Services/ReportService.cs
+@@ -50,6 +50,12 @@ namespace Legacy.Core.Services
+         public Report Generate(ReportCriteria criteria)
+         {
+             return BuildReport(criteria);
+         }
++
++        public async Task<Report> GenerateAsync(ReportCriteria criteria, CancellationToken cancellationToken)
++        {
++            var rows = await _repository.QueryAsync(criteria, cancellationToken).ConfigureAwait(false);
++            return BuildReport(criteria, rows);
++        }
+     }
+ }

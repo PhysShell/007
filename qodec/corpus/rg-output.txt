@@ -1,0 +1,20 @@
+src/Legacy.UI/ViewModels/UserEditorViewModel.cs:42:        public async Task SaveAsync(CancellationToken cancellationToken)
+src/Legacy.UI/ViewModels/UserEditorViewModel.cs:57:        await _userService.SaveAsync(CurrentUser, cancellationToken).ConfigureAwait(false);
+src/Legacy.UI/ViewModels/UserEditorViewModel.cs:58:        await _auditLogger.LogAsync("User saved", cancellationToken).ConfigureAwait(false);
+src/Legacy.UI/ViewModels/UserEditorViewModel.cs:112:        private void OnPropertyChanged(string propertyName)
+src/Legacy.UI/ViewModels/ReportViewModel.cs:31:        public async Task GenerateAsync(CancellationToken cancellationToken)
+src/Legacy.UI/ViewModels/ReportViewModel.cs:44:        var report = _reportService.Generate(criteria).GetAwaiter().GetResult();
+src/Legacy.UI/ViewModels/ReportViewModel.cs:88:        private void OnPropertyChanged(string propertyName)
+src/Legacy.UI/ViewModels/LoginViewModel.cs:23:        public async Task LoginAsync(CancellationToken cancellationToken)
+src/Legacy.UI/ViewModels/LoginViewModel.cs:39:        await _sessionService.OpenAsync(credentials, cancellationToken).ConfigureAwait(false);
+src/Legacy.UI/ViewModels/LoginViewModel.cs:71:        private void OnPropertyChanged(string propertyName)
+src/Legacy.Core/Services/UserService.cs:18:        public async Task SaveAsync(User user, CancellationToken cancellationToken)
+src/Legacy.Core/Services/UserService.cs:27:        await _repository.UpsertAsync(user, cancellationToken).ConfigureAwait(false);
+src/Legacy.Core/Services/ReportService.cs:52:        public Report Generate(ReportCriteria criteria)
+src/Legacy.Core/Services/SessionService.cs:33:        public async Task OpenAsync(Credentials credentials, CancellationToken cancellationToken)
+src/Legacy.Core/Services/SessionService.cs:41:        await _tokenClient.RequestAsync(credentials, cancellationToken).ConfigureAwait(false);
+src/Legacy.Core/Services/AuditLogger.cs:14:        public async Task LogAsync(string message, CancellationToken cancellationToken)
+tests/Legacy.UI.Tests/ViewModels/UserEditorViewModelTests.cs:29:        await viewModel.SaveAsync(CancellationToken.None);
+tests/Legacy.UI.Tests/ViewModels/UserEditorViewModelTests.cs:63:        await viewModel.SaveAsync(CancellationToken.None);
+tests/Legacy.UI.Tests/ViewModels/ReportViewModelTests.cs:41:        await viewModel.GenerateAsync(CancellationToken.None);
+tests/Legacy.UI.Tests/ViewModels/LoginViewModelTests.cs:36:        await viewModel.LoginAsync(CancellationToken.None);

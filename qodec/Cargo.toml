@@ -1,0 +1,35 @@
+[package]
+name = "qodec"
+version = "0.1.0"
+edition = "2021"
+# Option::is_none_or (1.82) is the newest API in use; usize::div_ceil needs 1.73.
+rust-version = "1.82"
+description = "Q's codec lab — token-aware lossless encode/decode experiments for agent context"
+publish = false
+
+[[bin]]
+name = "qodec"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tiktoken-rs = "0.7"
+
+[dev-dependencies]
+proptest = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
