@@ -75,7 +75,10 @@ P1:
 P2:
 9. Behavioral-baseline counters + red-flag rules in `meta.json`.
 10. CUE authoring pipeline (`cue export … --out toml`, `o7 policy compile`).
-11. Firecracker/gVisor (Sandboy Layer 1) — only once an actually-untrusted
+11. Own.NET evidence coverage for flow diagnostics (parallel effort, tracked
+    in Own.NET's `docs/tasks/evidence-coverage.md` — mirrored to keep §16
+    numbering aligned).
+12. Firecracker/gVisor (Sandboy Layer 1) — only once an actually-untrusted
     target repo enters scope.
 
 ## Build (nix devShell)

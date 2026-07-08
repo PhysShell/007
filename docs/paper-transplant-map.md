@@ -1,19 +1,19 @@
 # Paper-transplant map — what `awesome-ai-agent-papers` is worth pulling into 007 / Own.NET
 
-Status: design note · Scope: cross-repo (007 · Own.NET · Sandboy · OwnAudit) ·
+Status: design note · Scope: cross-repo (007 · Own.NET incl. `sandboy/` · OwnAudit) ·
 Source: [`VoltAgent/awesome-ai-agent-papers`](https://github.com/VoltAgent/awesome-ai-agent-papers)
 
-> **Read this next to the in-flight PRs, not instead of them.** The security /
-> sandbox / policy slice of this analysis is *already* being written:
+> **Read this next to the landed design docs, not instead of them.** The security /
+> sandbox / policy slice of this analysis is *already* written:
 >
-> - 007 **#9** `docs/zero-trust-framework.md` — the run/gate sandbox roadmap,
+> - 007 `docs/zero-trust-framework.md` — the run/gate sandbox roadmap,
 >   CUE-not-TOML policy authoring, WIT/WASM scoping, the tamper-evident
 >   run-record **hash chain**, egress, supply-chain `.007/`, cross-repo
 >   responsibility table.
-> - Own.NET **#182** — the CUE `owen.policy` authoring decision (§8 addendum to
->   `agent-capability-layer.md`) + Sandboy pointer.
-> - Own.NET **#181** — the `.agents/` memory & policy layer + `.007/gate.toml`
->   manifest contract.
+> - `Own.NET/docs/notes/agent-capability-layer.md` **§8** — the CUE `owen.policy`
+>   authoring decision (§8 addendum) + Sandboy pointer.
+> - `Own.NET/docs/proposals/P-029-agent-memory-layer.md` — the `.agents/` memory &
+>   policy layer + `.007/gate.toml` manifest contract.
 >
 > This note deliberately **does not re-tread** any of that. It covers the one
 > slice none of those touch: the **eval / verification / orchestration**
@@ -33,16 +33,16 @@ their verbatim titles from it.
 ## 1. The correction that sets the priorities
 
 The instinct "pull in more papers" is mostly wrong here, because **half the
-obvious targets are already built as spikes or already in flight**. The transplant
+obvious targets are already built as spikes or already landed**. The transplant
 that *remains* is narrow and it is not about the sandbox — it is about turning the
 existing run record into something a verifier can read.
 
 | Candidate | Papers | Real status |
 |---|---|---|
-| Sandboy in gate | Sandlock `arXiv:2605.26298` (already cited in the ADR) | **Spiked** — `Own.NET/sandboy/` (Landlock+seccomp wrap-the-child). Wiring roadmap in **#9**. |
+| Sandboy in gate | Sandlock `arXiv:2605.26298` (already cited in the ADR) | **Spiked** — `Own.NET/sandboy/` (Landlock+seccomp wrap-the-child). Wiring roadmap in `docs/zero-trust-framework.md`. |
 | WASM SARIF adapters | STELP, MCP-SandboxScan (conceptual) | **Spiked** — `Own.NET/audit/adapters/` (zero-import WIT, fuel/epoch/mem caps, sha256 provenance). |
-| `owen.policy` authoring | — (engineering) | **In flight** — CUE decision in Own.NET **#182**; not-built flag in `agent-capability-layer.md`. |
-| Run-record integrity | — | **In flight** — hash chain in 007 **#9**. |
+| `owen.policy` authoring | — (engineering) | **Landed** — CUE decision in `Own.NET/docs/notes/agent-capability-layer.md` §8; not-built flag in the same doc. |
+| Run-record integrity | — | **Landed** — hash chain in `docs/zero-trust-framework.md`. |
 | **trace-driven `o7 eval`** | **TrajAD**, **TriCEGAR**, **Automated Structural Testing of LLM-Based Agents** | **Net-new.** ← the real transplant (§2). |
 | **consensus judge** | **PerspectiveGap** | Deferred in `TODO.md`; **net-new** design (§2). |
 | **evidence graph** | **Reliable Graph-RAG for Codebases: AST-Derived Graphs vs LLM-Extracted Knowledge Graphs** | **Net-new**, Own.NET (§3). |
@@ -72,8 +72,8 @@ runs/<target>/<run-id>/
 - **Automated Structural Testing of LLM-Based Agents** — OpenTelemetry-style trace
   events + automated assertions: the concrete event schema and assertion form.
 
-**Delineation from #9 (important, not a duplicate):** #9's `record_hash` chain
-answers *"was the record tampered with"* (integrity). This answers *"does the
+**Delineation from `docs/zero-trust-framework.md` (important, not a duplicate):**
+its `record_hash` chain answers *"was the record tampered with"* (integrity). This answers *"does the
 record's story hold up against the diff and gates"* (semantic verification). They
 compose — integrity under it, verification over it — and are different layers.
 
@@ -99,11 +99,13 @@ No "agents converse for 14 rounds." Independent runs, deterministic merge, and t
 merge reads §2.1's `verification.json` as input — so this lands *after* the trace
 layer, not before. Builds on the existing read-only `judge.rs`.
 
-## 3. Own.NET — candidates, not commits (policy side already covered by #182/#181)
+## 3. Own.NET — candidates, not commits (policy side already covered by `agent-capability-layer.md` §8 / P-029)
 
-These are real and **not** in #182/#181 (which are policy/CUE and `.agents/`). But
-per the "maybe nothing needs to go to Own.NET while the policy PRs are open" call,
-they are recorded here as **candidate P-0NN proposals**, not opened yet:
+These are real and **not** in `Own.NET/docs/notes/agent-capability-layer.md` §8 /
+`Own.NET/docs/proposals/P-029-agent-memory-layer.md` (which are policy/CUE and
+`.agents/`). But per the "maybe nothing needs to go to Own.NET beyond the landed
+policy docs" call, they are recorded here as **candidate P-0NN proposals**, not
+opened yet:
 
 - **Evidence graph** — *Reliable Graph-RAG for Codebases* (AST-derived beats
   LLM-extracted for code RAG): project the *existing* `diagnostics.Evidence` /
@@ -115,7 +117,7 @@ they are recorded here as **candidate P-0NN proposals**, not opened yet:
 - **Claim-cards** — **JADE** (decompose a response into individual claims, check
   each against expert knowledge): give every diagnostic a deterministic evidence
   card (claim → facts from the graph), not an LLM eval. Slots directly into the
-  open evidence-coverage acceptance criteria in `execution-surfaces.md` §5.
+  open evidence-coverage acceptance criteria in `AGENTS.execution-surfaces.md` §5.
 
 ## 4. What NOT to pull (confirmed against the repos' pain)
 
@@ -123,25 +125,29 @@ RL training of agents · long-running self-evolving multi-agent colonies · GUI/
 agent training · social-simulation · medical/hospital-workflow agents · "agents
 open PRs autonomously." None closes the actual gap. The present pain is *"an agent
 with a shell can do anything and then we trust stdout"* — a **trust-boundary** gap
-(owned by Sandboy #9) and a **verification** gap (§2), not a creativity gap.
+(owned by Sandboy; roadmap in `docs/zero-trust-framework.md`) and a **verification**
+gap (§2), not a creativity gap.
 
-## 5. Priority, reconciled with what's already open
+## 5. Priority, reconciled with what's already landed
 
-1. **`owen.policy` (CUE)** — highest daily ROI, but **already #182**. Nothing to do here.
+1. **`owen.policy` (CUE)** — highest daily ROI, but **already landed** (`Own.NET/docs/notes/agent-capability-layer.md` §8). Nothing to do here.
 2. **007 `trace.jsonl` + `o7 eval`** — the top *net-new* item. TrajAD / TriCEGAR / Structural-Testing.
-3. **Wire Sandboy into gate** — spike done; roadmap **#9**. Finish, don't transplant.
+3. **Wire Sandboy into gate** — spike done; roadmap in `docs/zero-trust-framework.md`. Finish, don't transplant.
 4. **Consensus judge v0** — PerspectiveGap; after the trace layer.
 5. **Own.NET evidence graph + JADE claim-cards** — candidate P-0NN (§3).
 6. **WASM adapters harden** — adversarial corpus + build; spike done.
 
-Net: after #9 / #182 / #181, the single paper-driven thing genuinely left to design
-is **§2.1 — the trace-driven verifier over the run record.** Everything else is
-already spiked, already in flight, or a deliberate no.
+Net: after `docs/zero-trust-framework.md`, `Own.NET/docs/notes/agent-capability-layer.md`
+§8, and `Own.NET/docs/proposals/P-029-agent-memory-layer.md`, the single paper-driven
+thing genuinely left to design is **§2.1 — the trace-driven verifier over the run
+record.** Everything else is already spiked, already landed, or a deliberate no.
 
 ## 6. Placement
 
 Canonical file: `007/docs/paper-transplant-map.md`. Lives in 007 because the
 analysis is cross-repo and 007 is the private orchestration hub that drives the
-others (per `README.md` and the #9 responsibility table). Own.NET-side items (§3)
-stay here as candidates rather than seeding thin docs into Own.NET while its policy
-PRs (#181/#182) are open.
+others (per `README.md` and the responsibility table in `docs/zero-trust-framework.md`
+§2). Own.NET-side items (§3) stay here as candidates rather than seeding thin docs
+into Own.NET alongside its just-landed policy docs
+(`Own.NET/docs/proposals/P-029-agent-memory-layer.md` /
+`Own.NET/docs/notes/agent-capability-layer.md` §8).

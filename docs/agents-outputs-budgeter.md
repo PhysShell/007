@@ -1,10 +1,8 @@
-Proposal: Agent Output Budgeter for AI Coding Agents
+# Agent Output Budgeter for AI Coding Agents
 
-Status
+- **Status:** Draft
 
-Draft
-
-Summary
+## Summary
 
 This proposal introduces an Agent Output Budgeter: a local, deterministic middleware layer that reduces noisy command output before it enters an AI coding agent’s context window.
 
@@ -12,7 +10,7 @@ The goal is to make tools like Claude Code, Codex, MCP-based agents, and custom 
 
 This is especially useful for large .NET / MSBuild / legacy repositories where build logs, test output, "rg" results, "git diff", and runtime logs can easily flood the model context with low-value text.
 
-Problem
+## Problem
 
 AI coding agents often execute shell commands and receive raw output directly into the model context.
 
@@ -52,7 +50,7 @@ This creates several problems:
 6. Weak domain understanding
    Generic output compression does not understand project-specific build systems, legacy .NET Framework quirks, DevExpress dependencies, XAML build failures, binding redirects, or MSBuild diagnostic structure.
 
-Goals
+## Goals
 
 The system should:
 
@@ -72,7 +70,7 @@ The system should:
 - Be safe enough for private and commercial repositories.
 - Make failures easier to debug, not merely shorter.
 
-Non-goals
+## Non-goals
 
 This proposal does not aim to:
 
@@ -88,7 +86,7 @@ This proposal does not aim to:
 
 This system should be boring, local, explainable, and predictable.
 
-Motivation
+## Motivation
 
 Existing tools already show that output reduction is useful:
 
@@ -116,26 +114,25 @@ However, general-purpose tools are not enough for large legacy repositories. A s
 
 A generic “shorten stdout” tool helps, but a domain-aware reducer helps much more.
 
-Proposed Solution
+## Proposed Solution
 
 Introduce a local tool called Agent Output Budgeter.
 
-Working name:
-
-aob
+Working name: `aob`
 
 Alternative names:
 
-agent-budget
-agent-output
-context-saver
-stdout-budgeter
-safe-exec
+- agent-budget
+- agent-output
+- context-saver
+- stdout-budgeter
+- safe-exec
 
 The tool wraps command execution and returns a compact result to the agent.
 
-High-level Flow
+### High-level Flow
 
+```text
 AI Agent
   ↓
 safe_exec / aob run / MCP tool / Claude hook
@@ -151,20 +148,24 @@ Command-specific reducer runs
 Structured compact summary returned to agent
   ↓
 Agent may request full artifact only when needed
+```
 
-Example
+### Example
 
 Instead of giving the agent this:
 
+```text
 10,000 lines of MSBuild output
 800 repeated warnings
 NuGet restore noise
 Generated file paths
 Verbose target logs
 One real compiler error hidden near the end
+```
 
 The agent receives this:
 
+```text
 Command: msbuild Broker.sln /p:Configuration=Release /p:Platform="Any CPU"
 Exit code: 1
 Duration: 02:14
@@ -187,11 +188,13 @@ Likely next steps:
 - Inspect LoginViewModel.cs around line 142.
 - Verify DevExpress reference paths.
 - Check package/reference mismatch for DevExpress 12.2 vs newer restored packages.
+```
 
 The full log remains available, but the model does not eat it by default like a raccoon in a landfill.
 
-Architecture
+## Architecture
 
+```text
 src/
   AgentOutputBudgeter/
     Cli/
@@ -223,29 +226,31 @@ src/
       GitHubActions
     Config/
       aob.config.json
+```
 
-Core Components
+## Core Components
 
-1. Command Classifier
+### 1. Command Classifier
 
 Detects what kind of command is being executed.
 
 Examples:
 
-Command| Reducer
-"git status"| "GitStatusReducer"
-"git diff"| "GitDiffReducer"
-"rg Foo"| "RipgrepReducer"
-"dotnet build"| "DotNetBuildReducer"
-"msbuild *.sln"| "MSBuildReducer"
-"dotnet test"| "DotNetTestReducer"
-"cat *.log"| "LogReducer"
-"docker logs"| "LogReducer"
-unknown command| "GenericReducer"
+| Command | Reducer |
+|---|---|
+| `git status` | GitStatusReducer |
+| `git diff` | GitDiffReducer |
+| `rg Foo` | RipgrepReducer |
+| `dotnet build` | DotNetBuildReducer |
+| `msbuild *.sln` | MSBuildReducer |
+| `dotnet test` | DotNetTestReducer |
+| `cat *.log` | LogReducer |
+| `docker logs` | LogReducer |
+| unknown command | GenericReducer |
 
 The classifier should be rule-based first. No LLM is needed.
 
-2. Execution Engine
+### 2. Execution Engine
 
 Runs commands safely and captures:
 
@@ -269,12 +274,13 @@ The execution engine should support:
 - environment allowlist/blocklist
 - command denylist for dangerous operations, if used as an agent tool
 
-3. Artifact Store
+### 3. Artifact Store
 
 Stores full outputs locally.
 
 Suggested structure:
 
+```text
 .agent-artifacts/
   2026-07-06/
     183012-msbuild/
@@ -284,10 +290,11 @@ Suggested structure:
       summary.md
       metadata.json
       diagnostics.json
+```
 
 The agent receives paths and artifact IDs, not the full raw output.
 
-4. Reducer Pipeline
+### 4. Reducer Pipeline
 
 A reducer takes raw output and produces a compact summary.
 
@@ -306,6 +313,7 @@ Reducer output should include:
 
 Example reducer output:
 
+```json
 {
   "command": "dotnet test Login.Tests.csproj",
   "exitCode": 1,
@@ -328,13 +336,15 @@ Example reducer output:
     }
   ]
 }
+```
 
-5. Budget Policy
+### 5. Budget Policy
 
 Controls how much output may enter agent context.
 
 Example config:
 
+```json
 {
   "defaultMaxChars": 12000,
   "defaultMaxDiagnostics": 50,
@@ -361,10 +371,11 @@ Example config:
     }
   }
 }
+```
 
-Reducers
+## Reducers
 
-Git Status Reducer
+### Git Status Reducer
 
 Should return:
 
@@ -379,7 +390,7 @@ Should return:
 
 Avoid dumping the full porcelain output when it is large.
 
-Git Diff Reducer
+### Git Diff Reducer
 
 Should return:
 
@@ -394,6 +405,7 @@ Should return:
 
 Example:
 
+```text
 Changed files: 12
 - 4 C# files
 - 2 test files
@@ -405,8 +417,9 @@ Important hunks:
 - LoginViewModel.cs: token refresh logic changed
 - AuthService.cs: new null-check added
 - Login.Tests.cs: added expired-token regression test
+```
 
-Ripgrep Reducer
+### Ripgrep Reducer
 
 Should return:
 
@@ -419,6 +432,7 @@ Should return:
 
 Example:
 
+```text
 Search: rg "StationId"
 Matched: 47 lines in 12 files
 
@@ -430,8 +444,9 @@ Top files:
 Omitted:
 - 21 additional matches
 - 3 generated files
+```
 
-File Listing Reducer
+### File Listing Reducer
 
 For commands like:
 
@@ -459,7 +474,7 @@ Should hide by default:
 - ".vs/"
 - generated caches
 
-DotNet Build Reducer
+### DotNet Build Reducer
 
 Should detect:
 
@@ -483,6 +498,7 @@ Should group diagnostics by:
 
 Example:
 
+```text
 Build failed.
 
 Projects:
@@ -500,8 +516,9 @@ Errors:
 Warnings:
 - CS8618: 14 occurrences
 - NU1701: 3 occurrences
+```
 
-MSBuild Reducer
+### MSBuild Reducer
 
 This is a critical reducer for legacy .NET repositories.
 
@@ -520,7 +537,9 @@ It should support:
 
 Preferred mode:
 
+```bash
 msbuild Broker.sln /bl:.agent-artifacts/latest/build.binlog
+```
 
 Then parse the ".binlog" using a structured parser.
 
@@ -534,7 +553,7 @@ The reducer should return:
 - path to ".binlog"
 - path to structured diagnostics JSON
 
-DotNet Test Reducer
+### DotNet Test Reducer
 
 Should return:
 
@@ -550,7 +569,7 @@ Should return:
 
 Should not dump every passed test.
 
-TRX Reducer
+### TRX Reducer
 
 If ".trx" files are available, prefer them over parsing console output.
 
@@ -563,7 +582,7 @@ Should return:
 - attachments
 - result file path
 
-Log Reducer
+### Log Reducer
 
 For runtime logs, service logs, and CI logs.
 
@@ -581,7 +600,7 @@ Should return:
 
 Should group repeated errors aggressively.
 
-JSON / JSONL Reducer
+### JSON / JSONL Reducer
 
 Should return:
 
@@ -593,7 +612,7 @@ Should return:
 - first N relevant records
 - omitted count
 
-SQL Reducer
+### SQL Reducer
 
 Should return:
 
@@ -606,9 +625,9 @@ Should return:
 - deadlock/timeouts if detected
 - suspicious full-table scans if plan data is available
 
-Agent Integrations
+## Agent Integrations
 
-Claude Code Integration
+### Claude Code Integration
 
 Use hooks:
 
@@ -623,38 +642,43 @@ Possible behavior:
 
 Example:
 
+```bash
 git diff
+```
 
 becomes:
 
+```bash
 aob run -- git diff
+```
 
-Codex Integration
+### Codex Integration
 
 Possible strategies:
 
 1. Use wrapper commands:
-   
+
    - "aob rg"
    - "aob git diff"
    - "aob dotnet build"
 
 2. Use an MCP tool:
-   
+
    - "run_command_budgeted"
 
 3. Use a shell proxy:
-   
+
    - expose "safe_exec" instead of raw shell access
 
 4. Use project-level instructions:
-   
+
    - tell Codex to prefer "aob run -- <command>" for noisy commands
 
-MCP Integration
+### MCP Integration
 
 Expose tools:
 
+```text
 run_command_budgeted
 read_artifact
 list_artifacts
@@ -662,9 +686,11 @@ read_diagnostics
 rerun_last_command
 parse_msbuild_binlog
 parse_trx
+```
 
 Example MCP tool:
 
+```json
 {
   "name": "run_command_budgeted",
   "arguments": {
@@ -673,14 +699,17 @@ Example MCP tool:
     "maxSummaryChars": 12000
   }
 }
+```
 
-CI Integration
+### CI Integration
 
 The same reducers can run in CI.
 
 Example:
 
+```bash
 aob reduce --kind msbuild --input build.log --binlog build.binlog --output summary.md
+```
 
 This can produce:
 
@@ -689,7 +718,7 @@ This can produce:
 - Azure DevOps build summaries
 - local diagnostic artifacts
 
-Security Model
+## Security Model
 
 The system must be safe by design.
 
@@ -707,9 +736,11 @@ Requirements:
 
 Default ".gitignore" entry:
 
+```text
 .agent-artifacts/
+```
 
-Secret Redaction
+### Secret Redaction
 
 Before returning anything to the agent, the system should redact common secrets:
 
@@ -728,15 +759,18 @@ Redaction should happen before reducer output is shown.
 
 Example:
 
+```text
 Authorization: Bearer [REDACTED]
 Password=[REDACTED]
+```
 
-Error Handling
+## Error Handling
 
 The reducer must never hide failure.
 
 If reduction fails, return a safe fallback:
 
+```text
 Command failed or reducer crashed.
 
 Exit code: 1
@@ -749,15 +783,15 @@ MSBuildReducer failed to parse binlog: invalid format
 Fallback preview:
 <first 200 lines>
 <last 200 lines>
+```
 
-Failure of the reducer must not destroy the raw command output.
+Failure of the reducer must not destroy the raw command output, and must never mask the underlying compiler error.
 
-WHERE'S THE ERROR HANDLING?! It belongs here, not in a postmortem after the agent confidently ignores the only real compiler error.
-
-Configuration
+## Configuration
 
 Example "aob.config.json":
 
+```json
 {
   "artifactDirectory": ".agent-artifacts",
   "storeRawOutput": true,
@@ -806,38 +840,53 @@ Example "aob.config.json":
     }
   }
 }
+```
 
-CLI Design
+## CLI Design
 
-Run a command
+### Run a command
 
+```bash
 aob run -- dotnet build
+```
 
-Run MSBuild with artifact capture
+### Run MSBuild with artifact capture
 
+```bash
 aob run -- msbuild Broker.sln /p:Configuration=Release /p:Platform="Any CPU" /bl
+```
 
-Reduce existing output
+### Reduce existing output
 
+```bash
 aob reduce --kind msbuild --input build.log
+```
 
-Parse binary log
+### Parse binary log
 
+```bash
 aob msbuild summarize --binlog build.binlog
+```
 
-Parse TRX
+### Parse TRX
 
+```bash
 aob test summarize --trx TestResults/result.trx
+```
 
-Show artifact
+### Show artifact
 
+```bash
 aob artifact show 2026-07-06/183012-msbuild
+```
 
-Print last summary
+### Print last summary
 
+```bash
 aob last
+```
 
-Output Format
+## Output Format
 
 The CLI should support:
 
@@ -847,16 +896,18 @@ The CLI should support:
 
 Example:
 
+```bash
 aob run --format markdown -- dotnet test
 aob run --format json -- dotnet test
+```
 
 JSON is useful for MCP and CI integrations.
 
 Markdown is useful for agent context and PR comments.
 
-Implementation Plan
+## Implementation Plan
 
-Phase 1: Minimal CLI
+### Phase 1: Minimal CLI
 
 Implement:
 
@@ -875,7 +926,7 @@ Acceptance criteria:
 - Timeout works.
 - Reducer failure does not lose raw output.
 
-Phase 2: Git and Search Reducers
+### Phase 2: Git and Search Reducers
 
 Implement:
 
@@ -893,7 +944,7 @@ Acceptance criteria:
 - Generated/build folders are omitted by default.
 - Omitted counts are visible.
 
-Phase 3: .NET Build Reducers
+### Phase 3: .NET Build Reducers
 
 Implement:
 
@@ -912,7 +963,7 @@ Acceptance criteria:
 - Failed projects are listed before warnings.
 - Summary is useful without raw log.
 
-Phase 4: MSBuild Binlog Support
+### Phase 4: MSBuild Binlog Support
 
 Implement:
 
@@ -929,7 +980,7 @@ Acceptance criteria:
 - "ResolveAssemblyReference" problems are summarized.
 - Legacy .NET Framework build issues are easier to inspect.
 
-Phase 5: Test Reducers
+### Phase 5: Test Reducers
 
 Implement:
 
@@ -946,7 +997,7 @@ Acceptance criteria:
 - Stack traces are limited to relevant project frames.
 - TRX is preferred over console parsing when available.
 
-Phase 6: Agent Integrations
+### Phase 6: Agent Integrations
 
 Implement:
 
@@ -962,7 +1013,7 @@ Acceptance criteria:
 - MCP exposes artifact reading and command execution.
 - Setup is reversible.
 
-Phase 7: CI Integration
+### Phase 7: CI Integration
 
 Implement:
 
@@ -977,11 +1028,11 @@ Acceptance criteria:
 - Full logs remain available as artifacts.
 - PR comments contain only useful diagnostics.
 
-Project-specific Extensions
+## Project-specific Extensions
 
-For this repository, add custom reducers for known pain points:
+For the legacy .NET target repositories that o7 drives (see the C# stubs in `judge/fixtures/sts-stub/` for an example target), add custom reducers for known pain points:
 
-Legacy .NET Framework / WPF
+### Legacy .NET Framework / WPF
 
 Detect and summarize:
 
@@ -993,7 +1044,7 @@ Detect and summarize:
 - AnyCPU/x86/x64 mismatch
 - App.config transform issues
 
-Azure DevOps / NuGet
+### Azure DevOps / NuGet
 
 Detect and summarize:
 
@@ -1004,7 +1055,7 @@ Detect and summarize:
 - "packages.config" vs "PackageReference" mismatch
 - unexpected package version upgrades
 
-SQL / Database Logs
+### SQL / Database Logs
 
 Detect and summarize:
 
@@ -1015,9 +1066,9 @@ Detect and summarize:
 - connection string redaction
 - row count explosions
 
-Comparison With Existing Tools
+## Comparison With Existing Tools
 
-Generic CLI output reducers
+### Generic CLI output reducers
 
 Useful for common commands, but usually lack deep project-specific understanding.
 
@@ -1037,7 +1088,7 @@ Not enough for:
 - old .NET Framework quirks
 - project-specific CI failures
 
-Repository packers
+### Repository packers
 
 Useful for preparing source context, but they do not solve noisy command output.
 
@@ -1053,7 +1104,7 @@ Not enough for:
 - iterative agent command execution
 - CI diagnostics
 
-Semantic MCP code tools
+### Semantic MCP code tools
 
 Useful for code navigation and editing.
 
@@ -1070,7 +1121,7 @@ Not enough for:
 - build log summarization
 - test failure grouping
 
-Closed-source token optimizers
+### Closed-source token optimizers
 
 Not recommended for private or commercial repositories unless there is a strong trust model.
 
@@ -1082,9 +1133,9 @@ Problems:
 - licensing ambiguity
 - weak project-specific customization
 
-Risks
+## Risks
 
-Risk: Important output may be hidden
+### Risk: Important output may be hidden
 
 Mitigation:
 
@@ -1095,7 +1146,7 @@ Mitigation:
 - allow "--no-reduce"
 - allow "aob artifact show"
 
-Risk: Reducer produces misleading summary
+### Risk: Reducer produces misleading summary
 
 Mitigation:
 
@@ -1105,7 +1156,7 @@ Mitigation:
 - include raw artifact path
 - test reducers against real logs
 
-Risk: Security leaks
+### Risk: Security leaks
 
 Mitigation:
 
@@ -1115,7 +1166,7 @@ Mitigation:
 - artifact gitignore
 - configurable redaction patterns
 
-Risk: Too much custom logic
+### Risk: Too much custom logic
 
 Mitigation:
 
@@ -1124,7 +1175,7 @@ Mitigation:
 - use config for project-specific rules
 - add tests from real logs
 
-Acceptance Criteria
+## Acceptance Criteria
 
 The project is successful if:
 
@@ -1137,10 +1188,11 @@ The project is successful if:
 7. The system works with Claude Code, Codex, and MCP-style agents.
 8. Legacy .NET/MSBuild diagnostics are better than generic stdout truncation.
 
-Example Agent Instruction
+## Example Agent Instruction
 
 Add this to project-level AI instructions:
 
+```text
 When running commands that may produce large output, prefer:
 
 aob run -- <command>
@@ -1156,23 +1208,26 @@ Use this especially for:
 
 Do not request full raw output unless the reduced summary is insufficient.
 If needed, inspect the artifact path returned by aob.
+```
 
-Example ".gitignore"
+## Example ".gitignore"
 
+```text
 # Agent Output Budgeter artifacts
 .agent-artifacts/
+```
 
-Open Questions
+## Open Questions
 
 1. Should the first implementation be in Rust or .NET?
 2. Should MCP support be built into the main binary or shipped as a separate adapter?
 3. Should MSBuild ".binlog" parsing be implemented immediately or after plain log parsing?
 4. Should reducers be plugin-based from the beginning?
-5. Should project-specific reducers live in this repository or in separate packages?
+5. Should project-specific reducers live in the o7 harness (this repository, 007) or in per-target-repo config/packages?
 6. Should CI summaries be Markdown-only or also SARIF/JUnit-compatible?
 7. Should "aob run" enforce command safety, or should it only reduce output?
 
-Recommendation
+## Recommendation
 
 Start with a small local CLI and the highest-value reducers:
 
@@ -1195,7 +1250,7 @@ After that, add:
 
 This gives immediate value without depending on proprietary tools or vague token-optimizer magic.
 
-Final Position
+## Final Position
 
 The right approach is not to trust a closed-source binary with repository command output.
 

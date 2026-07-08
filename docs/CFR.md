@@ -1,12 +1,12 @@
 # Integrating Game-Theoretic Adversarial Methods into Own.NET Projects
 
-**Executive Summary:** We analyze how Counterfactual Regret Minimization (CFR) and related adversarial decision frameworks can be adapted to each project. For **Own.NET Core**, we propose using CFR to prioritize and schedule static analysis under uncertainty (treating code context as hidden information). For **007/OwnAudit**, we model attacker–defender interactions (vulnerability injection vs. audit actions) as a sequential game solved by CFR/CFR+. For **Agent Review Policies**, we consider multi-agent/regret-learning to optimize review strategies over time. For **Graph/State-Drift Detection**, we view drift as an adversarial change-detection game (agent vs. hidden system changes). Each section below includes a project-specific proposal with model details, a Proof-of-Concept (PoC) plan (milestones, data, compute, timeline, metrics), risks, integration points (with .NET/F# stacks), and evaluation criteria. We also compare alternatives (MCCFR, regret-matching bandits, multi-armed bandits, reinforcement learning, Bayesian decision theory) in a summary table. Key sources (seminal CFR papers, ArXiv work, and related tools) are cited throughout.
+**Executive Summary:** We analyze how Counterfactual Regret Minimization (CFR) and related adversarial decision frameworks can be adapted to each project. For **Own.NET Core**, we propose using CFR to prioritize and schedule static analysis under uncertainty (treating code context as hidden information). For **OwnAudit**, we model attacker–defender interactions (vulnerability injection vs. audit actions) as a sequential game solved by CFR/CFR+. For **Agent Review Policies**, we consider multi-agent/regret-learning to optimize review strategies over time. For **Graph/State-Drift Detection**, we view drift as an adversarial change-detection game (agent vs. hidden system changes). Each section below includes a project-specific proposal with model details, a Proof-of-Concept (PoC) plan (milestones, data, compute, timeline, metrics), risks, integration points (matched to each project’s actual stack), and evaluation criteria. We also compare alternatives (MCCFR, regret-matching bandits, multi-armed bandits, reinforcement learning, Bayesian decision theory) in a summary table. Key sources (seminal CFR papers, ArXiv work, and related tools) are cited throughout.
 
 ## Background: CFR and Related Techniques
 
 Counterfactual Regret Minimization (CFR) is an iterative algorithm for solving **extensive-form games** with imperfect information. In these games, players make sequential decisions without full state knowledge, so states are partitioned into *information sets* (all states indistinguishable to a player). CFR minimizes *counterfactual regret* at each information set (via regret-matching), guaranteeing convergence to a Nash equilibrium in two-player zero-sum games.  For large games, extensions like **MCCFR** use Monte Carlo sampling to reduce computation, and **CFR+** (used by best poker bots) speeds convergence by resetting negative regrets to zero. For extremely large or continuous domains, **Deep CFR** trains neural nets to approximate CFR strategies, obviating manual abstraction.  
 
-Other adversarial decision methods include **regret-matching bandits** (adapted bandit algorithms that mimic regret updates) and classical **multi-armed bandits** for exploration–exploitation trade-offs. *Reinforcement Learning (RL)* places a single agent in an environment to maximize cumulative reward via trial-and-error. *Bayesian decision theory* uses probability models to maximize expected utility under uncertainty. Table 2 (below) summarizes these approaches. 
+Other adversarial decision methods include **regret-matching bandits** (adapted bandit algorithms that mimic regret updates) and classical **multi-armed bandits** for exploration–exploitation trade-offs. *Reinforcement Learning (RL)* places a single agent in an environment to maximize cumulative reward via trial-and-error. *Bayesian decision theory* uses probability models to maximize expected utility under uncertainty. The comparison table in Section 5 below summarizes these approaches. 
 
 Throughout, we cite primary sources and seminal work: Zinkevich *et al.* on CFR, Lanctot *et al.* on MCCFR, Johanson *et al.* on CFR+, and Brown *et al.* on Deep CFR. We also reference security-game adaptations of CFR to motivate applications to auditing and detection.
 
@@ -32,7 +32,7 @@ Own.NET Core is a static analysis engine. We propose augmenting it with game-the
 ### Prioritized PoC Plan  
 - **Milestones:** 
   1. *Game Model & Simulator* (1 month): Define simplified code “game” (features, bug distributions) and baseline utilities.  
-  2. *CFR Engine Implementation* (2 months): Implement (in F#/.NET) a CFR solver for the model, possibly reusing BrianBerns’s F# code for reference.  
+  2. *CFR Engine Implementation* (2 months): Implement a CFR solver for the model in Python inside `ownlang/` (or as a Rust crate under `rust/crates` if performance demands it), possibly consulting BrianBerns’s F# CFR code as an algorithmic reference.  
   3. *Integration with Own.NET* (2 months): Hook the CFR module into the analysis pipeline (deciding checks on real code samples).  
   4. *Evaluation* (1 month): Measure gains on held-out code (bug detection rate vs. CPU cost).  
 - **Dataset:** Start with a small corpus of annotated .NET code (e.g. vulnerabilities from past audits or synthetic bugs). This serves as “game states.”  
@@ -68,10 +68,10 @@ gantt
 *Assumptions:* We assume the ability to simulate bug injection and that a coarse information set (e.g. by file or class) suffices. We assume static analysis actions have quantifiable cost and that defender/adversary utilities can be approximated (e.g. giving equal weight to each bug).
 
 ### Integration Points  
-- **Language & Libraries:** Implement the CFR logic in F# or C# as part of the Own.NET codebase. F# can interoperate with existing C# libraries for static analysis (Roslyn analyzers).  
+- **Language & Libraries:** Implement the CFR scheduler in Python inside the `ownlang/` analyzer package (alongside `analysis.py` and `cfg.py`), or in the Rust crates under `rust/crates` where performance matters. (Roslyn analyzers are used only by the separate audit arm — `Own.NET/audit` together with OwnAudit’s `Run-Roslyn.ps1` — not by the analyzer pipeline targeted here.)  
 - **Services/Pipelines:** The CFR module could be an independent service or microservice that receives code features (via JSON) and returns action probabilities. It fits into the current pipeline by deciding which analyzers to run on each code piece.  
 - **Data Inputs:** Feature data (code metrics, recent change flags) is already available in the analysis pipeline; CFR module subscribes to that stream.  
-- **Parallelism:** CFR training is parallelizable per information set; we can leverage .NET parallel libraries (Tasks, TPL) or Azure Batch for heavy compute.  
+- **Parallelism:** CFR training is parallelizable per information set; we can leverage Python `multiprocessing` (or Rust’s rayon in the `rust/crates` arm) for heavy compute.  
 - **Persistence:** Learned strategy (probability tables per info set) can be stored (e.g. in a SQL/NoSQL store) and updated over time.
 
 ### Recommended Evaluation Metrics  
@@ -80,10 +80,10 @@ gantt
 - **Regret:** Average regret per decision (should go toward 0 if learning).  
 - **Robustness:** Performance on out-of-sample code changes (resilience to code drift).  
 
-## 2. 007/OwnAudit (Adversarial Audit Scheduling)
+## 2. OwnAudit (Adversarial Audit Scheduling)
 
 ### Executive Summary  
-For the OwnAudit security audit pipeline, we cast it as a **sequential security game**: the defender (auditor) allocates limited auditing resources against an attacker who may exploit hidden vulnerabilities. Using CFR/CFR+ (as in recent security-game research), we compute mixed strategies for resource allocation that minimize worst-case loss.
+For the OwnAudit security audit pipeline, we cast it as a **sequential security game**: the defender (auditor) allocates limited auditing resources against an attacker who may exploit hidden vulnerabilities. (The sibling 007 repo — the private Rust agent harness `o7` that orchestrates agent runs across these repositories — is not part of the audit pipeline; this section applies to OwnAudit only.) Using CFR/CFR+ (as in recent security-game research), we compute mixed strategies for resource allocation that minimize worst-case loss.
 
 ### Concrete Proposal (Scope, Objectives, Benefits)  
 - **Scope:** Develop a “game-theoretic prioritization engine” within OwnAudit. It will model attacker types (bug categories) as hidden states and decide on audit actions (which tests or tools to apply) to maximize vulnerability discovery under budget constraints.  
@@ -99,7 +99,7 @@ For the OwnAudit security audit pipeline, we cast it as a **sequential security 
   - Attacker actions: *choose an attack vector* or *target component* at each turn.  
   - Auditor actions: *select audit modality* (static scan, dynamic analysis, pen-test) or *prioritize component*. Could include “no action” if budget is exceeded.  
 - **Utility:** Assign positive reward if an attack is detected/blocked, negative for successful exploits and audit costs. For example, +R for finding a critical bug, –C for audit effort, –P if a breach occurs undetected. Zero-sum or near-zero-sum can be assumed (attacker’s gain is auditor’s loss).  
-- **Simulation Method:** This is akin to a *sequential security game with chance nodes*. We can adapt frameworks like those in [8]. For PoC, start with a discrete abstraction: suppose there are 3 attacker types and 3 audit tools. Build an extensive-form game graph (turns: attacker picks type, defender picks tool, chance reveals result). Use **CFR+** (which efficiently handles imperfect recall) to solve for a mixed strategy equilibrium. The equilibrium strategy tells the auditor how often to use each tool given context.   
+- **Simulation Method:** This is akin to a *sequential security game with chance nodes*. We can adapt existing sequential security-game CFR frameworks (e.g. Lisý *et al.*). For PoC, start with a discrete abstraction: suppose there are 3 attacker types and 3 audit tools. Build an extensive-form game graph (turns: attacker picks type, defender picks tool, chance reveals result). Use **CFR+** (which efficiently handles imperfect recall) to solve for a mixed strategy equilibrium. The equilibrium strategy tells the auditor how often to use each tool given context.   
 
 ### Prioritized PoC Plan  
 - **Milestones:** 
@@ -137,7 +137,7 @@ gantt
 - **Data Scarcity:** Without actual attack statistics, we must assume priors. CFR assumes worst-case attacker; if reality is easier, CFR strategies may be conservative.
 
 ### Integration Points  
-- **Stack & Tech:** Implement the solver in .NET/F# or integrate a C++/Rust CFR library via interop (e.g. **Fro116/counterfactual-regret-minimization** is a C++ header-only CFR library). F# can call into such libraries or use `Process` to invoke a separate solver.  
+- **Stack & Tech:** Implement the solver in .NET/F# as part of OwnAudit’s existing .NET solution (`src/OwnAudit.Cli`, `src/OwnAudit.Core`, `src/OwnAudit.Runtime`), or integrate a C++/Rust CFR library via interop (e.g. **Fro116/counterfactual-regret-minimization** is a C++ header-only CFR library). F# can call into such libraries or use `Process` to invoke a separate solver.  
 - **Data Pipelines:** The game model needs current system state (e.g. which services are deployed) and audit logs. Existing databases (SQL/NoSQL) of code metrics can feed into attacker type probabilities.  
 - **Services:** The audit engine can expose an API: “Given (module X, context Y), return audit action probabilities.” That API can be called by the audit scheduling service.  
 - **Incremental Updates:** New threat intel can adjust game payoffs dynamically. For example, an emergent vulnerability raises the prior of that attacker type; the game solver can then be rerun to adapt strategy.  
@@ -268,10 +268,16 @@ Graph/state-drift detection involves monitoring evolving systems (dependency gra
 
 Each method has trade-offs. For example, **multi-armed bandits** excel at fast adaptation in a single-phase choice problem (e.g. allocating scan time among independent code modules) because they efficiently balance exploration/exploitation. However, bandits do not model opponent responses. In contrast, **CFR** explicitly models an adversarial opponent and yields mixed strategies robust to worst-case attack patterns. **MCCFR** combines these: it still solves for a Nash equilibrium but uses sampling to handle larger games. **RL** is most general for sequential tasks (see figure below), but it optimizes a single-agent policy rather than solving a two-player equilibrium. A typical RL agent observes state $S$, takes action $A$, receives reward $R$, then updates its policy to maximize future $R$. 
 
- *Figure: Reinforcement Learning loop (agent–environment interaction). An RL agent observes state, takes an action, receives a reward, and updates its policy to maximize cumulative reward.*  
+```mermaid
+flowchart LR
+    Agent -- "action A" --> Environment
+    Environment -- "state S, reward R" --> Agent
+```
+
+*Figure: Reinforcement Learning loop (agent–environment interaction). An RL agent observes state, takes an action, receives a reward, and updates its policy to maximize cumulative reward.*  
 
 We see that CFR (and MCCFR) is preferred when modeling a known adversary with sequential moves (Projects 1–2 above). Multi-armed bandits or simple contextual bandits fit well for quick one-shot choices or moderate context (Project 3’s suggestion decisions). RL is suitable if we treat the agent’s environment as stationary and want a powerful, flexible policy (also Project 3 and 4 if they become full MDPs). Bayesian approaches excel when probabilities are known or we want to incorporate strong priors (e.g. risk assessment if we have historical data). In practice, a hybrid can be used: e.g. use CFR+ for high-level strategy (audit allocation) and bandits for tuning parameters of scanning tools.  
 
 ## References
 
-Seminal and primary sources cited in this report include foundational CFR papers, extensions like Monte Carlo CFR and CFR+, as well as the Deep CFR work. We also cite sources on security game applications and general decision methods (bandits, RL, Bayesian decision theory). Relevant code and examples are noted (e.g. the **CFR-Explained** GitHub, and existing CFR libraries). For clarity and brevity, the full bibliographic details are not reproduced here, but each quoted passage is linked to its source for further reading.
+Seminal and primary sources cited in this report include foundational CFR papers (Zinkevich *et al.*), extensions like Monte Carlo CFR (Lanctot *et al.*) and CFR+ (Johanson *et al.*), as well as the Deep CFR work (Brown *et al.*). We also cite sources on security game applications and general decision methods (bandits, RL, Bayesian decision theory). Relevant code and examples are noted (e.g. the **CFR-Explained** GitHub repo, BrianBerns’s F# CFR implementation, and **Fro116/counterfactual-regret-minimization**). Sources are cited by name only in this document; full bibliographic details and links are not reproduced here.

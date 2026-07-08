@@ -1,14 +1,14 @@
-Proposal: Action Plan & Evidence Bridge для 007 / Own.NET / OwnAudit
+# Action Plan & Evidence Bridge (007 / Own.NET / OwnAudit)
 
-Status: proposal
-Scope: 007, Own.NET, OwnAudit, Sandboy integration
-Intent: связать agent task contract, runtime policy, diff policy, trace/evidence и OwnAudit triage в один проверяемый контур
-Primary artifact: "docs/action-plan-and-evidence-bridge.md"
+- **Status:** proposal
+- **Scope:** 007, Own.NET, OwnAudit, Sandboy integration
+- **Intent:** связать agent task contract, runtime policy, diff policy, trace/evidence и OwnAudit triage в один проверяемый контур
 
-1. Summary
+## 1. Summary
 
 В 007 уже формируется правильная архитектурная линия:
 
+```text
 task contract
   → isolated agent run
   → diff policy
@@ -16,6 +16,7 @@ task contract
   → run record
   → judge / eval / replay
   → OwnAudit evidence sink
+```
 
 Но между слоями всё ещё не хватает одного явного артефакта: машиночитаемого плана намерений агента.
 
@@ -30,6 +31,7 @@ task contract
 
 Предлагается добавить bridge layer:
 
+```text
 Prompt / TaskSpec
   → O7ActionPlan
   → Policy validation
@@ -38,10 +40,11 @@ Prompt / TaskSpec
   → Gate execution
   → Run evidence
   → OwnAudit ingest
+```
 
 Ключевая идея: 007 должен проверять не только “разрешена ли задача” и “прошли ли тесты”, но и совпало ли фактическое поведение агента с его заявленным планом.
 
-2. Problem
+## 2. Problem
 
 Открытые proposal-и уже покрывают крупные блоки:
 
@@ -58,6 +61,7 @@ Prompt / TaskSpec
 
 Но без промежуточного "ActionPlan" остаётся дыра:
 
+```text
 TaskContract говорит:
   “агенту разрешено работать в этих рамках”.
 
@@ -72,10 +76,11 @@ OwnAudit говорит:
 
 Но никто явно не фиксирует:
   “вот что агент обещал сделать до изменения кода”.
+```
 
 Это создаёт несколько failure modes.
 
-2.1. Fix без проверяемого намерения
+### 2.1. Fix без проверяемого намерения
 
 Агент может сказать:
 
@@ -94,7 +99,7 @@ OwnAudit говорит:
 
 Это не engineering. Это “поверь брат” с CI.
 
-2.2. DiffPolicy без semantic intent
+### 2.2. DiffPolicy без semantic intent
 
 DiffPolicy может проверить:
 
@@ -114,10 +119,11 @@ DiffPolicy может проверить:
 
 То есть policy видит форму diff-а, но не знает его обещанного смысла.
 
-2.3. OwnAudit получает evidence без declared baseline
+### 2.3. OwnAudit получает evidence без declared baseline
 
 OwnAudit может ingest-ить run record, policy violations, gate verdicts, sandbox reports и trace events. Но для полноценного triage ему нужно сравнивать:
 
+```text
 declared intent
   vs
 actual diff
@@ -125,6 +131,7 @@ actual diff
 actual runtime behavior
   vs
 actual analyzer/audit result
+```
 
 Без declared intent OwnAudit видит только последствия, но не может точно сказать:
 
@@ -134,7 +141,7 @@ actual analyzer/audit result
 - агент не подтвердил результат;
 - агент прошёл gate, но не решил target finding.
 
-3. Goals
+## 3. Goals
 
 Добавить минимальный bridge layer, который:
 
@@ -149,7 +156,7 @@ actual analyzer/audit result
 
 Никакого нового “языка программирования” для агента на v1. Только schema-first contract.
 
-4. Non-goals
+## 4. Non-goals
 
 Не предлагается:
 
@@ -172,10 +179,11 @@ AI не становится судьёй. Истина остаётся в dete
 - schema validation;
 - run evidence.
 
-5. Proposed architecture
+## 5. Proposed architecture
 
 Новый контур:
 
+```text
 TaskSpec
   ↓
 Prompt module render
@@ -197,8 +205,9 @@ Run record stores plan, diff, gates, trace, evidence
 OwnAudit ingests run record
   ↓
 OwnAudit emits SARIF/risk/triage report
+```
 
-6. New artifact: "O7ActionPlan.v1"
+## 6. New artifact: "O7ActionPlan.v1"
 
 "O7ActionPlan" is a machine-checkable declaration of what the agent intends to do.
 
@@ -206,8 +215,9 @@ It is not a free-form markdown plan. It is not a prompt. It is not a gate manife
 
 It is the agent’s declared contract for a single run.
 
-6.1. Example
+### 6.1. Example
 
+```yaml
 schema: o7.action_plan.v1
 task_id: ownaudit.fix.own001.subscription-token
 intent: fix_existing_finding
@@ -218,7 +228,10 @@ target_base_ref: main
 target_findings:
   - id: OWN001
     source: ownaudit.sarif
-    rule: event_subscription_leak
+    # OWN001 = "owned resource not released on all paths" (Own.NET
+    # spec/Diagnostics.md); event_subscription_leak is the OwnAudit/SARIF
+    # category layered on top, not the analyzer rule name
+    category_name: event_subscription_leak
     finding_id: "OWN001:src/Foo/ViewModel.cs:142"
 
 proposed_changes:
@@ -262,9 +275,11 @@ risk:
   reasons:
     - touches resource lifetime logic
     - fix must preserve existing subscription behavior
+```
 
-6.2. Required fields
+### 6.2. Required fields
 
+```text
 schema
 task_id
 intent
@@ -274,13 +289,15 @@ proposed_changes
 declared_effects
 verification
 risk
+```
 
 A run with no "O7ActionPlan" may still exist in legacy mode, but protected mode should require it.
 
-6.3. Intent classes
+### 6.3. Intent classes
 
 Initial enum:
 
+```text
 fix_existing_finding
 add_analyzer_rule
 add_test_case
@@ -288,11 +305,13 @@ refactor_internal_only
 update_docs
 triage_report
 investigate_only
+```
 
 Each intent class can have additional constraints.
 
 Example:
 
+```text
 fix_existing_finding:
   requires target_findings
   requires re-audit
@@ -301,8 +320,9 @@ fix_existing_finding:
 investigate_only:
   forbids source writes
   requires summary artifact
+```
 
-7. ActionPlan policy validation
+## 7. ActionPlan policy validation
 
 Before the agent is allowed to patch, 007 validates the plan against:
 
@@ -314,15 +334,18 @@ Before the agent is allowed to patch, 007 validates the plan against:
 - prompt module output schema;
 - per-intent required fields.
 
-7.1. Validation output
+### 7.1. Validation output
 
+```text
 runs/<target>/<run-id>/
   policy/
     action-plan.normalized.json
     action-plan.verdict.json
+```
 
 Example verdict:
 
+```json
 {
   "schema": "o7.action_plan_verdict.v1",
   "verdict": "PASS",
@@ -349,8 +372,9 @@ Example verdict:
     }
   ]
 }
+```
 
-7.2. Fail-closed rules
+### 7.2. Fail-closed rules
 
 Protected agent runs should fail before patching if:
 
@@ -363,15 +387,18 @@ Protected agent runs should fail before patching if:
 - ActionPlan requests diagnostic suppression without explicit permission;
 - ActionPlan attempts to edit .007/, .agents/, gate policy, or prompt registry without human-approved task scope.
 
-8. DiffPolicy binding
+## 8. DiffPolicy binding
 
 After the agent produces a diff, 007 compares actual diff against both:
 
+```text
 TaskContract
 ActionPlan
+```
 
 This creates three levels:
 
+```text
 TaskContract:
   broad allowed scope
 
@@ -380,11 +407,13 @@ ActionPlan:
 
 Diff:
   actual behavior
+```
 
-8.1. Diff vs ActionPlan checks
+### 8.1. Diff vs ActionPlan checks
 
 Initial checks:
 
+```text
 O7DIFF001 changed path not declared in ActionPlan
 O7DIFF002 forbidden path touched
 O7DIFF003 dependency file changed without permission
@@ -395,23 +424,29 @@ O7DIFF007 .007 or gate config changed
 O7DIFF008 .agents memory/policy changed
 O7DIFF009 target finding not referenced by diff
 O7DIFF010 diff exceeds declared risk/size budget
+```
 
-8.2. Verdict classes
+### 8.2. Verdict classes
 
+```text
 PASS
 FAIL
 ERROR
 NOT_APPLICABLE
+```
 
-8.3. Output
+### 8.3. Output
 
+```text
 runs/<target>/<run-id>/
   policy/
     diff-policy.json
     diff-vs-action-plan.json
+```
 
 Example:
 
+```json
 {
   "schema": "o7.diff_vs_action_plan.v1",
   "verdict": "FAIL",
@@ -424,17 +459,20 @@ Example:
     }
   ]
 }
+```
 
-9. Shared Effect Ledger
+## 9. Shared Effect Ledger
 
 A shared vocabulary is needed so 007, Own.NET and OwnAudit do not invent three names for the same thing.
 
 Initial file:
 
-docs/spec/effects-vocabulary.md
+`Own.NET spec/EffectsVocabulary.md` (Own.NET owns the vocabulary — its `spec/`
+is the normative layer; 007 and OwnAudit consume it)
 
 Possible schema:
 
+```yaml
 schema: owen.effects.v1
 
 effects:
@@ -477,6 +515,7 @@ effects:
   audit.finding.fix:
     scope: audit
     evidence_required: true
+```
 
 This vocabulary should be used by:
 
@@ -488,7 +527,7 @@ This vocabulary should be used by:
 - OwnAudit ingest rules;
 - Own.NET resource model exports.
 
-10. Own.NET binding: diagnostics as repair constraints
+## 10. Own.NET binding: diagnostics as repair constraints
 
 Own.NET remains the deterministic source of truth for diagnostics and resource/lifetime models.
 
@@ -496,10 +535,11 @@ For agent repair, Own.NET should expose repair constraints around findings.
 
 Example:
 
+```yaml
 schema: own.repair_constraints.v1
 
 diagnostic: OWN001
-category: event_subscription_leak
+category_name: event_subscription_leak
 
 resource:
   kind: EventSubscriptionToken
@@ -522,10 +562,11 @@ required_verification:
   - ownnet-check
   - ownaudit-reaudit
   - no-new-findings
+```
 
 This should integrate with project-local resource model files such as "own.models.yaml".
 
-10.1. Why this matters
+### 10.1. Why this matters
 
 Without repair constraints, an agent can “fix” a leak by removing behavior.
 
@@ -539,12 +580,13 @@ For "OWN001" and "OWN014", the agent should receive structured constraints:
 - which “fixes” are forbidden;
 - what verification must prove.
 
-11. AOB binding: output reduction as evidence, not just compression
+## 11. AOB binding: output reduction as evidence, not just compression
 
 The Agent Output Budgeter should not only shorten stdout. It should emit structured evidence.
 
 Each wrapped command should produce:
 
+```json
 {
   "schema": "o7.tool_result_reduced.v1",
   "event": "tool_result_reduced",
@@ -568,19 +610,25 @@ Each wrapped command should produce:
     "omitted_chars": 177800
   }
 }
+```
 
 This event can be appended to:
 
+```text
 runs/<target>/<run-id>/agent.trace.jsonl
+```
 
 or stored under:
 
+```text
 runs/<target>/<run-id>/evidence/commands/*.json
+```
 
-11.1. Initial reducers
+### 11.1. Initial reducers
 
 Priority reducers:
 
+```text
 git status
 git diff
 ripgrep
@@ -592,29 +640,35 @@ MSBuild binlog
 generic logs
 JSON/JSONL
 SQL diagnostics
+```
 
-11.2. Why this matters
+### 11.2. Why this matters
 
 If AOB only shortens output, it is a convenience tool.
 
 If AOB emits structured evidence, it becomes part of the trust pipeline:
 
+```text
 command output
   → reduced diagnostic summary
   → trace event
   → OwnAudit ingest
   → SARIF/risk report
+```
 
-12. OwnAudit ingest
+## 12. OwnAudit ingest
 
 OwnAudit should ingest completed 007 run records and emit a normalized report.
 
 Command shape:
 
+```text
 ownaudit ingest-o7-run <run-dir>
+```
 
 Input:
 
+```text
 runs/<target>/<run-id>/
   meta.json
   task.o7.toml
@@ -627,28 +681,34 @@ runs/<target>/<run-id>/
   agent.trace.jsonl
   evidence/**/*.json
   diff.patch
+```
 
 Output:
 
+```text
 runs/<target>/<run-id>/
   ownaudit/
     agent-run.sarif
     risk.json
     triage.md
     evidence.jsonl
+```
 
-12.1. Initial OwnAudit rules
+### 12.1. Initial OwnAudit rules
 
+Rule IDs are aligned with the numbering defined in sections 7.1 and 8.1.
+
+```text
 O7PLAN001 invalid or missing ActionPlan
 O7PLAN002 undeclared write effect
-O7PLAN003 target finding missing
 O7PLAN004 verification missing
+O7PLAN005 target finding missing
 
 O7DIFF001 changed path not declared in ActionPlan
 O7DIFF002 forbidden path touched
 O7DIFF003 dependency file changed without permission
-O7DIFF004 gate config changed
-O7DIFF005 tests changed without test/fix intent
+O7DIFF004 tests changed without test/fix intent
+O7DIFF007 gate config changed
 
 O7GATE001 required gate failed
 O7GATE002 required gate missing
@@ -666,9 +726,11 @@ O7AUDIT001 target finding not removed
 O7AUDIT002 new finding introduced
 O7AUDIT003 diagnostic suppressed instead of fixed
 O7AUDIT004 no re-audit evidence
+```
 
-12.2. Triage buckets
+### 12.2. Triage buckets
 
+```text
 confirmed_violation:
   policy fired and evidence confirms bad behavior
 
@@ -683,11 +745,13 @@ static_only:
 
 needs_human_review:
   sensitive action, unclear intent, or gate config/policy/memory touched
+```
 
-13. Run record changes
+## 13. Run record changes
 
 Target run structure:
 
+```text
 runs/<target>/<run-id>/
   task.md
   task.o7.toml
@@ -728,9 +792,11 @@ runs/<target>/<run-id>/
     risk.json
     triage.md
     evidence.jsonl
+```
 
 "meta.json" should reference all major artifacts:
 
+```json
 {
   "schema": "o7.run_meta.v1",
   "run_id": "2026-07-06T12-00-00Z-ownaudit-fix-own001",
@@ -745,30 +811,37 @@ runs/<target>/<run-id>/
   "ownaudit_ingest_verdict": "PASS",
   "risk_level": "medium"
 }
+```
 
-14. CLI additions
+## 14. CLI additions
 
-14.1. 007
+### 14.1. 007
 
+```text
 o7 plan --task task.o7.toml --out action-plan.yaml
 o7 validate-plan --task task.o7.toml --plan action-plan.yaml
 o7 run --task task.o7.toml --plan action-plan.yaml
 o7 diff-policy --run runs/<target>/<run-id>
 o7 evidence --run runs/<target>/<run-id>
+```
 
-14.2. OwnAudit
+### 14.2. OwnAudit
 
+```text
 ownaudit ingest-o7-run runs/<target>/<run-id>
 ownaudit summarize-o7-risk runs/<target>/<run-id>
+```
 
-14.3. Own.NET
+### 14.3. Own.NET
 
+```text
 own check --emit-repair-constraints
 own export-effects --format json
+```
 
 These are not all Phase 1 requirements. They define the direction.
 
-15. Phased roadmap
+## 15. Phased roadmap
 
 Phase 0: proposal only
 
@@ -863,7 +936,7 @@ Acceptance criteria:
 - agent cannot remove behavior without explicit high-risk declaration;
 - re-audit proves target finding removed and no new findings introduced.
 
-16. Security notes
+## 16. Security notes
 
 This proposal does not replace sandboxing.
 
@@ -881,9 +954,9 @@ Security enforcement still belongs to:
 
 The value of "ActionPlan" is that it makes deception, drift, and accidental overreach easier to detect.
 
-17. Design principles
+## 17. Design principles
 
-17.1. Agent declares, host enforces
+### 17.1. Agent declares, host enforces
 
 The agent may propose:
 
@@ -901,7 +974,7 @@ The host enforces:
 - gate execution;
 - artifact storage.
 
-17.2. Evidence beats narration
+### 17.2. Evidence beats narration
 
 A markdown explanation is not enough.
 
@@ -917,7 +990,7 @@ Every important claim should be backed by one of:
 - command summary;
 - re-audit result.
 
-17.3. Deterministic tools stay source of truth
+### 17.3. Deterministic tools stay source of truth
 
 AI can help:
 
@@ -935,7 +1008,7 @@ AI must not become the source of truth for:
 - gate pass/fail;
 - release decisions.
 
-18. Concrete MVP example
+## 18. Concrete MVP example
 
 Task: fix top "OWN001" subscription leak in OwnAudit.
 
@@ -945,7 +1018,7 @@ Expected flow:
    - target repo: OwnAudit
    - intent: fix_existing_finding
    - allowed paths: selected source/test files
-   - forbidden paths: .007/**, .agents/**, project files, build files
+   - forbidden paths: `.007/**`, `.agents/**`, project files, build files
    - required gates: test + re-audit
 
 2. Agent produces `action-plan.yaml`:
@@ -994,7 +1067,7 @@ Pass condition:
 - sandbox reports contain no violations;
 - OwnAudit ingest produces no high-risk O7* findings.
 
-19. Open questions
+## 19. Open questions
 
 1. Should `ActionPlan` be generated by the agent, by 007 from a task template, or both?
 2. Should protected mode require human approval of `ActionPlan` before patching?
@@ -1014,12 +1087,13 @@ Recommended v1 answers:
 6. OwnAudit reports risk; 007 decides enforcement.
 7. Store both: trace event points to evidence artifact.
 
-20. Final recommendation
+## 20. Final recommendation
 
 Implement this as a bridge proposal, not as another standalone subsystem.
 
 Priority order:
 
+```text
 P0:
   - O7ActionPlan schema;
   - ActionPlan validation;
@@ -1034,19 +1108,24 @@ P2:
   - AOB summaries as evidence;
   - OwnAudit ingest-o7-run;
   - Own.NET repair constraints for OWN001/OWN014.
+```
 
 The highest-value slice is:
 
+```text
 O7ActionPlan
   + DiffPolicy binding
   + OwnAudit ingest
+```
 
 That gives the system what it currently lacks most:
 
+```text
 declared intent
   → actual diff
   → runtime evidence
   → audit verdict
+```
 
 Without this bridge, 007 can become a pile of isolated runs and nice logs.
 

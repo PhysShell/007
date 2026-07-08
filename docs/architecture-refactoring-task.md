@@ -1,18 +1,8 @@
-Proposal: 007 Architecture Refactor Task Contract
+# 007 Architecture Refactor Task Contract
 
-Status
+- **Status:** draft
 
-Draft.
-
-Target repository
-
-"PhysShell/007"
-
-Suggested file:
-
-"docs/architecture-refactor-task-contract.md"
-
-Summary
+## Summary
 
 Introduce a strict 007 task contract for architecture refactoring driven by Own.NET/OwnAudit architecture findings.
 
@@ -20,6 +10,7 @@ Introduce a strict 007 task contract for architecture refactoring driven by Own.
 
 This proposal defines the 007-side execution loop for architecture fixes:
 
+```text
 OwnAudit architecture finding
         ↓
 task.yaml
@@ -35,31 +26,27 @@ policy check
 architecture gates
         ↓
 run record
+```
 
 The goal is not “let AI redesign the system”. That is how repositories turn into haunted houses with build scripts. The goal is narrow, evidence-bound, policy-gated refactoring.
 
-Existing groundwork
+## Existing groundwork
 
-007 already has open PR #15 for disciplined agentic coding. The PR describes task contracts, negative prompts, plan-then-build, diff policy gates, judge-run, trust levels, and notes that 007 already has an isolate → run → gate → harvest shape.
+007 already has [docs/agentic-coding-discipline-proposal.md](agentic-coding-discipline-proposal.md) for disciplined agentic coding. It describes task contracts, negative prompts, plan-then-build, diff policy gates, judge-run, trust levels, and notes that 007 already has an isolate → run → gate → harvest shape.
 
-007 PR #18 proposes a PromptOps/AgentOps layer across Own.NET, OwnAudit, and 007. It says Own.NET is the source of analysis truth, OwnAudit is the audit/fix orchestration layer, and 007 is the private agent harness using worktree isolation, gates, and run artifacts.
+[docs/agentops-promptops.md](agentops-promptops.md) proposes a PromptOps/AgentOps layer across Own.NET, OwnAudit, and 007. It says Own.NET is the source of analysis truth, OwnAudit is the audit/fix orchestration layer, and 007 is the private agent harness using worktree isolation, gates, and run artifacts.
 
-PR #18 also states the right trust boundary: AI is not the source of truth for diagnostics; analyzer output, tests, SARIF, and gates are the source of truth.
+That document also states the right trust boundary: AI is not the source of truth for diagnostics; analyzer output, tests, SARIF, and gates are the source of truth.
 
-007 PR #19 proposes a strict agent language: "task.yaml", optional "task.rules", "plan.o7plan", "verify.json", and "summary.md". It also states the key rule that the LLM proposes a structured plan, 007 parses/type-checks/policy-checks it, and only authorized actions are accepted.
+[docs/agent-language.md](agent-language.md) proposes a strict agent language: `task.yaml`, optional `task.rules`, `plan.o7plan`, `verify.json`, and `summary.md`. It also states the key rule that the LLM proposes a structured plan, 007 parses/type-checks/policy-checks it, and only authorized actions are accepted.
 
-Related open PRs:
+Related documents:
 
-- 007 PR #15: "docs: add agentic coding discipline proposal"
-  https://github.com/PhysShell/007/pull/15
+- [agentic-coding-discipline-proposal.md](agentic-coding-discipline-proposal.md)
+- [agentops-promptops.md](agentops-promptops.md)
+- [agent-language.md](agent-language.md)
 
-- 007 PR #18: "Create agentops-promptops.md"
-  https://github.com/PhysShell/007/pull/18
-
-- 007 PR #19: "Create agent-language.md"
-  https://github.com/PhysShell/007/pull/19
-
-Problem
+## Problem
 
 Architecture findings are only useful if there is a disciplined way to act on them.
 
@@ -82,7 +69,7 @@ But an agent needs a much stricter contract:
 
 Without this, “AI architecture refactoring” becomes a charming little bug farm.
 
-Non-goals
+## Non-goals
 
 007 should not:
 
@@ -94,24 +81,27 @@ Non-goals
 - make broad architectural rewrites without a selected finding;
 - treat markdown summaries as machine-verifiable output.
 
-Proposed 007 architecture task
+## Proposed 007 architecture task
 
 Add a task type:
 
-ownarch.fix
+`ownarch.fix`
 
 Canonical file:
 
-task.yaml
+`task.yaml`
 
 Example:
 
+```yaml
 schema: o7.task/v1
 task_id: ownarch.fix.arch001.presentation-infrastructure
 kind: ownarch.fix
 
 target:
-  repo: Own.NET
+  # the audited C# solution (the codebase under repair), not the Own.NET
+  # analyzer repo itself
+  repo: <audited-csharp-repo>
   base_ref: main
 
 input:
@@ -162,13 +152,15 @@ gates:
     - tests
     - own-arch-evaluate
     - no-new-arch-findings
+```
 
-"plan.o7plan"
+## plan.o7plan
 
 The agent must produce a strict plan.
 
 Example:
 
+```text
 plan v1
 
 claim selected_finding {
@@ -204,8 +196,9 @@ test add_arch_regression {
 verify {
   run = ["build", "tests", "own-arch-evaluate", "no-new-arch-findings"]
 }
+```
 
-Policy checks
+## Policy checks
 
 007 must reject the run before accepting the patch if:
 
@@ -223,10 +216,11 @@ Policy checks
 
 This is the difference between an agent and a shell script wearing a fake moustache.
 
-"verify.json"
+## verify.json
 
 Example:
 
+```json
 {
   "schema": "o7.verify/v1",
   "task_id": "ownarch.fix.arch001.presentation-infrastructure",
@@ -271,11 +265,13 @@ Example:
     "tests/Architecture/LayeringTests.cs"
   ]
 }
+```
 
-Run record additions
+## Run record additions
 
 Extend 007 run records with architecture-specific metadata:
 
+```json
 {
   "schema": "o7.run-record/v1",
   "task_id": "ownarch.fix.arch001.presentation-infrastructure",
@@ -299,15 +295,17 @@ Extend 007 run records with architecture-specific metadata:
     "summary": "summary.md"
   }
 }
+```
 
-Prompt module
+## Prompt module
 
 Suggested prompt module:
 
-prompts/ownarch.fix-layer-violation.prompt.md
+`prompts/ownarch.fix-layer-violation.prompt.md`
 
 Prompt contract:
 
+```yaml
 name: ownarch.fix-layer-violation
 version: 0.1.0
 purpose: >
@@ -340,8 +338,9 @@ forbidden_actions:
   - modify_unrelated_files
   - invent_findings
   - skip_required_gates
+```
 
-Fix classes
+## Fix classes
 
 Start with only three fix classes.
 
@@ -349,7 +348,9 @@ Start with only three fix classes.
 
 Example:
 
+```text
 Presentation -> Infrastructure
+```
 
 Preferred moves:
 
@@ -362,8 +363,10 @@ Preferred moves:
 
 Example:
 
+```text
 Domain -> System.Windows
 Domain -> DevExpress
+```
 
 Preferred moves:
 
@@ -376,8 +379,10 @@ Preferred moves:
 
 Example:
 
+```text
 Domain -> Microsoft.Data.SqlClient
 Application -> DevExpress.Xpf
+```
 
 Preferred moves:
 
@@ -387,34 +392,38 @@ Preferred moves:
 
 Do not start with “fix cycles automatically”. Cycle refactors are harder and easier to botch. Let the first version fix direct forbidden edges before it tries architectural surgery with a butter knife.
 
-Gate integration
+## Gate integration
 
 007 should call OwnAudit/Own.NET commands, not duplicate their logic.
 
-Example ".007/gate.toml" entry:
+Example `.007/gate.toml` entry (`arch.review_cli` is the command surface
+proposed in `OwnAudit docs/architecture-review.md`; today the closest
+implemented pieces are `arch.cli` + `report.diff_cli`):
 
-[[steps]]
+```toml
+[[gate]]
 name = "own-arch-evaluate"
 cmd = "python3 -m arch.review_cli --facts artifacts/arch-facts.json --findings artifacts/arch-findings.json --baseline artifacts/architecture-baseline.json --out-dir artifacts/arch-review --gate-level error"
 required = true
 
-[[steps]]
+[[gate]]
 name = "no-new-arch-findings"
-cmd = "python3 -m report.diff_cli --baseline artifacts/baseline.json artifacts/current-findings.json --gate-level error"
+cmd = "python3 -m report.diff_cli --baseline artifacts/baseline.json --current artifacts/current-findings.json --gate-level error"
 required = true
+```
 
-Acceptance criteria
+## Acceptance criteria
 
 MVP is accepted when:
 
-1. 007 can read "ownarch.fix" task specs.
-2. 007 stores "task.yaml", rendered "task.md", "plan.o7plan", "diff.patch", "verify.json", and "summary.md".
+1. 007 can read `ownarch.fix` task specs.
+2. 007 stores `task.yaml`, rendered `task.md`, `plan.o7plan`, `diff.patch`, `verify.json`, and `summary.md`.
 3. 007 rejects plans without evidence references.
 4. 007 rejects edits to denied paths.
 5. 007 rejects architecture baseline modification unless explicitly allowed.
-6. 007 checks required gate names appear in "verify".
+6. 007 checks required gate names appear in `verify`.
 7. 007 records architecture finding fingerprint in run metadata.
-8. A sample task exists for "ARCH001".
+8. A sample task exists for `ARCH001`.
 9. Fixture tests cover:
    - valid plan;
    - missing evidence;
@@ -424,16 +433,16 @@ MVP is accepted when:
    - changed file count exceeded;
    - failing architecture gate.
 
-First implementation slice
+## First implementation slice
 
 Implement only:
 
-task kind: ownarch.fix
-task.yaml schema extension
-plan.o7plan validation for claim/edit/test/verify
-policy check for selected finding + file permissions
-run record metadata
-one sample ARCH001 task
-tests
+- task kind: `ownarch.fix`
+- `task.yaml` schema extension
+- `plan.o7plan` validation for claim/edit/test/verify
+- policy check for selected finding + file permissions
+- run record metadata
+- one sample `ARCH001` task
+- tests
 
 Do not implement autonomous multi-step architecture migration yet. First make one precise architecture violation fixable under policy and gates. Then grow the beast.

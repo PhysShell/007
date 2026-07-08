@@ -1,16 +1,9 @@
-Proposal: Strict Agent Language for Own.NET, OwnAudit and 007
+# Strict Agent Language for Own.NET, OwnAudit and 007
 
-Status
+- **Status:** Draft
+- **Applies to:** 007, OwnAudit, Own.NET
 
-Draft
-
-Target repositories
-
-- "PhysShell/007"
-- "PhysShell/OwnAudit"
-- "PhysShell/Own.NET"
-
-Summary
+## Summary
 
 Introduce a strict, parseable and verifiable agent task/action layer for 007-driven work over Own.NET and OwnAudit.
 
@@ -18,32 +11,40 @@ The current "task.md" model is useful for human-readable instructions, but it is
 
 This proposal introduces:
 
-task.yaml     — canonical machine task spec
-task.rules    — optional controlled-English task/policy DSL
-plan.o7plan   — strict agent-produced action plan
-verify.json   — machine-readable verification result
-summary.md    — human-readable explanation only
+```text
+task.yaml         — canonical machine task spec
+task.rules        — optional controlled-English task/policy DSL
+plan.o7plan       — strict agent-produced action plan
+verification.json — machine-readable verification result
+summary.md        — human-readable explanation only
+```
 
 The key design rule:
 
+```text
 LLM does not directly execute trusted actions.
 LLM proposes a structured plan.
 007 parses the plan.
 007 type-checks and policy-checks the plan.
 007 accepts only authorized actions.
 Own.NET / OwnAudit gates verify the result.
+```
 
-Motivation
+## Motivation
 
 007 already has the right execution shape:
 
+```text
 isolate -> run agent -> gate -> harvest artifacts
+```
 
 However, the current task surface is still too close to free-form text. A Markdown instruction can say:
 
+```text
 Do not edit artifacts.
 Do not suppress findings.
 Run the gates.
+```
 
 But this is not a contract. It is a request.
 
@@ -58,17 +59,19 @@ For agentic work on static analysis and audit/fix pipelines, this is too weak. A
 
 The desired model is closer to a compiler/verifier pipeline:
 
+```text
 parse(AST)
 && typecheck(AST)
 && policy_check(AST)
 && execute_in_sandbox(AST)
 && verify(result)
+```
 
 The goal is not to make the model “smarter”. The goal is to reduce the number of invalid states the model can express and to reject unsafe or unverifiable outputs before they matter.
 
-Prior art
+## Prior art
 
-Inform 7
+### Inform 7
 
 Inform 7 is the most relevant design inspiration.
 
@@ -76,25 +79,30 @@ It uses English-like syntax for interactive fiction, but the text is not free pr
 
 The useful idea is not to depend on Inform 7. The useful idea is:
 
+```text
 controlled natural language
   -> parser/compiler
   -> world model
   -> rulebooks
   -> deterministic execution
+```
 
 For 007, the analogous shape is:
 
+```text
 controlled task language
   -> parser/typechecker
   -> task/action AST
   -> policy checker
   -> gates
   -> deterministic verdict
+```
 
-BAML / TypeChat / LMQL / Guidance / Outlines / Guardrails
+### BAML / TypeChat / LMQL / Guidance / Outlines / Guardrails
 
 Other useful references:
 
+```text
 BAML:
   typed prompt/task modules;
   typed outputs;
@@ -114,23 +122,27 @@ Guidance / Outlines:
 
 Guardrails / NeMo Guardrails:
   validation and policy layer around LLM input/output.
+```
 
 These are useful as prior art, not as mandatory dependencies. 007 should not become dependent on a large external LLM DSL/runtime unless there is a very specific reason.
 
-Decision
+## Decision
 
 Build a small project-specific strict language layer:
 
+```text
 O7Rules  — optional controlled-English policy/task DSL.
 O7Plan   — required strict agent action language.
 TaskSpec — canonical YAML/JSON machine task contract.
+```
 
 Markdown remains allowed only for human-facing explanation.
 
-Design overview
+## Design overview
 
-Layer split
+### Layer split
 
+```text
 Human-readable docs:
   summary.md
   rendered task.md
@@ -142,7 +154,7 @@ Machine task contract:
 Agent output:
   plan.o7plan
   diff.patch
-  verify.json
+  verification.json
 
 Execution:
   007 parser
@@ -150,9 +162,11 @@ Execution:
   007 policy checker
   007 gate runner
   007 artifact harvester
+```
 
-Data flow
+### Data flow
 
+```text
 task.yaml / task.rules
   ↓ parse
 Task AST
@@ -176,8 +190,9 @@ Patch
 VerificationResult
   ↓ harvest
 run record
+```
 
-O7Rules
+## O7Rules
 
 "O7Rules" is a controlled-English DSL for task and policy definition.
 
@@ -185,19 +200,20 @@ It is intended for humans to read and write, but it must compile into a strict t
 
 Example:
 
-The target repository is OwnAudit.
+```text
+The target repository is the audited STS worktree.
 The base branch is main.
 
 The task is to fix the highest ranked OWN001 finding.
 
 A finding is eligible if:
-    the diagnostic code is "OWN001";
-    the category is "subscription-token";
+    the rule is "OWN001";
+    the category name is "subscription-leak";
     the confidence is not "low";
     the source span exists.
 
 The agent may read any file.
-The agent may edit files under "src/".
+The agent may edit files under "Broker/".
 The agent may edit files under "tests/".
 The agent must not edit files under "artifacts/".
 The agent must not edit workflow files.
@@ -214,21 +230,23 @@ A run passes if:
     every required gate passes;
     no new finding appears;
     the patch changes at most 3 files.
+```
 
 This compiles into a machine model similar to:
 
-TargetRepo("OwnAudit")
+```text
+TargetRepo("STS")
 BaseBranch("main")
 
 Rule EligibleFinding:
-  diagnostic == OWN001
-  category == subscription-token
+  rule == OWN001
+  category_name == subscription-leak
   confidence != low
   source_span exists
 
 Permission:
   read any
-  edit src/**
+  edit Broker/**
   edit tests/**
   deny artifacts/**
   deny .github/**
@@ -245,8 +263,9 @@ PassCondition:
   all_required_gates_pass
   no_new_findings
   changed_files <= 3
+```
 
-Why not only YAML?
+### Why not only YAML?
 
 YAML is acceptable for the first implementation. It is easier to parse and validate.
 
@@ -254,6 +273,7 @@ However, YAML is poor as a long-term human policy surface. It becomes nested con
 
 Recommended approach:
 
+```text
 Phase 1:
   task.yaml is canonical.
 
@@ -262,40 +282,45 @@ Phase 2:
 
 Phase 3:
   task.rules becomes the preferred authoring surface for policies.
+```
 
-O7Plan
+## O7Plan
 
 "O7Plan" is the strict action language the agent must return.
 
 The agent should not return vague prose like:
 
+```text
 I think we should add unsubscribe in Dispose.
+```
 
 The agent must return a parseable action plan:
 
+```text
 plan v1
 
 claim finding_exists {
-  diagnostic = "OWN001"
-  finding_id = "STS:BrokerDataClasses/KTSGoods2:customerChanged"
+  rule = "OWN001"
+  finding_id = "STS:Broker/KTS/KTSGoods2.xaml.cs:77:Goodys_ListChanged"
   evidence = "artifacts/findings.json#finding[42]"
 }
 
 edit add_unsubscribe {
-  file = "src/BrokerDataClasses/KTSGoods2.cs"
+  file = "Broker/KTS/KTSGoods2.xaml.cs"
   region = "Dispose"
   reason = "subscription token acquired but not released"
-  fixes = ["STS:BrokerDataClasses/KTSGoods2:customerChanged"]
+  fixes = ["STS:Broker/KTS/KTSGoods2.xaml.cs:77:Goodys_ListChanged"]
 }
 
 test add_regression {
   file = "tests/SubscriptionLeakTests.cs"
-  scenario = "disposes_customerChanged_subscription"
+  scenario = "disposes_Goodys_ListChanged_subscription"
 }
 
 verify {
   run = ["dotnet-test", "ownaudit-smoke", "no-new-findings"]
 }
+```
 
 007 then verifies:
 
@@ -312,25 +337,30 @@ verify {
 
 If any check fails:
 
+```text
 REJECTED: invalid plan
+```
 
 The run may still preserve "agent.stdout", "plan.o7plan", "diff.patch" and gate logs, but the verdict must not be "PASS".
 
-Minimal O7Plan grammar
+### Minimal O7Plan grammar
 
 MVP should stay intentionally small.
 
 Supported statements:
 
+```text
 claim
 read
 edit
 test
 verify
 refuse
+```
 
 Draft grammar:
 
+```ebnf
 plan        := "plan" version statement*
 statement   := claim | read | edit | test | verify | refuse
 
@@ -344,9 +374,11 @@ refuse      := "refuse" "{" field* "}"
 field       := ident "=" value
 value       := string | number | bool | array
 array       := "[" value* "]"
+```
 
 Initial domain types:
 
+```text
 FindingId
 DiagnosticCode
 RepoPath
@@ -354,6 +386,7 @@ GateName
 EvidenceRef
 PatchIntent
 RiskLevel
+```
 
 Important invariant:
 
@@ -361,36 +394,37 @@ Every claim must have an EvidenceRef.
 
 A claim without evidence is rejected.
 
-TaskSpec YAML
+## TaskSpec YAML
 
 Before "O7Rules" exists, "task.yaml" should be the canonical task contract.
 
 Example:
 
+```yaml
 task_id: ownaudit.fix.own001.top
 version: 1
 
 target:
-  repo: OwnAudit
+  # the audited STS worktree — OwnAudit orchestrates the audit, its own src/ is not edited
+  repo: STS
   base: main
 
 input:
   artifact: artifacts/findings.json
   selector:
-    diagnostic: OWN001
-    category: subscription-token
+    rule: OWN001
+    category_name: subscription-leak
     rank: 1
 
 permissions:
   allow_read:
     - "**/*"
   allow_edit:
-    - "src/**/*.cs"
+    - "Broker/**/*.cs"
     - "tests/**/*.cs"
   deny_edit:
     - "artifacts/**"
     - ".github/**"
-    - "Run-Audit.ps1"
 
 constraints:
   max_files_changed: 3
@@ -410,22 +444,24 @@ gates:
     - dotnet-test
     - ownaudit-smoke
     - no-new-findings
+```
 
 007 validates this before running an agent.
 
-Verification result
+## Verification result
 
 "verification.json" should be machine-readable.
 
 Example:
 
+```json
 {
   "version": 1,
   "verdict": "FAIL",
-  "target_repo": "OwnAudit",
+  "target_repo": "STS",
   "base_commit": "abc123",
   "changed_files": [
-    "src/BrokerDataClasses/KTSGoods2.cs",
+    "Broker/KTS/KTSGoods2.xaml.cs",
     "tests/SubscriptionLeakTests.cs"
   ],
   "gates": [
@@ -457,11 +493,13 @@ Example:
     ]
   }
 }
+```
 
-Repository layout
+## Repository layout
 
-007
+### 007
 
+```text
 007/
   crates/
     o7-task-spec/
@@ -488,9 +526,11 @@ Repository layout
       ownaudit.fix-own001.valid.o7plan
       ownaudit.fix-own001.invalid-no-evidence.o7plan
       ownaudit.fix-own001.invalid-denied-file.o7plan
+```
 
-OwnAudit
+### OwnAudit
 
+```text
 OwnAudit/
   ai/
     tasks/
@@ -506,9 +546,11 @@ OwnAudit/
 
   .007/
     gate.toml
+```
 
-Own.NET
+### Own.NET
 
+```text
 Own.NET/
   ai/
     tasks/
@@ -524,19 +566,22 @@ Own.NET/
 
   .007/
     gate.toml
+```
 
-OwnAudit use case
+## OwnAudit use case
 
 OwnAudit is the first practical target for strict agent tasks.
 
+Note on the repair target: OwnAudit does not analyze code itself — OWN001 findings are produced by the audit pipeline against the external STS target (see `OwnAudit/Run-Audit.ps1` and `OwnAudit/sts_audit/findings.json`). The code under repair is therefore the audited STS worktree (or an in-repo fixture such as `OwnAudit/oracle/LeakyOracle`), not OwnAudit's own `src/`.
+
 Initial scenario:
 
-Fix the highest-ranked OWN001 subscription-token finding.
+Fix the highest-ranked OWN001 subscription-leak finding in the audited STS worktree.
 
 Policy constraints:
 
 - selected finding must exist in artifacts/findings.json;
-- selected finding must match diagnostic OWN001;
+- selected finding must match rule OWN001;
 - selected finding must have source span;
 - patch must claim which finding it fixes;
 - patch must not modify artifacts;
@@ -548,12 +593,13 @@ Policy constraints:
 
 This gives a narrow, auditable, useful vertical slice.
 
-Own.NET use case
+## Own.NET use case
 
 Own.NET can use the same strict layer for diagnostic semantics, docs and test generation.
 
 Example controlled rules:
 
+```text
 A view model is a scoped object.
 An event subscription is a resource.
 A static event has process lifetime.
@@ -565,10 +611,11 @@ Subscribing to a static event captures the subscriber.
 A capture leaks if the source lifetime outlives the subscriber lifetime.
 
 A matching unsubscribe clears the capture.
+```
 
 Possible location:
 
-Own.NET/ai/rules/wpf-lifetimes.ownrules
+`Own.NET/ai/rules/wpf-lifetimes.ownrules`
 
 Uses:
 
@@ -581,10 +628,11 @@ Uses:
 
 The rule file is not the checker. It is a controlled specification surface that can be tested against the checker.
 
-007 run artifacts
+## 007 run artifacts
 
 Extend 007 run records with strict-language artifacts:
 
+```text
 runs/<target>/<run-id>/
   task.yaml
   task.rules
@@ -599,13 +647,15 @@ runs/<target>/<run-id>/
   gate/
     verdict.json
     *.log
+```
 
 Required metadata:
 
+```json
 {
   "task_id": "ownaudit.fix.own001.top",
   "task_version": 1,
-  "target_repo": "OwnAudit",
+  "target_repo": "STS",
   "base_commit": "...",
   "agent": "claude-cli",
   "prompt_module": "ownaudit.fix-own001",
@@ -613,44 +663,52 @@ Required metadata:
   "plan_language": "o7plan.v1",
   "verdict": "FAIL"
 }
+```
 
-Gates
+## Gates
 
-OwnAudit gate example
+Gate manifests live at `.007/gate.toml` in the target repo and follow 007's implemented schema (`src/gate.rs`): a `[[gate]]` table array with `name` and `cmd`, plus optional `required` (default true) and `env` (`"windows"` runs the step on the Windows host).
 
-[[step]]
+### OwnAudit gate example
+
+```toml
+[[gate]]
 name = "dotnet-test"
-command = "dotnet test"
+cmd = "dotnet test"
 
-[[step]]
+[[gate]]
 name = "ownaudit-smoke"
-command = "pwsh ./Run-Audit.ps1 -Smoke"
+cmd = "pwsh ./Run-Audit.ps1"   # fast OwnSharp-only mode
+env = "windows"
 
-[[step]]
+[[gate]]
 name = "no-new-findings"
-command = "python tools/compare_audit_reports.py --baseline artifacts/health-report.json --current artifacts/current-health-report.json"
+cmd = "python -m report.diff_cli --baseline sts_audit/baseline.json --current sts_audit/findings.json"
+```
 
-Own.NET gate example
+### Own.NET gate example
 
-[[step]]
+```toml
+[[gate]]
 name = "python-tests"
-command = "python tests/run_tests.py"
+cmd = "python tests/run_tests.py"
 
-[[step]]
+[[gate]]
 name = "gallery-tests"
-command = "python tests/test_gallery.py"
+cmd = "python tests/test_gallery.py"
 
-[[step]]
+[[gate]]
 name = "wpf-tests"
-command = "python tests/test_wpf.py"
+cmd = "python tests/test_wpf.py"
 
-[[step]]
+[[gate]]
 name = "lifetime-tests"
-command = "python tests/test_lifetimes.py"
+cmd = "python tests/test_lifetimes.py"
+```
 
-MVP roadmap
+## MVP roadmap
 
-Phase 0: schemas first
+### Phase 0: schemas first
 
 Deliver:
 
@@ -669,7 +727,7 @@ Acceptance criteria:
 - missing evidence ref fails;
 - denied file edit fails.
 
-Phase 1: task.yaml as canonical
+### Phase 1: task.yaml as canonical
 
 Deliver:
 
@@ -684,7 +742,7 @@ Acceptance criteria:
 - task.md is treated as rendered view, not source of truth;
 - run metadata includes task_id, task_version, base commit and target repo.
 
-Phase 2: O7Plan parser/checker
+### Phase 2: O7Plan parser/checker
 
 Deliver:
 
@@ -701,12 +759,12 @@ Acceptance criteria:
 - missing required gates produce REJECTED;
 - suppress-only fix produces REJECTED.
 
-Phase 3: OwnAudit OWN001 vertical slice
+### Phase 3: OwnAudit OWN001 vertical slice
 
 Deliver:
 
 - task spec for highest-ranked OWN001 finding;
-- 007 run against OwnAudit worktree;
+- 007 run against the audited STS worktree (or the `OwnAudit/oracle/LeakyOracle` fixture);
 - plan verification;
 - patch inspection;
 - gates;
@@ -720,7 +778,7 @@ Acceptance criteria:
 - required gates run;
 - no-new-findings gate determines final verdict.
 
-Phase 4: O7Rules controlled English
+### Phase 4: O7Rules controlled English
 
 Deliver:
 
@@ -736,7 +794,7 @@ Acceptance criteria:
 - invalid controlled-English rule fails with useful diagnostic;
 - generated policy matches expected fixtures.
 
-Phase 5: Own.NET diagnostic rules
+### Phase 5: Own.NET diagnostic rules
 
 Deliver:
 
@@ -752,7 +810,7 @@ Acceptance criteria:
 - examples map to expected diagnostics;
 - generated test cases must be accepted only if checker output matches expected code.
 
-Non-goals
+## Non-goals
 
 This proposal does not attempt to:
 
@@ -765,39 +823,39 @@ This proposal does not attempt to:
 - make Markdown a source of truth;
 - treat suppressions as fixes.
 
-Risks
+## Risks
 
-Risk: building a second OwnLang
+### Risk: building a second OwnLang
 
 Mitigation:
 
 Keep O7Plan tiny. It is an action protocol, not a general-purpose language.
 
-Risk: controlled English becomes ambiguous
+### Risk: controlled English becomes ambiguous
 
 Mitigation:
 
 Start with "task.yaml". Add "O7Rules" only after the Task AST is stable.
 
-Risk: valid syntax but invalid behavior
+### Risk: valid syntax but invalid behavior
 
 Mitigation:
 
 Use semantic checks, evidence refs, audit diff and gates. Syntax is only the first layer.
 
-Risk: agent learns to satisfy the format while doing bad work
+### Risk: agent learns to satisfy the format while doing bad work
 
 Mitigation:
 
 Treat gates as the final authority. A valid plan with a bad patch still fails.
 
-Risk: too much infrastructure before value
+### Risk: too much infrastructure before value
 
 Mitigation:
 
 First vertical slice is narrow: one OwnAudit OWN001 finding, max 3 changed files, required gates.
 
-Final design principle
+## Final design principle
 
 Markdown is documentation.
 

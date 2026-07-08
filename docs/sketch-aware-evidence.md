@@ -1,14 +1,11 @@
-Proposal: Sketch-Aware Agent Execution, Context Selection, and Risk Control
+# Sketch-Aware Agent Execution, Context Selection, and Risk Control
 
-Target repository
+- **Related:** Own.NET's `docs/proposals/P-033-probabilistic-data-structures.md`
+  (the probabilistic data structures / sketches proposal) and OwnAudit's
+  `docs/sketch-based-evidence.md` (the aggregation/gate side that ingests the
+  run summaries this doc exports).
 
-"PhysShell/007"
-
-Suggested file:
-
-"docs/proposals/P-030-sketch-aware-agent-execution.md"
-
-Summary
+## Summary
 
 007 should use compact data structures and sketch-style summaries to make agentic coding runs safer, more explainable, and less wasteful.
 
@@ -35,7 +32,7 @@ Every agent run should leave behind compact evidence about:
 
 Without this, agentic coding becomes “trust me bro, I changed only what mattered”. That sentence should be illegal in CI.
 
-Problem
+## Problem
 
 Agent runs can fail in boring but dangerous ways:
 
@@ -52,25 +49,31 @@ Traditional logs are too verbose. Final summaries are too flattering. Humans are
 
 007 needs small, machine-checkable summaries that can guide execution and later feed OwnAudit.
 
-Proposed solution
+## Proposed solution
 
 Add a sketch-aware evidence layer to 007.
 
 Suggested module:
 
-src/o7/evidence/
-  context_index.*
-  effect_sketch.*
-  risk_sketch.*
-  similarity.*
-  run_summary.*
+```text
+src/evidence/
+  mod.rs
+  context_index.rs
+  effect_sketch.rs
+  risk_sketch.rs
+  similarity.rs
+  run_summary.rs
+```
 
-The exact language/module layout can follow the existing 007 implementation. The important part is the contract.
+(007 is a flat Rust crate — `src/agent.rs`, `gate.rs`, `judge.rs`, `record.rs` —
+so the evidence module lands as `src/evidence/`.) The important part is the
+contract.
 
-Evidence produced per run
+## Evidence produced per run
 
 Each 007 run should produce:
 
+```text
 artifacts/o7/runs/<run-id>/
   action-plan.json
   effect-ledger.json
@@ -81,10 +84,11 @@ artifacts/o7/runs/<run-id>/
   context-selection.json
   similarity-groups.json
   risk-summary.json
+```
 
 This is not “more logs”. Logs are where signals go to die. This is structured evidence.
 
-1. Bitmap indexes for touched files and symbols
+### 1. Bitmap indexes for touched files and symbols
 
 Assign stable ids during a run:
 
@@ -106,6 +110,7 @@ Use bitmap-style sets for:
 
 Then compute:
 
+```text
 UnexpectedTouches =
     ActuallyTouchedFiles
     AND NOT AllowedFiles
@@ -117,10 +122,11 @@ SensitiveTouches =
 UntestedTouches =
     ActuallyTouchedFiles
     AND NOT FilesCoveredByExecutedTests
+```
 
 This gives 007 a hard mechanism for detecting scope drift.
 
-2. Top-K / Count-Min for repeated failure patterns
+### 2. Top-K / Count-Min for repeated failure patterns
 
 Use heavy-hitter summaries for:
 
@@ -133,17 +139,19 @@ Use heavy-hitter summaries for:
 
 Example:
 
+```json
 {
   "schema": "o7.heavy_hitters.v1",
   "kind": "failed_commands",
   "top": [
     {
-      "key": "dotnet test",
+      "key": "python tests/run_tests.py",
       "count": 4,
       "lastExitCode": 1
     }
   ]
 }
+```
 
 This helps distinguish:
 
@@ -155,7 +163,7 @@ The agent is headbutting the same wall with improved formatting
 
 Important distinction. Civilization depends on it.
 
-3. t-digest/DDSketch-style summaries for execution timing
+### 3. t-digest/DDSketch-style summaries for execution timing
 
 Track p50/p95/p99 for:
 
@@ -168,7 +176,7 @@ Track p50/p95/p99 for:
 
 This helps 007 understand where runs become expensive and where caching/context pruning matters.
 
-4. SimHash/MinHash for similar failures and repeated bad patches
+### 4. SimHash/MinHash for similar failures and repeated bad patches
 
 Fingerprint:
 
@@ -179,6 +187,10 @@ Fingerprint:
 - review comments;
 - rejected plans.
 
+Scope note: these fingerprints serve within-run checks and 007's own run
+history; cross-run grouping and trend reporting live in OwnAudit
+(`OwnAudit docs/sketch-based-evidence.md`), which ingests the export below.
+
 Then 007 can detect:
 
 This proposed fix resembles a previously failed fix.
@@ -187,7 +199,7 @@ This PR repeats a known risky pattern.
 
 That should affect risk scoring and context selection.
 
-5. Context selection using compact indexes
+### 5. Context selection using compact indexes
 
 007 should maintain compact indexes over repository facts:
 
@@ -201,35 +213,40 @@ That should affect risk scoring and context selection.
 
 For a new task, 007 can select context by set operations:
 
+```text
 RelevantContext =
     FilesMentionedInTask
     OR FilesWithDiagnostics
     OR TestsCoveringChangedSymbols
     OR SimilarPreviousFailures
+```
 
 Then prune:
 
+```text
 ContextToAvoid =
     LargeUnrelatedFiles
     OR KnownNoisyFindings
     OR OutOfScopeModules
+```
 
 This is better than “stuff another 80k tokens into the prompt and pray”. That strategy is not context engineering. It is token landfill.
 
-Proposed task contract additions
+## Proposed task contract additions
 
 Extend task metadata with explicit risk and evidence expectations.
 
-Example:
+Example (a fix for Own.NET's OWN014 region-escape diagnostic):
 
+```yaml
 schema: o7.task.v1
-id: fix-own014-cloud-mapping
+id: fix-own014-region-escape
 scope:
   allowed_paths:
-    - src/Own.Net.Analyzers/**
-    - tests/Own.Net.Analyzers.Tests/**
+    - ownlang/**
+    - tests/**
   forbidden_paths:
-    - src/LegacyRuntime/**
+    - spec/**
 risk_budget:
   max_touched_files: 8
   max_architecture_sensitive_files: 0
@@ -239,11 +256,13 @@ evidence:
   require_touched_files_bitmap: true
   require_diagnostic_heavy_hitters: true
   require_similarity_check: true
+```
 
-Risk summary output
+## Risk summary output
 
 Each run should emit:
 
+```json
 {
   "schema": "o7.risk_summary.v1",
   "runId": "2026-07-06-own014-fix",
@@ -251,14 +270,15 @@ Each run should emit:
   "touchedFiles": 5,
   "unexpectedTouchedFiles": 0,
   "architectureSensitiveTouchedFiles": 0,
-  "testsExecuted": ["Own.Net.Analyzers.Tests"],
+  "testsExecuted": ["tests/run_tests.py"],
   "repeatedFailureGroups": [],
   "riskLevel": "low"
 }
+```
 
 OwnAudit can then ingest this directly.
 
-MVP
+## MVP
 
 The MVP should include:
 
@@ -271,7 +291,7 @@ The MVP should include:
 
 No LLM magic required. No vector database required. No heroic rewrite required. Just evidence. Brutally inconvenient for bad automation, which is exactly the point.
 
-Phase 2
+## Phase 2
 
 Add:
 
@@ -282,7 +302,7 @@ Add:
 - Own.NET analyzer fact ingestion;
 - policy-based abort or warning when risk budget is exceeded.
 
-Phase 3
+## Phase 3
 
 Add:
 
@@ -292,7 +312,7 @@ Add:
 - automatic “do not repeat this failed strategy” hints;
 - support for architecture-sensitive repair plans.
 
-Non-goals
+## Non-goals
 
 007 should not:
 
@@ -309,7 +329,7 @@ Declared intent must be checked against actual effects.
 
 Without that, 007 is just a code generator with a clipboard and delusions of governance.
 
-Acceptance criteria
+## Acceptance criteria
 
 This proposal is successful when:
 
@@ -321,7 +341,7 @@ This proposal is successful when:
 - out-of-scope changes are detected automatically;
 - future context selection can use evidence from previous runs.
 
-Expected benefit
+## Expected benefit
 
 007 becomes safer and more useful as an agent runner:
 

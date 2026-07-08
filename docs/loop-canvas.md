@@ -42,7 +42,7 @@ parts have a named home.
 | 1 | **Goal** — the outcome, and how *done* is checked by something other than a human | Gate steps in `.007/gate.toml` reduce to `PASS`/`FAIL`/`ERROR` (`verdict.rs::Verdict::reduce`); exit `0` only on `PASS`, so CI can gate on it. | "Done" is *implicit* in whatever the target repo's gate asserts — there is no explicit per-target "definition of done" statement. A `[goal] done = "…"` note in the manifest (documentation-only) would make the intent legible. |
 | 2 | **Problem** — the recurring work that justifies a loop, and what stays human | "One isolated, gated agent run" over the public repos (Own.NET first, OwnAudit Phase 2). | The recurring-work case (nightly, a task queue, PR-triggered) is not built — the unit is invoked by hand. One-shot is not yet a loop; keeping that line sharp is the whole reason for this doc. |
 | 3 | **Trigger** — how work enters, and what one unit of work is | `o7 run --repo <path> --base <ref> --task ./task.md [--gate <toml>]` (`main.rs`). One unit = one worktree run at one base commit. | No scheduler / queue / event trigger; concurrency policy is "one run per invocation." A queue + `run-id` dedup is the natural first extension of **State**. |
-| 4 | **Actions** — what the agent may read, write, call, decide; scope, network, isolation | Agent runs `claude`/`codex` full-auto under `bypassPermissions` + a **deny-list** on irreversible ops (`agent.rs::DENY`). Gate steps run `bash -lc <cmd>` with `current_dir(worktree)` (`gate.rs`). | `current_dir(worktree)` sets **cwd, not a boundary** — a step can still write outside the tree via absolute/`..` paths, read anything the user can, and reach the network (see `security-layers.md`). There is **no** write-scope, forbidden-path, or per-step least-privilege enforcement. This is the sandbox slot — the enforcement tool now exists (`sandboy`, below). |
+| 4 | **Actions** — what the agent may read, write, call, decide; scope, network, isolation | Agent runs `claude` full-auto (`codex` is a Phase-2 engine flag, not wired yet — `agent.rs` bails) under `bypassPermissions` + a **deny-list** on irreversible ops (`agent.rs::DENY`). Gate steps run `bash -lc <cmd>` with `current_dir(worktree)` (`gate.rs`). | `current_dir(worktree)` sets **cwd, not a boundary** — a step can still write outside the tree via absolute/`..` paths, read anything the user can, and reach the network (see `security-layers.md`). There is **no** write-scope, forbidden-path, or per-step least-privilege enforcement. This is the sandbox slot — the enforcement tool now exists (`sandboy`, below). |
 | 5 | **State** — what persists between runs, and who may write it | `runs/<target>/<run-id>/`: `task.md`, `meta.json` (`RunMeta`), `agent.stdout`, `diff.patch`, `gate/*.log` (`record.rs`). Append-only archive. | It is an **archive, not a state machine**: `RunMeta` has no `task_hash`, `diff_hash`, or normalized `failure_signature`, so there is no cross-run index for dedup / retry / "has this failed before?" queries. A `runs/index.*` ledger *over* the existing per-run dirs is new infra, and it is what unblocks **Control**. |
 | 6 | **Limits** — token/cost budget, max iterations, circuit breaker, no-progress detection | `--max-turns` caps the agent (`main.rs` → `agent.rs`). | No gate/agent **timeout**, no cost cap, no max-diff-size, no per-step log-size cap, no max-retries (there is no retry yet). A hung gate step blocks the run and can produce an unbounded log. These are per-step manifest fields waiting to be added. |
 | 7 | **Control** — after the gate: continue / retry-with-feedback / repair / escalate / pause / stop / ship | A single exit code from `Verdict::reduce`: `PASS` → `0`, else `1`. | The entire control layer is absent — one run, one verdict, done. `o7 loop` (feed gate logs + diff summary back, retry with a bound, stop on repeated `failure_signature`) lives here, and it **depends on** the ledger in **State** to detect no-progress. |
@@ -93,10 +93,13 @@ Ordered so no floor is built on an un-sandboxed one below it:
   today, not the earlier Wasmtime framing). Cheap; stabilizes the design.
 - **Floor 1 — Actions/Limits/Observability at the gate.** Extend `GateStep` with
   `sandbox_policy` + `timeout_sec`; run steps through `sandboy` when a policy is
-  set (legacy bare `bash` otherwise, loudly warned); emit a `sandboy --report`
-  JSON into `gate/<step>.sandbox.json`. Gate the security field behind a manifest
-  `schema` bump so an older `o7` **fails closed** — refusing a step that carries a
-  `sandbox_policy` it cannot enforce, never silently running it bare.
+  set; emit a `sandboy --report` JSON into `gate/<step>.sandbox.json`. A bare
+  legacy step (no `sandbox_policy`), loudly warned, is a *migration-window*
+  allowance only — the end state is `docs/zero-trust-framework.md` §4's
+  non-negotiable fail-closed rule: a gate step with no `sandbox_policy` does not
+  run. Gate the security field behind a manifest `schema` bump so an older `o7`
+  **fails closed** — refusing a step that carries a `sandbox_policy` it cannot
+  enforce, never silently running it bare.
 - **Floor 2 — State/Control.** A `runs/` ledger (`task_hash`, `diff_hash`,
   `failure_signature`) over the existing per-run dirs; then `o7 loop` with
   max-retries + no-progress detection keyed on the normalized signature.

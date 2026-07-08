@@ -1,16 +1,9 @@
-Proposal: Agent Memory Layer for 007
+# Agent Memory Layer for 007
 
-Status
+- **Status:** draft · Scope: `o7 memory` / `o7 context` (007 only; OwnAudit
+  and Own.NET runs are data sources, not implementation targets).
 
-Draft.
-
-Target repositories
-
-- "PhysShell/007"
-- "PhysShell/OwnAudit"
-- "PhysShell/Own.NET"
-
-Summary
+## Summary
 
 Introduce an agent memory layer for "007" that stores, retrieves, and reuses engineering context from past agent runs.
 
@@ -32,14 +25,17 @@ The memory layer must remain subordinate to "007".
 
 "007" remains the orchestrator, authority, gate runner, artifact harvester, and policy boundary. The memory system is an index and recall layer over trusted run artifacts, not a replacement for "runs/", ".007/gate.toml", TaskSpec, O7Plan, or deterministic analyzers.
 
-Motivation
+## Motivation
 
 "007" already has the right execution shape:
 
+```text
 isolate -> run agent -> gate -> harvest artifacts
+```
 
 The current MVP stores canonical run artifacts:
 
+```text
 runs/<target>/<run-id>/
   task.md
   meta.json
@@ -48,6 +44,7 @@ runs/<target>/<run-id>/
   gate/
     <name>.log
     verdict.json
+```
 
 This is enough for a single run. It is not enough for a growing agentic engineering workflow.
 
@@ -65,7 +62,7 @@ The result is a system that records evidence but does not learn from it.
 
 That is not AgentOps. That is an archive with a superiority complex.
 
-Design principle
+## Design principle
 
 The memory layer must follow one rule:
 
@@ -86,7 +83,7 @@ Every memory entry must have provenance.
 
 A memory entry without provenance is not knowledge. It is a rumor with JSON formatting.
 
-Non-goals
+## Non-goals
 
 This proposal does not introduce:
 
@@ -102,7 +99,7 @@ This proposal does not introduce:
 
 The first version should be local, boring, append-only, inspectable, and hard to lie to.
 
-Prior art: agentmemory
+## Prior art: agentmemory
 
 "rohitg00/agentmemory" is a persistent memory server for coding agents. It supports Claude Code, Codex CLI, Cursor, Gemini CLI, OpenCode and other MCP-compatible clients.
 
@@ -138,8 +135,9 @@ Risky parts for "007":
 
 Conclusion: "agentmemory" is useful as a memory runtime, but "007" should wrap it behind its own artifact-derived adapter.
 
-Proposed architecture
+## Proposed architecture
 
+```text
              +------------------+
              |   TaskSpec       |
              |   task.yaml      |
@@ -189,22 +187,29 @@ Proposed architecture
              | memory facts     |
              | with provenance  |
              +------------------+
+```
 
-Core rule: 007 writes memory, not the agent
+## Core rule: 007 writes memory, not the agent
 
 During the first phases, the agent must not directly write trusted memory.
 
 Allowed:
 
+```text
 007 -> memory
+```
 
 Allowed later, read-only:
 
+```text
 agent -> memory recall
+```
 
 Not allowed initially:
 
+```text
 agent -> memory save
+```
 
 The reason is simple: an LLM can hallucinate, rationalize, omit failed checks, or claim that a finding is fixed because the vibes aligned under a full moon.
 
@@ -218,20 +223,21 @@ The reason is simple: an LLM can hallucinate, rationalize, omit failed checks, o
 
 That is the right trust boundary.
 
-Memory item types
+## Memory item types
 
-RunMemory
+### RunMemory
 
 Represents one "o7 run".
 
+```json
 {
   "kind": "o7.run",
   "schema": 1,
-  "run_id": "2026-07-06T12-30-44Z_abcd1234",
+  "run_id": "1751804444-12345",
   "target": "OwnAudit",
   "repo": "PhysShell/OwnAudit",
   "base_commit": "abc123",
-  "engine": "claude-cli",
+  "engine": "claude",
   "model": "claude-sonnet",
   "verdict": "FAIL",
   "task_id": "ownaudit.fix.own001.top",
@@ -250,11 +256,13 @@ Represents one "o7 run".
     "gate_verdict": "runs/OwnAudit/<run-id>/gate/verdict.json"
   }
 }
+```
 
-TaskMemory
+### TaskMemory
 
 Represents a task contract.
 
+```json
 {
   "kind": "o7.task",
   "schema": 1,
@@ -272,11 +280,13 @@ Represents a task contract.
     "task": "runs/OwnAudit/<run-id>/task.yaml"
   }
 }
+```
 
-GateMemory
+### GateMemory
 
 Represents a gate step result.
 
+```json
 {
   "kind": "o7.gate",
   "schema": 1,
@@ -286,11 +296,13 @@ Represents a gate step result.
   "reason": "2 new OWN001 findings appeared",
   "log": "runs/OwnAudit/<run-id>/gate/no-new-findings.log"
 }
+```
 
-FindingMemory
+### FindingMemory
 
 Represents a finding encountered during an audit/fix/triage run.
 
+```json
 {
   "kind": "ownaudit.finding",
   "schema": 1,
@@ -306,11 +318,13 @@ Represents a finding encountered during an audit/fix/triage run.
     "run_id": "<run-id>"
   }
 }
+```
 
-FixPatternMemory
+### FixPatternMemory
 
 Represents a successful repair pattern.
 
+```json
 {
   "kind": "o7.fix_pattern",
   "schema": 1,
@@ -330,11 +344,13 @@ Represents a successful repair pattern.
     "diff": "runs/OwnAudit/<run-id>/diff.patch"
   }
 }
+```
 
-FailurePatternMemory
+### FailurePatternMemory
 
 Represents a failed attempt that should be avoided.
 
+```json
 {
   "kind": "o7.failure_pattern",
   "schema": 1,
@@ -351,11 +367,13 @@ Represents a failed attempt that should be avoided.
     "gate_log": "runs/OwnAudit/<run-id>/gate/no-new-findings.log"
   }
 }
+```
 
-DecisionMemory
+### DecisionMemory
 
 Represents human-confirmed decisions.
 
+```json
 {
   "kind": "o7.decision",
   "schema": 1,
@@ -368,11 +386,13 @@ Represents human-confirmed decisions.
     "doc": "docs/agentops-promptops.md"
   }
 }
+```
 
-Trust levels
+## Trust levels
 
 Memory entries should have explicit trust levels.
 
+```text
 agent-claimed
 artifact-derived
 gate-derived
@@ -380,6 +400,7 @@ analyzer-derived
 human-confirmed
 superseded
 rejected
+```
 
 Rules:
 
@@ -391,13 +412,15 @@ Rules:
 - "superseded" must be hidden by default.
 - "rejected" can be used only as a negative example.
 
-Commands
+## Commands
 
-"o7 memory ingest-run"
+### `o7 memory ingest-run`
 
 Ingests one run record into memory.
 
+```sh
 o7 memory ingest-run runs/OwnAudit/<run-id>
+```
 
 Responsibilities:
 
@@ -414,10 +437,13 @@ Responsibilities:
 
 Example:
 
+```sh
 o7 memory ingest-run runs/OwnAudit/2026-07-06T12-30-44Z_abcd1234
+```
 
 Output:
 
+```text
 ingested:
   runs: 1
   tasks: 1
@@ -426,15 +452,18 @@ ingested:
   findings: 3
   fix_patterns: 0
   failure_patterns: 1
+```
 
-"o7 context build"
+### `o7 context build`
 
 Builds a pre-run context brief.
 
+```sh
 o7 context build \
   --repo ../OwnAudit \
   --task tasks/fix-own001-top.task.yaml \
   --out context.md
+```
 
 Responsibilities:
 
@@ -450,11 +479,14 @@ Responsibilities:
 
 Output files:
 
+```text
 context.md
 context.meta.json
+```
 
 Example "context.meta.json":
 
+```json
 {
   "schema": 1,
   "task_id": "ownaudit.fix.own001.top",
@@ -467,24 +499,29 @@ Example "context.meta.json":
   "token_budget": 2000,
   "result_count": 12
 }
+```
 
-"o7 memory recall"
+### `o7 memory recall`
 
 Manual query interface.
 
+```sh
 o7 memory recall --finding OWN001
 o7 memory recall --file src/BrokerDataClasses/KTSGoods2.cs
 o7 memory recall --gate no-new-findings
 o7 memory recall --prompt ownaudit.fix-own001
 o7 memory recall --run <run-id>
+```
 
 This gives the human operator direct visibility into what the system “knows”.
 
-"o7 memory audit"
+### `o7 memory audit`
 
 Audits stored memory.
 
+```sh
 o7 memory audit
+```
 
 Checks:
 
@@ -498,12 +535,13 @@ Checks:
 
 A memory system without audit is just a haunted cache.
 
-Context brief format
+## Context brief format
 
 "context.md" should be short, explicit, and provenance-backed.
 
 Example:
 
+```markdown
 # 007 Context Brief
 
 ## Similar successful runs
@@ -530,15 +568,17 @@ Example:
 - `dotnet-test`
 - `ownaudit-smoke`
 - `no-new-findings`
+```
 
 The agent receives this as context, not as authority. Gates remain authority.
 
-Integration with TaskSpec and O7Plan
+## Integration with TaskSpec and O7Plan
 
 This memory layer should be designed around the strict task/action model.
 
 Recommended run flow:
 
+```text
 task.yaml
   ↓
 o7 context build
@@ -558,12 +598,13 @@ gates / re-audit
 run record
   ↓
 o7 memory ingest-run
+```
 
 Memory should help the agent produce a better plan, but O7Plan and gates decide whether the output is acceptable.
 
-Backend options
+## Backend options
 
-Option A: agentmemory
+### Option A: agentmemory
 
 Use "agentmemory" as the first backend.
 
@@ -586,11 +627,13 @@ Cons:
 
 Recommended use:
 
+```text
 007 -> REST/MCP adapter -> agentmemory
+```
 
 Do not let full-auto agents write trusted memory directly.
 
-Option B: local SQLite memory index
+### Option B: local SQLite memory index
 
 Build a minimal Rust-native memory store.
 
@@ -611,10 +654,11 @@ Cons:
 
 Recommended if "agentmemory" proves too broad or too leaky.
 
-Option C: graph memory later
+### Option C: graph memory later
 
 A graph backend can come later for relationships such as:
 
+```text
 Run -> Task
 Run -> GateStep
 Run -> TouchedFile
@@ -623,12 +667,13 @@ Patch -> Finding
 Decision -> SupersedesDecision
 FailurePattern -> Gate
 FixPattern -> Diagnostic
+```
 
 Do not start here. A graph without real run data is architecture cosplay.
 
-Security and privacy
+## Security and privacy
 
-Secret handling
+### Secret handling
 
 Memory ingest must redact:
 
@@ -645,15 +690,19 @@ Memory ingest must redact:
 
 Support explicit private blocks:
 
+```text
 <private>
 anything here must not enter memory
 </private>
+```
 
-Memory scope
+### Memory scope
 
 Default scope:
 
+```text
 private-local
+```
 
 Do not enable team memory until:
 
@@ -663,11 +712,13 @@ Do not enable team memory until:
 - write rules are enforced;
 - human-confirmed decisions are separated from agent-claimed notes.
 
-MCP policy
+### MCP policy
 
 Initial MCP mode:
 
+```text
 read-only
+```
 
 Allowed tools:
 
@@ -688,14 +739,16 @@ Forbidden initially:
 
 The agent should not be able to rewrite the memory that will later be used to judge it. That is how you build a self-licking ice cream cone with a shell prompt.
 
-Failure modes
+## Failure modes
 
-Hallucinated memory
+### Hallucinated memory
 
 Problem:
 
+```text
 Agent writes: "OWN001 fixed by adding Dispose unsubscribe."
 Gate says: FAIL.
+```
 
 Mitigation:
 
@@ -703,13 +756,15 @@ Mitigation:
 - only "gate-derived" entries can become fix patterns;
 - failed runs become negative examples.
 
-Stale prompt memory
+### Stale prompt memory
 
 Problem:
 
+```text
 Prompt v0.1.0 succeeded.
 Prompt v0.2.0 regressed.
 Memory retrieves old guidance without version distinction.
+```
 
 Mitigation:
 
@@ -717,7 +772,7 @@ Mitigation:
 - context builder groups by prompt version;
 - superseded prompt decisions are hidden by default.
 
-Secret leakage
+### Secret leakage
 
 Problem:
 
@@ -730,7 +785,7 @@ Mitigation:
 - do not export memory by default;
 - add "o7 memory audit --secrets".
 
-Garbage recall
+### Garbage recall
 
 Problem:
 
@@ -749,7 +804,7 @@ Mitigation:
 - context builder must cap result count;
 - context brief must include provenance.
 
-Self-reinforcing bad fix
+### Self-reinforcing bad fix
 
 Problem:
 
@@ -761,9 +816,9 @@ Mitigation:
 - only PASS runs can create "FixPatternMemory";
 - context brief separates “successful runs” and “failed runs”.
 
-Minimal implementation plan
+## Minimal implementation plan
 
-Phase 0: manual experiment
+### Phase 0: manual experiment
 
 Run "agentmemory" locally and verify:
 
@@ -776,11 +831,13 @@ Run "agentmemory" locally and verify:
 
 No 007 code changes yet.
 
-Phase 1: artifact-derived ingest
+### Phase 1: artifact-derived ingest
 
 Add:
 
+```sh
 o7 memory ingest-run <run-dir>
+```
 
 Implement:
 
@@ -793,16 +850,20 @@ Implement:
 
 Trait sketch:
 
+```rust
 pub trait MemoryBackend {
     fn save(&self, item: MemoryItem) -> anyhow::Result<()>;
     fn search(&self, query: MemoryQuery) -> anyhow::Result<Vec<MemoryHit>>;
 }
+```
 
-Phase 2: context builder
+### Phase 2: context builder
 
 Add:
 
+```sh
 o7 context build --task <task.yaml> --repo <path> --out context.md
+```
 
 Implement:
 
@@ -813,15 +874,17 @@ Implement:
 - "context.md";
 - "context.meta.json".
 
-Phase 3: run integration
+### Phase 3: run integration
 
 Extend "o7 run":
 
+```sh
 o7 run \
   --repo ../OwnAudit \
   --base main \
   --task tasks/fix-own001-top.task.yaml \
   --memory-context auto
+```
 
 Behavior:
 
@@ -831,11 +894,13 @@ Behavior:
 4. Gate.
 5. Ingest run after harvest.
 
-Phase 4: trace-based memory
+### Phase 4: trace-based memory
 
 Switch from only "agent.stdout" to also storing:
 
+```text
 agent.trace.jsonl
+```
 
 Use trace to extract:
 
@@ -849,12 +914,13 @@ Use trace to extract:
 
 This also supports future behavior profiling.
 
-Phase 5: read-only MCP inside runs
+### Phase 5: read-only MCP inside runs
 
 Allow the agent to use memory recall during a run, but only in read-only mode.
 
 Policy:
 
+```text
 allow:
   memory_recall
   memory_smart_search
@@ -868,8 +934,9 @@ deny:
   memory_action_create
   memory_lease
   memory_mesh_sync
+```
 
-Phase 6: trusted write-back after gates
+### Phase 6: trusted write-back after gates
 
 Only "007" writes durable memory after gates.
 
@@ -880,8 +947,9 @@ Rules:
 - ERROR run can create "RunMemory", but not fix/failure conclusions unless cause is known.
 - Human review can promote memory to "human-confirmed".
 
-Suggested repository layout
+## Suggested repository layout
 
+```text
 007/
   src/
     memory/
@@ -908,9 +976,11 @@ Suggested repository layout
       finding-memory.json
       fix-pattern-memory.json
       failure-pattern-memory.json
+```
 
 Run record layout extension:
 
+```text
 runs/<target>/<run-id>/
   task.md
   task.yaml
@@ -926,8 +996,9 @@ runs/<target>/<run-id>/
   gate/
     verdict.json
     *.log
+```
 
-Acceptance criteria
+## Acceptance criteria
 
 Phase 1 is complete when:
 
@@ -954,7 +1025,7 @@ Phase 3 is complete when:
 - post-run ingest is automatic;
 - failed gates are searchable in the next run.
 
-Recommended first vertical slice
+## Recommended first vertical slice
 
 Target: OwnAudit false-positive / fix workflow.
 
@@ -964,10 +1035,12 @@ Fix or triage one OWN001 subscription-token finding.
 
 Memory queries before run:
 
+```text
 diagnostic = OWN001
 category = subscription-token
 gate = no-new-findings
 prompt_module = ownaudit.fix-own001
+```
 
 Expected context:
 
@@ -987,7 +1060,7 @@ Expected post-run memory:
 
 This is narrow enough to implement and useful enough to matter.
 
-Final decision
+## Final decision
 
 Adopt a memory layer for "007", but only as an artifact-derived, provenance-backed recall system.
 
@@ -1001,6 +1074,8 @@ Do not start with graph complexity.
 
 Start with:
 
+```text
 ingest run artifacts -> build context for next run -> preserve provenance -> gate everything
+```
 
 That gives "007" the thing it actually needs: not a model that “remembers”, but a harness that accumulates operational experience and can prove where that experience came from.

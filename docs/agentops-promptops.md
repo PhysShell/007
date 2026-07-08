@@ -1,6 +1,6 @@
-Proposal: PromptOps / AgentOps слой для Own.NET, OwnAudit и 007
+# PromptOps / AgentOps слой для Own.NET, OwnAudit и 007
 
-1. Кратко
+## 1. Кратко
 
 Предлагается добавить общий инженерный слой для промптов, AI-задач, evals, схем ответов и agent-run артефактов вокруг трёх проектов:
 
@@ -10,21 +10,21 @@ Proposal: PromptOps / AgentOps слой для Own.NET, OwnAudit и 007
 
 Цель: перестать использовать промпты как магические строки и оформить их как версионируемые, тестируемые, ревьюируемые модули продукта.
 
-2. Текущее положение
+## 2. Текущее положение
 
-Own.NET
+### Own.NET
 
 Own.NET сейчас является PoC OwnLang: маленький ownership language с Rust-style ownership discipline, который компилируется в C# и включает lexer/parser, AST, resolver, signatures, CFG, flow-sensitive dataflow, diagnostics и codegen.
 
 Важный для proposal момент: Own.NET уже не просто toy language. В README описан WPF lifetime/module slice, где подписка на событие моделируется как "acquire" token, отписка как "release", а утечки превращаются в OWN001/OWN014 diagnostics. Это идеально ложится на audit/triage/fix pipeline.
 
-OwnAudit
+### OwnAudit
 
 OwnAudit уже определён как lift-out home для audit pipeline Own.NET. Каноническая реализация пока живёт в "Own.NET/audit/": static aggregation, taxonomy, scoring, reporters, runtime LeakHarness, DuplicateDetector и storm profiler. OwnAudit держит boundary, STS runner, artifacts и будущую C# skeleton-зону.
 
 OwnAudit также уже имеет валидированный STS-прогон: 380 findings за 49 секунд, с категоризацией, heatmap и spot-check true positives. Это значит, что у нас есть не игрушечная база для eval-кейсов и regression tests.
 
-007
+### 007
 
 007 уже описан как приватный harness, который гоняет "claude"/"codex" по публичным Own.NET и OwnAudit через CLI, без API keys, через subscription auth. README прямо говорит держать репозиторий приватным, потому что agent-routing/subscription-auth не должны попадать в public tree.
 
@@ -32,7 +32,7 @@ MVP 007 уже имеет правильную базовую форму: isolat
 
 Это почти готовая AgentOps-платформа. Просто пока без нормального PromptOps-контракта. То есть двигатель есть, но руль пока из фанеры. Классика.
 
-3. Проблема
+## 3. Проблема
 
 Сейчас AI-задачи рискуют расползтись в три плохих формы:
 
@@ -52,14 +52,16 @@ MVP 007 уже имеет правильную базовую форму: isolat
    
    - если AI выдаёт finding без привязки к deterministic analyzer / SARIF / source span / gate, это просто уверенный попугай в каске инженера.
 
-4. Предлагаемая архитектура
+## 4. Предлагаемая архитектура
 
 Ввести общий слой:
 
+```text
 PromptOps = prompt modules + typed inputs + output schemas + evals + versioning
 AgentOps  = task specs + isolated runs + gates + artifacts + regression history
+```
 
-4.1. Own.NET: source of analysis truth
+### 4.1. Own.NET: source of analysis truth
 
 Own.NET остаётся местом, где живут:
 
@@ -81,10 +83,11 @@ AI-слой в Own.NET не должен заменять checker. Он долж
 
 Правило: AI не является источником истины для diagnostics. Истина — analyzer output, tests, SARIF, gates. AI может быть scout, narrator, fixer candidate, но не судья.
 
-4.2. OwnAudit: audit/fix orchestration
+### 4.2. OwnAudit: audit/fix orchestration
 
 OwnAudit должен стать местом, где AI применяется после deterministic aggregation:
 
+```text
 OwnSharp / CodeQL / Roslyn / runtime harness
         ↓
 SARIF normalization
@@ -98,6 +101,7 @@ dry-run patch
 re-audit
         ↓
 gate verdict
+```
 
 AI-задачи для OwnAudit:
 
@@ -111,16 +115,19 @@ AI-задачи для OwnAudit:
 
 Особенно важно для fix arm: уже в PLAN описана идея dry-run → diff → re-audit no-new-findings → tier gate.  AI должен встраиваться именно туда, а не “я поправил, поверь брат”.
 
-4.3. 007: private execution harness
+### 4.3. 007: private execution harness
 
 007 становится исполнителем AI-задач:
 
+```text
 o7 run --repo <path> --base <ref> --task ./task.md --gate <toml>
+```
 
 Но "task.md" должен стать не ручной простынёй, а render output из typed task spec.
 
 Новая форма:
 
+```text
 task spec
   ↓
 prompt module + typed args
@@ -134,12 +141,14 @@ gate
 run record
   ↓
 eval/regression store
+```
 
 007 должен хранить не только "task.md", "agent.stdout", "diff.patch" и gate logs, но и:
 
+```json
 {
   "task_id": "ownaudit.fix.own001.subscription-token.v1",
-  "prompt_module": "ownaudit.fix.finding-cluster",
+  "prompt_module": "ownaudit.fix-own001",
   "prompt_version": "0.1.0",
   "input_schema_version": "1",
   "output_schema_version": "1",
@@ -150,13 +159,15 @@ eval/regression store
   "eval_suite": "ownaudit.fix-arm.smoke",
   "created_at": "..."
 }
+```
 
 Без этого через месяц будет невозможно понять, что именно сработало: промпт, модель, конкретный diff, gate, удача или случайный демон в WSL.
 
-5. Предлагаемая структура файлов
+## 5. Предлагаемая структура файлов
 
-5.1. В Own.NET
+### 5.1. В Own.NET
 
+```text
 Own.NET/
   ai/
     prompts/
@@ -180,9 +191,11 @@ Own.NET/
 
   .007/
     gate.toml
+```
 
-5.2. В OwnAudit
+### 5.2. В OwnAudit
 
+```text
 OwnAudit/
   ai/
     prompts/
@@ -213,9 +226,11 @@ OwnAudit/
 
   .007/
     gate.toml
+```
 
-5.3. В 007
+### 5.3. В 007
 
+```text
 007/
   src/
     prompt_registry/
@@ -252,11 +267,13 @@ OwnAudit/
         gate/
           verdict.json
           *.log
+```
 
-6. Prompt module contract
+## 6. Prompt module contract
 
 Каждый prompt module должен иметь contract file:
 
+```yaml
 name: ownaudit.fix-own001
 version: 0.1.0
 owner: ownaudit
@@ -294,13 +311,15 @@ evals:
   - own001.static-event-region-escape
   - own001.false-positive-equal-lifetime
   - own001.dispose-existing-pattern
+```
 
-7. Task spec contract
+## 7. Task spec contract
 
 007 должен принимать task spec, а не только свободный "task.md".
 
 Пример:
 
+```yaml
 id: ownaudit.fix.top-subscription-leak
 target_repo: OwnAudit
 base_ref: main
@@ -330,15 +349,17 @@ outputs:
   patch: diff.patch
   explanation: fix-explanation.md
   verdict: gate/verdict.json
+```
 
 Rendered "task.md" уже может быть человекочитаемым, но canonical source должен быть YAML/JSON task spec.
 
-8. Output schemas
+## 8. Output schemas
 
 AI-ответы должны быть структурированными. Не “вот мои мысли”, не markdown-суп, не философия про качество кода.
 
 Пример "FixProposal.v1":
 
+```json
 {
   "type": "object",
   "required": [
@@ -376,12 +397,13 @@ AI-ответы должны быть структурированными. Не
     }
   }
 }
+```
 
 Если агент не может вернуть valid schema, run должен быть "ERROR", а не “ну вроде понятно”. WHERE'S THE ERROR HANDLING?! Вот оно.
 
-9. Evals
+## 9. Evals
 
-9.1. Типы evals
+### 9.1. Типы evals
 
 Нужны четыре слоя:
 
@@ -397,7 +419,7 @@ AI-ответы должны быть структурированными. Не
 4. Regression tests
    Каждый production failure превращается в eval case.
 
-9.2. Own.NET eval cases
+### 9.2. Own.NET eval cases
 
 ownnet.diagnostic-explainer:
 - OWN001 subscription token leak
@@ -416,7 +438,7 @@ ownnet.checker-review:
 - detect diagnostic code drift
 - detect missing golden update
 
-9.3. OwnAudit eval cases
+### 9.3. OwnAudit eval cases
 
 ownaudit.report-triage:
 - summarize STS health report top pain areas
@@ -439,7 +461,7 @@ ownaudit.audit-diff-review:
 - detect category movement
 - compare pain score before/after
 
-9.4. 007 eval cases
+### 9.4. 007 eval cases
 
 o7.task-renderer:
 - task spec renders deterministic task.md
@@ -456,73 +478,104 @@ o7.harvest:
 - diff.patch saved even on FAIL if diff exists
 - prompt.rendered.md and prompt.meta.json saved
 
-10. Gates
+## 10. Gates
 
-10.1. Own.NET ".007/gate.toml"
+Схема манифеста — как в `007/src/gate.rs` и `007/examples/gate.own.net.toml`: заголовок `schema = 1` и таблицы `[[gate]]` с ключами `name`/`cmd`/`required`/`env`.
+
+### 10.1. Own.NET `.007/gate.toml`
 
 Initial gate:
 
-[[step]]
+```toml
+schema = 1
+
+[[gate]]
 name = "python-tests"
-command = "python tests/run_tests.py"
+cmd = "python tests/run_tests.py"
+required = true
 
-[[step]]
+[[gate]]
 name = "gallery-tests"
-command = "python tests/test_gallery.py"
+cmd = "python tests/test_gallery.py"
+required = true
 
-[[step]]
+[[gate]]
 name = "wpf-tests"
-command = "python tests/test_wpf.py"
+cmd = "python tests/test_wpf.py"
+required = true
 
-[[step]]
+[[gate]]
 name = "lifetime-tests"
-command = "python tests/test_lifetimes.py"
+cmd = "python tests/test_lifetimes.py"
+required = true
 
-[[step]]
+[[gate]]
 name = "prompt-contracts"
-command = "python ai/tools/check_prompt_contracts.py"
+cmd = "python ai/tools/check_prompt_contracts.py"
+required = true
+```
 
-10.2. OwnAudit ".007/gate.toml"
+### 10.2. OwnAudit `.007/gate.toml`
 
 Initial gate:
 
-[[step]]
+```toml
+schema = 1
+
+[[gate]]
 name = "schema-check"
-command = "dotnet test"
+cmd = "dotnet test"
+required = true
+env = "windows"
 
-[[step]]
+[[gate]]
 name = "prompt-contracts"
-command = "python ai/tools/check_prompt_contracts.py"
+cmd = "python ai/tools/check_prompt_contracts.py"
+required = true
 
-[[step]]
+[[gate]]
 name = "audit-report-smoke"
-command = "pwsh ./Run-Audit.ps1 -Smoke"
+cmd = "pwsh ./Run-Audit.ps1 -Smoke"
+required = true
+env = "windows"
 
-[[step]]
+[[gate]]
 name = "no-new-findings"
-command = "python tools/compare_audit_reports.py --baseline artifacts/health-report.json --current artifacts/current-health-report.json"
+cmd = "python ai/tools/compare_audit_reports.py --baseline artifacts/health-report.json --current artifacts/current-health-report.json"
+required = true
+```
 
-Windows-bound parts should be tagged explicitly. 007 README already says Own.NET is target first and OwnAudit Windows-bound gates are Phase 2, tagged "env = "windows"" in the manifest.
+Оговорка: у текущего `OwnAudit/Run-Audit.ps1` ключа `-Smoke` нет (его param-блок принимает только `-OwnNet`, `-Ref`, `-Target`, `-Worktree`, `-Out`, `-Codeql`, `-Strict`, `-CodeqlExe`, `-CodeqlDb`, `-RebuildCodeqlDb`, `-LineTol`) — режим `-Smoke` нужно сначала добавить в Run-Audit.ps1; это внесено в Phase 0 deliverables.
 
-10.3. 007 internal gate
+Windows-bound parts should be tagged explicitly. 007 README already says Own.NET is target first and OwnAudit Windows-bound gates are Phase 2, tagged `env = "windows"` in the manifest.
 
-[[step]]
+### 10.3. 007 internal gate
+
+```toml
+schema = 1
+
+[[gate]]
 name = "fmt"
-command = "cargo fmt --check"
+cmd = "cargo fmt --check"
+required = true
 
-[[step]]
+[[gate]]
 name = "clippy"
-command = "cargo clippy -- -D warnings"
+cmd = "cargo clippy -- -D warnings"
+required = true
 
-[[step]]
+[[gate]]
 name = "tests"
-command = "cargo test"
+cmd = "cargo test"
+required = true
 
-[[step]]
+[[gate]]
 name = "schema-fixtures"
-command = "cargo test task_spec_schema"
+cmd = "cargo test task_spec_schema"
+required = true
+```
 
-11. Security and privacy constraints
+## 11. Security and privacy constraints
 
 1. 007 remains private.
    Subscription auth, agent routing and CLI orchestration must not land in public Own.NET/OwnAudit. This is already stated in the 007 README and should remain a hard boundary.
@@ -559,9 +612,9 @@ command = "cargo test task_spec_schema"
    - no-new-findings gate;
    - optional manual review for high-risk categories.
 
-12. Roadmap
+## 12. Roadmap
 
-Phase 0 — Contract skeleton
+### Phase 0 — Contract skeleton
 
 Deliverables:
 
@@ -569,8 +622,10 @@ Deliverables:
 - ai/schemas/ directories
 - ai/evals/ seed cases
 - ai/tools/check_prompt_contracts.py
+- ai/tools/compare_audit_reports.py (сравнение health-report'ов для gate `no-new-findings`; сегодня ближайший аналог — `report/diff_cli.py`)
 - .007/gate.toml in Own.NET
 - .007/gate.toml in OwnAudit
+- `-Smoke` mode in OwnAudit Run-Audit.ps1 (required by the audit-report-smoke gate step)
 - task spec schema in 007
 
 Acceptance criteria:
@@ -581,10 +636,11 @@ Acceptance criteria:
 - sample task spec renders into task.md
 - 007 records prompt metadata in run artifacts
 
-Phase 1 — Own.NET diagnostic explainer
+### Phase 1 — Own.NET diagnostic explainer
 
 First useful vertical slice:
 
+```text
 Input:
   OWN diagnostic + source span + small context
 
@@ -595,6 +651,7 @@ Output:
     - likely C# analogue
     - suggested safe fix
     - confidence
+```
 
 Why first: low risk, no code modification, good docs payoff.
 
@@ -605,10 +662,11 @@ Acceptance criteria:
 - invalid/missing diagnostic fails schema
 - explanation does not invent source facts
 
-Phase 2 — OwnAudit report triage
+### Phase 2 — OwnAudit report triage
 
 Second vertical slice:
 
+```text
 Input:
   health-report.json / findings.json
 
@@ -619,6 +677,7 @@ Output:
     - likely quick wins
     - what requires runtime proof
     - what should stay low-confidence
+```
 
 Acceptance criteria:
 
@@ -627,10 +686,11 @@ Acceptance criteria:
 - links every recommendation to finding ids/categories
 - produces markdown summary plus structured JSON
 
-Phase 3 — 007 prompt-aware run records
+### Phase 3 — 007 prompt-aware run records
 
 Extend 007 run artifacts:
 
+```text
 runs/<target>/<run-id>/
   task.yaml
   task.md
@@ -640,6 +700,7 @@ runs/<target>/<run-id>/
   agent.stdout
   diff.patch
   gate/
+```
 
 Acceptance criteria:
 
@@ -649,12 +710,13 @@ Acceptance criteria:
 - prompt changes are diffable
 - failed gates still preserve diagnostics
 
-Phase 4 — OwnAudit fix arm MVP
+### Phase 4 — OwnAudit fix arm MVP
 
 Scope: OWN001 subscription-token leaks only.
 
 Flow:
 
+```text
 finding cluster
   ↓
 AI fix plan
@@ -668,6 +730,7 @@ re-audit
 no-new-findings gate
   ↓
 manual review
+```
 
 Acceptance criteria:
 
@@ -677,7 +740,7 @@ Acceptance criteria:
 - before/after report generated
 - patch rejected if new findings appear
 
-Phase 5 — OWN014 / region escape support
+### Phase 5 — OWN014 / region escape support
 
 Scope: static event / longer-lived source escape.
 
@@ -688,9 +751,9 @@ Acceptance criteria:
 - skips cases where lifetime source cannot be proven
 - documents uncertainty rather than inventing ownership
 
-13. Proposed initial issues
+## 13. Proposed initial issues
 
-Own.NET
+### Own.NET
 
 1. Add ai/ prompt contract skeleton
 2. Add diagnostic explanation schema
@@ -698,7 +761,7 @@ Own.NET
 4. Add prompt contract checker
 5. Add .007/gate.toml for Own.NET
 
-OwnAudit
+### OwnAudit
 
 1. Add ai/ prompt contract skeleton
 2. Add audit triage schema
@@ -707,7 +770,7 @@ OwnAudit
 5. Add STS health-report triage seed evals
 6. Add .007/gate.toml for OwnAudit
 
-007
+### 007
 
 1. Add task spec schema
 2. Add prompt module metadata to run record
@@ -716,7 +779,7 @@ OwnAudit
 5. Add run artifact schema tests
 6. Add env-tagged gate steps
 
-14. Non-goals
+## 14. Non-goals
 
 This proposal does not attempt to:
 
@@ -728,7 +791,7 @@ This proposal does not attempt to:
 - auto-merge AI-generated fixes;
 - trust AI findings without deterministic corroboration.
 
-15. Design principle
+## 15. Design principle
 
 Own.NET should prove or detect.
 

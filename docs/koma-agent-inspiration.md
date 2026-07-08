@@ -1,11 +1,11 @@
-Proposal: 007 как проверяемый agentic harness, а не клон terminal-agent
+# Proposal: 007 как проверяемый agentic harness, а не клон terminal-agent
 
-«Status: proposal
-Scope: "007", Own.NET, OwnAudit, sandboy integration
-Date: 2026-07-06
-Intent: зафиксировать направление развития "007" после сравнения с "aula-id/koma" и текущими PR-ами "007".»
+- **Status:** proposal
+- **Scope:** "007", Own.NET, OwnAudit, sandboy integration
+- **Date:** 2026-07-06
+- **Intent:** зафиксировать направление развития "007" после сравнения с "aula-id/koma" и консолидированными docs "007" (см. Current state).
 
-Summary
+## Summary
 
 "koma" и "007" решают разные задачи.
 
@@ -13,12 +13,14 @@ Summary
 
 "007" не должен становиться клоном "koma". Правильная ниша "007" — проверяемый agentic execution harness:
 
+```text
 task contract
   → isolated run
   → gated execution
   → diff policy
   → run record
   → judge / replay / audit
+```
 
 То есть не “агент живёт в терминале”, а “агент выполняет ограниченный эксперимент, оставляет доказательства, проходит gate, а его поведение можно восстановить и проверить”.
 
@@ -32,7 +34,7 @@ task contract
 
 Но порядок важен. Сначала "007" должен закрыть свой главный trust gap: "o7 run" и ".007/gate.toml" сейчас используют worktree как удобство, а не как настоящую security boundary. Worktree помогает cleanup/diff, но не запрещает чтение, запись наружу или network egress. Поэтому первые code milestones должны быть про "TaskContract", "DiffPolicy", gate timeout, sandboy-backed sandbox policy и реальный Own.NET run record.
 
-Current state
+## Current state
 
 На "main" уже есть основа:
 
@@ -42,20 +44,20 @@ Current state
 - Verification layer: proptest, fuzz targets, Kani harnesses, curated lints, cargo-deny.
 - Docs already name the core security problem: worktree is not confinement, deny-list is not sandbox, gate commands are arbitrary "bash -lc".
 
-По открытым/последним PR-ам уже видна стратегическая линия:
+По консолидированным docs уже видна стратегическая линия:
 
-- agentic coding discipline: task contracts, negative prompts, plan-then-build, diff policy gates, judge-run, trust levels;
-- workflow scripting: typed but host-enforced workflows, scoped down to linear "workflow.toml";
-- microVM/container roadmap for "run"/gate isolation;
-- Zero Trust roadmap and CUE-based policy authoring;
-- sandboy reconciliation: Landlock + seccomp wrap-the-child confinement for the "run"/gate slot;
-- behavior profiling deferred until real trace stream exists.
+- agentic coding discipline (`docs/agentic-coding-discipline-proposal.md`): task contracts, negative prompts, plan-then-build, diff policy gates, judge-run, trust levels;
+- workflow scripting (`docs/workflow-scripting.md`): typed but host-enforced workflows, scoped down to linear "workflow.toml";
+- microVM/container roadmap for "run"/gate isolation (`docs/microvm-isolation.md`);
+- Zero Trust roadmap and CUE-based policy authoring (`docs/zero-trust-framework.md`);
+- sandboy reconciliation (`docs/security-layers.md`): Landlock + seccomp wrap-the-child confinement for the "run"/gate slot;
+- behavior profiling deferred until real trace stream exists (`docs/agent-behavior-profiling.md`).
 
 Вывод: проблема не в отсутствии идей. Проблема в риске распухнуть в архитектурный космолёт до первого реально безопасного и полезного "o7 run".
 
-Design position
+## Design position
 
-007 should not compete with Koma on UX
+### 007 should not compete with Koma on UX
 
 Do not copy:
 
@@ -69,7 +71,7 @@ Do not copy:
 
 That path turns "007" into another coding-agent shell. Там уже толпа, и все машут “AI-native workflow” как флагом на пожаре.
 
-007 should compete on trust, auditability, and gated execution
+### 007 should compete on trust, auditability, and gated execution
 
 "007" should own this niche:
 
@@ -80,14 +82,15 @@ with a durable record proving what happened?
 
 For Own.NET/OwnAudit this is more valuable than yet another terminal chat. The target repos are legacy-heavy, analyzer-heavy, policy-heavy. The useful agent is not the one that types fastest. The useful agent is the one that can be constrained, judged, replayed, and blamed accurately when it does something stupid, because apparently we need software to produce receipts now.
 
-Proposed architecture direction
+## Proposed architecture direction
 
-1. TaskContract: machine-readable task scope
+### 1. TaskContract: machine-readable task scope
 
 Add "task.o7.toml" as the machine-readable companion to "task.md".
 
 Example:
 
+```toml
 schema = 1
 id = "ownnet-async-rule-001"
 title = "Add async void analyzer rule"
@@ -134,6 +137,7 @@ required = ["format", "lint", "test"]
 require_diff = true
 require_run_record = true
 require_trace = false
+```
 
 "task.md" remains human-readable. "task.o7.toml" becomes enforceable.
 
@@ -145,7 +149,7 @@ renames public APIs, and calls it "cleanup".
 
 Technical term: absolute fucking shambles.
 
-2. DiffPolicy gate
+### 2. DiffPolicy gate
 
 Before running project gates, "007" should validate the produced diff against the task contract.
 
@@ -162,48 +166,58 @@ Checks:
 
 Output:
 
+```text
 runs/<target>/<run-id>/
   policy/
     task-contract.normalized.json
     diff-policy.json
     path-policy.json
+```
 
 Verdict classes:
 
+```text
 PASS
 FAIL
 ERROR
 NOT_APPLICABLE
+```
 
 "DiffPolicy" should run before expensive gates. No point running tests on a diff that already touched forbidden paths. That’s not discipline, that’s letting the raccoon into the kitchen and then checking whether the soup tastes funny.
 
-3. GateStep extensions: timeout and sandbox policy
+### 3. GateStep extensions: timeout and sandbox policy
 
 Extend ".007/gate.toml" without breaking current manifests.
 
 Current shape:
 
+```toml
 [[gate]]
 name = "test"
 cmd = "python tests/run_tests.py"
 required = true
+```
 
 Proposed shape:
 
+```toml
 [[gate]]
 name = "test"
 cmd = "python tests/run_tests.py"
 required = true
 timeout_sec = 300
 sandbox_policy = "worktree-no-net"
+```
 
 Policy examples:
 
+```text
 none
 worktree-readonly
 worktree-write
 worktree-no-net
 windows-host
+```
 
 The first implementation can be simple:
 
@@ -213,13 +227,16 @@ The first implementation can be simple:
 
 Expected artifacts:
 
+```text
 runs/<target>/<run-id>/
   gate/
     test.log
     test.sandbox.json
+```
 
 "sandbox.json" should include:
 
+```json
 {
   "policy": "worktree-no-net",
   "backend": "sandboy",
@@ -229,15 +246,17 @@ runs/<target>/<run-id>/
   "exit_code": 0,
   "violations": []
 }
+```
 
 This is the first real code-level move from “worktree as convention” to “worktree as enforceable boundary”.
 
-4. Real run record as the source of truth
+### 4. Real run record as the source of truth
 
 The run record should be treated as the primary artifact, not just logs dumped somewhere.
 
 Target shape:
 
+```text
 runs/<target>/<run-id>/
   task.md
   task.o7.toml
@@ -256,9 +275,11 @@ runs/<target>/<run-id>/
     review.json            # later
   replay/
     manifest.json          # later
+```
 
 "meta.json" should eventually include:
 
+```json
 {
   "schema": 1,
   "kind": "run",
@@ -280,10 +301,11 @@ runs/<target>/<run-id>/
     "deletions": 18
   }
 }
+```
 
 No dashboard, replay, profiling, judge-run, or memory layer should invent its own truth. Everything reads the record. Otherwise we get the classic enterprise masterpiece: six systems of record, all wrong in different fonts.
 
-5. Agent trace stream before behavior profiling
+### 5. Agent trace stream before behavior profiling
 
 Behavior profiling should stay deferred until "agent.trace.jsonl" exists.
 
@@ -299,25 +321,30 @@ Behavior profiling should stay deferred until "agent.trace.jsonl" exists.
 
 Required trace event shape:
 
+```text
 {"type":"assistant_message","turn":1,"text":"..."}
 {"type":"tool_call","turn":1,"tool":"Read","args":{...}}
 {"type":"tool_result","turn":1,"tool":"Read","exit_code":0,"summary":"..."}
 {"type":"tool_call","turn":2,"tool":"Edit","args":{...}}
 {"type":"gate_start","name":"test"}
 {"type":"gate_end","name":"test","verdict":"FAIL"}
+```
 
 This enables later:
 
+```text
 o7 profile runs/Own.NET/<run-id>
 o7 replay runs/Own.NET/<run-id>
 o7 judge-run runs/Own.NET/<run-id>
+```
 
 But not before the data exists. Building profiling before trace is astrology with JSON.
 
-6. Repair loop, but only after policy and sandbox
+### 6. Repair loop, but only after policy and sandbox
 
 The eventual loop:
 
+```text
 agent patch
   → diff policy
   → gate
@@ -326,13 +353,16 @@ agent patch
   → diff policy again
   → gate again
   → final harvest
+```
 
 Initial limit:
 
+```toml
 [repair]
 enabled = true
 max_attempts = 2
 log_budget_lines = 200
+```
 
 Rules:
 
@@ -343,12 +373,13 @@ Rules:
 
 Do not add repair loop before diff policy. Otherwise the agent gets multiple chances to make the mess larger. That’s not repair, that’s giving a raccoon a second screwdriver.
 
-7. Workflow scripting: keep v1 boring
+### 7. Workflow scripting: keep v1 boring
 
 A future "workflow.toml" is useful, but v1 should be deliberately flat.
 
 Example:
 
+```toml
 schema = 1
 name = "ownnet-safe-agent-run"
 
@@ -368,6 +399,7 @@ run = "$previous"
 [[step]]
 kind = "report"
 format = "markdown"
+```
 
 Non-goals for v1:
 
@@ -380,9 +412,9 @@ Non-goals for v1:
 
 Workflow scripts should propose orchestration. The "o7" host enforces capabilities. A script should not get raw filesystem/network/shell authority.
 
-Phased roadmap
+## Phased roadmap
 
-Phase 1: make "o7 run" enforceable
+### Phase 1: make "o7 run" enforceable
 
 Goal: one real Own.NET task can run with a task contract, diff policy, timeout, and sandboxed gates.
 
@@ -404,7 +436,7 @@ Acceptance criteria:
 - sandbox policy produces "gate/<name>.sandbox.json";
 - run record is complete enough for postmortem without rerunning anything.
 
-Phase 2: trace and repair
+### Phase 2: trace and repair
 
 Goal: make agent behavior observable enough for replay/judging.
 
@@ -424,7 +456,7 @@ Acceptance criteria:
 - repair cannot violate original "TaskContract";
 - final run record distinguishes first patch from repair patches.
 
-Phase 3: judge-run and replay
+### Phase 3: judge-run and replay
 
 Goal: make run quality reviewable.
 
@@ -443,7 +475,7 @@ Acceptance criteria:
 - replay can summarize task, diff, gates, policy, and agent trace;
 - failed runs are useful training/debug artifacts, not just piles of logs.
 
-Phase 4: context and memory economics
+### Phase 4: context and memory economics
 
 Goal: borrow the useful part of "koma" without turning into "koma".
 
@@ -464,7 +496,7 @@ Rules:
 - memory cannot override "TaskContract";
 - memory cannot weaken sandbox/diff policy.
 
-Phase 5: stronger isolation backends
+### Phase 5: stronger isolation backends
 
 Goal: support higher trust levels.
 
@@ -477,6 +509,7 @@ Deliverables:
 
 Trust levels:
 
+```text
 trusted-local:
   local repo, developer-owned, normal sandboy policy
 
@@ -485,10 +518,11 @@ semi-trusted:
 
 untrusted:
   no host secrets, no ambient credentials, strong isolation required
+```
 
 Do not build microVM first. Start with policy and sandboy. MicroVM before task contract is just expensive cosplay.
 
-Relationship to Koma
+## Relationship to Koma
 
 Ideas to borrow:
 
@@ -513,11 +547,11 @@ Ideas not to borrow now:
 
 That distinction matters.
 
-Concrete next PR sequence
+## Concrete next PR sequence
 
 Recommended order:
 
-1. Docs consolidation PR
+1. Docs consolidation PR — **done** (the branch this file lands in):
    
    - link current roadmap docs;
    - mark overlaps;
@@ -566,7 +600,7 @@ Recommended order:
 
 This order keeps the project honest. It forces "007" to become useful before it becomes grand.
 
-Non-goals
+## Non-goals
 
 This proposal explicitly does not recommend:
 
@@ -579,7 +613,7 @@ This proposal explicitly does not recommend:
 - adding microVMs before task contracts and diff policy;
 - adding behavior profiling before trace events exist.
 
-Final position
+## Final position
 
 "007" should become the harness that answers:
 

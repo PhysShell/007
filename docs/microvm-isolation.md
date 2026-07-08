@@ -20,8 +20,8 @@ proposal starts from, and it is verified against the current tree:
 
 | Claim | Verdict | Evidence |
 | --- | --- | --- |
-| `o7 run` executes arbitrary `bash -lc <cmd>` from the target repo's `.007/gate.toml` | ✅ | `src/gate.rs:78-81` |
-| `current_dir(workdir)` is the *only* confinement — no write/read/egress boundary | ✅ | `src/gate.rs:80`, `src/worktree.rs` (git worktree add/remove only sets cwd) |
+| `o7 run` executes arbitrary `bash -lc <cmd>` from the target repo's `.007/gate.toml` | ✅ | `src/gate.rs:80-84` |
+| `current_dir(workdir)` is the *only* confinement — no write/read/egress boundary | ✅ | `src/gate.rs:83`, `src/worktree.rs` (git worktree add/remove only sets cwd) |
 | the agent itself runs unsandboxed under `bypassPermissions` | ✅ | `src/agent.rs:66-75` — comment there even says "safe only because the worktree contains the blast radius", which `security-layers.md` already flags as false against adversarial paths |
 | the deny-list (`DENY` in `agent.rs`) is defense-in-depth, not a boundary | ✅ | `src/agent.rs:33-44`, docstring says so explicitly |
 | "the real sandbox slot is `run`/gate, not `judge`" | ⚠️ | true for `judge --provider claude` — closed-world (`--tools ""`, `--strict-mcp-config`, canonicalize+prefix check). **Not** true for `judge --provider codex`: `call_codex` runs `--sandbox read-only` (`src/judge.rs:698-702`), which denies writes but **not network** — a prompt-injection payload still has an egress path there. `run` remains the bigger open door either way, but this roadmap's isolation work shouldn't skip codex-backed `judge` runs on untrusted source. |
@@ -173,6 +173,15 @@ also need live model calls from inside the guest.
    from the copied-out tree.
 4. **Auth broker**: only once an isolated run needs live model calls from
    inside the guest without the raw token ever entering it.
+
+Sequencing note: the cross-cutting Zero Trust roadmap
+(`docs/zero-trust-framework.md` §16) supersedes the ordering here where they
+differ — in particular, it places the sibling `sandboy` (Landlock+seccomp
+wrap-the-child, per-gate-step confinement) between Phase 1 and any
+container/gVisor work, and gates the container/gVisor prototype on the same
+untrusted-target-repo trigger. Landlock+seccomp is defense-in-depth *inside*
+whatever boundary this note picks; a microVM remains the only true host-escape
+boundary.
 
 ## Bottom line
 

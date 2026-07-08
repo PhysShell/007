@@ -48,8 +48,8 @@ others' half:
 
 | Concern | Owner | Artifact |
 |---|---|---|
-| Declares the capability/policy vocabulary, verifies static contracts | **Own.NET** | [`docs/notes/agent-capability-layer.md`](../../own.net/docs/notes/agent-capability-layer.md) ("Owen Gate") |
-| Process/syscall isolation boundary (the actual sandbox) | **Own.NET** (`sandboy/`, sibling project, not core) | [`sandboy/README.md`](../../own.net/sandboy/README.md), [`docs/notes/sandboy-isolation-adr.md`](../../own.net/docs/notes/sandboy-isolation-adr.md) |
+| Declares the capability/policy vocabulary, verifies static contracts | **Own.NET** | [`docs/notes/agent-capability-layer.md`](https://github.com/PhysShell/Own.NET/blob/main/docs/notes/agent-capability-layer.md) ("Owen Gate") |
+| Process/syscall isolation boundary (the actual sandbox) | **Own.NET** (`sandboy/`, sibling project, not core) | [`sandboy/README.md`](https://github.com/PhysShell/Own.NET/blob/main/sandboy/README.md), [`docs/notes/sandboy-isolation-adr.md`](https://github.com/PhysShell/Own.NET/blob/main/docs/notes/sandboy-isolation-adr.md) |
 | Orchestrates the run, enforces policy at runtime, emits the audit trail | **007** (this repo) | `gate.rs`, `record.rs`, this doc |
 | Ingests the audit trail as evidence, triages, reports | **OwnAudit** | [`docs/agent-run-triage.md`](https://github.com/PhysShell/OwnAudit/blob/main/docs/agent-run-triage.md) |
 
@@ -176,9 +176,9 @@ proves what actually ran. Add a hash chain, not a SIEM:
   "model": "…",
   "gate_manifest_sha256": "…",
   "sandbox_policy_sha256": {
-    "ruff": "…",
-    "mypy-ownlang": "…",
-    "regression": "…"
+    "ruff":          { "source_cue": "…", "rendered": "…" },
+    "mypy-ownlang":  { "source_cue": "…", "rendered": "…" },
+    "regression":    { "source_cue": "…", "rendered": "…" }
   },
   "task_sha256": "…",
   "diff_sha256": "…",
@@ -310,7 +310,7 @@ this order, none of it exotic:
   tools" radar; unchanged by this note, just recorded here as part of the same
   discipline.
 
-## 11. Behavioral baseline — rule-based, not ML (Phase 2/triage)
+## 11. Behavioral baseline — rule-based, not ML (P2 backlog; consumed by Phase 4 triage)
 
 Not anomaly-detection theater — three extra counters in `meta.json` and a
 handful of `if` statements, consumed by OwnAudit's triage
