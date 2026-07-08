@@ -54,6 +54,27 @@ Domain hands: `--repo <STS source root>` + `--findings <STS-210 findings.json>` 
 - consensus (claude+codex race + cross-family judge), memory layer.
 - OwnAudit Windows gates (`env: windows`), container egress hardening.
 
+## Zero Trust backlog (`docs/zero-trust-framework.md` §16 — full rationale there)
+
+P0:
+1. Compile Sandboy, pass `./tests/demo.sh`.
+2. Wrap every `.007/gate.toml` step through `sandboy run` instead of bare `bash -lc`.
+3. Make `sandbox_policy` mandatory per step — fail closed on a missing one.
+4. Hash every gate/policy/task/diff/log artifact into `meta.json`, chained
+   (`prev_record_hash`/`record_hash`).
+
+P1:
+5. Layer 3 egress: blanket UDP block + TCP host/CIDR allowlist, ordered per step.
+6. Spotlighting wrapper around untrusted source/diff/stdout in `judge/prompt.template.md`.
+7. Hash-lock (`.007/gate.lock`) for the gate manifest + policies; signing later.
+8. `cargo-udeps`, OpenSSF Scorecard (public siblings), CodeQL/Semgrep over Own.NET/OwnAudit.
+
+P2:
+9. Behavioral-baseline counters + red-flag rules in `meta.json`.
+10. CUE authoring pipeline (`cue export … --out toml`, `o7 policy compile`).
+11. Firecracker/gVisor (Sandboy Layer 1) — only once an actually-untrusted
+    target repo enters scope.
+
 ## Build (nix devShell)
 `cargo build` (regenerates `Cargo.lock` — judge added `sha1`/`sha2`) →
 `cargo fmt` → `nix flake check` → commit `Cargo.lock`.

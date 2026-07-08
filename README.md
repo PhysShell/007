@@ -59,6 +59,9 @@ judge), memory layer, policy/ignore engine, container egress hardening.
 
 Security layers (what's real, what's absent, and the triggers for
 Cedar/Verus/Kani/fuzz plus the `run`/gate sandbox slot): `docs/security-layers.md`.
+Zero Trust roadmap (phased plan to close that gap, cross-repo division of labor
+with Own.NET/Sandboy/OwnAudit, the CUE policy-authoring decision):
+`docs/zero-trust-framework.md`.
 Verification harnesses (proptest/fuzz/Kani) + lints: `docs/verification.md`.
 Performance (007 is subprocess-bound — the only lever is parallel judge calls):
 `docs/performance.md`.
