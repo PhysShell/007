@@ -12,10 +12,13 @@ name = "qodec"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 serde_json = "1"
 anyhow = "1"
 tiktoken-rs = "0.7"
+# Blocking HTTP for the perplexity gate (same choice as docs/fastcontext.md:
+# no async runtime for one local call).
+ureq = "2"
 
 [dev-dependencies]
 proptest = "1"

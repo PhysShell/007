@@ -8,20 +8,26 @@ pub mod container;
 pub mod fold;
 pub mod meter;
 pub mod mine;
+pub mod ppl;
+pub mod sam;
 pub mod toon;
 
 use anyhow::{bail, Result};
 
 use crate::alias::Alphabet;
 use crate::meter::TokenMeter;
-use crate::mine::MineOptions;
+use crate::mine::{MineOptions, MinerKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodecKind {
     Mine,
+    /// `mine` with suffix-automaton candidate discovery: every repeated
+    /// substring, any boundary. Same container, same decode.
+    Deep,
     Fold,
     Toon,
-    /// Pipeline: `toon` (JSON) or `fold` (text), then `mine` over the result.
+    /// Pipeline: `toon` (JSON) or `fold` (text), then the better of the two
+    /// miners over the result.
     Squeeze,
 }
 
@@ -29,6 +35,7 @@ impl CodecKind {
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "mine" => Some(Self::Mine),
+            "deep" => Some(Self::Deep),
             "fold" => Some(Self::Fold),
             "toon" => Some(Self::Toon),
             "squeeze" => Some(Self::Squeeze),
@@ -39,6 +46,7 @@ impl CodecKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::Mine => "mine",
+            Self::Deep => "deep",
             Self::Fold => "fold",
             Self::Toon => "toon",
             Self::Squeeze => "squeeze",
@@ -51,8 +59,14 @@ pub fn encode(text: &str, kind: CodecKind, meter: &dyn TokenMeter, alphabet: Alp
         alphabet,
         ..MineOptions::default()
     };
+    let deep_opts = MineOptions {
+        alphabet,
+        miner: MinerKind::Deep,
+        ..MineOptions::default()
+    };
     match kind {
         CodecKind::Mine => mine::encode(text, meter, &mine_opts),
+        CodecKind::Deep => mine::encode(text, meter, &deep_opts),
         CodecKind::Fold => fold::encode(text, meter),
         CodecKind::Toon => toon::encode(text, meter),
         CodecKind::Squeeze => {
@@ -72,8 +86,15 @@ pub fn encode(text: &str, kind: CodecKind, meter: &dyn TokenMeter, alphabet: Alp
                 fold::encode(text, meter)
             };
             // Mine over the full stage-1 container (headers, legends, rows —
-            // repeated paths inside cells are fair game).
-            let stage2 = mine::encode(&stage1, meter, &mine_opts);
+            // repeated paths inside cells are fair game); keep whichever
+            // miner measures cheaper.
+            let stage2 = [
+                mine::encode(&stage1, meter, &mine_opts),
+                mine::encode(&stage1, meter, &deep_opts),
+            ]
+            .into_iter()
+            .min_by_key(|artifact| meter.count(artifact))
+            .unwrap_or_else(|| stage1.clone());
             let best = if meter.count(&stage2) < meter.count(&stage1) {
                 stage2
             } else {

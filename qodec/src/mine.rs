@@ -31,12 +31,28 @@ const MAX_CANDIDATE_CHARS: usize = 200;
 /// Exact-measure at most this many top-ranked candidates per round.
 const SCORE_BUDGET: usize = 40;
 
+/// Candidate discovery strategy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MinerKind {
+    /// Word-boundary n-grams + separator-aligned prefixes. Fast, misses
+    /// repeats that straddle boundaries.
+    Words,
+    /// Word candidates ∪ suffix-automaton candidates (`sam.rs`), half the
+    /// probe budget each. Pure SAM ranking drowns the budget in nested
+    /// variants of one giant repeat (measured: stack traces fell from +18.8%
+    /// to +6.8% cold); the union keeps word-tally diversity *and* the
+    /// boundary-straddling repeats only the automaton can see. CPU-heavier —
+    /// the classic BWT-lineage trade.
+    Deep,
+}
+
 pub struct MineOptions {
     pub alphabet: Alphabet,
     /// A dictionary entry is committed only when measured net gain (tokens)
     /// exceeds this.
     pub min_gain: i64,
     pub max_entries: usize,
+    pub miner: MinerKind,
 }
 
 impl Default for MineOptions {
@@ -45,6 +61,7 @@ impl Default for MineOptions {
             alphabet: Alphabet::Auto,
             min_gain: 0,
             max_entries: 64,
+            miner: MinerKind::Words,
         }
     }
 }
@@ -65,7 +82,7 @@ pub fn encode(text: &str, meter: &dyn TokenMeter, opts: &MineOptions) -> String 
         };
 
         let mut best: Option<(String, String, i64)> = None; // (phrase, replaced, gain)
-        for phrase in ranked_candidates(&current) {
+        for phrase in ranked_candidates(&current, opts.miner) {
             let replaced = current.replace(&phrase, &alias);
             let legend_line = format!("{alias}={phrase}\n");
             let gain =
@@ -129,7 +146,25 @@ pub fn decode(c: &Container) -> Result<String> {
 ///   repeat as *prefixes* (`src/a/b/One.cs` vs `src/a/b/Two.cs`), which whole
 ///   words never expose. This is the cheap end of the BWT/suffix-array
 ///   insight: repetition ignores token boundaries, so the miner must too.
-fn ranked_candidates(text: &str) -> Vec<String> {
+fn ranked_candidates(text: &str, miner: MinerKind) -> Vec<String> {
+    if miner == MinerKind::Deep {
+        let mut merged = word_candidates(text, SCORE_BUDGET / 2);
+        for c in crate::sam::repeated_substrings(
+            text,
+            MIN_CANDIDATE_CHARS,
+            MAX_CANDIDATE_CHARS,
+            SCORE_BUDGET / 2,
+        ) {
+            if !merged.contains(&c.text) {
+                merged.push(c.text);
+            }
+        }
+        return merged;
+    }
+    word_candidates(text, SCORE_BUDGET)
+}
+
+fn word_candidates(text: &str, budget: usize) -> Vec<String> {
     let mut tally: HashMap<&str, usize> = HashMap::new();
 
     for line in text.split('\n') {
@@ -166,7 +201,7 @@ fn ranked_candidates(text: &str) -> Vec<String> {
     ranked.sort_by(|a, b| (b.1 * b.0.len(), b.0).cmp(&(a.1 * a.0.len(), a.0)));
     ranked
         .into_iter()
-        .take(SCORE_BUDGET)
+        .take(budget)
         .map(|(span, _)| span.to_string())
         .collect()
 }
