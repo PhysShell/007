@@ -94,13 +94,24 @@ pub fn decode(c: &Container) -> Result<String> {
         .find(|(name, _)| *name == sep_name)
         .with_context(|| format!("unknown toon separator {sep_name:?}"))?;
 
-    let mut lines = c.body.split('\n');
+    // Only the final `\n` produces a non-row element; a `[{}, {}, ...]`
+    // array of empty objects legitimately encodes as empty row lines, so
+    // drop exactly one trailing empty element instead of skipping blanks.
+    let mut lines: Vec<&str> = c.body.split('\n').collect();
+    if lines.last() == Some(&"") {
+        lines.pop();
+    }
+    let mut lines = lines.into_iter();
     let keys_line = lines.next().context("toon body missing keys line")?;
     let keys: Vec<String> = serde_json::from_str(keys_line).context("parsing toon keys line")?;
 
     let mut rows: Vec<Value> = Vec::new();
     for line in lines {
-        if line.is_empty() {
+        if keys.is_empty() {
+            if !line.is_empty() {
+                bail!("toon row for empty key set must be empty: {line:?}");
+            }
+            rows.push(Value::Object(serde_json::Map::new()));
             continue;
         }
         let cells: Vec<&str> = line.split(sep).collect();
@@ -118,6 +129,12 @@ pub fn decode(c: &Container) -> Result<String> {
             obj.insert(key.clone(), cell_value);
         }
         rows.push(Value::Object(obj));
+    }
+    if let Some(expected) = c.param("rows") {
+        let expected: usize = expected.parse().context("parsing rows param")?;
+        if rows.len() != expected {
+            bail!("toon decoded {} rows, header says {expected}", rows.len());
+        }
     }
     serde_json::to_string(&Value::Array(rows)).context("serializing decoded toon")
 }

@@ -107,6 +107,29 @@ fn toon_roundtrips_uniform_array_semantically() -> Result<()> {
 }
 
 #[test]
+fn toon_preserves_empty_object_rows() -> Result<()> {
+    // Codex review finding on PR #26: `[{}, {}, ...]` encodes as empty row
+    // lines after the `[]` keys line; decode must not confuse them with the
+    // trailing-newline artifact and collapse the array to `[]`.
+    let meter = Bpe::o200k()?;
+    let text = serde_json::to_string(&vec![serde_json::json!({}); 120])?;
+    let encoded = encode(&text, CodecKind::Toon, &meter, Alphabet::Auto);
+    let back = decode(&encoded)?;
+    let a: serde_json::Value = serde_json::from_str(&back)?;
+    let b: serde_json::Value = serde_json::from_str(&text)?;
+    anyhow::ensure!(a == b, "empty-object rows must survive: {back:?}");
+
+    // Pin the decode path directly, independent of encode acceptance.
+    let container = "%q1 toon sep=pipe rows=3\n%q1 body\n[]\n\n\n\n";
+    let direct = decode(container)?;
+    anyhow::ensure!(
+        direct == "[{},{},{}]",
+        "hand-built empty-rows container decoded to {direct:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn toon_falls_back_on_non_uniform_json() -> Result<()> {
     let meter = Bpe::o200k()?;
     let text = r#"[{"a":1},{"a":1,"b":2}]"#;
