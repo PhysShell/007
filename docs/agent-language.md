@@ -667,7 +667,7 @@ Required metadata:
 
 ## Gates
 
-Gate manifests live at `.007/gate.toml` in the target repo and follow 007's implemented schema (`src/gate.rs`): a `[[gate]]` table array with `name` and `cmd`, plus optional `required` (default true) and `env` (`"windows"` runs the step on the Windows host).
+Gate manifests live at `.007/gate.toml` in the target repo and follow 007's implemented schema (`src/gate.rs`): a `[[gate]]` table array with `name` and `cmd`, plus optional `required` (default true) and `env`. Caveat on `env = "windows"`: today's runner does **not** execute such steps — it skips them loudly as Phase 2 and records `NOT_APPLICABLE` with `required: false`, which `Verdict::reduce` ignores. Until the Windows host path lands, a "required" Windows gate is absent from the effective verdict, so don't treat the examples below as enforced end-to-end.
 
 ### OwnAudit gate example
 

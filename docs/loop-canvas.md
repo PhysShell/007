@@ -55,7 +55,11 @@ Fields **4 (Actions)** and **8 (Observability)** both point at the same gap: gat
 steps are `bash -lc` under `bypassPermissions` with no confinement, and no
 evidence that any confinement ran. `docs/security-layers.md` marks this as 007's
 sharpest present-day trust boundary — the "sandbox slot" is here in `run`/gate,
-not in `judge` (already closed-world).
+not in `judge`. (The claude judge path is closed-world — read-only tools plus
+no-network; the codex path is `--sandbox read-only`, which denies writes but
+does not close network egress (`src/judge.rs`) — so for untrusted source the
+codex-backed judge still has an exfiltration channel and belongs on the same
+sandbox roadmap.)
 
 The enforcement tool now exists as a sibling in Own.NET: **`sandboy`** — a
 Landlock + seccomp *wrap-the-child* confinement (no root, no daemon), invoked as
