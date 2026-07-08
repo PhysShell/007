@@ -90,6 +90,10 @@ doc), `docs/agent-memory-layer.md` (`o7 memory` / `o7 context`),
 `docs/CFR.md` (CFR/game-theoretic scheduling survey),
 `docs/fastcontext.md`, `docs/omnigraph.md`.
 
+Working experiment: **`qodec/`** — token-aware lossless codec lab (measured
+context encoding for agent payloads; design record and bench numbers in
+`docs/token-codec.md`).
+
 Sibling project (separate, in Own.NET): **sandboy** — a Landlock + seccomp
 *wrap-the-child* confinement (`sandboy run --policy step.toml -- <cmd>`), the
 least-privilege-per-command layer for the `run`/gate sandbox slot that
