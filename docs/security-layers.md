@@ -18,7 +18,7 @@ missing layer worth building.
 | **path confinement + `canonicalize`** | confused-deputy via *arguments* (`../../../etc/passwd`, symlinks) | ✅ `judge` — `repo.join(file).canonicalize()` then `starts_with(&repo)`, skip-with-warning. Canonicalize **before** the prefix check is load-bearing (else symlink bypass). Residual **TOCTOU** between canonicalize and open remains — only a real sandbox layer closes it, not a string check. |
 | **stdin instead of argv** | argv is world-readable (`/proc/*/cmdline`, `ps`), hits shell history/logs, has a size limit | ✅ `judge` — the prompt (whole source file) goes via piped stdin, not `-p <arg>`. |
 | **worktree isolation** | cleanup + *convention*, **not** a boundary | ⚠️ `run` — `worktree.rs` runs the agent/gate with `current_dir(worktree)`. That sets the process **cwd**, which is *not* confinement: an unsandboxed command can still write outside the tree via absolute or `..` paths, read anything the user can, and reach the network. It helps well-behaved tools stay put and makes teardown a `git worktree remove` — it does **not** make the main checkout untouchable against untrusted code. |
-| **syscall sandbox (WASI/Wasmtime, container)** | the only true deny-by-default *boundary* (capability I/O) | ❌ **absent in 007.** The agent runs under `bypassPermissions` with no syscall confinement. Wasmtime lives in the **parked, separate** sibling `sandboy` (Own.NET), not here. |
+| **syscall sandbox (Landlock+seccomp; container/VM)** | the only true deny-by-default *boundary* (capability I/O) | ❌ **absent from 007 today**, but the enforcement tool now exists: the sibling `sandboy` (Own.NET) is a Landlock + seccomp *wrap-the-child* confinement — `sandboy run --policy step.toml -- bash -lc '<step>'`, no root, no daemon, both survive `execve` so the whole process tree inherits the cage — built for exactly this `run`/gate slot. Not yet wired (the hook is a per-step `sandbox_policy` on `GateStep`). Host-*escape* resistance is still a VM (Firecracker, Layer 1); Landlock+seccomp is defense-in-depth inside it. (Earlier notes framed this row as WASI/Wasmtime — that direction was dropped; `sandboy` is Landlock+seccomp.) |
 | **typed tool surface (MCP schemas)** | arg validation before execution | ❌ N/A — 007 consumes external CLIs (`claude`, `git`, `bash`); it does not publish its own MCP tools. |
 | **structured audit log** | forensics / replay (not defense) | ✅ `record.rs` → `meta.json`, `diff.patch`, `agent.stdout`, `gate/*.log`. |
 
@@ -38,7 +38,12 @@ sharpest present-day trust boundary. The real "sandbox slot" is here in
 
 Decision needed (deferred until untrusted target repos are in scope): trust model
 for `.007/gate.toml` and the agent — container egress hardening (already on the
-deferred list) or a WASI boundary (the sandboy direction) belong here.
+deferred list) or a syscall-confinement boundary (the `sandboy` direction —
+Landlock+seccomp per step today, Firecracker for true escape resistance) belong
+here. See `docs/microvm-isolation.md` for a fuller assessment and phased roadmap
+(policy-only first, container/gVisor prototype, microVM backend, auth broker).
+The nine-field framing of this slot — Actions/Limits/Observability at the gate,
+and the `sandboy` wiring contract — is in `docs/loop-canvas.md`.
 
 ## Verification: buy it, don't build it
 
@@ -80,4 +85,6 @@ effort (now wired — see `docs/verification.md` for how to run each):
 - The reason is **not** "Wasmtime + Cedar already secure the stack" — neither is
   in 007. It is that 007 is glue, so property/fuzz/bounded-model testing of the
   parsers and pure functions is the whole ROI, and the sandbox layer is **not yet
-  built** — its place is `run`/gate, not `judge`.
+  built** — its place is `run`/gate, not `judge`. The enforcement tool for that
+  slot (`sandboy`, Landlock+seccomp) now exists in Own.NET but is not yet wired;
+  see `docs/loop-canvas.md`.
