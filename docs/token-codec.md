@@ -83,17 +83,34 @@ pipeline can be applied blindly.
 
 ## Measured results (o200k, auto alphabet, corpus in `qodec/corpus/`)
 
+With prefix-aware mining (see "BWT lineage" below):
+
 | sample | best codec | cold Δ | warm Δ | roundtrip |
 |---|---|---:|---:|---|
-| build-log.txt (msbuild, repeated warnings) | squeeze | **+40.4%** | +52.5% | byte |
-| stacktrace.txt (.NET async spam) | mine | +16.9% | **+47.5%** | byte |
-| findings.json (12 uniform findings) | squeeze | +24.6% | +37.8% | semantic |
-| git-diff.txt | mine | +7.3% | +32.6% | byte |
-| rg-output.txt | mine | +4.5% | +15.2% | byte |
+| build-log.txt (msbuild, repeated warnings) | squeeze | **+41.9%** | +53.0% | byte |
+| stacktrace.txt (.NET async spam) | mine | +18.0% | **+52.7%** | byte |
+| findings.json (12 uniform findings) | squeeze | +31.1% | +46.7% | semantic |
+| rg-output.txt | mine | +19.3% | +34.2% | byte |
+| git-diff.txt | mine | +7.9% | +23.6% | byte |
 | prose.md (unique text — control) | any | −4.2% (raw fallback) | 0.0% | byte |
 
-Cross-check under `cl100k` reproduces the ordering (squeeze on build log
-+39.1% cold / +51.3% warm), so the effect is not one tokenizer's quirk.
+Cross-check under `cl100k` reproduces the ordering, so the effect is not one
+tokenizer's quirk.
+
+### Real payloads (gathered from the sibling repos and a live conversation)
+
+| payload | tok in | cold Δ | warm Δ |
+|---|---:|---:|---:|
+| verbose cargo build log (this crate) | 1323 | +20.3% | **+50.0%** |
+| grep over Own.NET `rust/` (150 hits) | 3089 | **+31.8%** | +36.1% |
+| `find` file listing over Own.NET (200 paths) | 3070 | +27.2% | +27.9% |
+| ChatGPT conversation transcript (30 KB slice) | 5861 | +15.1% | +37.0% |
+| Own.NET `git diff --stat` (15 commits) | 1436 | +5.6% | +9.4% |
+| Own.NET `git diff` (docs-heavy, mostly prose) | 4644 | +2.4% | +5.8% |
+| OwnAudit oracle findings.json (tiny, nested) | 294 | raw fallback | 0.0% |
+
+Pattern: tool output and transcripts (what agents actually exchange) sit in
+the +20–50% band; unique prose and tiny payloads honestly fall back.
 
 **The alphabet finding.** The same bench with `--alphabet sigil` (ASCII-style
 `§0`, `§1` — 2 tokens each under o200k) collapses the wins: stacktrace drops
@@ -127,19 +144,65 @@ Reading the two columns:
   (logs, traces, listings, findings, briefs), not for spans the agent must
   reproduce exactly.
 
+## BWT lineage — where the remaining headroom lives
+
+Byte-level compressors put a ceiling on how much repetition exists at all:
+on the real payloads above, `bzip2 -9` removes 65–81% of *bytes* while the
+miner extracts 5–50% of *tokens*. The ceiling is not reachable in token
+space — BPE already ate the easy entropy, the model must still read the
+output, and every alias occurrence costs ≥1 token — but the *gap pattern*
+says where to dig.
+
+The BWT insight (group by context; repetition ignores human-visible
+boundaries) transplants to token space as: **candidate discovery must not be
+limited to word boundaries.** First installment is in: `segment_prefixes`
+mines separator-aligned prefixes *inside* words (`rust/src/`, `Legacy.UI.`,
+namespace chains), which took the `find` listing from raw-fallback to +27%
+and real grep output from +5.6% to +31.8% cold. The rest of the ladder:
+
+- a proper suffix-array/-automaton miner over raw substrings (all repeats,
+  any boundary, CPU-heavier — the classic ratio-vs-time trade);
+- what does *not* transplant: BWT's entropy-coding half (MTF/RLE/Huffman
+  over the transform). Its output is byte soup the model cannot read; that
+  family is transport-layer compression, where the decoder is a machine and
+  prompt tokens are unaffected. The boundary rule stays: **the model reads
+  substitution + structure; machines read entropy codes.**
+- the nncp/LLMZip end of that literature (LM-as-probability-model +
+  arithmetic coding) is likewise transport-only, but points at a useful
+  tool: a small local LM's perplexity over the encoded body is a cheap
+  *comprehension proxy* — a natural pre-gate before spending real judge
+  runs (FastContext, `docs/fastcontext.md`, could serve).
+
+## Keeping the model unconfused (design rules for live use)
+
+1. **One stable notation, taught once.** The container grammar and alias
+   style live in the cached preamble with 2–3 worked decode examples;
+   per-message novelty is limited to legend *entries*, never new syntax.
+2. **Mnemonic aliases.** The glyph pool is not random: `警`=warning,
+   `错`=error, `码`=code, `路`=path. Assigning meaning-adjacent glyphs to
+   phrases (warning lines get `警`…) turns the alias from an opaque symbol
+   into a hint. Unmeasured yet — candidate for the A/B.
+3. **Never encode what the model must reproduce.** IDs, hashes, code spans
+   to be edited/quoted travel raw. The codec is for evidence payloads.
+4. **One-hop indirection only.** Alias → phrase, never alias → alias
+   (enforced by the reserved-chars design).
+5. **Read-side first.** The model only *reads* the notation; it never has
+   to write it until the read side is proven.
+6. **Cap the legend.** 64 entries is a lab bound; live use should probe the
+   savings-vs-entries curve and likely stop near 16–24 per message.
+
 ## Next steps (in rough order of information gained per effort)
 
 1. **Comprehension A/B** — encoded vs raw payloads through `o7 judge` on the
    FP-triage rubric; measure verdict agreement. This is the go/no-go gate.
+   `qodec probe` emits the artifact; FastContext perplexity can pre-filter.
 2. **Wire as an output filter** — `o7` already harvests `agent.stdout` and
    feeds judge prompts; `qodec encode --codec squeeze` is a one-line insert
    at the prompt-assembly seam (and a PostToolUse hook candidate in Claude
    Code, where tool output is the dominant repetitive payload).
-3. **Prefix-aware mining** — word-boundary n-grams miss shared *prefixes*
-   inside long path words (`…/ViewModels/UserEditorViewModel.cs` vs
-   `…/ViewModels/ReportViewModel.cs`), visible as rg-output's modest +4.5%.
-   A suffix-automaton miner over raw substrings should roughly double wins
-   on path-heavy output.
+3. **Suffix-automaton mining** — finish the BWT transplant: all repeated
+   substrings, any boundary, token-scored as today. Expect the biggest wins
+   on path-heavy and log payloads (see the bzip2 gap table).
 4. **Session dictionaries** — persist a per-repo legend (top paths, type
    names, frame prefixes) into the cached preamble once, so *every* message
    is warm-path; `mine` then only handles payload-local repetition.

@@ -118,10 +118,17 @@ pub fn decode(c: &Container) -> Result<String> {
     Ok(out)
 }
 
-/// Collect repeated word-boundary spans, rank by a cheap (count × len) proxy,
-/// return up to `SCORE_BUDGET` for exact measurement. Occurrence counts here
-/// are approximate (per-line n-gram tallies); the miner's commit decision
-/// re-measures the real replacement, so a bad rank only wastes a probe.
+/// Collect repeated spans, rank by a cheap (count × len) proxy, return up to
+/// `SCORE_BUDGET` for exact measurement. Occurrence counts here are
+/// approximate (per-line tallies); the miner's commit decision re-measures
+/// the real replacement, so a bad rank only wastes a probe.
+///
+/// Two candidate families:
+/// * word-boundary n-grams (exact slices between word starts/ends);
+/// * **segment prefixes inside words** — paths, namespaces and identifiers
+///   repeat as *prefixes* (`src/a/b/One.cs` vs `src/a/b/Two.cs`), which whole
+///   words never expose. This is the cheap end of the BWT/suffix-array
+///   insight: repetition ignores token boundaries, so the miner must too.
 fn ranked_candidates(text: &str, reserved: &HashSet<char>) -> Vec<String> {
     let mut tally: HashMap<&str, usize> = HashMap::new();
 
@@ -145,6 +152,11 @@ fn ranked_candidates(text: &str, reserved: &HashSet<char>) -> Vec<String> {
                     break;
                 }
                 *tally.entry(span).or_insert(0) += 1;
+                if i == j {
+                    for prefix in segment_prefixes(span) {
+                        *tally.entry(prefix).or_insert(0) += 1;
+                    }
+                }
             }
         }
     }
@@ -159,6 +171,17 @@ fn ranked_candidates(text: &str, reserved: &HashSet<char>) -> Vec<String> {
         .take(SCORE_BUDGET)
         .map(|(span, _)| span.to_string())
         .collect()
+}
+
+/// Prefixes of a word that end right after a separator (`/`, `\`, `.`, `:`),
+/// e.g. `rust/src/lib.rs:12:` → `rust/`, `rust/src/`, `rust/src/lib.`, ….
+/// These are exactly the shared-prefix repeats that whole-word candidates
+/// miss on file listings, greps, stack frames and namespaces.
+fn segment_prefixes(word: &str) -> impl Iterator<Item = &str> {
+    word.char_indices()
+        .filter(|(_, ch)| matches!(ch, '/' | '\\' | '.' | ':'))
+        .filter_map(move |(idx, ch)| word.get(..idx + ch.len_utf8()))
+        .filter(|p| p.len() >= MIN_CANDIDATE_CHARS && p.len() <= MAX_CANDIDATE_CHARS)
 }
 
 /// Byte ranges of whitespace-delimited words (char-boundary safe).
