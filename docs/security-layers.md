@@ -38,7 +38,9 @@ sharpest present-day trust boundary. The real "sandbox slot" is here in
 
 Decision needed (deferred until untrusted target repos are in scope): trust model
 for `.007/gate.toml` and the agent — container egress hardening (already on the
-deferred list) or a WASI boundary (the sandboy direction) belong here.
+deferred list) or a WASI boundary (the sandboy direction) belong here. See
+`docs/microvm-isolation.md` for a fuller assessment and phased roadmap
+(policy-only first, container/gVisor prototype, microVM backend, auth broker).
 
 ## Verification: buy it, don't build it
 

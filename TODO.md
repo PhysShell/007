@@ -52,7 +52,10 @@ Domain hands: `--repo <STS source root>` + `--findings <STS-210 findings.json>` 
 ## Backlog (deferred — design with real data)
 - `o7 run` first real exercise on an Own.NET coding task.
 - consensus (claude+codex race + cross-family judge), memory layer.
-- OwnAudit Windows gates (`env: windows`), container egress hardening.
+- OwnAudit Windows gates (`env: windows`), container egress hardening —
+  assessed in `docs/microvm-isolation.md` (Phase 1: policy/diff-contract, no
+  VM, blocks on nothing; Phase 3: `o7 run --isolation microvm` once an
+  untrusted target repo's `gate.toml` is actually in scope).
 
 ## Zero Trust backlog (`docs/zero-trust-framework.md` §16 — full rationale there)
 
