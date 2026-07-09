@@ -145,6 +145,34 @@ fn sigil_mode_commits_multiple_entries() -> Result<()> {
 }
 
 #[test]
+fn deep_beats_words_on_boundary_straddling_repeats() -> Result<()> {
+    // The suffix-automaton miner's reason to exist: repeats that no word or
+    // separator boundary exposes — here a shared stem *inside* snake_case
+    // identifiers that differ only in their numeric tail.
+    let meter = Bpe::o200k()?;
+    let mut text = String::new();
+    for i in 0..20 {
+        text.push_str(&format!(
+            "measurement_batch_processor_run{i} emitted checkpoint_fingerprint_hash{i}\n"
+        ));
+    }
+    let words = encode(&text, CodecKind::Mine, &meter, Alphabet::Auto);
+    let deep = encode(&text, CodecKind::Deep, &meter, Alphabet::Auto);
+    anyhow::ensure!(deep.starts_with("%q1 mine"), "expected mine container");
+    anyhow::ensure!(
+        meter.count(&deep) < meter.count(&words),
+        "deep ({}) must beat words ({}) on straddling repeats",
+        meter.count(&deep),
+        meter.count(&words)
+    );
+    roundtrip_bytes(&text, CodecKind::Deep, &meter)?;
+    // Hostile shapes: CRLF (candidates must not swallow the `\r`), sigils
+    // in input, alias-adjacent digits.
+    let hostile = "alpha_beta_gamma_delta7 §00 tail\r\nalpha_beta_gamma_delta8 tail\r\n".repeat(4);
+    roundtrip_bytes(&hostile, CodecKind::Deep, &meter)
+}
+
+#[test]
 fn squeeze_never_loses_to_the_raw_floor() -> Result<()> {
     // CodeRabbit review on PR #26: squeeze compared stage2 only against
     // stage1, so mining a raw container's overhead could beat stage1 while
@@ -251,7 +279,7 @@ proptest! {
     #[test]
     fn prop_mine_fold_squeeze_roundtrip(text in "[ -~\n§¤码引]{0,400}") {
         let meter = Approx;
-        for kind in [CodecKind::Mine, CodecKind::Fold, CodecKind::Squeeze] {
+        for kind in [CodecKind::Mine, CodecKind::Deep, CodecKind::Fold, CodecKind::Squeeze] {
             let encoded = encode(&text, kind, &meter, Alphabet::Auto);
             let back = decode(&encoded).map_err(|e| {
                 TestCaseError::fail(format!("decode error for {}: {e}", kind.label()))

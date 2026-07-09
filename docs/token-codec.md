@@ -74,12 +74,17 @@ pipeline can be applied blindly.
   *exactly measured* (re-tokenize the actual replacement, subtract the legend
   line), and only positive-gain entries commit. Aliases come from a probed
   pool; chars are provably absent from the input, so decode is collision-free.
+- **`deep`** — `mine` with the full-strength candidate miner: word candidates
+  ∪ suffix-automaton candidates (`sam.rs`, every repeated substring at any
+  boundary), half the probe budget each. Same container, same decode;
+  ~15–20× the encode CPU — the BWT-lineage ratio-vs-time trade, live.
 - **`fold`** — RLE for consecutive identical lines (`%q1 xN`), CRLF-safe,
   with escaping for hostile `%q1`-shaped input lines.
 - **`toon`** — uniform JSON array → keys-once table with a probed separator;
   roundtrip is semantic (Value-equal canonical JSON), scope deliberately
   narrow (top-level array, identical flat keys) with honest fallback.
-- **`squeeze`** — `toon` (JSON) or `fold` (text), then `mine` over the result.
+- **`squeeze`** — `toon` (JSON) or `fold` (text), then the better of the two
+  miners over the result.
 
 ## Measured results (o200k, auto alphabet, corpus in `qodec/corpus/`)
 
@@ -161,24 +166,52 @@ says where to dig.
 
 The BWT insight (group by context; repetition ignores human-visible
 boundaries) transplants to token space as: **candidate discovery must not be
-limited to word boundaries.** First installment is in: `segment_prefixes`
-mines separator-aligned prefixes *inside* words (`rust/src/`, `Legacy.UI.`,
-namespace chains), which together with nested dictionary entries took the
-`find` listing from raw-fallback to +44.9% and real grep output from +5.6%
-to +40.8% cold. The rest of the ladder:
+limited to word boundaries.** The ladder, as climbed:
 
-- a proper suffix-array/-automaton miner over raw substrings (all repeats,
-  any boundary, CPU-heavier — the classic ratio-vs-time trade);
-- what does *not* transplant: BWT's entropy-coding half (MTF/RLE/Huffman
-  over the transform). Its output is byte soup the model cannot read; that
-  family is transport-layer compression, where the decoder is a machine and
-  prompt tokens are unaffected. The boundary rule stays: **the model reads
-  substitution + structure; machines read entropy codes.**
-- the nncp/LLMZip end of that literature (LM-as-probability-model +
-  arithmetic coding) is likewise transport-only, but points at a useful
-  tool: a small local LM's perplexity over the encoded body is a cheap
-  *comprehension proxy* — a natural pre-gate before spending real judge
-  runs (FastContext, `docs/fastcontext.md`, could serve).
+1. **Separator prefixes** (`segment_prefixes`): prefixes *inside* words —
+   `rust/src/`, `Legacy.UI.`, namespace chains. Together with nested
+   dictionary entries this took the `find` listing from raw-fallback to
+   +44.9% and real grep output from +5.6% to +40.8% cold.
+2. **Suffix automaton** (`sam.rs`, the `deep` codec): every repeated
+   substring, any boundary, O(n) states. Lab lesson learned the honest way:
+   *pure* SAM ranking drowns the probe budget in nested variants of one
+   giant repeat (stack traces fell from +18.8% to +6.8% cold; a 30 KB
+   transcript fell back entirely). The fix is diversity, not depth — union
+   the word-tally and SAM candidate families, half the budget each. Hybrid
+   `deep` then wins or ties everywhere:
+
+   | payload | `mine` cold | `deep` cold | `deep` warm | bzip2 byte ceiling |
+   |---|---:|---:|---:|---:|
+   | grep over Own.NET | +40.8% | **+51.3%** | +60.2% | 79% |
+   | `find` listing | +44.9% | **+48.6%** | +54.5% | 81% |
+   | cargo build log | +20.6% | **+36.1%** | +67.4% | 65% |
+   | findings.json (synthetic) | +3.0% | **+34.4%** | +66.0% | — |
+   | git-diff (synthetic) | +8.1% | **+17.9%** | +40.7% | — |
+
+   JSON is the sleeper win: `","file":"src/` -style repeats straddle every
+   word boundary, invisible to the word miner, trivial for the automaton.
+3. What does *not* transplant: BWT's entropy-coding half (MTF/RLE/Huffman
+   over the transform). Its output is byte soup the model cannot read; that
+   family is transport-layer compression, where the decoder is a machine and
+   prompt tokens are unaffected. The boundary rule stays: **the model reads
+   substitution + structure; machines read entropy codes.**
+
+## Perplexity gate (`qodec ppl`) — compression = prediction, inverted
+
+The nncp/LLMZip end of the literature uses an LM's next-token predictions to
+compress; flipped, the same quantity is a *comprehension proxy*: if a small
+local LM finds the encoded body barely harder to predict than the raw text,
+a frontier model will very likely read it fine.
+
+`qodec ppl -i payload.txt --codec deep --url http://127.0.0.1:8000/v1/completions`
+encodes the payload, scores raw and encoded under an OpenAI-compatible
+legacy-completions endpoint (`echo=true, max_tokens=0, logprobs=0` — vLLM
+implements this contract), and reports the perplexity ratio with a
+three-band verdict (≤1.5 likely-readable / ≤3 borderline / else
+model-hostile). This is where FastContext (`docs/fastcontext.md`) plugs in:
+served locally, it makes the gate free, and only borderline artifacts spend
+real `o7 judge` runs. The bands are heuristic seeds — calibrate them against
+actual judge-run agreement before trusting them as a gate.
 
 ## Keeping the model unconfused (design rules for live use)
 
@@ -200,20 +233,21 @@ to +40.8% cold. The rest of the ladder:
 
 ## Next steps (in rough order of information gained per effort)
 
+Done from the previous edition of this list: suffix-automaton mining (the
+`deep` codec, table above) and the perplexity pre-gate (`qodec ppl`).
+
 1. **Comprehension A/B** — encoded vs raw payloads through `o7 judge` on the
    FP-triage rubric; measure verdict agreement. This is the go/no-go gate.
-   `qodec probe` emits the artifact; FastContext perplexity can pre-filter.
+   `qodec probe` emits the artifact; `qodec ppl` pre-filters, and the A/B
+   results calibrate its verdict bands.
 2. **Wire as an output filter** — `o7` already harvests `agent.stdout` and
    feeds judge prompts; `qodec encode --codec squeeze` is a one-line insert
    at the prompt-assembly seam (and a PostToolUse hook candidate in Claude
    Code, where tool output is the dominant repetitive payload).
-3. **Suffix-automaton mining** — finish the BWT transplant: all repeated
-   substrings, any boundary, token-scored as today. Expect the biggest wins
-   on path-heavy and log payloads (see the bzip2 gap table).
-4. **Session dictionaries** — persist a per-repo legend (top paths, type
+3. **Session dictionaries** — persist a per-repo legend (top paths, type
    names, frame prefixes) into the cached preamble once, so *every* message
    is warm-path; `mine` then only handles payload-local repetition.
-5. **Output-side notation** — the reverse direction: let the subagent *reply*
+4. **Output-side notation** — the reverse direction: let the subagent *reply*
    in the legend's notation and expand deterministically outside the model.
    Output tokens cost ~5× input; this is where the same trick pays most, and
    nothing about the container is input-specific.

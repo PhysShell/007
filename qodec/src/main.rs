@@ -33,6 +33,9 @@ enum Cmd {
     Aliases(AliasArgs),
     /// Emit a paste-ready comprehension probe: legend brief + encoded payload.
     Probe(EncodeArgs),
+    /// Perplexity gate: score raw vs encoded under a local LM endpoint —
+    /// cheap comprehension proxy before judge runs. See docs/token-codec.md.
+    Ppl(PplArgs),
 }
 
 #[derive(Args)]
@@ -49,7 +52,7 @@ struct IoArgs {
 struct EncodeArgs {
     #[command(flatten)]
     io: IoArgs,
-    /// mine | fold | toon | squeeze
+    /// mine | deep | fold | toon | squeeze
     #[arg(long, default_value = "squeeze")]
     codec: String,
     /// auto | glyph | sigil
@@ -83,6 +86,27 @@ struct AliasArgs {
     top: usize,
 }
 
+#[derive(Args)]
+struct PplArgs {
+    /// Input file (stdin when omitted).
+    #[arg(short, long)]
+    input: Option<PathBuf>,
+    /// mine | deep | fold | toon | squeeze
+    #[arg(long, default_value = "squeeze")]
+    codec: String,
+    #[arg(long, default_value = "auto")]
+    alphabet: String,
+    #[arg(long, default_value = "o200k")]
+    meter: String,
+    /// OpenAI-compatible legacy completions endpoint with echo+logprobs
+    /// (vLLM; FastContext served locally). Env: QODEC_PPL_URL.
+    #[arg(long, env = "QODEC_PPL_URL")]
+    url: String,
+    /// Served model name. Env: QODEC_PPL_MODEL.
+    #[arg(long, env = "QODEC_PPL_MODEL", default_value = "fastcontext")]
+    model: String,
+}
+
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Encode(a) => cmd_encode(&a, false),
@@ -93,7 +117,41 @@ fn main() -> Result<()> {
         }
         Cmd::Bench(a) => cmd_bench(&a),
         Cmd::Aliases(a) => cmd_aliases(&a),
+        Cmd::Ppl(a) => cmd_ppl(&a),
     }
+}
+
+fn cmd_ppl(a: &PplArgs) -> Result<()> {
+    let text = read_input(&IoArgs {
+        input: a.input.clone(),
+        output: None,
+    })?;
+    let meter = by_name(&a.meter)?;
+    let kind =
+        CodecKind::parse(&a.codec).with_context(|| format!("unknown codec {:?}", a.codec))?;
+    let alphabet = Alphabet::parse(&a.alphabet)
+        .with_context(|| format!("unknown alphabet {:?}", a.alphabet))?;
+
+    let encoded = encode(&text, kind, meter.as_ref(), alphabet);
+    let cfg = qodec::ppl::PplConfig {
+        url: a.url.clone(),
+        model: a.model.clone(),
+    };
+    let report = qodec::ppl::compare(&cfg, &text, &encoded)?;
+    println!(
+        "raw:     ppl {:8.2} over {} tokens\n\
+         encoded: ppl {:8.2} over {} tokens ({} tokens by {})\n\
+         ratio:   {:.3} -> {}",
+        report.raw.perplexity,
+        report.raw.tokens,
+        report.encoded.perplexity,
+        report.encoded.tokens,
+        meter.count(&encoded),
+        meter.name(),
+        report.ratio(),
+        report.verdict(),
+    );
+    Ok(())
 }
 
 fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {

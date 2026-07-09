@@ -55,6 +55,7 @@ pub fn run(corpus: &Path, meter: &dyn TokenMeter, alphabet: Alphabet) -> Result<
             CodecKind::Fold,
             CodecKind::Toon,
             CodecKind::Mine,
+            CodecKind::Deep,
             CodecKind::Squeeze,
         ] {
             let encoded = encode(&text, kind, meter, alphabet);

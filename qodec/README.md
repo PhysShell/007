@@ -22,6 +22,11 @@ cargo build --release
 
 # emit a paste-ready comprehension probe for a live model
 ./target/release/qodec probe -i corpus/stacktrace.txt --codec mine
+
+# perplexity gate: score raw vs encoded under a local LM (vLLM-style
+# echo+logprobs endpoint, e.g. FastContext) — cheap comprehension proxy
+QODEC_PPL_URL=http://127.0.0.1:8000/v1/completions \
+  ./target/release/qodec ppl -i corpus/stacktrace.txt --codec deep
 ```
 
 ## Codecs
@@ -29,9 +34,10 @@ cargo build --release
 | codec | idea | roundtrip |
 |---|---|---|
 | `mine` | token-aware dictionary miner: repeated exact spans → probed 1-token aliases, legend in header; gain **measured** per commit against the live tokenizer | byte |
+| `deep` | `mine` with the full miner: word candidates ∪ suffix-automaton candidates (every repeated substring, any boundary); ~15–20× encode CPU, best ratios | byte |
 | `fold` | RLE for consecutive identical lines (`%q1 xN`) | byte |
 | `toon` | uniform JSON array → keys-once table | semantic (Value-equal) |
-| `squeeze` | `toon`/`fold` then `mine` over the result | byte / semantic |
+| `squeeze` | `toon`/`fold` then the better miner over the result | byte / semantic |
 
 Every encode is self-describing (`%q1` container: header + legend = the
 decryption key) and falls back to `raw` whenever the measured artifact does
