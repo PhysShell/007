@@ -6,12 +6,28 @@ the agents compact gear; this is the workbench where the gear is measured.
 Standalone crate (not part of the `o7` workspace/binary — it's a lab). Design
 record with theory and measured results: [`../docs/token-codec.md`](../docs/token-codec.md).
 
+**Prereqs:** Rust ≥ 1.82 (`rustup` is enough; no nix required). The first
+`cargo build` fetches dependencies from crates.io like any Rust project;
+after that everything is offline — tokenizer data is bundled in the binary
+and nothing phones home at runtime (`ppl` being the explicit exception: it
+talks to the local LM endpoint you point it at).
+
+## Quickstart
+
 ```bash
 cd qodec
+./demo.sh                 # guided tour: aliases → encode → roundtrip →
+                          # honest fallback → full bench → probe artifact
+./demo.sh my-big.log      # same tour + your own file at the end
+```
+
+## The pieces, one by one
+
+```bash
 cargo build --release
 
 # what does an encoded artifact look like?
-./target/release/qodec encode --codec mine  -i corpus/stacktrace.txt --report
+./target/release/qodec encode --codec deep -i corpus/stacktrace.txt --report
 ./target/release/qodec encode --codec squeeze -i corpus/findings.json --report | ./target/release/qodec decode
 
 # the full measured table (every codec × every sample, roundtrip-verified)
@@ -21,13 +37,34 @@ cargo build --release
 ./target/release/qodec aliases --meter o200k --top 30
 
 # emit a paste-ready comprehension probe for a live model
-./target/release/qodec probe -i corpus/stacktrace.txt --codec mine
+./target/release/qodec probe -i corpus/stacktrace.txt --codec deep
+
+# comprehension A/B: emit paired prompts, run them through any model, grade
+./target/release/qodec ab emit -i corpus/stacktrace.txt --questions ab/stacktrace.json --out-dir /tmp/ab
+./target/release/qodec ab grade --questions ab/stacktrace.json --answers answers.json
+# (recorded runs + methodology: ab/results/)
 
 # perplexity gate: score raw vs encoded under a local LM (vLLM-style
 # echo+logprobs endpoint, e.g. FastContext) — cheap comprehension proxy
 QODEC_PPL_URL=http://127.0.0.1:8000/v1/completions \
   ./target/release/qodec ppl -i corpus/stacktrace.txt --codec deep
 ```
+
+## On your own data
+
+Everything reads stdin when `-i` is omitted:
+
+```bash
+git diff | ./target/release/qodec encode --codec deep --report >/dev/null   # just the numbers
+rg "TODO" ~/src/repo | ./target/release/qodec encode --codec deep --report | less
+./target/release/qodec bench --corpus /path/to/dir/of/logs
+./target/release/qodec probe -i huge.log --codec deep > probe.txt           # paste into a chat, ask questions
+```
+
+Reading the report: **cold** = the legend travels in-message; **warm** = the
+legend lives in a cached prompt prefix (CLAUDE.md / system prompt) and is
+amortized. Result `raw` = the codec refused — the artifact would not beat
+the original, and that honesty is a feature.
 
 ## Codecs
 
