@@ -2,6 +2,7 @@
 //! agent context. See `docs/token-codec.md` in the repo root for the design
 //! record and measured results.
 
+pub mod ab;
 pub mod alias;
 pub mod bench;
 pub mod container;

@@ -36,6 +36,44 @@ enum Cmd {
     /// Perplexity gate: score raw vs encoded under a local LM endpoint —
     /// cheap comprehension proxy before judge runs. See docs/token-codec.md.
     Ppl(PplArgs),
+    /// Comprehension A/B: emit paired raw/encoded prompts, grade answers.
+    #[command(subcommand)]
+    Ab(AbCmd),
+}
+
+#[derive(Subcommand)]
+enum AbCmd {
+    /// Write `raw.prompt.txt` and `encoded.prompt.txt` into --out-dir.
+    Emit(AbEmitArgs),
+    /// Grade an answers JSON against a questions file.
+    Grade(AbGradeArgs),
+}
+
+#[derive(Args)]
+struct AbEmitArgs {
+    /// Payload file.
+    #[arg(short, long)]
+    input: PathBuf,
+    /// Questions JSON (array of {id, question, accept}).
+    #[arg(long)]
+    questions: PathBuf,
+    #[arg(long, default_value = "deep")]
+    codec: String,
+    #[arg(long, default_value = "auto")]
+    alphabet: String,
+    #[arg(long, default_value = "o200k")]
+    meter: String,
+    #[arg(long)]
+    out_dir: PathBuf,
+}
+
+#[derive(Args)]
+struct AbGradeArgs {
+    #[arg(long)]
+    questions: PathBuf,
+    /// Model answers (JSON object id->answer; chatty text around it is ok).
+    #[arg(long)]
+    answers: PathBuf,
 }
 
 #[derive(Args)]
@@ -118,7 +156,72 @@ fn main() -> Result<()> {
         Cmd::Bench(a) => cmd_bench(&a),
         Cmd::Aliases(a) => cmd_aliases(&a),
         Cmd::Ppl(a) => cmd_ppl(&a),
+        Cmd::Ab(AbCmd::Emit(a)) => cmd_ab_emit(&a),
+        Cmd::Ab(AbCmd::Grade(a)) => cmd_ab_grade(&a),
     }
+}
+
+fn cmd_ab_emit(a: &AbEmitArgs) -> Result<()> {
+    let payload =
+        fs::read_to_string(&a.input).with_context(|| format!("reading {}", a.input.display()))?;
+    let questions_text = fs::read_to_string(&a.questions)
+        .with_context(|| format!("reading {}", a.questions.display()))?;
+    let questions = qodec::ab::parse_questions(&questions_text)?;
+
+    let meter = by_name(&a.meter)?;
+    let kind =
+        CodecKind::parse(&a.codec).with_context(|| format!("unknown codec {:?}", a.codec))?;
+    let alphabet = Alphabet::parse(&a.alphabet)
+        .with_context(|| format!("unknown alphabet {:?}", a.alphabet))?;
+    let encoded = encode(&payload, kind, meter.as_ref(), alphabet);
+    let outcome = container::parse(&encoded)
+        .map(|c| c.codec)
+        .unwrap_or_else(|_| "?".to_string());
+    // Fail closed: a raw fallback would compare raw text against raw-in-a-
+    // container — an "A/B" that never exercises the notation and can only
+    // report fake encoded-side success (Codex review on PR #28).
+    if outcome == "raw" {
+        bail!(
+            "codec {:?} fell back to raw on this payload — the A/B would not \
+             exercise the notation; pick a more repetitive payload or another codec",
+            a.codec
+        );
+    }
+
+    fs::create_dir_all(&a.out_dir).with_context(|| format!("creating {}", a.out_dir.display()))?;
+    let raw_prompt = qodec::ab::prompt("", &payload, &questions);
+    let enc_prompt = qodec::ab::prompt(qodec::ab::notation_brief(), &encoded, &questions);
+    fs::write(a.out_dir.join("raw.prompt.txt"), &raw_prompt)?;
+    fs::write(a.out_dir.join("encoded.prompt.txt"), &enc_prompt)?;
+    eprintln!(
+        "qodec ab: emitted prompts to {} (payload {} -> {} tokens encoded as {} [{}])",
+        a.out_dir.display(),
+        meter.count(&payload),
+        meter.count(&encoded),
+        outcome,
+        meter.name(),
+    );
+    Ok(())
+}
+
+fn cmd_ab_grade(a: &AbGradeArgs) -> Result<()> {
+    let questions_text = fs::read_to_string(&a.questions)
+        .with_context(|| format!("reading {}", a.questions.display()))?;
+    let questions = qodec::ab::parse_questions(&questions_text)?;
+    let answers = fs::read_to_string(&a.answers)
+        .with_context(|| format!("reading {}", a.answers.display()))?;
+    let rows = qodec::ab::grade(&questions, &answers)?;
+    let correct = rows.iter().filter(|r| r.correct).count();
+    for r in &rows {
+        println!(
+            "{} {}: {}",
+            if r.correct { "PASS" } else { "FAIL" },
+            r.id,
+            r.answer
+        );
+    }
+    println!("score: {correct}/{}", rows.len());
+    Ok(())
 }
 
 fn cmd_ppl(a: &PplArgs) -> Result<()> {

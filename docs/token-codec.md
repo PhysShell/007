@@ -140,13 +140,31 @@ Reading the two columns:
   +30–50% on exactly the payloads agents exchange most (traces, diffs,
   findings, tool output).
 
+## Comprehension A/B (`qodec ab`) — first measured result
+
+The experiment the whole lab was waiting for: does a fresh model context
+answer questions about an *encoded* payload as well as about the raw one?
+`qodec ab emit` builds the paired prompts (payload + questions from
+`qodec/ab/*.json`); `qodec ab grade` scores answers by distinctive accept
+substrings — the model invocation stays outside, per the agent-language
+discipline.
+
+First run (2026-07-08, full record in `qodec/ab/results/`): 8 fresh-context
+Claude subagents, 4 payloads × raw/encoded (`deep`, 12–16 legend entries),
+6 questions each — **24/24 raw, 24/24 encoded**, answers near
+byte-identical, including counting `suspect_fp=true` values scattered
+across nested aliases in the findings table. Two honest observations ride
+along: encoded QA cost ~3–5× the wall time on alias-dense payloads (the
+model decodes in its head — on reasoning models some input savings shifts
+into thinking tokens), and the scope is smoke-level (one model family, small
+payloads, retrieval questions). The gate is open, not proven.
+
 ## What this deliberately does not claim
 
-- **Comprehension is unproven.** Lossless-to-the-decoder ≠ legible-to-the-
-  model. Whether Claude reasons as well over `类 96` with the legend in
-  context as over the expanded line is the next experiment: `qodec probe`
-  emits a paste-ready artifact (legend brief + encoded payload) so encoded
-  vs raw can be A/B-judged with the existing `o7 judge` machinery.
+- **Comprehension is proven only at smoke level.** The A/B above covers
+  retrieval questions over small payloads in one model family. Long-context
+  behavior, deep reasoning over decoded content, and cheaper reader models
+  are untested — the `o7 judge` FP-triage agreement run is the next rung.
 - **Claude's tokenizer is not public.** o200k/cl100k are proxies; absolute
   numbers will shift, orderings should hold. A future meter can wrap an
   API-side count endpoint behind the same `TokenMeter` trait.
@@ -233,13 +251,13 @@ actual judge-run agreement before trusting them as a gate.
 
 ## Next steps (in rough order of information gained per effort)
 
-Done from the previous edition of this list: suffix-automaton mining (the
-`deep` codec, table above) and the perplexity pre-gate (`qodec ppl`).
+Done from previous editions of this list: suffix-automaton mining (`deep`),
+the perplexity pre-gate (`qodec ppl`), and the first comprehension A/B
+(`qodec ab`, 24/24 = 24/24 — section above).
 
-1. **Comprehension A/B** — encoded vs raw payloads through `o7 judge` on the
-   FP-triage rubric; measure verdict agreement. This is the go/no-go gate.
-   `qodec probe` emits the artifact; `qodec ppl` pre-filters, and the A/B
-   results calibrate its verdict bands.
+1. **Judge-grade A/B** — encoded vs raw payloads through `o7 judge` on the
+   FP-triage rubric; measure *verdict agreement* on a real task, not just
+   retrieval QA. `qodec ppl` pre-filters; A/B results calibrate its bands.
 2. **Wire as an output filter** — `o7` already harvests `agent.stdout` and
    feeds judge prompts; `qodec encode --codec squeeze` is a one-line insert
    at the prompt-assembly seam (and a PostToolUse hook candidate in Claude
