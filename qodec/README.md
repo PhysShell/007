@@ -6,8 +6,11 @@ the agents compact gear; this is the workbench where the gear is measured.
 Standalone crate (not part of the `o7` workspace/binary — it's a lab). Design
 record with theory and measured results: [`../docs/token-codec.md`](../docs/token-codec.md).
 
-**Prereqs:** Rust ≥ 1.82 (`rustup` is enough; no nix required — the crate is
-self-contained, tokenizer data is bundled, nothing phones home).
+**Prereqs:** Rust ≥ 1.82 (`rustup` is enough; no nix required). The first
+`cargo build` fetches dependencies from crates.io like any Rust project;
+after that everything is offline — tokenizer data is bundled in the binary
+and nothing phones home at runtime (`ppl` being the explicit exception: it
+talks to the local LM endpoint you point it at).
 
 ## Quickstart
 
