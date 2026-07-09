@@ -33,11 +33,12 @@ correctly attributed the *aliased* subscription line (`记` in the legend) to
 both Watchlist variants and keyed their FP verdicts on the raw-visible
 `Dispose()` teardowns — the deciding facts were never garbled.
 
-**Phase-1 gate (TODO.md): PASS** — both FP-control findings came back
-`false_positive` from every judge, reasons citing the `-=` in `Dispose` /
-`_timer.Dispose()`, which is exactly the gate's PASS criterion. (Panel
-edition: fresh Claude contexts, not the `o7 judge` binary — re-run through
-`o7` for the record when a `claude` CLI box is handy.)
+**Phase-1 gate (TODO.md): PASS — panel edition, provisional.** Both
+FP-control findings came back `false_positive` from every judge, reasons
+citing the `-=` in `Dispose` / `_timer.Dispose()`, which matches the gate's
+PASS criterion. The judges were fresh Claude contexts, not the `o7 judge`
+binary; the authoritative gate record still requires the `o7` run on a
+`claude`-CLI box, which should be attached here when it happens.
 
 ## Codec economics on this task (o200k)
 

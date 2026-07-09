@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # qodec guided tour — run from qodec/: `./demo.sh [your-file]`
-# Builds the release binary if needed, then walks every lab surface on the
-# bundled corpus. Pass a file of your own as $1 to see it encoded too.
+# Builds the release binary, then walks every lab surface on the bundled
+# corpus. Pass a file of your own as $1 to see it encoded too.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 Q=./target/release/qodec
-if [ ! -x "$Q" ]; then
-  echo "==> building (first run only)…"
-  cargo build --release
-fi
+# Unconditional: cargo no-ops in well under a second when nothing changed,
+# and the tour never runs a stale binary after source edits.
+echo "==> building release binary…"
+cargo build --release
 
 hr() { printf '\n\e[1m== %s ==\e[0m\n\n' "$1"; }
 
@@ -17,7 +17,12 @@ hr "1/6 what do aliases cost under the tokenizer? (probed, not assumed)"
 $Q aliases --meter o200k --top 12
 
 hr "2/6 encode a stack trace — legend on top is the 'decryption key'"
-$Q encode --codec deep -i corpus/stacktrace.txt --report | head -20
+# No `head` in the pipe: under pipefail an early-closing head can SIGPIPE
+# the encoder and abort the tour; preview from a temp file instead.
+preview=$(mktemp -t qodec-preview.XXXX.txt)
+trap 'rm -f "$preview"' EXIT
+$Q encode --codec deep -i corpus/stacktrace.txt --report >"$preview"
+head -20 "$preview"
 echo "…"
 
 hr "3/6 losslessness — decode(encode(x)) is byte-identical"
