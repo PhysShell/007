@@ -279,7 +279,7 @@ proptest! {
     #[test]
     fn prop_codec_roundtrip(text in "[ -~\n§¤码引']{0,400}") {
         let meter = Approx;
-        for kind in [CodecKind::Mine, CodecKind::Deep, CodecKind::Fold, CodecKind::Grep, CodecKind::Diag, CodecKind::Squeeze] {
+        for kind in [CodecKind::Mine, CodecKind::Deep, CodecKind::Fold, CodecKind::Grep, CodecKind::Diag, CodecKind::Tmpl, CodecKind::Squeeze] {
             let encoded = encode(&text, kind, &meter, Alphabet::Auto);
             let back = decode(&encoded).map_err(|e| {
                 TestCaseError::fail(format!("decode error for {}: {e}", kind.label()))
@@ -294,7 +294,7 @@ proptest! {
         // trailing \r on parse, so any codec that lets a line ending leak
         // into its legend corrupts CRLF input (Codex review on PR #32).
         let meter = Approx;
-        for kind in [CodecKind::Fold, CodecKind::Grep, CodecKind::Diag] {
+        for kind in [CodecKind::Fold, CodecKind::Grep, CodecKind::Diag, CodecKind::Tmpl] {
             let encoded = encode(&text, kind, &meter, Alphabet::Auto);
             let back = decode(&encoded).map_err(|e| {
                 TestCaseError::fail(format!("decode error for {}: {e}", kind.label()))

@@ -170,6 +170,54 @@ fn grep_crlf_roundtrips() -> Result<()> {
 }
 
 #[test]
+fn tmpl_learns_unquoted_msbuild_variance() -> Result<()> {
+    // diag's home turf needs quoted identifiers; MSBuild restore/copy
+    // lines vary in bare positions. tmpl must learn these without rules.
+    let meter = Bpe::o200k()?;
+    let mut text = String::new();
+    for i in 0..12 {
+        text.push_str(&format!(
+            "  Restoring packages for C:\\build\\src\\Module{i}\\Module{i}.csproj...\n"
+        ));
+    }
+    for i in 0..12 {
+        text.push_str(&format!(
+            "  warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core{i}\" that could not be resolved. [C:\\build\\src\\Module{i}.csproj]\n"
+        ));
+    }
+    let encoded = roundtrip(&text, CodecKind::Tmpl, &meter)?;
+    anyhow::ensure!(encoded.starts_with("%q1 tmpl"), "expected tmpl container");
+    anyhow::ensure!(
+        meter.count(&encoded) < meter.count(&text),
+        "learned templates must reduce tokens"
+    );
+    Ok(())
+}
+
+#[test]
+fn tmpl_crlf_and_identical_lines() -> Result<()> {
+    // Slotless templates (identical lines) and CRLF endings, together.
+    let meter = Bpe::o200k()?;
+    let mut text = String::new();
+    for i in 0..6 {
+        text.push_str(&format!("  CSC : warning CS8618: Non-nullable property must contain a value. [C:\\b\\P{}.csproj]\r\n", i % 2));
+        text.push_str("  ValidateSolutionConfiguration: building solution configuration Release|AnyCPU\r\n");
+    }
+    let encoded = roundtrip(&text, CodecKind::Tmpl, &meter)?;
+    anyhow::ensure!(encoded.starts_with("%q1 tmpl"), "expected tmpl container");
+    Ok(())
+}
+
+#[test]
+fn tmpl_refuses_prose() -> Result<()> {
+    let meter = Bpe::o200k()?;
+    let text = "every line here is quite different from the next\nno structure repeats at all in this sample honestly\n";
+    let encoded = roundtrip(text, CodecKind::Tmpl, &meter)?;
+    anyhow::ensure!(encoded.starts_with("%q1 raw"), "nothing to learn -> raw");
+    Ok(())
+}
+
+#[test]
 fn diag_unbalanced_quotes_and_prose_fall_back() -> Result<()> {
     let meter = Bpe::o200k()?;
     // Unbalanced quote in a tail -> that line rides verbatim; nothing

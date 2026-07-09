@@ -56,6 +56,7 @@ pub fn run(corpus: &Path, meter: &dyn TokenMeter, alphabet: Alphabet) -> Result<
             CodecKind::Toon,
             CodecKind::Grep,
             CodecKind::Diag,
+            CodecKind::Tmpl,
             CodecKind::Mine,
             CodecKind::Deep,
             CodecKind::Squeeze,

@@ -31,10 +31,12 @@ MSBuild, paths, or C#; every win is mined from repetition in the concrete
 payload. That universality is paid for in CPU: the miner has to *search* for
 redundancy, superlinearly, re-tokenizing candidates as it goes. The lab has
 since grown a measured shelf of format codecs (`toon` for uniform JSON,
-`grep` for matcher output, `diag` for diagnostic streams) that *know* where
-a format's redundancy lives and take it in one linear pass — on the real
+`grep` for matcher output, `diag` for diagnostic streams, `tmpl` for any
+line-based log via Drain-style template learning) that *know* where a
+format's redundancy lives and take it in one linear pass — on the real
 133 KB ownsharp audit log, `diag` is −52% in 0.4 s where `deep` is −77% in
-20 s. `squeeze` dispatches: structural codec by shape first, miners over the
+20 s, and `tmpl` learns −46% from the same file with zero format rules.
+`squeeze` dispatches: structural codec by shape first, miners over the
 residue. Acceptance stays measured either way; every codec still refuses to
 `raw` when the artifact does not beat the input.
 

@@ -171,3 +171,16 @@ pub fn grade(questions: &[Question], answers_text: &str) -> Result<Vec<GradeRow>
     }
     Ok(rows)
 }
+
+/// The TOON-benchmark normalization: accuracy percentage points per 1000
+/// prompt tokens. Two notations with equal scores are not equal — the one
+/// the model reads from fewer tokens wins; this makes that visible.
+/// (toonformat.dev reports JSON ≈ 16.4 vs its table form ≈ 27.7 on
+/// retrieval QA — the shape of number to expect here.)
+pub fn accuracy_per_1k(correct: usize, total: usize, prompt_tokens: usize) -> f64 {
+    if total == 0 || prompt_tokens == 0 {
+        return 0.0;
+    }
+    let accuracy = 100.0 * correct as f64 / total as f64;
+    accuracy / (prompt_tokens as f64 / 1000.0)
+}
