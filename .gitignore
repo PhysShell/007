@@ -12,3 +12,4 @@
 # local commit/PR scratch (not committed)
 /.commit-msg
 /.pr-body.md
+/ship.ps1

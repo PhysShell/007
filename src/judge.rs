@@ -12,6 +12,8 @@ use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
 
 use crate::agent::Engine;
 use crate::record::RunRecord;
@@ -322,6 +324,10 @@ pub struct JudgeArgs {
     /// Backend agent CLI: `claude` | `codex` | `auto` (infer from --model).
     #[arg(long, default_value = "auto")]
     pub provider: String,
+    /// Parallel per-file workers. Bounded — respects backend rate limits; a burst
+    /// of 100+ concurrent calls would throttle. `1` = fully sequential.
+    #[arg(long, default_value_t = 4)]
+    pub jobs: usize,
     /// Overlay output path (fp-verdicts.json). Also written into the run-record.
     #[arg(long)]
     pub out: Option<PathBuf>,
@@ -340,6 +346,32 @@ pub struct JudgeArgs {
     /// Plan only — print files/ids/calls, do not call the backend.
     #[arg(long)]
     pub dry_run: bool,
+}
+
+/// Extra retry attempts per file on a transient backend failure (429 / flaky
+/// spawn), with short linear backoff. Matters most under `--jobs` concurrency.
+const JUDGE_RETRIES: u32 = 2;
+
+/// One file's mergeable outcome, produced by a worker and folded into the run's
+/// maps single-threaded. Empty on a skip (unreadable source, backend failure after
+/// retries, unparseable output) — `session_id`/`cost` may still be set if the call
+/// succeeded but parsing didn't.
+#[derive(Default)]
+struct FileResult {
+    verdicts: Vec<(String, VerdictOut)>,
+    /// Valid classes (real / false_positive / uncertain) of the recorded verdicts,
+    /// folded into the run's `by_class` summary. Kept separate from `verdicts` only
+    /// so the merge stays a plain count.
+    classes: Vec<String>,
+    session_id: Option<String>,
+    cost: Option<f64>,
+    /// This file contributed nothing to the overlay (unreadable source, backend
+    /// failure after retries, unparseable output). Counted in the merge even when
+    /// `verdicts` is empty, so a worker failure can't let a partial run pass as clean.
+    file_skipped: bool,
+    /// Verdicts dropped on this file for an invalid `class` (empty / not in the
+    /// schema enum). Summed into the run's `findings_malformed`.
+    findings_malformed: usize,
 }
 
 pub fn run(a: &JudgeArgs) -> Result<()> {
@@ -475,139 +507,88 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
     let mut files_skipped = 0usize;
     let mut findings_malformed = 0usize;
 
-    for (fi, file) in files.iter().enumerate() {
-        // `by_file` only ever stores valid indices into `reps`.
-        #[allow(clippy::indexing_slicing)]
-        let fif: Vec<&Rep> = by_file
-            .get(file)
-            .map(|ids| ids.iter().map(|&i| &reps[i]).collect())
-            .unwrap_or_default();
-        let fif_json = serde_json::to_string_pretty(&fif)?;
+    // Judge files with a bounded worker pool: calls are independent per file and the
+    // overlay is a finding_id -> verdict MAP assembled after the fact, so files
+    // finishing out of order changes nothing (docs/performance.md). Bounded, not
+    // unbounded — a burst of 100+ concurrent claude/codex calls would trip the
+    // subscription rate limits. Model calls run on the workers; the merge below stays
+    // single-threaded, so all pairing/dedup logic is unchanged and deterministic.
+    let total = files.len();
+    // Bound workers by the file count too: `--jobs 1000` on a 3-file run shouldn't
+    // spawn 1000 idle scoped threads (keeps the "bounded" contract local, Codex).
+    let jobs = a.jobs.max(1).min(total.max(1));
+    println!("[o7 judge] judging {total} file(s), {jobs} worker(s)");
 
-        // Confine reads to the repo root: an absolute or `../` path smuggled into
-        // findings.json must not pull arbitrary files into the prompt — that is another
-        // exfil channel the tool sandbox can't stop. `repo` is already canonicalized.
-        let src_path = match repo.join(file).canonicalize() {
-            Ok(p) if p.starts_with(&repo) => p,
-            Ok(p) => {
-                eprintln!(
-                    "[o7 judge] warn: {file} resolves outside --repo ({}) — skipped",
-                    p.display()
+    let next = AtomicUsize::new(0);
+    let (tx, rx) = mpsc::channel::<FileResult>();
+    std::thread::scope(|scope| {
+        // Shadow shared state as shared refs so each `move` worker copies the ref.
+        let files = &files;
+        let repo = &repo;
+        let template = &template;
+        let rubric = &rubric;
+        let reps = &reps;
+        let by_file = &by_file;
+        let key_to_id = &key_to_id;
+        let lines_by_id = &lines_by_id;
+        let rec = &rec;
+        let next = &next;
+        let model = a.model.as_str();
+        for _ in 0..jobs {
+            let tx = tx.clone();
+            scope.spawn(move || loop {
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                let Some(file) = files.get(i) else { break };
+                let res = judge_one_file(
+                    i + 1,
+                    total,
+                    file,
+                    provider,
+                    repo,
+                    model,
+                    template,
+                    rubric,
+                    reps,
+                    by_file,
+                    key_to_id,
+                    lines_by_id,
+                    rec,
+                    JUDGE_RETRIES,
                 );
-                files_skipped += 1;
-                continue;
-            }
-            Err(e) => {
-                eprintln!("[o7 judge] warn: {file}: cannot resolve source ({e}) — skipped");
-                files_skipped += 1;
-                continue;
-            }
-        };
-        // A per-file read failure (invalid UTF-8, permissions, a directory path)
-        // must skip that file and be counted, not abort the batch — same contract
-        // as the resolve/parse skips above (CodeRabbit).
-        let src = match std::fs::read_to_string(&src_path) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!(
-                    "[o7 judge] warn: {file}: reading source failed ({e}) — skipped ({})",
-                    src_path.display()
-                );
-                files_skipped += 1;
-                continue;
-            }
-        };
-
-        let prompt = template
-            .replace("{{RUBRIC}}", &rubric)
-            .replace("{{FILE_PATH}}", file)
-            .replace("{{FINDINGS_IN_FILE}}", &fif_json)
-            .replace("{{FILE_CONTENT}}", &src);
-
-        println!(
-            "[o7 judge] ({}/{}) {file} — {} finding(s)",
-            fi + 1,
-            files.len(),
-            fif.len()
-        );
-
-        // A per-file failure must not abort the whole batch (a 116-file run shouldn't
-        // die on file 3), but every skip is COUNTED (files_skipped) and forces a
-        // non-zero exit at the end — a silently-partial overlay is worse than a loud
-        // one. A hard backend failure (not logged in, empty codex message) skips this
-        // file too; if it's systemic every file skips and the run exits non-zero.
-        let (result_text, sid, cost) = match call_agent(provider, &repo, &prompt, &a.model) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("[o7 judge] warn: {file}: backend call failed ({e}) — skipped");
-                files_skipped += 1;
-                continue;
-            }
-        };
-        if let Some(s) = sid {
+                // The collector outlives every worker (the scope joins before the
+                // drain below), so a send failure means rx was dropped — impossible
+                // here; bail out of the loop rather than panic if it ever happens.
+                if tx.send(res).is_err() {
+                    break;
+                }
+            });
+        }
+    });
+    // Close the original sender so the collector's `for res in rx` terminates once
+    // every worker (each held a clone) has finished and dropped its own sender.
+    drop(tx);
+    // Single-threaded merge — deterministic, and the only writer of these maps. The
+    // scope above already joined all workers, so this just drains the buffered channel.
+    for res in rx {
+        // A worker that produced nothing (unreadable source, backend failure,
+        // unparseable output) still counts as a skipped file even with empty
+        // `verdicts` — otherwise a partial overlay silently reads as complete.
+        if res.file_skipped {
+            files_skipped += 1;
+        }
+        findings_malformed += res.findings_malformed;
+        if let Some(s) = res.session_id {
             session_ids.push(s);
         }
-        if let Some(c) = cost {
+        if let Some(c) = res.cost {
             cost_total += c;
             cost_any = true;
         }
-
-        rec.write_text(&format!("raw.{}.txt", sanitize(file)), &result_text)?;
-
-        // The raw text is already persisted above, so on a malformed output warn,
-        // skip this file, and keep going — the overlay records what succeeded.
-        let arr = match extract_json_array(&result_text) {
-            Some(a) => a,
-            None => {
-                eprintln!(
-                    "[o7 judge] warn: {file}: no JSON array in {} output — skipped (raw saved)",
-                    provider.label()
-                );
-                files_skipped += 1;
-                continue;
-            }
-        };
-        let raws: Vec<RawVerdict> = match serde_json::from_str(&arr) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!(
-                    "[o7 judge] warn: {file}: parsing verdicts failed ({e}) — skipped (raw saved)"
-                );
-                files_skipped += 1;
-                continue;
-            }
-        };
-
-        let (paired, warnings) = pair_verdicts(&raws, &fif, &key_to_id);
-        for w in warnings {
-            eprintln!("[o7 judge] warn: {file}: {w}");
+        for class in res.classes {
+            *by_class.entry(class).or_default() += 1;
         }
-
-        for (id, rv) in paired {
-            // Validate `class` against the schema enum — not just non-empty. A wrong-
-            // case / hyphenated / prose class is malformed: count it (a first-class
-            // counter, NOT a magic `by_class` key that could collide with a model-
-            // emitted class) and keep it out of the overlay, so the domain merge never
-            // sees a value the overlay schema forbids.
-            let Some(class) = normalized_class(&rv.class) else {
-                findings_malformed += 1;
-                eprintln!(
-                    "[o7 judge] warn: {file}: invalid class {:?} for {id} — not recorded",
-                    rv.class
-                );
-                continue;
-            };
-            *by_class.entry(class.to_string()).or_default() += 1;
-            verdicts.insert(
-                id.clone(),
-                VerdictOut {
-                    class: class.to_string(),
-                    confidence: rv.confidence,
-                    reason: rv.reason.clone(),
-                    evidence: rv.evidence.clone(),
-                    lines: lines_by_id.get(&id).cloned().unwrap_or_default(),
-                },
-            );
+        for (id, v) in res.verdicts {
+            verdicts.insert(id, v);
         }
     }
 
@@ -676,6 +657,188 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Judge a single file: build the prompt, call the backend (with retry), parse and
+/// pair the verdicts. Fully error-isolated — every failure warns and returns an
+/// empty/partial `FileResult` rather than propagating, so one bad file never aborts
+/// the batch. The whole per-file pipeline runs on a worker thread; only reads shared
+/// (read-only) state, so it is `Send`/`Sync`-safe by construction.
+#[allow(clippy::too_many_arguments)]
+fn judge_one_file(
+    seq: usize,
+    total: usize,
+    file: &str,
+    provider: Engine,
+    repo: &Path,
+    model: &str,
+    template: &str,
+    rubric: &str,
+    reps: &[Rep],
+    by_file: &BTreeMap<String, Vec<usize>>,
+    key_to_id: &BTreeMap<(String, i64, String), String>,
+    lines_by_id: &BTreeMap<String, Vec<i64>>,
+    rec: &RunRecord,
+    retries: u32,
+) -> FileResult {
+    let mut out = FileResult::default();
+
+    // `by_file` only ever stores valid indices into `reps`.
+    #[allow(clippy::indexing_slicing)]
+    let fif: Vec<&Rep> = by_file
+        .get(file)
+        .map(|ids| ids.iter().map(|&i| &reps[i]).collect())
+        .unwrap_or_default();
+    let fif_json = match serde_json::to_string_pretty(&fif) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[o7 judge] warn: {file}: serializing findings failed ({e}) — skipped");
+            out.file_skipped = true;
+            return out;
+        }
+    };
+
+    // Confine reads to the repo root: an absolute or `../` path smuggled into
+    // findings.json must not pull arbitrary files into the prompt — that is another
+    // exfil channel the tool sandbox can't stop. `repo` is already canonicalized.
+    let src_path = match repo.join(file).canonicalize() {
+        Ok(p) if p.starts_with(repo) => p,
+        Ok(p) => {
+            eprintln!(
+                "[o7 judge] warn: {file} resolves outside --repo ({}) — skipped",
+                p.display()
+            );
+            out.file_skipped = true;
+            return out;
+        }
+        Err(e) => {
+            eprintln!("[o7 judge] warn: {file}: cannot resolve source ({e}) — skipped");
+            out.file_skipped = true;
+            return out;
+        }
+    };
+    let src = match std::fs::read_to_string(&src_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[o7 judge] warn: {file}: reading source failed ({e}) — skipped");
+            out.file_skipped = true;
+            return out;
+        }
+    };
+
+    let prompt = template
+        .replace("{{RUBRIC}}", rubric)
+        .replace("{{FILE_PATH}}", file)
+        .replace("{{FINDINGS_IN_FILE}}", &fif_json)
+        .replace("{{FILE_CONTENT}}", &src);
+
+    println!(
+        "[o7 judge] ({seq}/{total}) {file} — {} finding(s)",
+        fif.len()
+    );
+
+    let (result_text, sid, cost) = match call_agent_retry(provider, repo, &prompt, model, retries) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[o7 judge] warn: {file}: backend call failed ({e}) — skipped");
+            out.file_skipped = true;
+            return out;
+        }
+    };
+    // The call happened (cost incurred, session exists) — carry these even if the
+    // parse below fails, so the run-record accounts for every call made.
+    out.session_id = sid;
+    out.cost = cost;
+
+    if let Err(e) = rec.write_text(&format!("raw.{}.txt", sanitize(file)), &result_text) {
+        eprintln!("[o7 judge] warn: {file}: could not persist raw output ({e})");
+    }
+
+    // A malformed output for ONE file must not abort the batch. The raw text is
+    // already persisted above, so warn, skip this file, keep going.
+    let arr = match extract_json_array(&result_text) {
+        Some(a) => a,
+        None => {
+            eprintln!(
+                "[o7 judge] warn: {file}: no JSON array in {} output — skipped (raw saved)",
+                provider.label()
+            );
+            out.file_skipped = true;
+            return out;
+        }
+    };
+    let raws: Vec<RawVerdict> = match serde_json::from_str(&arr) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!(
+                "[o7 judge] warn: {file}: parsing verdicts failed ({e}) — skipped (raw saved)"
+            );
+            out.file_skipped = true;
+            return out;
+        }
+    };
+
+    // Pair verdicts to finding ids via the shared, option-aware helper (position when
+    // counts match, key-recovery otherwise) instead of reimplementing it here — the
+    // inline version compared `RawVerdict`'s `Option` echo fields as if non-optional
+    // and duplicated the warnings (CodeRabbit).
+    let (paired, warnings) = pair_verdicts(&raws, &fif, key_to_id);
+    for w in warnings {
+        eprintln!("[o7 judge] warn: {file}: {w}");
+    }
+
+    for (id, rv) in paired {
+        // Validate `class` against the schema enum — not just non-empty. A wrong-case
+        // / hyphenated / prose class is malformed: count it (a first-class counter,
+        // not a magic `by_class` key that could collide with a model-emitted class)
+        // and keep it out of the overlay, so the domain merge never sees a value the
+        // overlay schema forbids.
+        let Some(class) = normalized_class(&rv.class) else {
+            out.findings_malformed += 1;
+            eprintln!(
+                "[o7 judge] warn: {file}: invalid class {:?} for {id} — not recorded",
+                rv.class
+            );
+            continue;
+        };
+        out.classes.push(class.to_string());
+        out.verdicts.push((
+            id.clone(),
+            VerdictOut {
+                class: class.to_string(),
+                confidence: rv.confidence,
+                reason: rv.reason.clone(),
+                evidence: rv.evidence.clone(),
+                lines: lines_by_id.get(&id).cloned().unwrap_or_default(),
+            },
+        ));
+    }
+    out
+}
+
+/// `call_agent` with light bounded retry. Under `--jobs` concurrency a transient
+/// backend hiccup (rate-limit 429, flaky spawn) shouldn't drop the file on the first
+/// miss. Bounded, not infinite: a hard error (bad model, auth) burns the retries and
+/// returns the last error, which the caller turns into a skip.
+fn call_agent_retry(
+    provider: Engine,
+    cwd: &Path,
+    prompt: &str,
+    model: &str,
+    retries: u32,
+) -> Result<(String, Option<String>, Option<f64>)> {
+    let mut attempt = 0u32;
+    loop {
+        match call_agent(provider, cwd, prompt, model) {
+            Ok(v) => return Ok(v),
+            Err(e) if attempt < retries => {
+                attempt += 1;
+                eprintln!("[o7 judge] retry {attempt}/{retries} after backend error: {e}");
+                std::thread::sleep(std::time::Duration::from_millis(500 * u64::from(attempt)));
+            }
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 /// Dispatch one read-only judge call to the selected backend. Both return the
