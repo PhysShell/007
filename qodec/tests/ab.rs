@@ -42,6 +42,21 @@ fn numeric_accepts_match_only_at_digit_boundaries() -> Result<()> {
 }
 
 #[test]
+fn parse_rejects_empty_and_whitespace_accepts() -> Result<()> {
+    for bad in [
+        r#"[{"id":"q1","question":"?","accept":[]}]"#,
+        r#"[{"id":"q1","question":"?","accept":[""]}]"#,
+        r#"[{"id":"q1","question":"?","accept":["  "]}]"#,
+    ] {
+        anyhow::ensure!(
+            parse_questions(bad).is_err(),
+            "must reject degenerate accept list: {bad}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn grade_extracts_json_from_chatty_output() -> Result<()> {
     let questions = parse_questions(QUESTIONS)?;
     let chatty = "Sure! Here are my answers:\n{\"q1\": \"2\", \"q2\": \"14\", \"q3\": \"CS1061\"}\nHope that helps.";

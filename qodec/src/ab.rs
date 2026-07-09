@@ -54,6 +54,12 @@ pub fn parse_questions(text: &str) -> Result<Vec<Question>> {
         if accept.is_empty() {
             bail!("question {id} has an empty accept list");
         }
+        // An empty or whitespace-only accept entry would match nearly any
+        // answer via `contains` and silently inflate scores — fail loudly
+        // at parse time instead (CodeRabbit review on PR #28).
+        if accept.iter().any(|a| a.trim().is_empty()) {
+            bail!("question {id} has an empty or whitespace-only accept entry");
+        }
         out.push(Question {
             id,
             question,
