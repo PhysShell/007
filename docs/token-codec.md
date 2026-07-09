@@ -252,12 +252,21 @@ actual judge-run agreement before trusting them as a gate.
 ## Next steps (in rough order of information gained per effort)
 
 Done from previous editions of this list: suffix-automaton mining (`deep`),
-the perplexity pre-gate (`qodec ppl`), and the first comprehension A/B
-(`qodec ab`, 24/24 = 24/24 — section above).
+the perplexity pre-gate (`qodec ppl`), the first comprehension A/B
+(`qodec ab`, 24/24 = 24/24 — section above), and the **judge-grade A/B at
+oracle scale** (`qodec/ab/results/judge-run/`): the real own-check FP-triage
+contract — full rubric, 4 real findings incl. the FP-direction controls —
+judged 12/12 = 12/12 raw vs encoded with teardown citations intact, PASSing
+the 007 Phase-1 gate along the way. Economics finding from that run:
+per-file prompts on small files honestly fall back (below the container
+payoff), while the batched `--max-files` shape pays −10% cold / −25% warm
+and leaves the verdict-deciding teardown lines un-aliased, diff-style.
+Remaining rung: the same A/B over the 156-finding STS run (real source,
+hostile input) through the actual `o7 judge` binary.
 
-1. **Judge-grade A/B** — encoded vs raw payloads through `o7 judge` on the
-   FP-triage rubric; measure *verdict agreement* on a real task, not just
-   retrieval QA. `qodec ppl` pre-filters; A/B results calibrate its bands.
+1. **STS-scale judge A/B** — the 156 findings with real source through
+   `o7 judge`; measure verdict agreement at scale. `qodec ppl` pre-filters;
+   A/B results calibrate its bands.
 2. **Wire as an output filter** — `o7` already harvests `agent.stdout` and
    feeds judge prompts; `qodec encode --codec squeeze` is a one-line insert
    at the prompt-assembly seam (and a PostToolUse hook candidate in Claude
