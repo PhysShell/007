@@ -69,22 +69,30 @@ the original, and that honesty is a feature.
 ## Big files (bigger than the miner wants to chew)
 
 The `mine`/`deep`/`squeeze` miner is single-threaded and superlinear — a 26 MB
-`findings.json` took ~28 min in one shot. Two helpers around the same binary
-sidestep that (no source change; qodec itself stays single-threaded):
+`findings.json` took ~28 min in one shot. Three rungs, in order of leverage:
 
 ```bash
-# split into byte chunks, deep-encode each in parallel across all cores, sum
-./qodec-bulk.sh huge.log 150k deep              # -52% on the 26 MB audit JSON
+# 1. Don't send records you don't need — the biggest lever needs no codec.
+#    Descend to the array, filter, get a compact JSON array; kept/total on stderr.
+./target/release/qodec slice -i findings.json --key findings \
+  --where tool=codeql --where 'message~injection' > slice.json
 
-# a uniform JSON array of records? skip the miner entirely — toon strips the
-# repeated keys, semantic (value-equal) roundtrip, seconds instead of minutes
-pwsh qodec-json.ps1 -File findings.json -Key findings   # -49% in ~18s
+# 2. Still sending many same-shaped records? toon the slice — keys-once
+#    table, seconds instead of minutes (-49% on that 26 MB file in ~18 s).
+./target/release/qodec slice -i findings.json --key findings \
+  | ./target/release/qodec encode --codec toon --report > slice.toon
+
+# 3. Unstructured text (build logs, traces): byte chunks, deep-encoded in
+#    parallel across all cores, token reports summed.
+./qodec-bulk.sh huge.log 150k deep              # -52% on the 26 MB audit JSON
 ```
 
-`qodec-bulk.sh` is byte-lossless per chunk and its gain is a lower bound (cross-
-chunk repetition is lost). For one big array of same-shaped records, `toon` via
-`qodec-json.ps1` matches the miner in seconds. Both take `$QODEC` to override the
-binary path.
+`slice` ANDs its `--where` clauses (`key=value`, `key!=value`,
+`key~substring`; the operator is the first `=`/`~`) and emits canonical
+compact JSON — value-equal, like `toon`'s decode, not byte-exact.
+`qodec-bulk.sh` is byte-lossless per chunk and its summed gain is a lower
+bound (cross-chunk repetition is lost); a failed chunk fails the totals
+instead of skewing them. It takes `$QODEC` to override the binary path.
 
 ## Codecs
 
