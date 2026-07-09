@@ -12,6 +12,8 @@ use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
 
 use crate::record::RunRecord;
 
@@ -202,6 +204,10 @@ pub struct JudgeArgs {
     /// Backend agent CLI: `claude` | `codex` | `auto` (infer from --model).
     #[arg(long, default_value = "auto")]
     pub provider: String,
+    /// Parallel per-file workers. Bounded — respects backend rate limits; a burst
+    /// of 100+ concurrent calls would throttle. `1` = fully sequential.
+    #[arg(long, default_value_t = 4)]
+    pub jobs: usize,
     /// Overlay output path (fp-verdicts.json). Also written into the run-record.
     #[arg(long)]
     pub out: Option<PathBuf>,
@@ -220,6 +226,24 @@ pub struct JudgeArgs {
     /// Plan only — print files/ids/calls, do not call the backend.
     #[arg(long)]
     pub dry_run: bool,
+}
+
+/// Extra retry attempts per file on a transient backend failure (429 / flaky
+/// spawn), with short linear backoff. Matters most under `--jobs` concurrency.
+const JUDGE_RETRIES: u32 = 2;
+
+/// One file's mergeable outcome, produced by a worker and folded into the run's
+/// maps single-threaded. Empty on a skip (unreadable source, backend failure after
+/// retries, unparseable output) — `session_id`/`cost` may still be set if the call
+/// succeeded but parsing didn't.
+#[derive(Default)]
+struct FileResult {
+    verdicts: Vec<(String, VerdictOut)>,
+    /// Every class counted for the summary, including `_malformed` — kept separate
+    /// from `verdicts` so malformed entries are tallied but not recorded.
+    classes: Vec<String>,
+    session_id: Option<String>,
+    cost: Option<f64>,
 }
 
 pub fn run(a: &JudgeArgs) -> Result<()> {
@@ -357,171 +381,76 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
     let mut cost_total = 0f64;
     let mut cost_any = false;
 
-    for (fi, file) in files.iter().enumerate() {
-        // `by_file` only ever stores valid indices into `reps`.
-        #[allow(clippy::indexing_slicing)]
-        let fif: Vec<&Rep> = by_file
-            .get(file)
-            .map(|ids| ids.iter().map(|&i| &reps[i]).collect())
-            .unwrap_or_default();
-        let fif_json = serde_json::to_string_pretty(&fif)?;
+    // Judge files with a bounded worker pool: calls are independent per file and the
+    // overlay is a finding_id -> verdict MAP assembled after the fact, so files
+    // finishing out of order changes nothing (docs/performance.md). Bounded, not
+    // unbounded — a burst of 100+ concurrent claude/codex calls would trip the
+    // subscription rate limits. Model calls run on the workers; the merge below stays
+    // single-threaded, so all pairing/dedup logic is unchanged and deterministic.
+    let jobs = a.jobs.max(1);
+    let total = files.len();
+    println!("[o7 judge] judging {total} file(s), {jobs} worker(s)");
 
-        // Confine reads to the repo root: an absolute or `../` path smuggled into
-        // findings.json must not pull arbitrary files into the prompt — that is another
-        // exfil channel the tool sandbox can't stop. `repo` is already canonicalized.
-        let src_path = match repo.join(file).canonicalize() {
-            Ok(p) if p.starts_with(&repo) => p,
-            Ok(p) => {
-                eprintln!(
-                    "[o7 judge] warn: {file} resolves outside --repo ({}) — skipped",
-                    p.display()
+    let next = AtomicUsize::new(0);
+    let (tx, rx) = mpsc::channel::<FileResult>();
+    std::thread::scope(|scope| {
+        // Shadow shared state as shared refs so each `move` worker copies the ref.
+        let files = &files;
+        let repo = &repo;
+        let template = &template;
+        let rubric = &rubric;
+        let reps = &reps;
+        let by_file = &by_file;
+        let key_to_id = &key_to_id;
+        let lines_by_id = &lines_by_id;
+        let rec = &rec;
+        let next = &next;
+        let model = a.model.as_str();
+        for _ in 0..jobs {
+            let tx = tx.clone();
+            scope.spawn(move || loop {
+                let i = next.fetch_add(1, Ordering::Relaxed);
+                let Some(file) = files.get(i) else { break };
+                let res = judge_one_file(
+                    i + 1,
+                    total,
+                    file,
+                    provider,
+                    repo,
+                    model,
+                    template,
+                    rubric,
+                    reps,
+                    by_file,
+                    key_to_id,
+                    lines_by_id,
+                    rec,
+                    JUDGE_RETRIES,
                 );
-                continue;
-            }
-            Err(e) => {
-                eprintln!("[o7 judge] warn: {file}: cannot resolve source ({e}) — skipped");
-                continue;
-            }
-        };
-        let src = std::fs::read_to_string(&src_path)
-            .with_context(|| format!("reading source {}", src_path.display()))?;
-
-        let prompt = template
-            .replace("{{RUBRIC}}", &rubric)
-            .replace("{{FILE_PATH}}", file)
-            .replace("{{FINDINGS_IN_FILE}}", &fif_json)
-            .replace("{{FILE_CONTENT}}", &src);
-
-        println!(
-            "[o7 judge] ({}/{}) {file} — {} finding(s)",
-            fi + 1,
-            files.len(),
-            fif.len()
-        );
-
-        let (result_text, sid, cost) = call_agent(provider, &repo, &prompt, &a.model)?;
-        if let Some(s) = sid {
-            session_ids.push(s);
+                if tx.send(res).is_err() {
+                    break;
+                }
+            });
         }
-        if let Some(c) = cost {
-            cost_total += c;
-            cost_any = true;
+        // Close the original sender so the collector ends once the workers finish.
+        drop(tx);
+        // Single-threaded merge — deterministic, and the only writer of these maps.
+        for res in rx {
+            if let Some(s) = res.session_id {
+                session_ids.push(s);
+            }
+            if let Some(c) = res.cost {
+                cost_total += c;
+                cost_any = true;
+            }
+            for class in res.classes {
+                *by_class.entry(class).or_default() += 1;
+            }
+            for (id, v) in res.verdicts {
+                verdicts.insert(id, v);
+            }
         }
-
-        rec.write_text(&format!("raw.{}.txt", sanitize(file)), &result_text)?;
-
-        // A malformed output for ONE file must not abort the whole batch (a 116-file
-        // run shouldn't die on file 3). The raw text is already persisted above, so
-        // warn, skip this file, and keep going — the overlay records what succeeded.
-        let arr = match extract_json_array(&result_text) {
-            Some(a) => a,
-            None => {
-                eprintln!(
-                    "[o7 judge] warn: {file}: no JSON array in {} output — skipped (raw saved)",
-                    provider.label()
-                );
-                continue;
-            }
-        };
-        let raws: Vec<RawVerdict> = match serde_json::from_str(&arr) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!(
-                    "[o7 judge] warn: {file}: parsing verdicts failed ({e}) — skipped (raw saved)"
-                );
-                continue;
-            }
-        };
-
-        // The prompt mandates "one object per finding above, in the same order",
-        // so pair verdicts to findings positionally when the counts match. That is
-        // the only reliable identity: two findings sharing (path, line, rule) but
-        // differing in `message` have distinct `finding_id`s, yet `RawVerdict` never
-        // echoes `message` back — so a (path, line, rule) tuple lookup is lossy by
-        // construction and silently drops one. Fall back to the tuple map only when
-        // the model breaks the count contract.
-        let paired: Vec<(String, &RawVerdict)> = if raws.len() == fif.len() {
-            raws.iter()
-                .zip(fif.iter())
-                .map(|(rv, rep)| {
-                    // Counts match, so the model honored "one object per finding, in
-                    // order". Position is the primary identity — it's the only way to
-                    // split a message-collision (same tuple, distinct finding_id). The
-                    // echoed tuple is a cross-check: matches rep -> confirmed; matches a
-                    // DIFFERENT known finding -> the model reordered, recover by key;
-                    // matches nothing (dropped/garbled echo) -> fall back to position.
-                    // Either way every verdict is placed (never dropped), so `.map`.
-                    if rv.path == rep.path && rv.line == rep.line && rv.rule == rep.rule {
-                        return (rep.id.clone(), rv);
-                    }
-                    let key = (rv.path.clone(), rv.line, rv.rule.clone());
-                    match key_to_id.get(&key) {
-                        Some(id) => {
-                            eprintln!(
-                                "[o7 judge] warn: {file}: verdict ({}, {}, {}) out of position \
-                                 — recovered by key, not position",
-                                rv.path, rv.line, rv.rule
-                            );
-                            (id.clone(), rv)
-                        }
-                        None => {
-                            // Echo matches no known finding — almost always a dropped
-                            // or garbled echo field (e.g. missing `rule`), not a real
-                            // reorder. Counts match, so position is the best identity.
-                            eprintln!(
-                                "[o7 judge] warn: {file}: verdict echo ({}, {}, {:?}) matches no \
-                                 finding — assigning by position to {}",
-                                rv.path, rv.line, rv.rule, rep.id
-                            );
-                            (rep.id.clone(), rv)
-                        }
-                    }
-                })
-                .collect()
-        } else {
-            eprintln!(
-                "[o7 judge] warn: {file}: model returned {} verdict(s) for {} finding(s) \
-                 — pairing by (path, line, rule) key instead of position",
-                raws.len(),
-                fif.len()
-            );
-            raws.iter()
-                .filter_map(|rv| {
-                    let key = (rv.path.clone(), rv.line, rv.rule.clone());
-                    match key_to_id.get(&key) {
-                        Some(id) => Some((id.clone(), rv)),
-                        None => {
-                            eprintln!(
-                                "[o7 judge] warn: verdict for unknown finding {key:?} — skipped"
-                            );
-                            None
-                        }
-                    }
-                })
-                .collect()
-        };
-
-        for (id, rv) in paired {
-            // A verdict with no class is unusable (the model dropped the one field
-            // that matters). Count it as `_malformed` for the summary, don't record it.
-            if rv.class.is_empty() {
-                *by_class.entry("_malformed".to_string()).or_default() += 1;
-                eprintln!("[o7 judge] warn: {file}: empty class for {id} — not recorded");
-                continue;
-            }
-            *by_class.entry(rv.class.clone()).or_default() += 1;
-            verdicts.insert(
-                id.clone(),
-                VerdictOut {
-                    class: rv.class.clone(),
-                    confidence: rv.confidence,
-                    reason: rv.reason.clone(),
-                    evidence: rv.evidence.clone(),
-                    lines: lines_by_id.get(&id).cloned().unwrap_or_default(),
-                },
-            );
-        }
-    }
+    });
 
     let overlay = Overlay {
         schema: 1,
@@ -570,6 +499,224 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
     println!("[o7 judge] overlay -> {overlay_at}");
     println!("[o7 judge] record -> {}", rec.dir.display());
     Ok(())
+}
+
+/// Judge a single file: build the prompt, call the backend (with retry), parse and
+/// pair the verdicts. Fully error-isolated — every failure warns and returns an
+/// empty/partial `FileResult` rather than propagating, so one bad file never aborts
+/// the batch. The whole per-file pipeline runs on a worker thread; only reads shared
+/// (read-only) state, so it is `Send`/`Sync`-safe by construction.
+#[allow(clippy::too_many_arguments)]
+fn judge_one_file(
+    seq: usize,
+    total: usize,
+    file: &str,
+    provider: Provider,
+    repo: &Path,
+    model: &str,
+    template: &str,
+    rubric: &str,
+    reps: &[Rep],
+    by_file: &BTreeMap<String, Vec<usize>>,
+    key_to_id: &BTreeMap<(String, i64, String), String>,
+    lines_by_id: &BTreeMap<String, Vec<i64>>,
+    rec: &RunRecord,
+    retries: u32,
+) -> FileResult {
+    let mut out = FileResult::default();
+
+    // `by_file` only ever stores valid indices into `reps`.
+    #[allow(clippy::indexing_slicing)]
+    let fif: Vec<&Rep> = by_file
+        .get(file)
+        .map(|ids| ids.iter().map(|&i| &reps[i]).collect())
+        .unwrap_or_default();
+    let fif_json = match serde_json::to_string_pretty(&fif) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[o7 judge] warn: {file}: serializing findings failed ({e}) — skipped");
+            return out;
+        }
+    };
+
+    // Confine reads to the repo root: an absolute or `../` path smuggled into
+    // findings.json must not pull arbitrary files into the prompt — that is another
+    // exfil channel the tool sandbox can't stop. `repo` is already canonicalized.
+    let src_path = match repo.join(file).canonicalize() {
+        Ok(p) if p.starts_with(repo) => p,
+        Ok(p) => {
+            eprintln!(
+                "[o7 judge] warn: {file} resolves outside --repo ({}) — skipped",
+                p.display()
+            );
+            return out;
+        }
+        Err(e) => {
+            eprintln!("[o7 judge] warn: {file}: cannot resolve source ({e}) — skipped");
+            return out;
+        }
+    };
+    let src = match std::fs::read_to_string(&src_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[o7 judge] warn: {file}: reading source failed ({e}) — skipped");
+            return out;
+        }
+    };
+
+    let prompt = template
+        .replace("{{RUBRIC}}", rubric)
+        .replace("{{FILE_PATH}}", file)
+        .replace("{{FINDINGS_IN_FILE}}", &fif_json)
+        .replace("{{FILE_CONTENT}}", &src);
+
+    println!(
+        "[o7 judge] ({seq}/{total}) {file} — {} finding(s)",
+        fif.len()
+    );
+
+    let (result_text, sid, cost) = match call_agent_retry(provider, repo, &prompt, model, retries) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[o7 judge] warn: {file}: backend call failed ({e}) — skipped");
+            return out;
+        }
+    };
+    // The call happened (cost incurred, session exists) — carry these even if the
+    // parse below fails, so the run-record accounts for every call made.
+    out.session_id = sid;
+    out.cost = cost;
+
+    if let Err(e) = rec.write_text(&format!("raw.{}.txt", sanitize(file)), &result_text) {
+        eprintln!("[o7 judge] warn: {file}: could not persist raw output ({e})");
+    }
+
+    // A malformed output for ONE file must not abort the batch. The raw text is
+    // already persisted above, so warn, skip this file, keep going.
+    let arr = match extract_json_array(&result_text) {
+        Some(a) => a,
+        None => {
+            eprintln!(
+                "[o7 judge] warn: {file}: no JSON array in {} output — skipped (raw saved)",
+                provider.label()
+            );
+            return out;
+        }
+    };
+    let raws: Vec<RawVerdict> = match serde_json::from_str(&arr) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!(
+                "[o7 judge] warn: {file}: parsing verdicts failed ({e}) — skipped (raw saved)"
+            );
+            return out;
+        }
+    };
+
+    // Pair verdicts to findings positionally when the counts match (the prompt
+    // mandates "one object per finding, in order"). Two findings sharing
+    // (path, line, rule) but differing in `message` have distinct `finding_id`s,
+    // which only position can split. Fall back to the tuple map when the model
+    // breaks the count contract.
+    let paired: Vec<(String, &RawVerdict)> = if raws.len() == fif.len() {
+        raws.iter()
+            .zip(fif.iter())
+            .map(|(rv, rep)| {
+                // Position is primary; the echoed tuple is a cross-check: matches rep
+                // -> confirmed; matches a DIFFERENT known finding -> reordered, recover
+                // by key; matches nothing (dropped/garbled echo) -> fall back to
+                // position. Every verdict is placed (never dropped), so `.map`.
+                if rv.path == rep.path && rv.line == rep.line && rv.rule == rep.rule {
+                    return (rep.id.clone(), rv);
+                }
+                let key = (rv.path.clone(), rv.line, rv.rule.clone());
+                match key_to_id.get(&key) {
+                    Some(id) => {
+                        eprintln!(
+                            "[o7 judge] warn: {file}: verdict ({}, {}, {}) out of position \
+                             — recovered by key, not position",
+                            rv.path, rv.line, rv.rule
+                        );
+                        (id.clone(), rv)
+                    }
+                    None => {
+                        eprintln!(
+                            "[o7 judge] warn: {file}: verdict echo ({}, {}, {:?}) matches no \
+                             finding — assigning by position to {}",
+                            rv.path, rv.line, rv.rule, rep.id
+                        );
+                        (rep.id.clone(), rv)
+                    }
+                }
+            })
+            .collect()
+    } else {
+        eprintln!(
+            "[o7 judge] warn: {file}: model returned {} verdict(s) for {} finding(s) \
+             — pairing by (path, line, rule) key instead of position",
+            raws.len(),
+            fif.len()
+        );
+        raws.iter()
+            .filter_map(|rv| {
+                let key = (rv.path.clone(), rv.line, rv.rule.clone());
+                match key_to_id.get(&key) {
+                    Some(id) => Some((id.clone(), rv)),
+                    None => {
+                        eprintln!("[o7 judge] warn: verdict for unknown finding {key:?} — skipped");
+                        None
+                    }
+                }
+            })
+            .collect()
+    };
+
+    for (id, rv) in paired {
+        // A verdict with no class is unusable (the model dropped the one field that
+        // matters). Count it as `_malformed` for the summary, don't record it.
+        if rv.class.is_empty() {
+            out.classes.push("_malformed".to_string());
+            eprintln!("[o7 judge] warn: {file}: empty class for {id} — not recorded");
+            continue;
+        }
+        out.classes.push(rv.class.clone());
+        out.verdicts.push((
+            id.clone(),
+            VerdictOut {
+                class: rv.class.clone(),
+                confidence: rv.confidence,
+                reason: rv.reason.clone(),
+                evidence: rv.evidence.clone(),
+                lines: lines_by_id.get(&id).cloned().unwrap_or_default(),
+            },
+        ));
+    }
+    out
+}
+
+/// `call_agent` with light bounded retry. Under `--jobs` concurrency a transient
+/// backend hiccup (rate-limit 429, flaky spawn) shouldn't drop the file on the first
+/// miss. Bounded, not infinite: a hard error (bad model, auth) burns the retries and
+/// returns the last error, which the caller turns into a skip.
+fn call_agent_retry(
+    provider: Provider,
+    cwd: &Path,
+    prompt: &str,
+    model: &str,
+    retries: u32,
+) -> Result<(String, Option<String>, Option<f64>)> {
+    let mut attempt = 0u32;
+    loop {
+        match call_agent(provider, cwd, prompt, model) {
+            Ok(v) => return Ok(v),
+            Err(e) if attempt < retries => {
+                attempt += 1;
+                eprintln!("[o7 judge] retry {attempt}/{retries} after backend error: {e}");
+                std::thread::sleep(std::time::Duration::from_millis(500 * u64::from(attempt)));
+            }
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 /// Dispatch one read-only judge call to the selected backend. Both return the

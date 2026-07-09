@@ -37,31 +37,36 @@ is exactly the "blind optimization" the source article opens by warning against.
 
 ## The one real lever — parallelize per-file judge calls
 
-The article's **"Parallelize"** section is the hit. `judge::run` loops over files
-**sequentially** (`for (fi, file) in files.iter().enumerate()` → blocking
-`call_claude`). The calls are **independent across files**, so on a real run
-(~156 findings over many files) sequential wall-clock = the *sum* of every call's
-latency — easily 10–20+ minutes. A bounded worker pool cuts that to roughly the
-*max* per batch: near-linear speedup in the number of workers.
+The article's **"Parallelize"** section is the hit. `judge::run` **used to** loop
+over files sequentially (`for (fi, file) in files.iter().enumerate()` → blocking
+`call_agent`). The calls are **independent across files**, so on a real run
+(~210 findings over 116 files) sequential wall-clock = the *sum* of every call's
+latency — measured ~30–50s per opus whole-file call → ~1.5h. A bounded worker pool
+cuts that to roughly the *max* per batch: near-linear speedup in the number of
+workers. **Now implemented — see below.**
 
-### Design (build when the real STS run lands)
+### Design — implemented as `--jobs N` (default 4)
 
-- **`--jobs N`** (default a small number, e.g. 4) — a bounded pool over the
-  per-file work items. Bounded, not unbounded: respect the `claude`/Anthropic
-  rate limits; a burst of 156 concurrent calls would throttle or fail.
-- **Ordering-safe by construction.** Verdict↔finding pairing is *per file*
-  (positional zip within a file's `raws`/`fif`, key fallback otherwise). The
-  overlay is a `finding_id → verdict` map assembled after the fact, so files
-  completing out of order changes nothing. No new correctness surface.
-- **Error isolation.** One file's failure must not abort the run — collect
-  per-file results, warn on failures (matches the existing skip-with-warning
-  posture), and still emit the overlay for the files that succeeded.
-- **Cost is unchanged** — same number of `claude` calls, just issued with
-  bounded concurrency instead of one at a time. The win is wall-clock, not $.
-- Consider light backoff/retry on transient `claude` failures under concurrency.
+Shipped in `judge::run`: a bounded `std::thread::scope` pool over the per-file work
+items. Model calls run on the workers; the overlay merge stays single-threaded on the
+main thread (via an `mpsc` channel), so pairing/dedup is unchanged and deterministic.
+Validated on a 5-file STS taste run — files complete out of order, output (finding_ids
++ classes) is byte-identical to the sequential path.
 
-Gate: implement alongside the real STS run (design with real data, per `TODO.md`),
-not speculatively.
+- **`--jobs N`** (default 4) — bounded pool. Bounded, not unbounded: a burst of 100+
+  concurrent `claude`/`codex` calls would trip the subscription rate limits. `1` =
+  fully sequential.
+- **Ordering-safe by construction.** Verdict↔finding pairing is *per file* (extracted
+  into `judge_one_file`). The overlay is a `finding_id → verdict` map assembled after
+  the fact, so out-of-order completion changes nothing. No new correctness surface.
+- **Error isolation.** `judge_one_file` never propagates — every failure (unreadable
+  source, backend error after retries, unparseable output) warns and returns an
+  empty/partial `FileResult`; the run still emits the overlay for what succeeded.
+- **Light retry.** `call_agent_retry` gives `JUDGE_RETRIES` (2) extra attempts with
+  linear backoff on transient backend errors (429 / flaky spawn) — matters most under
+  concurrency.
+- **Cost is unchanged** — same number of calls, just issued with bounded concurrency.
+  The win is wall-clock (~4× at `--jobs 4`), not $.
 
 ## Out of scope for 007
 
