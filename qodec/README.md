@@ -66,6 +66,26 @@ legend lives in a cached prompt prefix (CLAUDE.md / system prompt) and is
 amortized. Result `raw` = the codec refused — the artifact would not beat
 the original, and that honesty is a feature.
 
+## Big files (bigger than the miner wants to chew)
+
+The `mine`/`deep`/`squeeze` miner is single-threaded and superlinear — a 26 MB
+`findings.json` took ~28 min in one shot. Two helpers around the same binary
+sidestep that (no source change; qodec itself stays single-threaded):
+
+```bash
+# split into byte chunks, deep-encode each in parallel across all cores, sum
+./qodec-bulk.sh huge.log 150k deep              # -52% on the 26 MB audit JSON
+
+# a uniform JSON array of records? skip the miner entirely — toon strips the
+# repeated keys, semantic (value-equal) roundtrip, seconds instead of minutes
+pwsh qodec-json.ps1 -File findings.json -Key findings   # -49% in ~18s
+```
+
+`qodec-bulk.sh` is byte-lossless per chunk and its gain is a lower bound (cross-
+chunk repetition is lost). For one big array of same-shaped records, `toon` via
+`qodec-json.ps1` matches the miner in seconds. Both take `$QODEC` to override the
+binary path.
+
 ## Codecs
 
 | codec | idea | roundtrip |
