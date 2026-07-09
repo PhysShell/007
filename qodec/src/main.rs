@@ -94,7 +94,7 @@ struct IoArgs {
 struct EncodeArgs {
     #[command(flatten)]
     io: IoArgs,
-    /// mine | deep | fold | toon | squeeze
+    /// mine | deep | fold | toon | grep | diag | squeeze
     #[arg(long, default_value = "squeeze")]
     codec: String,
     /// auto | glyph | sigil
@@ -145,7 +145,7 @@ struct PplArgs {
     /// Input file (stdin when omitted).
     #[arg(short, long)]
     input: Option<PathBuf>,
-    /// mine | deep | fold | toon | squeeze
+    /// mine | deep | fold | toon | grep | diag | squeeze
     #[arg(long, default_value = "squeeze")]
     codec: String,
     #[arg(long, default_value = "auto")]
@@ -341,6 +341,11 @@ fn probe_wrapper(encoded: &str) -> String {
          occurs N times in total. A `toon` body is a table: first line is a JSON array\n\
          of keys, each following line is one object, cells are JSON values joined by\n\
          the separator named in the header.\n\
+         A `grep` body is grouped matcher output: a marker line names a file path and\n\
+         the lines after it are `line:text` hits in that file (a bare marker starts\n\
+         verbatim lines). A `diag` body line starting with an alias expands to: the\n\
+         head after the alias, then the legend template with each slot placeholder\n\
+         filled by the sep-joined values in order.\n\
          Mentally decode the payload, then answer questions about its content.\n\
          Never emit alias characters in answers — always use the expanded phrases.\n\n\
          {encoded}"

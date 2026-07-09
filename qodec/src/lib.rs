@@ -6,7 +6,9 @@ pub mod ab;
 pub mod alias;
 pub mod bench;
 pub mod container;
+pub mod diag;
 pub mod fold;
+pub mod grep;
 pub mod meter;
 pub mod mine;
 pub mod ppl;
@@ -28,8 +30,15 @@ pub enum CodecKind {
     Deep,
     Fold,
     Toon,
-    /// Pipeline: `toon` (JSON) or `fold` (text), then the better of the two
-    /// miners over the result.
+    /// Group `path:line[:col]:text` matcher output by file path — the
+    /// `rg --heading` shape, byte roundtrip.
+    Grep,
+    /// Template mining for diagnostic streams (`path:line: warning: …` /
+    /// MSBuild): repeated tails go to the legend once, quoted identifiers
+    /// become slot values. Byte roundtrip, one linear pass.
+    Diag,
+    /// Pipeline: `toon` (JSON) or the measured best of `fold`/`grep`/`diag`
+    /// (text), then the better of the two miners over the result.
     Squeeze,
 }
 
@@ -40,6 +49,8 @@ impl CodecKind {
             "deep" => Some(Self::Deep),
             "fold" => Some(Self::Fold),
             "toon" => Some(Self::Toon),
+            "grep" => Some(Self::Grep),
+            "diag" => Some(Self::Diag),
             "squeeze" => Some(Self::Squeeze),
             _ => None,
         }
@@ -51,6 +62,8 @@ impl CodecKind {
             Self::Deep => "deep",
             Self::Fold => "fold",
             Self::Toon => "toon",
+            Self::Grep => "grep",
+            Self::Diag => "diag",
             Self::Squeeze => "squeeze",
         }
     }
@@ -71,21 +84,23 @@ pub fn encode(text: &str, kind: CodecKind, meter: &dyn TokenMeter, alphabet: Alp
         CodecKind::Deep => mine::encode(text, meter, &deep_opts),
         CodecKind::Fold => fold::encode(text, meter),
         CodecKind::Toon => toon::encode(text, meter),
+        CodecKind::Grep => grep::encode(text, meter),
+        CodecKind::Diag => diag::encode(text, meter),
         CodecKind::Squeeze => {
             let stage1 = if serde_json::from_str::<serde_json::Value>(text).is_ok() {
                 let tooned = toon::encode(text, meter);
                 // toon may fall back on non-table JSON — pretty-printed JSON
-                // with repeated lines can still benefit from RLE.
+                // with repeated lines can still benefit from the text shapes.
                 if container::parse(&tooned)
                     .ok()
                     .is_none_or(|c| c.codec == "raw")
                 {
-                    fold::encode(text, meter)
+                    best_text_stage(text, meter)
                 } else {
                     tooned
                 }
             } else {
-                fold::encode(text, meter)
+                best_text_stage(text, meter)
             };
             // Mine over the full stage-1 container (headers, legends, rows —
             // repeated paths inside cells are fair game); keep whichever
@@ -113,6 +128,19 @@ pub fn encode(text: &str, kind: CodecKind, meter: &dyn TokenMeter, alphabet: Alp
     }
 }
 
+/// Squeeze's text stage: every structural text codec is one linear pass
+/// and refuses honestly, so the measured minimum is always safe to take.
+fn best_text_stage(text: &str, meter: &dyn TokenMeter) -> String {
+    [
+        fold::encode(text, meter),
+        grep::encode(text, meter),
+        diag::encode(text, meter),
+    ]
+    .into_iter()
+    .min_by_key(|artifact| meter.count(artifact))
+    .unwrap_or_else(|| container::raw(text))
+}
+
 /// Decode one container layer.
 pub fn decode_once(text: &str) -> Result<String> {
     decode_container(&container::parse(text)?)
@@ -124,6 +152,8 @@ fn decode_container(c: &container::Container) -> Result<String> {
         "mine" => mine::decode(c),
         "fold" => fold::decode(c),
         "toon" => toon::decode(c),
+        "grep" => grep::decode(c),
+        "diag" => diag::decode(c),
         other => bail!("unknown codec {other:?} in container"),
     }
 }
