@@ -174,6 +174,19 @@ fn cmd_ab_emit(a: &AbEmitArgs) -> Result<()> {
     let alphabet = Alphabet::parse(&a.alphabet)
         .with_context(|| format!("unknown alphabet {:?}", a.alphabet))?;
     let encoded = encode(&payload, kind, meter.as_ref(), alphabet);
+    let outcome = container::parse(&encoded)
+        .map(|c| c.codec)
+        .unwrap_or_else(|_| "?".to_string());
+    // Fail closed: a raw fallback would compare raw text against raw-in-a-
+    // container — an "A/B" that never exercises the notation and can only
+    // report fake encoded-side success (Codex review on PR #28).
+    if outcome == "raw" {
+        bail!(
+            "codec {:?} fell back to raw on this payload — the A/B would not \
+             exercise the notation; pick a more repetitive payload or another codec",
+            a.codec
+        );
+    }
 
     fs::create_dir_all(&a.out_dir).with_context(|| format!("creating {}", a.out_dir.display()))?;
     let raw_prompt = qodec::ab::prompt("", &payload, &questions);
@@ -181,10 +194,11 @@ fn cmd_ab_emit(a: &AbEmitArgs) -> Result<()> {
     fs::write(a.out_dir.join("raw.prompt.txt"), &raw_prompt)?;
     fs::write(a.out_dir.join("encoded.prompt.txt"), &enc_prompt)?;
     eprintln!(
-        "qodec ab: emitted prompts to {} (payload {} -> {} tokens encoded [{}])",
+        "qodec ab: emitted prompts to {} (payload {} -> {} tokens encoded as {} [{}])",
         a.out_dir.display(),
         meter.count(&payload),
         meter.count(&encoded),
+        outcome,
         meter.name(),
     );
     Ok(())

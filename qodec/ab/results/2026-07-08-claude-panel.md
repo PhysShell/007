@@ -26,3 +26,10 @@ Scope honesty: one model family, one run, 4 small payloads (300–660 tokens),
 retrieval-style questions. Not tested: long-context payloads, deep reasoning
 over decoded content, weaker/cheaper reader models. The gate is *open*, not
 *proven* — extend with `o7 judge` FP-triage agreement next.
+
+Post-run grader hardening (Codex review on PR #28): purely numeric accepts
+now match only at digit boundaries (`"2"` no longer passes `"20 warnings"`),
+and `ab emit` fails closed when the codec falls back to raw. The recorded
+answers above were re-graded under the hardened rules: **24/24 = 24/24
+stands** (every numeric answer was the exact digits). All four payloads had
+encoded as `mine` with 12–16 legend entries — no raw fallbacks in this run.

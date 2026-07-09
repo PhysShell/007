@@ -104,6 +104,34 @@ pub struct GradeRow {
     pub correct: bool,
 }
 
+/// Purely numeric accepts match only at digit boundaries, so `"2"` passes
+/// `"2"` or `"2 errors"` but not `"20 warnings"`, and `"14"` passes
+/// `"line 14"` but not `"142"`. Everything else stays plain case-insensitive
+/// substring matching. (Codex review on PR #28: `contains` alone lets short
+/// numeric accepts overstate comprehension scores.)
+fn accept_matches(answer_lower: &str, accept: &str) -> bool {
+    let a = accept.to_lowercase();
+    if a.is_empty() {
+        return false;
+    }
+    if !a.chars().all(|c| c.is_ascii_digit()) {
+        return answer_lower.contains(&a);
+    }
+    let bytes = answer_lower.as_bytes();
+    let mut from = 0usize;
+    while let Some(pos) = answer_lower.get(from..).and_then(|s| s.find(&a)) {
+        let start = from + pos;
+        let end = start + a.len();
+        let prev_is_digit = start > 0 && bytes.get(start - 1).is_some_and(|b| b.is_ascii_digit());
+        let next_is_digit = bytes.get(end).is_some_and(|b| b.is_ascii_digit());
+        if !prev_is_digit && !next_is_digit {
+            return true;
+        }
+        from = start + 1;
+    }
+    false
+}
+
 /// Tolerant answer extraction: takes the outermost `{...}` block so chatty
 /// model output around the JSON does not fail the grade.
 pub fn grade(questions: &[Question], answers_text: &str) -> Result<Vec<GradeRow>> {
@@ -128,7 +156,7 @@ pub fn grade(questions: &[Question], answers_text: &str) -> Result<Vec<GradeRow>
             })
             .unwrap_or_default();
         let lower = answer.to_lowercase();
-        let correct = q.accept.iter().any(|a| lower.contains(&a.to_lowercase()));
+        let correct = q.accept.iter().any(|a| accept_matches(&lower, a));
         rows.push(GradeRow {
             id: q.id.clone(),
             answer,
