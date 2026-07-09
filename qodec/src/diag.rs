@@ -14,6 +14,11 @@
 //! travel verbatim — a passthrough line can never be mistaken for a row
 //! because alias glyphs and the probed sep/slot characters are all chosen
 //! to be absent from the original input.
+//!
+//! CRLF-safe: a line's trailing `\r` rides at the end of its body row —
+//! never inside the template, because `container::parse` normalizes a
+//! trailing `\r` on legend lines and would silently eat it (Codex review
+//! on PR #32). Lines with a *bare* CR anywhere else travel verbatim.
 
 use std::collections::HashMap;
 
@@ -98,11 +103,14 @@ fn split_tail(tail: &str, slot: char) -> Option<(String, Vec<&str>)> {
 
 enum Line<'a> {
     Row {
+        /// The line ended with `\r` (CRLF input); re-attached after the row.
+        cr: bool,
         head: &'a str,
         template: String,
         slots: Vec<&'a str>,
     },
-    Pass(&'a str),
+    /// Emitted verbatim from the original line.
+    Pass,
 }
 
 pub fn encode(text: &str, meter: &dyn TokenMeter) -> String {
@@ -128,21 +136,31 @@ pub fn encode(text: &str, meter: &dyn TokenMeter) -> String {
 
     let parsed: Vec<Line<'_>> = raw_lines
         .iter()
-        .map(|&line| {
+        .map(|&full| {
+            let (line, cr) = match full.strip_suffix('\r') {
+                Some(stripped) => (stripped, true),
+                None => (full, false),
+            };
+            // A bare CR anywhere else would end up inside a template or
+            // slot and get mangled by legend normalization — verbatim.
+            if line.contains('\r') {
+                return Line::Pass;
+            }
             let Some(hl) = head_len(line) else {
-                return Line::Pass(line);
+                return Line::Pass;
             };
             let (head, tail) = match (line.get(..hl), line.get(hl..)) {
                 (Some(h), Some(t)) => (h, t),
-                _ => return Line::Pass(line),
+                _ => return Line::Pass,
             };
             match split_tail(tail, slot) {
                 Some((template, slots)) => Line::Row {
+                    cr,
                     head,
                     template,
                     slots,
                 },
-                None => Line::Pass(line),
+                None => Line::Pass,
             }
         })
         .collect();
@@ -175,9 +193,10 @@ pub fn encode(text: &str, meter: &dyn TokenMeter) -> String {
     }
 
     let mut body = String::new();
-    for line in &parsed {
+    for (line, &full) in parsed.iter().zip(&raw_lines) {
         match line {
             Line::Row {
+                cr,
                 head,
                 template,
                 slots,
@@ -189,18 +208,13 @@ pub fn encode(text: &str, meter: &dyn TokenMeter) -> String {
                     body.push(sep);
                     body.push_str(s);
                 }
-            }
-            Line::Row { head, template, slots } => {
-                // Un-committed template: reassemble the original line.
-                body.push_str(head);
-                let mut segs = template.split(slot);
-                body.push_str(segs.next().unwrap_or_default());
-                for (seg, s) in segs.zip(slots) {
-                    body.push_str(s);
-                    body.push_str(seg);
+                if *cr {
+                    body.push('\r');
                 }
             }
-            Line::Pass(line) => body.push_str(line),
+            // Un-committed template or unparsed line: the original,
+            // verbatim (the container body is read verbatim to EOF).
+            _ => body.push_str(full),
         }
         body.push('\n');
     }
@@ -264,6 +278,10 @@ pub fn decode(c: &Container) -> Result<String> {
             out.push(line.to_string());
             continue;
         };
+        let (rest, cr) = match rest.strip_suffix('\r') {
+            Some(stripped) => (stripped, true),
+            None => (rest, false),
+        };
         let want_slots = segs.len().saturating_sub(1);
         let mut fields = rest.split(sep);
         let head = fields.next().unwrap_or_default();
@@ -280,6 +298,9 @@ pub fn decode(c: &Container) -> Result<String> {
         for (seg, s) in segs_iter.zip(slots) {
             rebuilt.push_str(s);
             rebuilt.push_str(seg);
+        }
+        if cr {
+            rebuilt.push('\r');
         }
         out.push(rebuilt);
     }

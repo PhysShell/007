@@ -277,9 +277,24 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
     #[test]
-    fn prop_mine_fold_squeeze_roundtrip(text in "[ -~\n§¤码引']{0,400}") {
+    fn prop_codec_roundtrip(text in "[ -~\n§¤码引']{0,400}") {
         let meter = Approx;
         for kind in [CodecKind::Mine, CodecKind::Deep, CodecKind::Fold, CodecKind::Grep, CodecKind::Diag, CodecKind::Squeeze] {
+            let encoded = encode(&text, kind, &meter, Alphabet::Auto);
+            let back = decode(&encoded).map_err(|e| {
+                TestCaseError::fail(format!("decode error for {}: {e}", kind.label()))
+            })?;
+            prop_assert_eq!(&back, &text, "codec {}", kind.label());
+        }
+    }
+
+    #[test]
+    fn prop_format_codecs_survive_carriage_returns(text in "[ -~\n\r§¤码引']{0,400}") {
+        // \r is deliberately in the alphabet: legend lines normalize a
+        // trailing \r on parse, so any codec that lets a line ending leak
+        // into its legend corrupts CRLF input (Codex review on PR #32).
+        let meter = Approx;
+        for kind in [CodecKind::Fold, CodecKind::Grep, CodecKind::Diag] {
             let encoded = encode(&text, kind, &meter, Alphabet::Auto);
             let back = decode(&encoded).map_err(|e| {
                 TestCaseError::fail(format!("decode error for {}: {e}", kind.label()))

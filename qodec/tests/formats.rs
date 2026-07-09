@@ -118,6 +118,58 @@ fn diag_msbuild_heads_and_passthrough() -> Result<()> {
 }
 
 #[test]
+fn diag_crlf_commits_and_roundtrips() -> Result<()> {
+    // container::parse strips a trailing \r from legend lines, so a CRLF
+    // line ending must never reach the template (Codex review on PR #32).
+    let meter = Bpe::o200k()?;
+    let mut text = String::new();
+    for i in 0..12 {
+        text.push_str(&format!(
+            "../STS_new/Broker/File{}.xaml.cs:{}: warning: [OWN001] event 'obj{i}.PropertyChanged' is subscribed but never unsubscribed; it may keep 'Host{}' alive\r\n",
+            i % 3,
+            40 + i,
+            i % 3,
+        ));
+    }
+    let encoded = roundtrip(&text, CodecKind::Diag, &meter)?;
+    anyhow::ensure!(
+        encoded.starts_with("%q1 diag"),
+        "CRLF diagnostics must still commit"
+    );
+    Ok(())
+}
+
+#[test]
+fn diag_bare_cr_lines_travel_verbatim() -> Result<()> {
+    // A CR that is not part of a CRLF ending would land inside a template
+    // or slot; such lines must pass through untouched.
+    let meter = Bpe::o200k()?;
+    let mut text = String::from("a.cs:1: warning 'we\rird' value\n");
+    for i in 0..12 {
+        text.push_str(&format!(
+            "src/Broker/Handlers/b.cs:{i}: warning: [OWN007] local variable 'x{i}' is assigned but its value is never used\n"
+        ));
+    }
+    let encoded = roundtrip(&text, CodecKind::Diag, &meter)?;
+    anyhow::ensure!(encoded.starts_with("%q1 diag"), "clean lines still commit");
+    Ok(())
+}
+
+#[test]
+fn grep_crlf_roundtrips() -> Result<()> {
+    let meter = Bpe::o200k()?;
+    let mut text = String::new();
+    for file in ["A", "B"] {
+        for i in 0..10 {
+            text.push_str(&format!("src/Broker/{file}.cs:{i}:obj.PropertyChanged += handler;\r\n"));
+        }
+    }
+    let encoded = roundtrip(&text, CodecKind::Grep, &meter)?;
+    anyhow::ensure!(encoded.starts_with("%q1 grep"), "CRLF rg output must still commit");
+    Ok(())
+}
+
+#[test]
 fn diag_unbalanced_quotes_and_prose_fall_back() -> Result<()> {
     let meter = Bpe::o200k()?;
     // Unbalanced quote in a tail -> that line rides verbatim; nothing
