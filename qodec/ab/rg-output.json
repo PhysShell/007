@@ -1,0 +1,8 @@
+[
+  {"id":"q1","question":"On what line of UserService.cs is SaveAsync declared?","accept":["18"]},
+  {"id":"q2","question":"Which ViewModel calls GetAwaiter().GetResult()?","accept":["ReportViewModel"]},
+  {"id":"q3","question":"Which client method does SessionService.OpenAsync await on _tokenClient?","accept":["RequestAsync"]},
+  {"id":"q4","question":"How many distinct test files appear in the results?","accept":["3", "three"]},
+  {"id":"q5","question":"On what line does AuditLogger's LogAsync declaration appear?","accept":["14"]},
+  {"id":"q6","question":"Which repository method does UserService.SaveAsync await?","accept":["UpsertAsync"]}
+]
