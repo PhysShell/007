@@ -277,9 +277,9 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
     #[test]
-    fn prop_mine_fold_squeeze_roundtrip(text in "[ -~\n§¤码引]{0,400}") {
+    fn prop_mine_fold_squeeze_roundtrip(text in "[ -~\n§¤码引']{0,400}") {
         let meter = Approx;
-        for kind in [CodecKind::Mine, CodecKind::Deep, CodecKind::Fold, CodecKind::Squeeze] {
+        for kind in [CodecKind::Mine, CodecKind::Deep, CodecKind::Fold, CodecKind::Grep, CodecKind::Diag, CodecKind::Squeeze] {
             let encoded = encode(&text, kind, &meter, Alphabet::Auto);
             let back = decode(&encoded).map_err(|e| {
                 TestCaseError::fail(format!("decode error for {}: {e}", kind.label()))

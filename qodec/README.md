@@ -102,7 +102,14 @@ instead of skewing them. It takes `$QODEC` to override the binary path.
 | `deep` | `mine` with the full miner: word candidates ∪ suffix-automaton candidates (every repeated substring, any boundary); ~15–20× encode CPU, best ratios | byte |
 | `fold` | RLE for consecutive identical lines (`%q1 xN`) | byte |
 | `toon` | uniform JSON array → keys-once table | semantic (Value-equal) |
-| `squeeze` | `toon`/`fold` then the better miner over the result | byte / semantic |
+| `grep` | `path:line[:col]:text` matcher output → path once per run of hits (the `rg --heading` shape) | byte |
+| `diag` | template miner for diagnostic streams (`path:line: warning: …`, MSBuild `path(l,c): …`): repeated tails → legend once, quoted identifiers → slot values; one linear pass — the redundancy is *known*, not searched for | byte |
+| `squeeze` | `toon` (JSON) or measured best of `fold`/`grep`/`diag` (text), then the better miner over the result | byte / semantic |
+
+Format specialization is the speed lever: on the real 133 KB ownsharp audit
+log, `diag` takes −52% in 0.4 s where `deep` takes −77% in 20 s — the miner
+*searches* for redundancy (superlinear, re-tokenizing candidates), a format
+codec already knows where it lives.
 
 Every encode is self-describing (`%q1` container: header + legend = the
 decryption key) and falls back to `raw` whenever the measured artifact does

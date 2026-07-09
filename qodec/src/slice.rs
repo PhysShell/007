@@ -101,9 +101,13 @@ pub fn slice(doc: &str, path: &str, clauses: &[Clause]) -> Result<Slice> {
     let root: Value = serde_json::from_str(doc).context("parsing input JSON")?;
     let mut node = &root;
     for step in path.split('.').filter(|s| !s.is_empty()) {
-        node = node
-            .get(step)
-            .with_context(|| format!("no key {step:?} walking down {path:?}"))?;
+        // An all-digit step on an array is an index (SARIF: `runs.0.results`);
+        // objects always win by key, so `{"0": …}` stays addressable.
+        let next = match (node, step.parse::<usize>()) {
+            (Value::Array(items), Ok(idx)) => items.get(idx),
+            _ => node.get(step),
+        };
+        node = next.with_context(|| format!("no key {step:?} walking down {path:?}"))?;
     }
     let records = node.as_array().with_context(|| {
         format!(
