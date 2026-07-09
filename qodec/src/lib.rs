@@ -11,6 +11,7 @@ pub mod meter;
 pub mod mine;
 pub mod ppl;
 pub mod sam;
+pub mod slice;
 pub mod toon;
 
 use anyhow::{bail, Result};

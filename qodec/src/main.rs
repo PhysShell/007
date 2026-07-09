@@ -27,6 +27,10 @@ enum Cmd {
     Encode(EncodeArgs),
     /// Decode a %q1 container back (unwraps pipelines).
     Decode(IoArgs),
+    /// Slice a record array out of a JSON document: descend by --key, keep
+    /// records matching every --where, emit a compact JSON array (feed it
+    /// raw, or pipe into `encode --codec toon`).
+    Slice(SliceArgs),
     /// Run every codec over a corpus directory and print a measured table.
     Bench(BenchArgs),
     /// Probe alias candidates against a tokenizer — see what your aliases cost.
@@ -105,6 +109,18 @@ struct EncodeArgs {
 }
 
 #[derive(Args)]
+struct SliceArgs {
+    #[command(flatten)]
+    io: IoArgs,
+    /// Dotted path to the record array (omit when the root is the array).
+    #[arg(long, default_value = "")]
+    key: String,
+    /// key=value | key!=value | key~substring — repeatable, all must match.
+    #[arg(long = "where", value_name = "CLAUSE")]
+    clauses: Vec<String>,
+}
+
+#[derive(Args)]
 struct BenchArgs {
     /// Corpus directory of sample files.
     #[arg(long, default_value = "corpus")]
@@ -153,6 +169,7 @@ fn main() -> Result<()> {
             let text = read_input(&io)?;
             write_output(&io, &decode(&text)?)
         }
+        Cmd::Slice(a) => cmd_slice(&a),
         Cmd::Bench(a) => cmd_bench(&a),
         Cmd::Aliases(a) => cmd_aliases(&a),
         Cmd::Ppl(a) => cmd_ppl(&a),
@@ -291,6 +308,18 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
         encoded
     };
     write_output(&a.io, &payload)
+}
+
+fn cmd_slice(a: &SliceArgs) -> Result<()> {
+    let text = read_input(&a.io)?;
+    let clauses = a
+        .clauses
+        .iter()
+        .map(|s| qodec::slice::Clause::parse(s))
+        .collect::<Result<Vec<_>>>()?;
+    let s = qodec::slice::slice(&text, &a.key, &clauses)?;
+    eprintln!("qodec slice: kept {} / {} records", s.kept, s.total);
+    write_output(&a.io, &s.body)
 }
 
 fn pct(before: usize, after: usize) -> f64 {

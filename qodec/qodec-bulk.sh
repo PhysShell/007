@@ -13,6 +13,7 @@
 #   ./qodec-bulk.sh <file> [chunk=150k] [codec=deep] [jobs=nproc]
 #   $QODEC overrides the binary path.
 set -euo pipefail
+export LC_ALL=C   # stable number formats for split sizes and awk output
 
 IN=${1:?usage: qodec-bulk.sh <file> [chunk] [codec] [jobs]}
 CHUNK=${2:-150k}
@@ -20,8 +21,13 @@ CODEC=${3:-deep}
 JOBS=${4:-$(nproc)}
 
 here=$(cd "$(dirname "$0")" && pwd)
-Q=${QODEC:-"$here/target/release/qodec.exe"}
-[ -x "$Q" ] || Q="$here/target/release/qodec"          # non-Windows build
+# An explicit $QODEC must win outright — a broken override should fail
+# loudly below, not fall back to whatever the repo happens to contain.
+Q=${QODEC:-}
+if [ -z "$Q" ]; then
+  Q="$here/target/release/qodec.exe"                   # Windows build
+  [ -x "$Q" ] || Q="$here/target/release/qodec"        # everyone else
+fi
 
 [ -f "$IN" ] || { echo "no such file: $IN" >&2; exit 1; }
 [ -x "$Q" ] || { echo "no qodec binary (run: cargo build --release), or set \$QODEC" >&2; exit 1; }
@@ -36,17 +42,26 @@ echo "input : $IN  (${bytes} bytes)"
 echo "split : ${n} chunks x ${CHUNK}   codec=${CODEC}   jobs=${JOBS}"
 echo "encoding on ${JOBS} cores…"
 
-# each chunk: token report -> stderr -> .rep file; encoded artifact discarded
+# each chunk: token report -> stderr -> .rep file; encoded artifact discarded.
+# On failure, surface the chunk's stderr now — the tmpdir is gone after EXIT.
 printf '%s\n' "$TMP"/c.* | xargs -P "$JOBS" -I{} sh -c \
-  '"$0" encode -i "$1" --codec "$2" --report >/dev/null 2>"$1.rep" || echo "FAIL $1" >&2' \
+  '"$0" encode -i "$1" --codec "$2" --report >/dev/null 2>"$1.rep" \
+     || { echo "FAIL $1:" >&2; cat "$1.rep" >&2; }' \
   "$Q" {} "$CODEC"
 
-awk '
-  match($0, /: ([0-9]+) -> ([0-9]+) tokens.*body-only ([0-9]+) \(warm.*overhead ([0-9]+)/, m) {
-    tin += m[1]; cold += m[2]; warm += m[3]; ovh += m[4]; k++
+# Field-anchored POSIX awk (mawk/busybox fine — no gawk match(...,arr)).
+# Report shape: qodec: IN -> COLD tokens (cold, X%), body-only WARM (warm, Y%),
+# key overhead OVH [meter]. Anchors double as a format check: if the shape
+# drifts or a chunk failed, k != n and the totals refuse instead of lying.
+awk -v n="$n" '
+  $1 == "qodec:" && $3 == "->" && $5 == "tokens" && $8 == "body-only" {
+    tin += $2; cold += $4; warm += $9; ovh += $14; k++
   }
   END {
-    if (tin == 0) { print "no reports parsed" > "/dev/stderr"; exit 1 }
+    if (k != n) {
+      printf "parsed %d of %d chunk reports — failed chunks or a changed report format; totals would lie, refusing\n", k, n > "/dev/stderr"
+      exit 1
+    }
     printf "\n--- totals over %d chunks (o200k proxy tokens) ---\n", k
     printf "tokens in    : %d\n", tin
     printf "tokens cold  : %d  (%+.1f%%)   legend travels in-message\n", cold, (cold-tin)*100.0/tin
