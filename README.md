@@ -7,7 +7,7 @@ land in a public tree.
 
 ## MVP — one isolated, gated run (the "unit")
 
-```
+```bash
 o7 run --repo <path> --base <ref> --task ./task.md [--gate <toml>]
 ```
 
@@ -20,7 +20,7 @@ The loop:
    to a verdict (`PASS`/`FAIL`/`ERROR`).
 4. **harvest** — write the canonical record into the private store:
 
-```
+```text
 runs/<target>/<run-id>/
   task.md        # the task given
   meta.json      # engine, model, base_commit, verdict, per-step results
@@ -42,7 +42,7 @@ Exit code is `0` on `PASS`, `1` otherwise — so callers/CI can gate on it.
 - Dev env = nix flake (crane + rust-overlay) + direnv; **no system-wide Rust**. `claude`/`codex` are external (npm + subscription).
 - Requires `git` (in the devShell) and `claude` on PATH (Pro/Max, logged in).
 
-```
+```bash
 direnv allow                 # enter the nix devShell (flake.nix)
 cargo generate-lockfile      # once — crane/nix build needs a committed Cargo.lock
 cargo build --release        # binary: target/release/o7

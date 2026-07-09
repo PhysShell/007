@@ -15,6 +15,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 
+use crate::agent::Engine;
 use crate::record::RunRecord;
 
 // ---------- findings.json (own-check shape) ----------
@@ -99,18 +100,24 @@ struct VerdictOut {
 
 // ---------- raw judge output (per prompt.template.md) ----------
 
-// Every field defaults: the model occasionally drops an echo field (`rule` seen
-// missing on real runs). A missing field must NOT abort parsing of the whole array
-// — identity is recovered by position (see the pairing logic), and a verdict with
-// an empty `class` is skipped downstream rather than crashing the batch.
+// The model occasionally drops an echo field (`rule` seen missing on real runs).
+// A missing field must NOT abort parsing of the whole array. The echo fields are
+// `Option` — NOT blanket-defaulted — so the pairing logic can tell "the model
+// omitted this" (absent -> trust position) from "the model asserted a value"
+// (present -> a real cross-check / reorder signal). A blanket `default` collapses
+// both into ""/0 and feeds fabricated values into identity matching, which — since
+// `Finding.line` also defaults to 0 — can key-match a real line-0 finding and
+// misattribute the verdict. `class` is the one load-bearing field: kept a plain
+// String and validated against the schema enum downstream (empty / unknown ->
+// counted malformed, never written to the overlay).
 #[derive(Deserialize)]
 struct RawVerdict {
     #[serde(default)]
-    path: String,
+    path: Option<String>,
     #[serde(default)]
-    line: i64,
+    line: Option<i64>,
     #[serde(default)]
-    rule: String,
+    rule: Option<String>,
     #[serde(default)]
     class: String,
     #[serde(default)]
@@ -119,6 +126,96 @@ struct RawVerdict {
     reason: String,
     #[serde(default)]
     evidence: String,
+}
+
+/// Valid verdict classes, per `judge/fp-verdicts.schema.json` (the overlay
+/// contract). Anything else — empty, wrong-case, hyphenated, prose — is malformed
+/// and must not reach the overlay, or the domain merge fails schema validation on
+/// a run `o7` already reported as successful.
+fn normalized_class(class: &str) -> Option<&'static str> {
+    match class {
+        "real" => Some("real"),
+        "false_positive" => Some("false_positive"),
+        "uncertain" => Some("uncertain"),
+        _ => None,
+    }
+}
+
+/// Pair a file's raw verdicts to finding ids.
+///
+/// The prompt mandates "one object per finding above, in the same order", so when
+/// counts match **position is the identity**: it is the only thing that can split a
+/// message-collision (same `(path,line,rule)`, distinct `finding_id`) and — because
+/// each finding appears once — it never assigns two verdicts to one id. The echoed
+/// tuple is used only as a *cross-check*: a COMPLETE echo that lands at the wrong
+/// position is surfaced as a warning (possible reorder), but we still trust
+/// position. Silently repairing by key (the old behaviour) could map two verdicts
+/// onto one id and drop another — the bug this replaces.
+///
+/// When counts DON'T match, position is meaningless, so fall back to key recovery,
+/// dropping any verdict whose complete echo matches no finding.
+///
+/// Pure (no I/O): returns the pairing plus human-readable warnings, so it is unit-
+/// and property-testable like the repo's other model-output parsers.
+fn pair_verdicts<'a>(
+    raws: &'a [RawVerdict],
+    fif: &[&Rep],
+    key_to_id: &BTreeMap<(String, i64, String), String>,
+) -> (Vec<(String, &'a RawVerdict)>, Vec<String>) {
+    let mut warnings = Vec::new();
+    let echo = |rv: &RawVerdict| match (rv.path.as_deref(), rv.line, rv.rule.as_deref()) {
+        (Some(p), Some(l), Some(r)) => Some((p.to_string(), l, r.to_string())),
+        _ => None,
+    };
+
+    if raws.len() == fif.len() {
+        let paired = raws
+            .iter()
+            .zip(fif.iter())
+            .map(|(rv, rep)| {
+                if let Some(key) = echo(rv) {
+                    let at_position = key.0 == rep.path && key.1 == rep.line && key.2 == rep.rule;
+                    if !at_position && key_to_id.contains_key(&key) {
+                        warnings.push(format!(
+                            "verdict echo ({}, {}, {}) matches a different finding than its \
+                             position ({}) — trusting position per the ordered-output contract",
+                            key.0, key.1, key.2, rep.id
+                        ));
+                    }
+                }
+                (rep.id.clone(), rv)
+            })
+            .collect();
+        (paired, warnings)
+    } else {
+        warnings.push(format!(
+            "model returned {} verdict(s) for {} finding(s) — pairing by (path, line, rule) key \
+             instead of position",
+            raws.len(),
+            fif.len()
+        ));
+        let paired = raws
+            .iter()
+            .filter_map(|rv| match echo(rv) {
+                Some(key) => match key_to_id.get(&key) {
+                    Some(id) => Some((id.clone(), rv)),
+                    None => {
+                        warnings.push(format!(
+                            "verdict for unknown finding ({}, {}, {}) — skipped",
+                            key.0, key.1, key.2
+                        ));
+                        None
+                    }
+                },
+                None => {
+                    warnings
+                        .push("verdict with incomplete echo and mismatched count — skipped".into());
+                    None
+                }
+            })
+            .collect();
+        (paired, warnings)
+    }
 }
 
 // ---------- judge run-record meta ----------
@@ -133,6 +230,12 @@ struct JudgeMeta {
     provider: &'static str,
     model: String,
     files_judged: usize,
+    /// Files slated to run but skipped (unreadable source / malformed output /
+    /// backend failure). `> 0` means the overlay is PARTIAL and the run exits
+    /// non-zero — coverage automation must read this, not just the exit code.
+    files_skipped: usize,
+    /// Verdicts dropped for an invalid `class` (empty / not in the schema enum).
+    findings_malformed: usize,
     findings_total: usize,
     ids_total: usize,
     by_class: BTreeMap<String, usize>,
@@ -141,45 +244,62 @@ struct JudgeMeta {
 }
 
 // ---------- backend agent provider ----------
+//
+// The judge dispatches to two subprocess CLIs, both subscription-auth, no API
+// keys: `claude -p` (Claude Max) and `codex exec` (ChatGPT, via `codex login`).
+// The backend is the shared `agent::Engine`; `--provider` selects it (or `auto`
+// infers it from the model id via `model_family`).
 
-/// Which subprocess CLI backs a judge call. Both use subscription auth, no API
-/// keys: `claude -p` (Claude Max) and `codex exec` (ChatGPT, via `codex login`).
-/// Chosen by `--provider`, or inferred from the model id under `auto`.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Provider {
+/// Which vendor a model id belongs to. Single source of truth for BOTH
+/// `--provider auto` routing and the `--provider codex` footgun guard, so the
+/// two can never drift (they used to be two separate hardcoded lists). Prefix
+/// matching — not exact — so versioned aliases (`opus-4.5`, `gpt-5.5`) classify
+/// correctly. `opus`/`sonnet`/... are tested before the `o1`/`o3`/... OpenAI
+/// prefixes, so `opus` resolves to Claude, not the `o`-series.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Family {
     Claude,
-    Codex,
+    OpenAI,
+    /// Unrecognized id — auto-routes to Claude (the historical default) but is
+    /// NOT blocked by the codex guard, so an explicit `--provider codex --model
+    /// <new-openai-id>` still works before we've taught this list the new name.
+    Unknown,
 }
 
-impl Provider {
-    fn label(self) -> &'static str {
-        match self {
-            Provider::Claude => "claude",
-            Provider::Codex => "codex",
-        }
+fn model_family(model: &str) -> Family {
+    let m = model.to_ascii_lowercase();
+    if m.starts_with("claude")
+        || m.starts_with("opus")
+        || m.starts_with("sonnet")
+        || m.starts_with("haiku")
+        || m.starts_with("fable")
+        || m.starts_with("mythos")
+    {
+        Family::Claude
+    } else if m.starts_with("gpt")
+        || m.starts_with("o1")
+        || m.starts_with("o3")
+        || m.starts_with("o4")
+        || m.starts_with("o5")
+        || m.contains("codex")
+    {
+        Family::OpenAI
+    } else {
+        Family::Unknown
     }
 }
 
 /// Resolve `--provider` (`claude` | `codex` | `auto`) against the model id.
-/// `auto` routes OpenAI-family ids (gpt*, o1/o3/o4*, *codex*) to codex and
-/// everything else (opus, sonnet, haiku, ...) to claude.
-fn resolve_provider(flag: &str, model: &str) -> Result<Provider> {
+/// `auto` routes OpenAI-family ids to codex and everything else (incl. unknown
+/// ids) to claude, using the shared `model_family` classifier.
+fn resolve_provider(flag: &str, model: &str) -> Result<Engine> {
     match flag.to_ascii_lowercase().as_str() {
-        "claude" => Ok(Provider::Claude),
-        "codex" => Ok(Provider::Codex),
-        "auto" => {
-            let m = model.to_ascii_lowercase();
-            let openai = m.starts_with("gpt")
-                || m.starts_with("o1")
-                || m.starts_with("o3")
-                || m.starts_with("o4")
-                || m.contains("codex");
-            Ok(if openai {
-                Provider::Codex
-            } else {
-                Provider::Claude
-            })
-        }
+        "claude" => Ok(Engine::Claude),
+        "codex" => Ok(Engine::Codex),
+        "auto" => Ok(match model_family(model) {
+            Family::OpenAI => Engine::Codex,
+            Family::Claude | Family::Unknown => Engine::Claude,
+        }),
         other => anyhow::bail!("unknown --provider '{other}' (want: claude | codex | auto)"),
     }
 }
@@ -269,21 +389,14 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
     let provider = resolve_provider(&a.provider, &a.model)?;
     // The default model is `opus` (claude), so `--provider codex` with no `--model`
     // would ship a Claude-family name to codex and 400. Catch that footgun early with
-    // a hint instead of a raw upstream error.
-    if provider == Provider::Codex {
-        let m = a.model.to_ascii_lowercase();
-        if m.starts_with("claude")
-            || m == "opus"
-            || m == "sonnet"
-            || m == "haiku"
-            || m == "fable"
-            || m == "mythos"
-        {
-            anyhow::bail!(
-                "--provider codex needs an OpenAI model (e.g. --model gpt-5.5), got '{}'",
-                a.model
-            );
-        }
+    // a hint instead of a raw upstream error. `model_family` is the SAME classifier
+    // that drives auto-routing, so the guard can't drift from it — and it prefix-
+    // matches, so a versioned alias like `opus-4.5` is still caught.
+    if provider == Engine::Codex && model_family(&a.model) == Family::Claude {
+        anyhow::bail!(
+            "--provider codex needs an OpenAI model (e.g. --model gpt-5.5), got '{}'",
+            a.model
+        );
     }
 
     // Dedupe -> reps keyed by finding_id (first-seen order preserved).
@@ -380,6 +493,11 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
     let mut session_ids: Vec<String> = Vec::new();
     let mut cost_total = 0f64;
     let mut cost_any = false;
+    // Coverage bookkeeping: a file skipped for ANY reason (unreadable source,
+    // malformed output, backend failure) leaves its findings unjudged. Count both so
+    // the overlay/meta can't silently pass as complete.
+    let mut files_skipped = 0usize;
+    let mut findings_malformed = 0usize;
 
     // Judge files with a bounded worker pool: calls are independent per file and the
     // overlay is a finding_id -> verdict MAP assembled after the fact, so files
@@ -427,10 +545,58 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
                     rec,
                     JUDGE_RETRIES,
                 );
-                if tx.send(res).is_err() {
-                    break;
-                }
-            });
+                files_skipped += 1;
+                continue;
+            }
+            Err(e) => {
+                eprintln!("[o7 judge] warn: {file}: cannot resolve source ({e}) — skipped");
+                files_skipped += 1;
+                continue;
+            }
+        };
+        // A per-file read failure (invalid UTF-8, permissions, a directory path)
+        // must skip that file and be counted, not abort the batch — same contract
+        // as the resolve/parse skips above (CodeRabbit).
+        let src = match std::fs::read_to_string(&src_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!(
+                    "[o7 judge] warn: {file}: reading source failed ({e}) — skipped ({})",
+                    src_path.display()
+                );
+                files_skipped += 1;
+                continue;
+            }
+        };
+
+        let prompt = template
+            .replace("{{RUBRIC}}", &rubric)
+            .replace("{{FILE_PATH}}", file)
+            .replace("{{FINDINGS_IN_FILE}}", &fif_json)
+            .replace("{{FILE_CONTENT}}", &src);
+
+        println!(
+            "[o7 judge] ({}/{}) {file} — {} finding(s)",
+            fi + 1,
+            files.len(),
+            fif.len()
+        );
+
+        // A per-file failure must not abort the whole batch (a 116-file run shouldn't
+        // die on file 3), but every skip is COUNTED (files_skipped) and forces a
+        // non-zero exit at the end — a silently-partial overlay is worse than a loud
+        // one. A hard backend failure (not logged in, empty codex message) skips this
+        // file too; if it's systemic every file skips and the run exits non-zero.
+        let (result_text, sid, cost) = match call_agent(provider, &repo, &prompt, &a.model) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("[o7 judge] warn: {file}: backend call failed ({e}) — skipped");
+                files_skipped += 1;
+                continue;
+            }
+        };
+        if let Some(s) = sid {
+            session_ids.push(s);
         }
         // Close the original sender so the collector ends once the workers finish.
         drop(tx);
@@ -450,7 +616,65 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
                 verdicts.insert(id, v);
             }
         }
-    });
+
+        rec.write_text(&format!("raw.{}.txt", sanitize(file)), &result_text)?;
+
+        // The raw text is already persisted above, so on a malformed output warn,
+        // skip this file, and keep going — the overlay records what succeeded.
+        let arr = match extract_json_array(&result_text) {
+            Some(a) => a,
+            None => {
+                eprintln!(
+                    "[o7 judge] warn: {file}: no JSON array in {} output — skipped (raw saved)",
+                    provider.label()
+                );
+                files_skipped += 1;
+                continue;
+            }
+        };
+        let raws: Vec<RawVerdict> = match serde_json::from_str(&arr) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!(
+                    "[o7 judge] warn: {file}: parsing verdicts failed ({e}) — skipped (raw saved)"
+                );
+                files_skipped += 1;
+                continue;
+            }
+        };
+
+        let (paired, warnings) = pair_verdicts(&raws, &fif, &key_to_id);
+        for w in warnings {
+            eprintln!("[o7 judge] warn: {file}: {w}");
+        }
+
+        for (id, rv) in paired {
+            // Validate `class` against the schema enum — not just non-empty. A wrong-
+            // case / hyphenated / prose class is malformed: count it (a first-class
+            // counter, NOT a magic `by_class` key that could collide with a model-
+            // emitted class) and keep it out of the overlay, so the domain merge never
+            // sees a value the overlay schema forbids.
+            let Some(class) = normalized_class(&rv.class) else {
+                findings_malformed += 1;
+                eprintln!(
+                    "[o7 judge] warn: {file}: invalid class {:?} for {id} — not recorded",
+                    rv.class
+                );
+                continue;
+            };
+            *by_class.entry(class.to_string()).or_default() += 1;
+            verdicts.insert(
+                id.clone(),
+                VerdictOut {
+                    class: class.to_string(),
+                    confidence: rv.confidence,
+                    reason: rv.reason.clone(),
+                    evidence: rv.evidence.clone(),
+                    lines: lines_by_id.get(&id).cloned().unwrap_or_default(),
+                },
+            );
+        }
+    }
 
     let overlay = Overlay {
         schema: 1,
@@ -478,7 +702,10 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
         generated_from,
         provider: provider.label(),
         model: a.model.clone(),
-        files_judged: files.len(),
+        // Honest coverage: judged = slated minus skipped, not the planned count.
+        files_judged: files.len() - files_skipped,
+        files_skipped,
+        findings_malformed,
         findings_total,
         ids_total: reps.len(),
         by_class: by_class.clone(),
@@ -488,6 +715,9 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
     rec.write_json("meta.json", &meta)?;
 
     println!("[o7 judge] {run_id}: {by_class:?}");
+    if findings_malformed > 0 {
+        println!("[o7 judge] {findings_malformed} malformed verdict(s) dropped (invalid class)");
+    }
     if cost_any {
         println!("[o7 judge] cost ~${cost_total:.4}");
     }
@@ -498,6 +728,18 @@ pub fn run(a: &JudgeArgs) -> Result<()> {
         .unwrap_or_else(|| rec.dir.join("fp-verdicts.json").display().to_string());
     println!("[o7 judge] overlay -> {overlay_at}");
     println!("[o7 judge] record -> {}", rec.dir.display());
+
+    // The overlay + meta are on disk (they record the partial result and the skip
+    // count); now surface the partial coverage as a non-zero exit so a wrapper /
+    // dashboard can't read a silently-incomplete triage as a clean, complete run.
+    if files_skipped > 0 {
+        anyhow::bail!(
+            "{files_skipped} of {} file(s) skipped — overlay is PARTIAL; \
+             see the warnings above and raw.*.txt in {}",
+            files.len(),
+            rec.dir.display()
+        );
+    }
     Ok(())
 }
 
@@ -723,14 +965,14 @@ fn call_agent_retry(
 /// same `(result_text, session_id, cost_usd)` shape; codex has no single-envelope
 /// session/cost on a subscription, so those come back `None`.
 fn call_agent(
-    provider: Provider,
+    provider: Engine,
     cwd: &Path,
     prompt: &str,
     model: &str,
 ) -> Result<(String, Option<String>, Option<f64>)> {
     match provider {
-        Provider::Claude => call_claude(cwd, prompt, model),
-        Provider::Codex => call_codex(cwd, prompt, model),
+        Engine::Claude => call_claude(cwd, prompt, model),
+        Engine::Codex => call_codex(cwd, prompt, model),
     }
 }
 
@@ -745,8 +987,10 @@ fn call_agent(
 /// - `-` reads the prompt from stdin, not argv: a large embedded source file would
 ///   blow the OS arg-size limit and argv is world-readable in `ps` (source leak).
 /// - `--output-last-message <FILE>`: codex writes ONLY the agent's final message
-///   there. We read that instead of scraping stdout, which also carries codex's
-///   session preamble (a stray `[` in it could fool `extract_json_array`).
+///   there. We read that and ONLY that — stdout is discarded (`Stdio::null`),
+///   because it also carries codex's session preamble whose stray `[` could fool
+///   `extract_json_array`. If the file comes back empty we fail loud rather than
+///   fall back to stdout (see below).
 /// - `--skip-git-repo-check` so a non-git scan root never hard-fails; `--ephemeral`
 ///   so a 150-call batch doesn't litter session history; `--color never` for clean
 ///   logs.
@@ -782,27 +1026,48 @@ fn call_codex(
         .arg(&last_msg)
         .arg("-") // read the prompt from stdin
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
+        // We read the answer from `--output-last-message`, never from stdout, so
+        // discard stdout instead of buffering codex's whole session transcript in
+        // memory per call — and it removes one pipe that could fill and deadlock the
+        // stdin write below.
+        .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
         .context("spawning `codex` (installed? `codex login` done? on PATH?)")?;
-    child
-        .stdin
-        .take()
-        .context("codex stdin unavailable")?
-        .write_all(prompt.as_bytes())
-        .context("writing prompt to codex stdin")?;
+    // Write the prompt, but do NOT `?`-return on failure yet: if codex died early
+    // (bad flag, not logged in) the write hits EPIPE, and returning here would both
+    // leave the child unreaped AND discard its stderr (the real reason). Drop stdin
+    // to send EOF, always `wait_with_output` (which reaps), then report the write
+    // error together with codex's stderr.
+    let mut stdin = child.stdin.take().context("codex stdin unavailable")?;
+    let write_res = stdin.write_all(prompt.as_bytes());
+    drop(stdin);
     let out = child.wait_with_output().context("waiting for `codex`")?;
+    if let Err(e) = write_res {
+        let _ = std::fs::remove_file(&last_msg);
+        anyhow::bail!(
+            "writing prompt to codex stdin failed ({e}); codex stderr: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
     if !out.status.success() {
         let _ = std::fs::remove_file(&last_msg);
         anyhow::bail!("codex failed: {}", String::from_utf8_lossy(&out.stderr));
     }
-    // Prefer the isolated final message; fall back to stdout if `-o` wrote nothing.
-    let text = match std::fs::read_to_string(&last_msg) {
-        Ok(s) if !s.trim().is_empty() => s,
-        _ => String::from_utf8_lossy(&out.stdout).to_string(),
-    };
+    let text = std::fs::read_to_string(&last_msg).unwrap_or_default();
     let _ = std::fs::remove_file(&last_msg);
+    // Do NOT fall back to scraping stdout when the final-message file is empty:
+    // codex's stdout carries the session preamble/event log, and a stray `[` in it
+    // fools `extract_json_array` into slicing a bogus "array" out of log text —
+    // silently-wrong verdicts, the exact hazard `--output-last-message` exists to
+    // avoid. An empty final message means no usable answer, so fail loud; the caller
+    // persists raw output and (with batch resilience) skips just this file.
+    if text.trim().is_empty() {
+        anyhow::bail!(
+            "codex produced no final message (--output-last-message empty); \
+             refusing to scrape stdout as verdicts"
+        );
+    }
     Ok((text, None, None))
 }
 
@@ -979,6 +1244,55 @@ mod tests {
     }
 
     #[test]
+    fn model_family_classifies_versioned_aliases() {
+        // The guard-bypass fix: prefix match, not exact — so a dated alias still
+        // classifies as its family (exact `== "opus"` let `opus-4.5` slip to codex).
+        assert_eq!(model_family("opus"), Family::Claude);
+        assert_eq!(model_family("opus-4.5"), Family::Claude);
+        assert_eq!(model_family("claude-sonnet-5"), Family::Claude);
+        assert_eq!(model_family("Sonnet"), Family::Claude); // case-insensitive
+        assert_eq!(model_family("gpt-5.5"), Family::OpenAI);
+        assert_eq!(model_family("o3-mini"), Family::OpenAI);
+        assert_eq!(model_family("gpt-5-codex"), Family::OpenAI);
+        // `opus` is tested before the `o`-series, so it never falls to OpenAI.
+        assert_eq!(model_family("mystery-model"), Family::Unknown);
+    }
+
+    #[test]
+    fn resolve_provider_and_guard() {
+        // auto routing follows the family; unknown ids default to claude.
+        assert_eq!(
+            resolve_provider("auto", "opus-4.5").ok(),
+            Some(Engine::Claude)
+        );
+        assert_eq!(
+            resolve_provider("auto", "gpt-5.5").ok(),
+            Some(Engine::Codex)
+        );
+        assert_eq!(
+            resolve_provider("auto", "mystery").ok(),
+            Some(Engine::Claude)
+        );
+        // explicit flags win regardless of model.
+        assert_eq!(resolve_provider("codex", "opus").ok(), Some(Engine::Codex));
+        assert_eq!(
+            resolve_provider("claude", "gpt-5.5").ok(),
+            Some(Engine::Claude)
+        );
+        assert!(resolve_provider("nonsense", "opus").is_err());
+        // The footgun guard fires for a versioned Claude alias under codex — the
+        // exact case the old `== "opus"` check let through.
+        let is_guarded = |m: &str| {
+            resolve_provider("codex", m).ok() == Some(Engine::Codex)
+                && model_family(m) == Family::Claude
+        };
+        assert!(is_guarded("opus-4.5"));
+        assert!(is_guarded("haiku-3.5"));
+        assert!(!is_guarded("gpt-5.5"));
+        assert!(!is_guarded("some-new-openai-id")); // unknown → not blocked
+    }
+
+    #[test]
     fn finding_id_depends_on_path_and_rule() {
         let base = finding_id("a.cs", "OWN001", "m");
         assert_ne!(base, finding_id("b.cs", "OWN001", "m"), "path matters");
@@ -1051,5 +1365,165 @@ mod tests {
             prop_assert!(out.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
             prop_assert_eq!(out.chars().count(), s.chars().count());
         }
+
+        /// The core pairing invariant that the misattribution/overwrite fixes rest
+        /// on: when verdict count == finding count, every verdict is placed by
+        /// POSITION — so the paired ids equal the findings' ids in order, EXACTLY,
+        /// no matter what the model echoed (complete, dropped, or reordered). This
+        /// rules out both the dropped-verdict and duplicate-id-overwrite bugs.
+        #[test]
+        fn prop_pair_counts_match_is_positional_bijection(mask in any::<u32>(), take in 1usize..=7) {
+            let lines = [10i64, 20, 30, 40, 50, 60, 70];
+            let reps: Vec<Rep> = lines
+                .iter()
+                .take(take)
+                .enumerate()
+                .map(|(i, &l)| test_rep(&format!("id{i}"), "a.cs", l, "OWN001"))
+                .collect();
+            let fif: Vec<&Rep> = reps.iter().collect();
+            let k = test_ktoi(&reps);
+            // Each verdict either echoes its finding faithfully or drops the whole
+            // echo (Option::None) — both must still land on the positional id.
+            let raws: Vec<RawVerdict> = reps
+                .iter()
+                .enumerate()
+                .map(|(i, r)| {
+                    if (mask >> i) & 1 == 1 {
+                        test_raw(None, None, None, "real")
+                    } else {
+                        test_raw(Some(&r.path), Some(r.line), Some(&r.rule), "real")
+                    }
+                })
+                .collect();
+            let (paired, _warn) = pair_verdicts(&raws, &fif, &k);
+            let got: Vec<&str> = paired.iter().map(|(id, _)| id.as_str()).collect();
+            let want: Vec<&str> = reps.iter().map(|r| r.id.as_str()).collect();
+            prop_assert_eq!(got, want);
+        }
+    }
+
+    // ---- pairing + class validation (the batch-resilience core) ----
+
+    fn test_rep(id: &str, path: &str, line: i64, rule: &str) -> Rep {
+        Rep {
+            id: id.into(),
+            path: path.into(),
+            line,
+            rule: rule.into(),
+            category_name: String::new(),
+            message: String::new(),
+            lines: vec![line],
+        }
+    }
+
+    fn test_raw(
+        path: Option<&str>,
+        line: Option<i64>,
+        rule: Option<&str>,
+        class: &str,
+    ) -> RawVerdict {
+        RawVerdict {
+            path: path.map(Into::into),
+            line,
+            rule: rule.map(Into::into),
+            class: class.into(),
+            confidence: 0.0,
+            reason: String::new(),
+            evidence: String::new(),
+        }
+    }
+
+    fn test_ktoi(reps: &[Rep]) -> BTreeMap<(String, i64, String), String> {
+        reps.iter()
+            .map(|r| ((r.path.clone(), r.line, r.rule.clone()), r.id.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn pair_dropped_echo_keeps_position() {
+        // The real observed failure: the model drops `rule` on one verdict. Counts
+        // match, so both must still land on their positional ids — no misattribution.
+        let reps = vec![
+            test_rep("idA", "a.cs", 1, "OWN001"),
+            test_rep("idB", "a.cs", 2, "OWN001"),
+        ];
+        let fif: Vec<&Rep> = reps.iter().collect();
+        let k = test_ktoi(&reps);
+        let raws = vec![
+            test_raw(Some("a.cs"), Some(1), Some("OWN001"), "real"),
+            test_raw(Some("a.cs"), Some(2), None, "false_positive"), // dropped rule
+        ];
+        let (paired, _w) = pair_verdicts(&raws, &fif, &k);
+        let ids: Vec<&str> = paired.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, vec!["idA", "idB"]);
+    }
+
+    #[test]
+    fn pair_reorder_never_overwrites_or_drops() {
+        // The duplicate-id-overwrite bug: model reorders echoes (pos0 echoes B,
+        // pos1 echoes A). Position is trusted, so each id appears exactly once and
+        // none is dropped; the reorder is surfaced as a warning, not silently
+        // "repaired" by key (which mapped two verdicts to one id).
+        let reps = vec![
+            test_rep("idA", "a.cs", 1, "OWN001"),
+            test_rep("idB", "a.cs", 2, "OWN001"),
+        ];
+        let fif: Vec<&Rep> = reps.iter().collect();
+        let k = test_ktoi(&reps);
+        let raws = vec![
+            test_raw(Some("a.cs"), Some(2), Some("OWN001"), "real"), // echoes B
+            test_raw(Some("a.cs"), Some(1), Some("OWN001"), "false_positive"), // echoes A
+        ];
+        let (paired, warnings) = pair_verdicts(&raws, &fif, &k);
+        let ids: Vec<&str> = paired.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec!["idA", "idB"],
+            "position trusted, no overwrite/drop"
+        );
+        assert!(!warnings.is_empty(), "reorder is surfaced, not silent");
+    }
+
+    #[test]
+    fn pair_count_mismatch_recovers_by_key() {
+        let reps = vec![
+            test_rep("idA", "a.cs", 1, "OWN001"),
+            test_rep("idB", "a.cs", 2, "OWN001"),
+        ];
+        let fif: Vec<&Rep> = reps.iter().collect();
+        let k = test_ktoi(&reps);
+        // One verdict for two findings -> key path; echoes B.
+        let raws = vec![test_raw(Some("a.cs"), Some(2), Some("OWN001"), "real")];
+        let (paired, _w) = pair_verdicts(&raws, &fif, &k);
+        assert_eq!(paired.len(), 1);
+        assert_eq!(paired.first().map(|(id, _)| id.as_str()), Some("idB"));
+    }
+
+    #[test]
+    fn pair_count_mismatch_skips_unknown_and_incomplete() {
+        let reps = vec![test_rep("idA", "a.cs", 1, "OWN001")];
+        let fif: Vec<&Rep> = reps.iter().collect();
+        let k = test_ktoi(&reps);
+        // Two verdicts for one finding -> key path. One matches no finding, one has
+        // an incomplete echo — both dropped, none misattributed.
+        let raws = vec![
+            test_raw(Some("a.cs"), Some(9), Some("OWN999"), "real"), // unknown
+            test_raw(None, None, None, "real"),                      // incomplete
+        ];
+        let (paired, _w) = pair_verdicts(&raws, &fif, &k);
+        assert!(paired.is_empty());
+    }
+
+    #[test]
+    fn normalized_class_enforces_schema_enum() {
+        assert_eq!(normalized_class("real"), Some("real"));
+        assert_eq!(normalized_class("false_positive"), Some("false_positive"));
+        assert_eq!(normalized_class("uncertain"), Some("uncertain"));
+        // Everything else is malformed — never written to the overlay.
+        assert_eq!(normalized_class(""), None);
+        assert_eq!(normalized_class("Real"), None);
+        assert_eq!(normalized_class("false-positive"), None);
+        assert_eq!(normalized_class("fp"), None);
+        assert_eq!(normalized_class("_malformed"), None);
     }
 }

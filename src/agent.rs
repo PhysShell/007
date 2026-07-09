@@ -2,10 +2,21 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Engine {
     Claude,
     Codex,
+}
+
+impl Engine {
+    /// Stable lowercase name for logs, `meta.json`, and error messages. Shared by
+    /// every caller so the string can't drift between the two subcommands.
+    pub fn label(self) -> &'static str {
+        match self {
+            Engine::Claude => "claude",
+            Engine::Codex => "codex",
+        }
+    }
 }
 
 impl std::str::FromStr for Engine {
