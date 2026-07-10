@@ -31,6 +31,11 @@ enum Cmd {
     /// records matching every --where, emit a compact JSON array (feed it
     /// raw, or pipe into `encode --codec toon`).
     Slice(SliceArgs),
+    /// Learn a per-repo redundancy profile from files: repeated phrases and
+    /// templates accumulate across runs; `encode --profile` probes them
+    /// first. Acceptance stays measured — a stale profile costs probes,
+    /// never bytes.
+    Learn(LearnArgs),
     /// Run every codec over a corpus directory and print a measured table.
     Bench(BenchArgs),
     /// Probe alias candidates against a tokenizer — see what your aliases cost.
@@ -114,6 +119,22 @@ struct EncodeArgs {
     /// Print a token report to stderr.
     #[arg(long)]
     report: bool,
+    /// Redundancy profile from `qodec learn`; its phrases are probed first.
+    #[arg(long)]
+    profile: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct LearnArgs {
+    /// Files to learn from (repeatable).
+    #[arg(short, long)]
+    input: Vec<PathBuf>,
+    /// Or every file in this directory (non-recursive, like bench).
+    #[arg(long)]
+    corpus: Option<PathBuf>,
+    /// Profile to create or update.
+    #[arg(long)]
+    profile: PathBuf,
 }
 
 #[derive(Args)]
@@ -178,6 +199,7 @@ fn main() -> Result<()> {
             write_output(&io, &decode(&text)?)
         }
         Cmd::Slice(a) => cmd_slice(&a),
+        Cmd::Learn(a) => cmd_learn(&a),
         Cmd::Bench(a) => cmd_bench(&a),
         Cmd::Aliases(a) => cmd_aliases(&a),
         Cmd::Ppl(a) => cmd_ppl(&a),
@@ -300,8 +322,12 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
         CodecKind::parse(&a.codec).with_context(|| format!("unknown codec {:?}", a.codec))?;
     let alphabet = Alphabet::parse(&a.alphabet)
         .with_context(|| format!("unknown alphabet {:?}", a.alphabet))?;
+    let seeds = match &a.profile {
+        Some(path) => qodec::profile::Profile::load(path)?.seed_phrases(64),
+        None => Vec::new(),
+    };
 
-    let encoded = encode(&text, kind, meter.as_ref(), alphabet);
+    let encoded = qodec::encode_seeded(&text, kind, meter.as_ref(), alphabet, &seeds);
 
     if a.report {
         let tokens_in = meter.count(&text);
@@ -327,6 +353,63 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
         encoded
     };
     write_output(&a.io, &payload)
+}
+
+fn cmd_learn(a: &LearnArgs) -> Result<()> {
+    // Harvest memory is proportional to input size; big blobs (SARIF and
+    // friends) get a capped, logged prefix instead of an OOM.
+    const LEARN_CAP_BYTES: usize = 4 * 1024 * 1024;
+
+    let mut files: Vec<PathBuf> = a.input.clone();
+    if let Some(dir) = &a.corpus {
+        let mut listed: Vec<PathBuf> = fs::read_dir(dir)
+            .with_context(|| format!("reading {}", dir.display()))?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.is_file())
+            .collect();
+        listed.sort();
+        files.extend(listed);
+    }
+    if files.is_empty() {
+        bail!("nothing to learn from — pass -i <file> and/or --corpus <dir>");
+    }
+
+    let mut profile = qodec::profile::Profile::load(&a.profile)?;
+    let mut learned = 0usize;
+    for path in &files {
+        let text = match fs::read_to_string(path) {
+            Ok(text) => text,
+            Err(err) => {
+                eprintln!("qodec learn: skipping {} ({err})", path.display());
+                continue;
+            }
+        };
+        let text = if text.len() > LEARN_CAP_BYTES {
+            let mut end = LEARN_CAP_BYTES;
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            eprintln!(
+                "qodec learn: {} capped to first {end} bytes of {}",
+                path.display(),
+                text.len(),
+            );
+            text.get(..end).unwrap_or_default().to_string()
+        } else {
+            text
+        };
+        profile.learn_from(&text);
+        learned += 1;
+    }
+    profile.save(&a.profile)?;
+    eprintln!(
+        "qodec learn: {learned} file(s) -> {} ({} phrases, {} templates, {} runs total)",
+        a.profile.display(),
+        profile.phrase_count(),
+        profile.template_count(),
+        profile.runs,
+    );
+    Ok(())
 }
 
 fn cmd_slice(a: &SliceArgs) -> Result<()> {

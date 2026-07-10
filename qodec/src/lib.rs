@@ -12,6 +12,7 @@ pub mod grep;
 pub mod meter;
 pub mod mine;
 pub mod ppl;
+pub mod profile;
 pub mod sam;
 pub mod slice;
 pub mod tmpl;
@@ -78,13 +79,28 @@ impl CodecKind {
 }
 
 pub fn encode(text: &str, kind: CodecKind, meter: &dyn TokenMeter, alphabet: Alphabet) -> String {
+    encode_seeded(text, kind, meter, alphabet, &[])
+}
+
+/// `encode` with profile-learned seed phrases for the miners (`qodec learn`).
+/// Seeds are probed ahead of discovery; acceptance stays measured, so they
+/// can only change what gets tried first, never what survives.
+pub fn encode_seeded(
+    text: &str,
+    kind: CodecKind,
+    meter: &dyn TokenMeter,
+    alphabet: Alphabet,
+    seeds: &[String],
+) -> String {
     let mine_opts = MineOptions {
         alphabet,
+        seeds: seeds.to_vec(),
         ..MineOptions::default()
     };
     let deep_opts = MineOptions {
         alphabet,
         miner: MinerKind::Deep,
+        seeds: seeds.to_vec(),
         ..MineOptions::default()
     };
     match kind {

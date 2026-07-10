@@ -94,6 +94,26 @@ compact JSON — value-equal, like `toon`'s decode, not byte-exact.
 bound (cross-chunk repetition is lost); a failed chunk fails the totals
 instead of skewing them. It takes `$QODEC` to override the binary path.
 
+## Learning across runs
+
+The miners rediscover the same paths and sentence stems on every call; a
+profile remembers them between runs:
+
+```bash
+# accumulate (counts merge; deterministic, reviewable JSON)
+./target/release/qodec learn --corpus ~/logs --profile repo-profile.json
+# probe the remembered phrases first
+./target/release/qodec encode -i today.log --codec mine --profile repo-profile.json --report
+```
+
+`learn` harvests the miner's phrase candidates and `tmpl`'s learned template
+parts. `encode --profile` probes them ahead of discovery — cross-file
+knowledge a single-payload miner cannot have (a phrase longer than the word
+window can only arrive this way). Measured on the real ownsharp pair: a
+profile learned on the 3.7 KB broker log lifts `mine` on the 133 KB sectorts
+log from −65.1% to −66.5% cold. Seeds only reorder the probe queue —
+acceptance stays measured, so a stale profile costs probes, never bytes.
+
 ## Codecs
 
 | codec | idea | roundtrip |
