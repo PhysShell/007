@@ -350,27 +350,11 @@ fn pct(before: usize, after: usize) -> f64 {
 
 /// A self-contained prompt to test whether a model can *read* the encoded
 /// form given only the in-band key. Paste it, then ask questions about the
-/// content — compare answers against the raw original.
+/// content — compare answers against the raw original. The notation text is
+/// `ab::notation_brief()` verbatim, so probe and A/B can never drift apart
+/// (Codex review on PR #33).
 fn probe_wrapper(encoded: &str) -> String {
-    format!(
-        "You will receive a payload encoded as a `%q1` container.\n\
-         Format: first line `%q1 <codec> ...` (parameters), then legend lines of the\n\
-         form `<alias>=<phrase>` (each alias is a short stand-in for that exact phrase),\n\
-         then a `%q1 body` line, then the body. `%q1 xN` after a line means that line\n\
-         occurs N times in total. A `toon` body is a table: first line is a JSON array\n\
-         of keys, each following line is one object, cells are JSON values joined by\n\
-         the separator named in the header.\n\
-         A `grep` body is grouped matcher output: a marker line names a file path and\n\
-         the lines after it are `line:text` hits in that file (a bare marker starts\n\
-         verbatim lines). A `diag` body line starting with an alias expands to: the\n\
-         head after the alias, then the legend template with each slot placeholder\n\
-         filled by the sep-joined values in order. A `tmpl` body line starting with\n\
-         an alias is the legend template with its slot placeholders filled by the\n\
-         sep-joined values that follow the alias.\n\
-         Mentally decode the payload, then answer questions about its content.\n\
-         Never emit alias characters in answers — always use the expanded phrases.\n\n\
-         {encoded}"
-    )
+    format!("{}\n\n{encoded}", qodec::ab::notation_brief())
 }
 
 fn cmd_bench(a: &BenchArgs) -> Result<()> {
