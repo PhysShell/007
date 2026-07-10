@@ -294,11 +294,15 @@ hostile input) through the actual `o7 judge` binary.
    its FNV checksum (`%q1 ext sum=…`) and decode fails closed without the
    exact file; in-artifact key overhead on the real ownsharp log drops
    950 → 23 tokens, with the 564-token key amortized in the prefix.
-   Found along the way, worth its own rung:
-   alias glyph cost is *context-dependent* (the pool probes glyphs in
-   isolation; `" 引 "` can tokenize cheaper than `" 码 "` mid-row), which
-   can flip close greedy outcomes — probing alias cost in context is a
-   measured improvement waiting to happen.
+   Found along the way and since *done*: alias glyph cost is
+   context-dependent (`" 引 "` can tokenize cheaper than `" 码 "`
+   mid-row), which flipped a close greedy outcome on PR #34's stem
+   sample. The miner now picks each committed phrase's glyph by probing
+   the pool in the phrase's own line context (argmin over a small
+   window; the commit decision still re-measures the whole text).
+   Measured: the stem flip reversed (seeded 174 → 150 vs plain's 154),
+   and plain mine on the real ownsharp log improved −65.1% → −66.1%
+   cold with no other change.
 4. **Output-side notation** — the reverse direction: let the subagent *reply*
    in the legend's notation and expand deterministically outside the model.
    Output tokens cost ~5× input; this is where the same trick pays most, and
