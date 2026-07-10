@@ -101,3 +101,43 @@ fn colliding_glyph_skips_the_entry_and_stays_exact() -> Result<()> {
     anyhow::ensure!(back == payload, "collision case stays byte-exact");
     Ok(())
 }
+
+#[test]
+fn duplicate_alias_is_rejected_at_parse() -> Result<()> {
+    // A flat `used` list cannot tell two same-alias entries apart, so a
+    // hand-merged legend could silently reconstruct the wrong phrase.
+    let text = "# qodec extern legend v1\n码=alpha phrase\n码=beta phrase\n";
+    let refused = ExternLegend::parse(text);
+    anyhow::ensure!(
+        refused
+            .as_ref()
+            .err()
+            .is_some_and(|e| format!("{e:#}").contains("duplicate")),
+        "duplicate alias must refuse: {refused:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn stale_legend_adds_no_wrapper() -> Result<()> {
+    use qodec::legend::wrap_if_used;
+    // A legend that shares nothing with the payload applies zero entries;
+    // the artifact must stay a plain one — no ext wrapper, no key demand.
+    let meter = Bpe::o200k()?;
+    let mut profile = Profile::default();
+    profile.learn_from(&corpus_text("alpha"));
+    let legend = ExternLegend::parse(&generate(&profile, &meter, 32)?)?;
+
+    let payload = "completely unrelated prose that shares no stems at all\n".repeat(3);
+    let sub = substitute(&payload, &legend, &meter);
+    anyhow::ensure!(sub.used.is_empty(), "nothing must apply");
+    anyhow::ensure!(sub.text == payload, "text must be untouched");
+
+    let inner = encode(&sub.text, CodecKind::Mine, &meter, Alphabet::Auto);
+    let final_artifact = wrap_if_used(inner.clone(), &legend, &sub.used, &meter, &payload);
+    anyhow::ensure!(final_artifact == inner, "no substitutions -> no wrapper");
+    // And it decodes plainly, no legend needed.
+    let back = decode(&final_artifact)?;
+    anyhow::ensure!(back == payload, "plain decode must reconstruct the payload");
+    Ok(())
+}

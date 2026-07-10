@@ -392,7 +392,9 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
     };
     let inner = qodec::encode_seeded(&to_encode, kind, meter.as_ref(), alphabet, &seeds);
     let encoded = match (&extern_legend, &substitution) {
-        (Some(legend), Some(sub)) => qodec::legend::emit(&inner, legend, &sub.used),
+        (Some(legend), Some(sub)) => {
+            qodec::legend::wrap_if_used(inner, legend, &sub.used, meter.as_ref(), &text)
+        }
         _ => inner,
     };
 

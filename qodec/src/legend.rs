@@ -28,6 +28,7 @@ const HEADER: &str = "# qodec extern legend v1";
 
 /// A parsed extern legend: ordered entries plus the checksum of the exact
 /// file bytes (the artifact pins it, decode verifies it).
+#[derive(Debug)]
 pub struct ExternLegend {
     pub entries: Vec<(String, String)>,
     pub sum: String,
@@ -45,7 +46,7 @@ impl ExternLegend {
         if lines.next().map(str::trim) != Some(HEADER) {
             bail!("not an extern legend (first line must be {HEADER:?})");
         }
-        let mut entries = Vec::new();
+        let mut entries: Vec<(String, String)> = Vec::new();
         for line in lines {
             let line = line.trim_end_matches('\r');
             if line.is_empty() || line.starts_with('#') {
@@ -56,6 +57,13 @@ impl ExternLegend {
             };
             if alias.is_empty() || phrase.is_empty() {
                 bail!("empty alias or phrase in legend line {line:?}");
+            }
+            // A hand-edited or merged legend with two entries per alias
+            // would silently reconstruct the wrong phrase on expand — the
+            // artifact's `used` list is flat and cannot tell them apart
+            // (Codex review on PR #35). Refuse up front.
+            if entries.iter().any(|(a, _)| a == alias) {
+                bail!("duplicate alias {alias:?} in extern legend");
             }
             entries.push((alias.to_string(), phrase.to_string()));
         }
@@ -156,6 +164,31 @@ pub fn emit(inner: &str, legend: &ExternLegend, used: &[String]) -> String {
         legend: Vec::new(),
         body: inner.to_string(),
     })
+}
+
+/// The encode-side gate for the ext wrapper. No substitutions → no
+/// wrapper: a stale legend must not turn a normal artifact into one that
+/// demands a key it never used (Codex review on PR #35) — with `used`
+/// empty, `inner` encoded the untouched original and stands on its own.
+/// With substitutions applied, the wrapped artifact must still clear the
+/// original's raw floor; when it can't, the only byte-safe fallback is
+/// `raw(original)` — `inner` alone would decode to the *substituted* text.
+pub fn wrap_if_used(
+    inner: String,
+    legend: &ExternLegend,
+    used: &[String],
+    meter: &dyn TokenMeter,
+    original: &str,
+) -> String {
+    if used.is_empty() {
+        return inner;
+    }
+    let wrapped = emit(&inner, legend, used);
+    if meter.count(&wrapped) < meter.count(&container::raw(original)) {
+        wrapped
+    } else {
+        container::raw(original)
+    }
 }
 
 /// Expand an `ext` container body (already inner-decoded) back to original
