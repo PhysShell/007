@@ -13,6 +13,7 @@
 //! On-disk format is plain JSON, versioned, deterministically capped and
 //! ordered — diffs of a committed profile stay reviewable.
 
+use std::io::Read;
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
@@ -187,6 +188,37 @@ impl Profile {
 
     pub fn template_count(&self) -> usize {
         self.templates.len()
+    }
+}
+
+/// Read at most `cap` bytes of UTF-8 from `path`, returning the text and
+/// whether it was capped. The whole point of the cap is to never hold a
+/// multi-GB blob in memory, so the bound is applied at the *read*, not
+/// after a full `read_to_string` (Codex review on PR #34). A char split
+/// by the cap is dropped; invalid UTF-8 anywhere else is an error — the
+/// same skip semantics the uncapped read had.
+pub fn read_capped(path: &Path, cap: usize) -> Result<(String, bool)> {
+    let file =
+        std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
+    let mut buf = Vec::new();
+    // One extra byte so "exactly cap bytes" and "capped" are distinguishable.
+    file.take(cap as u64 + 1)
+        .read_to_end(&mut buf)
+        .with_context(|| format!("reading {}", path.display()))?;
+    let capped = buf.len() > cap;
+    buf.truncate(cap);
+    match String::from_utf8(buf) {
+        Ok(text) => Ok((text, capped)),
+        // Only a char sliced by the cap itself may be dropped (a UTF-8
+        // char is at most 4 bytes); earlier invalid bytes mean the file
+        // is not text and must be skipped, not silently mangled.
+        Err(err) if capped && err.utf8_error().valid_up_to() + 4 > cap => {
+            let valid = err.utf8_error().valid_up_to();
+            let mut bytes = err.into_bytes();
+            bytes.truncate(valid);
+            Ok((String::from_utf8(bytes).unwrap_or_default(), true))
+        }
+        Err(err) => bail!("{} is not UTF-8: {err}", path.display()),
     }
 }
 

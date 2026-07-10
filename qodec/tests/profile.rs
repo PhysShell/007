@@ -108,3 +108,31 @@ fn seeds_transfer_what_the_word_miner_cannot_see() -> Result<()> {
     anyhow::ensure!(plain.starts_with("%q1 mine"), "plain baseline still commits");
     Ok(())
 }
+
+#[test]
+fn read_capped_bounds_the_read_and_respects_char_boundaries() -> Result<()> {
+    use qodec::profile::read_capped;
+    let dir = std::env::temp_dir();
+
+    // A small file arrives whole, uncapped.
+    let small = dir.join("qodec-readcap-small-test.txt");
+    std::fs::write(&small, "hello")?;
+    let (text, capped) = read_capped(&small, 16)?;
+    std::fs::remove_file(&small).ok();
+    anyhow::ensure!(text == "hello" && !capped, "small file must pass through");
+
+    // The cap slicing a multibyte char drops that char, never mangles it.
+    let multi = dir.join("qodec-readcap-multibyte-test.txt");
+    std::fs::write(&multi, "abcd码码码")?;
+    let (text, capped) = read_capped(&multi, 6)?;
+    std::fs::remove_file(&multi).ok();
+    anyhow::ensure!(capped && text == "abcd", "sliced char must be dropped, got {text:?}");
+
+    // Binary content is refused (same semantics as the uncapped read had).
+    let bin = dir.join("qodec-readcap-binary-test.bin");
+    std::fs::write(&bin, [0xFF, 0xFE, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05])?;
+    let refused = read_capped(&bin, 4);
+    std::fs::remove_file(&bin).ok();
+    anyhow::ensure!(refused.is_err(), "binary must be refused, not mangled");
+    Ok(())
+}

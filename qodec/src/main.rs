@@ -377,27 +377,22 @@ fn cmd_learn(a: &LearnArgs) -> Result<()> {
     let mut profile = qodec::profile::Profile::load(&a.profile)?;
     let mut learned = 0usize;
     for path in &files {
-        let text = match fs::read_to_string(path) {
-            Ok(text) => text,
+        // The cap is applied at the read itself — a multi-GB blob never
+        // reaches memory (Codex review on PR #34).
+        let (text, capped) = match qodec::profile::read_capped(path, LEARN_CAP_BYTES) {
+            Ok(read) => read,
             Err(err) => {
                 eprintln!("qodec learn: skipping {} ({err})", path.display());
                 continue;
             }
         };
-        let text = if text.len() > LEARN_CAP_BYTES {
-            let mut end = LEARN_CAP_BYTES;
-            while !text.is_char_boundary(end) {
-                end -= 1;
-            }
+        if capped {
             eprintln!(
-                "qodec learn: {} capped to first {end} bytes of {}",
+                "qodec learn: {} capped to its first {} bytes",
                 path.display(),
                 text.len(),
             );
-            text.get(..end).unwrap_or_default().to_string()
-        } else {
-            text
-        };
+        }
         profile.learn_from(&text);
         learned += 1;
     }
