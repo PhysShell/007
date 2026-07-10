@@ -67,3 +67,32 @@ fn grade_extracts_json_from_chatty_output() -> Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn accuracy_per_1k_normalizes_by_prompt_cost() -> Result<()> {
+    use qodec::ab::accuracy_per_1k;
+    // Same score, half the prompt -> twice the metric (the TOON-benchmark
+    // normalization this is borrowed from).
+    let full = accuracy_per_1k(9, 12, 4000);
+    let lean = accuracy_per_1k(9, 12, 2000);
+    anyhow::ensure!((full - 18.75).abs() < 1e-9, "75% over 4k tokens = 18.75, got {full}");
+    anyhow::ensure!((lean - 2.0 * full).abs() < 1e-9, "half the tokens doubles the metric");
+    // Degenerate inputs never divide by zero.
+    anyhow::ensure!(accuracy_per_1k(0, 0, 100) == 0.0 && accuracy_per_1k(1, 1, 0) == 0.0);
+    Ok(())
+}
+
+#[test]
+fn notation_brief_teaches_every_shelf_codec() -> Result<()> {
+    // ab emit hands this brief to the model; a codec whose body shape is
+    // missing here gets graded on missing instructions, not readability
+    // (Codex review on PR #33). Tripwire for the next shelf addition.
+    let brief = qodec::ab::notation_brief();
+    for label in ["toon", "grep", "diag", "tmpl"] {
+        anyhow::ensure!(
+            brief.contains(label),
+            "notation brief must teach `{label}` bodies"
+        );
+    }
+    Ok(())
+}

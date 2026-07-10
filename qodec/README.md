@@ -104,7 +104,8 @@ instead of skewing them. It takes `$QODEC` to override the binary path.
 | `toon` | uniform JSON array → keys-once table | semantic (Value-equal) |
 | `grep` | `path:line[:col]:text` matcher output → path once per run of hits (the `rg --heading` shape) | byte |
 | `diag` | template miner for diagnostic streams (`path:line: warning: …`, MSBuild `path(l,c): …`): repeated tails → legend once, quoted identifiers → slot values; one linear pass — the redundancy is *known*, not searched for | byte |
-| `squeeze` | `toon` (JSON) or measured best of `fold`/`grep`/`diag` (text), then the better miner over the result | byte / semantic |
+| `tmpl` | Drain-style template mining for *any* line-based log: lines cluster by skeleton (whitespace byte-equal, ≥60% of words equal), varying positions become slots — `diag` without the format rules | byte |
+| `squeeze` | `toon` (JSON) or measured best of `fold`/`grep`/`diag`/`tmpl` (text), then the better miner over the result | byte / semantic |
 
 Format specialization is the speed lever: on the real 133 KB ownsharp audit
 log, `diag` takes −52% in 0.4 s where `deep` takes −77% in 20 s — the miner

@@ -92,7 +92,10 @@ pub fn prompt(payload_intro: &str, payload: &str, questions: &[Question]) -> Str
     out
 }
 
-/// The notation brief for encoded payloads — same contract `probe` teaches.
+/// The notation brief for encoded payloads — the single description of the
+/// `%q1` contract, taught verbatim by both `probe` and the A/B prompts.
+/// One text on purpose: when the two drifted, A/B runs measured the missing
+/// instructions instead of codec readability (Codex review on PR #33).
 pub fn notation_brief() -> &'static str {
     "The payload is encoded as a `%q1` container. Format: first line\n\
      `%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`\n\
@@ -100,8 +103,16 @@ pub fn notation_brief() -> &'static str {
      `%q1 body` line, then the body. `%q1 xN` after a line means that line\n\
      occurs N times in total. A `toon` body is a table: first line is a JSON\n\
      array of keys, each following line is one object, cells are JSON values\n\
-     joined by the separator named in the header. Mentally decode the body\n\
-     via the legend before answering; never emit alias characters in answers."
+     joined by the separator named in the header. A `grep` body is grouped\n\
+     matcher output: a marker line names a file path and the lines after it\n\
+     are `line:text` hits in that file (a bare marker starts verbatim\n\
+     lines). A `diag` body line starting with an alias expands to: the head\n\
+     after the alias, then that alias's legend template with each slot\n\
+     placeholder filled by the sep-joined values in order. A `tmpl` body\n\
+     line starting with an alias is its legend template with the slot\n\
+     placeholders filled by the sep-joined values that follow the alias.\n\
+     Mentally decode the body via the legend before answering; never emit\n\
+     alias characters in answers."
 }
 
 pub struct GradeRow {
@@ -170,4 +181,17 @@ pub fn grade(questions: &[Question], answers_text: &str) -> Result<Vec<GradeRow>
         });
     }
     Ok(rows)
+}
+
+/// The TOON-benchmark normalization: accuracy percentage points per 1000
+/// prompt tokens. Two notations with equal scores are not equal — the one
+/// the model reads from fewer tokens wins; this makes that visible.
+/// (toonformat.dev reports JSON ≈ 16.4 vs its table form ≈ 27.7 on
+/// retrieval QA — the shape of number to expect here.)
+pub fn accuracy_per_1k(correct: usize, total: usize, prompt_tokens: usize) -> f64 {
+    if total == 0 || prompt_tokens == 0 {
+        return 0.0;
+    }
+    let accuracy = 100.0 * correct as f64 / total as f64;
+    accuracy / (prompt_tokens as f64 / 1000.0)
 }

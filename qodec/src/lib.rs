@@ -14,6 +14,7 @@ pub mod mine;
 pub mod ppl;
 pub mod sam;
 pub mod slice;
+pub mod tmpl;
 pub mod toon;
 
 use anyhow::{bail, Result};
@@ -37,8 +38,13 @@ pub enum CodecKind {
     /// MSBuild): repeated tails go to the legend once, quoted identifiers
     /// become slot values. Byte roundtrip, one linear pass.
     Diag,
-    /// Pipeline: `toon` (JSON) or the measured best of `fold`/`grep`/`diag`
-    /// (text), then the better of the two miners over the result.
+    /// Drain-style template mining for arbitrary line-based logs: lines
+    /// cluster by skeleton, varying positions become slots. No format
+    /// rules needed. Byte roundtrip.
+    Tmpl,
+    /// Pipeline: `toon` (JSON) or the measured best of
+    /// `fold`/`grep`/`diag`/`tmpl` (text), then the better of the two
+    /// miners over the result.
     Squeeze,
 }
 
@@ -51,6 +57,7 @@ impl CodecKind {
             "toon" => Some(Self::Toon),
             "grep" => Some(Self::Grep),
             "diag" => Some(Self::Diag),
+            "tmpl" => Some(Self::Tmpl),
             "squeeze" => Some(Self::Squeeze),
             _ => None,
         }
@@ -64,6 +71,7 @@ impl CodecKind {
             Self::Toon => "toon",
             Self::Grep => "grep",
             Self::Diag => "diag",
+            Self::Tmpl => "tmpl",
             Self::Squeeze => "squeeze",
         }
     }
@@ -86,6 +94,7 @@ pub fn encode(text: &str, kind: CodecKind, meter: &dyn TokenMeter, alphabet: Alp
         CodecKind::Toon => toon::encode(text, meter),
         CodecKind::Grep => grep::encode(text, meter),
         CodecKind::Diag => diag::encode(text, meter),
+        CodecKind::Tmpl => tmpl::encode(text, meter),
         CodecKind::Squeeze => {
             let stage1 = if serde_json::from_str::<serde_json::Value>(text).is_ok() {
                 let tooned = toon::encode(text, meter);
@@ -135,6 +144,7 @@ fn best_text_stage(text: &str, meter: &dyn TokenMeter) -> String {
         fold::encode(text, meter),
         grep::encode(text, meter),
         diag::encode(text, meter),
+        tmpl::encode(text, meter),
     ]
     .into_iter()
     .min_by_key(|artifact| meter.count(artifact))
@@ -154,6 +164,7 @@ fn decode_container(c: &container::Container) -> Result<String> {
         "toon" => toon::decode(c),
         "grep" => grep::decode(c),
         "diag" => diag::decode(c),
+        "tmpl" => tmpl::decode(c),
         other => bail!("unknown codec {other:?} in container"),
     }
 }
