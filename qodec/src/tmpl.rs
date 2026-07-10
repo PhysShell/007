@@ -142,30 +142,11 @@ impl<'a> Cluster<'a> {
     }
 }
 
-pub fn encode(text: &str, meter: &dyn TokenMeter) -> String {
-    if text.is_empty() {
-        return container::raw(text);
-    }
-    let Some(&(sep_name, sep)) = SEPS.iter().find(|(_, ch)| !text.contains(*ch)) else {
-        return container::raw(text);
-    };
-    let Some(&(slot_name, slot)) = SLOTS.iter().find(|(_, ch)| !text.contains(*ch)) else {
-        return container::raw(text);
-    };
-    let exclusion = format!("{text}{sep}{slot}");
-    let mut pool = AliasPool::build(Alphabet::Auto, meter, &exclusion);
-
-    let ends_with_nl = text.ends_with('\n');
-    let mut raw_lines: Vec<&str> = text.split('\n').collect();
-    if ends_with_nl {
-        raw_lines.pop();
-    }
-
-    let splits: Vec<Option<Split<'_>>> = raw_lines.iter().map(|&l| split_line(l)).collect();
-
-    // Bucket by word count, grow clusters greedily — first fit above the
-    // similarity bar wins, in arrival order (deterministic).
-    let mut buckets: HashMap<usize, Vec<Cluster<'_>>> = HashMap::new();
+/// Bucket by segment shape, grow clusters greedily — first fit above the
+/// similarity bar wins, in arrival order (deterministic). Shared by encode
+/// and `qodec learn`.
+fn build_clusters<'a>(splits: &[Option<Split<'a>>]) -> Vec<Cluster<'a>> {
+    let mut buckets: HashMap<usize, Vec<Cluster<'a>>> = HashMap::new();
     for (idx, split) in splits.iter().enumerate() {
         let Some(split) = split else { continue };
         let words = split.segs.len() / 2;
@@ -188,11 +169,68 @@ pub fn encode(text: &str, meter: &dyn TokenMeter) -> String {
             None => {}
         }
     }
+    buckets.into_values().flatten().collect()
+}
+
+/// Learned templates as (fixed parts, member count) — wildcards sit between
+/// consecutive parts. Profile food for `qodec learn`.
+pub(crate) fn learn_templates(text: &str) -> Vec<(Vec<String>, usize)> {
+    let mut raw_lines: Vec<&str> = text.split('\n').collect();
+    if text.ends_with('\n') {
+        raw_lines.pop();
+    }
+    let splits: Vec<Option<Split<'_>>> = raw_lines.iter().map(|&l| split_line(l)).collect();
+    let mut out: Vec<(Vec<String>, usize)> = Vec::new();
+    for cluster in build_clusters(&splits) {
+        if cluster.members.len() < 2 {
+            continue;
+        }
+        let mut parts = vec![String::new()];
+        for seg in &cluster.segs {
+            match seg {
+                Some(fixed) => {
+                    if let Some(part) = parts.last_mut() {
+                        part.push_str(fixed);
+                    }
+                }
+                None => parts.push(String::new()),
+            }
+        }
+        out.push((parts, cluster.members.len()));
+    }
+    out.sort_by(|a, b| {
+        let wa = a.1 * a.0.iter().map(String::len).sum::<usize>();
+        let wb = b.1 * b.0.iter().map(String::len).sum::<usize>();
+        wb.cmp(&wa).then(a.0.cmp(&b.0))
+    });
+    out
+}
+
+pub fn encode(text: &str, meter: &dyn TokenMeter) -> String {
+    if text.is_empty() {
+        return container::raw(text);
+    }
+    let Some(&(sep_name, sep)) = SEPS.iter().find(|(_, ch)| !text.contains(*ch)) else {
+        return container::raw(text);
+    };
+    let Some(&(slot_name, slot)) = SLOTS.iter().find(|(_, ch)| !text.contains(*ch)) else {
+        return container::raw(text);
+    };
+    let exclusion = format!("{text}{sep}{slot}");
+    let mut pool = AliasPool::build(Alphabet::Auto, meter, &exclusion);
+
+    let ends_with_nl = text.ends_with('\n');
+    let mut raw_lines: Vec<&str> = text.split('\n').collect();
+    if ends_with_nl {
+        raw_lines.pop();
+    }
+
+    let splits: Vec<Option<Split<'_>>> = raw_lines.iter().map(|&l| split_line(l)).collect();
+    let clusters = build_clusters(&splits);
 
     // Rank repeated clusters by saved fixed text, hand out cheap aliases.
-    let mut repeated: Vec<&Cluster<'_>> = buckets
-        .values()
-        .flatten()
+    let mut repeated: Vec<&Cluster<'_>> = clusters
+        .iter()
         .filter(|c| c.members.len() >= 2)
         .collect();
     repeated.sort_by_key(|c| {

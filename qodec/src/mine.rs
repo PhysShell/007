@@ -53,6 +53,10 @@ pub struct MineOptions {
     pub min_gain: i64,
     pub max_entries: usize,
     pub miner: MinerKind,
+    /// Profile-learned phrases, probed ahead of discovery each round.
+    /// Seeds only reorder the queue — every commit still passes the same
+    /// measured acceptance, so a stale seed wastes a probe, never bytes.
+    pub seeds: Vec<String>,
 }
 
 impl Default for MineOptions {
@@ -62,6 +66,7 @@ impl Default for MineOptions {
             min_gain: 0,
             max_entries: 64,
             miner: MinerKind::Words,
+            seeds: Vec::new(),
         }
     }
 }
@@ -82,7 +87,18 @@ pub fn encode(text: &str, meter: &dyn TokenMeter, opts: &MineOptions) -> String 
         };
 
         let mut best: Option<(String, String, i64)> = None; // (phrase, replaced, gain)
-        for phrase in ranked_candidates(&current, opts.miner) {
+        let mut queue: Vec<String> = opts
+            .seeds
+            .iter()
+            .filter(|s| !s.is_empty() && current.contains(s.as_str()))
+            .cloned()
+            .collect();
+        for candidate in ranked_candidates(&current, opts.miner) {
+            if !queue.contains(&candidate) {
+                queue.push(candidate);
+            }
+        }
+        for phrase in queue {
             let replaced = current.replace(&phrase, &alias);
             let legend_line = format!("{alias}={phrase}\n");
             let gain =
@@ -162,6 +178,12 @@ fn ranked_candidates(text: &str, miner: MinerKind) -> Vec<String> {
         return merged;
     }
     word_candidates(text, SCORE_BUDGET)
+}
+
+/// The word/prefix candidate family, exposed for `qodec learn`: the same
+/// spans the miner would probe are what a profile should remember.
+pub(crate) fn learn_phrases(text: &str, budget: usize) -> Vec<String> {
+    word_candidates(text, budget)
 }
 
 fn word_candidates(text: &str, budget: usize) -> Vec<String> {
