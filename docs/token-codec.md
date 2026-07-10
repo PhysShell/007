@@ -285,11 +285,16 @@ hostile input) through the actual `o7 judge` binary.
 3. **Session dictionaries** — persist a per-repo legend (top paths, type
    names, frame prefixes) into the cached preamble once, so *every* message
    is warm-path; `mine` then only handles payload-local repetition.
-   *Half done:* `qodec learn` + `encode --profile` implement the
-   harvest-and-seed side — phrases and tmpl template parts accumulate
-   across runs and are probed ahead of discovery (measured on the real
-   ownsharp pair: −65.1% → −66.5% cold, cross-file). The cached-preamble
-   legend is the open half. Found along the way, worth its own rung:
+   *Done, both halves:* `qodec learn` + `encode --profile` implement
+   harvest-and-seed — phrases and tmpl template parts accumulate across
+   runs and are probed ahead of discovery (measured on the real ownsharp
+   pair: −65.1% → −66.5% cold, cross-file). `qodec legend` +
+   `encode/decode --extern-legend` implement the cached-preamble side:
+   the profile freezes into a stable `alias=phrase` file, artifacts pin
+   its FNV checksum (`%q1 ext sum=…`) and decode fails closed without the
+   exact file; in-artifact key overhead on the real ownsharp log drops
+   950 → 23 tokens, with the 564-token key amortized in the prefix.
+   Found along the way, worth its own rung:
    alias glyph cost is *context-dependent* (the pool probes glyphs in
    isolation; `" 引 "` can tokenize cheaper than `" 码 "` mid-row), which
    can flip close greedy outcomes — probing alias cost in context is a

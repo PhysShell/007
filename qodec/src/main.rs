@@ -9,7 +9,7 @@ use clap::{Args, Parser, Subcommand};
 
 use qodec::alias::{probe_table, Alphabet};
 use qodec::meter::by_name;
-use qodec::{bench, container, decode, encode, CodecKind};
+use qodec::{bench, container, encode, CodecKind};
 
 #[derive(Parser)]
 #[command(
@@ -26,7 +26,11 @@ enum Cmd {
     /// Encode text into a %q1 container (falls back to raw when it doesn't pay).
     Encode(EncodeArgs),
     /// Decode a %q1 container back (unwraps pipelines).
-    Decode(IoArgs),
+    Decode(DecodeArgs),
+    /// Freeze the heaviest profile phrases into an extern legend file — a
+    /// stable dictionary for a cached prompt prefix (CLAUDE.md / system
+    /// prompt). Artifacts pin its checksum; decode fails closed on drift.
+    Legend(LegendArgs),
     /// Slice a record array out of a JSON document: descend by --key, keep
     /// records matching every --where, emit a compact JSON array (feed it
     /// raw, or pipe into `encode --codec toon`).
@@ -122,6 +126,37 @@ struct EncodeArgs {
     /// Redundancy profile from `qodec learn`; its phrases are probed first.
     #[arg(long)]
     profile: Option<PathBuf>,
+    /// Extern legend (`qodec legend`): substitute its phrases without
+    /// paying for legend lines — the reader holds the key in a cached
+    /// prefix. The artifact pins the file's checksum.
+    #[arg(long)]
+    extern_legend: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct DecodeArgs {
+    #[command(flatten)]
+    io: IoArgs,
+    /// The extern legend the artifact was encoded against (`ext` artifacts
+    /// refuse to decode without the exact file).
+    #[arg(long)]
+    extern_legend: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct LegendArgs {
+    /// Profile from `qodec learn`.
+    #[arg(long)]
+    profile: PathBuf,
+    /// How many phrases to freeze.
+    #[arg(long, default_value_t = 48)]
+    top: usize,
+    /// o200k | cl100k | approx
+    #[arg(long, default_value = "o200k")]
+    meter: String,
+    /// Output file (stdout when omitted).
+    #[arg(short, long)]
+    output: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -194,10 +229,19 @@ fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Encode(a) => cmd_encode(&a, false),
         Cmd::Probe(a) => cmd_encode(&a, true),
-        Cmd::Decode(io) => {
-            let text = read_input(&io)?;
-            write_output(&io, &decode(&text)?)
+        Cmd::Decode(a) => {
+            let text = read_input(&a.io)?;
+            let extern_legend = a
+                .extern_legend
+                .as_deref()
+                .map(qodec::legend::ExternLegend::load)
+                .transpose()?;
+            write_output(
+                &a.io,
+                &qodec::decode_with_extern(&text, extern_legend.as_ref())?,
+            )
         }
+        Cmd::Legend(a) => cmd_legend(&a),
         Cmd::Slice(a) => cmd_slice(&a),
         Cmd::Learn(a) => cmd_learn(&a),
         Cmd::Bench(a) => cmd_bench(&a),
@@ -327,7 +371,30 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
         None => Vec::new(),
     };
 
-    let encoded = qodec::encode_seeded(&text, kind, meter.as_ref(), alphabet, &seeds);
+    let extern_legend = a
+        .extern_legend
+        .as_deref()
+        .map(qodec::legend::ExternLegend::load)
+        .transpose()?;
+    if probe && extern_legend.is_some() {
+        bail!(
+            "probe teaches the in-band key; an extern legend is out-of-band \
+             by design — probe without --extern-legend"
+        );
+    }
+
+    let (to_encode, substitution) = match &extern_legend {
+        Some(legend) => {
+            let sub = qodec::legend::substitute(&text, legend, meter.as_ref());
+            (sub.text.clone(), Some(sub))
+        }
+        None => (text.clone(), None),
+    };
+    let inner = qodec::encode_seeded(&to_encode, kind, meter.as_ref(), alphabet, &seeds);
+    let encoded = match (&extern_legend, &substitution) {
+        (Some(legend), Some(sub)) => qodec::legend::emit(&inner, legend, &sub.used),
+        _ => inner,
+    };
 
     if a.report {
         let tokens_in = meter.count(&text);
@@ -353,6 +420,25 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
         encoded
     };
     write_output(&a.io, &payload)
+}
+
+fn cmd_legend(a: &LegendArgs) -> Result<()> {
+    let profile = qodec::profile::Profile::load(&a.profile)?;
+    let meter = by_name(&a.meter)?;
+    let text = qodec::legend::generate(&profile, meter.as_ref(), a.top)?;
+    let entries = text.lines().filter(|l| l.contains('=')).count();
+    match &a.output {
+        Some(path) => {
+            fs::write(path, &text).with_context(|| format!("writing {}", path.display()))?;
+            eprintln!(
+                "qodec legend: {entries} entries -> {} ({} tokens as cached-prefix key)",
+                path.display(),
+                meter.count(&text),
+            );
+        }
+        None => print!("{text}"),
+    }
+    Ok(())
 }
 
 fn cmd_learn(a: &LearnArgs) -> Result<()> {
