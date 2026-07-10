@@ -115,7 +115,13 @@ impl Profile {
             "templates": templates,
         });
         let text = serde_json::to_string_pretty(&root).context("serializing profile")?;
-        std::fs::write(path, text).with_context(|| format!("writing {}", path.display()))
+        // Atomic replace: fs::write truncates in place, so an interrupted
+        // save would corrupt the accumulated memory of every previous run
+        // (CodeRabbit review on PR #34). Same-directory rename is atomic.
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, &text).with_context(|| format!("writing {}", tmp.display()))?;
+        std::fs::rename(&tmp, path)
+            .with_context(|| format!("renaming {} to {}", tmp.display(), path.display()))
     }
 
     /// Harvest one text into the profile: repeated phrases (the miner's

@@ -35,6 +35,10 @@ fn profile_accumulates_and_roundtrips_disk() -> Result<()> {
 
     let path = std::env::temp_dir().join("qodec-profile-roundtrip-test.json");
     profile.save(&path)?;
+    anyhow::ensure!(
+        !path.with_extension("json.tmp").exists(),
+        "atomic save must leave no temp file behind"
+    );
     let back = Profile::load(&path)?;
     std::fs::remove_file(&path).ok();
     anyhow::ensure!(
