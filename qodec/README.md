@@ -114,6 +114,22 @@ profile learned on the 3.7 KB broker log lifts `mine` on the 133 KB sectorts
 log from −65.1% to −66.5% cold. Seeds only reorder the probe queue —
 acceptance stays measured, so a stale profile costs probes, never bytes.
 
+Profile templates seed `tmpl` clustering too: they enter each bucket first
+as *sealed* clusters — exact on fixed words, wildcards free, never eroded —
+so a matching line lands on the known template before any same-run cluster
+can claim it. That rescues greedy first-fit's known failure: two same-shape
+line families merging into one mongrel template that pays an extra slot
+value on every row. The seeded pass competes with the plain one by
+whole-artifact measurement (ties go to seeded), so when it wins, the legend
+pins the profile's template bytes exactly — stable, diffable notation
+across runs. Honest scope: on the real corpora tried so far (a 428 KB
+MSBuild-style log, ownsharp slices) the plain pass already finds the same
+templates or beats the seeds by fixing positions that agree by chance
+inside the slice, and the gate returns the plain artifact byte-identically.
+The mechanism is proven on the constructed misroute case in the tests, and
+the byte-stable legend is the prerequisite for moving template legends into
+a cached prefix the way `--extern-legend` already moves phrases.
+
 Freeze the profile into a stable dictionary for a *cached prompt prefix*
 (CLAUDE.md / system prompt) — the warm story made real:
 

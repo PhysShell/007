@@ -84,6 +84,10 @@ fn split_line(full: &str) -> Option<Split<'_>> {
 struct Cluster<'a> {
     segs: Vec<Option<&'a str>>,
     members: Vec<usize>,
+    /// Profile-seeded template: fixed positions are exact-match and never
+    /// erode, so its legend line stays byte-identical to the profile's —
+    /// the property that makes artifacts diff-stable across runs.
+    sealed: bool,
 }
 
 impl<'a> Cluster<'a> {
@@ -91,11 +95,22 @@ impl<'a> Cluster<'a> {
         Self {
             segs: split.segs.iter().map(|s| Some(*s)).collect(),
             members: vec![line_idx],
+            sealed: false,
+        }
+    }
+
+    fn from_profile(segs: &'a [Option<String>]) -> Self {
+        Self {
+            segs: segs.iter().map(Option::as_deref).collect(),
+            members: Vec::new(),
+            sealed: true,
         }
     }
 
     /// Word-position agreement against a candidate with the same shape;
-    /// whitespace mismatch disqualifies outright.
+    /// whitespace mismatch disqualifies outright. Sealed templates demand
+    /// every fixed word exactly (wildcards free) — a hit outranks any
+    /// same-run cluster because seeds sit first in the bucket.
     fn score(&self, split: &Split<'a>) -> Option<f64> {
         let mut words = 0usize;
         let mut hits = 0usize;
@@ -107,18 +122,25 @@ impl<'a> Cluster<'a> {
                 continue;
             }
             words += 1;
-            if *mine == Some(*theirs) {
-                hits += 1;
+            match mine {
+                Some(word) if *word == *theirs => hits += 1,
+                Some(_) if self.sealed => return None,
+                _ => {}
             }
+        }
+        if self.sealed {
+            return (words > 0).then_some(1.0);
         }
         // A no-word skeleton (blank-ish line) never templates.
         (words > 0).then(|| hits as f64 / words as f64)
     }
 
     fn absorb(&mut self, split: &Split<'a>, line_idx: usize) {
-        for (mine, theirs) in self.segs.iter_mut().zip(&split.segs) {
-            if *mine != Some(*theirs) {
-                *mine = None;
+        if !self.sealed {
+            for (mine, theirs) in self.segs.iter_mut().zip(&split.segs) {
+                if *mine != Some(*theirs) {
+                    *mine = None;
+                }
             }
         }
         self.members.push(line_idx);
@@ -142,11 +164,47 @@ impl<'a> Cluster<'a> {
     }
 }
 
+/// Rebuild a profile template (fixed parts, wildcards between them) into
+/// the seg shape clustering works on. Parts re-split exactly as the
+/// original lines did — whitespace/word boundaries are a pure function of
+/// the bytes — so the reconstruction is faithful. Templates a line-based
+/// legend cannot carry (embedded newlines or any CR) are refused.
+fn seed_to_segs(parts: &[String]) -> Option<Vec<Option<String>>> {
+    let mut segs: Vec<Option<String>> = Vec::new();
+    for (idx, part) in parts.iter().enumerate() {
+        if part.contains('\n') {
+            return None;
+        }
+        if idx > 0 {
+            segs.push(None); // the wildcard word between consecutive parts
+        }
+        let split = split_line(part)?;
+        if split.cr {
+            return None;
+        }
+        segs.extend(split.segs.iter().map(|s| Some((*s).to_string())));
+    }
+    // Each part splits to an odd ws-word-…-ws run, so alternation survives
+    // concatenation; a template with no word position at all is useless.
+    (segs.len() / 2 > 0).then_some(segs)
+}
+
 /// Bucket by segment shape, grow clusters greedily — first fit above the
 /// similarity bar wins, in arrival order (deterministic). Shared by encode
-/// and `qodec learn`.
-fn build_clusters<'a>(splits: &[Option<Split<'a>>]) -> Vec<Cluster<'a>> {
+/// and `qodec learn`. Seeded templates enter their buckets first, in
+/// profile (weight) order, so a matching line lands on the known template
+/// before any same-run cluster can claim it.
+fn build_clusters<'a>(
+    splits: &[Option<Split<'a>>],
+    seeds: &'a [Vec<Option<String>>],
+) -> Vec<Cluster<'a>> {
     let mut buckets: HashMap<usize, Vec<Cluster<'a>>> = HashMap::new();
+    for seed in seeds {
+        buckets
+            .entry(seed.len())
+            .or_default()
+            .push(Cluster::from_profile(seed));
+    }
     for (idx, split) in splits.iter().enumerate() {
         let Some(split) = split else { continue };
         let words = split.segs.len() / 2;
@@ -181,7 +239,7 @@ pub(crate) fn learn_templates(text: &str) -> Vec<(Vec<String>, usize)> {
     }
     let splits: Vec<Option<Split<'_>>> = raw_lines.iter().map(|&l| split_line(l)).collect();
     let mut out: Vec<(Vec<String>, usize)> = Vec::new();
-    for cluster in build_clusters(&splits) {
+    for cluster in build_clusters(&splits, &[]) {
         if cluster.members.len() < 2 {
             continue;
         }
@@ -207,13 +265,56 @@ pub(crate) fn learn_templates(text: &str) -> Vec<(Vec<String>, usize)> {
 }
 
 pub fn encode(text: &str, meter: &dyn TokenMeter) -> String {
+    encode_seeded(text, meter, &[])
+}
+
+/// `encode` pre-shaped by profile templates (`qodec learn`). The seeded
+/// pass competes with the plain one by measurement — a chance-agreeing
+/// position that the plain pass keeps fixed makes shorter rows, so seeds
+/// must *win or tie* to be taken (tie goes to seeded: byte-stable profile
+/// legends are worth having at equal cost). Stale seeds can therefore
+/// waste a pass, never tokens or bytes.
+pub(crate) fn encode_seeded(
+    text: &str,
+    meter: &dyn TokenMeter,
+    templates: &[Vec<String>],
+) -> String {
+    let plain = encode_pass(text, meter, &[]);
+    let seeds: Vec<Vec<Option<String>>> = templates
+        .iter()
+        .filter_map(|parts| seed_to_segs(parts))
+        .take(MAX_TEMPLATES)
+        .collect();
+    if seeds.is_empty() {
+        return plain;
+    }
+    let seeded = encode_pass(text, meter, &seeds);
+    if meter.count(&seeded) <= meter.count(&plain) {
+        seeded
+    } else {
+        plain
+    }
+}
+
+fn encode_pass(text: &str, meter: &dyn TokenMeter, seeds: &[Vec<Option<String>>]) -> String {
     if text.is_empty() {
         return container::raw(text);
     }
     let Some(&(sep_name, sep)) = SEPS.iter().find(|(_, ch)| !text.contains(*ch)) else {
         return container::raw(text);
     };
-    let Some(&(slot_name, slot)) = SLOTS.iter().find(|(_, ch)| !text.contains(*ch)) else {
+    // The slot char splits *legend* templates on decode, and seeded
+    // templates put profile bytes into the legend — so the slot must be
+    // absent from the seeds too, not just the input.
+    let seed_blob: String = seeds
+        .iter()
+        .flat_map(|segs| segs.iter().flatten())
+        .map(String::as_str)
+        .collect();
+    let Some(&(slot_name, slot)) = SLOTS
+        .iter()
+        .find(|(_, ch)| !text.contains(*ch) && !seed_blob.contains(*ch))
+    else {
         return container::raw(text);
     };
     let exclusion = format!("{text}{sep}{slot}");
@@ -226,7 +327,7 @@ pub fn encode(text: &str, meter: &dyn TokenMeter) -> String {
     }
 
     let splits: Vec<Option<Split<'_>>> = raw_lines.iter().map(|&l| split_line(l)).collect();
-    let clusters = build_clusters(&splits);
+    let clusters = build_clusters(&splits, seeds);
 
     // Rank repeated clusters by saved fixed text, hand out cheap aliases.
     let mut repeated: Vec<&Cluster<'_>> = clusters

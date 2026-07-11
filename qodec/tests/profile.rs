@@ -7,7 +7,7 @@ use anyhow::Result;
 use qodec::alias::Alphabet;
 use qodec::meter::{Bpe, TokenMeter};
 use qodec::profile::Profile;
-use qodec::{encode, encode_seeded, CodecKind};
+use qodec::{encode, encode_seeded, CodecKind, Seeds};
 
 /// Log-ish lines sharing one 14-word stem — far beyond the word-miner's
 /// MAX_WORDS window, so plain mine can only tile it from sub-spans while a
@@ -87,11 +87,15 @@ fn seeds_transfer_what_the_word_miner_cannot_see() -> Result<()> {
     let mut profile = Profile::default();
     profile.learn_from(&stem_lines("alpha"));
 
-    let seeds = profile.seed_phrases(64);
+    let phrases = profile.seed_phrases(64);
     anyhow::ensure!(
-        seeds.iter().any(|s| s.split_whitespace().count() >= 14),
-        "profile must carry the long template stem, got {seeds:?}"
+        phrases.iter().any(|s| s.split_whitespace().count() >= 14),
+        "profile must carry the long template stem, got {phrases:?}"
     );
+    let seeds = Seeds {
+        phrases,
+        ..Seeds::default()
+    };
 
     let other = stem_lines("omega");
     let seeded = encode_seeded(&other, CodecKind::Mine, &meter, Alphabet::Auto, &seeds);
@@ -110,6 +114,100 @@ fn seeds_transfer_what_the_word_miner_cannot_see() -> Result<()> {
     // Plain mine still works alongside for comparison runs.
     let plain = encode(&other, CodecKind::Mine, &meter, Alphabet::Auto);
     anyhow::ensure!(plain.starts_with("%q1 mine"), "plain baseline still commits");
+    Ok(())
+}
+
+/// Two line families with the same seg shape sharing exactly 4 of 6 words
+/// (0.667 ≥ SIMILARITY) — a greedy single-pass merges them into one
+/// two-slot mongrel template, which is Drain's known first-fit weakness.
+fn family(kind: &str, noun: &str, n: usize) -> String {
+    let mut text = String::new();
+    for i in 0..n {
+        text.push_str(&format!("worker thread pool {kind} {noun}{i} spawned\n"));
+    }
+    text
+}
+
+#[test]
+fn tmpl_seeds_rescue_misrouted_templates_and_pin_legend_bytes() -> Result<()> {
+    // Learned from separate files, the profile holds two clean one-slot
+    // templates. On a mixed file the plain pass cannot: the second
+    // family's first line clears the similarity bar against the first
+    // family's cluster and erodes it into `worker thread pool ¿ ¿
+    // spawned`, so every row pays an extra slot value. Seeded clustering
+    // routes each line to its sealed template first.
+    let meter = Bpe::o200k()?;
+    let mut profile = Profile::default();
+    profile.learn_from(&family("delta", "task", 16));
+    profile.learn_from(&family("epsilon", "job", 16));
+    let templates = profile.seed_templates(64);
+    anyhow::ensure!(
+        templates
+            .iter()
+            .filter(|parts| {
+                parts.first().is_some_and(|p| {
+                    p == "worker thread pool delta " || p == "worker thread pool epsilon "
+                })
+            })
+            .count()
+            == 2,
+        "profile must hold both clean templates, got {templates:?}"
+    );
+    let seeds = Seeds {
+        templates,
+        ..Seeds::default()
+    };
+
+    // Interleave the families the way a real mixed log would.
+    let mixed: String = family("delta", "task", 16)
+        .lines()
+        .zip(family("epsilon", "job", 16).lines())
+        .flat_map(|(a, b)| [a, "\n", b, "\n"])
+        .collect();
+
+    let plain = encode(&mixed, CodecKind::Tmpl, &meter, Alphabet::Auto);
+    anyhow::ensure!(plain.starts_with("%q1 tmpl"), "plain must commit: {plain:?}");
+    anyhow::ensure!(
+        plain.contains("=worker thread pool ¿ ¿ spawned"),
+        "plain first-fit must produce the merged two-slot template"
+    );
+
+    let seeded = encode_seeded(&mixed, CodecKind::Tmpl, &meter, Alphabet::Auto, &seeds);
+    anyhow::ensure!(seeded.starts_with("%q1 tmpl"), "seeded must commit");
+    anyhow::ensure!(
+        seeded.contains("=worker thread pool delta ¿ spawned")
+            && seeded.contains("=worker thread pool epsilon ¿ spawned"),
+        "seeded legend must pin both profile templates byte-exactly"
+    );
+    anyhow::ensure!(
+        meter.count(&seeded) < meter.count(&plain),
+        "one slot value per row instead of two must measure smaller: seeded {} vs plain {}",
+        meter.count(&seeded),
+        meter.count(&plain),
+    );
+    let back = qodec::decode(&seeded)?;
+    anyhow::ensure!(back == mixed, "seeded tmpl stays byte-lossless");
+    Ok(())
+}
+
+#[test]
+fn unrelated_template_seeds_change_nothing() -> Result<()> {
+    // Seeds that match no input line must leave the artifact byte-identical
+    // — the min(seeded, plain) gate plus empty sealed clusters guarantee a
+    // stale profile costs a pass, never bytes.
+    let meter = Bpe::o200k()?;
+    let mut profile = Profile::default();
+    profile.learn_from(&family("delta", "task", 16));
+    let seeds = Seeds {
+        templates: profile.seed_templates(64),
+        ..Seeds::default()
+    };
+    let prose = "the meeting moved to thursday because the room was double booked\n\
+                 the meeting moved to friday because the projector was broken\n"
+        .repeat(4);
+    let plain = encode(&prose, CodecKind::Tmpl, &meter, Alphabet::Auto);
+    let seeded = encode_seeded(&prose, CodecKind::Tmpl, &meter, Alphabet::Auto, &seeds);
+    anyhow::ensure!(seeded == plain, "unmatched seeds must not change the artifact");
     Ok(())
 }
 
