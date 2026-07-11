@@ -40,6 +40,11 @@ enum Cmd {
     /// first. Acceptance stays measured — a stale profile costs probes,
     /// never bytes.
     Learn(LearnArgs),
+    /// Train the probe ranker: measure real first-round gains for every
+    /// pool candidate over files, accumulate (features, gain) statistics
+    /// into the profile. `encode --profile` then ranks probes by predicted
+    /// gain — ordering only, acceptance stays measured.
+    Train(TrainArgs),
     /// Run every codec over a corpus directory and print a measured table.
     Bench(BenchArgs),
     /// Probe alias candidates against a tokenizer — see what your aliases cost.
@@ -136,6 +141,11 @@ struct EncodeArgs {
     /// in-artifact legend line. The artifact pins the file's checksum.
     #[arg(long)]
     extern_templates: Option<PathBuf>,
+    /// Measured probes per mining round (default 40). With a trained
+    /// ranker in the profile a small budget keeps the ratio at a fraction
+    /// of the CPU.
+    #[arg(long)]
+    probe_budget: Option<usize>,
 }
 
 #[derive(Args)]
@@ -183,6 +193,25 @@ struct LearnArgs {
     /// Profile to create or update.
     #[arg(long)]
     profile: PathBuf,
+}
+
+#[derive(Args)]
+struct TrainArgs {
+    /// Files to train on (repeatable).
+    #[arg(short, long)]
+    input: Vec<PathBuf>,
+    /// Or every file in this directory (non-recursive, like bench).
+    #[arg(long)]
+    corpus: Option<PathBuf>,
+    /// Profile to accumulate ranker statistics into.
+    #[arg(long)]
+    profile: PathBuf,
+    /// o200k | cl100k | approx
+    #[arg(long, default_value = "o200k")]
+    meter: String,
+    /// Candidates measured per file.
+    #[arg(long, default_value_t = 160)]
+    budget: usize,
 }
 
 #[derive(Args)]
@@ -263,6 +292,7 @@ fn main() -> Result<()> {
         Cmd::Legend(a) => cmd_legend(&a),
         Cmd::Slice(a) => cmd_slice(&a),
         Cmd::Learn(a) => cmd_learn(&a),
+        Cmd::Train(a) => cmd_train(&a),
         Cmd::Bench(a) => cmd_bench(&a),
         Cmd::Aliases(a) => cmd_aliases(&a),
         Cmd::Ppl(a) => cmd_ppl(&a),
@@ -385,16 +415,19 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
         CodecKind::parse(&a.codec).with_context(|| format!("unknown codec {:?}", a.codec))?;
     let alphabet = Alphabet::parse(&a.alphabet)
         .with_context(|| format!("unknown alphabet {:?}", a.alphabet))?;
-    let seeds = match &a.profile {
+    let mut seeds = match &a.profile {
         Some(path) => {
             let profile = qodec::profile::Profile::load(path)?;
             qodec::Seeds {
                 phrases: profile.seed_phrases(64),
                 templates: profile.seed_templates(64),
+                ranker: profile.fitted_ranker(),
+                ..qodec::Seeds::default()
             }
         }
         None => qodec::Seeds::default(),
     };
+    seeds.probe_budget = a.probe_budget;
 
     let extern_legend = a
         .extern_legend
@@ -471,6 +504,56 @@ fn report_tokens(text: &str, encoded: &str, meter: &dyn qodec::meter::TokenMeter
         overhead,
         meter.name(),
     );
+}
+
+fn cmd_train(a: &TrainArgs) -> Result<()> {
+    const TRAIN_CAP_BYTES: usize = 4 * 1024 * 1024;
+    let mut files: Vec<PathBuf> = a.input.clone();
+    if let Some(dir) = &a.corpus {
+        let mut listed: Vec<PathBuf> = fs::read_dir(dir)
+            .with_context(|| format!("reading {}", dir.display()))?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.is_file())
+            .collect();
+        listed.sort();
+        files.extend(listed);
+    }
+    if files.is_empty() {
+        bail!("nothing to train on — pass -i <file> and/or --corpus <dir>");
+    }
+    let meter = by_name(&a.meter)?;
+    let mut profile = qodec::profile::Profile::load(&a.profile)?;
+    let mut observed = 0usize;
+    for path in &files {
+        let (text, capped) = match qodec::profile::read_capped(path, TRAIN_CAP_BYTES) {
+            Ok(read) => read,
+            Err(err) => {
+                eprintln!("qodec train: skipping {} ({err})", path.display());
+                continue;
+            }
+        };
+        if capped {
+            eprintln!(
+                "qodec train: {} capped to its first {} bytes",
+                path.display(),
+                text.len(),
+            );
+        }
+        observed +=
+            qodec::mine::train_pass(&text, meter.as_ref(), profile.ranker_stats_mut(), a.budget);
+    }
+    profile.save(&a.profile)?;
+    let fitted = if profile.fitted_ranker().is_some() {
+        "ranker fitted"
+    } else {
+        "not enough samples to fit yet"
+    };
+    eprintln!(
+        "qodec train: {observed} probes measured -> {} ({} samples total, {fitted})",
+        a.profile.display(),
+        profile.ranker_samples(),
+    );
+    Ok(())
 }
 
 fn cmd_legend(a: &LegendArgs) -> Result<()> {

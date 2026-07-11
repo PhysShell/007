@@ -14,6 +14,7 @@ pub mod meter;
 pub mod mine;
 pub mod ppl;
 pub mod profile;
+pub mod rank;
 pub mod sam;
 pub mod slice;
 pub mod tmpl;
@@ -88,6 +89,12 @@ pub struct Seeds {
     pub phrases: Vec<String>,
     /// tmpl templates as fixed parts, wildcards between consecutive parts.
     pub templates: Vec<Vec<String>>,
+    /// Trained probe ranker (`qodec train`): reorders the miners' probe
+    /// queue by predicted gain. Ordering only, acceptance stays measured.
+    pub ranker: Option<rank::Ranker>,
+    /// Measured probes per mining round (`None` = the default 40). With a
+    /// good ranker a small budget keeps the ratio at a fraction of the CPU.
+    pub probe_budget: Option<usize>,
 }
 
 pub fn encode(text: &str, kind: CodecKind, meter: &dyn TokenMeter, alphabet: Alphabet) -> String {
@@ -104,15 +111,20 @@ pub fn encode_seeded(
     alphabet: Alphabet,
     seeds: &Seeds,
 ) -> String {
+    let defaults = MineOptions::default();
     let mine_opts = MineOptions {
         alphabet,
         seeds: seeds.phrases.clone(),
+        ranker: seeds.ranker.clone(),
+        probe_budget: seeds.probe_budget.unwrap_or(defaults.probe_budget),
         ..MineOptions::default()
     };
     let deep_opts = MineOptions {
         alphabet,
         miner: MinerKind::Deep,
         seeds: seeds.phrases.clone(),
+        ranker: seeds.ranker.clone(),
+        probe_budget: seeds.probe_budget.unwrap_or(defaults.probe_budget),
         ..MineOptions::default()
     };
     match kind {

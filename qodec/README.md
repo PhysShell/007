@@ -130,6 +130,30 @@ The mechanism is proven on the constructed misroute case in the tests, and
 the byte-stable legend is the prerequisite for moving template legends into
 a cached prefix the way `--extern-legend` already moves phrases.
 
+The measured probes themselves are training data, and the profile can
+keep them:
+
+```bash
+# accumulate (features -> measured gain) statistics from real probes
+./target/release/qodec train --profile repo-profile.json -i build.log -i audit.txt
+# rank probes by predicted gain, spend a quarter of the budget
+./target/release/qodec encode -i today.log --codec deep --profile repo-profile.json --probe-budget 10 --report
+```
+
+`train` measures the real first-round gain of every pool candidate and
+accumulates ridge-regression sufficient statistics (`XᵀX`/`Xᵀy` — constant
+size, merged across runs by plain summation, deterministic) into the
+profile; `encode --profile` solves them into linear weights and reorders
+the probe queue by predicted gain over a 4× wider candidate pool. The
+ranker never decides — acceptance stays measured — so a wrong model wastes
+probes, never bytes. Measured on the real 133 KB ownsharp log (`deep`,
+o200k): the full-budget baseline is −76.8% in 15.1 s; at a quarter of the
+probes the naive cut drops to −75.0% in 5.6 s, and the in-domain-trained
+ranker recovers 69% of that quality gap (−76.3% in 5.2 s — 2.9× faster at
+99.3% of the reduction). Cross-format transfer is honest-weak (a
+MSBuild-trained ranker on the analyzer log recovers only 9%): train where
+you encode — the profile is per-repo anyway.
+
 Freeze the profile into a stable dictionary for a *cached prompt prefix*
 (CLAUDE.md / system prompt) — the warm story made real:
 

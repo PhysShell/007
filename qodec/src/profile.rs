@@ -38,6 +38,9 @@ pub struct Profile {
     phrases: Vec<(String, u64)>,
     /// tmpl templates as their fixed parts (wildcards between parts).
     templates: Vec<(Vec<String>, u64)>,
+    /// Probe-ranker sufficient statistics (`qodec train`) — constant-size,
+    /// merged by summation, solved into linear weights at consumption.
+    ranker: crate::rank::Stats,
 }
 
 impl Profile {
@@ -94,6 +97,10 @@ impl Profile {
             let parts = parts.with_context(|| format!("malformed template part in {}", path.display()))?;
             profile.templates.push((parts, count));
         }
+        if let Some(stats) = root.get("ranker") {
+            profile.ranker = crate::rank::Stats::from_json(stats)
+                .with_context(|| format!("ranker stats in {}", path.display()))?;
+        }
         Ok(profile)
     }
 
@@ -108,12 +115,19 @@ impl Profile {
             .iter()
             .map(|(parts, count)| json!([parts, count]))
             .collect();
-        let root = json!({
+        let mut root = json!({
             "v": VERSION,
             "runs": self.runs,
             "phrases": phrases,
             "templates": templates,
         });
+        // Optional section: absent until `qodec train` has observed probes,
+        // so untrained profiles keep their exact old bytes.
+        if self.ranker.n > 0 {
+            if let Some(obj) = root.as_object_mut() {
+                obj.insert("ranker".to_string(), self.ranker.to_json());
+            }
+        }
         let text = serde_json::to_string_pretty(&root).context("serializing profile")?;
         // Atomic replace: fs::write truncates in place, so an interrupted
         // save would corrupt the accumulated memory of every previous run
@@ -207,6 +221,21 @@ impl Profile {
 
     pub fn template_count(&self) -> usize {
         self.templates.len()
+    }
+
+    /// Mutable ranker statistics for `qodec train` to accumulate into.
+    pub fn ranker_stats_mut(&mut self) -> &mut crate::rank::Stats {
+        &mut self.ranker
+    }
+
+    pub fn ranker_samples(&self) -> u64 {
+        self.ranker.n
+    }
+
+    /// Solve the accumulated statistics into a usable ranker; `None` until
+    /// enough observations exist (encode then keeps its heuristic order).
+    pub fn fitted_ranker(&self) -> Option<crate::rank::Ranker> {
+        self.ranker.solve()
     }
 }
 

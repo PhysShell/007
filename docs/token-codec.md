@@ -346,6 +346,17 @@ hostile input) through the actual `o7 judge` binary.
    Sub-word extern keys close the loop: MSBuild slices −65.7%/−67.1%
    cold vs refined plain's −50.3%/−51.0%, broker slice −57.0%
    (868 → 373 tokens), byte-exact, fail-closed.
+   *Done* on the same substrate: the probe ranker. Every mining round
+   already measures whole-text gain per probed candidate; `qodec train`
+   keeps those observations as ridge sufficient statistics (`XᵀX`/`Xᵀy`,
+   constant-size, merge = summation) in the profile, and encode solves
+   them into linear weights that reorder the probe queue over a wider
+   pool under `--probe-budget`. Ordering only — acceptance unchanged.
+   Measured (133 KB ownsharp, deep): baseline −76.8%/15.1 s at 40
+   probes; naive @10 −75.0%/5.6 s; in-domain ranker @10 −76.3%/5.2 s —
+   69% of the budget-cut quality gap recovered at 2.9× less CPU.
+   Held-out cross-format transfer recovers only 9% — the model learns
+   the corpus, not the universe; per-repo training is the intended use.
 4. **Output-side notation** — the reverse direction: let the subagent *reply*
    in the legend's notation and expand deterministically outside the model.
    Output tokens cost ~5× input; this is where the same trick pays most, and
