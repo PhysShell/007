@@ -360,6 +360,22 @@ hostile input) through the actual `o7 judge` binary.
    on words only, which recovered 69%).
    Held-out cross-format transfer recovers only 9% — the model learns
    the corpus, not the universe; per-repo training is the intended use.
+   *Done*, closing the ladder: the propose/verify loop. `qodec residual`
+   briefs a proposer (any LLM, out of band, never trusted) on what the
+   codecs left; drafted parametric span rules — glob templates applied
+   inside lines, `⌈alias|value⌉` spans with probed delimiters — pass
+   `qodec rules verify`, which keeps only byte-exact-inverting, measured
+   winners (first live run: 1 of 3 drafted rules survived; +9731 tokens
+   vs raw over two real files); survivors are a checksummed key
+   (`encode/decode --rules`, fail-closed). Honest verdict from the live
+   measurements: against squeeze the k-hole rule pays ~2 tokens more
+   per occurrence than the miners' k+1-literal split, so in-artifact it
+   wins only at very low occurrence counts (2-finding excerpt: 151 vs
+   153 cold; 4-finding: 272 vs 246 — the in-band mine legend amortizes
+   fast). The loop's value is the *contract* — proposals cost probes,
+   never bytes — and the out-of-band key; rules the miners cannot
+   split into paying literals are the open case the next proposer
+   should hunt.
 4. **Output-side notation** — the reverse direction: let the subagent *reply*
    in the legend's notation and expand deterministically outside the model.
    Output tokens cost ~5× input; this is where the same trick pays most, and

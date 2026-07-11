@@ -15,6 +15,7 @@ pub mod mine;
 pub mod ppl;
 pub mod profile;
 pub mod rank;
+pub mod rules;
 pub mod sam;
 pub mod slice;
 pub mod tmpl;
@@ -199,6 +200,9 @@ fn best_text_stage(text: &str, meter: &dyn TokenMeter, templates: &[Vec<String>]
 pub struct Keys<'a> {
     pub phrases: Option<&'a legend::ExternLegend>,
     pub templates: Option<&'a legend::TemplateLegend>,
+    /// Verified proposer rules (`qodec rules verify`) — parametric span
+    /// rewrites applied as an encode pre-pass, pinned like the legends.
+    pub rules: Option<&'a rules::RulesKey>,
 }
 
 /// Decode one container layer.
@@ -220,6 +224,11 @@ fn decode_container(c: &container::Container, keys: &Keys<'_>) -> Result<String>
              --extern-legend <file> (sum={})",
             c.param("sum").unwrap_or("?"),
         ),
+        "rules" => bail!(
+            "artifact was encoded against a rules key — decode with \
+             --rules <file> (sum={})",
+            c.param("sum").unwrap_or("?"),
+        ),
         other => bail!("unknown codec {other:?} in container"),
     }
 }
@@ -236,7 +245,7 @@ pub fn decode_with_extern(
         text,
         &Keys {
             phrases: extern_legend,
-            templates: None,
+            ..Keys::default()
         },
     )
 }
@@ -248,6 +257,10 @@ pub fn decode_with_keys(text: &str, keys: &Keys<'_>) -> Result<String> {
         Ok(c) if c.codec == "ext" => {
             let inner = decode_all(&c.body, keys)?;
             legend::expand(&c, &inner, keys.phrases)
+        }
+        Ok(c) if c.codec == "rules" => {
+            let inner = decode_all(&c.body, keys)?;
+            rules::expand(&c, &inner, keys.rules)
         }
         _ => decode_all(text, keys),
     }
