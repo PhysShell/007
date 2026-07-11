@@ -115,6 +115,17 @@ fn duplicate_alias_is_rejected_at_parse() -> Result<()> {
             .is_some_and(|e| format!("{e:#}").contains("duplicate")),
         "duplicate alias must refuse: {refused:?}"
     );
+    // Whitespace aliases would break the ext wrapper's space-separated
+    // `used=` header param — refuse at the same trust boundary.
+    let spaced = "# qodec extern legend v1\nmy alias=some phrase\n";
+    let refused = ExternLegend::parse(spaced);
+    anyhow::ensure!(
+        refused
+            .as_ref()
+            .err()
+            .is_some_and(|e| format!("{e:#}").contains("whitespace")),
+        "whitespace alias must refuse: {refused:?}"
+    );
     Ok(())
 }
 

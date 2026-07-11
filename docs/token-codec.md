@@ -317,6 +317,18 @@ hostile input) through the actual `o7 judge` binary.
    artifacts — free today, and the byte-stable template legend it
    guarantees is the prerequisite for an `ext`-style cached-prefix
    template legend, where the in-artifact legend cost disappears.
+   *Done*, and it delivers: `qodec legend --templates` freezes profile
+   templates into a checksummed key file, `encode --codec tmpl
+   --extern-templates` emits rows against the file's aliases with no
+   in-artifact legend line (`ext=`/`used=` params pin the file; decode
+   fails closed), each used template must beat the lines it replaces,
+   and the whole artifact must beat the plain one strictly. Measured on
+   the exact slices where seeding returned byte-identical artifacts:
+   MSBuild slices −22.0% → −34.7% and −24.1% → −37.6% cold; the
+   ownsharp broker slice against a sectorts-learned legend −9.0% →
+   −43.9% cold (790 → 487 tokens; 547-token key amortized in the
+   cached prefix) — cross-file templates stop losing to
+   chance-agreement ones once their legend costs nothing in-artifact.
 4. **Output-side notation** — the reverse direction: let the subagent *reply*
    in the legend's notation and expand deterministically outside the model.
    Output tokens cost ~5× input; this is where the same trick pays most, and

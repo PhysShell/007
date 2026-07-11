@@ -179,12 +179,22 @@ fn best_text_stage(text: &str, meter: &dyn TokenMeter, templates: &[Vec<String>]
     .unwrap_or_else(|| container::raw(text))
 }
 
-/// Decode one container layer.
-pub fn decode_once(text: &str) -> Result<String> {
-    decode_container(&container::parse(text)?)
+/// The out-of-band keys an artifact may pin: the phrase legend (`ext`
+/// wrapper) and the template legend (`ext=` param on a tmpl container).
+/// Both live in a cached prompt prefix on the reader's side; decode fails
+/// closed on a pinned key that is missing or drifted.
+#[derive(Default)]
+pub struct Keys<'a> {
+    pub phrases: Option<&'a legend::ExternLegend>,
+    pub templates: Option<&'a legend::TemplateLegend>,
 }
 
-fn decode_container(c: &container::Container) -> Result<String> {
+/// Decode one container layer.
+pub fn decode_once(text: &str) -> Result<String> {
+    decode_container(&container::parse(text)?, &Keys::default())
+}
+
+fn decode_container(c: &container::Container, keys: &Keys<'_>) -> Result<String> {
     match c.codec.as_str() {
         "raw" => Ok(c.body.clone()),
         "mine" => mine::decode(c),
@@ -192,7 +202,7 @@ fn decode_container(c: &container::Container) -> Result<String> {
         "toon" => toon::decode(c),
         "grep" => grep::decode(c),
         "diag" => diag::decode(c),
-        "tmpl" => tmpl::decode(c),
+        "tmpl" => tmpl::decode(c, keys.templates),
         "ext" => bail!(
             "artifact was encoded against an extern legend — decode with \
              --extern-legend <file> (sum={})",
@@ -210,12 +220,24 @@ pub fn decode_with_extern(
     text: &str,
     extern_legend: Option<&legend::ExternLegend>,
 ) -> Result<String> {
+    decode_with_keys(
+        text,
+        &Keys {
+            phrases: extern_legend,
+            templates: None,
+        },
+    )
+}
+
+/// `decode` with the full key ring: opens phrase-`ext` wrappers and
+/// extern-template tmpl artifacts, composed or alone.
+pub fn decode_with_keys(text: &str, keys: &Keys<'_>) -> Result<String> {
     match container::parse(text) {
         Ok(c) if c.codec == "ext" => {
-            let inner = decode(&c.body)?;
-            legend::expand(&c, &inner, extern_legend)
+            let inner = decode_all(&c.body, keys)?;
+            legend::expand(&c, &inner, keys.phrases)
         }
-        _ => decode(text),
+        _ => decode_all(text, keys),
     }
 }
 
@@ -223,10 +245,14 @@ pub fn decode_with_extern(
 /// Note: input that was *already* container-shaped before encoding will also
 /// be unwrapped — a lab-grade caveat, documented in the design doc.
 pub fn decode(text: &str) -> Result<String> {
+    decode_all(text, &Keys::default())
+}
+
+fn decode_all(text: &str, keys: &Keys<'_>) -> Result<String> {
     let mut current = text.to_string();
     loop {
         match container::parse(&current) {
-            Ok(c) => current = decode_container(&c)?,
+            Ok(c) => current = decode_container(&c, keys)?,
             Err(_) => return Ok(current),
         }
     }
