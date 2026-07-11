@@ -168,7 +168,12 @@ ones — measured on the same slices where seeding changed nothing:
 the 60-line MSBuild slices go −22.0% → −34.7% and −24.1% → −37.6% cold
 (654-token key), and the ownsharp broker slice against a sectorts-learned
 legend goes −9.0% → **−43.9%** cold (790 → 487 tokens, 547-token key),
-byte-exact under `cmp`.
+byte-exact under `cmp`. Since sub-word slots landed, the *plain* pass
+alone reaches −50.3%/−51.0% on those MSBuild slices — better than the
+word-boundary key — and the strict referee returns the keyless artifact
+there automatically; the broker case still keeps its key (−43.9% vs
+−14.5%). A sub-word extern file needs glob-style sealed matching: the
+next extern rung.
 
 ## Codecs
 
@@ -180,7 +185,7 @@ byte-exact under `cmp`.
 | `toon` | uniform JSON array → keys-once table | semantic (Value-equal) |
 | `grep` | `path:line[:col]:text` matcher output → path once per run of hits (the `rg --heading` shape) | byte |
 | `diag` | template miner for diagnostic streams (`path:line: warning: …`, MSBuild `path(l,c): …`): repeated tails → legend once, quoted identifiers → slot values; one linear pass — the redundancy is *known*, not searched for | byte |
-| `tmpl` | Drain-style template mining for *any* line-based log: lines cluster by skeleton (whitespace byte-equal, ≥60% of words equal), varying positions become slots — `diag` without the format rules | byte |
+| `tmpl` | Drain-style template mining for *any* line-based log: lines cluster by skeleton (whitespace byte-equal, ≥60% of words equal), varying positions become slots; slots go *sub-word* — a cluster pulls its members' common prefix/suffix inside a varying word into the template when that measures cheaper, so a path that differs in one number costs one number per row | byte |
 | `squeeze` | `toon` (JSON) or measured best of `fold`/`grep`/`diag`/`tmpl` (text), then the better miner over the result | byte / semantic |
 
 Format specialization is the speed lever: on the real 133 KB ownsharp audit

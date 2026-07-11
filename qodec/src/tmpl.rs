@@ -171,6 +171,149 @@ impl<'a> Cluster<'a> {
     }
 }
 
+/// Byte length of the char-wise common prefix of two strings — always a
+/// char boundary of both.
+fn common_prefix_bytes(a: &str, b: &str) -> usize {
+    let mut end = 0usize;
+    for (ca, cb) in a.chars().zip(b.chars()) {
+        if ca != cb {
+            break;
+        }
+        end += ca.len_utf8();
+    }
+    end
+}
+
+/// Byte length of the char-wise common suffix of two strings.
+fn common_suffix_bytes(a: &str, b: &str) -> usize {
+    let mut end = 0usize;
+    for (ca, cb) in a.chars().rev().zip(b.chars().rev()) {
+        if ca != cb {
+            break;
+        }
+        end += ca.len_utf8();
+    }
+    end
+}
+
+/// Common prefix/suffix byte lengths over all words. The suffix is
+/// computed on what remains after the prefix, so the two never overlap on
+/// any member — `word[pre..len-suf]` is always a valid, in-order slice.
+fn common_affixes(words: &[&str]) -> (usize, usize) {
+    let Some(&first) = words.first() else {
+        return (0, 0);
+    };
+    let mut pre = first.len();
+    for &w in words.iter().skip(1) {
+        pre = pre.min(common_prefix_bytes(first, w));
+    }
+    let first_rest = first.get(pre..).unwrap_or_default();
+    let mut suf = first_rest.len();
+    for &w in words.iter().skip(1) {
+        let rest = w.get(pre..).unwrap_or_default();
+        suf = suf.min(common_suffix_bytes(first_rest, rest));
+    }
+    (pre, suf)
+}
+
+/// One emitted row: the cluster alias plus, per wildcard, the seg position
+/// and how many bytes of the word the template already carries as its
+/// common prefix/suffix (0/0 = the bare whole-word slot).
+struct RowPlan {
+    alias: String,
+    slots: Vec<(usize, usize, usize)>,
+}
+
+fn render_row(plan: &RowPlan, split: &Split<'_>, sep: char) -> String {
+    let mut row = plan.alias.clone();
+    for &(pos, pre, suf) in &plan.slots {
+        row.push(sep);
+        let word = split.segs.get(pos).copied().unwrap_or_default();
+        let end = word.len().saturating_sub(suf);
+        row.push_str(word.get(pre..end).unwrap_or_default());
+    }
+    if split.cr {
+        row.push('\r');
+    }
+    row
+}
+
+/// Pick the cluster's emitted template: bare whole-word wildcards, or
+/// wildcards refined with the members' common prefix/suffix pulled into
+/// the template — whichever measures cheaper over the legend line plus all
+/// rows. Sub-word slots need no decode change: the affixes simply become
+/// part of the template's fixed parts. Sealed clusters always stay bare —
+/// their template bytes are pinned to the profile or extern file.
+fn choose_template(
+    cluster: &Cluster<'_>,
+    splits: &[Option<Split<'_>>],
+    slot: char,
+    sep: char,
+    alias: &str,
+    meter: &dyn TokenMeter,
+) -> (String, Vec<(usize, usize, usize)>) {
+    let (bare, wild) = cluster.template(slot);
+    let bare_slots: Vec<(usize, usize, usize)> = wild.iter().map(|&p| (p, 0, 0)).collect();
+    if cluster.sealed {
+        return (bare, bare_slots);
+    }
+    let member_splits: Vec<&Split<'_>> = cluster
+        .members
+        .iter()
+        .filter_map(|&idx| splits.get(idx).and_then(Option::as_ref))
+        .collect();
+    let mut refined_slots: Vec<(usize, usize, usize)> = Vec::with_capacity(wild.len());
+    for &pos in &wild {
+        let words: Vec<&str> = member_splits
+            .iter()
+            .map(|s| s.segs.get(pos).copied().unwrap_or_default())
+            .collect();
+        let (pre, suf) = common_affixes(&words);
+        refined_slots.push((pos, pre, suf));
+    }
+    if refined_slots.iter().all(|&(_, pre, suf)| pre == 0 && suf == 0) {
+        return (bare, bare_slots);
+    }
+    // Refined template: each wildcard becomes prefix + slot + suffix, the
+    // affix bytes taken from any member (they are common by construction).
+    let mut refined = String::new();
+    let mut wild_iter = refined_slots.iter();
+    for (idx, seg) in cluster.segs.iter().enumerate() {
+        match seg {
+            Some(text) => refined.push_str(text),
+            None => {
+                let &(pos, pre, suf) = wild_iter.next().unwrap_or(&(idx, 0, 0));
+                let word = member_splits
+                    .first()
+                    .and_then(|s| s.segs.get(pos))
+                    .copied()
+                    .unwrap_or_default();
+                let end = word.len().saturating_sub(suf);
+                refined.push_str(word.get(..pre).unwrap_or_default());
+                refined.push(slot);
+                refined.push_str(word.get(end..).unwrap_or_default());
+            }
+        }
+    }
+    // The gate: legend line + every row, measured both ways.
+    let cost = |template: &str, slots: &[(usize, usize, usize)]| -> usize {
+        let plan = RowPlan {
+            alias: alias.to_string(),
+            slots: slots.to_vec(),
+        };
+        let mut total = meter.count(&format!("{alias}={template}"));
+        for split in &member_splits {
+            total += meter.count(&render_row(&plan, split, sep));
+        }
+        total
+    };
+    if cost(&refined, &refined_slots) < cost(&bare, &bare_slots) {
+        (refined, refined_slots)
+    } else {
+        (bare, bare_slots)
+    }
+}
+
 /// Rebuild a profile template (fixed parts, wildcards between them) into
 /// the seg shape clustering works on. Parts re-split exactly as the
 /// original lines did — whitespace/word boundaries are a pure function of
@@ -349,15 +492,18 @@ fn encode_pass(text: &str, meter: &dyn TokenMeter, seeds: &[Vec<Option<String>>]
         )
     });
 
-    // line index -> (alias, wildcard positions)
-    let mut rows: HashMap<usize, (String, Vec<usize>)> = HashMap::new();
+    // line index -> row plan (alias + per-wildcard trim amounts)
+    let mut rows: HashMap<usize, usize> = HashMap::new();
+    let mut plans: Vec<RowPlan> = Vec::new();
     let mut legend: Vec<String> = Vec::new();
     for cluster in repeated.iter().take(MAX_TEMPLATES) {
         let Some((alias, _)) = pool.take() else { break };
-        let (template, wild) = cluster.template(slot);
+        let (template, slots) = choose_template(cluster, &splits, slot, sep, &alias, meter);
         legend.push(format!("{alias}={template}"));
+        let plan_idx = plans.len();
+        plans.push(RowPlan { alias, slots });
         for &line_idx in &cluster.members {
-            rows.insert(line_idx, (alias.clone(), wild.clone()));
+            rows.insert(line_idx, plan_idx);
         }
     }
     if legend.is_empty() {
@@ -366,17 +512,9 @@ fn encode_pass(text: &str, meter: &dyn TokenMeter, seeds: &[Vec<Option<String>>]
 
     let mut body = String::new();
     for (idx, &full) in raw_lines.iter().enumerate() {
-        match (rows.get(&idx), splits.get(idx).and_then(Option::as_ref)) {
-            (Some((alias, wild)), Some(split)) => {
-                body.push_str(alias);
-                for &pos in wild {
-                    body.push(sep);
-                    body.push_str(split.segs.get(pos).copied().unwrap_or_default());
-                }
-                if split.cr {
-                    body.push('\r');
-                }
-            }
+        let plan = rows.get(&idx).and_then(|&i| plans.get(i));
+        match (plan, splits.get(idx).and_then(Option::as_ref)) {
+            (Some(plan), Some(split)) => body.push_str(&render_row(plan, split, sep)),
             _ => body.push_str(full),
         }
         body.push('\n');
@@ -460,6 +598,7 @@ pub fn encode_extern(
     // Extern clusters pay from the first member — their legend is already
     // in the reader's cached prefix. Rows render up front so the
     // per-cluster gate can measure them against the lines they replace.
+    // Always bare slots: the file's templates are frozen bytes.
     let mut ext_rows: HashMap<usize, String> = HashMap::new();
     let mut used: Vec<usize> = Vec::new();
     for cluster in &clusters {
@@ -469,19 +608,16 @@ pub fn encode_extern(
         }
         let Some(alias) = aliases.get(seed_idx) else { continue };
         let (_, wild) = cluster.template(slot);
+        let plan = RowPlan {
+            alias: (*alias).to_string(),
+            slots: wild.iter().map(|&p| (p, 0, 0)).collect(),
+        };
         let mut row_tokens = 0usize;
         let mut line_tokens = 0usize;
         let mut cluster_rows: Vec<(usize, String)> = Vec::new();
         for &line_idx in &cluster.members {
             let Some(Some(split)) = splits.get(line_idx) else { continue };
-            let mut row = String::from(*alias);
-            for &pos in &wild {
-                row.push(sep);
-                row.push_str(split.segs.get(pos).copied().unwrap_or_default());
-            }
-            if split.cr {
-                row.push('\r');
-            }
+            let row = render_row(&plan, split, sep);
             row_tokens += meter.count(&row);
             line_tokens += meter.count(raw_lines.get(line_idx).copied().unwrap_or_default());
             cluster_rows.push((line_idx, row));
@@ -514,14 +650,17 @@ pub fn encode_extern(
             c.members.first().copied().unwrap_or_default(),
         )
     });
-    let mut rows: HashMap<usize, (String, Vec<usize>)> = HashMap::new();
+    let mut rows: HashMap<usize, usize> = HashMap::new();
+    let mut plans: Vec<RowPlan> = Vec::new();
     let mut inline_legend: Vec<String> = Vec::new();
     for cluster in repeated.iter().take(MAX_TEMPLATES) {
         let Some((alias, _)) = pool.take() else { break };
-        let (template, wild) = cluster.template(slot);
+        let (template, slots) = choose_template(cluster, &splits, slot, sep, &alias, meter);
         inline_legend.push(format!("{alias}={template}"));
+        let plan_idx = plans.len();
+        plans.push(RowPlan { alias, slots });
         for &line_idx in &cluster.members {
-            rows.insert(line_idx, (alias.clone(), wild.clone()));
+            rows.insert(line_idx, plan_idx);
         }
     }
 
@@ -532,17 +671,9 @@ pub fn encode_extern(
             body.push('\n');
             continue;
         }
-        match (rows.get(&idx), splits.get(idx).and_then(Option::as_ref)) {
-            (Some((alias, wild)), Some(split)) => {
-                body.push_str(alias);
-                for &pos in wild {
-                    body.push(sep);
-                    body.push_str(split.segs.get(pos).copied().unwrap_or_default());
-                }
-                if split.cr {
-                    body.push('\r');
-                }
-            }
+        let plan = rows.get(&idx).and_then(|&i| plans.get(i));
+        match (plan, splits.get(idx).and_then(Option::as_ref)) {
+            (Some(plan), Some(split)) => body.push_str(&render_row(plan, split, sep)),
             _ => body.push_str(full),
         }
         body.push('\n');

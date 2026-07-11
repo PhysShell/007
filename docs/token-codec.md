@@ -35,7 +35,11 @@ since grown a measured shelf of format codecs (`toon` for uniform JSON,
 line-based log via Drain-style template learning) that *know* where a
 format's redundancy lives and take it in one linear pass — on the real
 133 KB ownsharp audit log, `diag` is −52% in 0.4 s where `deep` is −77% in
-20 s, and `tmpl` learns −46% from the same file with zero format rules.
+20 s, and `tmpl` learns −62% from the same file with zero format rules
+(−46% before its slots went *sub-word*: the varying fragment usually hides
+inside one long path- or identifier-word, so each cluster now pulls the
+members' common prefix/suffix into the template — per-cluster measured,
+decode unchanged — and only the genuinely varying bytes ride in the row).
 `squeeze` dispatches: structural codec by shape first, miners over the
 residue. Acceptance stays measured either way; every codec still refuses to
 `raw` when the artifact does not beat the input.
@@ -329,6 +333,13 @@ hostile input) through the actual `o7 judge` binary.
    −43.9% cold (790 → 487 tokens; 547-token key amortized in the
    cached prefix) — cross-file templates stop losing to
    chance-agreement ones once their legend costs nothing in-artifact.
+   Interaction measured after sub-word slots landed: the refined plain
+   pass overtakes the word-boundary extern key on the MSBuild slices
+   (−50.3% vs −34.7%) and the strict referee drops the key demand
+   automatically — the artifact comes out keyless; the broker case
+   keeps its key (−43.9% vs −14.5%, whole cross-file stems, not
+   affixes). Freezing *sub-word* templates into the extern file needs
+   glob-style sealed matching — the natural next extern rung.
 4. **Output-side notation** — the reverse direction: let the subagent *reply*
    in the legend's notation and expand deterministically outside the model.
    Output tokens cost ~5× input; this is where the same trick pays most, and
