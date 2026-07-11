@@ -762,6 +762,37 @@ fn cmd_rules_verify(a: &RulesVerifyArgs) -> Result<()> {
     if kept == 0 {
         bail!("no rule survived verification — nothing written");
     }
+    // The composed backstop: rules verified one-by-one are *applied*
+    // sequentially at encode time, so the whole survivor set must also
+    // invert byte-exactly on every file before the key is written
+    // (Codex, PR #39 — nested-span capture is prevented in find_span,
+    // and this refuses loudly should anything unforeseen slip through).
+    let survivors = qodec::rules::RulesKey::parse(&out)
+        .context("internal: survivor key must reparse")?;
+    for (path, content) in &files {
+        let Some(applied) = qodec::rules::apply(content, &survivors, meter.as_ref()) else {
+            bail!("composed check: delimiters exhausted on {}", path.display());
+        };
+        if applied.used.is_empty() {
+            continue;
+        }
+        let (start, end, sep) = qodec::rules::delimiters(&applied)?;
+        let back = qodec::rules::expand_spans(
+            &applied.text,
+            &survivors,
+            start,
+            end,
+            sep,
+            &applied.used.concat(),
+        )?;
+        if back != *content {
+            bail!(
+                "composed survivor set does not invert on {} — refusing to write the key",
+                path.display()
+            );
+        }
+    }
+    eprintln!("qodec rules verify: composed set inverts byte-exactly on every file");
     match &a.output {
         Some(path) => {
             fs::write(path, &out).with_context(|| format!("writing {}", path.display()))?;

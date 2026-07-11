@@ -166,3 +166,77 @@ fn alias_collision_and_crlf_stay_exact() -> Result<()> {
     anyhow::ensure!(back == crlf, "CRLF span inversion is byte-exact");
     Ok(())
 }
+
+#[test]
+fn sequential_rules_never_capture_earlier_spans() -> Result<()> {
+    // The second rule's wildcard could swallow the first's emitted `⌈码|x⌉` —
+    // whitespace-free, so the old matcher accepted it and decode then
+    // broke on the nested delimiters (Codex, PR #39). A match whose span
+    // contains a delimiter glyph must be rejected instead.
+    let meter = Bpe::o200k()?;
+    let key = RulesKey::parse(
+        "# qodec rules v1 slot=quest\n\
+         码=initialization of module '¿' completed with all invariants intact and resources pinned\n\
+         引=BEGIN transaction ¿ committed after full quorum acknowledgement END\n",
+    )?;
+    let mut text = String::new();
+    for i in 0..6 {
+        // The first rule's phrase sits exactly where the second's wildcard
+        // looks: in raw text the second cannot match there (whitespace in
+        // the gap), but after the first rewrites, the gap becomes the
+        // whitespace-free ⌈码|…⌉ bytes.
+        text.push_str(&format!(
+            "BEGIN transaction initialization of module 'Mod{i}' completed with all invariants intact and resources pinned committed after full quorum acknowledgement END\n"
+        ));
+        // The second rule's own paying habitat, no first-rule span inside.
+        text.push_str(&format!(
+            "BEGIN transaction tx{i} committed after full quorum acknowledgement END\n"
+        ));
+    }
+    let applied = apply(&text, &key, &meter).context("delimiters available")?;
+    anyhow::ensure!(
+        applied.used.contains(&"码".to_string()) && applied.used.contains(&"引".to_string()),
+        "both rules must pay on their own habitats: {:?}",
+        applied.used
+    );
+    let (start, end, sep) = delimiters(&applied)?;
+    let back = expand_spans(&applied.text, &key, start, end, sep, &applied.used.concat())?;
+    anyhow::ensure!(back == text, "composed application must invert byte-exactly");
+    Ok(())
+}
+
+#[test]
+fn failed_multibyte_anchor_advances_by_a_whole_char() -> Result<()> {
+    // The first fixed part starts with a multibyte char; the first
+    // occurrence fails (whitespace in the wildcard), and the old +1 byte
+    // bump landed mid-UTF-8, killing the line's remaining scan — the
+    // valid second occurrence was lost (Codex, PR #39).
+    let meter = Bpe::o200k()?;
+    let key = RulesKey::parse(
+        "# qodec rules v1 slot=quest\n\
+         码=протокол сеанса '¿' завершён без потерь и расхождений по контрольным суммам\n",
+    )?;
+    let mut text = String::new();
+    for i in 0..8 {
+        // The first anchor hit fails (whitespace lands in the wildcard),
+        // the second is valid — reachable only if the failed anchor
+        // advances by a whole char.
+        text.push_str(&format!(
+            "протокол сеанса 'сбой в кавычках' начат; протокол сеанса 'запись{i}.данные' завершён без потерь и расхождений по контрольным суммам\n"
+        ));
+    }
+    let applied = apply(&text, &key, &meter).context("delimiters available")?;
+    anyhow::ensure!(
+        applied.used == ["码"],
+        "the second, valid occurrence must still match: {:?}",
+        applied.used
+    );
+    anyhow::ensure!(
+        !applied.text.contains("завершён без потерь"),
+        "every valid occurrence must be rewritten"
+    );
+    let (start, end, sep) = delimiters(&applied)?;
+    let back = expand_spans(&applied.text, &key, start, end, sep, &applied.used.concat())?;
+    anyhow::ensure!(back == text, "multibyte-anchored spans invert byte-exactly");
+    Ok(())
+}

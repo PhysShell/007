@@ -118,11 +118,31 @@ struct SpanMatch<'a> {
     values: Vec<&'a str>,
 }
 
+/// The next char boundary after `start` — a failed anchor must advance by
+/// a whole character, or `line.get(anchor..)` lands mid-UTF-8 and kills
+/// the rest of the line's scan (Codex, PR #39).
+fn bump(line: &str, start: usize) -> usize {
+    start
+        + line
+            .get(start..)
+            .and_then(|rest| rest.chars().next())
+            .map_or(1, char::len_utf8)
+}
+
 /// Leftmost match of `parts` at or after `from`, within one line. The
 /// span is anchored on the first fixed part; wildcards are single word
 /// fragments (no whitespace), earliest occurrence — the tmpl glob's
-/// discipline applied to spans.
-fn find_span<'a>(line: &'a str, parts: &[String], from: usize) -> Option<SpanMatch<'a>> {
+/// discipline applied to spans. A match whose span contains any of the
+/// `forbidden` delimiter glyphs is rejected: those are absent from the
+/// original input by probing, so any occurrence is an earlier rule's
+/// emitted span, and capturing it would nest spans that decode cannot
+/// parse (Codex, PR #39).
+fn find_span<'a>(
+    line: &'a str,
+    parts: &[String],
+    from: usize,
+    forbidden: [char; 3],
+) -> Option<SpanMatch<'a>> {
     let first = parts.first()?;
     let mut anchor = from;
     'anchors: while let Some(rel) = line.get(anchor..)?.find(first.as_str()) {
@@ -132,16 +152,21 @@ fn find_span<'a>(line: &'a str, parts: &[String], from: usize) -> Option<SpanMat
         for part in parts.iter().skip(1) {
             let rest = line.get(pos..)?;
             let Some(hit) = rest.find(part.as_str()) else {
-                anchor = start + 1;
+                anchor = bump(line, start);
                 continue 'anchors;
             };
             let value = rest.get(..hit)?;
             if value.contains(char::is_whitespace) {
-                anchor = start + 1;
+                anchor = bump(line, start);
                 continue 'anchors;
             }
             values.push(value);
             pos += hit + part.len();
+        }
+        let span = line.get(start..pos)?;
+        if forbidden.iter().any(|&ch| span.contains(ch)) {
+            anchor = bump(line, start);
+            continue 'anchors;
         }
         return Some(SpanMatch {
             start,
@@ -191,7 +216,7 @@ pub fn apply(text: &str, key: &RulesKey, meter: &dyn TokenMeter) -> Option<Appli
                 rewritten.push('\n');
             }
             let mut cursor = 0usize;
-            while let Some(m) = find_span(line, parts, cursor) {
+            while let Some(m) = find_span(line, parts, cursor, [start, end, sep]) {
                 rewritten.push_str(line.get(cursor..m.start).unwrap_or_default());
                 rewritten.push(start);
                 rewritten.push_str(alias);
