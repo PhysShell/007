@@ -59,6 +59,13 @@ pub struct MineOptions {
     /// Seeds only reorder the queue — every commit still passes the same
     /// measured acceptance, so a stale seed wastes a probe, never bytes.
     pub seeds: Vec<String>,
+    /// Trained probe ranker (`qodec train`). When present, candidates come
+    /// from a wider pool re-ranked by predicted gain instead of the
+    /// count×len heuristic. Ordering only — acceptance stays measured.
+    pub ranker: Option<crate::rank::Ranker>,
+    /// Measured probes per round. The knob the ranker earns its keep on:
+    /// a good ranking keeps the ratio at a fraction of the probes.
+    pub probe_budget: usize,
 }
 
 impl Default for MineOptions {
@@ -69,6 +76,8 @@ impl Default for MineOptions {
             max_entries: 64,
             miner: MinerKind::Words,
             seeds: Vec::new(),
+            ranker: None,
+            probe_budget: SCORE_BUDGET,
         }
     }
 }
@@ -98,7 +107,7 @@ pub fn encode(text: &str, meter: &dyn TokenMeter, opts: &MineOptions) -> String 
             .filter(|s| !s.is_empty() && current.contains(s.as_str()))
             .cloned()
             .collect();
-        for candidate in ranked_candidates(&current, opts.miner) {
+        for candidate in probe_queue(&current, opts) {
             if !queue.contains(&candidate) {
                 queue.push(candidate);
             }
@@ -171,10 +180,11 @@ pub fn decode(c: &Container) -> Result<String> {
     Ok(out)
 }
 
-/// Collect repeated spans, rank by a cheap (count × len) proxy, return up to
-/// `SCORE_BUDGET` for exact measurement. Occurrence counts here are
-/// approximate (per-line tallies); the miner's commit decision re-measures
-/// the real replacement, so a bad rank only wastes a probe.
+/// The probe queue for one round: repeated spans ranked either by the
+/// cheap count×len proxy, or — with a trained ranker — by predicted gain
+/// over a 4× wider pool, truncated to the probe budget. Occurrence counts
+/// are approximate (per-line tallies); the miner's commit decision
+/// re-measures the real replacement, so a bad rank only wastes a probe.
 ///
 /// Two candidate families:
 /// * word-boundary n-grams (exact slices between word starts/ends);
@@ -182,28 +192,97 @@ pub fn decode(c: &Container) -> Result<String> {
 ///   repeat as *prefixes* (`src/a/b/One.cs` vs `src/a/b/Two.cs`), which whole
 ///   words never expose. This is the cheap end of the BWT/suffix-array
 ///   insight: repetition ignores token boundaries, so the miner must too.
-fn ranked_candidates(text: &str, miner: MinerKind) -> Vec<String> {
+fn probe_queue(text: &str, opts: &MineOptions) -> Vec<String> {
+    let budget = opts.probe_budget.max(1);
+    let pool_size = if opts.ranker.is_some() {
+        budget.saturating_mul(4)
+    } else {
+        budget
+    };
+    let mut pool = candidate_pool(text, opts.miner, pool_size);
+    if let Some(ranker) = &opts.ranker {
+        // Predicted-gain order; ties break on the candidate bytes so the
+        // queue is deterministic regardless of pool iteration order.
+        let mut scored: Vec<(f64, String)> = pool
+            .drain(..)
+            .map(|(phrase, count)| {
+                let score = ranker.score(&crate::rank::features(&phrase, count));
+                (score, phrase)
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.total_cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        return scored
+            .into_iter()
+            .take(budget)
+            .map(|(_, phrase)| phrase)
+            .collect();
+    }
+    pool.truncate(budget);
+    pool.into_iter().map(|(phrase, _)| phrase).collect()
+}
+
+/// Candidates with occurrence estimates, heuristic-ranked, deduplicated.
+fn candidate_pool(text: &str, miner: MinerKind, want: usize) -> Vec<(String, usize)> {
     if miner == MinerKind::Deep {
-        let mut merged = word_candidates(text, SCORE_BUDGET / 2);
+        // Each family keeps at least one candidate — an odd or tiny budget
+        // must never starve the round to zero probes (Codex, PR #38). The
+        // callers truncate to the real budget after merging.
+        let half = want.div_ceil(2);
+        let mut merged = word_candidates_counted(text, half);
         for c in crate::sam::repeated_substrings(
             text,
             MIN_CANDIDATE_CHARS,
             MAX_CANDIDATE_CHARS,
-            SCORE_BUDGET / 2,
+            half,
         ) {
-            if !merged.contains(&c.text) {
-                merged.push(c.text);
+            if !merged.iter().any(|(t, _)| *t == c.text) {
+                merged.push((c.text, c.count));
             }
         }
         return merged;
     }
-    word_candidates(text, SCORE_BUDGET)
+    word_candidates_counted(text, want)
 }
 
 /// The word/prefix candidate family, exposed for `qodec learn`: the same
 /// spans the miner would probe are what a profile should remember.
 pub(crate) fn learn_phrases(text: &str, budget: usize) -> Vec<String> {
-    word_candidates(text, budget)
+    word_candidates_counted(text, budget)
+        .into_iter()
+        .map(|(phrase, _)| phrase)
+        .collect()
+}
+
+/// One training pass for the probe ranker (`qodec train`): measure the
+/// real first-round gain of every pool candidate against the pristine
+/// text and record (features, gain) into the stats. Uses a provisional
+/// alias exactly like the miner's ranking probes, and draws candidates
+/// from the *deep* pool — words ∪ SAM — so the model learns the full
+/// distribution it will later rank, not just the word family
+/// (CodeRabbit, PR #38).
+pub fn train_pass(
+    text: &str,
+    meter: &dyn TokenMeter,
+    stats: &mut crate::rank::Stats,
+    budget: usize,
+) -> usize {
+    if text.is_empty() {
+        return 0;
+    }
+    let pool = AliasPool::build(Alphabet::Auto, meter, text);
+    let Some((alias, _)) = pool.peek() else {
+        return 0;
+    };
+    let base = meter.count(text) as i64;
+    let mut observed = 0usize;
+    for (phrase, count) in candidate_pool(text, MinerKind::Deep, budget) {
+        let replaced = text.replace(&phrase, &alias);
+        let legend_line = format!("{alias}={phrase}\n");
+        let gain = base - meter.count(&replaced) as i64 - meter.count(&legend_line) as i64;
+        stats.observe(&crate::rank::features(&phrase, count), gain as f64);
+        observed += 1;
+    }
+    observed
 }
 
 /// Same-line context around the first occurrence of `phrase` — the window
@@ -243,7 +322,7 @@ fn tail_chars(s: &str, n: usize) -> &str {
     }
 }
 
-fn word_candidates(text: &str, budget: usize) -> Vec<String> {
+fn word_candidates_counted(text: &str, budget: usize) -> Vec<(String, usize)> {
     let mut tally: HashMap<&str, usize> = HashMap::new();
 
     for line in text.split('\n') {
@@ -281,7 +360,7 @@ fn word_candidates(text: &str, budget: usize) -> Vec<String> {
     ranked
         .into_iter()
         .take(budget)
-        .map(|(span, _)| span.to_string())
+        .map(|(span, count)| (span.to_string(), count))
         .collect()
 }
 

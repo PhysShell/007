@@ -47,8 +47,10 @@ fn template_legend_generates_parses_and_pins_bytes() -> Result<()> {
         legend
             .entries
             .iter()
-            .any(|(_, parts)| parts.first().is_some_and(|p| p == "worker thread pool delta ")),
-        "the learned template must survive the file roundtrip: {:?}",
+            .any(|(_, parts)| parts
+                .first()
+                .is_some_and(|p| p == "worker thread pool delta task")),
+        "the learned template must survive the file roundtrip sub-word refined: {:?}",
         legend.entries,
     );
     let again = TemplateLegend::parse(&text)?;
@@ -250,5 +252,38 @@ fn extern_rows_survive_crlf() -> Result<()> {
     };
     let back = decode_with_keys(&artifact, &keys)?;
     anyhow::ensure!(back == payload, "CRLF extern rows must roundtrip byte-exactly");
+    Ok(())
+}
+
+#[test]
+fn subword_extern_template_leaves_only_the_varying_bytes_in_rows() -> Result<()> {
+    // The file's parts start and end mid-word — exactly what the seg-based
+    // matcher could never represent. Rows must carry just the digits.
+    let meter = Bpe::o200k()?;
+    let text = "# qodec extern templates v1 slot=quest\n\
+                码=  Restoring C:\\build\\src\\Proj¿\\obj\\project.assets.json (in ¿ ms)\n";
+    let legend = TemplateLegend::parse(text)?;
+    let mut payload = String::new();
+    for i in 0..14 {
+        payload.push_str(&format!(
+            "  Restoring C:\\build\\src\\Proj{i}\\obj\\project.assets.json (in {} ms)\n",
+            40 + i * 3,
+        ));
+    }
+    let artifact = encode_extern(&payload, &meter, &legend);
+    anyhow::ensure!(
+        artifact.contains("ext=") && artifact.contains("used=码"),
+        "sub-word extern template must be used: {artifact:?}"
+    );
+    anyhow::ensure!(
+        artifact.contains("码|3|49"),
+        "rows must carry only the varying digits: {artifact:?}"
+    );
+    let keys = Keys {
+        templates: Some(&legend),
+        ..Keys::default()
+    };
+    let back = decode_with_keys(&artifact, &keys)?;
+    anyhow::ensure!(back == payload, "sub-word extern roundtrip is byte-exact");
     Ok(())
 }

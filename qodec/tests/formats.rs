@@ -287,3 +287,47 @@ fn tmpl_seeds_survive_crlf_rows() -> Result<()> {
     anyhow::ensure!(back == text, "CRLF seeded roundtrip must be byte-exact");
     Ok(())
 }
+
+#[test]
+fn tmpl_subword_slots_pull_common_affixes_into_the_template() -> Result<()> {
+    // The varying fragment hides inside one long path "word" — whole-word
+    // slots would ship the entire path in every row. The refined template
+    // must carry the shared prefix/suffix and leave only the digits in
+    // the row.
+    let meter = Bpe::o200k()?;
+    let mut text = String::new();
+    for i in 0..12 {
+        text.push_str(&format!(
+            "  Copying C:\\build\\src\\Proj{i}\\obj\\App.dll to C:\\out\\Proj{i}\\App.dll done\n"
+        ));
+    }
+    let encoded = roundtrip(&text, CodecKind::Tmpl, &meter)?;
+    anyhow::ensure!(encoded.starts_with("%q1 tmpl"), "expected tmpl container");
+    anyhow::ensure!(
+        encoded.contains("C:\\build\\src\\Proj¿\\obj\\App.dll"),
+        "the shared path bytes must move into the template: {encoded:?}"
+    );
+    // Rows should be alias + two tiny slot values (the digits), i.e. the
+    // body must not repeat the path bytes.
+    anyhow::ensure!(
+        encoded.matches("\\obj\\App.dll").count() == 1,
+        "path bytes must appear exactly once (in the legend): {encoded:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn tmpl_subword_slots_respect_multibyte_boundaries() -> Result<()> {
+    let meter = Bpe::o200k()?;
+    let mut text = String::new();
+    for i in 0..10 {
+        text.push_str(&format!("запись файл{i}.данные обработана успешно строка\n"));
+    }
+    let encoded = roundtrip(&text, CodecKind::Tmpl, &meter)?;
+    anyhow::ensure!(encoded.starts_with("%q1 tmpl"), "expected tmpl container");
+    anyhow::ensure!(
+        encoded.contains("файл¿.данные"),
+        "multibyte affixes must split on char boundaries: {encoded:?}"
+    );
+    Ok(())
+}

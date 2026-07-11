@@ -130,6 +130,31 @@ The mechanism is proven on the constructed misroute case in the tests, and
 the byte-stable legend is the prerequisite for moving template legends into
 a cached prefix the way `--extern-legend` already moves phrases.
 
+The measured probes themselves are training data, and the profile can
+keep them:
+
+```bash
+# accumulate (features -> measured gain) statistics from real probes
+./target/release/qodec train --profile repo-profile.json -i build.log -i audit.txt
+# rank probes by predicted gain, spend a quarter of the budget
+./target/release/qodec encode -i today.log --codec deep --profile repo-profile.json --probe-budget 10 --report
+```
+
+`train` measures the real first-round gain of every pool candidate and
+accumulates ridge-regression sufficient statistics (`XᵀX`/`Xᵀy` — constant
+size, merged across runs by plain summation, deterministic) into the
+profile; `encode --profile` solves them into linear weights and reorders
+the probe queue by predicted gain over a 4× wider candidate pool. The
+ranker never decides — acceptance stays measured — so a wrong model wastes
+probes, never bytes. Measured on the real 133 KB ownsharp log (`deep`,
+o200k): the full-budget baseline is −76.8% in 15.1 s; at a quarter of the
+probes the naive cut drops to −75.0% in 5.6 s, and the in-domain-trained
+ranker recovers 83% of that quality gap (−76.5% in 4.7 s — 3.2× faster at
+99.6% of the reduction; training draws candidates from the same
+words∪SAM pool deep ranks, so the model sees its real distribution). Cross-format transfer is honest-weak (a
+MSBuild-trained ranker on the analyzer log recovers only 9%): train where
+you encode — the profile is per-repo anyway.
+
 Freeze the profile into a stable dictionary for a *cached prompt prefix*
 (CLAUDE.md / system prompt) — the warm story made real:
 
@@ -168,7 +193,15 @@ ones — measured on the same slices where seeding changed nothing:
 the 60-line MSBuild slices go −22.0% → −34.7% and −24.1% → −37.6% cold
 (654-token key), and the ownsharp broker slice against a sectorts-learned
 legend goes −9.0% → **−43.9%** cold (790 → 487 tokens, 547-token key),
-byte-exact under `cmp`.
+byte-exact under `cmp`. Frozen templates (profile seeds and extern
+entries alike) are matched by *glob* now — parts may start or end
+mid-word — so `qodec learn` freezes each cluster in two shapes: bare
+whole-word slots (general across files; its long parts also feed
+`seed_phrases`) and sub-word refined (corpus-specific, far cheaper per
+row), tried heaviest-first. With sub-word keys the extern story closes:
+the MSBuild slices reach **−65.7%/−67.1%** cold (refined plain stops at
+−50.3%/−51.0%) and the broker slice **−57.0%** (868 → 373 tokens, key
+overhead 42), all byte-exact, all fail-closed without the exact file.
 
 ## Codecs
 
@@ -180,7 +213,7 @@ byte-exact under `cmp`.
 | `toon` | uniform JSON array → keys-once table | semantic (Value-equal) |
 | `grep` | `path:line[:col]:text` matcher output → path once per run of hits (the `rg --heading` shape) | byte |
 | `diag` | template miner for diagnostic streams (`path:line: warning: …`, MSBuild `path(l,c): …`): repeated tails → legend once, quoted identifiers → slot values; one linear pass — the redundancy is *known*, not searched for | byte |
-| `tmpl` | Drain-style template mining for *any* line-based log: lines cluster by skeleton (whitespace byte-equal, ≥60% of words equal), varying positions become slots — `diag` without the format rules | byte |
+| `tmpl` | Drain-style template mining for *any* line-based log: lines cluster by skeleton (whitespace byte-equal, ≥60% of words equal), varying positions become slots; slots go *sub-word* — a cluster pulls its members' common prefix/suffix inside a varying word into the template when that measures cheaper, so a path that differs in one number costs one number per row | byte |
 | `squeeze` | `toon` (JSON) or measured best of `fold`/`grep`/`diag`/`tmpl` (text), then the better miner over the result | byte / semantic |
 
 Format specialization is the speed lever: on the real 133 KB ownsharp audit

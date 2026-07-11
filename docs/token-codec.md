@@ -35,7 +35,11 @@ since grown a measured shelf of format codecs (`toon` for uniform JSON,
 line-based log via Drain-style template learning) that *know* where a
 format's redundancy lives and take it in one linear pass — on the real
 133 KB ownsharp audit log, `diag` is −52% in 0.4 s where `deep` is −77% in
-20 s, and `tmpl` learns −46% from the same file with zero format rules.
+20 s, and `tmpl` learns −62% from the same file with zero format rules
+(−46% before its slots went *sub-word*: the varying fragment usually hides
+inside one long path- or identifier-word, so each cluster now pulls the
+members' common prefix/suffix into the template — per-cluster measured,
+decode unchanged — and only the genuinely varying bytes ride in the row).
 `squeeze` dispatches: structural codec by shape first, miners over the
 residue. Acceptance stays measured either way; every codec still refuses to
 `raw` when the artifact does not beat the input.
@@ -329,6 +333,33 @@ hostile input) through the actual `o7 judge` binary.
    −43.9% cold (790 → 487 tokens; 547-token key amortized in the
    cached prefix) — cross-file templates stop losing to
    chance-agreement ones once their legend costs nothing in-artifact.
+   Interaction measured after sub-word slots landed: the refined plain
+   pass overtakes the word-boundary extern key on the MSBuild slices
+   (−50.3% vs −34.7%) and the strict referee drops the key demand
+   automatically — the artifact comes out keyless; the broker case
+   keeps its key (−43.9% vs −14.5%, whole cross-file stems, not
+   affixes). *Done* next: frozen templates now match by glob (parts may
+   start or end mid-word), which replaced the sealed-cluster machinery
+   with a per-line pre-match and let `learn` freeze every cluster in
+   two shapes — bare (general, feeds seed_phrases) and sub-word refined
+   (specific, cheaper rows) — tried heaviest-first, measured as always.
+   Sub-word extern keys close the loop: MSBuild slices −65.7%/−67.1%
+   cold vs refined plain's −50.3%/−51.0%, broker slice −57.0%
+   (868 → 373 tokens), byte-exact, fail-closed.
+   *Done* on the same substrate: the probe ranker. Every mining round
+   already measures whole-text gain per probed candidate; `qodec train`
+   keeps those observations as ridge sufficient statistics (`XᵀX`/`Xᵀy`,
+   constant-size, merge = summation) in the profile, and encode solves
+   them into linear weights that reorder the probe queue over a wider
+   pool under `--probe-budget`. Ordering only — acceptance unchanged.
+   Measured (133 KB ownsharp, deep): baseline −76.8%/15.1 s at 40
+   probes; naive @10 −75.0%/5.6 s; in-domain ranker @10 −76.5%/4.7 s —
+   83% of the budget-cut quality gap recovered at 3.2× less CPU
+   (training draws from the deep words∪SAM pool, so the model sees the
+   distribution it ranks — CodeRabbit caught the first version training
+   on words only, which recovered 69%).
+   Held-out cross-format transfer recovers only 9% — the model learns
+   the corpus, not the universe; per-repo training is the intended use.
 4. **Output-side notation** — the reverse direction: let the subagent *reply*
    in the legend's notation and expand deterministically outside the model.
    Output tokens cost ~5× input; this is where the same trick pays most, and
