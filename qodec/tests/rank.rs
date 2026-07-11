@@ -159,3 +159,30 @@ fn ranked_encode_still_roundtrips_and_passes_acceptance() -> Result<()> {
     anyhow::ensure!(plain == unranked, "no ranker -> byte-identical to encode()");
     Ok(())
 }
+
+#[test]
+fn deep_with_probe_budget_one_still_probes() -> Result<()> {
+    // A tiny odd budget used to starve both deep candidate families to
+    // zero (want/2 each) and fall back to raw on compressible input
+    // (Codex, PR #38). One probe per round must survive.
+    let meter = Bpe::o200k()?;
+    let mut text = String::new();
+    for i in 0..24 {
+        text.push_str(&format!(
+            "../STS_new/SectorTS/Broker/File{i}.cs: warning: [OWN001] event subscribed but never unsubscribed\n"
+        ));
+    }
+    let seeds = Seeds {
+        probe_budget: Some(1),
+        ..Seeds::default()
+    };
+    let artifact = encode_seeded(&text, CodecKind::Deep, &meter, Alphabet::Auto, &seeds);
+    anyhow::ensure!(
+        artifact.starts_with("%q1 mine"),
+        "budget 1 must still commit on compressible input: {:.60}",
+        artifact,
+    );
+    let back = decode(&artifact)?;
+    anyhow::ensure!(back == text, "budget-1 artifact stays byte-lossless");
+    Ok(())
+}

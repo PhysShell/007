@@ -224,12 +224,16 @@ fn probe_queue(text: &str, opts: &MineOptions) -> Vec<String> {
 /// Candidates with occurrence estimates, heuristic-ranked, deduplicated.
 fn candidate_pool(text: &str, miner: MinerKind, want: usize) -> Vec<(String, usize)> {
     if miner == MinerKind::Deep {
-        let mut merged = word_candidates_counted(text, want / 2);
+        // Each family keeps at least one candidate — an odd or tiny budget
+        // must never starve the round to zero probes (Codex, PR #38). The
+        // callers truncate to the real budget after merging.
+        let half = want.div_ceil(2);
+        let mut merged = word_candidates_counted(text, half);
         for c in crate::sam::repeated_substrings(
             text,
             MIN_CANDIDATE_CHARS,
             MAX_CANDIDATE_CHARS,
-            want / 2,
+            half,
         ) {
             if !merged.iter().any(|(t, _)| *t == c.text) {
                 merged.push((c.text, c.count));
