@@ -240,3 +240,30 @@ fn failed_multibyte_anchor_advances_by_a_whole_char() -> Result<()> {
     anyhow::ensure!(back == text, "multibyte-anchored spans invert byte-exactly");
     Ok(())
 }
+
+#[test]
+fn overlapping_aliases_refuse_and_used_tokenizes_exactly() -> Result<()> {
+    // `used` is a concatenation; substring membership would let an unused
+    // alias ride on a recorded one (CodeRabbit, PR #39). Overlapping
+    // aliases are refused at the trust boundary, and expansion tokenizes
+    // `used` against the key, failing closed on unknown residue.
+    let overlapping = "# qodec rules v1 slot=quest\nR1=alpha ¿ beta\nR12=gamma ¿ delta\n";
+    anyhow::ensure!(
+        RulesKey::parse(overlapping)
+            .err()
+            .is_some_and(|e| format!("{e:#}").contains("overlaps")),
+        "prefix-overlapping aliases must refuse at parse"
+    );
+
+    let key = RulesKey::parse(KEY_TEXT)?;
+    // A span referencing an alias while `used` records something else
+    // entirely must bail on the residue, not silently pass.
+    let bogus = expand_spans("⌈码|X⌉", &key, '⌈', '⌉', '|', "zz");
+    anyhow::ensure!(
+        bogus
+            .err()
+            .is_some_and(|e| format!("{e:#}").contains("residue")),
+        "unknown used residue must fail closed"
+    );
+    Ok(())
+}

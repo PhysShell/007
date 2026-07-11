@@ -79,12 +79,18 @@ impl RulesKey {
             }
             // The same trust-boundary rules as the legends: a used alias
             // becomes a container header token, and the flat `used` list
-            // cannot tell duplicates apart.
+            // is a concatenation — it only tokenizes unambiguously when no
+            // alias is a substring of another (duplicates included), so
+            // refuse overlaps here where hand-edited keys enter
+            // (CodeRabbit, PR #39).
             if alias.chars().any(char::is_whitespace) {
                 bail!("alias {alias:?} must not contain whitespace");
             }
-            if entries.iter().any(|(a, _)| a == alias) {
-                bail!("duplicate alias {alias:?} in rules key");
+            if entries
+                .iter()
+                .any(|(a, _)| a.contains(alias) || alias.contains(a.as_str()))
+            {
+                bail!("alias {alias:?} overlaps another alias in the rules key");
             }
             let parts: Vec<String> = template.split(slot).map(str::to_string).collect();
             if parts.iter().any(|p| p.contains('\n') || p.contains('\r')) {
@@ -321,6 +327,21 @@ pub fn expand_spans(
     sep: char,
     used: &str,
 ) -> Result<String> {
+    // `used` is a concatenation; substring `contains` would let an unused
+    // alias ride on a recorded one (CodeRabbit, PR #39). Tokenize it into
+    // discrete aliases — parse refuses overlapping aliases, so the greedy
+    // longest-first scan is unambiguous — and fail closed on any residue.
+    let mut known: Vec<&str> = key.entries.iter().map(|(a, _)| a.as_str()).collect();
+    known.sort_by_key(|a| std::cmp::Reverse(a.len()));
+    let mut used_set: Vec<&str> = Vec::new();
+    let mut rest_used = used;
+    while !rest_used.is_empty() {
+        let Some(&hit) = known.iter().find(|&&a| rest_used.starts_with(a)) else {
+            bail!("used list has an unknown residue near {rest_used:.16?}");
+        };
+        used_set.push(hit);
+        rest_used = rest_used.get(hit.len()..).unwrap_or_default();
+    }
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     loop {
@@ -336,7 +357,7 @@ pub fn expand_spans(
         let span = after.get(..close).unwrap_or_default();
         let mut fields = span.split(sep);
         let alias = fields.next().unwrap_or_default();
-        if !used.contains(alias) {
+        if !used_set.contains(&alias) {
             bail!("rules span references alias {alias:?} outside the used list");
         }
         let (_, parts) = key

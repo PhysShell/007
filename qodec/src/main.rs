@@ -692,7 +692,13 @@ fn cmd_rules_verify(a: &RulesVerifyArgs) -> Result<()> {
     let meter = by_name(&a.meter)?;
     let mut files: Vec<(PathBuf, String)> = Vec::new();
     for path in &a.input {
-        let (content, _) = qodec::profile::read_capped(path, CAP)?;
+        let (content, capped) = qodec::profile::read_capped(path, CAP)?;
+        if capped {
+            eprintln!(
+                "qodec rules verify: {} capped at {CAP} bytes — verification covers only that prefix",
+                path.display(),
+            );
+        }
         files.push((path.clone(), content));
     }
 
