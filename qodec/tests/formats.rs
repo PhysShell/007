@@ -230,3 +230,60 @@ fn diag_unbalanced_quotes_and_prose_fall_back() -> Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn tmpl_seed_carrying_a_slot_glyph_shifts_the_slot_choice() -> Result<()> {
+    use qodec::{encode_seeded, Seeds};
+    // One junk seed contains '¿' — the default slot glyph. The slot char
+    // splits legend templates on decode, so the seeded pass must pick the
+    // next candidate ('«') for the whole artifact instead of emitting an
+    // ambiguous legend. The useful seed still routes and pins.
+    let meter = Bpe::o200k()?;
+    let seeds = Seeds {
+        templates: vec![
+            vec!["¿ junk marker ".to_string(), String::new()],
+            vec!["worker thread pool delta ".to_string(), " spawned".to_string()],
+            vec!["worker thread pool epsilon ".to_string(), " spawned".to_string()],
+        ],
+        ..Seeds::default()
+    };
+    let mut text = String::new();
+    for i in 0..16 {
+        text.push_str(&format!("worker thread pool delta task{i} spawned\n"));
+        text.push_str(&format!("worker thread pool epsilon job{i} spawned\n"));
+    }
+    let encoded = encode_seeded(&text, CodecKind::Tmpl, &meter, Alphabet::Auto, &seeds);
+    anyhow::ensure!(encoded.starts_with("%q1 tmpl"), "seeded must commit");
+    anyhow::ensure!(
+        encoded.contains("=worker thread pool delta « spawned")
+            && encoded.contains("=worker thread pool epsilon « spawned"),
+        "slot must shift to '«' and both templates must pin: {encoded:?}"
+    );
+    let back = decode(&encoded)?;
+    anyhow::ensure!(back == text, "slot-shifted seeded artifact stays byte-exact");
+    Ok(())
+}
+
+#[test]
+fn tmpl_seeds_survive_crlf_rows() -> Result<()> {
+    use qodec::{encode_seeded, Seeds};
+    // Sealed matching happens on the CR-stripped line; the row re-attaches
+    // `\r` exactly like unseeded tmpl rows do.
+    let meter = Bpe::o200k()?;
+    let seeds = Seeds {
+        templates: vec![vec![
+            "worker thread pool delta ".to_string(),
+            " spawned".to_string(),
+        ]],
+        ..Seeds::default()
+    };
+    let mut text = String::new();
+    for i in 0..12 {
+        text.push_str(&format!("worker thread pool delta task{i} spawned\r\n"));
+    }
+    let encoded = encode_seeded(&text, CodecKind::Tmpl, &meter, Alphabet::Auto, &seeds);
+    anyhow::ensure!(encoded.starts_with("%q1 tmpl"), "seeded must commit");
+    let back = decode(&encoded)?;
+    anyhow::ensure!(back == text, "CRLF seeded roundtrip must be byte-exact");
+    Ok(())
+}

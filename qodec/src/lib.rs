@@ -79,29 +79,40 @@ impl CodecKind {
     }
 }
 
-pub fn encode(text: &str, kind: CodecKind, meter: &dyn TokenMeter, alphabet: Alphabet) -> String {
-    encode_seeded(text, kind, meter, alphabet, &[])
+/// Profile-learned seeds for `encode_seeded` (`qodec learn`): phrases join
+/// the miners' probe queue ahead of discovery, templates pre-shape `tmpl`
+/// clustering. Both are suggestions — every use is measured, so a stale
+/// profile can waste probes, never size or bytes.
+#[derive(Debug, Clone, Default)]
+pub struct Seeds {
+    pub phrases: Vec<String>,
+    /// tmpl templates as fixed parts, wildcards between consecutive parts.
+    pub templates: Vec<Vec<String>>,
 }
 
-/// `encode` with profile-learned seed phrases for the miners (`qodec learn`).
-/// Seeds are probed ahead of discovery; acceptance stays measured, so they
-/// can only change what gets tried first, never what survives.
+pub fn encode(text: &str, kind: CodecKind, meter: &dyn TokenMeter, alphabet: Alphabet) -> String {
+    encode_seeded(text, kind, meter, alphabet, &Seeds::default())
+}
+
+/// `encode` with profile-learned seeds (`qodec learn`). Seeds are tried
+/// ahead of same-run discovery; acceptance stays measured, so they can
+/// only change what gets tried first, never what survives.
 pub fn encode_seeded(
     text: &str,
     kind: CodecKind,
     meter: &dyn TokenMeter,
     alphabet: Alphabet,
-    seeds: &[String],
+    seeds: &Seeds,
 ) -> String {
     let mine_opts = MineOptions {
         alphabet,
-        seeds: seeds.to_vec(),
+        seeds: seeds.phrases.clone(),
         ..MineOptions::default()
     };
     let deep_opts = MineOptions {
         alphabet,
         miner: MinerKind::Deep,
-        seeds: seeds.to_vec(),
+        seeds: seeds.phrases.clone(),
         ..MineOptions::default()
     };
     match kind {
@@ -111,7 +122,7 @@ pub fn encode_seeded(
         CodecKind::Toon => toon::encode(text, meter),
         CodecKind::Grep => grep::encode(text, meter),
         CodecKind::Diag => diag::encode(text, meter),
-        CodecKind::Tmpl => tmpl::encode(text, meter),
+        CodecKind::Tmpl => tmpl::encode_seeded(text, meter, &seeds.templates),
         CodecKind::Squeeze => {
             let stage1 = if serde_json::from_str::<serde_json::Value>(text).is_ok() {
                 let tooned = toon::encode(text, meter);
@@ -121,12 +132,12 @@ pub fn encode_seeded(
                     .ok()
                     .is_none_or(|c| c.codec == "raw")
                 {
-                    best_text_stage(text, meter)
+                    best_text_stage(text, meter, &seeds.templates)
                 } else {
                     tooned
                 }
             } else {
-                best_text_stage(text, meter)
+                best_text_stage(text, meter, &seeds.templates)
             };
             // Mine over the full stage-1 container (headers, legends, rows —
             // repeated paths inside cells are fair game); keep whichever
@@ -156,12 +167,12 @@ pub fn encode_seeded(
 
 /// Squeeze's text stage: every structural text codec is one linear pass
 /// and refuses honestly, so the measured minimum is always safe to take.
-fn best_text_stage(text: &str, meter: &dyn TokenMeter) -> String {
+fn best_text_stage(text: &str, meter: &dyn TokenMeter, templates: &[Vec<String>]) -> String {
     [
         fold::encode(text, meter),
         grep::encode(text, meter),
         diag::encode(text, meter),
-        tmpl::encode(text, meter),
+        tmpl::encode_seeded(text, meter, templates),
     ]
     .into_iter()
     .min_by_key(|artifact| meter.count(artifact))

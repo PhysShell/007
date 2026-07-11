@@ -188,6 +188,19 @@ impl Profile {
         seeds
     }
 
+    /// Seed templates for `tmpl`: heaviest first, the same weight rule as
+    /// `compact`, re-ranked here defensively — a hand-merged profile file
+    /// may arrive unsorted, and the cap must still take the heaviest.
+    pub fn seed_templates(&self, top: usize) -> Vec<Vec<String>> {
+        let mut ranked: Vec<&(Vec<String>, u64)> = self.templates.iter().collect();
+        ranked.sort_by(|a, b| weight_template(b).cmp(&weight_template(a)).then(a.0.cmp(&b.0)));
+        ranked
+            .into_iter()
+            .take(top)
+            .map(|(parts, _)| parts.clone())
+            .collect()
+    }
+
     pub fn phrase_count(&self) -> usize {
         self.phrases.len()
     }

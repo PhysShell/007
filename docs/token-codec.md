@@ -303,6 +303,20 @@ hostile input) through the actual `o7 judge` binary.
    Measured: the stem flip reversed (seeded 174 → 150 vs plain's 154),
    and plain mine on the real ownsharp log improved −65.1% → −66.1%
    cold with no other change.
+   *Done* since: `tmpl` consumes the profile too. Templates seed
+   clustering as sealed clusters (exact fixed words, never eroded),
+   tried before same-run first-fit, and the seeded pass must win-or-tie
+   the plain one by whole-artifact measurement. On the constructed
+   misroute case (two same-shape families sharing 4 of 6 words — first
+   fit merges them into a two-slot mongrel) the seeded pass pins both
+   profile templates and measures strictly smaller. On the real corpora
+   tried (428 KB MSBuild-style log; ownsharp broker slice against a
+   sectorts-learned profile) seeds match lines structurally, but the
+   plain pass either finds the same templates or wins by fixing
+   chance-agreeing positions, so the gate returns byte-identical
+   artifacts — free today, and the byte-stable template legend it
+   guarantees is the prerequisite for an `ext`-style cached-prefix
+   template legend, where the in-artifact legend cost disappears.
 4. **Output-side notation** — the reverse direction: let the subagent *reply*
    in the legend's notation and expand deterministically outside the model.
    Output tokens cost ~5× input; this is where the same trick pays most, and

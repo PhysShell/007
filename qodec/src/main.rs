@@ -367,8 +367,14 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
     let alphabet = Alphabet::parse(&a.alphabet)
         .with_context(|| format!("unknown alphabet {:?}", a.alphabet))?;
     let seeds = match &a.profile {
-        Some(path) => qodec::profile::Profile::load(path)?.seed_phrases(64),
-        None => Vec::new(),
+        Some(path) => {
+            let profile = qodec::profile::Profile::load(path)?;
+            qodec::Seeds {
+                phrases: profile.seed_phrases(64),
+                templates: profile.seed_templates(64),
+            }
+        }
+        None => qodec::Seeds::default(),
     };
 
     let extern_legend = a
