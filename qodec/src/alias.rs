@@ -114,6 +114,42 @@ impl AliasPool {
         self.next += 1;
         entry
     }
+
+    /// The next unused alias without consuming it — a provisional glyph for
+    /// gain estimation before `take_best_for` picks the real one.
+    pub fn peek(&self) -> Option<(String, usize)> {
+        self.entries.get(self.next).cloned()
+    }
+
+    /// Hand out the alias that tokenizes cheapest *in context*: standalone
+    /// glyph cost lies — `" 引 "` can cost a token less than `" 码 "`
+    /// mid-row (measured on PR #34's stem sample, where it flipped a close
+    /// greedy outcome). Probes up to `k` unused entries inside
+    /// `{before}{alias}{after}` and removes the winner from the pool; ties
+    /// keep pool order, so behavior without context differences is
+    /// unchanged.
+    pub fn take_best_for(
+        &mut self,
+        meter: &dyn TokenMeter,
+        before: &str,
+        after: &str,
+        k: usize,
+    ) -> Option<(String, usize)> {
+        let window = self.next..self.entries.len().min(self.next + k.max(1));
+        let mut best: Option<(usize, usize)> = None; // (index, in-context cost)
+        for idx in window {
+            let Some((alias, _)) = self.entries.get(idx) else {
+                break;
+            };
+            let cost = meter.count(&format!("{before}{alias}{after}"));
+            if best.is_none_or(|(_, c)| cost < c) {
+                best = Some((idx, cost));
+            }
+        }
+        let (idx, _) = best?;
+        self.entries.swap(self.next, idx);
+        self.take()
+    }
 }
 
 /// Probe report row for the `aliases` subcommand — the "play with your

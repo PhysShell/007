@@ -1,0 +1,45 @@
+[
+ {
+  "id": "q1",
+  "question": "What version of the Build Engine is reported on the first line?",
+  "accept": [
+   "17.8.3"
+  ]
+ },
+ {
+  "id": "q2",
+  "question": "At what line and column in File748.cs is the CS8618 warning reported?",
+  "accept": [
+   "748,16",
+   "line 748, column 16"
+  ]
+ },
+ {
+  "id": "q3",
+  "question": "Which project is blamed (in square brackets) for the CS8618 warning in File81.cs?",
+  "accept": [
+   "Legacy.Broker.Transport"
+  ]
+ },
+ {
+  "id": "q4",
+  "question": "How many 'Restoring packages' lines are there in total?",
+  "accept": [
+   "17"
+  ]
+ },
+ {
+  "id": "q5",
+  "question": "Which DevExpress package version is named in the first MSB3277 warning?",
+  "accept": [
+   "v3"
+  ]
+ },
+ {
+  "id": "q6",
+  "question": "How many CS8618 warnings appear in total?",
+  "accept": [
+   "7"
+  ]
+ }
+]

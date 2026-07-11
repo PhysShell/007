@@ -30,6 +30,8 @@ const MIN_CANDIDATE_CHARS: usize = 6;
 const MAX_CANDIDATE_CHARS: usize = 200;
 /// Exact-measure at most this many top-ranked candidates per round.
 const SCORE_BUDGET: usize = 40;
+/// How many unused pool glyphs to probe in the committed phrase's context.
+const GLYPH_PROBE_K: usize = 8;
 
 /// Candidate discovery strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,7 +84,10 @@ pub fn encode(text: &str, meter: &dyn TokenMeter, opts: &MineOptions) -> String 
     let mut current_tokens = meter.count(&current) as i64;
 
     while legend.len() < opts.max_entries {
-        let Some((alias, _alias_cost)) = pool.take() else {
+        // Candidates are ranked with a provisional glyph; the committed
+        // phrase then gets the glyph that tokenizes cheapest in its real
+        // context — standalone glyph cost lies mid-row (PR #34).
+        let Some((alias, _alias_cost)) = pool.peek() else {
             break;
         };
 
@@ -109,7 +114,22 @@ pub fn encode(text: &str, meter: &dyn TokenMeter, opts: &MineOptions) -> String 
         }
 
         match best {
-            Some((phrase, replaced, gain)) if gain > opts.min_gain => {
+            Some((phrase, _, gain)) if gain > opts.min_gain => {
+                let (before, after) = local_context(&current, &phrase);
+                let Some((alias, _)) = pool.take_best_for(meter, before, after, GLYPH_PROBE_K)
+                else {
+                    break;
+                };
+                // The commit decision re-measures exactly with the chosen
+                // glyph — the provisional estimate never decides alone.
+                let replaced = current.replace(&phrase, &alias);
+                let legend_line = format!("{alias}={phrase}\n");
+                let gain = current_tokens
+                    - meter.count(&replaced) as i64
+                    - meter.count(&legend_line) as i64;
+                if gain <= opts.min_gain {
+                    break;
+                }
                 current_tokens = meter.count(&replaced) as i64;
                 current = replaced;
                 legend.push((alias, phrase));
@@ -184,6 +204,43 @@ fn ranked_candidates(text: &str, miner: MinerKind) -> Vec<String> {
 /// spans the miner would probe are what a profile should remember.
 pub(crate) fn learn_phrases(text: &str, budget: usize) -> Vec<String> {
     word_candidates(text, budget)
+}
+
+/// Same-line context around the first occurrence of `phrase` — the window
+/// a glyph is probed in. BPE merges are local, so the line neighborhood is
+/// the honest proxy; the commit itself still re-measures the whole text.
+fn local_context<'a>(text: &'a str, phrase: &str) -> (&'a str, &'a str) {
+    const WIN: usize = 12;
+    let Some(pos) = text.find(phrase) else {
+        return ("", "");
+    };
+    let before_all = text.get(..pos).unwrap_or_default();
+    let after_all = text.get(pos + phrase.len()..).unwrap_or_default();
+    let before_line = before_all
+        .rfind('\n')
+        .map_or(before_all, |i| before_all.get(i + 1..).unwrap_or_default());
+    let after_line = after_all
+        .find('\n')
+        .map_or(after_all, |i| after_all.get(..i).unwrap_or_default());
+    (tail_chars(before_line, WIN), head_chars(after_line, WIN))
+}
+
+fn head_chars(s: &str, n: usize) -> &str {
+    match s.char_indices().nth(n) {
+        Some((idx, _)) => s.get(..idx).unwrap_or(s),
+        None => s,
+    }
+}
+
+fn tail_chars(s: &str, n: usize) -> &str {
+    let total = s.chars().count();
+    if total <= n {
+        return s;
+    }
+    match s.char_indices().nth(total - n) {
+        Some((idx, _)) => s.get(idx..).unwrap_or(s),
+        None => s,
+    }
 }
 
 fn word_candidates(text: &str, budget: usize) -> Vec<String> {

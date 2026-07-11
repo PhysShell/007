@@ -9,6 +9,7 @@ pub mod container;
 pub mod diag;
 pub mod fold;
 pub mod grep;
+pub mod legend;
 pub mod meter;
 pub mod mine;
 pub mod ppl;
@@ -181,7 +182,29 @@ fn decode_container(c: &container::Container) -> Result<String> {
         "grep" => grep::decode(c),
         "diag" => diag::decode(c),
         "tmpl" => tmpl::decode(c),
+        "ext" => bail!(
+            "artifact was encoded against an extern legend — decode with \
+             --extern-legend <file> (sum={})",
+            c.param("sum").unwrap_or("?"),
+        ),
         other => bail!("unknown codec {other:?} in container"),
+    }
+}
+
+/// `decode` that can open `ext` artifacts: the outer container pins an
+/// extern legend by checksum; the inner artifact decodes normally, then
+/// the used aliases expand from the supplied legend. Without the exact
+/// legend this fails closed instead of reconstructing wrong bytes.
+pub fn decode_with_extern(
+    text: &str,
+    extern_legend: Option<&legend::ExternLegend>,
+) -> Result<String> {
+    match container::parse(text) {
+        Ok(c) if c.codec == "ext" => {
+            let inner = decode(&c.body)?;
+            legend::expand(&c, &inner, extern_legend)
+        }
+        _ => decode(text),
     }
 }
 

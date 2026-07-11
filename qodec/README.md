@@ -114,6 +114,24 @@ profile learned on the 3.7 KB broker log lifts `mine` on the 133 KB sectorts
 log from −65.1% to −66.5% cold. Seeds only reorder the probe queue —
 acceptance stays measured, so a stale profile costs probes, never bytes.
 
+Freeze the profile into a stable dictionary for a *cached prompt prefix*
+(CLAUDE.md / system prompt) — the warm story made real:
+
+```bash
+./target/release/qodec legend --profile repo-profile.json -o qodec-legend.txt
+./target/release/qodec encode -i today.log --codec mine --extern-legend qodec-legend.txt --report
+./target/release/qodec decode -i artifact.q1 --extern-legend qodec-legend.txt
+```
+
+The artifact pins the legend file's checksum (`%q1 ext sum=…`); decode
+without the exact file fails closed instead of reconstructing wrong bytes.
+An entry whose glyph already occurs in the payload is skipped and excluded
+from the artifact's `used` list, so expansion can never touch pre-existing
+bytes. Measured on the real ownsharp log: in-artifact key overhead drops
+950 → 23 tokens — the 564-token key lives once in the cached prefix
+instead of traveling in every message (an in-band `mine` legend differs
+per artifact and could never be pre-cached).
+
 ## Codecs
 
 | codec | idea | roundtrip |

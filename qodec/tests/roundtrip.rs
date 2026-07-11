@@ -317,3 +317,33 @@ proptest! {
         prop_assert_eq!(a, b);
     }
 }
+
+#[test]
+fn alias_pool_picks_the_glyph_that_is_cheapest_in_context() -> Result<()> {
+    use qodec::alias::AliasPool;
+    // Standalone glyph cost lies mid-row (PR #34: " 引 " beat " 码 " by a
+    // token per row). take_best_for must return the in-context argmin of
+    // the probed window, never worse than the pool-order head.
+    let meter = Bpe::o200k()?;
+    let ctx = |g: &str| meter.count(&format!("  {g} omega0"));
+
+    let mut head_pool = AliasPool::build(Alphabet::Glyph, &meter, "");
+    let (first, _) = head_pool.take().ok_or_else(|| anyhow::anyhow!("empty pool"))?;
+    let (second, _) = head_pool.take().ok_or_else(|| anyhow::anyhow!("one-entry pool"))?;
+
+    let mut pool = AliasPool::build(Alphabet::Glyph, &meter, "");
+    let (chosen, _) = pool
+        .take_best_for(&meter, "  ", " omega0", 8)
+        .ok_or_else(|| anyhow::anyhow!("no glyph chosen"))?;
+    anyhow::ensure!(
+        ctx(&chosen) <= ctx(&first) && ctx(&chosen) <= ctx(&second),
+        "chosen {chosen:?} ({}) must not lose to pool heads {first:?} ({}) / {second:?} ({})",
+        ctx(&chosen),
+        ctx(&first),
+        ctx(&second),
+    );
+    // The winner is consumed: the next take must hand out something else.
+    let (next, _) = pool.take().ok_or_else(|| anyhow::anyhow!("pool drained"))?;
+    anyhow::ensure!(next != chosen, "chosen glyph must leave the pool");
+    Ok(())
+}
