@@ -3,7 +3,7 @@
 //! them across disk, and a fitted ranker changes probe *order* only —
 //! artifacts still roundtrip and pass the same measured acceptance.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use qodec::alias::Alphabet;
 use qodec::meter::{Bpe, TokenMeter};
@@ -36,7 +36,7 @@ fn ridge_recovers_a_known_law_and_refuses_small_samples() -> Result<()> {
         "under MIN_SAMPLES the solve must refuse"
     );
     teach(&mut stats, 468);
-    let ranker = stats.solve().context_ok()?;
+    let ranker = stats.solve().context("expected a fitted ranker")?;
     // Score differences isolate the learned weights: doubling len must add
     // ~3·ln2, doubling count must subtract ~2·ln2.
     let base = ranker.score(&features(&"x".repeat(10), 4));
@@ -54,15 +54,6 @@ fn ridge_recovers_a_known_law_and_refuses_small_samples() -> Result<()> {
         base - cnt2,
     );
     Ok(())
-}
-
-trait ContextOk<T> {
-    fn context_ok(self) -> Result<T>;
-}
-impl<T> ContextOk<T> for Option<T> {
-    fn context_ok(self) -> Result<T> {
-        self.ok_or_else(|| anyhow::anyhow!("expected Some"))
-    }
 }
 
 #[test]

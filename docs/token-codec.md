@@ -353,8 +353,11 @@ hostile input) through the actual `o7 judge` binary.
    them into linear weights that reorder the probe queue over a wider
    pool under `--probe-budget`. Ordering only — acceptance unchanged.
    Measured (133 KB ownsharp, deep): baseline −76.8%/15.1 s at 40
-   probes; naive @10 −75.0%/5.6 s; in-domain ranker @10 −76.3%/5.2 s —
-   69% of the budget-cut quality gap recovered at 2.9× less CPU.
+   probes; naive @10 −75.0%/5.6 s; in-domain ranker @10 −76.5%/4.7 s —
+   83% of the budget-cut quality gap recovered at 3.2× less CPU
+   (training draws from the deep words∪SAM pool, so the model sees the
+   distribution it ranks — CodeRabbit caught the first version training
+   on words only, which recovered 69%).
    Held-out cross-format transfer recovers only 9% — the model learns
    the corpus, not the universe; per-repo training is the intended use.
 4. **Output-side notation** — the reverse direction: let the subagent *reply*

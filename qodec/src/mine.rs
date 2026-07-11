@@ -256,8 +256,10 @@ pub(crate) fn learn_phrases(text: &str, budget: usize) -> Vec<String> {
 /// One training pass for the probe ranker (`qodec train`): measure the
 /// real first-round gain of every pool candidate against the pristine
 /// text and record (features, gain) into the stats. Uses a provisional
-/// alias exactly like the miner's ranking probes, so the model learns the
-/// distribution it will be asked to predict.
+/// alias exactly like the miner's ranking probes, and draws candidates
+/// from the *deep* pool — words ∪ SAM — so the model learns the full
+/// distribution it will later rank, not just the word family
+/// (CodeRabbit, PR #38).
 pub fn train_pass(
     text: &str,
     meter: &dyn TokenMeter,
@@ -273,7 +275,7 @@ pub fn train_pass(
     };
     let base = meter.count(text) as i64;
     let mut observed = 0usize;
-    for (phrase, count) in candidate_pool(text, MinerKind::Words, budget) {
+    for (phrase, count) in candidate_pool(text, MinerKind::Deep, budget) {
         let replaced = text.replace(&phrase, &alias);
         let legend_line = format!("{alias}={phrase}\n");
         let gain = base - meter.count(&replaced) as i64 - meter.count(&legend_line) as i64;

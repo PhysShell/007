@@ -149,8 +149,9 @@ ranker never decides — acceptance stays measured — so a wrong model wastes
 probes, never bytes. Measured on the real 133 KB ownsharp log (`deep`,
 o200k): the full-budget baseline is −76.8% in 15.1 s; at a quarter of the
 probes the naive cut drops to −75.0% in 5.6 s, and the in-domain-trained
-ranker recovers 69% of that quality gap (−76.3% in 5.2 s — 2.9× faster at
-99.3% of the reduction). Cross-format transfer is honest-weak (a
+ranker recovers 83% of that quality gap (−76.5% in 4.7 s — 3.2× faster at
+99.6% of the reduction; training draws candidates from the same
+words∪SAM pool deep ranks, so the model sees its real distribution). Cross-format transfer is honest-weak (a
 MSBuild-trained ranker on the analyzer log recovers only 9%): train where
 you encode — the profile is per-repo anyway.
 
