@@ -86,13 +86,6 @@ fn split_line(full: &str) -> Option<Split<'_>> {
 struct Cluster<'a> {
     segs: Vec<Option<&'a str>>,
     members: Vec<usize>,
-    /// Profile-seeded template: fixed positions are exact-match and never
-    /// erode, so its legend line stays byte-identical to the profile's —
-    /// the property that makes artifacts diff-stable across runs.
-    sealed: bool,
-    /// Which seed this sealed cluster came from — `encode_extern` maps it
-    /// back to the extern file's alias through this index.
-    seed_idx: Option<usize>,
 }
 
 impl<'a> Cluster<'a> {
@@ -100,24 +93,11 @@ impl<'a> Cluster<'a> {
         Self {
             segs: split.segs.iter().map(|s| Some(*s)).collect(),
             members: vec![line_idx],
-            sealed: false,
-            seed_idx: None,
-        }
-    }
-
-    fn from_profile(segs: &'a [Option<String>], seed_idx: usize) -> Self {
-        Self {
-            segs: segs.iter().map(Option::as_deref).collect(),
-            members: Vec::new(),
-            sealed: true,
-            seed_idx: Some(seed_idx),
         }
     }
 
     /// Word-position agreement against a candidate with the same shape;
-    /// whitespace mismatch disqualifies outright. Sealed templates demand
-    /// every fixed word exactly (wildcards free) — a hit outranks any
-    /// same-run cluster because seeds sit first in the bucket.
+    /// whitespace mismatch disqualifies outright.
     fn score(&self, split: &Split<'a>) -> Option<f64> {
         let mut words = 0usize;
         let mut hits = 0usize;
@@ -129,25 +109,18 @@ impl<'a> Cluster<'a> {
                 continue;
             }
             words += 1;
-            match mine {
-                Some(word) if *word == *theirs => hits += 1,
-                Some(_) if self.sealed => return None,
-                _ => {}
+            if *mine == Some(*theirs) {
+                hits += 1;
             }
-        }
-        if self.sealed {
-            return (words > 0).then_some(1.0);
         }
         // A no-word skeleton (blank-ish line) never templates.
         (words > 0).then(|| hits as f64 / words as f64)
     }
 
     fn absorb(&mut self, split: &Split<'a>, line_idx: usize) {
-        if !self.sealed {
-            for (mine, theirs) in self.segs.iter_mut().zip(&split.segs) {
-                if *mine != Some(*theirs) {
-                    *mine = None;
-                }
+        for (mine, theirs) in self.segs.iter_mut().zip(&split.segs) {
+            if *mine != Some(*theirs) {
+                *mine = None;
             }
         }
         self.members.push(line_idx);
@@ -242,8 +215,7 @@ fn render_row(plan: &RowPlan, split: &Split<'_>, sep: char) -> String {
 /// wildcards refined with the members' common prefix/suffix pulled into
 /// the template — whichever measures cheaper over the legend line plus all
 /// rows. Sub-word slots need no decode change: the affixes simply become
-/// part of the template's fixed parts. Sealed clusters always stay bare —
-/// their template bytes are pinned to the profile or extern file.
+/// part of the template's fixed parts.
 fn choose_template(
     cluster: &Cluster<'_>,
     splits: &[Option<Split<'_>>],
@@ -254,9 +226,6 @@ fn choose_template(
 ) -> (String, Vec<(usize, usize, usize)>) {
     let (bare, wild) = cluster.template(slot);
     let bare_slots: Vec<(usize, usize, usize)> = wild.iter().map(|&p| (p, 0, 0)).collect();
-    if cluster.sealed {
-        return (bare, bare_slots);
-    }
     let member_splits: Vec<&Split<'_>> = cluster
         .members
         .iter()
@@ -314,47 +283,57 @@ fn choose_template(
     }
 }
 
-/// Rebuild a profile template (fixed parts, wildcards between them) into
-/// the seg shape clustering works on. Parts re-split exactly as the
-/// original lines did — whitespace/word boundaries are a pure function of
-/// the bytes — so the reconstruction is faithful. Templates a line-based
-/// legend cannot carry (embedded newlines or any CR) are refused.
-fn seed_to_segs(parts: &[String]) -> Option<Vec<Option<String>>> {
-    let mut segs: Vec<Option<String>> = Vec::new();
-    for (idx, part) in parts.iter().enumerate() {
-        if part.contains('\n') {
-            return None;
-        }
-        if idx > 0 {
-            segs.push(None); // the wildcard word between consecutive parts
-        }
-        let split = split_line(part)?;
-        if split.cr {
-            return None;
-        }
-        segs.extend(split.segs.iter().map(|s| Some((*s).to_string())));
+/// Match a full (CR-stripped) line against template parts: the parts must
+/// cover the line in order, and every gap — one slot value — must be a
+/// single word fragment (no whitespace). Interior gaps take the earliest
+/// occurrence of the next part; once whitespace enters the gap no later
+/// occurrence can help, so the scan is linear and deterministic. *Any*
+/// consistent assignment roundtrips — decode is interleave(parts, values)
+/// — so occurrence choice affects only which bytes land in which value.
+/// This is how frozen templates (profile seeds, extern files) match lines
+/// now that their parts may start or end mid-word (sub-word slots).
+fn glob_match<'a>(line: &'a str, parts: &[String]) -> Option<Vec<&'a str>> {
+    let (first, rest_parts) = parts.split_first()?;
+    let mut rest = line.strip_prefix(first.as_str())?;
+    if rest_parts.is_empty() {
+        // Slotless template: the line must be the template, byte for byte.
+        return rest.is_empty().then_some(Vec::new());
     }
-    // Each part splits to an odd ws-word-…-ws run, so alternation survives
-    // concatenation; a template with no word position at all is useless.
-    (segs.len() / 2 > 0).then_some(segs)
+    let mut values: Vec<&'a str> = Vec::with_capacity(rest_parts.len());
+    for (idx, part) in rest_parts.iter().enumerate() {
+        let last = idx + 1 == rest_parts.len();
+        if last {
+            // The final part must close the line exactly.
+            let value_len = rest.len().checked_sub(part.len())?;
+            let (value, tail) = rest.split_at_checked(value_len)?;
+            if tail != part.as_str() || value.contains(char::is_whitespace) {
+                return None;
+            }
+            values.push(value);
+            rest = "";
+        } else {
+            if part.is_empty() {
+                // Two adjacent slots — unlearnable and ambiguous; refuse.
+                return None;
+            }
+            let pos = rest.find(part.as_str())?;
+            let value = rest.get(..pos)?;
+            if value.contains(char::is_whitespace) {
+                return None;
+            }
+            values.push(value);
+            rest = rest.get(pos + part.len()..)?;
+        }
+    }
+    debug_assert!(rest.is_empty());
+    Some(values)
 }
 
 /// Bucket by segment shape, grow clusters greedily — first fit above the
 /// similarity bar wins, in arrival order (deterministic). Shared by encode
-/// and `qodec learn`. Seeded templates enter their buckets first, in
-/// profile (weight) order, so a matching line lands on the known template
-/// before any same-run cluster can claim it.
-fn build_clusters<'a>(
-    splits: &[Option<Split<'a>>],
-    seeds: &'a [Vec<Option<String>>],
-) -> Vec<Cluster<'a>> {
+/// and `qodec learn`.
+fn build_clusters<'a>(splits: &[Option<Split<'a>>]) -> Vec<Cluster<'a>> {
     let mut buckets: HashMap<usize, Vec<Cluster<'a>>> = HashMap::new();
-    for (idx, seed) in seeds.iter().enumerate() {
-        buckets
-            .entry(seed.len())
-            .or_default()
-            .push(Cluster::from_profile(seed, idx));
-    }
     for (idx, split) in splits.iter().enumerate() {
         let Some(split) = split else { continue };
         let words = split.segs.len() / 2;
@@ -389,22 +368,56 @@ pub(crate) fn learn_templates(text: &str) -> Vec<(Vec<String>, usize)> {
     }
     let splits: Vec<Option<Split<'_>>> = raw_lines.iter().map(|&l| split_line(l)).collect();
     let mut out: Vec<(Vec<String>, usize)> = Vec::new();
-    for cluster in build_clusters(&splits, &[]) {
+    for cluster in build_clusters(&splits) {
         if cluster.members.len() < 2 {
             continue;
         }
-        let mut parts = vec![String::new()];
-        for seg in &cluster.segs {
+        // Two shapes per cluster. The *bare* one keeps whole-word slots —
+        // general across files, and its long parts are what seed_phrases
+        // feeds the miners. The *refined* one bakes the members' common
+        // prefix/suffix into the parts (the encoder's sub-word move) —
+        // corpus-specific but far cheaper per row when it matches.
+        // Consumers glob-match in weight order, so the longer refined
+        // template is tried first and the bare one catches the rest; an
+        // affix that was mere corpus coincidence costs nothing but bytes
+        // in the profile, because every use is still measured.
+        let member_splits: Vec<&Split<'_>> = cluster
+            .members
+            .iter()
+            .filter_map(|&i| splits.get(i).and_then(Option::as_ref))
+            .collect();
+        let mut bare = vec![String::new()];
+        let mut refined = vec![String::new()];
+        for (idx, seg) in cluster.segs.iter().enumerate() {
             match seg {
                 Some(fixed) => {
-                    if let Some(part) = parts.last_mut() {
+                    if let Some(part) = bare.last_mut() {
+                        part.push_str(fixed);
+                    }
+                    if let Some(part) = refined.last_mut() {
                         part.push_str(fixed);
                     }
                 }
-                None => parts.push(String::new()),
+                None => {
+                    bare.push(String::new());
+                    let words: Vec<&str> = member_splits
+                        .iter()
+                        .map(|s| s.segs.get(idx).copied().unwrap_or_default())
+                        .collect();
+                    let (pre, suf) = common_affixes(&words);
+                    let word = words.first().copied().unwrap_or_default();
+                    let end = word.len().saturating_sub(suf);
+                    if let Some(part) = refined.last_mut() {
+                        part.push_str(word.get(..pre).unwrap_or_default());
+                    }
+                    refined.push(word.get(end..).unwrap_or_default().to_string());
+                }
             }
         }
-        out.push((parts, cluster.members.len()));
+        if refined != bare {
+            out.push((refined, cluster.members.len()));
+        }
+        out.push((bare, cluster.members.len()));
     }
     out.sort_by(|a, b| {
         let wa = a.1 * a.0.iter().map(String::len).sum::<usize>();
@@ -416,6 +429,64 @@ pub(crate) fn learn_templates(text: &str) -> Vec<(Vec<String>, usize)> {
 
 pub fn encode(text: &str, meter: &dyn TokenMeter) -> String {
     encode_seeded(text, meter, &[])
+}
+
+/// A line claimed by a frozen template before clustering: which template,
+/// the slot values glob matching extracted, and the CRLF flag.
+struct Claim<'a> {
+    template_idx: usize,
+    values: Vec<&'a str>,
+    cr: bool,
+}
+
+/// Pre-match lines against frozen templates (profile seeds or extern
+/// entries) in template (weight/file) order — the first match claims the
+/// line. Claimed lines skip clustering entirely; that is the priority the
+/// sealed buckets used to provide, without a parallel cluster machinery.
+fn claim_lines<'a>(raw_lines: &[&'a str], templates: &[Vec<String>]) -> HashMap<usize, Claim<'a>> {
+    let mut claims = HashMap::new();
+    if templates.is_empty() {
+        return claims;
+    }
+    for (idx, &full) in raw_lines.iter().enumerate() {
+        let (line, cr) = match full.strip_suffix('\r') {
+            Some(stripped) => (stripped, true),
+            None => (full, false),
+        };
+        if line.contains('\r') {
+            continue; // bare CR rides verbatim, as everywhere in tmpl
+        }
+        for (template_idx, parts) in templates.iter().enumerate() {
+            if let Some(values) = glob_match(line, parts) {
+                claims.insert(
+                    idx,
+                    Claim {
+                        template_idx,
+                        values,
+                        cr,
+                    },
+                );
+                break;
+            }
+        }
+    }
+    claims
+}
+
+/// Frozen templates a line-based legend can carry: no line breaks, no CR,
+/// at least one part.
+fn usable_templates(templates: &[Vec<String>]) -> Vec<Vec<String>> {
+    templates
+        .iter()
+        .filter(|parts| {
+            !parts.is_empty()
+                && parts
+                    .iter()
+                    .all(|p| !p.contains('\n') && !p.contains('\r'))
+        })
+        .take(MAX_TEMPLATES)
+        .cloned()
+        .collect()
 }
 
 /// `encode` pre-shaped by profile templates (`qodec learn`). The seeded
@@ -430,11 +501,7 @@ pub(crate) fn encode_seeded(
     templates: &[Vec<String>],
 ) -> String {
     let plain = encode_pass(text, meter, &[]);
-    let seeds: Vec<Vec<Option<String>>> = templates
-        .iter()
-        .filter_map(|parts| seed_to_segs(parts))
-        .take(MAX_TEMPLATES)
-        .collect();
+    let seeds = usable_templates(templates);
     if seeds.is_empty() {
         return plain;
     }
@@ -446,7 +513,7 @@ pub(crate) fn encode_seeded(
     }
 }
 
-fn encode_pass(text: &str, meter: &dyn TokenMeter, seeds: &[Vec<Option<String>>]) -> String {
+fn encode_pass(text: &str, meter: &dyn TokenMeter, seeds: &[Vec<String>]) -> String {
     if text.is_empty() {
         return container::raw(text);
     }
@@ -458,7 +525,7 @@ fn encode_pass(text: &str, meter: &dyn TokenMeter, seeds: &[Vec<Option<String>>]
     // absent from the seeds too, not just the input.
     let seed_blob: String = seeds
         .iter()
-        .flat_map(|segs| segs.iter().flatten())
+        .flat_map(|parts| parts.iter())
         .map(String::as_str)
         .collect();
     let Some(&(slot_name, slot)) = SLOTS
@@ -476,8 +543,63 @@ fn encode_pass(text: &str, meter: &dyn TokenMeter, seeds: &[Vec<Option<String>>]
         raw_lines.pop();
     }
 
-    let splits: Vec<Option<Split<'_>>> = raw_lines.iter().map(|&l| split_line(l)).collect();
-    let clusters = build_clusters(&splits, seeds);
+    // Seeded groups claim their lines first; a group of one releases its
+    // line back to clustering (a legend line for a single row never pays
+    // in-artifact).
+    let claims = claim_lines(&raw_lines, seeds);
+    let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (&line_idx, claim) in &claims {
+        groups.entry(claim.template_idx).or_default().push(line_idx);
+    }
+    groups.retain(|_, members| members.len() >= 2);
+    for members in groups.values_mut() {
+        members.sort_unstable();
+    }
+    let taken: std::collections::HashSet<usize> =
+        groups.values().flatten().copied().collect();
+
+    let splits: Vec<Option<Split<'_>>> = raw_lines
+        .iter()
+        .enumerate()
+        .map(|(idx, &l)| {
+            if taken.contains(&idx) {
+                None
+            } else {
+                split_line(l)
+            }
+        })
+        .collect();
+    let clusters = build_clusters(&splits);
+
+    // Seeded groups first, in seed (weight) order: their legend lines are
+    // the profile's template bytes, verbatim.
+    let mut seeded_rows: HashMap<usize, String> = HashMap::new();
+    let mut legend: Vec<String> = Vec::new();
+    let mut group_ids: Vec<usize> = groups.keys().copied().collect();
+    group_ids.sort_unstable();
+    for template_idx in group_ids {
+        if legend.len() >= MAX_TEMPLATES {
+            break;
+        }
+        let (Some(members), Some(parts)) = (groups.get(&template_idx), seeds.get(template_idx))
+        else {
+            continue;
+        };
+        let Some((alias, _)) = pool.take() else { break };
+        legend.push(format!("{alias}={}", parts.join(&slot.to_string())));
+        for &line_idx in members {
+            let Some(claim) = claims.get(&line_idx) else { continue };
+            let mut row = alias.clone();
+            for value in &claim.values {
+                row.push(sep);
+                row.push_str(value);
+            }
+            if claim.cr {
+                row.push('\r');
+            }
+            seeded_rows.insert(line_idx, row);
+        }
+    }
 
     // Rank repeated clusters by saved fixed text, hand out cheap aliases.
     let mut repeated: Vec<&Cluster<'_>> = clusters
@@ -495,8 +617,8 @@ fn encode_pass(text: &str, meter: &dyn TokenMeter, seeds: &[Vec<Option<String>>]
     // line index -> row plan (alias + per-wildcard trim amounts)
     let mut rows: HashMap<usize, usize> = HashMap::new();
     let mut plans: Vec<RowPlan> = Vec::new();
-    let mut legend: Vec<String> = Vec::new();
-    for cluster in repeated.iter().take(MAX_TEMPLATES) {
+    let self_budget = MAX_TEMPLATES.saturating_sub(legend.len());
+    for cluster in repeated.iter().take(self_budget) {
         let Some((alias, _)) = pool.take() else { break };
         let (template, slots) = choose_template(cluster, &splits, slot, sep, &alias, meter);
         legend.push(format!("{alias}={template}"));
@@ -512,6 +634,11 @@ fn encode_pass(text: &str, meter: &dyn TokenMeter, seeds: &[Vec<Option<String>>]
 
     let mut body = String::new();
     for (idx, &full) in raw_lines.iter().enumerate() {
+        if let Some(row) = seeded_rows.get(&idx) {
+            body.push_str(row);
+            body.push('\n');
+            continue;
+        }
         let plan = rows.get(&idx).and_then(|&i| plans.get(i));
         match (plan, splits.get(idx).and_then(Option::as_ref)) {
             (Some(plan), Some(split)) => body.push_str(&render_row(plan, split, sep)),
@@ -568,19 +695,25 @@ pub fn encode_extern(
     let Some(&(slot_name, slot)) = SLOTS.iter().find(|(_, ch)| !text.contains(*ch)) else {
         return plain;
     };
-    // Usable entries, kept parallel: seeds[i] rebuilds entries with alias
-    // aliases[i]. The file's slot char never appears in the artifact.
+    // Usable entries, kept parallel: templates[i] carries alias aliases[i].
+    // The file's slot char never appears in the artifact.
     let mut aliases: Vec<&str> = Vec::new();
-    let mut seeds: Vec<Vec<Option<String>>> = Vec::new();
+    let mut templates: Vec<Vec<String>> = Vec::new();
     for (alias, parts) in &legend.entries {
         if text.contains(alias.as_str()) || alias.contains(sep) || alias.contains(slot) {
             continue;
         }
-        let Some(segs) = seed_to_segs(parts) else { continue };
+        if parts.is_empty()
+            || parts
+                .iter()
+                .any(|p| p.contains('\n') || p.contains('\r'))
+        {
+            continue;
+        }
         aliases.push(alias);
-        seeds.push(segs);
+        templates.push(parts.clone());
     }
-    if seeds.is_empty() {
+    if templates.is_empty() {
         return plain;
     }
     // Self-learned aliases must never collide with the file's.
@@ -592,56 +725,78 @@ pub fn encode_extern(
     if ends_with_nl {
         raw_lines.pop();
     }
-    let splits: Vec<Option<Split<'_>>> = raw_lines.iter().map(|&l| split_line(l)).collect();
-    let clusters = build_clusters(&splits, &seeds);
 
-    // Extern clusters pay from the first member — their legend is already
-    // in the reader's cached prefix. Rows render up front so the
-    // per-cluster gate can measure them against the lines they replace.
-    // Always bare slots: the file's templates are frozen bytes.
+    // Glob pre-match against the file's templates (sub-word parts and all).
+    // Extern groups pay from the first member — their legend is already in
+    // the reader's cached prefix — but each group must still beat the
+    // lines it replaces; a refused group releases its lines to clustering.
+    let claims = claim_lines(&raw_lines, &templates);
+    let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (&line_idx, claim) in &claims {
+        groups.entry(claim.template_idx).or_default().push(line_idx);
+    }
+    for members in groups.values_mut() {
+        members.sort_unstable();
+    }
     let mut ext_rows: HashMap<usize, String> = HashMap::new();
     let mut used: Vec<usize> = Vec::new();
-    for cluster in &clusters {
-        let Some(seed_idx) = cluster.seed_idx else { continue };
-        if cluster.members.is_empty() {
+    let mut group_ids: Vec<usize> = groups.keys().copied().collect();
+    group_ids.sort_unstable();
+    for template_idx in group_ids {
+        let (Some(members), Some(alias)) =
+            (groups.get(&template_idx), aliases.get(template_idx))
+        else {
             continue;
-        }
-        let Some(alias) = aliases.get(seed_idx) else { continue };
-        let (_, wild) = cluster.template(slot);
-        let plan = RowPlan {
-            alias: (*alias).to_string(),
-            slots: wild.iter().map(|&p| (p, 0, 0)).collect(),
         };
         let mut row_tokens = 0usize;
         let mut line_tokens = 0usize;
-        let mut cluster_rows: Vec<(usize, String)> = Vec::new();
-        for &line_idx in &cluster.members {
-            let Some(Some(split)) = splits.get(line_idx) else { continue };
-            let row = render_row(&plan, split, sep);
+        let mut group_rows: Vec<(usize, String)> = Vec::new();
+        for &line_idx in members {
+            let Some(claim) = claims.get(&line_idx) else { continue };
+            let mut row = (*alias).to_string();
+            for value in &claim.values {
+                row.push(sep);
+                row.push_str(value);
+            }
+            if claim.cr {
+                row.push('\r');
+            }
             row_tokens += meter.count(&row);
             line_tokens += meter.count(raw_lines.get(line_idx).copied().unwrap_or_default());
-            cluster_rows.push((line_idx, row));
+            group_rows.push((line_idx, row));
         }
-        if row_tokens >= line_tokens {
-            continue; // members ride verbatim instead
+        if group_rows.is_empty() || row_tokens >= line_tokens {
+            continue; // members go back to clustering instead
         }
-        ext_rows.extend(cluster_rows);
-        used.push(seed_idx);
+        ext_rows.extend(group_rows);
+        used.push(template_idx);
     }
     if used.is_empty() {
         return plain;
     }
-    // `used` in file order — deterministic regardless of bucket iteration.
-    used.sort_unstable();
+    // `used` is already in file order — group_ids were sorted.
     let used_aliases: String = used
         .iter()
         .filter_map(|&i| aliases.get(i).copied())
         .collect();
 
+    let splits: Vec<Option<Split<'_>>> = raw_lines
+        .iter()
+        .enumerate()
+        .map(|(idx, &l)| {
+            if ext_rows.contains_key(&idx) {
+                None
+            } else {
+                split_line(l)
+            }
+        })
+        .collect();
+    let clusters = build_clusters(&splits);
+
     // Self-learned clusters commit inline exactly like the plain pass.
     let mut repeated: Vec<&Cluster<'_>> = clusters
         .iter()
-        .filter(|c| c.seed_idx.is_none() && c.members.len() >= 2)
+        .filter(|c| c.members.len() >= 2)
         .collect();
     repeated.sort_by_key(|c| {
         let fixed: usize = c.segs.iter().flatten().map(|s| s.len()).sum();

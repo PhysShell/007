@@ -338,8 +338,14 @@ hostile input) through the actual `o7 judge` binary.
    (−50.3% vs −34.7%) and the strict referee drops the key demand
    automatically — the artifact comes out keyless; the broker case
    keeps its key (−43.9% vs −14.5%, whole cross-file stems, not
-   affixes). Freezing *sub-word* templates into the extern file needs
-   glob-style sealed matching — the natural next extern rung.
+   affixes). *Done* next: frozen templates now match by glob (parts may
+   start or end mid-word), which replaced the sealed-cluster machinery
+   with a per-line pre-match and let `learn` freeze every cluster in
+   two shapes — bare (general, feeds seed_phrases) and sub-word refined
+   (specific, cheaper rows) — tried heaviest-first, measured as always.
+   Sub-word extern keys close the loop: MSBuild slices −65.7%/−67.1%
+   cold vs refined plain's −50.3%/−51.0%, broker slice −57.0%
+   (868 → 373 tokens), byte-exact, fail-closed.
 4. **Output-side notation** — the reverse direction: let the subagent *reply*
    in the legend's notation and expand deterministically outside the model.
    Output tokens cost ~5× input; this is where the same trick pays most, and

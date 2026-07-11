@@ -168,12 +168,15 @@ ones — measured on the same slices where seeding changed nothing:
 the 60-line MSBuild slices go −22.0% → −34.7% and −24.1% → −37.6% cold
 (654-token key), and the ownsharp broker slice against a sectorts-learned
 legend goes −9.0% → **−43.9%** cold (790 → 487 tokens, 547-token key),
-byte-exact under `cmp`. Since sub-word slots landed, the *plain* pass
-alone reaches −50.3%/−51.0% on those MSBuild slices — better than the
-word-boundary key — and the strict referee returns the keyless artifact
-there automatically; the broker case still keeps its key (−43.9% vs
-−14.5%). A sub-word extern file needs glob-style sealed matching: the
-next extern rung.
+byte-exact under `cmp`. Frozen templates (profile seeds and extern
+entries alike) are matched by *glob* now — parts may start or end
+mid-word — so `qodec learn` freezes each cluster in two shapes: bare
+whole-word slots (general across files; its long parts also feed
+`seed_phrases`) and sub-word refined (corpus-specific, far cheaper per
+row), tried heaviest-first. With sub-word keys the extern story closes:
+the MSBuild slices reach **−65.7%/−67.1%** cold (refined plain stops at
+−50.3%/−51.0%) and the broker slice **−57.0%** (868 → 373 tokens, key
+overhead 42), all byte-exact, all fail-closed without the exact file.
 
 ## Codecs
 
