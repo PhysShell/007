@@ -148,6 +148,28 @@ bytes. Measured on the real ownsharp log: in-artifact key overhead drops
 instead of traveling in every message (an in-band `mine` legend differs
 per artifact and could never be pre-cached).
 
+The same move exists for whole *templates* — this is where the byte-stable
+seeding above pays off:
+
+```bash
+./target/release/qodec legend --templates --profile repo-profile.json -o qodec-tmpl-legend.txt
+./target/release/qodec encode -i today.log --codec tmpl --extern-templates qodec-tmpl-legend.txt --report
+./target/release/qodec decode -i artifact.q1 --extern-templates qodec-tmpl-legend.txt
+```
+
+Lines matching a frozen template emit rows against the *file's* alias, no
+in-artifact legend line; `ext=`/`used=` params on the tmpl container pin
+the file by checksum and decode fails closed without it. Each used
+template must beat the lines it replaces, the whole artifact must beat the
+plain one strictly (a tie keeps the keyless artifact), and an alias
+occurring naturally in the input skips its entry. With the legend cost
+out of the artifact, cross-file templates stop losing to chance-agreement
+ones — measured on the same slices where seeding changed nothing:
+the 60-line MSBuild slices go −22.0% → −34.7% and −24.1% → −37.6% cold
+(654-token key), and the ownsharp broker slice against a sectorts-learned
+legend goes −9.0% → **−43.9%** cold (790 → 487 tokens, 547-token key),
+byte-exact under `cmp`.
+
 ## Codecs
 
 | codec | idea | roundtrip |

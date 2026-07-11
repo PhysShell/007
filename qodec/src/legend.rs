@@ -218,6 +218,149 @@ pub fn expand(c: &Container, decoded_inner: &str, legend: Option<&ExternLegend>)
     Ok(out)
 }
 
+const THEADER: &str = "# qodec extern templates v1";
+
+/// The tmpl counterpart of the phrase legend: whole *templates* frozen
+/// into a cached-prefix file. An artifact encoded against it carries only
+/// rows (`ext=`/`used=` params on the tmpl container pin the file), so the
+/// per-artifact legend cost — the reason cross-file templates lose to
+/// chance-agreement ones — disappears. Same fail-closed contract: decode
+/// refuses without the exact bytes.
+#[derive(Debug)]
+pub struct TemplateLegend {
+    /// The slot char this file uses between fixed parts (declared in the
+    /// header by name, so the file survives copy-paste unambiguously).
+    pub slot: char,
+    /// alias -> fixed parts; wildcards sit between consecutive parts.
+    pub entries: Vec<(String, Vec<String>)>,
+    pub sum: String,
+}
+
+impl TemplateLegend {
+    pub fn load(path: &Path) -> Result<Self> {
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        Self::parse(&text).with_context(|| format!("parsing {}", path.display()))
+    }
+
+    pub fn parse(text: &str) -> Result<Self> {
+        let mut lines = text.lines();
+        let header = lines.next().map(str::trim).unwrap_or_default();
+        let Some(rest) = header.strip_prefix(THEADER) else {
+            bail!("not an extern template legend (first line must start with {THEADER:?})");
+        };
+        let slot_name = rest
+            .trim()
+            .strip_prefix("slot=")
+            .context("template legend header missing slot=<name>")?;
+        let &(_, slot) = crate::tmpl::SLOTS
+            .iter()
+            .find(|(name, _)| *name == slot_name)
+            .with_context(|| format!("unknown slot name {slot_name:?} in template legend"))?;
+        let mut entries: Vec<(String, Vec<String>)> = Vec::new();
+        for line in lines {
+            let line = line.trim_end_matches('\r');
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let Some((alias, template)) = line.split_once('=') else {
+                bail!("malformed template legend line {line:?}");
+            };
+            if alias.is_empty() || template.is_empty() {
+                bail!("empty alias or template in legend line {line:?}");
+            }
+            // Same flat-`used` ambiguity as the phrase legend: refuse
+            // duplicates up front instead of reconstructing wrong bytes.
+            if entries.iter().any(|(a, _)| a == alias) {
+                bail!("duplicate alias {alias:?} in extern template legend");
+            }
+            let parts: Vec<String> = template.split(slot).map(str::to_string).collect();
+            entries.push((alias.to_string(), parts));
+        }
+        if entries.is_empty() {
+            bail!("extern template legend has no entries");
+        }
+        Ok(Self {
+            slot,
+            sum: fnv1a(text.as_bytes()),
+            entries,
+        })
+    }
+}
+
+/// Freeze profile templates into legend text. The slot char is chosen to
+/// collide with as few templates as possible (ties in SLOTS order); the
+/// colliders are skipped — an entry whose own bytes contain the slot would
+/// parse back into different parts, and while encode and decode would
+/// still agree (both read the file), it would silently stop matching the
+/// lines it was learned from.
+pub fn generate_templates(
+    profile: &Profile,
+    meter: &dyn TokenMeter,
+    top: usize,
+) -> Result<String> {
+    let templates: Vec<Vec<String>> = profile
+        .seed_templates(top)
+        .into_iter()
+        .filter(|parts| {
+            parts
+                .iter()
+                .all(|p| !p.contains('\n') && !p.contains('\r'))
+        })
+        .collect();
+    if templates.is_empty() {
+        bail!("profile has no templates to freeze — run `qodec learn` first");
+    }
+    let (slot_name, slot) = crate::tmpl::SLOTS
+        .iter()
+        .min_by_key(|(_, ch)| {
+            templates
+                .iter()
+                .filter(|parts| parts.iter().any(|p| p.contains(*ch)))
+                .count()
+        })
+        .copied()
+        .context("SLOTS is non-empty")?;
+    let kept: Vec<&Vec<String>> = templates
+        .iter()
+        .filter(|parts| parts.iter().all(|p| !p.contains(slot)))
+        .collect();
+    if kept.is_empty() {
+        bail!("every profile template contains every slot candidate — nothing freezable");
+    }
+    // Aliases must stay clear of template bytes, every slot candidate and
+    // every row separator — the file outlives any single artifact's probe.
+    let exclusion: String = kept
+        .iter()
+        .flat_map(|parts| parts.iter())
+        .map(String::as_str)
+        .chain(std::iter::once("¿«‹°|\t¦·"))
+        .collect();
+    let mut pool = crate::alias::AliasPool::build(crate::alias::Alphabet::Auto, meter, &exclusion);
+    let mut out = String::new();
+    out.push_str(THEADER);
+    out.push_str(&format!(" slot={slot_name}\n"));
+    out.push_str("# generated from a qodec profile; keep this file stable —\n");
+    out.push_str("# artifacts pin its checksum and fail closed on drift.\n");
+    let mut emitted = 0usize;
+    for parts in kept {
+        let Some((alias, alias_cost)) = pool.take() else { break };
+        let display = parts.join(&slot.to_string());
+        if alias_cost >= meter.count(&display) {
+            continue;
+        }
+        out.push_str(&alias);
+        out.push('=');
+        out.push_str(&display);
+        out.push('\n');
+        emitted += 1;
+    }
+    if emitted == 0 {
+        bail!("no profile template beat its alias under this meter");
+    }
+    Ok(out)
+}
+
 /// FNV-1a 64 over raw bytes — a stable, dependency-free fingerprint. Not
 /// cryptographic; it guards against version drift, not adversaries.
 fn fnv1a(bytes: &[u8]) -> String {

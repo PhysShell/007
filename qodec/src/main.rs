@@ -131,6 +131,11 @@ struct EncodeArgs {
     /// prefix. The artifact pins the file's checksum.
     #[arg(long)]
     extern_legend: Option<PathBuf>,
+    /// Extern template legend (`qodec legend --templates`), tmpl codec
+    /// only: matching lines emit rows against the file's templates, no
+    /// in-artifact legend line. The artifact pins the file's checksum.
+    #[arg(long)]
+    extern_templates: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -141,6 +146,10 @@ struct DecodeArgs {
     /// refuse to decode without the exact file).
     #[arg(long)]
     extern_legend: Option<PathBuf>,
+    /// The extern template legend the artifact was encoded against
+    /// (tmpl artifacts with `ext=` refuse to decode without the exact file).
+    #[arg(long)]
+    extern_templates: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -148,6 +157,10 @@ struct LegendArgs {
     /// Profile from `qodec learn`.
     #[arg(long)]
     profile: PathBuf,
+    /// Freeze tmpl templates instead of phrases (`encode --extern-templates`
+    /// consumes the result; the two file kinds are separate keys).
+    #[arg(long)]
+    templates: bool,
     /// How many phrases to freeze.
     #[arg(long, default_value_t = 48)]
     top: usize,
@@ -236,10 +249,16 @@ fn main() -> Result<()> {
                 .as_deref()
                 .map(qodec::legend::ExternLegend::load)
                 .transpose()?;
-            write_output(
-                &a.io,
-                &qodec::decode_with_extern(&text, extern_legend.as_ref())?,
-            )
+            let extern_templates = a
+                .extern_templates
+                .as_deref()
+                .map(qodec::legend::TemplateLegend::load)
+                .transpose()?;
+            let keys = qodec::Keys {
+                phrases: extern_legend.as_ref(),
+                templates: extern_templates.as_ref(),
+            };
+            write_output(&a.io, &qodec::decode_with_keys(&text, &keys)?)
         }
         Cmd::Legend(a) => cmd_legend(&a),
         Cmd::Slice(a) => cmd_slice(&a),
@@ -382,11 +401,31 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
         .as_deref()
         .map(qodec::legend::ExternLegend::load)
         .transpose()?;
-    if probe && extern_legend.is_some() {
+    if probe && (extern_legend.is_some() || a.extern_templates.is_some()) {
         bail!(
             "probe teaches the in-band key; an extern legend is out-of-band \
-             by design — probe without --extern-legend"
+             by design — probe without --extern-legend/--extern-templates"
         );
+    }
+    if let Some(path) = &a.extern_templates {
+        // This rung is deliberately narrow: extern templates apply to the
+        // tmpl codec alone, one key per artifact. Composing with the
+        // phrase legend or squeeze is a future rung.
+        if kind != CodecKind::Tmpl {
+            bail!("--extern-templates works with --codec tmpl only");
+        }
+        if extern_legend.is_some() {
+            bail!("--extern-templates and --extern-legend do not compose yet — pick one key");
+        }
+        if a.profile.is_some() {
+            bail!("--extern-templates already is the frozen profile — drop --profile");
+        }
+        let tlegend = qodec::legend::TemplateLegend::load(path)?;
+        let encoded = qodec::tmpl::encode_extern(&text, meter.as_ref(), &tlegend);
+        if a.report {
+            report_tokens(&text, &encoded, meter.as_ref());
+        }
+        return write_output(&a.io, &encoded);
     }
 
     let (to_encode, substitution) = match &extern_legend {
@@ -405,21 +444,7 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
     };
 
     if a.report {
-        let tokens_in = meter.count(&text);
-        let tokens_cold = meter.count(&encoded);
-        let overhead = container::overhead(&encoded, meter.as_ref());
-        let warm = tokens_cold.saturating_sub(overhead);
-        eprintln!(
-            "qodec: {} -> {} tokens (cold, {:+.1}%), body-only {} (warm, {:+.1}%), \
-             key overhead {} [{}]",
-            tokens_in,
-            tokens_cold,
-            pct(tokens_in, tokens_cold),
-            warm,
-            pct(tokens_in, warm),
-            overhead,
-            meter.name(),
-        );
+        report_tokens(&text, &encoded, meter.as_ref());
     }
 
     let payload = if probe {
@@ -430,11 +455,36 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
     write_output(&a.io, &payload)
 }
 
+fn report_tokens(text: &str, encoded: &str, meter: &dyn qodec::meter::TokenMeter) {
+    let tokens_in = meter.count(text);
+    let tokens_cold = meter.count(encoded);
+    let overhead = container::overhead(encoded, meter);
+    let warm = tokens_cold.saturating_sub(overhead);
+    eprintln!(
+        "qodec: {} -> {} tokens (cold, {:+.1}%), body-only {} (warm, {:+.1}%), \
+         key overhead {} [{}]",
+        tokens_in,
+        tokens_cold,
+        pct(tokens_in, tokens_cold),
+        warm,
+        pct(tokens_in, warm),
+        overhead,
+        meter.name(),
+    );
+}
+
 fn cmd_legend(a: &LegendArgs) -> Result<()> {
     let profile = qodec::profile::Profile::load(&a.profile)?;
     let meter = by_name(&a.meter)?;
-    let text = qodec::legend::generate(&profile, meter.as_ref(), a.top)?;
-    let entries = text.lines().filter(|l| l.contains('=')).count();
+    let text = if a.templates {
+        qodec::legend::generate_templates(&profile, meter.as_ref(), a.top)?
+    } else {
+        qodec::legend::generate(&profile, meter.as_ref(), a.top)?
+    };
+    let entries = text
+        .lines()
+        .filter(|l| !l.starts_with('#') && l.contains('='))
+        .count();
     match &a.output {
         Some(path) => {
             fs::write(path, &text).with_context(|| format!("writing {}", path.display()))?;

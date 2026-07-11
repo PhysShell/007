@@ -25,8 +25,10 @@ use crate::meter::TokenMeter;
 
 /// Column separator between slot values, probed against the whole input.
 const SEPS: &[(&str, char)] = &[("pipe", '|'), ("tab", '\t'), ("broke", '¦'), ("dot", '·')];
-/// Placeholder for a wildcard position inside a legend template.
-const SLOTS: &[(&str, char)] = &[("quest", '¿'), ("laquo", '«'), ("langle", '‹'), ("degree", '°')];
+/// Placeholder for a wildcard position inside a legend template. Shared
+/// with the extern template legend, which declares its own pick by name.
+pub(crate) const SLOTS: &[(&str, char)] =
+    &[("quest", '¿'), ("laquo", '«'), ("langle", '‹'), ("degree", '°')];
 /// Same legend bound as the miners.
 const MAX_TEMPLATES: usize = 64;
 /// Fraction of word positions that must match to join a cluster.
@@ -88,6 +90,9 @@ struct Cluster<'a> {
     /// erode, so its legend line stays byte-identical to the profile's —
     /// the property that makes artifacts diff-stable across runs.
     sealed: bool,
+    /// Which seed this sealed cluster came from — `encode_extern` maps it
+    /// back to the extern file's alias through this index.
+    seed_idx: Option<usize>,
 }
 
 impl<'a> Cluster<'a> {
@@ -96,14 +101,16 @@ impl<'a> Cluster<'a> {
             segs: split.segs.iter().map(|s| Some(*s)).collect(),
             members: vec![line_idx],
             sealed: false,
+            seed_idx: None,
         }
     }
 
-    fn from_profile(segs: &'a [Option<String>]) -> Self {
+    fn from_profile(segs: &'a [Option<String>], seed_idx: usize) -> Self {
         Self {
             segs: segs.iter().map(Option::as_deref).collect(),
             members: Vec::new(),
             sealed: true,
+            seed_idx: Some(seed_idx),
         }
     }
 
@@ -199,11 +206,11 @@ fn build_clusters<'a>(
     seeds: &'a [Vec<Option<String>>],
 ) -> Vec<Cluster<'a>> {
     let mut buckets: HashMap<usize, Vec<Cluster<'a>>> = HashMap::new();
-    for seed in seeds {
+    for (idx, seed) in seeds.iter().enumerate() {
         buckets
             .entry(seed.len())
             .or_default()
-            .push(Cluster::from_profile(seed));
+            .push(Cluster::from_profile(seed, idx));
     }
     for (idx, split) in splits.iter().enumerate() {
         let Some(split) = split else { continue };
@@ -396,7 +403,175 @@ fn encode_pass(text: &str, meter: &dyn TokenMeter, seeds: &[Vec<Option<String>>]
     }
 }
 
-pub fn decode(c: &Container) -> Result<String> {
+/// `encode` against an extern template legend (`qodec legend --templates`):
+/// lines matching a frozen template emit rows that reference the *file's*
+/// alias, and `ext=`/`used=` params pin the file by checksum — the legend
+/// line itself costs nothing in-artifact, which is exactly what cross-file
+/// templates need to stop losing to chance-agreement ones. Self-learned
+/// clusters still commit inline like plain tmpl. Guarantees:
+/// - each used extern template must beat the lines it replaces (a template
+///   whose slot values carry the whole line is passed through);
+/// - the whole artifact must beat the plain one *strictly* — a tie goes to
+///   plain, which demands no key;
+/// - an extern alias occurring anywhere in the input skips its entry, so
+///   expansion can never touch pre-existing bytes.
+pub fn encode_extern(
+    text: &str,
+    meter: &dyn TokenMeter,
+    legend: &crate::legend::TemplateLegend,
+) -> String {
+    let plain = encode(text, meter);
+    if text.is_empty() {
+        return plain;
+    }
+    let Some(&(sep_name, sep)) = SEPS.iter().find(|(_, ch)| !text.contains(*ch)) else {
+        return plain;
+    };
+    let Some(&(slot_name, slot)) = SLOTS.iter().find(|(_, ch)| !text.contains(*ch)) else {
+        return plain;
+    };
+    // Usable entries, kept parallel: seeds[i] rebuilds entries with alias
+    // aliases[i]. The file's slot char never appears in the artifact.
+    let mut aliases: Vec<&str> = Vec::new();
+    let mut seeds: Vec<Vec<Option<String>>> = Vec::new();
+    for (alias, parts) in &legend.entries {
+        if text.contains(alias.as_str()) || alias.contains(sep) || alias.contains(slot) {
+            continue;
+        }
+        let Some(segs) = seed_to_segs(parts) else { continue };
+        aliases.push(alias);
+        seeds.push(segs);
+    }
+    if seeds.is_empty() {
+        return plain;
+    }
+    // Self-learned aliases must never collide with the file's.
+    let exclusion = format!("{text}{sep}{slot}{}", aliases.concat());
+    let mut pool = AliasPool::build(Alphabet::Auto, meter, &exclusion);
+
+    let ends_with_nl = text.ends_with('\n');
+    let mut raw_lines: Vec<&str> = text.split('\n').collect();
+    if ends_with_nl {
+        raw_lines.pop();
+    }
+    let splits: Vec<Option<Split<'_>>> = raw_lines.iter().map(|&l| split_line(l)).collect();
+    let clusters = build_clusters(&splits, &seeds);
+
+    // Extern clusters pay from the first member — their legend is already
+    // in the reader's cached prefix. Rows render up front so the
+    // per-cluster gate can measure them against the lines they replace.
+    let mut ext_rows: HashMap<usize, String> = HashMap::new();
+    let mut used: Vec<usize> = Vec::new();
+    for cluster in &clusters {
+        let Some(seed_idx) = cluster.seed_idx else { continue };
+        if cluster.members.is_empty() {
+            continue;
+        }
+        let Some(alias) = aliases.get(seed_idx) else { continue };
+        let (_, wild) = cluster.template(slot);
+        let mut row_tokens = 0usize;
+        let mut line_tokens = 0usize;
+        let mut cluster_rows: Vec<(usize, String)> = Vec::new();
+        for &line_idx in &cluster.members {
+            let Some(Some(split)) = splits.get(line_idx) else { continue };
+            let mut row = String::from(*alias);
+            for &pos in &wild {
+                row.push(sep);
+                row.push_str(split.segs.get(pos).copied().unwrap_or_default());
+            }
+            if split.cr {
+                row.push('\r');
+            }
+            row_tokens += meter.count(&row);
+            line_tokens += meter.count(raw_lines.get(line_idx).copied().unwrap_or_default());
+            cluster_rows.push((line_idx, row));
+        }
+        if row_tokens >= line_tokens {
+            continue; // members ride verbatim instead
+        }
+        ext_rows.extend(cluster_rows);
+        used.push(seed_idx);
+    }
+    if used.is_empty() {
+        return plain;
+    }
+    // `used` in file order — deterministic regardless of bucket iteration.
+    used.sort_unstable();
+    let used_aliases: String = used
+        .iter()
+        .filter_map(|&i| aliases.get(i).copied())
+        .collect();
+
+    // Self-learned clusters commit inline exactly like the plain pass.
+    let mut repeated: Vec<&Cluster<'_>> = clusters
+        .iter()
+        .filter(|c| c.seed_idx.is_none() && c.members.len() >= 2)
+        .collect();
+    repeated.sort_by_key(|c| {
+        let fixed: usize = c.segs.iter().flatten().map(|s| s.len()).sum();
+        (
+            std::cmp::Reverse((c.members.len() - 1) * fixed),
+            c.members.first().copied().unwrap_or_default(),
+        )
+    });
+    let mut rows: HashMap<usize, (String, Vec<usize>)> = HashMap::new();
+    let mut inline_legend: Vec<String> = Vec::new();
+    for cluster in repeated.iter().take(MAX_TEMPLATES) {
+        let Some((alias, _)) = pool.take() else { break };
+        let (template, wild) = cluster.template(slot);
+        inline_legend.push(format!("{alias}={template}"));
+        for &line_idx in &cluster.members {
+            rows.insert(line_idx, (alias.clone(), wild.clone()));
+        }
+    }
+
+    let mut body = String::new();
+    for (idx, &full) in raw_lines.iter().enumerate() {
+        if let Some(row) = ext_rows.get(&idx) {
+            body.push_str(row);
+            body.push('\n');
+            continue;
+        }
+        match (rows.get(&idx), splits.get(idx).and_then(Option::as_ref)) {
+            (Some((alias, wild)), Some(split)) => {
+                body.push_str(alias);
+                for &pos in wild {
+                    body.push(sep);
+                    body.push_str(split.segs.get(pos).copied().unwrap_or_default());
+                }
+                if split.cr {
+                    body.push('\r');
+                }
+            }
+            _ => body.push_str(full),
+        }
+        body.push('\n');
+    }
+
+    let candidate = container::emit(&Container {
+        codec: "tmpl".to_string(),
+        params: vec![
+            ("sep".to_string(), sep_name.to_string()),
+            ("slot".to_string(), slot_name.to_string()),
+            ("n".to_string(), inline_legend.len().to_string()),
+            (
+                "nl".to_string(),
+                if ends_with_nl { "1" } else { "0" }.to_string(),
+            ),
+            ("ext".to_string(), legend.sum.clone()),
+            ("used".to_string(), used_aliases),
+        ],
+        legend: inline_legend,
+        body,
+    });
+    if meter.count(&candidate) < meter.count(&plain) {
+        candidate
+    } else {
+        plain
+    }
+}
+
+pub fn decode(c: &Container, templates: Option<&crate::legend::TemplateLegend>) -> Result<String> {
     let slot_name = c.param("slot").context("tmpl container missing slot")?;
     let &(_, slot) = SLOTS
         .iter()
@@ -415,6 +590,31 @@ pub fn decode(c: &Container) -> Result<String> {
             bail!("malformed tmpl legend line {line:?}");
         };
         entries.push((alias, template.split(slot).collect()));
+    }
+    // An `ext=` param pins an extern template legend: rows may reference
+    // its aliases without any in-artifact legend line. Fail closed — the
+    // exact file or nothing — and only admit aliases the encoder recorded
+    // in `used`, so a file entry can never touch rows it did not emit.
+    if let Some(sum) = c.param("ext") {
+        let Some(legend) = templates else {
+            bail!(
+                "artifact pins an extern template legend (ext={sum}); \
+                 pass --extern-templates with that exact file"
+            );
+        };
+        if legend.sum != sum {
+            bail!(
+                "extern template legend mismatch: artifact pins ext={sum}, file has {} — \
+                 refusing to reconstruct wrong bytes",
+                legend.sum
+            );
+        }
+        let used = c.param("used").unwrap_or_default();
+        for (alias, parts) in &legend.entries {
+            if used.contains(alias.as_str()) {
+                entries.push((alias.as_str(), parts.iter().map(String::as_str).collect()));
+            }
+        }
     }
     entries.sort_by_key(|(alias, _)| std::cmp::Reverse(alias.len()));
 
