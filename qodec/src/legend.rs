@@ -58,6 +58,12 @@ impl ExternLegend {
             if alias.is_empty() || phrase.is_empty() {
                 bail!("empty alias or phrase in legend line {line:?}");
             }
+            // Same trust-boundary rule as the template legend: a used
+            // alias becomes a container header token, so whitespace in it
+            // would break the artifact (CodeRabbit review on PR #37).
+            if alias.chars().any(char::is_whitespace) {
+                bail!("alias {alias:?} must not contain whitespace");
+            }
             // A hand-edited or merged legend with two entries per alias
             // would silently reconstruct the wrong phrase on expand — the
             // artifact's `used` list is flat and cannot tell them apart
@@ -268,6 +274,14 @@ impl TemplateLegend {
             };
             if alias.is_empty() || template.is_empty() {
                 bail!("empty alias or template in legend line {line:?}");
+            }
+            // A used alias travels verbatim inside the container header's
+            // space-separated `used=` param — whitespace in it would break
+            // the artifact into a confusing "malformed header" refusal
+            // instead of a clear key error. Parse is the trust boundary
+            // for hand-edited files (CodeRabbit review on PR #37).
+            if alias.chars().any(char::is_whitespace) {
+                bail!("alias {alias:?} must not contain whitespace");
             }
             // Same flat-`used` ambiguity as the phrase legend: refuse
             // duplicates up front instead of reconstructing wrong bytes.

@@ -225,6 +225,16 @@ fn duplicate_alias_and_bad_header_are_rejected() -> Result<()> {
         TemplateLegend::parse(phrase_file).is_err(),
         "a phrase legend is not a template legend"
     );
+    // A used alias rides in the space-separated container header, so a
+    // hand-edited alias with whitespace must refuse at parse — the trust
+    // boundary — not surface later as a malformed-header decode error.
+    let spaced = "# qodec extern templates v1 slot=quest\nmy alias=a ¿ b\n";
+    anyhow::ensure!(
+        TemplateLegend::parse(spaced)
+            .err()
+            .is_some_and(|e| format!("{e:#}").contains("whitespace")),
+        "whitespace alias must refuse"
+    );
     Ok(())
 }
 
