@@ -11,7 +11,7 @@
   "question": "At what line and column in File748.cs is the CS8618 warning reported?",
   "accept": [
    "748,16",
-   "748"
+   "line 748, column 16"
   ]
  },
  {
