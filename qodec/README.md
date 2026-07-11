@@ -155,6 +155,33 @@ words∪SAM pool deep ranks, so the model sees its real distribution). Cross-for
 MSBuild-trained ranker on the analyzer log recovers only 9%): train where
 you encode — the profile is per-repo anyway.
 
+The loop closes with a proposer that is *not* the lab:
+
+```bash
+# 1. what did the codecs leave on the table?
+./target/release/qodec residual -i audit.txt --top 12
+# 2. an LLM drafts parametric span rules from the brief (out of band)
+# 3. keep only what inverts byte-exactly and wins measured tokens
+./target/release/qodec rules verify --draft draft.txt -i audit.txt -i other.txt -o verified.txt
+# 4. exploit: pre-pass before any codec, checksum-pinned like the legends
+./target/release/qodec encode -i excerpt.txt --codec squeeze --rules verified.txt --report
+./target/release/qodec decode -i artifact.q1 --rules verified.txt
+```
+
+A rule is a glob template applied to spans *inside* lines — fixed parts,
+single-word wildcards, anchored both ends — rewritten to
+`⌈alias|value|…⌉` with probed delimiters. The verifier is the whole
+point: proposals are never trusted, only measured (byte-exact inversion on
+every file touched, strict token win overall) — in the first live run it
+kept 1 of 3 rules this session's own proposer drafted. Honest scope from
+that run: against `squeeze` the k-hole rule costs ~2 more tokens per
+occurrence than the miners' k+1-literal split, so in-artifact it only wins
+at very low occurrence counts (measured: 2-finding excerpt 151 vs 153
+cold; 4-finding 272 vs 246 — mine amortizes its legend fast). The rules
+key's genuine edge is being *out-of-band and stable* where a mine legend
+is per-artifact by construction; structures the miners cannot split into
+literals (many short anchors) remain the open case for future proposers.
+
 Freeze the profile into a stable dictionary for a *cached prompt prefix*
 (CLAUDE.md / system prompt) — the warm story made real:
 

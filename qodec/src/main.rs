@@ -45,6 +45,14 @@ enum Cmd {
     /// into the profile. `encode --profile` then ranks probes by predicted
     /// gain — ordering only, acceptance stays measured.
     Train(TrainArgs),
+    /// Emit a proposer brief: the top repeated spans the miners see, with
+    /// counts and sample lines — food for an LLM drafting `rules` entries.
+    Residual(ResidualArgs),
+    /// The propose/verify loop's verifier: check drafted rules for
+    /// byte-exact inversion and measured token wins on real files, keep
+    /// survivors.
+    #[command(subcommand)]
+    Rules(RulesCmd),
     /// Run every codec over a corpus directory and print a measured table.
     Bench(BenchArgs),
     /// Probe alias candidates against a tokenizer — see what your aliases cost.
@@ -146,6 +154,10 @@ struct EncodeArgs {
     /// of the CPU.
     #[arg(long)]
     probe_budget: Option<usize>,
+    /// Verified rules key (`qodec rules verify`): parametric span rewrites
+    /// applied before any codec. The artifact pins the file's checksum.
+    #[arg(long)]
+    rules: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -160,6 +172,10 @@ struct DecodeArgs {
     /// (tmpl artifacts with `ext=` refuse to decode without the exact file).
     #[arg(long)]
     extern_templates: Option<PathBuf>,
+    /// The rules key the artifact was encoded against (`rules` artifacts
+    /// refuse to decode without the exact file).
+    #[arg(long)]
+    rules: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -212,6 +228,42 @@ struct TrainArgs {
     /// Candidates measured per file.
     #[arg(long, default_value_t = 160)]
     budget: usize,
+}
+
+#[derive(Args)]
+struct ResidualArgs {
+    /// File to analyze.
+    #[arg(short, long)]
+    input: PathBuf,
+    /// o200k | cl100k | approx
+    #[arg(long, default_value = "o200k")]
+    meter: String,
+    /// How many spans to show.
+    #[arg(long, default_value_t = 32)]
+    top: usize,
+}
+
+#[derive(Subcommand)]
+enum RulesCmd {
+    /// Verify drafted rules against real files; write the survivors.
+    Verify(RulesVerifyArgs),
+}
+
+#[derive(Args)]
+struct RulesVerifyArgs {
+    /// Drafted rules key (`# qodec rules v1 slot=<name>` + alias=template).
+    #[arg(long)]
+    draft: PathBuf,
+    /// Files to verify against (repeatable; every rule must invert
+    /// byte-exactly on every file, and win tokens on at least one).
+    #[arg(short, long)]
+    input: Vec<PathBuf>,
+    /// o200k | cl100k | approx
+    #[arg(long, default_value = "o200k")]
+    meter: String,
+    /// Where to write the surviving rules (stdout when omitted).
+    #[arg(short, long)]
+    output: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -283,9 +335,15 @@ fn main() -> Result<()> {
                 .as_deref()
                 .map(qodec::legend::TemplateLegend::load)
                 .transpose()?;
+            let rules_key = a
+                .rules
+                .as_deref()
+                .map(qodec::rules::RulesKey::load)
+                .transpose()?;
             let keys = qodec::Keys {
                 phrases: extern_legend.as_ref(),
                 templates: extern_templates.as_ref(),
+                rules: rules_key.as_ref(),
             };
             write_output(&a.io, &qodec::decode_with_keys(&text, &keys)?)
         }
@@ -293,6 +351,8 @@ fn main() -> Result<()> {
         Cmd::Slice(a) => cmd_slice(&a),
         Cmd::Learn(a) => cmd_learn(&a),
         Cmd::Train(a) => cmd_train(&a),
+        Cmd::Residual(a) => cmd_residual(&a),
+        Cmd::Rules(RulesCmd::Verify(a)) => cmd_rules_verify(&a),
         Cmd::Bench(a) => cmd_bench(&a),
         Cmd::Aliases(a) => cmd_aliases(&a),
         Cmd::Ppl(a) => cmd_ppl(&a),
@@ -434,11 +494,27 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
         .as_deref()
         .map(qodec::legend::ExternLegend::load)
         .transpose()?;
-    if probe && (extern_legend.is_some() || a.extern_templates.is_some()) {
+    if probe && (extern_legend.is_some() || a.extern_templates.is_some() || a.rules.is_some()) {
         bail!(
-            "probe teaches the in-band key; an extern legend is out-of-band \
-             by design — probe without --extern-legend/--extern-templates"
+            "probe teaches the in-band key; extern keys are out-of-band \
+             by design — probe without --extern-legend/--extern-templates/--rules"
         );
+    }
+    if let Some(path) = &a.rules {
+        // The rules pre-pass is codec-agnostic like the phrase legend, but
+        // key composition is a future rung — one key per artifact.
+        if extern_legend.is_some() || a.extern_templates.is_some() {
+            bail!("--rules and the legend keys do not compose yet — pick one");
+        }
+        let key = qodec::rules::RulesKey::load(path)?;
+        let applied = qodec::rules::apply(&text, &key, meter.as_ref())
+            .context("rules delimiters exhausted on this input")?;
+        let inner = qodec::encode_seeded(&applied.text, kind, meter.as_ref(), alphabet, &seeds);
+        let encoded = qodec::rules::wrap_if_used(inner, &key, &applied, meter.as_ref(), &text);
+        if a.report {
+            report_tokens(&text, &encoded, meter.as_ref());
+        }
+        return write_output(&a.io, &encoded);
     }
     if let Some(path) = &a.extern_templates {
         // This rung is deliberately narrow: extern templates apply to the
@@ -553,6 +629,146 @@ fn cmd_train(a: &TrainArgs) -> Result<()> {
         a.profile.display(),
         profile.ranker_samples(),
     );
+    Ok(())
+}
+
+fn cmd_residual(a: &ResidualArgs) -> Result<()> {
+    const CAP: usize = 4 * 1024 * 1024;
+    let (text, capped) = qodec::profile::read_capped(&a.input, CAP)?;
+    let meter = by_name(&a.meter)?;
+    println!("# qodec residual brief: {}", a.input.display());
+    println!(
+        "# {} bytes{}, {} tokens [{}]",
+        text.len(),
+        if capped { " (capped)" } else { "" },
+        meter.count(&text),
+        meter.name(),
+    );
+    println!("# Top repeated spans below. Draft parametric rules from them:");
+    println!("#   # qodec rules v1 slot=quest");
+    println!("#   R1=fixed text ¿ more fixed (wildcard = one word fragment;");
+    println!("#   anchor both ends with fixed text). Verify with `qodec rules verify`.");
+    // SAM returns nested variants of one repeat; the brief wants distinct
+    // structures, so ask for a deep pool and skip substrings of what is
+    // already shown.
+    let mut shown: Vec<String> = Vec::new();
+    for c in qodec::sam::repeated_substrings(&text, 12, 200, a.top * 20) {
+        if shown.len() >= a.top {
+            break;
+        }
+        // Variants of one repeat extend left/right around a shared core;
+        // dedup on the candidate's central slice, not strict containment.
+        let chars: Vec<(usize, char)> = c.text.char_indices().collect();
+        let trim = chars.len() / 5;
+        let core: &str = chars
+            .get(trim)
+            .zip(chars.get(chars.len().saturating_sub(trim + 1)))
+            .and_then(|(&(a, _), &(b, ch))| c.text.get(a..b + ch.len_utf8()))
+            .unwrap_or(&c.text);
+        if shown.iter().any(|s| s.contains(core)) {
+            continue;
+        }
+        let sample = text
+            .lines()
+            .find(|l| l.contains(&c.text))
+            .unwrap_or_default();
+        let head: String = sample.chars().take(160).collect();
+        println!("{:>5}x {:?}", c.count, c.text);
+        println!("       e.g. {head}");
+        shown.push(c.text);
+    }
+    Ok(())
+}
+
+fn cmd_rules_verify(a: &RulesVerifyArgs) -> Result<()> {
+    const CAP: usize = 4 * 1024 * 1024;
+    if a.input.is_empty() {
+        bail!("pass at least one -i file to verify against");
+    }
+    let draft_text = fs::read_to_string(&a.draft)
+        .with_context(|| format!("reading {}", a.draft.display()))?;
+    let draft = qodec::rules::RulesKey::parse(&draft_text)?;
+    let header = draft_text.lines().next().unwrap_or_default().to_string();
+    let meter = by_name(&a.meter)?;
+    let mut files: Vec<(PathBuf, String)> = Vec::new();
+    for path in &a.input {
+        let (content, _) = qodec::profile::read_capped(path, CAP)?;
+        files.push((path.clone(), content));
+    }
+
+    let mut out = String::new();
+    out.push_str(&header);
+    out.push('\n');
+    out.push_str("# survivors of `qodec rules verify` — byte-exact inversion on
+");
+    out.push_str("# every file they touched, strict measured token win overall.
+");
+    let mut kept = 0usize;
+    for (alias, parts) in &draft.entries {
+        let mini = qodec::rules::RulesKey {
+            slot: draft.slot,
+            entries: vec![(alias.clone(), parts.clone())],
+            sum: String::new(),
+        };
+        let mut total_gain = 0i64;
+        let mut hit_files = 0usize;
+        let mut failure: Option<String> = None;
+        for (path, content) in &files {
+            let Some(applied) = qodec::rules::apply(content, &mini, meter.as_ref()) else {
+                failure = Some(format!("delimiters exhausted on {}", path.display()));
+                break;
+            };
+            if applied.used.is_empty() {
+                continue;
+            }
+            let (start, end, sep) = qodec::rules::delimiters(&applied)?;
+            let back = qodec::rules::expand_spans(
+                &applied.text,
+                &mini,
+                start,
+                end,
+                sep,
+                &applied.used.concat(),
+            )?;
+            if back != *content {
+                failure = Some(format!("inversion mismatch on {}", path.display()));
+                break;
+            }
+            total_gain +=
+                meter.count(content) as i64 - meter.count(&applied.text) as i64;
+            hit_files += 1;
+        }
+        let template = parts.join(&draft.slot.to_string());
+        match failure {
+            Some(reason) => eprintln!("rule {alias}: REJECTED — {reason}"),
+            None if hit_files == 0 => {
+                eprintln!("rule {alias}: rejected — matched nothing (or never paid per-file)");
+            }
+            None if total_gain <= 0 => {
+                eprintln!("rule {alias}: rejected — no net token win ({total_gain:+})");
+            }
+            None => {
+                eprintln!(
+                    "rule {alias}: KEPT — {total_gain:+} tokens over {hit_files} file(s)"
+                );
+                out.push_str(&format!("# verified: {total_gain:+} tokens, {hit_files} file(s)
+"));
+                out.push_str(&format!("{alias}={template}
+"));
+                kept += 1;
+            }
+        }
+    }
+    if kept == 0 {
+        bail!("no rule survived verification — nothing written");
+    }
+    match &a.output {
+        Some(path) => {
+            fs::write(path, &out).with_context(|| format!("writing {}", path.display()))?;
+            eprintln!("qodec rules verify: {kept} survivor(s) -> {}", path.display());
+        }
+        None => print!("{out}"),
+    }
     Ok(())
 }
 
