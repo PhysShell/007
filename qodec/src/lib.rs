@@ -3,6 +3,7 @@
 //! record and measured results.
 
 pub mod ab;
+pub mod adapter;
 pub mod alias;
 pub mod bench;
 pub mod container;

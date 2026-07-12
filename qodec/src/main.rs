@@ -158,6 +158,18 @@ struct EncodeArgs {
     /// applied before any codec. The artifact pins the file's checksum.
     #[arg(long)]
     rules: Option<PathBuf>,
+    /// Emit an adapter envelope instead of the bare artifact:
+    /// `{"encoded","codec","content","tokens_in","tokens_out","meter"}` on
+    /// one line. This is the contract `qodec/evals/interop/` calls qodec
+    /// through — the harness reads `content` (and decodes it when `encoded`).
+    #[arg(long)]
+    json: bool,
+    /// When the artifact does not beat the input under the meter, return the
+    /// original text untouched instead of a `raw` container. Lets qodec sit at
+    /// the end of a layered pipeline (RTK/Headroom/brief) and never add the
+    /// ~13-token container tax to output that held no residual repetition.
+    #[arg(long)]
+    passthrough_on_no_gain: bool,
 }
 
 #[derive(Args)]
@@ -489,6 +501,13 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
     };
     seeds.probe_budget = a.probe_budget;
 
+    if probe && (a.json || a.passthrough_on_no_gain) {
+        bail!(
+            "probe emits a paste-ready comprehension prompt, not an adapter \
+             envelope — drop --json/--passthrough-on-no-gain"
+        );
+    }
+
     let extern_legend = a
         .extern_legend
         .as_deref()
@@ -500,7 +519,10 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
              by design — probe without --extern-legend/--extern-templates/--rules"
         );
     }
-    if let Some(path) = &a.rules {
+
+    // Every key/profile path funnels to one `artifact`, so report, the
+    // adapter envelope, passthrough and probe are decided once, at the tail.
+    let artifact = if let Some(path) = &a.rules {
         // The rules pre-pass is codec-agnostic like the phrase legend, but
         // key composition is a future rung — one key per artifact.
         if extern_legend.is_some() || a.extern_templates.is_some() {
@@ -510,13 +532,8 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
         let applied = qodec::rules::apply(&text, &key, meter.as_ref())
             .context("rules delimiters exhausted on this input")?;
         let inner = qodec::encode_seeded(&applied.text, kind, meter.as_ref(), alphabet, &seeds);
-        let encoded = qodec::rules::wrap_if_used(inner, &key, &applied, meter.as_ref(), &text);
-        if a.report {
-            report_tokens(&text, &encoded, meter.as_ref());
-        }
-        return write_output(&a.io, &encoded);
-    }
-    if let Some(path) = &a.extern_templates {
+        qodec::rules::wrap_if_used(inner, &key, &applied, meter.as_ref(), &text)
+    } else if let Some(path) = &a.extern_templates {
         // This rung is deliberately narrow: extern templates apply to the
         // tmpl codec alone, one key per artifact. Composing with the
         // phrase legend or squeeze is a future rung.
@@ -530,36 +547,52 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
             bail!("--extern-templates already is the frozen profile — drop --profile");
         }
         let tlegend = qodec::legend::TemplateLegend::load(path)?;
-        let encoded = qodec::tmpl::encode_extern(&text, meter.as_ref(), &tlegend);
-        if a.report {
-            report_tokens(&text, &encoded, meter.as_ref());
+        qodec::tmpl::encode_extern(&text, meter.as_ref(), &tlegend)
+    } else {
+        let (to_encode, substitution) = match &extern_legend {
+            Some(legend) => {
+                let sub = qodec::legend::substitute(&text, legend, meter.as_ref());
+                (sub.text.clone(), Some(sub))
+            }
+            None => (text.clone(), None),
+        };
+        let inner = qodec::encode_seeded(&to_encode, kind, meter.as_ref(), alphabet, &seeds);
+        match (&extern_legend, &substitution) {
+            (Some(legend), Some(sub)) => {
+                qodec::legend::wrap_if_used(inner, legend, &sub.used, meter.as_ref(), &text)
+            }
+            _ => inner,
         }
-        return write_output(&a.io, &encoded);
-    }
-
-    let (to_encode, substitution) = match &extern_legend {
-        Some(legend) => {
-            let sub = qodec::legend::substitute(&text, legend, meter.as_ref());
-            (sub.text.clone(), Some(sub))
-        }
-        None => (text.clone(), None),
-    };
-    let inner = qodec::encode_seeded(&to_encode, kind, meter.as_ref(), alphabet, &seeds);
-    let encoded = match (&extern_legend, &substitution) {
-        (Some(legend), Some(sub)) => {
-            qodec::legend::wrap_if_used(inner, legend, &sub.used, meter.as_ref(), &text)
-        }
-        _ => inner,
     };
 
     if a.report {
-        report_tokens(&text, &encoded, meter.as_ref());
+        report_tokens(&text, &artifact, meter.as_ref());
+    }
+
+    if a.json {
+        let adapted =
+            qodec::adapter::adapt(&text, &artifact, meter.as_ref(), a.passthrough_on_no_gain);
+        let envelope = serde_json::json!({
+            "encoded": adapted.encoded,
+            "codec": adapted.codec,
+            "content": adapted.content,
+            "tokens_in": adapted.tokens_in,
+            "tokens_out": adapted.tokens_out,
+            "meter": meter.name(),
+        });
+        let line = serde_json::to_string(&envelope).context("serializing adapter envelope")?;
+        return write_output(&a.io, &line);
+    }
+
+    if a.passthrough_on_no_gain {
+        let adapted = qodec::adapter::adapt(&text, &artifact, meter.as_ref(), true);
+        return write_output(&a.io, &adapted.content);
     }
 
     let payload = if probe {
-        probe_wrapper(&encoded)
+        probe_wrapper(&artifact)
     } else {
-        encoded
+        artifact
     };
     write_output(&a.io, &payload)
 }
