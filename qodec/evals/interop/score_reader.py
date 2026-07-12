@@ -57,13 +57,17 @@ def analyze(meta: dict, records: list[dict]) -> dict:
         arms = index.get((case, q, arm), {})
         return arms.get(0) or (arms[min(arms)] if arms else None)
 
-    # Stability: for each (case,q,arm) with >1 repeat, are the repeats consistent?
+    # Stability: for each (case,q,arm) with >1 repeat, do the repeats agree on the
+    # full signature — not just correctness, but format, alias leakage and invalid
+    # identifiers too, so a flip in any of them marks the question unstable.
+    def _sig(r):
+        return (r["correct"], r.get("format_compliant", not r["malformed"]),
+                bool(r.get("alias_leaks")), bool(r.get("invalid_identifiers")))
+
     unstable_q = set()
     for (case, q, arm), reps in index.items():
-        if len(reps) > 1:
-            corr = {reps[k]["correct"] for k in reps}
-            if len(corr) > 1:
-                unstable_q.add((case, q))
+        if len(reps) > 1 and len({_sig(reps[k]) for k in reps}) > 1:
+            unstable_q.add((case, q))
 
     def transitions(cats):
         qs = [(c, q) for (c, q) in questions if cats is None or categories[(c, q)] in cats]

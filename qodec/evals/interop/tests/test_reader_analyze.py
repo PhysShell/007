@@ -104,6 +104,16 @@ class Stability(unittest.TestCase):
         self.assertGreaterEqual(a["unstable_questions"], 1)
         self.assertEqual(a["groups"]["locator"]["stable_codec_losses"], 0)
 
+    def test_signature_flip_beyond_correct_is_unstable(self):
+        # correct is stable across repeats, but alias_leaks appears in one → the
+        # extended signature (correct, format, leaks, invalid) marks it unstable.
+        recs = []
+        for i in range(12):
+            recs += three_arms("c", f"q{i}", "locator")
+        recs += [rec("c", "q0", "locator", "encoded+brief", repeat=1, correct=True, leaks=["码"])]
+        a = sr.analyze({}, recs)
+        self.assertGreaterEqual(a["unstable_questions"], 1)
+
 
 class Parity(unittest.TestCase):
     def test_constant_overhead_is_ok(self):

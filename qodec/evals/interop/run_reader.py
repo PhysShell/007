@@ -25,7 +25,7 @@ import datetime as _dt
 import json
 from pathlib import Path
 
-from bench import preflight, qodec, reader, reader_tasks
+from bench import durability, preflight, qodec, reader, reader_tasks
 
 HERE = Path(__file__).resolve().parent
 ARMS = ["raw", "raw+brief", "encoded+brief"]
@@ -47,6 +47,8 @@ def main() -> int:
     ap.add_argument("--name")
     ap.add_argument("--out", type=Path, default=HERE / "runs-l2")
     ap.add_argument("--repeats", type=int, default=3, help="repeats for flagged questions (pass 2)")
+    ap.add_argument("--resume", action="store_true",
+                    help="continue an existing run dir, skipping already-completed (case,question,arm,repeat)")
     args = ap.parse_args()
 
     try:
@@ -127,16 +129,43 @@ def main() -> int:
     for q in tasks:
         by_case.setdefault(q["case"], []).append(q)
 
-    records = []
-    # Pass 1 — everything once, content-grouped.
+    # Crash-durable journal: each record is appended + flushed immediately, so a
+    # crash in pass 2 keeps pass 1; --resume skips completed keys (no duplicates).
+    log = durability.RecordLog(run_dir / "records.jsonl")
+    if args.resume:
+        log.load_existing()
+        print(f"resume: {len(log.completed)} record(s) already present; skipping those keys")
+    log.open()
+    records = log.records  # append target, includes any resumed records
+
+    def do(case: str, q: dict, arm: str, repeat: int) -> None:
+        key = (case, q["id"], arm, repeat)
+        if log.has(key):
+            return
+        log.append(run_one(case, q, arm, repeat))
+
+    def write_state(phase: str) -> None:
+        durability.atomic_write(run_dir / "run-state.json", json.dumps({
+            "run_id": run_id, "phase": phase, "records": len(log.records),
+            "completed_keys": len(log.completed), "unique_questions": len(tasks),
+        }, indent=2) + "\n")
+
+    # Pass 1 — every (case, question) once, content-grouped for prefix reuse.
+    write_state("pass1")
     for case, qs in by_case.items():
         for arm in ARMS:
             for q in qs:
-                records.append(run_one(case, q, arm, 0))
+                do(case, q, arm, 0)
+    durability.atomic_write(run_dir / "pass1-complete.json", json.dumps({
+        "pass1_complete": True,
+        "n_primary": len([r for r in log.records if r["repeat"] == 0]),
+        "unique_questions": len(tasks),
+    }, indent=2) + "\n")
+    write_state("pass1-complete")
 
-    # Flag questions for pass 2.
+    # Flag questions for pass 2 from the primary (repeat 0) results.
     def flagged(case, qid) -> bool:
-        rs = [r for r in records if r["case"] == case and r["question"] == qid]
+        rs = [r for r in records if r["case"] == case and r["question"] == qid and r["repeat"] == 0]
         byarm = {r["arm"]: r for r in rs}
         if any(r["malformed"] for r in rs):
             return True
@@ -153,11 +182,14 @@ def main() -> int:
     repeat_by_case: dict[str, list[dict]] = {}
     for q in to_repeat:
         repeat_by_case.setdefault(q["case"], []).append(q)
+    write_state("pass2")
     for repeat in range(1, max(1, args.repeats)):
         for case, qs in repeat_by_case.items():
             for arm in ARMS:
                 for q in qs:
-                    records.append(run_one(case, q, arm, repeat))
+                    do(case, q, arm, repeat)
+    log.close()
+    write_state("complete")
 
     meta = {
         "run_id": run_id, "level": 2, "kind": "cpu-calibration",
@@ -173,10 +205,7 @@ def main() -> int:
         "unique_questions": len(tasks),
         "repeated_questions": [f"{q['case']}:{q['id']}" for q in to_repeat],
     }
-    (run_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
-    with (run_dir / "records.jsonl").open("w") as fh:
-        for r in records:
-            fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+    durability.atomic_write(run_dir / "meta.json", json.dumps(meta, indent=2) + "\n")
     print(f"wrote {run_dir}  ({len(records)} answers, {len(to_repeat)} questions repeated)")
     print(f"score with: python3 score_reader.py {run_dir}")
     return 0
