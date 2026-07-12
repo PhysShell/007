@@ -1,84 +1,22 @@
-# repos.lock.toml — the corpus for the optimizer lanes, pinned by commit.
+# repos.lock.toml — corpus repos pinned by exact commit for the tool lanes.
 #
-# Reproducibility requires an exact SHA per repo (a floating branch makes two
-# runs incomparable). SHAs are left as "unset" until you clone and pin them —
-# doctor.py should refuse an optimizer lane whose repo rev is unpinned rather
-# than silently benchmark whatever HEAD happened to be.
-#
-# The Level-1 MVP does NOT need these: its corpus lane uses qodec/corpus/* as
-# stand-in producer output. These repos are for the real Graphify/CodeGraph
-# lanes and the eventual reader/agent rungs.
+# A reproducible run pins every repo it touches to a SHA (a floating branch
+# makes two runs incomparable). Only repos actually used by a manifest appear
+# here, each with a real `rev`; doctor.py verifies the managed clone's HEAD ==
+# rev before a codegraph/graphify lane runs. The bench clones into
+# `.cache/repos/<id>` (gitignored) via `manage.py`.
 
-# First (neutral) selection — CodeGraph's public corpus: Rust, Python, C#,
-# medium+large repos. The architectural questions come paired with each repo.
-[[repo]]
-id = "clap"
+[repos.clap]
 url = "https://github.com/clap-rs/clap"
-rev = "unset"
+tag = "v4.5.61"
+rev = "8b41d0b8497ccaa0fb0d1d8a51f91ea2f62b3aa8"
 lang = "rust"
-question = "how derived command definitions become parsed arguments"
+# CodeGraph's public corpus repo; the architectural question it ships with.
+question = "How does clap parse arguments against a derived command definition?"
 
-[[repo]]
-id = "tokio"
-url = "https://github.com/tokio-rs/tokio"
-rev = "unset"
-lang = "rust"
-question = "scheduling async tasks"
-
-[[repo]]
-id = "django"
-url = "https://github.com/django/django"
-rev = "unset"
-lang = "python"
-question = "QuerySet -> SQL execution"
-
-[[repo]]
-id = "serilog"
-url = "https://github.com/serilog/serilog"
-rev = "unset"
-lang = "csharp"
-question = "routing log events to sinks"
-
-# Second circle — CodeGraph's published end-to-end benchmark projects.
-[[repo]]
-id = "excalidraw"
-url = "https://github.com/excalidraw/excalidraw"
-rev = "unset"
-lang = "typescript"
-
-[[repo]]
-id = "gin"
-url = "https://github.com/gin-gonic/gin"
-rev = "unset"
-lang = "go"
-
-[[repo]]
-id = "okhttp"
-url = "https://github.com/square/okhttp"
-rev = "unset"
-lang = "kotlin"
-
-[[repo]]
-id = "alamofire"
-url = "https://github.com/Alamofire/Alamofire"
-rev = "unset"
-lang = "swift"
-
-[[repo]]
-id = "vscode"
-url = "https://github.com/microsoft/vscode"
-rev = "unset"
-lang = "typescript"
-
-# Graphify home-field: its own code benchmark uses ~1M lines of ERPNext + a
-# fixed coding agent.
-[[repo]]
-id = "erpnext"
-url = "https://github.com/frappe/erpnext"
-rev = "unset"
-lang = "python"
-note = "Graphify home-field (fixed coding agent, ~1M LOC)"
-
-# Own repos come after the neutral selection, with gold tasks built from
-# already-fixed PRs (checkout parent, task = issue, gold = the actual commit;
-# score localization Recall@k first, then patch + tests). Tracked in tasks/.
+# Future selection (NOT pinned, NOT part of any current run — do not reference
+# from a manifest until pinned here with a real rev):
+#   tokio, django, serilog   (rest of CodeGraph's neutral corpus)
+#   excalidraw, gin, okhttp, alamofire, vscode  (CodeGraph e2e benchmark)
+#   erpnext                  (Graphify home-field)
+# Own.NET / OwnAudit / 007 come after, with gold tasks from already-fixed PRs.

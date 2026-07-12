@@ -1,63 +1,55 @@
-# tools.lock.toml — the optimizers the bench layers qodec after.
+# tools.lock.toml — pinned tool identities for a reproducible Level-1 run.
 #
-# doctor.py verifies each is present and answering before a lane that needs it
-# runs. `invoke` records the EXACT command form the adapter uses, so a run is
-# reproducible and the "which switches were actually on" question has a written
-# answer (this matters most for Headroom: the bench uses the library API with
-# memory/learning/output-shaping OFF, never `headroom wrap`, which would start
-# a proxy and quietly benchmark Headroom+RTK+hidden switches).
+# doctor.py reads this and verifies each REQUIRED tool is present at the pinned
+# version before a lane that needs it runs. `--strict rtk codegraph` fails
+# non-zero on any mismatch. Nothing here says "unset": a tool is either pinned
+# and validated, or explicitly `kind = "unsupported"` with a reason — never a
+# lane pretending to wait for install.
 #
-# `version` / `rev` are left unset until the tool is actually installed in your
-# environment — pin them then so the receipt is honest, not aspirational.
+# Binary resolution is by <NAME>_BIN env var, then PATH. Versions (not machine
+# paths) are what pin reproducibility; paths differ per environment.
 
-[qodec]
-# The one hard requirement. Built from this crate; the bench shells the binary.
+[tools.qodec]
+kind = "built"
 build = "cargo build --release"
-binary = "target/release/qodec"
+# The crate has no --version flag; identity is the binary's content hash,
+# recorded per-run in the receipt (qodec.version()).
 encode = "qodec encode --json --passthrough-on-no-gain --codec squeeze --meter o200k"
 decode = "qodec decode"
-version = "unset — `qodec --version` once a version flag exists"
 
-[graphify]
-present = false
-version = "unset"
-# Builds graph.json + GRAPH_REPORT.md, then answers query/path/explain.
-doctor = ["graphify --version", "graphify <repo>", "test -f graphify-out/graph.json", "test -f graphify-out/GRAPH_REPORT.md"]
-invoke = "graphify query <query>   # cwd = repo"
+[tools.rtk]
+kind = "cli"
+bin = "rtk"
+version = "0.42.4"
+version_cmd = ["--version"]
+version_re = 'rtk (\S+)'
+# Two real modes (probed 2026-07-12): a stdin filter (`rtk log` reads piped
+# output) and command-runners that proxy a native tool (`rtk rg PATTERN PATH`
+# runs rg, then filters). There is NO `rtk pipe --filter` — the earlier design
+# note was wrong; the harness uses the interface RTK actually ships.
+stdin_filters = ["log"]
+smoke = "printf 'ERROR x\\nERROR x\\n' | rtk log"
 
-[codegraph]
-present = false
-version = "unset"
-# `codegraph init` builds the full graph; a separate `index` is not needed.
-doctor = ["codegraph --version", "codegraph init", "codegraph status", "test -d .codegraph", "no pending sync"]
-invoke = "codegraph explore <target>   # cwd = repo"
+[tools.codegraph]
+kind = "cli"
+bin = "codegraph"
+version = "1.4.1"
+version_cmd = ["--version"]
+version_re = '(\S+)'
+# `codegraph init` builds .codegraph/ (full graph, one step). `status --json`
+# reports index.state and pendingChanges; `explore <query> -p <repo>` answers.
+# 100% local, no API keys, no network at query time (verified: clap indexed in
+# ~9s offline).
+smoke = "codegraph status <repo> --json"
 
-[rtk]
-present = false
-version = "unset"
-# The hook does NOT intercept built-in Read/Grep/Glob — call filters explicitly.
-doctor = ["rtk --version", "rtk git status", "rtk grep <pattern>"]
-invoke = "rtk <kind> --stdin   # kind ∈ {cargo, test, git, grep, read, ...}"
+[tools.headroom]
+kind = "unsupported"
+reason = "adapter used an unverified return contract and side-effect flags; not validated. Do not run it as a lane."
 
-[headroom]
-present = false
-version = "unset"
-# Library API only. Never `headroom wrap` in the bench.
-doctor = ["python -c 'import headroom'", "headroom doctor", "headroom perf"]
-invoke = "headroom.compress(messages, memory=False, learning=False, output_shaping=False)"
+[tools.fastcontext]
+kind = "unsupported"
+reason = "FastContext is a served model (OpenAI-compatible endpoint), not a `fastcontext.brief()` Python package. The earlier adapter was wrong."
 
-[fastcontext]
-present = false
-version = "unset"
-doctor = ["python -c 'import fastcontext'"]
-invoke = "fastcontext.brief(text)   # + qodec-encoded evidence appendix"
-
-[model]
-# Level 2/3 reader/agent. Fixed everything so raw vs qodec is the only variable.
-present = false
-served_via = "OpenAI-compatible endpoint (vLLM / Colibrì)"
-sweep_model = "unset — e.g. FastContext-1.0-4B-SFT (cheap) or Qwen3-Coder-30B-A3B (reader)"
-audit_model = "unset — e.g. GLM-5.2 via Colibrì (narrow confirmation set only)"
-tokenizer_id = "unset — MUST match the served model; o200k/cl100k are proxies"
-temperature = 0.0
-max_output = "unset"
+[tools.graphify]
+kind = "unsupported"
+reason = "not yet integrated — the Graphify lane is a later increment (this one covers RTK + CodeGraph only)."

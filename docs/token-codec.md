@@ -557,9 +557,25 @@ hostile input) through the actual `o7 judge` binary.
    whether removing it keeps comprehension and actionability. This is a
    *separate* evaluation harness (`qodec/evals/interop/`), reproducible-
    experiment-first, not tool code stuffed into the crate. Three rungs: L1
-   artifact benchmark (tokens/time, no model — `run.py`, working over the
-   corpus today), L2 reader (one model, one prompt, raw vs qodec, JSON-scored),
-   L3 agent (tool choice → patch → tests). Two prerequisites the doc surfaced:
+   artifact benchmark (tokens/time, no model — `run.py`), L2 reader (one model,
+   one prompt, raw vs qodec, JSON-scored), L3 agent (tool choice → patch →
+   tests). L1 is a **real-tool vertical slice**: producers (CodeGraph
+   `explore`, RTK command-runners, fixtures) vs transforms (RTK stdin filters,
+   qodec), run against a pinned corpus repo — RTK 0.42.4 and CodeGraph 1.4.1,
+   both 100% local, pinned by version with `doctor.py --strict` and repos
+   pinned by SHA. Every artifact is saved and SHA-256'd; each arm reports
+   **cold** (notation brief + artifact) and **warm** (artifact only, brief
+   cached) gain, so a combination that only wins after dropping the mandatory
+   decoder instruction is visible as such. First measured slice (clap
+   v4.5.61, o200k): `rtk log` compresses logs so hard qodec correctly passes
+   through (the *redundant* layer); `rtk rg` and `codegraph explore` output
+   still hold residual redundancy qodec mines (warm +13…+47%, cold lower once
+   the brief is charged). Two facts corrected against reality: there is no
+   `rtk pipe --filter` (RTK proxies native commands / filters stdin), and the
+   Headroom (bad return contract) and FastContext (a served model, not a
+   `brief()` package) adapters are **not validated** — the harness marks them
+   `unsupported`, never a lane "waiting for install". Two prerequisites the
+   doc surfaced:
    - *Done* — **the adapter/passthrough contract** (`src/adapter.rs`,
      `encode --json --passthrough-on-no-gain`). `encode` always wraps, so blind
      application after an already-compressing optimizer taxed dense output the

@@ -1,7 +1,6 @@
-# Per-run outputs — reproducible from `run.py`, not source.
+# Per-run outputs and cloned corpus repos — reproducible from lock files + manage.py.
 runs/
-# Python bytecode.
+.cache/
 __pycache__/
 *.pyc
-# uv virtualenv, if you sync the Level-2 deps.
 .venv/

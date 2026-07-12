@@ -1,28 +1,15 @@
 #!/usr/bin/env python3
-"""score.py — aggregate a Level-1 run into the go/no-go table.
+"""score.py — aggregate a run into the cold/warm go/no-go table.
 
-Reads a run directory's metrics.jsonl and reports, per lane and arm, the median
-incremental_qodec_gain and the token-level verdict mix. The design doc's
-go/no-go for a qodec interop combination is:
+The design doc's go/no-go needs median incremental_qodec_gain >= 10%. This
+scorer reports it for BOTH cold (notation brief + artifact, what a one-shot
+message pays) and warm (artifact only, brief amortized in a cached prefix), so a
+combination that wins only warm — i.e. only after ignoring the mandatory decoder
+instruction cold — is visible as exactly that, never sold as a flat win.
 
-    median incremental token saving >= 10%
-    quality delta >= -1 percentage point
-    no rise in invalid exact IDs / paths
-    end-to-end latency not disproportionately worse
+harm / redundant / wrong-layer stay comprehension verdicts for the L2/L3 rungs;
+Level 1 decides win / marginal / loss / passthrough on tokens alone.
 
-Only the first is decidable from Level 1 (tokens). The other three need the
-reader (Level 2) and agent (Level 3) rungs — this scorer says so out loud
-rather than implying a token win is the whole story. Its verdicts are the
-token-level subset:
-
-    win          gain >= 10%, artifact kept
-    marginal     0 < gain < 10%
-    passthrough  qodec added nothing and honestly fell back (no tax paid)
-
-`harm`, `redundant` and `wrong-layer` are comprehension verdicts reserved for
-the model rungs.
-
-Usage:
     python3 score.py runs/<id>
 """
 
@@ -39,61 +26,54 @@ def _median(xs: list[float]) -> float:
     return statistics.median(xs) if xs else 0.0
 
 
-def load(run_dir: Path) -> list[dict]:
-    lines = (run_dir / "metrics.jsonl").read_text().splitlines()
-    return [json.loads(line) for line in lines if line.strip()]
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("run_dir", type=Path, help="a runs/<id> directory")
-    ap.add_argument("--go-threshold", type=float, default=0.10, help="median gain go/no-go (default 0.10)")
+    ap.add_argument("run_dir", type=Path)
+    ap.add_argument("--go-threshold", type=float, default=0.10)
     args = ap.parse_args()
 
-    records = load(args.run_dir)
     meta = json.loads((args.run_dir / "meta.json").read_text())
+    records = [json.loads(l) for l in (args.run_dir / "metrics.jsonl").read_text().splitlines() if l.strip()]
+    ok = [r for r in records if r["status"] == "ok"]
+    other = [r for r in records if r["status"] != "ok"]
 
-    # Group by arm across all cases.
     by_arm: dict[str, list[dict]] = defaultdict(list)
-    roundtrip_breaks = 0
-    for rec in records:
-        for arm, m in rec["arms"].items():
-            by_arm[arm].append(m)
-            if not m["roundtrip_ok"]:
-                roundtrip_breaks += 1
+    for r in ok:
+        by_arm[r["arm"]].append(r)
 
-    print(f"# qodec interop bench — Level 1 (artifacts, no model)")
-    print(f"run {meta['run_id']}  codec={meta['codec']}  meter={meta['meter']}  "
-          f"cases={meta['n_cases']}\n")
-    print(f"{'arm':<18}{'n':>3}{'median gain':>13}{'wins':>6}{'marg':>6}{'pass':>6}  go?")
-    for arm, ms in sorted(by_arm.items()):
-        gains = [m["incremental_qodec_gain"] for m in ms]
-        med = _median(gains)
-        verdicts = [m["verdict"] for m in ms]
-        wins = verdicts.count("win")
-        marg = verdicts.count("marginal")
-        pas = verdicts.count("passthrough")
-        go = "GO" if med >= args.go_threshold else "no"
-        print(f"{arm:<18}{len(ms):>3}{med*100:>12.1f}%{wins:>6}{marg:>6}{pas:>6}  {go}")
+    print("# qodec interop bench — Level 1 (artifacts, no model)")
+    print(f"run {meta['run_id']}  manifest={Path(meta['manifest']).name}  "
+          f"codec={meta['codec']}  meter={meta['meter']}  cases={meta['n_cases']}\n")
 
-    print()
-    # Per-case detail for the raw home-stadium lane.
-    print("raw+qodec by case:")
-    for rec in records:
-        m = rec["arms"].get("raw+qodec")
-        if m:
-            print(f"  {rec['id']:<12}{rec['lane']:<15}"
-                  f"{m['incremental_qodec_gain']*100:+7.1f}%  {m['codec']:<12}{m['verdict']}")
+    print(f"{'arm':<11}{'n':>3}{'med cold':>10}{'med warm':>10}  cold_go  warm_go")
+    for arm, rs in sorted(by_arm.items()):
+        cold = _median([r["cold_gain"] for r in rs])
+        warm = _median([r["warm_gain"] for r in rs])
+        cg = "GO" if cold >= args.go_threshold else "no"
+        wg = "GO" if warm >= args.go_threshold else "no"
+        print(f"{arm:<11}{len(rs):>3}{cold*100:>9.1f}%{warm*100:>9.1f}%   {cg:<7}  {wg}")
 
-    skipped = {sk["optimizer"] for rec in records for sk in rec.get("skipped", [])}
-    if skipped:
-        print(f"\noptimizer lanes skipped (tool absent): {', '.join(sorted(skipped))}")
-        print("install them (see doctor.py / tools.lock.toml) to light up those arms.")
-    if roundtrip_breaks:
-        print(f"\n!! {roundtrip_breaks} roundtrip break(s) — a codec bug, not a scoring event.")
+    print("\nby case:")
+    print(f"{'case':<22}{'arm':<11}{'cold':>8}{'warm':>8}  {'codec':<10}{'up_ms':>7}{'q_ms':>7}  roundtrip")
+    for r in ok:
+        qms = r["encode_ms"] + r["decode_ms"]
+        print(f"{r['id']:<22}{r['arm']:<11}{r['cold_gain']*100:+7.1f}%{r['warm_gain']*100:+7.1f}%  "
+              f"{r['codec']:<10}{r['upstream_tool_ms']:>7.0f}{qms:>7.0f}  {'ok' if r['roundtrip_ok'] else 'FAIL'}")
+        if r.get("baseline"):
+            b = r["baseline"]
+            red = 1 - r["tool_only_tokens"] / b["tokens"] if b["tokens"] else 0.0
+            print(f"{'  ↳ raw baseline':<33}{b['tokens']:>7} tok  ->  tool {r['tool_only_tokens']} "
+                  f"({red*100:+.1f}% by {b['tool']})")
+
+    for r in other:
+        print(f"{r['id']:<22}{r['arm']:<11}{r['status'].upper():>8}  {r.get('reason','')[:55]}")
+
+    broke = [r["id"] for r in ok if not r["roundtrip_ok"]]
+    if broke:
+        print(f"\n!! roundtrip break(s): {broke} — a codec bug, not a scoring event.")
         return 2
-    print("\nLevel 1 measures tokens only. Comprehension (harm / redundant / wrong-layer)")
-    print("needs the reader (L2) and agent (L3) rungs before any combination ships.")
+    print("\ncold = brief + artifact (one-shot). warm = artifact only (brief cached).")
+    print("Level 1 is tokens only; comprehension (harm/redundant/wrong-layer) is L2/L3.")
     return 0
 
 

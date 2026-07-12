@@ -9,137 +9,139 @@ for one question:
 > redundancy left after each of them — and if qodec removes it, does
 > comprehension or actionability survive?
 
-The comparisons that matter are **compositions**, never `Graphify vs qodec`
-(different floors). Each optimizer reduces something; qodec's reasonable place
-is *after* it:
+Level 1 (artifacts, no model) is a **real-tool vertical slice**: it runs actual
+RTK and CodeGraph against a pinned corpus repo, not stubs waiting for install.
 
-| tool | what it shortens | qodec's place |
-|---|---|---|
-| Graphify | file reads, via graph retrieval | after query/path/explain |
-| CodeGraph | tool calls + code found | after `codegraph explore` |
-| RTK | raw command stdout | command → RTK → qodec |
-| Headroom | whole prompt, tool output, RAG, history | Headroom → qodec (protect control IDs) |
-| FastContext | selected data → brief | brief plain + evidence via qodec |
+## Producers vs transforms
 
-## Three rungs (do them in order)
+The load-bearing distinction (and the correction this harness makes over the
+first scaffold): Graphify/CodeGraph are **producers** — they create an artifact
+from a repo + query. RTK's stdin filters and qodec are **transforms** — they
+rewrite text. A case states its whole pipeline, so an adapter can never silently
+ignore its input:
 
-**Level 1 — artifact benchmark, no model** (`run.py`, working today). For each
-producer artifact measure `A`, `qodec(A)`, `tool(A)`, `qodec(tool(A))` on tokens
-and time only. Headline:
+```json
+{"id": "clap-derive-explore",
+ "producer": {"type": "codegraph", "repo": "clap",
+              "query": "How does clap parse arguments against a derived command definition?"},
+ "transforms": ["qodec"]}
 
-    incremental_qodec_gain = 1 - tokens(tool_then_qodec) / tokens(tool_only)
+{"id": "build-log-rtk-log",
+ "producer": {"type": "fixture", "path": "corpus/build-log.txt"},
+ "transforms": [{"type": "rtk", "filter": "log"}, "qodec"]}
+```
 
-Answers the clean question — *did tokenizer-visible redundancy survive the
-upstream optimizer?* — before a single model call is spent. Also records: bytes,
-tool time, qodec encode/decode time, byte-exact roundtrip, chosen codec,
-fallback fraction, cold cost. (Warm cost — the amortized-key figure — is a
-follow-up: it needs the adapter envelope to expose the container's key
-overhead.)
+Producer types: `fixture`, `command`, `rtk-command`, `codegraph`. Transform
+types: `rtk` (stdin filter only) and `qodec` (terminal). The arm is named by the
+tool feeding qodec: `raw+qodec`, `rtk+qodec`, `codegraph+qodec`.
 
-**Level 2 — reader benchmark, local model** (not yet built). Same data, same
-model, same prompt; the only difference is raw vs qodec. Four task types — fact
-retrieval, exact locator, relationship tracing, actionability — answered in a
-fixed JSON shape so scoring is deterministic (rule-based, never an LLM judging
-its own vibe).
+### The real RTK interface (there is no `rtk pipe --filter`)
 
-**Level 3 — agent benchmark** (not yet built). The model picks tools, makes
-several calls, gets output raw or through qodec, answers or patches; patches are
-checked by tests. Only after L1+L2, so a quality drop is attributable to the
-codec and not to the retriever, the model, or an agent that decided to explore
-`node_modules`.
+RTK 0.42.4 ships two modes, both used here:
 
-## Arms
+- **stdin filters** (`rtk log`) read piped output → a genuine `text→text`
+  transform over a fixture or command output.
+- **command-runners** (`rtk rg PATTERN PATH`) proxy a native command (they run
+  ripgrep, then filter). These cannot transform arbitrary text, so they are a
+  `rtk-command` **producer** with a raw baseline (`rg …` without rtk) for RTK's
+  own reduction figure — never a transform. The manifest parser rejects a
+  command-runner filter used as a transform.
 
-Every payload runs through up to three arms:
+## Cold vs warm (honest token metrics)
 
-- **no qodec** — the producer output as-is (the baseline).
-- **blind qodec** — `qodec encode --json --passthrough-on-no-gain`. Applied
-  without knowing the payload's structure; passthrough guarantees it never adds
-  the container tax to already-dense output.
-- **protected qodec** — *(not yet implemented; see "Next rung")* mining that
-  refuses to touch code blocks, file paths, symbol names, finding IDs,
-  tool-call arguments, Headroom retrieval handles, or JSON control fields. The
-  hypothesis is that this is the production variant for CodeGraph and Headroom.
+An encoded artifact is unreadable without the qodec **notation brief** (the
+decoder instruction). So every arm reports two figures:
 
-## Go / no-go for a combination
+- **cold** — a one-shot message: `tokens(notation brief + artifact)`. A
+  passthrough pays only its plaintext (no brief).
+- **warm** — the protocol case: `tokens(artifact)` alone, brief amortized in a
+  cached prefix.
 
-- median `incremental_qodec_gain` ≥ **10%**
-- quality delta ≥ **−1 percentage point** *(needs L2/L3)*
-- no rise in invalid exact IDs / paths *(needs L2/L3)*
-- end-to-end latency not disproportionately worse *(the 24/24 A/B kept quality
-  but alias-dense payloads cost 3–5× model wall time — a token win that
-  quadruples latency is not a win)*
+`incremental_qodec_gain` is reported for both. A combination that wins warm but
+loses cold — i.e. only after ignoring the mandatory decoder instruction — shows
+up as exactly that, never sold as a flat win. On small one-shot payloads the
+brief often makes cold negative while warm is strongly positive; that is the
+truth, not a bug.
 
-Classification: **win** (extra compression, no quality loss) · **neutral**
-(qodec passes through) · **harm** (fewer tokens, worse comprehension) ·
-**redundant** (optimizer already removed the redundancy) · **wrong layer**
-(qodec applied to code/control data). Only *win / marginal / passthrough* are
-decidable at Level 1.
+## Three rungs
+
+**Level 1 — artifact benchmark, no model** (`run.py`, working today over real
+RTK + CodeGraph). **Level 2 — reader** and **Level 3 — agent** are deferred (see
+docs/token-codec.md).
+
+## Go / no-go
+
+Median `incremental_qodec_gain` ≥ 10% — reported for cold **and** warm. Quality
+delta, invalid-ID rate and latency thresholds need L2/L3. Level-1 verdicts are
+token-only: **win** / **marginal** / **loss** / **passthrough**;
+harm / redundant / wrong-layer are comprehension verdicts for the model rungs.
 
 ## Layout
 
 ```
 interop/
-├── README.md          # this file — the plan of record
-├── pyproject.toml     # Level 2/3 model deps (tokenizers/transformers); L1 is stdlib-only
-├── tools.lock.toml    # pinned optimizer versions + exact invocations
-├── repos.lock.toml    # neutral corpus repos, pinned by commit SHA
-├── tasks/             # gold localization/patch tasks (L3) — TODO
-├── prompts/           # reader prompt templates (L2) — TODO
-├── adapters/          # one module per optimizer + the qodec adapter (always present)
-├── doctor.py          # setup receipt: qodec healthy? which optimizers present?
-├── run.py             # Level 1 runner
-├── score.py           # Level 1 → go/no-go table
-└── runs/              # per-run outputs (gitignored)
+├── README.md
+├── bench/              # importable package (unit-tested)
+│   ├── qodec.py        # terminal transform + token meter (encode/decode/count/probe)
+│   ├── lockfiles.py    # tools.lock.toml + repos.lock.toml
+│   ├── manifest.py     # producer/transform model + validation
+│   ├── producers.py    # fixture / command / rtk-command / codegraph
+│   ├── transforms.py   # rtk stdin filter, qodec; headroom/fastcontext = unsupported
+│   ├── execution.py    # run + capture full provenance
+│   ├── artifacts.py    # save + sha256 every artifact
+│   ├── metrics.py      # cold/warm token accounting
+│   ├── doctor.py       # setup receipt + strict gate
+│   └── runner.py       # execute a case's pipeline
+├── doctor.py run.py score.py manage.py   # thin CLIs
+├── manifests/          # corpus.json, rtk.json, codegraph.json
+├── tests/              # unittest: manifest parsing, RTK invocation, receipt validation
+├── tools.lock.toml     # pinned tool versions + exact invocations
+├── repos.lock.toml     # corpus repos pinned by commit SHA
+├── .cache/             # cloned repos + indexes (gitignored, built by manage.py)
+└── runs/               # per-run outputs + hashed artifacts (gitignored)
 ```
 
 ## Running Level 1
 
 ```bash
-cd qodec && cargo build --release        # the bench shells out to the release binary
+cd qodec && cargo build --release              # the bench shells the release binary
+
+# install the real tools (100% local, no API keys)
+cargo install --git https://github.com/rtk-ai/rtk     # rtk 0.42.4
+npm install -g @colbymchenry/codegraph                # codegraph 1.4.1
+
 cd evals/interop
-python3 doctor.py                        # confirm qodec is healthy
-python3 run.py --name my-run             # corpus cases; tool lanes skip if tools absent
-python3 score.py runs/my-run
+python3 manage.py sync                         # clone pinned repos + build codegraph index
+python3 doctor.py --strict rtk codegraph       # must pass before the tool lanes run
+python3 run.py --manifest manifests/rtk.json       --name rtk
+python3 run.py --manifest manifests/codegraph.json --name cg
+python3 run.py --manifest manifests/corpus.json    --name corpus   # fixtures, no tools
+python3 score.py runs/rtk
 ```
 
 No Python dependencies for Level 1 — the standard library plus the built
-`qodec` binary. `doctor.py` reports which optimizers are installed; absent ones
-skip their lanes and are named in the score, never silently counted as passing.
+binaries. `doctor.py --strict` verifies actual==pinned versions, repo HEAD ==
+pinned SHA, and CodeGraph index readiness, recording each check's exact command,
+exit code and elapsed time; it exits non-zero on any drift. Binaries resolve via
+`RTK_BIN` / `CODEGRAPH_BIN` env or PATH.
 
-Custom cases: `python3 run.py --manifest cases.json`, where `cases.json` is
-`{"cases": [{"id","lane","kind","path","optimizers":[...],"json":false}, ...]}`
-with `path` relative to the crate root.
+Every case/arm persists `producer.txt`, `transformed.txt`, `qodec-envelope.json`,
+`qodec-content.txt`, `decoded.txt` and a `meta.json` with argv, cwd, versions,
+repo SHA, exit codes, timings, and the SHA-256 + byte size of every artifact.
+`decoded.txt`'s hash equalling `producer.txt`'s is the byte-exact roundtrip
+proof.
 
-## Corpus
+## Not validated (do not treat as working)
 
-First (neutral) selection, from CodeGraph's public corpus + Graphify's
-home-field ERPNext — pinned in `repos.lock.toml`. The MVP corpus lane uses the
-crate's own `qodec/corpus/*` as stand-in producer output (msbuild log, .NET
-stack trace, ripgrep hits, git diff, uniform findings, unique-prose control) so
-Level 1 is runnable with zero external setup. Real optimizer lanes attach once
-the tools in `tools.lock.toml` are installed.
+- **Headroom** — the earlier adapter used an unverified return contract and
+  side-effect flags. `doctor.py` reports it `unsupported`; a case that names it
+  gets an explicit `unsupported` arm, not a skip.
+- **FastContext** — a served model (OpenAI-compatible endpoint), not a
+  `fastcontext.brief()` package. Also `unsupported`.
+- **Graphify** — not yet integrated; a later increment.
 
-## Next rung: protected spans (blocks the third arm)
+## Deferred (unchanged)
 
-Blind mining must never alias spans the model has to reproduce byte-for-byte.
-The qodec side needs:
-
-```
---protect markdown-code
---protect-json-pointer /tool_call/id
---protect-regex 'headroom:[A-Za-z0-9_-]+'
---protect-regex '(?:src|tests)/\S+'
-```
-
-with the semantics: protected byte ranges are excluded from candidate discovery
-**and** from substitution, the surrounding text mines normally, the protected
-content stays verbatim in place, and byte-exact roundtrip is preserved (decode
-is unchanged — nothing inside a protected span was ever substituted). This is a
-localized but careful change to the miner (`mine.rs`), so it is its own
-increment; the `protected qodec` arm here is wired to report *not available*
-until it lands.
-
-The dependency this harness already unblocked is the adapter/passthrough
-contract (`qodec/src/adapter.rs`, `encode --json --passthrough-on-no-gain`) —
-without it, blind application taxes every dense payload it can no longer help.
+Protected spans (`--protect …`, the `protected qodec` arm) and Level 2/3. The
+CodeGraph lane is where protected mode matters most: explore output is verbatim
+source + symbol names + paths, exactly the spans blind mining must not alias.

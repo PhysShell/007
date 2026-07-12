@@ -1,0 +1,25 @@
+{
+  "_comment": "RTK lane. Two usage modes RTK actually ships (there is no `rtk pipe --filter`): stdin filters (`rtk log` reads piped output) as transforms over fixtures, and command-runners (`rtk rg PATTERN PATH` proxies ripgrep) as rtk-command producers with a raw baseline. All four arms are `rtk+qodec`, none skipped.",
+  "cases": [
+    {
+      "id": "build-log-rtk-log",
+      "producer": {"type": "fixture", "path": "corpus/build-log.txt"},
+      "transforms": [{"type": "rtk", "filter": "log"}, "qodec"]
+    },
+    {
+      "id": "stacktrace-rtk-log",
+      "producer": {"type": "fixture", "path": "corpus/stacktrace.txt"},
+      "transforms": [{"type": "rtk", "filter": "log"}, "qodec"]
+    },
+    {
+      "id": "rtk-rg-derive-clap",
+      "producer": {"type": "rtk-command", "repo": "clap", "argv": ["rg", "-n", "derive", "src"]},
+      "transforms": ["qodec"]
+    },
+    {
+      "id": "rtk-rg-parser-clap",
+      "producer": {"type": "rtk-command", "repo": "clap", "argv": ["rg", "-n", "Parser", "src"]},
+      "transforms": ["qodec"]
+    }
+  ]
+}
