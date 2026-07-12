@@ -1,5 +1,6 @@
 # Per-run outputs and cloned corpus repos — reproducible from lock files + manage.py.
 runs/
+runs-l2/
 .cache/
 __pycache__/
 *.pyc

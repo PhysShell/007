@@ -1,0 +1,50 @@
+{
+  "_comment": "Level-2 reader tasks. Deterministic questions with gold answers grounded byte-for-byte in the L1 tool-only artifacts (results/rtk-codegraph-clap-v1). Answer schema: {facts,files,symbols,call_path,answer}. Scoring is rule-based (bench/reader_tasks.py): count=exact numeric; files/symbols=set-superset exact match; facts=accepted substrings; plus invalid-identifier and alias-leakage checks. No LLM judge.",
+  "cases": [
+    {
+      "case": "build-log-rtk-log",
+      "questions": [
+        {"id": "n-errors", "type": "count", "q": "How many errors does this build log report? Put the integer in \"answer\".", "gold": {"answer": "3"}},
+        {"id": "n-warnings", "type": "count", "q": "How many warnings does this build log report? Put the integer in \"answer\".", "gold": {"answer": "9"}},
+        {"id": "error-code", "type": "facts", "q": "What is the compiler error code? Put it in \"facts\".", "gold": {"facts": ["CS1061"]}},
+        {"id": "error-file", "type": "files", "q": "Which source file has the errors? Put its file name in \"files\".", "gold": {"files": ["UserEditorViewModel.cs"]}},
+        {"id": "warn-symbol", "type": "symbols", "q": "Which property triggers the CS8618 non-nullable warning? Put it in \"symbols\".", "gold": {"symbols": ["CurrentUser"]}}
+      ]
+    },
+    {
+      "case": "rg-output-rtk-grep",
+      "questions": [
+        {"id": "n-matches", "type": "count", "q": "How many matches are reported? Put the integer in \"answer\".", "gold": {"answer": "20"}},
+        {"id": "n-files", "type": "count", "q": "Across how many files? Put the integer in \"answer\".", "gold": {"answer": "10"}},
+        {"id": "two-match-file", "type": "files", "q": "Which file has 2 matches? Put its file name in \"files\".", "gold": {"files": ["SessionService.cs"]}},
+        {"id": "method", "type": "symbols", "q": "Name a method shown in SessionService.cs. Put it in \"symbols\".", "gold": {"symbols": ["OpenAsync"]}}
+      ]
+    },
+    {
+      "case": "rtk-rg-parser-clap",
+      "questions": [
+        {"id": "file", "type": "files", "q": "Give one exact file path (as shown) that matches. Put it in \"files\".", "gold": {"files": ["src/_concepts.rs"]}},
+        {"id": "symbol", "type": "symbols", "q": "Name a value-parser type mentioned. Put it in \"symbols\".", "gold": {"symbols": ["ValueParser"]}}
+      ]
+    },
+    {
+      "case": "rtk-rg-derive-clap",
+      "questions": [
+        {"id": "n-matches", "type": "count", "q": "How many total matching lines are there? Put the integer in \"answer\".", "gold": {"answer": "129"}},
+        {"id": "file", "type": "files", "q": "Give one exact file path (as shown) under src/_derive. Put it in \"files\".", "gold": {"files": ["src/_derive/mod.rs"]}},
+        {"id": "example", "type": "facts", "q": "Which examples directory is referenced by the doc includes? Put the directory name in \"facts\".", "gold": {"facts": ["derive_ref"]}}
+      ]
+    },
+    {
+      "case": "clap-derive-explore",
+      "questions": [
+        {"id": "n-symbols", "type": "count", "q": "How many symbols did the exploration find? Put the integer in \"answer\".", "gold": {"answer": "56"}},
+        {"id": "n-files", "type": "count", "q": "Across how many files? Put the integer in \"answer\".", "gold": {"answer": "3"}},
+        {"id": "top-symbol", "type": "symbols", "q": "Name the value-parser type with the most callers. Put it in \"symbols\".", "gold": {"symbols": ["ValueParser"]}},
+        {"id": "callers", "type": "count", "q": "How many callers does ValueParser have? Put the integer in \"answer\".", "gold": {"answer": "8"}},
+        {"id": "trait", "type": "symbols", "q": "Name the public trait whose parse() method is shown. Put it in \"symbols\".", "gold": {"symbols": ["Parser"]}},
+        {"id": "loc", "type": "facts", "q": "In which file is ValueParser defined? Put the file name in \"facts\".", "gold": {"facts": ["value_parser.rs"]}}
+      ]
+    }
+  ]
+}

@@ -59,6 +59,10 @@ enum Cmd {
     Aliases(AliasArgs),
     /// Emit a paste-ready comprehension probe: legend brief + encoded payload.
     Probe(EncodeArgs),
+    /// Print the notation brief (the decoder instruction) verbatim — the text
+    /// `probe`/`ab` prepend. The interop reader benchmark sends it as the
+    /// `raw + brief` control and the `encoded + brief` preamble.
+    Notation,
     /// Perplexity gate: score raw vs encoded under a local LM endpoint —
     /// cheap comprehension proxy before judge runs. See docs/token-codec.md.
     Ppl(PplArgs),
@@ -335,6 +339,10 @@ fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Encode(a) => cmd_encode(&a, false),
         Cmd::Probe(a) => cmd_encode(&a, true),
+        Cmd::Notation => {
+            print!("{}", qodec::ab::notation_brief());
+            Ok(())
+        }
         Cmd::Decode(a) => {
             let text = read_input(&a.io)?;
             let extern_legend = a

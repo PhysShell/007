@@ -138,6 +138,13 @@ def count(text: str, *, meter: str = "o200k") -> int:
     return json.loads(out)["tokens_in"]
 
 
+def notation() -> str:
+    """The notation brief (decoder instruction) verbatim — the reader's
+    `raw + brief` control and `encoded + brief` preamble."""
+    out, _ = _run([str(binary()), "notation"], "")
+    return out
+
+
 def probe(text: str, *, codec: str = "squeeze", meter: str = "o200k") -> str:
     """The cold prompt a reader actually receives for an encoded payload: the
     notation brief (the decoder instruction) followed by the artifact. `qodec
