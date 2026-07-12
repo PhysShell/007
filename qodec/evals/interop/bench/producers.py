@@ -40,8 +40,9 @@ def produce(case: Case, tools: dict[str, lockfiles.Tool],
         return ex, None
 
     if p.type == "command":
-        cwd = _repo_dir(p["repo"], repos) if "repo" in p.raw else CRATE_ROOT
-        sha = execution.repo_head(repos[p.raw["repo"]]) if "repo" in p.raw else None
+        has_repo = "repo" in p.raw
+        cwd = _repo_dir(p.raw["repo"], repos) if has_repo else CRATE_ROOT
+        sha = execution.repo_head(repos[p.raw["repo"]]) if has_repo else None
         ex = execution.run(p.raw["argv"], cwd=cwd, tool="command", repo_sha=sha)
         return ex, None
 

@@ -570,12 +570,16 @@ hostile input) through the actual `o7 judge` binary.
    v4.5.61, o200k): `rtk log` compresses logs so hard qodec correctly passes
    through (the *redundant* layer); `rtk rg` and `codegraph explore` output
    still hold residual redundancy qodec mines (warm +13…+47%, cold lower once
-   the brief is charged). Two facts corrected against reality: there is no
-   `rtk pipe --filter` (RTK proxies native commands / filters stdin), and the
-   Headroom (bad return contract) and FastContext (a served model, not a
-   `brief()` package) adapters are **not validated** — the harness marks them
-   `unsupported`, never a lane "waiting for install". Two prerequisites the
-   doc surfaced:
+   the brief is charged). RTK's transform interface is `rtk pipe --filter
+   <name>` (log/grep/git-diff/cargo-test), pinned by version **and** binary
+   SHA-256 from the exact upstream tag; a provenance finding is that tagged
+   v0.42.4 `rtk rg` is a raw passthrough (filtering landed on master after the
+   tag), reported rather than papered over with a newer binary. The Headroom
+   (bad return contract) and FastContext (a served model, not a `brief()`
+   package) adapters are **not validated** — the harness marks them
+   `unsupported`, never a lane "waiting for install". A committed, hash-verified
+   record lives at `qodec/evals/interop/results/rtk-codegraph-clap-v1/`. Two
+   prerequisites the doc surfaced:
    - *Done* — **the adapter/passthrough contract** (`src/adapter.rs`,
      `encode --json --passthrough-on-no-gain`). `encode` always wraps, so blind
      application after an already-compressing optimizer taxed dense output the

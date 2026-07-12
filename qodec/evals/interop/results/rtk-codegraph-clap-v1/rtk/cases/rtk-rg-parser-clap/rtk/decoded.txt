@@ -1,0 +1,32 @@
+src/_concepts.rs:100://! the Value will be parsed according to [`ValueParser`]
+src/_concepts.rs:104:use clap_builder::builder::ValueParser;
+src/_cookbook/typed_derive.rs:13://! ## Built-in [`TypedValueParser`][crate::builder::TypedValueParser]
+src/_cookbook/typed_derive.rs:29://! ## Custom [`TypedValueParser`][crate::builder::TypedValueParser]
+src/_features.rs:18://! * `derive`: Enables the custom derive (i.e. `#[derive(Parser)]`). Without this you must use one of the other methods of creating a `clap` CLI listed above.
+src/lib.rs:6://! > **Command Line Argument Parser for Rust**
+src/lib.rs:93:pub use clap_derive::{self, Args, Parser, Subcommand, ValueEnum};
+src/_tutorial.rs:34://! ## Configuring the Parser
+src/_tutorial.rs:164://! [`PossibleValuesParser`] or [`Arg::value_parser(["val1",
+src/_tutorial.rs:194://! A [custom parser][TypedValueParser] can be used to improve the error messages or provide additional validation:
+src/_derive/mod.rs:27://! use clap::{Parser, Args, Subcommand, ValueEnum};
+src/_derive/mod.rs:30://! #[derive(Parser)]
+src/_derive/mod.rs:90://! - [`Parser`][crate::Parser] parses arguments into a `struct` (arguments) or `enum` (subcommands).
+src/_derive/mod.rs:148://!   - When not present: [package `name`](https://doc.rust-lang.org/cargo/reference/manifest.html#the-name-field) (if on [`Parser`][crate::Parser] container), variant name (if on [`Subcommand`][crate::Subcommand] variant)
+src/_derive/mod.rs:158://!   - Without `<expr>`: [crate `description`](https://doc.rust-lang.org/cargo/reference/manifest.html#the-description-field) ([`Parser`][crate::Parser] container)
+src/_derive/mod.rs:192://!     [`Parser`][crate::Parser] or on the flattened field.
+src/_derive/mod.rs:197://! See [Configuring the Parser][_tutorial#configuring-the-parser] and
+src/_derive/mod.rs:344://! # use clap::Parser;
+src/_derive/mod.rs:346://! #[derive(Parser)]
+src/_derive/mod.rs:358://! # use clap::Parser;
+src/_derive/mod.rs:360://! #[derive(Parser)]
+src/_derive/mod.rs:383://! # use clap::Parser;
+src/_derive/mod.rs:384://! #[derive(Parser)]
+src/_derive/mod.rs:448://! deriving `Args` or `Parser`. This example shows how you can augment a `Command` instance
+src/_derive/mod.rs:466://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can
+src/_derive/mod.rs:480://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can
+src/_derive/mod.rs:488://! `Parser`, whereas now we implement
+src/_derive/mod.rs:507://! struct that derived `Parser`, whereas now we implement
+src/_derive/mod.rs:520://!   [`Parser`][crate::Parser])
+src/_derive/_tutorial.rs:35://! ## Configuring the Parser
+src/_derive/_tutorial.rs:37://! You use derive [`Parser`][crate::Parser] to start building a parser.
+src/_derive/_tutorial.rs:200://! A [custom parser][TypedValueParser] can be used to improve the error messages or provide additional validation:

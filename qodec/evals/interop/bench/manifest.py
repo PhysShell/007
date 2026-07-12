@@ -52,7 +52,7 @@ class Case:
 
     @property
     def arm(self) -> str:
-        """The tool feeding qodec — how the case's qodec arm is named."""
+        """The tool feeding qodec — the coarse arm name."""
         if self.producer.type == "rtk-command":
             return "rtk"
         if any(t.type == "rtk" for t in self.transforms):
@@ -60,6 +60,21 @@ class Case:
         if self.producer.type == "codegraph":
             return "codegraph"
         return "raw"
+
+    @property
+    def pipeline_id(self) -> str:
+        """A stable, mode-distinguishing id so scoring never blends distinct
+        RTK modes (a stdin `pipe` filter vs a command-runner) into one number."""
+        if self.producer.type == "rtk-command":
+            return f"rtk:command:{self.producer.raw['argv'][0]}"
+        rtk_t = next((t for t in self.transforms if t.type == "rtk"), None)
+        if rtk_t is not None:
+            return f"rtk:pipe:{rtk_t.raw['filter']}"
+        if self.producer.type == "codegraph":
+            return "codegraph:explore"
+        if self.producer.type == "command":
+            return "raw:command"
+        return "raw:fixture"
 
     @property
     def unsupported(self) -> Transform | None:
@@ -77,7 +92,7 @@ def _parse_transform(item: object) -> Transform:
     raise ValueError(f"bad transform entry: {item!r}")
 
 
-def parse_case(obj: dict, *, stdin_filters: set[str]) -> Case:
+def parse_case(obj: dict, *, pipe_filters: set[str]) -> Case:
     if "id" not in obj:
         raise ValueError("case missing 'id'")
     cid = obj["id"]
@@ -103,13 +118,14 @@ def parse_case(obj: dict, *, stdin_filters: set[str]) -> Case:
             f = t.raw.get("filter")
             if f is None:
                 raise ValueError(f"{cid}: rtk transform needs a 'filter'")
-            # An rtk *transform* must be a real stdin filter — a command-runner
-            # would ignore the incoming text, which the model forbids.
-            if f not in stdin_filters:
+            # An rtk *transform* runs `rtk pipe --filter <f>` over stdin, so the
+            # filter must be one the harness pins as a pipe filter. A native
+            # command-runner (rtk rg) is an rtk-command producer, not this.
+            if f not in pipe_filters:
                 raise ValueError(
-                    f"{cid}: rtk filter {f!r} is not a stdin filter "
-                    f"(stdin filters: {sorted(stdin_filters)}); use an "
-                    "rtk-command producer for command-runner filters"
+                    f"{cid}: rtk filter {f!r} is not a pinned pipe filter "
+                    f"({sorted(pipe_filters)}); use an rtk-command producer "
+                    "for native command-runners like rtk rg"
                 )
 
     # Producer-specific required fields.
@@ -124,9 +140,9 @@ def parse_case(obj: dict, *, stdin_filters: set[str]) -> Case:
     return Case(id=cid, producer=producer, transforms=transforms, raw=obj)
 
 
-def load(path: Path, *, stdin_filters: set[str]) -> list[Case]:
+def load(path: Path, *, pipe_filters: set[str]) -> list[Case]:
     obj = json.loads(path.read_text())
     cases = obj.get("cases")
     if not isinstance(cases, list):
         raise ValueError(f"{path}: manifest must have a 'cases' array")
-    return [parse_case(c, stdin_filters=stdin_filters) for c in cases]
+    return [parse_case(c, pipe_filters=pipe_filters) for c in cases]

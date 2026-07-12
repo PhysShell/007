@@ -1,0 +1,8 @@
+{
+  "encoded": false,
+  "codec": "passthrough",
+  "content": "Log Summary\n   [error] 1 errors (1 unique)\n   [warn] 0 warnings (0 unique)\n   [info] 3 info messages\n\n[ERRORS]\n   System.AggregateException: One or more errors occurred. ---> System.TimeoutException: The operati...\n",
+  "tokens_in": 59,
+  "tokens_out": 59,
+  "meter": "o200k"
+}

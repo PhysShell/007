@@ -34,8 +34,25 @@ class Tool:
         return self.raw.get("reason")
 
     @property
-    def stdin_filters(self) -> list[str]:
-        return list(self.raw.get("stdin_filters", []))
+    def pipe_filters(self) -> list[str]:
+        """RTK `pipe --filter <name>` filters this harness uses as transforms."""
+        return list(self.raw.get("pipe_filters", []))
+
+    @property
+    def pinned_sha256(self) -> str | None:
+        return self.raw.get("sha256")
+
+    @property
+    def provenance(self) -> str | None:
+        return self.raw.get("provenance")
+
+    def actual_sha256(self) -> str | None:
+        import hashlib
+
+        b = self.resolve_bin()
+        if not b:
+            return None
+        return hashlib.sha256(Path(b).read_bytes()).hexdigest()
 
     def resolve_bin(self) -> str | None:
         """Locate the executable: <NAME>_BIN env override, then PATH."""

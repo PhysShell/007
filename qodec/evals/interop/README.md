@@ -35,17 +35,24 @@ Producer types: `fixture`, `command`, `rtk-command`, `codegraph`. Transform
 types: `rtk` (stdin filter only) and `qodec` (terminal). The arm is named by the
 tool feeding qodec: `raw+qodec`, `rtk+qodec`, `codegraph+qodec`.
 
-### The real RTK interface (there is no `rtk pipe --filter`)
+### The real RTK interface (`rtk pipe --filter`, confirmed against v0.42.4)
 
 RTK 0.42.4 ships two modes, both used here:
 
-- **stdin filters** (`rtk log`) read piped output → a genuine `text→text`
-  transform over a fixture or command output.
-- **command-runners** (`rtk rg PATTERN PATH`) proxy a native command (they run
-  ripgrep, then filter). These cannot transform arbitrary text, so they are a
-  `rtk-command` **producer** with a raw baseline (`rg …` without rtk) for RTK's
-  own reduction figure — never a transform. The manifest parser rejects a
-  command-runner filter used as a transform.
+- **`rtk pipe --filter <name>`** — "read stdin, apply filter, print filtered
+  output (Unix pipe mode)". A genuine `text→text` transform. The harness pins
+  the filters it uses: `log`, `grep`, `git-diff`, `cargo-test`.
+- **command-runners** (`rtk rg PATTERN PATH`) proxy a native command. These
+  cannot transform arbitrary text, so they are a `rtk-command` **producer** with
+  a raw baseline (`rg …` without rtk). The manifest parser rejects a native
+  command-runner name used as a `pipe` transform.
+
+Provenance matters: the binary is built from the exact upstream tag
+(`cargo install --git … --tag v0.42.4`), and `tools.lock.toml` pins its
+SHA-256, which `doctor.py` verifies. A finding from that discipline: the
+**tagged v0.42.4 `rtk rg` is a raw passthrough** (it does not filter — that was
+added on `master` after the tag), so the `rtk-command` lane measures qodec over
+raw ripgrep output. We report that rather than swap in a newer, unpinned binary.
 
 ## Cold vs warm (honest token metrics)
 

@@ -1,0 +1,8 @@
+{
+  "encoded": false,
+  "codec": "passthrough",
+  "content": "cargo test: 55 passed (10 suites, 99.24s)",
+  "tokens_in": 16,
+  "tokens_out": 16,
+  "meter": "o200k"
+}

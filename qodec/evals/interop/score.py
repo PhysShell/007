@@ -37,32 +37,39 @@ def main() -> int:
     ok = [r for r in records if r["status"] == "ok"]
     other = [r for r in records if r["status"] != "ok"]
 
-    by_arm: dict[str, list[dict]] = defaultdict(list)
+    by_pid: dict[str, list[dict]] = defaultdict(list)
     for r in ok:
-        by_arm[r["arm"]].append(r)
+        by_pid[r.get("pipeline_id", r["arm"])].append(r)
 
     print("# qodec interop bench — Level 1 (artifacts, no model)")
     print(f"run {meta['run_id']}  manifest={Path(meta['manifest']).name}  "
           f"codec={meta['codec']}  meter={meta['meter']}  cases={meta['n_cases']}\n")
 
-    print(f"{'arm':<11}{'n':>3}{'med cold':>10}{'med warm':>10}  cold_go  warm_go")
-    for arm, rs in sorted(by_arm.items()):
+    # Median by pipeline_id so distinct RTK modes (pipe vs command) never blend.
+    print(f"{'pipeline_id':<22}{'n':>3}{'med cold':>10}{'med warm':>10}  cold_go  warm_go")
+    for pid, rs in sorted(by_pid.items()):
         cold = _median([r["cold_gain"] for r in rs])
         warm = _median([r["warm_gain"] for r in rs])
         cg = "GO" if cold >= args.go_threshold else "no"
         wg = "GO" if warm >= args.go_threshold else "no"
-        print(f"{arm:<11}{len(rs):>3}{cold*100:>9.1f}%{warm*100:>9.1f}%   {cg:<7}  {wg}")
+        print(f"{pid:<22}{len(rs):>3}{cold*100:>9.1f}%{warm*100:>9.1f}%   {cg:<7}  {wg}")
 
     print("\nby case:")
-    print(f"{'case':<22}{'arm':<11}{'cold':>8}{'warm':>8}  {'codec':<10}{'up_ms':>7}{'q_ms':>7}  roundtrip")
+    print(f"{'case':<22}{'pipeline_id':<20}{'cold':>8}{'warm':>8}  {'codec':<10}{'up_ms':>7}{'q_ms':>7}  rt")
     for r in ok:
         qms = r["encode_ms"] + r["decode_ms"]
-        print(f"{r['id']:<22}{r['arm']:<11}{r['cold_gain']*100:+7.1f}%{r['warm_gain']*100:+7.1f}%  "
-              f"{r['codec']:<10}{r['upstream_tool_ms']:>7.0f}{qms:>7.0f}  {'ok' if r['roundtrip_ok'] else 'FAIL'}")
+        print(f"{r['id']:<22}{r.get('pipeline_id',r['arm']):<20}{r['cold_gain']*100:+7.1f}%"
+              f"{r['warm_gain']*100:+7.1f}%  {r['codec']:<10}{r['upstream_tool_ms']:>7.0f}{qms:>7.0f}  "
+              f"{'ok' if r['roundtrip_ok'] else 'FAIL'}")
+        # Upstream tool reduction: producer -> tool-only (pipe transforms) or
+        # raw baseline -> tool-only (rtk-command).
+        if r.get("upstream_reduction") is not None and r.get("producer_tokens"):
+            print(f"{'  ↳ upstream (producer→tool)':<42}{r['producer_tokens']:>6} → "
+                  f"{r['tool_only_tokens']} tok ({r['upstream_reduction']*100:+.1f}%)")
         if r.get("baseline"):
             b = r["baseline"]
             red = 1 - r["tool_only_tokens"] / b["tokens"] if b["tokens"] else 0.0
-            print(f"{'  ↳ raw baseline':<33}{b['tokens']:>7} tok  ->  tool {r['tool_only_tokens']} "
+            print(f"{'  ↳ raw baseline (raw→rtk)':<42}{b['tokens']:>6} → {r['tool_only_tokens']} tok "
                   f"({red*100:+.1f}% by {b['tool']})")
 
     for r in other:

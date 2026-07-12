@@ -13,11 +13,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from bench import manifest  # noqa: E402
 
-STDIN_FILTERS = {"log"}
+PIPE_FILTERS = {"log", "grep", "git-diff", "cargo-test"}
 
 
 def parse(obj):
-    return manifest.parse_case(obj, stdin_filters=STDIN_FILTERS)
+    return manifest.parse_case(obj, pipe_filters=PIPE_FILTERS)
 
 
 class ArmNaming(unittest.TestCase):
@@ -52,11 +52,14 @@ class Guardrails(unittest.TestCase):
             parse({"id": "x", "producer": {"type": "fixture", "path": "p"},
                    "transforms": ["qodec", "qodec"]})
 
-    def test_rtk_transform_must_be_stdin_filter(self):
-        # grep is a command-runner, not a stdin filter — rejected as a transform.
+    def test_rtk_transform_must_be_pinned_pipe_filter(self):
+        # `grep` is a valid pipe filter; a native command-runner like `rg` is
+        # not — used as a pipe transform it must be rejected.
+        parse({"id": "ok", "producer": {"type": "fixture", "path": "p"},
+               "transforms": [{"type": "rtk", "filter": "grep"}, "qodec"]})
         with self.assertRaises(ValueError):
-            parse({"id": "x", "producer": {"type": "fixture", "path": "p"},
-                   "transforms": [{"type": "rtk", "filter": "grep"}, "qodec"]})
+            parse({"id": "bad", "producer": {"type": "fixture", "path": "p"},
+                   "transforms": [{"type": "rtk", "filter": "rg"}, "qodec"]})
 
     def test_rtk_transform_needs_filter(self):
         with self.assertRaises(ValueError):
@@ -90,7 +93,7 @@ class RealManifests(unittest.TestCase):
     def test_shipped_manifests_parse(self):
         base = Path(__file__).resolve().parents[1] / "manifests"
         for name in ("corpus.json", "rtk.json", "codegraph.json"):
-            cases = manifest.load(base / name, stdin_filters=STDIN_FILTERS)
+            cases = manifest.load(base / name, pipe_filters=PIPE_FILTERS)
             self.assertTrue(cases, f"{name} produced no cases")
 
 

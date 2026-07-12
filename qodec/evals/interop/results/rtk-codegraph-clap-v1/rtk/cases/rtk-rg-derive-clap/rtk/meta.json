@@ -1,0 +1,89 @@
+{
+  "case": "rtk-rg-derive-clap",
+  "arm": "rtk",
+  "pipeline_id": "rtk:command:rg",
+  "qodec_version": "sha256:b68fb317dcc8",
+  "codec": "squeeze",
+  "meter": "o200k",
+  "is_json": false,
+  "pipeline": [
+    {
+      "tool": "rtk",
+      "argv": [
+        "/tmp/claude-0/-home-user-007/4b6242b1-5681-5614-a540-21fcbbe1799d/scratchpad/tools-tag/bin/rtk",
+        "rg",
+        "-n",
+        "derive",
+        "src"
+      ],
+      "cwd": "/home/user/007/qodec/evals/interop/.cache/repos/clap",
+      "exit_code": 0,
+      "wall_ms": 34.72,
+      "tool_version": "0.42.4",
+      "repo_sha": "8b41d0b8497ccaa0fb0d1d8a51f91ea2f62b3aa8"
+    }
+  ],
+  "baseline": {
+    "tool": "rg",
+    "argv": [
+      "rg",
+      "-n",
+      "derive",
+      "src"
+    ],
+    "cwd": "/home/user/007/qodec/evals/interop/.cache/repos/clap",
+    "exit_code": 0,
+    "wall_ms": 6.71,
+    "tool_version": null,
+    "repo_sha": "8b41d0b8497ccaa0fb0d1d8a51f91ea2f62b3aa8",
+    "tokens": 3359
+  },
+  "upstream_reduction": null,
+  "tokens": {
+    "producer": null,
+    "tool_only": 3359,
+    "qodec_content": 1697,
+    "cold_prompt": 1958,
+    "warm_payload": 1697
+  },
+  "incremental_qodec_gain": {
+    "cold": 0.4171,
+    "warm": 0.4948
+  },
+  "qodec_codec": "mine",
+  "is_fallback": false,
+  "encode_ms": 2176.39,
+  "decode_ms": 2.95,
+  "upstream_tool_ms": 34.72,
+  "roundtrip_ok": true,
+  "artifacts": {
+    "producer.txt": {
+      "sha256": "sha256:8dc6bb56e30d5cc0a795a7ba9b1ad72f069f1ae3de8d23496079c27dc1abe55d",
+      "bytes": 12267
+    },
+    "transformed.txt": {
+      "sha256": "sha256:8dc6bb56e30d5cc0a795a7ba9b1ad72f069f1ae3de8d23496079c27dc1abe55d",
+      "bytes": 12267
+    },
+    "qodec-envelope.json": {
+      "sha256": "sha256:abe6886114bcb6dee4a845eed33701220028489cf790c8b8ebde367e02c93e24",
+      "bytes": 6959
+    },
+    "qodec-content.txt": {
+      "sha256": "sha256:c636b067ed79950711514798ea638f87d2e861bf39f8123e631004f0cc19ffe5",
+      "bytes": 6032
+    },
+    "cold-prompt.txt": {
+      "sha256": "sha256:723939f04ce562e893020130f96f2a901e00406a4f8c0a3203adec36d37d5847",
+      "bytes": 7085
+    },
+    "decoded.txt": {
+      "sha256": "sha256:8dc6bb56e30d5cc0a795a7ba9b1ad72f069f1ae3de8d23496079c27dc1abe55d",
+      "bytes": 12267
+    },
+    "baseline.txt": {
+      "sha256": "sha256:de604fa67d2958368614055d870e0f9a757c77f40c4e46637a7f3207f0c846f6",
+      "bytes": 12267
+    }
+  }
+}

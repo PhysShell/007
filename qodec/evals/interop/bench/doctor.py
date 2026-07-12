@@ -80,12 +80,20 @@ def check_tool(tool: lockfiles.Tool) -> dict:
     r["detected_version"] = detected
     r["pinned_version"] = tool.pinned_version
     r["version_match"] = detected == tool.pinned_version
-    smoke_spec = tool.raw.get("smoke", "")
+    # Binary provenance: the running binary must match the pinned SHA-256.
+    r["provenance"] = tool.provenance
+    r["pinned_sha256"] = tool.pinned_sha256
+    r["actual_sha256"] = tool.actual_sha256()
+    r["sha256_match"] = tool.pinned_sha256 is None or r["actual_sha256"] == tool.pinned_sha256
     if tool.name == "rtk":
-        r["smoke"] = _smoke([b, "log"], stdin="ERROR boom\nERROR boom\n")
+        # Real pipe smoke — the interface the lanes actually use.
+        r["smoke"] = _smoke([b, "pipe", "--filter", "log"], stdin="ERROR boom\nERROR boom\n")
     else:
-        r["smoke"] = {"argv": None, "ok": True, "note": f"see lane checks ({smoke_spec})"}
-    r["ok"] = bool(r["version_match"]) and r["smoke"]["ok"]
+        # codegraph's real smoke is a per-repo `explore` in check_codegraph_index.
+        r["smoke"] = {"argv": None, "ok": True, "note": "real explore smoke runs per-repo"}
+    r["ok"] = bool(r["version_match"]) and bool(r["sha256_match"]) and r["smoke"]["ok"]
+    if not r["sha256_match"]:
+        r["reason"] = f"binary SHA {r['actual_sha256']} != pinned {tool.pinned_sha256}"
     return r
 
 
@@ -128,14 +136,36 @@ def check_codegraph_index(repo: lockfiles.Repo, tool: lockfiles.Tool) -> dict:
     r["index_state"] = idx.get("state")
     r["pending"] = pending
     r["node_count"] = st.get("nodeCount")
-    ready = (
+    index_ready = (
         st.get("initialized")
         and idx.get("state") == "complete"
         and all(v == 0 for v in pending.values())
     )
-    r["ok"] = bool(ready)
-    if not ready:
+
+    # Real smoke: run the pinned query through `codegraph explore` and require a
+    # non-empty answer — not a placeholder. Record exact argv + elapsed.
+    query = repo.raw.get("question", "explore the codebase")
+    started = time.perf_counter()
+    try:
+        proc = __import__("subprocess").run(
+            [b, "explore", query, "-p", str(d)], capture_output=True, text=True, check=False
+        )
+        explore = {
+            "argv": [b, "explore", query, "-p", str(d)],
+            "exit_code": proc.returncode,
+            "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
+            "stdout_bytes": len(proc.stdout.encode("utf-8")),
+            "ok": proc.returncode == 0 and len(proc.stdout.strip()) > 0,
+        }
+    except OSError as exc:
+        explore = {"argv": [b, "explore"], "ok": False, "error": str(exc)}
+    r["explore_smoke"] = explore
+
+    r["ok"] = bool(index_ready) and explore["ok"]
+    if not index_ready:
         r["reason"] = f"index not ready (state={idx.get('state')}, pending={pending})"
+    elif not explore["ok"]:
+        r["reason"] = f"explore smoke failed (exit={explore.get('exit_code')}, bytes={explore.get('stdout_bytes')})"
     return r
 
 

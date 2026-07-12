@@ -49,8 +49,8 @@ def main() -> int:
 
     tools = lockfiles.tools()
     repos = lockfiles.repos()
-    stdin_filters = set(tools["rtk"].stdin_filters) if "rtk" in tools else set()
-    cases = manifest.load(args.manifest, stdin_filters=stdin_filters)
+    pipe_filters = set(tools["rtk"].pipe_filters) if "rtk" in tools else set()
+    cases = manifest.load(args.manifest, pipe_filters=pipe_filters)
 
     required = _required_tools(cases)
     receipt = doctor.build_receipt(required)

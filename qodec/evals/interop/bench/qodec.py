@@ -110,8 +110,24 @@ def encode(text: str, *, codec: str = "squeeze", meter: str = "o200k",
 
 
 def decode(content: str) -> tuple[str, float]:
-    """Invert an artifact (or a passthrough, which decodes to itself)."""
+    """Invert a `%q1` artifact. NOTE: this always runs the decoder, so passing
+    container-shaped *plaintext* here would wrongly unwrap it — route through
+    `decode_envelope`, which respects the `encoded` flag."""
     return _run([str(binary()), "decode"], content)
+
+
+def decode_envelope(env: Encoded) -> tuple[str, float]:
+    """Recover the original text from an adapter envelope, honoring `encoded`.
+
+    `encoded=false` means `content` is already the plaintext original (a
+    passthrough) and must be returned verbatim — never fed to `qodec decode`.
+    That matters when the passthrough text is itself container-shaped (a literal
+    `%q1 …` string in tool output): decoding it would unwrap a container the
+    codec never created. Only `encoded=true` content is a real artifact to
+    invert."""
+    if not env.encoded:
+        return env.content, 0.0
+    return decode(env.content)
 
 
 def count(text: str, *, meter: str = "o200k") -> int:

@@ -1,0 +1,169 @@
+%q1 mine n=24
+码=:#![doc = include_str!("../../examples/
+引=码tutorial_derive/
+路=://! - [FAQ: When should I use the builder vs derive APIs?][crate::_faq#when-should-i-use-the-builder-vs-derive-apis]
+类=://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can
+函=://! When using the derive API, you can use `#[command(subcommand)]` inside the struct to add
+值= the [`derive` feature flag][crate::_features]
+错=_derive
+试=://! [`augment_subcommands`][crate::Subcommand::augment_subcommands]
+件=引03_0
+组=码typed-derive/
+标= the derive API
+记=»src/_cookbook/
+链=://! #[derive(
+表=[tutorial][错::_tutorial] and [reference][错]
+层=4:// - Please update the corresponding section in
+块=When should I use the builder vs derive APIs?
+节= still be used inside the struct created with
+行=created behind the scenes for you by标.
+列=_positional
+键=://! $ cargo add clap --features derive
+名=引04_0
+数=][crate::
+串=-derive
+图=`#[command(flatten)]`
+%q1 body
+%q1 grep mark=raquo nl=1
+%q1 body
+»src/_faq.rs
+9://! 3. [块](#when-should-i-use-the-builder-vs串-apis)
+26://! Simple! `clap` *is* `structopt`.  `structopt` started as a derive API built on
+30://! with the release of `clap错`.
+36://!   derives in mind and easier to change `clap` in response to `structopt` bugs.
+62://! - [Derive数错::_tutorial]
+74://! ### 块
+76://! Our default answer is to use the [Derive API数错::_tutorial]:
+88://! You can [interop between Derive and Builder APIs数错#mixing-builder-and串-apis].
+记escaped列错.rs
+4码escaped-positional串.rs")]
+7码escaped-positional串.md")]
+»src/_tutorial.rs
+层 the derive tutorial
+31路
+176://! When enabling the [`derive` feature数_features], you can use
+记mod.rs
+10://! Typed arguments: [derive][typed错]
+14://! Custom cargo command: [builder][cargo_example], [derive][cargo_example错]
+24://! git-like interface: [builder][git], [derive][git错]
+37://! Escaped positionals with `--`: [builder][escaped列], [derive][escaped列错]
+47://! repl: [builder][repl], [derive][repl错]
+52:pub mod cargo_example错;
+54:pub mod escaped列错;
+57:pub mod git错;
+62:pub mod repl错;
+63:pub mod typed错;
+»
+src/_cookbook/repl错.rs:4码repl串.rs")]
+记cargo_example错.rs
+4码cargo-example串.rs")]
+7码cargo-example串.md")]
+记typed错.rs
+3://! **This requires enabling值.**
+8组implicit.rs")]
+11组implicit.md")]
+16组builtin.rs")]
+19组builtin.md")]
+24组fn_parser.rs")]
+27组fn_parser.md")]
+32组custom.rs")]
+35组custom.md")]
+»
+src/_features.rs:18://! * `derive`: Enables the custom derive (i.e. `#[derive(Parser)]`). Without this you must use one of the other methods of creating a `clap` CLI listed above.
+记git错.rs
+4码git串.rs")]
+7码git串.md")]
+»src/lib.rs
+9://! - Derive 表
+42键
+48://! # #[cfg(feature = "derive")] {
+56://! See also the derive 表
+91:#[cfg(feature = "derive")]
+93:pub use clap错::{self, Args, Parser, Subcommand, ValueEnum};
+100:pub mod 错;
+»src/错/mod.rs
+13://! 5. [Mixing Builder and Derive APIs](#mixing-builder-and串-apis)
+18://! To derive `clap` types, you need to enable值.
+25://! Let's start by breaking down the anatomy of the derive attributes:
+30链Parser)]
+49链Args)]
+59链Subcommand)]
+76链ValueEnum)]
+95://!   - The derive doesn't work on enums that contain non-unit variants, unless they are skipped
+97://! *See also the [derive tutorial数错::_tutorial] and [cookbook数_cookbook]*
+203://! `Args` derive.
+346链Parser)]
+360链Parser)]
+384链Parser)]
+441://! The builder and derive APIs do not live in isolation. They can work together, which is
+445://! ### Using derived arguments in a builder application
+447://! When using标, you can 图 a struct deriving `Args` into a struct
+449://! created using the builder API with `Args` created using标.
+460码derive_ref/augment_args.rs")]
+463://! ### Using derived subcommands in a builder application
+465函
+466类
+474码derive_ref/augment_subcommands.rs")]
+477://! ### Adding hand-implemented subcommands to a derived application
+479函
+480类
+482://!节标. The implementation of the
+484://! 行
+487试 on an enum that derived
+489试 ourselves, but标
+494码derive_ref/hand_subcommand.rs")]
+497://! ### Flattening hand-implemented args into a derived application
+499://! When using标, you can use 图 inside the struct to add arguments as
+501://! struct that derived `Args`. However, you can also implement the `Args` trait manually on this
+502://! struct (or any other type) and it can节 the derive
+504://! the `Command` instance 行
+507://! struct that derived `Parser`, whereas now we implement
+508://! [`augment_args`数Args::augment_args] ourselves, but标 calls it
+513码derive_ref/flatten_hand_args.rs")]
+526:// Point people here that search for attributes that don't exist in the derive (a subset of magic
+»src/错/_tutorial.rs
+层 the derive tutorial
+19://! First, ensure `clap` is available with值:
+21键
+26引01_quick.rs")]
+29引01_quick.md")]
+32路
+37://! You use derive [`Parser`数Parser] to start building a parser.
+40引02_apps.rs")]
+43引02_apps.md")]
+48引02_crate.rs")]
+50引02_crate.md")]
+55引02_app_settings.rs")]
+57引02_app_settings.md")]
+75件3列.rs")]
+77件3列.md")]
+82件3列_mult.rs")]
+84件3列_mult.md")]
+97件2_option.rs")]
+99件2_option.md")]
+104件2_option_mult.rs")]
+106件2_option_mult.md")]
+113件1_flag_bool.rs")]
+115件1_flag_bool.md")]
+122件1_flag_count.rs")]
+124件1_flag_count.md")]
+133件6_optional.rs")]
+135件6_optional.md")]
+144件5_default_values.rs")]
+146件5_default_values.md")]
+150://! Subcommands are derived with `#[derive(Subcommand)]` and be added via
+156件4_subcommands.rs")]
+161件4_subcommands_alt.rs")]
+164件4_subcommands.md")]
+178://! For example, if you have arguments of specific values you want to test for, you can derive
+187名1_enum.rs")]
+189名1_enum.md")]
+196名2_parse.rs")]
+198名2_parse.md")]
+203名2_validate.rs")]
+205名2_validate.md")]
+226名3_relations.rs")]
+228名3_relations.md")]
+235名4_custom.rs")]
+237名4_custom.md")]
+245引05_01_assert.rs")]

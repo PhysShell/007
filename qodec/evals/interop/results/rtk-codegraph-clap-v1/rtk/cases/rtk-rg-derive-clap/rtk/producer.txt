@@ -1,0 +1,129 @@
+src/_faq.rs:9://! 3. [When should I use the builder vs derive APIs?](#when-should-i-use-the-builder-vs-derive-apis)
+src/_faq.rs:26://! Simple! `clap` *is* `structopt`.  `structopt` started as a derive API built on
+src/_faq.rs:30://! with the release of `clap_derive`.
+src/_faq.rs:36://!   derives in mind and easier to change `clap` in response to `structopt` bugs.
+src/_faq.rs:62://! - [Derive][crate::_derive::_tutorial]
+src/_faq.rs:74://! ### When should I use the builder vs derive APIs?
+src/_faq.rs:76://! Our default answer is to use the [Derive API][crate::_derive::_tutorial]:
+src/_faq.rs:88://! You can [interop between Derive and Builder APIs][crate::_derive#mixing-builder-and-derive-apis].
+src/_cookbook/escaped_positional_derive.rs:4:#![doc = include_str!("../../examples/escaped-positional-derive.rs")]
+src/_cookbook/escaped_positional_derive.rs:7:#![doc = include_str!("../../examples/escaped-positional-derive.md")]
+src/_tutorial.rs:4:// - Please update the corresponding section in the derive tutorial
+src/_tutorial.rs:31://! - [FAQ: When should I use the builder vs derive APIs?][crate::_faq#when-should-i-use-the-builder-vs-derive-apis]
+src/_tutorial.rs:176://! When enabling the [`derive` feature][crate::_features], you can use
+src/_cookbook/mod.rs:10://! Typed arguments: [derive][typed_derive]
+src/_cookbook/mod.rs:14://! Custom cargo command: [builder][cargo_example], [derive][cargo_example_derive]
+src/_cookbook/mod.rs:24://! git-like interface: [builder][git], [derive][git_derive]
+src/_cookbook/mod.rs:37://! Escaped positionals with `--`: [builder][escaped_positional], [derive][escaped_positional_derive]
+src/_cookbook/mod.rs:47://! repl: [builder][repl], [derive][repl_derive]
+src/_cookbook/mod.rs:52:pub mod cargo_example_derive;
+src/_cookbook/mod.rs:54:pub mod escaped_positional_derive;
+src/_cookbook/mod.rs:57:pub mod git_derive;
+src/_cookbook/mod.rs:62:pub mod repl_derive;
+src/_cookbook/mod.rs:63:pub mod typed_derive;
+src/_cookbook/repl_derive.rs:4:#![doc = include_str!("../../examples/repl-derive.rs")]
+src/_cookbook/cargo_example_derive.rs:4:#![doc = include_str!("../../examples/cargo-example-derive.rs")]
+src/_cookbook/cargo_example_derive.rs:7:#![doc = include_str!("../../examples/cargo-example-derive.md")]
+src/_cookbook/typed_derive.rs:3://! **This requires enabling the [`derive` feature flag][crate::_features].**
+src/_cookbook/typed_derive.rs:8:#![doc = include_str!("../../examples/typed-derive/implicit.rs")]
+src/_cookbook/typed_derive.rs:11:#![doc = include_str!("../../examples/typed-derive/implicit.md")]
+src/_cookbook/typed_derive.rs:16:#![doc = include_str!("../../examples/typed-derive/builtin.rs")]
+src/_cookbook/typed_derive.rs:19:#![doc = include_str!("../../examples/typed-derive/builtin.md")]
+src/_cookbook/typed_derive.rs:24:#![doc = include_str!("../../examples/typed-derive/fn_parser.rs")]
+src/_cookbook/typed_derive.rs:27:#![doc = include_str!("../../examples/typed-derive/fn_parser.md")]
+src/_cookbook/typed_derive.rs:32:#![doc = include_str!("../../examples/typed-derive/custom.rs")]
+src/_cookbook/typed_derive.rs:35:#![doc = include_str!("../../examples/typed-derive/custom.md")]
+src/_features.rs:18://! * `derive`: Enables the custom derive (i.e. `#[derive(Parser)]`). Without this you must use one of the other methods of creating a `clap` CLI listed above.
+src/_cookbook/git_derive.rs:4:#![doc = include_str!("../../examples/git-derive.rs")]
+src/_cookbook/git_derive.rs:7:#![doc = include_str!("../../examples/git-derive.md")]
+src/lib.rs:9://! - Derive [tutorial][_derive::_tutorial] and [reference][_derive]
+src/lib.rs:42://! $ cargo add clap --features derive
+src/lib.rs:48://! # #[cfg(feature = "derive")] {
+src/lib.rs:56://! See also the derive [tutorial][_derive::_tutorial] and [reference][_derive]
+src/lib.rs:91:#[cfg(feature = "derive")]
+src/lib.rs:93:pub use clap_derive::{self, Args, Parser, Subcommand, ValueEnum};
+src/lib.rs:100:pub mod _derive;
+src/_derive/mod.rs:13://! 5. [Mixing Builder and Derive APIs](#mixing-builder-and-derive-apis)
+src/_derive/mod.rs:18://! To derive `clap` types, you need to enable the [`derive` feature flag][crate::_features].
+src/_derive/mod.rs:25://! Let's start by breaking down the anatomy of the derive attributes:
+src/_derive/mod.rs:30://! #[derive(Parser)]
+src/_derive/mod.rs:49://! #[derive(Args)]
+src/_derive/mod.rs:59://! #[derive(Subcommand)]
+src/_derive/mod.rs:76://! #[derive(ValueEnum)]
+src/_derive/mod.rs:95://!   - The derive doesn't work on enums that contain non-unit variants, unless they are skipped
+src/_derive/mod.rs:97://! *See also the [derive tutorial][crate::_derive::_tutorial] and [cookbook][crate::_cookbook]*
+src/_derive/mod.rs:203://! `Args` derive.
+src/_derive/mod.rs:346://! #[derive(Parser)]
+src/_derive/mod.rs:360://! #[derive(Parser)]
+src/_derive/mod.rs:384://! #[derive(Parser)]
+src/_derive/mod.rs:441://! The builder and derive APIs do not live in isolation. They can work together, which is
+src/_derive/mod.rs:445://! ### Using derived arguments in a builder application
+src/_derive/mod.rs:447://! When using the derive API, you can `#[command(flatten)]` a struct deriving `Args` into a struct
+src/_derive/mod.rs:449://! created using the builder API with `Args` created using the derive API.
+src/_derive/mod.rs:460:#![doc = include_str!("../../examples/derive_ref/augment_args.rs")]
+src/_derive/mod.rs:463://! ### Using derived subcommands in a builder application
+src/_derive/mod.rs:465://! When using the derive API, you can use `#[command(subcommand)]` inside the struct to add
+src/_derive/mod.rs:466://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can
+src/_derive/mod.rs:474:#![doc = include_str!("../../examples/derive_ref/augment_subcommands.rs")]
+src/_derive/mod.rs:477://! ### Adding hand-implemented subcommands to a derived application
+src/_derive/mod.rs:479://! When using the derive API, you can use `#[command(subcommand)]` inside the struct to add
+src/_derive/mod.rs:480://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can
+src/_derive/mod.rs:482://! still be used inside the struct created with the derive API. The implementation of the
+src/_derive/mod.rs:484://! created behind the scenes for you by the derive API.
+src/_derive/mod.rs:487://! [`augment_subcommands`][crate::Subcommand::augment_subcommands] on an enum that derived
+src/_derive/mod.rs:489://! [`augment_subcommands`][crate::Subcommand::augment_subcommands] ourselves, but the derive API
+src/_derive/mod.rs:494:#![doc = include_str!("../../examples/derive_ref/hand_subcommand.rs")]
+src/_derive/mod.rs:497://! ### Flattening hand-implemented args into a derived application
+src/_derive/mod.rs:499://! When using the derive API, you can use `#[command(flatten)]` inside the struct to add arguments as
+src/_derive/mod.rs:501://! struct that derived `Args`. However, you can also implement the `Args` trait manually on this
+src/_derive/mod.rs:502://! struct (or any other type) and it can still be used inside the struct created with the derive
+src/_derive/mod.rs:504://! the `Command` instance created behind the scenes for you by the derive API.
+src/_derive/mod.rs:507://! struct that derived `Parser`, whereas now we implement
+src/_derive/mod.rs:508://! [`augment_args`][crate::Args::augment_args] ourselves, but the derive API calls it
+src/_derive/mod.rs:513:#![doc = include_str!("../../examples/derive_ref/flatten_hand_args.rs")]
+src/_derive/mod.rs:526:// Point people here that search for attributes that don't exist in the derive (a subset of magic
+src/_derive/_tutorial.rs:4:// - Please update the corresponding section in the derive tutorial
+src/_derive/_tutorial.rs:19://! First, ensure `clap` is available with the [`derive` feature flag][crate::_features]:
+src/_derive/_tutorial.rs:21://! $ cargo add clap --features derive
+src/_derive/_tutorial.rs:26:#![doc = include_str!("../../examples/tutorial_derive/01_quick.rs")]
+src/_derive/_tutorial.rs:29:#![doc = include_str!("../../examples/tutorial_derive/01_quick.md")]
+src/_derive/_tutorial.rs:32://! - [FAQ: When should I use the builder vs derive APIs?][crate::_faq#when-should-i-use-the-builder-vs-derive-apis]
+src/_derive/_tutorial.rs:37://! You use derive [`Parser`][crate::Parser] to start building a parser.
+src/_derive/_tutorial.rs:40:#![doc = include_str!("../../examples/tutorial_derive/02_apps.rs")]
+src/_derive/_tutorial.rs:43:#![doc = include_str!("../../examples/tutorial_derive/02_apps.md")]
+src/_derive/_tutorial.rs:48:#![doc = include_str!("../../examples/tutorial_derive/02_crate.rs")]
+src/_derive/_tutorial.rs:50:#![doc = include_str!("../../examples/tutorial_derive/02_crate.md")]
+src/_derive/_tutorial.rs:55:#![doc = include_str!("../../examples/tutorial_derive/02_app_settings.rs")]
+src/_derive/_tutorial.rs:57:#![doc = include_str!("../../examples/tutorial_derive/02_app_settings.md")]
+src/_derive/_tutorial.rs:75:#![doc = include_str!("../../examples/tutorial_derive/03_03_positional.rs")]
+src/_derive/_tutorial.rs:77:#![doc = include_str!("../../examples/tutorial_derive/03_03_positional.md")]
+src/_derive/_tutorial.rs:82:#![doc = include_str!("../../examples/tutorial_derive/03_03_positional_mult.rs")]
+src/_derive/_tutorial.rs:84:#![doc = include_str!("../../examples/tutorial_derive/03_03_positional_mult.md")]
+src/_derive/_tutorial.rs:97:#![doc = include_str!("../../examples/tutorial_derive/03_02_option.rs")]
+src/_derive/_tutorial.rs:99:#![doc = include_str!("../../examples/tutorial_derive/03_02_option.md")]
+src/_derive/_tutorial.rs:104:#![doc = include_str!("../../examples/tutorial_derive/03_02_option_mult.rs")]
+src/_derive/_tutorial.rs:106:#![doc = include_str!("../../examples/tutorial_derive/03_02_option_mult.md")]
+src/_derive/_tutorial.rs:113:#![doc = include_str!("../../examples/tutorial_derive/03_01_flag_bool.rs")]
+src/_derive/_tutorial.rs:115:#![doc = include_str!("../../examples/tutorial_derive/03_01_flag_bool.md")]
+src/_derive/_tutorial.rs:122:#![doc = include_str!("../../examples/tutorial_derive/03_01_flag_count.rs")]
+src/_derive/_tutorial.rs:124:#![doc = include_str!("../../examples/tutorial_derive/03_01_flag_count.md")]
+src/_derive/_tutorial.rs:133:#![doc = include_str!("../../examples/tutorial_derive/03_06_optional.rs")]
+src/_derive/_tutorial.rs:135:#![doc = include_str!("../../examples/tutorial_derive/03_06_optional.md")]
+src/_derive/_tutorial.rs:144:#![doc = include_str!("../../examples/tutorial_derive/03_05_default_values.rs")]
+src/_derive/_tutorial.rs:146:#![doc = include_str!("../../examples/tutorial_derive/03_05_default_values.md")]
+src/_derive/_tutorial.rs:150://! Subcommands are derived with `#[derive(Subcommand)]` and be added via
+src/_derive/_tutorial.rs:156:#![doc = include_str!("../../examples/tutorial_derive/03_04_subcommands.rs")]
+src/_derive/_tutorial.rs:161:#![doc = include_str!("../../examples/tutorial_derive/03_04_subcommands_alt.rs")]
+src/_derive/_tutorial.rs:164:#![doc = include_str!("../../examples/tutorial_derive/03_04_subcommands.md")]
+src/_derive/_tutorial.rs:178://! For example, if you have arguments of specific values you want to test for, you can derive
+src/_derive/_tutorial.rs:187:#![doc = include_str!("../../examples/tutorial_derive/04_01_enum.rs")]
+src/_derive/_tutorial.rs:189:#![doc = include_str!("../../examples/tutorial_derive/04_01_enum.md")]
+src/_derive/_tutorial.rs:196:#![doc = include_str!("../../examples/tutorial_derive/04_02_parse.rs")]
+src/_derive/_tutorial.rs:198:#![doc = include_str!("../../examples/tutorial_derive/04_02_parse.md")]
+src/_derive/_tutorial.rs:203:#![doc = include_str!("../../examples/tutorial_derive/04_02_validate.rs")]
+src/_derive/_tutorial.rs:205:#![doc = include_str!("../../examples/tutorial_derive/04_02_validate.md")]
+src/_derive/_tutorial.rs:226:#![doc = include_str!("../../examples/tutorial_derive/04_03_relations.rs")]
+src/_derive/_tutorial.rs:228:#![doc = include_str!("../../examples/tutorial_derive/04_03_relations.md")]
+src/_derive/_tutorial.rs:235:#![doc = include_str!("../../examples/tutorial_derive/04_04_custom.rs")]
+src/_derive/_tutorial.rs:237:#![doc = include_str!("../../examples/tutorial_derive/04_04_custom.md")]
+src/_derive/_tutorial.rs:245:#![doc = include_str!("../../examples/tutorial_derive/05_01_assert.rs")]

@@ -50,24 +50,17 @@ class ArmMetrics:
         return "loss"
 
 
-def measure(tool_only_text: str, env: qodec.Encoded, *, codec: str, meter: str,
-            decode_ms: float, roundtrip_ok: bool) -> ArmMetrics:
-    """Build the cold/warm metrics for one qodec arm.
-
-    cold: for an encoded artifact, count the notation brief + artifact together
-    (the reader tokenizes them as one prompt). For a passthrough there is no
-    brief — cold == warm == the plaintext body.
-    """
-    warm = env.tokens_out
-    if env.is_fallback:
-        cold = warm
-    else:
-        cold = qodec.count(qodec.probe(tool_only_text, codec=codec, meter=meter), meter=meter)
+def build(env: qodec.Encoded, *, cold_prompt_tokens: int, decode_ms: float,
+          roundtrip_ok: bool) -> ArmMetrics:
+    """Assemble cold/warm metrics from an envelope and a caller-measured cold
+    prompt (notation brief + artifact for an encoded payload; the plaintext body
+    for a passthrough). The caller measures cold so it can also persist the exact
+    cold-prompt text as an artifact."""
     return ArmMetrics(
         tool_only_tokens=env.tokens_in,
         qodec_content_tokens=env.tokens_out,
-        cold_prompt_tokens=cold,
-        warm_payload_tokens=warm,
+        cold_prompt_tokens=cold_prompt_tokens,
+        warm_payload_tokens=env.tokens_out,
         codec=env.codec,
         is_fallback=env.is_fallback,
         encode_ms=env.encode_ms,
