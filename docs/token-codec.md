@@ -104,8 +104,8 @@ pipeline can be applied blindly.
   and route each region to its cheapest structural codec via a shortest path
   over span candidates (single-segment results elide to the bare codec), then
   mine the whole assembled artifact. Byte-exact, fail-closed length-prefixed
-  container, with an exhaustive `O(N²)` oracle for the kill criterion. Measured
-  verdict below — an exhaustively-verified negative on today's byte-exact shelf.
+  container, with an exhaustive `O(N²)` all-span DP for the kill criterion.
+  Measured verdict below — a well-supported negative on today's byte-exact shelf.
 
 ## Measured results (o200k, auto alphabet, corpus in `qodec/corpus/`)
 
@@ -262,9 +262,12 @@ fast, but it is *not* optimal: a beneficial 45-line region in the middle of a
 500-line file can only be spelled `32+8+4+1`, paying four headers. So the
 geometric router answers "is there a win among geometric spans?", never "is
 there a win at all?". Calling its output an *oracle* would be exactly the
-overreach the review caught. The real oracle is a separate, **exhaustive**
-`O(N²)` search (`mosaic::oracle`) that considers *every* span `[i, j)`, run
-offline on small payloads — that is what decides the kill criterion.
+overreach the review caught. The wider search is a separate **all-span additive
+DP** (`mosaic::all_span_dp`) that considers *every* span `[i, j)`, `O(N²)` of
+them, run offline on small payloads. It is still an *additive* DP — it selects a
+path by summed edge cost and exact-measures only that path plus the baseline, so
+it is not a token-exact oracle over assembled artifacts — but it removes the
+window grid as a suspect, which is what the kill criterion needed.
 
 Three correctness properties make the comparison honest:
 
@@ -313,51 +316,66 @@ The lone gap is `findings.json`, where `squeeze` reaches for the *semantic*
 `toon` table; mosaic's byte-exact shelf excludes `toon`, so it lands on the
 next-best byte-exact path — not a segmentation loss, a missing candidate.
 
-**The exhaustive oracle confirms the strong claim.** Running the full `O(N²)`
-all-pairs search — including on the payloads *built to favour segmentation*
-(two regions with disjoint vocabularies; a diag block adjacent to an rg block,
-each a different codec's specialty) — the optimum ties the whole-span baseline
-exactly:
+**The all-span additive DP declines to segment.** Running the full `O(N²)`
+all-pairs search (`mosaic::all_span_dp`) — including on the payloads *built to
+favour segmentation* (two regions with disjoint vocabularies; a diag block
+adjacent to an rg block, each a different codec's specialty) — the DP itself
+chooses a single segment (`segments == 1`, checked via the pre-arbitration
+[`AllSpanReport`], not the baseline-clamped output), tying the whole-span
+baseline exactly:
 
-| payload (≤ 60 lines) | exhaustive oracle | whole-span baseline | Δ |
-|---|---:|---:|---:|
-| prose + diag + trace | 202 | 202 | +0 |
-| uniform diagnostics | 409 | 409 | +0 |
-| disjoint-vocab diag + rg + prose | 310 | 310 | +0 |
-| format-specific diag + rg | 751 | 751 | +0 |
+| payload (≤ 60 lines) | DP segments | DP exact | baseline | Δ |
+|---|---:|---:|---:|---:|
+| prose + diag + trace | 1 | 202 | 202 | +0 |
+| uniform diagnostics | 1 | 409 | 409 | +0 |
+| disjoint-vocab diag + rg + prose | 1 | 310 | 310 | +0 |
+| format-specific diag + rg | 1 | 751 | 751 | +0 |
 
-So the correct statement is the strong one, now earned: **the best split in the
-exhaustive candidate graph is no split.** Not "the geometric grid found
-nothing" — every span, and still nothing.
+The honest statement, and no stronger: **the all-span additive DP found no
+segmentation that, after exact measurement, the meter prefers over
+not-segmenting** — on every span, not just the geometric grid. This is *not* a
+proven global token minimum: the path is still chosen by the additive edge
+model (`dp[i] + tok(edge) + frame`), and only the DP's own pick plus the
+baseline are exact-measured. A token-exact oracle would enumerate assembled
+artifacts, not edges; top-K assembly is the cheap step toward it, deferred
+until a real multi-segment winner exists to protect (there is none yet).
 
-**Why the negative is structural, not a tuning miss.** For line-based
-byte-exact codecs the arithmetic is forced: two adjacent same-format regions
-share *one* legend when kept whole; any cut between them **duplicates** that
-legend, and the duplication costs at least as much as any routing benefit.
-`tmpl` compounds it — it is *already* a per-line router (each line joins its own
-Drain-style cluster) with a single global legend, so it does mosaic's job for
-free. And the stage-2 global miner is the equalizer: `deep`'s suffix automaton
-exploits cross-region and intra-line repetition that segmentation actively
-*hides*. Even the obvious-headroom case — a uniform-JSON island in a non-JSON
-payload — does not flip it: the island is one long line, and whole-payload
-`mine` crushes its internal repetition (`squeeze` 181 vs `mosaic` 197 on prose
-+ a 12-record array).
+**Why the negative holds on the payloads tried.** For line-based byte-exact
+codecs the arithmetic runs against segmentation: two adjacent same-format
+regions share *one* legend when kept whole, and any cut between them
+**duplicates** that legend. On every corpus and hand-built payload here the
+duplication has cost at least as much as the routing benefit — but this is an
+explanation of the measurements, not a theorem. One can imagine two adjacent
+blocks, one ideal for `diag` and one for `grep`, whose local legends are small
+and whose whole-span `tmpl` clusters are poor; we simply have not found a
+byte-exact corpus where local specialization repays the extra framing. `tmpl`
+compounds the effect — it is *already* a per-line router (each line joins its
+own Drain-style cluster) with a single global legend — and the stage-2 global
+miner is the equalizer: `deep`'s suffix automaton exploits cross-region and
+intra-line repetition that segmentation actively *hides*. Even the
+obvious-headroom case — a uniform-JSON island in a non-JSON payload — does not
+flip it: the island is one long line, and whole-payload `mine` crushes its
+internal repetition (`squeeze` 181 vs `mosaic` 197 on prose + a 12-record
+array).
 
 ### Where a win could still live (deferred rungs)
 
 The apparatus is built, honest, and byte-exact; the negative is specific to the
 current byte-exact candidate set. The rungs that could change it, by promise:
 
-1. **Semantic segments (`toon` per region)** — the one place the oracle *cannot*
-   currently look. An embedded uniform-JSON block that only `toon`'s keys-once
-   table captures, in a payload that isn't JSON as a whole, is a candidate no
-   byte-exact codec can express. Needs a mixed byte/semantic roundtrip contract
-   (per-segment `byte`/`sem` tracking) so mosaic can host a `sem` island inside
-   a `byte` payload — the roundtrip check must go per-segment. This is the
-   first thing to build, and the oracle harness already exists to measure it.
+1. **Semantic segments (`toon` per region)** — the one place the all-span DP
+   *cannot* currently look. An embedded uniform-JSON block that only `toon`'s
+   keys-once table captures, in a payload that isn't JSON as a whole, is a
+   candidate no byte-exact codec can express. Needs a mixed byte/semantic
+   roundtrip contract (per-segment `byte`/`sem` tracking) so mosaic can host a
+   `sem` island inside a `byte` payload — the roundtrip check must go
+   per-segment. This is the first thing to build, and the all-span DP harness
+   already exists to measure it.
 2. **Top-K paths.** v1 measures the one DP path against the whole-span baseline;
    assembling and exact-measuring the K best paths would remove the last of the
-   additive-model risk. Cheap insurance, not yet needed given the oracle result.
+   additive-model risk and turn the all-span DP into a genuine token-exact
+   search. Cheap insurance, deferred until a real multi-segment winner exists to
+   protect (there is none yet, so it would guard nothing).
 3. **Multi-objective cost.** The paper allows any cost, not just bits. Alias-
    dense output can cost 3–5× model *wall time* (see the A/B section); a cost
    `tokens + λ·encode_ms + μ·ppl_penalty` would let mosaic route a hot region to
@@ -369,13 +387,13 @@ current byte-exact candidate set. The rungs that could change it, by promise:
    behind runtime feature detection — if the idea ever earns a hot loop.
 
 Bottom line: mosaic is the missing *orchestration* layer, correctly built and
-honestly measured — and the finding is a real, exhaustively-verified negative:
-for byte-exact line codecs, `tmpl`'s shared legend plus global `deep` already
-act as a near-ideal universal router, and region-level segmentation cannot
-clear the legend it duplicates. The branch's value is now twofold: a precise,
-falsifiable pointer at the semantic-segment rung, and a standing regression
-harness (`mosaic::oracle`) for future toon-islands, real semantic boundaries,
-and multi-objective routing.
+honestly measured — and the finding is a well-supported negative: on every
+corpus and hand-built payload tried, for byte-exact line codecs, `tmpl`'s shared
+legend plus global `deep` already act as a near-ideal universal router, and
+region-level segmentation could not clear the legend it duplicates. The branch's
+value is now twofold: a precise, falsifiable pointer at the semantic-segment
+rung, and a standing falsification harness (`mosaic::all_span_dp`) for future
+toon-islands, real semantic boundaries, and multi-objective routing.
 
 ## Perplexity gate (`qodec ppl`) — compression = prediction, inverted
 

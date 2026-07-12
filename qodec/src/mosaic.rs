@@ -9,28 +9,34 @@
 //! region `[i, j)` encoded by one codec, weighted by the *measured* full token
 //! cost of that nested artifact (header, legend and all).
 //!
-//! ## Two graphs, and why the distinction matters
+//! ## Two candidate graphs, and the honest limits of each
 //!
-//! The production router ([`encode`]) uses a **geometric** candidate graph:
-//! from each start it tries window sizes `1,2,4,8,16,32,64,128` lines, plus an
-//! explicit whole-payload edge. This is `O(N·W)` and fast, but it is *not* the
-//! optimal segmentation — a beneficial region whose length is not on the grid
-//! (a 45-line block in the middle of a 500-line file) can only be represented
-//! as `32+8+4+1`, paying four headers. So the geometric router answers the
-//! narrow question "is there a win among geometric spans?", not "is there a
-//! win at all?".
+//! The production router ([`encode_seeded`]) uses a **geometric** candidate
+//! graph: from each start it tries window sizes `1,2,4,8,16,32,64,128` lines,
+//! plus an explicit whole-payload edge. This is `O(N·W)` and fast, but it is
+//! *not* the optimal segmentation — a beneficial region whose length is not on
+//! the grid (a 45-line block in the middle of a 500-line file) can only be
+//! spelled `32+8+4+1`, paying four headers. So it answers the narrow question
+//! "is there a win among geometric spans?", not "is there a win at all?".
 //!
-//! The exhaustive [`oracle`] answers the real question: it considers *every*
-//! span `[i, j)`, `O(N²)` of them, and is meant to be run offline on small
-//! payloads to decide the kill criterion. If even the exhaustive oracle
-//! declines to segment, the idea is genuinely pinned; if it finds a beneficial
-//! odd-length span, only the window grid was too coarse.
+//! [`all_span_dp`] widens the graph to **every** span `[i, j)`, `O(N²)` of
+//! them — run offline on small payloads for the kill criterion. But note what
+//! it is *not*: the path is still chosen by the **additive** edge model
+//! (`dp[i] + meter.count(edge) + frame`), and because BPE is not additive
+//! (`tok(A+B) != tok(A) + tok(B)`) with a `frame` that only approximates the
+//! real length-prefix + envelope cost, the DP-selected path is then the *only*
+//! multi-segment artifact measured exactly (against the whole-span baseline).
+//! It is an exhaustive-span *additive DP*, not a token-exact oracle: it can
+//! prove "the all-span additive DP found no segmentation the exact meter
+//! prefers over not-segmenting", which is a strong negative — but it is not a
+//! mathematical minimum over all assembled artifacts. [`AllSpanReport`] exposes
+//! the DP's *pre-arbitration* choice so a test can check what the DP actually
+//! picked, not just the baseline-clamped result.
 //!
-//! Because BPE is not additive (`tok(A+B) != tok(A) + tok(B)`), the DP edge
-//! weights only *propose* a path; [`encode`] then measures the assembled
-//! artifact against the whole-payload baseline with the exact meter and keeps
-//! the real minimum — so an approximate edge model can waste probes but cannot
-//! ship a path the exact meter rejects.
+//! Either way, [`encode_seeded`] measures the assembled path against the
+//! whole-payload baseline with the exact meter and keeps the real minimum — so
+//! an approximate edge model can waste probes but cannot ship a path the exact
+//! meter rejects.
 //!
 //! ## Container — a length-prefixed envelope of sibling `%q1` artifacts
 //!
@@ -52,7 +58,8 @@
 //! Deliberately deferred: `toon` segments (semantic, not byte-exact), per-span
 //! `mine`/`deep`, a shared opcode table stripping the repeated `%q1` headers,
 //! and a top-K path search (v1 measures the one DP path against the whole-span
-//! baseline only).
+//! baseline only — cheap insurance against BPE non-additivity, not worth the
+//! code until a real multi-segment winner exists to protect).
 
 use anyhow::{bail, Context, Result};
 
@@ -82,24 +89,74 @@ const FRAME_COST: usize = 1;
 /// header, before any allocation sized by it.
 const MAX_SEGMENTS: usize = 4096;
 
-/// Encode `text` via the geometric router, then keep whichever is cheaper by
-/// the exact meter: the routed (possibly segmented) artifact or the
-/// whole-payload single-codec baseline. Falls back to a single raw container
-/// when the input is empty or larger than [`MAX_LINES`].
+/// Encode `text` with no profile seeds — see [`encode_seeded`].
 pub fn encode(text: &str, meter: &dyn TokenMeter) -> String {
-    routed_or_baseline(text, meter, segment_geometric(text, meter))
+    encode_seeded(text, meter, &[])
 }
 
-/// Exhaustive segmentation for the kill criterion: consider *every* span, not
-/// just the geometric grid. Offline truth-teller, bounded to small payloads
-/// ([`MAX_ORACLE_LINES`]); `None` when the input is too large or unsegmentable.
-pub fn oracle(text: &str, meter: &dyn TokenMeter) -> Option<String> {
+/// Encode `text` via the geometric router, then keep whichever is cheaper by
+/// the exact meter: the routed (possibly segmented) artifact or the
+/// whole-payload single-codec baseline. `templates` are the profile-learned
+/// `tmpl` seeds — threaded into every per-span `tmpl` candidate so the routing
+/// stage sees the same clusters `squeeze` does (without them, a learned profile
+/// would change `squeeze`'s candidates but not mosaic's, and the two would
+/// stop being comparable). Falls back to a single raw container when the input
+/// is empty or larger than [`MAX_LINES`].
+pub fn encode_seeded(text: &str, meter: &dyn TokenMeter, templates: &[Vec<String>]) -> String {
+    let path = segment(text, meter, false, templates);
+    routed_or_baseline(text, meter, path, templates)
+}
+
+/// The pre-arbitration verdict of the all-span additive DP — see
+/// [`all_span_dp`]. Fields separate what the DP *chose* from what baseline
+/// arbitration would then keep, so a caller can tell "the DP itself declined to
+/// split" from "the DP split but the baseline was silently substituted".
+#[derive(Debug, Clone)]
+pub struct AllSpanReport {
+    /// The assembled artifact of the DP-selected path, *before* baseline
+    /// arbitration — bare when the DP chose a single segment.
+    pub artifact: String,
+    /// Segments in the DP-selected path (`1` = the DP itself did not split).
+    pub segments: usize,
+    /// Sum of edge weights along the DP path — the additive model's own cost.
+    pub additive_cost: usize,
+    /// Exact `meter.count` of the assembled DP artifact.
+    pub exact_tokens: usize,
+    /// Exact `meter.count` of the whole-payload single-codec baseline.
+    pub baseline_tokens: usize,
+}
+
+/// Run the **all-span additive DP** (every span `[i, j)`, not the geometric
+/// grid) and report its pre-arbitration choice. This is the kill-criterion
+/// truth-teller, bounded to small payloads ([`MAX_ORACLE_LINES`]); `None` when
+/// the input is too large or unsegmentable.
+///
+/// It is *not* a token-exact oracle: the path is selected by the additive edge
+/// model, so it establishes "no all-span additive-DP path, exactly measured,
+/// beats the whole-span baseline", not a proven global minimum. The returned
+/// [`AllSpanReport::artifact`] is the DP's own choice, un-arbitrated.
+pub fn all_span_dp(
+    text: &str,
+    meter: &dyn TokenMeter,
+    templates: &[Vec<String>],
+) -> Option<AllSpanReport> {
     let lines = line_count(text)?;
     if lines > MAX_ORACLE_LINES {
         return None;
     }
-    let segs = segment(text, meter, true)?;
-    Some(routed_or_baseline(text, meter, Some(segs)))
+    let segs = segment(text, meter, true, templates)?;
+    let additive_cost = segs
+        .iter()
+        .map(|s| meter.count(s).saturating_add(FRAME_COST))
+        .sum();
+    let artifact = assemble(&segs);
+    Some(AllSpanReport {
+        exact_tokens: meter.count(&artifact),
+        baseline_tokens: meter.count(&best_span(text, meter, templates).0),
+        segments: segs.len(),
+        additive_cost,
+        artifact,
+    })
 }
 
 /// Number of line units, or `None` if the input is empty / over [`MAX_LINES`].
@@ -111,17 +168,18 @@ fn line_count(text: &str) -> Option<usize> {
     (n > 0 && n <= MAX_LINES).then_some(n)
 }
 
-fn segment_geometric(text: &str, meter: &dyn TokenMeter) -> Option<Vec<String>> {
-    segment(text, meter, false)
-}
-
 /// Given a candidate path (or `None`), assemble it and return the exact-meter
 /// minimum of {assembled path, whole-payload single-codec baseline}. This is
 /// the guarantee point-3 needs: the additive DP can misrank a multi-segment
 /// path that the exact meter then rejects, so "not segmenting" is always a
 /// measured competitor, never assumed away.
-fn routed_or_baseline(text: &str, meter: &dyn TokenMeter, path: Option<Vec<String>>) -> String {
-    let baseline = best_span(text, meter).0;
+fn routed_or_baseline(
+    text: &str,
+    meter: &dyn TokenMeter,
+    path: Option<Vec<String>>,
+    templates: &[Vec<String>],
+) -> String {
+    let baseline = best_span(text, meter, templates).0;
     match path {
         Some(segs) => {
             let candidate = assemble(&segs);
@@ -147,8 +205,13 @@ fn assemble(segs: &[String]) -> String {
 
 /// The shortest-path segmentation: the ordered per-region artifacts of the
 /// cheapest `0..N` path. `exhaustive` selects the candidate graph (every span
-/// vs the geometric grid).
-fn segment(text: &str, meter: &dyn TokenMeter, exhaustive: bool) -> Option<Vec<String>> {
+/// vs the geometric grid); `templates` seed every per-span `tmpl` candidate.
+fn segment(
+    text: &str,
+    meter: &dyn TokenMeter,
+    exhaustive: bool,
+    templates: &[Vec<String>],
+) -> Option<Vec<String>> {
     let units: Vec<&str> = text.split_inclusive('\n').collect();
     let n = units.len();
     if n == 0 || n > MAX_LINES {
@@ -185,7 +248,7 @@ fn segment(text: &str, meter: &dyn TokenMeter, exhaustive: bool) -> Option<Vec<S
             let Some(span) = text.get(start..end) else {
                 continue;
             };
-            let (artifact, weight) = best_span(span, meter);
+            let (artifact, weight) = best_span(span, meter, templates);
             let cost = dp_i.saturating_add(weight).saturating_add(FRAME_COST);
             if cost < dp.get(j).copied().unwrap_or(inf) {
                 if let Some(slot) = dp.get_mut(j) {
@@ -244,15 +307,17 @@ fn candidate_ends(i: usize, n: usize, exhaustive: bool) -> Vec<usize> {
 
 /// The cheapest byte-exact artifact for one span, and its measured token cost.
 /// Every candidate already falls back to `raw` internally, so the raw floor is
-/// always in the running and the measured minimum is safe to take.
-fn best_span(span: &str, meter: &dyn TokenMeter) -> (String, usize) {
+/// always in the running and the measured minimum is safe to take. `tmpl` is
+/// seeded with the profile `templates` so the routing stage clusters exactly as
+/// `squeeze` would.
+fn best_span(span: &str, meter: &dyn TokenMeter, templates: &[Vec<String>]) -> (String, usize) {
     let mut best = container::raw(span);
     let mut best_weight = meter.count(&best);
     for candidate in [
         fold::encode(span, meter),
         grep::encode(span, meter),
         diag::encode(span, meter),
-        tmpl::encode(span, meter),
+        tmpl::encode_seeded(span, meter, templates),
     ] {
         let weight = meter.count(&candidate);
         if weight < best_weight {

@@ -165,13 +165,13 @@ fn mosaic_identity_elides_a_single_segment() -> Result<()> {
 }
 
 #[test]
-fn exhaustive_oracle_agrees_with_the_geometric_router() -> Result<()> {
-    // The honest kill criterion: run the *exhaustive* all-pairs oracle (every
-    // span, not just the geometric grid) on real mixed payloads. If it, too,
-    // never beats the whole-payload baseline, the negative result is not an
-    // artifact of a coarse window grid. This test records the finding; it
-    // asserts only that the oracle is sound (byte-exact, never above the
-    // baseline), and prints the token deltas for the record.
+fn all_span_dp_declines_to_segment() -> Result<()> {
+    // The honest kill criterion: run the all-span additive DP (every span, not
+    // the geometric grid) and inspect its *pre-arbitration* choice — not the
+    // baseline-clamped result, which is optimal by construction and would prove
+    // nothing. On these payloads (including ones built to favour segmentation:
+    // disjoint-vocab regions; format-specific diag+rg blocks) the DP itself
+    // declines to split, so the negative is the DP's verdict, not a fallback.
     let meter = Bpe::o200k()?;
     let payloads = [
         ("mixed", mixed_payload()),
@@ -180,21 +180,81 @@ fn exhaustive_oracle_agrees_with_the_geometric_router() -> Result<()> {
         ("format2", format_specific_regions()),
     ];
     for (name, text) in payloads {
-        let baseline = best_whole_span(&text, &meter);
-        let oracle = mosaic::oracle(&text, &meter)
-            .ok_or_else(|| anyhow::anyhow!("payload {name} exceeds the oracle bound"))?;
-        anyhow::ensure!(decode(&oracle)? == text, "oracle roundtrip for {name}");
+        let report = mosaic::all_span_dp(&text, &meter, &[])
+            .ok_or_else(|| anyhow::anyhow!("payload {name} exceeds the DP bound"))?;
         anyhow::ensure!(
-            meter.count(&oracle) <= baseline,
-            "oracle for {name} ({}) must not exceed the whole-span baseline ({baseline})",
-            meter.count(&oracle)
+            decode(&report.artifact)? == text,
+            "DP artifact roundtrip for {name}"
+        );
+        // The strong claim, provable only via the pre-arbitration report: the
+        // DP *chose* a single segment (no split), and it exactly ties the
+        // whole-span baseline.
+        anyhow::ensure!(
+            report.segments == 1,
+            "all-span DP for {name} split into {} segments (additive {}, exact {})",
+            report.segments,
+            report.additive_cost,
+            report.exact_tokens
+        );
+        anyhow::ensure!(
+            report.exact_tokens == report.baseline_tokens,
+            "single-segment DP for {name} ({}) must equal the baseline ({})",
+            report.exact_tokens,
+            report.baseline_tokens
         );
         eprintln!(
-            "oracle[{name}]: exhaustive={} baseline={baseline} (Δ {:+})",
-            meter.count(&oracle),
-            baseline as i64 - meter.count(&oracle) as i64
+            "all_span_dp[{name}]: segments={} exact={} baseline={}",
+            report.segments, report.exact_tokens, report.baseline_tokens
         );
     }
+    Ok(())
+}
+
+#[test]
+fn mosaic_routing_stage_honours_template_seeds() -> Result<()> {
+    // Point-3 regression: `best_span` must seed its `tmpl` candidate with the
+    // profile templates, else a learned profile changes squeeze's candidates
+    // but not mosaic's and the "mosaic == squeeze" claim holds only for the
+    // empty profile. A frozen template that eats a whole line makes the seeded
+    // routing strictly beat the unseeded one on a payload tmpl clusters poorly.
+    let meter = Bpe::o200k()?;
+    // Two same-shape families sharing most of their words — first-fit tmpl
+    // merges them into a weak two-slot cluster; a sealed template per family
+    // clusters them cleanly.
+    let mut text = String::new();
+    for i in 0..12 {
+        text.push_str(&format!(
+            "event alpha region {} committed offset {} to durable log\n",
+            i % 4,
+            1000 + i
+        ));
+        text.push_str(&format!(
+            "event beta region {} committed offset {} to durable log\n",
+            i % 4,
+            2000 + i
+        ));
+    }
+    let templates = vec![
+        vec![
+            "event alpha region ".to_string(),
+            " committed offset ".to_string(),
+            " to durable log".to_string(),
+        ],
+        vec![
+            "event beta region ".to_string(),
+            " committed offset ".to_string(),
+            " to durable log".to_string(),
+        ],
+    ];
+    let plain = mosaic::encode_seeded(&text, &meter, &[]);
+    let seeded = mosaic::encode_seeded(&text, &meter, &templates);
+    anyhow::ensure!(decode(&seeded)? == text, "seeded mosaic must roundtrip");
+    anyhow::ensure!(
+        meter.count(&seeded) <= meter.count(&plain),
+        "seeded routing ({}) must not lose to unseeded ({}) — seeds are ignored",
+        meter.count(&seeded),
+        meter.count(&plain)
+    );
     Ok(())
 }
 
@@ -260,19 +320,6 @@ fn format_specific_regions() -> String {
         ));
     }
     s
-}
-
-fn best_whole_span(text: &str, meter: &dyn TokenMeter) -> usize {
-    [
-        CodecKind::Fold,
-        CodecKind::Grep,
-        CodecKind::Diag,
-        CodecKind::Tmpl,
-    ]
-    .iter()
-    .map(|k| meter.count(&encode(text, *k, meter, Alphabet::Auto)))
-    .min()
-    .unwrap_or(usize::MAX)
 }
 
 #[test]

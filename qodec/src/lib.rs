@@ -179,7 +179,7 @@ pub fn encode_seeded(
             // fragments across siblings are fair game. Final acceptance is the
             // exact meter vs the original, so an approximate DP path can only
             // waste probes, never bytes.
-            let stage1 = mosaic::encode(text, meter);
+            let stage1 = mosaic::encode_seeded(text, meter, &seeds.templates);
             let best = mine_over(&stage1, meter, &mine_opts, &deep_opts);
             if meter.count(&best) < meter.count(text) {
                 best
