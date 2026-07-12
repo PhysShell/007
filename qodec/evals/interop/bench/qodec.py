@@ -53,13 +53,17 @@ def binary() -> Path:
     )
 
 
+def binary_sha256() -> str:
+    """Full SHA-256 of the built binary — the run manifest's qodec identity."""
+    import hashlib
+
+    return hashlib.sha256(binary().read_bytes()).hexdigest()
+
+
 def version() -> str:
     """A stable identity for the receipt. The crate has no --version flag yet,
     so pin the binary's own content hash (short) as its version."""
-    import hashlib
-
-    data = binary().read_bytes()
-    return "sha256:" + hashlib.sha256(data).hexdigest()[:12]
+    return "sha256:" + binary_sha256()[:12]
 
 
 @dataclass

@@ -107,5 +107,58 @@ class Durability(unittest.TestCase):
         self.assertEqual(self.path.read_text(), before, "idempotent resume must not change the journal")
 
 
+class JournalValidation(unittest.TestCase):
+    """A completed line is trusted, so a corrupt one must fail loudly — never be
+    skipped (silent data loss) or double-counted."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        self.path = self.dir / "records.jsonl"
+
+    def _load(self):
+        log = durability.RecordLog(self.path)
+        log.load_existing()
+        return log
+
+    def test_append_rejects_duplicate_key_even_without_has(self):
+        log = durability.RecordLog(self.path)
+        log.open()
+        log.append(_rec(("c", "q0", "raw", 0)))
+        with self.assertRaises(durability.DuplicateKey):
+            log.append(_rec(("c", "q0", "raw", 0)))
+        log.close()
+
+    def test_malformed_complete_line_raises(self):
+        self.path.write_text('{"case":"c","question":"q0","arm":"raw","repeat":0}\n'
+                             '{"case":"c","question":"q0","arm":"raw+brief"  BROKEN\n')
+        with self.assertRaises(durability.JournalCorruption):
+            self._load()
+
+    def test_missing_key_field_raises(self):
+        self.path.write_text('{"case":"c","question":"q0","arm":"raw"}\n')  # no repeat
+        with self.assertRaises(durability.JournalCorruption):
+            self._load()
+
+    def test_duplicate_key_in_journal_raises(self):
+        line = '{"case":"c","question":"q0","arm":"raw","repeat":0}\n'
+        self.path.write_text(line + line)
+        with self.assertRaises(durability.JournalCorruption):
+            self._load()
+
+    def test_invalid_utf8_in_completed_region_raises(self):
+        self.path.write_bytes(b'{"case":"c","question":"q0","arm":"raw","repeat":0}\n'
+                              b'\xff\xfe not utf-8 but newline-terminated\n')
+        with self.assertRaises(durability.JournalCorruption):
+            self._load()
+
+    def test_all_torn_first_line_truncates_to_empty(self):
+        # A single half-written first record (no newline at all) is the one torn
+        # fragment: nothing was committed, so the journal loads empty and is cleared.
+        self.path.write_text('{"case":"c","question":"q0","arm":"raw","rep')
+        log = self._load()
+        self.assertEqual(log.completed, set())
+        self.assertEqual(self.path.read_text(), "")
+
+
 if __name__ == "__main__":
     unittest.main()

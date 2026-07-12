@@ -8,9 +8,14 @@ aliases and codec acceptance match what the model reads. Everything is recorded:
 request, response, parsed answer, score, per-arm local tokens, server usage,
 TTFT, latency, plus a preflight receipt and the tokenizer/model/qodec identities.
 
-Two passes: pass 1 runs every (case, question) once; pass 2 re-runs (2 more
-times) only the questions that were flagged — malformed JSON, raw/raw+brief
-disagreement, a codec loss, alias leakage, or an invalid identifier.
+Before the first request a `run-manifest.json` pins the run's identity (model,
+tokenizer, qodec, codec, tasks, L1 inputs, brief/system prompt, effective
+contract, seed, arms). On `--resume` the current environment is re-derived and
+compared field-by-field against that manifest — any mismatch aborts before a
+single request, and the canonical `preflight.json` is never overwritten (a
+resume writes `preflight-resume-N.json`). The matrix itself is crash-durable:
+records are journaled + flushed per request, so a pass-2 crash keeps pass 1 and
+`--resume` skips completed (case,question,arm,repeat) keys without duplicates.
 
     export QODEC_READER_URL=http://127.0.0.1:8000/v1
     export QODEC_READER_MODEL=<served-model-id>
@@ -25,10 +30,10 @@ import datetime as _dt
 import json
 from pathlib import Path
 
-from bench import durability, preflight, qodec, reader, reader_tasks
+from bench import durability, matrix, preflight, qodec, reader, reader_tasks
 
 HERE = Path(__file__).resolve().parent
-ARMS = ["raw", "raw+brief", "encoded+brief"]
+ARMS = matrix.ARMS
 
 
 def _tool_only_text(l1_run: Path, case: str) -> tuple[str, str]:
@@ -37,6 +42,39 @@ def _tool_only_text(l1_run: Path, case: str) -> tuple[str, str]:
     if not matches:
         raise FileNotFoundError(f"no transformed.txt for case {case!r} under {l1_run}")
     return matches[0].read_text(), matches[0].parent.name
+
+
+def _run_manifest(cfg, pf: dict, args, tasks: list[dict], brief: str, ctx: dict) -> dict:
+    """The immutable run identity: everything whose change would make a resumed
+    run a different experiment. Hashes, not paths, are load-bearing."""
+    ti, mi = pf["tokenizer"], pf["model_identity"]
+    chat_template_sha = None
+    if ti.get("path"):
+        tok_dir = Path(ti["path"]).parent
+        for name in ("chat_template.jinja", "chat_template.json"):
+            ct = tok_dir / name
+            if ct.exists():
+                chat_template_sha = matrix.sha256_bytes(ct.read_bytes())
+                break
+    return {
+        "manifest_version": 1,
+        "model_requested": cfg.model,
+        "model_reported": pf["models"].get("model_reported"),
+        "model_gguf_sha256": mi.get("model_file_sha256"),
+        "tokenizer_sha256": ti.get("sha256"),
+        "tokenizer_config_sha256": ti.get("tokenizer_config_sha256"),
+        "chat_template_sha256": chat_template_sha,
+        "qodec_binary_sha256": qodec.binary_sha256(),
+        "codec": args.codec,
+        "tasks_snapshot_sha256": matrix.sha256_bytes(Path(args.tasks).read_bytes()),
+        "l1_run": str(args.l1_run),
+        "l1_tool_only_sha256": {case: matrix.sha256_text(ctx[case]["tool_only"]) for case in sorted(ctx)},
+        "notation_brief_sha256": matrix.sha256_text(brief),
+        "system_prompt_sha256": matrix.sha256_text(reader_tasks.SYSTEM),
+        "effective_contract": pf["effective"],
+        "determinism": {"temperature": 0, "seed": pf["determinism"].get("seed_sent")},
+        "arms": list(ARMS),
+    }
 
 
 def main() -> int:
@@ -48,7 +86,7 @@ def main() -> int:
     ap.add_argument("--out", type=Path, default=HERE / "runs-l2")
     ap.add_argument("--repeats", type=int, default=3, help="repeats for flagged questions (pass 2)")
     ap.add_argument("--resume", action="store_true",
-                    help="continue an existing run dir, skipping already-completed (case,question,arm,repeat)")
+                    help="continue an existing run dir, skipping already-completed keys")
     args = ap.parse_args()
 
     try:
@@ -62,13 +100,27 @@ def main() -> int:
 
     run_id = args.name or _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = args.out / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+
+    # Fail fast on the directory policy before touching the endpoint.
+    try:
+        matrix.assert_dir_policy(run_dir, args.resume)
+    except matrix.DirectoryPolicyError as exc:
+        print(f"directory policy: {exc}")
+        return 5
+    if not args.resume:
+        run_dir.mkdir(parents=True, exist_ok=True)
 
     pf = preflight.run(cfg, meter)
-    preflight.save(pf, run_dir / "preflight.json")
+    if args.resume:
+        # Never overwrite the canonical preflight.json on a resume; keep the
+        # current environment's receipt alongside it for the audit trail.
+        n = len(list(run_dir.glob("preflight-resume-*.json"))) + 1
+        preflight.save(pf, run_dir / f"preflight-resume-{n}.json")
+    else:
+        preflight.save(pf, run_dir / "preflight.json")
     if not pf["ready"]:
         print(f"preflight not ready: {json.dumps(pf.get('streaming_sample', {}))[:200]}")
-        print(f"saved {run_dir}/preflight.json — fix the endpoint and re-run.")
+        print(f"saved preflight receipt under {run_dir} — fix the endpoint and re-run.")
         return 4
     eff = preflight.effective_from(pf)     # the negotiated contract the matrix uses
     model_reported = pf["models"].get("model_reported")
@@ -85,7 +137,6 @@ def main() -> int:
         env = qodec.encode(tool_only, codec=args.codec, meter=meter, passthrough=True)
         aliases = reader_tasks.used_aliases(env.content) if env.encoded else set()
         ctx[case] = {"tool_only": tool_only, "artifact": env.content, "aliases": aliases}
-        # LOCAL content tokens = tokens of exactly what build_messages sends.
         local = {
             "raw": qodec.count(tool_only, meter=meter),
             "raw+brief": qodec.count(f"{brief}\n\n{tool_only}", meter=meter),
@@ -121,76 +172,20 @@ def main() -> int:
             "answer_raw": res.text, "answer_parsed": ans, "request": res.request,
         }
 
-    # Cache-friendly order: group by (case, arm) so the server re-uses the
-    # prefix KV across a case's questions (the content is identical; only the
-    # short question suffix changes). Interleaving arms would evict it and
-    # re-prefill the whole payload every request.
-    by_case: dict[str, list[dict]] = {}
-    for q in tasks:
-        by_case.setdefault(q["case"], []).append(q)
+    manifest = _run_manifest(cfg, pf, args, tasks, brief, ctx)
+    try:
+        result = matrix.run_matrix(run_dir, manifest=manifest, tasks=tasks, run_one=run_one,
+                                   resume=args.resume, repeats=args.repeats)
+    except matrix.ManifestMismatch as exc:
+        print(f"resume refused — {exc}")
+        print("The endpoint/inputs changed since this run started; no request was sent. "
+              "Start a fresh run (new --name) for the changed configuration.")
+        return 6
+    except matrix.DirectoryPolicyError as exc:
+        print(f"directory policy: {exc}")
+        return 5
 
-    # Crash-durable journal: each record is appended + flushed immediately, so a
-    # crash in pass 2 keeps pass 1; --resume skips completed keys (no duplicates).
-    log = durability.RecordLog(run_dir / "records.jsonl")
-    if args.resume:
-        log.load_existing()
-        print(f"resume: {len(log.completed)} record(s) already present; skipping those keys")
-    log.open()
-    records = log.records  # append target, includes any resumed records
-
-    def do(case: str, q: dict, arm: str, repeat: int) -> None:
-        key = (case, q["id"], arm, repeat)
-        if log.has(key):
-            return
-        log.append(run_one(case, q, arm, repeat))
-
-    def write_state(phase: str) -> None:
-        durability.atomic_write(run_dir / "run-state.json", json.dumps({
-            "run_id": run_id, "phase": phase, "records": len(log.records),
-            "completed_keys": len(log.completed), "unique_questions": len(tasks),
-        }, indent=2) + "\n")
-
-    # Pass 1 — every (case, question) once, content-grouped for prefix reuse.
-    write_state("pass1")
-    for case, qs in by_case.items():
-        for arm in ARMS:
-            for q in qs:
-                do(case, q, arm, 0)
-    durability.atomic_write(run_dir / "pass1-complete.json", json.dumps({
-        "pass1_complete": True,
-        "n_primary": len([r for r in log.records if r["repeat"] == 0]),
-        "unique_questions": len(tasks),
-    }, indent=2) + "\n")
-    write_state("pass1-complete")
-
-    # Flag questions for pass 2 from the primary (repeat 0) results.
-    def flagged(case, qid) -> bool:
-        rs = [r for r in records if r["case"] == case and r["question"] == qid and r["repeat"] == 0]
-        byarm = {r["arm"]: r for r in rs}
-        if any(r["malformed"] for r in rs):
-            return True
-        if any(r["alias_leaks"] for r in rs) or any(r["invalid_identifiers"] for r in rs):
-            return True
-        raw, rb, eb = byarm.get("raw"), byarm.get("raw+brief"), byarm.get("encoded+brief")
-        if raw and rb and raw["correct"] != rb["correct"]:
-            return True
-        if rb and eb and rb["correct"] and not eb["correct"]:  # codec loss
-            return True
-        return False
-
-    to_repeat = [q for q in tasks if flagged(q["case"], q["id"])]
-    repeat_by_case: dict[str, list[dict]] = {}
-    for q in to_repeat:
-        repeat_by_case.setdefault(q["case"], []).append(q)
-    write_state("pass2")
-    for repeat in range(1, max(1, args.repeats)):
-        for case, qs in repeat_by_case.items():
-            for arm in ARMS:
-                for q in qs:
-                    do(case, q, arm, repeat)
-    log.close()
-    write_state("complete")
-
+    records, to_repeat = result["records"], result["to_repeat"]
     meta = {
         "run_id": run_id, "level": 2, "kind": "cpu-calibration",
         "model_requested": cfg.model, "model_reported": model_reported,
@@ -201,6 +196,7 @@ def main() -> int:
         "preflight_ttft_ms": pf.get("streaming_sample", {}).get("ttft_ms"),
         "matrix_streamed": eff.stream,
         "tasks": str(args.tasks), "l1_run": str(args.l1_run),
+        "manifest_sha256": matrix.sha256_bytes((run_dir / matrix.MANIFEST).read_bytes()),
         "case_tokens": case_tokens, "n_records": len(records),
         "unique_questions": len(tasks),
         "repeated_questions": [f"{q['case']}:{q['id']}" for q in to_repeat],

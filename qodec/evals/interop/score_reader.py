@@ -58,11 +58,14 @@ def analyze(meta: dict, records: list[dict]) -> dict:
         return arms.get(0) or (arms[min(arms)] if arms else None)
 
     # Stability: for each (case,q,arm) with >1 repeat, do the repeats agree on the
-    # full signature — not just correctness, but format, alias leakage and invalid
-    # identifiers too, so a flip in any of them marks the question unstable.
+    # full signature — not just correctness, but format, and the ACTUAL normalized
+    # sets of alias leaks and invalid identifiers. So a flip from one leaked alias
+    # to a different one (same count), or invalid `Foo` becoming invalid `Bar`,
+    # marks the question unstable; a mere reordering of the same set does not.
     def _sig(r):
         return (r["correct"], r.get("format_compliant", not r["malformed"]),
-                bool(r.get("alias_leaks")), bool(r.get("invalid_identifiers")))
+                tuple(sorted(set(r.get("alias_leaks") or []))),
+                tuple(sorted(set(r.get("invalid_identifiers") or []))))
 
     unstable_q = set()
     for (case, q, arm), reps in index.items():

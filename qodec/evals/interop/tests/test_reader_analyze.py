@@ -114,6 +114,37 @@ class Stability(unittest.TestCase):
         a = sr.analyze({}, recs)
         self.assertGreaterEqual(a["unstable_questions"], 1)
 
+    def _repeat_eb(self, r0, r1):
+        # 12 clean questions for eligibility, with q0's encoded+brief replaced by
+        # two explicit repeats so the signature comparison is exercised directly.
+        recs = []
+        for i in range(12):
+            recs += three_arms("c", f"q{i}", "locator")
+        recs = [r for r in recs if not (r["question"] == "q0" and r["arm"] == "encoded+brief")]
+        return recs + [r0, r1]
+
+    def test_alias_change_same_count_is_unstable(self):
+        # One leaked alias becomes a *different* alias — same count, so a bool
+        # flag would call it stable; the normalized set makes it unstable.
+        recs = self._repeat_eb(
+            rec("c", "q0", "locator", "encoded+brief", repeat=0, leaks=["码A"]),
+            rec("c", "q0", "locator", "encoded+brief", repeat=1, leaks=["码B"]))
+        self.assertGreaterEqual(sr.analyze({}, recs)["unstable_questions"], 1)
+
+    def test_invalid_identifier_change_is_unstable(self):
+        # invalid Foo → invalid Bar across repeats.
+        recs = self._repeat_eb(
+            rec("c", "q0", "locator", "encoded+brief", repeat=0, inv=["Foo"]),
+            rec("c", "q0", "locator", "encoded+brief", repeat=1, inv=["Bar"]))
+        self.assertGreaterEqual(sr.analyze({}, recs)["unstable_questions"], 1)
+
+    def test_reordered_same_set_is_stable(self):
+        # Same set of invalid ids in a different order → NOT unstable.
+        recs = self._repeat_eb(
+            rec("c", "q0", "locator", "encoded+brief", repeat=0, inv=["a", "b"]),
+            rec("c", "q0", "locator", "encoded+brief", repeat=1, inv=["b", "a"]))
+        self.assertEqual(sr.analyze({}, recs)["unstable_questions"], 0)
+
 
 class Parity(unittest.TestCase):
     def test_constant_overhead_is_ok(self):
