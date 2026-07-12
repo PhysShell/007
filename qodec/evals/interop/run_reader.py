@@ -123,11 +123,20 @@ def main() -> int:
             "answer_raw": res.text, "answer_parsed": ans, "request": res.request,
         }
 
-    records = []
-    # Pass 1 — everything once.
+    # Cache-friendly order: group by (case, arm) so the server re-uses the
+    # prefix KV across a case's questions (the content is identical; only the
+    # short question suffix changes). Interleaving arms would evict it and
+    # re-prefill the whole payload every request.
+    by_case: dict[str, list[dict]] = {}
     for q in tasks:
+        by_case.setdefault(q["case"], []).append(q)
+
+    records = []
+    # Pass 1 — everything once, content-grouped.
+    for case, qs in by_case.items():
         for arm in ARMS:
-            records.append(run_one(q["case"], q, arm, 0))
+            for q in qs:
+                records.append(run_one(case, q, arm, 0))
 
     # Flag questions for pass 2.
     def flagged(case, qid) -> bool:
@@ -144,11 +153,15 @@ def main() -> int:
             return True
         return False
 
-    to_repeat = [(q["case"], q["id"], q) for q in tasks if flagged(q["case"], q["id"])]
-    for case, qid, q in to_repeat:
-        for repeat in range(1, max(1, args.repeats)):
+    to_repeat = [q for q in tasks if flagged(q["case"], q["id"])]
+    repeat_by_case: dict[str, list[dict]] = {}
+    for q in to_repeat:
+        repeat_by_case.setdefault(q["case"], []).append(q)
+    for repeat in range(1, max(1, args.repeats)):
+        for case, qs in repeat_by_case.items():
             for arm in ARMS:
-                records.append(run_one(case, q, arm, repeat))
+                for q in qs:
+                    records.append(run_one(case, q, arm, repeat))
 
     meta = {
         "run_id": run_id, "level": 2, "kind": "cpu-calibration",
@@ -159,7 +172,7 @@ def main() -> int:
         "streaming_usage_supported": bool(pf.get("streaming", {}).get("usage_supported")),
         "tasks": str(args.tasks), "l1_run": str(args.l1_run),
         "case_tokens": case_tokens, "n_records": len(records),
-        "repeated_questions": [f"{c}:{qid}" for c, qid, _ in to_repeat],
+        "repeated_questions": [f"{q['case']}:{q['id']}" for q in to_repeat],
     }
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
     with (run_dir / "records.jsonl").open("w") as fh:

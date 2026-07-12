@@ -557,9 +557,9 @@ hostile input) through the actual `o7 judge` binary.
    whether removing it keeps comprehension and actionability. This is a
    *separate* evaluation harness (`qodec/evals/interop/`), reproducible-
    experiment-first, not tool code stuffed into the crate. Three rungs: L1
-   artifact benchmark (tokens/time, no model — `run.py`), L2 reader (one model,
-   one prompt, raw vs qodec, JSON-scored), L3 agent (tool choice → patch →
-   tests). L1 is a **real-tool vertical slice**: producers (CodeGraph
+   artifact benchmark (tokens/time, no model — `run.py`), L2 reader (conditional
+   paired scoring under the served model's own tokenizer), L3 agent (tool choice
+   → patch → tests). L1 is a **real-tool vertical slice**: producers (CodeGraph
    `explore`, RTK command-runners, fixtures) vs transforms (RTK stdin filters,
    qodec), run against a pinned corpus repo — RTK 0.42.4 and CodeGraph 1.4.1,
    both 100% local, pinned by version with `doctor.py --strict` and repos
@@ -578,7 +578,21 @@ hostile input) through the actual `o7 judge` binary.
    (bad return contract) and FastContext (a served model, not a `brief()`
    package) adapters are **not validated** — the harness marks them
    `unsupported`, never a lane "waiting for install". A committed, hash-verified
-   record lives at `qodec/evals/interop/results/rtk-codegraph-clap-v1/`. Two
+   record lives at `qodec/evals/interop/results/rtk-codegraph-clap-v1/`.
+   **Level 2** runs a served model under its *own* tokenizer (`--meter
+   hf:<tokenizer.json>`, an in-process Rust `tokenizers` meter proven identical
+   to the Python library and **fail-closed** — a bad tokenizer aborts, never a
+   char-count guess). Scoring is *conditional and paired*: per question it
+   follows raw → raw+brief → encoded+brief and isolates the codec as
+   encoded+brief vs raw+brief, gating to INCONCLUSIVE (never a false pass) when
+   the reader cannot clear a 60% raw-competence bar or the eligible sample is
+   too small. Match modes (exact/exact-set/one-of/contains-all/ordered-path, no
+   basename fallback), real `call_path`/`actionability` scoring, whole-string
+   alias-leak and invalid-identifier checks, a preflight receipt, and real
+   server `prompt_tokens` accounting round it out. First **CPU calibration run**
+   (Qwen2.5-0.5B, committed at `results/l2-cpu-qwen0.5b-v1/`) came back
+   INCONCLUSIVE (raw competence 16% < 60%) — the weak-reader guard working as
+   intended; a stronger reader is needed to reach a qodec verdict. Two
    prerequisites the doc surfaced:
    - *Done* — **the adapter/passthrough contract** (`src/adapter.rs`,
      `encode --json --passthrough-on-no-gain`). `encode` always wraps, so blind

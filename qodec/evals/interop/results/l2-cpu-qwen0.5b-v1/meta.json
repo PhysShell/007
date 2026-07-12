@@ -1,0 +1,89 @@
+{
+  "run_id": "cpu-qwen0.5b",
+  "level": 2,
+  "kind": "cpu-calibration",
+  "model_requested": "qwen2.5-0.5b-instruct",
+  "model_reported": "qwen2.5-0.5b-instruct",
+  "tokenizer": {
+    "meter": "hf:/root/.cache/qodec-bench/tokenizer.json",
+    "path": "/root/.cache/qodec-bench/tokenizer.json",
+    "sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539",
+    "size_bytes": 7031645
+  },
+  "qodec_version": "sha256:07ff3a94830c",
+  "reader_url": "http://127.0.0.1:8080/v1",
+  "determinism": {
+    "temperature": 0,
+    "seed_sent": 0,
+    "seed_accepted": true,
+    "contract": "temperature=0, seed=0"
+  },
+  "preflight_ttft_ms": 201.89902000015536,
+  "streaming_usage_supported": false,
+  "tasks": "/home/user/007/qodec/evals/interop/tasks/reader/tasks.json",
+  "l1_run": "results/rtk-codegraph-clap-v1",
+  "case_tokens": {
+    "build-log-rtk-log": {
+      "raw_payload": 188,
+      "raw+brief_content": 450,
+      "encoded+brief_content": 449,
+      "encoded_artifact_warm": 187,
+      "encoded": true,
+      "codec": "tmpl"
+    },
+    "rg-output-rtk-grep": {
+      "raw_payload": 475,
+      "raw+brief_content": 737,
+      "encoded+brief_content": 686,
+      "encoded_artifact_warm": 424,
+      "encoded": true,
+      "codec": "mine"
+    },
+    "rtk-rg-parser-clap": {
+      "raw_payload": 847,
+      "raw+brief_content": 1109,
+      "encoded+brief_content": 881,
+      "encoded_artifact_warm": 619,
+      "encoded": true,
+      "codec": "mine"
+    },
+    "rtk-rg-derive-clap": {
+      "raw_payload": 3549,
+      "raw+brief_content": 3811,
+      "encoded+brief_content": 2177,
+      "encoded_artifact_warm": 1915,
+      "encoded": true,
+      "codec": "mine"
+    },
+    "clap-derive-explore": {
+      "raw_payload": 4377,
+      "raw+brief_content": 4639,
+      "encoded+brief_content": 4094,
+      "encoded_artifact_warm": 3832,
+      "encoded": true,
+      "codec": "mine"
+    }
+  },
+  "n_records": 183,
+  "repeated_questions": [
+    "build-log-rtk-log:n-errors",
+    "build-log-rtk-log:n-warnings",
+    "build-log-rtk-log:error-code",
+    "build-log-rtk-log:error-file",
+    "rg-output-rtk-grep:n-matches",
+    "rg-output-rtk-grep:n-files",
+    "rtk-rg-parser-clap:file",
+    "rtk-rg-parser-clap:symbol",
+    "rtk-rg-derive-clap:n-matches",
+    "rtk-rg-derive-clap:file",
+    "rtk-rg-derive-clap:example",
+    "clap-derive-explore:n-symbols",
+    "clap-derive-explore:n-files",
+    "clap-derive-explore:top-symbol",
+    "clap-derive-explore:callers",
+    "clap-derive-explore:trait-path",
+    "clap-derive-explore:def-path",
+    "clap-derive-explore:call-path",
+    "clap-derive-explore:action"
+  ]
+}
