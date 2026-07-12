@@ -589,11 +589,18 @@ hostile input) through the actual `o7 judge` binary.
    too small. Match modes (exact/exact-set/one-of/contains-all/ordered-path, no
    basename fallback), real `call_path`/`actionability` scoring, whole-string
    alias-leak and invalid-identifier checks, a preflight receipt, and real
-   server `prompt_tokens` accounting round it out. First **CPU calibration run**
-   (Qwen2.5-0.5B, committed at `results/l2-cpu-qwen0.5b-v1/`) came back
-   INCONCLUSIVE (raw competence 16% < 60%) — the weak-reader guard working as
-   intended; a stronger reader is needed to reach a qodec verdict. Two
-   prerequisites the doc surfaced:
+   server `prompt_tokens` accounting round it out. The 0.5B calibration run
+   (`results/l2-cpu-qwen0.5b-v1/`) came back INCONCLUSIVE (raw 16% < 60%) — the
+   weak-reader guard working. The first **decision-capable** run (Qwen2.5-Coder-
+   7B on CPU, `results/l2-cpu-qwen2.5-coder-7b-v1/`) clears the gate (raw 70%,
+   eligible 16, locator 9, all repeats stable, tokenizer parity exact) and
+   returns a real verdict: **DO NOT APPLY BLIND QODEC / change notation.**
+   Encoding *does* save cost (2769→2314 server tokens, 43→31 s) but a 7B coder
+   reads the packed CodeGraph/RTK evidence worse — codec_retention 69% overall /
+   56% locator, 5 stable losses, 2 alias leaks. Because the drop is *general*,
+   not a locator-only regression with facts/counts preserved, the next step is
+   not protected spans; it is to stop applying blind qodec to this evidence, or
+   change the notation. Two prerequisites the doc surfaced:
    - *Done* — **the adapter/passthrough contract** (`src/adapter.rs`,
      `encode --json --passthrough-on-no-gain`). `encode` always wraps, so blind
      application after an already-compressing optimizer taxed dense output the

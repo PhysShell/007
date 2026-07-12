@@ -136,6 +136,14 @@ wrong) with facts/counts preserved is what makes **protected spans** the next
 increment; a general comprehension drop means don't apply blind qodec here (or
 change the notation), not protected spans.
 
+Committed runs (`results/`): the 0.5B `l2-cpu-qwen0.5b-v1` came back
+**INCONCLUSIVE** (raw 16% — the weak-reader guard). The decision-capable
+`l2-cpu-qwen2.5-coder-7b-v1` (Qwen2.5-Coder-7B, raw 70%, exact tokenizer parity)
+returns **DO NOT APPLY BLIND QODEC / change notation**: encoding saves tokens
+(2769→2314) and latency (43→31 s) but drops codec_retention to 69% overall / 56%
+locator with 5 stable losses — a *general* comprehension drop, so not a
+protected-spans trigger.
+
 ## Go / no-go
 
 Median `incremental_qodec_gain` ≥ 10% — reported for cold **and** warm. Quality

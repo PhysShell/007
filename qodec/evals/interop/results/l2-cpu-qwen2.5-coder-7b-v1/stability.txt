@@ -1,0 +1,25 @@
+# stability — repeated (case,question,arm) and whether repeats agree on correct
+build-log-rtk-log     n-warnings    encoded+brief  repeats=3 correct=[False, False, False] STABLE
+build-log-rtk-log     n-warnings    raw            repeats=3 correct=[True, True, True] STABLE
+build-log-rtk-log     n-warnings    raw+brief      repeats=3 correct=[True, True, True] STABLE
+clap-derive-explore   action        encoded+brief  repeats=3 correct=[False, False, False] STABLE
+clap-derive-explore   action        raw            repeats=3 correct=[False, False, False] STABLE
+clap-derive-explore   action        raw+brief      repeats=3 correct=[False, False, False] STABLE
+clap-derive-explore   def-path      encoded+brief  repeats=3 correct=[False, False, False] STABLE
+clap-derive-explore   def-path      raw            repeats=3 correct=[True, True, True] STABLE
+clap-derive-explore   def-path      raw+brief      repeats=3 correct=[True, True, True] STABLE
+clap-derive-explore   n-files       encoded+brief  repeats=3 correct=[True, True, True] STABLE
+clap-derive-explore   n-files       raw            repeats=3 correct=[True, True, True] STABLE
+clap-derive-explore   n-files       raw+brief      repeats=3 correct=[True, True, True] STABLE
+clap-derive-explore   top-symbol    encoded+brief  repeats=3 correct=[False, False, False] STABLE
+clap-derive-explore   top-symbol    raw            repeats=3 correct=[True, True, True] STABLE
+clap-derive-explore   top-symbol    raw+brief      repeats=3 correct=[True, True, True] STABLE
+rg-output-rtk-grep    n-files       encoded+brief  repeats=3 correct=[False, False, False] STABLE
+rg-output-rtk-grep    n-files       raw            repeats=3 correct=[False, False, False] STABLE
+rg-output-rtk-grep    n-files       raw+brief      repeats=3 correct=[False, False, False] STABLE
+rtk-rg-derive-clap    file          encoded+brief  repeats=3 correct=[False, False, False] STABLE
+rtk-rg-derive-clap    file          raw            repeats=3 correct=[True, True, True] STABLE
+rtk-rg-derive-clap    file          raw+brief      repeats=3 correct=[True, True, True] STABLE
+rtk-rg-parser-clap    file          encoded+brief  repeats=3 correct=[False, False, False] STABLE
+rtk-rg-parser-clap    file          raw            repeats=3 correct=[True, True, True] STABLE
+rtk-rg-parser-clap    file          raw+brief      repeats=3 correct=[True, True, True] STABLE
