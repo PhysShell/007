@@ -128,7 +128,7 @@ struct IoArgs {
 struct EncodeArgs {
     #[command(flatten)]
     io: IoArgs,
-    /// mine | deep | fold | toon | grep | diag | tmpl | squeeze | mosaic
+    /// mine | deep | fold | toon | grep | diag | tmpl | squeeze | mosaic | identity | structural | squeeze-guarded
     #[arg(long, default_value = "squeeze")]
     codec: String,
     /// auto | glyph | sigil
@@ -319,7 +319,7 @@ struct PplArgs {
     /// Input file (stdin when omitted).
     #[arg(short, long)]
     input: Option<PathBuf>,
-    /// mine | deep | fold | toon | grep | diag | tmpl | squeeze | mosaic
+    /// mine | deep | fold | toon | grep | diag | tmpl | squeeze | mosaic | identity | structural | squeeze-guarded
     #[arg(long, default_value = "squeeze")]
     codec: String,
     #[arg(long, default_value = "auto")]

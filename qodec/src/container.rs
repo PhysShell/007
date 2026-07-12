@@ -128,6 +128,18 @@ pub fn raw(text: &str) -> String {
     })
 }
 
+/// An explicit `%q1 identity` container: byte-identical body, no legend, no
+/// transforms. The eval-only I arm — isolates the influence of the `%q1`
+/// framing itself. Decodes byte-for-byte back to the input.
+pub fn identity(text: &str) -> String {
+    emit(&Container {
+        codec: "identity".to_string(),
+        params: Vec::new(),
+        legend: Vec::new(),
+        body: text.to_string(),
+    })
+}
+
 /// Tokens spent on header + legend (everything before the body). This is the
 /// part a stable "decryption key" can amortize into a cached prompt prefix.
 pub fn overhead(text: &str, meter: &dyn crate::meter::TokenMeter) -> usize {
