@@ -1,0 +1,86 @@
+--- raw
++++ encoded
+@@ -1,43 +1,55 @@
++%q1 mine n=8
++类=src/Legacy.Core/Services/
++引=, cancellationToken).ConfigureAwait(false);
++码=tests/Legacy.UI.Tests/ViewModels/
++路=[file]
++函=src/Legacy.UI/ViewModels/
++值=Async(CancellationToken
++错=: public async Task 
++试=: private void OnPropertyChanged(string propertyName)
++%q1 body
++%q1 raw
++%q1 body
+ 20 matches in 10F:
+ 
+-[file] src/Legacy.Core/Services/AuditLogger.cs (1):
+-    14: public async Task LogAsync(string message, CancellationToken cancellationToken)
++路 类AuditLogger.cs (1):
++    14错LogAsync(string message, CancellationToken cancellationToken)
+ 
+-[file] src/Legacy.Core/Services/ReportService.cs (1):
++路 类ReportService.cs (1):
+     52: public Report Generate(ReportCriteria criteria)
+ 
+-[file] src/Legacy.Core/Services/SessionService.cs (2):
+-    33: public async Task OpenAsync(Credentials credentials, CancellationToken cancellationToken)
+-    41: await _tokenClient.RequestAsync(credentials, cancellationToken).ConfigureAwait(false);
++路 类SessionService.cs (2):
++    33错OpenAsync(Credentials credentials, CancellationToken cancellationToken)
++    41: await _tokenClient.RequestAsync(credentials引
+ 
+-[file] src/Legacy.Core/Services/UserService.cs (2):
+-    18: public async Task SaveAsync(User user, CancellationToken cancellationToken)
+-    27: await _repository.UpsertAsync(user, cancellationToken).ConfigureAwait(false);
++路 类UserService.cs (2):
++    18错SaveAsync(User user, CancellationToken cancellationToken)
++    27: await _repository.UpsertAsync(user引
+ 
+-[file] src/Legacy.UI/ViewModels/LoginViewModel.cs (3):
+-    23: public async Task LoginAsync(CancellationToken cancellationToken)
+-    39: await _sessionService.OpenAsync(credentials, cancellationToken).ConfigureAwait(false);
+-    71: private void OnPropertyChanged(string propertyName)
++路 函LoginViewModel.cs (3):
++    23错Login值 cancellationToken)
++    39: await _sessionService.OpenAsync(credentials引
++    71试
+ 
+-[file] src/Legacy.UI/ViewModels/ReportViewModel.cs (3):
+-    31: public async Task GenerateAsync(CancellationToken cancellationToken)
++路 函ReportViewModel.cs (3):
++    31错Generate值 cancellationToken)
+     44: var report = _reportService.Generate(criteria).GetAwaiter().GetResult();
+-    88: private void OnPropertyChanged(string propertyName)
++    88试
+ 
+-[file] src/Legacy.UI/ViewModels/UserEditorViewModel.cs (4):
+-    42: public async Task SaveAsync(CancellationToken cancellationToken)
+-    57: await _userService.SaveAsync(CurrentUser, cancellationToken).ConfigureAwait(false);
+-    58: await _auditLogger.LogAsync("User saved", cancellationToken).ConfigureAwait(false);
+-   112: private void OnPropertyChanged(string propertyName)
++路 函UserEditorViewModel.cs (4):
++    42错Save值 cancellationToken)
++    57: await _userService.SaveAsync(CurrentUser引
++    58: await _auditLogger.LogAsync("User saved"引
++   112试
+ 
+-[file] tests/Legacy.UI.Tests/ViewModels/LoginViewModelTests.cs (1):
+-    36: await viewModel.LoginAsync(CancellationToken.None);
++路 码LoginViewModelTests.cs (1):
++    36: await viewModel.Login值.None);
+ 
+-[file] tests/Legacy.UI.Tests/ViewModels/ReportViewModelTests.cs (1):
+-    41: await viewModel.GenerateAsync(CancellationToken.None);
++路 码ReportViewModelTests.cs (1):
++    41: await viewModel.Generate值.None);
+ 
+-[file] tests/Legacy.UI.Tests/ViewModels/UserEditorViewModelTests.cs (2):
+-    29: await viewModel.SaveAsync(CancellationToken.None);
+-    63: await viewModel.SaveAsync(CancellationToken.None);
++路 码UserEditorViewModelTests.cs (2):
++    29: await viewModel.Save值.None);
++    63: await viewModel.Save值.None);
+ 
+ 

@@ -1,0 +1,1815 @@
+[
+  {
+    "alias_stats": {
+      "alias_count": 1,
+      "alias_density_per_kchar": 2.5316,
+      "legend_size": 1
+    },
+    "answers": [
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "9",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": []
+        },
+        "answer_sha256": "d19ccb250bc839875a40401aa6c47bdec4fc5b256a01937eabf36290c9a01c47",
+        "arm": "raw",
+        "completion_tokens": 30,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 8650.450345000081,
+        "malformed": false,
+        "prompt_tokens": 321,
+        "repeat": 0,
+        "request_sha256": "69c735a9c555e4a11f3721052c61ee96ec826e4f7b94440158bb4bd507ccd6cd"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "9",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": []
+        },
+        "answer_sha256": "d19ccb250bc839875a40401aa6c47bdec4fc5b256a01937eabf36290c9a01c47",
+        "arm": "raw",
+        "completion_tokens": 30,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 19218.869414999972,
+        "malformed": false,
+        "prompt_tokens": 321,
+        "repeat": 1,
+        "request_sha256": "69c735a9c555e4a11f3721052c61ee96ec826e4f7b94440158bb4bd507ccd6cd"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "9",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": []
+        },
+        "answer_sha256": "d19ccb250bc839875a40401aa6c47bdec4fc5b256a01937eabf36290c9a01c47",
+        "arm": "raw",
+        "completion_tokens": 30,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 18986.576287999924,
+        "malformed": false,
+        "prompt_tokens": 321,
+        "repeat": 2,
+        "request_sha256": "69c735a9c555e4a11f3721052c61ee96ec826e4f7b94440158bb4bd507ccd6cd"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "9",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": []
+        },
+        "answer_sha256": "d19ccb250bc839875a40401aa6c47bdec4fc5b256a01937eabf36290c9a01c47",
+        "arm": "raw+brief",
+        "completion_tokens": 30,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 8053.277772999991,
+        "malformed": false,
+        "prompt_tokens": 583,
+        "repeat": 0,
+        "request_sha256": "630ef5cfea061f81ad8fbbd8fb01d040190cc306f9496c02cdf4d01bb24085f7"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "9",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": []
+        },
+        "answer_sha256": "d19ccb250bc839875a40401aa6c47bdec4fc5b256a01937eabf36290c9a01c47",
+        "arm": "raw+brief",
+        "completion_tokens": 30,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 34336.68150699987,
+        "malformed": false,
+        "prompt_tokens": 583,
+        "repeat": 1,
+        "request_sha256": "630ef5cfea061f81ad8fbbd8fb01d040190cc306f9496c02cdf4d01bb24085f7"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "9",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": []
+        },
+        "answer_sha256": "d19ccb250bc839875a40401aa6c47bdec4fc5b256a01937eabf36290c9a01c47",
+        "arm": "raw+brief",
+        "completion_tokens": 30,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 35583.94615499947,
+        "malformed": false,
+        "prompt_tokens": 583,
+        "repeat": 2,
+        "request_sha256": "630ef5cfea061f81ad8fbbd8fb01d040190cc306f9496c02cdf4d01bb24085f7"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "7",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": []
+        },
+        "answer_sha256": "868a9f93950da8d6b4761527eb57882a0f78e26991443bdcb51e8c2d21aad013",
+        "arm": "encoded+brief",
+        "completion_tokens": 30,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 7855.54067299995,
+        "malformed": false,
+        "prompt_tokens": 582,
+        "repeat": 0,
+        "request_sha256": "1a11e013c92cece173d18fadcf0abf9e7ce28e201a3366f3fcefde8d80076d73"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "7",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": []
+        },
+        "answer_sha256": "868a9f93950da8d6b4761527eb57882a0f78e26991443bdcb51e8c2d21aad013",
+        "arm": "encoded+brief",
+        "completion_tokens": 30,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 18960.240528999748,
+        "malformed": false,
+        "prompt_tokens": 582,
+        "repeat": 1,
+        "request_sha256": "1a11e013c92cece173d18fadcf0abf9e7ce28e201a3366f3fcefde8d80076d73"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "7",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": []
+        },
+        "answer_sha256": "868a9f93950da8d6b4761527eb57882a0f78e26991443bdcb51e8c2d21aad013",
+        "arm": "encoded+brief",
+        "completion_tokens": 30,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 19395.840053999564,
+        "malformed": false,
+        "prompt_tokens": 582,
+        "repeat": 2,
+        "request_sha256": "1a11e013c92cece173d18fadcf0abf9e7ce28e201a3366f3fcefde8d80076d73"
+      }
+    ],
+    "cost": {
+      "encoded_prompt_tokens": 582,
+      "raw_brief_prompt_tokens": 583
+    },
+    "diff_stats": {
+      "added": 6,
+      "removed": 2
+    },
+    "gold_diff_hunks": [
+      "-   C:\\build\\src\\Legacy.UI\\ViewModels\\UserEditorViewModel.cs(198,22): error CS1061: 'UserSession' doe...",
+      "+码|98,22"
+    ],
+    "identity": {
+      "case": "build-log-rtk-log",
+      "category": "count",
+      "field": "answer",
+      "gold": [
+        "9"
+      ],
+      "match_mode": "exact",
+      "model": "qwen2.5-coder-7b-instruct",
+      "qodec": "sha256:07ff3a94830c",
+      "question_id": "n-warnings",
+      "question_text": "How many warnings does this build log report? Put the integer in \"answer\".",
+      "records_sha256": "18e1afcba6f34c987e1cc78a6b7e107253f6df697a7a979591574db13e157aea",
+      "source_commit": "0b76e64",
+      "source_run": "cpu-qwen2.5-coder-7b",
+      "tokenizer_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539"
+    },
+    "kind": "loss",
+    "mechanism": {
+      "count_analysis": {
+        "fold_markers_present": true,
+        "gold_count": "9",
+        "gold_count_line_in_artifact": "[warn] 9 warnings (3 unique)",
+        "gold_count_preserved_verbatim": true
+      },
+      "evidence": [
+        {
+          "kind": "gold_count_preserved_verbatim",
+          "line": "[warn] 9 warnings (3 unique)",
+          "value": "9"
+        },
+        {
+          "kind": "competing_count_present_verbatim",
+          "line": "[×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could...",
+          "value": "7"
+        },
+        {
+          "kind": "fold_markers_present_in_artifact"
+        }
+      ],
+      "primary_mechanism": "notation-ambiguity",
+      "secondary_mechanisms": [
+        "structural-folding"
+      ]
+    },
+    "prompt_evidence": {
+      "alias_dictionary": {
+        "码": "   C:\\build\\src\\Legacy.UI\\ViewModels\\UserEditorViewModel.cs(1¿): error CS1061: 'UserSession' doe..."
+      },
+      "encoded_artifact": "%q1 tmpl sep=pipe slot=quest n=1 nl=0\n码=   C:\\build\\src\\Legacy.UI\\ViewModels\\UserEditorViewModel.cs(1¿): error CS1061: 'UserSession' doe...\n%q1 body\nLog Summary\n   [error] 3 errors (3 unique)\n   [warn] 9 warnings (3 unique)\n   [info] 0 info messages\n\n[ERRORS]\n码|98,22\n       2 Error(s)\n码|42,38\n\n[WARNINGS]\n   [×5]   CSC : warning CS8618: Non-nullable property 'CurrentUser' must contain a non-null value when ex...\n   [×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could...\n       7 Warning(s)\n",
+      "notation_brief": "The payload is encoded as a `%q1` container. Format: first line\n`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`\n(each alias is a short stand-in for that exact phrase), then a\n`%q1 body` line, then the body. `%q1 xN` after a line means that line\noccurs N times in total. A `toon` body is a table: first line is a JSON\narray of keys, each following line is one object, cells are JSON values\njoined by the separator named in the header. A `grep` body is grouped\nmatcher output: a marker line names a file path and the lines after it\nare `line:text` hits in that file (a bare marker starts verbatim\nlines). A `diag` body line starting with an alias expands to: the head\nafter the alias, then that alias's legend template with each slot\nplaceholder filled by the sep-joined values in order. A `tmpl` body\nline starting with an alias is its legend template with the slot\nplaceholders filled by the sep-joined values that follow the alias.\nMentally decode the body via the legend before answering; never emit\nalias characters in answers.",
+      "question_suffix": "QUESTION: How many warnings does this build log report? Put the integer in \"answer\".\n\nRespond with the JSON object only.",
+      "raw_tool_payload": "Log Summary\n   [error] 3 errors (3 unique)\n   [warn] 9 warnings (3 unique)\n   [info] 0 info messages\n\n[ERRORS]\n   C:\\build\\src\\Legacy.UI\\ViewModels\\UserEditorViewModel.cs(198,22): error CS1061: 'UserSession' doe...\n       2 Error(s)\n   C:\\build\\src\\Legacy.UI\\ViewModels\\UserEditorViewModel.cs(142,38): error CS1061: 'UserSession' doe...\n\n[WARNINGS]\n   [×5]   CSC : warning CS8618: Non-nullable property 'CurrentUser' must contain a non-null value when ex...\n   [×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could...\n       7 Warning(s)",
+      "system_prompt": "You are a precise code-context reader. Answer ONLY about the provided text. Reply with a single JSON object and nothing else, using exactly these keys: {\"facts\": [], \"files\": [], \"symbols\": [], \"call_path\": [], \"answer\": \"\"}. Put integers as strings in \"answer\". Use exact identifiers and full paths copied verbatim from the text; never invent or abbreviate names. Do not include any decoding notation or alias glyphs in your answer.",
+      "used_aliases": [
+        "码"
+      ]
+    },
+    "span_analysis": {
+      "count_checks": {
+        "fold_markers_present": true,
+        "gold_count": "9",
+        "gold_count_line_in_artifact": "[warn] 9 warnings (3 unique)",
+        "gold_count_preserved_verbatim": true
+      },
+      "gold_spans": [
+        {
+          "aliases": [],
+          "fate": "preserved_verbatim",
+          "span": "9"
+        }
+      ]
+    }
+  },
+  {
+    "alias_stats": {
+      "alias_count": 41,
+      "alias_density_per_kchar": 4.2351,
+      "legend_size": 41
+    },
+    "answers": [
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "clap_builder/src/builder/value_parser.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "cd31f383e19ed993529916e8d51f8641ef6cc12fa1ea345664b268a98affaed5",
+        "arm": "raw",
+        "completion_tokens": 38,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 11220.253429999957,
+        "malformed": false,
+        "prompt_tokens": 4513,
+        "repeat": 0,
+        "request_sha256": "3ba5cb6864036e6703c0af7b84e798ad8d74206309bd67ea5afe7331ae4ea14f"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "clap_builder/src/builder/value_parser.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "cd31f383e19ed993529916e8d51f8641ef6cc12fa1ea345664b268a98affaed5",
+        "arm": "raw",
+        "completion_tokens": 38,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 11428.76193400025,
+        "malformed": false,
+        "prompt_tokens": 4513,
+        "repeat": 1,
+        "request_sha256": "3ba5cb6864036e6703c0af7b84e798ad8d74206309bd67ea5afe7331ae4ea14f"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "clap_builder/src/builder/value_parser.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "cd31f383e19ed993529916e8d51f8641ef6cc12fa1ea345664b268a98affaed5",
+        "arm": "raw",
+        "completion_tokens": 38,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 11657.991476000461,
+        "malformed": false,
+        "prompt_tokens": 4513,
+        "repeat": 2,
+        "request_sha256": "3ba5cb6864036e6703c0af7b84e798ad8d74206309bd67ea5afe7331ae4ea14f"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "files": [
+            "clap_builder/src/builder/value_parser.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "2212fba9b1a5058326d781deebd6caccb5cbdf25cc95ce476b535210ab48fe6e",
+        "arm": "raw+brief",
+        "completion_tokens": 33,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 10904.705704999742,
+        "malformed": false,
+        "prompt_tokens": 4775,
+        "repeat": 0,
+        "request_sha256": "f39d03463be0f7739fb6f5f056b868615d8c612ee0355c6dc6f7b523f19fedf5"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "files": [
+            "clap_builder/src/builder/value_parser.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "2212fba9b1a5058326d781deebd6caccb5cbdf25cc95ce476b535210ab48fe6e",
+        "arm": "raw+brief",
+        "completion_tokens": 33,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 10878.537878000316,
+        "malformed": false,
+        "prompt_tokens": 4775,
+        "repeat": 1,
+        "request_sha256": "f39d03463be0f7739fb6f5f056b868615d8c612ee0355c6dc6f7b523f19fedf5"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "files": [
+            "clap_builder/src/builder/value_parser.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "2212fba9b1a5058326d781deebd6caccb5cbdf25cc95ce476b535210ab48fe6e",
+        "arm": "raw+brief",
+        "completion_tokens": 33,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 10802.179084000272,
+        "malformed": false,
+        "prompt_tokens": 4775,
+        "repeat": 2,
+        "request_sha256": "f39d03463be0f7739fb6f5f056b868615d8c612ee0355c6dc6f7b523f19fedf5"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "clap_derive/src/value_parser.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "e77f818645834ba3f20ec821d32b19a363183bac004a69ac2700109aa501a2a2",
+        "arm": "encoded+brief",
+        "completion_tokens": 37,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [
+          "clap_derive/src/value_parser.rs"
+        ],
+        "latency_ms": 10577.106653999635,
+        "malformed": false,
+        "prompt_tokens": 4230,
+        "repeat": 0,
+        "request_sha256": "a93d6f4cd7e37f8d9586558f8d250142e2ae7f40b60598f53611f90be1c36bf7"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "clap_derive/src/value_parser.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "e77f818645834ba3f20ec821d32b19a363183bac004a69ac2700109aa501a2a2",
+        "arm": "encoded+brief",
+        "completion_tokens": 37,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [
+          "clap_derive/src/value_parser.rs"
+        ],
+        "latency_ms": 11299.760552000407,
+        "malformed": false,
+        "prompt_tokens": 4230,
+        "repeat": 1,
+        "request_sha256": "a93d6f4cd7e37f8d9586558f8d250142e2ae7f40b60598f53611f90be1c36bf7"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "clap_derive/src/value_parser.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "e77f818645834ba3f20ec821d32b19a363183bac004a69ac2700109aa501a2a2",
+        "arm": "encoded+brief",
+        "completion_tokens": 37,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [
+          "clap_derive/src/value_parser.rs"
+        ],
+        "latency_ms": 11326.601198999924,
+        "malformed": false,
+        "prompt_tokens": 4230,
+        "repeat": 2,
+        "request_sha256": "a93d6f4cd7e37f8d9586558f8d250142e2ae7f40b60598f53611f90be1c36bf7"
+      }
+    ],
+    "cost": {
+      "encoded_prompt_tokens": 4230,
+      "raw_brief_prompt_tokens": 4775
+    },
+    "diff_stats": {
+      "added": 323,
+      "removed": 278
+    },
+    "gold_diff_hunks": [
+      "+键=(引value_parser.rs:",
+      "+态=`引value_parser.rs`; 名",
+      "-- `ValueParser` (clap_builder/src/builder/value_parser.rs:63) — 8 callers in `clap_builder/src/builder/mod.rs`, `clap_builder/src/builder/action.rs`, `clap_builder/src/builder/arg.rs`, `clap_builder/src/builder/command.rs` +1 more; ⚠️ no covering tests found",
+      "-- `MapValueParser` (clap_builder/src/builder/value_parser.rs:2014) — 2 callers in `clap_builder/src/builder/mod.rs`, `clap_builder/src/builder/value_parser.rs`; ⚠️ no covering tests found",
+      "-- `AnyValueParser` (clap_builder/src/builder/value_parser.rs:591) — 3 callers in `clap_builder/src/builder/value_parser.rs`; ⚠️ no covering tests found",
+      "-**`clap_builder/src/builder/value_parser.rs`** — calls(calls), ValueParser(struct), ValueParserInner(enum), from(method), references(references), fmt(method), +10 more",
+      "+**`引value_parser.rs`** — calls(calls), 错(struct), 错Inner(enum), from版references(references), fmt版+10 more"
+    ],
+    "identity": {
+      "case": "clap-derive-explore",
+      "category": "locator",
+      "field": "files",
+      "gold": [
+        "clap_builder/src/builder/value_parser.rs"
+      ],
+      "match_mode": "exact-set",
+      "model": "qwen2.5-coder-7b-instruct",
+      "qodec": "sha256:07ff3a94830c",
+      "question_id": "def-path",
+      "question_text": "In which single file is ValueParser defined? Put only that full path in \"files\".",
+      "records_sha256": "18e1afcba6f34c987e1cc78a6b7e107253f6df697a7a979591574db13e157aea",
+      "source_commit": "0b76e64",
+      "source_run": "cpu-qwen2.5-coder-7b",
+      "tokenizer_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539"
+    },
+    "kind": "loss",
+    "mechanism": {
+      "evidence": [
+        {
+          "candidate_aliases": [
+            "引"
+          ],
+          "kind": "gold_span_represented_only_by_alias",
+          "span": "clap_builder/src/builder/value_parser.rs"
+        },
+        {
+          "answer": [
+            "clap_derive/src/value_parser.rs"
+          ],
+          "kind": "model_decoded_to_value_not_in_artifact"
+        }
+      ],
+      "primary_mechanism": "identifier-or-path-aliasing",
+      "secondary_mechanisms": [
+        "alias-decoding"
+      ]
+    },
+    "prompt_evidence": {
+      "alias_dictionary": {
+        "串": "1\t    ",
+        "件": "\t    pub(crate) ",
+        "例": "2\t        ",
+        "值": "\t            \"",
+        "函": "\t            } else if attr.path().is_ident(\"",
+        "列": "crate::ValueEnum + Clone + Send + Sync +",
+        "包": "4\t        ",
+        "名": "⚠️ no covering tests found",
+        "告": "库        ",
+        "图": "/// Parse from `std::env::args_os()`,",
+        "块": "8\t    ",
+        "层": "错Inner::",
+        "帧": "\t            Self::",
+        "常": "/// Build a [`Command`] that can",
+        "库": "5\t    ",
+        "建": " as CommandFactory>::command",
+        "异": "_t码DefaultValue",
+        "引": "clap_builder/src/builder/",
+        "态": "`引value_parser.rs`; 名",
+        "数": "f.debug_struct(\"错::",
+        "构": "0\t        ",
+        "查": "crate::",
+        "标": "\t    fn ",
+        "树": "6\t        ",
+        "测": "Some(AttrValue::",
+        "点": "3\t        ",
+        "版": "(method), ",
+        "码": "\" => Some(MagicAttrName::",
+        "类": "Sp::new(AttrKind::",
+        "组": ", attr.path().span())",
+        "节": "7\t    ",
+        "行": "value: &std::ffi::OsStr,",
+        "表": "9\t    ",
+        "警": "表        ",
+        "记": "\t    // Common enough to optimize",
+        "试": "... (gap) ...",
+        "路": "\t            ValueParserInner::",
+        "边": ") -> Result<",
+        "链": "#[derive(Copy, Clone,",
+        "错": "ValueParser",
+        "键": "(引value_parser.rs:"
+      },
+      "encoded_artifact": "%q1 mine n=41\n码=\" => Some(MagicAttrName::\n引=clap_builder/src/builder/\n路=\t            ValueParserInner::\n类=Sp::new(AttrKind::\n函=\t            } else if attr.path().is_ident(\"\n值=\t            \"\n错=ValueParser\n试=... (gap) ...\n帧=\t            Self::\n件=\t    pub(crate) \n组=, attr.path().span())\n标=\t    fn \n记=\t    // Common enough to optimize\n链=#[derive(Copy, Clone,\n节=7\t    \n名=⚠️ no covering tests found\n块=8\t    \n数=f.debug_struct(\"错::\n图=/// Parse from `std::env::args_os()`,\n列=crate::ValueEnum + Clone + Send + Sync +\n键=(引value_parser.rs:\n层=错Inner::\n表=9\t    \n串=1\t    \n行=value: &std::ffi::OsStr,\n树=6\t        \n点=3\t        \n边=) -> Result<\n库=5\t    \n包=4\t        \n版=(method), \n构=0\t        \n建= as CommandFactory>::command\n测=Some(AttrValue::\n例=2\t        \n警=表        \n告=库        \n异=_t码DefaultValue\n常=/// Build a [`Command`] that can\n态=`引value_parser.rs`; 名\n查=crate::\n%q1 body\n%q1 raw\n%q1 body\n**Exploration: How does clap parse arguments against a derived command definition?**\n\nFound 56 symbols across 3 files.\n\n**Blast radius — what depends on these (update/verify before editing)**\n\n- `错` 键63) — 8 callers in `引mod.rs`, `引action.rs`, `引arg.rs`, `引command.rs` +1 more; 名\n- `Map错` 键2014) — 2 callers in `引mod.rs`, 态\n- `Any错` 键591) — 3 callers in 态\n\n**Source Code**\n\n> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.\n\n**`clap_builder/src/derive.rs`** — parse版calls(calls), command版Command(references)\n\n```rust\n28\t/// </div>\n29\tpub trait Parser: FromArgMatches + CommandFactory + Sized {\n30\t    图 [exit][Error::exit] on error.\n31标parse() -> Self {\n3例let mut matches = <Self建().get_matches();\n3点let res = <Self as FromArgMatches>::from_arg_matches_mut(&mut matches)\n3包    .map_err(format_error::<Self>);\n3库    match res {\n3树    Ok(s) => s,\n3节        Err(e) => {\n3块            // Since this is more of a development-time error, we aren't doing as fancy of a quit\n3警    // as `get_matches`\n4构        e.exit()\n4串        }\n4例}\n43\t    }\n44\t\n4库图 return Err on error.\n46标try_parse(边Self, Error> {\n\n试\n\n11节常 instantiate `Self`.\n11块///\n11表/// See [`FromArgMatches::from_arg_matches_mut`] for instantiating `Self`.\n120标command() -> Command;\n12串常 update `self`.\n122\t    ///\n123\t    /// See [`FromArgMatches::update_from_arg_matches_mut`] for updating `self`.\n\n试\n\n314\t}\n315\t\n316\timpl<T: Parser> Parser for Box<T> {\n317标parse() -> Self {\n31块    Box::new(<T as Parser>::parse())\n31表}\n320\t\n321标try_parse(边Self, Error> {\n32例<T as Parser>::try_parse().map(Box::new)\n\n试\n\n340\t}\n341\t\n342\timpl<T: CommandFactory> CommandFactory for Box<T> {\n343标command() -> Command {\n34包<T建()\n34库}\n346标command_for_update() -> Command {\n34节    <T建_for_update()\n34块}\n```\n\n**`clap_derive/src/attr.rs`** — parse版ClapAttr(struct), as_str版parse_all版value_or_abort版lit_str_or_abort版+4 more\n\n```rust\n1\tuse std::iter::FromIterator;\n2\t\n3\tuse proc_macro2::TokenStream;\n4\tuse quote::quote;\n5\tuse quote::ToTokens;\n6\tuse syn::spanned::Spanned;\n7\tuse syn::{\n块parenthesized,\n表parse::{Parse, ParseStream},\n10\t    punctuated::Punctuated,\n1串Attribute, Expr, Ident, LitStr, Token,\n12\t};\n13\t\n14\tuse 查utils::Sp;\n15\t\n16\t#[derive(Clone)]\n17\tpub(crate) struct ClapAttr {\n18件kind: Sp<AttrKind>,\n19件name: Ident,\n20件magic: Option<MagicAttrName>,\n21件value: Option<AttrValue>,\n22\t}\n23\t\n24\timpl ClapAttr {\n25件fn parse_all(all_attrs: &[Attribute]边Vec<Self>, syn::Error> {\n2树let mut parsed = Vec::new();\n2节    for attr in all_attrs {\n2块        let kind = if attr.path().is_ident(\"clap\") {\n2警    类Clap组\n30函structopt\") {\n3串            类StructOpt组\n32函command\") {\n3点        类Command组\n34函group\") {\n3告    类Group组\n36函arg\") {\n3节            类Arg组\n38函value\") {\n3警    类Value组\n4构    } else {\n4串            continue;\n4例    };\n4点    for mut attr in\n4包        attr.parse_args_with(Punctuated::<ClapAttr, Token![,]>::parse_terminated)?\n4告{\n4树        attr.kind = kind;\n4节            parsed.push(attr);\n4块        }\n4表    }\n5构Ok(parsed)\n5串}\n52\t\n53件fn value_or_abort(&self边&AttrValue, syn::Error> {\n5包self.value\n5告.as_ref()\n5树    .ok_or_else(|| format_err!(self.name, \"attribute `{}` requires a value\", self.name))\n5节}\n58\t\n59件fn lit_str_or_abort(&self边&LitStr, syn::Error> {\n6构let value = self.value_or_abort()?;\n6串    match value {\n6例    AttrValue::LitStr(tokens) => Ok(tokens),\n6点    AttrValue::Expr(_) | AttrValue::Call(_) => {\n6包        abort!(\n6告        self.name,\n6树            \"attribute `{}` can only accept string literals\",\n6节                self.name\n6块            )\n6警}\n7构}\n7串}\n72\t}\n73\t\n74\timpl Parse for ClapAttr {\n75标parse(input: ParseStream<'_>) -> syn::Result<Self> {\n7树let name: Ident = input.parse()?;\n7节    let name_str = name.to_string();\n78\t\n7表    let magic = match name_str.as_str() {\n80值rename_all码RenameAll),\n81值rename_all_env码RenameAllEnv),\n82值skip码Skip),\n83值next_display_order码NextDisplayOrder),\n84值next_help_heading码NextHelpHeading),\n85值default_value异T),\n86值default_values异sT),\n87值default_value_os异OsT),\n88值default_values_os异sOsT),\n89值long码Long),\n90值short码Short),\n91值value_parser码错),\n92值action码Action),\n93值env码Env),\n94值flatten码Flatten),\n95值value_enum码ValueEnum),\n96值from_global码FromGlobal),\n97值subcommand码Subcommand),\n98值external_subcommand码ExternalSubcommand),\n99值verbatim_doc_comment码VerbatimDocComment),\n100值about码About),\n101值long_about码LongAbout),\n102值long_help码LongHelp),\n103值author码Author),\n104值version码Version),\n10告_ => None,\n10树};\n107\t\n10块    let value = if input.peek(Token![=]) {\n10警// `name = value` attributes.\n11构    let assign_token = input.parse::<Token![=]>()?; // skip '='\n11串        if input.peek(LitStr) {\n11例        let lit: LitStr = input.parse()?;\n11点        测LitStr(lit))\n11包    } else {\n11告    match input.parse::<Expr>() {\n11树            Ok(expr) => 测Expr(expr)),\n117\t\n11块                Err(_) => abort! {\n11警            assign_token,\n12构                \"expected `string literal` or `expression` after `=`\"\n12串                },\n12例        }\n12点    }\n12包} else if input.peek(syn::token::Paren) {\n12告// `name(...)` attributes.\n12树    let nested;\n12节        parenthesized!(nested in input);\n128\t\n12警let method_args: Punctuated<_, _> = nested.parse_terminated(Expr::parse, Token![,])?;\n13构    测Call(Vec::from_iter(method_args)))\n13串    } else {\n13例    None\n13点};\n134\t\n13库    Ok(Self {\n13树    kind: 类Clap, name.span()),\n13节        name,\n13块        magic,\n13警value,\n14构})\n14串}\n142\t}\n143\t\n144\t链 PartialEq, Eq)]\n145\tpub(crate) enum MagicAttrName {\n146\t    Short,\n14节Long,\n14块错,\n14表Action,\n150\t    Env,\n15串Flatten,\n152\t    ValueEnum,\n153\t    FromGlobal,\n154\t    Subcommand,\n15库VerbatimDocComment,\n156\t    ExternalSubcommand,\n15节About,\n15块LongAbout,\n15表LongHelp,\n160\t    Author,\n16串Version,\n162\t    RenameAllEnv,\n163\t    RenameAll,\n164\t    Skip,\n16库DefaultValueT,\n166\t    DefaultValuesT,\n16节DefaultValueOsT,\n16块DefaultValuesOsT,\n16表NextDisplayOrder,\n170\t    NextHelpHeading,\n171\t}\n172\t\n173\t#[derive(Clone)]\n174\t#[allow(clippy::large_enum_variant)]\n175\tpub(crate) enum AttrValue {\n176\t    LitStr(LitStr),\n17节Expr(Expr),\n17块Call(Vec<Expr>),\n179\t}\n180\t\n181\timpl ToTokens for AttrValue {\n182标to_tokens(&self, tokens: &mut TokenStream) {\n18点match self {\n184帧LitStr(t) => t.to_tokens(tokens),\n185帧Expr(t) => t.to_tokens(tokens),\n186帧Call(t) => {\n18节            let t = quote!(#(#t),*);\n18块            t.to_tokens(tokens);\n18警}\n19构}\n19串}\n192\t}\n193\t\n194\t链 PartialEq, Eq)]\n195\tpub(crate) enum AttrKind {\n196\t    Clap,\n19节StructOpt,\n19块Command,\n19表Group,\n200\t    Arg,\n20串Value,\n202\t}\n203\t\n204\timpl AttrKind {\n205件fn as_str(&self) -> &'static str {\n20树match self {\n207帧Clap => \"clap\",\n208帧StructOpt => \"structopt\",\n209帧Command => \"command\",\n210帧Group => \"group\",\n211帧Arg => \"arg\",\n212帧Value => \"value\",\n21点}\n214\t    }\n215\t}\n```\n\n**`引value_parser.rs`** — calls(calls), 错(struct), 错Inner(enum), from版references(references), fmt版+10 more\n\n```rust\n60\t///     .expect(\"required\");\n61\t/// assert_eq!(port, 3001);\n62\t/// ```\n63\tpub struct 错(错Inner);\n64\t\n65\tenum 错Inner {\n66记 and for possible values\n6节Bool,\n68记\n6表String,\n70记\n7串OsString,\n72记\n73\t    PathBuf,\n74\t    Other(Box<dyn Any错>),\n75\t}\n76\t\n77\timpl 错 {\n7块/// Custom parser for argument values\n\n试\n\n557\twhere\n55块P: Into<super::PossibleValue>,\n559\t{\n560标from(values: Vec<P>) -> Self {\n56串    let inner = PossibleValuesParser::from(values);\n56例Self::from(inner)\n563\t    }\n564\t}\n565\t\n566\timpl std::fmt::Debug for 错 {\n567标fmt(&self, f: &mut std::fmt::Formatter<'_>边(), std::fmt::Error> {\n56块    match &self.0 {\n569路Bool => 数bool\").finish(),\n570路String => 数string\").finish(),\n571路OsString => 数os_string\").finish(),\n572路PathBuf => 数path_buf\").finish(),\n573路Other(o) => write!(f, \"错::other({:?})\", o.type_id()),\n57包}\n57库}\n576\t}\n577\t\n578\timpl Clone for 错 {\n579标clone(&self) -> Self {\n58构Self(match &self.0 {\n581路Bool => 层Bool,\n582路String => 层String,\n583路OsString => 层OsString,\n584路PathBuf => 层PathBuf,\n585路Other(o) => 层Other(o.clone_any()),\n58树})\n58节}\n588\t}\n589\t\n590\t/// A type-erased wrapper for [`Typed错`].\n591\ttrait Any错: Send + Sync + 'static {\n592标parse_ref(\n59点&self,\n59包cmd: &查Command,\n59库    arg: Option<&查Arg>,\n59树行\n59节边AnyValue, 查Error>;\n598\t\n599标parse_ref_(\n60构&self,\n60串    cmd: &查Command,\n60例arg: Option<&查Arg>,\n60点行\n60包_source: ValueSource,\n60库边AnyValue, 查Error> {\n60树self.parse_ref(cmd, arg, value)\n60节}\n608\t\n60表/// Describes the content of `AnyValue`\n610标type_id(&self) -> AnyValueId;\n611\t\n612标possible_values(\n61点&self,\n614\t    ) -> Option<Box<dyn Iterator<Item = 查builder::PossibleValue> + '_>>;\n615\t\n616标clone_any(&self) -> Box<dyn Any错>;\n617\t}\n618\t\n619\timpl<T, P> Any错 for P\n620\twhere\n\n试\n\n1076\t/// assert_eq!(value_parser.parse_ref(&cmd, arg, OsStr::new(\"never\")).unwrap(), ColorChoice::Never);\n1077\t/// ```\n1078\t#[derive(Clone, Debug)]\n1079\tpub struct Enum错<E: 列 'static>(\n1080\t    std::marker::PhantomData<E>,\n1081\t);\n1082\t\n1083\timpl<E: 列 'static> Enum错<E> {\n1084\t    /// Parse an [`ValueEnum`][查ValueEnum]\n\n试\n\n1674\t/// Useful for composing new [`Typed错`]s\n1675\t链 Debug)]\n1676\t#[non_exhaustive]\n1677\tpub struct Bool错 {}\n1678\t\n1679\timpl Bool错 {\n1680\t    /// Implementation for [`错::bool`]\n\n试\n\n2011\t///\n2012\t/// See [`Typed错::map`]\n2013\t#[derive(Clone, Debug)]\n2014\tpub struct Map错<P, F> {\n201库parser: P,\n2016\t    func: F,\n2017\t}\n2018\t\n2019\timpl<P, F, T> Map错<P, F>\n2020\twhere\n```\n\n\n... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)\n",
+      "notation_brief": "The payload is encoded as a `%q1` container. Format: first line\n`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`\n(each alias is a short stand-in for that exact phrase), then a\n`%q1 body` line, then the body. `%q1 xN` after a line means that line\noccurs N times in total. A `toon` body is a table: first line is a JSON\narray of keys, each following line is one object, cells are JSON values\njoined by the separator named in the header. A `grep` body is grouped\nmatcher output: a marker line names a file path and the lines after it\nare `line:text` hits in that file (a bare marker starts verbatim\nlines). A `diag` body line starting with an alias expands to: the head\nafter the alias, then that alias's legend template with each slot\nplaceholder filled by the sep-joined values in order. A `tmpl` body\nline starting with an alias is its legend template with the slot\nplaceholders filled by the sep-joined values that follow the alias.\nMentally decode the body via the legend before answering; never emit\nalias characters in answers.",
+      "question_suffix": "QUESTION: In which single file is ValueParser defined? Put only that full path in \"files\".\n\nRespond with the JSON object only.",
+      "raw_tool_payload": "**Exploration: How does clap parse arguments against a derived command definition?**\n\nFound 56 symbols across 3 files.\n\n**Blast radius — what depends on these (update/verify before editing)**\n\n- `ValueParser` (clap_builder/src/builder/value_parser.rs:63) — 8 callers in `clap_builder/src/builder/mod.rs`, `clap_builder/src/builder/action.rs`, `clap_builder/src/builder/arg.rs`, `clap_builder/src/builder/command.rs` +1 more; ⚠️ no covering tests found\n- `MapValueParser` (clap_builder/src/builder/value_parser.rs:2014) — 2 callers in `clap_builder/src/builder/mod.rs`, `clap_builder/src/builder/value_parser.rs`; ⚠️ no covering tests found\n- `AnyValueParser` (clap_builder/src/builder/value_parser.rs:591) — 3 callers in `clap_builder/src/builder/value_parser.rs`; ⚠️ no covering tests found\n\n**Source Code**\n\n> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.\n\n**`clap_builder/src/derive.rs`** — parse(method), calls(calls), command(method), Command(references)\n\n```rust\n28\t/// </div>\n29\tpub trait Parser: FromArgMatches + CommandFactory + Sized {\n30\t    /// Parse from `std::env::args_os()`, [exit][Error::exit] on error.\n31\t    fn parse() -> Self {\n32\t        let mut matches = <Self as CommandFactory>::command().get_matches();\n33\t        let res = <Self as FromArgMatches>::from_arg_matches_mut(&mut matches)\n34\t            .map_err(format_error::<Self>);\n35\t        match res {\n36\t            Ok(s) => s,\n37\t            Err(e) => {\n38\t                // Since this is more of a development-time error, we aren't doing as fancy of a quit\n39\t                // as `get_matches`\n40\t                e.exit()\n41\t            }\n42\t        }\n43\t    }\n44\t\n45\t    /// Parse from `std::env::args_os()`, return Err on error.\n46\t    fn try_parse() -> Result<Self, Error> {\n\n... (gap) ...\n\n117\t    /// Build a [`Command`] that can instantiate `Self`.\n118\t    ///\n119\t    /// See [`FromArgMatches::from_arg_matches_mut`] for instantiating `Self`.\n120\t    fn command() -> Command;\n121\t    /// Build a [`Command`] that can update `self`.\n122\t    ///\n123\t    /// See [`FromArgMatches::update_from_arg_matches_mut`] for updating `self`.\n\n... (gap) ...\n\n314\t}\n315\t\n316\timpl<T: Parser> Parser for Box<T> {\n317\t    fn parse() -> Self {\n318\t        Box::new(<T as Parser>::parse())\n319\t    }\n320\t\n321\t    fn try_parse() -> Result<Self, Error> {\n322\t        <T as Parser>::try_parse().map(Box::new)\n\n... (gap) ...\n\n340\t}\n341\t\n342\timpl<T: CommandFactory> CommandFactory for Box<T> {\n343\t    fn command() -> Command {\n344\t        <T as CommandFactory>::command()\n345\t    }\n346\t    fn command_for_update() -> Command {\n347\t        <T as CommandFactory>::command_for_update()\n348\t    }\n```\n\n**`clap_derive/src/attr.rs`** — parse(method), ClapAttr(struct), as_str(method), parse_all(method), value_or_abort(method), lit_str_or_abort(method), +4 more\n\n```rust\n1\tuse std::iter::FromIterator;\n2\t\n3\tuse proc_macro2::TokenStream;\n4\tuse quote::quote;\n5\tuse quote::ToTokens;\n6\tuse syn::spanned::Spanned;\n7\tuse syn::{\n8\t    parenthesized,\n9\t    parse::{Parse, ParseStream},\n10\t    punctuated::Punctuated,\n11\t    Attribute, Expr, Ident, LitStr, Token,\n12\t};\n13\t\n14\tuse crate::utils::Sp;\n15\t\n16\t#[derive(Clone)]\n17\tpub(crate) struct ClapAttr {\n18\t    pub(crate) kind: Sp<AttrKind>,\n19\t    pub(crate) name: Ident,\n20\t    pub(crate) magic: Option<MagicAttrName>,\n21\t    pub(crate) value: Option<AttrValue>,\n22\t}\n23\t\n24\timpl ClapAttr {\n25\t    pub(crate) fn parse_all(all_attrs: &[Attribute]) -> Result<Vec<Self>, syn::Error> {\n26\t        let mut parsed = Vec::new();\n27\t        for attr in all_attrs {\n28\t            let kind = if attr.path().is_ident(\"clap\") {\n29\t                Sp::new(AttrKind::Clap, attr.path().span())\n30\t            } else if attr.path().is_ident(\"structopt\") {\n31\t                Sp::new(AttrKind::StructOpt, attr.path().span())\n32\t            } else if attr.path().is_ident(\"command\") {\n33\t                Sp::new(AttrKind::Command, attr.path().span())\n34\t            } else if attr.path().is_ident(\"group\") {\n35\t                Sp::new(AttrKind::Group, attr.path().span())\n36\t            } else if attr.path().is_ident(\"arg\") {\n37\t                Sp::new(AttrKind::Arg, attr.path().span())\n38\t            } else if attr.path().is_ident(\"value\") {\n39\t                Sp::new(AttrKind::Value, attr.path().span())\n40\t            } else {\n41\t                continue;\n42\t            };\n43\t            for mut attr in\n44\t                attr.parse_args_with(Punctuated::<ClapAttr, Token![,]>::parse_terminated)?\n45\t            {\n46\t                attr.kind = kind;\n47\t                parsed.push(attr);\n48\t            }\n49\t        }\n50\t        Ok(parsed)\n51\t    }\n52\t\n53\t    pub(crate) fn value_or_abort(&self) -> Result<&AttrValue, syn::Error> {\n54\t        self.value\n55\t            .as_ref()\n56\t            .ok_or_else(|| format_err!(self.name, \"attribute `{}` requires a value\", self.name))\n57\t    }\n58\t\n59\t    pub(crate) fn lit_str_or_abort(&self) -> Result<&LitStr, syn::Error> {\n60\t        let value = self.value_or_abort()?;\n61\t        match value {\n62\t            AttrValue::LitStr(tokens) => Ok(tokens),\n63\t            AttrValue::Expr(_) | AttrValue::Call(_) => {\n64\t                abort!(\n65\t                    self.name,\n66\t                    \"attribute `{}` can only accept string literals\",\n67\t                    self.name\n68\t                )\n69\t            }\n70\t        }\n71\t    }\n72\t}\n73\t\n74\timpl Parse for ClapAttr {\n75\t    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {\n76\t        let name: Ident = input.parse()?;\n77\t        let name_str = name.to_string();\n78\t\n79\t        let magic = match name_str.as_str() {\n80\t            \"rename_all\" => Some(MagicAttrName::RenameAll),\n81\t            \"rename_all_env\" => Some(MagicAttrName::RenameAllEnv),\n82\t            \"skip\" => Some(MagicAttrName::Skip),\n83\t            \"next_display_order\" => Some(MagicAttrName::NextDisplayOrder),\n84\t            \"next_help_heading\" => Some(MagicAttrName::NextHelpHeading),\n85\t            \"default_value_t\" => Some(MagicAttrName::DefaultValueT),\n86\t            \"default_values_t\" => Some(MagicAttrName::DefaultValuesT),\n87\t            \"default_value_os_t\" => Some(MagicAttrName::DefaultValueOsT),\n88\t            \"default_values_os_t\" => Some(MagicAttrName::DefaultValuesOsT),\n89\t            \"long\" => Some(MagicAttrName::Long),\n90\t            \"short\" => Some(MagicAttrName::Short),\n91\t            \"value_parser\" => Some(MagicAttrName::ValueParser),\n92\t            \"action\" => Some(MagicAttrName::Action),\n93\t            \"env\" => Some(MagicAttrName::Env),\n94\t            \"flatten\" => Some(MagicAttrName::Flatten),\n95\t            \"value_enum\" => Some(MagicAttrName::ValueEnum),\n96\t            \"from_global\" => Some(MagicAttrName::FromGlobal),\n97\t            \"subcommand\" => Some(MagicAttrName::Subcommand),\n98\t            \"external_subcommand\" => Some(MagicAttrName::ExternalSubcommand),\n99\t            \"verbatim_doc_comment\" => Some(MagicAttrName::VerbatimDocComment),\n100\t            \"about\" => Some(MagicAttrName::About),\n101\t            \"long_about\" => Some(MagicAttrName::LongAbout),\n102\t            \"long_help\" => Some(MagicAttrName::LongHelp),\n103\t            \"author\" => Some(MagicAttrName::Author),\n104\t            \"version\" => Some(MagicAttrName::Version),\n105\t            _ => None,\n106\t        };\n107\t\n108\t        let value = if input.peek(Token![=]) {\n109\t            // `name = value` attributes.\n110\t            let assign_token = input.parse::<Token![=]>()?; // skip '='\n111\t            if input.peek(LitStr) {\n112\t                let lit: LitStr = input.parse()?;\n113\t                Some(AttrValue::LitStr(lit))\n114\t            } else {\n115\t                match input.parse::<Expr>() {\n116\t                    Ok(expr) => Some(AttrValue::Expr(expr)),\n117\t\n118\t                    Err(_) => abort! {\n119\t                        assign_token,\n120\t                        \"expected `string literal` or `expression` after `=`\"\n121\t                    },\n122\t                }\n123\t            }\n124\t        } else if input.peek(syn::token::Paren) {\n125\t            // `name(...)` attributes.\n126\t            let nested;\n127\t            parenthesized!(nested in input);\n128\t\n129\t            let method_args: Punctuated<_, _> = nested.parse_terminated(Expr::parse, Token![,])?;\n130\t            Some(AttrValue::Call(Vec::from_iter(method_args)))\n131\t        } else {\n132\t            None\n133\t        };\n134\t\n135\t        Ok(Self {\n136\t            kind: Sp::new(AttrKind::Clap, name.span()),\n137\t            name,\n138\t            magic,\n139\t            value,\n140\t        })\n141\t    }\n142\t}\n143\t\n144\t#[derive(Copy, Clone, PartialEq, Eq)]\n145\tpub(crate) enum MagicAttrName {\n146\t    Short,\n147\t    Long,\n148\t    ValueParser,\n149\t    Action,\n150\t    Env,\n151\t    Flatten,\n152\t    ValueEnum,\n153\t    FromGlobal,\n154\t    Subcommand,\n155\t    VerbatimDocComment,\n156\t    ExternalSubcommand,\n157\t    About,\n158\t    LongAbout,\n159\t    LongHelp,\n160\t    Author,\n161\t    Version,\n162\t    RenameAllEnv,\n163\t    RenameAll,\n164\t    Skip,\n165\t    DefaultValueT,\n166\t    DefaultValuesT,\n167\t    DefaultValueOsT,\n168\t    DefaultValuesOsT,\n169\t    NextDisplayOrder,\n170\t    NextHelpHeading,\n171\t}\n172\t\n173\t#[derive(Clone)]\n174\t#[allow(clippy::large_enum_variant)]\n175\tpub(crate) enum AttrValue {\n176\t    LitStr(LitStr),\n177\t    Expr(Expr),\n178\t    Call(Vec<Expr>),\n179\t}\n180\t\n181\timpl ToTokens for AttrValue {\n182\t    fn to_tokens(&self, tokens: &mut TokenStream) {\n183\t        match self {\n184\t            Self::LitStr(t) => t.to_tokens(tokens),\n185\t            Self::Expr(t) => t.to_tokens(tokens),\n186\t            Self::Call(t) => {\n187\t                let t = quote!(#(#t),*);\n188\t                t.to_tokens(tokens);\n189\t            }\n190\t        }\n191\t    }\n192\t}\n193\t\n194\t#[derive(Copy, Clone, PartialEq, Eq)]\n195\tpub(crate) enum AttrKind {\n196\t    Clap,\n197\t    StructOpt,\n198\t    Command,\n199\t    Group,\n200\t    Arg,\n201\t    Value,\n202\t}\n203\t\n204\timpl AttrKind {\n205\t    pub(crate) fn as_str(&self) -> &'static str {\n206\t        match self {\n207\t            Self::Clap => \"clap\",\n208\t            Self::StructOpt => \"structopt\",\n209\t            Self::Command => \"command\",\n210\t            Self::Group => \"group\",\n211\t            Self::Arg => \"arg\",\n212\t            Self::Value => \"value\",\n213\t        }\n214\t    }\n215\t}\n```\n\n**`clap_builder/src/builder/value_parser.rs`** — calls(calls), ValueParser(struct), ValueParserInner(enum), from(method), references(references), fmt(method), +10 more\n\n```rust\n60\t///     .expect(\"required\");\n61\t/// assert_eq!(port, 3001);\n62\t/// ```\n63\tpub struct ValueParser(ValueParserInner);\n64\t\n65\tenum ValueParserInner {\n66\t    // Common enough to optimize and for possible values\n67\t    Bool,\n68\t    // Common enough to optimize\n69\t    String,\n70\t    // Common enough to optimize\n71\t    OsString,\n72\t    // Common enough to optimize\n73\t    PathBuf,\n74\t    Other(Box<dyn AnyValueParser>),\n75\t}\n76\t\n77\timpl ValueParser {\n78\t    /// Custom parser for argument values\n\n... (gap) ...\n\n557\twhere\n558\t    P: Into<super::PossibleValue>,\n559\t{\n560\t    fn from(values: Vec<P>) -> Self {\n561\t        let inner = PossibleValuesParser::from(values);\n562\t        Self::from(inner)\n563\t    }\n564\t}\n565\t\n566\timpl std::fmt::Debug for ValueParser {\n567\t    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {\n568\t        match &self.0 {\n569\t            ValueParserInner::Bool => f.debug_struct(\"ValueParser::bool\").finish(),\n570\t            ValueParserInner::String => f.debug_struct(\"ValueParser::string\").finish(),\n571\t            ValueParserInner::OsString => f.debug_struct(\"ValueParser::os_string\").finish(),\n572\t            ValueParserInner::PathBuf => f.debug_struct(\"ValueParser::path_buf\").finish(),\n573\t            ValueParserInner::Other(o) => write!(f, \"ValueParser::other({:?})\", o.type_id()),\n574\t        }\n575\t    }\n576\t}\n577\t\n578\timpl Clone for ValueParser {\n579\t    fn clone(&self) -> Self {\n580\t        Self(match &self.0 {\n581\t            ValueParserInner::Bool => ValueParserInner::Bool,\n582\t            ValueParserInner::String => ValueParserInner::String,\n583\t            ValueParserInner::OsString => ValueParserInner::OsString,\n584\t            ValueParserInner::PathBuf => ValueParserInner::PathBuf,\n585\t            ValueParserInner::Other(o) => ValueParserInner::Other(o.clone_any()),\n586\t        })\n587\t    }\n588\t}\n589\t\n590\t/// A type-erased wrapper for [`TypedValueParser`].\n591\ttrait AnyValueParser: Send + Sync + 'static {\n592\t    fn parse_ref(\n593\t        &self,\n594\t        cmd: &crate::Command,\n595\t        arg: Option<&crate::Arg>,\n596\t        value: &std::ffi::OsStr,\n597\t    ) -> Result<AnyValue, crate::Error>;\n598\t\n599\t    fn parse_ref_(\n600\t        &self,\n601\t        cmd: &crate::Command,\n602\t        arg: Option<&crate::Arg>,\n603\t        value: &std::ffi::OsStr,\n604\t        _source: ValueSource,\n605\t    ) -> Result<AnyValue, crate::Error> {\n606\t        self.parse_ref(cmd, arg, value)\n607\t    }\n608\t\n609\t    /// Describes the content of `AnyValue`\n610\t    fn type_id(&self) -> AnyValueId;\n611\t\n612\t    fn possible_values(\n613\t        &self,\n614\t    ) -> Option<Box<dyn Iterator<Item = crate::builder::PossibleValue> + '_>>;\n615\t\n616\t    fn clone_any(&self) -> Box<dyn AnyValueParser>;\n617\t}\n618\t\n619\timpl<T, P> AnyValueParser for P\n620\twhere\n\n... (gap) ...\n\n1076\t/// assert_eq!(value_parser.parse_ref(&cmd, arg, OsStr::new(\"never\")).unwrap(), ColorChoice::Never);\n1077\t/// ```\n1078\t#[derive(Clone, Debug)]\n1079\tpub struct EnumValueParser<E: crate::ValueEnum + Clone + Send + Sync + 'static>(\n1080\t    std::marker::PhantomData<E>,\n1081\t);\n1082\t\n1083\timpl<E: crate::ValueEnum + Clone + Send + Sync + 'static> EnumValueParser<E> {\n1084\t    /// Parse an [`ValueEnum`][crate::ValueEnum]\n\n... (gap) ...\n\n1674\t/// Useful for composing new [`TypedValueParser`]s\n1675\t#[derive(Copy, Clone, Debug)]\n1676\t#[non_exhaustive]\n1677\tpub struct BoolValueParser {}\n1678\t\n1679\timpl BoolValueParser {\n1680\t    /// Implementation for [`ValueParser::bool`]\n\n... (gap) ...\n\n2011\t///\n2012\t/// See [`TypedValueParser::map`]\n2013\t#[derive(Clone, Debug)]\n2014\tpub struct MapValueParser<P, F> {\n2015\t    parser: P,\n2016\t    func: F,\n2017\t}\n2018\t\n2019\timpl<P, F, T> MapValueParser<P, F>\n2020\twhere\n```\n\n\n... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)\n",
+      "system_prompt": "You are a precise code-context reader. Answer ONLY about the provided text. Reply with a single JSON object and nothing else, using exactly these keys: {\"facts\": [], \"files\": [], \"symbols\": [], \"call_path\": [], \"answer\": \"\"}. Put integers as strings in \"answer\". Use exact identifiers and full paths copied verbatim from the text; never invent or abbreviate names. Do not include any decoding notation or alias glyphs in your answer.",
+      "used_aliases": [
+        "串",
+        "件",
+        "例",
+        "值",
+        "函",
+        "列",
+        "包",
+        "名",
+        "告",
+        "图",
+        "块",
+        "层",
+        "帧",
+        "常",
+        "库",
+        "建",
+        "异",
+        "引",
+        "态",
+        "数",
+        "构",
+        "查",
+        "标",
+        "树",
+        "测",
+        "点",
+        "版",
+        "码",
+        "类",
+        "组",
+        "节",
+        "行",
+        "表",
+        "警",
+        "记",
+        "试",
+        "路",
+        "边",
+        "链",
+        "错",
+        "键"
+      ]
+    },
+    "span_analysis": {
+      "gold_spans": [
+        {
+          "aliases": [
+            "引"
+          ],
+          "fate": "represented_by_alias",
+          "span": "clap_builder/src/builder/value_parser.rs"
+        }
+      ],
+      "locator_checks": [
+        {
+          "basename": "preserved_verbatim",
+          "full_path": "represented_by_alias",
+          "path_prefix": "preserved_verbatim",
+          "prefix_aliases": [
+            "引"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "alias_stats": {
+      "alias_count": 41,
+      "alias_density_per_kchar": 4.2351,
+      "legend_size": 41
+    },
+    "answers": [
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "8",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": [
+            "ValueParser"
+          ]
+        },
+        "answer_sha256": "40e22fc7e00c63586cb8064f87876da71d518e3541bd7ef77ccf446f69056546",
+        "arm": "raw",
+        "completion_tokens": 33,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 10417.897811999865,
+        "malformed": false,
+        "prompt_tokens": 4511,
+        "repeat": 0,
+        "request_sha256": "17922f8b2d2f35ac1559919ed2cc15fa24a1e765e2d5ec63cec44037f9fc53c7"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "8",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": [
+            "ValueParser"
+          ]
+        },
+        "answer_sha256": "40e22fc7e00c63586cb8064f87876da71d518e3541bd7ef77ccf446f69056546",
+        "arm": "raw",
+        "completion_tokens": 33,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 10290.448870000546,
+        "malformed": false,
+        "prompt_tokens": 4511,
+        "repeat": 1,
+        "request_sha256": "17922f8b2d2f35ac1559919ed2cc15fa24a1e765e2d5ec63cec44037f9fc53c7"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "8",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": [
+            "ValueParser"
+          ]
+        },
+        "answer_sha256": "40e22fc7e00c63586cb8064f87876da71d518e3541bd7ef77ccf446f69056546",
+        "arm": "raw",
+        "completion_tokens": 33,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 10341.049718999784,
+        "malformed": false,
+        "prompt_tokens": 4511,
+        "repeat": 2,
+        "request_sha256": "17922f8b2d2f35ac1559919ed2cc15fa24a1e765e2d5ec63cec44037f9fc53c7"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "8",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": [
+            "ValueParser"
+          ]
+        },
+        "answer_sha256": "40e22fc7e00c63586cb8064f87876da71d518e3541bd7ef77ccf446f69056546",
+        "arm": "raw+brief",
+        "completion_tokens": 33,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 10253.963374999785,
+        "malformed": false,
+        "prompt_tokens": 4773,
+        "repeat": 0,
+        "request_sha256": "955eaa3f4f53bfaa7b3fc4aab425087d28563b07ea8577210d96da6b925ae85d"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "8",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": [
+            "ValueParser"
+          ]
+        },
+        "answer_sha256": "40e22fc7e00c63586cb8064f87876da71d518e3541bd7ef77ccf446f69056546",
+        "arm": "raw+brief",
+        "completion_tokens": 33,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 10079.103826999926,
+        "malformed": false,
+        "prompt_tokens": 4773,
+        "repeat": 1,
+        "request_sha256": "955eaa3f4f53bfaa7b3fc4aab425087d28563b07ea8577210d96da6b925ae85d"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "8",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": [
+            "ValueParser"
+          ]
+        },
+        "answer_sha256": "40e22fc7e00c63586cb8064f87876da71d518e3541bd7ef77ccf446f69056546",
+        "arm": "raw+brief",
+        "completion_tokens": 33,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 10331.968088999929,
+        "malformed": false,
+        "prompt_tokens": 4773,
+        "repeat": 2,
+        "request_sha256": "955eaa3f4f53bfaa7b3fc4aab425087d28563b07ea8577210d96da6b925ae85d"
+      },
+      {
+        "alias_leaks": [
+          "错"
+        ],
+        "answer_parsed": {
+          "answer": "3",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": [
+            "Map错"
+          ]
+        },
+        "answer_sha256": "dc7364881a153909c5b0825d13c0c6fe1cebcb7dd48a4de3322f14a1c8c86bcb",
+        "arm": "encoded+brief",
+        "completion_tokens": 33,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [
+          "Map错"
+        ],
+        "latency_ms": 9933.325653999873,
+        "malformed": false,
+        "prompt_tokens": 4228,
+        "repeat": 0,
+        "request_sha256": "795ebe5a09ae1a3e268749d4bba3834ab8efc73f96eef4058b70dff7f30fb23c"
+      },
+      {
+        "alias_leaks": [
+          "错"
+        ],
+        "answer_parsed": {
+          "answer": "3",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": [
+            "Map错"
+          ]
+        },
+        "answer_sha256": "dc7364881a153909c5b0825d13c0c6fe1cebcb7dd48a4de3322f14a1c8c86bcb",
+        "arm": "encoded+brief",
+        "completion_tokens": 33,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [
+          "Map错"
+        ],
+        "latency_ms": 10091.802075000487,
+        "malformed": false,
+        "prompt_tokens": 4228,
+        "repeat": 1,
+        "request_sha256": "795ebe5a09ae1a3e268749d4bba3834ab8efc73f96eef4058b70dff7f30fb23c"
+      },
+      {
+        "alias_leaks": [
+          "错"
+        ],
+        "answer_parsed": {
+          "answer": "3",
+          "call_path": [],
+          "facts": [],
+          "files": [],
+          "symbols": [
+            "Map错"
+          ]
+        },
+        "answer_sha256": "dc7364881a153909c5b0825d13c0c6fe1cebcb7dd48a4de3322f14a1c8c86bcb",
+        "arm": "encoded+brief",
+        "completion_tokens": 33,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [
+          "Map错"
+        ],
+        "latency_ms": 10475.408690999757,
+        "malformed": false,
+        "prompt_tokens": 4228,
+        "repeat": 2,
+        "request_sha256": "795ebe5a09ae1a3e268749d4bba3834ab8efc73f96eef4058b70dff7f30fb23c"
+      }
+    ],
+    "cost": {
+      "encoded_prompt_tokens": 4228,
+      "raw_brief_prompt_tokens": 4773
+    },
+    "diff_stats": {
+      "added": 323,
+      "removed": 278
+    },
+    "gold_diff_hunks": [
+      "+路=\t            ValueParserInner::",
+      "+错=ValueParser",
+      "-- `ValueParser` (clap_builder/src/builder/value_parser.rs:63) — 8 callers in `clap_builder/src/builder/mod.rs`, `clap_builder/src/builder/action.rs`, `clap_builder/src/builder/arg.rs`, `clap_builder/src/builder/command.rs` +1 more; ⚠️ no covering tests found",
+      "-- `MapValueParser` (clap_builder/src/builder/value_parser.rs:2014) — 2 callers in `clap_builder/src/builder/mod.rs`, `clap_builder/src/builder/value_parser.rs`; ⚠️ no covering tests found",
+      "-- `AnyValueParser` (clap_builder/src/builder/value_parser.rs:591) — 3 callers in `clap_builder/src/builder/value_parser.rs`; ⚠️ no covering tests found",
+      "-91\t            \"value_parser\" => Some(MagicAttrName::ValueParser),",
+      "-148\t    ValueParser,",
+      "-**`clap_builder/src/builder/value_parser.rs`** — calls(calls), ValueParser(struct), ValueParserInner(enum), from(method), references(references), fmt(method), +10 more",
+      "-63\tpub struct ValueParser(ValueParserInner);",
+      "-65\tenum ValueParserInner {",
+      "-74\t    Other(Box<dyn AnyValueParser>),",
+      "-77\timpl ValueParser {",
+      "-566\timpl std::fmt::Debug for ValueParser {",
+      "-569\t            ValueParserInner::Bool => f.debug_struct(\"ValueParser::bool\").finish(),",
+      "-570\t            ValueParserInner::String => f.debug_struct(\"ValueParser::string\").finish(),",
+      "-571\t            ValueParserInner::OsString => f.debug_struct(\"ValueParser::os_string\").finish(),",
+      "-572\t            ValueParserInner::PathBuf => f.debug_struct(\"ValueParser::path_buf\").finish(),",
+      "-573\t            ValueParserInner::Other(o) => write!(f, \"ValueParser::other({:?})\", o.type_id()),",
+      "-578\timpl Clone for ValueParser {",
+      "-581\t            ValueParserInner::Bool => ValueParserInner::Bool,",
+      "-582\t            ValueParserInner::String => ValueParserInner::String,",
+      "-583\t            ValueParserInner::OsString => ValueParserInner::OsString,",
+      "-584\t            ValueParserInner::PathBuf => ValueParserInner::PathBuf,",
+      "-585\t            ValueParserInner::Other(o) => ValueParserInner::Other(o.clone_any()),",
+      "-590\t/// A type-erased wrapper for [`TypedValueParser`].",
+      "-591\ttrait AnyValueParser: Send + Sync + 'static {",
+      "-616\t    fn clone_any(&self) -> Box<dyn AnyValueParser>;",
+      "-619\timpl<T, P> AnyValueParser for P",
+      "-1079\tpub struct EnumValueParser<E: crate::ValueEnum + Clone + Send + Sync + 'static>(",
+      "-1083\timpl<E: crate::ValueEnum + Clone + Send + Sync + 'static> EnumValueParser<E> {",
+      "-1674\t/// Useful for composing new [`TypedValueParser`]s",
+      "-1677\tpub struct BoolValueParser {}",
+      "-1679\timpl BoolValueParser {",
+      "-1680\t    /// Implementation for [`ValueParser::bool`]",
+      "-2012\t/// See [`TypedValueParser::map`]",
+      "-2014\tpub struct MapValueParser<P, F> {",
+      "-2019\timpl<P, F, T> MapValueParser<P, F>"
+    ],
+    "identity": {
+      "case": "clap-derive-explore",
+      "category": "locator",
+      "field": "symbols",
+      "gold": [
+        "ValueParser"
+      ],
+      "match_mode": "one-of",
+      "model": "qwen2.5-coder-7b-instruct",
+      "qodec": "sha256:07ff3a94830c",
+      "question_id": "top-symbol",
+      "question_text": "Name the value-parser type with the most callers. Put it in \"symbols\".",
+      "records_sha256": "18e1afcba6f34c987e1cc78a6b7e107253f6df697a7a979591574db13e157aea",
+      "source_commit": "0b76e64",
+      "source_run": "cpu-qwen2.5-coder-7b",
+      "tokenizer_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539"
+    },
+    "kind": "loss",
+    "mechanism": {
+      "evidence": [
+        {
+          "alias": "错",
+          "kind": "gold_identifier_also_aliased",
+          "phrase": "ValueParser",
+          "span": "ValueParser"
+        },
+        {
+          "glyphs": [
+            "错"
+          ],
+          "kind": "alias_glyph_leaked_in_answer"
+        }
+      ],
+      "primary_mechanism": "identifier-or-path-aliasing",
+      "secondary_mechanisms": [
+        "alias-decoding",
+        "format-or-integrity"
+      ]
+    },
+    "prompt_evidence": {
+      "alias_dictionary": {
+        "串": "1\t    ",
+        "件": "\t    pub(crate) ",
+        "例": "2\t        ",
+        "值": "\t            \"",
+        "函": "\t            } else if attr.path().is_ident(\"",
+        "列": "crate::ValueEnum + Clone + Send + Sync +",
+        "包": "4\t        ",
+        "名": "⚠️ no covering tests found",
+        "告": "库        ",
+        "图": "/// Parse from `std::env::args_os()`,",
+        "块": "8\t    ",
+        "层": "错Inner::",
+        "帧": "\t            Self::",
+        "常": "/// Build a [`Command`] that can",
+        "库": "5\t    ",
+        "建": " as CommandFactory>::command",
+        "异": "_t码DefaultValue",
+        "引": "clap_builder/src/builder/",
+        "态": "`引value_parser.rs`; 名",
+        "数": "f.debug_struct(\"错::",
+        "构": "0\t        ",
+        "查": "crate::",
+        "标": "\t    fn ",
+        "树": "6\t        ",
+        "测": "Some(AttrValue::",
+        "点": "3\t        ",
+        "版": "(method), ",
+        "码": "\" => Some(MagicAttrName::",
+        "类": "Sp::new(AttrKind::",
+        "组": ", attr.path().span())",
+        "节": "7\t    ",
+        "行": "value: &std::ffi::OsStr,",
+        "表": "9\t    ",
+        "警": "表        ",
+        "记": "\t    // Common enough to optimize",
+        "试": "... (gap) ...",
+        "路": "\t            ValueParserInner::",
+        "边": ") -> Result<",
+        "链": "#[derive(Copy, Clone,",
+        "错": "ValueParser",
+        "键": "(引value_parser.rs:"
+      },
+      "encoded_artifact": "%q1 mine n=41\n码=\" => Some(MagicAttrName::\n引=clap_builder/src/builder/\n路=\t            ValueParserInner::\n类=Sp::new(AttrKind::\n函=\t            } else if attr.path().is_ident(\"\n值=\t            \"\n错=ValueParser\n试=... (gap) ...\n帧=\t            Self::\n件=\t    pub(crate) \n组=, attr.path().span())\n标=\t    fn \n记=\t    // Common enough to optimize\n链=#[derive(Copy, Clone,\n节=7\t    \n名=⚠️ no covering tests found\n块=8\t    \n数=f.debug_struct(\"错::\n图=/// Parse from `std::env::args_os()`,\n列=crate::ValueEnum + Clone + Send + Sync +\n键=(引value_parser.rs:\n层=错Inner::\n表=9\t    \n串=1\t    \n行=value: &std::ffi::OsStr,\n树=6\t        \n点=3\t        \n边=) -> Result<\n库=5\t    \n包=4\t        \n版=(method), \n构=0\t        \n建= as CommandFactory>::command\n测=Some(AttrValue::\n例=2\t        \n警=表        \n告=库        \n异=_t码DefaultValue\n常=/// Build a [`Command`] that can\n态=`引value_parser.rs`; 名\n查=crate::\n%q1 body\n%q1 raw\n%q1 body\n**Exploration: How does clap parse arguments against a derived command definition?**\n\nFound 56 symbols across 3 files.\n\n**Blast radius — what depends on these (update/verify before editing)**\n\n- `错` 键63) — 8 callers in `引mod.rs`, `引action.rs`, `引arg.rs`, `引command.rs` +1 more; 名\n- `Map错` 键2014) — 2 callers in `引mod.rs`, 态\n- `Any错` 键591) — 3 callers in 态\n\n**Source Code**\n\n> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.\n\n**`clap_builder/src/derive.rs`** — parse版calls(calls), command版Command(references)\n\n```rust\n28\t/// </div>\n29\tpub trait Parser: FromArgMatches + CommandFactory + Sized {\n30\t    图 [exit][Error::exit] on error.\n31标parse() -> Self {\n3例let mut matches = <Self建().get_matches();\n3点let res = <Self as FromArgMatches>::from_arg_matches_mut(&mut matches)\n3包    .map_err(format_error::<Self>);\n3库    match res {\n3树    Ok(s) => s,\n3节        Err(e) => {\n3块            // Since this is more of a development-time error, we aren't doing as fancy of a quit\n3警    // as `get_matches`\n4构        e.exit()\n4串        }\n4例}\n43\t    }\n44\t\n4库图 return Err on error.\n46标try_parse(边Self, Error> {\n\n试\n\n11节常 instantiate `Self`.\n11块///\n11表/// See [`FromArgMatches::from_arg_matches_mut`] for instantiating `Self`.\n120标command() -> Command;\n12串常 update `self`.\n122\t    ///\n123\t    /// See [`FromArgMatches::update_from_arg_matches_mut`] for updating `self`.\n\n试\n\n314\t}\n315\t\n316\timpl<T: Parser> Parser for Box<T> {\n317标parse() -> Self {\n31块    Box::new(<T as Parser>::parse())\n31表}\n320\t\n321标try_parse(边Self, Error> {\n32例<T as Parser>::try_parse().map(Box::new)\n\n试\n\n340\t}\n341\t\n342\timpl<T: CommandFactory> CommandFactory for Box<T> {\n343标command() -> Command {\n34包<T建()\n34库}\n346标command_for_update() -> Command {\n34节    <T建_for_update()\n34块}\n```\n\n**`clap_derive/src/attr.rs`** — parse版ClapAttr(struct), as_str版parse_all版value_or_abort版lit_str_or_abort版+4 more\n\n```rust\n1\tuse std::iter::FromIterator;\n2\t\n3\tuse proc_macro2::TokenStream;\n4\tuse quote::quote;\n5\tuse quote::ToTokens;\n6\tuse syn::spanned::Spanned;\n7\tuse syn::{\n块parenthesized,\n表parse::{Parse, ParseStream},\n10\t    punctuated::Punctuated,\n1串Attribute, Expr, Ident, LitStr, Token,\n12\t};\n13\t\n14\tuse 查utils::Sp;\n15\t\n16\t#[derive(Clone)]\n17\tpub(crate) struct ClapAttr {\n18件kind: Sp<AttrKind>,\n19件name: Ident,\n20件magic: Option<MagicAttrName>,\n21件value: Option<AttrValue>,\n22\t}\n23\t\n24\timpl ClapAttr {\n25件fn parse_all(all_attrs: &[Attribute]边Vec<Self>, syn::Error> {\n2树let mut parsed = Vec::new();\n2节    for attr in all_attrs {\n2块        let kind = if attr.path().is_ident(\"clap\") {\n2警    类Clap组\n30函structopt\") {\n3串            类StructOpt组\n32函command\") {\n3点        类Command组\n34函group\") {\n3告    类Group组\n36函arg\") {\n3节            类Arg组\n38函value\") {\n3警    类Value组\n4构    } else {\n4串            continue;\n4例    };\n4点    for mut attr in\n4包        attr.parse_args_with(Punctuated::<ClapAttr, Token![,]>::parse_terminated)?\n4告{\n4树        attr.kind = kind;\n4节            parsed.push(attr);\n4块        }\n4表    }\n5构Ok(parsed)\n5串}\n52\t\n53件fn value_or_abort(&self边&AttrValue, syn::Error> {\n5包self.value\n5告.as_ref()\n5树    .ok_or_else(|| format_err!(self.name, \"attribute `{}` requires a value\", self.name))\n5节}\n58\t\n59件fn lit_str_or_abort(&self边&LitStr, syn::Error> {\n6构let value = self.value_or_abort()?;\n6串    match value {\n6例    AttrValue::LitStr(tokens) => Ok(tokens),\n6点    AttrValue::Expr(_) | AttrValue::Call(_) => {\n6包        abort!(\n6告        self.name,\n6树            \"attribute `{}` can only accept string literals\",\n6节                self.name\n6块            )\n6警}\n7构}\n7串}\n72\t}\n73\t\n74\timpl Parse for ClapAttr {\n75标parse(input: ParseStream<'_>) -> syn::Result<Self> {\n7树let name: Ident = input.parse()?;\n7节    let name_str = name.to_string();\n78\t\n7表    let magic = match name_str.as_str() {\n80值rename_all码RenameAll),\n81值rename_all_env码RenameAllEnv),\n82值skip码Skip),\n83值next_display_order码NextDisplayOrder),\n84值next_help_heading码NextHelpHeading),\n85值default_value异T),\n86值default_values异sT),\n87值default_value_os异OsT),\n88值default_values_os异sOsT),\n89值long码Long),\n90值short码Short),\n91值value_parser码错),\n92值action码Action),\n93值env码Env),\n94值flatten码Flatten),\n95值value_enum码ValueEnum),\n96值from_global码FromGlobal),\n97值subcommand码Subcommand),\n98值external_subcommand码ExternalSubcommand),\n99值verbatim_doc_comment码VerbatimDocComment),\n100值about码About),\n101值long_about码LongAbout),\n102值long_help码LongHelp),\n103值author码Author),\n104值version码Version),\n10告_ => None,\n10树};\n107\t\n10块    let value = if input.peek(Token![=]) {\n10警// `name = value` attributes.\n11构    let assign_token = input.parse::<Token![=]>()?; // skip '='\n11串        if input.peek(LitStr) {\n11例        let lit: LitStr = input.parse()?;\n11点        测LitStr(lit))\n11包    } else {\n11告    match input.parse::<Expr>() {\n11树            Ok(expr) => 测Expr(expr)),\n117\t\n11块                Err(_) => abort! {\n11警            assign_token,\n12构                \"expected `string literal` or `expression` after `=`\"\n12串                },\n12例        }\n12点    }\n12包} else if input.peek(syn::token::Paren) {\n12告// `name(...)` attributes.\n12树    let nested;\n12节        parenthesized!(nested in input);\n128\t\n12警let method_args: Punctuated<_, _> = nested.parse_terminated(Expr::parse, Token![,])?;\n13构    测Call(Vec::from_iter(method_args)))\n13串    } else {\n13例    None\n13点};\n134\t\n13库    Ok(Self {\n13树    kind: 类Clap, name.span()),\n13节        name,\n13块        magic,\n13警value,\n14构})\n14串}\n142\t}\n143\t\n144\t链 PartialEq, Eq)]\n145\tpub(crate) enum MagicAttrName {\n146\t    Short,\n14节Long,\n14块错,\n14表Action,\n150\t    Env,\n15串Flatten,\n152\t    ValueEnum,\n153\t    FromGlobal,\n154\t    Subcommand,\n15库VerbatimDocComment,\n156\t    ExternalSubcommand,\n15节About,\n15块LongAbout,\n15表LongHelp,\n160\t    Author,\n16串Version,\n162\t    RenameAllEnv,\n163\t    RenameAll,\n164\t    Skip,\n16库DefaultValueT,\n166\t    DefaultValuesT,\n16节DefaultValueOsT,\n16块DefaultValuesOsT,\n16表NextDisplayOrder,\n170\t    NextHelpHeading,\n171\t}\n172\t\n173\t#[derive(Clone)]\n174\t#[allow(clippy::large_enum_variant)]\n175\tpub(crate) enum AttrValue {\n176\t    LitStr(LitStr),\n17节Expr(Expr),\n17块Call(Vec<Expr>),\n179\t}\n180\t\n181\timpl ToTokens for AttrValue {\n182标to_tokens(&self, tokens: &mut TokenStream) {\n18点match self {\n184帧LitStr(t) => t.to_tokens(tokens),\n185帧Expr(t) => t.to_tokens(tokens),\n186帧Call(t) => {\n18节            let t = quote!(#(#t),*);\n18块            t.to_tokens(tokens);\n18警}\n19构}\n19串}\n192\t}\n193\t\n194\t链 PartialEq, Eq)]\n195\tpub(crate) enum AttrKind {\n196\t    Clap,\n19节StructOpt,\n19块Command,\n19表Group,\n200\t    Arg,\n20串Value,\n202\t}\n203\t\n204\timpl AttrKind {\n205件fn as_str(&self) -> &'static str {\n20树match self {\n207帧Clap => \"clap\",\n208帧StructOpt => \"structopt\",\n209帧Command => \"command\",\n210帧Group => \"group\",\n211帧Arg => \"arg\",\n212帧Value => \"value\",\n21点}\n214\t    }\n215\t}\n```\n\n**`引value_parser.rs`** — calls(calls), 错(struct), 错Inner(enum), from版references(references), fmt版+10 more\n\n```rust\n60\t///     .expect(\"required\");\n61\t/// assert_eq!(port, 3001);\n62\t/// ```\n63\tpub struct 错(错Inner);\n64\t\n65\tenum 错Inner {\n66记 and for possible values\n6节Bool,\n68记\n6表String,\n70记\n7串OsString,\n72记\n73\t    PathBuf,\n74\t    Other(Box<dyn Any错>),\n75\t}\n76\t\n77\timpl 错 {\n7块/// Custom parser for argument values\n\n试\n\n557\twhere\n55块P: Into<super::PossibleValue>,\n559\t{\n560标from(values: Vec<P>) -> Self {\n56串    let inner = PossibleValuesParser::from(values);\n56例Self::from(inner)\n563\t    }\n564\t}\n565\t\n566\timpl std::fmt::Debug for 错 {\n567标fmt(&self, f: &mut std::fmt::Formatter<'_>边(), std::fmt::Error> {\n56块    match &self.0 {\n569路Bool => 数bool\").finish(),\n570路String => 数string\").finish(),\n571路OsString => 数os_string\").finish(),\n572路PathBuf => 数path_buf\").finish(),\n573路Other(o) => write!(f, \"错::other({:?})\", o.type_id()),\n57包}\n57库}\n576\t}\n577\t\n578\timpl Clone for 错 {\n579标clone(&self) -> Self {\n58构Self(match &self.0 {\n581路Bool => 层Bool,\n582路String => 层String,\n583路OsString => 层OsString,\n584路PathBuf => 层PathBuf,\n585路Other(o) => 层Other(o.clone_any()),\n58树})\n58节}\n588\t}\n589\t\n590\t/// A type-erased wrapper for [`Typed错`].\n591\ttrait Any错: Send + Sync + 'static {\n592标parse_ref(\n59点&self,\n59包cmd: &查Command,\n59库    arg: Option<&查Arg>,\n59树行\n59节边AnyValue, 查Error>;\n598\t\n599标parse_ref_(\n60构&self,\n60串    cmd: &查Command,\n60例arg: Option<&查Arg>,\n60点行\n60包_source: ValueSource,\n60库边AnyValue, 查Error> {\n60树self.parse_ref(cmd, arg, value)\n60节}\n608\t\n60表/// Describes the content of `AnyValue`\n610标type_id(&self) -> AnyValueId;\n611\t\n612标possible_values(\n61点&self,\n614\t    ) -> Option<Box<dyn Iterator<Item = 查builder::PossibleValue> + '_>>;\n615\t\n616标clone_any(&self) -> Box<dyn Any错>;\n617\t}\n618\t\n619\timpl<T, P> Any错 for P\n620\twhere\n\n试\n\n1076\t/// assert_eq!(value_parser.parse_ref(&cmd, arg, OsStr::new(\"never\")).unwrap(), ColorChoice::Never);\n1077\t/// ```\n1078\t#[derive(Clone, Debug)]\n1079\tpub struct Enum错<E: 列 'static>(\n1080\t    std::marker::PhantomData<E>,\n1081\t);\n1082\t\n1083\timpl<E: 列 'static> Enum错<E> {\n1084\t    /// Parse an [`ValueEnum`][查ValueEnum]\n\n试\n\n1674\t/// Useful for composing new [`Typed错`]s\n1675\t链 Debug)]\n1676\t#[non_exhaustive]\n1677\tpub struct Bool错 {}\n1678\t\n1679\timpl Bool错 {\n1680\t    /// Implementation for [`错::bool`]\n\n试\n\n2011\t///\n2012\t/// See [`Typed错::map`]\n2013\t#[derive(Clone, Debug)]\n2014\tpub struct Map错<P, F> {\n201库parser: P,\n2016\t    func: F,\n2017\t}\n2018\t\n2019\timpl<P, F, T> Map错<P, F>\n2020\twhere\n```\n\n\n... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)\n",
+      "notation_brief": "The payload is encoded as a `%q1` container. Format: first line\n`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`\n(each alias is a short stand-in for that exact phrase), then a\n`%q1 body` line, then the body. `%q1 xN` after a line means that line\noccurs N times in total. A `toon` body is a table: first line is a JSON\narray of keys, each following line is one object, cells are JSON values\njoined by the separator named in the header. A `grep` body is grouped\nmatcher output: a marker line names a file path and the lines after it\nare `line:text` hits in that file (a bare marker starts verbatim\nlines). A `diag` body line starting with an alias expands to: the head\nafter the alias, then that alias's legend template with each slot\nplaceholder filled by the sep-joined values in order. A `tmpl` body\nline starting with an alias is its legend template with the slot\nplaceholders filled by the sep-joined values that follow the alias.\nMentally decode the body via the legend before answering; never emit\nalias characters in answers.",
+      "question_suffix": "QUESTION: Name the value-parser type with the most callers. Put it in \"symbols\".\n\nRespond with the JSON object only.",
+      "raw_tool_payload": "**Exploration: How does clap parse arguments against a derived command definition?**\n\nFound 56 symbols across 3 files.\n\n**Blast radius — what depends on these (update/verify before editing)**\n\n- `ValueParser` (clap_builder/src/builder/value_parser.rs:63) — 8 callers in `clap_builder/src/builder/mod.rs`, `clap_builder/src/builder/action.rs`, `clap_builder/src/builder/arg.rs`, `clap_builder/src/builder/command.rs` +1 more; ⚠️ no covering tests found\n- `MapValueParser` (clap_builder/src/builder/value_parser.rs:2014) — 2 callers in `clap_builder/src/builder/mod.rs`, `clap_builder/src/builder/value_parser.rs`; ⚠️ no covering tests found\n- `AnyValueParser` (clap_builder/src/builder/value_parser.rs:591) — 3 callers in `clap_builder/src/builder/value_parser.rs`; ⚠️ no covering tests found\n\n**Source Code**\n\n> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.\n\n**`clap_builder/src/derive.rs`** — parse(method), calls(calls), command(method), Command(references)\n\n```rust\n28\t/// </div>\n29\tpub trait Parser: FromArgMatches + CommandFactory + Sized {\n30\t    /// Parse from `std::env::args_os()`, [exit][Error::exit] on error.\n31\t    fn parse() -> Self {\n32\t        let mut matches = <Self as CommandFactory>::command().get_matches();\n33\t        let res = <Self as FromArgMatches>::from_arg_matches_mut(&mut matches)\n34\t            .map_err(format_error::<Self>);\n35\t        match res {\n36\t            Ok(s) => s,\n37\t            Err(e) => {\n38\t                // Since this is more of a development-time error, we aren't doing as fancy of a quit\n39\t                // as `get_matches`\n40\t                e.exit()\n41\t            }\n42\t        }\n43\t    }\n44\t\n45\t    /// Parse from `std::env::args_os()`, return Err on error.\n46\t    fn try_parse() -> Result<Self, Error> {\n\n... (gap) ...\n\n117\t    /// Build a [`Command`] that can instantiate `Self`.\n118\t    ///\n119\t    /// See [`FromArgMatches::from_arg_matches_mut`] for instantiating `Self`.\n120\t    fn command() -> Command;\n121\t    /// Build a [`Command`] that can update `self`.\n122\t    ///\n123\t    /// See [`FromArgMatches::update_from_arg_matches_mut`] for updating `self`.\n\n... (gap) ...\n\n314\t}\n315\t\n316\timpl<T: Parser> Parser for Box<T> {\n317\t    fn parse() -> Self {\n318\t        Box::new(<T as Parser>::parse())\n319\t    }\n320\t\n321\t    fn try_parse() -> Result<Self, Error> {\n322\t        <T as Parser>::try_parse().map(Box::new)\n\n... (gap) ...\n\n340\t}\n341\t\n342\timpl<T: CommandFactory> CommandFactory for Box<T> {\n343\t    fn command() -> Command {\n344\t        <T as CommandFactory>::command()\n345\t    }\n346\t    fn command_for_update() -> Command {\n347\t        <T as CommandFactory>::command_for_update()\n348\t    }\n```\n\n**`clap_derive/src/attr.rs`** — parse(method), ClapAttr(struct), as_str(method), parse_all(method), value_or_abort(method), lit_str_or_abort(method), +4 more\n\n```rust\n1\tuse std::iter::FromIterator;\n2\t\n3\tuse proc_macro2::TokenStream;\n4\tuse quote::quote;\n5\tuse quote::ToTokens;\n6\tuse syn::spanned::Spanned;\n7\tuse syn::{\n8\t    parenthesized,\n9\t    parse::{Parse, ParseStream},\n10\t    punctuated::Punctuated,\n11\t    Attribute, Expr, Ident, LitStr, Token,\n12\t};\n13\t\n14\tuse crate::utils::Sp;\n15\t\n16\t#[derive(Clone)]\n17\tpub(crate) struct ClapAttr {\n18\t    pub(crate) kind: Sp<AttrKind>,\n19\t    pub(crate) name: Ident,\n20\t    pub(crate) magic: Option<MagicAttrName>,\n21\t    pub(crate) value: Option<AttrValue>,\n22\t}\n23\t\n24\timpl ClapAttr {\n25\t    pub(crate) fn parse_all(all_attrs: &[Attribute]) -> Result<Vec<Self>, syn::Error> {\n26\t        let mut parsed = Vec::new();\n27\t        for attr in all_attrs {\n28\t            let kind = if attr.path().is_ident(\"clap\") {\n29\t                Sp::new(AttrKind::Clap, attr.path().span())\n30\t            } else if attr.path().is_ident(\"structopt\") {\n31\t                Sp::new(AttrKind::StructOpt, attr.path().span())\n32\t            } else if attr.path().is_ident(\"command\") {\n33\t                Sp::new(AttrKind::Command, attr.path().span())\n34\t            } else if attr.path().is_ident(\"group\") {\n35\t                Sp::new(AttrKind::Group, attr.path().span())\n36\t            } else if attr.path().is_ident(\"arg\") {\n37\t                Sp::new(AttrKind::Arg, attr.path().span())\n38\t            } else if attr.path().is_ident(\"value\") {\n39\t                Sp::new(AttrKind::Value, attr.path().span())\n40\t            } else {\n41\t                continue;\n42\t            };\n43\t            for mut attr in\n44\t                attr.parse_args_with(Punctuated::<ClapAttr, Token![,]>::parse_terminated)?\n45\t            {\n46\t                attr.kind = kind;\n47\t                parsed.push(attr);\n48\t            }\n49\t        }\n50\t        Ok(parsed)\n51\t    }\n52\t\n53\t    pub(crate) fn value_or_abort(&self) -> Result<&AttrValue, syn::Error> {\n54\t        self.value\n55\t            .as_ref()\n56\t            .ok_or_else(|| format_err!(self.name, \"attribute `{}` requires a value\", self.name))\n57\t    }\n58\t\n59\t    pub(crate) fn lit_str_or_abort(&self) -> Result<&LitStr, syn::Error> {\n60\t        let value = self.value_or_abort()?;\n61\t        match value {\n62\t            AttrValue::LitStr(tokens) => Ok(tokens),\n63\t            AttrValue::Expr(_) | AttrValue::Call(_) => {\n64\t                abort!(\n65\t                    self.name,\n66\t                    \"attribute `{}` can only accept string literals\",\n67\t                    self.name\n68\t                )\n69\t            }\n70\t        }\n71\t    }\n72\t}\n73\t\n74\timpl Parse for ClapAttr {\n75\t    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {\n76\t        let name: Ident = input.parse()?;\n77\t        let name_str = name.to_string();\n78\t\n79\t        let magic = match name_str.as_str() {\n80\t            \"rename_all\" => Some(MagicAttrName::RenameAll),\n81\t            \"rename_all_env\" => Some(MagicAttrName::RenameAllEnv),\n82\t            \"skip\" => Some(MagicAttrName::Skip),\n83\t            \"next_display_order\" => Some(MagicAttrName::NextDisplayOrder),\n84\t            \"next_help_heading\" => Some(MagicAttrName::NextHelpHeading),\n85\t            \"default_value_t\" => Some(MagicAttrName::DefaultValueT),\n86\t            \"default_values_t\" => Some(MagicAttrName::DefaultValuesT),\n87\t            \"default_value_os_t\" => Some(MagicAttrName::DefaultValueOsT),\n88\t            \"default_values_os_t\" => Some(MagicAttrName::DefaultValuesOsT),\n89\t            \"long\" => Some(MagicAttrName::Long),\n90\t            \"short\" => Some(MagicAttrName::Short),\n91\t            \"value_parser\" => Some(MagicAttrName::ValueParser),\n92\t            \"action\" => Some(MagicAttrName::Action),\n93\t            \"env\" => Some(MagicAttrName::Env),\n94\t            \"flatten\" => Some(MagicAttrName::Flatten),\n95\t            \"value_enum\" => Some(MagicAttrName::ValueEnum),\n96\t            \"from_global\" => Some(MagicAttrName::FromGlobal),\n97\t            \"subcommand\" => Some(MagicAttrName::Subcommand),\n98\t            \"external_subcommand\" => Some(MagicAttrName::ExternalSubcommand),\n99\t            \"verbatim_doc_comment\" => Some(MagicAttrName::VerbatimDocComment),\n100\t            \"about\" => Some(MagicAttrName::About),\n101\t            \"long_about\" => Some(MagicAttrName::LongAbout),\n102\t            \"long_help\" => Some(MagicAttrName::LongHelp),\n103\t            \"author\" => Some(MagicAttrName::Author),\n104\t            \"version\" => Some(MagicAttrName::Version),\n105\t            _ => None,\n106\t        };\n107\t\n108\t        let value = if input.peek(Token![=]) {\n109\t            // `name = value` attributes.\n110\t            let assign_token = input.parse::<Token![=]>()?; // skip '='\n111\t            if input.peek(LitStr) {\n112\t                let lit: LitStr = input.parse()?;\n113\t                Some(AttrValue::LitStr(lit))\n114\t            } else {\n115\t                match input.parse::<Expr>() {\n116\t                    Ok(expr) => Some(AttrValue::Expr(expr)),\n117\t\n118\t                    Err(_) => abort! {\n119\t                        assign_token,\n120\t                        \"expected `string literal` or `expression` after `=`\"\n121\t                    },\n122\t                }\n123\t            }\n124\t        } else if input.peek(syn::token::Paren) {\n125\t            // `name(...)` attributes.\n126\t            let nested;\n127\t            parenthesized!(nested in input);\n128\t\n129\t            let method_args: Punctuated<_, _> = nested.parse_terminated(Expr::parse, Token![,])?;\n130\t            Some(AttrValue::Call(Vec::from_iter(method_args)))\n131\t        } else {\n132\t            None\n133\t        };\n134\t\n135\t        Ok(Self {\n136\t            kind: Sp::new(AttrKind::Clap, name.span()),\n137\t            name,\n138\t            magic,\n139\t            value,\n140\t        })\n141\t    }\n142\t}\n143\t\n144\t#[derive(Copy, Clone, PartialEq, Eq)]\n145\tpub(crate) enum MagicAttrName {\n146\t    Short,\n147\t    Long,\n148\t    ValueParser,\n149\t    Action,\n150\t    Env,\n151\t    Flatten,\n152\t    ValueEnum,\n153\t    FromGlobal,\n154\t    Subcommand,\n155\t    VerbatimDocComment,\n156\t    ExternalSubcommand,\n157\t    About,\n158\t    LongAbout,\n159\t    LongHelp,\n160\t    Author,\n161\t    Version,\n162\t    RenameAllEnv,\n163\t    RenameAll,\n164\t    Skip,\n165\t    DefaultValueT,\n166\t    DefaultValuesT,\n167\t    DefaultValueOsT,\n168\t    DefaultValuesOsT,\n169\t    NextDisplayOrder,\n170\t    NextHelpHeading,\n171\t}\n172\t\n173\t#[derive(Clone)]\n174\t#[allow(clippy::large_enum_variant)]\n175\tpub(crate) enum AttrValue {\n176\t    LitStr(LitStr),\n177\t    Expr(Expr),\n178\t    Call(Vec<Expr>),\n179\t}\n180\t\n181\timpl ToTokens for AttrValue {\n182\t    fn to_tokens(&self, tokens: &mut TokenStream) {\n183\t        match self {\n184\t            Self::LitStr(t) => t.to_tokens(tokens),\n185\t            Self::Expr(t) => t.to_tokens(tokens),\n186\t            Self::Call(t) => {\n187\t                let t = quote!(#(#t),*);\n188\t                t.to_tokens(tokens);\n189\t            }\n190\t        }\n191\t    }\n192\t}\n193\t\n194\t#[derive(Copy, Clone, PartialEq, Eq)]\n195\tpub(crate) enum AttrKind {\n196\t    Clap,\n197\t    StructOpt,\n198\t    Command,\n199\t    Group,\n200\t    Arg,\n201\t    Value,\n202\t}\n203\t\n204\timpl AttrKind {\n205\t    pub(crate) fn as_str(&self) -> &'static str {\n206\t        match self {\n207\t            Self::Clap => \"clap\",\n208\t            Self::StructOpt => \"structopt\",\n209\t            Self::Command => \"command\",\n210\t            Self::Group => \"group\",\n211\t            Self::Arg => \"arg\",\n212\t            Self::Value => \"value\",\n213\t        }\n214\t    }\n215\t}\n```\n\n**`clap_builder/src/builder/value_parser.rs`** — calls(calls), ValueParser(struct), ValueParserInner(enum), from(method), references(references), fmt(method), +10 more\n\n```rust\n60\t///     .expect(\"required\");\n61\t/// assert_eq!(port, 3001);\n62\t/// ```\n63\tpub struct ValueParser(ValueParserInner);\n64\t\n65\tenum ValueParserInner {\n66\t    // Common enough to optimize and for possible values\n67\t    Bool,\n68\t    // Common enough to optimize\n69\t    String,\n70\t    // Common enough to optimize\n71\t    OsString,\n72\t    // Common enough to optimize\n73\t    PathBuf,\n74\t    Other(Box<dyn AnyValueParser>),\n75\t}\n76\t\n77\timpl ValueParser {\n78\t    /// Custom parser for argument values\n\n... (gap) ...\n\n557\twhere\n558\t    P: Into<super::PossibleValue>,\n559\t{\n560\t    fn from(values: Vec<P>) -> Self {\n561\t        let inner = PossibleValuesParser::from(values);\n562\t        Self::from(inner)\n563\t    }\n564\t}\n565\t\n566\timpl std::fmt::Debug for ValueParser {\n567\t    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {\n568\t        match &self.0 {\n569\t            ValueParserInner::Bool => f.debug_struct(\"ValueParser::bool\").finish(),\n570\t            ValueParserInner::String => f.debug_struct(\"ValueParser::string\").finish(),\n571\t            ValueParserInner::OsString => f.debug_struct(\"ValueParser::os_string\").finish(),\n572\t            ValueParserInner::PathBuf => f.debug_struct(\"ValueParser::path_buf\").finish(),\n573\t            ValueParserInner::Other(o) => write!(f, \"ValueParser::other({:?})\", o.type_id()),\n574\t        }\n575\t    }\n576\t}\n577\t\n578\timpl Clone for ValueParser {\n579\t    fn clone(&self) -> Self {\n580\t        Self(match &self.0 {\n581\t            ValueParserInner::Bool => ValueParserInner::Bool,\n582\t            ValueParserInner::String => ValueParserInner::String,\n583\t            ValueParserInner::OsString => ValueParserInner::OsString,\n584\t            ValueParserInner::PathBuf => ValueParserInner::PathBuf,\n585\t            ValueParserInner::Other(o) => ValueParserInner::Other(o.clone_any()),\n586\t        })\n587\t    }\n588\t}\n589\t\n590\t/// A type-erased wrapper for [`TypedValueParser`].\n591\ttrait AnyValueParser: Send + Sync + 'static {\n592\t    fn parse_ref(\n593\t        &self,\n594\t        cmd: &crate::Command,\n595\t        arg: Option<&crate::Arg>,\n596\t        value: &std::ffi::OsStr,\n597\t    ) -> Result<AnyValue, crate::Error>;\n598\t\n599\t    fn parse_ref_(\n600\t        &self,\n601\t        cmd: &crate::Command,\n602\t        arg: Option<&crate::Arg>,\n603\t        value: &std::ffi::OsStr,\n604\t        _source: ValueSource,\n605\t    ) -> Result<AnyValue, crate::Error> {\n606\t        self.parse_ref(cmd, arg, value)\n607\t    }\n608\t\n609\t    /// Describes the content of `AnyValue`\n610\t    fn type_id(&self) -> AnyValueId;\n611\t\n612\t    fn possible_values(\n613\t        &self,\n614\t    ) -> Option<Box<dyn Iterator<Item = crate::builder::PossibleValue> + '_>>;\n615\t\n616\t    fn clone_any(&self) -> Box<dyn AnyValueParser>;\n617\t}\n618\t\n619\timpl<T, P> AnyValueParser for P\n620\twhere\n\n... (gap) ...\n\n1076\t/// assert_eq!(value_parser.parse_ref(&cmd, arg, OsStr::new(\"never\")).unwrap(), ColorChoice::Never);\n1077\t/// ```\n1078\t#[derive(Clone, Debug)]\n1079\tpub struct EnumValueParser<E: crate::ValueEnum + Clone + Send + Sync + 'static>(\n1080\t    std::marker::PhantomData<E>,\n1081\t);\n1082\t\n1083\timpl<E: crate::ValueEnum + Clone + Send + Sync + 'static> EnumValueParser<E> {\n1084\t    /// Parse an [`ValueEnum`][crate::ValueEnum]\n\n... (gap) ...\n\n1674\t/// Useful for composing new [`TypedValueParser`]s\n1675\t#[derive(Copy, Clone, Debug)]\n1676\t#[non_exhaustive]\n1677\tpub struct BoolValueParser {}\n1678\t\n1679\timpl BoolValueParser {\n1680\t    /// Implementation for [`ValueParser::bool`]\n\n... (gap) ...\n\n2011\t///\n2012\t/// See [`TypedValueParser::map`]\n2013\t#[derive(Clone, Debug)]\n2014\tpub struct MapValueParser<P, F> {\n2015\t    parser: P,\n2016\t    func: F,\n2017\t}\n2018\t\n2019\timpl<P, F, T> MapValueParser<P, F>\n2020\twhere\n```\n\n\n... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)\n",
+      "system_prompt": "You are a precise code-context reader. Answer ONLY about the provided text. Reply with a single JSON object and nothing else, using exactly these keys: {\"facts\": [], \"files\": [], \"symbols\": [], \"call_path\": [], \"answer\": \"\"}. Put integers as strings in \"answer\". Use exact identifiers and full paths copied verbatim from the text; never invent or abbreviate names. Do not include any decoding notation or alias glyphs in your answer.",
+      "used_aliases": [
+        "串",
+        "件",
+        "例",
+        "值",
+        "函",
+        "列",
+        "包",
+        "名",
+        "告",
+        "图",
+        "块",
+        "层",
+        "帧",
+        "常",
+        "库",
+        "建",
+        "异",
+        "引",
+        "态",
+        "数",
+        "构",
+        "查",
+        "标",
+        "树",
+        "测",
+        "点",
+        "版",
+        "码",
+        "类",
+        "组",
+        "节",
+        "行",
+        "表",
+        "警",
+        "记",
+        "试",
+        "路",
+        "边",
+        "链",
+        "错",
+        "键"
+      ]
+    },
+    "span_analysis": {
+      "gold_spans": [
+        {
+          "aliases": [],
+          "fate": "preserved_verbatim",
+          "span": "ValueParser"
+        }
+      ],
+      "locator_checks": [
+        {
+          "basename": "preserved_verbatim",
+          "full_path": "preserved_verbatim",
+          "path_prefix": "not_applicable",
+          "prefix_aliases": []
+        }
+      ]
+    }
+  },
+  {
+    "alias_stats": {
+      "alias_count": 23,
+      "alias_density_per_kchar": 4.878,
+      "legend_size": 23
+    },
+    "answers": [
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_derive/mod.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "d9dcd8b5408b28fabd1c2609fdfa2605eb509b7231a8d4a4951d34cc87b9af47",
+        "arm": "raw",
+        "completion_tokens": 34,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 10960.458239999753,
+        "malformed": false,
+        "prompt_tokens": 3687,
+        "repeat": 0,
+        "request_sha256": "4e51a311d2c1f0637dc8edd276b57a66064b973892aca8af4c8d8ea9b2e352af"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_derive/mod.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "d9dcd8b5408b28fabd1c2609fdfa2605eb509b7231a8d4a4951d34cc87b9af47",
+        "arm": "raw",
+        "completion_tokens": 34,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 240813.62102799994,
+        "malformed": false,
+        "prompt_tokens": 3687,
+        "repeat": 1,
+        "request_sha256": "4e51a311d2c1f0637dc8edd276b57a66064b973892aca8af4c8d8ea9b2e352af"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_derive/mod.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "d9dcd8b5408b28fabd1c2609fdfa2605eb509b7231a8d4a4951d34cc87b9af47",
+        "arm": "raw",
+        "completion_tokens": 34,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 241502.26013099926,
+        "malformed": false,
+        "prompt_tokens": 3687,
+        "repeat": 2,
+        "request_sha256": "4e51a311d2c1f0637dc8edd276b57a66064b973892aca8af4c8d8ea9b2e352af"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_derive/mod.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "d9dcd8b5408b28fabd1c2609fdfa2605eb509b7231a8d4a4951d34cc87b9af47",
+        "arm": "raw+brief",
+        "completion_tokens": 34,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 10708.77977400005,
+        "malformed": false,
+        "prompt_tokens": 3949,
+        "repeat": 0,
+        "request_sha256": "c4c89bc11ba63ad483e844fcebff1cd31602517b7f3d0ae7f60157e502a8ea38"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_derive/mod.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "d9dcd8b5408b28fabd1c2609fdfa2605eb509b7231a8d4a4951d34cc87b9af47",
+        "arm": "raw+brief",
+        "completion_tokens": 34,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 258885.21569100066,
+        "malformed": false,
+        "prompt_tokens": 3949,
+        "repeat": 1,
+        "request_sha256": "c4c89bc11ba63ad483e844fcebff1cd31602517b7f3d0ae7f60157e502a8ea38"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_derive/mod.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "d9dcd8b5408b28fabd1c2609fdfa2605eb509b7231a8d4a4951d34cc87b9af47",
+        "arm": "raw+brief",
+        "completion_tokens": 34,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 258867.61865000063,
+        "malformed": false,
+        "prompt_tokens": 3949,
+        "repeat": 2,
+        "request_sha256": "c4c89bc11ba63ad483e844fcebff1cd31602517b7f3d0ae7f60157e502a8ea38"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_derive/implicit.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "3ef74cea8c18553ad26b696a876d61a942889fdc9a60665c21471fbffdbe4907",
+        "arm": "encoded+brief",
+        "completion_tokens": 35,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [
+          "src/_derive/implicit.rs"
+        ],
+        "latency_ms": 9942.305501000192,
+        "malformed": false,
+        "prompt_tokens": 2315,
+        "repeat": 0,
+        "request_sha256": "8648f591618d1d56697a651351d91a52005504d885eb38873c1f1ed957e5f68d"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_derive/implicit.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "3ef74cea8c18553ad26b696a876d61a942889fdc9a60665c21471fbffdbe4907",
+        "arm": "encoded+brief",
+        "completion_tokens": 35,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [
+          "src/_derive/implicit.rs"
+        ],
+        "latency_ms": 131239.10221500046,
+        "malformed": false,
+        "prompt_tokens": 2315,
+        "repeat": 1,
+        "request_sha256": "8648f591618d1d56697a651351d91a52005504d885eb38873c1f1ed957e5f68d"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_derive/implicit.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "3ef74cea8c18553ad26b696a876d61a942889fdc9a60665c21471fbffdbe4907",
+        "arm": "encoded+brief",
+        "completion_tokens": 35,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [
+          "src/_derive/implicit.rs"
+        ],
+        "latency_ms": 129283.82920700006,
+        "malformed": false,
+        "prompt_tokens": 2315,
+        "repeat": 2,
+        "request_sha256": "8648f591618d1d56697a651351d91a52005504d885eb38873c1f1ed957e5f68d"
+      }
+    ],
+    "cost": {
+      "encoded_prompt_tokens": 2315,
+      "raw_brief_prompt_tokens": 3949
+    },
+    "diff_stats": {
+      "added": 167,
+      "removed": 128
+    },
+    "gold_diff_hunks": [
+      "-src/_cookbook/mod.rs:10://! Typed arguments: [derive][typed_derive]",
+      "-src/_cookbook/mod.rs:14://! Custom cargo command: [builder][cargo_example], [derive][cargo_example_derive]",
+      "-src/_cookbook/mod.rs:24://! git-like interface: [builder][git], [derive][git_derive]",
+      "-src/_cookbook/mod.rs:37://! Escaped positionals with `--`: [builder][escaped_positional], [derive][escaped_positional_derive]",
+      "-src/_cookbook/mod.rs:47://! repl: [builder][repl], [derive][repl_derive]",
+      "-src/_cookbook/mod.rs:52:pub mod cargo_example_derive;",
+      "-src/_cookbook/mod.rs:54:pub mod escaped_positional_derive;",
+      "-src/_cookbook/mod.rs:57:pub mod git_derive;",
+      "-src/_cookbook/mod.rs:62:pub mod repl_derive;",
+      "-src/_cookbook/mod.rs:63:pub mod typed_derive;",
+      "+标mod.rs",
+      "-src/_derive/mod.rs:13://! 5. [Mixing Builder and Derive APIs](#mixing-builder-and-derive-apis)",
+      "-src/_derive/mod.rs:18://! To derive `clap` types, you need to enable the [`derive` feature flag][crate::_features].",
+      "-src/_derive/mod.rs:25://! Let's start by breaking down the anatomy of the derive attributes:",
+      "-src/_derive/mod.rs:30://! #[derive(Parser)]",
+      "-src/_derive/mod.rs:49://! #[derive(Args)]",
+      "-src/_derive/mod.rs:59://! #[derive(Subcommand)]",
+      "-src/_derive/mod.rs:76://! #[derive(ValueEnum)]",
+      "-src/_derive/mod.rs:95://!   - The derive doesn't work on enums that contain non-unit variants, unless they are skipped",
+      "-src/_derive/mod.rs:97://! *See also the [derive tutorial][crate::_derive::_tutorial] and [cookbook][crate::_cookbook]*",
+      "-src/_derive/mod.rs:203://! `Args` derive.",
+      "-src/_derive/mod.rs:346://! #[derive(Parser)]",
+      "-src/_derive/mod.rs:360://! #[derive(Parser)]",
+      "-src/_derive/mod.rs:384://! #[derive(Parser)]",
+      "-src/_derive/mod.rs:441://! The builder and derive APIs do not live in isolation. They can work together, which is",
+      "-src/_derive/mod.rs:445://! ### Using derived arguments in a builder application",
+      "-src/_derive/mod.rs:447://! When using the derive API, you can `#[command(flatten)]` a struct deriving `Args` into a struct",
+      "-src/_derive/mod.rs:449://! created using the builder API with `Args` created using the derive API.",
+      "-src/_derive/mod.rs:460:#![doc = include_str!(\"../../examples/derive_ref/augment_args.rs\")]",
+      "-src/_derive/mod.rs:463://! ### Using derived subcommands in a builder application",
+      "-src/_derive/mod.rs:465://! When using the derive API, you can use `#[command(subcommand)]` inside the struct to add",
+      "-src/_derive/mod.rs:466://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can",
+      "-src/_derive/mod.rs:474:#![doc = include_str!(\"../../examples/derive_ref/augment_subcommands.rs\")]",
+      "-src/_derive/mod.rs:477://! ### Adding hand-implemented subcommands to a derived application",
+      "-src/_derive/mod.rs:479://! When using the derive API, you can use `#[command(subcommand)]` inside the struct to add",
+      "-src/_derive/mod.rs:480://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can",
+      "-src/_derive/mod.rs:482://! still be used inside the struct created with the derive API. The implementation of the",
+      "-src/_derive/mod.rs:484://! created behind the scenes for you by the derive API.",
+      "-src/_derive/mod.rs:487://! [`augment_subcommands`][crate::Subcommand::augment_subcommands] on an enum that derived",
+      "-src/_derive/mod.rs:489://! [`augment_subcommands`][crate::Subcommand::augment_subcommands] ourselves, but the derive API"
+    ],
+    "identity": {
+      "case": "rtk-rg-derive-clap",
+      "category": "locator",
+      "field": "files",
+      "gold": [
+        "src/_derive/mod.rs"
+      ],
+      "match_mode": "one-of",
+      "model": "qwen2.5-coder-7b-instruct",
+      "qodec": "sha256:07ff3a94830c",
+      "question_id": "file",
+      "question_text": "Give one exact file path (as shown) under src/_derive. Put it in \"files\".",
+      "records_sha256": "18e1afcba6f34c987e1cc78a6b7e107253f6df697a7a979591574db13e157aea",
+      "source_commit": "0b76e64",
+      "source_run": "cpu-qwen2.5-coder-7b",
+      "tokenizer_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539"
+    },
+    "kind": "loss",
+    "mechanism": {
+      "evidence": [
+        {
+          "candidate_aliases": [
+            "错"
+          ],
+          "kind": "gold_path_represented_by_alias",
+          "span": "src/_derive/mod.rs"
+        },
+        {
+          "kind": "grep_grouping_present",
+          "note": "file→hits markers; gold path not a clean marker"
+        },
+        {
+          "answer": [
+            "src/_derive/implicit.rs"
+          ],
+          "kind": "model_answer_not_present_in_artifact"
+        }
+      ],
+      "primary_mechanism": "mixed",
+      "secondary_mechanisms": [
+        "identifier-or-path-aliasing",
+        "grouping-or-boundary-loss",
+        "alias-decoding"
+      ]
+    },
+    "prompt_evidence": {
+      "alias_dictionary": {
+        "件": " the derive API",
+        "值": " the [`derive` feature flag][crate::_features]",
+        "函": "://! When using the derive API, you can use `#[command(subcommand)]` inside the struct to add",
+        "列": "][crate::错::_tutorial]",
+        "名": "-derive",
+        "块": " still be used inside the struct created with",
+        "层": "When should I use the builder vs derive APIs?",
+        "帧": "引typed-derive/",
+        "引": ":#![doc = include_str!(\"../../examples/",
+        "数": "`#[command(flatten)]`",
+        "标": "»src/_cookbook/",
+        "码": ":#![doc = include_str!(\"../../examples/tutorial_derive/0",
+        "类": "://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can",
+        "组": "码3_0",
+        "节": "4:// - Please update the corresponding section in",
+        "行": "://! $ cargo add clap --features derive",
+        "表": "_positional",
+        "记": "://! #[derive(",
+        "试": "://! [`augment_subcommands`][crate::Subcommand::augment_subcommands]",
+        "路": "://! - [FAQ: When should I use the builder vs derive APIs?][crate::_faq#when-should-i-use-the-builder-vs-derive-apis]",
+        "链": "erive [tutorial][错::_tutorial] and [reference][错]",
+        "错": "_derive",
+        "键": " created behind the scenes for you by件."
+      },
+      "encoded_artifact": "%q1 mine n=23\n码=:#![doc = include_str!(\"../../examples/tutorial_derive/0\n引=:#![doc = include_str!(\"../../examples/\n路=://! - [FAQ: When should I use the builder vs derive APIs?][crate::_faq#when-should-i-use-the-builder-vs-derive-apis]\n类=://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can\n函=://! When using the derive API, you can use `#[command(subcommand)]` inside the struct to add\n值= the [`derive` feature flag][crate::_features]\n错=_derive\n试=://! [`augment_subcommands`][crate::Subcommand::augment_subcommands]\n帧=引typed-derive/\n件= the derive API\n组=码3_0\n标=»src/_cookbook/\n记=://! #[derive(\n链=erive [tutorial][错::_tutorial] and [reference][错]\n节=4:// - Please update the corresponding section in\n层=When should I use the builder vs derive APIs?\n块= still be used inside the struct created with\n表=_positional\n行=://! $ cargo add clap --features derive\n列=][crate::错::_tutorial]\n键= created behind the scenes for you by件.\n名=-derive\n数=`#[command(flatten)]`\n%q1 body\n%q1 grep mark=raquo nl=1\n%q1 body\n»src/_faq.rs\n9://! 3. [层](#when-should-i-use-the-builder-vs名-apis)\n26://! Simple! `clap` *is* `structopt`.  `structopt` started as a derive API built on\n30://! with the release of `clap错`.\n36://!   derives in mind and easier to change `clap` in response to `structopt` bugs.\n62://! - [Derive列\n74://! ### 层\n76://! Our default answer is to use the [Derive API列:\n88://! You can [interop between Derive and Builder APIs][crate::错#mixing-builder-and名-apis].\n标escaped表错.rs\n4引escaped-positional名.rs\")]\n7引escaped-positional名.md\")]\n»src/_tutorial.rs\n节 the derive tutorial\n31路\n176://! When enabling the [`derive` feature][crate::_features], you can use\n标mod.rs\n10://! Typed arguments: [derive][typed错]\n14://! Custom cargo command: [builder][cargo_example], [derive][cargo_example错]\n24://! git-like interface: [builder][git], [derive][git错]\n37://! Escaped positionals with `--`: [builder][escaped表], [derive][escaped表错]\n47://! repl: [builder][repl], [derive][repl错]\n52:pub mod cargo_example错;\n54:pub mod escaped表错;\n57:pub mod git错;\n62:pub mod repl错;\n63:pub mod typed错;\n»\nsrc/_cookbook/repl错.rs:4引repl名.rs\")]\n标cargo_example错.rs\n4引cargo-example名.rs\")]\n7引cargo-example名.md\")]\n标typed错.rs\n3://! **This requires enabling值.**\n8帧implicit.rs\")]\n11帧implicit.md\")]\n16帧builtin.rs\")]\n19帧builtin.md\")]\n24帧fn_parser.rs\")]\n27帧fn_parser.md\")]\n32帧custom.rs\")]\n35帧custom.md\")]\n»\nsrc/_features.rs:18://! * `derive`: Enables the custom derive (i.e. `#[derive(Parser)]`). Without this you must use one of the other methods of creating a `clap` CLI listed above.\n标git错.rs\n4引git名.rs\")]\n7引git名.md\")]\n»src/lib.rs\n9://! - D链\n42行\n48://! # #[cfg(feature = \"derive\")] {\n56://! See also the d链\n91:#[cfg(feature = \"derive\")]\n93:pub use clap错::{self, Args, Parser, Subcommand, ValueEnum};\n100:pub mod 错;\n»src/错/mod.rs\n13://! 5. [Mixing Builder and Derive APIs](#mixing-builder-and名-apis)\n18://! To derive `clap` types, you need to enable值.\n25://! Let's start by breaking down the anatomy of the derive attributes:\n30记Parser)]\n49记Args)]\n59记Subcommand)]\n76记ValueEnum)]\n95://!   - The derive doesn't work on enums that contain non-unit variants, unless they are skipped\n97://! *See also the [derive tutorial列 and [cookbook][crate::_cookbook]*\n203://! `Args` derive.\n346记Parser)]\n360记Parser)]\n384记Parser)]\n441://! The builder and derive APIs do not live in isolation. They can work together, which is\n445://! ### Using derived arguments in a builder application\n447://! When using件, you can 数 a struct deriving `Args` into a struct\n449://! created using the builder API with `Args` created using件.\n460引derive_ref/augment_args.rs\")]\n463://! ### Using derived subcommands in a builder application\n465函\n466类\n474引derive_ref/augment_subcommands.rs\")]\n477://! ### Adding hand-implemented subcommands to a derived application\n479函\n480类\n482://!块件. The implementation of the\n484://!键\n487试 on an enum that derived\n489试 ourselves, but件\n494引derive_ref/hand_subcommand.rs\")]\n497://! ### Flattening hand-implemented args into a derived application\n499://! When using件, you can use 数 inside the struct to add arguments as\n501://! struct that derived `Args`. However, you can also implement the `Args` trait manually on this\n502://! struct (or any other type) and it can块 the derive\n504://! the `Command` instance键\n507://! struct that derived `Parser`, whereas now we implement\n508://! [`augment_args`][crate::Args::augment_args] ourselves, but件 calls it\n513引derive_ref/flatten_hand_args.rs\")]\n526:// Point people here that search for attributes that don't exist in the derive (a subset of magic\n»src/错/_tutorial.rs\n节 the derive tutorial\n19://! First, ensure `clap` is available with值:\n21行\n26码1_quick.rs\")]\n29码1_quick.md\")]\n32路\n37://! You use derive [`Parser`][crate::Parser] to start building a parser.\n40码2_apps.rs\")]\n43码2_apps.md\")]\n48码2_crate.rs\")]\n50码2_crate.md\")]\n55码2_app_settings.rs\")]\n57码2_app_settings.md\")]\n75组3表.rs\")]\n77组3表.md\")]\n82组3表_mult.rs\")]\n84组3表_mult.md\")]\n97组2_option.rs\")]\n99组2_option.md\")]\n104组2_option_mult.rs\")]\n106组2_option_mult.md\")]\n113组1_flag_bool.rs\")]\n115组1_flag_bool.md\")]\n122组1_flag_count.rs\")]\n124组1_flag_count.md\")]\n133组6_optional.rs\")]\n135组6_optional.md\")]\n144组5_default_values.rs\")]\n146组5_default_values.md\")]\n150://! Subcommands are derived with `#[derive(Subcommand)]` and be added via\n156组4_subcommands.rs\")]\n161组4_subcommands_alt.rs\")]\n164组4_subcommands.md\")]\n178://! For example, if you have arguments of specific values you want to test for, you can derive\n187码4_01_enum.rs\")]\n189码4_01_enum.md\")]\n196码4_02_parse.rs\")]\n198码4_02_parse.md\")]\n203码4_02_validate.rs\")]\n205码4_02_validate.md\")]\n226码4_03_relations.rs\")]\n228码4_03_relations.md\")]\n235码4_04_custom.rs\")]\n237码4_04_custom.md\")]\n245码5_01_assert.rs\")]\n",
+      "notation_brief": "The payload is encoded as a `%q1` container. Format: first line\n`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`\n(each alias is a short stand-in for that exact phrase), then a\n`%q1 body` line, then the body. `%q1 xN` after a line means that line\noccurs N times in total. A `toon` body is a table: first line is a JSON\narray of keys, each following line is one object, cells are JSON values\njoined by the separator named in the header. A `grep` body is grouped\nmatcher output: a marker line names a file path and the lines after it\nare `line:text` hits in that file (a bare marker starts verbatim\nlines). A `diag` body line starting with an alias expands to: the head\nafter the alias, then that alias's legend template with each slot\nplaceholder filled by the sep-joined values in order. A `tmpl` body\nline starting with an alias is its legend template with the slot\nplaceholders filled by the sep-joined values that follow the alias.\nMentally decode the body via the legend before answering; never emit\nalias characters in answers.",
+      "question_suffix": "QUESTION: Give one exact file path (as shown) under src/_derive. Put it in \"files\".\n\nRespond with the JSON object only.",
+      "raw_tool_payload": "src/_faq.rs:9://! 3. [When should I use the builder vs derive APIs?](#when-should-i-use-the-builder-vs-derive-apis)\nsrc/_faq.rs:26://! Simple! `clap` *is* `structopt`.  `structopt` started as a derive API built on\nsrc/_faq.rs:30://! with the release of `clap_derive`.\nsrc/_faq.rs:36://!   derives in mind and easier to change `clap` in response to `structopt` bugs.\nsrc/_faq.rs:62://! - [Derive][crate::_derive::_tutorial]\nsrc/_faq.rs:74://! ### When should I use the builder vs derive APIs?\nsrc/_faq.rs:76://! Our default answer is to use the [Derive API][crate::_derive::_tutorial]:\nsrc/_faq.rs:88://! You can [interop between Derive and Builder APIs][crate::_derive#mixing-builder-and-derive-apis].\nsrc/_cookbook/escaped_positional_derive.rs:4:#![doc = include_str!(\"../../examples/escaped-positional-derive.rs\")]\nsrc/_cookbook/escaped_positional_derive.rs:7:#![doc = include_str!(\"../../examples/escaped-positional-derive.md\")]\nsrc/_tutorial.rs:4:// - Please update the corresponding section in the derive tutorial\nsrc/_tutorial.rs:31://! - [FAQ: When should I use the builder vs derive APIs?][crate::_faq#when-should-i-use-the-builder-vs-derive-apis]\nsrc/_tutorial.rs:176://! When enabling the [`derive` feature][crate::_features], you can use\nsrc/_cookbook/mod.rs:10://! Typed arguments: [derive][typed_derive]\nsrc/_cookbook/mod.rs:14://! Custom cargo command: [builder][cargo_example], [derive][cargo_example_derive]\nsrc/_cookbook/mod.rs:24://! git-like interface: [builder][git], [derive][git_derive]\nsrc/_cookbook/mod.rs:37://! Escaped positionals with `--`: [builder][escaped_positional], [derive][escaped_positional_derive]\nsrc/_cookbook/mod.rs:47://! repl: [builder][repl], [derive][repl_derive]\nsrc/_cookbook/mod.rs:52:pub mod cargo_example_derive;\nsrc/_cookbook/mod.rs:54:pub mod escaped_positional_derive;\nsrc/_cookbook/mod.rs:57:pub mod git_derive;\nsrc/_cookbook/mod.rs:62:pub mod repl_derive;\nsrc/_cookbook/mod.rs:63:pub mod typed_derive;\nsrc/_cookbook/repl_derive.rs:4:#![doc = include_str!(\"../../examples/repl-derive.rs\")]\nsrc/_cookbook/cargo_example_derive.rs:4:#![doc = include_str!(\"../../examples/cargo-example-derive.rs\")]\nsrc/_cookbook/cargo_example_derive.rs:7:#![doc = include_str!(\"../../examples/cargo-example-derive.md\")]\nsrc/_cookbook/typed_derive.rs:3://! **This requires enabling the [`derive` feature flag][crate::_features].**\nsrc/_cookbook/typed_derive.rs:8:#![doc = include_str!(\"../../examples/typed-derive/implicit.rs\")]\nsrc/_cookbook/typed_derive.rs:11:#![doc = include_str!(\"../../examples/typed-derive/implicit.md\")]\nsrc/_cookbook/typed_derive.rs:16:#![doc = include_str!(\"../../examples/typed-derive/builtin.rs\")]\nsrc/_cookbook/typed_derive.rs:19:#![doc = include_str!(\"../../examples/typed-derive/builtin.md\")]\nsrc/_cookbook/typed_derive.rs:24:#![doc = include_str!(\"../../examples/typed-derive/fn_parser.rs\")]\nsrc/_cookbook/typed_derive.rs:27:#![doc = include_str!(\"../../examples/typed-derive/fn_parser.md\")]\nsrc/_cookbook/typed_derive.rs:32:#![doc = include_str!(\"../../examples/typed-derive/custom.rs\")]\nsrc/_cookbook/typed_derive.rs:35:#![doc = include_str!(\"../../examples/typed-derive/custom.md\")]\nsrc/_features.rs:18://! * `derive`: Enables the custom derive (i.e. `#[derive(Parser)]`). Without this you must use one of the other methods of creating a `clap` CLI listed above.\nsrc/_cookbook/git_derive.rs:4:#![doc = include_str!(\"../../examples/git-derive.rs\")]\nsrc/_cookbook/git_derive.rs:7:#![doc = include_str!(\"../../examples/git-derive.md\")]\nsrc/lib.rs:9://! - Derive [tutorial][_derive::_tutorial] and [reference][_derive]\nsrc/lib.rs:42://! $ cargo add clap --features derive\nsrc/lib.rs:48://! # #[cfg(feature = \"derive\")] {\nsrc/lib.rs:56://! See also the derive [tutorial][_derive::_tutorial] and [reference][_derive]\nsrc/lib.rs:91:#[cfg(feature = \"derive\")]\nsrc/lib.rs:93:pub use clap_derive::{self, Args, Parser, Subcommand, ValueEnum};\nsrc/lib.rs:100:pub mod _derive;\nsrc/_derive/mod.rs:13://! 5. [Mixing Builder and Derive APIs](#mixing-builder-and-derive-apis)\nsrc/_derive/mod.rs:18://! To derive `clap` types, you need to enable the [`derive` feature flag][crate::_features].\nsrc/_derive/mod.rs:25://! Let's start by breaking down the anatomy of the derive attributes:\nsrc/_derive/mod.rs:30://! #[derive(Parser)]\nsrc/_derive/mod.rs:49://! #[derive(Args)]\nsrc/_derive/mod.rs:59://! #[derive(Subcommand)]\nsrc/_derive/mod.rs:76://! #[derive(ValueEnum)]\nsrc/_derive/mod.rs:95://!   - The derive doesn't work on enums that contain non-unit variants, unless they are skipped\nsrc/_derive/mod.rs:97://! *See also the [derive tutorial][crate::_derive::_tutorial] and [cookbook][crate::_cookbook]*\nsrc/_derive/mod.rs:203://! `Args` derive.\nsrc/_derive/mod.rs:346://! #[derive(Parser)]\nsrc/_derive/mod.rs:360://! #[derive(Parser)]\nsrc/_derive/mod.rs:384://! #[derive(Parser)]\nsrc/_derive/mod.rs:441://! The builder and derive APIs do not live in isolation. They can work together, which is\nsrc/_derive/mod.rs:445://! ### Using derived arguments in a builder application\nsrc/_derive/mod.rs:447://! When using the derive API, you can `#[command(flatten)]` a struct deriving `Args` into a struct\nsrc/_derive/mod.rs:449://! created using the builder API with `Args` created using the derive API.\nsrc/_derive/mod.rs:460:#![doc = include_str!(\"../../examples/derive_ref/augment_args.rs\")]\nsrc/_derive/mod.rs:463://! ### Using derived subcommands in a builder application\nsrc/_derive/mod.rs:465://! When using the derive API, you can use `#[command(subcommand)]` inside the struct to add\nsrc/_derive/mod.rs:466://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can\nsrc/_derive/mod.rs:474:#![doc = include_str!(\"../../examples/derive_ref/augment_subcommands.rs\")]\nsrc/_derive/mod.rs:477://! ### Adding hand-implemented subcommands to a derived application\nsrc/_derive/mod.rs:479://! When using the derive API, you can use `#[command(subcommand)]` inside the struct to add\nsrc/_derive/mod.rs:480://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can\nsrc/_derive/mod.rs:482://! still be used inside the struct created with the derive API. The implementation of the\nsrc/_derive/mod.rs:484://! created behind the scenes for you by the derive API.\nsrc/_derive/mod.rs:487://! [`augment_subcommands`][crate::Subcommand::augment_subcommands] on an enum that derived\nsrc/_derive/mod.rs:489://! [`augment_subcommands`][crate::Subcommand::augment_subcommands] ourselves, but the derive API\nsrc/_derive/mod.rs:494:#![doc = include_str!(\"../../examples/derive_ref/hand_subcommand.rs\")]\nsrc/_derive/mod.rs:497://! ### Flattening hand-implemented args into a derived application\nsrc/_derive/mod.rs:499://! When using the derive API, you can use `#[command(flatten)]` inside the struct to add arguments as\nsrc/_derive/mod.rs:501://! struct that derived `Args`. However, you can also implement the `Args` trait manually on this\nsrc/_derive/mod.rs:502://! struct (or any other type) and it can still be used inside the struct created with the derive\nsrc/_derive/mod.rs:504://! the `Command` instance created behind the scenes for you by the derive API.\nsrc/_derive/mod.rs:507://! struct that derived `Parser`, whereas now we implement\nsrc/_derive/mod.rs:508://! [`augment_args`][crate::Args::augment_args] ourselves, but the derive API calls it\nsrc/_derive/mod.rs:513:#![doc = include_str!(\"../../examples/derive_ref/flatten_hand_args.rs\")]\nsrc/_derive/mod.rs:526:// Point people here that search for attributes that don't exist in the derive (a subset of magic\nsrc/_derive/_tutorial.rs:4:// - Please update the corresponding section in the derive tutorial\nsrc/_derive/_tutorial.rs:19://! First, ensure `clap` is available with the [`derive` feature flag][crate::_features]:\nsrc/_derive/_tutorial.rs:21://! $ cargo add clap --features derive\nsrc/_derive/_tutorial.rs:26:#![doc = include_str!(\"../../examples/tutorial_derive/01_quick.rs\")]\nsrc/_derive/_tutorial.rs:29:#![doc = include_str!(\"../../examples/tutorial_derive/01_quick.md\")]\nsrc/_derive/_tutorial.rs:32://! - [FAQ: When should I use the builder vs derive APIs?][crate::_faq#when-should-i-use-the-builder-vs-derive-apis]\nsrc/_derive/_tutorial.rs:37://! You use derive [`Parser`][crate::Parser] to start building a parser.\nsrc/_derive/_tutorial.rs:40:#![doc = include_str!(\"../../examples/tutorial_derive/02_apps.rs\")]\nsrc/_derive/_tutorial.rs:43:#![doc = include_str!(\"../../examples/tutorial_derive/02_apps.md\")]\nsrc/_derive/_tutorial.rs:48:#![doc = include_str!(\"../../examples/tutorial_derive/02_crate.rs\")]\nsrc/_derive/_tutorial.rs:50:#![doc = include_str!(\"../../examples/tutorial_derive/02_crate.md\")]\nsrc/_derive/_tutorial.rs:55:#![doc = include_str!(\"../../examples/tutorial_derive/02_app_settings.rs\")]\nsrc/_derive/_tutorial.rs:57:#![doc = include_str!(\"../../examples/tutorial_derive/02_app_settings.md\")]\nsrc/_derive/_tutorial.rs:75:#![doc = include_str!(\"../../examples/tutorial_derive/03_03_positional.rs\")]\nsrc/_derive/_tutorial.rs:77:#![doc = include_str!(\"../../examples/tutorial_derive/03_03_positional.md\")]\nsrc/_derive/_tutorial.rs:82:#![doc = include_str!(\"../../examples/tutorial_derive/03_03_positional_mult.rs\")]\nsrc/_derive/_tutorial.rs:84:#![doc = include_str!(\"../../examples/tutorial_derive/03_03_positional_mult.md\")]\nsrc/_derive/_tutorial.rs:97:#![doc = include_str!(\"../../examples/tutorial_derive/03_02_option.rs\")]\nsrc/_derive/_tutorial.rs:99:#![doc = include_str!(\"../../examples/tutorial_derive/03_02_option.md\")]\nsrc/_derive/_tutorial.rs:104:#![doc = include_str!(\"../../examples/tutorial_derive/03_02_option_mult.rs\")]\nsrc/_derive/_tutorial.rs:106:#![doc = include_str!(\"../../examples/tutorial_derive/03_02_option_mult.md\")]\nsrc/_derive/_tutorial.rs:113:#![doc = include_str!(\"../../examples/tutorial_derive/03_01_flag_bool.rs\")]\nsrc/_derive/_tutorial.rs:115:#![doc = include_str!(\"../../examples/tutorial_derive/03_01_flag_bool.md\")]\nsrc/_derive/_tutorial.rs:122:#![doc = include_str!(\"../../examples/tutorial_derive/03_01_flag_count.rs\")]\nsrc/_derive/_tutorial.rs:124:#![doc = include_str!(\"../../examples/tutorial_derive/03_01_flag_count.md\")]\nsrc/_derive/_tutorial.rs:133:#![doc = include_str!(\"../../examples/tutorial_derive/03_06_optional.rs\")]\nsrc/_derive/_tutorial.rs:135:#![doc = include_str!(\"../../examples/tutorial_derive/03_06_optional.md\")]\nsrc/_derive/_tutorial.rs:144:#![doc = include_str!(\"../../examples/tutorial_derive/03_05_default_values.rs\")]\nsrc/_derive/_tutorial.rs:146:#![doc = include_str!(\"../../examples/tutorial_derive/03_05_default_values.md\")]\nsrc/_derive/_tutorial.rs:150://! Subcommands are derived with `#[derive(Subcommand)]` and be added via\nsrc/_derive/_tutorial.rs:156:#![doc = include_str!(\"../../examples/tutorial_derive/03_04_subcommands.rs\")]\nsrc/_derive/_tutorial.rs:161:#![doc = include_str!(\"../../examples/tutorial_derive/03_04_subcommands_alt.rs\")]\nsrc/_derive/_tutorial.rs:164:#![doc = include_str!(\"../../examples/tutorial_derive/03_04_subcommands.md\")]\nsrc/_derive/_tutorial.rs:178://! For example, if you have arguments of specific values you want to test for, you can derive\nsrc/_derive/_tutorial.rs:187:#![doc = include_str!(\"../../examples/tutorial_derive/04_01_enum.rs\")]\nsrc/_derive/_tutorial.rs:189:#![doc = include_str!(\"../../examples/tutorial_derive/04_01_enum.md\")]\nsrc/_derive/_tutorial.rs:196:#![doc = include_str!(\"../../examples/tutorial_derive/04_02_parse.rs\")]\nsrc/_derive/_tutorial.rs:198:#![doc = include_str!(\"../../examples/tutorial_derive/04_02_parse.md\")]\nsrc/_derive/_tutorial.rs:203:#![doc = include_str!(\"../../examples/tutorial_derive/04_02_validate.rs\")]\nsrc/_derive/_tutorial.rs:205:#![doc = include_str!(\"../../examples/tutorial_derive/04_02_validate.md\")]\nsrc/_derive/_tutorial.rs:226:#![doc = include_str!(\"../../examples/tutorial_derive/04_03_relations.rs\")]\nsrc/_derive/_tutorial.rs:228:#![doc = include_str!(\"../../examples/tutorial_derive/04_03_relations.md\")]\nsrc/_derive/_tutorial.rs:235:#![doc = include_str!(\"../../examples/tutorial_derive/04_04_custom.rs\")]\nsrc/_derive/_tutorial.rs:237:#![doc = include_str!(\"../../examples/tutorial_derive/04_04_custom.md\")]\nsrc/_derive/_tutorial.rs:245:#![doc = include_str!(\"../../examples/tutorial_derive/05_01_assert.rs\")]\n",
+      "system_prompt": "You are a precise code-context reader. Answer ONLY about the provided text. Reply with a single JSON object and nothing else, using exactly these keys: {\"facts\": [], \"files\": [], \"symbols\": [], \"call_path\": [], \"answer\": \"\"}. Put integers as strings in \"answer\". Use exact identifiers and full paths copied verbatim from the text; never invent or abbreviate names. Do not include any decoding notation or alias glyphs in your answer.",
+      "used_aliases": [
+        "件",
+        "值",
+        "函",
+        "列",
+        "名",
+        "块",
+        "层",
+        "帧",
+        "引",
+        "数",
+        "标",
+        "码",
+        "类",
+        "组",
+        "节",
+        "行",
+        "表",
+        "记",
+        "试",
+        "路",
+        "链",
+        "错",
+        "键"
+      ]
+    },
+    "span_analysis": {
+      "gold_spans": [
+        {
+          "aliases": [
+            "错"
+          ],
+          "fate": "represented_by_alias",
+          "span": "src/_derive/mod.rs"
+        }
+      ],
+      "locator_checks": [
+        {
+          "basename": "preserved_verbatim",
+          "full_path": "represented_by_alias",
+          "path_prefix": "represented_by_alias",
+          "prefix_aliases": [
+            "错"
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "alias_stats": {
+      "alias_count": 14,
+      "alias_density_per_kchar": 11.0149,
+      "legend_size": 14
+    },
+    "answers": [
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_concepts.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "de2ccf7cf692e945319ac8381445b4f615703981ed6a2471429a4b6d822bdca2",
+        "arm": "raw",
+        "completion_tokens": 34,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 60557.9470350001,
+        "malformed": false,
+        "prompt_tokens": 982,
+        "repeat": 0,
+        "request_sha256": "11d7d86c04ec696ac05a5f6057ff760254d9d6b114a4eae2593a20ea05462386"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_concepts.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "de2ccf7cf692e945319ac8381445b4f615703981ed6a2471429a4b6d822bdca2",
+        "arm": "raw",
+        "completion_tokens": 34,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 60315.313738999976,
+        "malformed": false,
+        "prompt_tokens": 982,
+        "repeat": 1,
+        "request_sha256": "11d7d86c04ec696ac05a5f6057ff760254d9d6b114a4eae2593a20ea05462386"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_concepts.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "de2ccf7cf692e945319ac8381445b4f615703981ed6a2471429a4b6d822bdca2",
+        "arm": "raw",
+        "completion_tokens": 34,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 60110.50416599937,
+        "malformed": false,
+        "prompt_tokens": 982,
+        "repeat": 2,
+        "request_sha256": "11d7d86c04ec696ac05a5f6057ff760254d9d6b114a4eae2593a20ea05462386"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_concepts.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "de2ccf7cf692e945319ac8381445b4f615703981ed6a2471429a4b6d822bdca2",
+        "arm": "raw+brief",
+        "completion_tokens": 34,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 79962.23143700013,
+        "malformed": false,
+        "prompt_tokens": 1244,
+        "repeat": 0,
+        "request_sha256": "8b85ebe86c948ca5c628b569c5c959039a6dafd3a973e14b892eed22d0425504"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_concepts.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "de2ccf7cf692e945319ac8381445b4f615703981ed6a2471429a4b6d822bdca2",
+        "arm": "raw+brief",
+        "completion_tokens": 34,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 78337.05742500024,
+        "malformed": false,
+        "prompt_tokens": 1244,
+        "repeat": 1,
+        "request_sha256": "8b85ebe86c948ca5c628b569c5c959039a6dafd3a973e14b892eed22d0425504"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_concepts.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "de2ccf7cf692e945319ac8381445b4f615703981ed6a2471429a4b6d822bdca2",
+        "arm": "raw+brief",
+        "completion_tokens": 34,
+        "correct": true,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 76125.0635209999,
+        "malformed": false,
+        "prompt_tokens": 1244,
+        "repeat": 2,
+        "request_sha256": "8b85ebe86c948ca5c628b569c5c959039a6dafd3a973e14b892eed22d0425504"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_features.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "57b0b1d2e0f4321b668f80022f4b957e050470ea6c8180397e7ed6d37f599425",
+        "arm": "encoded+brief",
+        "completion_tokens": 33,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 46971.42936599994,
+        "malformed": false,
+        "prompt_tokens": 1016,
+        "repeat": 0,
+        "request_sha256": "547d4b9ea99b549fc695c86d79befadc2725f96fc30686412b47b5e5efa99e18"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_features.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "57b0b1d2e0f4321b668f80022f4b957e050470ea6c8180397e7ed6d37f599425",
+        "arm": "encoded+brief",
+        "completion_tokens": 33,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 46539.38813700006,
+        "malformed": false,
+        "prompt_tokens": 1016,
+        "repeat": 1,
+        "request_sha256": "547d4b9ea99b549fc695c86d79befadc2725f96fc30686412b47b5e5efa99e18"
+      },
+      {
+        "alias_leaks": [],
+        "answer_parsed": {
+          "answer": "",
+          "call_path": [],
+          "facts": [],
+          "files": [
+            "src/_features.rs"
+          ],
+          "symbols": []
+        },
+        "answer_sha256": "57b0b1d2e0f4321b668f80022f4b957e050470ea6c8180397e7ed6d37f599425",
+        "arm": "encoded+brief",
+        "completion_tokens": 33,
+        "correct": false,
+        "format_compliant": true,
+        "invalid_identifiers": [],
+        "latency_ms": 46790.460099000484,
+        "malformed": false,
+        "prompt_tokens": 1016,
+        "repeat": 2,
+        "request_sha256": "547d4b9ea99b549fc695c86d79befadc2725f96fc30686412b47b5e5efa99e18"
+      }
+    ],
+    "cost": {
+      "encoded_prompt_tokens": 1016,
+      "raw_brief_prompt_tokens": 1244
+    },
+    "diff_stats": {
+      "added": 57,
+      "removed": 32
+    },
+    "gold_diff_hunks": [
+      "-src/_concepts.rs:100://! the Value will be parsed according to [`ValueParser`]",
+      "-src/_concepts.rs:104:use clap_builder::builder::ValueParser;",
+      "+帧_concepts.rs"
+    ],
+    "identity": {
+      "case": "rtk-rg-parser-clap",
+      "category": "locator",
+      "field": "files",
+      "gold": [
+        "src/_concepts.rs"
+      ],
+      "match_mode": "one-of",
+      "model": "qwen2.5-coder-7b-instruct",
+      "qodec": "sha256:07ff3a94830c",
+      "question_id": "file",
+      "question_text": "Give one exact file path (as shown) that matches. Put it in \"files\".",
+      "records_sha256": "18e1afcba6f34c987e1cc78a6b7e107253f6df697a7a979591574db13e157aea",
+      "source_commit": "0b76e64",
+      "source_run": "cpu-qwen2.5-coder-7b",
+      "tokenizer_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539"
+    },
+    "kind": "loss",
+    "mechanism": {
+      "evidence": [
+        {
+          "candidate_aliases": [],
+          "kind": "gold_path_represented_by_alias",
+          "span": "src/_concepts.rs"
+        },
+        {
+          "answer": [
+            "src/_features.rs"
+          ],
+          "kind": "model_answer_is_a_different_present_file_marker"
+        }
+      ],
+      "primary_mechanism": "grouping-or-boundary-loss",
+      "secondary_mechanisms": [
+        "identifier-or-path-aliasing"
+      ]
+    },
+    "prompt_evidence": {
+      "alias_dictionary": {
+        "件": " `Parser`, whereas now we implement",
+        "值": "://! #",
+        "函": " [`TypedValueParser`][crate::builder::TypedValueParser]",
+        "帧": "»src/",
+        "引": "://! A [custom parser][TypedValueParser] can be used to improve the error messages or provide additional validation:",
+        "标": ", Subcommand, ValueEnum};",
+        "码": "`](https://doc.rust-lang.org/cargo/reference/manifest.html#the-",
+        "类": "[`Parser`][crate::Parser]",
+        "组": "值# Configuring the Parser",
+        "记": "://!   ",
+        "试": "值 use clap::Parser;",
+        "路": "://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can",
+        "链": "7://! ",
+        "错": "[derive(Parser)]"
+      },
+      "encoded_artifact": "%q1 mine n=14\n类=[`Parser`][crate::Parser]\n引=://! A [custom parser][TypedValueParser] can be used to improve the error messages or provide additional validation:\n路=://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can\n码=`](https://doc.rust-lang.org/cargo/reference/manifest.html#the-\n函= [`TypedValueParser`][crate::builder::TypedValueParser]\n值=://! #\n错=[derive(Parser)]\n试=值 use clap::Parser;\n帧=»src/\n件= `Parser`, whereas now we implement\n组=值# Configuring the Parser\n标=, Subcommand, ValueEnum};\n记=://!   \n链=7://! \n%q1 body\n%q1 grep mark=raquo nl=1\n%q1 body\n帧_concepts.rs\n100://! the Value will be parsed according to [`ValueParser`]\n104:use clap_builder::builder::ValueParser;\n帧_cookbook/typed_derive.rs\n13值# Built-in函\n29值# Custom函\n»\nsrc/_features.rs:18://! * `derive`: Enables the custom derive (i.e. `#错`). Without this you must use one of the other methods of creating a `clap` CLI listed above.\n帧lib.rs\n6://! > **Command Line Argument Parser for Rust**\n93:pub use clap_derive::{self, Args, Parser标\n帧_tutorial.rs\n34组\n164://! [`PossibleValuesParser`] or [`Arg::value_parser([\"val1\",\n194引\n帧_derive/mod.rs\n2链use clap::{Parser, Args标\n30值错\n90://! - 类 parses arguments into a `struct` (arguments) or `enum` (subcommands).\n148记- When not present: [package `name码name-field) (if on 类 container), variant name (if on [`Subcommand`][crate::Subcommand] variant)\n158记- Without `<expr>`: [crate `description码description-field) (类 container)\n192记  类 or on the flattened field.\n19链See [Configuring the Parser][_tutorial#configuring-the-parser] and\n344试\n346值错\n358试\n360值错\n383试\n384值错\n448://! deriving `Args` or `Parser`. This example shows how you can augment a `Command` instance\n466路\n480路\n488://!件\n50链struct that derived件\n520记类)\n帧_derive/_tutorial.rs\n35组\n3链You use derive 类 to start building a parser.\n200引\n",
+      "notation_brief": "The payload is encoded as a `%q1` container. Format: first line\n`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`\n(each alias is a short stand-in for that exact phrase), then a\n`%q1 body` line, then the body. `%q1 xN` after a line means that line\noccurs N times in total. A `toon` body is a table: first line is a JSON\narray of keys, each following line is one object, cells are JSON values\njoined by the separator named in the header. A `grep` body is grouped\nmatcher output: a marker line names a file path and the lines after it\nare `line:text` hits in that file (a bare marker starts verbatim\nlines). A `diag` body line starting with an alias expands to: the head\nafter the alias, then that alias's legend template with each slot\nplaceholder filled by the sep-joined values in order. A `tmpl` body\nline starting with an alias is its legend template with the slot\nplaceholders filled by the sep-joined values that follow the alias.\nMentally decode the body via the legend before answering; never emit\nalias characters in answers.",
+      "question_suffix": "QUESTION: Give one exact file path (as shown) that matches. Put it in \"files\".\n\nRespond with the JSON object only.",
+      "raw_tool_payload": "src/_concepts.rs:100://! the Value will be parsed according to [`ValueParser`]\nsrc/_concepts.rs:104:use clap_builder::builder::ValueParser;\nsrc/_cookbook/typed_derive.rs:13://! ## Built-in [`TypedValueParser`][crate::builder::TypedValueParser]\nsrc/_cookbook/typed_derive.rs:29://! ## Custom [`TypedValueParser`][crate::builder::TypedValueParser]\nsrc/_features.rs:18://! * `derive`: Enables the custom derive (i.e. `#[derive(Parser)]`). Without this you must use one of the other methods of creating a `clap` CLI listed above.\nsrc/lib.rs:6://! > **Command Line Argument Parser for Rust**\nsrc/lib.rs:93:pub use clap_derive::{self, Args, Parser, Subcommand, ValueEnum};\nsrc/_tutorial.rs:34://! ## Configuring the Parser\nsrc/_tutorial.rs:164://! [`PossibleValuesParser`] or [`Arg::value_parser([\"val1\",\nsrc/_tutorial.rs:194://! A [custom parser][TypedValueParser] can be used to improve the error messages or provide additional validation:\nsrc/_derive/mod.rs:27://! use clap::{Parser, Args, Subcommand, ValueEnum};\nsrc/_derive/mod.rs:30://! #[derive(Parser)]\nsrc/_derive/mod.rs:90://! - [`Parser`][crate::Parser] parses arguments into a `struct` (arguments) or `enum` (subcommands).\nsrc/_derive/mod.rs:148://!   - When not present: [package `name`](https://doc.rust-lang.org/cargo/reference/manifest.html#the-name-field) (if on [`Parser`][crate::Parser] container), variant name (if on [`Subcommand`][crate::Subcommand] variant)\nsrc/_derive/mod.rs:158://!   - Without `<expr>`: [crate `description`](https://doc.rust-lang.org/cargo/reference/manifest.html#the-description-field) ([`Parser`][crate::Parser] container)\nsrc/_derive/mod.rs:192://!     [`Parser`][crate::Parser] or on the flattened field.\nsrc/_derive/mod.rs:197://! See [Configuring the Parser][_tutorial#configuring-the-parser] and\nsrc/_derive/mod.rs:344://! # use clap::Parser;\nsrc/_derive/mod.rs:346://! #[derive(Parser)]\nsrc/_derive/mod.rs:358://! # use clap::Parser;\nsrc/_derive/mod.rs:360://! #[derive(Parser)]\nsrc/_derive/mod.rs:383://! # use clap::Parser;\nsrc/_derive/mod.rs:384://! #[derive(Parser)]\nsrc/_derive/mod.rs:448://! deriving `Args` or `Parser`. This example shows how you can augment a `Command` instance\nsrc/_derive/mod.rs:466://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can\nsrc/_derive/mod.rs:480://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can\nsrc/_derive/mod.rs:488://! `Parser`, whereas now we implement\nsrc/_derive/mod.rs:507://! struct that derived `Parser`, whereas now we implement\nsrc/_derive/mod.rs:520://!   [`Parser`][crate::Parser])\nsrc/_derive/_tutorial.rs:35://! ## Configuring the Parser\nsrc/_derive/_tutorial.rs:37://! You use derive [`Parser`][crate::Parser] to start building a parser.\nsrc/_derive/_tutorial.rs:200://! A [custom parser][TypedValueParser] can be used to improve the error messages or provide additional validation:\n",
+      "system_prompt": "You are a precise code-context reader. Answer ONLY about the provided text. Reply with a single JSON object and nothing else, using exactly these keys: {\"facts\": [], \"files\": [], \"symbols\": [], \"call_path\": [], \"answer\": \"\"}. Put integers as strings in \"answer\". Use exact identifiers and full paths copied verbatim from the text; never invent or abbreviate names. Do not include any decoding notation or alias glyphs in your answer.",
+      "used_aliases": [
+        "件",
+        "值",
+        "函",
+        "帧",
+        "引",
+        "标",
+        "码",
+        "类",
+        "组",
+        "记",
+        "试",
+        "路",
+        "链",
+        "错"
+      ]
+    },
+    "span_analysis": {
+      "gold_spans": [
+        {
+          "aliases": [],
+          "fate": "represented_by_alias",
+          "span": "src/_concepts.rs"
+        }
+      ],
+      "locator_checks": [
+        {
+          "basename": "preserved_verbatim",
+          "full_path": "represented_by_alias",
+          "path_prefix": "preserved_verbatim",
+          "prefix_aliases": []
+        }
+      ]
+    }
+  }
+]

@@ -144,6 +144,17 @@ returns **DO NOT APPLY BLIND QODEC / change notation**: encoding saves tokens
 locator with 5 stable losses — a *general* comprehension drop, so not a
 protected-spans trigger.
 
+Those five stable losses are decomposed offline in
+`analysis/l2-qwen2.5-coder-7b-failure-decomp-v1/` (built by
+`analyze_codec_failures.py` — no model/qodec/network; the canonical record is
+verified against its own SHA256SUMS first, and nothing is written back into it).
+Each loss gets a hash-verified dossier (all arms/repeats, prompt evidence, gold
+span fate, a deterministic matched control) with an evidence-linked mechanism
+label. The honest aggregate is **evidence suggests fold × alias interaction**:
+no gold span was *absent* (qodec aliased or folded the information, it did not
+delete it) — 1 count → notation-ambiguity, 2 identifier/path → aliasing, 2
+grep-file → grouping/boundary loss and a fold×alias mix.
+
 ## Go / no-go
 
 Median `incremental_qodec_gain` ≥ 10% — reported for cold **and** warm. Quality
@@ -167,7 +178,11 @@ interop/
 │   ├── metrics.py      # cold/warm token accounting
 │   ├── doctor.py       # setup receipt + strict gate
 │   └── runner.py       # execute a case's pipeline
+│   ├── failure_decomp.py  # offline codec-loss decomposition (pure; no endpoint/qodec)
+│   └── …
 ├── doctor.py run.py score.py manage.py   # thin CLIs
+├── analyze_codec_failures.py             # offline decomposition CLI → analysis/
+├── analysis/           # hash-verified failure dossiers (separate from results/)
 ├── manifests/          # corpus.json, rtk.json, codegraph.json
 ├── tests/              # unittest: manifest parsing, RTK invocation, receipt validation
 ├── tools.lock.toml     # pinned tool versions + exact invocations

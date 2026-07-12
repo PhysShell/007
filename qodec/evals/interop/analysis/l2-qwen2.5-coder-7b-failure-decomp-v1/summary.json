@@ -1,0 +1,56 @@
+{
+  "alias_losses_vs_controls": {
+    "controls": {
+      "alias_count_mean": 21.0,
+      "alias_density_mean": 5.7311
+    },
+    "losses": {
+      "alias_count_mean": 24.0,
+      "alias_density_mean": 5.3789
+    }
+  },
+  "conclusion": "evidence suggests fold × alias interaction",
+  "encoded_tokens_losses_vs_controls": {
+    "controls": 2175.0,
+    "losses": 2474.2
+  },
+  "gold_span_share_controls": {
+    "absent": 0,
+    "alias_only": 0,
+    "structurally_rewritten": 0,
+    "total_gold_spans": 5,
+    "verbatim": 5
+  },
+  "gold_span_share_losses": {
+    "absent": 0,
+    "alias_only": 3,
+    "structurally_rewritten": 0,
+    "total_gold_spans": 5,
+    "verbatim": 2
+  },
+  "integrity": {
+    "losses_with_alias_leaks": 1,
+    "losses_with_invalid_identifiers": 3,
+    "losses_with_malformed_encoded": 0
+  },
+  "losses_by_category": {
+    "facts/counts": 1,
+    "locator": 4
+  },
+  "losses_by_primary_mechanism": {
+    "grouping-or-boundary-loss": 1,
+    "identifier-or-path-aliasing": 2,
+    "mixed": 1,
+    "notation-ambiguity": 1
+  },
+  "mechanisms_in_facts_counts": [
+    "notation-ambiguity"
+  ],
+  "mechanisms_in_locator": [
+    "grouping-or-boundary-loss",
+    "identifier-or-path-aliasing",
+    "mixed"
+  ],
+  "n_losses": 5,
+  "source_run": "cpu-qwen2.5-coder-7b"
+}
