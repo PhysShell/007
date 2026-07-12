@@ -60,6 +60,7 @@ pub fn run(corpus: &Path, meter: &dyn TokenMeter, alphabet: Alphabet) -> Result<
             CodecKind::Mine,
             CodecKind::Deep,
             CodecKind::Squeeze,
+            CodecKind::Mosaic,
         ] {
             let encoded = encode(&text, kind, meter, alphabet);
             let tokens_cold = meter.count(&encoded);

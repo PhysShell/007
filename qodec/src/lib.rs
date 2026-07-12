@@ -12,6 +12,7 @@ pub mod grep;
 pub mod legend;
 pub mod meter;
 pub mod mine;
+pub mod mosaic;
 pub mod ppl;
 pub mod profile;
 pub mod rank;
@@ -50,6 +51,11 @@ pub enum CodecKind {
     /// `fold`/`grep`/`diag`/`tmpl` (text), then the better of the two
     /// miners over the result.
     Squeeze,
+    /// Measured optimal segmentation: cut the payload at line boundaries and
+    /// route each region to the cheapest structural codec (shortest path over
+    /// span candidates), then mine the whole assembled artifact. The
+    /// orchestration layer above the specialized codecs. See `mosaic.rs`.
+    Mosaic,
 }
 
 impl CodecKind {
@@ -63,6 +69,7 @@ impl CodecKind {
             "diag" => Some(Self::Diag),
             "tmpl" => Some(Self::Tmpl),
             "squeeze" => Some(Self::Squeeze),
+            "mosaic" => Some(Self::Mosaic),
             _ => None,
         }
     }
@@ -77,6 +84,7 @@ impl CodecKind {
             Self::Diag => "diag",
             Self::Tmpl => "tmpl",
             Self::Squeeze => "squeeze",
+            Self::Mosaic => "mosaic",
         }
     }
 }
@@ -155,18 +163,7 @@ pub fn encode_seeded(
             // Mine over the full stage-1 container (headers, legends, rows —
             // repeated paths inside cells are fair game); keep whichever
             // miner measures cheaper.
-            let stage2 = [
-                mine::encode(&stage1, meter, &mine_opts),
-                mine::encode(&stage1, meter, &deep_opts),
-            ]
-            .into_iter()
-            .min_by_key(|artifact| meter.count(artifact))
-            .unwrap_or_else(|| stage1.clone());
-            let best = if meter.count(&stage2) < meter.count(&stage1) {
-                stage2
-            } else {
-                stage1
-            };
+            let best = mine_over(&stage1, meter, &mine_opts, &deep_opts);
             // Final acceptance vs the *original* — mining a raw container's
             // overhead can beat stage1 while still losing to the input.
             if meter.count(&best) < meter.count(text) {
@@ -175,6 +172,45 @@ pub fn encode_seeded(
                 container::raw(text)
             }
         }
+        CodecKind::Mosaic => {
+            // Stage 1: route each region to its cheapest structural codec via a
+            // measured shortest path. Stage 2 (shared with squeeze): mine the
+            // whole assembled mosaic — repeated nested `%q1` headers and legend
+            // fragments across siblings are fair game. Final acceptance is the
+            // exact meter vs the original, so an approximate DP path can only
+            // waste probes, never bytes.
+            let stage1 = mosaic::encode(text, meter);
+            let best = mine_over(&stage1, meter, &mine_opts, &deep_opts);
+            if meter.count(&best) < meter.count(text) {
+                best
+            } else {
+                container::raw(text)
+            }
+        }
+    }
+}
+
+/// Shared stage-2 for the pipeline codecs: mine the assembled container with
+/// both miners and keep whichever measures strictly cheaper than the input
+/// container (mining a raw container's overhead can otherwise "win" while
+/// losing to the plain stage-1).
+fn mine_over(
+    stage1: &str,
+    meter: &dyn TokenMeter,
+    mine_opts: &MineOptions,
+    deep_opts: &MineOptions,
+) -> String {
+    let stage2 = [
+        mine::encode(stage1, meter, mine_opts),
+        mine::encode(stage1, meter, deep_opts),
+    ]
+    .into_iter()
+    .min_by_key(|artifact| meter.count(artifact))
+    .unwrap_or_else(|| stage1.to_string());
+    if meter.count(&stage2) < meter.count(stage1) {
+        stage2
+    } else {
+        stage1.to_string()
     }
 }
 
@@ -219,6 +255,18 @@ fn decode_container(c: &container::Container, keys: &Keys<'_>) -> Result<String>
         "grep" => grep::decode(c),
         "diag" => diag::decode(c),
         "tmpl" => tmpl::decode(c, keys.templates),
+        "mosaic" => {
+            // Each segment is a single-layer container by construction, so
+            // decode exactly one layer per segment — no `decode_all` loop,
+            // which keeps mosaic from amplifying the already-container-shaped
+            // over-unwrap caveat across many siblings.
+            let mut out = String::new();
+            for seg in mosaic::split(c)? {
+                let inner = container::parse(&seg)?;
+                out.push_str(&decode_container(&inner, keys)?);
+            }
+            Ok(out)
+        }
         "ext" => bail!(
             "artifact was encoded against an extern legend — decode with \
              --extern-legend <file> (sum={})",

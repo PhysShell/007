@@ -279,7 +279,7 @@ proptest! {
     #[test]
     fn prop_codec_roundtrip(text in "[ -~\n§¤码引']{0,400}") {
         let meter = Approx;
-        for kind in [CodecKind::Mine, CodecKind::Deep, CodecKind::Fold, CodecKind::Grep, CodecKind::Diag, CodecKind::Tmpl, CodecKind::Squeeze] {
+        for kind in [CodecKind::Mine, CodecKind::Deep, CodecKind::Fold, CodecKind::Grep, CodecKind::Diag, CodecKind::Tmpl, CodecKind::Squeeze, CodecKind::Mosaic] {
             let encoded = encode(&text, kind, &meter, Alphabet::Auto);
             let back = decode(&encoded).map_err(|e| {
                 TestCaseError::fail(format!("decode error for {}: {e}", kind.label()))

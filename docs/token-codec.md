@@ -100,6 +100,11 @@ pipeline can be applied blindly.
   narrow (top-level array, identical flat keys) with honest fallback.
 - **`squeeze`** — `toon` (JSON) or `fold` (text), then the better of the two
   miners over the result.
+- **`mosaic`** — the orchestration layer: cut the payload at line boundaries
+  and route each region to its cheapest structural codec via a shortest path
+  over span candidates, then mine the whole assembled artifact. Byte-exact,
+  fail-closed length-prefixed container. Measured verdict below — a disciplined
+  negative on today's byte-exact shelf.
 
 ## Measured results (o200k, auto alphabet, corpus in `qodec/corpus/`)
 
@@ -228,6 +233,116 @@ limited to word boundaries.** The ladder, as climbed:
    family is transport-layer compression, where the decoder is a machine and
    prompt tokens are unaffected. The boundary rule stays: **the model reads
    substitution + structure; machines read entropy codes.**
+
+## `mosaic` — measured optimal segmentation across codecs
+
+`squeeze` picks *one* structural codec for the whole payload. A mixed agent
+payload — intro prose, then a diagnostic block, then a diff, then a findings
+array, then a stack trace — has no single best codec. The idea (transplanted
+from a DP-over-formats paper, `docs/paper-transplant-map.md`): cut the payload
+into regions and route each to the codec that measures cheapest *there*.
+
+The disciplined transplant is **not** the paper's `position × codec` table
+(that assumes per-symbol cost, a constant switch price, and codecs that don't
+learn across the span — none true here, where `mine`/`tmpl` amortize a legend
+over a whole span). It is a **shortest path over span candidates**: a node is a
+boundary between lines, an edge `i → j` is the region `[i, j)` encoded by one
+codec, weighted by the *measured full token cost* of that nested artifact
+(header, legend and all). The cheapest `0..N` path is the segmentation.
+
+```text
+dp[j] = min over (i, c) of  dp[i] + meter.count(encode_c(lines[i..j])) + frame
+```
+
+Windows are geometric (`1,2,4,8,16,32,64,128` lines) and **clamp to `N`**, so
+"don't segment" (one edge `0 → N`) is always a candidate — without the clamp,
+pure powers of two cannot express a single span whose length is not itself a
+power of two, and the DP is forced to fragment even when whole-payload
+`squeeze` is optimal. The container is a length-prefixed envelope of sibling
+`%q1` artifacts; decode reads the decimal byte length, takes exactly that many
+bytes, decodes one layer, concatenates, and refuses on a bad count or trailing
+garbage:
+
+```text
+%q1 mosaic n=3
+%q1 body
+154
+<154 bytes of nested q1 artifact>827
+<827 bytes>93
+<93 bytes>
+```
+
+Because BPE is not additive (`tok(A+B) ≠ tok(A)+tok(B)`), the DP only
+*proposes*; the whole-artifact meter *decides*, exactly as `squeeze` already
+treats its candidates.
+
+### Measured verdict (o200k, corpus in `qodec/corpus/`)
+
+| sample | squeeze cold | mosaic cold | Δ |
+|---|---:|---:|---:|
+| build-log.txt | +47.0% | +44.6% | −2.4 |
+| findings.json | +46.6% | +34.1% | −12.5 |
+| git-diff.txt | +15.9% | +12.6% | −3.3 |
+| rg-output.txt | +37.2% | +34.2% | −3.0 |
+| stacktrace.txt | +26.7% | +23.7% | −3.0 |
+| prose.md | −4.2% (raw) | −4.2% (raw) | 0 |
+
+On **every** payload tried — the corpus above and hand-built mixed payloads
+(prose + diagnostics + diff + JSON + trace) — the DP declines to segment: it
+chooses a single whole-payload span (`n=1`) and mosaic lands a constant ~16
+tokens (one extra container envelope) behind `squeeze`. The kill criterion from
+the proposal — *if the best per-region split beats `squeeze` by less than ~5%,
+the router will not repay its complexity* — is met, and the DP itself is the
+proof: the oracle split is "no split."
+
+**Why the negative is robust, not a tuning miss.** Two facts collapse the
+idea on today's byte-exact shelf:
+
+1. **`tmpl` is already a per-line router.** Each line joins its own best
+   Drain-style cluster, and *one* legend is shared across the whole payload.
+   Region-level routing re-pays a legend and a `%q1` header per region to buy
+   what `tmpl` does for free with global amortization.
+2. **The stage-2 global miner is the equalizer.** `squeeze` and `mosaic` both
+   mine the whole assembled artifact; `deep`'s suffix automaton exploits
+   cross-region and intra-line repetition that segmentation actively *hides*.
+   So mosaic inherits squeeze's stage-2 win and adds only overhead.
+
+Even the one case with obvious structural headroom — a uniform-JSON island
+inside a non-JSON payload, where `squeeze` can't reach for `toon` (the whole
+isn't JSON) — does not flip it: the island is a single long line, and
+whole-payload `mine` crushes its internal repetition (`squeeze` 181 vs `mosaic`
+197 on prose + a 12-record array).
+
+### Where a win could still live (deferred rungs)
+
+The apparatus is built, fair, and byte-exact; the negative is specific to the
+current candidate set. The rungs that could change it, in order of promise:
+
+1. **Semantic segments (`toon` per region).** The real gap: an embedded
+   uniform-JSON block that only `toon`'s keys-once table captures, in a payload
+   that isn't JSON as a whole. Needs a mixed byte/semantic roundtrip contract
+   (per-segment `byte`/`sem` tracking) so mosaic can host a `sem` island inside
+   a `byte` payload — the roundtrip check must go per-segment.
+2. **Shared opcode / legend table.** v1 repeats a full `%q1` header per segment;
+   a common table across siblings would erase most of the ~16-token envelope
+   tax that currently sinks it.
+3. **Multi-objective cost.** The paper allows any cost, not just bits. Alias-
+   dense output can cost 3–5× model *wall time* (see the A/B section); a cost
+   `tokens + λ·encode_ms + μ·ppl_penalty` would let mosaic route a hot region
+   to a cheap-to-read codec even at equal tokens — a routing job the token-only
+   objective can't express.
+4. **`_mm_minpos_epu16` Viterbi.** Eight codec states fit one SSE register — a
+   cute fit, but pure premature optimization: span-candidate generation
+   dominates the DP by orders of magnitude, and there is no win to accelerate
+   yet. Scalar first, benchmark, and only then behind runtime feature
+   detection — if the idea ever earns a hot loop at all.
+
+Bottom line: mosaic is the missing *orchestration* layer, correctly built and
+honestly measured — and today's specialized codecs are strong enough
+(whole-payload `tmpl` + global `deep`) that region-level routing over byte-exact
+candidates cannot clear its own envelope. The idea's value is now a precise,
+falsifiable pointer at the semantic-segment rung, not another heuristic in the
+bag.
 
 ## Perplexity gate (`qodec ppl`) — compression = prediction, inverted
 
