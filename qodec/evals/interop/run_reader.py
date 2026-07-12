@@ -8,14 +8,16 @@ aliases and codec acceptance match what the model reads. Everything is recorded:
 request, response, parsed answer, score, per-arm local tokens, server usage,
 TTFT, latency, plus a preflight receipt and the tokenizer/model/qodec identities.
 
-Before the first request a `run-manifest.json` pins the run's identity (model,
-tokenizer, qodec, codec, tasks, L1 inputs, brief/system prompt, effective
-contract, seed, arms). On `--resume` the current environment is re-derived and
-compared field-by-field against that manifest — any mismatch aborts before a
-single request, and the canonical `preflight.json` is never overwritten (a
-resume writes `preflight-resume-N.json`). The matrix itself is crash-durable:
-records are journaled + flushed per request, so a pass-2 crash keeps pass 1 and
-`--resume` skips completed (case,question,arm,repeat) keys without duplicates.
+Before the first request a `run-manifest.json` pins the run's identity (model +
+runtime, tokenizer, qodec, codec, tasks, L1 inputs, the per-case encoded
+artifact, brief/system prompt, effective contract, endpoint, generation budget,
+seed, arms). On `--resume` the current environment is re-derived and compared
+field-by-field against that manifest — a **manifest mismatch aborts before any
+scored matrix request**. Preflight probes are allowed and saved as audit
+receipts (the canonical `preflight.json` is never overwritten; a resume writes
+`preflight-resume-N.json`). The matrix itself is crash-durable: records are
+journaled + flushed per request, so a pass-2 crash keeps pass 1 and `--resume`
+skips completed (case,question,arm,repeat) keys without duplicates.
 
     export QODEC_READER_URL=http://127.0.0.1:8000/v1
     export QODEC_READER_MODEL=<served-model-id>
@@ -41,12 +43,24 @@ def _tool_only_text(l1_run: Path, case: str) -> tuple[str, str]:
         or sorted(l1_run.glob(f"cases/{case}/*/transformed.txt"))
     if not matches:
         raise FileNotFoundError(f"no transformed.txt for case {case!r} under {l1_run}")
-    return matches[0].read_text(), matches[0].parent.name
+    return matches[0].read_text(encoding="utf-8"), matches[0].parent.name
+
+
+def _effective_contract(pf: dict) -> dict:
+    """The negotiated contract as run identity. A grammar is pinned by CONTENT
+    hash, not a bool — two different grammars are two different contracts."""
+    contract = dict(pf["effective"])            # stream, send_seed, include_usage, response_format, grammar(bool)
+    grammar = (pf.get("_effective_obj") or {}).get("grammar")
+    contract.pop("grammar", None)
+    contract["grammar_sha256"] = matrix.sha256_text(grammar) if grammar else None
+    return contract
 
 
 def _run_manifest(cfg, pf: dict, args, tasks: list[dict], brief: str, ctx: dict) -> dict:
     """The immutable run identity: everything whose change would make a resumed
-    run a different experiment. Hashes, not paths, are load-bearing."""
+    run a different experiment — including decision-relevant execution identity
+    (endpoint, generation budget, runtime) and the exact per-case qodec output
+    the model will read. Hashes, not paths, are load-bearing."""
     ti, mi = pf["tokenizer"], pf["model_identity"]
     chat_template_sha = None
     if ti.get("path"):
@@ -57,10 +71,13 @@ def _run_manifest(cfg, pf: dict, args, tasks: list[dict], brief: str, ctx: dict)
                 chat_template_sha = matrix.sha256_bytes(ct.read_bytes())
                 break
     return {
-        "manifest_version": 1,
+        "manifest_version": 2,
         "model_requested": cfg.model,
         "model_reported": pf["models"].get("model_reported"),
+        "model_source": mi.get("model_source"),
         "model_gguf_sha256": mi.get("model_file_sha256"),
+        "model_file_size_bytes": mi.get("model_file_size_bytes"),
+        "quantization": mi.get("quantization"),
         "tokenizer_sha256": ti.get("sha256"),
         "tokenizer_config_sha256": ti.get("tokenizer_config_sha256"),
         "chat_template_sha256": chat_template_sha,
@@ -69,9 +86,17 @@ def _run_manifest(cfg, pf: dict, args, tasks: list[dict], brief: str, ctx: dict)
         "tasks_snapshot_sha256": matrix.sha256_bytes(Path(args.tasks).read_bytes()),
         "l1_run": str(args.l1_run),
         "l1_tool_only_sha256": {case: matrix.sha256_text(ctx[case]["tool_only"]) for case in sorted(ctx)},
+        # The actual qodec artifact the model reads, pinned per case.
+        "encoded_artifact_sha256": {case: matrix.sha256_text(ctx[case]["artifact"]) for case in sorted(ctx)},
         "notation_brief_sha256": matrix.sha256_text(brief),
         "system_prompt_sha256": matrix.sha256_text(reader_tasks.SYSTEM),
-        "effective_contract": pf["effective"],
+        "effective_contract": _effective_contract(pf),
+        # Decision-relevant execution identity.
+        "reader_url": cfg.url,
+        "max_tokens": cfg.max_tokens,
+        "repeats": args.repeats,
+        "runtime": {"llama_cpp_python_version": mi.get("llama_cpp_python_version"),
+                    "n_ctx": mi.get("n_ctx"), "threads": mi.get("threads"), "batch": mi.get("batch")},
         "determinism": {"temperature": 0, "seed": pf["determinism"].get("seed_sent")},
         "arms": list(ARMS),
     }

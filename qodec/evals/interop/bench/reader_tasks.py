@@ -180,7 +180,7 @@ def score_question(q: dict, answer: dict | None, *, source_text: str,
 
 
 def load_tasks(path) -> list[dict]:
-    obj = json.loads(path.read_text())
+    obj = json.loads(path.read_text(encoding="utf-8"))
     out = []
     for c in obj["cases"]:
         for q in c["questions"]:

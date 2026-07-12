@@ -15,16 +15,21 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from bench import matrix  # noqa: E402
+from bench import durability, matrix  # noqa: E402
 
 TASKS = [{"case": "c", "id": f"q{i}", "category": "locator", "q": "where?"} for i in range(4)]
 MAN = {
-    "manifest_version": 1,
+    "manifest_version": 2,
     "model_requested": "m", "model_reported": "m",
-    "model_gguf_sha256": "a" * 64, "tokenizer_sha256": "b" * 64,
-    "codec": "squeeze", "tasks_snapshot_sha256": "c" * 64,
+    "model_source": "repo@rev", "model_gguf_sha256": "a" * 64,
+    "model_file_size_bytes": 123, "quantization": "q4_k_m",
+    "tokenizer_sha256": "b" * 64, "codec": "squeeze", "tasks_snapshot_sha256": "c" * 64,
+    "encoded_artifact_sha256": {"c": "e" * 64},
     "effective_contract": {"stream": False, "send_seed": True,
-                           "response_format": {"type": "json_object"}, "grammar": False},
+                           "response_format": {"type": "json_object"}, "grammar_sha256": None},
+    "reader_url": "http://127.0.0.1:8000/v1",
+    "max_tokens": 128, "repeats": 3,
+    "runtime": {"llama_cpp_python_version": "0.3.34", "n_ctx": 8192, "threads": 8, "batch": 512},
     "determinism": {"temperature": 0, "seed": 0},
     "arms": list(matrix.ARMS),
 }
@@ -71,7 +76,8 @@ class MatrixResume(unittest.TestCase):
         # Pass 1 finished and its receipt was written before pass 2 started.
         receipt = json.loads((self.d / "pass1-complete.json").read_text())
         self.assertEqual((receipt["expected"], receipt["actual"], receipt["duplicates"]), (12, 12, 0))
-        self.assertEqual(receipt["missing"], [])
+        self.assertEqual((receipt["missing"], receipt["n_primary"]), ([], 12))
+        self.assertEqual(len(receipt["records_prefix_sha256"]), 64)
         self.assertEqual(sum(1 for k in calls1 if k[3] == 0), 12)   # 12 primary ran
         self.assertEqual(sum(1 for k in calls1 if k[3] > 0), 2)     # 2 pass-2 ran, then crash
 
@@ -97,13 +103,21 @@ class MatrixResume(unittest.TestCase):
     def test_resume_refuses_changed_identity_before_any_request(self):
         matrix.run_matrix(self.d, manifest=MAN, tasks=TASKS,
                           run_one=make_reader([]), resume=False, repeats=1)
-        nested = {"effective_contract": {"stream": True, "send_seed": True,
-                                         "response_format": {"type": "json_object"}, "grammar": False}}
+        base_contract = MAN["effective_contract"]
+        stream_changed = {**base_contract, "stream": True}
+        grammar_changed = {**base_contract, "grammar_sha256": "aa" * 32}  # different grammar, same shape
+        n_ctx_changed = {**MAN["runtime"], "n_ctx": 4096}
         for label, mutate in (("model", {"model_gguf_sha256": "d" * 64}),
                               ("tokenizer", {"tokenizer_sha256": "d" * 64}),
                               ("tasks", {"tasks_snapshot_sha256": "d" * 64}),
                               ("codec", {"codec": "mosaic"}),
-                              ("nested contract", nested)):
+                              ("max_tokens", {"max_tokens": 256}),
+                              ("repeats", {"repeats": 5}),
+                              ("reader_url", {"reader_url": "http://127.0.0.1:9000/v1"}),
+                              ("encoded artifact", {"encoded_artifact_sha256": {"c": "f" * 64}}),
+                              ("runtime n_ctx", {"runtime": n_ctx_changed}),
+                              ("effective stream", {"effective_contract": stream_changed}),
+                              ("grammar content", {"effective_contract": grammar_changed})):
             calls = []
             with self.assertRaises(matrix.ManifestMismatch):
                 matrix.run_matrix(self.d, manifest={**MAN, **mutate}, tasks=TASKS,
@@ -124,6 +138,48 @@ class MatrixResume(unittest.TestCase):
         with self.assertRaises(matrix.DirectoryPolicyError):
             matrix.run_matrix(self.d, manifest=MAN, tasks=TASKS,
                               run_one=make_reader([]), resume=True, repeats=1)
+
+
+class Pass1DurablePrefix(unittest.TestCase):
+    """The pass-1 receipt pins a power-loss-durable prefix; a resume must prove
+    that prefix is intact, not regenerate a truncated/corrupted journal."""
+
+    def setUp(self):
+        self.d = Path(tempfile.mkdtemp()) / "run"
+
+    def _fresh(self):
+        # 4 unique x 3 arms = 12 primary records — deliberately NOT a multiple of
+        # RecordLog.sync_every (5), so sync() is what makes the receipt durable.
+        matrix.run_matrix(self.d, manifest=MAN, tasks=TASKS,
+                          run_one=make_reader([]), resume=False, repeats=1)
+
+    def test_receipt_pins_full_durable_prefix(self):
+        self._fresh()
+        receipt = json.loads((self.d / "pass1-complete.json").read_text())
+        self.assertEqual(receipt["records_prefix_bytes"], (self.d / "records.jsonl").stat().st_size)
+        self.assertEqual(receipt["n_primary"], 12)
+
+    def test_resume_refuses_truncated_prefix(self):
+        self._fresh()
+        data = (self.d / "records.jsonl").read_bytes()
+        (self.d / "records.jsonl").write_bytes(data[: len(data) // 2])   # lose pass-1 bytes
+        calls = []
+        with self.assertRaises(durability.JournalCorruption):
+            matrix.run_matrix(self.d, manifest=MAN, tasks=TASKS,
+                              run_one=make_reader(calls), resume=True, repeats=1)
+        self.assertEqual(calls, [], "a shortened pass-1 journal must abort, not be regenerated")
+
+    def test_resume_refuses_corrupted_prefix(self):
+        self._fresh()
+        data = (self.d / "records.jsonl").read_bytes()
+        corrupt = data.replace(b'"question": "q1"', b'"question": "qZ"', 1)   # same length, valid JSON
+        self.assertNotEqual(corrupt, data)
+        (self.d / "records.jsonl").write_bytes(corrupt)
+        calls = []
+        with self.assertRaises(durability.JournalCorruption):
+            matrix.run_matrix(self.d, manifest=MAN, tasks=TASKS,
+                              run_one=make_reader(calls), resume=True, repeats=1)
+        self.assertEqual(calls, [])
 
 
 class DiffManifest(unittest.TestCase):

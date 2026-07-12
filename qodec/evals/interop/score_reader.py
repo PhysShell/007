@@ -218,8 +218,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("run_dir", type=Path)
     args = ap.parse_args()
-    meta = json.loads((args.run_dir / "meta.json").read_text())
-    recs = [json.loads(l) for l in (args.run_dir / "records.jsonl").read_text().splitlines() if l.strip()]
+    meta = json.loads((args.run_dir / "meta.json").read_text(encoding="utf-8"))
+    recs = [json.loads(l) for l in (args.run_dir / "records.jsonl").read_text(encoding="utf-8").splitlines() if l.strip()]
     print(render(meta, analyze(meta, recs)))
     return 0
 

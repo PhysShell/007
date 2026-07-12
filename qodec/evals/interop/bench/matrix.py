@@ -23,6 +23,7 @@ import json
 from pathlib import Path
 
 from . import durability
+from .durability import JournalCorruption   # re-exported: receipt/journal corruption
 
 ARMS = ["raw", "raw+brief", "encoded+brief"]
 
@@ -156,21 +157,56 @@ def _verify_pass1(records: list[dict], tasks: list[dict], arms) -> int:
     return len(got)
 
 
-def _write_pass1_receipt(run_dir: Path, tasks: list[dict], arms, n_primary: int) -> None:
-    man = json.loads((run_dir / MANIFEST).read_text())
+def _write_pass1_receipt(run_dir: Path, tasks: list[dict], arms, n_primary: int,
+                         log: durability.RecordLog) -> None:
+    # Force the journal to a known-durable state, then pin the exact byte length
+    # and hash of that durable prefix. Pass 2 only ever appends AFTER this prefix,
+    # so on resume the receipt lets us prove pass 1's bytes are intact.
+    log.sync()
+    data = (run_dir / RECORDS).read_bytes()
+    man_bytes = (run_dir / MANIFEST).read_bytes()
+    man = json.loads(man_bytes.decode("utf-8"))
     receipt = {
         "pass1_complete": True,
         "expected": len(tasks) * len(arms),
         "actual": n_primary,
+        "n_primary": n_primary,
         "duplicates": 0,
         "missing": [],
         "unique_questions": len(tasks),
         "arms": list(arms),
-        "records_sha256": sha256_bytes((run_dir / RECORDS).read_bytes()),
+        "records_prefix_bytes": len(data),
+        "records_prefix_sha256": sha256_bytes(data),
         "tasks_snapshot_sha256": man.get("tasks_snapshot_sha256"),
-        "manifest_sha256": sha256_bytes((run_dir / MANIFEST).read_bytes()),
+        "manifest_sha256": sha256_bytes(man_bytes),
     }
     durability.atomic_write(run_dir / PASS1, json.dumps(receipt, indent=2) + "\n")
+
+
+def _verify_pass1_receipt(run_dir: Path, tasks: list[dict], arms,
+                          journal_bytes: bytes, loaded_records: list[dict]) -> None:
+    """On resume with a pass-1 receipt: prove the journal still contains exactly
+    the durable prefix the receipt pinned, BEFORE re-running anything. Refuses a
+    truncated or corrupted pass-1 journal instead of silently regenerating it."""
+    receipt = json.loads((run_dir / PASS1).read_text(encoding="utf-8"))
+    pb, ps = receipt.get("records_prefix_bytes"), receipt.get("records_prefix_sha256")
+    if pb is None or ps is None:
+        raise JournalCorruption("pass-1 receipt lacks durable-prefix fields (records_prefix_*)")
+    if len(journal_bytes) < pb:
+        raise JournalCorruption(
+            f"journal ({len(journal_bytes)} B) shorter than the pass-1 durable prefix ({pb} B)")
+    if sha256_bytes(journal_bytes[:pb]) != ps:
+        raise JournalCorruption("pass-1 durable-prefix hash mismatch — journal truncated or corrupted")
+    got = sorted((r["case"], r["question"], r["arm"]) for r in loaded_records if r["repeat"] == 0)
+    expected = sorted({(q["case"], q["id"], arm) for q in tasks for arm in arms})
+    if got != expected:
+        raise JournalCorruption("pass-1 primary key set no longer matches the receipt")
+    man_bytes = (run_dir / MANIFEST).read_bytes()
+    if receipt.get("manifest_sha256") != sha256_bytes(man_bytes):
+        raise JournalCorruption("run manifest changed since the pass-1 receipt")
+    man = json.loads(man_bytes.decode("utf-8"))
+    if receipt.get("tasks_snapshot_sha256") != man.get("tasks_snapshot_sha256"):
+        raise JournalCorruption("tasks snapshot changed since the pass-1 receipt")
 
 
 def run_matrix(run_dir, *, manifest: dict, tasks: list[dict], run_one,
@@ -181,8 +217,9 @@ def run_matrix(run_dir, *, manifest: dict, tasks: list[dict], run_one,
     assert_dir_policy(run_dir, resume)
 
     manifest_path = run_dir / MANIFEST
+    pass1_path = run_dir / PASS1
     if resume:
-        stored = json.loads(manifest_path.read_text())
+        stored = json.loads(manifest_path.read_text(encoding="utf-8"))
         mismatches = diff_manifest(stored, manifest)
         if mismatches:
             raise ManifestMismatch(mismatches)   # aborts before any request
@@ -190,9 +227,17 @@ def run_matrix(run_dir, *, manifest: dict, tasks: list[dict], run_one,
         run_dir.mkdir(parents=True, exist_ok=True)
         durability.atomic_write(manifest_path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
-    log = durability.RecordLog(run_dir / RECORDS)
+    records_path = run_dir / RECORDS
+    log = durability.RecordLog(records_path)
     if resume:
         log.load_existing()
+        # If pass 1 already completed, verify its pinned durable prefix is still
+        # intact before touching anything — a truncated/corrupted pass-1 journal
+        # must abort, not be silently regenerated.
+        if pass1_path.exists():
+            _verify_pass1_receipt(run_dir, tasks, arms,
+                                  journal_bytes=records_path.read_bytes(),
+                                  loaded_records=log.records)
     log.open()
 
     by_case = _group(tasks)
@@ -233,8 +278,8 @@ def run_matrix(run_dir, *, manifest: dict, tasks: list[dict], run_one,
     # but write the receipt only once — on resume its records.jsonl hash would
     # include pass-2 lines and no longer describe pass-1 completion.
     n_primary = _verify_pass1(log.records, tasks, arms)
-    if not (run_dir / PASS1).exists():
-        _write_pass1_receipt(run_dir, tasks, arms, n_primary)
+    if not pass1_path.exists():
+        _write_pass1_receipt(run_dir, tasks, arms, n_primary, log)
 
     # Flag from the primary results, then pass 2 (repeats of flagged only).
     # Resolve the flagged keys back to the FULL task dicts (flagging only carries

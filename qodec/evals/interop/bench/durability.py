@@ -53,7 +53,7 @@ def atomic_write(path: Path, text: str, *, fsync: bool = True) -> None:
     `fsync=True` the temp file's bytes and the parent-directory rename are
     flushed to disk, making the write durable against power loss too."""
     tmp = path.with_name(path.name + ".tmp")
-    with tmp.open("w") as fh:
+    with tmp.open("w", encoding="utf-8", newline="\n") as fh:
         fh.write(text)
         fh.flush()
         if fsync:
@@ -122,10 +122,21 @@ class RecordLog:
                 fh.truncate(cut)
 
     def open(self) -> None:
-        self._fh = self.path.open("a")
+        self._fh = self.path.open("a", encoding="utf-8", newline="\n")
 
     def has(self, key: tuple) -> bool:
         return key in self.completed
+
+    def sync(self) -> None:
+        """Force flush + fsync now, regardless of `sync_every`, so the journal on
+        disk is a known-durable prefix. Called before a pass-1 receipt pins the
+        prefix bytes + hash, so the receipt describes bytes that survive power
+        loss — not just OS buffers."""
+        if self._fh is None:
+            raise RuntimeError("RecordLog.open() not called")
+        self._fh.flush()
+        os.fsync(self._fh.fileno())
+        self._since = 0
 
     def append(self, r: dict) -> None:
         if self._fh is None:

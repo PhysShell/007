@@ -243,4 +243,4 @@ def effective_from(pf: dict) -> reader.Effective:
 
 
 def save(result: dict, path: Path) -> None:
-    path.write_text(json.dumps(result, indent=2) + "\n")
+    path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
