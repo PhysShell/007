@@ -1,0 +1,63 @@
+# tools.lock.toml — the optimizers the bench layers qodec after.
+#
+# doctor.py verifies each is present and answering before a lane that needs it
+# runs. `invoke` records the EXACT command form the adapter uses, so a run is
+# reproducible and the "which switches were actually on" question has a written
+# answer (this matters most for Headroom: the bench uses the library API with
+# memory/learning/output-shaping OFF, never `headroom wrap`, which would start
+# a proxy and quietly benchmark Headroom+RTK+hidden switches).
+#
+# `version` / `rev` are left unset until the tool is actually installed in your
+# environment — pin them then so the receipt is honest, not aspirational.
+
+[qodec]
+# The one hard requirement. Built from this crate; the bench shells the binary.
+build = "cargo build --release"
+binary = "target/release/qodec"
+encode = "qodec encode --json --passthrough-on-no-gain --codec squeeze --meter o200k"
+decode = "qodec decode"
+version = "unset — `qodec --version` once a version flag exists"
+
+[graphify]
+present = false
+version = "unset"
+# Builds graph.json + GRAPH_REPORT.md, then answers query/path/explain.
+doctor = ["graphify --version", "graphify <repo>", "test -f graphify-out/graph.json", "test -f graphify-out/GRAPH_REPORT.md"]
+invoke = "graphify query <query>   # cwd = repo"
+
+[codegraph]
+present = false
+version = "unset"
+# `codegraph init` builds the full graph; a separate `index` is not needed.
+doctor = ["codegraph --version", "codegraph init", "codegraph status", "test -d .codegraph", "no pending sync"]
+invoke = "codegraph explore <target>   # cwd = repo"
+
+[rtk]
+present = false
+version = "unset"
+# The hook does NOT intercept built-in Read/Grep/Glob — call filters explicitly.
+doctor = ["rtk --version", "rtk git status", "rtk grep <pattern>"]
+invoke = "rtk <kind> --stdin   # kind ∈ {cargo, test, git, grep, read, ...}"
+
+[headroom]
+present = false
+version = "unset"
+# Library API only. Never `headroom wrap` in the bench.
+doctor = ["python -c 'import headroom'", "headroom doctor", "headroom perf"]
+invoke = "headroom.compress(messages, memory=False, learning=False, output_shaping=False)"
+
+[fastcontext]
+present = false
+version = "unset"
+doctor = ["python -c 'import fastcontext'"]
+invoke = "fastcontext.brief(text)   # + qodec-encoded evidence appendix"
+
+[model]
+# Level 2/3 reader/agent. Fixed everything so raw vs qodec is the only variable.
+present = false
+served_via = "OpenAI-compatible endpoint (vLLM / Colibrì)"
+sweep_model = "unset — e.g. FastContext-1.0-4B-SFT (cheap) or Qwen3-Coder-30B-A3B (reader)"
+audit_model = "unset — e.g. GLM-5.2 via Colibrì (narrow confirmation set only)"
+tokenizer_id = "unset — MUST match the served model; o200k/cl100k are proxies"
+temperature = 0.0
+max_output = "unset"

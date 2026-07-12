@@ -550,3 +550,29 @@ hostile input) through the actual `o7 judge` binary.
    in the legend's notation and expand deterministically outside the model.
    Output tokens cost ~5× input; this is where the same trick pays most, and
    nothing about the container is input-specific.
+5. **Interop bench** — qodec does not replace Graphify, CodeGraph, RTK,
+   Headroom or FastContext; it may be the last, tokenizer-aware, lossless layer
+   *after* whichever of them selected or shortened the context. The question is
+   whether residual, tokenizer-visible redundancy survives each of them, and
+   whether removing it keeps comprehension and actionability. This is a
+   *separate* evaluation harness (`qodec/evals/interop/`), reproducible-
+   experiment-first, not tool code stuffed into the crate. Three rungs: L1
+   artifact benchmark (tokens/time, no model — `run.py`, working over the
+   corpus today), L2 reader (one model, one prompt, raw vs qodec, JSON-scored),
+   L3 agent (tool choice → patch → tests). Two prerequisites the doc surfaced:
+   - *Done* — **the adapter/passthrough contract** (`src/adapter.rs`,
+     `encode --json --passthrough-on-no-gain`). `encode` always wraps, so blind
+     application after an already-compressing optimizer taxed dense output the
+     ~13-token container header (the −4.2% on unique prose). The adapter
+     compares artifact vs input under the live meter and passes the original
+     through untouched when there is no gain, so qodec can end any lane and
+     never worsen what reached it. The bench calls qodec through this envelope.
+   - *Next* — **protected spans** (`--protect markdown-code`,
+     `--protect-json-pointer /tool_call/id`, `--protect-regex …`): mining that
+     excludes code blocks, paths, symbol names, finding IDs, tool-call args,
+     Headroom retrieval handles and JSON control fields from candidate
+     discovery *and* substitution, leaving them verbatim in place (decode
+     unchanged, roundtrip still byte-exact). A localized but careful `mine.rs`
+     change; it gates the bench's third arm (`no qodec` / `blind qodec` /
+     `protected qodec`) and is the suspected production variant for CodeGraph
+     and Headroom output.
