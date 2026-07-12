@@ -228,10 +228,16 @@
     "kind": "loss",
     "mechanism": {
       "count_analysis": {
-        "fold_markers_present": true,
+        "competing_count_line": "7 Warning(s)",
+        "competing_count_value": "7",
         "gold_count": "9",
         "gold_count_line_in_artifact": "[warn] 9 warnings (3 unique)",
-        "gold_count_preserved_verbatim": true
+        "gold_count_preserved_verbatim": true,
+        "repetition_marker_lines": [
+          "[×5]   CSC : warning CS8618: Non-nullable property 'CurrentUser' must contain a non-null value when ex...",
+          "[×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could..."
+        ],
+        "repetition_markers_present": true
       },
       "evidence": [
         {
@@ -240,12 +246,17 @@
           "value": "9"
         },
         {
-          "kind": "competing_count_present_verbatim",
-          "line": "[×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could...",
+          "kind": "competing_count_present",
+          "line": "7 Warning(s)",
           "value": "7"
         },
         {
-          "kind": "fold_markers_present_in_artifact"
+          "kind": "repetition_grouping_present",
+          "lines": [
+            "[×5]   CSC : warning CS8618: Non-nullable property 'CurrentUser' must contain a non-null value when ex...",
+            "[×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could..."
+          ],
+          "note": "counted items folded under [×N] markers — grouping evidence, not the source of the wrong count"
         }
       ],
       "primary_mechanism": "notation-ambiguity",
@@ -268,10 +279,16 @@
     },
     "span_analysis": {
       "count_checks": {
-        "fold_markers_present": true,
+        "competing_count_line": "7 Warning(s)",
+        "competing_count_value": "7",
         "gold_count": "9",
         "gold_count_line_in_artifact": "[warn] 9 warnings (3 unique)",
-        "gold_count_preserved_verbatim": true
+        "gold_count_preserved_verbatim": true,
+        "repetition_marker_lines": [
+          "[×5]   CSC : warning CS8618: Non-nullable property 'CurrentUser' must contain a non-null value when ex...",
+          "[×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could..."
+        ],
+        "repetition_markers_present": true
       },
       "gold_spans": [
         {
@@ -538,8 +555,8 @@
     "mechanism": {
       "evidence": [
         {
-          "candidate_aliases": [
-            "引"
+          "aliases": [
+            "键"
           ],
           "kind": "gold_span_represented_only_by_alias",
           "span": "clap_builder/src/builder/value_parser.rs"
@@ -653,7 +670,7 @@
       "gold_spans": [
         {
           "aliases": [
-            "引"
+            "键"
           ],
           "fate": "represented_by_alias",
           "span": "clap_builder/src/builder/value_parser.rs"
@@ -663,9 +680,9 @@
         {
           "basename": "preserved_verbatim",
           "full_path": "represented_by_alias",
-          "path_prefix": "preserved_verbatim",
+          "path_prefix": "represented_by_alias",
           "prefix_aliases": [
-            "引"
+            "键"
           ]
         }
       ]
@@ -966,9 +983,10 @@
     "mechanism": {
       "evidence": [
         {
-          "alias": "错",
-          "kind": "gold_identifier_also_aliased",
-          "phrase": "ValueParser",
+          "aliases": [
+            "错"
+          ],
+          "kind": "gold_span_represented_only_by_alias",
           "span": "ValueParser"
         },
         {
@@ -1080,15 +1098,17 @@
     "span_analysis": {
       "gold_spans": [
         {
-          "aliases": [],
-          "fate": "preserved_verbatim",
+          "aliases": [
+            "错"
+          ],
+          "fate": "represented_by_alias",
           "span": "ValueParser"
         }
       ],
       "locator_checks": [
         {
-          "basename": "preserved_verbatim",
-          "full_path": "preserved_verbatim",
+          "basename": "represented_by_alias",
+          "full_path": "represented_by_alias",
           "path_prefix": "not_applicable",
           "prefix_aliases": []
         }
@@ -1387,7 +1407,7 @@
     "mechanism": {
       "evidence": [
         {
-          "candidate_aliases": [
+          "aliases": [
             "错"
           ],
           "kind": "gold_path_represented_by_alias",
@@ -1739,7 +1759,9 @@
     "mechanism": {
       "evidence": [
         {
-          "candidate_aliases": [],
+          "aliases": [
+            "帧"
+          ],
           "kind": "gold_path_represented_by_alias",
           "span": "src/_concepts.rs"
         },
@@ -1797,7 +1819,9 @@
     "span_analysis": {
       "gold_spans": [
         {
-          "aliases": [],
+          "aliases": [
+            "帧"
+          ],
           "fate": "represented_by_alias",
           "span": "src/_concepts.rs"
         }

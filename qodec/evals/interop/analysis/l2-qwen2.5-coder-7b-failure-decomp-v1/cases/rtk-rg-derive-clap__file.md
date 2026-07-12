@@ -12,7 +12,7 @@
   {
     "kind": "gold_path_represented_by_alias",
     "span": "src/_derive/mod.rs",
-    "candidate_aliases": [
+    "aliases": [
       "错"
     ]
   },

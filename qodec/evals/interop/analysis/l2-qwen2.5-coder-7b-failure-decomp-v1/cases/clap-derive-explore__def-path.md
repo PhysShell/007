@@ -12,8 +12,8 @@
   {
     "kind": "gold_span_represented_only_by_alias",
     "span": "clap_builder/src/builder/value_parser.rs",
-    "candidate_aliases": [
-      "引"
+    "aliases": [
+      "键"
     ]
   },
   {
@@ -40,9 +40,9 @@
 | encoded+brief | 2 | False | True | False | 0 | 1 | 4230 | 37 | e77f818645 |
 
 ## gold span fate
-- `clap_builder/src/builder/value_parser.rs` → **represented_by_alias**  aliases=['引']
+- `clap_builder/src/builder/value_parser.rs` → **represented_by_alias**  aliases=['键']
 
-locator checks: [{"full_path": "represented_by_alias", "basename": "preserved_verbatim", "path_prefix": "preserved_verbatim", "prefix_aliases": ["引"]}]
+locator checks: [{"full_path": "represented_by_alias", "basename": "preserved_verbatim", "path_prefix": "represented_by_alias", "prefix_aliases": ["键"]}]
 
 ## alias dictionary (used)
 ```

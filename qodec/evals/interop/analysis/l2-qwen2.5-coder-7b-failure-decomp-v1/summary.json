@@ -23,10 +23,10 @@
   },
   "gold_span_share_losses": {
     "absent": 0,
-    "alias_only": 3,
+    "alias_only": 4,
     "structurally_rewritten": 0,
     "total_gold_spans": 5,
-    "verbatim": 2
+    "verbatim": 1
   },
   "integrity": {
     "losses_with_alias_leaks": 1,

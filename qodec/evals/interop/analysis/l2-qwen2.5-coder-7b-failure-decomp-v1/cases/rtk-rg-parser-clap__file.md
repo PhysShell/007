@@ -12,7 +12,9 @@
   {
     "kind": "gold_path_represented_by_alias",
     "span": "src/_concepts.rs",
-    "candidate_aliases": []
+    "aliases": [
+      "帧"
+    ]
   },
   {
     "kind": "model_answer_is_a_different_present_file_marker",
@@ -38,7 +40,7 @@
 | encoded+brief | 2 | False | True | False | 0 | 0 | 1016 | 33 | 57b0b1d2e0 |
 
 ## gold span fate
-- `src/_concepts.rs` → **represented_by_alias**
+- `src/_concepts.rs` → **represented_by_alias**  aliases=['帧']
 
 locator checks: [{"full_path": "represented_by_alias", "basename": "preserved_verbatim", "path_prefix": "preserved_verbatim", "prefix_aliases": []}]
 

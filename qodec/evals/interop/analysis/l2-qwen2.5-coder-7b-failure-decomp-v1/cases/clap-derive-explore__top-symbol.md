@@ -10,10 +10,11 @@
 ```json
 [
   {
-    "kind": "gold_identifier_also_aliased",
+    "kind": "gold_span_represented_only_by_alias",
     "span": "ValueParser",
-    "alias": "错",
-    "phrase": "ValueParser"
+    "aliases": [
+      "错"
+    ]
   },
   {
     "kind": "alias_glyph_leaked_in_answer",
@@ -39,9 +40,9 @@
 | encoded+brief | 2 | False | True | False | 1 | 1 | 4228 | 33 | dc7364881a |
 
 ## gold span fate
-- `ValueParser` → **preserved_verbatim**
+- `ValueParser` → **represented_by_alias**  aliases=['错']
 
-locator checks: [{"full_path": "preserved_verbatim", "basename": "preserved_verbatim", "path_prefix": "not_applicable", "prefix_aliases": []}]
+locator checks: [{"full_path": "represented_by_alias", "basename": "represented_by_alias", "path_prefix": "not_applicable", "prefix_aliases": []}]
 
 ## alias dictionary (used)
 ```

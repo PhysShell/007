@@ -101,11 +101,28 @@ def _render_readme(summary: dict, controls_map: list, loss_dossiers: list) -> st
     out += ["", "## matched controls (deterministic selection)", "",
             "| loss | control | same cat | same case | Δtokens | Δalias# | Δdensity |",
             "|------|---------|----------|-----------|---------|---------|----------|"]
+    well, weak = [], []
     for c in controls_map:
         s = c["selection_score"]
-        out.append(f"| {c['loss']['case']}/{c['loss']['question_id']} | "
-                   f"{c['control']['case']}/{c['control']['question_id']} | {s['same_category']} | "
-                   f"{s['same_case']} | {s['encoded_token_diff']} | {s['alias_count_diff']} | {s['alias_density_diff']} |")
+        row = (f"| {c['loss']['case']}/{c['loss']['question_id']} | "
+               f"{c['control']['case']}/{c['control']['question_id']} | {s['same_category']} | "
+               f"{s['same_case']} | {s['encoded_token_diff']} | {s['alias_count_diff']} | {s['alias_density_diff']} |")
+        out.append(row)
+        (well if s["same_case"] and s["encoded_token_diff"] <= 50 else weak).append(
+            f"{c['loss']['case']}/{c['loss']['question_id']}")
+    out += ["",
+            "**Control quality (read before trusting the aggregate):** the first "
+            "three pairs are well matched (same case, ~0 token/alias delta). The two "
+            "grep-file pairs are only **weakly matched** — no both-correct locator "
+            "exists in their own case, so the control is a cross-case grep question "
+            "with a large encoded-token gap. Treat those two rows as illustrative, "
+            "not tight controls.",
+            "",
+            "The aggregate alias-count / alias-density comparison below is "
+            "**descriptive, not causal**: it summarises what the artifacts look like, "
+            "it does not by itself attribute the losses. Causation is carried only by "
+            "the per-loss `mechanism.evidence`, which ties a specific transform to a "
+            "specific gold-bearing span."]
     out += ["", "## summary", "```json", json.dumps(summary, indent=2, ensure_ascii=False), "```", ""]
     out.append("Files: `summary.json`, `losses.json`, `controls.json`, `cases/`. "
                "Integrity: `SHA256SUMS`.")

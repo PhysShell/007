@@ -17,7 +17,7 @@
 ## gold span fate
 - `3` → **preserved_verbatim**
 
-count checks: {"gold_count": "3", "gold_count_line_in_artifact": "[error] 3 errors (3 unique)", "gold_count_preserved_verbatim": true, "fold_markers_present": true}
+count checks: {"gold_count": "3", "gold_count_line_in_artifact": "[error] 3 errors (3 unique)", "gold_count_preserved_verbatim": true, "competing_count_line": null, "competing_count_value": null, "repetition_markers_present": true, "repetition_marker_lines": ["[×5]   CSC : warning CS8618: Non-nullable property 'CurrentUser' must contain a non-null value when ex...", "[×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could..."]}
 
 ## alias dictionary (used)
 ```

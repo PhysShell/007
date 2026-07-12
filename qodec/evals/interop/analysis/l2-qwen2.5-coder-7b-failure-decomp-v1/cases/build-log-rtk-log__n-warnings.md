@@ -15,12 +15,17 @@
     "line": "[warn] 9 warnings (3 unique)"
   },
   {
-    "kind": "competing_count_present_verbatim",
+    "kind": "competing_count_present",
     "value": "7",
-    "line": "[×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could..."
+    "line": "7 Warning(s)"
   },
   {
-    "kind": "fold_markers_present_in_artifact"
+    "kind": "repetition_grouping_present",
+    "lines": [
+      "[×5]   CSC : warning CS8618: Non-nullable property 'CurrentUser' must contain a non-null value when ex...",
+      "[×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could..."
+    ],
+    "note": "counted items folded under [×N] markers — grouping evidence, not the source of the wrong count"
   }
 ]
 ```
@@ -42,7 +47,7 @@
 ## gold span fate
 - `9` → **preserved_verbatim**
 
-count checks: {"gold_count": "9", "gold_count_line_in_artifact": "[warn] 9 warnings (3 unique)", "gold_count_preserved_verbatim": true, "fold_markers_present": true}
+count checks: {"gold_count": "9", "gold_count_line_in_artifact": "[warn] 9 warnings (3 unique)", "gold_count_preserved_verbatim": true, "competing_count_line": "7 Warning(s)", "competing_count_value": "7", "repetition_markers_present": true, "repetition_marker_lines": ["[×5]   CSC : warning CS8618: Non-nullable property 'CurrentUser' must contain a non-null value when ex...", "[×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could..."]}
 
 ## alias dictionary (used)
 ```

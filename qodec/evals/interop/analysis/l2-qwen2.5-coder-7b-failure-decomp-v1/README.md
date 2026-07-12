@@ -26,6 +26,10 @@ This decomposes *why* the five stable codec losses happen; it does not revisit t
 | rtk-rg-derive-clap/file | rtk-rg-parser-clap/symbol | True | False | 1304 | 9 | 6.1369 |
 | rtk-rg-parser-clap/file | rg-output-rtk-grep/method | True | False | 198 | 6 | 4.3759 |
 
+**Control quality (read before trusting the aggregate):** the first three pairs are well matched (same case, ~0 token/alias delta). The two grep-file pairs are only **weakly matched** — no both-correct locator exists in their own case, so the control is a cross-case grep question with a large encoded-token gap. Treat those two rows as illustrative, not tight controls.
+
+The aggregate alias-count / alias-density comparison below is **descriptive, not causal**: it summarises what the artifacts look like, it does not by itself attribute the losses. Causation is carried only by the per-loss `mechanism.evidence`, which ties a specific transform to a specific gold-bearing span.
+
 ## summary
 ```json
 {
@@ -65,8 +69,8 @@ This decomposes *why* the five stable codec losses happen; it does not revisit t
   },
   "gold_span_share_losses": {
     "total_gold_spans": 5,
-    "verbatim": 2,
-    "alias_only": 3,
+    "verbatim": 1,
+    "alias_only": 4,
     "structurally_rewritten": 0,
     "absent": 0
   },

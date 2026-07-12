@@ -271,19 +271,58 @@ def answer_value(rec: dict, task: dict):
 
 
 # --------------------------------------------------------------------------- #
-# Gold-span fate
+# Gold-span fate — via traceable alias provenance
 # --------------------------------------------------------------------------- #
 
 FATES = ("preserved_verbatim", "represented_by_alias", "structurally_rewritten",
          "absent_from_encoded_artifact", "ambiguous_after_encoding", "not_applicable")
 
+# Structural marker glyphs a codec adds around content (grep file markers, etc.);
+# normalized away so a path's content is contiguous and its provenance is the
+# alias that carried the *content*, not the marker.
+STRUCT_MARKERS = ("»",)
 
-def _aliases_covering(span: str, legend: dict) -> list[str]:
-    """Candidate aliases whose (non-trivial) phrase is a substring of the span —
-    the aliases through which the span is reconstructed in the body. Evidence,
-    not proof of exact position, so it may list more than the minimal set."""
-    return [a for a, phrase in sorted(legend.items())
-            if len(phrase.strip()) >= 2 and phrase.strip() in span]
+
+def _decode_traced(body: str, legend: dict, max_depth: int = 64) -> list[tuple]:
+    """Fully decode the body, returning [(char, source_alias)] where source_alias
+    is the TOP-LEVEL body alias that produced this char (None for a literal body
+    char). Nested aliases inherit the body-level alias as their provenance, so a
+    reconstructed span can be traced back to the alias a reader had to expand."""
+    out: list[tuple] = []
+
+    def emit(text: str, top, depth: int) -> None:
+        for ch in text:
+            if ch in legend and depth < max_depth:
+                emit(legend[ch], top if top is not None else ch, depth + 1)
+            else:
+                out.append((ch, top))
+    emit(body, None, 0)
+    return out
+
+
+class DecodedTrace:
+    """A body decoded to normalized text with per-character alias provenance."""
+
+    def __init__(self, body: str, legend: dict):
+        self.body = body
+        self.legend = legend
+        chars = _decode_traced(body, legend)
+        text, prov = [], []
+        for ch, src in chars:
+            if ch in STRUCT_MARKERS:      # marker: drop the glyph, keep the content run
+                continue
+            text.append(ch)
+            prov.append(src)
+        self.text = "".join(text)
+        self.prov = prov                  # parallel to self.text
+
+    def aliases_for(self, span: str) -> list[str] | None:
+        """Aliases whose expansion contributes any char of `span` at its location
+        in the normalized decoded text, or None if `span` is not reconstructable."""
+        idx = self.text.find(span)
+        if idx < 0:
+            return None
+        return sorted({self.prov[i] for i in range(idx, idx + len(span)) if self.prov[i]})
 
 
 def _aliased_exactly(span: str, legend: dict) -> list[str]:
@@ -292,49 +331,101 @@ def _aliased_exactly(span: str, legend: dict) -> list[str]:
     return [a for a, phrase in sorted(legend.items()) if phrase.strip() == span]
 
 
-def span_fate(span: str, artifact: str, decoded: str, legend: dict) -> dict:
-    """Fate of one gold span in the encoded artifact, with evidence."""
+def span_fate(span: str, trace: DecodedTrace) -> dict:
+    """Fate of one gold span, decided from readable body content + traced alias
+    provenance. Invariant: represented_by_alias ⇒ aliases is non-empty; when the
+    span is present but no alias provenance can be attributed we say
+    ambiguous_after_encoding rather than claim aliasing without evidence."""
     if not span:
         return {"span": span, "fate": "not_applicable", "aliases": []}
-    if span in artifact:
+    if span in trace.body:                       # literal in the readable body
         return {"span": span, "fate": "preserved_verbatim", "aliases": []}
-    covering = _aliases_covering(span, legend)
-    if span in decoded:
-        return {"span": span, "fate": "represented_by_alias", "aliases": covering}
-    # Basename / final segment survival for structural rewrite vs absence.
+    aliases = trace.aliases_for(span)
+    if aliases is not None:                       # reconstructable from the decoded body
+        if aliases:
+            return {"span": span, "fate": "represented_by_alias", "aliases": aliases}
+        return {"span": span, "fate": "ambiguous_after_encoding", "aliases": [],
+                "note": "present after decode but no alias provenance — marker/structure only"}
     tail = re.split(r"[/:]", span)[-1]
-    if tail and (tail in artifact or tail in decoded):
-        return {"span": span, "fate": "structurally_rewritten", "aliases": covering,
+    if tail and (tail in trace.body or tail in trace.text):
+        talias = trace.aliases_for(tail) or []
+        return {"span": span, "fate": "structurally_rewritten", "aliases": talias,
                 "surviving_segment": tail}
-    return {"span": span, "fate": "absent_from_encoded_artifact", "aliases": covering}
+    return {"span": span, "fate": "absent_from_encoded_artifact", "aliases": []}
 
 
-def locator_span_analysis(gold_path: str, artifact: str, decoded: str, legend: dict) -> dict:
-    """Per the spec: full path, basename, symbol, enclosing relation, ordering."""
+def locator_span_analysis(gold_path: str, trace: DecodedTrace) -> dict:
+    """Per the spec: full path, basename, enclosing path prefix and its aliases."""
     base = re.split(r"[/:]", gold_path)[-1]
-    prefix = gold_path[: len(gold_path) - len(base)]
+    prefix = gold_path[: len(gold_path) - len(base)].rstrip("/:")
+    pf = span_fate(prefix, trace) if prefix else {"fate": "not_applicable", "aliases": []}
     return {
-        "full_path": span_fate(gold_path, artifact, decoded, legend)["fate"],
-        "basename": span_fate(base, artifact, decoded, legend)["fate"],
-        "path_prefix": span_fate(prefix.rstrip("/:"), artifact, decoded, legend)["fate"] if prefix.strip("/:") else "not_applicable",
-        "prefix_aliases": _aliases_covering(prefix, legend) if prefix.strip("/:") else [],
+        "full_path": span_fate(gold_path, trace)["fate"],
+        "basename": span_fate(base, trace)["fate"],
+        "path_prefix": pf["fate"],
+        "prefix_aliases": pf.get("aliases", []),
     }
 
 
-def count_span_analysis(gold_count: str, unit_hint: str, raw_payload: str, artifact: str) -> dict:
-    """For counts: did the counted items / grouping survive, and is a competing
-    count also literally present (visual collapse of distinct groups)?"""
-    def line_with(tok):
-        for ln in artifact.split("\n"):
-            if tok and tok in ln and re.search(r"\d", ln):
-                return ln.strip()
-        return None
-    gold_line = line_with(f"{gold_count} {unit_hint}".strip()) or line_with(gold_count)
+# ---- numeric candidate extraction (counts) -------------------------------- #
+
+COUNT_UNIT_RE = re.compile(r"^\s*(warnings?|errors?|infos?|matches|match|files?|symbols?|"
+                           r"Warning\(s\)|Error\(s\)|Info\(s\))", re.I)
+
+
+def _classify_numeric(line: str, s: int, e: int) -> tuple[str, str]:
+    """Classify a full numeric token by its surrounding construct so a bare count
+    (`7 Warning(s)`) is never confused with a digit inside an identifier
+    (`MSB3277`), a line coordinate (`173:`), or a repetition marker (`[×3]`)."""
+    before = line[s - 1] if s > 0 else ""
+    after = line[e] if e < len(line) else ""
+    before_ctx, after_ctx = line[max(0, s - 3):s], line[e:e + 14]
+    if before.isalpha() or after.isalpha() or before == "_" or after == "_":
+        return "identifier_or_code", ""            # glued to letters → not a count
+    if "×" in before_ctx:
+        return "repetition_marker", ""             # [×3] — grouping, not the answer
+    if after.startswith(":") or re.match(r"^\s*\d+:", line):
+        return "line_coordinate", ""
+    if re.search(r"\bunique\b", after_ctx):
+        return "unique_count", "unique"
+    m = COUNT_UNIT_RE.match(after_ctx)
+    if m:
+        return "count", m.group(1)
+    if before.isdigit() or after.isdigit():
+        return "numeric_run", ""
+    return "bare_number", ""
+
+
+def numeric_candidates(text: str) -> list[dict]:
+    """Every full numeric token with its construct — counts are separated from
+    identifiers/coordinates/repetition markers by context, not substring luck."""
+    out = []
+    for line in text.split("\n"):
+        for m in re.finditer(r"\d+", line):
+            construct, unit = _classify_numeric(line, m.start(), m.end())
+            out.append({"value": m.group(0), "unit": unit, "line": line.strip(),
+                        "token_span": [m.start(), m.end()], "source_construct": construct})
+    return out
+
+
+def count_span_analysis(gold_count: str, artifact: str, wrong_value: str | None = None) -> dict:
+    """Count fate from classified numeric candidates: is the gold present *as a
+    count*, and is a competing *count* also present (a visual collapse of distinct
+    groups)? Repetition markers are reported separately, never as the answer."""
+    cands = numeric_candidates(artifact)
+    gold_counts = [c for c in cands if c["value"] == gold_count and c["source_construct"] == "count"]
+    competing = [c for c in cands
+                 if wrong_value is not None and c["value"] == str(wrong_value)
+                 and c["source_construct"] == "count" and c["value"] != gold_count]
+    reps = [c for c in cands if c["source_construct"] == "repetition_marker"]
     return {
         "gold_count": gold_count,
-        "gold_count_line_in_artifact": gold_line,
-        "gold_count_preserved_verbatim": bool(gold_line),
-        "fold_markers_present": bool(re.search(r"(\[×\d+\]|%q1 x\d+)", artifact)),
+        "gold_count_line_in_artifact": gold_counts[0]["line"] if gold_counts else None,
+        "gold_count_preserved_verbatim": bool(gold_counts),
+        "competing_count_line": competing[0]["line"] if competing else None,
+        "competing_count_value": competing[0]["value"] if competing else None,
+        "repetition_markers_present": bool(reps),
+        "repetition_marker_lines": [c["line"] for c in reps][:4],
     }
 
 
@@ -363,7 +454,7 @@ def _is_grep_body(artifact: str, container: Container) -> bool:
 
 
 def label_mechanism(task: dict, spans: list[dict], eb0: dict, container: Container,
-                    artifact: str, decoded: str, raw_payload: str) -> dict:
+                    artifact: str, trace: DecodedTrace, raw_payload: str) -> dict:
     cat = task["category"]
     legend = container.legend
     evidence: list[dict] = []
@@ -371,39 +462,36 @@ def label_mechanism(task: dict, spans: list[dict], eb0: dict, container: Contain
     leaked = _answer_glyphs(eb0, legend) or list(eb0.get("alias_leaks") or [])
     wrong = answer_value(eb0, task)
     wrong_tokens = _wrong_tokens(wrong)
-    wrong_present = bool(wrong_tokens) and any(w in artifact for w in wrong_tokens)
+    wrong_present = bool(wrong_tokens) and any(w in artifact or w in trace.text for w in wrong_tokens)
 
     def add(kind, **kw):
         evidence.append({"kind": kind, **kw})
 
-    # ---- counts / facts --------------------------------------------------- #
-    if cat in ("fact", "count"):
+    # ---- counts ----------------------------------------------------------- #
+    if cat == "count":
         gold = str(task["gold"][0] if isinstance(task["gold"], list) else task["gold"])
-        csa = count_span_analysis(gold, "", raw_payload, artifact)
-        competitor = None
-        if isinstance(wrong, str):
-            for ln in artifact.split("\n"):
-                if wrong and wrong in ln and re.search(r"\d", ln) and gold not in ln:
-                    competitor = ln.strip()
-                    break
-        if csa["gold_count_preserved_verbatim"] and competitor:
+        wrong_val = wrong if isinstance(wrong, str) else None
+        csa = count_span_analysis(gold, artifact, wrong_val)
+        if csa["gold_count_preserved_verbatim"] and csa["competing_count_value"]:
             primary = "notation-ambiguity"
             add("gold_count_preserved_verbatim", value=gold, line=csa["gold_count_line_in_artifact"])
-            add("competing_count_present_verbatim", value=str(wrong), line=competitor)
-            if csa["fold_markers_present"]:
+            add("competing_count_present", value=csa["competing_count_value"], line=csa["competing_count_line"])
+            if csa["repetition_markers_present"]:
                 secondary.append("structural-folding")
-                add("fold_markers_present_in_artifact")
-        elif not csa["gold_count_preserved_verbatim"] and csa["fold_markers_present"]:
+                add("repetition_grouping_present", lines=csa["repetition_marker_lines"],
+                    note="counted items folded under [×N] markers — grouping evidence, not the source of the wrong count")
+        elif csa["gold_count_preserved_verbatim"]:
+            primary = "unresolved"
+            add("gold_count_preserved_verbatim_no_competitor", value=gold, line=csa["gold_count_line_in_artifact"])
+        elif csa["repetition_markers_present"]:
             primary = "structural-folding"
-            add("gold_count_absent_but_fold_markers_present", value=gold)
-        elif not csa["gold_count_preserved_verbatim"]:
+            add("gold_count_absent_but_repetition_markers_present", value=gold)
+        else:
             primary = "information-absent"
             add("gold_count_absent_from_artifact", value=gold)
-        else:
-            primary = "unresolved"
         return _finish(primary, secondary, evidence, spans, csa)
 
-    # ---- locators / symbols / paths --------------------------------------- #
+    # ---- locators / symbols / paths / facts ------------------------------- #
     aliasing = [s for s in spans if s["fate"] == "represented_by_alias"]
     verbatim = [s for s in spans if s["fate"] == "preserved_verbatim"]
     absent = [s for s in spans if s["fate"] == "absent_from_encoded_artifact"]
@@ -416,7 +504,7 @@ def label_mechanism(task: dict, spans: list[dict], eb0: dict, container: Contain
         primary = "mixed"
         secondary = ["identifier-or-path-aliasing", "grouping-or-boundary-loss", "alias-decoding"]
         for s in aliasing:
-            add("gold_path_represented_by_alias", span=s["span"], candidate_aliases=s["aliases"][:4])
+            add("gold_path_represented_by_alias", span=s["span"], aliases=s["aliases"])
         add("grep_grouping_present", note="file→hits markers; gold path not a clean marker")
         add("model_answer_not_present_in_artifact", answer=wrong_tokens)
     elif grep_body and (aliasing or absent):
@@ -426,7 +514,7 @@ def label_mechanism(task: dict, spans: list[dict], eb0: dict, container: Contain
         if aliasing:
             secondary.append("identifier-or-path-aliasing")
             for s in aliasing:
-                add("gold_path_represented_by_alias", span=s["span"], candidate_aliases=s["aliases"][:4])
+                add("gold_path_represented_by_alias", span=s["span"], aliases=s["aliases"])
         if wrong_present:
             add("model_answer_is_a_different_present_file_marker", answer=wrong_tokens)
     elif also_aliased:
@@ -441,7 +529,7 @@ def label_mechanism(task: dict, spans: list[dict], eb0: dict, container: Contain
     elif aliasing:
         primary = "identifier-or-path-aliasing"
         for s in aliasing:
-            add("gold_span_represented_only_by_alias", span=s["span"], candidate_aliases=s["aliases"][:4])
+            add("gold_span_represented_only_by_alias", span=s["span"], aliases=s["aliases"])
         if leaked:
             secondary += ["alias-decoding", "format-or-integrity"]
             add("alias_glyph_leaked_in_answer", glyphs=leaked)
@@ -551,16 +639,17 @@ def _span_analysis(task: dict, arm_recs: dict) -> dict:
     eb0 = arm_recs["encoded+brief"][0]
     art = artifact_of(eb0) or ""
     cont = parse_container(art) if art else Container("", "", {}, "", set())
-    decoded = decode_via_legend(cont.body, cont.legend)
+    trace = DecodedTrace(cont.body, cont.legend)
     gold = _gold_list(task)
-    spans = [span_fate(g, art, decoded, cont.legend) for g in gold]
+    spans = [span_fate(g, trace) for g in gold]
     detail: dict = {"gold_spans": spans}
     if task["category"] == "locator":
-        detail["locator_checks"] = [locator_span_analysis(g, art, decoded, cont.legend) for g in gold]
-    if task["category"] in ("count", "fact"):
-        detail["count_checks"] = count_span_analysis(gold[0], "", raw_payload_of(
-            (arm_recs.get("raw") or {}).get(0) or arm_recs["raw+brief"][0]), art)
-    return detail, spans, cont, art, decoded
+        detail["locator_checks"] = [locator_span_analysis(g, trace) for g in gold]
+    if task["category"] == "count":
+        eb0 = arm_recs["encoded+brief"][0]
+        wrong = answer_value(eb0, task)
+        detail["count_checks"] = count_span_analysis(gold[0], art, wrong if isinstance(wrong, str) else None)
+    return detail, spans, cont, art, trace
 
 
 def build_dossier(kind: str, case: str, q: str, records: list[dict], tasks: dict,
@@ -569,7 +658,7 @@ def build_dossier(kind: str, case: str, q: str, records: list[dict], tasks: dict
     arm_recs = _by_arm(records, case, q)
     eb0 = arm_recs["encoded+brief"][0]
     raw0 = (arm_recs.get("raw") or {}).get(0) or arm_recs["raw+brief"][0]
-    detail, spans, cont, art, decoded = _span_analysis(task, arm_recs)
+    detail, spans, cont, art, trace = _span_analysis(task, arm_recs)
 
     all_records = []
     for arm in ARMS:
@@ -600,7 +689,7 @@ def build_dossier(kind: str, case: str, q: str, records: list[dict], tasks: dict
         "gold_diff_hunks": _gold_hunks(diff, gold),
     }
     if kind == "loss":
-        dossier["mechanism"] = label_mechanism(task, spans, eb0, cont, art, decoded, raw_payload_of(raw0))
+        dossier["mechanism"] = label_mechanism(task, spans, eb0, cont, art, trace, raw_payload_of(raw0))
     else:
         dossier["retained"] = True
     dossier["_full_diff"] = "\n".join(diff)   # split out to a per-case file by the CLI
