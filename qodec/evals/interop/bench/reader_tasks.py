@@ -1,24 +1,33 @@
-"""Level-2 reader: build the three comprehension arms and score answers by rule.
+"""Level-2 reader: build the three comprehension arms and score by rule.
 
 Three arms per question, all seeing the same brief where present so quality is
-comparable and only cost accounting (cold vs warm) differs:
+comparable and only cost accounting differs:
 
   raw              tool-only text, no brief
   raw+brief        notation brief + tool-only text  (control: brief-as-distraction)
   encoded+brief    notation brief + qodec artifact
 
-The model must answer ONLY in the fixed JSON schema. Scoring is deterministic
-(no LLM judge): exact numeric counts, set-superset match on files/symbols,
-accepted substrings for facts — plus two integrity checks the design doc calls
-for: invalid identifiers (a file/symbol not present in the source) and alias
-leakage (a qodec legend glyph copied into the answer).
+The model answers ONLY in the fixed JSON schema. Scoring is deterministic (no
+LLM judge). Each question declares a `field` (which answer key), a `category`
+(for the report), and a `match` mode:
+
+  exact / exact-set   set equality, no extra identifiers allowed
+  one-of              at least one gold value (extra *existing* identifiers ok)
+  contains-all        every gold value present (extras ok)
+  ordered-path        gold is an ordered subsequence of the answer's call_path
+
+Exact file paths are matched in full — never by basename. Two integrity checks
+ride along: invalid identifiers (a file/symbol/path element absent from the
+source) and alias leakage (a full qodec legend alias copied into an answer
+value — aliases are matched as whole strings, only those actually used in the
+encoded body, and only against structured answer values).
 """
 
 from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field as dc_field
 
 ANSWER_SCHEMA = '{"facts": [], "files": [], "symbols": [], "call_path": [], "answer": ""}'
 
@@ -26,110 +35,154 @@ SYSTEM = (
     "You are a precise code-context reader. Answer ONLY about the provided text. "
     "Reply with a single JSON object and nothing else, using exactly these keys: "
     f"{ANSWER_SCHEMA}. Put integers as strings in \"answer\". Use exact identifiers "
-    "and paths copied from the text; never invent names. Do not include any "
-    "decoding notation or alias glyphs in your answer."
+    "and full paths copied verbatim from the text; never invent or abbreviate names. "
+    "Do not include any decoding notation or alias glyphs in your answer."
 )
+
+CATEGORIES = ["fact", "count", "locator", "call_path", "actionability"]
 
 
 def build_messages(arm: str, payload: str, brief: str, question: str) -> list[dict]:
-    """Assemble the chat messages for one (arm, question)."""
     if arm == "raw":
         content = payload
-    elif arm == "raw+brief":
+    elif arm in ("raw+brief", "encoded+brief"):
         content = f"{brief}\n\n{payload}"
-    elif arm == "encoded+brief":
-        content = f"{brief}\n\n{payload}"
-    else:  # pragma: no cover - guarded by caller
+    else:  # pragma: no cover
         raise ValueError(f"unknown arm {arm!r}")
     user = f"CONTEXT:\n{content}\n\nQUESTION: {question}\n\nRespond with the JSON object only."
     return [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}]
 
 
-def parse_answer(text: str) -> dict:
-    """Extract the JSON object from a model reply (tolerate chatter around it)."""
+def parse_answer(text: str) -> dict | None:
+    """Extract the JSON object from a model reply. Returns None when the reply
+    has no parseable object (malformed JSON), which scoring treats as a miss and
+    the runner flags for a repeat."""
     m = re.search(r"\{.*\}", text, re.DOTALL)
     if not m:
-        return {}
+        return None
     try:
         obj = json.loads(m.group(0))
-        return obj if isinstance(obj, dict) else {}
+        return obj if isinstance(obj, dict) else None
     except json.JSONDecodeError:
-        return {}
+        return None
 
 
-def _norm(s: str) -> str:
-    return re.sub(r"\s+", "", str(s)).lower()
+def _s(x) -> str:
+    return str(x).strip()
 
 
-def legend_glyphs(artifact: str) -> set[str]:
-    """The alias characters a `%q1` container assigns (legend lines `X=phrase`),
-    which the reader must never copy into an answer."""
-    glyphs: set[str] = set()
+def _norm(x) -> str:
+    return re.sub(r"\s+", "", str(x)).lower()
+
+
+def _list(answer: dict, key: str) -> list[str]:
+    v = answer.get(key)
+    if isinstance(v, list):
+        return [_s(e) for e in v if isinstance(e, (str, int)) and _s(e)]
+    if isinstance(v, str) and v.strip():
+        return [_s(v)]
+    return []
+
+
+def _is_subsequence(needle: list[str], hay: list[str]) -> bool:
+    it = iter(hay)
+    return all(any(n == h for h in it) for n in needle)
+
+
+def used_aliases(artifact: str) -> set[str]:
+    """Full alias strings assigned by a `%q1` container (legend lines
+    `alias=phrase`) that actually occur in the encoded body — never split into
+    characters."""
     lines = artifact.splitlines()
-    in_header = lines and lines[0].startswith("%q1 ")
-    for line in lines[1:] if in_header else []:
+    if not lines or not lines[0].startswith("%q1 "):
+        return set()
+    aliases: list[str] = []
+    body_start = None
+    for i, line in enumerate(lines[1:], start=1):
         if line.startswith("%q1 body"):
+            body_start = i + 1
             break
         if "=" in line:
-            alias = line.split("=", 1)[0]
-            if alias and len(alias) <= 3:  # alias tokens are short (glyph/sigil)
-                glyphs.update(alias)
-    return glyphs
+            aliases.append(line.split("=", 1)[0])
+    body = "\n".join(lines[body_start:]) if body_start is not None else ""
+    return {a for a in aliases if a and a in body}
 
 
 @dataclass
 class QuestionScore:
     id: str
-    type: str
+    category: str
     correct: bool
-    invalid_identifiers: list[str] = field(default_factory=list)
-    alias_leak: int = 0
+    invalid_identifiers: list[str] = dc_field(default_factory=list)
+    alias_leaks: list[str] = dc_field(default_factory=list)
     got: object = None
 
 
-def score_question(q: dict, answer: dict, *, source_text: str, glyphs: set[str]) -> QuestionScore:
-    qtype = q["type"]
-    gold = q["gold"]
+def _match(mode: str, gold: list[str], got: list[str]) -> bool:
+    g = [_s(x) for x in gold]
+    a = [_s(x) for x in got]
+    if mode in ("exact", "exact-set"):
+        return sorted(a) == sorted(g)          # no extra identifiers permitted
+    if mode == "one-of":
+        return bool(set(a) & set(g))
+    if mode == "contains-all":
+        return set(g) <= set(a)
+    if mode == "ordered-path":
+        return _is_subsequence(g, a)
+    raise ValueError(f"unknown match mode {mode!r}")
+
+
+def score_question(q: dict, answer: dict | None, *, source_text: str,
+                   aliases: set[str]) -> QuestionScore:
+    cat = q["category"]
+    fld = q["field"]
+    gold = q["gold"] if isinstance(q["gold"], list) else [q["gold"]]
+    ans = answer or {}
     correct = False
-    got: object = None
 
-    if qtype == "count":
-        got = _norm(answer.get("answer", ""))
-        # accept the gold integer appearing as the answer (exact) or as a bare
-        # leading token; reject if any other integer is given instead.
-        want = _norm(gold["answer"])
-        nums = re.findall(r"\d+", str(answer.get("answer", "")))
-        correct = (got == want) or (nums == [gold["answer"]])
-    elif qtype in ("files", "symbols"):
-        key = qtype
-        want = {_norm(x) for x in gold[key]}
-        have = {_norm(x) for x in answer.get(key, []) if isinstance(x, str)}
-        correct = want.issubset(have)
-        got = sorted(have)
-    elif qtype == "facts":
-        blob = _norm(json.dumps(answer.get("facts", [])) + str(answer.get("answer", "")))
-        correct = all(_norm(x) in blob for x in gold["facts"])
-        got = answer.get("facts")
-    else:  # pragma: no cover
-        raise ValueError(f"unknown question type {qtype!r}")
+    if cat == "count":
+        raw = _s(ans.get("answer", ""))
+        nums = re.findall(r"-?\d+", raw)
+        correct = (len(nums) == 1 and nums[0] == _s(gold[0])) or (_norm(raw) == _norm(gold[0]))
+        got = raw
+    elif cat in ("fact", "actionability"):
+        blob = _norm(json.dumps(ans.get("facts", []), ensure_ascii=False) + _s(ans.get("answer", "")))
+        correct = all(_norm(x) in blob for x in gold)
+        got = ans.get("facts") or ans.get("answer")
+    else:  # locator / call_path
+        got_list = _list(ans, fld)
+        correct = _match(q["match"], gold, got_list)
+        got = got_list
 
-    # Integrity: any file/symbol the model returned that is NOT present verbatim
-    # in the source text is an invented identifier.
-    src = source_text
+    # Invalid identifiers — presence in the source. Files and symbols are
+    # matched in full (no basename fallback, per the exact-path rule). A
+    # call-path step is a method reference; the source shows it method-first
+    # (`<Self as CommandFactory>::command()`), so its final `::` segment counts.
     invalid = []
     for key in ("files", "symbols"):
-        for x in answer.get(key, []) or []:
-            if isinstance(x, str) and x.strip() and x not in src and x.split("/")[-1] not in src:
+        for x in _list(ans, key):
+            if x not in source_text:
                 invalid.append(x)
+    for x in _list(ans, "call_path"):
+        if x not in source_text and x.split("::")[-1] not in source_text:
+            invalid.append(x)
 
-    # Alias leakage: any legend glyph copied into the answer body.
-    answer_blob = json.dumps(answer, ensure_ascii=False)
-    leak = sum(answer_blob.count(g) for g in glyphs) if glyphs else 0
+    # Alias leakage — whole aliases used in the body, checked against structured
+    # answer VALUES only (not the JSON punctuation).
+    values = []
+    for key in ("files", "symbols", "call_path", "facts"):
+        values += _list(ans, key)
+    values.append(_s(ans.get("answer", "")))
+    leaks = [a for a in aliases for v in values if a and a in v]
 
-    return QuestionScore(id=q["id"], type=qtype, correct=correct,
-                         invalid_identifiers=invalid, alias_leak=leak, got=got)
+    return QuestionScore(id=q["id"], category=cat, correct=correct,
+                         invalid_identifiers=invalid, alias_leaks=leaks, got=got)
 
 
-def load_tasks(path) -> dict[str, list[dict]]:
+def load_tasks(path) -> list[dict]:
     obj = json.loads(path.read_text())
-    return {c["case"]: c["questions"] for c in obj["cases"]}
+    out = []
+    for c in obj["cases"]:
+        for q in c["questions"]:
+            out.append({**q, "case": c["case"]})
+    return out

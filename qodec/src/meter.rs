@@ -12,6 +12,13 @@ use anyhow::{bail, Result};
 pub trait TokenMeter {
     fn name(&self) -> &str;
     fn count(&self, text: &str) -> usize;
+    /// `true` once a `count` has failed. A fail-closed meter (the HF tokenizer)
+    /// never returns a guessed count on error — it marks itself poisoned and the
+    /// CLI aborts with no token result, so a run can never silently proceed on
+    /// fabricated numbers. The BPE/char meters cannot fail and stay `false`.
+    fn poisoned(&self) -> bool {
+        false
+    }
 }
 
 pub struct Bpe {
@@ -69,17 +76,26 @@ impl TokenMeter for Approx {
 pub struct HfMeter {
     name: String,
     tokenizer: tokenizers::Tokenizer,
+    /// Interior mutability: `count` takes `&self` but must record a failure.
+    /// Single-threaded CLI use, so a `Cell` is enough (no `Sync` needed).
+    poisoned: std::cell::Cell<bool>,
 }
 
 impl HfMeter {
     /// Load from a `tokenizer.json` path. The meter name is `hf:<path>` so
     /// reports and run records identify which tokenizer produced the numbers.
+    /// A probe encode runs at load so a structurally-valid-but-unusable
+    /// tokenizer fails here rather than mid-run.
     pub fn from_file(path: &str) -> Result<Self> {
         let tokenizer = tokenizers::Tokenizer::from_file(path)
             .map_err(|e| anyhow::anyhow!("loading tokenizer {path}: {e}"))?;
+        tokenizer
+            .encode("qodec meter probe", false)
+            .map_err(|e| anyhow::anyhow!("tokenizer {path} cannot encode a probe string: {e}"))?;
         Ok(Self {
             name: format!("hf:{path}"),
             tokenizer,
+            poisoned: std::cell::Cell::new(false),
         })
     }
 }
@@ -92,13 +108,23 @@ impl TokenMeter for HfMeter {
     fn count(&self, text: &str) -> usize {
         // `add_special_tokens = false`: count the content's own tokens, not the
         // chat-template wrapping the server adds — that is what the codec
-        // optimizes and what raw-vs-encoded must be compared on. A tokenizer
-        // that cannot encode a string is broken; fall back to a byte-safe
-        // char estimate rather than panic (the meter API cannot return an error).
+        // optimizes and what raw-vs-encoded must be compared on.
+        //
+        // Fail closed: if the tokenizer cannot encode this input, do NOT guess a
+        // char count (that would silently corrupt every downstream measurement
+        // and the L2 verdict). Poison the meter and return 0; the CLI checks
+        // `poisoned()` and aborts with no token result.
         match self.tokenizer.encode(text, false) {
             Ok(enc) => enc.len(),
-            Err(_) => text.chars().count(),
+            Err(_) => {
+                self.poisoned.set(true);
+                0
+            }
         }
+    }
+
+    fn poisoned(&self) -> bool {
+        self.poisoned.get()
     }
 }
 

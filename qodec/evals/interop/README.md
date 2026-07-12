@@ -75,54 +75,66 @@ truth, not a bug.
 **Level 1 — artifact benchmark, no model** (`run.py`, working today over real
 RTK + CodeGraph). **Level 3 — agent** is deferred.
 
-**Level 2 — reader comprehension** (`run_reader.py` / `score_reader.py`) is
-built and component-verified; it needs a served model to run.
+**Level 2 — reader comprehension** (`run_reader.py` / `score_reader.py`) runs a
+served model; a first CPU calibration run is recorded (see below).
 
-- **Target tokenizer (B1).** Level 2 is only honest if qodec picks aliases and
-  accepts codecs under the tokenizer the served model actually reads — not an
-  o200k proxy. `qodec --meter hf:/abs/tokenizer.json` is an in-process Rust
-  `tokenizers` meter (no per-count subprocess); a golden-corpus test proves it
-  counts bit-for-bit identical to the Python `tokenizers` library
-  (`tests/test_hf_meter_parity.py`). The encoded arm is re-encoded under this
-  meter, and the run records the model id + tokenizer.
-- **Three arms.** `raw`, `raw+brief` (control: the notation brief as
-  distraction), `encoded+brief`. Warm and cold are the *same* prompt (both
-  include the brief); they differ only in cost accounting (cached vs one-shot
-  brief).
-- **Tasks + scoring (B4).** Five real-tool cases, 3–6 deterministic questions
-  each, gold grounded byte-for-byte in the L1 artifacts
-  (`tasks/reader/tasks.json`). Answers in the fixed
-  `{facts,files,symbols,call_path,answer}` schema; scoring is **rule-based, no
-  LLM judge** — exact counts, set-superset match, accepted substrings, plus
-  invalid-identifier (a name absent from the source) and alias-leakage (a legend
-  glyph copied into the answer) checks.
-- **Client (B2).** OpenAI-compatible, env-configured, `temperature=0` + `seed`,
-  streaming for TTFT; the full request/response, TTFT, latency, and token counts
-  (target tokenizer + endpoint usage) are recorded.
+- **Target tokenizer, fail-closed (B1).** Level 2 is only honest if qodec picks
+  aliases and accepts codecs under the tokenizer the served model actually reads
+  — not an o200k proxy. `qodec --meter hf:/abs/tokenizer.json` is an in-process
+  Rust `tokenizers` meter, proven bit-for-bit identical to the Python
+  `tokenizers` library (`tests/test_hf_meter_parity.py`). It is **fail-closed**:
+  a tokenizer that cannot encode aborts the qodec operation with no token result
+  — never a char-count fallback (`test_hf_meter_parity.py::HfMeterFailsClosed`).
+  Runs pin the tokenizer path + SHA-256 + size, requested vs reported model, and
+  the qodec binary hash.
+- **Three arms.** `raw`, `raw+brief` (control: the brief as distraction),
+  `encoded+brief`. All three quality-comparable; the qodec effect is isolated by
+  **encoded+brief vs raw+brief** (both carry the brief).
+- **Conditional paired scoring.** Not a raw-vs-encoded accuracy race — per
+  question+repeat it follows raw → raw+brief → encoded+brief and reports
+  `raw_competence`, `brief_retention`, `codec_retention`, `codec_losses`,
+  `codec_rescues`, broken out by facts/counts / locator / call-path /
+  actionability. A weak reader is a valid **calibration reader**: questions it
+  cannot answer in the control arms are ineligible and cannot move the verdict.
+  Gates → **INCONCLUSIVE** (never PASS on `raw=0/encoded=0`): raw competence
+  <60%, or eligible overall <10, or eligible locator <4.
+- **Tasks + match modes (B4).** Five real-tool cases, gold grounded byte-for-byte
+  in the L1 artifacts, fixed `{facts,files,symbols,call_path,answer}` schema.
+  Rule-based, **no LLM judge**: `exact` / `exact-set` (no extra identifiers) /
+  `one-of` / `contains-all` / `ordered-path`; exact file paths matched in full
+  (no basename fallback); real `call_path` and `actionability` scoring. Integrity
+  checks: invalid identifiers (absent from source) and alias leakage (a **whole**
+  legend alias — matched as a full string, only those used in the encoded body,
+  against structured answer values).
+- **Preflight + client (B2, B7).** `preflight.json` records real endpoint
+  capabilities (reachability, `/models`, a streaming request's content/TTFT/usage,
+  seed acceptance, `stream_options.include_usage` support) and the tokenizer/qodec
+  identities before the matrix. `temperature=0` + seed; unsupported seed is
+  recorded as the effective determinism contract, not dropped. Token accounting
+  shows **real server `prompt_tokens`** per arm (never the raw count in the
+  raw+brief row, never the warm artifact as the encoded prompt); warm is an
+  explicit amortization estimate. Two passes: everything once, then 3× only for
+  flagged questions (malformed JSON, raw/brief disagreement, codec loss, alias
+  leak, invalid id).
 
 ```bash
 export QODEC_READER_URL=http://127.0.0.1:8000/v1
 export QODEC_READER_MODEL=<served-model-id>
-export QODEC_READER_TOKENIZER=hf:/abs/tokenizer.json
+export QODEC_READER_TOKENIZER=hf:/abs/tokenizer.json     # MUST match the served model
 python3 run_reader.py --l1-run results/rtk-codegraph-clap-v1 --name l2
 python3 score_reader.py runs-l2/l2
 ```
 
 Without an endpoint `run_reader.py` exits cleanly (code 3) — it never fabricates
-answers. The full client → parse → score → report pipeline is verified against a
-mock endpoint (`tests/test_reader_mock.py`, `tests/test_reader_scoring.py`); only
-the model itself is absent here (no GPU / served endpoint in this environment). A
-real run needs an adequately capable model — a tiny CPU model would fail the
-tasks for reasons unrelated to qodec and mislead the decision.
+answers. The full pipeline is also verified against a mock endpoint
+(`tests/test_reader_mock.py`, `tests/test_reader_scoring.py`).
 
-The B6 report shows, per case × arm: target-tokenizer raw/cold/warm tokens, fact
-/ exact-locator / count scores, invalid-identifier count, alias leakage, output
-tokens, TTFT and total latency — then the decision:
-
-- blind qodec passes → protected spans stay unnecessary;
-- only exact paths/symbols drop → next increment is protected spans;
-- general comprehension drops → don't apply qodec to that evidence / change notation;
-- quality holds but latency balloons → warm/cached-protocol use only.
+Decision (only after the raw gate + eligibility pass): blind qodec passes when
+codec losses ≈ 0, no locator loss, zero alias leakage, and no rise in invalid
+identifiers. A measured locator regression (raw+brief correct → encoded+brief
+wrong) with facts/counts preserved is what makes **protected spans** the next
+increment; a general comprehension drop means don't apply blind qodec here (or
+change the notation), not protected spans.
 
 ## Go / no-go
 

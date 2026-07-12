@@ -577,6 +577,16 @@ fn cmd_encode(a: &EncodeArgs, probe: bool) -> Result<()> {
         report_tokens(&text, &artifact, meter.as_ref());
     }
 
+    // Fail closed: encode_seeded (and the adapter below) have now tokenized the
+    // input and the artifact exhaustively. If the meter poisoned itself on any
+    // of that, abort — never emit a token count the tokenizer could not produce.
+    if meter.poisoned() {
+        bail!(
+            "meter {} failed to tokenize the input — aborting with no token result",
+            meter.name()
+        );
+    }
+
     if a.json {
         let adapted =
             qodec::adapter::adapt(&text, &artifact, meter.as_ref(), a.passthrough_on_no_gain);

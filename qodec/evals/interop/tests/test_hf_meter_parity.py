@@ -88,5 +88,24 @@ class HfMeterParity(unittest.TestCase):
         self.assertEqual(env.meter, self.meter)
 
 
+@unittest.skipUnless(_QODEC, "qodec binary not built")
+class HfMeterFailsClosed(unittest.TestCase):
+    """A bad tokenizer must FAIL the qodec operation with no token result —
+    never a char-count fallback that would silently corrupt L2 numbers."""
+
+    def test_corrupt_tokenizer_fails_closed(self):
+        bad = Path(__file__).resolve().parent / "_corrupt_tokenizer.json"
+        bad.write_text('{"this is": "not a tokenizer"')
+        try:
+            proc = subprocess.run(
+                [str(qodec.binary()), "encode", "--codec", "fold", "--json", "--meter", f"hf:{bad}"],
+                input="hello\n", capture_output=True, text=True, check=False,
+            )
+            self.assertNotEqual(proc.returncode, 0, "must exit non-zero on a bad tokenizer")
+            self.assertEqual(proc.stdout.strip(), "", "must emit NO token result")
+        finally:
+            bad.unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     unittest.main()
