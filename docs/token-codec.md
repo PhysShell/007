@@ -372,10 +372,14 @@ current byte-exact candidate set. The rungs that could change it, by promise:
    per-segment. This is the first thing to build, and the all-span DP harness
    already exists to measure it.
 2. **Top-K paths.** v1 measures the one DP path against the whole-span baseline;
-   assembling and exact-measuring the K best paths would remove the last of the
-   additive-model risk and turn the all-span DP into a genuine token-exact
-   search. Cheap insurance, deferred until a real multi-segment winner exists to
-   protect (there is none yet, so it would guard nothing).
+   assembling and exact-measuring the K best *additive* paths would reduce the
+   residual risk from BPE non-additivity, but it would still be a heuristic, not
+   a global token-exact search — a path with a poor additive score but a great
+   real BPE cost can miss the top-K entirely. A true token-exact optimum would
+   need either all assembled paths enumerated or a DP state that models
+   tokenizer boundary context closely enough — a different, much larger beast.
+   Deferred regardless until a real multi-segment winner exists to protect
+   (there is none yet, so it would guard nothing).
 3. **Multi-objective cost.** The paper allows any cost, not just bits. Alias-
    dense output can cost 3–5× model *wall time* (see the A/B section); a cost
    `tokens + λ·encode_ms + μ·ppl_penalty` would let mosaic route a hot region to

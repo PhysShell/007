@@ -71,9 +71,9 @@ use crate::{diag, fold, grep, tmpl};
 /// codec; fall back to a single raw container (the caller still measures it).
 const MAX_LINES: usize = 4000;
 
-/// The exhaustive [`oracle`] is `O(N²)` spans × structural codecs; keep it to
-/// small payloads where truth is cheap enough. Larger inputs return `None`.
-const MAX_ORACLE_LINES: usize = 300;
+/// The exhaustive [`all_span_dp`] is `O(N²)` spans × structural codecs; keep it
+/// to small payloads where truth is cheap enough. Larger inputs return `None`.
+const MAX_ALL_SPAN_LINES: usize = 300;
 
 /// Geometric window sizes (in lines) tried from every start in the production
 /// router. `1` guarantees the DAG is always connected; the larger sizes let a
@@ -101,7 +101,7 @@ pub fn encode(text: &str, meter: &dyn TokenMeter) -> String {
 /// stage sees the same clusters `squeeze` does (without them, a learned profile
 /// would change `squeeze`'s candidates but not mosaic's, and the two would
 /// stop being comparable). Falls back to a single raw container when the input
-/// is empty or larger than [`MAX_LINES`].
+/// is empty or larger than `MAX_LINES`.
 pub fn encode_seeded(text: &str, meter: &dyn TokenMeter, templates: &[Vec<String>]) -> String {
     let path = segment(text, meter, false, templates);
     routed_or_baseline(text, meter, path, templates)
@@ -128,7 +128,7 @@ pub struct AllSpanReport {
 
 /// Run the **all-span additive DP** (every span `[i, j)`, not the geometric
 /// grid) and report its pre-arbitration choice. This is the kill-criterion
-/// truth-teller, bounded to small payloads ([`MAX_ORACLE_LINES`]); `None` when
+/// truth-teller, bounded to small payloads (`MAX_ALL_SPAN_LINES`); `None` when
 /// the input is too large or unsegmentable.
 ///
 /// It is *not* a token-exact oracle: the path is selected by the additive edge
@@ -141,7 +141,7 @@ pub fn all_span_dp(
     templates: &[Vec<String>],
 ) -> Option<AllSpanReport> {
     let lines = line_count(text)?;
-    if lines > MAX_ORACLE_LINES {
+    if lines > MAX_ALL_SPAN_LINES {
         return None;
     }
     let segs = segment(text, meter, true, templates)?;
@@ -159,7 +159,7 @@ pub fn all_span_dp(
     })
 }
 
-/// Number of line units, or `None` if the input is empty / over [`MAX_LINES`].
+/// Number of line units, or `None` if the input is empty / over `MAX_LINES`.
 fn line_count(text: &str) -> Option<usize> {
     if text.is_empty() {
         return None;
@@ -285,7 +285,7 @@ fn segment(
 ///   (the clamp alone only reaches `n` when `n - i <= 128`, which is exactly
 ///   the flaw the review caught — a 500-line file's `0 -> n` edge is otherwise
 ///   absent). Reaching the end from an arbitrary mid-file start is *not* in the
-///   geometric grid; that is what [`oracle`] is for.
+///   geometric grid; that is what [`all_span_dp`] is for.
 fn candidate_ends(i: usize, n: usize, exhaustive: bool) -> Vec<usize> {
     if exhaustive {
         return ((i + 1)..=n).collect();
@@ -353,7 +353,7 @@ pub fn emit(segs: &[String]) -> String {
 ///
 /// `n` comes from an untrusted header, so it is bounded before it sizes any
 /// allocation: a segment needs at least a length line and a byte, so `n` can
-/// never exceed `body.len()`, and never [`MAX_SEGMENTS`] regardless.
+/// never exceed `body.len()`, and never `MAX_SEGMENTS` regardless.
 pub fn split(c: &Container) -> Result<Vec<String>> {
     let n: usize = c
         .param("n")

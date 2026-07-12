@@ -249,9 +249,17 @@ fn mosaic_routing_stage_honours_template_seeds() -> Result<()> {
     let plain = mosaic::encode_seeded(&text, &meter, &[]);
     let seeded = mosaic::encode_seeded(&text, &meter, &templates);
     anyhow::ensure!(decode(&seeded)? == text, "seeded mosaic must roundtrip");
+    // Strict `<`, not `<=`: if a refactor ever drops the seeds (best_span back
+    // to tmpl::encode), the two artifacts become identical in cost and a `<=`
+    // check would pass anyway. Differing artifacts can also tie on tokens, so
+    // assert the token win itself, not just artifact inequality.
     anyhow::ensure!(
-        meter.count(&seeded) <= meter.count(&plain),
-        "seeded routing ({}) must not lose to unseeded ({}) — seeds are ignored",
+        seeded != plain,
+        "seeded and unseeded routing produced the identical artifact — seeds ignored"
+    );
+    anyhow::ensure!(
+        meter.count(&seeded) < meter.count(&plain),
+        "seeded routing must strictly beat unseeded: seeded={}, plain={}",
         meter.count(&seeded),
         meter.count(&plain)
     );
