@@ -65,12 +65,11 @@ def main() -> int:
     pf = preflight.run(cfg, meter)
     preflight.save(pf, run_dir / "preflight.json")
     if not pf["ready"]:
-        print(f"preflight not ready: {json.dumps(pf.get('streaming', {}))[:200]}")
+        print(f"preflight not ready: {json.dumps(pf.get('streaming_sample', {}))[:200]}")
         print(f"saved {run_dir}/preflight.json — fix the endpoint and re-run.")
         return 4
-    model_reported = None
-    if pf["models"].get("ok") and pf["models"].get("ids"):
-        model_reported = pf["models"]["ids"][0]
+    eff = preflight.effective_from(pf)     # the negotiated contract the matrix uses
+    model_reported = pf["models"].get("model_reported")
 
     tasks = reader_tasks.load_tasks(args.tasks)
     brief = qodec.notation()
@@ -98,28 +97,25 @@ def main() -> int:
             "encoded": env.encoded, "codec": env.codec,
         }
 
-    # This endpoint streams content but not usage (recorded in preflight). Score
-    # requests non-streaming so server prompt/completion tokens are REAL, not
-    # local estimates; TTFT is the preflight streaming sample.
-    stream_usage = bool(pf.get("streaming", {}).get("usage_supported"))
-
     def run_one(case: str, q: dict, arm: str, repeat: int) -> dict:
         c = ctx[case]
         payload = c["artifact"] if arm == "encoded+brief" else c["tool_only"]
         msgs = reader_tasks.build_messages(arm, payload, brief, q["q"])
-        res = reader.chat(cfg, msgs, stream=stream_usage)
+        res = reader.chat(cfg, msgs, eff)
         ans = reader_tasks.parse_answer(res.text)
         sc = reader_tasks.score_question(q, ans, source_text=c["tool_only"], aliases=c["aliases"])
         return {
             "case": case, "question": q["id"], "category": q["category"], "arm": arm, "repeat": repeat,
-            "correct": sc.correct, "malformed": ans is None,
+            # semantic_correct vs format: malformed is a FORMAT failure separated
+            # from wrong-content, but both count as an overall failure.
+            "correct": sc.correct, "format_compliant": ans is not None, "malformed": ans is None,
             "invalid_identifiers": sc.invalid_identifiers, "alias_leaks": sc.alias_leaks,
             "local_content_tokens": {"raw": case_tokens[case]["raw_payload"],
                                      "raw+brief": case_tokens[case]["raw+brief_content"],
                                      "encoded+brief": case_tokens[case]["encoded+brief_content"]}[arm],
             "server_prompt_tokens": res.usage.get("prompt_tokens"),
             "completion_tokens": res.usage.get("completion_tokens"),
-            "ttft_ms": res.ttft_ms, "total_ms": res.total_ms,
+            "ttft_ms": res.ttft_ms, "total_ms": res.total_ms, "http_error": res.http_error,
             "answer_raw": res.text, "answer_parsed": ans, "request": res.request,
         }
 
@@ -166,12 +162,15 @@ def main() -> int:
     meta = {
         "run_id": run_id, "level": 2, "kind": "cpu-calibration",
         "model_requested": cfg.model, "model_reported": model_reported,
-        "tokenizer": pf["tokenizer"], "qodec_version": qodec.version(),
-        "reader_url": cfg.url, "determinism": pf["determinism"],
-        "preflight_ttft_ms": pf.get("streaming", {}).get("ttft_ms"),
-        "streaming_usage_supported": bool(pf.get("streaming", {}).get("usage_supported")),
+        "model_identity": pf["model_identity"], "tokenizer": pf["tokenizer"],
+        "qodec_version": qodec.version(), "reader_url": cfg.url,
+        "effective": pf["effective"], "structured_json": pf.get("structured_json"),
+        "determinism": pf["determinism"],
+        "preflight_ttft_ms": pf.get("streaming_sample", {}).get("ttft_ms"),
+        "matrix_streamed": eff.stream,
         "tasks": str(args.tasks), "l1_run": str(args.l1_run),
         "case_tokens": case_tokens, "n_records": len(records),
+        "unique_questions": len(tasks),
         "repeated_questions": [f"{q['case']}:{q['id']}" for q in to_repeat],
     }
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
