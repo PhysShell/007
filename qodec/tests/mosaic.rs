@@ -100,18 +100,27 @@ fn mosaic_decode_fails_closed_on_corruption() -> Result<()> {
         decode(&overrun).is_err(),
         "segment length overrun must fail closed"
     );
+
+    // A monstrous segment count from an untrusted header must be rejected
+    // before it sizes an allocation — not OOM or panic.
+    let bomb = "%q1 mosaic n=999999999999999\n%q1 body\n0\n";
+    anyhow::ensure!(
+        decode(bomb).is_err(),
+        "an unreasonable segment count must fail closed, not allocate"
+    );
+
+    // A nested mosaic segment must be refused (stack-exhaustion guard).
+    let nested = mosaic::emit(std::slice::from_ref(&good));
+    anyhow::ensure!(
+        decode(&nested).is_err(),
+        "nested mosaic segments must be rejected"
+    );
     Ok(())
 }
 
-#[test]
-fn mosaic_declines_to_segment_when_whole_payload_wins() -> Result<()> {
-    // The kill-criterion finding as a regression test: on a uniform repetitive
-    // payload a single whole-payload structural codec is optimal, so the DP
-    // must choose exactly one segment rather than fragmenting (which would pay
-    // a per-segment container tax for nothing).
-    let meter = Bpe::o200k()?;
+fn uniform_diagnostics(rows: usize) -> String {
     let mut text = String::new();
-    for i in 0..40 {
+    for i in 0..rows {
         text.push_str(&format!(
             "src/svc/Worker{}.cs({},4): warning CS8618: Non-nullable field 'x{}' uninitialized\n",
             i % 3,
@@ -119,16 +128,151 @@ fn mosaic_declines_to_segment_when_whole_payload_wins() -> Result<()> {
             i % 7
         ));
     }
-    let stage1 = mosaic::encode(&text, &meter);
-    let c = container::parse(&stage1)?;
-    anyhow::ensure!(c.codec == "mosaic", "expected a mosaic container");
-    let segs = mosaic::split(&c)?;
+    text
+}
+
+#[test]
+fn mosaic_identity_elides_a_single_segment() -> Result<()> {
+    // The load-bearing fix: when the router declines to segment, the result is
+    // the bare winning codec — no `%q1 mosaic` envelope — so "no split" costs
+    // exactly what the plain codec costs, never a self-inflicted container tax.
+    let meter = Bpe::o200k()?;
+    let text = uniform_diagnostics(40);
+    let encoded = mosaic::encode(&text, &meter);
+    let c = container::parse(&encoded)?;
     anyhow::ensure!(
-        segs.len() == 1,
-        "DP over-fragmented a uniform payload into {} segments",
-        segs.len()
+        c.codec != "mosaic",
+        "a single-segment result must be emitted bare, got a {} envelope",
+        c.codec
+    );
+    // And it must not cost more than the whole-payload structural baseline.
+    let baseline = [
+        CodecKind::Fold,
+        CodecKind::Grep,
+        CodecKind::Diag,
+        CodecKind::Tmpl,
+    ]
+    .iter()
+    .map(|k| meter.count(&encode(&text, *k, &meter, Alphabet::Auto)))
+    .min()
+    .unwrap_or(usize::MAX);
+    anyhow::ensure!(
+        meter.count(&encoded) <= baseline,
+        "elided mosaic ({}) exceeds the whole-span baseline ({baseline})",
+        meter.count(&encoded)
     );
     Ok(())
+}
+
+#[test]
+fn exhaustive_oracle_agrees_with_the_geometric_router() -> Result<()> {
+    // The honest kill criterion: run the *exhaustive* all-pairs oracle (every
+    // span, not just the geometric grid) on real mixed payloads. If it, too,
+    // never beats the whole-payload baseline, the negative result is not an
+    // artifact of a coarse window grid. This test records the finding; it
+    // asserts only that the oracle is sound (byte-exact, never above the
+    // baseline), and prints the token deltas for the record.
+    let meter = Bpe::o200k()?;
+    let payloads = [
+        ("mixed", mixed_payload()),
+        ("uniform40", uniform_diagnostics(40)),
+        ("hetero", hetero_disjoint_vocab()),
+        ("format2", format_specific_regions()),
+    ];
+    for (name, text) in payloads {
+        let baseline = best_whole_span(&text, &meter);
+        let oracle = mosaic::oracle(&text, &meter)
+            .ok_or_else(|| anyhow::anyhow!("payload {name} exceeds the oracle bound"))?;
+        anyhow::ensure!(decode(&oracle)? == text, "oracle roundtrip for {name}");
+        anyhow::ensure!(
+            meter.count(&oracle) <= baseline,
+            "oracle for {name} ({}) must not exceed the whole-span baseline ({baseline})",
+            meter.count(&oracle)
+        );
+        eprintln!(
+            "oracle[{name}]: exhaustive={} baseline={baseline} (Δ {:+})",
+            meter.count(&oracle),
+            baseline as i64 - meter.count(&oracle) as i64
+        );
+    }
+    Ok(())
+}
+
+/// Two regions with *disjoint* vocabularies (diag-shaped + rg-shaped) framing
+/// unique prose — the best case for segmentation, since global mining cannot
+/// bridge the regions and each wants a different structural codec.
+fn hetero_disjoint_vocab() -> String {
+    let mut s = String::new();
+    for f in ["Parser", "Lexer", "Emitter", "Optimizer", "Linker"] {
+        for ln in [12, 18, 41] {
+            s.push_str(&format!(
+                "compiler/frontend/{f}Stage.rs:{ln}: warning: unused variable `scratch_buffer_{ln}`\n"
+            ));
+        }
+    }
+    s.push('\n');
+    for f in ["billing", "invoice", "ledger", "payroll"] {
+        for ln in [7, 33, 88] {
+            s.push_str(&format!(
+                "services/finance/{f}.py:{ln}:    total = compute_gross_amount(transaction_batch)\n"
+            ));
+        }
+    }
+    s.push_str("\nOwnership of the finance module moves to the platform squad next quarter.\n");
+    s
+}
+
+/// A large diagnostic block (diag's specialty, one distinct message per line so
+/// tmpl clusters poorly) followed by a large ripgrep block (grep's specialty).
+fn format_specific_regions() -> String {
+    // `.get(i % len)` rather than `[i % len]`: the tree denies index-slicing.
+    let nth = |arr: &[&'static str], i: usize| -> &'static str {
+        arr.get(i % arr.len().max(1)).copied().unwrap_or_default()
+    };
+    let mut s = String::new();
+    let codes = ["CS8618", "CS8602", "CS0168", "CS0219", "CS4014"];
+    let msgs = [
+        "Non-nullable field must contain a non-null value",
+        "Dereference of a possibly null reference",
+        "The variable is declared but never used",
+        "The variable is assigned but its value is never used",
+        "Because this call is not awaited execution continues",
+    ];
+    let diag_names = ["Alpha", "Beta", "Gamma", "Delta"];
+    for i in 0..24 {
+        s.push_str(&format!(
+            "src/Legacy.UI/ViewModels/{}ViewModel.cs({},{}): warning {}: {} 'field_{}'\n",
+            nth(&diag_names, i),
+            10 + i,
+            5 + i % 7,
+            nth(&codes, i),
+            nth(&msgs, i),
+            i % 9
+        ));
+    }
+    let grep_names = ["parser", "lexer", "emitter"];
+    for i in 0..24 {
+        s.push_str(&format!(
+            "tooling/analysis/{}_pass.rs:{}:{}:    let node_index = resolve_symbol_reference(scope_table, ident);\n",
+            nth(&grep_names, i),
+            100 + i,
+            3 + i % 5
+        ));
+    }
+    s
+}
+
+fn best_whole_span(text: &str, meter: &dyn TokenMeter) -> usize {
+    [
+        CodecKind::Fold,
+        CodecKind::Grep,
+        CodecKind::Diag,
+        CodecKind::Tmpl,
+    ]
+    .iter()
+    .map(|k| meter.count(&encode(text, *k, meter, Alphabet::Auto)))
+    .min()
+    .unwrap_or(usize::MAX)
 }
 
 #[test]

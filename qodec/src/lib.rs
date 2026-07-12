@@ -263,6 +263,12 @@ fn decode_container(c: &container::Container, keys: &Keys<'_>) -> Result<String>
             let mut out = String::new();
             for seg in mosaic::split(c)? {
                 let inner = container::parse(&seg)?;
+                if inner.codec == "mosaic" {
+                    // v1 segments are single structural layers by construction;
+                    // a hand-built nested mosaic could otherwise recurse a
+                    // decoder to stack exhaustion. Refuse it outright.
+                    bail!("mosaic: nested mosaic segments are unsupported");
+                }
                 out.push_str(&decode_container(&inner, keys)?);
             }
             Ok(out)

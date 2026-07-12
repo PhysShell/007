@@ -1,21 +1,36 @@
-//! `mosaic` — measured optimal segmentation across codecs.
+//! `mosaic` — measured segmentation across codecs.
 //!
 //! Where `squeeze` picks *one* structural codec for the whole payload,
 //! `mosaic` cuts the payload at line boundaries and routes each region to the
 //! codec that measures cheapest *there* — the diagnostic block to `diag`, a
-//! repetitive run to `fold`, unique prose to `raw` — then (in `lib`) optionally
-//! mines the whole assembled artifact. The split is a shortest path over a DAG
-//! of span candidates: a node is a boundary between lines, an edge `i -> j` is
-//! the region `[i, j)` encoded by one codec, weighted by the *measured* full
-//! token cost of that nested artifact (header, legend and all). The cheapest
-//! `0..N` path is the segmentation.
+//! repetitive run to `fold`, unique prose to `raw` — then (in `lib`) mines the
+//! whole assembled artifact. The split is a shortest path over a DAG of span
+//! candidates: a node is a boundary between lines, an edge `i -> j` is the
+//! region `[i, j)` encoded by one codec, weighted by the *measured* full token
+//! cost of that nested artifact (header, legend and all).
 //!
-//! This is the disciplined transplant of the DP-over-formats idea (see
-//! `docs/token-codec.md`, "mosaic" section): variable span lengths, legend
-//! cost already inside each edge weight, no switch-cost constant to
-//! approximate, and a final whole-artifact meter that overrules the DP's
-//! BPE-additivity approximation — `tok(A+B) != tok(A) + tok(B)`, so the DP only
-//! *proposes*, the exact meter *decides*.
+//! ## Two graphs, and why the distinction matters
+//!
+//! The production router ([`encode`]) uses a **geometric** candidate graph:
+//! from each start it tries window sizes `1,2,4,8,16,32,64,128` lines, plus an
+//! explicit whole-payload edge. This is `O(N·W)` and fast, but it is *not* the
+//! optimal segmentation — a beneficial region whose length is not on the grid
+//! (a 45-line block in the middle of a 500-line file) can only be represented
+//! as `32+8+4+1`, paying four headers. So the geometric router answers the
+//! narrow question "is there a win among geometric spans?", not "is there a
+//! win at all?".
+//!
+//! The exhaustive [`oracle`] answers the real question: it considers *every*
+//! span `[i, j)`, `O(N²)` of them, and is meant to be run offline on small
+//! payloads to decide the kill criterion. If even the exhaustive oracle
+//! declines to segment, the idea is genuinely pinned; if it finds a beneficial
+//! odd-length span, only the window grid was too coarse.
+//!
+//! Because BPE is not additive (`tok(A+B) != tok(A) + tok(B)`), the DP edge
+//! weights only *propose* a path; [`encode`] then measures the assembled
+//! artifact against the whole-payload baseline with the exact meter and keeps
+//! the real minimum — so an approximate edge model can waste probes but cannot
+//! ship a path the exact meter rejects.
 //!
 //! ## Container — a length-prefixed envelope of sibling `%q1` artifacts
 //!
@@ -29,13 +44,15 @@
 //! ```
 //!
 //! Each segment is a self-contained container. Decode reads the decimal byte
-//! length, takes exactly that many bytes, decodes them (one container layer —
-//! v1 segments are never pipelines) and concatenates. Byte-exact: the segments
-//! partition the input, and every candidate codec here is itself byte-exact.
+//! length, takes exactly that many bytes, decodes one layer, and concatenates.
+//! Byte-exact: the segments partition the input, every candidate here is itself
+//! byte-exact, and a single-segment result is emitted *bare* (identity elision
+//! — no `%q1 mosaic` wrapper), exactly as `squeeze` never wraps its winner.
 //!
-//! Deliberately deferred (prove the win first, then earn the complexity):
-//! `toon` segments (semantic, not byte-exact), per-span `mine`/`deep`, and a
-//! shared opcode table that would strip the repeated nested `%q1` headers.
+//! Deliberately deferred: `toon` segments (semantic, not byte-exact), per-span
+//! `mine`/`deep`, a shared opcode table stripping the repeated `%q1` headers,
+//! and a top-K path search (v1 measures the one DP path against the whole-span
+//! baseline only).
 
 use anyhow::{bail, Context, Result};
 
@@ -43,38 +60,95 @@ use crate::container::{self, Container};
 use crate::meter::TokenMeter;
 use crate::{diag, fold, grep, tmpl};
 
-/// Above this many lines the `O(N·W)` candidate sweep is not worth it for a lab
+/// Above this many lines the geometric `O(N·W)` sweep is not worth it for a lab
 /// codec; fall back to a single raw container (the caller still measures it).
 const MAX_LINES: usize = 4000;
 
-/// Geometric window sizes (in lines) tried from every start. `1` guarantees
-/// the DAG is always connected; the larger sizes let a region grow until a
-/// codec has enough lines to learn from and pay for its own header.
+/// The exhaustive [`oracle`] is `O(N²)` spans × structural codecs; keep it to
+/// small payloads where truth is cheap enough. Larger inputs return `None`.
+const MAX_ORACLE_LINES: usize = 300;
+
+/// Geometric window sizes (in lines) tried from every start in the production
+/// router. `1` guarantees the DAG is always connected; the larger sizes let a
+/// region grow until a codec has enough lines to pay for its own header.
 const WINDOWS: [usize; 8] = [1, 2, 4, 8, 16, 32, 64, 128];
 
 /// A small nudge per extra segment: the length-prefix line, plus a tie-breaker
 /// toward fewer, larger spans. The real per-segment cost — the nested `%q1`
-/// header — already rides inside each edge weight; this only breaks ties, and
-/// the final whole-artifact meter is the actual judge.
+/// header — already rides inside each edge weight; this only breaks ties.
 const FRAME_COST: usize = 1;
 
-/// Encode `text` as a `%q1 mosaic` container of per-region artifacts, chosen by
-/// a measured shortest path. Falls back to a single raw container when the
-/// input is empty or larger than [`MAX_LINES`] (the caller's final acceptance
-/// still measures the result against the original either way).
+/// Hard cap on the segment count a decoder will honour from an untrusted
+/// header, before any allocation sized by it.
+const MAX_SEGMENTS: usize = 4096;
+
+/// Encode `text` via the geometric router, then keep whichever is cheaper by
+/// the exact meter: the routed (possibly segmented) artifact or the
+/// whole-payload single-codec baseline. Falls back to a single raw container
+/// when the input is empty or larger than [`MAX_LINES`].
 pub fn encode(text: &str, meter: &dyn TokenMeter) -> String {
-    match segment(text, meter) {
-        Some(segs) => emit(&segs),
-        None => container::raw(text),
+    routed_or_baseline(text, meter, segment_geometric(text, meter))
+}
+
+/// Exhaustive segmentation for the kill criterion: consider *every* span, not
+/// just the geometric grid. Offline truth-teller, bounded to small payloads
+/// ([`MAX_ORACLE_LINES`]); `None` when the input is too large or unsegmentable.
+pub fn oracle(text: &str, meter: &dyn TokenMeter) -> Option<String> {
+    let lines = line_count(text)?;
+    if lines > MAX_ORACLE_LINES {
+        return None;
+    }
+    let segs = segment(text, meter, true)?;
+    Some(routed_or_baseline(text, meter, Some(segs)))
+}
+
+/// Number of line units, or `None` if the input is empty / over [`MAX_LINES`].
+fn line_count(text: &str) -> Option<usize> {
+    if text.is_empty() {
+        return None;
+    }
+    let n = text.split_inclusive('\n').count();
+    (n > 0 && n <= MAX_LINES).then_some(n)
+}
+
+fn segment_geometric(text: &str, meter: &dyn TokenMeter) -> Option<Vec<String>> {
+    segment(text, meter, false)
+}
+
+/// Given a candidate path (or `None`), assemble it and return the exact-meter
+/// minimum of {assembled path, whole-payload single-codec baseline}. This is
+/// the guarantee point-3 needs: the additive DP can misrank a multi-segment
+/// path that the exact meter then rejects, so "not segmenting" is always a
+/// measured competitor, never assumed away.
+fn routed_or_baseline(text: &str, meter: &dyn TokenMeter, path: Option<Vec<String>>) -> String {
+    let baseline = best_span(text, meter).0;
+    match path {
+        Some(segs) => {
+            let candidate = assemble(&segs);
+            if meter.count(&candidate) <= meter.count(&baseline) {
+                candidate
+            } else {
+                baseline
+            }
+        }
+        None => baseline,
+    }
+}
+
+/// Assemble a chosen path. A single segment is returned *bare* — no envelope,
+/// so a routed result that declines to split costs exactly what the plain
+/// codec costs, with no self-inflicted container tax.
+fn assemble(segs: &[String]) -> String {
+    match segs {
+        [single] => single.clone(),
+        _ => emit(segs),
     }
 }
 
 /// The shortest-path segmentation: the ordered per-region artifacts of the
-/// cheapest `0..N` path, or `None` when the input is unsegmentable here.
-fn segment(text: &str, meter: &dyn TokenMeter) -> Option<Vec<String>> {
-    if text.is_empty() {
-        return None;
-    }
+/// cheapest `0..N` path. `exhaustive` selects the candidate graph (every span
+/// vs the geometric grid).
+fn segment(text: &str, meter: &dyn TokenMeter, exhaustive: bool) -> Option<Vec<String>> {
     let units: Vec<&str> = text.split_inclusive('\n').collect();
     let n = units.len();
     if n == 0 || n > MAX_LINES {
@@ -92,8 +166,6 @@ fn segment(text: &str, meter: &dyn TokenMeter) -> Option<Vec<String>> {
         offsets.push(acc);
     }
 
-    // Shortest path: `dp[j]` = cheapest measured cost to encode `units[0..j]`;
-    // `best[j]` = (span start `i`, chosen artifact) that achieves it.
     let inf = usize::MAX / 4;
     let mut dp = vec![inf; n + 1];
     let mut best: Vec<Option<(usize, String)>> = vec![None; n + 1];
@@ -106,19 +178,7 @@ fn segment(text: &str, meter: &dyn TokenMeter) -> Option<Vec<String>> {
         if dp_i >= inf {
             continue;
         }
-        // Windows clamp to `n`, so "reach the end in one edge" is always a
-        // candidate: without it the pure powers of two could not express a
-        // single span whose length is not itself a power of two, forcing the
-        // DP to fragment even when *not* segmenting (the squeeze-equivalent) is
-        // optimal. Clamping collapses the large windows onto `j = n`; skip the
-        // duplicates it creates.
-        let mut prev_j = i;
-        for &w in &WINDOWS {
-            let j = (i + w).min(n);
-            if j <= prev_j {
-                continue;
-            }
-            prev_j = j;
+        for j in candidate_ends(i, n, exhaustive) {
             let (Some(&start), Some(&end)) = (offsets.get(i), offsets.get(j)) else {
                 continue;
             };
@@ -154,6 +214,34 @@ fn segment(text: &str, meter: &dyn TokenMeter) -> Option<Vec<String>> {
     Some(segs)
 }
 
+/// The set of end boundaries considered from start `i`.
+///
+/// * exhaustive: every `j` in `i+1..=n` — the true candidate graph.
+/// * geometric: the clamped power-of-two windows, **plus an explicit
+///   whole-payload edge** so "don't segment" is a real candidate at *any* `N`
+///   (the clamp alone only reaches `n` when `n - i <= 128`, which is exactly
+///   the flaw the review caught — a 500-line file's `0 -> n` edge is otherwise
+///   absent). Reaching the end from an arbitrary mid-file start is *not* in the
+///   geometric grid; that is what [`oracle`] is for.
+fn candidate_ends(i: usize, n: usize, exhaustive: bool) -> Vec<usize> {
+    if exhaustive {
+        return ((i + 1)..=n).collect();
+    }
+    let mut ends = Vec::with_capacity(WINDOWS.len() + 1);
+    let mut prev = i;
+    for &w in &WINDOWS {
+        let j = (i + w).min(n);
+        if j > prev {
+            ends.push(j);
+            prev = j;
+        }
+    }
+    if i == 0 && n > prev {
+        ends.push(n); // the whole-payload baseline edge
+    }
+    ends
+}
+
 /// The cheapest byte-exact artifact for one span, and its measured token cost.
 /// Every candidate already falls back to `raw` internally, so the raw floor is
 /// always in the running and the measured minimum is safe to take.
@@ -177,8 +265,8 @@ fn best_span(span: &str, meter: &dyn TokenMeter) -> (String, usize) {
 
 /// Wrap the per-region artifacts into a `%q1 mosaic` container: each segment is
 /// framed by its decimal byte length on its own line, then the segment bytes
-/// verbatim. Length framing means the segments need no separator and may
-/// contain any bytes (including their own `%q1 body` lines).
+/// verbatim. Length framing means segments need no separator and may contain
+/// any bytes (including their own `%q1 body` lines).
 pub fn emit(segs: &[String]) -> String {
     let mut body = String::new();
     for s in segs {
@@ -197,6 +285,10 @@ pub fn emit(segs: &[String]) -> String {
 /// Split a `mosaic` container body back into its segment artifact strings,
 /// checked against the header count and refusing trailing garbage. The caller
 /// decodes each segment (one container layer) and concatenates.
+///
+/// `n` comes from an untrusted header, so it is bounded before it sizes any
+/// allocation: a segment needs at least a length line and a byte, so `n` can
+/// never exceed `body.len()`, and never [`MAX_SEGMENTS`] regardless.
 pub fn split(c: &Container) -> Result<Vec<String>> {
     let n: usize = c
         .param("n")
@@ -204,9 +296,18 @@ pub fn split(c: &Container) -> Result<Vec<String>> {
         .parse()
         .context("mosaic: bad or missing n= segment count")?;
     let body = &c.body;
+    if n > MAX_SEGMENTS || n > body.len().saturating_add(1) {
+        bail!(
+            "mosaic: unreasonable segment count n={n} for a {}-byte body",
+            body.len()
+        );
+    }
     let mut segs = Vec::with_capacity(n);
     let mut pos = 0usize;
     while pos < body.len() {
+        if segs.len() > n {
+            bail!("mosaic: body holds more than the declared n={n} segments");
+        }
         let rest = body.get(pos..).unwrap_or_default();
         let nl = rest
             .find('\n')
