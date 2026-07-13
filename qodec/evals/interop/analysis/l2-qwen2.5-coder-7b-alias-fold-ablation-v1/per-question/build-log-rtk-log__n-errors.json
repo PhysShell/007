@@ -11,28 +11,11 @@
         "symbols": []
       },
       "correct": true,
+      "final_codec": "raw",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
       "latency_ms": 8068.0,
-      "n_repeats": 1,
-      "prompt_tokens": 593,
-      "stable": null
-    },
-    "GF": {
-      "alias_leaks": 0,
-      "answer": {
-        "answer": "3",
-        "call_path": [],
-        "facts": [],
-        "files": [],
-        "symbols": []
-      },
-      "correct": true,
-      "finish_reason": null,
-      "format_compliant": true,
-      "invalid_identifiers": 0,
-      "latency_ms": 7846.0,
       "n_repeats": 1,
       "prompt_tokens": 593,
       "stable": null
@@ -47,6 +30,7 @@
         "symbols": []
       },
       "correct": true,
+      "final_codec": "identity",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
@@ -65,6 +49,7 @@
         "symbols": []
       },
       "correct": true,
+      "final_codec": "mine",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
@@ -83,6 +68,7 @@
         "symbols": []
       },
       "correct": true,
+      "final_codec": "tmpl",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
@@ -101,12 +87,32 @@
         "symbols": []
       },
       "correct": true,
+      "final_codec": null,
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
       "latency_ms": 7928.0,
       "n_repeats": 1,
       "prompt_tokens": 583,
+      "stable": null
+    },
+    "VG": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "3",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": "raw",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 7846.0,
+      "n_repeats": 1,
+      "prompt_tokens": 593,
       "stable": null
     }
   },

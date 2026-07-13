@@ -65,10 +65,12 @@ pub enum CodecKind {
     /// `fold`/`grep`, with full verbatim paths and no glyph aliases (the F arm).
     /// alias=off, structural=on.
     Structural,
-    /// Eval-only. `squeeze` with the miner's generic lexical guard on: never
-    /// aliases paths / code spans / `::`,snake,Camel identifiers / grep markers
-    /// (the GF arm). alias=on(guarded), structural=on.
-    SqueezeGuarded,
+    /// Eval-only. The VERBATIM structural shelf (fold/grep only — NOT the full
+    /// production squeeze shelf of toon/diag/tmpl) followed by a guarded mine
+    /// that never aliases paths / code spans / `::`,snake,Camel identifiers /
+    /// grep markers. This is the ablation VG arm; it is NOT "guarded squeeze",
+    /// because it also drops diag/tmpl/toon. Production `squeeze` is untouched.
+    FoldGrepGuarded,
 }
 
 impl CodecKind {
@@ -85,7 +87,7 @@ impl CodecKind {
             "mosaic" => Some(Self::Mosaic),
             "identity" => Some(Self::Identity),
             "structural" => Some(Self::Structural),
-            "squeeze-guarded" => Some(Self::SqueezeGuarded),
+            "fold-grep-guarded" => Some(Self::FoldGrepGuarded),
             _ => None,
         }
     }
@@ -103,7 +105,7 @@ impl CodecKind {
             Self::Mosaic => "mosaic",
             Self::Identity => "identity",
             Self::Structural => "structural",
-            Self::SqueezeGuarded => "squeeze-guarded",
+            Self::FoldGrepGuarded => "fold-grep-guarded",
         }
     }
 }
@@ -164,8 +166,8 @@ pub fn encode_seeded(
         CodecKind::Diag => diag::encode(text, meter),
         CodecKind::Tmpl => tmpl::encode_seeded(text, meter, &seeds.templates),
         CodecKind::Squeeze => squeeze_encode(text, meter, &seeds.templates, &mine_opts, &deep_opts),
-        CodecKind::SqueezeGuarded => {
-            // GF: the VERBATIM structural stage (fold/grep only — never the
+        CodecKind::FoldGrepGuarded => {
+            // VG: the VERBATIM structural stage (fold/grep only — never the
             // alias-legend codecs tmpl/diag), then a guarded mine so no generic
             // lexical span is ever aliased by either stage. squeeze is untouched.
             let guarded = MineOptions {
@@ -221,7 +223,7 @@ pub fn encode_seeded(
     }
 }
 
-/// Squeeze's full pipeline, shared by `squeeze` and `squeeze-guarded` (which
+/// Squeeze's full pipeline, shared by `squeeze` and `fold-grep-guarded` (which
 /// pass guarded mine options). Kept byte-for-byte identical to the original
 /// inline body so production `squeeze` is unchanged.
 fn squeeze_encode(

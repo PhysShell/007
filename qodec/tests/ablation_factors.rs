@@ -1,7 +1,7 @@
-//! Eval-only ablation codecs (identity / structural / squeeze-guarded) and the
-//! miner's lexical guard. The factor arms must be lossless, and — the load-
-//! bearing property — `squeeze` itself must be byte-for-byte unchanged and GF
-//! must never alias a guarded lexical span.
+//! Eval-only ablation codecs (identity / structural / fold-grep-guarded) and
+//! the miner's lexical guard. The factor arms must be lossless, and — the load-
+//! bearing property — `squeeze` itself must be byte-for-byte unchanged and the
+//! guarded arm (VG) must never alias a guarded lexical span.
 
 use anyhow::Result;
 
@@ -44,7 +44,7 @@ fn identity_is_byte_exact_and_frames() -> Result<()> {
 #[test]
 fn structural_and_guarded_roundtrip() -> Result<()> {
     roundtrips(CodecKind::Structural)?;
-    roundtrips(CodecKind::SqueezeGuarded)?;
+    roundtrips(CodecKind::FoldGrepGuarded)?;
     Ok(())
 }
 
@@ -61,8 +61,8 @@ fn structural_carries_no_alias_legend() {
 }
 
 #[test]
-fn guarded_squeeze_never_aliases_a_guarded_span() {
-    let art = encode(SAMPLE, CodecKind::SqueezeGuarded, &meter(), Alphabet::Auto);
+fn vg_never_aliases_a_guarded_span() {
+    let art = encode(SAMPLE, CodecKind::FoldGrepGuarded, &meter(), Alphabet::Auto);
     // Every legend phrase in GF must be a non-guarded span.
     for line in art.lines() {
         if line.starts_with("%q1") {
@@ -71,7 +71,7 @@ fn guarded_squeeze_never_aliases_a_guarded_span() {
         if let Some((_alias, phrase)) = line.split_once('=') {
             assert!(
                 !is_guarded_lexical(phrase),
-                "GF aliased a guarded span: {phrase:?}"
+                "VG aliased a guarded span: {phrase:?}"
             );
         }
     }
@@ -83,7 +83,7 @@ fn guarded_squeeze_never_aliases_a_guarded_span() {
 #[test]
 fn squeeze_is_unchanged_by_the_guard() -> Result<()> {
     // Production squeeze must not be affected by the guard machinery, and must
-    // still roundtrip. squeeze-guarded is only ever <= squeeze in aliasing.
+    // still roundtrip. fold-grep-guarded (VG) is a separate shelf, not squeeze+guard.
     let m = meter();
     let sq = encode(SAMPLE, CodecKind::Squeeze, &m, Alphabet::Auto);
     assert_eq!(decode(&sq)?, SAMPLE);

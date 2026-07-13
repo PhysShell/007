@@ -34,33 +34,39 @@ def _man(losses, controls, weak=()):
 
 
 class Verdicts(unittest.TestCase):
-    def _verdict(self, pattern):
+    def _verdict(self, pattern, mf_codec="mine"):
         recs = question("c", "q", pattern)
-        man = _man([("c", "q")], [])
-        qs = A.factorial(recs, man)
+        for r in recs:
+            r["arm_receipt"] = {"format_codec": mf_codec}
+        qs = A.factorial(recs, _man([("c", "q")], []))
         return qs[0]["verdict"]
 
-    def test_alias_main_effect(self):
-        v = self._verdict({"R": True, "I": True, "M": False, "F": True, "MF": True, "GF": True})
-        self.assertTrue(any("alias main effect" in s for s in v))
+    def test_alias_main_effect_confirmed(self):
+        v = self._verdict({"R": True, "I": True, "M": False, "F": True, "MF": False, "VG": True})
+        self.assertIn("alias main effect confirmed", v["causal"])
 
-    def test_structural_main_effect(self):
-        v = self._verdict({"R": True, "I": True, "M": True, "F": False, "MF": True, "GF": True})
-        self.assertTrue(any("structural main effect" in s for s in v))
+    def test_production_stage_mine_interaction_when_mf_mined(self):
+        v = self._verdict({"R": True, "I": True, "M": True, "F": True, "MF": False, "VG": True}, mf_codec="mine")
+        self.assertIn("production-stage / mine interaction unresolved", v["causal"])
+        # VG rescue is reported as candidate-policy, NOT causal
+        self.assertIn("VG", v["candidate_policy_rescue"])
 
-    def test_interaction_requires_same_question(self):
-        v = self._verdict({"R": True, "I": True, "M": True, "F": True, "MF": False, "GF": True})
-        self.assertTrue(any("interaction" in s for s in v))
-        self.assertTrue(any("lexical aliasing implicated" in s for s in v))
+    def test_production_stage_effect_when_mf_structural(self):
+        v = self._verdict({"R": True, "I": True, "M": True, "F": True, "MF": False, "VG": True}, mf_codec="tmpl")
+        self.assertIn("production-stage effect unresolved", v["causal"])
 
-    def test_framing_regression(self):
-        v = self._verdict({"R": True, "I": False, "M": False, "F": False, "MF": False, "GF": False})
-        self.assertTrue(any("framing regression" in s for s in v))
-        self.assertTrue(any("framing implicated" in s for s in v))
+    def test_no_lexical_guard_claim_from_mf_fail_vg_pass(self):
+        # The old bug: MF fail + VG pass must NOT be stated as a lexical-guard effect.
+        v = self._verdict({"R": True, "I": True, "M": True, "F": True, "MF": False, "VG": True})
+        self.assertNotIn("lexical", v["causal"].lower())
+        self.assertNotIn("guard", v["causal"].lower())
+
+    def test_framing_implicated(self):
+        v = self._verdict({"R": True, "I": False, "M": False, "F": False, "MF": False, "VG": False})
+        self.assertIn("framing implicated", v["causal"])
 
     def test_unstable_arm_is_not_a_clean_pass(self):
         recs = question("c", "q", ALLPASS)
-        # M flips across repeats → unstable → not counted as pass for M
         recs += [rec("c", "q", "M", 1, False), rec("c", "q", "M", 2, True)]
         recs = [r for r in recs if not (r["arm"] == "M" and r["repeat"] == 0)] + [rec("c", "q", "M", 0, True)]
         qs = A.factorial(recs, _man([("c", "q")], []))
@@ -73,11 +79,11 @@ class GateAndPareto(unittest.TestCase):
         controls = [("C", f"c{i}") for i in range(5)]
         recs = []
         # loss patterns: none rescued by a single arm across all five
-        recs += question("L", "l0", {"R": True, "I": True, "M": False, "F": True, "MF": False, "GF": False})
-        recs += question("L", "l1", {"R": True, "I": True, "M": True, "F": False, "MF": False, "GF": False})
-        recs += question("L", "l2", {"R": True, "I": True, "M": True, "F": True, "MF": False, "GF": True})
-        recs += question("L", "l3", {"R": True, "I": True, "M": False, "F": True, "MF": False, "GF": True})
-        recs += question("L", "l4", {"R": True, "I": True, "M": True, "F": False, "MF": False, "GF": True})
+        recs += question("L", "l0", {"R": True, "I": True, "M": False, "F": True, "MF": False, "VG": False})
+        recs += question("L", "l1", {"R": True, "I": True, "M": True, "F": False, "MF": False, "VG": False})
+        recs += question("L", "l2", {"R": True, "I": True, "M": True, "F": True, "MF": False, "VG": True})
+        recs += question("L", "l3", {"R": True, "I": True, "M": False, "F": True, "MF": False, "VG": True})
+        recs += question("L", "l4", {"R": True, "I": True, "M": True, "F": False, "MF": False, "VG": True})
         for i in range(5):
             # controls all pass except c0 regresses under M
             pat = dict(ALLPASS)
@@ -90,16 +96,16 @@ class GateAndPareto(unittest.TestCase):
         recs, man = self._run()
         qs = A.factorial(recs, man)
         gate = A.candidate_gate(qs)
-        # MF fails every loss → 0/5; GF rescues l2,l3,l4 → 3/5; none is 5/5
+        # MF fails every loss → 0/5; VG rescues l2,l3,l4 → 3/5; none is 5/5
         self.assertEqual(gate["MF"]["losses_rescued"], "0/5")
-        self.assertEqual(gate["GF"]["losses_rescued"], "3/5")
+        self.assertEqual(gate["VG"]["losses_rescued"], "3/5")
         self.assertIn("C:c0", gate["M"]["control_regressions"])
         self.assertFalse(any(g["advances_to_full_rerun"] for g in gate.values()))
 
-    def test_pareto_orders_by_quality_first(self):
+    def test_priority_ranking_orders_by_quality_first(self):
         recs, man = self._run()
         qs = A.factorial(recs, man)
-        par = A.pareto(qs)
+        par = A.priority_ranking(qs)
         # R passes all 10; MF passes fewest → R ranks ahead of MF
         self.assertLess(par["ranked"].index("R"), par["ranked"].index("MF"))
 

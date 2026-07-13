@@ -13,32 +13,13 @@
         ]
       },
       "correct": true,
+      "final_codec": "raw",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
       "latency_ms": 9929.0,
       "n_repeats": 3,
       "prompt_tokens": 4783,
-      "stable": true
-    },
-    "GF": {
-      "alias_leaks": 0,
-      "answer": {
-        "answer": "8",
-        "call_path": [],
-        "facts": [],
-        "files": [],
-        "symbols": [
-          "ValueParser"
-        ]
-      },
-      "correct": true,
-      "finish_reason": null,
-      "format_compliant": true,
-      "invalid_identifiers": 0,
-      "latency_ms": 10096.0,
-      "n_repeats": 3,
-      "prompt_tokens": 4682,
       "stable": true
     },
     "I": {
@@ -53,6 +34,7 @@
         ]
       },
       "correct": true,
+      "final_codec": "identity",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
@@ -73,6 +55,7 @@
         ]
       },
       "correct": true,
+      "final_codec": "mine",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
@@ -93,6 +76,7 @@
         ]
       },
       "correct": false,
+      "final_codec": "mine",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 1,
@@ -113,6 +97,7 @@
         ]
       },
       "correct": true,
+      "final_codec": null,
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
@@ -120,13 +105,38 @@
       "n_repeats": 3,
       "prompt_tokens": 4773,
       "stable": true
+    },
+    "VG": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "8",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "ValueParser"
+        ]
+      },
+      "correct": true,
+      "final_codec": "mine",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 10096.0,
+      "n_repeats": 3,
+      "prompt_tokens": 4682,
+      "stable": true
     }
   },
   "question": "top-symbol",
   "role": "loss",
-  "verdict": [
-    "alias × structural interaction (I/M/F pass, MF fail)",
-    "lexical aliasing implicated (MF fail, GF pass)"
-  ],
+  "verdict": {
+    "candidate_policy_rescue": [
+      "F",
+      "VG"
+    ],
+    "causal": "production-stage / mine interaction unresolved (only MF fails; MF mined)",
+    "note": "VG/F rescue is candidate-policy evidence only; VG changes the shelf AND guards the mine, so it is not a clean lexical-guard attribution"
+  },
   "weakly_matched": false
 }

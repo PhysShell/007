@@ -14,31 +14,11 @@
         ]
       },
       "correct": true,
+      "final_codec": "raw",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
       "latency_ms": 42459.0,
-      "n_repeats": 1,
-      "prompt_tokens": 879,
-      "stable": null
-    },
-    "GF": {
-      "alias_leaks": 0,
-      "answer": {
-        "answer": "",
-        "call_path": [],
-        "facts": [],
-        "files": [],
-        "symbols": [
-          "OpenAsync",
-          "RequestAsync"
-        ]
-      },
-      "correct": true,
-      "finish_reason": null,
-      "format_compliant": true,
-      "invalid_identifiers": 0,
-      "latency_ms": 34673.0,
       "n_repeats": 1,
       "prompt_tokens": 879,
       "stable": null
@@ -56,6 +36,7 @@
         ]
       },
       "correct": true,
+      "final_codec": "identity",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
@@ -76,6 +57,7 @@
         ]
       },
       "correct": true,
+      "final_codec": "mine",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
@@ -97,6 +79,7 @@
         ]
       },
       "correct": true,
+      "final_codec": "mine",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
@@ -118,12 +101,35 @@
         ]
       },
       "correct": true,
+      "final_codec": null,
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
       "latency_ms": 37220.0,
       "n_repeats": 1,
       "prompt_tokens": 869,
+      "stable": null
+    },
+    "VG": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "OpenAsync",
+          "RequestAsync"
+        ]
+      },
+      "correct": true,
+      "final_codec": "raw",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 34673.0,
+      "n_repeats": 1,
+      "prompt_tokens": 879,
       "stable": null
     }
   },

@@ -1,20 +1,40 @@
 {
+  "byte_identical_arms": [
+    {
+      "arms": [
+        "F",
+        "VG"
+      ],
+      "case": "build-log-rtk-log"
+    },
+    {
+      "arms": [
+        "F",
+        "VG"
+      ],
+      "case": "rg-output-rtk-grep"
+    },
+    {
+      "arms": [
+        "F",
+        "VG"
+      ],
+      "case": "rtk-rg-parser-clap"
+    }
+  ],
   "candidate_gate": {
     "F": {
-      "advances_to_full_rerun": true,
+      "advances_to_full_rerun": false,
       "alias_leaks": 0,
       "control_regressions": [],
       "invalid_id_delta_vs_R": 0,
       "losses_rescued": "5/5",
-      "token_savings_vs_R": 936
-    },
-    "GF": {
-      "advances_to_full_rerun": true,
-      "alias_leaks": 0,
-      "control_regressions": [],
-      "invalid_id_delta_vs_R": 0,
-      "losses_rescued": "5/5",
-      "token_savings_vs_R": 1358
+      "token_savings_vs_R": {
+        "mean_per_question_vs_R": 93.6,
+        "median_per_question_vs_R": -10.0,
+        "percent_vs_R": 3.4,
+        "total_vs_R": 936
+      }
     },
     "I": {
       "advances_to_full_rerun": false,
@@ -22,7 +42,12 @@
       "control_regressions": [],
       "invalid_id_delta_vs_R": 0,
       "losses_rescued": "5/5",
-      "token_savings_vs_R": -100
+      "token_savings_vs_R": {
+        "mean_per_question_vs_R": -10.0,
+        "median_per_question_vs_R": -10.0,
+        "percent_vs_R": -0.4,
+        "total_vs_R": -100
+      }
     },
     "M": {
       "advances_to_full_rerun": false,
@@ -30,7 +55,12 @@
       "control_regressions": [],
       "invalid_id_delta_vs_R": 1,
       "losses_rescued": "3/5",
-      "token_savings_vs_R": 2478
+      "token_savings_vs_R": {
+        "mean_per_question_vs_R": 247.8,
+        "median_per_question_vs_R": 210.5,
+        "percent_vs_R": 9.0,
+        "total_vs_R": 2478
+      }
     },
     "MF": {
       "advances_to_full_rerun": false,
@@ -38,14 +68,36 @@
       "control_regressions": [],
       "invalid_id_delta_vs_R": 3,
       "losses_rescued": "0/5",
-      "token_savings_vs_R": 4323
+      "token_savings_vs_R": {
+        "mean_per_question_vs_R": 432.3,
+        "median_per_question_vs_R": 386.5,
+        "percent_vs_R": 15.7,
+        "total_vs_R": 4323
+      }
+    },
+    "VG": {
+      "advances_to_full_rerun": true,
+      "alias_leaks": 0,
+      "control_regressions": [],
+      "invalid_id_delta_vs_R": 0,
+      "losses_rescued": "5/5",
+      "token_savings_vs_R": {
+        "mean_per_question_vs_R": 135.8,
+        "median_per_question_vs_R": 91.0,
+        "percent_vs_R": 4.9,
+        "total_vs_R": 1358
+      }
     }
   },
-  "conclusion": "candidate policy for full 23-question rerun: F, GF",
+  "conclusion": "2/5 losses have a confirmed factor (alias main effect); 3/5 are production-stage effects unresolved without a stage-matched S/SM/SG comparison (Commit I). Candidate policies that pass the gate: VG — candidate-policy evidence, NOT a causal claim that a lexical guard fixed production squeeze. Blind production squeeze remains rejected.",
+  "guard_isolation": {
+    "note": "VG's structural shelf (fold/grep) differs from MF's (toon/fold/grep/diag/tmpl), so no stage-1-matched arm pair exists in this run — the lexical guard's effect is NOT isolated here. Commit I's SM/SG arms (same frozen stage-1, guard on/off) isolate it.",
+    "stage1_matched_pair_present": false
+  },
   "model": "qwen2.5-coder-7b-instruct",
-  "pareto": {
+  "priority_ranking": {
     "ranked": [
-      "GF",
+      "VG",
       "F",
       "R",
       "I",
@@ -95,7 +147,7 @@
       },
       {
         "alias_leaks": 0,
-        "arm": "GF",
+        "arm": "VG",
         "correct": 10,
         "invalid_identifiers": 0,
         "mean_latency_ms": 64495.0,
@@ -118,28 +170,11 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "raw",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 19558.0,
-          "n_repeats": 3,
-          "prompt_tokens": 593,
-          "stable": true
-        },
-        "GF": {
-          "alias_leaks": 0,
-          "answer": {
-            "answer": "9",
-            "call_path": [],
-            "facts": [],
-            "files": [],
-            "symbols": []
-          },
-          "correct": true,
-          "finish_reason": null,
-          "format_compliant": true,
-          "invalid_identifiers": 0,
-          "latency_ms": 20030.0,
           "n_repeats": 3,
           "prompt_tokens": 593,
           "stable": true
@@ -154,6 +189,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "identity",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -172,6 +208,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -190,6 +227,7 @@
             "symbols": []
           },
           "correct": false,
+          "final_codec": "tmpl",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -208,6 +246,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": null,
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -215,14 +254,37 @@
           "n_repeats": 3,
           "prompt_tokens": 583,
           "stable": true
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "9",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "raw",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 20030.0,
+          "n_repeats": 3,
+          "prompt_tokens": 593,
+          "stable": true
         }
       },
       "question": "n-warnings",
       "role": "loss",
-      "verdict": [
-        "alias × structural interaction (I/M/F pass, MF fail)",
-        "lexical aliasing implicated (MF fail, GF pass)"
-      ],
+      "verdict": {
+        "candidate_policy_rescue": [
+          "F",
+          "VG"
+        ],
+        "causal": "production-stage effect unresolved (only MF fails; its outer codec is structural)",
+        "note": "VG/F rescue is candidate-policy evidence only; VG changes the shelf AND guards the mine, so it is not a clean lexical-guard attribution"
+      },
       "weakly_matched": false
     },
     {
@@ -236,32 +298,13 @@
             ]
           },
           "correct": true,
+          "final_codec": "raw",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 295467.0,
           "n_repeats": 3,
           "prompt_tokens": 4785,
-          "stable": true
-        },
-        "GF": {
-          "alias_leaks": 0,
-          "answer": {
-            "answer": "",
-            "call_path": [],
-            "facts": [],
-            "files": [
-              "clap_builder/src/builder/value_parser.rs"
-            ],
-            "symbols": []
-          },
-          "correct": true,
-          "finish_reason": null,
-          "format_compliant": true,
-          "invalid_identifiers": 0,
-          "latency_ms": 293212.0,
-          "n_repeats": 3,
-          "prompt_tokens": 4684,
           "stable": true
         },
         "I": {
@@ -272,6 +315,7 @@
             ]
           },
           "correct": true,
+          "final_codec": "identity",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -288,6 +332,7 @@
             ]
           },
           "correct": false,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 1,
@@ -308,6 +353,7 @@
             "symbols": []
           },
           "correct": false,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 1,
@@ -327,6 +373,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": null,
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -334,14 +381,39 @@
           "n_repeats": 3,
           "prompt_tokens": 4775,
           "stable": true
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "clap_builder/src/builder/value_parser.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 293212.0,
+          "n_repeats": 3,
+          "prompt_tokens": 4684,
+          "stable": true
         }
       },
       "question": "def-path",
       "role": "loss",
-      "verdict": [
-        "alias main effect (I pass, M fail)",
-        "lexical aliasing implicated (MF fail, GF pass)"
-      ],
+      "verdict": {
+        "candidate_policy_rescue": [
+          "F",
+          "VG"
+        ],
+        "causal": "alias main effect confirmed (I pass, M fail)",
+        "note": "VG/F rescue is candidate-policy evidence only; VG changes the shelf AND guards the mine, so it is not a clean lexical-guard attribution"
+      },
       "weakly_matched": false
     },
     {
@@ -359,32 +431,13 @@
             ]
           },
           "correct": true,
+          "final_codec": "raw",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 9929.0,
           "n_repeats": 3,
           "prompt_tokens": 4783,
-          "stable": true
-        },
-        "GF": {
-          "alias_leaks": 0,
-          "answer": {
-            "answer": "8",
-            "call_path": [],
-            "facts": [],
-            "files": [],
-            "symbols": [
-              "ValueParser"
-            ]
-          },
-          "correct": true,
-          "finish_reason": null,
-          "format_compliant": true,
-          "invalid_identifiers": 0,
-          "latency_ms": 10096.0,
-          "n_repeats": 3,
-          "prompt_tokens": 4682,
           "stable": true
         },
         "I": {
@@ -399,6 +452,7 @@
             ]
           },
           "correct": true,
+          "final_codec": "identity",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -419,6 +473,7 @@
             ]
           },
           "correct": true,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -439,6 +494,7 @@
             ]
           },
           "correct": false,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 1,
@@ -459,6 +515,7 @@
             ]
           },
           "correct": true,
+          "final_codec": null,
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -466,14 +523,39 @@
           "n_repeats": 3,
           "prompt_tokens": 4773,
           "stable": true
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "8",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 10096.0,
+          "n_repeats": 3,
+          "prompt_tokens": 4682,
+          "stable": true
         }
       },
       "question": "top-symbol",
       "role": "loss",
-      "verdict": [
-        "alias × structural interaction (I/M/F pass, MF fail)",
-        "lexical aliasing implicated (MF fail, GF pass)"
-      ],
+      "verdict": {
+        "candidate_policy_rescue": [
+          "F",
+          "VG"
+        ],
+        "causal": "production-stage / mine interaction unresolved (only MF fails; MF mined)",
+        "note": "VG/F rescue is candidate-policy evidence only; VG changes the shelf AND guards the mine, so it is not a clean lexical-guard attribution"
+      },
       "weakly_matched": false
     },
     {
@@ -491,32 +573,13 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "grep",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 185145.0,
           "n_repeats": 3,
           "prompt_tokens": 3199,
-          "stable": true
-        },
-        "GF": {
-          "alias_leaks": 0,
-          "answer": {
-            "answer": "",
-            "call_path": [],
-            "facts": [],
-            "files": [
-              "src/_derive/mod.rs"
-            ],
-            "symbols": []
-          },
-          "correct": true,
-          "finish_reason": null,
-          "format_compliant": true,
-          "invalid_identifiers": 0,
-          "latency_ms": 184631.0,
-          "n_repeats": 3,
-          "prompt_tokens": 3181,
           "stable": true
         },
         "I": {
@@ -531,6 +594,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "identity",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -551,6 +615,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -571,6 +636,7 @@
             "symbols": []
           },
           "correct": false,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 1,
@@ -591,6 +657,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": null,
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -598,14 +665,39 @@
           "n_repeats": 3,
           "prompt_tokens": 3949,
           "stable": true
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "src/_derive/mod.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 184631.0,
+          "n_repeats": 3,
+          "prompt_tokens": 3181,
+          "stable": true
         }
       },
       "question": "file",
       "role": "loss",
-      "verdict": [
-        "alias × structural interaction (I/M/F pass, MF fail)",
-        "lexical aliasing implicated (MF fail, GF pass)"
-      ],
+      "verdict": {
+        "candidate_policy_rescue": [
+          "F",
+          "VG"
+        ],
+        "causal": "production-stage / mine interaction unresolved (only MF fails; MF mined)",
+        "note": "VG/F rescue is candidate-policy evidence only; VG changes the shelf AND guards the mine, so it is not a clean lexical-guard attribution"
+      },
       "weakly_matched": false
     },
     {
@@ -629,36 +721,11 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "grep",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 62390.0,
-          "n_repeats": 3,
-          "prompt_tokens": 1116,
-          "stable": true
-        },
-        "GF": {
-          "alias_leaks": 0,
-          "answer": {
-            "answer": "src/_concepts.rs",
-            "call_path": [],
-            "facts": [],
-            "files": [
-              "src/_concepts.rs",
-              "src/_cookbook/typed_derive.rs",
-              "src/_features.rs",
-              "src/lib.rs",
-              "src/_tutorial.rs",
-              "src/_derive/mod.rs",
-              "src/_derive/_tutorial.rs"
-            ],
-            "symbols": []
-          },
-          "correct": true,
-          "finish_reason": null,
-          "format_compliant": true,
-          "invalid_identifiers": 0,
-          "latency_ms": 64527.0,
           "n_repeats": 3,
           "prompt_tokens": 1116,
           "stable": true
@@ -675,6 +742,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "identity",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -695,6 +763,7 @@
             "symbols": []
           },
           "correct": false,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -715,6 +784,7 @@
             "symbols": []
           },
           "correct": false,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -735,6 +805,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": null,
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -742,14 +813,45 @@
           "n_repeats": 3,
           "prompt_tokens": 1244,
           "stable": true
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "src/_concepts.rs",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "src/_concepts.rs",
+              "src/_cookbook/typed_derive.rs",
+              "src/_features.rs",
+              "src/lib.rs",
+              "src/_tutorial.rs",
+              "src/_derive/mod.rs",
+              "src/_derive/_tutorial.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "grep",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 64527.0,
+          "n_repeats": 3,
+          "prompt_tokens": 1116,
+          "stable": true
         }
       },
       "question": "file",
       "role": "loss",
-      "verdict": [
-        "alias main effect (I pass, M fail)",
-        "lexical aliasing implicated (MF fail, GF pass)"
-      ],
+      "verdict": {
+        "candidate_policy_rescue": [
+          "F",
+          "VG"
+        ],
+        "causal": "alias main effect confirmed (I pass, M fail)",
+        "note": "VG/F rescue is candidate-policy evidence only; VG changes the shelf AND guards the mine, so it is not a clean lexical-guard attribution"
+      },
       "weakly_matched": false
     },
     {
@@ -765,28 +867,11 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "raw",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 8068.0,
-          "n_repeats": 1,
-          "prompt_tokens": 593,
-          "stable": null
-        },
-        "GF": {
-          "alias_leaks": 0,
-          "answer": {
-            "answer": "3",
-            "call_path": [],
-            "facts": [],
-            "files": [],
-            "symbols": []
-          },
-          "correct": true,
-          "finish_reason": null,
-          "format_compliant": true,
-          "invalid_identifiers": 0,
-          "latency_ms": 7846.0,
           "n_repeats": 1,
           "prompt_tokens": 593,
           "stable": null
@@ -801,6 +886,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "identity",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -819,6 +905,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -837,6 +924,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "tmpl",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -855,12 +943,32 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": null,
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 7928.0,
           "n_repeats": 1,
           "prompt_tokens": 583,
+          "stable": null
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "3",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "raw",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 7846.0,
+          "n_repeats": 1,
+          "prompt_tokens": 593,
           "stable": null
         }
       },
@@ -884,32 +992,13 @@
             ]
           },
           "correct": true,
+          "final_codec": "raw",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 9255.0,
           "n_repeats": 1,
           "prompt_tokens": 4785,
-          "stable": null
-        },
-        "GF": {
-          "alias_leaks": 0,
-          "answer": {
-            "answer": "Parser",
-            "call_path": [],
-            "facts": [],
-            "files": [],
-            "symbols": [
-              "Parser"
-            ]
-          },
-          "correct": true,
-          "finish_reason": null,
-          "format_compliant": true,
-          "invalid_identifiers": 0,
-          "latency_ms": 9696.0,
-          "n_repeats": 1,
-          "prompt_tokens": 4684,
           "stable": null
         },
         "I": {
@@ -924,6 +1013,7 @@
             ]
           },
           "correct": true,
+          "final_codec": "identity",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -944,6 +1034,7 @@
             ]
           },
           "correct": true,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -964,6 +1055,7 @@
             ]
           },
           "correct": true,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -984,12 +1076,34 @@
             ]
           },
           "correct": true,
+          "final_codec": null,
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 9656.0,
           "n_repeats": 1,
           "prompt_tokens": 4775,
+          "stable": null
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "Parser",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "Parser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 9696.0,
+          "n_repeats": 1,
+          "prompt_tokens": 4684,
           "stable": null
         }
       },
@@ -1013,32 +1127,13 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "raw",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 11137.0,
           "n_repeats": 1,
           "prompt_tokens": 4789,
-          "stable": null
-        },
-        "GF": {
-          "alias_leaks": 0,
-          "answer": {
-            "answer": "",
-            "call_path": [],
-            "facts": [],
-            "files": [
-              "clap_builder/src/derive.rs"
-            ],
-            "symbols": []
-          },
-          "correct": true,
-          "finish_reason": null,
-          "format_compliant": true,
-          "invalid_identifiers": 0,
-          "latency_ms": 10955.0,
-          "n_repeats": 1,
-          "prompt_tokens": 4688,
           "stable": null
         },
         "I": {
@@ -1053,6 +1148,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "identity",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -1073,6 +1169,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -1093,6 +1190,7 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -1113,12 +1211,34 @@
             "symbols": []
           },
           "correct": true,
+          "final_codec": null,
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 11120.0,
           "n_repeats": 1,
           "prompt_tokens": 4779,
+          "stable": null
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "clap_builder/src/derive.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 10955.0,
+          "n_repeats": 1,
+          "prompt_tokens": 4688,
           "stable": null
         }
       },
@@ -1143,31 +1263,11 @@
             ]
           },
           "correct": true,
+          "final_codec": "grep",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 9089.0,
-          "n_repeats": 1,
-          "prompt_tokens": 1111,
-          "stable": null
-        },
-        "GF": {
-          "alias_leaks": 0,
-          "answer": {
-            "answer": "",
-            "call_path": [],
-            "facts": [],
-            "files": [],
-            "symbols": [
-              "ValueParser",
-              "TypedValueParser"
-            ]
-          },
-          "correct": true,
-          "finish_reason": null,
-          "format_compliant": true,
-          "invalid_identifiers": 0,
-          "latency_ms": 9283.0,
           "n_repeats": 1,
           "prompt_tokens": 1111,
           "stable": null
@@ -1185,6 +1285,7 @@
             ]
           },
           "correct": true,
+          "final_codec": "identity",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -1205,6 +1306,7 @@
             ]
           },
           "correct": true,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -1225,6 +1327,7 @@
             ]
           },
           "correct": true,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -1245,12 +1348,35 @@
             ]
           },
           "correct": true,
+          "final_codec": null,
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 8449.0,
           "n_repeats": 1,
           "prompt_tokens": 1239,
+          "stable": null
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser",
+              "TypedValueParser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "grep",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 9283.0,
+          "n_repeats": 1,
+          "prompt_tokens": 1111,
           "stable": null
         }
       },
@@ -1275,31 +1401,11 @@
             ]
           },
           "correct": true,
+          "final_codec": "raw",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 42459.0,
-          "n_repeats": 1,
-          "prompt_tokens": 879,
-          "stable": null
-        },
-        "GF": {
-          "alias_leaks": 0,
-          "answer": {
-            "answer": "",
-            "call_path": [],
-            "facts": [],
-            "files": [],
-            "symbols": [
-              "OpenAsync",
-              "RequestAsync"
-            ]
-          },
-          "correct": true,
-          "finish_reason": null,
-          "format_compliant": true,
-          "invalid_identifiers": 0,
-          "latency_ms": 34673.0,
           "n_repeats": 1,
           "prompt_tokens": 879,
           "stable": null
@@ -1317,6 +1423,7 @@
             ]
           },
           "correct": true,
+          "final_codec": "identity",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -1337,6 +1444,7 @@
             ]
           },
           "correct": true,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -1358,6 +1466,7 @@
             ]
           },
           "correct": true,
+          "final_codec": "mine",
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
@@ -1379,12 +1488,35 @@
             ]
           },
           "correct": true,
+          "final_codec": null,
           "finish_reason": null,
           "format_compliant": true,
           "invalid_identifiers": 0,
           "latency_ms": 37220.0,
           "n_repeats": 1,
           "prompt_tokens": 869,
+          "stable": null
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "OpenAsync",
+              "RequestAsync"
+            ]
+          },
+          "correct": true,
+          "final_codec": "raw",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 34673.0,
+          "n_repeats": 1,
+          "prompt_tokens": 879,
           "stable": null
         }
       },

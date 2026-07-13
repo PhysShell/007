@@ -66,7 +66,7 @@ pub struct MineOptions {
     /// Measured probes per round. The knob the ranker earns its keep on:
     /// a good ranking keeps the ratio at a fraction of the probes.
     pub probe_budget: usize,
-    /// Eval-only lexical guard (the `squeeze-guarded` / GF ablation arm): when
+    /// Eval-only lexical guard (the `fold-grep-guarded` / VG ablation arm): when
     /// set, candidate phrases that span a guarded lexical class (paths, code
     /// spans, `::`/snake/Camel identifiers, grep markers) are never aliased.
     /// A diagnostic global guard recognised without task/gold — NOT protected
@@ -74,7 +74,7 @@ pub struct MineOptions {
     pub guard_lexical: bool,
 }
 
-/// Generic lexical classes GF never lets the miner alias — recognised purely
+/// Generic lexical classes the guard never lets the miner alias — recognised purely
 /// from surface form, with no knowledge of the task or gold answer. Purity of
 /// the factor matters more than compression ratio, so this over-guards rather
 /// than risk hiding an identifier inside a glyph.
@@ -152,7 +152,7 @@ pub fn encode(text: &str, meter: &dyn TokenMeter, opts: &MineOptions) -> String 
         }
         for phrase in queue {
             if opts.guard_lexical && is_guarded_lexical(&phrase) {
-                continue; // GF: never alias a guarded lexical span
+                continue; // guarded: never alias a guarded lexical span
             }
             let replaced = current.replace(&phrase, &alias);
             let legend_line = format!("{alias}={phrase}\n");

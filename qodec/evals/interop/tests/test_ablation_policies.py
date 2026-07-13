@@ -46,7 +46,7 @@ class Policies(unittest.TestCase):
         self.assertEqual(viol, [], f"invariant violations: {viol}")
 
     def test_every_encoded_arm_roundtrips_byte_exact(self):
-        for name in ("I", "M", "F", "MF", "GF"):
+        for name in ("I", "M", "F", "MF", "VG"):
             self.assertTrue(self.arms[name].roundtrip_ok, f"{name} roundtrip")
             self.assertEqual(self.arms[name].receipt["roundtrip_sha256"], ap._sha(SAMPLE))
 
@@ -60,10 +60,10 @@ class Policies(unittest.TestCase):
         for name in ("R", "I", "F"):
             self.assertEqual(ap.legend_of(self.arms[name].artifact), {}, name)
 
-    def test_GF_aliases_nothing_guarded(self):
-        for a, phrase in ap.legend_of(self.arms["GF"].artifact).items():
+    def test_VG_aliases_nothing_guarded(self):
+        for a, phrase in ap.legend_of(self.arms["VG"].artifact).items():
             self.assertFalse(ap.is_guarded_lexical(phrase), f"{a}={phrase!r}")
-        self.assertTrue(self.arms["GF"].receipt["lexical_guard"])
+        self.assertTrue(self.arms["VG"].receipt["lexical_guard"])
 
     def test_identity_is_a_container_not_passthrough(self):
         self.assertTrue(self.arms["I"].artifact.startswith("%q1 identity"))
@@ -80,6 +80,26 @@ class Policies(unittest.TestCase):
             for key in ("alias_enabled", "structural_enabled", "lexical_guard",
                         "format_codec", "miner", "artifact_sha256", "roundtrip_sha256", "tokens"):
                 self.assertIn(key, res.receipt, f"{name} missing {key}")
+
+    def test_realized_stages_report_applied_transforms_not_intent(self):
+        st = {a: ap.realized_stages(a, SAMPLE, METER, self.qb) for a in ap.ARM_NAMES if a != "R"}
+        # I: identity container — neither factor actually applied.
+        self.assertFalse(st["I"]["alias_applied"])
+        self.assertFalse(st["I"]["structural_applied"])
+        # M: alias applied (legend present), no structural stage.
+        self.assertTrue(st["M"]["alias_applied"])
+        self.assertFalse(st["M"]["structural_applied"])
+        # F/VG shelf is fold/grep only; MF shelf includes tmpl/diag/toon.
+        self.assertEqual(st["F"]["stage1"]["candidate_codecs"], ["fold", "grep"])
+        self.assertIn("tmpl", st["MF"]["stage1"]["candidate_codecs"])
+        # alias_applied is read from the artifact, never from the arm name.
+        for a in ("I", "F"):
+            self.assertEqual(st[a]["stage2"]["legend_entries"], 0)
+
+    def test_byte_identical_pairs_detected(self):
+        # On this sample the guard removes all VG aliases → VG == F byte-for-byte.
+        pairs = ap.byte_identical_pairs(self.arms)
+        self.assertIn(("F", "VG"), [tuple(p) for p in pairs])
 
 
 if __name__ == "__main__":

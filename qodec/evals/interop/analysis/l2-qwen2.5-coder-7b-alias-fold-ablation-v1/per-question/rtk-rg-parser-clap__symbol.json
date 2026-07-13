@@ -14,31 +14,11 @@
         ]
       },
       "correct": true,
+      "final_codec": "grep",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
       "latency_ms": 9089.0,
-      "n_repeats": 1,
-      "prompt_tokens": 1111,
-      "stable": null
-    },
-    "GF": {
-      "alias_leaks": 0,
-      "answer": {
-        "answer": "",
-        "call_path": [],
-        "facts": [],
-        "files": [],
-        "symbols": [
-          "ValueParser",
-          "TypedValueParser"
-        ]
-      },
-      "correct": true,
-      "finish_reason": null,
-      "format_compliant": true,
-      "invalid_identifiers": 0,
-      "latency_ms": 9283.0,
       "n_repeats": 1,
       "prompt_tokens": 1111,
       "stable": null
@@ -56,6 +36,7 @@
         ]
       },
       "correct": true,
+      "final_codec": "identity",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
@@ -76,6 +57,7 @@
         ]
       },
       "correct": true,
+      "final_codec": "mine",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
@@ -96,6 +78,7 @@
         ]
       },
       "correct": true,
+      "final_codec": "mine",
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
@@ -116,12 +99,35 @@
         ]
       },
       "correct": true,
+      "final_codec": null,
       "finish_reason": null,
       "format_compliant": true,
       "invalid_identifiers": 0,
       "latency_ms": 8449.0,
       "n_repeats": 1,
       "prompt_tokens": 1239,
+      "stable": null
+    },
+    "VG": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "ValueParser",
+          "TypedValueParser"
+        ]
+      },
+      "correct": true,
+      "final_codec": "grep",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 9283.0,
+      "n_repeats": 1,
+      "prompt_tokens": 1111,
       "stable": null
     }
   },

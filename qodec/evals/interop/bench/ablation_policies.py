@@ -1,20 +1,22 @@
 """Factorized alias × structural ablation policies (eval-only).
 
-Six arms decompose the production `squeeze` codec into its factors so a targeted
-run can attribute a codec loss to aliasing, structural folding, their
-interaction, the `%q1` framing, or a generic lexical guard:
+Six arms probe how the production `squeeze` codec's factors relate to a loss:
 
-    R   raw+brief                      alias=off structural=off  (no container)
-    I   %q1 identity container         alias=off structural=off  (framing only)
-    M   mine                           alias=on  structural=off
-    F   structural (fold/grep)         alias=off structural=on
-    MF  squeeze  (== production)        alias=on  structural=on
-    GF  squeeze-guarded                alias=on  structural=on  lexical_guard=on
+    R   raw+brief                      no container
+    I   %q1 identity container         framing only
+    M   mine over raw                  aliasing only, no structural stage
+    F   structural (fold/grep)         verbatim structural only, no aliases
+    MF  squeeze  (== production)        production shelf + mine
+    VG  fold-grep-guarded              fold/grep shelf + GUARDED mine
 
-Production `squeeze` is untouched; MF calls it and must reproduce it byte-for-byte.
-Each arm drives the built qodec binary (no reimplementation), records a stage
-receipt, and is checked for byte-exact roundtrip. GF's guard is generic and
-surface-only (no task/gold) — a diagnostic, NOT protected spans.
+IMPORTANT — VG is NOT "guarded squeeze". Production squeeze's structural stage is
+`toon | best(fold,grep,diag,tmpl)`; VG's is `best(fold,grep)` ONLY, then a guarded
+mine. So VG differs from MF in TWO ways (a smaller structural shelf AND the mine
+guard), and an `MF fail / VG pass` flip is candidate-policy evidence, not a clean
+lexical-guard attribution. A stage-matched S/SM/SG comparison (Commit I) isolates
+the guard. Production `squeeze` is untouched; MF calls it and reproduces it
+byte-for-byte. The guard is generic surface-only (no task/gold) — NOT protected
+spans.
 """
 
 from __future__ import annotations
@@ -25,16 +27,22 @@ import re
 import subprocess
 from dataclasses import dataclass
 
-# Arms as (name, codec, alias, structural, guard). R has no codec.
+# Arms as (name, codec, alias_intent, structural_intent, guard). R has no codec.
+# "intent" is the POLICY; the realized_stages() receipt records what was actually
+# applied (never inferred from the arm name).
 POLICIES = [
     ("R", None, False, False, False),
     ("I", "identity", False, False, False),
     ("M", "mine", True, False, False),
     ("F", "structural", False, True, False),
     ("MF", "squeeze", True, True, False),
-    ("GF", "squeeze-guarded", True, True, True),
+    ("VG", "fold-grep-guarded", True, True, True),
 ]
 ARM_NAMES = [p[0] for p in POLICIES]
+
+# The structural candidate shelf each arm's codec may pick from (for the receipt).
+SHELF = {"R": [], "I": [], "M": [], "F": ["fold", "grep"],
+         "MF": ["toon", "fold", "grep", "diag", "tmpl"], "VG": ["fold", "grep"]}
 
 
 def _sha(s: str) -> str:
@@ -129,6 +137,83 @@ def encode_all_arms(raw_payload: str, meter: str, qodec_bin: str) -> dict:
     return {p[0]: apply_policy(p, raw_payload, meter, qodec_bin) for p in POLICIES}
 
 
+def _outer_codec(artifact: str) -> str:
+    return artifact.split("\n", 1)[0].split()[1] if artifact.startswith("%q1 ") else "raw"
+
+
+def _tokens(qodec_bin: str, codec: str, text: str, meter: str) -> int:
+    return _encode(qodec_bin, codec, text, meter)["tokens_out"]
+
+
+def realized_stages(arm: str, raw_payload: str, meter: str, qodec_bin: str) -> dict:
+    """The REALIZED codec stages of an arm — what transforms actually landed in
+    the artifact, read from the bytes, never inferred from the arm name.
+
+    stage1 selected_codec is reconstructed as the measured-minimum over that arm's
+    shelf (the same rule production's best_text_stage uses); the production-code-
+    exact stage-1 (`S`) arm is added in the Commit-I closure run. guarded_
+    candidates_rejected needs miner instrumentation and is likewise deferred to I.
+    Invariants recorded here: alias_applied ⇔ the final artifact carries an alias
+    legend; structural_applied ⇔ the selected structural artifact differs from raw.
+    """
+    res = apply_policy(next(p for p in POLICIES if p[0] == arm), raw_payload, meter, qodec_bin)
+    art = res.artifact
+    final_codec = _outer_codec(art) if res.encoded else None
+    legend = legend_of(art)
+
+    shelf = SHELF[arm]
+    stage1 = {"candidate_codecs": shelf, "selected_codec": None, "artifact_sha256": None,
+              "tokens": None, "transform_applied": False}
+    if shelf:
+        # toon only applies to JSON, mirroring squeeze's stage-1 gate.
+        cands = [c for c in shelf if c != "toon" or _is_json(raw_payload)]
+        best = min(((c, _encode(qodec_bin, c, raw_payload, meter)) for c in cands),
+                   key=lambda ce: ce[1]["tokens_out"])
+        c, env = best
+        s1 = env["content"]
+        stage1 = {"candidate_codecs": shelf, "selected_codec": (_outer_codec(s1) if env["encoded"] else "raw"),
+                  "artifact_sha256": _sha(s1), "tokens": env["tokens_out"],
+                  "transform_applied": s1 != raw_payload and env["encoded"],
+                  "reconstruction": "measured-min over shelf; production-exact S arm in Commit I"}
+
+    alias_applied = bool(legend)
+    stage2 = {"attempted": arm in ("M", "MF", "VG"),
+              "selected_miner": "mine" if arm in ("M", "MF", "VG") else None,
+              "transform_applied": alias_applied,
+              "legend_entries": len(legend),
+              "guarded_candidates_rejected": None,  # measured in Commit I
+              "artifact_sha256": _sha(art)}
+    return {
+        "arm": arm,
+        "stage1": stage1,
+        "stage2": stage2,
+        "final": {"outer_codec": final_codec, "artifact_sha256": _sha(art), "tokens": res.tokens},
+        "alias_applied": alias_applied,
+        "structural_applied": stage1["transform_applied"],
+    }
+
+
+def _is_json(text: str) -> bool:
+    try:
+        json.loads(text)
+        return True
+    except Exception:
+        return False
+
+
+def byte_identical_pairs(arms: dict) -> list[tuple]:
+    """Arm pairs whose artifacts are byte-identical (e.g. F and VG when the guard
+    rejected every candidate the structural stage left). Reported so a 'both pass'
+    is not read as two independent results."""
+    names = [n for n in ARM_NAMES if arms[n].encoded]
+    out = []
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            if arms[a].artifact == arms[b].artifact:
+                out.append((a, b))
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Invariant checks — a policy that violates one must never enter a run.
 # --------------------------------------------------------------------------- #
@@ -148,10 +233,10 @@ def check_invariants(arms: dict, raw_payload: str, squeeze_artifact: str | None 
         if tok not in arms["F"].artifact:
             viol.append(f"F: path token not verbatim: {tok}")
             break
-    # GF never aliases a guarded span.
-    for a, phrase in legend_of(arms["GF"].artifact).items():
+    # VG never aliases a guarded span.
+    for a, phrase in legend_of(arms["VG"].artifact).items():
         if is_guarded_lexical(phrase):
-            viol.append(f"GF: aliased a guarded span {a}={phrase!r}")
+            viol.append(f"VG: aliased a guarded span {a}={phrase!r}")
             break
     # MF reproduces production squeeze byte-for-byte.
     if squeeze_artifact is not None and arms["MF"].artifact != squeeze_artifact:
