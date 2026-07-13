@@ -169,8 +169,24 @@ a fold/grep-only shelf + guarded mine, **not** "guarded squeeze") rescues 5/5 an
 passes the candidate gate, but that is candidate-policy evidence, not a
 lexical-guard attribution: VG differs from MF in both the shelf and the guard, and
 is byte-identical to F on three cases. The stage-matched **S/SM/SG closure run**
-(Commit I) isolates whether the guard alone repairs the production stage. Blind
-production squeeze remains rejected; protected spans stay unimplemented.
+(Commit I) isolates whether the guard alone repairs the production stage.
+
+That closure run (`--policy-set closure`, arms R/S/SM/SG/V/VG,
+`analysis/l2-qwen2.5-coder-7b-alias-fold-closure-v1/`) settles it. SM (== squeeze)
+and SG share production's exact stage-1 (`squeeze_stage1`) and differ only in the
+mine's lexical guard, so the comparison is clean. Result (all five stable, zero
+control regressions): **four losses are a confirmed stage-2 lexical-mining effect**
+(S pass, SM fail, SG pass) — the guard in the mine stage fixes them; **one
+(`n-warnings`) fails already at the production structural stage** (S fails, and SG
+cannot repair it — the culprit is the `tmpl` stage-1, not the mining). So
+**`SG` (guard alone) rescues only 4/5**; the viable 5/5 candidate is **`VG`** (the
+simplified fold/grep shelf + guarded mine, which both drops `tmpl` and guards the
+mine) — it passes the gate (0 leaks, invalid Δ 0, +1358 tokens / +4.9% vs R).
+Priority ranking VG > V > R > SG > S > SM. The honest reading is *"lexical guard
+alone is insufficient; the viable candidate is the simplified structural shelf"*,
+**not** "guarded squeeze fixed production squeeze". Blind production squeeze
+remains rejected; a full 23-question rerun of VG is a separate later decision;
+protected spans stay unimplemented.
 
 ## Go / no-go
 

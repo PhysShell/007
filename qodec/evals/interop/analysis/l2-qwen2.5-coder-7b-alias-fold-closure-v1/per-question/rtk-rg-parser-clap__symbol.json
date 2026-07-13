@@ -1,0 +1,139 @@
+{
+  "case": "rtk-rg-parser-clap",
+  "cells": {
+    "R": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "ValueParser"
+        ]
+      },
+      "correct": true,
+      "final_codec": null,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 10195.0,
+      "n_repeats": 1,
+      "prompt_tokens": 1239,
+      "stable": null
+    },
+    "S": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "ValueParser",
+          "TypedValueParser"
+        ]
+      },
+      "correct": true,
+      "final_codec": "grep",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 11515.0,
+      "n_repeats": 1,
+      "prompt_tokens": 1111,
+      "stable": null
+    },
+    "SG": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "ValueParser",
+          "TypedValueParser"
+        ]
+      },
+      "correct": true,
+      "final_codec": "grep",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 11665.0,
+      "n_repeats": 1,
+      "prompt_tokens": 1111,
+      "stable": null
+    },
+    "SM": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "ValueParser"
+        ]
+      },
+      "correct": true,
+      "final_codec": "mine",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 10174.0,
+      "n_repeats": 1,
+      "prompt_tokens": 1011,
+      "stable": null
+    },
+    "V": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "ValueParser",
+          "TypedValueParser"
+        ]
+      },
+      "correct": true,
+      "final_codec": "grep",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 11517.0,
+      "n_repeats": 1,
+      "prompt_tokens": 1111,
+      "stable": null
+    },
+    "VG": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "ValueParser",
+          "TypedValueParser"
+        ]
+      },
+      "correct": true,
+      "final_codec": "grep",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 10742.0,
+      "n_repeats": 1,
+      "prompt_tokens": 1111,
+      "stable": null
+    }
+  },
+  "question": "symbol",
+  "role": "control",
+  "verdict": null,
+  "weakly_matched": true
+}

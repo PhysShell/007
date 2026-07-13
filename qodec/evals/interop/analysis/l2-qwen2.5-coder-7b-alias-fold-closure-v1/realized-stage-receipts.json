@@ -1,0 +1,903 @@
+{
+  "consistency": {
+    "mismatches": [],
+    "recomputed_matches_run": true
+  },
+  "receipts": {
+    "build-log-rtk-log|R": {
+      "alias_applied": false,
+      "arm": "R",
+      "final": {
+        "artifact_sha256": "5ae681f10e98b0b2a934318adc430188892ee20d25ac989b450f8c05f4965076",
+        "outer_codec": null,
+        "tokens": null
+      },
+      "stage1": {
+        "artifact_sha256": null,
+        "candidate_codecs": [],
+        "selected_codec": null,
+        "tokens": null,
+        "transform_applied": false
+      },
+      "stage2": {
+        "artifact_sha256": "5ae681f10e98b0b2a934318adc430188892ee20d25ac989b450f8c05f4965076",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": false
+    },
+    "build-log-rtk-log|S": {
+      "alias_applied": true,
+      "arm": "S",
+      "final": {
+        "artifact_sha256": "dea4a92c26c73d2af46c28e0d63d9933f4b951494c35b1313860d007812f85a4",
+        "outer_codec": "tmpl",
+        "tokens": 187
+      },
+      "stage1": {
+        "artifact_sha256": "dea4a92c26c73d2af46c28e0d63d9933f4b951494c35b1313860d007812f85a4",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "tmpl",
+        "tokens": 187,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "dea4a92c26c73d2af46c28e0d63d9933f4b951494c35b1313860d007812f85a4",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 1,
+        "selected_miner": null,
+        "transform_applied": true
+      },
+      "structural_applied": true
+    },
+    "build-log-rtk-log|SG": {
+      "alias_applied": true,
+      "arm": "SG",
+      "final": {
+        "artifact_sha256": "dea4a92c26c73d2af46c28e0d63d9933f4b951494c35b1313860d007812f85a4",
+        "outer_codec": "tmpl",
+        "tokens": 187
+      },
+      "stage1": {
+        "artifact_sha256": "dea4a92c26c73d2af46c28e0d63d9933f4b951494c35b1313860d007812f85a4",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "tmpl",
+        "tokens": 187,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "dea4a92c26c73d2af46c28e0d63d9933f4b951494c35b1313860d007812f85a4",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 1,
+        "selected_miner": null,
+        "transform_applied": true
+      },
+      "structural_applied": true
+    },
+    "build-log-rtk-log|SM": {
+      "alias_applied": true,
+      "arm": "SM",
+      "final": {
+        "artifact_sha256": "dea4a92c26c73d2af46c28e0d63d9933f4b951494c35b1313860d007812f85a4",
+        "outer_codec": "tmpl",
+        "tokens": 187
+      },
+      "stage1": {
+        "artifact_sha256": "dea4a92c26c73d2af46c28e0d63d9933f4b951494c35b1313860d007812f85a4",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "tmpl",
+        "tokens": 187,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "dea4a92c26c73d2af46c28e0d63d9933f4b951494c35b1313860d007812f85a4",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 1,
+        "selected_miner": null,
+        "transform_applied": true
+      },
+      "structural_applied": true
+    },
+    "build-log-rtk-log|V": {
+      "alias_applied": false,
+      "arm": "V",
+      "final": {
+        "artifact_sha256": "e7d79a52e8759ebf76614c69cbfc67210d58eecc0e2bec434fb4ab29ecb64b41",
+        "outer_codec": "raw",
+        "tokens": 198
+      },
+      "stage1": {
+        "artifact_sha256": "e7d79a52e8759ebf76614c69cbfc67210d58eecc0e2bec434fb4ab29ecb64b41",
+        "candidate_codecs": [
+          "fold",
+          "grep"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "raw",
+        "tokens": 198,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "e7d79a52e8759ebf76614c69cbfc67210d58eecc0e2bec434fb4ab29ecb64b41",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": true
+    },
+    "build-log-rtk-log|VG": {
+      "alias_applied": false,
+      "arm": "VG",
+      "final": {
+        "artifact_sha256": "e7d79a52e8759ebf76614c69cbfc67210d58eecc0e2bec434fb4ab29ecb64b41",
+        "outer_codec": "raw",
+        "tokens": 198
+      },
+      "stage1": {
+        "artifact_sha256": "e7d79a52e8759ebf76614c69cbfc67210d58eecc0e2bec434fb4ab29ecb64b41",
+        "candidate_codecs": [
+          "fold",
+          "grep"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "raw",
+        "tokens": 198,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "e7d79a52e8759ebf76614c69cbfc67210d58eecc0e2bec434fb4ab29ecb64b41",
+        "attempted": true,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": "mine",
+        "transform_applied": false
+      },
+      "structural_applied": true
+    },
+    "clap-derive-explore|R": {
+      "alias_applied": false,
+      "arm": "R",
+      "final": {
+        "artifact_sha256": "90e41db833c9094c664767244984e4b7e264b354db7463d9a2c33f89f26ccb6f",
+        "outer_codec": null,
+        "tokens": null
+      },
+      "stage1": {
+        "artifact_sha256": null,
+        "candidate_codecs": [],
+        "selected_codec": null,
+        "tokens": null,
+        "transform_applied": false
+      },
+      "stage2": {
+        "artifact_sha256": "90e41db833c9094c664767244984e4b7e264b354db7463d9a2c33f89f26ccb6f",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": false
+    },
+    "clap-derive-explore|S": {
+      "alias_applied": false,
+      "arm": "S",
+      "final": {
+        "artifact_sha256": "e781e568ae88f77e6cacd333cffe1de6bdf7ad67954e67bc40d901576a315f1d",
+        "outer_codec": "raw",
+        "tokens": 4387
+      },
+      "stage1": {
+        "artifact_sha256": "e781e568ae88f77e6cacd333cffe1de6bdf7ad67954e67bc40d901576a315f1d",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "raw",
+        "tokens": 4387,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "e781e568ae88f77e6cacd333cffe1de6bdf7ad67954e67bc40d901576a315f1d",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": true
+    },
+    "clap-derive-explore|SG": {
+      "alias_applied": true,
+      "arm": "SG",
+      "final": {
+        "artifact_sha256": "c9aa612904c58358930cdf5299b81f122981c415f1519ec48e4905673ec525c6",
+        "outer_codec": "mine",
+        "tokens": 4286
+      },
+      "stage1": {
+        "artifact_sha256": "e781e568ae88f77e6cacd333cffe1de6bdf7ad67954e67bc40d901576a315f1d",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "raw",
+        "tokens": 4387,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "c9aa612904c58358930cdf5299b81f122981c415f1519ec48e4905673ec525c6",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 2,
+        "selected_miner": null,
+        "transform_applied": true
+      },
+      "structural_applied": true
+    },
+    "clap-derive-explore|SM": {
+      "alias_applied": true,
+      "arm": "SM",
+      "final": {
+        "artifact_sha256": "8f71a56598ee68ea51dec91ee55a8b28e7b773abeb543d11240675f4de718c64",
+        "outer_codec": "mine",
+        "tokens": 3832
+      },
+      "stage1": {
+        "artifact_sha256": "e781e568ae88f77e6cacd333cffe1de6bdf7ad67954e67bc40d901576a315f1d",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "raw",
+        "tokens": 4387,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "8f71a56598ee68ea51dec91ee55a8b28e7b773abeb543d11240675f4de718c64",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 41,
+        "selected_miner": null,
+        "transform_applied": true
+      },
+      "structural_applied": true
+    },
+    "clap-derive-explore|V": {
+      "alias_applied": false,
+      "arm": "V",
+      "final": {
+        "artifact_sha256": "e781e568ae88f77e6cacd333cffe1de6bdf7ad67954e67bc40d901576a315f1d",
+        "outer_codec": "raw",
+        "tokens": 4387
+      },
+      "stage1": {
+        "artifact_sha256": "e781e568ae88f77e6cacd333cffe1de6bdf7ad67954e67bc40d901576a315f1d",
+        "candidate_codecs": [
+          "fold",
+          "grep"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "raw",
+        "tokens": 4387,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "e781e568ae88f77e6cacd333cffe1de6bdf7ad67954e67bc40d901576a315f1d",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": true
+    },
+    "clap-derive-explore|VG": {
+      "alias_applied": true,
+      "arm": "VG",
+      "final": {
+        "artifact_sha256": "c9aa612904c58358930cdf5299b81f122981c415f1519ec48e4905673ec525c6",
+        "outer_codec": "mine",
+        "tokens": 4286
+      },
+      "stage1": {
+        "artifact_sha256": "e781e568ae88f77e6cacd333cffe1de6bdf7ad67954e67bc40d901576a315f1d",
+        "candidate_codecs": [
+          "fold",
+          "grep"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "raw",
+        "tokens": 4387,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "c9aa612904c58358930cdf5299b81f122981c415f1519ec48e4905673ec525c6",
+        "attempted": true,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 2,
+        "selected_miner": "mine",
+        "transform_applied": true
+      },
+      "structural_applied": true
+    },
+    "rg-output-rtk-grep|R": {
+      "alias_applied": false,
+      "arm": "R",
+      "final": {
+        "artifact_sha256": "efc7c153def1547954c8013dcbaf67fe4f040a77af33da2e134d07cd4083074a",
+        "outer_codec": null,
+        "tokens": null
+      },
+      "stage1": {
+        "artifact_sha256": null,
+        "candidate_codecs": [],
+        "selected_codec": null,
+        "tokens": null,
+        "transform_applied": false
+      },
+      "stage2": {
+        "artifact_sha256": "efc7c153def1547954c8013dcbaf67fe4f040a77af33da2e134d07cd4083074a",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": false
+    },
+    "rg-output-rtk-grep|S": {
+      "alias_applied": false,
+      "arm": "S",
+      "final": {
+        "artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "outer_codec": "raw",
+        "tokens": 485
+      },
+      "stage1": {
+        "artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "raw",
+        "tokens": 485,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": true
+    },
+    "rg-output-rtk-grep|SG": {
+      "alias_applied": false,
+      "arm": "SG",
+      "final": {
+        "artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "outer_codec": "raw",
+        "tokens": 485
+      },
+      "stage1": {
+        "artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "raw",
+        "tokens": 485,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": true
+    },
+    "rg-output-rtk-grep|SM": {
+      "alias_applied": true,
+      "arm": "SM",
+      "final": {
+        "artifact_sha256": "33ef204bcdf85d193b197d372df1f495b971f2a1c09451261fd825791db8d034",
+        "outer_codec": "mine",
+        "tokens": 424
+      },
+      "stage1": {
+        "artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "raw",
+        "tokens": 485,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "33ef204bcdf85d193b197d372df1f495b971f2a1c09451261fd825791db8d034",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 8,
+        "selected_miner": null,
+        "transform_applied": true
+      },
+      "structural_applied": true
+    },
+    "rg-output-rtk-grep|V": {
+      "alias_applied": false,
+      "arm": "V",
+      "final": {
+        "artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "outer_codec": "raw",
+        "tokens": 485
+      },
+      "stage1": {
+        "artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "candidate_codecs": [
+          "fold",
+          "grep"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "raw",
+        "tokens": 485,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": true
+    },
+    "rg-output-rtk-grep|VG": {
+      "alias_applied": false,
+      "arm": "VG",
+      "final": {
+        "artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "outer_codec": "raw",
+        "tokens": 485
+      },
+      "stage1": {
+        "artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "candidate_codecs": [
+          "fold",
+          "grep"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "raw",
+        "tokens": 485,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "attempted": true,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": "mine",
+        "transform_applied": false
+      },
+      "structural_applied": true
+    },
+    "rtk-rg-derive-clap|R": {
+      "alias_applied": false,
+      "arm": "R",
+      "final": {
+        "artifact_sha256": "8dc6bb56e30d5cc0a795a7ba9b1ad72f069f1ae3de8d23496079c27dc1abe55d",
+        "outer_codec": null,
+        "tokens": null
+      },
+      "stage1": {
+        "artifact_sha256": null,
+        "candidate_codecs": [],
+        "selected_codec": null,
+        "tokens": null,
+        "transform_applied": false
+      },
+      "stage2": {
+        "artifact_sha256": "8dc6bb56e30d5cc0a795a7ba9b1ad72f069f1ae3de8d23496079c27dc1abe55d",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": false
+    },
+    "rtk-rg-derive-clap|S": {
+      "alias_applied": false,
+      "arm": "S",
+      "final": {
+        "artifact_sha256": "8a3b7c38a10f1968c1085aaff69abd3d0a282b7adafc29e7df44e29f120b181b",
+        "outer_codec": "grep",
+        "tokens": 2799
+      },
+      "stage1": {
+        "artifact_sha256": "8a3b7c38a10f1968c1085aaff69abd3d0a282b7adafc29e7df44e29f120b181b",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "grep",
+        "tokens": 2799,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "8a3b7c38a10f1968c1085aaff69abd3d0a282b7adafc29e7df44e29f120b181b",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": true
+    },
+    "rtk-rg-derive-clap|SG": {
+      "alias_applied": true,
+      "arm": "SG",
+      "final": {
+        "artifact_sha256": "08870d4eba618c0934f3494862c30dfa780a948cc12bcdcd9e2fbea406fb5518",
+        "outer_codec": "mine",
+        "tokens": 2781
+      },
+      "stage1": {
+        "artifact_sha256": "8a3b7c38a10f1968c1085aaff69abd3d0a282b7adafc29e7df44e29f120b181b",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "grep",
+        "tokens": 2799,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "08870d4eba618c0934f3494862c30dfa780a948cc12bcdcd9e2fbea406fb5518",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 2,
+        "selected_miner": null,
+        "transform_applied": true
+      },
+      "structural_applied": true
+    },
+    "rtk-rg-derive-clap|SM": {
+      "alias_applied": true,
+      "arm": "SM",
+      "final": {
+        "artifact_sha256": "458fa2f5a1c2c847d57ac3ae83f8338120cb23fe98b60b5ed164487fc654c3ae",
+        "outer_codec": "mine",
+        "tokens": 1915
+      },
+      "stage1": {
+        "artifact_sha256": "8a3b7c38a10f1968c1085aaff69abd3d0a282b7adafc29e7df44e29f120b181b",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "grep",
+        "tokens": 2799,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "458fa2f5a1c2c847d57ac3ae83f8338120cb23fe98b60b5ed164487fc654c3ae",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 23,
+        "selected_miner": null,
+        "transform_applied": true
+      },
+      "structural_applied": true
+    },
+    "rtk-rg-derive-clap|V": {
+      "alias_applied": false,
+      "arm": "V",
+      "final": {
+        "artifact_sha256": "8a3b7c38a10f1968c1085aaff69abd3d0a282b7adafc29e7df44e29f120b181b",
+        "outer_codec": "grep",
+        "tokens": 2799
+      },
+      "stage1": {
+        "artifact_sha256": "8a3b7c38a10f1968c1085aaff69abd3d0a282b7adafc29e7df44e29f120b181b",
+        "candidate_codecs": [
+          "fold",
+          "grep"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "grep",
+        "tokens": 2799,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "8a3b7c38a10f1968c1085aaff69abd3d0a282b7adafc29e7df44e29f120b181b",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": true
+    },
+    "rtk-rg-derive-clap|VG": {
+      "alias_applied": true,
+      "arm": "VG",
+      "final": {
+        "artifact_sha256": "08870d4eba618c0934f3494862c30dfa780a948cc12bcdcd9e2fbea406fb5518",
+        "outer_codec": "mine",
+        "tokens": 2781
+      },
+      "stage1": {
+        "artifact_sha256": "8a3b7c38a10f1968c1085aaff69abd3d0a282b7adafc29e7df44e29f120b181b",
+        "candidate_codecs": [
+          "fold",
+          "grep"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "grep",
+        "tokens": 2799,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "08870d4eba618c0934f3494862c30dfa780a948cc12bcdcd9e2fbea406fb5518",
+        "attempted": true,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 2,
+        "selected_miner": "mine",
+        "transform_applied": true
+      },
+      "structural_applied": true
+    },
+    "rtk-rg-parser-clap|R": {
+      "alias_applied": false,
+      "arm": "R",
+      "final": {
+        "artifact_sha256": "662ca11cfdab0ac458e031b48d1efdc79a49c9dcd6c88e3cabc449951d5336da",
+        "outer_codec": null,
+        "tokens": null
+      },
+      "stage1": {
+        "artifact_sha256": null,
+        "candidate_codecs": [],
+        "selected_codec": null,
+        "tokens": null,
+        "transform_applied": false
+      },
+      "stage2": {
+        "artifact_sha256": "662ca11cfdab0ac458e031b48d1efdc79a49c9dcd6c88e3cabc449951d5336da",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": false
+    },
+    "rtk-rg-parser-clap|S": {
+      "alias_applied": false,
+      "arm": "S",
+      "final": {
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "outer_codec": "grep",
+        "tokens": 719
+      },
+      "stage1": {
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "grep",
+        "tokens": 719,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": true
+    },
+    "rtk-rg-parser-clap|SG": {
+      "alias_applied": false,
+      "arm": "SG",
+      "final": {
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "outer_codec": "grep",
+        "tokens": 719
+      },
+      "stage1": {
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "grep",
+        "tokens": 719,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": true
+    },
+    "rtk-rg-parser-clap|SM": {
+      "alias_applied": true,
+      "arm": "SM",
+      "final": {
+        "artifact_sha256": "3415ab98416222cbe4ffbf670dc2d95913448cb0479d33a8f78406dfb07496d9",
+        "outer_codec": "mine",
+        "tokens": 619
+      },
+      "stage1": {
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "candidate_codecs": [
+          "toon",
+          "fold",
+          "grep",
+          "diag",
+          "tmpl"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "grep",
+        "tokens": 719,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "3415ab98416222cbe4ffbf670dc2d95913448cb0479d33a8f78406dfb07496d9",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 14,
+        "selected_miner": null,
+        "transform_applied": true
+      },
+      "structural_applied": true
+    },
+    "rtk-rg-parser-clap|V": {
+      "alias_applied": false,
+      "arm": "V",
+      "final": {
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "outer_codec": "grep",
+        "tokens": 719
+      },
+      "stage1": {
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "candidate_codecs": [
+          "fold",
+          "grep"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "grep",
+        "tokens": 719,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "attempted": false,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": null,
+        "transform_applied": false
+      },
+      "structural_applied": true
+    },
+    "rtk-rg-parser-clap|VG": {
+      "alias_applied": false,
+      "arm": "VG",
+      "final": {
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "outer_codec": "grep",
+        "tokens": 719
+      },
+      "stage1": {
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "candidate_codecs": [
+          "fold",
+          "grep"
+        ],
+        "reconstruction": "measured-min over shelf; production-exact S arm in Commit I",
+        "selected_codec": "grep",
+        "tokens": 719,
+        "transform_applied": true
+      },
+      "stage2": {
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "attempted": true,
+        "guarded_candidates_rejected": null,
+        "legend_entries": 0,
+        "selected_miner": "mine",
+        "transform_applied": false
+      },
+      "structural_applied": true
+    }
+  }
+}

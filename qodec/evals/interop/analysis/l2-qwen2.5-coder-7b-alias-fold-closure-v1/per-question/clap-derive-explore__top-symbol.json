@@ -1,0 +1,143 @@
+{
+  "case": "clap-derive-explore",
+  "cells": {
+    "R": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "8",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "ValueParser"
+        ]
+      },
+      "correct": true,
+      "final_codec": null,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 11845.0,
+      "n_repeats": 3,
+      "prompt_tokens": 4773,
+      "stable": true
+    },
+    "S": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "8",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "ValueParser"
+        ]
+      },
+      "correct": true,
+      "final_codec": "raw",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 12823.0,
+      "n_repeats": 3,
+      "prompt_tokens": 4783,
+      "stable": true
+    },
+    "SG": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "8",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "ValueParser"
+        ]
+      },
+      "correct": true,
+      "final_codec": "mine",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 13123.0,
+      "n_repeats": 3,
+      "prompt_tokens": 4682,
+      "stable": true
+    },
+    "SM": {
+      "alias_leaks": 1,
+      "answer": {
+        "answer": "3",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "Map错"
+        ]
+      },
+      "correct": false,
+      "final_codec": "mine",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 1,
+      "latency_ms": 12380.0,
+      "n_repeats": 3,
+      "prompt_tokens": 4228,
+      "stable": true
+    },
+    "V": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "8",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "ValueParser"
+        ]
+      },
+      "correct": true,
+      "final_codec": "raw",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 13441.0,
+      "n_repeats": 3,
+      "prompt_tokens": 4783,
+      "stable": true
+    },
+    "VG": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "8",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "ValueParser"
+        ]
+      },
+      "correct": true,
+      "final_codec": "mine",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 14142.0,
+      "n_repeats": 3,
+      "prompt_tokens": 4682,
+      "stable": true
+    }
+  },
+  "question": "top-symbol",
+  "role": "loss",
+  "verdict": {
+    "candidate_policy_rescue": [
+      "SG",
+      "V",
+      "VG"
+    ],
+    "causal": "stage-2 lexical mining effect confirmed (S pass, SM fail, SG pass; stage-1 matched)",
+    "stage1_matched_guard_pair": "SM vs SG (production stage-1 shared)"
+  },
+  "weakly_matched": false
+}

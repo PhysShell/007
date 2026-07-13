@@ -1,0 +1,16 @@
+072c6784c832ef679762113eb0b1c6a1c9716e44a0b13ef5a94d09fc095267c7  ./README.md
+fa6276b038fb92c23646fb1896e3c27b466c6678561716efd7d0ce63038357f9  ./factorial.json
+a05f55e52892c5f4172cad19ae3fd7d8041331e8565be6fc32d5d9d5cda80e24  ./manifest.json
+403dca42dd7987cf2c4e264523294a0ed4ffec0a131a23b5e20e506ce1771182  ./per-question/build-log-rtk-log__n-errors.json
+f70aff1315f37306a214bd774570bf7aaf330627b28004e29e41e2b844b8fa23  ./per-question/build-log-rtk-log__n-warnings.json
+2e2313e9521cb96469dc877ff6e2d3c5a49898096459901fabd4a0ec4a56e8da  ./per-question/clap-derive-explore__def-path.json
+6ae6e40aa72f89450857c8da574c524e3676f90dcfbe9a8b323195ec8d893b43  ./per-question/clap-derive-explore__top-symbol.json
+3eb54d6da5cfc043e0cfc831eede792e3295b82c64aed624af088c5daa5e5651  ./per-question/clap-derive-explore__trait-path.json
+099de1d5c18ac2423fe0b144683346e5717dfb297cb8948a5cd6087b9cdab9eb  ./per-question/clap-derive-explore__trait.json
+3188e5f829460cf008c56cb0c7cb5d28a19794902535d65da46c7c4013c99c9c  ./per-question/rg-output-rtk-grep__method.json
+84f820eab61ac5fbbdca43c2e07db801cf77110531dc03e7ae1fbe7afb0c2fc9  ./per-question/rtk-rg-derive-clap__file.json
+dfb983d09ad79f322eead18da351553e897d81618843a19815292942a2949a3e  ./per-question/rtk-rg-parser-clap__file.json
+00711c5a195574493a61db02777a809f7dd791de28b203304ed6dc1086fc3478  ./per-question/rtk-rg-parser-clap__symbol.json
+465774cd5cb3e9b8e5e4490ab4026b9b67f2dea8205147b62f056b48072965f0  ./preflight.json
+9617c2e9ef2da60bcb3cad508abef34cdb1f101345e274ab2570e4693b032d63  ./realized-stage-receipts.json
+bbfe52e00e53cae87587954413fa4e25faa7275c08a172a69ff093dd71257c0e  ./records.jsonl
