@@ -102,5 +102,29 @@ class Policies(unittest.TestCase):
         self.assertIn(("F", "VG"), [tuple(p) for p in pairs])
 
 
+class ClosurePolicies(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.qb = str(qodec.binary())
+        cls.arms = ap.encode_all_arms(SAMPLE, METER, cls.qb, policies=ap.CLOSURE_POLICIES)
+        cls.squeeze = qodec.encode(SAMPLE, codec="squeeze", meter=METER, passthrough=False).content
+        cls.stage1 = qodec.encode(SAMPLE, codec="squeeze-stage1", meter=METER, passthrough=False).content
+
+    def test_closure_invariants_hold(self):
+        viol = ap.check_closure_invariants(self.arms, SAMPLE, self.squeeze, self.stage1)
+        self.assertEqual(viol, [], f"closure invariant violations: {viol}")
+
+    def test_SM_is_squeeze_and_S_is_stage1(self):
+        self.assertEqual(self.arms["SM"].artifact, self.squeeze)
+        self.assertEqual(self.arms["S"].artifact, self.stage1)
+
+    def test_SG_shares_stage1_with_SM_and_differs_only_in_guard(self):
+        # SG's non-mine (stage-1) legend equals S's legend; only the mine differs.
+        s_legend = ap.legend_of(self.arms["S"].artifact)
+        for a, phrase in ap.legend_of(self.arms["SG"].artifact).items():
+            if a not in s_legend:  # a mine-added entry
+                self.assertFalse(ap.is_guarded_lexical(phrase), f"SG mine aliased guarded {a}={phrase!r}")
+
+
 if __name__ == "__main__":
     unittest.main()

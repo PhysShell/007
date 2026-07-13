@@ -34,7 +34,7 @@ CONTROLS = [("build-log-rtk-log", "n-errors"), ("clap-derive-explore", "trait"),
             ("clap-derive-explore", "trait-path"), ("rtk-rg-parser-clap", "symbol"),
             ("rg-output-rtk-grep", "method")]
 WEAKLY_MATCHED = {("rtk-rg-parser-clap", "symbol"), ("rg-output-rtk-grep", "method")}
-ARMS = ap.ARM_NAMES  # R, I, M, F, MF, GF
+POLICY_SETS = {"factor": ap.POLICIES, "closure": ap.CLOSURE_POLICIES}
 
 
 def _tool_only_text(l1_run: Path, case: str) -> str:
@@ -53,8 +53,11 @@ def main() -> int:
     ap_.add_argument("--name")
     ap_.add_argument("--out", type=Path, default=HERE / "runs-l2")
     ap_.add_argument("--repeats", type=int, default=3)
+    ap_.add_argument("--policy-set", choices=list(POLICY_SETS), default="factor")
     ap_.add_argument("--resume", action="store_true")
     args = ap_.parse_args()
+    policies = POLICY_SETS[args.policy_set]
+    ARMS = [p[0] for p in policies]
 
     try:
         cfg = reader.ReaderConfig.from_env()
@@ -87,7 +90,7 @@ def main() -> int:
     for case in dict.fromkeys(c for c, _ in targets):
         tool_only = _tool_only_text(args.l1_run, case)
         ctx[case] = tool_only
-        arms = ap.encode_all_arms(tool_only, meter, qbin)
+        arms = ap.encode_all_arms(tool_only, meter, qbin, policies=policies)
         for name, res in arms.items():
             arm_art[(case, name)] = res
 
@@ -167,7 +170,7 @@ def main() -> int:
     log.close()
 
     manifest = {
-        "run_id": run_id, "kind": "alias-fold-ablation", "arms": ARMS,
+        "run_id": run_id, "kind": f"alias-fold-ablation-{args.policy_set}", "arms": ARMS,
         "losses": [f"{c}:{q}" for c, q in LOSSES],
         "controls": [f"{c}:{q}" for c, q in CONTROLS],
         "weakly_matched": [f"{c}:{q}" for c, q in WEAKLY_MATCHED],

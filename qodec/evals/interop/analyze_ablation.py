@@ -124,21 +124,50 @@ def question_verdict(cells: dict) -> dict:
                      if rescuers else None)}
 
 
+def closure_verdict(cells: dict) -> dict:
+    """Stage-matched causal verdict for the closure run (R/S/SM/SG/V/VG). SM and
+    SG share the exact production stage-1 and differ ONLY in the mine guard, so
+    an SM-fail / SG-pass flip IS a clean stage-2 lexical-mining attribution."""
+    R, S, SM, SG, V, VG = (_ok(cells.get(a)) for a in ("R", "S", "SM", "SG", "V", "VG"))
+    have = {a: cells.get(a) is not None for a in ("R", "S", "SM", "SG", "V", "VG")}
+    if have["S"] and not S:
+        causal = "production structural stage itself causes the loss (S fails)"
+        if (V or VG):
+            causal += "; V/VG pass → rescue comes from dropping the diag/tmpl/toon shelf, not the guard"
+    elif S and have["SM"] and not SM and SG:
+        causal = "stage-2 lexical mining effect confirmed (S pass, SM fail, SG pass; stage-1 matched)"
+    elif have["SM"] and not SM and have["SG"] and not SG and S:
+        causal = "non-guarded mining behaviour not covered by the lexical classes (S pass, SM & SG fail)"
+    elif have["SM"] and not SM and not SG and not S:
+        causal = "guard in stage 2 cannot repair stage-1 damage (S, SM, SG all fail)"
+    elif have["SM"] and SM:
+        causal = "no factor breaks this question (production squeeze passes)"
+    else:
+        causal = "unresolved (no clean stage pattern)"
+    rescuers = [a for a in ("SG", "V", "VG") if _ok(cells.get(a))] if (cells.get("SM") and not SM) else []
+    return {"causal": causal, "candidate_policy_rescue": rescuers,
+            "stage1_matched_guard_pair": "SM vs SG (production stage-1 shared)"}
+
+
 def factorial(records, manifest):
     idx = index(records)
+    arms = manifest.get("arms", ARMS)
+    is_closure = "SM" in arms
     losses = [tuple(s.split(":", 1)) for s in manifest["losses"]]
     controls = [tuple(s.split(":", 1)) for s in manifest["controls"]]
     weak = set(manifest.get("weakly_matched", []))
 
     questions = []
     for (case, q) in losses + controls:
-        cells = {a: cell(idx, case, q, a) for a in ARMS}
+        cells = {a: cell(idx, case, q, a) for a in arms}
+        verdict = None
+        if (case, q) in losses:
+            verdict = closure_verdict(cells) if is_closure else question_verdict(cells)
         questions.append({
             "case": case, "question": q,
             "role": "loss" if (case, q) in losses else "control",
             "weakly_matched": f"{case}:{q}" in weak,
-            "cells": cells,
-            "verdict": question_verdict(cells) if (case, q) in losses else None,
+            "cells": cells, "verdict": verdict,
         })
     return questions
 
@@ -148,14 +177,15 @@ def _r_tokens(cells):
     return (cells["R"] or {}).get("prompt_tokens")
 
 
-def candidate_gate(questions):
+def candidate_gate(questions, encoded=None):
     """A policy may advance to a full L2 rerun only if it rescues 5/5 losses,
     regresses 0 controls, leaks 0 aliases, keeps invalid-id delta ≤ 0 vs R, and
-    saves tokens vs R. Reported per encoded arm."""
+    saves tokens (positive total AND median) vs R. Reported per encoded arm."""
     losses = [q for q in questions if q["role"] == "loss"]
     controls = [q for q in questions if q["role"] == "control"]
+    encoded = encoded or ENCODED
     out = {}
-    for arm in ENCODED:
+    for arm in encoded:
         rescued = sum(1 for q in losses if _ok(q["cells"].get(arm)))
         # a control "regresses" if R was ok but this arm is not
         regressions = [f"{q['case']}:{q['question']}" for q in controls
@@ -200,12 +230,12 @@ def _token_savings(questions, arm):
             "percent_vs_R": round(100 * (r_total - a_total) / r_total, 1) if r_total else None}
 
 
-def priority_ranking(questions):
+def priority_ranking(questions, arms=None):
     """Priority ranking (NOT a Pareto frontier — this is a lexicographic ordering
     of dominated candidates): quality → integrity → tokens → latency, over all
     10 questions."""
     rows = []
-    for arm in ARMS:
+    for arm in (arms or ARMS):
         present = [c for c in (q["cells"].get(arm) for q in questions) if c]
         toks = [c["prompt_tokens"] for c in present if c["prompt_tokens"]]
         lats = [c["latency_ms"] for c in present if c["latency_ms"]]
@@ -238,36 +268,61 @@ def _byte_identical(stage_receipts) -> list:
     return out
 
 
+def _closure_conclusion(questions, gate, advancing):
+    losses = [q for q in questions if q["role"] == "loss"]
+    stage1 = [q for q in losses if "production structural stage" in q["verdict"]["causal"]]
+    mining = [q for q in losses if "stage-2 lexical mining effect confirmed" in q["verdict"]["causal"]]
+    sg_ok = gate.get("SG", {}).get("advances_to_full_rerun")
+    vg_ok = gate.get("VG", {}).get("advances_to_full_rerun")
+    if sg_ok:
+        head = ("SG (stage-matched guarded mining) rescues 5/5 and passes the gate — the guard "
+                "in the mine stage is the viable candidate for a full 23-question rerun.")
+    elif vg_ok:
+        head = ("lexical guard alone is insufficient; the viable candidate is the simplified "
+                "structural shelf (VG: fold/grep + guarded mine), which passes the gate.")
+    else:
+        head = ("no stage-matched policy rescues 5/5 without control regressions — current qodec "
+                "notation remains rejected for blind application.")
+    conclusion = (f"{head} By stage: {len(mining)}/5 losses are a confirmed stage-2 lexical-mining "
+                  f"effect (S pass, SM fail, SG pass); {len(stage1)}/5 fail already at the production "
+                  f"structural stage (S fails), where the stage-2 guard cannot help. Gate winners: "
+                  f"{', '.join(advancing) if advancing else 'none'}. Full rerun is a separate decision.")
+    guard_iso = {"stage1_matched_pair_present": True,
+                 "note": ("SM and SG share production's exact stage-1 (squeeze_stage1) and differ "
+                          "only in the mine guard, so SM-fail / SG-pass IS a clean stage-2 lexical-"
+                          "mining attribution.")}
+    return conclusion, guard_iso
+
+
 def build_files(run_dir: Path, records, manifest, stage_receipts=None) -> dict:
+    arms = manifest.get("arms", ARMS)
+    is_closure = "SM" in arms
+    encoded = [a for a in arms if a != "R"]
     questions = factorial(records, manifest)
-    gate = candidate_gate(questions)
-    ranking = priority_ranking(questions)
+    gate = candidate_gate(questions, encoded)
+    ranking = priority_ranking(questions, arms)
     advancing = [a for a, g in gate.items() if g["advances_to_full_rerun"]]
 
-    # Causal roll-up (VG/F rescue excluded — it is candidate-policy only).
-    confirmed = [q for q in questions if q["role"] == "loss"
-                 and "confirmed" in (q["verdict"]["causal"])]
-    unresolved = [q for q in questions if q["role"] == "loss"
-                  and "unresolved" in (q["verdict"]["causal"])]
-    conclusion = (
-        f"{len(confirmed)}/5 losses have a confirmed factor (alias main effect); "
-        f"{len(unresolved)}/5 are production-stage effects unresolved without a "
-        f"stage-matched S/SM/SG comparison (Commit I). Candidate policies that pass the "
-        f"gate: {', '.join(advancing) if advancing else 'none'} — candidate-policy evidence, "
-        f"NOT a causal claim that a lexical guard fixed production squeeze. "
-        f"Blind production squeeze remains rejected.")
+    if is_closure:
+        conclusion, guard_iso = _closure_conclusion(questions, gate, advancing)
+    else:
+        confirmed = [q for q in questions if q["role"] == "loss" and "confirmed" in q["verdict"]["causal"]]
+        unresolved = [q for q in questions if q["role"] == "loss" and "unresolved" in q["verdict"]["causal"]]
+        conclusion = (
+            f"{len(confirmed)}/5 losses have a confirmed factor (alias main effect); "
+            f"{len(unresolved)}/5 are production-stage effects unresolved without a "
+            f"stage-matched S/SM/SG comparison (Commit I). Candidate policies that pass the "
+            f"gate: {', '.join(advancing) if advancing else 'none'} — candidate-policy evidence, "
+            f"NOT a causal claim that a lexical guard fixed production squeeze. "
+            f"Blind production squeeze remains rejected.")
+        guard_iso = {"stage1_matched_pair_present": False,
+                     "note": ("VG's shelf (fold/grep) differs from MF's — no stage-1-matched pair "
+                              "here; the guard's effect is NOT isolated. Commit I isolates it.")}
 
     byte_identical = _byte_identical(stage_receipts) if stage_receipts else []
     factorial_json = {"questions": questions, "candidate_gate": gate,
                       "priority_ranking": ranking, "byte_identical_arms": byte_identical,
-                      "conclusion": conclusion,
-                      "guard_isolation": {
-                          "stage1_matched_pair_present": False,
-                          "note": ("VG's structural shelf (fold/grep) differs from MF's "
-                                   "(toon/fold/grep/diag/tmpl), so no stage-1-matched arm pair "
-                                   "exists in this run — the lexical guard's effect is NOT "
-                                   "isolated here. Commit I's SM/SG arms (same frozen stage-1, "
-                                   "guard on/off) isolate it.")},
+                      "conclusion": conclusion, "guard_isolation": guard_iso,
                       "model": manifest.get("model_requested"),
                       "qodec_binary_sha256": manifest.get("qodec_binary_sha256")}
 
@@ -302,16 +357,23 @@ def _tt_row(arm, c):
 
 
 def _render(fj, manifest) -> str:
-    o = ["# Level-2 alias × structural ablation — Qwen2.5-Coder-7B", "",
+    arms = manifest.get("arms", ARMS)
+    encoded = [a for a in arms if a != "R"]
+    is_closure = "SM" in arms
+    if is_closure:
+        armline = ("Arms: **R** raw+brief · **S** production stage-1 only · **SM** production "
+                   "squeeze · **SG** stage-1 + guarded mine (SM/SG share stage-1, differ only in "
+                   "the guard) · **V** fold/grep structural · **VG** fold/grep + guarded mine.")
+    else:
+        armline = ("Arms: **R** raw+brief · **I** identity (framing only) · **M** mine over raw "
+                   "(alias only) · **F** structural fold/grep only · **MF** production squeeze · "
+                   "**VG** fold-grep-guarded (fold/grep shelf + guarded mine).")
+    o = [f"# Level-2 {'stage-matched closure' if is_closure else 'alias × structural'} ablation — Qwen2.5-Coder-7B", "",
          f"Same model/tokenizer/determinism as the canonical record "
          f"(model `{manifest.get('model_requested')}`, qodec "
          f"`{manifest.get('qodec_binary_sha256','')[:12]}`). Six arms in one run.", "",
-         "Arms: **R** raw+brief · **I** identity (framing only) · **M** mine over raw "
-         "(alias only) · **F** structural fold/grep only · **MF** production squeeze · "
-         "**VG** fold-grep-guarded (fold/grep shelf + guarded mine).", "",
-         "> VG is NOT \"guarded squeeze\": it also drops the diag/tmpl/toon shelf, so an "
-         "`MF fail / VG pass` flip is candidate-policy evidence, not a lexical-guard "
-         "attribution. " + fj["guard_isolation"]["note"], "",
+         armline, "",
+         "> " + fj["guard_isolation"]["note"], "",
          f"**Conclusion: {fj['conclusion']}**", ""]
     o += ["## per-question truth tables", ""]
     for q in fj["questions"]:
@@ -319,7 +381,7 @@ def _render(fj, manifest) -> str:
         o.append(f"### {q['case']} / {q['question']} — {tag}")
         o += ["| arm | correct | stable | format | leaks | invalid | ptok |",
               "|-----|---------|--------|--------|-------|---------|------|"]
-        for arm in ARMS:
+        for arm in arms:
             o.append(_tt_row(arm, q["cells"].get(arm)))
         if q["verdict"]:
             o.append("")
@@ -331,7 +393,7 @@ def _render(fj, manifest) -> str:
           "Candidate-policy evidence only — passing this gate is NOT a causal claim.", "",
           "| arm | rescued | control regr. | leaks | invalid Δ vs R | tok save total / median / % vs R | advances |",
           "|-----|---------|---------------|-------|----------------|----------------------------------|----------|"]
-    for arm in ENCODED:
+    for arm in encoded:
         g = fj["candidate_gate"][arm]
         s = g["token_savings_vs_R"]
         o.append(f"| {arm} | {g['losses_rescued']} | {len(g['control_regressions'])} | {g['alias_leaks']} "
@@ -357,12 +419,13 @@ def _realized_stage_receipts(manifest, l1_run: Path):
     qb = str(qodec.binary())
     cases = sorted({k.split("|")[0] for k in manifest.get("arm_receipts", {})})
     recorded = manifest.get("arm_receipts", {})
+    arms = manifest.get("arms", ARMS)
     receipts, mismatches = {}, []
     for case in cases:
         matches = sorted(l1_run.glob(f"*/cases/{case}/*/transformed.txt")) \
             or sorted(l1_run.glob(f"cases/{case}/*/transformed.txt"))
         raw = matches[0].read_text(encoding="utf-8")
-        for arm in ARMS:
+        for arm in arms:
             st = ap.realized_stages(arm, raw, meter, qb)
             receipts[f"{case}|{arm}"] = st
             rec = recorded.get(f"{case}|{arm}")

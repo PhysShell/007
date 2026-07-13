@@ -40,9 +40,23 @@ POLICIES = [
 ]
 ARM_NAMES = [p[0] for p in POLICIES]
 
+# Stage-matched CLOSURE arms (Commit I): S = production stage-1 only; SM = squeeze
+# (== production); SG = production stage-1 + guarded mine (SM and SG share the
+# exact stage-1 and differ ONLY in the guard); V/VG = the fold/grep-only shelf.
+CLOSURE_POLICIES = [
+    ("R", None, False, False, False),
+    ("S", "squeeze-stage1", False, True, False),
+    ("SM", "squeeze", True, True, False),
+    ("SG", "squeeze-mine-guarded", True, True, True),
+    ("V", "structural", False, True, False),
+    ("VG", "fold-grep-guarded", True, True, True),
+]
+CLOSURE_ARMS = [p[0] for p in CLOSURE_POLICIES]
+
+PROD_SHELF = ["toon", "fold", "grep", "diag", "tmpl"]
 # The structural candidate shelf each arm's codec may pick from (for the receipt).
-SHELF = {"R": [], "I": [], "M": [], "F": ["fold", "grep"],
-         "MF": ["toon", "fold", "grep", "diag", "tmpl"], "VG": ["fold", "grep"]}
+SHELF = {"R": [], "I": [], "M": [], "F": ["fold", "grep"], "MF": PROD_SHELF, "VG": ["fold", "grep"],
+         "S": PROD_SHELF, "SM": PROD_SHELF, "SG": PROD_SHELF, "V": ["fold", "grep"]}
 
 
 def _sha(s: str) -> str:
@@ -133,8 +147,13 @@ def apply_policy(policy, raw_payload: str, meter: str, qodec_bin: str) -> ArmRes
     return ArmResult(name, artifact, encoded, env["tokens_out"], roundtrip == raw_payload, receipt)
 
 
-def encode_all_arms(raw_payload: str, meter: str, qodec_bin: str) -> dict:
-    return {p[0]: apply_policy(p, raw_payload, meter, qodec_bin) for p in POLICIES}
+def encode_all_arms(raw_payload: str, meter: str, qodec_bin: str, policies=None) -> dict:
+    policies = policies or POLICIES
+    return {p[0]: apply_policy(p, raw_payload, meter, qodec_bin) for p in policies}
+
+
+_BY_NAME = {p[0]: p for p in POLICIES}
+_BY_NAME.update({p[0]: p for p in CLOSURE_POLICIES})
 
 
 def _outer_codec(artifact: str) -> str:
@@ -156,7 +175,7 @@ def realized_stages(arm: str, raw_payload: str, meter: str, qodec_bin: str) -> d
     Invariants recorded here: alias_applied ⇔ the final artifact carries an alias
     legend; structural_applied ⇔ the selected structural artifact differs from raw.
     """
-    res = apply_policy(next(p for p in POLICIES if p[0] == arm), raw_payload, meter, qodec_bin)
+    res = apply_policy(_BY_NAME[arm], raw_payload, meter, qodec_bin)
     art = res.artifact
     final_codec = _outer_codec(art) if res.encoded else None
     legend = legend_of(art)
@@ -244,4 +263,40 @@ def check_invariants(arms: dict, raw_payload: str, squeeze_artifact: str | None 
     # I is a real container (framing applied), not a passthrough.
     if not arms["I"].artifact.startswith("%q1 identity"):
         viol.append("I: not an identity container")
+    return viol
+
+
+def check_closure_invariants(arms: dict, raw_payload: str, squeeze_artifact: str,
+                             stage1_artifact: str) -> list[str]:
+    """Closure-set invariants (R/S/SM/SG/V/VG): SM reproduces production squeeze;
+    S is exactly the production stage-1; SM and SG share that stage-1 and differ
+    only in the guard; V/VG keep the fold/grep-only shelf; VG aliases nothing
+    guarded; every encoded arm roundtrips."""
+    viol = []
+    for name, res in arms.items():
+        if not res.roundtrip_ok:
+            viol.append(f"{name}: roundtrip not byte-exact")
+    if arms["SM"].artifact != squeeze_artifact:
+        viol.append("SM: does not reproduce production squeeze byte-for-byte")
+    if arms["S"].artifact != stage1_artifact:
+        viol.append("S: does not equal production stage-1 byte-for-byte")
+    # R and V (fold/grep) carry no legend. S MAY carry a structural-codec legend
+    # (tmpl/diag alias via templates) — that is the production stage-1, so it is
+    # not a violation; the guard is a stage-2 (mine) property only.
+    for name in ("R", "V"):
+        if legend_of(arms[name].artifact):
+            viol.append(f"{name}: alias legend present in an alias-off arm")
+    # The GUARD applies to the MINE stage only. So the invariant is that the
+    # MINE-ADDED entries (SG.legend − S.legend) never alias a guarded span. A
+    # guarded span already aliased by the production stage-1 (tmpl) is untouched
+    # by the stage-2 guard — a real finding, not a violation.
+    s_legend = set(legend_of(arms["S"].artifact))
+    for a, phrase in legend_of(arms["SG"].artifact).items():
+        if a not in s_legend and is_guarded_lexical(phrase):
+            viol.append(f"SG: MINE aliased a guarded span {a}={phrase!r}")
+            break
+    for a, phrase in legend_of(arms["VG"].artifact).items():  # VG stage-1 (fold/grep) has no legend
+        if is_guarded_lexical(phrase):
+            viol.append(f"VG: aliased a guarded span {a}={phrase!r}")
+            break
     return viol

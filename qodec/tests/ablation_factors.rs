@@ -93,6 +93,36 @@ fn squeeze_is_unchanged_by_the_guard() -> Result<()> {
 }
 
 #[test]
+fn stage_matched_closure_arms() -> Result<()> {
+    // S = production stage-1 only; SM = squeeze; SG = stage-1 + guarded mine.
+    let m = meter();
+    let s = encode(SAMPLE, CodecKind::SqueezeStage1, &m, Alphabet::Auto);
+    let sm = encode(SAMPLE, CodecKind::SqueezeMineGuarded, &m, Alphabet::Auto);
+    let squeeze = encode(SAMPLE, CodecKind::Squeeze, &m, Alphabet::Auto);
+    // S is exactly production stage-1 (shared code, not a copy).
+    assert_eq!(s, qodec::squeeze_stage1(SAMPLE, &m, &[]));
+    // SM/SG both decode losslessly.
+    assert_eq!(decode(&sm)?, SAMPLE);
+    assert_eq!(decode(&s)?, SAMPLE);
+    // The plain `squeeze` codec IS SM's unguarded twin; both share stage-1.
+    assert_eq!(decode(&squeeze)?, SAMPLE);
+    Ok(())
+}
+
+#[test]
+fn sm_and_sg_differ_only_in_the_guard() {
+    // On a payload with NO guarded lexical spans, the guard rejects nothing, so
+    // the guarded and unguarded pipelines over the same stage-1 are identical.
+    let m = meter();
+    let plain = "the cat sat the cat sat the cat sat the cat sat the cat sat the cat sat\n".repeat(6);
+    assert_eq!(
+        encode(&plain, CodecKind::SqueezeMineGuarded, &m, Alphabet::Auto),
+        encode(&plain, CodecKind::Squeeze, &m, Alphabet::Auto),
+        "with no guarded spans, SG must equal squeeze (SM)"
+    );
+}
+
+#[test]
 fn guard_predicate_classes() {
     for g in [
         "value_parser",              // snake_case

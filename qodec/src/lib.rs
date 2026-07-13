@@ -71,6 +71,13 @@ pub enum CodecKind {
     /// grep markers. This is the ablation VG arm; it is NOT "guarded squeeze",
     /// because it also drops diag/tmpl/toon. Production `squeeze` is untouched.
     FoldGrepGuarded,
+    /// Eval-only. Production squeeze's stage 1 ONLY (`squeeze_stage1`), no mine —
+    /// the S arm. Isolates the production structural stage from the mining.
+    SqueezeStage1,
+    /// Eval-only. Production stage 1 + a GUARDED mine/deep — the SG arm, the true
+    /// "guarded squeeze". It shares the exact stage-1 artifact with `squeeze`
+    /// (== SM), so SM and SG differ ONLY in the mine's lexical guard.
+    SqueezeMineGuarded,
 }
 
 impl CodecKind {
@@ -88,6 +95,8 @@ impl CodecKind {
             "identity" => Some(Self::Identity),
             "structural" => Some(Self::Structural),
             "fold-grep-guarded" => Some(Self::FoldGrepGuarded),
+            "squeeze-stage1" => Some(Self::SqueezeStage1),
+            "squeeze-mine-guarded" => Some(Self::SqueezeMineGuarded),
             _ => None,
         }
     }
@@ -106,6 +115,8 @@ impl CodecKind {
             Self::Identity => "identity",
             Self::Structural => "structural",
             Self::FoldGrepGuarded => "fold-grep-guarded",
+            Self::SqueezeStage1 => "squeeze-stage1",
+            Self::SqueezeMineGuarded => "squeeze-mine-guarded",
         }
     }
 }
@@ -195,6 +206,35 @@ pub fn encode_seeded(
                 container::raw(text)
             }
         }
+        CodecKind::SqueezeStage1 => squeeze_stage1(text, meter, &seeds.templates),
+        CodecKind::SqueezeMineGuarded => {
+            // SG: production stage 1 (shared code) + a GUARDED mine. Same stage-1
+            // artifact as squeeze/SM, so SM and SG differ only in the guard.
+            let guarded = MineOptions {
+                alphabet,
+                seeds: seeds.phrases.clone(),
+                ranker: seeds.ranker.clone(),
+                probe_budget: seeds.probe_budget.unwrap_or(defaults.probe_budget),
+                guard_lexical: true,
+                ..MineOptions::default()
+            };
+            let guarded_deep = MineOptions {
+                alphabet,
+                miner: MinerKind::Deep,
+                seeds: seeds.phrases.clone(),
+                ranker: seeds.ranker.clone(),
+                probe_budget: seeds.probe_budget.unwrap_or(defaults.probe_budget),
+                guard_lexical: true,
+                ..MineOptions::default()
+            };
+            let stage1 = squeeze_stage1(text, meter, &seeds.templates);
+            let best = mine_over(&stage1, meter, &guarded, &guarded_deep);
+            if meter.count(&best) < meter.count(text) {
+                best
+            } else {
+                container::raw(text)
+            }
+        }
         CodecKind::Identity => container::identity(text),
         CodecKind::Structural => {
             // Structural folding/grouping only — no mine stage, verbatim content.
@@ -223,6 +263,24 @@ pub fn encode_seeded(
     }
 }
 
+/// Production squeeze's EXACT stage-1 selection: `toon` for table-shaped JSON,
+/// otherwise the measured best of fold/grep/diag/tmpl. This is the one place the
+/// selection lives, so the eval `squeeze-stage1` (S) and `squeeze-mine-guarded`
+/// (SG) arms share production's code rather than a copy — an SG built on this and
+/// an SM (== squeeze) built on this differ only in the mine guard.
+pub fn squeeze_stage1(text: &str, meter: &dyn TokenMeter, templates: &[Vec<String>]) -> String {
+    if serde_json::from_str::<serde_json::Value>(text).is_ok() {
+        let tooned = toon::encode(text, meter);
+        if container::parse(&tooned).ok().is_none_or(|c| c.codec == "raw") {
+            best_text_stage(text, meter, templates)
+        } else {
+            tooned
+        }
+    } else {
+        best_text_stage(text, meter, templates)
+    }
+}
+
 /// Squeeze's full pipeline, shared by `squeeze` and `fold-grep-guarded` (which
 /// pass guarded mine options). Kept byte-for-byte identical to the original
 /// inline body so production `squeeze` is unchanged.
@@ -233,19 +291,7 @@ fn squeeze_encode(
     mine_opts: &MineOptions,
     deep_opts: &MineOptions,
 ) -> String {
-    let stage1 = if serde_json::from_str::<serde_json::Value>(text).is_ok() {
-        let tooned = toon::encode(text, meter);
-        if container::parse(&tooned)
-            .ok()
-            .is_none_or(|c| c.codec == "raw")
-        {
-            best_text_stage(text, meter, templates)
-        } else {
-            tooned
-        }
-    } else {
-        best_text_stage(text, meter, templates)
-    };
+    let stage1 = squeeze_stage1(text, meter, templates);
     let best = mine_over(&stage1, meter, mine_opts, deep_opts);
     if meter.count(&best) < meter.count(text) {
         best
