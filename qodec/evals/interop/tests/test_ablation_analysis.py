@@ -109,6 +109,21 @@ class GateAndPareto(unittest.TestCase):
         # R passes all 10; MF passes fewest → R ranks ahead of MF
         self.assertLess(par["ranked"].index("R"), par["ranked"].index("MF"))
 
+    def test_stage_mismatch_aborts_causal_verdict(self):
+        # A closure run whose S/SM/SG stage-1 SHAs disagree must NOT publish a
+        # causal verdict — build_files raises instead.
+        recs = question("c", "q", {"R": True, "S": True, "SM": False, "SG": True, "V": True, "VG": True})
+        man = {"losses": ["c:q"], "controls": [], "weakly_matched": [],
+               "arms": ["R", "S", "SM", "SG", "V", "VG"],
+               "model_requested": "m", "qodec_binary_sha256": "ab" * 32}
+        good = {"stage1": {"selected_codec": "raw"}, "stage2": {"input_artifact_sha256": "aa"},
+                "final": {"artifact_sha256": "aa"}}
+        bad = {"stage1": {"selected_codec": "raw"}, "stage2": {"input_artifact_sha256": "ZZ"},  # differs
+               "final": {"artifact_sha256": "aa"}}
+        sr = {"receipts": {"c|S": good, "c|SM": good, "c|SG": bad}}
+        with self.assertRaises(A.StageMatchError):
+            A.build_files(Path("."), recs, man, sr)
+
     def test_build_files_byte_stable(self):
         recs, man = self._run()
         f1 = {k: v for k, v in A.build_files(Path("."), recs, man).items() if k != "_meta" and not k.endswith((".jsonl",))}

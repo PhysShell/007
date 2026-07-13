@@ -32,7 +32,7 @@ import datetime as _dt
 import json
 from pathlib import Path
 
-from bench import durability, matrix, preflight, qodec, reader, reader_tasks
+from bench import ablation_policies, durability, matrix, preflight, qodec, reader, reader_tasks
 
 HERE = Path(__file__).resolve().parent
 ARMS = matrix.ARMS
@@ -70,6 +70,19 @@ def _run_manifest(cfg, pf: dict, args, tasks: list[dict], brief: str, ctx: dict)
             if ct.exists():
                 chat_template_sha = matrix.sha256_bytes(ct.read_bytes())
                 break
+    # Policy identity: label + realized codec-stage receipt per case, so a
+    # promotion run pins WHICH policy produced the artifacts, not just the codec
+    # name. A resume rejects any change to these before a scored request.
+    meter = cfg.tokenizer or "o200k"
+    policy_name = ablation_policies.CODEC_POLICY_LABEL.get(args.codec, args.codec)
+    stage_receipt_sha = {}
+    for case in sorted(ctx):
+        try:
+            st = ablation_policies.realized_stages_for_codec(
+                args.codec, ctx[case]["tool_only"], meter, str(qodec.binary()), passthrough=True)
+            stage_receipt_sha[case] = matrix.sha256_text(json.dumps(st, sort_keys=True, ensure_ascii=False))
+        except Exception:  # noqa: BLE001 — best-effort provenance (unknown codec / meter unavailable)
+            stage_receipt_sha[case] = None
     return {
         "manifest_version": 2,
         "model_requested": cfg.model,
@@ -83,6 +96,8 @@ def _run_manifest(cfg, pf: dict, args, tasks: list[dict], brief: str, ctx: dict)
         "chat_template_sha256": chat_template_sha,
         "qodec_binary_sha256": qodec.binary_sha256(),
         "codec": args.codec,
+        "policy_name": policy_name,
+        "realized_stage_receipt_sha256": stage_receipt_sha,
         "tasks_snapshot_sha256": matrix.sha256_bytes(Path(args.tasks).read_bytes()),
         "l1_run": str(args.l1_run),
         "l1_tool_only_sha256": {case: matrix.sha256_text(ctx[case]["tool_only"]) for case in sorted(ctx)},

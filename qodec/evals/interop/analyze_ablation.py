@@ -294,9 +294,19 @@ def _closure_conclusion(questions, gate, advancing):
     return conclusion, guard_iso
 
 
+class StageMatchError(RuntimeError):
+    """Closure comparison is not stage-matched — a causal verdict must not be
+    published on it."""
+
+
 def build_files(run_dir: Path, records, manifest, stage_receipts=None) -> dict:
     arms = manifest.get("arms", ARMS)
     is_closure = "SM" in arms
+    if is_closure and stage_receipts:
+        from bench import ablation_policies as ap
+        viol = ap.stage_match_violations(stage_receipts.get("receipts", {}))
+        if viol:
+            raise StageMatchError("stage-1 not matched; refusing causal verdict:\n  " + "\n  ".join(viol))
     encoded = [a for a in arms if a != "R"]
     questions = factorial(records, manifest)
     gate = candidate_gate(questions, encoded)

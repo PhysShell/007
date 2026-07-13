@@ -281,9 +281,11 @@ pub fn squeeze_stage1(text: &str, meter: &dyn TokenMeter, templates: &[Vec<Strin
     }
 }
 
-/// Squeeze's full pipeline, shared by `squeeze` and `fold-grep-guarded` (which
-/// pass guarded mine options). Kept byte-for-byte identical to the original
-/// inline body so production `squeeze` is unchanged.
+/// Squeeze's full pipeline (production stage-1 via `squeeze_stage1` + mine),
+/// shared by `squeeze` and `squeeze-mine-guarded` (SM/SG — same stage-1, the
+/// guarded arm passes guarded mine options). NOTE: `fold-grep-guarded` (VG) does
+/// NOT use this — it runs `structural_stage` (fold/grep only). Kept byte-for-byte
+/// identical to the original inline body so production `squeeze` is unchanged.
 fn squeeze_encode(
     text: &str,
     meter: &dyn TokenMeter,

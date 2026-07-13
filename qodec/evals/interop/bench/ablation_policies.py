@@ -164,50 +164,122 @@ def _tokens(qodec_bin: str, codec: str, text: str, meter: str) -> int:
     return _encode(qodec_bin, codec, text, meter)["tokens_out"]
 
 
+# Per-arm stage execution, from the POLICY (not the arm name string): the codec
+# that produces stage-1 (None ⇒ the mine runs over the raw text; "identity" ⇒ a
+# no-transform frame), whether the policy invokes a mine stage, and its guard.
+STAGE_META = {
+    "R": (None, False, False),
+    "I": ("identity", False, False),
+    "M": (None, True, False),
+    "F": ("structural", False, False),
+    "MF": ("squeeze-stage1", True, False),
+    "VG": ("structural", True, True),
+    "S": ("squeeze-stage1", False, False),
+    "SM": ("squeeze-stage1", True, False),
+    "SG": ("squeeze-stage1", True, True),
+    "V": ("structural", False, False),
+}
+_NO_TRANSFORM_CODECS = {"raw", "identity", None}
+
+
+# A run_reader-style codec maps to the same (stage1_codec, mines, guard) triple,
+# so realized stages can be computed for a promotion run driven by --codec.
+CODEC_STAGE = {
+    "fold-grep-guarded": ("structural", True, True),   # VG
+    "squeeze": ("squeeze-stage1", True, False),
+    "squeeze-mine-guarded": ("squeeze-stage1", True, True),
+    "squeeze-stage1": ("squeeze-stage1", False, False),
+    "structural": ("structural", False, False),
+    "mine": (None, True, False),
+    "deep": (None, True, False),
+    "identity": ("identity", False, False),
+}
+CODEC_POLICY_LABEL = {"fold-grep-guarded": "VG", "squeeze": "MF", "squeeze-mine-guarded": "SG",
+                      "squeeze-stage1": "S", "structural": "V", "mine": "M", "identity": "I"}
+
+
 def realized_stages(arm: str, raw_payload: str, meter: str, qodec_bin: str) -> dict:
-    """The REALIZED codec stages of an arm — what transforms actually landed in
-    the artifact, read from the bytes, never inferred from the arm name.
-
-    stage1 selected_codec is reconstructed as the measured-minimum over that arm's
-    shelf (the same rule production's best_text_stage uses); the production-code-
-    exact stage-1 (`S`) arm is added in the Commit-I closure run. guarded_
-    candidates_rejected needs miner instrumentation and is likewise deferred to I.
-    Invariants recorded here: alias_applied ⇔ the final artifact carries an alias
-    legend; structural_applied ⇔ the selected structural artifact differs from raw.
-    """
+    """Realized codec stages of an ablation ARM (uses its policy metadata)."""
+    stage1_codec, mines, guard = STAGE_META[arm]
     res = apply_policy(_BY_NAME[arm], raw_payload, meter, qodec_bin)
-    art = res.artifact
-    final_codec = _outer_codec(art) if res.encoded else None
-    legend = legend_of(art)
+    return _realized(arm, res.artifact, res.tokens, res.encoded,
+                     stage1_codec, mines, guard, raw_payload, meter, qodec_bin)
 
-    shelf = SHELF[arm]
-    stage1 = {"candidate_codecs": shelf, "selected_codec": None, "artifact_sha256": None,
-              "tokens": None, "transform_applied": False}
-    if shelf:
-        # toon only applies to JSON, mirroring squeeze's stage-1 gate.
-        cands = [c for c in shelf if c != "toon" or _is_json(raw_payload)]
-        best = min(((c, _encode(qodec_bin, c, raw_payload, meter)) for c in cands),
-                   key=lambda ce: ce[1]["tokens_out"])
-        c, env = best
-        s1 = env["content"]
-        stage1 = {"candidate_codecs": shelf, "selected_codec": (_outer_codec(s1) if env["encoded"] else "raw"),
-                  "artifact_sha256": _sha(s1), "tokens": env["tokens_out"],
-                  "transform_applied": s1 != raw_payload and env["encoded"],
-                  "reconstruction": "measured-min over shelf; production-exact S arm in Commit I"}
 
-    alias_applied = bool(legend)
-    stage2 = {"attempted": arm in ("M", "MF", "VG"),
-              "selected_miner": "mine" if arm in ("M", "MF", "VG") else None,
-              "transform_applied": alias_applied,
-              "legend_entries": len(legend),
-              "guarded_candidates_rejected": None,  # measured in Commit I
-              "artifact_sha256": _sha(art)}
+def realized_stages_for_codec(codec: str, raw_payload: str, meter: str, qodec_bin: str,
+                              passthrough: bool = False) -> dict:
+    """Realized codec stages for a promotion run driven by a --codec (e.g. VG =
+    fold-grep-guarded), computed against the artifact the reader actually gets."""
+    if codec not in CODEC_STAGE:
+        raise ValueError(f"no stage metadata for codec {codec!r}")
+    stage1_codec, mines, guard = CODEC_STAGE[codec]
+    env = _encode(qodec_bin, codec, raw_payload, meter) if not passthrough else \
+        json.loads(subprocess.run([qodec_bin, "encode", "--codec", codec, "--meter", meter,
+                                   "--json", "--passthrough-on-no-gain"],
+                                  input=raw_payload, capture_output=True, text=True, check=True).stdout)
+    return _realized(CODEC_POLICY_LABEL.get(codec, codec), env["content"], env["tokens_out"],
+                     env["encoded"], stage1_codec, mines, guard, raw_payload, meter, qodec_bin)
+
+
+def _realized(label, final_art, final_tokens, final_encoded, stage1_codec, mines, guard,
+              raw_payload, meter, qodec_bin) -> dict:
+    """Shared core: the REALIZED stages read from the artifacts — never inferred
+    from a name or from the final legend (a `tmpl`/`diag` stage-1 carries a legend
+    without any mining). stage-2 execution comes from the policy; stage-2
+    transform from the SHA changing between stage-1 and final."""
+    arm = label
+    final_codec = _outer_codec(final_art) if final_encoded else None
+    final_legend = legend_of(final_art)
+
+    # ---- stage 1 (structural) --------------------------------------------- #
+    if stage1_codec is None:
+        # No structural stage: the mine (if any) runs over the raw text itself.
+        s1_text, s1_codec, s1_legend = raw_payload, "raw", {}
+        stage1 = {"attempted": False, "selected_codec": None, "transform_applied": False,
+                  "alias_entries": 0, "artifact_sha256": None, "tokens": None}
+        s2_input_sha = _sha(raw_payload)
+    else:
+        s1 = _encode(qodec_bin, stage1_codec, raw_payload, meter)
+        s1_text = s1["content"]
+        s1_codec = _outer_codec(s1_text) if s1["encoded"] else "raw"
+        s1_legend = legend_of(s1_text)
+        stage1 = {"attempted": True, "selected_codec": s1_codec,
+                  "transform_applied": s1_codec not in _NO_TRANSFORM_CODECS,
+                  "alias_entries": len(s1_legend),
+                  "artifact_sha256": _sha(s1_text), "tokens": s1["tokens_out"]}
+        s2_input_sha = _sha(s1_text)
+
+    # ---- stage 2 (mine) --------------------------------------------------- #
+    if not mines:
+        stage2 = {"attempted": False, "selected_miner": None, "transform_applied": False,
+                  "alias_entries_added": 0, "input_artifact_sha256": None,
+                  "artifact_sha256": None, "tokens": None}
+    else:
+        transform = _sha(final_art) != s2_input_sha
+        miner = None
+        if transform and not guard:
+            # Identify which unguarded miner produced the final (mine_over picks
+            # the cheaper). Guarded miners have no standalone codec, so we leave
+            # the family unresolved rather than guess.
+            for cand in ("mine", "deep"):
+                if _encode(qodec_bin, cand, s1_text, meter)["content"] == final_art:
+                    miner = cand
+                    break
+            miner = miner or "mine-or-deep"
+        elif transform:
+            miner = "guarded-mine-or-deep"
+        stage2 = {"attempted": True, "selected_miner": miner, "transform_applied": transform,
+                  "alias_entries_added": len(final_legend) - len(s1_legend),
+                  "input_artifact_sha256": s2_input_sha,
+                  "artifact_sha256": _sha(final_art), "tokens": final_tokens}
+
     return {
         "arm": arm,
         "stage1": stage1,
         "stage2": stage2,
-        "final": {"outer_codec": final_codec, "artifact_sha256": _sha(art), "tokens": res.tokens},
-        "alias_applied": alias_applied,
+        "final": {"outer_codec": final_codec, "artifact_sha256": _sha(final_art), "tokens": final_tokens},
+        "overall_alias_entries": len(final_legend),
+        "alias_applied": bool(final_legend),
         "structural_applied": stage1["transform_applied"],
     }
 
@@ -218,6 +290,31 @@ def _is_json(text: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def stage_match_violations(receipts: dict) -> list[str]:
+    """Per case, verify the closure comparison is stage-matched: S's final, SM's
+    stage-2 input and SG's stage-2 input are the SAME stage-1 artifact, and their
+    selected stage-1 codec agrees; and SM/SG differ only by the mine guard
+    (policy-level). Any violation must abort the causal verdict."""
+    viol = []
+    cases = sorted({k.split("|")[0] for k in receipts})
+    for case in cases:
+        S, SM, SG = receipts.get(f"{case}|S"), receipts.get(f"{case}|SM"), receipts.get(f"{case}|SG")
+        if not (S and SM and SG):
+            continue
+        shas = {S["final"]["artifact_sha256"], SM["stage2"]["input_artifact_sha256"],
+                SG["stage2"]["input_artifact_sha256"]}
+        if len(shas) != 1:
+            viol.append(f"{case}: stage-1 SHA differs across S.final / SM.input / SG.input")
+        codecs = {S["stage1"]["selected_codec"], SM["stage1"]["selected_codec"], SG["stage1"]["selected_codec"]}
+        if len(codecs) != 1:
+            viol.append(f"{case}: stage-1 selected codec differs across S/SM/SG ({codecs})")
+    # SM and SG must differ only by the guard at the policy level.
+    if STAGE_META["SM"][0] != STAGE_META["SG"][0] or STAGE_META["SM"][1] != STAGE_META["SG"][1] \
+            or STAGE_META["SM"][2] == STAGE_META["SG"][2]:
+        viol.append("SM and SG policy configs differ by more than the mine guard")
+    return viol
 
 
 def byte_identical_pairs(arms: dict) -> list[tuple]:

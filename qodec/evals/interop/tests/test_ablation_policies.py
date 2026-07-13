@@ -86,15 +86,17 @@ class Policies(unittest.TestCase):
         # I: identity container — neither factor actually applied.
         self.assertFalse(st["I"]["alias_applied"])
         self.assertFalse(st["I"]["structural_applied"])
-        # M: alias applied (legend present), no structural stage.
-        self.assertTrue(st["M"]["alias_applied"])
-        self.assertFalse(st["M"]["structural_applied"])
-        # F/VG shelf is fold/grep only; MF shelf includes tmpl/diag/toon.
-        self.assertEqual(st["F"]["stage1"]["candidate_codecs"], ["fold", "grep"])
-        self.assertIn("tmpl", st["MF"]["stage1"]["candidate_codecs"])
-        # alias_applied is read from the artifact, never from the arm name.
-        for a in ("I", "F"):
-            self.assertEqual(st[a]["stage2"]["legend_entries"], 0)
+        self.assertFalse(st["I"]["stage2"]["attempted"])
+        # M: mine over raw — stage-2 attempted, no structural stage.
+        self.assertTrue(st["M"]["stage2"]["attempted"])
+        self.assertFalse(st["M"]["stage1"]["attempted"])
+        # F: structural only, no mine stage; MF: production stage-1 + mine.
+        self.assertTrue(st["F"]["stage1"]["attempted"])
+        self.assertFalse(st["F"]["stage2"]["attempted"])
+        self.assertTrue(st["MF"]["stage2"]["attempted"])
+        # stage-2 transform is the SHA change, not merely a legend being present.
+        self.assertEqual(st["MF"]["stage2"]["transform_applied"],
+                         st["MF"]["final"]["artifact_sha256"] != st["MF"]["stage2"]["input_artifact_sha256"])
 
     def test_byte_identical_pairs_detected(self):
         # On this sample the guard removes all VG aliases → VG == F byte-for-byte.
@@ -124,6 +126,44 @@ class ClosurePolicies(unittest.TestCase):
         for a, phrase in ap.legend_of(self.arms["SG"].artifact).items():
             if a not in s_legend:  # a mine-added entry
                 self.assertFalse(ap.is_guarded_lexical(phrase), f"SG mine aliased guarded {a}={phrase!r}")
+
+
+import json  # noqa: E402
+ROOT = Path(__file__).resolve().parents[1]
+CLOSURE = ROOT / "analysis" / "l2-qwen2.5-coder-7b-alias-fold-closure-v1"
+
+
+@unittest.skipUnless((CLOSURE / "realized-stage-receipts.json").exists(), "closure artifact not present")
+class CommittedClosureReceipts(unittest.TestCase):
+    """Regression on the COMMITTED closure receipts — realized stages read from
+    the artifacts, stage-2 attempted from the policy (not the tmpl legend)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.r = json.loads((CLOSURE / "realized-stage-receipts.json").read_text())["receipts"]
+
+    def test_stage_matched(self):
+        self.assertEqual(ap.stage_match_violations(self.r), [])
+
+    def test_build_log_stage1_tmpl_no_mining(self):
+        S = self.r["build-log-rtk-log|S"]
+        self.assertEqual(S["stage1"]["selected_codec"], "tmpl")
+        self.assertEqual(S["stage1"]["alias_entries"], 1)          # tmpl legend, not mining
+        self.assertFalse(S["stage2"]["attempted"])
+        for arm in ("SM", "SG"):
+            s = self.r[f"build-log-rtk-log|{arm}"]
+            self.assertTrue(s["stage2"]["attempted"])             # policy invokes mine
+            self.assertFalse(s["stage2"]["transform_applied"])    # but it changes nothing
+            self.assertEqual(s["final"]["artifact_sha256"], s["stage2"]["input_artifact_sha256"])
+
+    def test_clap_stage2_mining_with_matched_stage1(self):
+        SM, SG = self.r["clap-derive-explore|SM"], self.r["clap-derive-explore|SG"]
+        self.assertEqual(SM["stage1"]["selected_codec"], "raw")
+        self.assertTrue(SM["stage2"]["transform_applied"])
+        self.assertIsNotNone(SM["stage2"]["selected_miner"])
+        self.assertEqual(SM["stage2"]["input_artifact_sha256"], SG["stage2"]["input_artifact_sha256"])
+        # the guard cuts the mine-added aliases (SM aliases many; SG few)
+        self.assertGreater(SM["stage2"]["alias_entries_added"], SG["stage2"]["alias_entries_added"])
 
 
 if __name__ == "__main__":
