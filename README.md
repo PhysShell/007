@@ -80,6 +80,8 @@ Imported design proposals (normalized from design discussions; all draft):
 `docs/microvm-isolation.md` (microVM isolation assessment for `run`/gate),
 `docs/agentic-coding-discipline-proposal.md` (pointer to the canonical Own.NET
 doc), `docs/agent-memory-layer.md` (`o7 memory` / `o7 context`),
+`docs/task-aware-context-generator.md` (deterministic reverse source generator for
+task-specific, evidence-backed agent context),
 `docs/agent-language.md` (strict TaskSpec/O7Plan contract),
 `docs/agentops-promptops.md` (PromptOps/AgentOps layer),
 `docs/actions-plans-evidence-abridge.md` (action-plan & evidence bridge),
