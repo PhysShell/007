@@ -1,0 +1,119 @@
+{
+  "case": "clap-derive-explore",
+  "cells": {
+    "F": {
+      "alias_leaks": 0,
+      "answer": {
+        "files": [
+          "clap_builder/src/builder/value_parser.rs"
+        ]
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 295467.0,
+      "n_repeats": 3,
+      "prompt_tokens": 4785,
+      "stable": true
+    },
+    "GF": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "clap_builder/src/builder/value_parser.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 293212.0,
+      "n_repeats": 3,
+      "prompt_tokens": 4684,
+      "stable": true
+    },
+    "I": {
+      "alias_leaks": 0,
+      "answer": {
+        "files": [
+          "clap_builder/src/builder/value_parser.rs"
+        ]
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 293982.0,
+      "n_repeats": 3,
+      "prompt_tokens": 4785,
+      "stable": true
+    },
+    "M": {
+      "alias_leaks": 0,
+      "answer": {
+        "files": [
+          "clap_builder/src/value_parser.rs"
+        ]
+      },
+      "correct": false,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 1,
+      "latency_ms": 273796.0,
+      "n_repeats": 3,
+      "prompt_tokens": 4511,
+      "stable": true
+    },
+    "MF": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "clap_derive/src/value_parser.rs"
+        ],
+        "symbols": []
+      },
+      "correct": false,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 1,
+      "latency_ms": 258372.0,
+      "n_repeats": 3,
+      "prompt_tokens": 4230,
+      "stable": true
+    },
+    "R": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "files": [
+          "clap_builder/src/builder/value_parser.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 309284.0,
+      "n_repeats": 3,
+      "prompt_tokens": 4775,
+      "stable": true
+    }
+  },
+  "question": "def-path",
+  "role": "loss",
+  "verdict": [
+    "alias main effect (I pass, M fail)",
+    "lexical aliasing implicated (MF fail, GF pass)"
+  ],
+  "weakly_matched": false
+}

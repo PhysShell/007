@@ -1,0 +1,129 @@
+{
+  "case": "clap-derive-explore",
+  "cells": {
+    "F": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "Parser"
+        ]
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 9255.0,
+      "n_repeats": 1,
+      "prompt_tokens": 4785,
+      "stable": null
+    },
+    "GF": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "Parser",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "Parser"
+        ]
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 9696.0,
+      "n_repeats": 1,
+      "prompt_tokens": 4684,
+      "stable": null
+    },
+    "I": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "Parser"
+        ]
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 9369.0,
+      "n_repeats": 1,
+      "prompt_tokens": 4785,
+      "stable": null
+    },
+    "M": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "Parser",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "Parser"
+        ]
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 10198.0,
+      "n_repeats": 1,
+      "prompt_tokens": 4511,
+      "stable": null
+    },
+    "MF": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "Parser",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "Parser"
+        ]
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 9716.0,
+      "n_repeats": 1,
+      "prompt_tokens": 4230,
+      "stable": null
+    },
+    "R": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "Parser"
+        ]
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 9656.0,
+      "n_repeats": 1,
+      "prompt_tokens": 4775,
+      "stable": null
+    }
+  },
+  "question": "trait",
+  "role": "control",
+  "verdict": null,
+  "weakly_matched": false
+}

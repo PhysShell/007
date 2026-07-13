@@ -1,0 +1,134 @@
+{
+  "case": "rg-output-rtk-grep",
+  "cells": {
+    "F": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "OpenAsync",
+          "RequestAsync"
+        ]
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 42459.0,
+      "n_repeats": 1,
+      "prompt_tokens": 879,
+      "stable": null
+    },
+    "GF": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "OpenAsync",
+          "RequestAsync"
+        ]
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 34673.0,
+      "n_repeats": 1,
+      "prompt_tokens": 879,
+      "stable": null
+    },
+    "I": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "OpenAsync",
+          "RequestAsync"
+        ]
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 44807.0,
+      "n_repeats": 1,
+      "prompt_tokens": 879,
+      "stable": null
+    },
+    "M": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "OpenAsync"
+        ]
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 46730.0,
+      "n_repeats": 1,
+      "prompt_tokens": 837,
+      "stable": null
+    },
+    "MF": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "OpenAsync",
+          "RequestAsync"
+        ]
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 31734.0,
+      "n_repeats": 1,
+      "prompt_tokens": 818,
+      "stable": null
+    },
+    "R": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": [
+          "OpenAsync",
+          "RequestAsync"
+        ]
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 37220.0,
+      "n_repeats": 1,
+      "prompt_tokens": 869,
+      "stable": null
+    }
+  },
+  "question": "method",
+  "role": "control",
+  "verdict": null,
+  "weakly_matched": true
+}

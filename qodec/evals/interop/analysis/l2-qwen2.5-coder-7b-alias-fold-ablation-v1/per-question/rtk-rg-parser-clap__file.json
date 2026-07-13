@@ -1,0 +1,144 @@
+{
+  "case": "rtk-rg-parser-clap",
+  "cells": {
+    "F": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "src/_concepts.rs",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "src/_concepts.rs",
+          "src/_cookbook/typed_derive.rs",
+          "src/_features.rs",
+          "src/lib.rs",
+          "src/_tutorial.rs",
+          "src/_derive/mod.rs",
+          "src/_derive/_tutorial.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 62390.0,
+      "n_repeats": 3,
+      "prompt_tokens": 1116,
+      "stable": true
+    },
+    "GF": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "src/_concepts.rs",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "src/_concepts.rs",
+          "src/_cookbook/typed_derive.rs",
+          "src/_features.rs",
+          "src/lib.rs",
+          "src/_tutorial.rs",
+          "src/_derive/mod.rs",
+          "src/_derive/_tutorial.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 64527.0,
+      "n_repeats": 3,
+      "prompt_tokens": 1116,
+      "stable": true
+    },
+    "I": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "src/_concepts.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 62058.0,
+      "n_repeats": 3,
+      "prompt_tokens": 1254,
+      "stable": true
+    },
+    "M": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "src/_derive/mod.rs"
+        ],
+        "symbols": []
+      },
+      "correct": false,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 49825.0,
+      "n_repeats": 3,
+      "prompt_tokens": 1087,
+      "stable": true
+    },
+    "MF": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "src/_features.rs"
+        ],
+        "symbols": []
+      },
+      "correct": false,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 45139.0,
+      "n_repeats": 3,
+      "prompt_tokens": 1016,
+      "stable": true
+    },
+    "R": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "src/_concepts.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 59154.0,
+      "n_repeats": 3,
+      "prompt_tokens": 1244,
+      "stable": true
+    }
+  },
+  "question": "file",
+  "role": "loss",
+  "verdict": [
+    "alias main effect (I pass, M fail)",
+    "lexical aliasing implicated (MF fail, GF pass)"
+  ],
+  "weakly_matched": false
+}

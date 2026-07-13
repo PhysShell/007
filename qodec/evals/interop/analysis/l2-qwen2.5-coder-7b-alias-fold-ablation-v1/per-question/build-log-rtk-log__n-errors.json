@@ -1,0 +1,117 @@
+{
+  "case": "build-log-rtk-log",
+  "cells": {
+    "F": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "3",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": []
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 8068.0,
+      "n_repeats": 1,
+      "prompt_tokens": 593,
+      "stable": null
+    },
+    "GF": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "3",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": []
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 7846.0,
+      "n_repeats": 1,
+      "prompt_tokens": 593,
+      "stable": null
+    },
+    "I": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "3",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": []
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 7883.0,
+      "n_repeats": 1,
+      "prompt_tokens": 593,
+      "stable": null
+    },
+    "M": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "3",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": []
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 7914.0,
+      "n_repeats": 1,
+      "prompt_tokens": 581,
+      "stable": null
+    },
+    "MF": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "3",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": []
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 8265.0,
+      "n_repeats": 1,
+      "prompt_tokens": 582,
+      "stable": null
+    },
+    "R": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "3",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": []
+      },
+      "correct": true,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 7928.0,
+      "n_repeats": 1,
+      "prompt_tokens": 583,
+      "stable": null
+    }
+  },
+  "question": "n-errors",
+  "role": "control",
+  "verdict": null,
+  "weakly_matched": false
+}

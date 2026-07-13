@@ -155,6 +155,19 @@ no gold span was *absent* (qodec aliased or folded the information, it did not
 delete it) — 1 count → notation-ambiguity, 2 identifier/path → aliasing, 2
 grep-file → grouping/boundary loss and a fold×alias mix.
 
+That decomposition was then tested against the model in a factorized run
+(`run_ablation.py` → `analyze_ablation.py`, artifact
+`analysis/l2-qwen2.5-coder-7b-alias-fold-ablation-v1/`): the five losses + five
+matched controls × six arms (R/I/M/F/MF/GF, `bench/ablation_policies.py`) on the
+same 7B, one run. Result — the production codec **MF (squeeze) is the only arm
+that fails (0/5 losses, +1 alias leak)**, while structural folding alone (F) and
+a **generic lexical-guarded squeeze (GF, never aliases paths/`::`/snake/Camel
+identifiers) both rescue 5/5 with zero control regressions and still save tokens**
+(GF +1358, F +936 vs raw+brief). Pareto order GF > F > R > I > M > MF. Two losses
+are a pure alias main effect (M alone breaks them), three are an alias×structural
+interaction (only MF breaks). GF is the diagnostic candidate for a full
+23-question rerun — a global lexical guard, not protected spans.
+
 ## Go / no-go
 
 Median `incremental_qodec_gain` ≥ 10% — reported for cold **and** warm. Quality
