@@ -1,0 +1,4 @@
+# stability — repeated (case,question,arm) and whether repeats agree on correct
+rg-output-rtk-grep    n-files       encoded+brief  repeats=3 correct=[False, False, False] STABLE
+rg-output-rtk-grep    n-files       raw            repeats=3 correct=[False, False, False] STABLE
+rg-output-rtk-grep    n-files       raw+brief      repeats=3 correct=[False, False, False] STABLE

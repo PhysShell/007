@@ -1,0 +1,20 @@
+# qodec interop bench — full L2 VG candidate gate (fold-grep-guarded)
+run l2-vg-7b-v1  model=qwen2.5-coder-7b-instruct  policy=VG (best(fold,grep)+guarded mine)
+unique_questions=23  unstable=0  raw_competence=74%  eligible overall=17 locator=9
+retention overall=100% facts/counts=100% locator=100%
+stable VG losses=0  leaks=0  invalid Δ=0  malformed Δ=0
+token savings vs raw+brief: total=3379 mean=146.9 median=91 5.3%
+latency ms raw+brief=39668 vg=32198 (observation only)
+shelf distribution: {'raw': 3, 'grep': 2}
+guarded mining applied in 4 case(s): ['build-log-rtk-log', 'clap-derive-explore', 'rg-output-rtk-grep', 'rtk-rg-derive-clap']
+VG == V (structural) byte-identical in 3 case(s): ['build-log-rtk-log', 'rg-output-rtk-grep', 'rtk-rg-parser-clap']
+exact roundtrip all cases: True
+tokenizer parity: ok (spread 0.0)
+
+full-run gate: raw_competence>=60%=✓  eligible_overall>=10=✓  eligible_locator>=4=✓  tokenizer_parity_ok=✓
+VG quality gate: stable_vg_losses==0=✓  alias_leaks==0=✓  invalid_id_delta<=0=✓  malformed_delta<=0=✓  mean_savings>0=✓  median_savings>0=✓  exact_roundtrip_all=✓
+
+## verdict
+VG PASSES FULL L2 CANDIDATE GATE.
+Production squeeze remains rejected.
+VG promotion/integration is a separate decision.
