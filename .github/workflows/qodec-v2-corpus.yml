@@ -1,0 +1,84 @@
+# Interop Benchmark v2 — corpus compiler CI (Scope N0).
+# Validates the corpus compiler and the single NON-BENCHMARK demonstration
+# bundle. Zero real benchmark cases. No model calls, no network after Nix
+# dependency realization, and CI never rewrites committed snapshots.
+#
+# Kept separate from qodec-v2.yml. Third-party actions are pinned to full commit
+# SHAs with persist-credentials disabled. The committed flake.lock is mandatory
+# (--no-update-lock-file).
+name: qodec-v2-corpus
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qodec-v2-corpus-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LC_ALL: C.UTF-8
+  LANG: C.UTF-8
+  TZ: UTC
+
+jobs:
+  corpus-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - name: Corpus schemas + unit + no-benchmark-data (model-free)
+        run: |
+          nix build \
+            .#checks.x86_64-linux.qodec-v2-corpus-schemas \
+            .#checks.x86_64-linux.qodec-v2-corpus-unit \
+            .#checks.x86_64-linux.qodec-v2-no-benchmark-data \
+            --no-update-lock-file \
+            --print-build-logs
+
+  demo-reproducibility:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - name: Demo reproducibility + committed snapshot integrity
+        run: |
+          nix build \
+            .#checks.x86_64-linux.qodec-v2-demo-reproducible \
+            .#checks.x86_64-linux.qodec-v2-demo-snapshots \
+            --no-update-lock-file \
+            --print-build-logs
+
+  changed-cases:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Map changed files to affected case bundles
+        run: |
+          BASE='${{ github.event.pull_request.base.sha }}'
+          HEAD='${{ github.sha }}'
+          CLI=qodec/evals/interop/v2/corpus/tools/corpus_tool.py
+          if [ -n "$BASE" ]; then
+            echo "Affected case bundles for $BASE..$HEAD:"
+            python3 "$CLI" changed --base "$BASE" --head "$HEAD" || true
+          else
+            echo "No PR base (workflow_dispatch); validating full corpus."
+          fi
+      - name: Always validate manifest, schemas and affected bundles (no rewrite)
+        run: |
+          python3 qodec/evals/interop/v2/corpus/tools/corpus_tool.py validate
