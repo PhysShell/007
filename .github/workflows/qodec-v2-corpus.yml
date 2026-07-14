@@ -6,6 +6,11 @@
 # Kept separate from qodec-v2.yml. Third-party actions are pinned to full commit
 # SHAs with persist-credentials disabled. The committed flake.lock is mandatory
 # (--no-update-lock-file).
+#
+# The two Nix jobs cache the /nix/store via nix-community/cache-nix-action, keyed
+# on flake.lock/flake.nix, so rtk-pinned/qodec are not rebuilt cold every run.
+# This uses GitHub's built-in Actions cache — NO Cachix/FlakeHub secret. Saving
+# the cache needs `actions: write` (the only scope beyond contents: read).
 name: qodec-v2-corpus
 
 on:
@@ -14,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: qodec-v2-corpus-${{ github.workflow }}-${{ github.ref }}
@@ -34,6 +40,12 @@ jobs:
           persist-credentials: false
       - name: Install Nix
         uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - name: Cache /nix/store (GitHub Actions cache; no external secret)
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
       - name: Corpus schemas + unit + no-benchmark-data (model-free)
         run: |
           nix build \
@@ -52,6 +64,12 @@ jobs:
           persist-credentials: false
       - name: Install Nix
         uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - name: Cache /nix/store (GitHub Actions cache; no external secret)
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
       - name: Demo reproducibility + committed snapshot integrity
         run: |
           nix build \
