@@ -28,9 +28,23 @@ name: qodec-n2-miner-canary
 on:
   pull_request:
     paths:
-      - "qodec/evals/interop/v2/n2/**"
+      # Scope N2-A.1: narrowed from "qodec/evals/interop/v2/n2/**" — that
+      # broad filter also matched qodec/evals/interop/v2/n2/miner/** (Scope
+      # N2-B), so every N2-B-only push was incidentally re-executing this
+      # real, third-party-executing canary. It must still run when its own
+      # implementation or workflow changes; it must not run for changes
+      # confined to the miner/ tree.
+      - "qodec/evals/interop/v2/n2/canary/**"
       - ".github/workflows/qodec-n2-miner-canary.yml"
   workflow_dispatch:
+    inputs:
+      run_determinism_probe:
+        description: >-
+          Also run the determinism-probe job (Scope N2-A.1 investigation
+          tooling — never runs on pull_request, never part of the
+          acceptance gate, off by default even on manual dispatch).
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -101,6 +115,82 @@ jobs:
             ${{ runner.temp }}/source-artifact/source-manifest.json
             ${{ runner.temp }}/source-artifact/license-record.json
             ${{ runner.temp }}/source-artifact/source-file-manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+  determinism-probe:
+    name: determinism-probe (investigation only — never part of the acceptance gate)
+    needs: trusted-source-acquisition
+    if: github.event_name == 'workflow_dispatch' && inputs.run_determinism_probe == true
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout 007 (tooling only — no third-party source here)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Download miner-canary-source
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: miner-canary-source
+          path: ${{ runner.temp }}/source-artifact
+
+      - name: Extract + verify the already-trusted source artifact (no re-fetch)
+        run: |
+          mkdir -p "$RUNNER_TEMP/probe-source"
+          python3 - <<'PYEOF'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "qodec/evals/interop/v2/n2/canary/tools")
+          import capture_build as cb
+
+          artifact_dir = Path("${{ runner.temp }}/source-artifact")
+          dest = Path("${{ runner.temp }}/probe-source")
+          manifest = json.loads((artifact_dir / "source-manifest.json").read_text())
+          file_manifest = json.loads((artifact_dir / "source-file-manifest.json").read_text())
+          cb.verify_and_extract_source(artifact_dir / "source.tar", manifest, dest)
+          cb.verify_extracted_tree(dest, file_manifest)
+          print("probe source verified and extracted")
+          PYEOF
+
+      - name: Run determinism probe across candidate build-argv variants
+        run: |
+          cat > "$RUNNER_TEMP/variants.json" <<'EOF'
+          [
+            {"name": "baseline", "argv": []},
+            {"name": "disable-build-servers", "argv": ["--disable-build-servers"]},
+            {"name": "no-shared-compilation", "argv": ["-p:UseSharedCompilation=false"]},
+            {"name": "single-node", "argv": ["-m:1"]},
+            {"name": "no-parallel-build", "argv": ["-p:BuildInParallel=false"]},
+            {"name": "no-parallel-analyzers", "argv": ["-p:RunAnalyzersInParallel=false"]},
+            {"name": "no-shared-compilation-plus-disable-build-servers", "argv": ["-p:UseSharedCompilation=false", "--disable-build-servers"]},
+            {"name": "full-combination", "argv": ["-p:UseSharedCompilation=false", "--disable-build-servers", "-m:1", "-p:BuildInParallel=false", "-p:RunAnalyzersInParallel=false"]}
+          ]
+          EOF
+          python3 qodec/evals/interop/v2/n2/canary/tools/determinism_probe.py \
+            --source-root "$RUNNER_TEMP/probe-source" \
+            --dotnet-root "$DOTNET_ROOT" \
+            --project-rel EncryptAesApp/EncryptAesApp.csproj \
+            --repeats 6 \
+            --variants-json "$RUNNER_TEMP/variants.json" \
+            --out "$RUNNER_TEMP/n2a-determinism-probe-report.json"
+          python3 -c "
+          import json
+          d = json.load(open('$RUNNER_TEMP/n2a-determinism-probe-report.json'))
+          for v in d['variants']:
+              print(f\"{v['variant_name']:45s} deterministic={v['deterministic']!s:5s} distinct_stdout_hashes={len(v['distinct_sanitized_stdout_hashes'])}\")
+          "
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: n2a-determinism-probe-report
+          path: ${{ runner.temp }}/n2a-determinism-probe-report.json
           if-no-files-found: error
           retention-days: 90
 
