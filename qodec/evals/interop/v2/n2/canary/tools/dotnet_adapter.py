@@ -46,20 +46,51 @@ def _sha256_file(path: Path) -> str | None:
     return h.hexdigest()
 
 
-def capture_toolchain_identity(dotnet_bin: str = "dotnet") -> dict:
+def resolve_dotnet_bin(dotnet_root: str | None, dotnet_bin_hint: str = "dotnet") -> str:
+    """Prefer the explicit, absolute `<DOTNET_ROOT>/dotnet` (the exact SDK
+    `actions/setup-dotnet` installed) over PATH lookup. This matters beyond
+    tidiness: the real build later runs through `sudo` (see
+    run_confined_build.sh), and sudo's `secure_path` policy can silently
+    replace PATH regardless of --preserve-env, which would make an
+    unqualified "dotnet" resolve to whatever system-wide SDK the runner image
+    ships (a real N2-A run showed this: the build actually executed under
+    `/usr/share/dotnet/sdk/10.0.301/...`, not the requested 8.0.x). Resolving
+    to an absolute path once, here, and using that SAME path for both the
+    identity probe and the actual build argv, guarantees the two can never
+    silently diverge."""
+    if dotnet_root:
+        candidate = Path(dotnet_root) / "dotnet"
+        if candidate.is_file():
+            return str(candidate)
+    which = shutil.which(dotnet_bin_hint)
+    if which:
+        return which
+    return dotnet_bin_hint
+
+
+def capture_toolchain_identity(dotnet_bin: str) -> dict:
     """Trusted-setup step: `dotnet --info` identifies the exact SDK/runtime the
     canonical build ran against. Never run inside the Sandboy/network-isolated
     boundary — this is infrastructure identity, not repository-controlled
-    output."""
-    resolved = shutil.which(dotnet_bin) or dotnet_bin
-    r = subprocess.run([resolved, "--info"], capture_output=True, text=True, check=False)
+    output. `dotnet_bin` must be the same absolute path used for the actual
+    build argv (see resolve_dotnet_bin) so the recorded identity can't drift
+    from what actually executed."""
+    r = subprocess.run([dotnet_bin, "--info"], capture_output=True, text=True, check=False)
     text = r.stdout
-    sdk_version = _first_match(r"^Version:\s*(\S+)", text, flags=re.MULTILINE)
-    rid = _first_match(r"^RID:\s*(\S+)", text, flags=re.MULTILINE)
-    base_path = _first_match(r"^Base Path:\s*(\S+)", text, flags=re.MULTILINE)
+    # Real `dotnet --info` output indents every field line (e.g.
+    # " Version:            8.0.404"), which a `^Version:` anchor (no
+    # leading-whitespace tolerance) never matches — an earlier N2-A run
+    # showed both sdk_version and runtime_identifier come back None for
+    # exactly this reason, despite `dotnet --info` succeeding and printing
+    # the real values. ".NET SDK:" is the first "Version:" field in the
+    # output, ahead of the "Host:" section's own "Version:", so first-match
+    # is the SDK version, not the shared host version.
+    sdk_version = _first_match(r"^\s*Version:\s*(\S+)\s*$", text, flags=re.MULTILINE)
+    rid = _first_match(r"^\s*RID:\s*(\S+)\s*$", text, flags=re.MULTILINE)
+    base_path = _first_match(r"^\s*Base Path:\s*(\S+)\s*$", text, flags=re.MULTILINE)
     return {
-        "dotnet_binary_path": resolved,
-        "dotnet_binary_sha256": _sha256_file(Path(resolved)),
+        "dotnet_binary_path": dotnet_bin,
+        "dotnet_binary_sha256": _sha256_file(Path(dotnet_bin)),
         "dotnet_info_exit_code": r.returncode,
         "dotnet_info_stdout_sha256": _sha256_bytes(r.stdout.encode()),
         "dotnet_info_raw": r.stdout,
@@ -89,9 +120,11 @@ def validate_project_before_execution(source_root: Path, manifest: dict) -> dict
     return {"path": proj_rel, "sha256": _sha256_bytes(text.encode())}
 
 
-def realize_dependencies_trusted(source_root: Path, manifest: dict, dotnet_bin: str = "dotnet") -> dict:
+def realize_dependencies_trusted(source_root: Path, manifest: dict, dotnet_bin: str) -> dict:
     """TRUSTED SETUP ONLY — run before the outer network namespace closes and
-    before Sandboy. Not part of the captured canonical evidence."""
+    before Sandboy. Not part of the captured canonical evidence. `dotnet_bin`
+    must be the same resolved absolute path used everywhere else (see
+    resolve_dotnet_bin)."""
     proj_rel = manifest["project"]["path"]
     argv = [dotnet_bin, "restore", proj_rel]
     r = subprocess.run(argv, cwd=str(source_root), capture_output=True, text=True, check=False)
@@ -104,8 +137,14 @@ def realize_dependencies_trusted(source_root: Path, manifest: dict, dotnet_bin: 
     }
 
 
-def build_argv(manifest: dict) -> list[str]:
-    return list(manifest["build"]["argv"])
+def build_argv(manifest: dict, dotnet_bin: str) -> list[str]:
+    """The manifest's argv with argv[0] ("dotnet") replaced by the resolved
+    absolute binary path, so the actual build can't silently run a different
+    SDK than the one identified in the receipt (see resolve_dotnet_bin)."""
+    argv = list(manifest["build"]["argv"])
+    if argv and argv[0] == "dotnet":
+        argv[0] = dotnet_bin
+    return argv
 
 
 def expected_writable_dirs(source_root: Path, manifest: dict) -> list[Path]:
@@ -122,5 +161,7 @@ if __name__ == "__main__":
     # Minimal manual smoke: print toolchain identity so a workflow log shows
     # what actually ran, even before any capture step.
     import json
+    import os
 
-    print(json.dumps(capture_toolchain_identity(), indent=2, default=str), file=sys.stderr)
+    resolved = resolve_dotnet_bin(os.environ.get("DOTNET_ROOT"))
+    print(json.dumps(capture_toolchain_identity(resolved), indent=2, default=str), file=sys.stderr)

@@ -153,14 +153,32 @@ def main() -> int:
     file_manifest = json.loads((src_artifact_dir / "source-file-manifest.json").read_text())
     license_record = json.loads((src_artifact_dir / "license-record.json").read_text())
 
+    # Resolved ONCE, to an absolute path, and reused everywhere (identity
+    # probe, trusted restore, and the actual build argv) — see
+    # resolve_dotnet_bin's docstring for why a bare "dotnet" name is unsafe
+    # here (sudo's secure_path can make the real build silently use a
+    # different installed SDK than whichever "dotnet" this process finds).
+    dotnet_bin = adapter.resolve_dotnet_bin(args.dotnet_root, args.dotnet_bin)
+
     source_root = work_dir / "source"
     try:
         verify_and_extract_source(src_artifact_dir / "source.tar", source_manifest, source_root)
         verify_extracted_tree(source_root, file_manifest)
 
         adapter.validate_project_before_execution(source_root, source_manifest)
-        toolchain_identity = adapter.capture_toolchain_identity(args.dotnet_bin)
-        restore_result = adapter.realize_dependencies_trusted(source_root, source_manifest, args.dotnet_bin)
+        toolchain_identity = adapter.capture_toolchain_identity(dotnet_bin)
+        for required_field in ("sdk_version", "runtime_identifier"):
+            value = toolchain_identity.get(required_field)
+            if not value:
+                raise CaptureFailure(
+                    f"dotnet toolchain identity field {required_field!r} came back empty/null "
+                    f"(dotnet_bin={dotnet_bin!r}, dotnet --info exit_code="
+                    f"{toolchain_identity.get('dotnet_info_exit_code')}) — refusing to produce "
+                    "an incomplete receipt"
+                )
+        if not toolchain_identity.get("dotnet_binary_sha256"):
+            raise CaptureFailure(f"could not hash dotnet binary at {dotnet_bin!r}")
+        restore_result = adapter.realize_dependencies_trusted(source_root, source_manifest, dotnet_bin)
     except CaptureFailure as e:
         (out_dir / "capture-failure.json").write_text(json.dumps({"error": str(e)}, indent=2))
         print(f"capture_build: FAILED (pre-execution): {e}", file=sys.stderr)
@@ -228,7 +246,7 @@ def main() -> int:
     if not network_report["all_targets_unreachable"]:
         print("capture_build: WARNING: network probe found a reachable target inside the isolated namespace", file=sys.stderr)
 
-    build_argv = adapter.build_argv(source_manifest)
+    build_argv = adapter.build_argv(source_manifest, dotnet_bin)
     result = run_real_build(sandboy_bin, policy_path, source_root, build_argv, launcher_env)
 
     (out_dir / "raw.stdout").write_bytes(result["raw_stdout"])

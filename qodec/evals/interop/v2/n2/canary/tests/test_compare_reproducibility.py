@@ -53,6 +53,71 @@ def make_snapshot(job: str, raw_stdout="raw1", raw_stderr="raw1err", **overrides
     }
 
 
+class TestToolchainIdentityGate(unittest.TestCase):
+    """Regression coverage for a real N2-A bug: dotnet_sdk_version and
+    dotnet_runtime_identifier came back null in BOTH captures (a parsing bug
+    in dotnet_adapter.py, fixed separately), and plain `va == vb` equality
+    let None == None silently count as "reproducible". These two fields must
+    require BOTH values non-empty AND equal — never let missing evidence
+    read as agreement."""
+
+    def _field_row(self, field, value_a, value_b):
+        snap_a = make_snapshot("capture-a", **{field: value_a})
+        snap_b = make_snapshot("capture-b", **{field: value_b})
+        rows = cr.compare(snap_a, snap_b)
+        return next(r for r in rows if r["field"] == field)
+
+    def test_sdk_version_null_equals_null_must_fail(self):
+        row = self._field_row("dotnet_sdk_version", None, None)
+        self.assertFalse(row["equal"])
+
+    def test_sdk_version_empty_equals_empty_must_fail(self):
+        row = self._field_row("dotnet_sdk_version", "", "")
+        self.assertFalse(row["equal"])
+
+    def test_sdk_version_same_real_value_must_pass(self):
+        row = self._field_row("dotnet_sdk_version", "8.0.404", "8.0.404")
+        self.assertTrue(row["equal"])
+
+    def test_sdk_version_different_value_must_fail(self):
+        row = self._field_row("dotnet_sdk_version", "8.0.404", "8.0.405")
+        self.assertFalse(row["equal"])
+
+    def test_sdk_version_one_missing_must_fail(self):
+        row = self._field_row("dotnet_sdk_version", "8.0.404", None)
+        self.assertFalse(row["equal"])
+
+    def test_rid_null_equals_null_must_fail(self):
+        row = self._field_row("dotnet_runtime_identifier", None, None)
+        self.assertFalse(row["equal"])
+
+    def test_rid_empty_equals_empty_must_fail(self):
+        row = self._field_row("dotnet_runtime_identifier", "", "")
+        self.assertFalse(row["equal"])
+
+    def test_rid_same_real_value_must_pass(self):
+        row = self._field_row("dotnet_runtime_identifier", "linux-x64", "linux-x64")
+        self.assertTrue(row["equal"])
+
+    def test_rid_different_value_must_fail(self):
+        row = self._field_row("dotnet_runtime_identifier", "linux-x64", "linux-arm64")
+        self.assertFalse(row["equal"])
+
+    def test_rid_one_missing_must_fail(self):
+        row = self._field_row("dotnet_runtime_identifier", None, "linux-x64")
+        self.assertFalse(row["equal"])
+
+    def test_binary_hash_comparison_not_loosened(self):
+        # Not a REQUIRE_NON_EMPTY field — but plain equality must still catch
+        # a difference (this is the pre-existing, still-authoritative check).
+        row = self._field_row("dotnet_binary_sha256", "a" * 64, "b" * 64)
+        self.assertFalse(row["equal"])
+
+    def test_binary_hash_same_value_passes(self):
+        row = self._field_row("dotnet_binary_sha256", "a" * 64, "a" * 64)
+        self.assertTrue(row["equal"])
+
+
 class TestCompareReproducibility(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="n2a-repro-test-"))

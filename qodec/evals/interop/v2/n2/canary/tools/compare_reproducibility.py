@@ -19,6 +19,15 @@ import json
 from pathlib import Path
 
 
+# Fields where None/"" must never count as agreement — a receipt with a
+# missing toolchain identity is incomplete evidence, not evidence the two
+# jobs "agree" on nothing. An earlier N2-A run had both dotnet_sdk_version and
+# dotnet_runtime_identifier come back null in BOTH captures (a parsing bug,
+# fixed separately in dotnet_adapter.py) and the plain `va == vb` check let
+# None == None silently count as reproducible.
+REQUIRE_NON_EMPTY_FIELDS = {"dotnet_sdk_version", "dotnet_runtime_identifier"}
+
+
 def load_snapshot(capture_dir: Path) -> dict:
     return json.loads((capture_dir / "snapshot-manifest.json").read_text())
 
@@ -32,7 +41,11 @@ def compare(snapshot_a: dict, snapshot_b: dict) -> list[dict]:
     rows = []
     for field in fields_a:
         va, vb = view_a.get(field), view_b.get(field)
-        rows.append({"field": field, "value_a": va, "value_b": vb, "equal": va == vb})
+        if field in REQUIRE_NON_EMPTY_FIELDS:
+            equal = bool(va) and bool(vb) and va == vb
+        else:
+            equal = va == vb
+        rows.append({"field": field, "value_a": va, "value_b": vb, "equal": equal})
     return rows
 
 
