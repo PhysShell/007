@@ -149,12 +149,18 @@ jobs:
           PYEOF
           python3 qodec/evals/interop/v2/n2/miner/tools/generate_ci_artifacts.py selection-report \
             --out "$RUNNER_TEMP/reports/candidate-selection-report.json"
+          # Copy into the same directory as the report before upload: mixing a
+          # repo-relative path with a runner.temp-absolute path in one
+          # upload-artifact call makes actions/upload-artifact preserve the
+          # full path from their common ancestor instead of flattening both
+          # into "reports/", which broke the download in artifact-contract.
+          cp qodec/evals/interop/v2/n2/miner/candidate-selection-policy.json "$RUNNER_TEMP/reports/"
 
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: selection-artifacts
           path: |
-            qodec/evals/interop/v2/n2/miner/candidate-selection-policy.json
+            ${{ runner.temp }}/reports/candidate-selection-policy.json
             ${{ runner.temp }}/reports/candidate-selection-report.json
           if-no-files-found: error
           retention-days: 90
