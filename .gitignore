@@ -13,3 +13,6 @@
 /.commit-msg
 /.pr-body.md
 /ship.ps1
+
+# interop benchmark v2 sealed held-out material — never commit
+qodec/evals/interop/v2/private/
