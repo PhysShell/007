@@ -175,3 +175,14 @@ changing any frozen numeric gate** in `coverage-matrix.json` (its
 - **Non-scoring smoke suite:** [`smoke/`](smoke/) — NON-BENCHMARK, NON-GATING,
   not part of the 48 base cases or held-out; proves qodec losslessness and
   token accounting over arbitrary and RTK-shaped input.
+
+## Scope N0 — reproducible corpus compiler (compiler-only, zero benchmark cases)
+
+Scope N0 adds a reproducible corpus compiler under [`corpus/`](corpus/) that
+defines, captures, verifies and regenerates benchmark case bundles. It builds
+**only the compiler** — it contains **zero** real Benchmark v2 cases and ships
+one NON-BENCHMARK demonstration bundle. Contract:
+`interop-corpus-compiler-v1` (see [`corpus/corpus-contract.json`](corpus/corpus-contract.json),
+[`corpus/README.md`](corpus/README.md), [`corpus/decisions.md`](corpus/decisions.md)).
+Raw and RTK snapshots are canonical corpus evidence; qodec/VG/hybrid outputs are
+derived and rejected inside a bundle.

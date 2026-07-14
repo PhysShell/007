@@ -1,0 +1,49 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "corpus/schemas/provenance.schema.json",
+  "title": "Case provenance",
+  "description": "Where a case's raw material comes from and how it was sanitized. External sources MUST pin an immutable revision and record a license; N0 ships only a first-party generated demonstration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "origin_kind",
+    "source_description",
+    "source_revision",
+    "source_sha256",
+    "license",
+    "sanitization",
+    "generator_identity",
+    "created_by_scope"
+  ],
+  "properties": {
+    "origin_kind": {
+      "type": "string",
+      "enum": [
+        "generated-first-party",
+        "captured-first-party",
+        "external-sanitized",
+        "synthetic-adversarial",
+        "metamorphic"
+      ]
+    },
+    "source_description": { "type": "string", "minLength": 1 },
+    "source_revision": { "type": "string", "minLength": 1 },
+    "source_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "license": { "type": "string", "minLength": 1 },
+    "sanitization": { "type": "string", "minLength": 1 },
+    "generator_identity": { "type": "string", "minLength": 1 },
+    "created_by_scope": { "type": "string", "minLength": 1 },
+    "upstream_url": { "type": "string" },
+    "upstream_revision": { "type": "string" },
+    "upstream_license": { "type": "string" },
+    "local_extraction_recipe": { "type": "string" },
+    "pii_review": { "type": "string" },
+    "secret_review": { "type": "string" },
+    "sanitization_transformations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "original_payload_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "sanitized_payload_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

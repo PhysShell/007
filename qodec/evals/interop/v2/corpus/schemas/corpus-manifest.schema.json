@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "corpus/schemas/corpus-manifest.schema.json",
+  "title": "Corpus manifest",
+  "description": "Membership index for the corpus. In Scope N0 benchmark_cases MUST be empty and demonstration cases are listed separately. A demonstration case may never appear in benchmark_cases.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "benchmark_cases", "demonstration_cases"],
+  "properties": {
+    "contract_version": { "type": "string", "minLength": 1 },
+    "benchmark_cases": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+      "uniqueItems": true
+    },
+    "demonstration_cases": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+      "uniqueItems": true
+    }
+  }
+}

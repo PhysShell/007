@@ -139,6 +139,17 @@ marking for JSON). RTK output is **not** required to be smaller than raw, becaus
 `rust-version = "1.91"`), using RTK's own complete vendored `Cargo.lock` and
 unfiltered source. `packages.qodec` uses crane.
 
+## Corpus compiler (Scope N0)
+
+The reproducible corpus compiler under [`corpus/`](corpus/) reuses this
+substrate: capture runs argv arrays only (no shell), builds child environments
+from an explicit allowlist (never the inherited runner environment, credentials
+stripped), fixes `LC_ALL`/`LANG`/`TZ`/`SOURCE_DATE_EPOCH`, disables network
+during capture, and records an execution receipt per phase (setup/native/rtk)
+with the same identity fields used here. Raw and RTK snapshots are canonical;
+qodec/VG/hybrid outputs are derived and never stored in a bundle. See
+[`corpus/decisions.md`](corpus/decisions.md).
+
 ## Orchestration tests vs real RTK integration
 
 Two distinct test surfaces, never conflated:

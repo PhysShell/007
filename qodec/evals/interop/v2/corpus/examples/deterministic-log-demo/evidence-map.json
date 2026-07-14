@@ -1,0 +1,45 @@
+{
+  "case_id": "deterministic-log-demo",
+  "facts": [
+    {
+      "fact_id": "primary-error-code",
+      "kind": "exact",
+      "value": "E0308",
+      "stream": "raw.stdout",
+      "description": "The single compiler error code emitted.",
+      "evidence": [{ "start_line": 6, "end_line": 6 }]
+    },
+    {
+      "fact_id": "compile-line-repeat-count",
+      "kind": "count",
+      "value": 3,
+      "stream": "raw.stdout",
+      "description": "The 'compiling module core' line is emitted exactly three times.",
+      "evidence": [{ "start_line": 1, "end_line": 3 }]
+    },
+    {
+      "fact_id": "error-file-relation",
+      "kind": "relation",
+      "value": { "code": "E0308", "path": "src/core/parse.rs", "line": 120 },
+      "stream": "raw.stdout",
+      "description": "Error E0308 is attributed to src/core/parse.rs at line 120.",
+      "evidence": [{ "start_line": 6, "end_line": 6 }]
+    },
+    {
+      "fact_id": "warning-before-error-ordering",
+      "kind": "ordering",
+      "value": ["warning", "error[E0308]"],
+      "stream": "raw.stdout",
+      "description": "The warning line precedes the error line.",
+      "evidence": [{ "start_line": 5, "end_line": 6 }]
+    },
+    {
+      "fact_id": "no-panic-absence",
+      "kind": "absence",
+      "value": "panic",
+      "stream": "raw.stdout",
+      "description": "The build log contains no panic.",
+      "evidence": [{ "start_line": 1, "end_line": 7 }]
+    }
+  ]
+}

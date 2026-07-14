@@ -159,6 +159,35 @@
             --rtk-source-sha 5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2 \
             --out "$out"
         '';
+
+        # ---- Scope N0 corpus compiler (compiler-only; zero benchmark cases) --- #
+        corpusRoot = pkgs.runCommand "qodec-v2-corpus-root" { } ''
+          mkdir -p $out/qodec/evals/interop/v2
+          cp -r ${./qodec/evals/interop/v2/corpus} $out/qodec/evals/interop/v2/corpus
+          cp ${./flake.lock} $out/flake.lock
+        '';
+
+        # Prelude that stages a writable corpus copy and exports capture identity
+        # + the pinned RTK binary. Reproducibility identity is derived purely.
+        corpusPrelude = ''
+          set -euo pipefail
+          ${identityExports}
+          export RTK_BIN=${rtk-pinned}/bin/rtk
+          export PYTHONDONTWRITEBYTECODE=1
+          root=$(mktemp -d); cp -r ${corpusRoot}/. "$root"; chmod -R u+w "$root"
+          cd "$root/qodec/evals/interop/v2/corpus"
+          export PYTHONPATH="$PWD/tools:$PWD/tests"
+        '';
+
+        runCorpusCmd = name: sub: pkgs.writeShellScript name ''
+          ${corpusPrelude}
+          exec ${pyEnv}/bin/python tools/corpus_tool.py ${sub}
+        '';
+
+        corpusValidateApp = runCorpusCmd "qodec-v2-corpus-validate" "validate";
+        corpusRegenApp = runCorpusCmd "qodec-v2-demo-regenerate" "regenerate --case deterministic-log-demo";
+        corpusVerifyApp = runCorpusCmd "qodec-v2-demo-verify" "verify";
+        corpusListApp = runCorpusCmd "qodec-v2-corpus-list" "list";
       in
       {
         packages = {
@@ -178,6 +207,10 @@
             type = "app";
             program = "${runSmoke}";
           };
+          qodec-v2-corpus-validate = { type = "app"; program = "${corpusValidateApp}"; };
+          qodec-v2-demo-regenerate = { type = "app"; program = "${corpusRegenApp}"; };
+          qodec-v2-demo-verify = { type = "app"; program = "${corpusVerifyApp}"; };
+          qodec-v2-corpus-list = { type = "app"; program = "${corpusListApp}"; };
         };
 
         devShells = {
@@ -256,7 +289,47 @@
 
           github-actions-lint = pkgs.runCommand "check-github-actions-lint"
             { nativeBuildInputs = [ pkgs.actionlint ]; } ''
-            actionlint -color ${./.github/workflows}/qodec-v2.yml
+            actionlint -color ${./.github/workflows}/qodec-v2.yml ${./.github/workflows}/qodec-v2-corpus.yml
+            touch $out
+          '';
+
+          # ---- Scope N0 corpus compiler checks (model-free) ------------------ #
+          qodec-v2-corpus-schemas = pkgs.runCommand "check-qodec-v2-corpus-schemas"
+            { nativeBuildInputs = [ pyEnv rtk-pinned ]; } ''
+            ${corpusPrelude}
+            ${pyEnv}/bin/python -m unittest test_schemas -v
+            touch $out
+          '';
+
+          qodec-v2-corpus-unit = pkgs.runCommand "check-qodec-v2-corpus-unit"
+            { nativeBuildInputs = [ pyEnv rtk-pinned ]; } ''
+            ${corpusPrelude}
+            # unit surfaces that need no tool execution (RTK present but unused here)
+            ${pyEnv}/bin/python -m unittest test_manifest test_snapshots test_receipts test_security -v
+            touch $out
+          '';
+
+          # capture twice in independent temp dirs; compare raw + rtk snapshots and
+          # semantic receipt fields (capture_timestamp/wall_time_s ignored).
+          qodec-v2-demo-reproducible = pkgs.runCommand "check-qodec-v2-demo-reproducible"
+            { nativeBuildInputs = [ pyEnv rtk-pinned ]; } ''
+            ${corpusPrelude}
+            ${pyEnv}/bin/python tools/check_reproducible.py deterministic-log-demo
+            touch $out
+          '';
+
+          qodec-v2-demo-snapshots = pkgs.runCommand "check-qodec-v2-demo-snapshots"
+            { nativeBuildInputs = [ pyEnv rtk-pinned ]; } ''
+            ${corpusPrelude}
+            # committed-bundle integrity + schemas, no tool execution
+            ${pyEnv}/bin/python tools/corpus_tool.py verify
+            touch $out
+          '';
+
+          qodec-v2-no-benchmark-data = pkgs.runCommand "check-qodec-v2-no-benchmark-data"
+            { nativeBuildInputs = [ pyEnv ]; } ''
+            ${corpusPrelude}
+            ${pyEnv}/bin/python tools/check_no_benchmark_data.py
             touch $out
           '';
         };

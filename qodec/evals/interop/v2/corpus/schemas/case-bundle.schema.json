@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "corpus/schemas/case-bundle.schema.json",
+  "title": "Corpus case bundle — case.json",
+  "description": "The top-level descriptor of a corpus case bundle. In Scope N0 only status 'demonstration' is permitted. A demonstration case can NEVER become a benchmark case by renaming or retagging — that needs a separate scope, provenance review and manifest entry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_id",
+    "status",
+    "family",
+    "ecosystem",
+    "tool",
+    "origin_kind",
+    "capture_mode",
+    "rtk_mode",
+    "snapshot_policy",
+    "provenance_path",
+    "capture_recipe_path",
+    "evidence_map_path",
+    "snapshot_manifest_path"
+  ],
+  "properties": {
+    "case_id": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "status": {
+      "type": "string",
+      "enum": [
+        "demonstration",
+        "draft-public-development",
+        "frozen-public-development",
+        "draft-public-validation",
+        "frozen-public-validation",
+        "sealed-heldout",
+        "retired"
+      ]
+    },
+    "family": { "type": "string", "minLength": 1 },
+    "ecosystem": { "type": "string", "minLength": 1 },
+    "tool": { "type": "string", "minLength": 1 },
+    "origin_kind": {
+      "type": "string",
+      "enum": [
+        "generated-first-party",
+        "captured-first-party",
+        "external-sanitized",
+        "synthetic-adversarial",
+        "metamorphic"
+      ]
+    },
+    "capture_mode": {
+      "type": "string",
+      "enum": ["reproducible-command", "static-sanitized-capture", "generated-output"]
+    },
+    "rtk_mode": {
+      "type": "string",
+      "enum": ["pipe-filter", "pipe-auto", "explicit-passthrough", "unsupported"]
+    },
+    "snapshot_policy": {
+      "type": "string",
+      "enum": ["raw-and-rtk", "raw-only"]
+    },
+    "provenance_path": { "type": "string", "minLength": 1 },
+    "capture_recipe_path": { "type": "string", "minLength": 1 },
+    "evidence_map_path": { "type": "string", "minLength": 1 },
+    "snapshot_manifest_path": { "type": "string", "minLength": 1 },
+    "markers": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Human-facing markers. Demonstration cases MUST carry the NON-BENCHMARK marker set."
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "notes": { "type": "string" }
+  }
+}
