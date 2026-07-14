@@ -17,6 +17,9 @@ name: qodec-v2-public-log-pilot
 on:
   pull_request:
   workflow_dispatch:
+  push:
+    branches:
+      - claude/qodec-benchmark-v2-public-log-pilot-n1
 
 permissions:
   contents: read
@@ -134,9 +137,10 @@ jobs:
           nix flake check --no-update-lock-file --print-build-logs
 
   capture-bootstrap:
-    # Manual only: produce the canonical snapshots with the pinned toolchain and
-    # publish them for review + commit. Never runs on pull_request.
-    if: github.event_name == 'workflow_dispatch'
+    # Produce the canonical snapshots with the pinned toolchain and publish them
+    # for review + commit. Runs on push/workflow_dispatch, never on pull_request
+    # (the PR jobs verify against the committed snapshots instead).
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
