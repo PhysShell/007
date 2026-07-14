@@ -15,7 +15,7 @@ spans, and does **not** change the frozen VG policy or the frozen numeric gates.
 
 Frozen VG's verdicts stay exactly as accepted in Scope M:
 
-```
+```text
 VG FULL L2 CANDIDATE:      ACCEPTED
 PRODUCTION SQUEEZE:        REJECTED
 VG PRODUCTION PROMOTION:   NOT DECIDED

@@ -356,6 +356,14 @@ class TestFailures(ContractTestBase):
                 break
         self._assert_code(self.run_validate(m), "missing-path")
 
+    def test_public_case_omitting_payload_path_fails(self):
+        m = copy.deepcopy(self.manifest)
+        for c in m["cases"]:
+            if c["split"] != "sealed-heldout":
+                c.pop("payload_path", None)
+                break
+        self._assert_code(self.run_validate(m), "missing-path")
+
 
 class TestGitignore(unittest.TestCase):
     def test_private_path_is_gitignored(self):

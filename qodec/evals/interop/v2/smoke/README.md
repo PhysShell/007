@@ -35,7 +35,7 @@ to be smaller than raw.
 
 ## Invariants (enforced; nonzero exit on any failure)
 
-```
+```text
 all mandatory identity fields populated
 decode(qodec(raw))        == raw
 qodec_tokens  <= raw_tokens                       # target tokenizer, no chars/4

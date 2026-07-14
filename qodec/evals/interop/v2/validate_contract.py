@@ -438,6 +438,7 @@ class Validator:
                 continue
             p = c.get("payload_path")
             if p is None:
+                self.fail("missing-path", f"public case {c.get('case_id')} is missing payload_path (gold must be grounded in a raw payload)")
                 continue
             target = (self.base_dir / p).resolve()
             if not target.exists():

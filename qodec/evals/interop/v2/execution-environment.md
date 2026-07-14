@@ -25,20 +25,23 @@ Every future capture / run MUST record all of the following:
 | `qodec_binary_sha256` | SHA256 of the built `qodec` binary |
 | `rtk_source_sha` | pinned commit of `rtk-src` |
 | `rtk_binary_sha256` | SHA256 of the built `rtk-pinned` binary |
-| `tool_versions` | resolved from Nix, never from the runner `PATH` |
+| `tool_versions` | resolved from Nix, never from the runner `PATH` (future-capture field) |
 | `tokenizer_identity` + `tokenizer_sha256` | the real target tokenizer |
 | `locale` | fixed |
 | `timezone` | fixed |
-| `env_var_allowlist` | explicit allowlist actually exported |
-| `command` | argv actually executed |
-| `cwd` | working directory |
-| `stdin_sha256` / `stdout_sha256` / `stderr_sha256` | stream digests |
-| `exit_code` | process exit code |
-| `wall_time` | wall-clock duration |
+| `environment_variable_allowlist` | explicit allowlist actually exported |
+| `command` | argv actually executed (per-execution receipt) |
+| `cwd` | working directory (per-execution receipt) |
+| `stdin_sha256` / `stdout_sha256` / `stderr_sha256` | stream digests (per-execution receipt) |
+| `exit_code` | process exit code (per-execution receipt) |
+| `wall_time_s` | wall-clock duration, in seconds (per-execution receipt) |
 
-The smoke runner in `smoke/` already emits the execution-identity subset
-(command, cwd, stream SHAs, exit code, qodec/rtk source+binary identity) so the
-schema is exercised before any real corpus exists.
+Field names match `smoke/run_smoke.py` exactly (the top-level `identity`
+block plus the per-execution `run()` receipt). The non-scoring smoke runner
+emits and **requires** (via `MANDATORY_IDENTITY`) the full identity block above
+*except* `tool_versions`, which is a future-capture requirement not yet produced
+by the plumbing-only smoke — everything else in the table is populated, and the
+runner fails if any mandatory field is absent.
 
 ## Environment policy
 
