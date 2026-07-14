@@ -1,0 +1,59 @@
+{
+  "manifest_version": "n2a-source-manifest-v1",
+  "case_id": "miner-canary-dotnet-001",
+  "origin_kind": "generated-first-party-from-public-source",
+  "repository": {
+    "url": "https://github.com/danhpaiva/EncryptAesNet-console-app-csharp",
+    "owner": "danhpaiva",
+    "name": "EncryptAesNet-console-app-csharp",
+    "approved_commit_sha": "ee3f780da6f9f749242c7d7625fbbd02326055bb"
+  },
+  "license": {
+    "spdx": "MIT",
+    "file": "LICENSE"
+  },
+  "project": {
+    "path": "EncryptAesApp/EncryptAesApp.csproj",
+    "ecosystem": "dotnet",
+    "expected_target_framework": "net8.0",
+    "expected_output_type": "Exe",
+    "expected_package_reference_count": 0,
+    "expected_project_reference_count": 0
+  },
+  "build": {
+    "argv": [
+      "dotnet",
+      "build",
+      "EncryptAesApp/EncryptAesApp.csproj",
+      "--configuration",
+      "Release",
+      "--no-restore",
+      "--nologo",
+      "--verbosity",
+      "normal"
+    ],
+    "network_during_execution": "denied",
+    "restore": "not-performed"
+  },
+  "selection_rationale": [
+    "small public repository",
+    "explicit MIT license",
+    "immutable approved commit",
+    "SDK-style .NET project",
+    "TargetFramework = net8.0",
+    "zero PackageReference entries",
+    "no submodules expected",
+    "no Git LFS expected",
+    "no database",
+    "no containers",
+    "no external service",
+    "no private package feed",
+    "no package-install script required"
+  ],
+  "approved_csproj_expectation": "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net8.0</TargetFramework>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <Nullable>enable</Nullable>\n  </PropertyGroup>\n</Project>\n",
+  "rejected_candidates": [],
+  "notes": [
+    "Selected manually by explicit user approval outside this session's automated discovery (N2-A has no RepoSelector/CandidateScorer).",
+    "Do not substitute another revision or repository if this exact commit becomes unreachable — stop and report instead (see qodec-n2-miner-canary.yml fallback job)."
+  ]
+}

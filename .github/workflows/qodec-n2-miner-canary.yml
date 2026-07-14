@@ -1,0 +1,255 @@
+# Scope N2-A — thin miner-canary vertical slice (QODEC Scope N2 sourcing
+# addendum, Sandboy-dogfooding addendum). NOT the full N2 corpus: this proves
+# exactly one repository-miner acquisition + Sandboy-confined capture path,
+# using the accepted Sandboy S0 commit. See qodec/evals/interop/v2/n2/canary/.
+#
+# Trust boundary (the reason for the 4-job split):
+#   trusted-source-acquisition — the ONLY job that ever contacts the approved
+#     third-party repository. It checks out, inspects, hashes, and packages;
+#     it NEVER restores, builds, tests, or runs any repository-controlled
+#     script/hook/target. Read-only GITHUB_TOKEN via actions/checkout,
+#     persist-credentials: false, no token retained in the uploaded artifact.
+#   capture-a / capture-b — never clone or fetch the third-party repository
+#     again. They download the already-verified, already-packaged source
+#     artifact, extract it into a fresh isolated workspace, verify it against
+#     its own file manifest, then run the untrusted `dotnet build` inside:
+#     outer network-namespace isolation -> outer resource limits -> the
+#     accepted Sandboy commit (e925058ddea405b5821fc0aed4882c76650dcbe9).
+#   reproducibility-compare — downloads both capture outputs and verifies
+#     they agree on every semantic field.
+#
+# Fake credential canaries (GITHUB_TOKEN/AZURE_DEVOPS_PAT/NUGET_AUTH_TOKEN/
+# AWS_SECRET_ACCESS_KEY/SSH_AUTH_SOCK — unmistakably fake values, matching the
+# Sandboy S0 gate) are injected into the capture jobs and proven absent from
+# the captured build output; this reuses the accepted S0 evidence rather than
+# re-running the full S0 feasibility suite here.
+name: qodec-n2-miner-canary
+
+on:
+  pull_request:
+    paths:
+      - "qodec/evals/interop/v2/n2/**"
+      - ".github/workflows/qodec-n2-miner-canary.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  LC_ALL: C.UTF-8
+  LANG: C.UTF-8
+  TZ: UTC
+  SANDBOY_COMMIT_SHA: e925058ddea405b5821fc0aed4882c76650dcbe9
+
+jobs:
+  trusted-source-acquisition:
+    name: trusted-source-acquisition (read-only; never executes repository code)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout 007
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout approved third-party source at pinned commit
+        id: checkout_external
+        continue-on-error: true
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: danhpaiva/EncryptAesNet-console-app-csharp
+          ref: ee3f780da6f9f749242c7d7625fbbd02326055bb
+          path: external-source
+          persist-credentials: false
+          fetch-depth: 1
+
+      # Fallback per N2-A addendum §9: if the CI-only public checkout is
+      # refused, stop here — do not switch repositories or commits, do not
+      # execute anything, and say so plainly. (Using a same-owner mirror,
+      # e.g. PhysShell/EncryptAesNet-console-app-csharp preserving the
+      # upstream commit, is a follow-up requiring a human to create that
+      # mirror — not something this job does automatically.)
+      - name: Record acquisition failure and stop (fallback path)
+        if: steps.checkout_external.outcome == 'failure'
+        run: |
+          mkdir -p "$RUNNER_TEMP/source-artifact"
+          cat > "$RUNNER_TEMP/source-artifact/acquisition-failure.json" <<EOF
+          {
+            "error": "actions/checkout of danhpaiva/EncryptAesNet-console-app-csharp @ ee3f780da6f9f749242c7d7625fbbd02326055bb failed",
+            "workflow_run_id": "${{ github.run_id }}",
+            "required_action": "a same-owner mirror (PhysShell/EncryptAesNet-console-app-csharp) preserving the upstream commit is required; do not substitute another repository or revision"
+          }
+          EOF
+          echo "::error::Public-repository checkout failed — see acquisition-failure.json. Not executing any third-party source."
+          exit 1
+
+      - name: Validate acquired source and package normalized archive
+        run: |
+          mkdir -p "$RUNNER_TEMP/source-artifact"
+          python3 qodec/evals/interop/v2/n2/canary/tools/verify_source.py \
+            --source-dir external-source \
+            --manifest qodec/evals/interop/v2/n2/canary/source-manifest.json \
+            --out-dir "$RUNNER_TEMP/source-artifact" \
+            --workflow-run-id "${{ github.run_id }}" \
+            --runner-identity "${{ runner.name }}"
+
+      - name: Upload miner-canary-source
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: miner-canary-source
+          path: |
+            ${{ runner.temp }}/source-artifact/source.tar
+            ${{ runner.temp }}/source-artifact/source-manifest.json
+            ${{ runner.temp }}/source-artifact/license-record.json
+            ${{ runner.temp }}/source-artifact/source-file-manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
+  capture:
+    name: capture-${{ matrix.job }}
+    needs: trusted-source-acquisition
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [a, b]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout 007 (tooling only — no third-party source here)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout Own.NET/sandboy at the accepted S0 commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: PhysShell/Own.NET
+          ref: e925058ddea405b5821fc0aed4882c76650dcbe9
+          path: own-net
+          persist-credentials: false
+          fetch-depth: 1
+          sparse-checkout: |
+            sandboy
+          sparse-checkout-cone-mode: true
+
+      - name: Build the accepted Sandboy commit (release, locked)
+        working-directory: own-net/sandboy
+        run: cargo build --release --locked
+
+      - name: Verify Sandboy commit identity
+        working-directory: own-net
+        run: |
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$SANDBOY_COMMIT_SHA" ]; then
+            echo "::error::checked-out Sandboy HEAD $actual != accepted $SANDBOY_COMMIT_SHA"
+            exit 1
+          fi
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Download miner-canary-source
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: miner-canary-source
+          path: ${{ runner.temp }}/source-artifact
+
+      - name: Run capture (network-isolated, Sandboy-confined dotnet build)
+        env:
+          GITHUB_TOKEN: fake-canary-github-token
+          AZURE_DEVOPS_PAT: fake-canary-azure-token
+          NUGET_AUTH_TOKEN: fake-canary-nuget-token
+          AWS_SECRET_ACCESS_KEY: fake-canary-aws-key
+          SSH_AUTH_SOCK: /tmp/fake-ssh-agent
+        run: |
+          mkdir -p "$RUNNER_TEMP/work-${{ matrix.job }}" "$RUNNER_TEMP/capture-out-${{ matrix.job }}"
+          export SOURCE_DATE_EPOCH_ISO="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python3 qodec/evals/interop/v2/n2/canary/tools/capture_build.py \
+            --source-artifact-dir "$RUNNER_TEMP/source-artifact" \
+            --sandboy-bin "$GITHUB_WORKSPACE/own-net/sandboy/target/release/sandboy" \
+            --sandboy-commit-sha "$SANDBOY_COMMIT_SHA" \
+            --work-dir "$RUNNER_TEMP/work-${{ matrix.job }}" \
+            --out-dir "$RUNNER_TEMP/capture-out-${{ matrix.job }}" \
+            --job-name "capture-${{ matrix.job }}" \
+            --dotnet-root "$DOTNET_ROOT"
+
+      - name: Verify no credential canary reached the captured output
+        run: |
+          python3 - <<'PYEOF'
+          import pathlib, sys
+          out_dir = pathlib.Path("${{ runner.temp }}/capture-out-${{ matrix.job }}")
+          canaries = [
+              "fake-canary-github-token", "fake-canary-azure-token",
+              "fake-canary-nuget-token", "fake-canary-aws-key", "/tmp/fake-ssh-agent",
+          ]
+          leaked = []
+          for name in ("raw.stdout", "raw.stderr"):
+              data = (out_dir / name).read_bytes()
+              for c in canaries:
+                  if c.encode() in data:
+                      leaked.append((name, c))
+          if leaked:
+              print(f"::error::credential canary leaked into captured output: {leaked}")
+              sys.exit(1)
+          print("no credential canary present in captured output")
+          PYEOF
+
+      - name: Upload miner-canary-capture-${{ matrix.job }}
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: miner-canary-capture-${{ matrix.job }}
+          path: ${{ runner.temp }}/capture-out-${{ matrix.job }}
+          if-no-files-found: error
+          retention-days: 90
+
+  reproducibility-compare:
+    name: reproducibility-compare
+    needs: capture
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout 007 (tooling only)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Download miner-canary-source
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: miner-canary-source
+          path: ${{ runner.temp }}/source-artifact
+
+      - name: Download miner-canary-capture-a
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: miner-canary-capture-a
+          path: ${{ runner.temp }}/capture-a
+
+      - name: Download miner-canary-capture-b
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: miner-canary-capture-b
+          path: ${{ runner.temp }}/capture-b
+
+      - name: Compare reproducibility
+        id: compare
+        continue-on-error: true
+        run: |
+          python3 qodec/evals/interop/v2/n2/canary/tools/compare_reproducibility.py \
+            --capture-a-dir "$RUNNER_TEMP/capture-a" \
+            --capture-b-dir "$RUNNER_TEMP/capture-b" \
+            --source-artifact-dir "$RUNNER_TEMP/source-artifact" \
+            --out-dir "$RUNNER_TEMP/final-reports"
+
+      - name: Upload miner-canary-reports
+        if: always()
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: miner-canary-reports
+          path: ${{ runner.temp }}/final-reports
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Enforce reproducibility gate
+        if: steps.compare.outcome == 'failure'
+        run: |
+          echo "::error::N2-A reproducibility comparison failed — see miner-canary-reports artifact"
+          exit 1
