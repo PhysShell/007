@@ -52,6 +52,15 @@ def build_policy(
         # memory shortage (peak RSS was ~10MB).
         Path("/proc"),
         Path("/sys"),
+        # MSBuild's telemetry init calls Guid.NewGuid(), which on Linux reads
+        # from the kernel CSPRNG device nodes. Neither was reachable under
+        # the previous fs_ro list (nothing under /dev was): "Error occurred
+        # during a cryptographic operation" / CryptographicException wrapped
+        # around System.Guid.NewGuid() in an earlier N2-A run, after the
+        # /proc,/sys and /tmp fixes got CoreCLR and the NuGet-migrations
+        # mutex working.
+        Path("/dev/urandom"),
+        Path("/dev/random"),
     ]
     if repo_tools_dir is not None:
         # Only the network_probe.py helper (invoked through the same wrapper
