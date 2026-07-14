@@ -66,8 +66,10 @@ outputs:
 - `packages.qodec` — the `qodec/` crate, built with its own Cargo
   manifest/lock identity.
 - `packages.rtk-pinned` — RTK built from the pinned `rtk-src` commit via
-  `rustPlatform.buildRustPackage` with RTK's own vendored `Cargo.lock` (no
-  mutable prebuilt release binary is ever downloaded).
+  `buildRustPackage` from a `makeRustPlatform` built on the rust-overlay stable
+  toolchain (RTK needs Rust 1.91; nixpkgs-25.05's default rustPlatform is 1.86),
+  with RTK's own complete vendored `Cargo.lock` and unfiltered source (build.rs
+  reads `src/filters/`). No mutable prebuilt release binary is ever downloaded.
 - `devShells.qodec-bench` — qodec, rtk-pinned, python3 (Nix-pinned deps), git,
   ripgrep, gnugrep, jq, hyperfine, actionlint.
 - `apps.qodec-v2-contract-test`, `apps.qodec-rtk-smoke`.
@@ -116,8 +118,10 @@ must be non-empty; the exact argv, whether RTK changed the payload, and whether
 marking for JSON). RTK output is **not** required to be smaller than raw, because
 `never_worse` may legitimately return the raw input.
 
-`packages.rtk-pinned` is built with `pkgs.rustPlatform.buildRustPackage` (using
-RTK's own vendored `Cargo.lock`), **not** crane. `packages.qodec` uses crane.
+`packages.rtk-pinned` is built with `buildRustPackage` over a
+`makeRustPlatform` on the rust-overlay stable toolchain (new enough for RTK's
+`rust-version = "1.91"`), using RTK's own complete vendored `Cargo.lock` and
+unfiltered source. `packages.qodec` uses crane.
 
 ## Orchestration tests vs real RTK integration
 

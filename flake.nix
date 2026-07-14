@@ -78,17 +78,28 @@
           };
         });
 
-        # ---- rtk-pinned: built from the pinned source, never a release binary -- #
-        rtk-pinned = pkgs.rustPlatform.buildRustPackage {
+        # ---- rtk-pinned: built from the pinned source, never a release binary --
+        # RTK declares rust-version = "1.91"; nixpkgs-25.05's default rustPlatform
+        # is Rust 1.86 and would fail Cargo's minimum-version check. Build it with
+        # the rust-overlay stable toolchain (same one o7/qodec use) via
+        # makeRustPlatform. `src = rtk-src` is UNFILTERED on purpose: build.rs
+        # reads src/filters/*.toml, so a cargo-source clean would break it. RTK's
+        # own complete Cargo.lock (203 packages) is vendored offline — no network,
+        # no cargoHash guessing, no mutable release binary. ----
+        rtkPlatform = pkgs.makeRustPlatform {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
+        };
+        rtk-pinned = rtkPlatform.buildRustPackage {
           pname = "rtk-pinned";
-          version = "0.0.0+git.5d32d07";
+          version = "0.42.4";
           src = rtk-src;
-          # Use RTK's own vendored lock — no network fetch, no cargoHash guessing.
           cargoLock.lockFile = "${rtk-src}/Cargo.lock";
-          nativeBuildInputs = [ pkgs.pkg-config ];
-          buildInputs = [ pkgs.openssl ];
           doCheck = false;
-          meta.description = "RTK reducer, pinned @ 5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2";
+          meta = {
+            description = "RTK reducer, pinned @ 5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2";
+            mainProgram = "rtk";
+          };
         };
 
         # ---- python for the model-free contract / smoke checks ---------------- #
@@ -232,7 +243,9 @@
             # 2) real RTK integration unittests (execute the pinned RTK binary).
             root=$(mktemp -d); cp -r ${v2Root}/. "$root"; chmod -R u+w "$root"
             export V2_REPO_ROOT="$root" QODEC_BIN=${qodec}/bin/qodec RTK_BIN=${rtk-pinned}/bin/rtk
-            cd "$root/qodec/evals/interop/v2"
+            # test_rtk_comparison.py lives under tests/ — run from that directory
+            # so the module resolves (a bare module name from v2/ would not).
+            cd "$root/qodec/evals/interop/v2/tests"
             ${pyEnv}/bin/python -m unittest test_rtk_comparison.TestRealRtkIntegration -v
           '';
 
