@@ -252,6 +252,67 @@ class TestRealRtkIntegration(unittest.TestCase):
                         [i for i in report["invariants"] if not i["ok"]])
 
 
+@unittest.skipUnless(find_rtk() and find_qodec(), "pinned RTK + qodec binaries required")
+class TestQodecSourceIdentity(unittest.TestCase):
+    """qodec_source_sha must bind BOTH the tested checkout and the qodec tree."""
+
+    @classmethod
+    def setUpClass(cls):
+        import run_smoke
+        cls.rs = run_smoke
+        cls.qodec = find_qodec()
+        cls.rtk = find_rtk()
+
+    def _identity(self):
+        return self.rs.assemble_identity(self.qodec, self.rtk, "o200k", RTK_PIN)
+
+    def test_qodec_tree_sha_is_not_null(self):
+        self.assertTrue(self._identity()["qodec_tree_sha"])
+
+    def test_qodec_tree_sha_is_mandatory(self):
+        self.assertIn("qodec_tree_sha", self.rs.MANDATORY_IDENTITY)
+
+    def test_source_identity_contains_repo_and_tree(self):
+        ident = self._identity()
+        self.assertRegex(ident["qodec_source_sha"], r"^repo:.+\+qodec-tree:.+$")
+        self.assertIn(ident["repository_commit_sha"], ident["qodec_source_sha"])
+        self.assertIn(ident["qodec_tree_sha"], ident["qodec_source_sha"])
+
+    def test_content_tree_sha_is_deterministic(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "src"
+            p.mkdir()
+            (p / "a.rs").write_text("fn main() {}\n")
+            (p / "b.rs").write_text("// x\n")
+            self.assertEqual(self.rs.tree_sha256(p), self.rs.tree_sha256(p))
+
+    def test_missing_tree_identity_fails_smoke(self):
+        rs = self.rs
+        saved_git = rs._git
+        saved = {k: os.environ.get(k) for k in ("QODEC_SRC_DIR", "QODEC_TREE_SHA", "REPO_COMMIT_SHA")}
+        os.environ.pop("QODEC_SRC_DIR", None)
+        os.environ.pop("QODEC_TREE_SHA", None)
+        os.environ["REPO_COMMIT_SHA"] = "deadbeef" * 5  # repo known, tree unknown
+        os.environ.setdefault("NIX_VERSION", "test-local")
+        rs._git = lambda *a, **k: None  # no git tree fallback
+        try:
+            ident = rs.assemble_identity(self.qodec, self.rtk, "o200k", RTK_PIN)
+            self.assertIsNone(ident["qodec_tree_sha"])
+            self.assertIsNone(ident["qodec_source_sha"])
+            report = rs.smoke(self.qodec, self.rtk, "o200k", RTK_PIN)
+            self.assertFalse(report["all_invariants_ok"])
+            self.assertFalse(next(i for i in report["invariants"]
+                                  if i["invariant"] == "all mandatory identity fields populated")["ok"])
+        finally:
+            rs._git = saved_git
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+
 class TestWorkflow(unittest.TestCase):
     def setUp(self):
         self.text = WORKFLOW.read_text()
