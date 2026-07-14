@@ -173,6 +173,19 @@ def main() -> int:
         d.mkdir(parents=True, exist_ok=True)
 
     project_dir = (source_root / source_manifest["project"]["path"]).parent
+    # Sandboy's add_fs() silently SKIPS a fs_rw rule whose path doesn't exist
+    # yet at policy-application time (it warns and continues rather than
+    # failing the whole ruleset — reasonable for portability, but it means an
+    # about-to-be-created build output directory gets NO Landlock rule at
+    # all, which under a default-deny-all-not-explicitly-allowed ruleset
+    # means "completely inaccessible", not "writable once created". obj/
+    # already exists by this point (trusted `dotnet restore` created it) but
+    # bin/ does not — an earlier N2-A run showed the build fail at the final
+    # copy-to-output step (MSB3021: Access to the path '.../bin' is denied)
+    # for exactly this reason. Pre-create both so Sandboy's rule actually
+    # applies to them.
+    (project_dir / "bin").mkdir(parents=True, exist_ok=True)
+    (project_dir / "obj").mkdir(parents=True, exist_ok=True)
     policy_path = work_dir / "policy.toml"
     policy_sha256, canonical_policy_sha256 = sandboy_policy.write_policy(
         policy_path,
