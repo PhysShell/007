@@ -1,0 +1,26 @@
+{
+  "contract_version": "n2b-toolchain-identity-contract-v1",
+  "motivation": "N2-A's qodec-n2-miner-canary.yml requested dotnet 8.0.x via actions/setup-dotnet, but the confined build actually executed under /usr/share/dotnet/sdk/10.0.301 — nothing compared the requested range against what was resolved and what was executed, so the divergence went unnoticed until direct log inspection. This contract makes that comparison mandatory and structural.",
+  "stages": {
+    "requested": {
+      "description": "The version or range asked for, before any resolution happens.",
+      "example_sources": ["global.json sdk.version", "rust-toolchain.toml", ".python-version", "pom.xml maven.compiler.release", "gradle-wrapper.properties distributionUrl", "a workflow's setup-* action version input"]
+    },
+    "resolved": {
+      "description": "What the toolchain resolver actually picked, captured as trusted setup evidence (dotnet --info / rustc --version / python --version / mvn --version / gradle --version), before untrusted execution begins.",
+      "required_fields": ["resolved_version", "runtime_identifier", "resolved_executable_path"]
+    },
+    "executed": {
+      "description": "What the confined build process actually invoked and ran as argv[0] — must be the exact same absolute path used to capture the 'resolved' evidence, so identity can never silently drift across a sudo/privilege boundary.",
+      "required_fields": ["executed_binary_absolute_path", "executed_binary_sha256"]
+    }
+  },
+  "classifications": {
+    "exact-match": "resolved_version equals requested_version_or_range exactly.",
+    "compatible-resolution": "resolved_version satisfies a floating requested range (e.g. 8.0.x) under a documented resolution policy.",
+    "unexpected-resolution": "resolved_version neither matches nor satisfies the requested range — this is exactly the N2-A finding (8.0.x requested, 10.0.301 executed).",
+    "identity-missing": "one or more required resolved/executed fields is null or empty — ALWAYS a hard failure; a setup action's input string is a request, never evidence of what actually ran."
+  },
+  "hard_failure_classifications": ["identity-missing"],
+  "non_empty_equality_rule": "Two receipts both carrying a null or empty value for the same identity field must never be reported as 'in agreement' — see receipt_contract.py's REQUIRE_NON_EMPTY_PATHS and compare_receipts()."
+}

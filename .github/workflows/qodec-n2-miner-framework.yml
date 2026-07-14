@@ -1,0 +1,281 @@
+# Scope N2-B — generic RepoLogMiner primitives and candidate registry
+# (QODEC Scope N2-B addendum). Turns the one-shot N2-A miner-canary into a
+# configuration-driven planning framework: CandidateRegistry, EligibilityPolicy,
+# CandidateScorer, BuildDetector, a five-ecosystem ToolAdapterRegistry,
+# AcquisitionPlanner, SandboxExecutionPlanner, ReceiptContract,
+# SanitizerContract, ReproducibilityContract, and an N2-A compatibility gate.
+# See qodec/evals/interop/v2/n2/miner/.
+#
+# N2-B performs NO new third-party repository execution: every job here only
+# reads this repo's own synthetic first-party fixtures and the frozen,
+# already-accepted N2-A source-manifest.json (never re-executed). It produces
+# PLANS and PROVISIONAL selection reports, never a corpus freeze, and never
+# calls QODEC, RTK, or any model.
+name: qodec-n2-miner-framework
+
+on:
+  pull_request:
+    paths:
+      - "qodec/evals/interop/v2/n2/miner/**"
+      - ".github/workflows/qodec-n2-miner-framework.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  LC_ALL: C.UTF-8
+  LANG: C.UTF-8
+  TZ: UTC
+
+jobs:
+  frozen-base:
+    name: frozen-base
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify N2-A/N1/N0/M frozen paths + Sandboy pin are unchanged
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 qodec/evals/interop/v2/n2/miner/tools/generate_ci_artifacts.py frozen-base \
+            --repo-root . \
+            --out "$RUNNER_TEMP/reports/n2b-frozen-base-report.json"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: n2b-frozen-base-report
+          path: ${{ runner.temp }}/reports/n2b-frozen-base-report.json
+          if-no-files-found: error
+          retention-days: 90
+
+  schema-validation:
+    name: schema-validation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate candidate-registry.example.json and fixtures/receipts/valid-receipt.json against their schemas
+        run: |
+          python3 - <<'PYEOF'
+          import json
+          import sys
+          sys.path.insert(0, "qodec/evals/interop/v2/n2/miner/tools")
+          import registry
+          import receipt_contract
+
+          reg = registry.load_registry("qodec/evals/interop/v2/n2/miner/candidate-registry.example.json")
+          errors = registry.validate_registry(reg)
+          if errors:
+              print(f"::error::candidate registry schema/transition errors: {errors}")
+              sys.exit(1)
+          print("candidate-registry.example.json: valid")
+
+          receipt = json.loads(open("qodec/evals/interop/v2/n2/miner/fixtures/receipts/valid-receipt.json").read())
+          errors = receipt_contract.validate_receipt(receipt)
+          if errors:
+              print(f"::error::valid-receipt.json failed receipt-contract.schema.json validation: {errors}")
+              sys.exit(1)
+          if receipt["termination"]["exit_code"] != 0:
+              print("::error::valid-receipt.json fixture must have exit_code == 0")
+              sys.exit(1)
+          print("fixtures/receipts/valid-receipt.json: valid, exit_code == 0")
+          PYEOF
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: schema-artifacts
+          path: |
+            qodec/evals/interop/v2/n2/miner/schemas/candidate-registry.schema.json
+            qodec/evals/interop/v2/n2/miner/schemas/receipt-contract.schema.json
+          if-no-files-found: error
+          retention-days: 90
+
+  unit-tests:
+    name: unit-tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Run N2-B unit test suite
+        run: python3 -m unittest discover -s qodec/evals/interop/v2/n2/miner/tests -p 'test_*.py' -v
+
+      - name: Install pinned, hash-verified ruff and run ruff check
+        run: |
+          python3 -m pip install --quiet --require-hashes --only-binary=:all: \
+            -r qodec/evals/interop/v2/n2/miner/ci-requirements.txt
+          ruff --version
+          ruff check qodec/evals/interop/v2/n2/miner/
+
+  adapter-fixtures:
+    name: adapter-fixtures
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Run all five ToolAdapters over synthetic fixtures
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 qodec/evals/interop/v2/n2/miner/tools/generate_ci_artifacts.py adapter-capabilities \
+            --out "$RUNNER_TEMP/reports/adapter-capabilities.json"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: adapter-capabilities
+          path: ${{ runner.temp }}/reports/adapter-capabilities.json
+          if-no-files-found: error
+          retention-days: 90
+
+  selection-determinism:
+    name: selection-determinism
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Assert byte-identical ranking across repeated runs, generate provisional selection report
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 - <<'PYEOF'
+          import json
+          import sys
+          sys.path.insert(0, "qodec/evals/interop/v2/n2/miner/tools")
+          import registry, scorer
+
+          reg = registry.load_registry("qodec/evals/interop/v2/n2/miner/candidate-registry.example.json")
+          candidates = registry.eligible_candidates(reg)
+          ranking_a = scorer.rank_candidates(candidates)
+          ranking_b = scorer.rank_candidates(candidates)
+          if json.dumps(ranking_a, sort_keys=True) != json.dumps(ranking_b, sort_keys=True):
+              print("::error::CandidateScorer ranking is not byte-identical across repeated runs")
+              sys.exit(1)
+          print("ranking is byte-identical across repeated runs")
+          PYEOF
+          python3 qodec/evals/interop/v2/n2/miner/tools/generate_ci_artifacts.py selection-report \
+            --out "$RUNNER_TEMP/reports/candidate-selection-report.json"
+          # Copy into the same directory as the report before upload: mixing a
+          # repo-relative path with a runner.temp-absolute path in one
+          # upload-artifact call makes actions/upload-artifact preserve the
+          # full path from their common ancestor instead of flattening both
+          # into "reports/", which broke the download in artifact-contract.
+          cp qodec/evals/interop/v2/n2/miner/candidate-selection-policy.json "$RUNNER_TEMP/reports/"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: selection-artifacts
+          path: |
+            ${{ runner.temp }}/reports/candidate-selection-policy.json
+            ${{ runner.temp }}/reports/candidate-selection-report.json
+          if-no-files-found: error
+          retention-days: 90
+
+  n2a-compatibility:
+    name: n2a-compatibility
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Build a generic plan from the frozen N2-A reference manifest and diff it
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 qodec/evals/interop/v2/n2/miner/tools/generate_ci_artifacts.py n2a-compatibility \
+            --out "$RUNNER_TEMP/reports/n2a-compatibility-report.json"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: n2a-compatibility-report
+          path: ${{ runner.temp }}/reports/n2a-compatibility-report.json
+          if-no-files-found: error
+          retention-days: 90
+
+  sandboy-planning-smoke:
+    name: sandboy-planning-smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Plan Sandbox execution for every adapter against synthetic fixture manifests only
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 qodec/evals/interop/v2/n2/miner/tools/generate_ci_artifacts.py sandbox-planning \
+            --out "$RUNNER_TEMP/reports/sandbox-planning-report.json"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: sandbox-planning-report
+          path: ${{ runner.temp }}/reports/sandbox-planning-report.json
+          if-no-files-found: error
+          retention-days: 90
+
+  artifact-contract:
+    name: artifact-contract
+    needs:
+      - frozen-base
+      - schema-validation
+      - unit-tests
+      - adapter-fixtures
+      - selection-determinism
+      - n2a-compatibility
+      - sandboy-planning-smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: n2b-frozen-base-report
+          path: ${{ runner.temp }}/reports
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: n2a-compatibility-report
+          path: ${{ runner.temp }}/reports
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: sandbox-planning-report
+          path: ${{ runner.temp }}/reports
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: selection-artifacts
+          path: ${{ runner.temp }}/reports
+
+      - name: Render n2b-summary.md and verify every required artifact is present
+        run: |
+          python3 qodec/evals/interop/v2/n2/miner/tools/generate_ci_artifacts.py summary \
+            --frozen-base-report "$RUNNER_TEMP/reports/n2b-frozen-base-report.json" \
+            --n2a-compat-report "$RUNNER_TEMP/reports/n2a-compatibility-report.json" \
+            --sandbox-planning-report "$RUNNER_TEMP/reports/sandbox-planning-report.json" \
+            --selection-report "$RUNNER_TEMP/reports/candidate-selection-report.json" \
+            --out "$RUNNER_TEMP/reports/n2b-summary.md"
+          cat "$RUNNER_TEMP/reports/n2b-summary.md"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: n2b-framework-contract
+          path: |
+            qodec/evals/interop/v2/n2/miner/miner-framework-contract.json
+            qodec/evals/interop/v2/n2/miner/toolchain-identity-contract.json
+            ${{ runner.temp }}/reports/n2b-summary.md
+          if-no-files-found: error
+          retention-days: 90

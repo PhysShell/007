@@ -1,0 +1,14 @@
+# Pinned, hash-verified CI dependency for the N2-B unit-tests job.
+#
+# Immutable by construction: `pip install --require-hashes --only-binary=:all:`
+# refuses to install anything whose downloaded artifact doesn't match this
+# exact SHA256, so this is not a mutable "pip install ruff" download — it is
+# equivalent in spirit to the SHA-pinned GitHub Actions used elsewhere in
+# this repo's workflows. The hash below was computed by downloading the
+# wheel directly and running sha256sum against it (also cross-checked
+# against PyPI's published JSON metadata for this exact release), for the
+# manylinux x86_64 wheel — the platform "ubuntu-24.04" GitHub-hosted runners
+# actually use. ruff has zero runtime dependencies, so a single pinned entry
+# is the complete transitive closure.
+ruff==0.15.8 \
+    --hash=sha256:0f29b989a55572fb885b77464cf24af05500806ab4edf9a0fd8977f9759d85b1

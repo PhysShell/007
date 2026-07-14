@@ -1,0 +1,93 @@
+{
+  "receipt_contract_version": "n2b-receipt-contract-v1",
+  "source_identity": {
+    "commit_sha": "1111111111111111111111111111111111111111",
+    "archive_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+  },
+  "license_identity": {
+    "spdx": "MIT",
+    "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
+  },
+  "acquisition_identity": {
+    "checkout_action_identity": "actions/checkout@synthetic0000000000000000000000000000000000",
+    "persist_credentials": false
+  },
+  "adapter_identity": {
+    "name": "dotnet_adapter",
+    "version": "n2b-v1"
+  },
+  "toolchain_requested": {
+    "version_or_range": "8.0.x",
+    "resolver_mechanism": "global.json"
+  },
+  "toolchain_resolved": {
+    "resolved_version": "8.0.404",
+    "runtime_identifier": "linux-x64",
+    "resolved_executable_path": "/opt/synthetic-dotnet/dotnet"
+  },
+  "toolchain_executed": {
+    "executed_argv0": "/opt/synthetic-dotnet/dotnet",
+    "executed_binary_absolute_path": "/opt/synthetic-dotnet/dotnet",
+    "executed_binary_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+    "classification": "exact-match"
+  },
+  "sandbox_identity": {
+    "sandboy_commit_sha": "5555555555555555555555555555555555555555",
+    "policy_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+  },
+  "outer_isolation": {
+    "network_isolation": true,
+    "wall_clock_timeout_s": 900
+  },
+  "resource_limits": {
+    "cpu_time_limit_s": 600,
+    "process_count_limit": 512,
+    "memory_enforcement_mechanism": "outer-runner-enforced"
+  },
+  "command_argv": [
+    "/opt/synthetic-dotnet/dotnet",
+    "build",
+    "Foo/Foo.csproj",
+    "--configuration",
+    "Release",
+    "--no-restore",
+    "--nologo",
+    "--verbosity",
+    "normal"
+  ],
+  "environment_variable_names": [
+    "DOTNET_CLI_TELEMETRY_OPTOUT",
+    "DOTNET_NOLOGO",
+    "DOTNET_ROOT",
+    "HOME",
+    "PATH",
+    "TMPDIR"
+  ],
+  "stdout_identity": {
+    "sha256": "7777777777777777777777777777777777777777777777777777777777777777"
+  },
+  "stderr_identity": {
+    "sha256": "8888888888888888888888888888888888888888888888888888888888888888"
+  },
+  "termination": {
+    "exit_code": 0
+  },
+  "sanitization": {
+    "profile_version": "n2b-sanitizer-profile-v1",
+    "transformations": [
+      "iso_timestamp",
+      "workspace_root_path",
+      "tmp_root_path",
+      "pid_bracket",
+      "ansi_csi",
+      "ansi_osc",
+      "crlf_normalize",
+      "msbuild_build_started_banner",
+      "msbuild_process_id",
+      "dotnet_time_elapsed_line"
+    ]
+  },
+  "reproducibility": {
+    "class": "expected-byte-reproducible"
+  }
+}

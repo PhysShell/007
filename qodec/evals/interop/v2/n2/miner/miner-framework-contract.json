@@ -1,0 +1,105 @@
+{
+  "contract_version": "n2b-miner-framework-contract-v1",
+  "scope": "Scope N2-B — generic RepoLogMiner primitives and candidate registry",
+  "base_commit": "d7fd03fdc6fcbf731de81d538ab0f7bca512a607",
+  "accepted_n2a_head": "32c430e6d0401bd01905e0ac91553e7947d23438",
+  "accepted_sandboy_commit_sha": "e925058ddea405b5821fc0aed4882c76650dcbe9",
+  "components": [
+    {
+      "name": "CandidateRegistry",
+      "module": "tools/registry.py",
+      "schema": "schemas/candidate-registry.schema.json",
+      "responsibility": "Load and validate a versioned, explicitly-provided candidate registry file: schema conformance plus the selection_status state-machine transition contract.",
+      "non_goals": ["automatic candidate discovery", "crawling GitHub"]
+    },
+    {
+      "name": "EligibilityPolicy",
+      "module": "tools/eligibility.py",
+      "responsibility": "Apply hard rejection rules to every candidate before any scoring occurs. Produces a per-rule pass/fail report with evidence and an exact rejection reason.",
+      "non_goals": ["QODEC/RTK/token-count-based filtering"]
+    },
+    {
+      "name": "CandidateScorer",
+      "module": "tools/scorer.py",
+      "policy": "candidate-selection-policy.json",
+      "responsibility": "Deterministically score eligible candidates on license/source/offline-feasibility/dependency-lock/detector-confidence/coverage/size/security/cost/reproducibility features, with a SHA256-based deterministic tie-break.",
+      "non_goals": ["QODEC/RTK token-reduction signals", "GitHub-stars-based ranking", "post-hoc manual reweighting after viewing benchmark output"]
+    },
+    {
+      "name": "QuotaAwareSelectionPlanner",
+      "module": "tools/quota_planner.py",
+      "responsibility": "Given a deterministic ranking and quota targets, produce a PROVISIONAL proposed selection, unfilled-quota deficits, eligible alternatives, and a deterministic selection trace.",
+      "non_goals": ["fixing the final N2 case set", "corpus freeze"]
+    },
+    {
+      "name": "BuildDetector",
+      "module": "tools/build_detector.py",
+      "responsibility": "Dispatch every registered ToolAdapter's detect() over a source tree (filenames/manifests/lockfiles only) and report per-ecosystem detection results; refuses automatic ecosystem selection when more than one ecosystem is plausible.",
+      "non_goals": ["restore/build/test execution", "running repository scripts"]
+    },
+    {
+      "name": "ToolAdapterRegistry",
+      "module": "tools/adapters/__init__.py",
+      "adapters": ["dotnet", "rust", "python", "jvm-maven", "jvm-gradle"],
+      "contract_functions": [
+        "detect", "inspect", "validate_manifest", "plan_trusted_setup", "plan_untrusted_execution",
+        "toolchain_identity_contract", "filesystem_policy_hints", "environment_allowlist",
+        "network_requirements", "resource_limit_hints", "receipt_fields", "sanitizer_profile"
+      ],
+      "responsibility": "One inspection/planning module per ecosystem, sharing a common duck-typed interface. Never executes a package manager, build tool, wrapper script, or repository-provided script.",
+      "non_goals": ["executing any of the five ecosystems' real toolchains in this scope"]
+    },
+    {
+      "name": "AcquisitionPlanner",
+      "module": "tools/acquisition_planner.py",
+      "responsibility": "Produce a PLAN (never a new execution) separating trusted acquisition, trusted dependency realization, untrusted execution, and artifact collection, with explicit allowed/forbidden operations per stage.",
+      "non_goals": ["performing a new acquisition run"]
+    },
+    {
+      "name": "SandboxExecutionPlanner",
+      "module": "tools/sandbox_planner.py",
+      "responsibility": "Plan confinement using the accepted Sandboy S0 identity only; enforces a proven filesystem capability envelope and flags any adapter requirement outside it as a capability_gap instead of silently widening the sandbox.",
+      "non_goals": ["modifying Sandboy", "widening the S0/N2-A-proven capability envelope"]
+    },
+    {
+      "name": "ToolchainIdentityContract",
+      "module": "tools/toolchain_identity.py",
+      "contract": "toolchain-identity-contract.json",
+      "responsibility": "Keep requested/resolved/executed toolchain identity distinct and classify their relationship (exact-match/compatible-resolution/unexpected-resolution/identity-missing); identity-missing is always a hard failure.",
+      "non_goals": []
+    },
+    {
+      "name": "SanitizerContract",
+      "module": "tools/sanitizer_contract.py",
+      "responsibility": "Validate sanitizer profiles: deterministic, minimal, test-covered transformations only; structurally forbids dedup/reorder/truncate/token-reduction/diagnostic-removal transformations.",
+      "non_goals": ["a universal log-rewriting language"]
+    },
+    {
+      "name": "ReceiptContract",
+      "module": "tools/receipt_contract.py",
+      "schema": "schemas/receipt-contract.schema.json",
+      "responsibility": "Validate the versioned generic receipt shape and enforce non-empty mandatory identity fields.",
+      "non_goals": []
+    },
+    {
+      "name": "ReproducibilityContract",
+      "module": "tools/receipt_contract.py (compare_receipts)",
+      "responsibility": "Compare two receipts field-by-field; for a configurable set of identity fields, null==null or \"\"==\"\" never counts as agreement.",
+      "non_goals": []
+    },
+    {
+      "name": "N2ACompatibilityGate",
+      "module": "tools/n2a_compatibility.py",
+      "report": "n2a-compatibility-report.json (CI artifact)",
+      "responsibility": "Build a generic plan from the frozen N2-A source-manifest.json (read-only) and diff it against N2-A's actual accepted behavior; requires zero unexplained incompatibilities.",
+      "non_goals": ["modifying or re-executing N2-A"]
+    }
+  ],
+  "explicit_non_goals": [
+    "GitHub-wide search crawler", "automatic download of random repositories",
+    "star/popularity-based ranking", "distributed-runner scheduler", "database backend",
+    "web UI", "plugin marketplace", "microVM backend", "general orchestration service",
+    "final 18-case selection", "new third-party checkouts or builds", "RTK filter mapping",
+    "QODEC benchmark execution", "hybrid benchmark", "N2-C"
+  ]
+}

@@ -1,0 +1,3 @@
+[submodule "vendor/thirdparty"]
+	path = vendor/thirdparty
+	url = https://github.com/example/thirdparty.git
