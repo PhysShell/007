@@ -45,6 +45,14 @@ REQUIRE_NON_EMPTY_PATHS = frozenset({
 
 DEFAULT_SEMANTIC_PATHS = tuple(sorted(REQUIRE_NON_EMPTY_PATHS))
 
+# Fields whose presence is NOT "truthy" but "is an int, not a bool" — 0 is a
+# perfectly valid, meaningful exit code, not missing evidence. Using
+# `bool(value)` for this field (the original N2-A-derived gate) made
+# exit_code=0 read as absent on both sides, so two receipts that both
+# legitimately succeeded would fail the "is this field even present" check
+# before ever comparing values.
+_INT_PRESENCE_FIELDS = frozenset({"termination.exit_code"})
+
 
 def load_schema() -> dict:
     return json.loads(SCHEMA_PATH.read_text())
@@ -63,13 +71,29 @@ def _get_path(d: dict, path: str):
     return cur
 
 
+def _is_present(path: str, value) -> bool:
+    """Type-aware presence check used for REQUIRE_NON_EMPTY_PATHS fields.
+
+    String identity fields (commit SHAs, hashes, versions, ...): present iff
+    the value is a string, and is not empty or whitespace-only.
+
+    `termination.exit_code`: present iff the value is an int and NOT a bool
+    (bool is a subclass of int in Python, so `isinstance(True, int)` is True
+    and must be excluded explicitly) — any integer, including 0 and negative
+    values, counts as present.
+    """
+    if path in _INT_PRESENCE_FIELDS:
+        return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(value, str) and value.strip() != ""
+
+
 def compare_receipts(a: dict, b: dict, semantic_paths=DEFAULT_SEMANTIC_PATHS,
                       require_non_empty_paths=REQUIRE_NON_EMPTY_PATHS) -> list[dict]:
     rows = []
     for path in semantic_paths:
         va, vb = _get_path(a, path), _get_path(b, path)
         if path in require_non_empty_paths:
-            equal = bool(va) and bool(vb) and va == vb
+            equal = _is_present(path, va) and _is_present(path, vb) and va == vb
         else:
             equal = va == vb
         rows.append({"field": path, "value_a": va, "value_b": vb, "equal": equal})

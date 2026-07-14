@@ -61,18 +61,31 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Validate example registry + a sample receipt against their schemas
+      - name: Validate candidate-registry.example.json and fixtures/receipts/valid-receipt.json against their schemas
         run: |
           python3 - <<'PYEOF'
+          import json
           import sys
           sys.path.insert(0, "qodec/evals/interop/v2/n2/miner/tools")
           import registry
+          import receipt_contract
+
           reg = registry.load_registry("qodec/evals/interop/v2/n2/miner/candidate-registry.example.json")
           errors = registry.validate_registry(reg)
           if errors:
               print(f"::error::candidate registry schema/transition errors: {errors}")
               sys.exit(1)
           print("candidate-registry.example.json: valid")
+
+          receipt = json.loads(open("qodec/evals/interop/v2/n2/miner/fixtures/receipts/valid-receipt.json").read())
+          errors = receipt_contract.validate_receipt(receipt)
+          if errors:
+              print(f"::error::valid-receipt.json failed receipt-contract.schema.json validation: {errors}")
+              sys.exit(1)
+          if receipt["termination"]["exit_code"] != 0:
+              print("::error::valid-receipt.json fixture must have exit_code == 0")
+              sys.exit(1)
+          print("fixtures/receipts/valid-receipt.json: valid, exit_code == 0")
           PYEOF
 
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
@@ -95,9 +108,11 @@ jobs:
       - name: Run N2-B unit test suite
         run: python3 -m unittest discover -s qodec/evals/interop/v2/n2/miner/tests -p 'test_*.py' -v
 
-      - name: ruff check
+      - name: Install pinned, hash-verified ruff and run ruff check
         run: |
-          pip install --quiet ruff
+          python3 -m pip install --quiet --require-hashes --only-binary=:all: \
+            -r qodec/evals/interop/v2/n2/miner/ci-requirements.txt
+          ruff --version
           ruff check qodec/evals/interop/v2/n2/miner/
 
   adapter-fixtures:
