@@ -35,6 +35,22 @@ def _rules(tmp_root: str, workspace_root: str) -> list[tuple[str, re.Pattern, st
                 "<TIMESTAMP>",
             ),
             (
+                # MSBuild's own "Build started <date> <time>." banner, e.g.
+                # "Build started 07/14/2026 18:39:30." — a different format
+                # from the ISO timestamp rule above.
+                "msbuild_build_started_line",
+                re.compile(r"^Build started \d{1,2}/\d{1,2}/\d{4} \d{1,2}:\d{2}:\d{2}\.$", re.MULTILINE),
+                "Build started <TIMESTAMP>.",
+            ),
+            (
+                # MSBuild's out-of-process node banner, e.g. "Successfully
+                # created process with process id 3395" — the PID varies
+                # per run and isn't matched by the pid=/pid: rule below.
+                "msbuild_process_id",
+                re.compile(r"\bprocess id \d+\b"),
+                "process id <PID>",
+            ),
+            (
                 "elapsed_time",
                 re.compile(r"\b\d+(?:\.\d+)?\s*(?:ms|s|Sec|sec)\b"),
                 "<ELAPSED>",

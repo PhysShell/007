@@ -36,6 +36,22 @@ class TestSanitizer(unittest.TestCase):
         out, _ = sanitize(raw)
         self.assertEqual(out, b"Build succeeded.\n\nTime Elapsed <ELAPSED>\n")
 
+    def test_replaces_msbuild_build_started_banner(self):
+        # Regression test for a real N2-A reproducibility mismatch: two
+        # otherwise-identical captures differed only in this MSBuild banner's
+        # seconds field, which the ISO-8601 timestamp rule doesn't match
+        # (different format: MM/DD/YYYY HH:MM:SS).
+        raw = b"Build started 07/14/2026 18:39:30.\nsomething else\n"
+        out, _ = sanitize(raw)
+        self.assertEqual(out, b"Build started <TIMESTAMP>.\nsomething else\n")
+
+    def test_replaces_msbuild_process_id(self):
+        # Regression test for the same real mismatch: MSBuild's out-of-process
+        # node banner ("process id NNNN") isn't matched by the pid=/pid: rule.
+        raw = b"Successfully created process with process id 3395\n"
+        out, _ = sanitize(raw)
+        self.assertEqual(out, b"Successfully created process with process id <PID>\n")
+
     def test_strips_ansi_csi_sequences(self):
         raw = b"\x1b[32mBuild succeeded.\x1b[0m\n"
         out, report = sanitize(raw)
