@@ -200,6 +200,44 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      - name: Re-verify the extracted source (probe builds mutated obj/bin) before the equivalence check
+        run: |
+          rm -rf "$RUNNER_TEMP/probe-source"
+          mkdir -p "$RUNNER_TEMP/probe-source"
+          python3 - <<'PYEOF'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "qodec/evals/interop/v2/n2/canary/tools")
+          import capture_build as cb
+
+          artifact_dir = Path("${{ runner.temp }}/source-artifact")
+          dest = Path("${{ runner.temp }}/probe-source")
+          manifest = json.loads((artifact_dir / "source-manifest.json").read_text())
+          file_manifest = json.loads((artifact_dir / "source-file-manifest.json").read_text())
+          cb.verify_and_extract_source(artifact_dir / "source.tar", manifest, dest)
+          cb.verify_extracted_tree(dest, file_manifest)
+          print("probe source re-verified and re-extracted for the diagnostic-equivalence check")
+          PYEOF
+
+      - name: Diagnostic-equivalence check (pre-hotfix argv vs. post-hotfix argv)
+        run: |
+          python3 qodec/evals/interop/v2/n2/canary/tools/diagnostic_equivalence.py \
+            --source-root "$RUNNER_TEMP/probe-source" \
+            --dotnet-root "$DOTNET_ROOT" \
+            --project-rel EncryptAesApp/EncryptAesApp.csproj \
+            --pre-argv-json '[]' \
+            --post-argv-json '["--disable-build-servers"]' \
+            --out "$RUNNER_TEMP/n2a-diagnostic-equivalence-report.json"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: n2a-diagnostic-equivalence-report
+          path: ${{ runner.temp }}/n2a-diagnostic-equivalence-report.json
+          if-no-files-found: error
+          retention-days: 90
+
   capture:
     name: capture-${{ matrix.job }}
     needs: trusted-source-acquisition

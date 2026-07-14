@@ -30,10 +30,12 @@
       "--no-restore",
       "--nologo",
       "--verbosity",
-      "normal"
+      "normal",
+      "--disable-build-servers"
     ],
     "network_during_execution": "denied",
-    "restore": "not-performed"
+    "restore": "not-performed",
+    "determinism_note": "Scope N2-A.1: --disable-build-servers added after workflow run 29371996936 found an intermittent producer-ordering defect (Roslyn shared-compiler-server scheduling caused CoreCompile diagnostics to interleave in different orders across independent builds, though the full warning multiset, exit code, and every other semantic field always matched). Proven deterministic across 6/6 repeated fresh builds on real ubuntu-24.04 GitHub-hosted runners via qodec/evals/interop/v2/n2/canary/tools/determinism_probe.py — see n2a-determinism-probe-report.json. -p:UseSharedCompilation=false alone was tested and found insufficient (1/6 divergence); --disable-build-servers alone was sufficient and is the minimal change."
   },
   "selection_rationale": [
     "small public repository",
