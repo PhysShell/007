@@ -242,12 +242,19 @@ def main() -> int:
             {
                 "job": args.job_name,
                 "requested_limits": {
-                    "address_space_kib": 4 * 1024 * 1024,
+                    "address_space_kib": None,
                     "cpu_time_s": 600,
                     "max_processes": 512,
                     "wall_clock_timeout_s": 900,
                 },
-                "enforced_by": "outer job shell (ulimit) + timeout; NOT enforced by Sandboy itself (documented S0 gap)",
+                "address_space_limit_finding": (
+                    "RLIMIT_AS (`ulimit -v`) is deliberately NOT applied: an earlier N2-A run "
+                    "confirmed it makes CoreCLR fail immediately with HRESULT 0x8007000E "
+                    "(E_OUTOFMEMORY) — CoreCLR reserves virtual address space far beyond what "
+                    "it commits/uses at startup. This is a genuine dotnet/RLIMIT_AS interop "
+                    "constraint, recorded as a finding rather than forced through."
+                ),
+                "enforced_by": "outer job shell (ulimit -t/-u) + timeout; NOT enforced by Sandboy itself (documented S0 gap)",
                 "observed_peak_rss_kib": result["peak_rss_kb"],
                 "observed_wall_time_s": result["wall_time_s"],
                 "exit_code": result["exit_code"],

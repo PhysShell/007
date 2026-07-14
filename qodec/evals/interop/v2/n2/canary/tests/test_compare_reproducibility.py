@@ -106,6 +106,55 @@ class TestCompareReproducibility(unittest.TestCase):
         with self.assertRaises(ValueError):
             cr.compare(cr.load_snapshot(self.a_dir), cr.load_snapshot(self.b_dir))
 
+    def test_identically_failing_captures_are_reproducible_but_must_not_pass_n2a(self):
+        # Regression test for a real bug found against the actual canary run:
+        # both jobs failed the same way (CoreCLR OOM under a ulimit -v cap),
+        # which IS reproducible (identical exit code, identical sanitized
+        # output) but must NOT be reported as N2-A passing — acceptance must
+        # gate on the build actually succeeding, not merely on agreement.
+        import io
+        import contextlib
+
+        self.write(self.a_dir, make_snapshot("capture-a", exit_code=137))
+        self.write(self.b_dir, make_snapshot("capture-b", exit_code=137))
+        for d, job in ((self.a_dir, "capture-a"), (self.b_dir, "capture-b")):
+            (d / "sandboy-execution-receipt.json").write_text(
+                json.dumps({"exit_code": 137, "sandboy_commit_sha": "e925058ddea405b5821fc0aed4882c76650dcbe9"})
+            )
+            (d / "network-isolation-report.json").write_text(json.dumps({"all_targets_unreachable": True}))
+            (d / "resource-limit-report.json").write_text(json.dumps({"requested_limits": {"cpu_time_s": 600}}))
+            (d / "sanitization-report.json").write_text("{}")
+
+        src_dir = self.tmp / "src"
+        src_dir.mkdir()
+        (src_dir / "source-manifest.json").write_text(json.dumps({
+            "license": {"spdx": "MIT"}, "repository": {"approved_commit_sha": "a" * 40},
+        }))
+        (src_dir / "license-record.json").write_text(json.dumps({"spdx": "MIT", "file": "LICENSE", "sha256": "x"}))
+
+        out_dir = self.tmp / "out"
+        argv_backup = sys.argv
+        sys.argv = [
+            "compare_reproducibility.py",
+            "--capture-a-dir", str(self.a_dir),
+            "--capture-b-dir", str(self.b_dir),
+            "--source-artifact-dir", str(src_dir),
+            "--out-dir", str(out_dir),
+        ]
+        stdout = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(stdout):
+                exit_code = cr.main()
+        finally:
+            sys.argv = argv_backup
+
+        report = json.loads((out_dir / "reproducibility-report.json").read_text())
+        self.assertTrue(report["overall_reproducible"])  # identical failure IS reproducible...
+        self.assertNotEqual(exit_code, 0)  # ...but must still fail the overall N2-A gate
+        summary = (out_dir / "miner-canary-summary.md").read_text()
+        self.assertIn("FAIL", summary)
+        self.assertIn("build_succeeded", summary)
+
     def test_full_main_writes_reports_and_exits_nonzero_on_mismatch(self):
         import io
         import contextlib
@@ -113,6 +162,7 @@ class TestCompareReproducibility(unittest.TestCase):
         self.write(self.a_dir, make_snapshot("capture-a", exit_code=0))
         self.write(self.b_dir, make_snapshot("capture-b", exit_code=1))
         (self.a_dir / "sandboy-execution-receipt.json").write_text(json.dumps({"exit_code": 0, "sandboy_commit_sha": "x"}))
+        (self.b_dir / "sandboy-execution-receipt.json").write_text(json.dumps({"exit_code": 1, "sandboy_commit_sha": "x"}))
         for d in (self.a_dir, self.b_dir):
             (d / "network-isolation-report.json").write_text(json.dumps({"all_targets_unreachable": True}))
             (d / "resource-limit-report.json").write_text(json.dumps({"requested_limits": {"cpu_time_s": 1}}))

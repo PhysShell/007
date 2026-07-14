@@ -248,8 +248,8 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Enforce reproducibility gate
+      - name: Enforce N2-A acceptance gate
         if: steps.compare.outcome == 'failure'
         run: |
-          echo "::error::N2-A reproducibility comparison failed — see miner-canary-reports artifact"
+          echo "::error::N2-A did not pass (reproducibility and/or full acceptance criteria, e.g. build exit code) — see miner-canary-reports artifact, especially miner-canary-summary.md"
           exit 1

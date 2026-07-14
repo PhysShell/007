@@ -3,8 +3,18 @@
 # command, for the N2-A miner canary.
 #
 # Layering (outermost to innermost):
-#   ulimit (this shell)     -- address space / CPU time / process count caps,
-#                              inherited across exec+fork regardless of privilege
+#   ulimit (this shell)     -- CPU time / process count caps, inherited across
+#                              exec+fork regardless of privilege. NOT address
+#                              space (RLIMIT_AS): CoreCLR reserves virtual
+#                              memory far beyond what it commits/uses at
+#                              startup, and a `ulimit -v` cap makes it fail
+#                              immediately with HRESULT 0x8007000E
+#                              (E_OUTOFMEMORY) — confirmed against the real
+#                              canary build, not a hypothetical. This is a
+#                              genuine interop constraint, not something to
+#                              force through; wall-clock (`timeout`) and CPU
+#                              time/process-count limits below don't have
+#                              this problem.
 #   sudo --preserve-env=... -- root, needed only to create the network
 #                              namespace; explicitly allowlists the SAME small
 #                              set of env names Sandboy's own policy allows
@@ -34,7 +44,6 @@ shift
 CALLER_USER=$(id -un)
 PRESERVE_ENV="PATH,HOME,TMPDIR,DOTNET_ROOT,DOTNET_CLI_TELEMETRY_OPTOUT,DOTNET_NOLOGO,DOTNET_SKIP_FIRST_TIME_EXPERIENCE,DOTNET_MULTILEVEL_LOOKUP,DOTNET_GENERATE_ASPNET_CERTIFICATE"
 
-ulimit -v $((4 * 1024 * 1024))  # 4 GiB address space
 ulimit -t 600                    # 600s CPU time
 ulimit -u 512                    # max processes/threads for this user
 

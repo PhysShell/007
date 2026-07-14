@@ -41,17 +41,21 @@ def _load_json(path: Path) -> dict | None:
 
 
 def write_miner_canary_summary(*, source_manifest_dir: Path, a_dir: Path, b_dir: Path,
-                                reproducibility_report: dict, out_dir: Path) -> None:
+                                reproducibility_report: dict, out_dir: Path) -> bool:
+    """Returns overall N2-A acceptance (all criteria, including build success —
+    NOT just reproducibility; two runs identically failing the same way IS
+    reproducible but must not read as N2-A passing)."""
     source_manifest = _load_json(source_manifest_dir / "source-manifest.json") or {}
     license_record = _load_json(source_manifest_dir / "license-record.json") or {}
     receipt_a = _load_json(a_dir / "sandboy-execution-receipt.json") or {}
+    receipt_b = _load_json(b_dir / "sandboy-execution-receipt.json") or {}
     net_a = _load_json(a_dir / "network-isolation-report.json") or {}
     net_b = _load_json(b_dir / "network-isolation-report.json") or {}
     res_a = _load_json(a_dir / "resource-limit-report.json") or {}
     res_b = _load_json(b_dir / "resource-limit-report.json") or {}
 
     reproducible = reproducibility_report["overall_reproducible"]
-    build_ok = receipt_a.get("exit_code") == 0
+    build_ok = receipt_a.get("exit_code") == 0 and receipt_b.get("exit_code") == 0
     network_denied = net_a.get("all_targets_unreachable") and net_b.get("all_targets_unreachable")
 
     acceptance = {
@@ -64,7 +68,8 @@ def write_miner_canary_summary(*, source_manifest_dir: Path, a_dir: Path, b_dir:
         "stdout_stderr_separated": True,  # raw.stdout / raw.stderr always written as distinct files
         "sanitized_minimally": bool(_load_json(a_dir / "sanitization-report.json")),
         "captured_twice_reproducibly": reproducible,
-        "complete_receipts": bool(receipt_a),
+        "complete_receipts": bool(receipt_a) and bool(receipt_b),
+        "build_succeeded": build_ok,
     }
     all_pass = all(acceptance.values())
 
@@ -109,6 +114,7 @@ def write_miner_canary_summary(*, source_manifest_dir: Path, a_dir: Path, b_dir:
                  "adapters, additional repository captures, full 18-case corpus, RTK mapping, QODEC benchmark, "
                  "four-arm benchmark.\n")
     (out_dir / "miner-canary-summary.md").write_text("\n".join(lines) + "\n")
+    return all_pass
 
 
 def main() -> int:
@@ -165,13 +171,13 @@ def main() -> int:
     )
     (out_dir / "reproducibility-comparison-detail.md").write_text("\n".join(summary_lines) + "\n")
 
-    write_miner_canary_summary(
+    n2a_all_pass = write_miner_canary_summary(
         source_manifest_dir=source_manifest_dir, a_dir=a_dir, b_dir=b_dir,
         reproducibility_report=report, out_dir=out_dir,
     )
 
-    print(f"compare_reproducibility: overall_reproducible={all_equal}")
-    return 0 if all_equal else 1
+    print(f"compare_reproducibility: overall_reproducible={all_equal} n2a_overall_pass={n2a_all_pass}")
+    return 0 if (all_equal and n2a_all_pass) else 1
 
 
 if __name__ == "__main__":
