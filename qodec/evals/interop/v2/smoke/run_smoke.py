@@ -42,16 +42,17 @@ ENV_ALLOWLIST = sorted([
     "PATH", "HOME", "LC_ALL", "LANG", "TZ",
     "QODEC_BIN", "RTK_BIN", "SMOKE_OUT",
     "NIX_VERSION", "NIX_SYSTEM", "NIXPKGS_REV", "REPO_COMMIT_SHA",
-    "QODEC_TREE_SHA", "FLAKE_LOCK_SHA256", "RUST_TOOLCHAIN_IDENTITY",
+    "QODEC_TREE_SHA", "QODEC_SRC_DIR", "FLAKE_LOCK_SHA256", "RUST_TOOLCHAIN_IDENTITY",
     "RTK_SOURCE_SHA",
 ])
 TOKENIZER_PROBES = ["", "hello world\n", "error[E0308]: mismatched types\n",
                     "src/core/parse.rs:120:17\n", "运行 6 tests\n", "\t\r\n{}"]
 MANDATORY_IDENTITY = [
     "flake_lock_sha256", "nix_system", "nix_version", "nixpkgs_revision",
-    "rust_toolchain_identity", "qodec_source_sha", "qodec_binary_sha256",
-    "rtk_source_sha", "rtk_binary_sha256", "locale", "timezone",
-    "environment_variable_allowlist", "tokenizer_identity", "tokenizer_sha256",
+    "rust_toolchain_identity", "qodec_source_sha", "qodec_tree_sha",
+    "qodec_binary_sha256", "rtk_source_sha", "rtk_binary_sha256", "locale",
+    "timezone", "environment_variable_allowlist", "tokenizer_identity",
+    "tokenizer_sha256",
 ]
 
 
@@ -61,6 +62,29 @@ def sha256_bytes(b: bytes) -> str:
 
 def sha256_file(p: Path) -> str | None:
     return sha256_bytes(p.read_bytes()) if p.exists() else None
+
+
+def tree_sha256(root) -> str | None:
+    """Deterministic content hash of a source tree: sorted (relpath, file-hash)
+    entries. Same tree bytes -> same digest, independent of filesystem order."""
+    root = Path(root)
+    if not root.exists():
+        return None
+    h = hashlib.sha256()
+    h.update(b"qodec-src-tree-v1\n")
+    entries = []
+    for dp, dns, fns in os.walk(root):
+        dns.sort()
+        for name in sorted(fns):
+            p = Path(dp) / name
+            entries.append((p.relative_to(root).as_posix(), p))
+    for rel, p in sorted(entries, key=lambda e: e[0]):
+        try:
+            payload = sha256_bytes(p.read_bytes())
+        except OSError:
+            continue
+        h.update(rel.encode("utf-8") + b" " + payload.encode("ascii") + b"\n")
+    return h.hexdigest()
 
 
 def _child_env() -> dict:
@@ -178,11 +202,22 @@ def assemble_identity(qodec_bin: str, rtk_bin: str, meter: str,
                 pass
         if not rust_ident and (root / "rust-toolchain.toml").exists():
             rust_ident = sha256_file(root / "rust-toolchain.toml")
+    # repository_commit_sha is the EXACT tested checkout revision. Under a
+    # pull_request build this is GitHub's synthetic merge commit, NOT the branch
+    # head — do not treat it as the PR head unless they are equal.
     repo_commit = os.environ.get("REPO_COMMIT_SHA") or (_git(root, "rev-parse", "HEAD") if root else None)
-    qodec_tree = os.environ.get("QODEC_TREE_SHA") or (_git(root, "rev-parse", "HEAD:qodec") if root else None)
+    # qodec_tree_sha is a deterministic identity of the EXACT qodec source tree
+    # that built the binary: the Nix-cleaned source (QODEC_SRC_DIR) in CI, or the
+    # git tree object of qodec/ locally. It must never be null.
+    src_dir = os.environ.get("QODEC_SRC_DIR")
+    qodec_tree = (os.environ.get("QODEC_TREE_SHA")
+                  or (tree_sha256(src_dir) if src_dir else None)
+                  or (_git(root, "rev-parse", "HEAD:qodec") if root else None))
+    # qodec_source_sha binds BOTH identities; it is only set when both are known,
+    # so a missing tree identity fails the mandatory-identity gate.
     qodec_source_sha = None
-    if repo_commit:
-        qodec_source_sha = f"repo:{repo_commit}" + (f"+qodec-tree:{qodec_tree}" if qodec_tree else "")
+    if repo_commit and qodec_tree:
+        qodec_source_sha = f"repo:{repo_commit}+qodec-tree:{qodec_tree}"
     flake_lock_sha = os.environ.get("FLAKE_LOCK_SHA256") or (sha256_file(lock) if lock else None)
     nix_system = os.environ.get("NIX_SYSTEM") or f"{platform.machine()}-{platform.system().lower()}"
 

@@ -59,8 +59,11 @@
         });
 
         # ---- qodec: separate crate from ./qodec with its own Cargo identity ---- #
+        # Named so the exact source that builds the binary is also the source the
+        # smoke runner hashes for qodec_tree_sha (QODEC_SRC_DIR).
+        qodecSrc = craneLib.cleanCargoSource ./qodec;
         qodecArgs = {
-          src = craneLib.cleanCargoSource ./qodec;
+          src = qodecSrc;
           strictDeps = true;
           # onig (tokenizers `onig` feature) uses bindgen -> needs libclang;
           # ureq v2 uses rustls (ring) -> C compiler from stdenv, no openssl.
@@ -129,6 +132,8 @@
           export FLAKE_LOCK_SHA256=${builtins.hashFile "sha256" ./flake.lock}
           export RUST_TOOLCHAIN_IDENTITY=${builtins.hashFile "sha256" ./rust-toolchain.toml}
           export RTK_SOURCE_SHA=5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2
+          # Exact qodec source tree used to build the binary -> qodec_tree_sha.
+          export QODEC_SRC_DIR=${qodecSrc}
         '';
 
         runContractTests = pkgs.writeShellScript "qodec-v2-contract-test" ''

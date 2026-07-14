@@ -21,7 +21,9 @@ Every future capture / run MUST record all of the following:
 | `nix_version` | `nix --version` |
 | `nixpkgs_revision` | locked `nixpkgs` rev from `flake.lock` |
 | `rust_toolchain_identity` | channel + components from `rust-toolchain.toml` |
-| `qodec_source_sha` | git SHA of the `qodec/` crate source |
+| `repository_commit_sha` | the EXACT tested checkout revision; under a `pull_request` build this is GitHub's synthetic **merge** commit, NOT the branch head (do not describe it as the PR head unless they are equal) |
+| `qodec_tree_sha` | deterministic identity of the exact qodec **source tree** that built the binary — the Nix-cleaned source hash (`QODEC_SRC_DIR`) in CI, the git tree object of `qodec/` locally; never null |
+| `qodec_source_sha` | binds both: `repo:<repository_commit_sha>+qodec-tree:<qodec_tree_sha>` — only set when both are known, so a missing tree identity fails the run |
 | `qodec_binary_sha256` | SHA256 of the built `qodec` binary |
 | `rtk_source_sha` | pinned commit of `rtk-src` |
 | `rtk_binary_sha256` | SHA256 of the built `rtk-pinned` binary |
@@ -42,6 +44,17 @@ emits and **requires** (via `MANDATORY_IDENTITY`) the full identity block above
 *except* `tool_versions`, which is a future-capture requirement not yet produced
 by the plumbing-only smoke — everything else in the table is populated, and the
 runner fails if any mandatory field is absent.
+
+**Source identity.** `qodec_source_sha` deliberately binds two things: the
+tested checkout (`repository_commit_sha`) and the qodec source tree
+(`qodec_tree_sha`). In CI the tree identity is a content hash of the exact
+Nix-cleaned source that built the binary (exported as `QODEC_SRC_DIR` from the
+flake); locally it is the git tree object of `qodec/`. `qodec_tree_sha` is
+mandatory and can never be null — if it cannot be resolved, `qodec_source_sha`
+is left unset and the smoke run fails the mandatory-identity gate.
+`repository_commit_sha` is whatever revision was actually checked out and built;
+on a `pull_request` run GitHub checks out a synthetic merge commit, so that
+value is the merge commit, not the PR branch head.
 
 ## Environment policy
 
