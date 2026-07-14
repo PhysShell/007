@@ -1,0 +1,14 @@
+{
+  "anchors_sha256": "a8e3c9792d5970743e02a4467a3cadc3c79e23e8b69b8dee98ef7f3b0698f3e9",
+  "capture_recipe_sha256": "b0509fc54bb4984d062f327751a124a5f63752051ea30b9706f4930f559d53b5",
+  "case_id": "git-diff-noindex",
+  "fixture_tree_sha256": "ab167d69703a77c075da56fb5607bcf50fcc5b0a9fd4e39d4b50758370005fe5",
+  "native_receipt_sha256": "a03f2553fdb88d54a2e964d3963127b09d62bb4443cee661a01e35b768618961",
+  "provenance_sha256": "cd9aad9c5a8142740299059a2e0b14d5eb613e8863971b23ff2b6a02140459e9",
+  "raw_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "raw_stdout_sha256": "cc0ab9e2a206649e0a1cb0cbcda66f9dc0dd8e287a8bea42897caa3c9efb830b",
+  "rtk_receipt_sha256": "3e37e13a4e9f912bbaadbe8d3563688d302a7c9ba4914287bb676122f038e276",
+  "rtk_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "rtk_stdout_sha256": "cc0ab9e2a206649e0a1cb0cbcda66f9dc0dd8e287a8bea42897caa3c9efb830b",
+  "snapshot_version": "pilot-snapshot-v1"
+}

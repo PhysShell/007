@@ -1,0 +1,37 @@
+{
+  "argv": [
+    "rustc",
+    "--edition",
+    "2021",
+    "--crate-type",
+    "bin",
+    "--color",
+    "never",
+    "fixture/many_errors.rs"
+  ],
+  "capture_timestamp": "2023-11-14T22:13:20+00:00",
+  "case_id": "rust-compile-multi",
+  "checked_out_commit_sha": "5e5b96c934b18518b0827ff6e88dd1e71a0aa9a4",
+  "cwd": ".",
+  "environment_allowlist": [
+    "PATH"
+  ],
+  "exit_code": 1,
+  "flake_lock_sha256": "75708d790dd63c3aac0723c2a5349987ce64a7df6214023bae7afce49afec3d0",
+  "locale": "C.UTF-8",
+  "nix_system": "x86_64-linux",
+  "nix_version": "2.28.5",
+  "nixpkgs_revision": "ac62194c3917d5f474c1a844b6fd6da2db95077d",
+  "phase": "native",
+  "qodec_tree_sha": null,
+  "receipt_version": "corpus-receipt-v1",
+  "repository_head_sha": "5e5b96c934b18518b0827ff6e88dd1e71a0aa9a4",
+  "stderr_sha256": "5c053095c149d46cb498b3ca56eb2cccb5c1a1d5beef53169823958620c29181",
+  "stdin_sha256": null,
+  "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "timeout_status": "ok",
+  "timezone": "UTC",
+  "tool_binary_sha256": "f5dbb8021b35dc1b92b58f8b3a9a6afa182b13a2d1ae00d5a519e46e35757847",
+  "tool_identity": "rustc",
+  "wall_time_s": 0.069916
+}

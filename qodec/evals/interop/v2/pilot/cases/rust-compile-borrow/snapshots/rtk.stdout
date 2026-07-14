@@ -1,0 +1,9 @@
+Log Summary
+   [error] 3 errors (3 unique)
+   [warn] 0 warnings (0 unique)
+   [info] 0 info messages
+
+[ERRORS]
+   For more information about this error, try `rustc --explain E0499`.
+   error[E0499]: cannot borrow `buffer` as mutable more than once at a time
+   error: aborting due to 1 previous error

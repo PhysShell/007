@@ -1,0 +1,41 @@
+{
+  "argv": [
+    "rtk",
+    "pipe",
+    "--passthrough"
+  ],
+  "capture_timestamp": "2023-11-14T22:13:20+00:00",
+  "case_id": "python-syntaxerror",
+  "checked_out_commit_sha": "5e5b96c934b18518b0827ff6e88dd1e71a0aa9a4",
+  "cwd": ".",
+  "environment_allowlist": [
+    "PATH"
+  ],
+  "exit_code": 0,
+  "flake_lock_sha256": "75708d790dd63c3aac0723c2a5349987ce64a7df6214023bae7afce49afec3d0",
+  "locale": "C.UTF-8",
+  "never_worse_returned_raw": false,
+  "nix_system": "x86_64-linux",
+  "nix_version": "2.28.5",
+  "nixpkgs_revision": "ac62194c3917d5f474c1a844b6fd6da2db95077d",
+  "payload_changed": false,
+  "phase": "rtk",
+  "qodec_tree_sha": null,
+  "receipt_version": "corpus-receipt-v1",
+  "repository_head_sha": "5e5b96c934b18518b0827ff6e88dd1e71a0aa9a4",
+  "rtk_argv": [
+    "rtk",
+    "pipe",
+    "--passthrough"
+  ],
+  "rtk_classification": "explicit-passthrough",
+  "rtk_source_sha": "5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stdin_sha256": "71982fba36a3e588a7bb83fbd826c8062715a969372265622f14828375f92368",
+  "stdout_sha256": "71982fba36a3e588a7bb83fbd826c8062715a969372265622f14828375f92368",
+  "timeout_status": "ok",
+  "timezone": "UTC",
+  "tool_binary_sha256": "41f316adf7b30a568208a0a4f824bffb266ecb6d01bd9de81bed58e1d469dfcf",
+  "tool_identity": "rtk",
+  "wall_time_s": 0.001758
+}

@@ -1,0 +1,14 @@
+{
+  "anchors_sha256": "664aca6d3b3d4cc383b0138273296525424d20e0f400ab25131efa940bb83388",
+  "capture_recipe_sha256": "6f85dfec8cb5f14ff11e7e67cf0e611fb0ed7055ff3a0dc13ef353618aa7d36a",
+  "case_id": "python-json-decode-error",
+  "fixture_tree_sha256": "a34e340dad04d39482d1ff6e7f1521227970f39ace087608538ddbf45d70ed31",
+  "native_receipt_sha256": "e40d01d5750ffa323c459e4d99f581aab7d17be12aa5fee7b591a9da2428f357",
+  "provenance_sha256": "c34244894cb5d6aa9a30cf5d8f575eb5d43091c6ac7364023f536c1e95b0ba2d",
+  "raw_stderr_sha256": "64e5d91698ec561c37b8b55f1e5824a7855df887cb42be7f63d7a910e8685cf5",
+  "raw_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "rtk_receipt_sha256": "16443ed353a139e6e2f6f42449ca60d746878fcf6f9b83a8d0c62e8a01192b6f",
+  "rtk_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "rtk_stdout_sha256": "64e5d91698ec561c37b8b55f1e5824a7855df887cb42be7f63d7a910e8685cf5",
+  "snapshot_version": "pilot-snapshot-v1"
+}

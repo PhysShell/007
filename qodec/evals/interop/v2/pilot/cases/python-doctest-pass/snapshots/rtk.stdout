@@ -1,0 +1,17 @@
+Trying:
+    shout('ok')
+Expecting:
+    'OK!'
+ok
+Trying:
+    shout('hi')
+Expecting:
+    'HI!'
+ok
+1 items had no tests:
+    textutil
+1 items passed all tests:
+   2 tests in textutil.shout
+2 tests in 2 items.
+2 passed and 0 failed.
+Test passed.

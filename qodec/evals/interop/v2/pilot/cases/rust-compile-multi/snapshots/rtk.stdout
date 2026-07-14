@@ -1,0 +1,17 @@
+Log Summary
+   [error] 69 errors (69 unique)
+   [warn] 0 warnings (0 unique)
+   [info] 0 info messages
+
+[ERRORS]
+   error[E0425]: cannot find value `v15` in this scope
+   error[E0425]: cannot find function `missing_helper_03` in this scope
+    --> fixture/many_errors.rs:8:15
+    --> fixture/many_errors.rs:7:33
+   error[E0425]: cannot find function `missing_helper_09` in this scope
+   error[E0425]: cannot find value `v13` in this scope
+     --> fixture/many_errors.rs:13:15
+   error[E0425]: cannot find value `v06` in this scope
+   error[E0425]: cannot find function `missing_helper_11` in this scope
+     --> fixture/many_errors.rs:17:33
+   ... +59 more unique errors
