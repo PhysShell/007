@@ -1,0 +1,5 @@
+# stability — repeated (case,question,arm); repeats agree on the full
+# scorer signature (correct, format_compliant, alias_leaks, invalid_identifiers)
+rg-output-rtk-grep    n-files       encoded+brief  repeats=3 correct=[False, False, False] STABLE
+rg-output-rtk-grep    n-files       raw            repeats=3 correct=[False, False, False] STABLE
+rg-output-rtk-grep    n-files       raw+brief      repeats=3 correct=[False, False, False] STABLE

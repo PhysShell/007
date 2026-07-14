@@ -1,0 +1,82 @@
+{
+  "case": "stacktrace-rtk-log",
+  "arm": "rtk",
+  "pipeline_id": "rtk:pipe:log",
+  "qodec_version": "sha256:b68fb317dcc8",
+  "codec": "squeeze",
+  "meter": "o200k",
+  "is_json": false,
+  "pipeline": [
+    {
+      "tool": "fixture",
+      "argv": [
+        "cat",
+        "/home/user/007/qodec/corpus/stacktrace.txt"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "wall_ms": 0.0,
+      "tool_version": null,
+      "repo_sha": null
+    },
+    {
+      "tool": "rtk",
+      "argv": [
+        "/tmp/claude-0/-home-user-007/4b6242b1-5681-5614-a540-21fcbbe1799d/scratchpad/tools-tag/bin/rtk",
+        "pipe",
+        "--filter",
+        "log"
+      ],
+      "cwd": ".",
+      "exit_code": 0,
+      "wall_ms": 4.17,
+      "tool_version": "0.42.4",
+      "repo_sha": null
+    }
+  ],
+  "baseline": null,
+  "upstream_reduction": 0.8883,
+  "tokens": {
+    "producer": 528,
+    "tool_only": 59,
+    "qodec_content": 59,
+    "cold_prompt": 59,
+    "warm_payload": 59
+  },
+  "incremental_qodec_gain": {
+    "cold": 0.0,
+    "warm": 0.0
+  },
+  "qodec_codec": "passthrough",
+  "is_fallback": true,
+  "encode_ms": 195.22,
+  "decode_ms": 0.0,
+  "upstream_tool_ms": 4.17,
+  "roundtrip_ok": true,
+  "artifacts": {
+    "producer.txt": {
+      "sha256": "sha256:a30c3e5a3203476e3f865c5b1010f8d578d858725e0072255ed8a13a2696cc3b",
+      "bytes": 2625
+    },
+    "transformed.txt": {
+      "sha256": "sha256:49421eba813ca58fa779aa4d5bc2d0e4f8bc74c88f0bed1a87df53a2e7f697af",
+      "bytes": 215
+    },
+    "qodec-envelope.json": {
+      "sha256": "sha256:65c3d258db3fd969cc616f325da99045114ab1dc6877ba9a779cb2e57d998519",
+      "bytes": 347
+    },
+    "qodec-content.txt": {
+      "sha256": "sha256:49421eba813ca58fa779aa4d5bc2d0e4f8bc74c88f0bed1a87df53a2e7f697af",
+      "bytes": 215
+    },
+    "cold-prompt.txt": {
+      "sha256": "sha256:49421eba813ca58fa779aa4d5bc2d0e4f8bc74c88f0bed1a87df53a2e7f697af",
+      "bytes": 215
+    },
+    "decoded.txt": {
+      "sha256": "sha256:49421eba813ca58fa779aa4d5bc2d0e4f8bc74c88f0bed1a87df53a2e7f697af",
+      "bytes": 215
+    }
+  }
+}

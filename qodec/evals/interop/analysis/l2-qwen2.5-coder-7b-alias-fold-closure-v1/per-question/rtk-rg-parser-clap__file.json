@@ -1,0 +1,167 @@
+{
+  "case": "rtk-rg-parser-clap",
+  "cells": {
+    "R": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "src/_concepts.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": null,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 80504.0,
+      "n_repeats": 3,
+      "prompt_tokens": 1244,
+      "stable": true
+    },
+    "S": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "src/_concepts.rs",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "src/_concepts.rs",
+          "src/_cookbook/typed_derive.rs",
+          "src/_features.rs",
+          "src/lib.rs",
+          "src/_tutorial.rs",
+          "src/_derive/mod.rs",
+          "src/_derive/_tutorial.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": "grep",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 81401.0,
+      "n_repeats": 3,
+      "prompt_tokens": 1116,
+      "stable": true
+    },
+    "SG": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "src/_concepts.rs",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "src/_concepts.rs",
+          "src/_cookbook/typed_derive.rs",
+          "src/_features.rs",
+          "src/lib.rs",
+          "src/_tutorial.rs",
+          "src/_derive/mod.rs",
+          "src/_derive/_tutorial.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": "grep",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 80819.0,
+      "n_repeats": 3,
+      "prompt_tokens": 1116,
+      "stable": true
+    },
+    "SM": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "src/_features.rs"
+        ],
+        "symbols": []
+      },
+      "correct": false,
+      "final_codec": "mine",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 58240.0,
+      "n_repeats": 3,
+      "prompt_tokens": 1016,
+      "stable": true
+    },
+    "V": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "src/_concepts.rs",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "src/_concepts.rs",
+          "src/_cookbook/typed_derive.rs",
+          "src/_features.rs",
+          "src/lib.rs",
+          "src/_tutorial.rs",
+          "src/_derive/mod.rs",
+          "src/_derive/_tutorial.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": "grep",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 24940.0,
+      "n_repeats": 3,
+      "prompt_tokens": 1116,
+      "stable": true
+    },
+    "VG": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "src/_concepts.rs",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "src/_concepts.rs",
+          "src/_cookbook/typed_derive.rs",
+          "src/_features.rs",
+          "src/lib.rs",
+          "src/_tutorial.rs",
+          "src/_derive/mod.rs",
+          "src/_derive/_tutorial.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": "grep",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 24492.0,
+      "n_repeats": 3,
+      "prompt_tokens": 1116,
+      "stable": true
+    }
+  },
+  "question": "file",
+  "role": "loss",
+  "verdict": {
+    "candidate_policy_rescue": [
+      "SG",
+      "V",
+      "VG"
+    ],
+    "causal": "stage-2 lexical mining effect confirmed (S pass, SM fail, SG pass; stage-1 matched)",
+    "stage1_matched_guard_pair": "SM vs SG (production stage-1 shared)"
+  },
+  "weakly_matched": false
+}

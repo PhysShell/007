@@ -1,0 +1,78 @@
+The payload is encoded as a `%q1` container. Format: first line
+`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`
+(each alias is a short stand-in for that exact phrase), then a
+`%q1 body` line, then the body. `%q1 xN` after a line means that line
+occurs N times in total. A `toon` body is a table: first line is a JSON
+array of keys, each following line is one object, cells are JSON values
+joined by the separator named in the header. A `grep` body is grouped
+matcher output: a marker line names a file path and the lines after it
+are `line:text` hits in that file (a bare marker starts verbatim
+lines). A `diag` body line starting with an alias expands to: the head
+after the alias, then that alias's legend template with each slot
+placeholder filled by the sep-joined values in order. A `tmpl` body
+line starting with an alias is its legend template with the slot
+placeholders filled by the sep-joined values that follow the alias.
+Mentally decode the body via the legend before answering; never emit
+alias characters in answers.
+
+%q1 mine n=8
+试=, cancellationToken).ConfigureAwait(false);
+件=|src/Legacy.Core/Services/
+组=|tests/Legacy.UI.Tests/ViewModels/
+标=: private void OnPropertyChanged(string propertyName)
+记=Async(CancellationToken
+链=: await 
+节=[file] src/Legacy.UI/ViewModels/
+层==    ¿: public async Task ¿
+%q1 body
+%q1 tmpl sep=pipe slot=quest n=7 nl=1
+码层 ¿, CancellationToken cancellationToken)
+引层记 cancellationToken)
+路=    ¿标
+类=    ¿链viewModel.Save记.None);
+函=[file] ¿.cs (1):
+值=[file] ¿.cs (2):
+错=节¿ViewModel.cs (3):
+%q1 body
+20 matches in 10F:
+
+函件AuditLogger
+码|14|LogAsync(string|message
+
+函件ReportService
+    52: public Report Generate(ReportCriteria criteria)
+
+值件SessionService
+码|33|OpenAsync(Credentials|credentials
+    41链_tokenClient.RequestAsync(credentials试
+
+值件UserService
+码|18|SaveAsync(User|user
+    27链_repository.UpsertAsync(user试
+
+错|Login
+引|23|Login
+    39链_sessionService.OpenAsync(credentials试
+路|71
+
+错|Report
+引|31|Generate
+    44: var report = _reportService.Generate(criteria).GetAwaiter().GetResult();
+路|88
+
+节UserEditorViewModel.cs (4):
+引|42|Save
+    57链_userService.SaveAsync(CurrentUser试
+    58链_auditLogger.LogAsync("User saved"试
+   112标
+
+函组LoginViewModelTests
+    36链viewModel.Login记.None);
+
+函组ReportViewModelTests
+    41链viewModel.Generate记.None);
+
+值组UserEditorViewModelTests
+类|29
+类|63
+

@@ -1,0 +1,467 @@
+The payload is encoded as a `%q1` container. Format: first line
+`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`
+(each alias is a short stand-in for that exact phrase), then a
+`%q1 body` line, then the body. `%q1 xN` after a line means that line
+occurs N times in total. A `toon` body is a table: first line is a JSON
+array of keys, each following line is one object, cells are JSON values
+joined by the separator named in the header. A `grep` body is grouped
+matcher output: a marker line names a file path and the lines after it
+are `line:text` hits in that file (a bare marker starts verbatim
+lines). A `diag` body line starting with an alias expands to: the head
+after the alias, then that alias's legend template with each slot
+placeholder filled by the sep-joined values in order. A `tmpl` body
+line starting with an alias is its legend template with the slot
+placeholders filled by the sep-joined values that follow the alias.
+Mentally decode the body via the legend before answering; never emit
+alias characters in answers.
+
+%q1 mine n=26
+码=" => Some(MagicAttrName::
+引=clap_builder/src/builder/
+路=	            ValueParserInner::
+类=Sp::new(AttrKind::
+函=	            } else if attr.path().is_ident("
+值=	            "
+错=ValueParser
+试=... (gap) ...
+件=pub(crate)
+组=	            Self::
+标=, attr.path().span())
+记=	    fn 
+链=	    // Common enough to optimize
+表=f.debug_struct("错::
+层=#[derive(Copy, Clone,
+行=`引value_parser.rs`; ⚠️ no covering tests found
+名=/// Parse from `std::env::args_os()`,
+数=crate::ValueEnum + Clone + Send + Sync +
+图=(引value_parser.rs:
+点=错Inner::
+节=value: &std::ffi::OsStr,
+包=Some(AttrValue::
+串=/// Build a [`Command`] that can
+列=) -> Result<AnyValue,
+树=	                类
+键=	        let 
+%q1 body
+%q1 raw
+%q1 body
+**Exploration: How does clap parse arguments against a derived command definition?**
+
+Found 56 symbols across 3 files.
+
+**Blast radius — what depends on these (update/verify before editing)**
+
+- `错` 图63) — 8 callers in `引mod.rs`, `引action.rs`, `引arg.rs`, `引command.rs` +1 more; ⚠️ no covering tests found
+- `Map错` 图2014) — 2 callers in `引mod.rs`, 行
+- `Any错` 图591) — 3 callers in 行
+
+**Source Code**
+
+> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.
+
+**`clap_builder/src/derive.rs`** — parse(method), calls(calls), command(method), Command(references)
+
+```rust
+28	/// </div>
+29	pub trait Parser: FromArgMatches + CommandFactory + Sized {
+30	    名 [exit][Error::exit] on error.
+31记parse() -> Self {
+32键mut matches = <Self as CommandFactory>::command().get_matches();
+33键res = <Self as FromArgMatches>::from_arg_matches_mut(&mut matches)
+34	            .map_err(format_error::<Self>);
+35	        match res {
+36	            Ok(s) => s,
+37	            Err(e) => {
+38	                // Since this is more of a development-time error, we aren't doing as fancy of a quit
+39	                // as `get_matches`
+40	                e.exit()
+41	            }
+42	        }
+43	    }
+44	
+45	    名 return Err on error.
+46记try_parse() -> Result<Self, Error> {
+
+试
+
+117	    串 instantiate `Self`.
+118	    ///
+119	    /// See [`FromArgMatches::from_arg_matches_mut`] for instantiating `Self`.
+120记command() -> Command;
+121	    串 update `self`.
+122	    ///
+123	    /// See [`FromArgMatches::update_from_arg_matches_mut`] for updating `self`.
+
+试
+
+314	}
+315	
+316	impl<T: Parser> Parser for Box<T> {
+317记parse() -> Self {
+318	        Box::new(<T as Parser>::parse())
+319	    }
+320	
+321记try_parse() -> Result<Self, Error> {
+322	        <T as Parser>::try_parse().map(Box::new)
+
+试
+
+340	}
+341	
+342	impl<T: CommandFactory> CommandFactory for Box<T> {
+343记command() -> Command {
+344	        <T as CommandFactory>::command()
+345	    }
+346记command_for_update() -> Command {
+347	        <T as CommandFactory>::command_for_update()
+348	    }
+```
+
+**`clap_derive/src/attr.rs`** — parse(method), ClapAttr(struct), as_str(method), parse_all(method), value_or_abort(method), lit_str_or_abort(method), +4 more
+
+```rust
+1	use std::iter::FromIterator;
+2	
+3	use proc_macro2::TokenStream;
+4	use quote::quote;
+5	use quote::ToTokens;
+6	use syn::spanned::Spanned;
+7	use syn::{
+8	    parenthesized,
+9	    parse::{Parse, ParseStream},
+10	    punctuated::Punctuated,
+11	    Attribute, Expr, Ident, LitStr, Token,
+12	};
+13	
+14	use crate::utils::Sp;
+15	
+16	#[derive(Clone)]
+17	件 struct ClapAttr {
+18	    件 kind: Sp<AttrKind>,
+19	    件 name: Ident,
+20	    件 magic: Option<MagicAttrName>,
+21	    件 value: Option<AttrValue>,
+22	}
+23	
+24	impl ClapAttr {
+25	    件 fn parse_all(all_attrs: &[Attribute]) -> Result<Vec<Self>, syn::Error> {
+26键mut parsed = Vec::new();
+27	        for attr in all_attrs {
+28	            let kind = if attr.path().is_ident("clap") {
+29树Clap标
+30函structopt") {
+31树StructOpt标
+32函command") {
+33树Command标
+34函group") {
+35树Group标
+36函arg") {
+37树Arg标
+38函value") {
+39树Value标
+40	            } else {
+41	                continue;
+42	            };
+43	            for mut attr in
+44	                attr.parse_args_with(Punctuated::<ClapAttr, Token![,]>::parse_terminated)?
+45	            {
+46	                attr.kind = kind;
+47	                parsed.push(attr);
+48	            }
+49	        }
+50	        Ok(parsed)
+51	    }
+52	
+53	    件 fn value_or_abort(&self) -> Result<&AttrValue, syn::Error> {
+54	        self.value
+55	            .as_ref()
+56	            .ok_or_else(|| format_err!(self.name, "attribute `{}` requires a value", self.name))
+57	    }
+58	
+59	    件 fn lit_str_or_abort(&self) -> Result<&LitStr, syn::Error> {
+60键value = self.value_or_abort()?;
+61	        match value {
+62	            AttrValue::LitStr(tokens) => Ok(tokens),
+63	            AttrValue::Expr(_) | AttrValue::Call(_) => {
+64	                abort!(
+65	                    self.name,
+66	                    "attribute `{}` can only accept string literals",
+67	                    self.name
+68	                )
+69	            }
+70	        }
+71	    }
+72	}
+73	
+74	impl Parse for ClapAttr {
+75记parse(input: ParseStream<'_>) -> syn::Result<Self> {
+76键name: Ident = input.parse()?;
+77键name_str = name.to_string();
+78	
+79键magic = match name_str.as_str() {
+80值rename_all码RenameAll),
+81值rename_all_env码RenameAllEnv),
+82值skip码Skip),
+83值next_display_order码NextDisplayOrder),
+84值next_help_heading码NextHelpHeading),
+85值default_value_t码DefaultValueT),
+86值default_values_t码DefaultValuesT),
+87值default_value_os_t码DefaultValueOsT),
+88值default_values_os_t码DefaultValuesOsT),
+89值long码Long),
+90值short码Short),
+91值value_parser码错),
+92值action码Action),
+93值env码Env),
+94值flatten码Flatten),
+95值value_enum码ValueEnum),
+96值from_global码FromGlobal),
+97值subcommand码Subcommand),
+98值external_subcommand码ExternalSubcommand),
+99值verbatim_doc_comment码VerbatimDocComment),
+100值about码About),
+101值long_about码LongAbout),
+102值long_help码LongHelp),
+103值author码Author),
+104值version码Version),
+105	            _ => None,
+106	        };
+107	
+108键value = if input.peek(Token![=]) {
+109	            // `name = value` attributes.
+110	            let assign_token = input.parse::<Token![=]>()?; // skip '='
+111	            if input.peek(LitStr) {
+112	                let lit: LitStr = input.parse()?;
+113	                包LitStr(lit))
+114	            } else {
+115	                match input.parse::<Expr>() {
+116	                    Ok(expr) => 包Expr(expr)),
+117	
+118	                    Err(_) => abort! {
+119	                        assign_token,
+120	                        "expected `string literal` or `expression` after `=`"
+121	                    },
+122	                }
+123	            }
+124	        } else if input.peek(syn::token::Paren) {
+125	            // `name(...)` attributes.
+126	            let nested;
+127	            parenthesized!(nested in input);
+128	
+129	            let method_args: Punctuated<_, _> = nested.parse_terminated(Expr::parse, Token![,])?;
+130	            包Call(Vec::from_iter(method_args)))
+131	        } else {
+132	            None
+133	        };
+134	
+135	        Ok(Self {
+136	            kind: 类Clap, name.span()),
+137	            name,
+138	            magic,
+139	            value,
+140	        })
+141	    }
+142	}
+143	
+144	层 PartialEq, Eq)]
+145	件 enum MagicAttrName {
+146	    Short,
+147	    Long,
+148	    错,
+149	    Action,
+150	    Env,
+151	    Flatten,
+152	    ValueEnum,
+153	    FromGlobal,
+154	    Subcommand,
+155	    VerbatimDocComment,
+156	    ExternalSubcommand,
+157	    About,
+158	    LongAbout,
+159	    LongHelp,
+160	    Author,
+161	    Version,
+162	    RenameAllEnv,
+163	    RenameAll,
+164	    Skip,
+165	    DefaultValueT,
+166	    DefaultValuesT,
+167	    DefaultValueOsT,
+168	    DefaultValuesOsT,
+169	    NextDisplayOrder,
+170	    NextHelpHeading,
+171	}
+172	
+173	#[derive(Clone)]
+174	#[allow(clippy::large_enum_variant)]
+175	件 enum AttrValue {
+176	    LitStr(LitStr),
+177	    Expr(Expr),
+178	    Call(Vec<Expr>),
+179	}
+180	
+181	impl ToTokens for AttrValue {
+182记to_tokens(&self, tokens: &mut TokenStream) {
+183	        match self {
+184组LitStr(t) => t.to_tokens(tokens),
+185组Expr(t) => t.to_tokens(tokens),
+186组Call(t) => {
+187	                let t = quote!(#(#t),*);
+188	                t.to_tokens(tokens);
+189	            }
+190	        }
+191	    }
+192	}
+193	
+194	层 PartialEq, Eq)]
+195	件 enum AttrKind {
+196	    Clap,
+197	    StructOpt,
+198	    Command,
+199	    Group,
+200	    Arg,
+201	    Value,
+202	}
+203	
+204	impl AttrKind {
+205	    件 fn as_str(&self) -> &'static str {
+206	        match self {
+207组Clap => "clap",
+208组StructOpt => "structopt",
+209组Command => "command",
+210组Group => "group",
+211组Arg => "arg",
+212组Value => "value",
+213	        }
+214	    }
+215	}
+```
+
+**`引value_parser.rs`** — calls(calls), 错(struct), 错Inner(enum), from(method), references(references), fmt(method), +10 more
+
+```rust
+60	///     .expect("required");
+61	/// assert_eq!(port, 3001);
+62	/// ```
+63	pub struct 错(错Inner);
+64	
+65	enum 错Inner {
+66链 and for possible values
+67	    Bool,
+68链
+69	    String,
+70链
+71	    OsString,
+72链
+73	    PathBuf,
+74	    Other(Box<dyn Any错>),
+75	}
+76	
+77	impl 错 {
+78	    /// Custom parser for argument values
+
+试
+
+557	where
+558	    P: Into<super::PossibleValue>,
+559	{
+560记from(values: Vec<P>) -> Self {
+561键inner = PossibleValuesParser::from(values);
+562	        Self::from(inner)
+563	    }
+564	}
+565	
+566	impl std::fmt::Debug for 错 {
+567记fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+568	        match &self.0 {
+569路Bool => 表bool").finish(),
+570路String => 表string").finish(),
+571路OsString => 表os_string").finish(),
+572路PathBuf => 表path_buf").finish(),
+573路Other(o) => write!(f, "错::other({:?})", o.type_id()),
+574	        }
+575	    }
+576	}
+577	
+578	impl Clone for 错 {
+579记clone(&self) -> Self {
+580	        Self(match &self.0 {
+581路Bool => 点Bool,
+582路String => 点String,
+583路OsString => 点OsString,
+584路PathBuf => 点PathBuf,
+585路Other(o) => 点Other(o.clone_any()),
+586	        })
+587	    }
+588	}
+589	
+590	/// A type-erased wrapper for [`Typed错`].
+591	trait Any错: Send + Sync + 'static {
+592记parse_ref(
+593	        &self,
+594	        cmd: &crate::Command,
+595	        arg: Option<&crate::Arg>,
+596	        节
+597	    列 crate::Error>;
+598	
+599记parse_ref_(
+600	        &self,
+601	        cmd: &crate::Command,
+602	        arg: Option<&crate::Arg>,
+603	        节
+604	        _source: ValueSource,
+605	    列 crate::Error> {
+606	        self.parse_ref(cmd, arg, value)
+607	    }
+608	
+609	    /// Describes the content of `AnyValue`
+610记type_id(&self) -> AnyValueId;
+611	
+612记possible_values(
+613	        &self,
+614	    ) -> Option<Box<dyn Iterator<Item = crate::builder::PossibleValue> + '_>>;
+615	
+616记clone_any(&self) -> Box<dyn Any错>;
+617	}
+618	
+619	impl<T, P> Any错 for P
+620	where
+
+试
+
+1076	/// assert_eq!(value_parser.parse_ref(&cmd, arg, OsStr::new("never")).unwrap(), ColorChoice::Never);
+1077	/// ```
+1078	#[derive(Clone, Debug)]
+1079	pub struct Enum错<E: 数 'static>(
+1080	    std::marker::PhantomData<E>,
+1081	);
+1082	
+1083	impl<E: 数 'static> Enum错<E> {
+1084	    /// Parse an [`ValueEnum`][crate::ValueEnum]
+
+试
+
+1674	/// Useful for composing new [`Typed错`]s
+1675	层 Debug)]
+1676	#[non_exhaustive]
+1677	pub struct Bool错 {}
+1678	
+1679	impl Bool错 {
+1680	    /// Implementation for [`错::bool`]
+
+试
+
+2011	///
+2012	/// See [`Typed错::map`]
+2013	#[derive(Clone, Debug)]
+2014	pub struct Map错<P, F> {
+2015	    parser: P,
+2016	    func: F,
+2017	}
+2018	
+2019	impl<P, F, T> Map错<P, F>
+2020	where
+```
+
+
+... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)

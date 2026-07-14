@@ -66,6 +66,43 @@ pub struct MineOptions {
     /// Measured probes per round. The knob the ranker earns its keep on:
     /// a good ranking keeps the ratio at a fraction of the probes.
     pub probe_budget: usize,
+    /// Eval-only lexical guard (the `fold-grep-guarded` / VG ablation arm): when
+    /// set, candidate phrases that span a guarded lexical class (paths, code
+    /// spans, `::`/snake/Camel identifiers, grep markers) are never aliased.
+    /// A diagnostic global guard recognised without task/gold — NOT protected
+    /// spans. Default false, so `mine`/`squeeze` are unchanged.
+    pub guard_lexical: bool,
+}
+
+/// Generic lexical classes the guard never lets the miner alias — recognised purely
+/// from surface form, with no knowledge of the task or gold answer. Purity of
+/// the factor matters more than compression ratio, so this over-guards rather
+/// than risk hiding an identifier inside a glyph.
+pub fn is_guarded_lexical(phrase: &str) -> bool {
+    if phrase.contains('`') || phrase.contains('»') || phrase.contains("::") || phrase.contains('/') {
+        return true; // backtick span, grep marker, `::` path, or any path separator
+    }
+    const EXTS: [&str; 10] =
+        [".rs", ".cs", ".md", ".toml", ".json", ".lock", ".jinja", ".py", ".txt", ".yaml"];
+    if EXTS.iter().any(|e| phrase.contains(e)) {
+        return true; // filename.extension token
+    }
+    let chars: Vec<char> = phrase.chars().collect();
+    for i in 1..chars.len() {
+        // camel / pascal hump: a lowercase immediately followed by an uppercase
+        if chars[i].is_ascii_uppercase() && chars[i - 1].is_ascii_lowercase() {
+            return true;
+        }
+        // snake_case: alnum '_' alnum
+        if chars[i] == '_'
+            && chars[i - 1].is_ascii_alphanumeric()
+            && i + 1 < chars.len()
+            && chars[i + 1].is_ascii_alphanumeric()
+        {
+            return true;
+        }
+    }
+    false
 }
 
 impl Default for MineOptions {
@@ -78,6 +115,7 @@ impl Default for MineOptions {
             seeds: Vec::new(),
             ranker: None,
             probe_budget: SCORE_BUDGET,
+            guard_lexical: false,
         }
     }
 }
@@ -113,6 +151,9 @@ pub fn encode(text: &str, meter: &dyn TokenMeter, opts: &MineOptions) -> String 
             }
         }
         for phrase in queue {
+            if opts.guard_lexical && is_guarded_lexical(&phrase) {
+                continue; // guarded: never alias a guarded lexical span
+            }
             let replaced = current.replace(&phrase, &alias);
             let legend_line = format!("{alias}={phrase}\n");
             let gain =

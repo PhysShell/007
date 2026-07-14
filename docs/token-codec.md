@@ -100,6 +100,12 @@ pipeline can be applied blindly.
   narrow (top-level array, identical flat keys) with honest fallback.
 - **`squeeze`** — `toon` (JSON) or `fold` (text), then the better of the two
   miners over the result.
+- **`mosaic`** — the orchestration layer: cut the payload at line boundaries
+  and route each region to its cheapest structural codec via a shortest path
+  over span candidates (single-segment results elide to the bare codec), then
+  mine the whole assembled artifact. Byte-exact, fail-closed length-prefixed
+  container, with an exhaustive `O(N²)` all-span DP for the kill criterion.
+  Measured verdict below — a well-supported negative on today's byte-exact shelf.
 
 ## Measured results (o200k, auto alphabet, corpus in `qodec/corpus/`)
 
@@ -228,6 +234,170 @@ limited to word boundaries.** The ladder, as climbed:
    family is transport-layer compression, where the decoder is a machine and
    prompt tokens are unaffected. The boundary rule stays: **the model reads
    substitution + structure; machines read entropy codes.**
+
+## `mosaic` — measured optimal segmentation across codecs
+
+`squeeze` picks *one* structural codec for the whole payload. A mixed agent
+payload — intro prose, then a diagnostic block, then a diff, then a findings
+array, then a stack trace — has no single best codec. The idea (transplanted
+from a DP-over-formats paper, `docs/paper-transplant-map.md`): cut the payload
+into regions and route each to the codec that measures cheapest *there*.
+
+The disciplined transplant is **not** the paper's `position × codec` table
+(that assumes per-symbol cost, a constant switch price, and codecs that don't
+learn across the span — none true here, where `mine`/`tmpl` amortize a legend
+over a whole span). It is a **shortest path over span candidates**: a node is a
+boundary between lines, an edge `i → j` is the region `[i, j)` encoded by one
+codec, weighted by the *measured full token cost* of that nested artifact
+(header, legend and all). The cheapest `0..N` path is the segmentation.
+
+```text
+dp[j] = min over (i, c) of  dp[i] + meter.count(encode_c(lines[i..j])) + frame
+```
+
+**Two graphs — and the distinction is the whole result.** The production
+router uses a **geometric** candidate graph: window sizes `1,2,4,8,16,32,64,128`
+lines from each start, plus an explicit whole-payload edge. It is `O(N·W)` and
+fast, but it is *not* optimal: a beneficial 45-line region in the middle of a
+500-line file can only be spelled `32+8+4+1`, paying four headers. So the
+geometric router answers "is there a win among geometric spans?", never "is
+there a win at all?". Calling its output an *oracle* would be exactly the
+overreach the review caught. The wider search is a separate **all-span additive
+DP** (`mosaic::all_span_dp`) that considers *every* span `[i, j)`, `O(N²)` of
+them, run offline on small payloads. It is still an *additive* DP — it selects a
+path by summed edge cost and exact-measures only that path plus the baseline, so
+it is not a token-exact oracle over assembled artifacts — but it removes the
+window grid as a suspect, which is what the kill criterion needed.
+
+Three correctness properties make the comparison honest:
+
+1. **No self-inflicted tax (identity elision).** When the chosen path is one
+   segment, mosaic emits the winning codec **bare** — no `%q1 mosaic` envelope,
+   exactly as `squeeze` never wraps its winner. So "don't segment" costs what
+   the plain codec costs, not a spurious extra container.
+2. **"Not segmenting" is always measured, never assumed.** `encode` measures
+   the assembled path against the whole-payload single-codec baseline with the
+   exact meter and keeps the real minimum. Because BPE is not additive
+   (`tok(A+B) ≠ tok(A)+tok(B)`), the additive DP can misrank a multi-segment
+   path; this exact re-measurement is the backstop, so an approximate edge model
+   can waste probes but cannot ship a path the meter rejects.
+3. **Fail-closed container.** A length-prefixed envelope of sibling `%q1`
+   artifacts; decode reads the decimal byte length, takes exactly that many
+   bytes, decodes one layer, concatenates, and refuses on a bad count, trailing
+   garbage, an over-large segment length, an unreasonable header count (capped
+   before any allocation), or a **nested mosaic** segment (stack-exhaustion
+   guard):
+
+```text
+%q1 mosaic n=3
+%q1 body
+154
+<154 bytes of nested q1 artifact>827
+<827 bytes>93
+<93 bytes>
+```
+
+### Measured verdict (o200k, corpus in `qodec/corpus/`)
+
+After identity elision, mosaic on byte-exact text payloads **collapses into the
+same whole-span codec `squeeze` picks** — same artifact, same tokens, zero
+segmentation gain and zero overhead for declining to segment:
+
+| sample | squeeze cold | mosaic cold | Δ |
+|---|---:|---:|---:|
+| build-log.txt | +47.0% | +47.0% | 0 |
+| git-diff.txt | +15.9% | +15.9% | 0 |
+| rg-output.txt | +37.2% | +37.2% | 0 |
+| stacktrace.txt | +26.7% | +26.7% | 0 |
+| prose.md | −4.2% (raw) | −4.2% (raw) | 0 |
+| findings.json | +46.6% (`toon`, sem) | +36.6% (byte) | −10.0 |
+
+The lone gap is `findings.json`, where `squeeze` reaches for the *semantic*
+`toon` table; mosaic's byte-exact shelf excludes `toon`, so it lands on the
+next-best byte-exact path — not a segmentation loss, a missing candidate.
+
+**The all-span additive DP declines to segment.** Running the full `O(N²)`
+all-pairs search (`mosaic::all_span_dp`) — including on the payloads *built to
+favour segmentation* (two regions with disjoint vocabularies; a diag block
+adjacent to an rg block, each a different codec's specialty) — the DP itself
+chooses a single segment (`segments == 1`, checked via the pre-arbitration
+[`AllSpanReport`], not the baseline-clamped output), tying the whole-span
+baseline exactly:
+
+| payload (≤ 60 lines) | DP segments | DP exact | baseline | Δ |
+|---|---:|---:|---:|---:|
+| prose + diag + trace | 1 | 202 | 202 | +0 |
+| uniform diagnostics | 1 | 409 | 409 | +0 |
+| disjoint-vocab diag + rg + prose | 1 | 310 | 310 | +0 |
+| format-specific diag + rg | 1 | 751 | 751 | +0 |
+
+The honest statement, and no stronger: **the all-span additive DP found no
+segmentation that, after exact measurement, the meter prefers over
+not-segmenting** — on every span, not just the geometric grid. This is *not* a
+proven global token minimum: the path is still chosen by the additive edge
+model (`dp[i] + tok(edge) + frame`), and only the DP's own pick plus the
+baseline are exact-measured. A token-exact oracle would enumerate assembled
+artifacts, not edges; top-K assembly is the cheap step toward it, deferred
+until a real multi-segment winner exists to protect (there is none yet).
+
+**Why the negative holds on the payloads tried.** For line-based byte-exact
+codecs the arithmetic runs against segmentation: two adjacent same-format
+regions share *one* legend when kept whole, and any cut between them
+**duplicates** that legend. On every corpus and hand-built payload here the
+duplication has cost at least as much as the routing benefit — but this is an
+explanation of the measurements, not a theorem. One can imagine two adjacent
+blocks, one ideal for `diag` and one for `grep`, whose local legends are small
+and whose whole-span `tmpl` clusters are poor; we simply have not found a
+byte-exact corpus where local specialization repays the extra framing. `tmpl`
+compounds the effect — it is *already* a per-line router (each line joins its
+own Drain-style cluster) with a single global legend — and the stage-2 global
+miner is the equalizer: `deep`'s suffix automaton exploits cross-region and
+intra-line repetition that segmentation actively *hides*. Even the
+obvious-headroom case — a uniform-JSON island in a non-JSON payload — does not
+flip it: the island is one long line, and whole-payload `mine` crushes its
+internal repetition (`squeeze` 181 vs `mosaic` 197 on prose + a 12-record
+array).
+
+### Where a win could still live (deferred rungs)
+
+The apparatus is built, honest, and byte-exact; the negative is specific to the
+current byte-exact candidate set. The rungs that could change it, by promise:
+
+1. **Semantic segments (`toon` per region)** — the one place the all-span DP
+   *cannot* currently look. An embedded uniform-JSON block that only `toon`'s
+   keys-once table captures, in a payload that isn't JSON as a whole, is a
+   candidate no byte-exact codec can express. Needs a mixed byte/semantic
+   roundtrip contract (per-segment `byte`/`sem` tracking) so mosaic can host a
+   `sem` island inside a `byte` payload — the roundtrip check must go
+   per-segment. This is the first thing to build, and the all-span DP harness
+   already exists to measure it.
+2. **Top-K paths.** v1 measures the one DP path against the whole-span baseline;
+   assembling and exact-measuring the K best *additive* paths would reduce the
+   residual risk from BPE non-additivity, but it would still be a heuristic, not
+   a global token-exact search — a path with a poor additive score but a great
+   real BPE cost can miss the top-K entirely. A true token-exact optimum would
+   need either all assembled paths enumerated or a DP state that models
+   tokenizer boundary context closely enough — a different, much larger beast.
+   Deferred regardless until a real multi-segment winner exists to protect
+   (there is none yet, so it would guard nothing).
+3. **Multi-objective cost.** The paper allows any cost, not just bits. Alias-
+   dense output can cost 3–5× model *wall time* (see the A/B section); a cost
+   `tokens + λ·encode_ms + μ·ppl_penalty` would let mosaic route a hot region to
+   a cheap-to-read codec at equal tokens — a job the token-only objective can't
+   express.
+4. **`_mm_minpos_epu16` Viterbi.** Eight codec states fit one SSE register — a
+   cute fit, but pure premature optimization: span-candidate generation
+   dominates by orders of magnitude. Scalar first, benchmark, only then SIMD
+   behind runtime feature detection — if the idea ever earns a hot loop.
+
+Bottom line: mosaic is the missing *orchestration* layer, correctly built and
+honestly measured — and the finding is a well-supported negative: on every
+corpus and hand-built payload tried, for byte-exact line codecs, `tmpl`'s shared
+legend plus global `deep` already act as a near-ideal universal router, and
+region-level segmentation could not clear the legend it duplicates. The branch's
+value is now twofold: a precise, falsifiable pointer at the semantic-segment
+rung, and a standing falsification harness (`mosaic::all_span_dp`) for future
+toon-islands, real semantic boundaries, and multi-objective routing.
 
 ## Perplexity gate (`qodec ppl`) — compression = prediction, inverted
 
@@ -380,3 +550,70 @@ hostile input) through the actual `o7 judge` binary.
    in the legend's notation and expand deterministically outside the model.
    Output tokens cost ~5× input; this is where the same trick pays most, and
    nothing about the container is input-specific.
+5. **Interop bench** — qodec does not replace Graphify, CodeGraph, RTK,
+   Headroom or FastContext; it may be the last, tokenizer-aware, lossless layer
+   *after* whichever of them selected or shortened the context. The question is
+   whether residual, tokenizer-visible redundancy survives each of them, and
+   whether removing it keeps comprehension and actionability. This is a
+   *separate* evaluation harness (`qodec/evals/interop/`), reproducible-
+   experiment-first, not tool code stuffed into the crate. Three rungs: L1
+   artifact benchmark (tokens/time, no model — `run.py`), L2 reader (conditional
+   paired scoring under the served model's own tokenizer), L3 agent (tool choice
+   → patch → tests). L1 is a **real-tool vertical slice**: producers (CodeGraph
+   `explore`, RTK command-runners, fixtures) vs transforms (RTK stdin filters,
+   qodec), run against a pinned corpus repo — RTK 0.42.4 and CodeGraph 1.4.1,
+   both 100% local, pinned by version with `doctor.py --strict` and repos
+   pinned by SHA. Every artifact is saved and SHA-256'd; each arm reports
+   **cold** (notation brief + artifact) and **warm** (artifact only, brief
+   cached) gain, so a combination that only wins after dropping the mandatory
+   decoder instruction is visible as such. First measured slice (clap
+   v4.5.61, o200k): `rtk log` compresses logs so hard qodec correctly passes
+   through (the *redundant* layer); `rtk rg` and `codegraph explore` output
+   still hold residual redundancy qodec mines (warm +13…+47%, cold lower once
+   the brief is charged). RTK's transform interface is `rtk pipe --filter
+   <name>` (log/grep/git-diff/cargo-test), pinned by version **and** binary
+   SHA-256 from the exact upstream tag; a provenance finding is that tagged
+   v0.42.4 `rtk rg` is a raw passthrough (filtering landed on master after the
+   tag), reported rather than papered over with a newer binary. The Headroom
+   (bad return contract) and FastContext (a served model, not a `brief()`
+   package) adapters are **not validated** — the harness marks them
+   `unsupported`, never a lane "waiting for install". A committed, hash-verified
+   record lives at `qodec/evals/interop/results/rtk-codegraph-clap-v1/`.
+   **Level 2** runs a served model under its *own* tokenizer (`--meter
+   hf:<tokenizer.json>`, an in-process Rust `tokenizers` meter proven identical
+   to the Python library and **fail-closed** — a bad tokenizer aborts, never a
+   char-count guess). Scoring is *conditional and paired*: per question it
+   follows raw → raw+brief → encoded+brief and isolates the codec as
+   encoded+brief vs raw+brief, gating to INCONCLUSIVE (never a false pass) when
+   the reader cannot clear a 60% raw-competence bar or the eligible sample is
+   too small. Match modes (exact/exact-set/one-of/contains-all/ordered-path, no
+   basename fallback), real `call_path`/`actionability` scoring, whole-string
+   alias-leak and invalid-identifier checks, a preflight receipt, and real
+   server `prompt_tokens` accounting round it out. The 0.5B calibration run
+   (`results/l2-cpu-qwen0.5b-v1/`) came back INCONCLUSIVE (raw 16% < 60%) — the
+   weak-reader guard working. The first **decision-capable** run (Qwen2.5-Coder-
+   7B on CPU, `results/l2-cpu-qwen2.5-coder-7b-v1/`) clears the gate (raw 70%,
+   eligible 16, locator 9, all repeats stable, tokenizer parity exact) and
+   returns a real verdict: **DO NOT APPLY BLIND QODEC / change notation.**
+   Encoding *does* save cost (2769→2314 server tokens, 43→31 s) but a 7B coder
+   reads the packed CodeGraph/RTK evidence worse — codec_retention 69% overall /
+   56% locator, 5 stable losses, 2 alias leaks. Because the drop is *general*,
+   not a locator-only regression with facts/counts preserved, the next step is
+   not protected spans; it is to stop applying blind qodec to this evidence, or
+   change the notation. Two prerequisites the doc surfaced:
+   - *Done* — **the adapter/passthrough contract** (`src/adapter.rs`,
+     `encode --json --passthrough-on-no-gain`). `encode` always wraps, so blind
+     application after an already-compressing optimizer taxed dense output the
+     ~13-token container header (the −4.2% on unique prose). The adapter
+     compares artifact vs input under the live meter and passes the original
+     through untouched when there is no gain, so qodec can end any lane and
+     never worsen what reached it. The bench calls qodec through this envelope.
+   - *Next* — **protected spans** (`--protect markdown-code`,
+     `--protect-json-pointer /tool_call/id`, `--protect-regex …`): mining that
+     excludes code blocks, paths, symbol names, finding IDs, tool-call args,
+     Headroom retrieval handles and JSON control fields from candidate
+     discovery *and* substitution, leaving them verbatim in place (decode
+     unchanged, roundtrip still byte-exact). A localized but careful `mine.rs`
+     change; it gates the bench's third arm (`no qodec` / `blind qodec` /
+     `protected qodec`) and is the suspected production variant for CodeGraph
+     and Headroom output.

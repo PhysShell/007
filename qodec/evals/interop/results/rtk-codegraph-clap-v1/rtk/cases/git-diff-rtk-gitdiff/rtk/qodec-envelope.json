@@ -1,0 +1,8 @@
+{
+  "encoded": false,
+  "codec": "passthrough",
+  "content": "\nsrc/Legacy.UI/ViewModels/UserEditorViewModel.cs\n  @@ -40,7 +40,7 @@ namespace Legacy.UI.ViewModels\n  -            await _userService.SaveAsync(CurrentUser, cancellationToken);\n  +            await _userService.SaveAsync(CurrentUser, cancellationToken).ConfigureAwait(false);\n               await _auditLogger.LogAsync(\"User saved\", cancellationToken).ConfigureAwait(false);\n           }\n  +1 -1\n\nsrc/Legacy.UI/ViewModels/ReportViewModel.cs\n  @@ -41,9 +41,9 @@ namespace Legacy.UI.ViewModels\n  -            var report = _reportService.Generate(criteria).GetAwaiter().GetResult();\n  +            var report = await _reportService.GenerateAsync(criteria, cancellationToken).ConfigureAwait(false);\n               Report = report;\n  -            OnPropertyChanged(nameof(Report));\n  +            OnPropertyChanged(nameof(Report));\n           }\n  +2 -2\n\nsrc/Legacy.Core/Services/ReportService.cs\n  @@ -50,6 +50,12 @@ namespace Legacy.Core.Services\n  +\n  +        public async Task<Report> GenerateAsync(ReportCriteria criteria, CancellationToken cancellationToken)\n  +        {\n  +            var rows = await _repository.QueryAsync(criteria, cancellationToken).ConfigureAwait(false);\n  +            return BuildReport(criteria, rows);\n  +        }\n       }\n   }\n  +6 -0",
+  "tokens_in": 289,
+  "tokens_out": 289,
+  "meter": "o200k"
+}

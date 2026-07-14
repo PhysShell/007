@@ -1,0 +1,14 @@
+Log Summary
+   [error] 3 errors (3 unique)
+   [warn] 9 warnings (3 unique)
+   [info] 0 info messages
+
+[ERRORS]
+   C:\build\src\Legacy.UI\ViewModels\UserEditorViewModel.cs(198,22): error CS1061: 'UserSession' doe...
+       2 Error(s)
+   C:\build\src\Legacy.UI\ViewModels\UserEditorViewModel.cs(142,38): error CS1061: 'UserSession' doe...
+
+[WARNINGS]
+   [×5]   CSC : warning CS8618: Non-nullable property 'CurrentUser' must contain a non-null value when ex...
+   [×3]   warning MSB3277: Found conflicts between different versions of "DevExpress.Xpf.Core" that could...
+       7 Warning(s)

@@ -3,6 +3,7 @@
 //! record and measured results.
 
 pub mod ab;
+pub mod adapter;
 pub mod alias;
 pub mod bench;
 pub mod container;
@@ -12,6 +13,7 @@ pub mod grep;
 pub mod legend;
 pub mod meter;
 pub mod mine;
+pub mod mosaic;
 pub mod ppl;
 pub mod profile;
 pub mod rank;
@@ -50,6 +52,32 @@ pub enum CodecKind {
     /// `fold`/`grep`/`diag`/`tmpl` (text), then the better of the two
     /// miners over the result.
     Squeeze,
+    /// Measured optimal segmentation: cut the payload at line boundaries and
+    /// route each region to the cheapest structural codec (shortest path over
+    /// span candidates), then mine the whole assembled artifact. The
+    /// orchestration layer above the specialized codecs. See `mosaic.rs`.
+    Mosaic,
+    /// Eval-only. A `%q1 identity` container: byte-identical body, no alias, no
+    /// structural transform. Isolates the `%q1` framing itself (the ablation I
+    /// arm). alias=off, structural=off.
+    Identity,
+    /// Eval-only. Structural folding/grouping ONLY — the measured cheaper of
+    /// `fold`/`grep`, with full verbatim paths and no glyph aliases (the F arm).
+    /// alias=off, structural=on.
+    Structural,
+    /// Eval-only. The VERBATIM structural shelf (fold/grep only — NOT the full
+    /// production squeeze shelf of toon/diag/tmpl) followed by a guarded mine
+    /// that never aliases paths / code spans / `::`,snake,Camel identifiers /
+    /// grep markers. This is the ablation VG arm; it is NOT "guarded squeeze",
+    /// because it also drops diag/tmpl/toon. Production `squeeze` is untouched.
+    FoldGrepGuarded,
+    /// Eval-only. Production squeeze's stage 1 ONLY (`squeeze_stage1`), no mine —
+    /// the S arm. Isolates the production structural stage from the mining.
+    SqueezeStage1,
+    /// Eval-only. Production stage 1 + a GUARDED mine/deep — the SG arm, the true
+    /// "guarded squeeze". It shares the exact stage-1 artifact with `squeeze`
+    /// (== SM), so SM and SG differ ONLY in the mine's lexical guard.
+    SqueezeMineGuarded,
 }
 
 impl CodecKind {
@@ -63,6 +91,12 @@ impl CodecKind {
             "diag" => Some(Self::Diag),
             "tmpl" => Some(Self::Tmpl),
             "squeeze" => Some(Self::Squeeze),
+            "mosaic" => Some(Self::Mosaic),
+            "identity" => Some(Self::Identity),
+            "structural" => Some(Self::Structural),
+            "fold-grep-guarded" => Some(Self::FoldGrepGuarded),
+            "squeeze-stage1" => Some(Self::SqueezeStage1),
+            "squeeze-mine-guarded" => Some(Self::SqueezeMineGuarded),
             _ => None,
         }
     }
@@ -77,6 +111,12 @@ impl CodecKind {
             Self::Diag => "diag",
             Self::Tmpl => "tmpl",
             Self::Squeeze => "squeeze",
+            Self::Mosaic => "mosaic",
+            Self::Identity => "identity",
+            Self::Structural => "structural",
+            Self::FoldGrepGuarded => "fold-grep-guarded",
+            Self::SqueezeStage1 => "squeeze-stage1",
+            Self::SqueezeMineGuarded => "squeeze-mine-guarded",
         }
     }
 }
@@ -136,39 +176,84 @@ pub fn encode_seeded(
         CodecKind::Grep => grep::encode(text, meter),
         CodecKind::Diag => diag::encode(text, meter),
         CodecKind::Tmpl => tmpl::encode_seeded(text, meter, &seeds.templates),
-        CodecKind::Squeeze => {
-            let stage1 = if serde_json::from_str::<serde_json::Value>(text).is_ok() {
-                let tooned = toon::encode(text, meter);
-                // toon may fall back on non-table JSON — pretty-printed JSON
-                // with repeated lines can still benefit from the text shapes.
-                if container::parse(&tooned)
-                    .ok()
-                    .is_none_or(|c| c.codec == "raw")
-                {
-                    best_text_stage(text, meter, &seeds.templates)
-                } else {
-                    tooned
-                }
-            } else {
-                best_text_stage(text, meter, &seeds.templates)
+        CodecKind::Squeeze => squeeze_encode(text, meter, &seeds.templates, &mine_opts, &deep_opts),
+        CodecKind::FoldGrepGuarded => {
+            // VG: the VERBATIM structural stage (fold/grep only — never the
+            // alias-legend codecs tmpl/diag), then a guarded mine so no generic
+            // lexical span is ever aliased by either stage. squeeze is untouched.
+            let guarded = MineOptions {
+                alphabet,
+                seeds: seeds.phrases.clone(),
+                ranker: seeds.ranker.clone(),
+                probe_budget: seeds.probe_budget.unwrap_or(defaults.probe_budget),
+                guard_lexical: true,
+                ..MineOptions::default()
             };
-            // Mine over the full stage-1 container (headers, legends, rows —
-            // repeated paths inside cells are fair game); keep whichever
-            // miner measures cheaper.
-            let stage2 = [
-                mine::encode(&stage1, meter, &mine_opts),
-                mine::encode(&stage1, meter, &deep_opts),
-            ]
-            .into_iter()
-            .min_by_key(|artifact| meter.count(artifact))
-            .unwrap_or_else(|| stage1.clone());
-            let best = if meter.count(&stage2) < meter.count(&stage1) {
-                stage2
-            } else {
-                stage1
+            let guarded_deep = MineOptions {
+                alphabet,
+                miner: MinerKind::Deep,
+                seeds: seeds.phrases.clone(),
+                ranker: seeds.ranker.clone(),
+                probe_budget: seeds.probe_budget.unwrap_or(defaults.probe_budget),
+                guard_lexical: true,
+                ..MineOptions::default()
             };
-            // Final acceptance vs the *original* — mining a raw container's
-            // overhead can beat stage1 while still losing to the input.
+            let stage1 = structural_stage(text, meter);
+            let best = mine_over(&stage1, meter, &guarded, &guarded_deep);
+            if meter.count(&best) < meter.count(text) {
+                best
+            } else {
+                container::raw(text)
+            }
+        }
+        CodecKind::SqueezeStage1 => squeeze_stage1(text, meter, &seeds.templates),
+        CodecKind::SqueezeMineGuarded => {
+            // SG: production stage 1 (shared code) + a GUARDED mine. Same stage-1
+            // artifact as squeeze/SM, so SM and SG differ only in the guard.
+            let guarded = MineOptions {
+                alphabet,
+                seeds: seeds.phrases.clone(),
+                ranker: seeds.ranker.clone(),
+                probe_budget: seeds.probe_budget.unwrap_or(defaults.probe_budget),
+                guard_lexical: true,
+                ..MineOptions::default()
+            };
+            let guarded_deep = MineOptions {
+                alphabet,
+                miner: MinerKind::Deep,
+                seeds: seeds.phrases.clone(),
+                ranker: seeds.ranker.clone(),
+                probe_budget: seeds.probe_budget.unwrap_or(defaults.probe_budget),
+                guard_lexical: true,
+                ..MineOptions::default()
+            };
+            let stage1 = squeeze_stage1(text, meter, &seeds.templates);
+            let best = mine_over(&stage1, meter, &guarded, &guarded_deep);
+            if meter.count(&best) < meter.count(text) {
+                best
+            } else {
+                container::raw(text)
+            }
+        }
+        CodecKind::Identity => container::identity(text),
+        CodecKind::Structural => {
+            // Structural folding/grouping only — no mine stage, verbatim content.
+            let stage = structural_stage(text, meter);
+            if meter.count(&stage) < meter.count(text) {
+                stage
+            } else {
+                container::raw(text)
+            }
+        }
+        CodecKind::Mosaic => {
+            // Stage 1: route each region to its cheapest structural codec via a
+            // measured shortest path. Stage 2 (shared with squeeze): mine the
+            // whole assembled mosaic — repeated nested `%q1` headers and legend
+            // fragments across siblings are fair game. Final acceptance is the
+            // exact meter vs the original, so an approximate DP path can only
+            // waste probes, never bytes.
+            let stage1 = mosaic::encode_seeded(text, meter, &seeds.templates);
+            let best = mine_over(&stage1, meter, &mine_opts, &deep_opts);
             if meter.count(&best) < meter.count(text) {
                 best
             } else {
@@ -176,6 +261,80 @@ pub fn encode_seeded(
             }
         }
     }
+}
+
+/// Production squeeze's EXACT stage-1 selection: `toon` for table-shaped JSON,
+/// otherwise the measured best of fold/grep/diag/tmpl. This is the one place the
+/// selection lives, so the eval `squeeze-stage1` (S) and `squeeze-mine-guarded`
+/// (SG) arms share production's code rather than a copy — an SG built on this and
+/// an SM (== squeeze) built on this differ only in the mine guard.
+pub fn squeeze_stage1(text: &str, meter: &dyn TokenMeter, templates: &[Vec<String>]) -> String {
+    if serde_json::from_str::<serde_json::Value>(text).is_ok() {
+        let tooned = toon::encode(text, meter);
+        if container::parse(&tooned).ok().is_none_or(|c| c.codec == "raw") {
+            best_text_stage(text, meter, templates)
+        } else {
+            tooned
+        }
+    } else {
+        best_text_stage(text, meter, templates)
+    }
+}
+
+/// Squeeze's full pipeline (production stage-1 via `squeeze_stage1` + mine),
+/// shared by `squeeze` and `squeeze-mine-guarded` (SM/SG — same stage-1, the
+/// guarded arm passes guarded mine options). NOTE: `fold-grep-guarded` (VG) does
+/// NOT use this — it runs `structural_stage` (fold/grep only). Kept byte-for-byte
+/// identical to the original inline body so production `squeeze` is unchanged.
+fn squeeze_encode(
+    text: &str,
+    meter: &dyn TokenMeter,
+    templates: &[Vec<String>],
+    mine_opts: &MineOptions,
+    deep_opts: &MineOptions,
+) -> String {
+    let stage1 = squeeze_stage1(text, meter, templates);
+    let best = mine_over(&stage1, meter, mine_opts, deep_opts);
+    if meter.count(&best) < meter.count(text) {
+        best
+    } else {
+        container::raw(text)
+    }
+}
+
+/// Shared stage-2 for the pipeline codecs: mine the assembled container with
+/// both miners and keep whichever measures strictly cheaper than the input
+/// container (mining a raw container's overhead can otherwise "win" while
+/// losing to the plain stage-1).
+fn mine_over(
+    stage1: &str,
+    meter: &dyn TokenMeter,
+    mine_opts: &MineOptions,
+    deep_opts: &MineOptions,
+) -> String {
+    let stage2 = [
+        mine::encode(stage1, meter, mine_opts),
+        mine::encode(stage1, meter, deep_opts),
+    ]
+    .into_iter()
+    .min_by_key(|artifact| meter.count(artifact))
+    .unwrap_or_else(|| stage1.to_string());
+    if meter.count(&stage2) < meter.count(stage1) {
+        stage2
+    } else {
+        stage1.to_string()
+    }
+}
+
+/// Verbatim structural stage for the ablation F / GF arms: the measured cheaper
+/// of `fold` / `grep` ONLY. Excludes `diag`/`tmpl`, which substitute via an
+/// alias legend — factor purity (no aliasing) over compression ratio. Both fold
+/// and grep keep paths and identifiers verbatim.
+fn structural_stage(text: &str, meter: &dyn TokenMeter) -> String {
+    [fold::encode(text, meter), grep::encode(text, meter)]
+        .into_iter()
+        .min_by_key(|artifact| meter.count(artifact))
+        .unwrap_or_else(|| container::raw(text))
 }
 
 /// Squeeze's text stage: every structural text codec is one linear pass
@@ -213,12 +372,31 @@ pub fn decode_once(text: &str) -> Result<String> {
 fn decode_container(c: &container::Container, keys: &Keys<'_>) -> Result<String> {
     match c.codec.as_str() {
         "raw" => Ok(c.body.clone()),
+        "identity" => Ok(c.body.clone()),
         "mine" => mine::decode(c),
         "fold" => fold::decode(c),
         "toon" => toon::decode(c),
         "grep" => grep::decode(c),
         "diag" => diag::decode(c),
         "tmpl" => tmpl::decode(c, keys.templates),
+        "mosaic" => {
+            // Each segment is a single-layer container by construction, so
+            // decode exactly one layer per segment — no `decode_all` loop,
+            // which keeps mosaic from amplifying the already-container-shaped
+            // over-unwrap caveat across many siblings.
+            let mut out = String::new();
+            for seg in mosaic::split(c)? {
+                let inner = container::parse(&seg)?;
+                if inner.codec == "mosaic" {
+                    // v1 segments are single structural layers by construction;
+                    // a hand-built nested mosaic could otherwise recurse a
+                    // decoder to stack exhaustion. Refuse it outright.
+                    bail!("mosaic: nested mosaic segments are unsupported");
+                }
+                out.push_str(&decode_container(&inner, keys)?);
+            }
+            Ok(out)
+        }
         "ext" => bail!(
             "artifact was encoded against an extern legend — decode with \
              --extern-legend <file> (sum={})",

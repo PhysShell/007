@@ -1,0 +1,1054 @@
+{
+  "dossiers": [
+    {
+      "alias_stats": {
+        "alias_count": 1,
+        "alias_density_per_kchar": 2.5316,
+        "legend_size": 1
+      },
+      "answers": [
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "3",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "answer_sha256": "024383c4038789ff385ae6af008cddf7077d4bd69ba3d06cc81195b0d283f090",
+          "arm": "raw",
+          "completion_tokens": 30,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 27623.813130000144,
+          "malformed": false,
+          "prompt_tokens": 321,
+          "repeat": 0,
+          "request_sha256": "6d67b9b7279ddb9adeb1708434edb827733a11eb86a188070bd5e8ba9b4a8f7f"
+        },
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "3",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "answer_sha256": "024383c4038789ff385ae6af008cddf7077d4bd69ba3d06cc81195b0d283f090",
+          "arm": "raw+brief",
+          "completion_tokens": 30,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 37961.592108000106,
+          "malformed": false,
+          "prompt_tokens": 583,
+          "repeat": 0,
+          "request_sha256": "1a651e01abd5e9fa185bb53b8a8aab2359646e9dd7004c2de3fee82388d82bcb"
+        },
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "3",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "answer_sha256": "024383c4038789ff385ae6af008cddf7077d4bd69ba3d06cc81195b0d283f090",
+          "arm": "encoded+brief",
+          "completion_tokens": 30,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 19656.220631999986,
+          "malformed": false,
+          "prompt_tokens": 582,
+          "repeat": 0,
+          "request_sha256": "50ac8284ef2ce6ab4befaa77c81c570fb62bf5196df5bea99783a578480f57d4"
+        }
+      ],
+      "cost": {
+        "encoded_prompt_tokens": 582,
+        "raw_brief_prompt_tokens": 583
+      },
+      "diff_stats": {
+        "added": 6,
+        "removed": 2
+      },
+      "gold_diff_hunks": [
+        "    [error] 3 errors (3 unique)",
+        "-   C:\\build\\src\\Legacy.UI\\ViewModels\\UserEditorViewModel.cs(142,38): error CS1061: 'UserSession' doe...",
+        "+码|42,38",
+        "@@ -13,2 +16,3 @@",
+        "    [×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could..."
+      ],
+      "identity": {
+        "case": "build-log-rtk-log",
+        "category": "count",
+        "field": "answer",
+        "gold": [
+          "3"
+        ],
+        "match_mode": "exact",
+        "model": "qwen2.5-coder-7b-instruct",
+        "qodec": "sha256:07ff3a94830c",
+        "question_id": "n-errors",
+        "question_text": "How many errors does this build log report? Put the integer in \"answer\".",
+        "records_sha256": "18e1afcba6f34c987e1cc78a6b7e107253f6df697a7a979591574db13e157aea",
+        "source_commit": "0b76e64",
+        "source_run": "cpu-qwen2.5-coder-7b",
+        "tokenizer_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539"
+      },
+      "kind": "control",
+      "prompt_evidence": {
+        "alias_dictionary": {
+          "码": "   C:\\build\\src\\Legacy.UI\\ViewModels\\UserEditorViewModel.cs(1¿): error CS1061: 'UserSession' doe..."
+        },
+        "encoded_artifact": "%q1 tmpl sep=pipe slot=quest n=1 nl=0\n码=   C:\\build\\src\\Legacy.UI\\ViewModels\\UserEditorViewModel.cs(1¿): error CS1061: 'UserSession' doe...\n%q1 body\nLog Summary\n   [error] 3 errors (3 unique)\n   [warn] 9 warnings (3 unique)\n   [info] 0 info messages\n\n[ERRORS]\n码|98,22\n       2 Error(s)\n码|42,38\n\n[WARNINGS]\n   [×5]   CSC : warning CS8618: Non-nullable property 'CurrentUser' must contain a non-null value when ex...\n   [×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could...\n       7 Warning(s)\n",
+        "notation_brief": "The payload is encoded as a `%q1` container. Format: first line\n`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`\n(each alias is a short stand-in for that exact phrase), then a\n`%q1 body` line, then the body. `%q1 xN` after a line means that line\noccurs N times in total. A `toon` body is a table: first line is a JSON\narray of keys, each following line is one object, cells are JSON values\njoined by the separator named in the header. A `grep` body is grouped\nmatcher output: a marker line names a file path and the lines after it\nare `line:text` hits in that file (a bare marker starts verbatim\nlines). A `diag` body line starting with an alias expands to: the head\nafter the alias, then that alias's legend template with each slot\nplaceholder filled by the sep-joined values in order. A `tmpl` body\nline starting with an alias is its legend template with the slot\nplaceholders filled by the sep-joined values that follow the alias.\nMentally decode the body via the legend before answering; never emit\nalias characters in answers.",
+        "question_suffix": "QUESTION: How many errors does this build log report? Put the integer in \"answer\".\n\nRespond with the JSON object only.",
+        "raw_tool_payload": "Log Summary\n   [error] 3 errors (3 unique)\n   [warn] 9 warnings (3 unique)\n   [info] 0 info messages\n\n[ERRORS]\n   C:\\build\\src\\Legacy.UI\\ViewModels\\UserEditorViewModel.cs(198,22): error CS1061: 'UserSession' doe...\n       2 Error(s)\n   C:\\build\\src\\Legacy.UI\\ViewModels\\UserEditorViewModel.cs(142,38): error CS1061: 'UserSession' doe...\n\n[WARNINGS]\n   [×5]   CSC : warning CS8618: Non-nullable property 'CurrentUser' must contain a non-null value when ex...\n   [×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could...\n       7 Warning(s)",
+        "system_prompt": "You are a precise code-context reader. Answer ONLY about the provided text. Reply with a single JSON object and nothing else, using exactly these keys: {\"facts\": [], \"files\": [], \"symbols\": [], \"call_path\": [], \"answer\": \"\"}. Put integers as strings in \"answer\". Use exact identifiers and full paths copied verbatim from the text; never invent or abbreviate names. Do not include any decoding notation or alias glyphs in your answer.",
+        "used_aliases": [
+          "码"
+        ]
+      },
+      "retained": true,
+      "span_analysis": {
+        "count_checks": {
+          "competing_count_line": null,
+          "competing_count_value": null,
+          "gold_count": "3",
+          "gold_count_line_in_artifact": "[error] 3 errors (3 unique)",
+          "gold_count_preserved_verbatim": true,
+          "repetition_marker_lines": [
+            "[×5]   CSC : warning CS8618: Non-nullable property 'CurrentUser' must contain a non-null value when ex...",
+            "[×3]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could..."
+          ],
+          "repetition_markers_present": true
+        },
+        "gold_spans": [
+          {
+            "aliases": [],
+            "fate": "preserved_verbatim",
+            "span": "3"
+          }
+        ]
+      }
+    },
+    {
+      "alias_stats": {
+        "alias_count": 41,
+        "alias_density_per_kchar": 4.2351,
+        "legend_size": 41
+      },
+      "answers": [
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "Parser"
+            ]
+          },
+          "answer_sha256": "f26866055f6407ce4b7371c3bf19f00bb5ce9e200509c78d9dd9b9281b56070f",
+          "arm": "raw",
+          "completion_tokens": 30,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 9754.271208999853,
+          "malformed": false,
+          "prompt_tokens": 4513,
+          "repeat": 0,
+          "request_sha256": "576a65d17f1764a884a9b87bb118979c8aaf5c76f4f7bce80ef8967abee688bf"
+        },
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "Parser"
+            ]
+          },
+          "answer_sha256": "f26866055f6407ce4b7371c3bf19f00bb5ce9e200509c78d9dd9b9281b56070f",
+          "arm": "raw+brief",
+          "completion_tokens": 30,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 9922.100238999974,
+          "malformed": false,
+          "prompt_tokens": 4775,
+          "repeat": 0,
+          "request_sha256": "a89e774ab81cd54603859da60f92cf570cb9138b7f3305a2b04cec3e53dc184c"
+        },
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "Parser",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "Parser"
+            ]
+          },
+          "answer_sha256": "0c6a41830ec7647c2700ae1e798b22ee0eca02ac00ca13bf960e9e7b2cbc97b5",
+          "arm": "encoded+brief",
+          "completion_tokens": 32,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 9860.273667000001,
+          "malformed": false,
+          "prompt_tokens": 4230,
+          "repeat": 0,
+          "request_sha256": "ed874311f0d835f496df7e1c83e5e02f7d5ae81992856866eb033d0e602efb6c"
+        }
+      ],
+      "cost": {
+        "encoded_prompt_tokens": 4230,
+        "raw_brief_prompt_tokens": 4775
+      },
+      "diff_stats": {
+        "added": 323,
+        "removed": 278
+      },
+      "gold_diff_hunks": [
+        "+路=\t            ValueParserInner::",
+        "+错=ValueParser",
+        "-- `ValueParser` (clap_builder/src/builder/value_parser.rs:63) — 8 callers in `clap_builder/src/builder/mod.rs`, `clap_builder/src/builder/action.rs`, `clap_builder/src/builder/arg.rs`, `clap_builder/src/builder/command.rs` +1 more; ⚠️ no covering tests found",
+        "-- `MapValueParser` (clap_builder/src/builder/value_parser.rs:2014) — 2 callers in `clap_builder/src/builder/mod.rs`, `clap_builder/src/builder/value_parser.rs`; ⚠️ no covering tests found",
+        "-- `AnyValueParser` (clap_builder/src/builder/value_parser.rs:591) — 3 callers in `clap_builder/src/builder/value_parser.rs`; ⚠️ no covering tests found",
+        " 29\tpub trait Parser: FromArgMatches + CommandFactory + Sized {",
+        " 316\timpl<T: Parser> Parser for Box<T> {",
+        "-318\t        Box::new(<T as Parser>::parse())",
+        "+31块    Box::new(<T as Parser>::parse())",
+        "-322\t        <T as Parser>::try_parse().map(Box::new)",
+        "+32例<T as Parser>::try_parse().map(Box::new)",
+        "-91\t            \"value_parser\" => Some(MagicAttrName::ValueParser),",
+        "-148\t    ValueParser,",
+        "-**`clap_builder/src/builder/value_parser.rs`** — calls(calls), ValueParser(struct), ValueParserInner(enum), from(method), references(references), fmt(method), +10 more",
+        "-63\tpub struct ValueParser(ValueParserInner);",
+        "-65\tenum ValueParserInner {",
+        "-74\t    Other(Box<dyn AnyValueParser>),",
+        "-77\timpl ValueParser {",
+        "-561\t        let inner = PossibleValuesParser::from(values);",
+        "+56串    let inner = PossibleValuesParser::from(values);",
+        "-566\timpl std::fmt::Debug for ValueParser {",
+        "-569\t            ValueParserInner::Bool => f.debug_struct(\"ValueParser::bool\").finish(),",
+        "-570\t            ValueParserInner::String => f.debug_struct(\"ValueParser::string\").finish(),",
+        "-571\t            ValueParserInner::OsString => f.debug_struct(\"ValueParser::os_string\").finish(),",
+        "-572\t            ValueParserInner::PathBuf => f.debug_struct(\"ValueParser::path_buf\").finish(),",
+        "-573\t            ValueParserInner::Other(o) => write!(f, \"ValueParser::other({:?})\", o.type_id()),",
+        "-578\timpl Clone for ValueParser {",
+        "-581\t            ValueParserInner::Bool => ValueParserInner::Bool,",
+        "-582\t            ValueParserInner::String => ValueParserInner::String,",
+        "-583\t            ValueParserInner::OsString => ValueParserInner::OsString,",
+        "-584\t            ValueParserInner::PathBuf => ValueParserInner::PathBuf,",
+        "-585\t            ValueParserInner::Other(o) => ValueParserInner::Other(o.clone_any()),",
+        "-590\t/// A type-erased wrapper for [`TypedValueParser`].",
+        "-591\ttrait AnyValueParser: Send + Sync + 'static {",
+        "-616\t    fn clone_any(&self) -> Box<dyn AnyValueParser>;",
+        "-619\timpl<T, P> AnyValueParser for P",
+        "-1079\tpub struct EnumValueParser<E: crate::ValueEnum + Clone + Send + Sync + 'static>(",
+        "-1083\timpl<E: crate::ValueEnum + Clone + Send + Sync + 'static> EnumValueParser<E> {",
+        "-1674\t/// Useful for composing new [`TypedValueParser`]s",
+        "-1677\tpub struct BoolValueParser {}"
+      ],
+      "identity": {
+        "case": "clap-derive-explore",
+        "category": "locator",
+        "field": "symbols",
+        "gold": [
+          "Parser"
+        ],
+        "match_mode": "one-of",
+        "model": "qwen2.5-coder-7b-instruct",
+        "qodec": "sha256:07ff3a94830c",
+        "question_id": "trait",
+        "question_text": "Name the public trait whose parse() method source is shown. Put it in \"symbols\".",
+        "records_sha256": "18e1afcba6f34c987e1cc78a6b7e107253f6df697a7a979591574db13e157aea",
+        "source_commit": "0b76e64",
+        "source_run": "cpu-qwen2.5-coder-7b",
+        "tokenizer_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539"
+      },
+      "kind": "control",
+      "prompt_evidence": {
+        "alias_dictionary": {
+          "串": "1\t    ",
+          "件": "\t    pub(crate) ",
+          "例": "2\t        ",
+          "值": "\t            \"",
+          "函": "\t            } else if attr.path().is_ident(\"",
+          "列": "crate::ValueEnum + Clone + Send + Sync +",
+          "包": "4\t        ",
+          "名": "⚠️ no covering tests found",
+          "告": "库        ",
+          "图": "/// Parse from `std::env::args_os()`,",
+          "块": "8\t    ",
+          "层": "错Inner::",
+          "帧": "\t            Self::",
+          "常": "/// Build a [`Command`] that can",
+          "库": "5\t    ",
+          "建": " as CommandFactory>::command",
+          "异": "_t码DefaultValue",
+          "引": "clap_builder/src/builder/",
+          "态": "`引value_parser.rs`; 名",
+          "数": "f.debug_struct(\"错::",
+          "构": "0\t        ",
+          "查": "crate::",
+          "标": "\t    fn ",
+          "树": "6\t        ",
+          "测": "Some(AttrValue::",
+          "点": "3\t        ",
+          "版": "(method), ",
+          "码": "\" => Some(MagicAttrName::",
+          "类": "Sp::new(AttrKind::",
+          "组": ", attr.path().span())",
+          "节": "7\t    ",
+          "行": "value: &std::ffi::OsStr,",
+          "表": "9\t    ",
+          "警": "表        ",
+          "记": "\t    // Common enough to optimize",
+          "试": "... (gap) ...",
+          "路": "\t            ValueParserInner::",
+          "边": ") -> Result<",
+          "链": "#[derive(Copy, Clone,",
+          "错": "ValueParser",
+          "键": "(引value_parser.rs:"
+        },
+        "encoded_artifact": "%q1 mine n=41\n码=\" => Some(MagicAttrName::\n引=clap_builder/src/builder/\n路=\t            ValueParserInner::\n类=Sp::new(AttrKind::\n函=\t            } else if attr.path().is_ident(\"\n值=\t            \"\n错=ValueParser\n试=... (gap) ...\n帧=\t            Self::\n件=\t    pub(crate) \n组=, attr.path().span())\n标=\t    fn \n记=\t    // Common enough to optimize\n链=#[derive(Copy, Clone,\n节=7\t    \n名=⚠️ no covering tests found\n块=8\t    \n数=f.debug_struct(\"错::\n图=/// Parse from `std::env::args_os()`,\n列=crate::ValueEnum + Clone + Send + Sync +\n键=(引value_parser.rs:\n层=错Inner::\n表=9\t    \n串=1\t    \n行=value: &std::ffi::OsStr,\n树=6\t        \n点=3\t        \n边=) -> Result<\n库=5\t    \n包=4\t        \n版=(method), \n构=0\t        \n建= as CommandFactory>::command\n测=Some(AttrValue::\n例=2\t        \n警=表        \n告=库        \n异=_t码DefaultValue\n常=/// Build a [`Command`] that can\n态=`引value_parser.rs`; 名\n查=crate::\n%q1 body\n%q1 raw\n%q1 body\n**Exploration: How does clap parse arguments against a derived command definition?**\n\nFound 56 symbols across 3 files.\n\n**Blast radius — what depends on these (update/verify before editing)**\n\n- `错` 键63) — 8 callers in `引mod.rs`, `引action.rs`, `引arg.rs`, `引command.rs` +1 more; 名\n- `Map错` 键2014) — 2 callers in `引mod.rs`, 态\n- `Any错` 键591) — 3 callers in 态\n\n**Source Code**\n\n> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.\n\n**`clap_builder/src/derive.rs`** — parse版calls(calls), command版Command(references)\n\n```rust\n28\t/// </div>\n29\tpub trait Parser: FromArgMatches + CommandFactory + Sized {\n30\t    图 [exit][Error::exit] on error.\n31标parse() -> Self {\n3例let mut matches = <Self建().get_matches();\n3点let res = <Self as FromArgMatches>::from_arg_matches_mut(&mut matches)\n3包    .map_err(format_error::<Self>);\n3库    match res {\n3树    Ok(s) => s,\n3节        Err(e) => {\n3块            // Since this is more of a development-time error, we aren't doing as fancy of a quit\n3警    // as `get_matches`\n4构        e.exit()\n4串        }\n4例}\n43\t    }\n44\t\n4库图 return Err on error.\n46标try_parse(边Self, Error> {\n\n试\n\n11节常 instantiate `Self`.\n11块///\n11表/// See [`FromArgMatches::from_arg_matches_mut`] for instantiating `Self`.\n120标command() -> Command;\n12串常 update `self`.\n122\t    ///\n123\t    /// See [`FromArgMatches::update_from_arg_matches_mut`] for updating `self`.\n\n试\n\n314\t}\n315\t\n316\timpl<T: Parser> Parser for Box<T> {\n317标parse() -> Self {\n31块    Box::new(<T as Parser>::parse())\n31表}\n320\t\n321标try_parse(边Self, Error> {\n32例<T as Parser>::try_parse().map(Box::new)\n\n试\n\n340\t}\n341\t\n342\timpl<T: CommandFactory> CommandFactory for Box<T> {\n343标command() -> Command {\n34包<T建()\n34库}\n346标command_for_update() -> Command {\n34节    <T建_for_update()\n34块}\n```\n\n**`clap_derive/src/attr.rs`** — parse版ClapAttr(struct), as_str版parse_all版value_or_abort版lit_str_or_abort版+4 more\n\n```rust\n1\tuse std::iter::FromIterator;\n2\t\n3\tuse proc_macro2::TokenStream;\n4\tuse quote::quote;\n5\tuse quote::ToTokens;\n6\tuse syn::spanned::Spanned;\n7\tuse syn::{\n块parenthesized,\n表parse::{Parse, ParseStream},\n10\t    punctuated::Punctuated,\n1串Attribute, Expr, Ident, LitStr, Token,\n12\t};\n13\t\n14\tuse 查utils::Sp;\n15\t\n16\t#[derive(Clone)]\n17\tpub(crate) struct ClapAttr {\n18件kind: Sp<AttrKind>,\n19件name: Ident,\n20件magic: Option<MagicAttrName>,\n21件value: Option<AttrValue>,\n22\t}\n23\t\n24\timpl ClapAttr {\n25件fn parse_all(all_attrs: &[Attribute]边Vec<Self>, syn::Error> {\n2树let mut parsed = Vec::new();\n2节    for attr in all_attrs {\n2块        let kind = if attr.path().is_ident(\"clap\") {\n2警    类Clap组\n30函structopt\") {\n3串            类StructOpt组\n32函command\") {\n3点        类Command组\n34函group\") {\n3告    类Group组\n36函arg\") {\n3节            类Arg组\n38函value\") {\n3警    类Value组\n4构    } else {\n4串            continue;\n4例    };\n4点    for mut attr in\n4包        attr.parse_args_with(Punctuated::<ClapAttr, Token![,]>::parse_terminated)?\n4告{\n4树        attr.kind = kind;\n4节            parsed.push(attr);\n4块        }\n4表    }\n5构Ok(parsed)\n5串}\n52\t\n53件fn value_or_abort(&self边&AttrValue, syn::Error> {\n5包self.value\n5告.as_ref()\n5树    .ok_or_else(|| format_err!(self.name, \"attribute `{}` requires a value\", self.name))\n5节}\n58\t\n59件fn lit_str_or_abort(&self边&LitStr, syn::Error> {\n6构let value = self.value_or_abort()?;\n6串    match value {\n6例    AttrValue::LitStr(tokens) => Ok(tokens),\n6点    AttrValue::Expr(_) | AttrValue::Call(_) => {\n6包        abort!(\n6告        self.name,\n6树            \"attribute `{}` can only accept string literals\",\n6节                self.name\n6块            )\n6警}\n7构}\n7串}\n72\t}\n73\t\n74\timpl Parse for ClapAttr {\n75标parse(input: ParseStream<'_>) -> syn::Result<Self> {\n7树let name: Ident = input.parse()?;\n7节    let name_str = name.to_string();\n78\t\n7表    let magic = match name_str.as_str() {\n80值rename_all码RenameAll),\n81值rename_all_env码RenameAllEnv),\n82值skip码Skip),\n83值next_display_order码NextDisplayOrder),\n84值next_help_heading码NextHelpHeading),\n85值default_value异T),\n86值default_values异sT),\n87值default_value_os异OsT),\n88值default_values_os异sOsT),\n89值long码Long),\n90值short码Short),\n91值value_parser码错),\n92值action码Action),\n93值env码Env),\n94值flatten码Flatten),\n95值value_enum码ValueEnum),\n96值from_global码FromGlobal),\n97值subcommand码Subcommand),\n98值external_subcommand码ExternalSubcommand),\n99值verbatim_doc_comment码VerbatimDocComment),\n100值about码About),\n101值long_about码LongAbout),\n102值long_help码LongHelp),\n103值author码Author),\n104值version码Version),\n10告_ => None,\n10树};\n107\t\n10块    let value = if input.peek(Token![=]) {\n10警// `name = value` attributes.\n11构    let assign_token = input.parse::<Token![=]>()?; // skip '='\n11串        if input.peek(LitStr) {\n11例        let lit: LitStr = input.parse()?;\n11点        测LitStr(lit))\n11包    } else {\n11告    match input.parse::<Expr>() {\n11树            Ok(expr) => 测Expr(expr)),\n117\t\n11块                Err(_) => abort! {\n11警            assign_token,\n12构                \"expected `string literal` or `expression` after `=`\"\n12串                },\n12例        }\n12点    }\n12包} else if input.peek(syn::token::Paren) {\n12告// `name(...)` attributes.\n12树    let nested;\n12节        parenthesized!(nested in input);\n128\t\n12警let method_args: Punctuated<_, _> = nested.parse_terminated(Expr::parse, Token![,])?;\n13构    测Call(Vec::from_iter(method_args)))\n13串    } else {\n13例    None\n13点};\n134\t\n13库    Ok(Self {\n13树    kind: 类Clap, name.span()),\n13节        name,\n13块        magic,\n13警value,\n14构})\n14串}\n142\t}\n143\t\n144\t链 PartialEq, Eq)]\n145\tpub(crate) enum MagicAttrName {\n146\t    Short,\n14节Long,\n14块错,\n14表Action,\n150\t    Env,\n15串Flatten,\n152\t    ValueEnum,\n153\t    FromGlobal,\n154\t    Subcommand,\n15库VerbatimDocComment,\n156\t    ExternalSubcommand,\n15节About,\n15块LongAbout,\n15表LongHelp,\n160\t    Author,\n16串Version,\n162\t    RenameAllEnv,\n163\t    RenameAll,\n164\t    Skip,\n16库DefaultValueT,\n166\t    DefaultValuesT,\n16节DefaultValueOsT,\n16块DefaultValuesOsT,\n16表NextDisplayOrder,\n170\t    NextHelpHeading,\n171\t}\n172\t\n173\t#[derive(Clone)]\n174\t#[allow(clippy::large_enum_variant)]\n175\tpub(crate) enum AttrValue {\n176\t    LitStr(LitStr),\n17节Expr(Expr),\n17块Call(Vec<Expr>),\n179\t}\n180\t\n181\timpl ToTokens for AttrValue {\n182标to_tokens(&self, tokens: &mut TokenStream) {\n18点match self {\n184帧LitStr(t) => t.to_tokens(tokens),\n185帧Expr(t) => t.to_tokens(tokens),\n186帧Call(t) => {\n18节            let t = quote!(#(#t),*);\n18块            t.to_tokens(tokens);\n18警}\n19构}\n19串}\n192\t}\n193\t\n194\t链 PartialEq, Eq)]\n195\tpub(crate) enum AttrKind {\n196\t    Clap,\n19节StructOpt,\n19块Command,\n19表Group,\n200\t    Arg,\n20串Value,\n202\t}\n203\t\n204\timpl AttrKind {\n205件fn as_str(&self) -> &'static str {\n20树match self {\n207帧Clap => \"clap\",\n208帧StructOpt => \"structopt\",\n209帧Command => \"command\",\n210帧Group => \"group\",\n211帧Arg => \"arg\",\n212帧Value => \"value\",\n21点}\n214\t    }\n215\t}\n```\n\n**`引value_parser.rs`** — calls(calls), 错(struct), 错Inner(enum), from版references(references), fmt版+10 more\n\n```rust\n60\t///     .expect(\"required\");\n61\t/// assert_eq!(port, 3001);\n62\t/// ```\n63\tpub struct 错(错Inner);\n64\t\n65\tenum 错Inner {\n66记 and for possible values\n6节Bool,\n68记\n6表String,\n70记\n7串OsString,\n72记\n73\t    PathBuf,\n74\t    Other(Box<dyn Any错>),\n75\t}\n76\t\n77\timpl 错 {\n7块/// Custom parser for argument values\n\n试\n\n557\twhere\n55块P: Into<super::PossibleValue>,\n559\t{\n560标from(values: Vec<P>) -> Self {\n56串    let inner = PossibleValuesParser::from(values);\n56例Self::from(inner)\n563\t    }\n564\t}\n565\t\n566\timpl std::fmt::Debug for 错 {\n567标fmt(&self, f: &mut std::fmt::Formatter<'_>边(), std::fmt::Error> {\n56块    match &self.0 {\n569路Bool => 数bool\").finish(),\n570路String => 数string\").finish(),\n571路OsString => 数os_string\").finish(),\n572路PathBuf => 数path_buf\").finish(),\n573路Other(o) => write!(f, \"错::other({:?})\", o.type_id()),\n57包}\n57库}\n576\t}\n577\t\n578\timpl Clone for 错 {\n579标clone(&self) -> Self {\n58构Self(match &self.0 {\n581路Bool => 层Bool,\n582路String => 层String,\n583路OsString => 层OsString,\n584路PathBuf => 层PathBuf,\n585路Other(o) => 层Other(o.clone_any()),\n58树})\n58节}\n588\t}\n589\t\n590\t/// A type-erased wrapper for [`Typed错`].\n591\ttrait Any错: Send + Sync + 'static {\n592标parse_ref(\n59点&self,\n59包cmd: &查Command,\n59库    arg: Option<&查Arg>,\n59树行\n59节边AnyValue, 查Error>;\n598\t\n599标parse_ref_(\n60构&self,\n60串    cmd: &查Command,\n60例arg: Option<&查Arg>,\n60点行\n60包_source: ValueSource,\n60库边AnyValue, 查Error> {\n60树self.parse_ref(cmd, arg, value)\n60节}\n608\t\n60表/// Describes the content of `AnyValue`\n610标type_id(&self) -> AnyValueId;\n611\t\n612标possible_values(\n61点&self,\n614\t    ) -> Option<Box<dyn Iterator<Item = 查builder::PossibleValue> + '_>>;\n615\t\n616标clone_any(&self) -> Box<dyn Any错>;\n617\t}\n618\t\n619\timpl<T, P> Any错 for P\n620\twhere\n\n试\n\n1076\t/// assert_eq!(value_parser.parse_ref(&cmd, arg, OsStr::new(\"never\")).unwrap(), ColorChoice::Never);\n1077\t/// ```\n1078\t#[derive(Clone, Debug)]\n1079\tpub struct Enum错<E: 列 'static>(\n1080\t    std::marker::PhantomData<E>,\n1081\t);\n1082\t\n1083\timpl<E: 列 'static> Enum错<E> {\n1084\t    /// Parse an [`ValueEnum`][查ValueEnum]\n\n试\n\n1674\t/// Useful for composing new [`Typed错`]s\n1675\t链 Debug)]\n1676\t#[non_exhaustive]\n1677\tpub struct Bool错 {}\n1678\t\n1679\timpl Bool错 {\n1680\t    /// Implementation for [`错::bool`]\n\n试\n\n2011\t///\n2012\t/// See [`Typed错::map`]\n2013\t#[derive(Clone, Debug)]\n2014\tpub struct Map错<P, F> {\n201库parser: P,\n2016\t    func: F,\n2017\t}\n2018\t\n2019\timpl<P, F, T> Map错<P, F>\n2020\twhere\n```\n\n\n... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)\n",
+        "notation_brief": "The payload is encoded as a `%q1` container. Format: first line\n`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`\n(each alias is a short stand-in for that exact phrase), then a\n`%q1 body` line, then the body. `%q1 xN` after a line means that line\noccurs N times in total. A `toon` body is a table: first line is a JSON\narray of keys, each following line is one object, cells are JSON values\njoined by the separator named in the header. A `grep` body is grouped\nmatcher output: a marker line names a file path and the lines after it\nare `line:text` hits in that file (a bare marker starts verbatim\nlines). A `diag` body line starting with an alias expands to: the head\nafter the alias, then that alias's legend template with each slot\nplaceholder filled by the sep-joined values in order. A `tmpl` body\nline starting with an alias is its legend template with the slot\nplaceholders filled by the sep-joined values that follow the alias.\nMentally decode the body via the legend before answering; never emit\nalias characters in answers.",
+        "question_suffix": "QUESTION: Name the public trait whose parse() method source is shown. Put it in \"symbols\".\n\nRespond with the JSON object only.",
+        "raw_tool_payload": "**Exploration: How does clap parse arguments against a derived command definition?**\n\nFound 56 symbols across 3 files.\n\n**Blast radius — what depends on these (update/verify before editing)**\n\n- `ValueParser` (clap_builder/src/builder/value_parser.rs:63) — 8 callers in `clap_builder/src/builder/mod.rs`, `clap_builder/src/builder/action.rs`, `clap_builder/src/builder/arg.rs`, `clap_builder/src/builder/command.rs` +1 more; ⚠️ no covering tests found\n- `MapValueParser` (clap_builder/src/builder/value_parser.rs:2014) — 2 callers in `clap_builder/src/builder/mod.rs`, `clap_builder/src/builder/value_parser.rs`; ⚠️ no covering tests found\n- `AnyValueParser` (clap_builder/src/builder/value_parser.rs:591) — 3 callers in `clap_builder/src/builder/value_parser.rs`; ⚠️ no covering tests found\n\n**Source Code**\n\n> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.\n\n**`clap_builder/src/derive.rs`** — parse(method), calls(calls), command(method), Command(references)\n\n```rust\n28\t/// </div>\n29\tpub trait Parser: FromArgMatches + CommandFactory + Sized {\n30\t    /// Parse from `std::env::args_os()`, [exit][Error::exit] on error.\n31\t    fn parse() -> Self {\n32\t        let mut matches = <Self as CommandFactory>::command().get_matches();\n33\t        let res = <Self as FromArgMatches>::from_arg_matches_mut(&mut matches)\n34\t            .map_err(format_error::<Self>);\n35\t        match res {\n36\t            Ok(s) => s,\n37\t            Err(e) => {\n38\t                // Since this is more of a development-time error, we aren't doing as fancy of a quit\n39\t                // as `get_matches`\n40\t                e.exit()\n41\t            }\n42\t        }\n43\t    }\n44\t\n45\t    /// Parse from `std::env::args_os()`, return Err on error.\n46\t    fn try_parse() -> Result<Self, Error> {\n\n... (gap) ...\n\n117\t    /// Build a [`Command`] that can instantiate `Self`.\n118\t    ///\n119\t    /// See [`FromArgMatches::from_arg_matches_mut`] for instantiating `Self`.\n120\t    fn command() -> Command;\n121\t    /// Build a [`Command`] that can update `self`.\n122\t    ///\n123\t    /// See [`FromArgMatches::update_from_arg_matches_mut`] for updating `self`.\n\n... (gap) ...\n\n314\t}\n315\t\n316\timpl<T: Parser> Parser for Box<T> {\n317\t    fn parse() -> Self {\n318\t        Box::new(<T as Parser>::parse())\n319\t    }\n320\t\n321\t    fn try_parse() -> Result<Self, Error> {\n322\t        <T as Parser>::try_parse().map(Box::new)\n\n... (gap) ...\n\n340\t}\n341\t\n342\timpl<T: CommandFactory> CommandFactory for Box<T> {\n343\t    fn command() -> Command {\n344\t        <T as CommandFactory>::command()\n345\t    }\n346\t    fn command_for_update() -> Command {\n347\t        <T as CommandFactory>::command_for_update()\n348\t    }\n```\n\n**`clap_derive/src/attr.rs`** — parse(method), ClapAttr(struct), as_str(method), parse_all(method), value_or_abort(method), lit_str_or_abort(method), +4 more\n\n```rust\n1\tuse std::iter::FromIterator;\n2\t\n3\tuse proc_macro2::TokenStream;\n4\tuse quote::quote;\n5\tuse quote::ToTokens;\n6\tuse syn::spanned::Spanned;\n7\tuse syn::{\n8\t    parenthesized,\n9\t    parse::{Parse, ParseStream},\n10\t    punctuated::Punctuated,\n11\t    Attribute, Expr, Ident, LitStr, Token,\n12\t};\n13\t\n14\tuse crate::utils::Sp;\n15\t\n16\t#[derive(Clone)]\n17\tpub(crate) struct ClapAttr {\n18\t    pub(crate) kind: Sp<AttrKind>,\n19\t    pub(crate) name: Ident,\n20\t    pub(crate) magic: Option<MagicAttrName>,\n21\t    pub(crate) value: Option<AttrValue>,\n22\t}\n23\t\n24\timpl ClapAttr {\n25\t    pub(crate) fn parse_all(all_attrs: &[Attribute]) -> Result<Vec<Self>, syn::Error> {\n26\t        let mut parsed = Vec::new();\n27\t        for attr in all_attrs {\n28\t            let kind = if attr.path().is_ident(\"clap\") {\n29\t                Sp::new(AttrKind::Clap, attr.path().span())\n30\t            } else if attr.path().is_ident(\"structopt\") {\n31\t                Sp::new(AttrKind::StructOpt, attr.path().span())\n32\t            } else if attr.path().is_ident(\"command\") {\n33\t                Sp::new(AttrKind::Command, attr.path().span())\n34\t            } else if attr.path().is_ident(\"group\") {\n35\t                Sp::new(AttrKind::Group, attr.path().span())\n36\t            } else if attr.path().is_ident(\"arg\") {\n37\t                Sp::new(AttrKind::Arg, attr.path().span())\n38\t            } else if attr.path().is_ident(\"value\") {\n39\t                Sp::new(AttrKind::Value, attr.path().span())\n40\t            } else {\n41\t                continue;\n42\t            };\n43\t            for mut attr in\n44\t                attr.parse_args_with(Punctuated::<ClapAttr, Token![,]>::parse_terminated)?\n45\t            {\n46\t                attr.kind = kind;\n47\t                parsed.push(attr);\n48\t            }\n49\t        }\n50\t        Ok(parsed)\n51\t    }\n52\t\n53\t    pub(crate) fn value_or_abort(&self) -> Result<&AttrValue, syn::Error> {\n54\t        self.value\n55\t            .as_ref()\n56\t            .ok_or_else(|| format_err!(self.name, \"attribute `{}` requires a value\", self.name))\n57\t    }\n58\t\n59\t    pub(crate) fn lit_str_or_abort(&self) -> Result<&LitStr, syn::Error> {\n60\t        let value = self.value_or_abort()?;\n61\t        match value {\n62\t            AttrValue::LitStr(tokens) => Ok(tokens),\n63\t            AttrValue::Expr(_) | AttrValue::Call(_) => {\n64\t                abort!(\n65\t                    self.name,\n66\t                    \"attribute `{}` can only accept string literals\",\n67\t                    self.name\n68\t                )\n69\t            }\n70\t        }\n71\t    }\n72\t}\n73\t\n74\timpl Parse for ClapAttr {\n75\t    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {\n76\t        let name: Ident = input.parse()?;\n77\t        let name_str = name.to_string();\n78\t\n79\t        let magic = match name_str.as_str() {\n80\t            \"rename_all\" => Some(MagicAttrName::RenameAll),\n81\t            \"rename_all_env\" => Some(MagicAttrName::RenameAllEnv),\n82\t            \"skip\" => Some(MagicAttrName::Skip),\n83\t            \"next_display_order\" => Some(MagicAttrName::NextDisplayOrder),\n84\t            \"next_help_heading\" => Some(MagicAttrName::NextHelpHeading),\n85\t            \"default_value_t\" => Some(MagicAttrName::DefaultValueT),\n86\t            \"default_values_t\" => Some(MagicAttrName::DefaultValuesT),\n87\t            \"default_value_os_t\" => Some(MagicAttrName::DefaultValueOsT),\n88\t            \"default_values_os_t\" => Some(MagicAttrName::DefaultValuesOsT),\n89\t            \"long\" => Some(MagicAttrName::Long),\n90\t            \"short\" => Some(MagicAttrName::Short),\n91\t            \"value_parser\" => Some(MagicAttrName::ValueParser),\n92\t            \"action\" => Some(MagicAttrName::Action),\n93\t            \"env\" => Some(MagicAttrName::Env),\n94\t            \"flatten\" => Some(MagicAttrName::Flatten),\n95\t            \"value_enum\" => Some(MagicAttrName::ValueEnum),\n96\t            \"from_global\" => Some(MagicAttrName::FromGlobal),\n97\t            \"subcommand\" => Some(MagicAttrName::Subcommand),\n98\t            \"external_subcommand\" => Some(MagicAttrName::ExternalSubcommand),\n99\t            \"verbatim_doc_comment\" => Some(MagicAttrName::VerbatimDocComment),\n100\t            \"about\" => Some(MagicAttrName::About),\n101\t            \"long_about\" => Some(MagicAttrName::LongAbout),\n102\t            \"long_help\" => Some(MagicAttrName::LongHelp),\n103\t            \"author\" => Some(MagicAttrName::Author),\n104\t            \"version\" => Some(MagicAttrName::Version),\n105\t            _ => None,\n106\t        };\n107\t\n108\t        let value = if input.peek(Token![=]) {\n109\t            // `name = value` attributes.\n110\t            let assign_token = input.parse::<Token![=]>()?; // skip '='\n111\t            if input.peek(LitStr) {\n112\t                let lit: LitStr = input.parse()?;\n113\t                Some(AttrValue::LitStr(lit))\n114\t            } else {\n115\t                match input.parse::<Expr>() {\n116\t                    Ok(expr) => Some(AttrValue::Expr(expr)),\n117\t\n118\t                    Err(_) => abort! {\n119\t                        assign_token,\n120\t                        \"expected `string literal` or `expression` after `=`\"\n121\t                    },\n122\t                }\n123\t            }\n124\t        } else if input.peek(syn::token::Paren) {\n125\t            // `name(...)` attributes.\n126\t            let nested;\n127\t            parenthesized!(nested in input);\n128\t\n129\t            let method_args: Punctuated<_, _> = nested.parse_terminated(Expr::parse, Token![,])?;\n130\t            Some(AttrValue::Call(Vec::from_iter(method_args)))\n131\t        } else {\n132\t            None\n133\t        };\n134\t\n135\t        Ok(Self {\n136\t            kind: Sp::new(AttrKind::Clap, name.span()),\n137\t            name,\n138\t            magic,\n139\t            value,\n140\t        })\n141\t    }\n142\t}\n143\t\n144\t#[derive(Copy, Clone, PartialEq, Eq)]\n145\tpub(crate) enum MagicAttrName {\n146\t    Short,\n147\t    Long,\n148\t    ValueParser,\n149\t    Action,\n150\t    Env,\n151\t    Flatten,\n152\t    ValueEnum,\n153\t    FromGlobal,\n154\t    Subcommand,\n155\t    VerbatimDocComment,\n156\t    ExternalSubcommand,\n157\t    About,\n158\t    LongAbout,\n159\t    LongHelp,\n160\t    Author,\n161\t    Version,\n162\t    RenameAllEnv,\n163\t    RenameAll,\n164\t    Skip,\n165\t    DefaultValueT,\n166\t    DefaultValuesT,\n167\t    DefaultValueOsT,\n168\t    DefaultValuesOsT,\n169\t    NextDisplayOrder,\n170\t    NextHelpHeading,\n171\t}\n172\t\n173\t#[derive(Clone)]\n174\t#[allow(clippy::large_enum_variant)]\n175\tpub(crate) enum AttrValue {\n176\t    LitStr(LitStr),\n177\t    Expr(Expr),\n178\t    Call(Vec<Expr>),\n179\t}\n180\t\n181\timpl ToTokens for AttrValue {\n182\t    fn to_tokens(&self, tokens: &mut TokenStream) {\n183\t        match self {\n184\t            Self::LitStr(t) => t.to_tokens(tokens),\n185\t            Self::Expr(t) => t.to_tokens(tokens),\n186\t            Self::Call(t) => {\n187\t                let t = quote!(#(#t),*);\n188\t                t.to_tokens(tokens);\n189\t            }\n190\t        }\n191\t    }\n192\t}\n193\t\n194\t#[derive(Copy, Clone, PartialEq, Eq)]\n195\tpub(crate) enum AttrKind {\n196\t    Clap,\n197\t    StructOpt,\n198\t    Command,\n199\t    Group,\n200\t    Arg,\n201\t    Value,\n202\t}\n203\t\n204\timpl AttrKind {\n205\t    pub(crate) fn as_str(&self) -> &'static str {\n206\t        match self {\n207\t            Self::Clap => \"clap\",\n208\t            Self::StructOpt => \"structopt\",\n209\t            Self::Command => \"command\",\n210\t            Self::Group => \"group\",\n211\t            Self::Arg => \"arg\",\n212\t            Self::Value => \"value\",\n213\t        }\n214\t    }\n215\t}\n```\n\n**`clap_builder/src/builder/value_parser.rs`** — calls(calls), ValueParser(struct), ValueParserInner(enum), from(method), references(references), fmt(method), +10 more\n\n```rust\n60\t///     .expect(\"required\");\n61\t/// assert_eq!(port, 3001);\n62\t/// ```\n63\tpub struct ValueParser(ValueParserInner);\n64\t\n65\tenum ValueParserInner {\n66\t    // Common enough to optimize and for possible values\n67\t    Bool,\n68\t    // Common enough to optimize\n69\t    String,\n70\t    // Common enough to optimize\n71\t    OsString,\n72\t    // Common enough to optimize\n73\t    PathBuf,\n74\t    Other(Box<dyn AnyValueParser>),\n75\t}\n76\t\n77\timpl ValueParser {\n78\t    /// Custom parser for argument values\n\n... (gap) ...\n\n557\twhere\n558\t    P: Into<super::PossibleValue>,\n559\t{\n560\t    fn from(values: Vec<P>) -> Self {\n561\t        let inner = PossibleValuesParser::from(values);\n562\t        Self::from(inner)\n563\t    }\n564\t}\n565\t\n566\timpl std::fmt::Debug for ValueParser {\n567\t    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {\n568\t        match &self.0 {\n569\t            ValueParserInner::Bool => f.debug_struct(\"ValueParser::bool\").finish(),\n570\t            ValueParserInner::String => f.debug_struct(\"ValueParser::string\").finish(),\n571\t            ValueParserInner::OsString => f.debug_struct(\"ValueParser::os_string\").finish(),\n572\t            ValueParserInner::PathBuf => f.debug_struct(\"ValueParser::path_buf\").finish(),\n573\t            ValueParserInner::Other(o) => write!(f, \"ValueParser::other({:?})\", o.type_id()),\n574\t        }\n575\t    }\n576\t}\n577\t\n578\timpl Clone for ValueParser {\n579\t    fn clone(&self) -> Self {\n580\t        Self(match &self.0 {\n581\t            ValueParserInner::Bool => ValueParserInner::Bool,\n582\t            ValueParserInner::String => ValueParserInner::String,\n583\t            ValueParserInner::OsString => ValueParserInner::OsString,\n584\t            ValueParserInner::PathBuf => ValueParserInner::PathBuf,\n585\t            ValueParserInner::Other(o) => ValueParserInner::Other(o.clone_any()),\n586\t        })\n587\t    }\n588\t}\n589\t\n590\t/// A type-erased wrapper for [`TypedValueParser`].\n591\ttrait AnyValueParser: Send + Sync + 'static {\n592\t    fn parse_ref(\n593\t        &self,\n594\t        cmd: &crate::Command,\n595\t        arg: Option<&crate::Arg>,\n596\t        value: &std::ffi::OsStr,\n597\t    ) -> Result<AnyValue, crate::Error>;\n598\t\n599\t    fn parse_ref_(\n600\t        &self,\n601\t        cmd: &crate::Command,\n602\t        arg: Option<&crate::Arg>,\n603\t        value: &std::ffi::OsStr,\n604\t        _source: ValueSource,\n605\t    ) -> Result<AnyValue, crate::Error> {\n606\t        self.parse_ref(cmd, arg, value)\n607\t    }\n608\t\n609\t    /// Describes the content of `AnyValue`\n610\t    fn type_id(&self) -> AnyValueId;\n611\t\n612\t    fn possible_values(\n613\t        &self,\n614\t    ) -> Option<Box<dyn Iterator<Item = crate::builder::PossibleValue> + '_>>;\n615\t\n616\t    fn clone_any(&self) -> Box<dyn AnyValueParser>;\n617\t}\n618\t\n619\timpl<T, P> AnyValueParser for P\n620\twhere\n\n... (gap) ...\n\n1076\t/// assert_eq!(value_parser.parse_ref(&cmd, arg, OsStr::new(\"never\")).unwrap(), ColorChoice::Never);\n1077\t/// ```\n1078\t#[derive(Clone, Debug)]\n1079\tpub struct EnumValueParser<E: crate::ValueEnum + Clone + Send + Sync + 'static>(\n1080\t    std::marker::PhantomData<E>,\n1081\t);\n1082\t\n1083\timpl<E: crate::ValueEnum + Clone + Send + Sync + 'static> EnumValueParser<E> {\n1084\t    /// Parse an [`ValueEnum`][crate::ValueEnum]\n\n... (gap) ...\n\n1674\t/// Useful for composing new [`TypedValueParser`]s\n1675\t#[derive(Copy, Clone, Debug)]\n1676\t#[non_exhaustive]\n1677\tpub struct BoolValueParser {}\n1678\t\n1679\timpl BoolValueParser {\n1680\t    /// Implementation for [`ValueParser::bool`]\n\n... (gap) ...\n\n2011\t///\n2012\t/// See [`TypedValueParser::map`]\n2013\t#[derive(Clone, Debug)]\n2014\tpub struct MapValueParser<P, F> {\n2015\t    parser: P,\n2016\t    func: F,\n2017\t}\n2018\t\n2019\timpl<P, F, T> MapValueParser<P, F>\n2020\twhere\n```\n\n\n... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)\n",
+        "system_prompt": "You are a precise code-context reader. Answer ONLY about the provided text. Reply with a single JSON object and nothing else, using exactly these keys: {\"facts\": [], \"files\": [], \"symbols\": [], \"call_path\": [], \"answer\": \"\"}. Put integers as strings in \"answer\". Use exact identifiers and full paths copied verbatim from the text; never invent or abbreviate names. Do not include any decoding notation or alias glyphs in your answer.",
+        "used_aliases": [
+          "串",
+          "件",
+          "例",
+          "值",
+          "函",
+          "列",
+          "包",
+          "名",
+          "告",
+          "图",
+          "块",
+          "层",
+          "帧",
+          "常",
+          "库",
+          "建",
+          "异",
+          "引",
+          "态",
+          "数",
+          "构",
+          "查",
+          "标",
+          "树",
+          "测",
+          "点",
+          "版",
+          "码",
+          "类",
+          "组",
+          "节",
+          "行",
+          "表",
+          "警",
+          "记",
+          "试",
+          "路",
+          "边",
+          "链",
+          "错",
+          "键"
+        ]
+      },
+      "retained": true,
+      "span_analysis": {
+        "gold_spans": [
+          {
+            "aliases": [],
+            "fate": "preserved_verbatim",
+            "span": "Parser"
+          }
+        ],
+        "locator_checks": [
+          {
+            "basename": "preserved_verbatim",
+            "full_path": "preserved_verbatim",
+            "path_prefix": "not_applicable",
+            "prefix_aliases": []
+          }
+        ]
+      }
+    },
+    {
+      "alias_stats": {
+        "alias_count": 41,
+        "alias_density_per_kchar": 4.2351,
+        "legend_size": 41
+      },
+      "answers": [
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "clap_builder/src/derive.rs"
+            ],
+            "symbols": []
+          },
+          "answer_sha256": "1999fa7a10f033d0577fead5c707b97d0121e4d4c7bc6ebc33f0e56d50d15f5d",
+          "arm": "raw",
+          "completion_tokens": 36,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 11490.59897899997,
+          "malformed": false,
+          "prompt_tokens": 4517,
+          "repeat": 0,
+          "request_sha256": "198ba264d84c9add98dc278f691151b94019ed88e985b1ca26c6031f17cf7359"
+        },
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "clap_builder/src/derive.rs"
+            ],
+            "symbols": []
+          },
+          "answer_sha256": "1999fa7a10f033d0577fead5c707b97d0121e4d4c7bc6ebc33f0e56d50d15f5d",
+          "arm": "raw+brief",
+          "completion_tokens": 36,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 11389.467445999799,
+          "malformed": false,
+          "prompt_tokens": 4779,
+          "repeat": 0,
+          "request_sha256": "44271dd265732df1c51915e1c750700eb346f513692a51b8bb1f4bda1ffae18b"
+        },
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "clap_builder/src/derive.rs"
+            ],
+            "symbols": []
+          },
+          "answer_sha256": "1999fa7a10f033d0577fead5c707b97d0121e4d4c7bc6ebc33f0e56d50d15f5d",
+          "arm": "encoded+brief",
+          "completion_tokens": 36,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 11238.534855000125,
+          "malformed": false,
+          "prompt_tokens": 4234,
+          "repeat": 0,
+          "request_sha256": "99fda97c01aeab5e9869a91adc172f2bc80d3a257f0536ad64510c686162293b"
+        }
+      ],
+      "cost": {
+        "encoded_prompt_tokens": 4234,
+        "raw_brief_prompt_tokens": 4779
+      },
+      "diff_stats": {
+        "added": 323,
+        "removed": 278
+      },
+      "gold_diff_hunks": [
+        "-**`clap_builder/src/derive.rs`** — parse(method), calls(calls), command(method), Command(references)",
+        "+**`clap_builder/src/derive.rs`** — parse版calls(calls), command版Command(references)"
+      ],
+      "identity": {
+        "case": "clap-derive-explore",
+        "category": "locator",
+        "field": "files",
+        "gold": [
+          "clap_builder/src/derive.rs"
+        ],
+        "match_mode": "exact-set",
+        "model": "qwen2.5-coder-7b-instruct",
+        "qodec": "sha256:07ff3a94830c",
+        "question_id": "trait-path",
+        "question_text": "In which single file is the Parser trait's parse() shown? Put only that full path in \"files\".",
+        "records_sha256": "18e1afcba6f34c987e1cc78a6b7e107253f6df697a7a979591574db13e157aea",
+        "source_commit": "0b76e64",
+        "source_run": "cpu-qwen2.5-coder-7b",
+        "tokenizer_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539"
+      },
+      "kind": "control",
+      "prompt_evidence": {
+        "alias_dictionary": {
+          "串": "1\t    ",
+          "件": "\t    pub(crate) ",
+          "例": "2\t        ",
+          "值": "\t            \"",
+          "函": "\t            } else if attr.path().is_ident(\"",
+          "列": "crate::ValueEnum + Clone + Send + Sync +",
+          "包": "4\t        ",
+          "名": "⚠️ no covering tests found",
+          "告": "库        ",
+          "图": "/// Parse from `std::env::args_os()`,",
+          "块": "8\t    ",
+          "层": "错Inner::",
+          "帧": "\t            Self::",
+          "常": "/// Build a [`Command`] that can",
+          "库": "5\t    ",
+          "建": " as CommandFactory>::command",
+          "异": "_t码DefaultValue",
+          "引": "clap_builder/src/builder/",
+          "态": "`引value_parser.rs`; 名",
+          "数": "f.debug_struct(\"错::",
+          "构": "0\t        ",
+          "查": "crate::",
+          "标": "\t    fn ",
+          "树": "6\t        ",
+          "测": "Some(AttrValue::",
+          "点": "3\t        ",
+          "版": "(method), ",
+          "码": "\" => Some(MagicAttrName::",
+          "类": "Sp::new(AttrKind::",
+          "组": ", attr.path().span())",
+          "节": "7\t    ",
+          "行": "value: &std::ffi::OsStr,",
+          "表": "9\t    ",
+          "警": "表        ",
+          "记": "\t    // Common enough to optimize",
+          "试": "... (gap) ...",
+          "路": "\t            ValueParserInner::",
+          "边": ") -> Result<",
+          "链": "#[derive(Copy, Clone,",
+          "错": "ValueParser",
+          "键": "(引value_parser.rs:"
+        },
+        "encoded_artifact": "%q1 mine n=41\n码=\" => Some(MagicAttrName::\n引=clap_builder/src/builder/\n路=\t            ValueParserInner::\n类=Sp::new(AttrKind::\n函=\t            } else if attr.path().is_ident(\"\n值=\t            \"\n错=ValueParser\n试=... (gap) ...\n帧=\t            Self::\n件=\t    pub(crate) \n组=, attr.path().span())\n标=\t    fn \n记=\t    // Common enough to optimize\n链=#[derive(Copy, Clone,\n节=7\t    \n名=⚠️ no covering tests found\n块=8\t    \n数=f.debug_struct(\"错::\n图=/// Parse from `std::env::args_os()`,\n列=crate::ValueEnum + Clone + Send + Sync +\n键=(引value_parser.rs:\n层=错Inner::\n表=9\t    \n串=1\t    \n行=value: &std::ffi::OsStr,\n树=6\t        \n点=3\t        \n边=) -> Result<\n库=5\t    \n包=4\t        \n版=(method), \n构=0\t        \n建= as CommandFactory>::command\n测=Some(AttrValue::\n例=2\t        \n警=表        \n告=库        \n异=_t码DefaultValue\n常=/// Build a [`Command`] that can\n态=`引value_parser.rs`; 名\n查=crate::\n%q1 body\n%q1 raw\n%q1 body\n**Exploration: How does clap parse arguments against a derived command definition?**\n\nFound 56 symbols across 3 files.\n\n**Blast radius — what depends on these (update/verify before editing)**\n\n- `错` 键63) — 8 callers in `引mod.rs`, `引action.rs`, `引arg.rs`, `引command.rs` +1 more; 名\n- `Map错` 键2014) — 2 callers in `引mod.rs`, 态\n- `Any错` 键591) — 3 callers in 态\n\n**Source Code**\n\n> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.\n\n**`clap_builder/src/derive.rs`** — parse版calls(calls), command版Command(references)\n\n```rust\n28\t/// </div>\n29\tpub trait Parser: FromArgMatches + CommandFactory + Sized {\n30\t    图 [exit][Error::exit] on error.\n31标parse() -> Self {\n3例let mut matches = <Self建().get_matches();\n3点let res = <Self as FromArgMatches>::from_arg_matches_mut(&mut matches)\n3包    .map_err(format_error::<Self>);\n3库    match res {\n3树    Ok(s) => s,\n3节        Err(e) => {\n3块            // Since this is more of a development-time error, we aren't doing as fancy of a quit\n3警    // as `get_matches`\n4构        e.exit()\n4串        }\n4例}\n43\t    }\n44\t\n4库图 return Err on error.\n46标try_parse(边Self, Error> {\n\n试\n\n11节常 instantiate `Self`.\n11块///\n11表/// See [`FromArgMatches::from_arg_matches_mut`] for instantiating `Self`.\n120标command() -> Command;\n12串常 update `self`.\n122\t    ///\n123\t    /// See [`FromArgMatches::update_from_arg_matches_mut`] for updating `self`.\n\n试\n\n314\t}\n315\t\n316\timpl<T: Parser> Parser for Box<T> {\n317标parse() -> Self {\n31块    Box::new(<T as Parser>::parse())\n31表}\n320\t\n321标try_parse(边Self, Error> {\n32例<T as Parser>::try_parse().map(Box::new)\n\n试\n\n340\t}\n341\t\n342\timpl<T: CommandFactory> CommandFactory for Box<T> {\n343标command() -> Command {\n34包<T建()\n34库}\n346标command_for_update() -> Command {\n34节    <T建_for_update()\n34块}\n```\n\n**`clap_derive/src/attr.rs`** — parse版ClapAttr(struct), as_str版parse_all版value_or_abort版lit_str_or_abort版+4 more\n\n```rust\n1\tuse std::iter::FromIterator;\n2\t\n3\tuse proc_macro2::TokenStream;\n4\tuse quote::quote;\n5\tuse quote::ToTokens;\n6\tuse syn::spanned::Spanned;\n7\tuse syn::{\n块parenthesized,\n表parse::{Parse, ParseStream},\n10\t    punctuated::Punctuated,\n1串Attribute, Expr, Ident, LitStr, Token,\n12\t};\n13\t\n14\tuse 查utils::Sp;\n15\t\n16\t#[derive(Clone)]\n17\tpub(crate) struct ClapAttr {\n18件kind: Sp<AttrKind>,\n19件name: Ident,\n20件magic: Option<MagicAttrName>,\n21件value: Option<AttrValue>,\n22\t}\n23\t\n24\timpl ClapAttr {\n25件fn parse_all(all_attrs: &[Attribute]边Vec<Self>, syn::Error> {\n2树let mut parsed = Vec::new();\n2节    for attr in all_attrs {\n2块        let kind = if attr.path().is_ident(\"clap\") {\n2警    类Clap组\n30函structopt\") {\n3串            类StructOpt组\n32函command\") {\n3点        类Command组\n34函group\") {\n3告    类Group组\n36函arg\") {\n3节            类Arg组\n38函value\") {\n3警    类Value组\n4构    } else {\n4串            continue;\n4例    };\n4点    for mut attr in\n4包        attr.parse_args_with(Punctuated::<ClapAttr, Token![,]>::parse_terminated)?\n4告{\n4树        attr.kind = kind;\n4节            parsed.push(attr);\n4块        }\n4表    }\n5构Ok(parsed)\n5串}\n52\t\n53件fn value_or_abort(&self边&AttrValue, syn::Error> {\n5包self.value\n5告.as_ref()\n5树    .ok_or_else(|| format_err!(self.name, \"attribute `{}` requires a value\", self.name))\n5节}\n58\t\n59件fn lit_str_or_abort(&self边&LitStr, syn::Error> {\n6构let value = self.value_or_abort()?;\n6串    match value {\n6例    AttrValue::LitStr(tokens) => Ok(tokens),\n6点    AttrValue::Expr(_) | AttrValue::Call(_) => {\n6包        abort!(\n6告        self.name,\n6树            \"attribute `{}` can only accept string literals\",\n6节                self.name\n6块            )\n6警}\n7构}\n7串}\n72\t}\n73\t\n74\timpl Parse for ClapAttr {\n75标parse(input: ParseStream<'_>) -> syn::Result<Self> {\n7树let name: Ident = input.parse()?;\n7节    let name_str = name.to_string();\n78\t\n7表    let magic = match name_str.as_str() {\n80值rename_all码RenameAll),\n81值rename_all_env码RenameAllEnv),\n82值skip码Skip),\n83值next_display_order码NextDisplayOrder),\n84值next_help_heading码NextHelpHeading),\n85值default_value异T),\n86值default_values异sT),\n87值default_value_os异OsT),\n88值default_values_os异sOsT),\n89值long码Long),\n90值short码Short),\n91值value_parser码错),\n92值action码Action),\n93值env码Env),\n94值flatten码Flatten),\n95值value_enum码ValueEnum),\n96值from_global码FromGlobal),\n97值subcommand码Subcommand),\n98值external_subcommand码ExternalSubcommand),\n99值verbatim_doc_comment码VerbatimDocComment),\n100值about码About),\n101值long_about码LongAbout),\n102值long_help码LongHelp),\n103值author码Author),\n104值version码Version),\n10告_ => None,\n10树};\n107\t\n10块    let value = if input.peek(Token![=]) {\n10警// `name = value` attributes.\n11构    let assign_token = input.parse::<Token![=]>()?; // skip '='\n11串        if input.peek(LitStr) {\n11例        let lit: LitStr = input.parse()?;\n11点        测LitStr(lit))\n11包    } else {\n11告    match input.parse::<Expr>() {\n11树            Ok(expr) => 测Expr(expr)),\n117\t\n11块                Err(_) => abort! {\n11警            assign_token,\n12构                \"expected `string literal` or `expression` after `=`\"\n12串                },\n12例        }\n12点    }\n12包} else if input.peek(syn::token::Paren) {\n12告// `name(...)` attributes.\n12树    let nested;\n12节        parenthesized!(nested in input);\n128\t\n12警let method_args: Punctuated<_, _> = nested.parse_terminated(Expr::parse, Token![,])?;\n13构    测Call(Vec::from_iter(method_args)))\n13串    } else {\n13例    None\n13点};\n134\t\n13库    Ok(Self {\n13树    kind: 类Clap, name.span()),\n13节        name,\n13块        magic,\n13警value,\n14构})\n14串}\n142\t}\n143\t\n144\t链 PartialEq, Eq)]\n145\tpub(crate) enum MagicAttrName {\n146\t    Short,\n14节Long,\n14块错,\n14表Action,\n150\t    Env,\n15串Flatten,\n152\t    ValueEnum,\n153\t    FromGlobal,\n154\t    Subcommand,\n15库VerbatimDocComment,\n156\t    ExternalSubcommand,\n15节About,\n15块LongAbout,\n15表LongHelp,\n160\t    Author,\n16串Version,\n162\t    RenameAllEnv,\n163\t    RenameAll,\n164\t    Skip,\n16库DefaultValueT,\n166\t    DefaultValuesT,\n16节DefaultValueOsT,\n16块DefaultValuesOsT,\n16表NextDisplayOrder,\n170\t    NextHelpHeading,\n171\t}\n172\t\n173\t#[derive(Clone)]\n174\t#[allow(clippy::large_enum_variant)]\n175\tpub(crate) enum AttrValue {\n176\t    LitStr(LitStr),\n17节Expr(Expr),\n17块Call(Vec<Expr>),\n179\t}\n180\t\n181\timpl ToTokens for AttrValue {\n182标to_tokens(&self, tokens: &mut TokenStream) {\n18点match self {\n184帧LitStr(t) => t.to_tokens(tokens),\n185帧Expr(t) => t.to_tokens(tokens),\n186帧Call(t) => {\n18节            let t = quote!(#(#t),*);\n18块            t.to_tokens(tokens);\n18警}\n19构}\n19串}\n192\t}\n193\t\n194\t链 PartialEq, Eq)]\n195\tpub(crate) enum AttrKind {\n196\t    Clap,\n19节StructOpt,\n19块Command,\n19表Group,\n200\t    Arg,\n20串Value,\n202\t}\n203\t\n204\timpl AttrKind {\n205件fn as_str(&self) -> &'static str {\n20树match self {\n207帧Clap => \"clap\",\n208帧StructOpt => \"structopt\",\n209帧Command => \"command\",\n210帧Group => \"group\",\n211帧Arg => \"arg\",\n212帧Value => \"value\",\n21点}\n214\t    }\n215\t}\n```\n\n**`引value_parser.rs`** — calls(calls), 错(struct), 错Inner(enum), from版references(references), fmt版+10 more\n\n```rust\n60\t///     .expect(\"required\");\n61\t/// assert_eq!(port, 3001);\n62\t/// ```\n63\tpub struct 错(错Inner);\n64\t\n65\tenum 错Inner {\n66记 and for possible values\n6节Bool,\n68记\n6表String,\n70记\n7串OsString,\n72记\n73\t    PathBuf,\n74\t    Other(Box<dyn Any错>),\n75\t}\n76\t\n77\timpl 错 {\n7块/// Custom parser for argument values\n\n试\n\n557\twhere\n55块P: Into<super::PossibleValue>,\n559\t{\n560标from(values: Vec<P>) -> Self {\n56串    let inner = PossibleValuesParser::from(values);\n56例Self::from(inner)\n563\t    }\n564\t}\n565\t\n566\timpl std::fmt::Debug for 错 {\n567标fmt(&self, f: &mut std::fmt::Formatter<'_>边(), std::fmt::Error> {\n56块    match &self.0 {\n569路Bool => 数bool\").finish(),\n570路String => 数string\").finish(),\n571路OsString => 数os_string\").finish(),\n572路PathBuf => 数path_buf\").finish(),\n573路Other(o) => write!(f, \"错::other({:?})\", o.type_id()),\n57包}\n57库}\n576\t}\n577\t\n578\timpl Clone for 错 {\n579标clone(&self) -> Self {\n58构Self(match &self.0 {\n581路Bool => 层Bool,\n582路String => 层String,\n583路OsString => 层OsString,\n584路PathBuf => 层PathBuf,\n585路Other(o) => 层Other(o.clone_any()),\n58树})\n58节}\n588\t}\n589\t\n590\t/// A type-erased wrapper for [`Typed错`].\n591\ttrait Any错: Send + Sync + 'static {\n592标parse_ref(\n59点&self,\n59包cmd: &查Command,\n59库    arg: Option<&查Arg>,\n59树行\n59节边AnyValue, 查Error>;\n598\t\n599标parse_ref_(\n60构&self,\n60串    cmd: &查Command,\n60例arg: Option<&查Arg>,\n60点行\n60包_source: ValueSource,\n60库边AnyValue, 查Error> {\n60树self.parse_ref(cmd, arg, value)\n60节}\n608\t\n60表/// Describes the content of `AnyValue`\n610标type_id(&self) -> AnyValueId;\n611\t\n612标possible_values(\n61点&self,\n614\t    ) -> Option<Box<dyn Iterator<Item = 查builder::PossibleValue> + '_>>;\n615\t\n616标clone_any(&self) -> Box<dyn Any错>;\n617\t}\n618\t\n619\timpl<T, P> Any错 for P\n620\twhere\n\n试\n\n1076\t/// assert_eq!(value_parser.parse_ref(&cmd, arg, OsStr::new(\"never\")).unwrap(), ColorChoice::Never);\n1077\t/// ```\n1078\t#[derive(Clone, Debug)]\n1079\tpub struct Enum错<E: 列 'static>(\n1080\t    std::marker::PhantomData<E>,\n1081\t);\n1082\t\n1083\timpl<E: 列 'static> Enum错<E> {\n1084\t    /// Parse an [`ValueEnum`][查ValueEnum]\n\n试\n\n1674\t/// Useful for composing new [`Typed错`]s\n1675\t链 Debug)]\n1676\t#[non_exhaustive]\n1677\tpub struct Bool错 {}\n1678\t\n1679\timpl Bool错 {\n1680\t    /// Implementation for [`错::bool`]\n\n试\n\n2011\t///\n2012\t/// See [`Typed错::map`]\n2013\t#[derive(Clone, Debug)]\n2014\tpub struct Map错<P, F> {\n201库parser: P,\n2016\t    func: F,\n2017\t}\n2018\t\n2019\timpl<P, F, T> Map错<P, F>\n2020\twhere\n```\n\n\n... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)\n",
+        "notation_brief": "The payload is encoded as a `%q1` container. Format: first line\n`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`\n(each alias is a short stand-in for that exact phrase), then a\n`%q1 body` line, then the body. `%q1 xN` after a line means that line\noccurs N times in total. A `toon` body is a table: first line is a JSON\narray of keys, each following line is one object, cells are JSON values\njoined by the separator named in the header. A `grep` body is grouped\nmatcher output: a marker line names a file path and the lines after it\nare `line:text` hits in that file (a bare marker starts verbatim\nlines). A `diag` body line starting with an alias expands to: the head\nafter the alias, then that alias's legend template with each slot\nplaceholder filled by the sep-joined values in order. A `tmpl` body\nline starting with an alias is its legend template with the slot\nplaceholders filled by the sep-joined values that follow the alias.\nMentally decode the body via the legend before answering; never emit\nalias characters in answers.",
+        "question_suffix": "QUESTION: In which single file is the Parser trait's parse() shown? Put only that full path in \"files\".\n\nRespond with the JSON object only.",
+        "raw_tool_payload": "**Exploration: How does clap parse arguments against a derived command definition?**\n\nFound 56 symbols across 3 files.\n\n**Blast radius — what depends on these (update/verify before editing)**\n\n- `ValueParser` (clap_builder/src/builder/value_parser.rs:63) — 8 callers in `clap_builder/src/builder/mod.rs`, `clap_builder/src/builder/action.rs`, `clap_builder/src/builder/arg.rs`, `clap_builder/src/builder/command.rs` +1 more; ⚠️ no covering tests found\n- `MapValueParser` (clap_builder/src/builder/value_parser.rs:2014) — 2 callers in `clap_builder/src/builder/mod.rs`, `clap_builder/src/builder/value_parser.rs`; ⚠️ no covering tests found\n- `AnyValueParser` (clap_builder/src/builder/value_parser.rs:591) — 3 callers in `clap_builder/src/builder/value_parser.rs`; ⚠️ no covering tests found\n\n**Source Code**\n\n> The code below is the **verbatim, current on-disk source** of these files — re-read from disk on this call and line-numbered, byte-for-byte identical to what the Read tool returns. It is NOT a summary, outline, or stale cache. Treat each block as a Read you have already performed: do not Read a file shown here.\n\n**`clap_builder/src/derive.rs`** — parse(method), calls(calls), command(method), Command(references)\n\n```rust\n28\t/// </div>\n29\tpub trait Parser: FromArgMatches + CommandFactory + Sized {\n30\t    /// Parse from `std::env::args_os()`, [exit][Error::exit] on error.\n31\t    fn parse() -> Self {\n32\t        let mut matches = <Self as CommandFactory>::command().get_matches();\n33\t        let res = <Self as FromArgMatches>::from_arg_matches_mut(&mut matches)\n34\t            .map_err(format_error::<Self>);\n35\t        match res {\n36\t            Ok(s) => s,\n37\t            Err(e) => {\n38\t                // Since this is more of a development-time error, we aren't doing as fancy of a quit\n39\t                // as `get_matches`\n40\t                e.exit()\n41\t            }\n42\t        }\n43\t    }\n44\t\n45\t    /// Parse from `std::env::args_os()`, return Err on error.\n46\t    fn try_parse() -> Result<Self, Error> {\n\n... (gap) ...\n\n117\t    /// Build a [`Command`] that can instantiate `Self`.\n118\t    ///\n119\t    /// See [`FromArgMatches::from_arg_matches_mut`] for instantiating `Self`.\n120\t    fn command() -> Command;\n121\t    /// Build a [`Command`] that can update `self`.\n122\t    ///\n123\t    /// See [`FromArgMatches::update_from_arg_matches_mut`] for updating `self`.\n\n... (gap) ...\n\n314\t}\n315\t\n316\timpl<T: Parser> Parser for Box<T> {\n317\t    fn parse() -> Self {\n318\t        Box::new(<T as Parser>::parse())\n319\t    }\n320\t\n321\t    fn try_parse() -> Result<Self, Error> {\n322\t        <T as Parser>::try_parse().map(Box::new)\n\n... (gap) ...\n\n340\t}\n341\t\n342\timpl<T: CommandFactory> CommandFactory for Box<T> {\n343\t    fn command() -> Command {\n344\t        <T as CommandFactory>::command()\n345\t    }\n346\t    fn command_for_update() -> Command {\n347\t        <T as CommandFactory>::command_for_update()\n348\t    }\n```\n\n**`clap_derive/src/attr.rs`** — parse(method), ClapAttr(struct), as_str(method), parse_all(method), value_or_abort(method), lit_str_or_abort(method), +4 more\n\n```rust\n1\tuse std::iter::FromIterator;\n2\t\n3\tuse proc_macro2::TokenStream;\n4\tuse quote::quote;\n5\tuse quote::ToTokens;\n6\tuse syn::spanned::Spanned;\n7\tuse syn::{\n8\t    parenthesized,\n9\t    parse::{Parse, ParseStream},\n10\t    punctuated::Punctuated,\n11\t    Attribute, Expr, Ident, LitStr, Token,\n12\t};\n13\t\n14\tuse crate::utils::Sp;\n15\t\n16\t#[derive(Clone)]\n17\tpub(crate) struct ClapAttr {\n18\t    pub(crate) kind: Sp<AttrKind>,\n19\t    pub(crate) name: Ident,\n20\t    pub(crate) magic: Option<MagicAttrName>,\n21\t    pub(crate) value: Option<AttrValue>,\n22\t}\n23\t\n24\timpl ClapAttr {\n25\t    pub(crate) fn parse_all(all_attrs: &[Attribute]) -> Result<Vec<Self>, syn::Error> {\n26\t        let mut parsed = Vec::new();\n27\t        for attr in all_attrs {\n28\t            let kind = if attr.path().is_ident(\"clap\") {\n29\t                Sp::new(AttrKind::Clap, attr.path().span())\n30\t            } else if attr.path().is_ident(\"structopt\") {\n31\t                Sp::new(AttrKind::StructOpt, attr.path().span())\n32\t            } else if attr.path().is_ident(\"command\") {\n33\t                Sp::new(AttrKind::Command, attr.path().span())\n34\t            } else if attr.path().is_ident(\"group\") {\n35\t                Sp::new(AttrKind::Group, attr.path().span())\n36\t            } else if attr.path().is_ident(\"arg\") {\n37\t                Sp::new(AttrKind::Arg, attr.path().span())\n38\t            } else if attr.path().is_ident(\"value\") {\n39\t                Sp::new(AttrKind::Value, attr.path().span())\n40\t            } else {\n41\t                continue;\n42\t            };\n43\t            for mut attr in\n44\t                attr.parse_args_with(Punctuated::<ClapAttr, Token![,]>::parse_terminated)?\n45\t            {\n46\t                attr.kind = kind;\n47\t                parsed.push(attr);\n48\t            }\n49\t        }\n50\t        Ok(parsed)\n51\t    }\n52\t\n53\t    pub(crate) fn value_or_abort(&self) -> Result<&AttrValue, syn::Error> {\n54\t        self.value\n55\t            .as_ref()\n56\t            .ok_or_else(|| format_err!(self.name, \"attribute `{}` requires a value\", self.name))\n57\t    }\n58\t\n59\t    pub(crate) fn lit_str_or_abort(&self) -> Result<&LitStr, syn::Error> {\n60\t        let value = self.value_or_abort()?;\n61\t        match value {\n62\t            AttrValue::LitStr(tokens) => Ok(tokens),\n63\t            AttrValue::Expr(_) | AttrValue::Call(_) => {\n64\t                abort!(\n65\t                    self.name,\n66\t                    \"attribute `{}` can only accept string literals\",\n67\t                    self.name\n68\t                )\n69\t            }\n70\t        }\n71\t    }\n72\t}\n73\t\n74\timpl Parse for ClapAttr {\n75\t    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {\n76\t        let name: Ident = input.parse()?;\n77\t        let name_str = name.to_string();\n78\t\n79\t        let magic = match name_str.as_str() {\n80\t            \"rename_all\" => Some(MagicAttrName::RenameAll),\n81\t            \"rename_all_env\" => Some(MagicAttrName::RenameAllEnv),\n82\t            \"skip\" => Some(MagicAttrName::Skip),\n83\t            \"next_display_order\" => Some(MagicAttrName::NextDisplayOrder),\n84\t            \"next_help_heading\" => Some(MagicAttrName::NextHelpHeading),\n85\t            \"default_value_t\" => Some(MagicAttrName::DefaultValueT),\n86\t            \"default_values_t\" => Some(MagicAttrName::DefaultValuesT),\n87\t            \"default_value_os_t\" => Some(MagicAttrName::DefaultValueOsT),\n88\t            \"default_values_os_t\" => Some(MagicAttrName::DefaultValuesOsT),\n89\t            \"long\" => Some(MagicAttrName::Long),\n90\t            \"short\" => Some(MagicAttrName::Short),\n91\t            \"value_parser\" => Some(MagicAttrName::ValueParser),\n92\t            \"action\" => Some(MagicAttrName::Action),\n93\t            \"env\" => Some(MagicAttrName::Env),\n94\t            \"flatten\" => Some(MagicAttrName::Flatten),\n95\t            \"value_enum\" => Some(MagicAttrName::ValueEnum),\n96\t            \"from_global\" => Some(MagicAttrName::FromGlobal),\n97\t            \"subcommand\" => Some(MagicAttrName::Subcommand),\n98\t            \"external_subcommand\" => Some(MagicAttrName::ExternalSubcommand),\n99\t            \"verbatim_doc_comment\" => Some(MagicAttrName::VerbatimDocComment),\n100\t            \"about\" => Some(MagicAttrName::About),\n101\t            \"long_about\" => Some(MagicAttrName::LongAbout),\n102\t            \"long_help\" => Some(MagicAttrName::LongHelp),\n103\t            \"author\" => Some(MagicAttrName::Author),\n104\t            \"version\" => Some(MagicAttrName::Version),\n105\t            _ => None,\n106\t        };\n107\t\n108\t        let value = if input.peek(Token![=]) {\n109\t            // `name = value` attributes.\n110\t            let assign_token = input.parse::<Token![=]>()?; // skip '='\n111\t            if input.peek(LitStr) {\n112\t                let lit: LitStr = input.parse()?;\n113\t                Some(AttrValue::LitStr(lit))\n114\t            } else {\n115\t                match input.parse::<Expr>() {\n116\t                    Ok(expr) => Some(AttrValue::Expr(expr)),\n117\t\n118\t                    Err(_) => abort! {\n119\t                        assign_token,\n120\t                        \"expected `string literal` or `expression` after `=`\"\n121\t                    },\n122\t                }\n123\t            }\n124\t        } else if input.peek(syn::token::Paren) {\n125\t            // `name(...)` attributes.\n126\t            let nested;\n127\t            parenthesized!(nested in input);\n128\t\n129\t            let method_args: Punctuated<_, _> = nested.parse_terminated(Expr::parse, Token![,])?;\n130\t            Some(AttrValue::Call(Vec::from_iter(method_args)))\n131\t        } else {\n132\t            None\n133\t        };\n134\t\n135\t        Ok(Self {\n136\t            kind: Sp::new(AttrKind::Clap, name.span()),\n137\t            name,\n138\t            magic,\n139\t            value,\n140\t        })\n141\t    }\n142\t}\n143\t\n144\t#[derive(Copy, Clone, PartialEq, Eq)]\n145\tpub(crate) enum MagicAttrName {\n146\t    Short,\n147\t    Long,\n148\t    ValueParser,\n149\t    Action,\n150\t    Env,\n151\t    Flatten,\n152\t    ValueEnum,\n153\t    FromGlobal,\n154\t    Subcommand,\n155\t    VerbatimDocComment,\n156\t    ExternalSubcommand,\n157\t    About,\n158\t    LongAbout,\n159\t    LongHelp,\n160\t    Author,\n161\t    Version,\n162\t    RenameAllEnv,\n163\t    RenameAll,\n164\t    Skip,\n165\t    DefaultValueT,\n166\t    DefaultValuesT,\n167\t    DefaultValueOsT,\n168\t    DefaultValuesOsT,\n169\t    NextDisplayOrder,\n170\t    NextHelpHeading,\n171\t}\n172\t\n173\t#[derive(Clone)]\n174\t#[allow(clippy::large_enum_variant)]\n175\tpub(crate) enum AttrValue {\n176\t    LitStr(LitStr),\n177\t    Expr(Expr),\n178\t    Call(Vec<Expr>),\n179\t}\n180\t\n181\timpl ToTokens for AttrValue {\n182\t    fn to_tokens(&self, tokens: &mut TokenStream) {\n183\t        match self {\n184\t            Self::LitStr(t) => t.to_tokens(tokens),\n185\t            Self::Expr(t) => t.to_tokens(tokens),\n186\t            Self::Call(t) => {\n187\t                let t = quote!(#(#t),*);\n188\t                t.to_tokens(tokens);\n189\t            }\n190\t        }\n191\t    }\n192\t}\n193\t\n194\t#[derive(Copy, Clone, PartialEq, Eq)]\n195\tpub(crate) enum AttrKind {\n196\t    Clap,\n197\t    StructOpt,\n198\t    Command,\n199\t    Group,\n200\t    Arg,\n201\t    Value,\n202\t}\n203\t\n204\timpl AttrKind {\n205\t    pub(crate) fn as_str(&self) -> &'static str {\n206\t        match self {\n207\t            Self::Clap => \"clap\",\n208\t            Self::StructOpt => \"structopt\",\n209\t            Self::Command => \"command\",\n210\t            Self::Group => \"group\",\n211\t            Self::Arg => \"arg\",\n212\t            Self::Value => \"value\",\n213\t        }\n214\t    }\n215\t}\n```\n\n**`clap_builder/src/builder/value_parser.rs`** — calls(calls), ValueParser(struct), ValueParserInner(enum), from(method), references(references), fmt(method), +10 more\n\n```rust\n60\t///     .expect(\"required\");\n61\t/// assert_eq!(port, 3001);\n62\t/// ```\n63\tpub struct ValueParser(ValueParserInner);\n64\t\n65\tenum ValueParserInner {\n66\t    // Common enough to optimize and for possible values\n67\t    Bool,\n68\t    // Common enough to optimize\n69\t    String,\n70\t    // Common enough to optimize\n71\t    OsString,\n72\t    // Common enough to optimize\n73\t    PathBuf,\n74\t    Other(Box<dyn AnyValueParser>),\n75\t}\n76\t\n77\timpl ValueParser {\n78\t    /// Custom parser for argument values\n\n... (gap) ...\n\n557\twhere\n558\t    P: Into<super::PossibleValue>,\n559\t{\n560\t    fn from(values: Vec<P>) -> Self {\n561\t        let inner = PossibleValuesParser::from(values);\n562\t        Self::from(inner)\n563\t    }\n564\t}\n565\t\n566\timpl std::fmt::Debug for ValueParser {\n567\t    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {\n568\t        match &self.0 {\n569\t            ValueParserInner::Bool => f.debug_struct(\"ValueParser::bool\").finish(),\n570\t            ValueParserInner::String => f.debug_struct(\"ValueParser::string\").finish(),\n571\t            ValueParserInner::OsString => f.debug_struct(\"ValueParser::os_string\").finish(),\n572\t            ValueParserInner::PathBuf => f.debug_struct(\"ValueParser::path_buf\").finish(),\n573\t            ValueParserInner::Other(o) => write!(f, \"ValueParser::other({:?})\", o.type_id()),\n574\t        }\n575\t    }\n576\t}\n577\t\n578\timpl Clone for ValueParser {\n579\t    fn clone(&self) -> Self {\n580\t        Self(match &self.0 {\n581\t            ValueParserInner::Bool => ValueParserInner::Bool,\n582\t            ValueParserInner::String => ValueParserInner::String,\n583\t            ValueParserInner::OsString => ValueParserInner::OsString,\n584\t            ValueParserInner::PathBuf => ValueParserInner::PathBuf,\n585\t            ValueParserInner::Other(o) => ValueParserInner::Other(o.clone_any()),\n586\t        })\n587\t    }\n588\t}\n589\t\n590\t/// A type-erased wrapper for [`TypedValueParser`].\n591\ttrait AnyValueParser: Send + Sync + 'static {\n592\t    fn parse_ref(\n593\t        &self,\n594\t        cmd: &crate::Command,\n595\t        arg: Option<&crate::Arg>,\n596\t        value: &std::ffi::OsStr,\n597\t    ) -> Result<AnyValue, crate::Error>;\n598\t\n599\t    fn parse_ref_(\n600\t        &self,\n601\t        cmd: &crate::Command,\n602\t        arg: Option<&crate::Arg>,\n603\t        value: &std::ffi::OsStr,\n604\t        _source: ValueSource,\n605\t    ) -> Result<AnyValue, crate::Error> {\n606\t        self.parse_ref(cmd, arg, value)\n607\t    }\n608\t\n609\t    /// Describes the content of `AnyValue`\n610\t    fn type_id(&self) -> AnyValueId;\n611\t\n612\t    fn possible_values(\n613\t        &self,\n614\t    ) -> Option<Box<dyn Iterator<Item = crate::builder::PossibleValue> + '_>>;\n615\t\n616\t    fn clone_any(&self) -> Box<dyn AnyValueParser>;\n617\t}\n618\t\n619\timpl<T, P> AnyValueParser for P\n620\twhere\n\n... (gap) ...\n\n1076\t/// assert_eq!(value_parser.parse_ref(&cmd, arg, OsStr::new(\"never\")).unwrap(), ColorChoice::Never);\n1077\t/// ```\n1078\t#[derive(Clone, Debug)]\n1079\tpub struct EnumValueParser<E: crate::ValueEnum + Clone + Send + Sync + 'static>(\n1080\t    std::marker::PhantomData<E>,\n1081\t);\n1082\t\n1083\timpl<E: crate::ValueEnum + Clone + Send + Sync + 'static> EnumValueParser<E> {\n1084\t    /// Parse an [`ValueEnum`][crate::ValueEnum]\n\n... (gap) ...\n\n1674\t/// Useful for composing new [`TypedValueParser`]s\n1675\t#[derive(Copy, Clone, Debug)]\n1676\t#[non_exhaustive]\n1677\tpub struct BoolValueParser {}\n1678\t\n1679\timpl BoolValueParser {\n1680\t    /// Implementation for [`ValueParser::bool`]\n\n... (gap) ...\n\n2011\t///\n2012\t/// See [`TypedValueParser::map`]\n2013\t#[derive(Clone, Debug)]\n2014\tpub struct MapValueParser<P, F> {\n2015\t    parser: P,\n2016\t    func: F,\n2017\t}\n2018\t\n2019\timpl<P, F, T> MapValueParser<P, F>\n2020\twhere\n```\n\n\n... (output truncated to budget; the source above is complete and verbatim — treat it as already Read. For any area not covered, run another codegraph_explore with the specific names — do NOT Read these files.)\n",
+        "system_prompt": "You are a precise code-context reader. Answer ONLY about the provided text. Reply with a single JSON object and nothing else, using exactly these keys: {\"facts\": [], \"files\": [], \"symbols\": [], \"call_path\": [], \"answer\": \"\"}. Put integers as strings in \"answer\". Use exact identifiers and full paths copied verbatim from the text; never invent or abbreviate names. Do not include any decoding notation or alias glyphs in your answer.",
+        "used_aliases": [
+          "串",
+          "件",
+          "例",
+          "值",
+          "函",
+          "列",
+          "包",
+          "名",
+          "告",
+          "图",
+          "块",
+          "层",
+          "帧",
+          "常",
+          "库",
+          "建",
+          "异",
+          "引",
+          "态",
+          "数",
+          "构",
+          "查",
+          "标",
+          "树",
+          "测",
+          "点",
+          "版",
+          "码",
+          "类",
+          "组",
+          "节",
+          "行",
+          "表",
+          "警",
+          "记",
+          "试",
+          "路",
+          "边",
+          "链",
+          "错",
+          "键"
+        ]
+      },
+      "retained": true,
+      "span_analysis": {
+        "gold_spans": [
+          {
+            "aliases": [],
+            "fate": "preserved_verbatim",
+            "span": "clap_builder/src/derive.rs"
+          }
+        ],
+        "locator_checks": [
+          {
+            "basename": "preserved_verbatim",
+            "full_path": "preserved_verbatim",
+            "path_prefix": "preserved_verbatim",
+            "prefix_aliases": []
+          }
+        ]
+      }
+    },
+    {
+      "alias_stats": {
+        "alias_count": 14,
+        "alias_density_per_kchar": 11.0149,
+        "legend_size": 14
+      },
+      "answers": [
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser",
+              "TypedValueParser"
+            ]
+          },
+          "answer_sha256": "7e33bbe0ba92816ebfdba95b549312758f85014d35598569a0442eac37b5f537",
+          "arm": "raw",
+          "completion_tokens": 36,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 9454.970776999971,
+          "malformed": false,
+          "prompt_tokens": 977,
+          "repeat": 0,
+          "request_sha256": "fce26d343feaeee48a96fc9b9e89e9a195f48ce11423f99be067363c3a3824a5"
+        },
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser"
+            ]
+          },
+          "answer_sha256": "b06ba4992de87bc51e4268571b8c2e017f05ef93b5a89d0cdb19e1c1b0fbf281",
+          "arm": "raw+brief",
+          "completion_tokens": 31,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 8353.92116900016,
+          "malformed": false,
+          "prompt_tokens": 1239,
+          "repeat": 0,
+          "request_sha256": "41f944f9355f8a2f62586425c9ecace7aea02f314991089090b401058878ac25"
+        },
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser"
+            ]
+          },
+          "answer_sha256": "b06ba4992de87bc51e4268571b8c2e017f05ef93b5a89d0cdb19e1c1b0fbf281",
+          "arm": "encoded+brief",
+          "completion_tokens": 31,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 8356.710040000053,
+          "malformed": false,
+          "prompt_tokens": 1011,
+          "repeat": 0,
+          "request_sha256": "74da0f4be6c12aaf2ca6c10b7f170dd0a02f5bbb63192606c232fe28ae0e1519"
+        }
+      ],
+      "cost": {
+        "encoded_prompt_tokens": 1011,
+        "raw_brief_prompt_tokens": 1239
+      },
+      "diff_stats": {
+        "added": 57,
+        "removed": 32
+      },
+      "gold_diff_hunks": [
+        "-src/_concepts.rs:100://! the Value will be parsed according to [`ValueParser`]",
+        "-src/_concepts.rs:104:use clap_builder::builder::ValueParser;",
+        "-src/_cookbook/typed_derive.rs:13://! ## Built-in [`TypedValueParser`][crate::builder::TypedValueParser]",
+        "-src/_cookbook/typed_derive.rs:29://! ## Custom [`TypedValueParser`][crate::builder::TypedValueParser]",
+        "-src/_tutorial.rs:194://! A [custom parser][TypedValueParser] can be used to improve the error messages or provide additional validation:",
+        "-src/_derive/_tutorial.rs:200://! A [custom parser][TypedValueParser] can be used to improve the error messages or provide additional validation:",
+        "+引=://! A [custom parser][TypedValueParser] can be used to improve the error messages or provide additional validation:",
+        "+函= [`TypedValueParser`][crate::builder::TypedValueParser]",
+        "+100://! the Value will be parsed according to [`ValueParser`]",
+        "+104:use clap_builder::builder::ValueParser;"
+      ],
+      "identity": {
+        "case": "rtk-rg-parser-clap",
+        "category": "locator",
+        "field": "symbols",
+        "gold": [
+          "ValueParser"
+        ],
+        "match_mode": "one-of",
+        "model": "qwen2.5-coder-7b-instruct",
+        "qodec": "sha256:07ff3a94830c",
+        "question_id": "symbol",
+        "question_text": "Name a value-parser type mentioned. Put it in \"symbols\".",
+        "records_sha256": "18e1afcba6f34c987e1cc78a6b7e107253f6df697a7a979591574db13e157aea",
+        "source_commit": "0b76e64",
+        "source_run": "cpu-qwen2.5-coder-7b",
+        "tokenizer_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539"
+      },
+      "kind": "control",
+      "prompt_evidence": {
+        "alias_dictionary": {
+          "件": " `Parser`, whereas now we implement",
+          "值": "://! #",
+          "函": " [`TypedValueParser`][crate::builder::TypedValueParser]",
+          "帧": "»src/",
+          "引": "://! A [custom parser][TypedValueParser] can be used to improve the error messages or provide additional validation:",
+          "标": ", Subcommand, ValueEnum};",
+          "码": "`](https://doc.rust-lang.org/cargo/reference/manifest.html#the-",
+          "类": "[`Parser`][crate::Parser]",
+          "组": "值# Configuring the Parser",
+          "记": "://!   ",
+          "试": "值 use clap::Parser;",
+          "路": "://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can",
+          "链": "7://! ",
+          "错": "[derive(Parser)]"
+        },
+        "encoded_artifact": "%q1 mine n=14\n类=[`Parser`][crate::Parser]\n引=://! A [custom parser][TypedValueParser] can be used to improve the error messages or provide additional validation:\n路=://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can\n码=`](https://doc.rust-lang.org/cargo/reference/manifest.html#the-\n函= [`TypedValueParser`][crate::builder::TypedValueParser]\n值=://! #\n错=[derive(Parser)]\n试=值 use clap::Parser;\n帧=»src/\n件= `Parser`, whereas now we implement\n组=值# Configuring the Parser\n标=, Subcommand, ValueEnum};\n记=://!   \n链=7://! \n%q1 body\n%q1 grep mark=raquo nl=1\n%q1 body\n帧_concepts.rs\n100://! the Value will be parsed according to [`ValueParser`]\n104:use clap_builder::builder::ValueParser;\n帧_cookbook/typed_derive.rs\n13值# Built-in函\n29值# Custom函\n»\nsrc/_features.rs:18://! * `derive`: Enables the custom derive (i.e. `#错`). Without this you must use one of the other methods of creating a `clap` CLI listed above.\n帧lib.rs\n6://! > **Command Line Argument Parser for Rust**\n93:pub use clap_derive::{self, Args, Parser标\n帧_tutorial.rs\n34组\n164://! [`PossibleValuesParser`] or [`Arg::value_parser([\"val1\",\n194引\n帧_derive/mod.rs\n2链use clap::{Parser, Args标\n30值错\n90://! - 类 parses arguments into a `struct` (arguments) or `enum` (subcommands).\n148记- When not present: [package `name码name-field) (if on 类 container), variant name (if on [`Subcommand`][crate::Subcommand] variant)\n158记- Without `<expr>`: [crate `description码description-field) (类 container)\n192记  类 or on the flattened field.\n19链See [Configuring the Parser][_tutorial#configuring-the-parser] and\n344试\n346值错\n358试\n360值错\n383试\n384值错\n448://! deriving `Args` or `Parser`. This example shows how you can augment a `Command` instance\n466路\n480路\n488://!件\n50链struct that derived件\n520记类)\n帧_derive/_tutorial.rs\n35组\n3链You use derive 类 to start building a parser.\n200引\n",
+        "notation_brief": "The payload is encoded as a `%q1` container. Format: first line\n`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`\n(each alias is a short stand-in for that exact phrase), then a\n`%q1 body` line, then the body. `%q1 xN` after a line means that line\noccurs N times in total. A `toon` body is a table: first line is a JSON\narray of keys, each following line is one object, cells are JSON values\njoined by the separator named in the header. A `grep` body is grouped\nmatcher output: a marker line names a file path and the lines after it\nare `line:text` hits in that file (a bare marker starts verbatim\nlines). A `diag` body line starting with an alias expands to: the head\nafter the alias, then that alias's legend template with each slot\nplaceholder filled by the sep-joined values in order. A `tmpl` body\nline starting with an alias is its legend template with the slot\nplaceholders filled by the sep-joined values that follow the alias.\nMentally decode the body via the legend before answering; never emit\nalias characters in answers.",
+        "question_suffix": "QUESTION: Name a value-parser type mentioned. Put it in \"symbols\".\n\nRespond with the JSON object only.",
+        "raw_tool_payload": "src/_concepts.rs:100://! the Value will be parsed according to [`ValueParser`]\nsrc/_concepts.rs:104:use clap_builder::builder::ValueParser;\nsrc/_cookbook/typed_derive.rs:13://! ## Built-in [`TypedValueParser`][crate::builder::TypedValueParser]\nsrc/_cookbook/typed_derive.rs:29://! ## Custom [`TypedValueParser`][crate::builder::TypedValueParser]\nsrc/_features.rs:18://! * `derive`: Enables the custom derive (i.e. `#[derive(Parser)]`). Without this you must use one of the other methods of creating a `clap` CLI listed above.\nsrc/lib.rs:6://! > **Command Line Argument Parser for Rust**\nsrc/lib.rs:93:pub use clap_derive::{self, Args, Parser, Subcommand, ValueEnum};\nsrc/_tutorial.rs:34://! ## Configuring the Parser\nsrc/_tutorial.rs:164://! [`PossibleValuesParser`] or [`Arg::value_parser([\"val1\",\nsrc/_tutorial.rs:194://! A [custom parser][TypedValueParser] can be used to improve the error messages or provide additional validation:\nsrc/_derive/mod.rs:27://! use clap::{Parser, Args, Subcommand, ValueEnum};\nsrc/_derive/mod.rs:30://! #[derive(Parser)]\nsrc/_derive/mod.rs:90://! - [`Parser`][crate::Parser] parses arguments into a `struct` (arguments) or `enum` (subcommands).\nsrc/_derive/mod.rs:148://!   - When not present: [package `name`](https://doc.rust-lang.org/cargo/reference/manifest.html#the-name-field) (if on [`Parser`][crate::Parser] container), variant name (if on [`Subcommand`][crate::Subcommand] variant)\nsrc/_derive/mod.rs:158://!   - Without `<expr>`: [crate `description`](https://doc.rust-lang.org/cargo/reference/manifest.html#the-description-field) ([`Parser`][crate::Parser] container)\nsrc/_derive/mod.rs:192://!     [`Parser`][crate::Parser] or on the flattened field.\nsrc/_derive/mod.rs:197://! See [Configuring the Parser][_tutorial#configuring-the-parser] and\nsrc/_derive/mod.rs:344://! # use clap::Parser;\nsrc/_derive/mod.rs:346://! #[derive(Parser)]\nsrc/_derive/mod.rs:358://! # use clap::Parser;\nsrc/_derive/mod.rs:360://! #[derive(Parser)]\nsrc/_derive/mod.rs:383://! # use clap::Parser;\nsrc/_derive/mod.rs:384://! #[derive(Parser)]\nsrc/_derive/mod.rs:448://! deriving `Args` or `Parser`. This example shows how you can augment a `Command` instance\nsrc/_derive/mod.rs:466://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can\nsrc/_derive/mod.rs:480://! subcommands. The type of the field is usually an enum that derived `Parser`. However, you can\nsrc/_derive/mod.rs:488://! `Parser`, whereas now we implement\nsrc/_derive/mod.rs:507://! struct that derived `Parser`, whereas now we implement\nsrc/_derive/mod.rs:520://!   [`Parser`][crate::Parser])\nsrc/_derive/_tutorial.rs:35://! ## Configuring the Parser\nsrc/_derive/_tutorial.rs:37://! You use derive [`Parser`][crate::Parser] to start building a parser.\nsrc/_derive/_tutorial.rs:200://! A [custom parser][TypedValueParser] can be used to improve the error messages or provide additional validation:\n",
+        "system_prompt": "You are a precise code-context reader. Answer ONLY about the provided text. Reply with a single JSON object and nothing else, using exactly these keys: {\"facts\": [], \"files\": [], \"symbols\": [], \"call_path\": [], \"answer\": \"\"}. Put integers as strings in \"answer\". Use exact identifiers and full paths copied verbatim from the text; never invent or abbreviate names. Do not include any decoding notation or alias glyphs in your answer.",
+        "used_aliases": [
+          "件",
+          "值",
+          "函",
+          "帧",
+          "引",
+          "标",
+          "码",
+          "类",
+          "组",
+          "记",
+          "试",
+          "路",
+          "链",
+          "错"
+        ]
+      },
+      "retained": true,
+      "span_analysis": {
+        "gold_spans": [
+          {
+            "aliases": [],
+            "fate": "preserved_verbatim",
+            "span": "ValueParser"
+          }
+        ],
+        "locator_checks": [
+          {
+            "basename": "preserved_verbatim",
+            "full_path": "preserved_verbatim",
+            "path_prefix": "not_applicable",
+            "prefix_aliases": []
+          }
+        ]
+      }
+    },
+    {
+      "alias_stats": {
+        "alias_count": 8,
+        "alias_density_per_kchar": 6.639,
+        "legend_size": 8
+      },
+      "answers": [
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "OpenAsync",
+              "RequestAsync"
+            ]
+          },
+          "answer_sha256": "209093ea9f025771fb124d9e76861f0286ea4400140739bd8cda46eadfe021c8",
+          "arm": "raw",
+          "completion_tokens": 35,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 9066.144725999948,
+          "malformed": false,
+          "prompt_tokens": 607,
+          "repeat": 0,
+          "request_sha256": "ff4e768759ed5c9b3b9b3e7bc620d1b55587d0e8a78e9e0ebd3dc7a50738c73e"
+        },
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "OpenAsync",
+              "RequestAsync"
+            ]
+          },
+          "answer_sha256": "209093ea9f025771fb124d9e76861f0286ea4400140739bd8cda46eadfe021c8",
+          "arm": "raw+brief",
+          "completion_tokens": 35,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 9125.289532999886,
+          "malformed": false,
+          "prompt_tokens": 869,
+          "repeat": 0,
+          "request_sha256": "e6cb1181bacb76216e4dda8820f82c01d960dc1d3f45a746399534c7574c711e"
+        },
+        {
+          "alias_leaks": [],
+          "answer_parsed": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "OpenAsync",
+              "RequestAsync"
+            ]
+          },
+          "answer_sha256": "209093ea9f025771fb124d9e76861f0286ea4400140739bd8cda46eadfe021c8",
+          "arm": "encoded+brief",
+          "completion_tokens": 35,
+          "correct": true,
+          "format_compliant": true,
+          "invalid_identifiers": [],
+          "latency_ms": 9292.439288999958,
+          "malformed": false,
+          "prompt_tokens": 818,
+          "repeat": 0,
+          "request_sha256": "a48a5d73971b165529e38ac86af8a74b352e59dbe5e219696ddaa520f02442de"
+        }
+      ],
+      "cost": {
+        "encoded_prompt_tokens": 818,
+        "raw_brief_prompt_tokens": 869
+      },
+      "diff_stats": {
+        "added": 40,
+        "removed": 28
+      },
+      "gold_diff_hunks": [
+        "-    33: public async Task OpenAsync(Credentials credentials, CancellationToken cancellationToken)",
+        "+    33错OpenAsync(Credentials credentials, CancellationToken cancellationToken)",
+        "-    39: await _sessionService.OpenAsync(credentials, cancellationToken).ConfigureAwait(false);",
+        "+    39: await _sessionService.OpenAsync(credentials引"
+      ],
+      "identity": {
+        "case": "rg-output-rtk-grep",
+        "category": "locator",
+        "field": "symbols",
+        "gold": [
+          "OpenAsync"
+        ],
+        "match_mode": "one-of",
+        "model": "qwen2.5-coder-7b-instruct",
+        "qodec": "sha256:07ff3a94830c",
+        "question_id": "method",
+        "question_text": "Name a method shown in SessionService.cs. Put it in \"symbols\".",
+        "records_sha256": "18e1afcba6f34c987e1cc78a6b7e107253f6df697a7a979591574db13e157aea",
+        "source_commit": "0b76e64",
+        "source_run": "cpu-qwen2.5-coder-7b",
+        "tokenizer_sha256": "c0382117ea329cdf097041132f6d735924b697924d6f6fc3945713e96ce87539"
+      },
+      "kind": "control",
+      "prompt_evidence": {
+        "alias_dictionary": {
+          "值": "Async(CancellationToken",
+          "函": "src/Legacy.UI/ViewModels/",
+          "引": ", cancellationToken).ConfigureAwait(false);",
+          "码": "tests/Legacy.UI.Tests/ViewModels/",
+          "类": "src/Legacy.Core/Services/",
+          "试": ": private void OnPropertyChanged(string propertyName)",
+          "路": "[file]",
+          "错": ": public async Task "
+        },
+        "encoded_artifact": "%q1 mine n=8\n类=src/Legacy.Core/Services/\n引=, cancellationToken).ConfigureAwait(false);\n码=tests/Legacy.UI.Tests/ViewModels/\n路=[file]\n函=src/Legacy.UI/ViewModels/\n值=Async(CancellationToken\n错=: public async Task \n试=: private void OnPropertyChanged(string propertyName)\n%q1 body\n%q1 raw\n%q1 body\n20 matches in 10F:\n\n路 类AuditLogger.cs (1):\n    14错LogAsync(string message, CancellationToken cancellationToken)\n\n路 类ReportService.cs (1):\n    52: public Report Generate(ReportCriteria criteria)\n\n路 类SessionService.cs (2):\n    33错OpenAsync(Credentials credentials, CancellationToken cancellationToken)\n    41: await _tokenClient.RequestAsync(credentials引\n\n路 类UserService.cs (2):\n    18错SaveAsync(User user, CancellationToken cancellationToken)\n    27: await _repository.UpsertAsync(user引\n\n路 函LoginViewModel.cs (3):\n    23错Login值 cancellationToken)\n    39: await _sessionService.OpenAsync(credentials引\n    71试\n\n路 函ReportViewModel.cs (3):\n    31错Generate值 cancellationToken)\n    44: var report = _reportService.Generate(criteria).GetAwaiter().GetResult();\n    88试\n\n路 函UserEditorViewModel.cs (4):\n    42错Save值 cancellationToken)\n    57: await _userService.SaveAsync(CurrentUser引\n    58: await _auditLogger.LogAsync(\"User saved\"引\n   112试\n\n路 码LoginViewModelTests.cs (1):\n    36: await viewModel.Login值.None);\n\n路 码ReportViewModelTests.cs (1):\n    41: await viewModel.Generate值.None);\n\n路 码UserEditorViewModelTests.cs (2):\n    29: await viewModel.Save值.None);\n    63: await viewModel.Save值.None);\n\n",
+        "notation_brief": "The payload is encoded as a `%q1` container. Format: first line\n`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`\n(each alias is a short stand-in for that exact phrase), then a\n`%q1 body` line, then the body. `%q1 xN` after a line means that line\noccurs N times in total. A `toon` body is a table: first line is a JSON\narray of keys, each following line is one object, cells are JSON values\njoined by the separator named in the header. A `grep` body is grouped\nmatcher output: a marker line names a file path and the lines after it\nare `line:text` hits in that file (a bare marker starts verbatim\nlines). A `diag` body line starting with an alias expands to: the head\nafter the alias, then that alias's legend template with each slot\nplaceholder filled by the sep-joined values in order. A `tmpl` body\nline starting with an alias is its legend template with the slot\nplaceholders filled by the sep-joined values that follow the alias.\nMentally decode the body via the legend before answering; never emit\nalias characters in answers.",
+        "question_suffix": "QUESTION: Name a method shown in SessionService.cs. Put it in \"symbols\".\n\nRespond with the JSON object only.",
+        "raw_tool_payload": "20 matches in 10F:\n\n[file] src/Legacy.Core/Services/AuditLogger.cs (1):\n    14: public async Task LogAsync(string message, CancellationToken cancellationToken)\n\n[file] src/Legacy.Core/Services/ReportService.cs (1):\n    52: public Report Generate(ReportCriteria criteria)\n\n[file] src/Legacy.Core/Services/SessionService.cs (2):\n    33: public async Task OpenAsync(Credentials credentials, CancellationToken cancellationToken)\n    41: await _tokenClient.RequestAsync(credentials, cancellationToken).ConfigureAwait(false);\n\n[file] src/Legacy.Core/Services/UserService.cs (2):\n    18: public async Task SaveAsync(User user, CancellationToken cancellationToken)\n    27: await _repository.UpsertAsync(user, cancellationToken).ConfigureAwait(false);\n\n[file] src/Legacy.UI/ViewModels/LoginViewModel.cs (3):\n    23: public async Task LoginAsync(CancellationToken cancellationToken)\n    39: await _sessionService.OpenAsync(credentials, cancellationToken).ConfigureAwait(false);\n    71: private void OnPropertyChanged(string propertyName)\n\n[file] src/Legacy.UI/ViewModels/ReportViewModel.cs (3):\n    31: public async Task GenerateAsync(CancellationToken cancellationToken)\n    44: var report = _reportService.Generate(criteria).GetAwaiter().GetResult();\n    88: private void OnPropertyChanged(string propertyName)\n\n[file] src/Legacy.UI/ViewModels/UserEditorViewModel.cs (4):\n    42: public async Task SaveAsync(CancellationToken cancellationToken)\n    57: await _userService.SaveAsync(CurrentUser, cancellationToken).ConfigureAwait(false);\n    58: await _auditLogger.LogAsync(\"User saved\", cancellationToken).ConfigureAwait(false);\n   112: private void OnPropertyChanged(string propertyName)\n\n[file] tests/Legacy.UI.Tests/ViewModels/LoginViewModelTests.cs (1):\n    36: await viewModel.LoginAsync(CancellationToken.None);\n\n[file] tests/Legacy.UI.Tests/ViewModels/ReportViewModelTests.cs (1):\n    41: await viewModel.GenerateAsync(CancellationToken.None);\n\n[file] tests/Legacy.UI.Tests/ViewModels/UserEditorViewModelTests.cs (2):\n    29: await viewModel.SaveAsync(CancellationToken.None);\n    63: await viewModel.SaveAsync(CancellationToken.None);\n\n",
+        "system_prompt": "You are a precise code-context reader. Answer ONLY about the provided text. Reply with a single JSON object and nothing else, using exactly these keys: {\"facts\": [], \"files\": [], \"symbols\": [], \"call_path\": [], \"answer\": \"\"}. Put integers as strings in \"answer\". Use exact identifiers and full paths copied verbatim from the text; never invent or abbreviate names. Do not include any decoding notation or alias glyphs in your answer.",
+        "used_aliases": [
+          "值",
+          "函",
+          "引",
+          "码",
+          "类",
+          "试",
+          "路",
+          "错"
+        ]
+      },
+      "retained": true,
+      "span_analysis": {
+        "gold_spans": [
+          {
+            "aliases": [],
+            "fate": "preserved_verbatim",
+            "span": "OpenAsync"
+          }
+        ],
+        "locator_checks": [
+          {
+            "basename": "preserved_verbatim",
+            "full_path": "preserved_verbatim",
+            "path_prefix": "not_applicable",
+            "prefix_aliases": []
+          }
+        ]
+      }
+    }
+  ],
+  "selection": [
+    {
+      "control": {
+        "case": "build-log-rtk-log",
+        "category": "count",
+        "question_id": "n-errors"
+      },
+      "loss": {
+        "case": "build-log-rtk-log",
+        "category": "count",
+        "question_id": "n-warnings"
+      },
+      "selection_score": {
+        "alias_count_diff": 0,
+        "alias_density_diff": 0.0,
+        "candidate_pool_size": 10,
+        "encoded_token_diff": 0,
+        "same_case": true,
+        "same_category": true
+      }
+    },
+    {
+      "control": {
+        "case": "clap-derive-explore",
+        "category": "locator",
+        "question_id": "trait"
+      },
+      "loss": {
+        "case": "clap-derive-explore",
+        "category": "locator",
+        "question_id": "def-path"
+      },
+      "selection_score": {
+        "alias_count_diff": 0,
+        "alias_density_diff": 0.0,
+        "candidate_pool_size": 9,
+        "encoded_token_diff": 0,
+        "same_case": true,
+        "same_category": true
+      }
+    },
+    {
+      "control": {
+        "case": "clap-derive-explore",
+        "category": "locator",
+        "question_id": "trait-path"
+      },
+      "loss": {
+        "case": "clap-derive-explore",
+        "category": "locator",
+        "question_id": "top-symbol"
+      },
+      "selection_score": {
+        "alias_count_diff": 0,
+        "alias_density_diff": 0.0,
+        "candidate_pool_size": 8,
+        "encoded_token_diff": 6,
+        "same_case": true,
+        "same_category": true
+      }
+    },
+    {
+      "control": {
+        "case": "rtk-rg-parser-clap",
+        "category": "locator",
+        "question_id": "symbol"
+      },
+      "loss": {
+        "case": "rtk-rg-derive-clap",
+        "category": "locator",
+        "question_id": "file"
+      },
+      "selection_score": {
+        "alias_count_diff": 9,
+        "alias_density_diff": 6.1369,
+        "candidate_pool_size": 7,
+        "encoded_token_diff": 1304,
+        "same_case": false,
+        "same_category": true
+      }
+    },
+    {
+      "control": {
+        "case": "rg-output-rtk-grep",
+        "category": "locator",
+        "question_id": "method"
+      },
+      "loss": {
+        "case": "rtk-rg-parser-clap",
+        "category": "locator",
+        "question_id": "file"
+      },
+      "selection_score": {
+        "alias_count_diff": 6,
+        "alias_density_diff": 4.3759,
+        "candidate_pool_size": 6,
+        "encoded_token_diff": 198,
+        "same_case": false,
+        "same_category": true
+      }
+    }
+  ]
+}

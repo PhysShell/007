@@ -1,0 +1,135 @@
+{
+  "case": "clap-derive-explore",
+  "cells": {
+    "F": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "clap_builder/src/derive.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": "raw",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 11137.0,
+      "n_repeats": 1,
+      "prompt_tokens": 4789,
+      "stable": null
+    },
+    "I": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "clap_builder/src/derive.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": "identity",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 11323.0,
+      "n_repeats": 1,
+      "prompt_tokens": 4789,
+      "stable": null
+    },
+    "M": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "clap_builder/src/derive.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": "mine",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 11393.0,
+      "n_repeats": 1,
+      "prompt_tokens": 4515,
+      "stable": null
+    },
+    "MF": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "clap_builder/src/derive.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": "mine",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 11364.0,
+      "n_repeats": 1,
+      "prompt_tokens": 4234,
+      "stable": null
+    },
+    "R": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "clap_builder/src/derive.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": null,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 11120.0,
+      "n_repeats": 1,
+      "prompt_tokens": 4779,
+      "stable": null
+    },
+    "VG": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "",
+        "call_path": [],
+        "facts": [],
+        "files": [
+          "clap_builder/src/derive.rs"
+        ],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": "mine",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 10955.0,
+      "n_repeats": 1,
+      "prompt_tokens": 4688,
+      "stable": null
+    }
+  },
+  "question": "trait-path",
+  "role": "control",
+  "verdict": null,
+  "weakly_matched": false
+}

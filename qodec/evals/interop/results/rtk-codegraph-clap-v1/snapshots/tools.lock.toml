@@ -1,0 +1,62 @@
+# tools.lock.toml — pinned tool identities for a reproducible Level-1 run.
+#
+# doctor.py reads this and verifies each REQUIRED tool is present at the pinned
+# version before a lane that needs it runs. `--strict rtk codegraph` fails
+# non-zero on any mismatch. Nothing here says "unset": a tool is either pinned
+# and validated, or explicitly `kind = "unsupported"` with a reason — never a
+# lane pretending to wait for install.
+#
+# Binary resolution is by <NAME>_BIN env var, then PATH. Versions (not machine
+# paths) are what pin reproducibility; paths differ per environment.
+
+[tools.qodec]
+kind = "built"
+build = "cargo build --release"
+# The crate has no --version flag; identity is the binary's content hash,
+# recorded per-run in the receipt (qodec.version()).
+encode = "qodec encode --json --passthrough-on-no-gain --codec squeeze --meter o200k"
+decode = "qodec decode"
+
+[tools.rtk]
+kind = "cli"
+bin = "rtk"
+version = "0.42.4"
+version_cmd = ["--version"]
+version_re = 'rtk (\S+)'
+# Provenance: built from the exact upstream tag (not a floating branch).
+provenance = "cargo install --git https://github.com/rtk-ai/rtk --tag v0.42.4"
+# SHA-256 of the local release build of that tag (this environment's binary).
+# A rebuild on another toolchain/target will differ; re-pin then. doctor
+# verifies the running binary matches this hash.
+sha256 = "61683c0a25fb58e2e8e7d5a8067c6111956be75225daa2edfbc389a066f7133f"
+# `rtk pipe --filter <name>` (v0.42.4, "Read stdin, apply filter, print
+# filtered output — Unix pipe mode") IS the transform interface — the earlier
+# "no pipe" note was wrong, from a truncated --help and a stale README. These
+# are the pipe filters the harness uses as text transforms; native
+# command-runners (`rtk rg …`) stay separate rtk-command producers.
+pipe_filters = ["log", "grep", "git-diff", "cargo-test"]
+smoke = "printf 'ERROR x\\nERROR x\\n' | rtk pipe --filter log"
+
+[tools.codegraph]
+kind = "cli"
+bin = "codegraph"
+version = "1.4.1"
+version_cmd = ["--version"]
+version_re = '(\S+)'
+# `codegraph init` builds .codegraph/ (full graph, one step). `status --json`
+# reports index.state and pendingChanges; `explore <query> -p <repo>` answers.
+# 100% local, no API keys, no network at query time (verified: clap indexed in
+# ~9s offline).
+smoke = "codegraph status <repo> --json"
+
+[tools.headroom]
+kind = "unsupported"
+reason = "adapter used an unverified return contract and side-effect flags; not validated. Do not run it as a lane."
+
+[tools.fastcontext]
+kind = "unsupported"
+reason = "FastContext is a served model (OpenAI-compatible endpoint), not a `fastcontext.brief()` Python package. The earlier adapter was wrong."
+
+[tools.graphify]
+kind = "unsupported"
+reason = "not yet integrated — the Graphify lane is a later increment (this one covers RTK + CodeGraph only)."

@@ -1,0 +1,37 @@
+# qodec interop bench — Level 2 (reader comprehension, CPU calibration)
+run cpu-qwen0.5b  model=qwen2.5-0.5b-instruct (reported qwen2.5-0.5b-instruct)  tokenizer=hf:/root/.cache/qodec-bench/tokenizer.json
+tokenizer sha256=c0382117ea32  qodec=sha256:07ff3a94830c  determinism=temperature=0, seed=0
+endpoint streams content but not usage → server tokens from non-stream requests; TTFT is the preflight streaming sample (201.89902000015536 ms)
+pairs=61
+
+paired transitions (raw → raw+brief → encoded+brief):
+  group            n    raw brief_ret codec_ret  elig  loss  resc
+  all             61    16%       70%       54%    13     6     7
+  facts/counts    30    20%       50%      100%     3     0     6
+  locator         25    16%      100%       40%    10     6     1
+  call_path        3     0%         -         -     0     0     0
+  actionability    3     0%         -         -     0     0     0
+
+tokens (local content vs actual server prompt; warm = amortization estimate):
+  case                  arm              local  server   out   ttft  tot_ms
+  build-log-rtk-log     raw                188     320    46      -    2384
+  build-log-rtk-log     raw+brief          450     582    74      -    3930
+  build-log-rtk-log     encoded+brief      449     581    45      -    2296  (warm est. 187)
+  rg-output-rtk-grep    raw                475     605   112      -    5694
+  rg-output-rtk-grep    raw+brief          737     867    64      -    4564
+  rg-output-rtk-grep    encoded+brief      686     816     9      -    1727  (warm est. 424)
+  rtk-rg-parser-clap    raw                847     980     6      -    3513
+  rtk-rg-parser-clap    raw+brief         1109    1242    11      -    4829
+  rtk-rg-parser-clap    encoded+brief      881    1014    21      -    3377  (warm est. 619)
+  rtk-rg-derive-clap    raw               3549    3685   128      -   17442
+  rtk-rg-derive-clap    raw+brief         3811    3947   105      -   17266
+  rtk-rg-derive-clap    encoded+brief     2177    2313    74      -    9021  (warm est. 1915)
+  clap-derive-explore   raw               4377    4513    91      -   10107
+  clap-derive-explore   raw+brief         4639    4775    97      -   10955
+  clap-derive-explore   encoded+brief     4094    4230    80      -    8884  (warm est. 3832)
+
+integrity: alias_leaks(encoded)=9  invalid_ids raw+brief=6 encoded=30  malformed_json=99
+
+## decision
+INCONCLUSIVE: reader too weak for this task set (raw competence 16% < 60%).
+Run saved as calibration evidence; qodec verdict withheld.

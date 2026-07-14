@@ -1,0 +1,1529 @@
+{
+  "byte_identical_arms": [
+    {
+      "arms": [
+        "F",
+        "VG"
+      ],
+      "case": "build-log-rtk-log"
+    },
+    {
+      "arms": [
+        "F",
+        "VG"
+      ],
+      "case": "rg-output-rtk-grep"
+    },
+    {
+      "arms": [
+        "F",
+        "VG"
+      ],
+      "case": "rtk-rg-parser-clap"
+    }
+  ],
+  "candidate_gate": {
+    "F": {
+      "advances_to_full_rerun": false,
+      "alias_leaks": 0,
+      "control_regressions": [],
+      "invalid_id_delta_vs_R": 0,
+      "losses_rescued": "5/5",
+      "token_savings_vs_R": {
+        "mean_per_question_vs_R": 93.6,
+        "median_per_question_vs_R": -10.0,
+        "percent_vs_R": 3.4,
+        "total_vs_R": 936
+      }
+    },
+    "I": {
+      "advances_to_full_rerun": false,
+      "alias_leaks": 0,
+      "control_regressions": [],
+      "invalid_id_delta_vs_R": 0,
+      "losses_rescued": "5/5",
+      "token_savings_vs_R": {
+        "mean_per_question_vs_R": -10.0,
+        "median_per_question_vs_R": -10.0,
+        "percent_vs_R": -0.4,
+        "total_vs_R": -100
+      }
+    },
+    "M": {
+      "advances_to_full_rerun": false,
+      "alias_leaks": 0,
+      "control_regressions": [],
+      "invalid_id_delta_vs_R": 1,
+      "losses_rescued": "3/5",
+      "token_savings_vs_R": {
+        "mean_per_question_vs_R": 247.8,
+        "median_per_question_vs_R": 210.5,
+        "percent_vs_R": 9.0,
+        "total_vs_R": 2478
+      }
+    },
+    "MF": {
+      "advances_to_full_rerun": false,
+      "alias_leaks": 1,
+      "control_regressions": [],
+      "invalid_id_delta_vs_R": 3,
+      "losses_rescued": "0/5",
+      "token_savings_vs_R": {
+        "mean_per_question_vs_R": 432.3,
+        "median_per_question_vs_R": 386.5,
+        "percent_vs_R": 15.7,
+        "total_vs_R": 4323
+      }
+    },
+    "VG": {
+      "advances_to_full_rerun": true,
+      "alias_leaks": 0,
+      "control_regressions": [],
+      "invalid_id_delta_vs_R": 0,
+      "losses_rescued": "5/5",
+      "token_savings_vs_R": {
+        "mean_per_question_vs_R": 135.8,
+        "median_per_question_vs_R": 91.0,
+        "percent_vs_R": 4.9,
+        "total_vs_R": 1358
+      }
+    }
+  },
+  "conclusion": "2/5 losses have a confirmed factor (alias main effect); 3/5 are production-stage effects unresolved without a stage-matched S/SM/SG comparison (Commit I). Candidate policies that pass the gate: VG — candidate-policy evidence, NOT a causal claim that a lexical guard fixed production squeeze. Blind production squeeze remains rejected.",
+  "guard_isolation": {
+    "note": "VG's structural shelf (fold/grep) differs from MF's (toon/fold/grep/diag/tmpl), so no stage-1-matched arm pair exists in this run — the lexical guard's effect is NOT isolated here. Commit I's SM/SG arms (same frozen stage-1, guard on/off) isolate it.",
+    "stage1_matched_pair_present": false
+  },
+  "model": "qwen2.5-coder-7b-instruct",
+  "priority_ranking": {
+    "ranked": [
+      "VG",
+      "F",
+      "R",
+      "I",
+      "M",
+      "MF"
+    ],
+    "rows": [
+      {
+        "alias_leaks": 0,
+        "arm": "R",
+        "correct": 10,
+        "invalid_identifiers": 0,
+        "mean_latency_ms": 73112.0,
+        "mean_prompt_tokens": 2756.9
+      },
+      {
+        "alias_leaks": 0,
+        "arm": "I",
+        "correct": 10,
+        "invalid_identifiers": 0,
+        "mean_latency_ms": 70800.0,
+        "mean_prompt_tokens": 2766.9
+      },
+      {
+        "alias_leaks": 0,
+        "arm": "M",
+        "correct": 8,
+        "invalid_identifiers": 1,
+        "mean_latency_ms": 60523.0,
+        "mean_prompt_tokens": 2509.1
+      },
+      {
+        "alias_leaks": 0,
+        "arm": "F",
+        "correct": 10,
+        "invalid_identifiers": 0,
+        "mean_latency_ms": 65250.0,
+        "mean_prompt_tokens": 2663.3
+      },
+      {
+        "alias_leaks": 1,
+        "arm": "MF",
+        "correct": 5,
+        "invalid_identifiers": 3,
+        "mean_latency_ms": 52838.0,
+        "mean_prompt_tokens": 2324.6
+      },
+      {
+        "alias_leaks": 0,
+        "arm": "VG",
+        "correct": 10,
+        "invalid_identifiers": 0,
+        "mean_latency_ms": 64495.0,
+        "mean_prompt_tokens": 2621.1
+      }
+    ]
+  },
+  "qodec_binary_sha256": "e82d5f3e3154630556f0d2c0f7d6cb49010b87aca6ad8b76ca4e5622abbad9f4",
+  "questions": [
+    {
+      "case": "build-log-rtk-log",
+      "cells": {
+        "F": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "9",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "raw",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 19558.0,
+          "n_repeats": 3,
+          "prompt_tokens": 593,
+          "stable": true
+        },
+        "I": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "9",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "identity",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 20323.0,
+          "n_repeats": 3,
+          "prompt_tokens": 593,
+          "stable": true
+        },
+        "M": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "9",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 19327.0,
+          "n_repeats": 3,
+          "prompt_tokens": 581,
+          "stable": true
+        },
+        "MF": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "7",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "correct": false,
+          "final_codec": "tmpl",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 19241.0,
+          "n_repeats": 3,
+          "prompt_tokens": 582,
+          "stable": true
+        },
+        "R": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "9",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": null,
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 41079.0,
+          "n_repeats": 3,
+          "prompt_tokens": 583,
+          "stable": true
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "9",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "raw",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 20030.0,
+          "n_repeats": 3,
+          "prompt_tokens": 593,
+          "stable": true
+        }
+      },
+      "question": "n-warnings",
+      "role": "loss",
+      "verdict": {
+        "candidate_policy_rescue": [
+          "F",
+          "VG"
+        ],
+        "causal": "production-stage effect unresolved (only MF fails; its outer codec is structural)",
+        "note": "VG/F rescue is candidate-policy evidence only; VG changes the shelf AND guards the mine, so it is not a clean lexical-guard attribution"
+      },
+      "weakly_matched": false
+    },
+    {
+      "case": "clap-derive-explore",
+      "cells": {
+        "F": {
+          "alias_leaks": 0,
+          "answer": {
+            "files": [
+              "clap_builder/src/builder/value_parser.rs"
+            ]
+          },
+          "correct": true,
+          "final_codec": "raw",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 295467.0,
+          "n_repeats": 3,
+          "prompt_tokens": 4785,
+          "stable": true
+        },
+        "I": {
+          "alias_leaks": 0,
+          "answer": {
+            "files": [
+              "clap_builder/src/builder/value_parser.rs"
+            ]
+          },
+          "correct": true,
+          "final_codec": "identity",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 293982.0,
+          "n_repeats": 3,
+          "prompt_tokens": 4785,
+          "stable": true
+        },
+        "M": {
+          "alias_leaks": 0,
+          "answer": {
+            "files": [
+              "clap_builder/src/value_parser.rs"
+            ]
+          },
+          "correct": false,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 1,
+          "latency_ms": 273796.0,
+          "n_repeats": 3,
+          "prompt_tokens": 4511,
+          "stable": true
+        },
+        "MF": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "clap_derive/src/value_parser.rs"
+            ],
+            "symbols": []
+          },
+          "correct": false,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 1,
+          "latency_ms": 258372.0,
+          "n_repeats": 3,
+          "prompt_tokens": 4230,
+          "stable": true
+        },
+        "R": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "files": [
+              "clap_builder/src/builder/value_parser.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": null,
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 309284.0,
+          "n_repeats": 3,
+          "prompt_tokens": 4775,
+          "stable": true
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "clap_builder/src/builder/value_parser.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 293212.0,
+          "n_repeats": 3,
+          "prompt_tokens": 4684,
+          "stable": true
+        }
+      },
+      "question": "def-path",
+      "role": "loss",
+      "verdict": {
+        "candidate_policy_rescue": [
+          "F",
+          "VG"
+        ],
+        "causal": "alias main effect confirmed (I pass, M fail)",
+        "note": "VG/F rescue is candidate-policy evidence only; VG changes the shelf AND guards the mine, so it is not a clean lexical-guard attribution"
+      },
+      "weakly_matched": false
+    },
+    {
+      "case": "clap-derive-explore",
+      "cells": {
+        "F": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "8",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "raw",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 9929.0,
+          "n_repeats": 3,
+          "prompt_tokens": 4783,
+          "stable": true
+        },
+        "I": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "8",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "identity",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 9940.0,
+          "n_repeats": 3,
+          "prompt_tokens": 4783,
+          "stable": true
+        },
+        "M": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "13",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 10480.0,
+          "n_repeats": 3,
+          "prompt_tokens": 4509,
+          "stable": true
+        },
+        "MF": {
+          "alias_leaks": 1,
+          "answer": {
+            "answer": "3",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "Map错"
+            ]
+          },
+          "correct": false,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 1,
+          "latency_ms": 9964.0,
+          "n_repeats": 3,
+          "prompt_tokens": 4228,
+          "stable": true
+        },
+        "R": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "8",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser"
+            ]
+          },
+          "correct": true,
+          "final_codec": null,
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 10326.0,
+          "n_repeats": 3,
+          "prompt_tokens": 4773,
+          "stable": true
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "8",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 10096.0,
+          "n_repeats": 3,
+          "prompt_tokens": 4682,
+          "stable": true
+        }
+      },
+      "question": "top-symbol",
+      "role": "loss",
+      "verdict": {
+        "candidate_policy_rescue": [
+          "F",
+          "VG"
+        ],
+        "causal": "production-stage / mine interaction unresolved (only MF fails; MF mined)",
+        "note": "VG/F rescue is candidate-policy evidence only; VG changes the shelf AND guards the mine, so it is not a clean lexical-guard attribution"
+      },
+      "weakly_matched": false
+    },
+    {
+      "case": "rtk-rg-derive-clap",
+      "cells": {
+        "F": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "src/_derive/mod.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "grep",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 185145.0,
+          "n_repeats": 3,
+          "prompt_tokens": 3199,
+          "stable": true
+        },
+        "I": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "src/_derive/mod.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "identity",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 239473.0,
+          "n_repeats": 3,
+          "prompt_tokens": 3959,
+          "stable": true
+        },
+        "M": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "src/_derive/mod.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 167642.0,
+          "n_repeats": 3,
+          "prompt_tokens": 2877,
+          "stable": true
+        },
+        "MF": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "src/_derive/implicit.rs"
+            ],
+            "symbols": []
+          },
+          "correct": false,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 1,
+          "latency_ms": 126602.0,
+          "n_repeats": 3,
+          "prompt_tokens": 2315,
+          "stable": true
+        },
+        "R": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "src/_derive/mod.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": null,
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 236901.0,
+          "n_repeats": 3,
+          "prompt_tokens": 3949,
+          "stable": true
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "src/_derive/mod.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 184631.0,
+          "n_repeats": 3,
+          "prompt_tokens": 3181,
+          "stable": true
+        }
+      },
+      "question": "file",
+      "role": "loss",
+      "verdict": {
+        "candidate_policy_rescue": [
+          "F",
+          "VG"
+        ],
+        "causal": "production-stage / mine interaction unresolved (only MF fails; MF mined)",
+        "note": "VG/F rescue is candidate-policy evidence only; VG changes the shelf AND guards the mine, so it is not a clean lexical-guard attribution"
+      },
+      "weakly_matched": false
+    },
+    {
+      "case": "rtk-rg-parser-clap",
+      "cells": {
+        "F": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "src/_concepts.rs",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "src/_concepts.rs",
+              "src/_cookbook/typed_derive.rs",
+              "src/_features.rs",
+              "src/lib.rs",
+              "src/_tutorial.rs",
+              "src/_derive/mod.rs",
+              "src/_derive/_tutorial.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "grep",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 62390.0,
+          "n_repeats": 3,
+          "prompt_tokens": 1116,
+          "stable": true
+        },
+        "I": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "src/_concepts.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "identity",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 62058.0,
+          "n_repeats": 3,
+          "prompt_tokens": 1254,
+          "stable": true
+        },
+        "M": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "src/_derive/mod.rs"
+            ],
+            "symbols": []
+          },
+          "correct": false,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 49825.0,
+          "n_repeats": 3,
+          "prompt_tokens": 1087,
+          "stable": true
+        },
+        "MF": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "src/_features.rs"
+            ],
+            "symbols": []
+          },
+          "correct": false,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 45139.0,
+          "n_repeats": 3,
+          "prompt_tokens": 1016,
+          "stable": true
+        },
+        "R": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "src/_concepts.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": null,
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 59154.0,
+          "n_repeats": 3,
+          "prompt_tokens": 1244,
+          "stable": true
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "src/_concepts.rs",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "src/_concepts.rs",
+              "src/_cookbook/typed_derive.rs",
+              "src/_features.rs",
+              "src/lib.rs",
+              "src/_tutorial.rs",
+              "src/_derive/mod.rs",
+              "src/_derive/_tutorial.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "grep",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 64527.0,
+          "n_repeats": 3,
+          "prompt_tokens": 1116,
+          "stable": true
+        }
+      },
+      "question": "file",
+      "role": "loss",
+      "verdict": {
+        "candidate_policy_rescue": [
+          "F",
+          "VG"
+        ],
+        "causal": "alias main effect confirmed (I pass, M fail)",
+        "note": "VG/F rescue is candidate-policy evidence only; VG changes the shelf AND guards the mine, so it is not a clean lexical-guard attribution"
+      },
+      "weakly_matched": false
+    },
+    {
+      "case": "build-log-rtk-log",
+      "cells": {
+        "F": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "3",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "raw",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 8068.0,
+          "n_repeats": 1,
+          "prompt_tokens": 593,
+          "stable": null
+        },
+        "I": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "3",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "identity",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 7883.0,
+          "n_repeats": 1,
+          "prompt_tokens": 593,
+          "stable": null
+        },
+        "M": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "3",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 7914.0,
+          "n_repeats": 1,
+          "prompt_tokens": 581,
+          "stable": null
+        },
+        "MF": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "3",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "tmpl",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 8265.0,
+          "n_repeats": 1,
+          "prompt_tokens": 582,
+          "stable": null
+        },
+        "R": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "3",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": null,
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 7928.0,
+          "n_repeats": 1,
+          "prompt_tokens": 583,
+          "stable": null
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "3",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "raw",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 7846.0,
+          "n_repeats": 1,
+          "prompt_tokens": 593,
+          "stable": null
+        }
+      },
+      "question": "n-errors",
+      "role": "control",
+      "verdict": null,
+      "weakly_matched": false
+    },
+    {
+      "case": "clap-derive-explore",
+      "cells": {
+        "F": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "Parser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "raw",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 9255.0,
+          "n_repeats": 1,
+          "prompt_tokens": 4785,
+          "stable": null
+        },
+        "I": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "Parser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "identity",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 9369.0,
+          "n_repeats": 1,
+          "prompt_tokens": 4785,
+          "stable": null
+        },
+        "M": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "Parser",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "Parser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 10198.0,
+          "n_repeats": 1,
+          "prompt_tokens": 4511,
+          "stable": null
+        },
+        "MF": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "Parser",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "Parser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 9716.0,
+          "n_repeats": 1,
+          "prompt_tokens": 4230,
+          "stable": null
+        },
+        "R": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "Parser"
+            ]
+          },
+          "correct": true,
+          "final_codec": null,
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 9656.0,
+          "n_repeats": 1,
+          "prompt_tokens": 4775,
+          "stable": null
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "Parser",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "Parser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 9696.0,
+          "n_repeats": 1,
+          "prompt_tokens": 4684,
+          "stable": null
+        }
+      },
+      "question": "trait",
+      "role": "control",
+      "verdict": null,
+      "weakly_matched": false
+    },
+    {
+      "case": "clap-derive-explore",
+      "cells": {
+        "F": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "clap_builder/src/derive.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "raw",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 11137.0,
+          "n_repeats": 1,
+          "prompt_tokens": 4789,
+          "stable": null
+        },
+        "I": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "clap_builder/src/derive.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "identity",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 11323.0,
+          "n_repeats": 1,
+          "prompt_tokens": 4789,
+          "stable": null
+        },
+        "M": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "clap_builder/src/derive.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 11393.0,
+          "n_repeats": 1,
+          "prompt_tokens": 4515,
+          "stable": null
+        },
+        "MF": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "clap_builder/src/derive.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 11364.0,
+          "n_repeats": 1,
+          "prompt_tokens": 4234,
+          "stable": null
+        },
+        "R": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "clap_builder/src/derive.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": null,
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 11120.0,
+          "n_repeats": 1,
+          "prompt_tokens": 4779,
+          "stable": null
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [
+              "clap_builder/src/derive.rs"
+            ],
+            "symbols": []
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 10955.0,
+          "n_repeats": 1,
+          "prompt_tokens": 4688,
+          "stable": null
+        }
+      },
+      "question": "trait-path",
+      "role": "control",
+      "verdict": null,
+      "weakly_matched": false
+    },
+    {
+      "case": "rtk-rg-parser-clap",
+      "cells": {
+        "F": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser",
+              "TypedValueParser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "grep",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 9089.0,
+          "n_repeats": 1,
+          "prompt_tokens": 1111,
+          "stable": null
+        },
+        "I": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser",
+              "TypedValueParser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "identity",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 8837.0,
+          "n_repeats": 1,
+          "prompt_tokens": 1249,
+          "stable": null
+        },
+        "M": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 7925.0,
+          "n_repeats": 1,
+          "prompt_tokens": 1082,
+          "stable": null
+        },
+        "MF": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 7979.0,
+          "n_repeats": 1,
+          "prompt_tokens": 1011,
+          "stable": null
+        },
+        "R": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser"
+            ]
+          },
+          "correct": true,
+          "final_codec": null,
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 8449.0,
+          "n_repeats": 1,
+          "prompt_tokens": 1239,
+          "stable": null
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "ValueParser",
+              "TypedValueParser"
+            ]
+          },
+          "correct": true,
+          "final_codec": "grep",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 9283.0,
+          "n_repeats": 1,
+          "prompt_tokens": 1111,
+          "stable": null
+        }
+      },
+      "question": "symbol",
+      "role": "control",
+      "verdict": null,
+      "weakly_matched": true
+    },
+    {
+      "case": "rg-output-rtk-grep",
+      "cells": {
+        "F": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "OpenAsync",
+              "RequestAsync"
+            ]
+          },
+          "correct": true,
+          "final_codec": "raw",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 42459.0,
+          "n_repeats": 1,
+          "prompt_tokens": 879,
+          "stable": null
+        },
+        "I": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "OpenAsync",
+              "RequestAsync"
+            ]
+          },
+          "correct": true,
+          "final_codec": "identity",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 44807.0,
+          "n_repeats": 1,
+          "prompt_tokens": 879,
+          "stable": null
+        },
+        "M": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "OpenAsync"
+            ]
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 46730.0,
+          "n_repeats": 1,
+          "prompt_tokens": 837,
+          "stable": null
+        },
+        "MF": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "OpenAsync",
+              "RequestAsync"
+            ]
+          },
+          "correct": true,
+          "final_codec": "mine",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 31734.0,
+          "n_repeats": 1,
+          "prompt_tokens": 818,
+          "stable": null
+        },
+        "R": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "OpenAsync",
+              "RequestAsync"
+            ]
+          },
+          "correct": true,
+          "final_codec": null,
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 37220.0,
+          "n_repeats": 1,
+          "prompt_tokens": 869,
+          "stable": null
+        },
+        "VG": {
+          "alias_leaks": 0,
+          "answer": {
+            "answer": "",
+            "call_path": [],
+            "facts": [],
+            "files": [],
+            "symbols": [
+              "OpenAsync",
+              "RequestAsync"
+            ]
+          },
+          "correct": true,
+          "final_codec": "raw",
+          "finish_reason": null,
+          "format_compliant": true,
+          "invalid_identifiers": 0,
+          "latency_ms": 34673.0,
+          "n_repeats": 1,
+          "prompt_tokens": 879,
+          "stable": null
+        }
+      },
+      "question": "method",
+      "role": "control",
+      "verdict": null,
+      "weakly_matched": true
+    }
+  ]
+}

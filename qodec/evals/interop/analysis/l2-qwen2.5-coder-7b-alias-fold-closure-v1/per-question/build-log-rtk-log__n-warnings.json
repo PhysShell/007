@@ -1,0 +1,130 @@
+{
+  "case": "build-log-rtk-log",
+  "cells": {
+    "R": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "9",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": null,
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 74110.0,
+      "n_repeats": 3,
+      "prompt_tokens": 583,
+      "stable": true
+    },
+    "S": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "7",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": []
+      },
+      "correct": false,
+      "final_codec": "tmpl",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 27501.0,
+      "n_repeats": 3,
+      "prompt_tokens": 582,
+      "stable": true
+    },
+    "SG": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "7",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": []
+      },
+      "correct": false,
+      "final_codec": "tmpl",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 10236.0,
+      "n_repeats": 3,
+      "prompt_tokens": 582,
+      "stable": true
+    },
+    "SM": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "7",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": []
+      },
+      "correct": false,
+      "final_codec": "tmpl",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 10532.0,
+      "n_repeats": 3,
+      "prompt_tokens": 582,
+      "stable": true
+    },
+    "V": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "9",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": "raw",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 25159.0,
+      "n_repeats": 3,
+      "prompt_tokens": 593,
+      "stable": true
+    },
+    "VG": {
+      "alias_leaks": 0,
+      "answer": {
+        "answer": "9",
+        "call_path": [],
+        "facts": [],
+        "files": [],
+        "symbols": []
+      },
+      "correct": true,
+      "final_codec": "raw",
+      "finish_reason": null,
+      "format_compliant": true,
+      "invalid_identifiers": 0,
+      "latency_ms": 10230.0,
+      "n_repeats": 3,
+      "prompt_tokens": 593,
+      "stable": true
+    }
+  },
+  "question": "n-warnings",
+  "role": "loss",
+  "verdict": {
+    "candidate_policy_rescue": [
+      "V",
+      "VG"
+    ],
+    "causal": "production structural stage itself causes the loss (S fails); V/VG pass → rescue comes from dropping the diag/tmpl/toon shelf, not the guard",
+    "stage1_matched_guard_pair": "SM vs SG (production stage-1 shared)"
+  },
+  "weakly_matched": false
+}

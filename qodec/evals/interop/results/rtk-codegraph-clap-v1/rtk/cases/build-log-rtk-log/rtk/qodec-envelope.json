@@ -1,0 +1,8 @@
+{
+  "encoded": false,
+  "codec": "passthrough",
+  "content": "Log Summary\n   [error] 3 errors (3 unique)\n   [warn] 9 warnings (3 unique)\n   [info] 0 info messages\n\n[ERRORS]\n   C:\\build\\src\\Legacy.UI\\ViewModels\\UserEditorViewModel.cs(198,22): error CS1061: 'UserSession' doe...\n       2 Error(s)\n   C:\\build\\src\\Legacy.UI\\ViewModels\\UserEditorViewModel.cs(142,38): error CS1061: 'UserSession' doe...\n\n[WARNINGS]\n   [\u00d75]   CSC : warning CS8618: Non-nullable property 'CurrentUser' must contain a non-null value when ex...\n   [\u00d73]   warning MSB3277: Found conflicts between different versions of \"DevExpress.Xpf.Core\" that could...\n       7 Warning(s)",
+  "tokens_in": 176,
+  "tokens_out": 176,
+  "meter": "o200k"
+}

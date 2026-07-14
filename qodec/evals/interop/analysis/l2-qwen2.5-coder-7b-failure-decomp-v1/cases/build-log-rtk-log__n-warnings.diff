@@ -1,0 +1,22 @@
+--- raw
++++ encoded
+@@ -1,2 +1,5 @@
++%q1 tmpl sep=pipe slot=quest n=1 nl=0
++码=   C:\build\src\Legacy.UI\ViewModels\UserEditorViewModel.cs(1¿): error CS1061: 'UserSession' doe...
++%q1 body
+ Log Summary
+    [error] 3 errors (3 unique)
+@@ -5,7 +8,7 @@
+ 
+ [ERRORS]
+-   C:\build\src\Legacy.UI\ViewModels\UserEditorViewModel.cs(198,22): error CS1061: 'UserSession' doe...
++码|98,22
+        2 Error(s)
+-   C:\build\src\Legacy.UI\ViewModels\UserEditorViewModel.cs(142,38): error CS1061: 'UserSession' doe...
++码|42,38
+ 
+ [WARNINGS]
+@@ -13,2 +16,3 @@
+    [×3]   warning MSB3277: Found conflicts between different versions of "DevExpress.Xpf.Core" that could...
+        7 Warning(s)
++

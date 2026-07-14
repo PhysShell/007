@@ -16,6 +16,11 @@ clap = { version = "4", features = ["derive", "env"] }
 serde_json = "1"
 anyhow = "1"
 tiktoken-rs = "0.7"
+# Target-model tokenizer meter (`--meter hf:<tokenizer.json>`). In-process, so a
+# GLM/Qwen count costs no Python subprocess. `onig` matches the regex engine the
+# Python `tokenizers` wheel uses, so counts are bit-for-bit identical; the
+# training-only `esaxx_fast` and `progressbar` extras are dropped.
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
 # Blocking HTTP for the perplexity gate (same choice as docs/fastcontext.md:
 # no async runtime for one local call).
 ureq = "2"
