@@ -1,0 +1,52 @@
+{
+  "type": "object",
+  "required": ["manifest_version", "case_id", "origin_kind", "repository", "license", "project", "build"],
+  "additionalProperties": true,
+  "properties": {
+    "manifest_version": { "type": "string", "enum": ["n2a-source-manifest-v1"] },
+    "case_id": { "type": "string", "minLength": 1 },
+    "origin_kind": { "type": "string", "enum": ["generated-first-party-from-public-source"] },
+    "repository": {
+      "type": "object",
+      "required": ["url", "owner", "name", "approved_commit_sha"],
+      "additionalProperties": true,
+      "properties": {
+        "url": { "type": "string", "pattern": "^https://github\\.com/" },
+        "owner": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "approved_commit_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      }
+    },
+    "license": {
+      "type": "object",
+      "required": ["spdx", "file"],
+      "additionalProperties": true,
+      "properties": {
+        "spdx": { "type": "string", "minLength": 1 },
+        "file": { "type": "string", "minLength": 1 }
+      }
+    },
+    "project": {
+      "type": "object",
+      "required": ["path", "ecosystem", "expected_target_framework", "expected_package_reference_count", "expected_project_reference_count"],
+      "additionalProperties": true,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "ecosystem": { "type": "string", "enum": ["dotnet"] },
+        "expected_target_framework": { "type": "string", "minLength": 1 },
+        "expected_package_reference_count": { "type": "integer", "minimum": 0 },
+        "expected_project_reference_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "build": {
+      "type": "object",
+      "required": ["argv", "network_during_execution", "restore"],
+      "additionalProperties": true,
+      "properties": {
+        "argv": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "network_during_execution": { "type": "string", "enum": ["denied"] },
+        "restore": { "type": "string", "enum": ["not-performed"] }
+      }
+    }
+  }
+}
