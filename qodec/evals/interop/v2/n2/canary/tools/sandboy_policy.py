@@ -44,6 +44,14 @@ def build_policy(
         Path("/lib"),
         Path("/lib64"),
         Path("/etc"),
+        # CoreCLR startup reads /proc (cpuinfo/meminfo/self/*) and
+        # /sys/fs/cgroup (container memory/cpu limit detection) — without
+        # these, an earlier N2-A run showed CoreCLR abort with "Failed to
+        # create CoreCLR, HRESULT: 0x8007000E" (E_OUTOFMEMORY), even though
+        # the real cause was Landlock denying these paths, not an actual
+        # memory shortage (peak RSS was ~10MB).
+        Path("/proc"),
+        Path("/sys"),
     ]
     if repo_tools_dir is not None:
         # Only the network_probe.py helper (invoked through the same wrapper
