@@ -1,0 +1,31 @@
+{
+  "argv": [
+    "python3",
+    "fixture/demo_tool.py"
+  ],
+  "capture_timestamp": "2023-11-14T22:13:20+00:00",
+  "case_id": "deterministic-log-demo",
+  "checked_out_commit_sha": "38c86cc39c1b59a97c18f80fe66dfb774a698e02",
+  "cwd": ".",
+  "environment_allowlist": [
+    "PATH"
+  ],
+  "exit_code": 3,
+  "flake_lock_sha256": "75708d790dd63c3aac0723c2a5349987ce64a7df6214023bae7afce49afec3d0",
+  "locale": "C.UTF-8",
+  "nix_system": "x86_64-linux",
+  "nix_version": "local-cargo:no-nix",
+  "nixpkgs_revision": "ac62194c3917d5f474c1a844b6fd6da2db95077d",
+  "phase": "native",
+  "qodec_tree_sha": "7e0be7793ab0c0e10452734cc852ec3a0ea1ebc8",
+  "receipt_version": "corpus-receipt-v1",
+  "repository_head_sha": "38c86cc39c1b59a97c18f80fe66dfb774a698e02",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stdin_sha256": null,
+  "stdout_sha256": "959c5cf287e1ec254357ef96e5881c4553e1b5ddbe8ac79b569ecb6a15b1e551",
+  "timeout_status": "ok",
+  "timezone": "UTC",
+  "tool_binary_sha256": "f56a588548dd013906ae1dcd1b6faa417f4e204da634ff354840d9643e78ff9e",
+  "tool_identity": "python3",
+  "wall_time_s": 0.014184
+}
