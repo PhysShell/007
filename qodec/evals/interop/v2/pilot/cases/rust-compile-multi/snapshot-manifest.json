@@ -1,14 +1,14 @@
 {
   "anchors_sha256": "511a334ea0a3bd7360c7c31ba7fbd7a2977edfe1c3019b1bda526f60150da8e2",
-  "capture_recipe_sha256": "c68201bd955656fdd17048c822488ae5d10f6c4c853a2e6fae6e9e7b9395a12d",
+  "capture_recipe_sha256": "1080e6730c74f657b7b2d999b552b5da5a10e1bcb5b77f627f77eaa7595fc0f9",
   "case_id": "rust-compile-multi",
   "fixture_tree_sha256": "eb5d74effba76ccfcaf666a1902533ec14e8cba8021c0fefca7b687cb7790b1e",
-  "native_receipt_sha256": "abd193faf2993e03254ca2aea220277532961a62a3d01d35c230ba3f96a3615c",
+  "native_receipt_sha256": "f20231f63b079ee69b9e0f0af6f599b6f4c9a51a05d135ac23242eed26fed4a7",
   "provenance_sha256": "02a5b04325dbc0586cc16b2447f9db0540c3a982cf197e7b20ed3e7432946937",
   "raw_stderr_sha256": "5c053095c149d46cb498b3ca56eb2cccb5c1a1d5beef53169823958620c29181",
   "raw_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "rtk_receipt_sha256": "c665924e9a74fa3ca5ff4e2940e8d50eb9a40b32b569d8b93e73c45892f7aa7d",
+  "rtk_receipt_sha256": "be62bd36d58994b3537cf784a1def36be7ba0c0a004ceb03bc78c28b45ac4e5b",
   "rtk_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-  "rtk_stdout_sha256": "a82a223d3f1245830a24f87c0883cb3de43abb88db8de4fddc7ad30ebcd5b335",
+  "rtk_stdout_sha256": "5c053095c149d46cb498b3ca56eb2cccb5c1a1d5beef53169823958620c29181",
   "snapshot_version": "pilot-snapshot-v1"
 }

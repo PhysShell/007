@@ -11,7 +11,7 @@
   ],
   "capture_timestamp": "2023-11-14T22:13:20+00:00",
   "case_id": "rust-compile-multi",
-  "checked_out_commit_sha": "5e5b96c934b18518b0827ff6e88dd1e71a0aa9a4",
+  "checked_out_commit_sha": "21e998bd125eb85d3e9e514b6ac0529816081a42",
   "cwd": ".",
   "environment_allowlist": [
     "PATH"
@@ -25,7 +25,7 @@
   "phase": "native",
   "qodec_tree_sha": null,
   "receipt_version": "corpus-receipt-v1",
-  "repository_head_sha": "5e5b96c934b18518b0827ff6e88dd1e71a0aa9a4",
+  "repository_head_sha": "21e998bd125eb85d3e9e514b6ac0529816081a42",
   "stderr_sha256": "5c053095c149d46cb498b3ca56eb2cccb5c1a1d5beef53169823958620c29181",
   "stdin_sha256": null,
   "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -33,5 +33,5 @@
   "timezone": "UTC",
   "tool_binary_sha256": "f5dbb8021b35dc1b92b58f8b3a9a6afa182b13a2d1ae00d5a519e46e35757847",
   "tool_identity": "rustc",
-  "wall_time_s": 0.069916
+  "wall_time_s": 0.052963
 }

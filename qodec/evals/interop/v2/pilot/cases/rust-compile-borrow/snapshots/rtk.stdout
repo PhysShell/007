@@ -1,9 +1,13 @@
-Log Summary
-   [error] 3 errors (3 unique)
-   [warn] 0 warnings (0 unique)
-   [info] 0 info messages
+error[E0499]: cannot borrow `buffer` as mutable more than once at a time
+ --> fixture/double_borrow.rs:5:18
+  |
+4 |     let first = &mut buffer;
+  |                 ----------- first mutable borrow occurs here
+5 |     let second = &mut buffer;
+  |                  ^^^^^^^^^^^ second mutable borrow occurs here
+6 |     first.push(4);
+  |     ----- first borrow later used here
 
-[ERRORS]
-   For more information about this error, try `rustc --explain E0499`.
-   error[E0499]: cannot borrow `buffer` as mutable more than once at a time
-   error: aborting due to 1 previous error
+error: aborting due to 1 previous error
+
+For more information about this error, try `rustc --explain E0499`.

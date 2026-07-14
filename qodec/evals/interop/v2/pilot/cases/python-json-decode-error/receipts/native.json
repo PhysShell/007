@@ -7,7 +7,7 @@
   ],
   "capture_timestamp": "2023-11-14T22:13:20+00:00",
   "case_id": "python-json-decode-error",
-  "checked_out_commit_sha": "5e5b96c934b18518b0827ff6e88dd1e71a0aa9a4",
+  "checked_out_commit_sha": "21e998bd125eb85d3e9e514b6ac0529816081a42",
   "cwd": ".",
   "environment_allowlist": [
     "PATH"
@@ -21,7 +21,7 @@
   "phase": "native",
   "qodec_tree_sha": null,
   "receipt_version": "corpus-receipt-v1",
-  "repository_head_sha": "5e5b96c934b18518b0827ff6e88dd1e71a0aa9a4",
+  "repository_head_sha": "21e998bd125eb85d3e9e514b6ac0529816081a42",
   "stderr_sha256": "64e5d91698ec561c37b8b55f1e5824a7855df887cb42be7f63d7a910e8685cf5",
   "stdin_sha256": null,
   "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -29,5 +29,5 @@
   "timezone": "UTC",
   "tool_binary_sha256": "34e0e5e1a829a1e7a7f7b0db15a786b543602b53354da82e3cea56951f619de3",
   "tool_identity": "python3",
-  "wall_time_s": 0.034807
+  "wall_time_s": 0.032975
 }

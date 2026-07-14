@@ -6,7 +6,7 @@
   ],
   "capture_timestamp": "2023-11-14T22:13:20+00:00",
   "case_id": "python-syntaxerror",
-  "checked_out_commit_sha": "5e5b96c934b18518b0827ff6e88dd1e71a0aa9a4",
+  "checked_out_commit_sha": "21e998bd125eb85d3e9e514b6ac0529816081a42",
   "cwd": ".",
   "environment_allowlist": [
     "PATH"
@@ -22,7 +22,7 @@
   "phase": "rtk",
   "qodec_tree_sha": null,
   "receipt_version": "corpus-receipt-v1",
-  "repository_head_sha": "5e5b96c934b18518b0827ff6e88dd1e71a0aa9a4",
+  "repository_head_sha": "21e998bd125eb85d3e9e514b6ac0529816081a42",
   "rtk_argv": [
     "rtk",
     "pipe",
@@ -37,5 +37,5 @@
   "timezone": "UTC",
   "tool_binary_sha256": "41f316adf7b30a568208a0a4f824bffb266ecb6d01bd9de81bed58e1d469dfcf",
   "tool_identity": "rtk",
-  "wall_time_s": 0.001758
+  "wall_time_s": 0.001669
 }

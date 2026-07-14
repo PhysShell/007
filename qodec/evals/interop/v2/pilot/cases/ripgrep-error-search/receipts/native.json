@@ -12,7 +12,7 @@
   ],
   "capture_timestamp": "2023-11-14T22:13:20+00:00",
   "case_id": "ripgrep-error-search",
-  "checked_out_commit_sha": "5e5b96c934b18518b0827ff6e88dd1e71a0aa9a4",
+  "checked_out_commit_sha": "21e998bd125eb85d3e9e514b6ac0529816081a42",
   "cwd": ".",
   "environment_allowlist": [
     "PATH"
@@ -26,7 +26,7 @@
   "phase": "native",
   "qodec_tree_sha": null,
   "receipt_version": "corpus-receipt-v1",
-  "repository_head_sha": "5e5b96c934b18518b0827ff6e88dd1e71a0aa9a4",
+  "repository_head_sha": "21e998bd125eb85d3e9e514b6ac0529816081a42",
   "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
   "stdin_sha256": null,
   "stdout_sha256": "aa928f9211edcb1623278e397af665c9d5c2f39e48cc30a3d717cd584d950c92",
@@ -34,5 +34,5 @@
   "timezone": "UTC",
   "tool_binary_sha256": "29c309a90fea44d1cc930647dee579b76c58c1b016d4d1c6d193b3fae5a3849b",
   "tool_identity": "rg",
-  "wall_time_s": 0.002235
+  "wall_time_s": 0.002146
 }
