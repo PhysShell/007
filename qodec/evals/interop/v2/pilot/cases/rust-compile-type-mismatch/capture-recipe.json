@@ -24,8 +24,7 @@
     "argv": [
       "rtk",
       "pipe",
-      "--filter",
-      "log"
+      "--passthrough"
     ]
   },
   "source_date_epoch": 1700000000,

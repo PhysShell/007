@@ -49,6 +49,13 @@ dirs and compared byte-for-byte before they are trusted.
 families and a runtime exception traceback are omitted with cause — see
 `deviation_justification` in [`pilot-manifest.json`](pilot-manifest.json).
 
+**Interop finding (pinned RTK):** `rtk pipe --filter log` — the semantically
+correct reducer for compiler logs — is **non-deterministic** (unordered-map
+ordering; 5 distinct outputs in 20 runs over identical rustc stderr), so it is
+unfit as reproducible evidence. The three rust cases therefore record explicit
+RTK **passthrough**; the deterministic `--filter grep` reduces the ripgrep case.
+See `interop_findings` in `pilot-manifest.json`.
+
 ## Layout
 
 ```

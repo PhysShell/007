@@ -31,6 +31,7 @@
     },
     "source_policy": { "type": "string" },
     "deviation_justification": { "type": "string" },
+    "interop_findings": { "type": "string" },
     "non_gating": { "type": "boolean", "enum": [true] }
   }
 }
