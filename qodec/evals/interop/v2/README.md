@@ -147,3 +147,31 @@ Numeric gates, taxonomy and split policy are frozen and digest-protected in
 `coverage-matrix.json`. Once the first v2 results appear, any change to them
 requires a **new `contract_version`**. Old results are always judged by the
 contract they were produced under.
+
+## Scope M1 — execution substrate & RTK comparison (non-gating addendum)
+
+Scope M1 adds a Nix execution substrate and an RTK↔qodec comparison, **without
+changing any frozen numeric gate** in `coverage-matrix.json` (its
+`contract_version`, `gates_digest`, quotas, gates, `agent_ab_pilot` and
+`results_ledger` are untouched). New material:
+
+- **Execution environment:** [`execution-environment.md`](execution-environment.md)
+  — reproducibility identity + Nix-as-canonical policy.
+- **Nix / GitHub Actions:** root [`/flake.nix`](../../../../flake.nix) adds
+  `packages.qodec`, `packages.rtk-pinned` (built from a pinned RTK commit — no
+  mutable release binary), `devShells.qodec-bench`, apps and checks; the
+  workflow [`/.github/workflows/qodec-v2.yml`](../../../../.github/workflows/qodec-v2.yml)
+  runs them read-only, SHA-pinned, with no model calls.
+- **RTK source audit:** [`rtk-implementation-map.md`](rtk-implementation-map.md),
+  [`rtk-output-grammar.json`](rtk-output-grammar.json),
+  [`rtk-qodec-composition-risks.md`](rtk-qodec-composition-risks.md).
+- **Comparison contract (non-gating):**
+  [`rtk-comparison-contract.json`](rtk-comparison-contract.json) — four logical
+  arms (RAW, QODEC, RTK, RTK+QODEC), two separate leaderboards (transparency
+  excludes RTK; utility includes all four), all tokens via the same real target
+  tokenizer.
+- **Dataset map:** [`dataset-source-map.md`](dataset-source-map.md) — candidate
+  sources investigated (not downloaded), with ingest decisions.
+- **Non-scoring smoke suite:** [`smoke/`](smoke/) — NON-BENCHMARK, NON-GATING,
+  not part of the 48 base cases or held-out; proves qodec losslessness and
+  token accounting over arbitrary and RTK-shaped input.

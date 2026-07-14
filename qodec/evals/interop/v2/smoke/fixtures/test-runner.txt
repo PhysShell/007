@@ -1,0 +1,11 @@
+running 6 tests
+test parse::accepts_digits ... ok
+test parse::rejects_empty ... ok
+test parse::handles_unicode ... ok
+test emit::roundtrips ... FAILED
+test emit::empty_is_empty ... ok
+test util::helper_true ... ok
+
+failures:
+    emit::roundtrips
+test result: FAILED. 5 passed; 1 failed; 0 ignored

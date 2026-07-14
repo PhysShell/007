@@ -76,3 +76,20 @@ Two numbers that must never merge: **token savings** (L1) and **comprehension
 retention** (L2). A method that shrinks output while quietly losing answers
 fails v2 even if its savings look excellent, because the reader gate scores what
 survived — not what was removed.
+
+## See also (Scope M1)
+
+The RTK method-vs-verdict split above is operationalised by the Scope M1
+addendum, which pins and audits the actual RTK source and defines a non-gating
+four-arm comparison:
+
+- [`rtk-implementation-map.md`](rtk-implementation-map.md) — pinned-source audit.
+- [`rtk-output-grammar.json`](rtk-output-grammar.json) — RTK output forms and
+  their composition concerns.
+- [`rtk-qodec-composition-risks.md`](rtk-qodec-composition-risks.md) — the future
+  `VG-RTK-v1` boundary (documented, not implemented).
+- [`rtk-comparison-contract.json`](rtk-comparison-contract.json) — non-gating
+  four-arm comparison; transparency leaderboard excludes RTK (lossy), utility
+  leaderboard includes all four; RTK `chars/4` is a diagnostic column only.
+- [`execution-environment.md`](execution-environment.md) — the Nix substrate all
+  future captures run under.

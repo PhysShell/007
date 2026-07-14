@@ -321,6 +321,19 @@ class Validator:
                 if san == "none" or not san:
                     self.fail("origin", f"case {c.get('case_id')} carries secret-like hazard but sanitization=none")
 
+    # -- non-benchmark / smoke rejection ----------------------------------- #
+    def check_no_smoke(self):
+        """Smoke fixtures must never enter a coverage manifest (section 7)."""
+        for c in self.cases:
+            cid = str(c.get("case_id", ""))
+            tags = set(c.get("tags", []))
+            if cid.startswith("smoke-") or tags & {"smoke", "non-benchmark"}:
+                self.fail("smoke-leak", f"case {cid!r} is a non-benchmark/smoke fixture and cannot appear in a coverage manifest")
+        for q in self.questions:
+            qid = str(q.get("question_id", ""))
+            if qid.startswith("smoke-"):
+                self.fail("smoke-leak", f"question {qid!r} is a non-benchmark/smoke fixture and cannot appear in a coverage manifest")
+
     # -- hazards ------------------------------------------------------------ #
     def check_hazard_quota(self):
         hq = self.cov["quotas"]["hazards"]
@@ -476,6 +489,7 @@ class Validator:
         self.check_outcome_quota()
         self.check_size_quota()
         self.check_origin_quota()
+        self.check_no_smoke()
         self.check_hazard_quota()
         self.check_question_categories()
         self.check_question_axes()
