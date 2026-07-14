@@ -1,0 +1,32 @@
+{
+  "environment_allowlist": [
+    "PATH"
+  ],
+  "expected_exit_code": 1,
+  "expected_exit_code_class": "exact",
+  "locale": "C.UTF-8",
+  "native": {
+    "argv": [
+      "git",
+      "--no-pager",
+      "diff",
+      "--no-index",
+      "--",
+      "fixture/before.txt",
+      "fixture/after.txt"
+    ],
+    "cwd": ".",
+    "stdin_path": null
+  },
+  "network_policy": "disabled",
+  "rtk": {
+    "argv": [
+      "rtk",
+      "pipe",
+      "--passthrough"
+    ]
+  },
+  "source_date_epoch": 1700000000,
+  "timeout_s": 60,
+  "timezone": "UTC"
+}

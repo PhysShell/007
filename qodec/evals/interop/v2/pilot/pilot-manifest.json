@@ -1,0 +1,41 @@
+{
+  "scope": "N1",
+  "contract_version": "interop-benchmark-v2",
+  "status": "pilot-development-non-gating",
+  "split_policy": "public-development-only",
+  "case_count": 10,
+  "cases": [
+    "rust-compile-type-mismatch",
+    "rust-compile-borrow",
+    "rust-compile-multi",
+    "python-syntaxerror",
+    "python-doctest-pass",
+    "python-json-decode-error",
+    "ripgrep-error-search",
+    "jq-select-names",
+    "git-diff-noindex",
+    "ripgrep-def-exploration"
+  ],
+  "min_families": 4,
+  "min_ecosystems": 3,
+  "distribution": {
+    "families": {
+      "compiler-build": 3,
+      "lint-static-analysis": 1,
+      "test-runner": 1,
+      "structured-data-query": 2,
+      "search-listing": 1,
+      "git-diff-history": 1,
+      "code-exploration-callgraph": 1
+    },
+    "ecosystems": {
+      "rust": 3,
+      "python": 3,
+      "language-neutral": 4
+    }
+  },
+  "source_policy": "All 10 cases are first-party captures (origin_kind=generated-first-party) produced by real, pinned tools (rustc, CPython py_compile/doctest/json.tool, ripgrep, jq, git) over fixed in-repo fixtures under a canonical LC_ALL/LANG/TZ environment. No external datasets are fetched; no network; no hand-authored payloads; license is in-repo.",
+  "deviation_justification": "Target distribution suggested container/orchestrator and application/CI-log families and a runtime exception/stacktrace. These are omitted with cause: (1) no container/orchestrator runtime is available in the pinned Nix build environment; (2) no deterministic first-party tool emitting an application/CI-log stream is available without a generator (which the scope forbids); (3) CPython runtime tracebacks embed the absolute capture directory in __file__, which is irreproducible across the mandated independent temporary capture directories, so a path-clean py_compile SyntaxError (still a real CPython parse diagnostic) is substituted. The mandatory floor (exactly 10 real public-development cases, >=4 families, >=3 ecosystems) is met with margin (7 families, 3 ecosystems).",
+  "interop_findings": "Reproducibility finding (pinned RTK 5d32d073): `rtk pipe --filter log`, the semantically-correct reducer for compiler/build logs, is NON-DETERMINISTIC — repeated runs over identical rustc stderr produce different byte output (unordered-map iteration in RTK's log summarizer; observed 5 distinct outputs in 20 runs). It is therefore unfit as reproducible benchmark evidence. The three rust compiler-build cases record explicit RTK passthrough instead; `--filter grep` (deterministic) reduces the ripgrep case. This is a pilot observation about RTK, not a qodec or contract issue.",
+  "non_gating": true
+}

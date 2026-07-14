@@ -1,0 +1,4 @@
+  File "fixture/broken_def.py", line 2
+    def parse_config(:
+                     ^
+SyntaxError: invalid syntax

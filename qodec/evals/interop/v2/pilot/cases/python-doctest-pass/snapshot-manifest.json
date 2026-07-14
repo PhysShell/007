@@ -1,0 +1,14 @@
+{
+  "anchors_sha256": "ad978b1c915a53eb9fc444f6e9dd05f359530a3984517865035df17e066d187b",
+  "capture_recipe_sha256": "e91f32c28f4c8cd0efa007d82371c7159c850c1cf9a16944ed0e9ac6d8035bb6",
+  "case_id": "python-doctest-pass",
+  "fixture_tree_sha256": "576ed4d70098b4ea1ea72e8d172b8ac522444b6c8ababbcdd06f8e37e151b168",
+  "native_receipt_sha256": "8c6fc71482f5659a8c086e161cfa43de6ff93c4f1a61caab2a0bb53aaad2ee73",
+  "provenance_sha256": "2ae025b9080a96ec48f8926653bbd87c0ec6c7cbc77f02b2fd417c66a881609f",
+  "raw_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "raw_stdout_sha256": "31227afdf619a3e31591683b783505aec903d8794f3ab77212c5438ca6caa113",
+  "rtk_receipt_sha256": "16942c7a58cd80bcd696faf41543a44dede17cb8487f39426104ca040ead4bf9",
+  "rtk_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "rtk_stdout_sha256": "31227afdf619a3e31591683b783505aec903d8794f3ab77212c5438ca6caa113",
+  "snapshot_version": "pilot-snapshot-v1"
+}

@@ -1,0 +1,31 @@
+{
+  "anchors_path": "anchors.json",
+  "capture_mode": "reproducible-command",
+  "capture_recipe_path": "capture-recipe.json",
+  "case_id": "python-doctest-pass",
+  "ecosystem": "python",
+  "family": "test-runner",
+  "hand_authored": false,
+  "markers": [
+    "PUBLIC-DEVELOPMENT",
+    "PILOT",
+    "NON-GATING",
+    "NOT-PUBLIC-VALIDATION",
+    "NOT-SEALED-HELDOUT"
+  ],
+  "notes": "Real CPython doctest verbose output; all tests pass (success-clean).",
+  "origin_kind": "generated-first-party",
+  "outcome": "success-clean",
+  "primary_stream": "raw.stdout",
+  "provenance_path": "provenance.json",
+  "rtk_filter": null,
+  "rtk_mode": "explicit-passthrough",
+  "snapshot_manifest_path": "snapshot-manifest.json",
+  "snapshot_policy": "raw-and-rtk",
+  "split": "public-development",
+  "tags": [
+    "test-runner",
+    "python"
+  ],
+  "tool": "doctest"
+}

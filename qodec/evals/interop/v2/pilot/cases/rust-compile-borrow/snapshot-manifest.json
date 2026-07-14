@@ -1,0 +1,14 @@
+{
+  "anchors_sha256": "df1837870b930c8ca73a175364020219dfa197a9027b11120a21d853065193ff",
+  "capture_recipe_sha256": "ef36492ab1a3c30428ea0f8d98c030998041712606481b0c4a5654f98adb3759",
+  "case_id": "rust-compile-borrow",
+  "fixture_tree_sha256": "2f4e674e0aaca64bade189b837696a2033308e5dd01877a523b74a1258c8c014",
+  "native_receipt_sha256": "f66b5a48701bc6eda66133234f1791e6f012dbfeed8dd24070db81a75e1464b3",
+  "provenance_sha256": "799129082af1945f88461523c30b290cccea15189597f8b8ab3c149d2f824f39",
+  "raw_stderr_sha256": "05bab729ef5b394275b072785e5cb20eb7b5d39a6f6d51f77efd416dfc3ded7f",
+  "raw_stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "rtk_receipt_sha256": "df006df3f9dc009f0ae4b1b866f106901ab9a0199c6aa355b58ea5487ed21fd4",
+  "rtk_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "rtk_stdout_sha256": "05bab729ef5b394275b072785e5cb20eb7b5d39a6f6d51f77efd416dfc3ded7f",
+  "snapshot_version": "pilot-snapshot-v1"
+}

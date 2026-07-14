@@ -1,0 +1,66 @@
+{
+  "type": "object",
+  "required": [
+    "scope", "contract_version", "non_gating", "meter", "codec", "arms",
+    "identity", "case_count", "cases", "aggregates", "all_invariants_ok"
+  ],
+  "properties": {
+    "scope": { "type": "string", "enum": ["N1"] },
+    "contract_version": { "type": "string" },
+    "non_gating": { "type": "boolean", "enum": [true] },
+    "meter": { "type": "string" },
+    "codec": { "type": "string" },
+    "arms": {
+      "type": "array",
+      "minItems": 4,
+      "items": { "type": "string", "enum": ["RAW", "QODEC", "RTK", "RTK+QODEC"] }
+    },
+    "identity": { "type": "object" },
+    "case_count": { "type": "integer", "minimum": 10 },
+    "cases": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "type": "object",
+        "required": ["case_id", "family", "ecosystem", "arms", "invariants",
+                     "rtk_classification", "anchors", "invariants_ok"],
+        "properties": {
+          "case_id": { "type": "string" },
+          "family": { "type": "string" },
+          "ecosystem": { "type": "string" },
+          "rtk_classification": { "type": "string" },
+          "invariants_ok": { "type": "boolean" },
+          "arms": {
+            "type": "object",
+            "required": ["RAW", "QODEC", "RTK", "RTK+QODEC"],
+            "properties": {
+              "RAW": { "$ref": "#/definitions/arm" },
+              "QODEC": { "$ref": "#/definitions/arm" },
+              "RTK": { "$ref": "#/definitions/arm" },
+              "RTK+QODEC": { "$ref": "#/definitions/arm" }
+            }
+          },
+          "invariants": { "type": "array", "items": { "type": "object" } },
+          "anchors": { "type": "object" }
+        }
+      }
+    },
+    "aggregates": { "type": "object" },
+    "all_invariants_ok": { "type": "boolean" }
+  },
+  "definitions": {
+    "arm": {
+      "type": "object",
+      "required": ["input_sha256", "output_sha256", "bytes", "lines", "tokens",
+                   "token_ratio_vs_raw"],
+      "properties": {
+        "input_sha256": { "type": "string" },
+        "output_sha256": { "type": "string" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "lines": { "type": "integer", "minimum": 0 },
+        "tokens": { "type": "integer", "minimum": 0 },
+        "token_ratio_vs_raw": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

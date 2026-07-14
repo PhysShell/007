@@ -1,0 +1,31 @@
+{
+  "anchors_path": "anchors.json",
+  "capture_mode": "reproducible-command",
+  "capture_recipe_path": "capture-recipe.json",
+  "case_id": "ripgrep-error-search",
+  "ecosystem": "language-neutral",
+  "family": "search-listing",
+  "hand_authored": false,
+  "markers": [
+    "PUBLIC-DEVELOPMENT",
+    "PILOT",
+    "NON-GATING",
+    "NOT-PUBLIC-VALIDATION",
+    "NOT-SEALED-HELDOUT"
+  ],
+  "notes": "Real ripgrep search with deterministic --sort path ordering; many repeated matches.",
+  "origin_kind": "generated-first-party",
+  "outcome": "success-clean",
+  "primary_stream": "raw.stdout",
+  "provenance_path": "provenance.json",
+  "rtk_filter": "grep",
+  "rtk_mode": "pipe-filter",
+  "snapshot_manifest_path": "snapshot-manifest.json",
+  "snapshot_policy": "raw-and-rtk",
+  "split": "public-development",
+  "tags": [
+    "search-listing",
+    "language-neutral"
+  ],
+  "tool": "ripgrep"
+}

@@ -1,0 +1,24 @@
+{
+  "anchors": [
+    {
+      "anchor_id": "value-api",
+      "kind": "entity",
+      "stream": "raw.stdout",
+      "value": "api"
+    },
+    {
+      "anchor_id": "value-worker",
+      "kind": "entity",
+      "stream": "raw.stdout",
+      "value": "worker"
+    },
+    {
+      "anchor_id": "value-db",
+      "kind": "entity",
+      "stream": "raw.stdout",
+      "value": "db"
+    }
+  ],
+  "case_id": "jq-select-names",
+  "primary_stream": "raw.stdout"
+}

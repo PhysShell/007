@@ -1,0 +1,18 @@
+{
+  "anchors": [
+    {
+      "anchor_id": "message",
+      "kind": "exact",
+      "stream": "raw.stderr",
+      "value": "Expecting ',' delimiter"
+    },
+    {
+      "anchor_id": "location",
+      "kind": "exact",
+      "stream": "raw.stderr",
+      "value": "line 4"
+    }
+  ],
+  "case_id": "python-json-decode-error",
+  "primary_stream": "raw.stderr"
+}

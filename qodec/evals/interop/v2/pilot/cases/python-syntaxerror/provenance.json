@@ -1,0 +1,12 @@
+{
+  "created_by_scope": "N1",
+  "generator_identity": "python3 -m py_compile fixture/broken_def.py",
+  "license": "in-repo",
+  "origin_kind": "generated-first-party",
+  "pii_review": "clean: no personal data; hostnames/ports are synthetic",
+  "sanitization": "none-required",
+  "secret_review": "clean: no credentials, tokens or secrets",
+  "source_description": "First-party CPython py_compile static-parse capture over a fixed Python source with a syntax error.",
+  "source_revision": "first-party@scope-N1",
+  "source_sha256": "ad84d2bcbde6bd12ee779ec2560ece89f9872f73f5ed9fe859a4ec302ad0d62a"
+}

@@ -1,0 +1,12 @@
+{
+  "created_by_scope": "N1",
+  "generator_identity": "jq -S [.services[].name] fixture/services.json",
+  "license": "in-repo",
+  "origin_kind": "generated-first-party",
+  "pii_review": "clean: no personal data; hostnames/ports are synthetic",
+  "sanitization": "none-required",
+  "secret_review": "clean: no credentials, tokens or secrets",
+  "source_description": "First-party jq capture over a fixed JSON document, extracting a name array with -S -c.",
+  "source_revision": "first-party@scope-N1",
+  "source_sha256": "82c304406e38b9f54c784a1d6b1a6a039065478c6e9431baa1775088d7acf94f"
+}

@@ -1,0 +1,12 @@
+{
+  "created_by_scope": "N1",
+  "generator_identity": "rg --no-heading --line-number --color never --sort path -e fn  -e def  fixture/src",
+  "license": "in-repo",
+  "origin_kind": "generated-first-party",
+  "pii_review": "clean: no personal data; hostnames/ports are synthetic",
+  "sanitization": "none-required",
+  "secret_review": "clean: no credentials, tokens or secrets",
+  "source_description": "First-party ripgrep capture locating function/def sites across fixed rust and python sources.",
+  "source_revision": "first-party@scope-N1",
+  "source_sha256": "082e6f629551a4f349c8f64eddbc74157e41d40cca64797a2206fdc70ccd0be1"
+}

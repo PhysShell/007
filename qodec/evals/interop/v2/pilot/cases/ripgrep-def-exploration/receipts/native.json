@@ -1,0 +1,41 @@
+{
+  "argv": [
+    "rg",
+    "--no-heading",
+    "--line-number",
+    "--color",
+    "never",
+    "--sort",
+    "path",
+    "-e",
+    "fn ",
+    "-e",
+    "def ",
+    "fixture/src"
+  ],
+  "capture_timestamp": "2023-11-14T22:13:20+00:00",
+  "case_id": "ripgrep-def-exploration",
+  "checked_out_commit_sha": "21e998bd125eb85d3e9e514b6ac0529816081a42",
+  "cwd": ".",
+  "environment_allowlist": [
+    "PATH"
+  ],
+  "exit_code": 0,
+  "flake_lock_sha256": "75708d790dd63c3aac0723c2a5349987ce64a7df6214023bae7afce49afec3d0",
+  "locale": "C.UTF-8",
+  "nix_system": "x86_64-linux",
+  "nix_version": "2.28.5",
+  "nixpkgs_revision": "ac62194c3917d5f474c1a844b6fd6da2db95077d",
+  "phase": "native",
+  "qodec_tree_sha": null,
+  "receipt_version": "corpus-receipt-v1",
+  "repository_head_sha": "21e998bd125eb85d3e9e514b6ac0529816081a42",
+  "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "stdin_sha256": null,
+  "stdout_sha256": "892ab90aa84e022813c1a5f494d274228dee5b438351f22b836bd4d9e7fed538",
+  "timeout_status": "ok",
+  "timezone": "UTC",
+  "tool_binary_sha256": "29c309a90fea44d1cc930647dee579b76c58c1b016d4d1c6d193b3fae5a3849b",
+  "tool_identity": "rg",
+  "wall_time_s": 0.001889
+}

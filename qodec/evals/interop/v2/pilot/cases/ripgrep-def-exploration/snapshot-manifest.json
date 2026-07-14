@@ -1,0 +1,14 @@
+{
+  "anchors_sha256": "a075d413be0fee8758ef828cb06c27a536e88aa179c570ecbe0cea6aeda5a9f3",
+  "capture_recipe_sha256": "e76381bf40446962601e33a583db4b9fb421cfa1ac16660f1c1f316dbec1f0fa",
+  "case_id": "ripgrep-def-exploration",
+  "fixture_tree_sha256": "e01ffce0f7f39da67218b0a0f36e11332a0ae875d125d310cb7c7036a6b03804",
+  "native_receipt_sha256": "a4bf51ebf47e99d9419d05fd4803746276f0fe9240091d33240bfa3ad68f9a4d",
+  "provenance_sha256": "28519b4c8478016fa87fba27935f7e69aa3bda48794685ebaaba575aeff2e61c",
+  "raw_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "raw_stdout_sha256": "892ab90aa84e022813c1a5f494d274228dee5b438351f22b836bd4d9e7fed538",
+  "rtk_receipt_sha256": "20862ce3a62e6a1c95ff7bc87a9a8c55c28414a3a0736bbc786deb15568325d0",
+  "rtk_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "rtk_stdout_sha256": "892ab90aa84e022813c1a5f494d274228dee5b438351f22b836bd4d9e7fed538",
+  "snapshot_version": "pilot-snapshot-v1"
+}
