@@ -1,0 +1,166 @@
+# Interop Benchmark v2 — Scope N1 public-log pilot CI.
+#
+# Runs the first non-smoke, four-arm (RAW / QODEC / RTK / RTK+QODEC) leaderboard
+# over 10 real, first-party public-development log cases. Public-development only:
+# no validation split, no sealed-heldout material, no model/reader calls, no
+# production-promotion decision. Frozen numeric gates are untouched.
+#
+# Canonical snapshots are produced by the pinned Nix toolchain. The
+# `capture-bootstrap` job (workflow_dispatch only) emits them as an artifact for
+# review + commit; the pull_request jobs then verify against the committed bytes.
+# Third-party actions are SHA-pinned with persist-credentials disabled; the
+# committed flake.lock is mandatory (--no-update-lock-file). The Nix store is
+# cached (built-in Actions cache, no external secret); saving it needs
+# actions: write — the only scope beyond contents: read.
+name: qodec-v2-public-log-pilot
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: qodec-v2-pilot-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LC_ALL: C.UTF-8
+  LANG: C.UTF-8
+  TZ: UTC
+
+jobs:
+  corpus-validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install Nix
+        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - name: Cache /nix/store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+      - name: Validate pilot corpus + tests (model-free)
+        run: |
+          nix build .#checks.x86_64-linux.qodec-v2-pilot-validate \
+            --no-update-lock-file --print-build-logs
+      - name: Frozen-base guard (Scope M / M1 / N0 byte-identical)
+        run: |
+          python3 qodec/evals/interop/v2/pilot/tests/test_frozen.py
+
+  capture-reproducibility:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - name: Cache /nix/store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+      - name: Capture twice + compare (byte-identical raw + rtk)
+        run: |
+          nix build .#checks.x86_64-linux.qodec-v2-pilot-reproduce \
+            --no-update-lock-file --print-build-logs
+
+  pilot-four-arm-run:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - name: Cache /nix/store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+      - name: Run four-arm pilot (RAW / QODEC / RTK / RTK+QODEC)
+        run: |
+          nix build .#checks.x86_64-linux.qodec-v2-pilot-run \
+            --out-link pilot-out --no-update-lock-file --print-build-logs
+          mkdir -p pilot-reports
+          cp -L pilot-out/pilot/pilot-report.json pilot-reports/
+          cp -L pilot-out/pilot/pilot-summary.md pilot-reports/
+          cp -L pilot-out/pilot/case-manifest.json pilot-reports/
+          cp -L pilot-out/pilot/provenance-report.json pilot-reports/
+          test -f pilot-reports/pilot-report.json
+          test -f pilot-reports/pilot-summary.md
+          echo "== report SHA256 =="; sha256sum pilot-reports/*
+      - name: Upload pilot reports
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: qodec-v2-pilot-reports
+          path: pilot-reports/
+          if-no-files-found: error
+
+  flake:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - name: Cache /nix/store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+      - name: Full flake check (committed lock, no relock)
+        run: |
+          nix flake check --no-update-lock-file --print-build-logs
+
+  capture-bootstrap:
+    # Manual only: produce the canonical snapshots with the pinned toolchain and
+    # publish them for review + commit. Never runs on pull_request.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install Nix
+        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+      - name: Cache /nix/store
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+      - name: Capture canonical snapshots (pinned tools)
+        run: |
+          nix build .#checks.x86_64-linux.qodec-v2-pilot-capture \
+            --out-link captured --no-update-lock-file --print-build-logs
+          mkdir -p pilot-captured
+          cp -rL captured/cases/. pilot-captured/
+          find pilot-captured -type f | sort
+      - name: Upload captured bundles
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: qodec-v2-pilot-captured-bundles
+          path: pilot-captured/
+          if-no-files-found: error

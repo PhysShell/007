@@ -1,0 +1,12 @@
+{
+  "created_by_scope": "N1",
+  "generator_identity": "git --no-pager diff --no-index -- fixture/before.txt fixture/after.txt",
+  "license": "in-repo",
+  "origin_kind": "generated-first-party",
+  "pii_review": "clean: no personal data; hostnames/ports are synthetic",
+  "sanitization": "none-required",
+  "secret_review": "clean: no credentials, tokens or secrets",
+  "source_description": "First-party git diff --no-index capture between two fixed text files (no repository, no timestamps).",
+  "source_revision": "first-party@scope-N1",
+  "source_sha256": "687ffe0729ae45ee3b5d1a64761d286bd72cf36c5bb44c71345938204c808b07"
+}

@@ -188,6 +188,30 @@
         corpusRegenApp = runCorpusCmd "qodec-v2-demo-regenerate" "regenerate --case deterministic-log-demo";
         corpusVerifyApp = runCorpusCmd "qodec-v2-demo-verify" "verify";
         corpusListApp = runCorpusCmd "qodec-v2-corpus-list" "list";
+
+        # ---- Scope N1 public-log pilot (public-development only; non-gating) --- #
+        # Stages the pilot AND the N0 corpus tools it imports as a library.
+        pilotRoot = pkgs.runCommand "qodec-v2-pilot-root" { } ''
+          mkdir -p $out/qodec/evals/interop/v2
+          cp -r ${./qodec/evals/interop/v2/pilot} $out/qodec/evals/interop/v2/pilot
+          cp -r ${./qodec/evals/interop/v2/corpus} $out/qodec/evals/interop/v2/corpus
+          cp ${./flake.lock} $out/flake.lock
+        '';
+        # Real, pinned tools the capture recipes invoke (rustc has no rustup here).
+        pilotToolsPath = pkgs.lib.makeBinPath [
+          rustToolchain pyEnv pkgs.ripgrep pkgs.jq pkgs.git rtk-pinned qodec
+        ];
+        pilotPrelude = ''
+          set -euo pipefail
+          ${identityExports}
+          export RTK_BIN=${rtk-pinned}/bin/rtk
+          export QODEC_BIN=${qodec}/bin/qodec
+          export PYTHONDONTWRITEBYTECODE=1
+          export PATH=${pilotToolsPath}:$PATH
+          root=$(mktemp -d); cp -r ${pilotRoot}/. "$root"; chmod -R u+w "$root"
+          cd "$root/qodec/evals/interop/v2/pilot"
+          export PYTHONPATH="$PWD/tools:$PWD/tests"
+        '';
       in
       {
         packages = {
@@ -211,6 +235,13 @@
           qodec-v2-demo-regenerate = { type = "app"; program = "${corpusRegenApp}"; };
           qodec-v2-demo-verify = { type = "app"; program = "${corpusVerifyApp}"; };
           qodec-v2-corpus-list = { type = "app"; program = "${corpusListApp}"; };
+          qodec-v2-pilot-validate = {
+            type = "app";
+            program = "${pkgs.writeShellScript "qodec-v2-pilot-validate" ''
+              ${pilotPrelude}
+              exec ${pyEnv}/bin/python tools/pilot_validate.py "$@"
+            ''}";
+          };
         };
 
         devShells = {
@@ -289,7 +320,9 @@
 
           github-actions-lint = pkgs.runCommand "check-github-actions-lint"
             { nativeBuildInputs = [ pkgs.actionlint ]; } ''
-            actionlint -color ${./.github/workflows}/qodec-v2.yml ${./.github/workflows}/qodec-v2-corpus.yml
+            actionlint -color ${./.github/workflows}/qodec-v2.yml \
+              ${./.github/workflows}/qodec-v2-corpus.yml \
+              ${./.github/workflows}/qodec-v2-public-log-pilot.yml
             touch $out
           '';
 
@@ -331,6 +364,44 @@
             ${corpusPrelude}
             ${pyEnv}/bin/python tools/check_no_benchmark_data.py
             touch $out
+          '';
+
+          # ---- Scope N1 public-log pilot checks (public-development; non-gating) --
+          # Capture all 10 cases with the pinned toolchain; $out holds the canonical
+          # bundles (snapshots + receipts + manifests) — the bootstrap artifact.
+          qodec-v2-pilot-capture = pkgs.runCommand "check-qodec-v2-pilot-capture"
+            { nativeBuildInputs = [ pyEnv rustToolchain pkgs.ripgrep pkgs.jq pkgs.git rtk-pinned qodec ]; } ''
+            ${pilotPrelude}
+            mkdir -p $out/cases
+            ${pyEnv}/bin/python tools/pilot_capture.py --out $out/cases
+          '';
+
+          # Capture each case twice in independent temp dirs; raw + rtk snapshots
+          # must be byte-identical and semantic receipts must match; also compared
+          # against the committed snapshots.
+          qodec-v2-pilot-reproduce = pkgs.runCommand "check-qodec-v2-pilot-reproduce"
+            { nativeBuildInputs = [ pyEnv rustToolchain pkgs.ripgrep pkgs.jq pkgs.git rtk-pinned qodec ]; } ''
+            ${pilotPrelude}
+            ${pyEnv}/bin/python tools/pilot_reproduce.py
+            touch $out
+          '';
+
+          # Model-free corpus validation + the pilot test suite (static, security,
+          # committed-snapshot integrity, four-arm roundtrips).
+          qodec-v2-pilot-validate = pkgs.runCommand "check-qodec-v2-pilot-validate"
+            { nativeBuildInputs = [ pyEnv rtk-pinned qodec pkgs.git ]; } ''
+            ${pilotPrelude}
+            ${pyEnv}/bin/python tools/pilot_validate.py
+            ${pyEnv}/bin/python -m unittest discover -s tests -v
+            touch $out
+          '';
+
+          # The four-arm pilot leaderboard; $out publishes the report artifact set.
+          qodec-v2-pilot-run = pkgs.runCommand "check-qodec-v2-pilot-run"
+            { nativeBuildInputs = [ pyEnv qodec ]; } ''
+            ${pilotPrelude}
+            mkdir -p $out/pilot
+            ${pyEnv}/bin/python tools/pilot_run.py --out $out/pilot
           '';
         };
       });

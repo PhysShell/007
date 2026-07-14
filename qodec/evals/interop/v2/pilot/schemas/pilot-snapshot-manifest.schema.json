@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_id", "snapshot_version", "raw_stdout_sha256", "raw_stderr_sha256",
+    "rtk_stdout_sha256", "rtk_stderr_sha256", "native_receipt_sha256",
+    "rtk_receipt_sha256", "fixture_tree_sha256", "capture_recipe_sha256",
+    "provenance_sha256", "anchors_sha256"
+  ],
+  "properties": {
+    "case_id": { "type": "string" },
+    "snapshot_version": { "type": "string", "enum": ["pilot-snapshot-v1"] },
+    "raw_stdout_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "raw_stderr_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "rtk_stdout_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "rtk_stderr_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "native_receipt_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "rtk_receipt_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "fixture_tree_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "capture_recipe_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "provenance_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "anchors_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

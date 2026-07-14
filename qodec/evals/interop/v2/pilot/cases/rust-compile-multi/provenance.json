@@ -1,0 +1,12 @@
+{
+  "created_by_scope": "N1",
+  "generator_identity": "rustc --edition 2021 --crate-type bin --color never fixture/many_errors.rs",
+  "license": "in-repo",
+  "origin_kind": "generated-first-party",
+  "pii_review": "clean: no personal data; hostnames/ports are synthetic",
+  "sanitization": "none-required",
+  "secret_review": "clean: no credentials, tokens or secrets",
+  "source_description": "First-party rustc multi-error capture over a fixed Rust source with a type mismatch and sixteen unresolved function names.",
+  "source_revision": "first-party@scope-N1",
+  "source_sha256": "bac2fbc8fc2883127976268af2c65085ddcd9ad259ed31d6479b29b492dd5493"
+}

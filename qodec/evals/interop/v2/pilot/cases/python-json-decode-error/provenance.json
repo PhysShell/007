@@ -1,0 +1,12 @@
+{
+  "created_by_scope": "N1",
+  "generator_identity": "python3 -m json.tool fixture/services_bad.json",
+  "license": "in-repo",
+  "origin_kind": "generated-first-party",
+  "pii_review": "clean: no personal data; hostnames/ports are synthetic",
+  "sanitization": "none-required",
+  "secret_review": "clean: no credentials, tokens or secrets",
+  "source_description": "First-party CPython json.tool capture over a fixed malformed JSON document (missing delimiter).",
+  "source_revision": "first-party@scope-N1",
+  "source_sha256": "bea8cee46a42851c6bff27e65ac35662fe4175bf220087cbf5cce17977559661"
+}

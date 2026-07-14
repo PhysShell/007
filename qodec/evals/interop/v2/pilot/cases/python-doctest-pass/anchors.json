@@ -1,0 +1,24 @@
+{
+  "anchors": [
+    {
+      "anchor_id": "summary",
+      "kind": "exact",
+      "stream": "raw.stdout",
+      "value": "2 passed and 0 failed."
+    },
+    {
+      "anchor_id": "status",
+      "kind": "exact",
+      "stream": "raw.stdout",
+      "value": "Test passed."
+    },
+    {
+      "anchor_id": "entity",
+      "kind": "entity",
+      "stream": "raw.stdout",
+      "value": "shout"
+    }
+  ],
+  "case_id": "python-doctest-pass",
+  "primary_stream": "raw.stdout"
+}

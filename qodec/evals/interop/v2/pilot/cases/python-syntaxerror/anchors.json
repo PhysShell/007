@@ -1,0 +1,24 @@
+{
+  "anchors": [
+    {
+      "anchor_id": "exception-type",
+      "kind": "entity",
+      "stream": "raw.stderr",
+      "value": "SyntaxError"
+    },
+    {
+      "anchor_id": "source-file",
+      "kind": "exact",
+      "stream": "raw.stderr",
+      "value": "fixture/broken_def.py"
+    },
+    {
+      "anchor_id": "message",
+      "kind": "exact",
+      "stream": "raw.stderr",
+      "value": "invalid syntax"
+    }
+  ],
+  "case_id": "python-syntaxerror",
+  "primary_stream": "raw.stderr"
+}

@@ -1,0 +1,31 @@
+{
+  "anchors_path": "anchors.json",
+  "capture_mode": "reproducible-command",
+  "capture_recipe_path": "capture-recipe.json",
+  "case_id": "python-json-decode-error",
+  "ecosystem": "python",
+  "family": "structured-data-query",
+  "hand_authored": false,
+  "markers": [
+    "PUBLIC-DEVELOPMENT",
+    "PILOT",
+    "NON-GATING",
+    "NOT-PUBLIC-VALIDATION",
+    "NOT-SEALED-HELDOUT"
+  ],
+  "notes": "Real CPython json.tool decode error on malformed JSON (missing comma).",
+  "origin_kind": "generated-first-party",
+  "outcome": "single-failure",
+  "primary_stream": "raw.stderr",
+  "provenance_path": "provenance.json",
+  "rtk_filter": null,
+  "rtk_mode": "explicit-passthrough",
+  "snapshot_manifest_path": "snapshot-manifest.json",
+  "snapshot_policy": "raw-and-rtk",
+  "split": "public-development",
+  "tags": [
+    "structured-data-query",
+    "python"
+  ],
+  "tool": "json.tool"
+}

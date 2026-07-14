@@ -1,0 +1,30 @@
+{
+  "anchors": [
+    {
+      "anchor_id": "error-code",
+      "kind": "entity",
+      "stream": "raw.stderr",
+      "value": "E0308"
+    },
+    {
+      "anchor_id": "diagnostic",
+      "kind": "exact",
+      "stream": "raw.stderr",
+      "value": "mismatched types"
+    },
+    {
+      "anchor_id": "source-file",
+      "kind": "exact",
+      "stream": "raw.stderr",
+      "value": "fixture/type_mismatch.rs"
+    },
+    {
+      "anchor_id": "summary",
+      "kind": "exact",
+      "stream": "raw.stderr",
+      "value": "aborting due to 1 previous error"
+    }
+  ],
+  "case_id": "rust-compile-type-mismatch",
+  "primary_stream": "raw.stderr"
+}

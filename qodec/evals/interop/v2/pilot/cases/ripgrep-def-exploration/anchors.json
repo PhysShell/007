@@ -1,0 +1,18 @@
+{
+  "anchors": [
+    {
+      "anchor_id": "rs-fn",
+      "kind": "exact",
+      "stream": "raw.stdout",
+      "value": "fixture/src/handler.rs:1:fn handle_request()"
+    },
+    {
+      "anchor_id": "py-def",
+      "kind": "exact",
+      "stream": "raw.stdout",
+      "value": "fixture/src/worker.py:1:def run_worker():"
+    }
+  ],
+  "case_id": "ripgrep-def-exploration",
+  "primary_stream": "raw.stdout"
+}

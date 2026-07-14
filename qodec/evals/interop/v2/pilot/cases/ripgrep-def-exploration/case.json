@@ -1,0 +1,31 @@
+{
+  "anchors_path": "anchors.json",
+  "capture_mode": "reproducible-command",
+  "capture_recipe_path": "capture-recipe.json",
+  "case_id": "ripgrep-def-exploration",
+  "ecosystem": "language-neutral",
+  "family": "code-exploration-callgraph",
+  "hand_authored": false,
+  "markers": [
+    "PUBLIC-DEVELOPMENT",
+    "PILOT",
+    "NON-GATING",
+    "NOT-PUBLIC-VALIDATION",
+    "NOT-SEALED-HELDOUT"
+  ],
+  "notes": "Real ripgrep code-definition exploration across rust+python sources; deterministic order.",
+  "origin_kind": "generated-first-party",
+  "outcome": "success-clean",
+  "primary_stream": "raw.stdout",
+  "provenance_path": "provenance.json",
+  "rtk_filter": "grep",
+  "rtk_mode": "pipe-filter",
+  "snapshot_manifest_path": "snapshot-manifest.json",
+  "snapshot_policy": "raw-and-rtk",
+  "split": "public-development",
+  "tags": [
+    "code-exploration-callgraph",
+    "language-neutral"
+  ],
+  "tool": "ripgrep"
+}

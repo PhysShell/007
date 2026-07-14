@@ -1,0 +1,34 @@
+{
+  "environment_allowlist": [
+    "PATH"
+  ],
+  "expected_exit_code": 1,
+  "expected_exit_code_class": "exact",
+  "locale": "C.UTF-8",
+  "native": {
+    "argv": [
+      "rustc",
+      "--edition",
+      "2021",
+      "--crate-type",
+      "bin",
+      "--color",
+      "never",
+      "fixture/many_errors.rs"
+    ],
+    "cwd": ".",
+    "stdin_path": null
+  },
+  "network_policy": "disabled",
+  "rtk": {
+    "argv": [
+      "rtk",
+      "pipe",
+      "--filter",
+      "log"
+    ]
+  },
+  "source_date_epoch": 1700000000,
+  "timeout_s": 60,
+  "timezone": "UTC"
+}

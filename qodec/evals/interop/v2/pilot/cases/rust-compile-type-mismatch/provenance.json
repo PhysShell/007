@@ -1,0 +1,12 @@
+{
+  "created_by_scope": "N1",
+  "generator_identity": "rustc --edition 2021 --crate-type bin --color never fixture/type_mismatch.rs",
+  "license": "in-repo",
+  "origin_kind": "generated-first-party",
+  "pii_review": "clean: no personal data; hostnames/ports are synthetic",
+  "sanitization": "none-required",
+  "secret_review": "clean: no credentials, tokens or secrets",
+  "source_description": "First-party rustc build-error capture over a fixed Rust source with a u32/i64 type mismatch.",
+  "source_revision": "first-party@scope-N1",
+  "source_sha256": "d742d3801b5f20118e1993e460c8d8f79b273e1537cea2c6f71a71213ae6777b"
+}
