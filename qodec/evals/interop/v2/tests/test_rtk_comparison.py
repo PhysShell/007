@@ -290,7 +290,8 @@ class TestQodecSourceIdentity(unittest.TestCase):
     def test_missing_tree_identity_fails_smoke(self):
         rs = self.rs
         saved_git = rs._git
-        saved = {k: os.environ.get(k) for k in ("QODEC_SRC_DIR", "QODEC_TREE_SHA", "REPO_COMMIT_SHA")}
+        saved = {k: os.environ.get(k) for k in
+                 ("QODEC_SRC_DIR", "QODEC_TREE_SHA", "REPO_COMMIT_SHA", "NIX_VERSION")}
         os.environ.pop("QODEC_SRC_DIR", None)
         os.environ.pop("QODEC_TREE_SHA", None)
         os.environ["REPO_COMMIT_SHA"] = "deadbeef" * 5  # repo known, tree unknown
