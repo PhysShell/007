@@ -1,0 +1,9 @@
+{
+  "contract_version": "interop-benchmark-v2",
+  "status": "frozen-before-data",
+  "base_commit": "6b3d3d78d1dc04253842b1c15146ac0b477d59cd",
+  "policy_under_test": {
+    "name": "VG",
+    "codec": "fold-grep-guarded"
+  }
+}

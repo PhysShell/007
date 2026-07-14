@@ -1,0 +1,108 @@
+{
+  "grammar_version": "rtk-output-grammar-v1",
+  "status": "observational-before-data",
+  "rtk_source_sha": "5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2",
+  "note": "Known RTK output forms and how frozen qodec/VG should treat each when composed AFTER RTK. recommended_qodec_policy is advisory for the observational baseline only; the first comparison still runs unmodified frozen VG. No form here authorises changing production VG.",
+  "forms": {
+    "summary": {
+      "lossy": true,
+      "may_truncate": true,
+      "has_recovery_hint": false,
+      "contains_executable_hint": false,
+      "contains_paths": true,
+      "contains_identifiers": true,
+      "recommended_qodec_policy": "frozen-vg-passthrough-safe",
+      "risk": "Summary already dropped detail; VG can only fold what remains — savings are small and losses are RTK's, not VG's."
+    },
+    "grouped-list": {
+      "lossy": true,
+      "may_truncate": false,
+      "has_recovery_hint": false,
+      "contains_executable_hint": false,
+      "contains_paths": true,
+      "contains_identifiers": true,
+      "recommended_qodec_policy": "frozen-vg",
+      "risk": "Grouping reorders lines; ordering questions must be answered from RAW, not from RTK grouped output."
+    },
+    "failure-list": {
+      "lossy": true,
+      "may_truncate": true,
+      "has_recovery_hint": true,
+      "contains_executable_hint": false,
+      "contains_paths": true,
+      "contains_identifiers": true,
+      "recommended_qodec_policy": "frozen-vg",
+      "risk": "Non-failure context is discarded; negative-evidence questions can be corrupted."
+    },
+    "diagnostic-group": {
+      "lossy": true,
+      "may_truncate": false,
+      "has_recovery_hint": false,
+      "contains_executable_hint": true,
+      "contains_paths": true,
+      "contains_identifiers": true,
+      "recommended_qodec_policy": "frozen-vg",
+      "risk": "Executable hints (suggested fixes) must survive; a future VG-RTK-v1 should protect them."
+    },
+    "deduplicated-log": {
+      "lossy": true,
+      "may_truncate": false,
+      "has_recovery_hint": false,
+      "contains_executable_hint": false,
+      "contains_paths": true,
+      "contains_identifiers": true,
+      "recommended_qodec_policy": "frozen-vg-low-gain",
+      "risk": "RTK already removed the repetition VG folds losslessly; incremental VG gain is near zero (measure, do not assume)."
+    },
+    "tree": {
+      "lossy": false,
+      "may_truncate": true,
+      "has_recovery_hint": false,
+      "contains_executable_hint": false,
+      "contains_paths": true,
+      "contains_identifiers": true,
+      "recommended_qodec_policy": "frozen-vg",
+      "risk": "Deep trees may be truncated; full-path locator questions can lose leaves."
+    },
+    "truncated-list-with-recovery": {
+      "lossy": true,
+      "may_truncate": true,
+      "has_recovery_hint": true,
+      "contains_executable_hint": true,
+      "contains_paths": true,
+      "contains_identifiers": true,
+      "recommended_qodec_policy": "frozen-vg-preserve-recovery",
+      "risk": "The recovery hint ([full output: …] / [see remaining: …]) is the ONLY path back to raw; it must never be folded away."
+    },
+    "passthrough": {
+      "lossy": false,
+      "may_truncate": false,
+      "has_recovery_hint": false,
+      "contains_executable_hint": false,
+      "contains_paths": true,
+      "contains_identifiers": true,
+      "recommended_qodec_policy": "frozen-vg",
+      "risk": "RTK returned input unchanged; this is the cleanest case for measuring VG's own contribution."
+    },
+    "empty": {
+      "lossy": false,
+      "may_truncate": false,
+      "has_recovery_hint": false,
+      "contains_executable_hint": false,
+      "contains_paths": false,
+      "contains_identifiers": false,
+      "recommended_qodec_policy": "frozen-vg-passthrough",
+      "risk": "Empty result; VG must passthrough with no negative savings."
+    },
+    "parse-fallback": {
+      "lossy": false,
+      "may_truncate": false,
+      "has_recovery_hint": false,
+      "contains_executable_hint": false,
+      "contains_paths": true,
+      "contains_identifiers": true,
+      "recommended_qodec_policy": "frozen-vg",
+      "risk": "RTK failed to parse and returned raw; VG operates on true raw — the fair lossless comparison point."
+    }
+  }
+}

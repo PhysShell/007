@@ -15,9 +15,17 @@
     # Deliberately NOT `follows`-ing our nixpkgs: codex is built/tested against its
     # own nixpkgs-unstable pin; forcing it onto 25.05 risks a broken rebuild.
     codex-cli.url = "github:PhysShell/codex-cli-nix";
+
+    # RTK — pinned to an EXACT commit (never a branch/tag), source-only so
+    # `packages.rtk-pinned` builds it from source instead of pulling a mutable
+    # release binary. Interop Benchmark v2 RTK↔qodec comparison substrate.
+    rtk-src = {
+      url = "github:rtk-ai/rtk/5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, crane, rust-overlay, codex-cli }:
+  outputs = { self, nixpkgs, flake-utils, crane, rust-overlay, codex-cli, rtk-src }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = import nixpkgs {
@@ -49,28 +57,160 @@
             mainProgram = "o7";
           };
         });
+
+        # ---- qodec: separate crate from ./qodec with its own Cargo identity ---- #
+        # Named so the exact source that builds the binary is also the source the
+        # smoke runner hashes for qodec_tree_sha (QODEC_SRC_DIR).
+        qodecSrc = craneLib.cleanCargoSource ./qodec;
+        qodecArgs = {
+          src = qodecSrc;
+          strictDeps = true;
+          # onig (tokenizers `onig` feature) uses bindgen -> needs libclang;
+          # ureq v2 uses rustls (ring) -> C compiler from stdenv, no openssl.
+          nativeBuildInputs = [ pkgs.pkg-config pkgs.rustPlatform.bindgenHook ];
+          buildInputs = [ ];
+        };
+        qodecDeps = craneLib.buildDepsOnly (qodecArgs // { pname = "qodec-deps"; });
+        qodec = craneLib.buildPackage (qodecArgs // {
+          cargoArtifacts = qodecDeps;
+          pname = "qodec";
+          doCheck = false;
+          meta = {
+            description = "Q's codec lab — qodec (fold-grep-guarded is the VG policy)";
+            mainProgram = "qodec";
+          };
+        });
+
+        # ---- rtk-pinned: built from the pinned source, never a release binary --
+        # RTK declares rust-version = "1.91"; nixpkgs-25.05's default rustPlatform
+        # is Rust 1.86 and would fail Cargo's minimum-version check. Build it with
+        # the rust-overlay stable toolchain (same one o7/qodec use) via
+        # makeRustPlatform. `src = rtk-src` is UNFILTERED on purpose: build.rs
+        # reads src/filters/*.toml, so a cargo-source clean would break it. RTK's
+        # own complete Cargo.lock (203 packages) is vendored offline — no network,
+        # no cargoHash guessing, no mutable release binary. ----
+        rtkPlatform = pkgs.makeRustPlatform {
+          cargo = rustToolchain;
+          rustc = rustToolchain;
+        };
+        rtk-pinned = rtkPlatform.buildRustPackage {
+          pname = "rtk-pinned";
+          version = "0.42.4";
+          src = rtk-src;
+          cargoLock.lockFile = "${rtk-src}/Cargo.lock";
+          doCheck = false;
+          meta = {
+            description = "RTK reducer, pinned @ 5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2";
+            mainProgram = "rtk";
+          };
+        };
+
+        # ---- python for the model-free contract / smoke checks ---------------- #
+        pyEnv = pkgs.python3.withPackages (ps: [ ps.pyyaml ]);
+
+        # A store copy of just the files the contract tests need to read.
+        v2Root = pkgs.runCommand "qodec-v2-root" { } ''
+          mkdir -p $out/qodec/evals/interop $out/.github/workflows
+          cp -r ${./qodec/evals/interop/v2} $out/qodec/evals/interop/v2
+          cp ${./flake.nix} $out/flake.nix
+          cp ${./flake.lock} $out/flake.lock
+          cp ${./.github/workflows/qodec-v2.yml} $out/.github/workflows/qodec-v2.yml
+          cp ${./.gitignore} $out/.gitignore
+        '';
+
+        # Reproducibility identity exported to the smoke runner. Everything here
+        # is purely derivable from the pinned flake — no impure `nix --version`.
+        identityExports = ''
+          export LC_ALL=C.UTF-8
+          export LANG=C.UTF-8
+          export TZ=UTC
+          export HOME=$(mktemp -d)
+          export NIX_SYSTEM=${system}
+          export NIX_VERSION=${pkgs.nix.version}
+          export NIXPKGS_REV=${nixpkgs.rev or "unknown"}
+          export REPO_COMMIT_SHA=${self.rev or self.dirtyRev or "uncommitted"}
+          export FLAKE_LOCK_SHA256=${builtins.hashFile "sha256" ./flake.lock}
+          export RUST_TOOLCHAIN_IDENTITY=${builtins.hashFile "sha256" ./rust-toolchain.toml}
+          export RTK_SOURCE_SHA=5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2
+          # Exact qodec source tree used to build the binary -> qodec_tree_sha.
+          export QODEC_SRC_DIR=${qodecSrc}
+        '';
+
+        runContractTests = pkgs.writeShellScript "qodec-v2-contract-test" ''
+          set -euo pipefail
+          root=$(mktemp -d)
+          cp -r ${v2Root}/. "$root"
+          chmod -R u+w "$root"
+          export V2_REPO_ROOT="$root"
+          export PYTHONDONTWRITEBYTECODE=1
+          cd "$root/qodec/evals/interop/v2"
+          exec ${pyEnv}/bin/python -m unittest discover -s tests -v
+        '';
+
+        runSmoke = pkgs.writeShellScript "qodec-rtk-smoke" ''
+          set -euo pipefail
+          ${identityExports}
+          out=''${SMOKE_OUT:-$(mktemp -d)/smoke}
+          export PYTHONDONTWRITEBYTECODE=1
+          exec ${pyEnv}/bin/python ${./qodec/evals/interop/v2/smoke}/run_smoke.py \
+            --qodec ${qodec}/bin/qodec \
+            --rtk ${rtk-pinned}/bin/rtk \
+            --meter o200k \
+            --rtk-source-sha 5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2 \
+            --out "$out"
+        '';
       in
       {
         packages = {
           default = o7;
           o7 = o7;
+          qodec = qodec;
+          rtk-pinned = rtk-pinned;
         };
 
-        apps.default = flake-utils.lib.mkApp { drv = o7; };
+        apps = {
+          default = flake-utils.lib.mkApp { drv = o7; };
+          qodec-v2-contract-test = {
+            type = "app";
+            program = "${runContractTests}";
+          };
+          qodec-rtk-smoke = {
+            type = "app";
+            program = "${runSmoke}";
+          };
+        };
 
-        devShells.default = pkgs.mkShell {
-          packages = (with pkgs; [
-            rustToolchain
-            cargo-deny
-            cargo-audit
-            git
-            jq
-          ]) ++ [
-            # Native `bin/codex` from github:PhysShell/codex-cli-nix.
-            codex-cli.packages.${system}.default
-          ];
-          # `claude` is external (npm + Claude Max). `codex` is provided above but
-          # still needs `codex login` once (ChatGPT subscription, no API key).
+        devShells = {
+          default = pkgs.mkShell {
+            packages = (with pkgs; [
+              rustToolchain
+              cargo-deny
+              cargo-audit
+              git
+              jq
+            ]) ++ [
+              # Native `bin/codex` from github:PhysShell/codex-cli-nix.
+              codex-cli.packages.${system}.default
+            ];
+            # `claude` is external (npm + Claude Max). `codex` is provided above but
+            # still needs `codex login` once (ChatGPT subscription, no API key).
+          };
+
+          # Interop Benchmark v2 bench shell: pinned tools, no mutable PATH RTK.
+          qodec-bench = pkgs.mkShell {
+            packages = [
+              qodec
+              rtk-pinned
+              pyEnv
+            ] ++ (with pkgs; [
+              git
+              ripgrep
+              gnugrep
+              jq
+              hyperfine
+              actionlint
+            ]);
+          };
         };
 
         checks = {
@@ -84,6 +224,41 @@
           fmt = craneLib.cargoFmt {
             src = commonArgs.src;
           };
+
+          # ---- Interop Benchmark v2 substrate checks (no model/tokenizer net) -- #
+          qodec-build = qodec;
+          rtk-pinned-build = rtk-pinned;
+
+          qodec-v2-contract = pkgs.runCommand "check-qodec-v2-contract"
+            { nativeBuildInputs = [ pyEnv ]; } ''
+            ${runContractTests}
+            touch $out
+          '';
+
+          qodec-rtk-smoke = pkgs.runCommand "check-qodec-rtk-smoke"
+            { nativeBuildInputs = [ pyEnv qodec rtk-pinned ]; } ''
+            set -euo pipefail
+            ${identityExports}
+            export SMOKE_OUT=$out/smoke
+            mkdir -p $out
+            # 1) real-RTK smoke: runs a real `rtk pipe` subcommand per fixture.
+            ${pyEnv}/bin/python ${./qodec/evals/interop/v2/smoke}/run_smoke.py \
+              --qodec ${qodec}/bin/qodec --rtk ${rtk-pinned}/bin/rtk \
+              --meter o200k --out "$SMOKE_OUT"
+            # 2) real RTK integration unittests (execute the pinned RTK binary).
+            root=$(mktemp -d); cp -r ${v2Root}/. "$root"; chmod -R u+w "$root"
+            export V2_REPO_ROOT="$root" QODEC_BIN=${qodec}/bin/qodec RTK_BIN=${rtk-pinned}/bin/rtk
+            # test_rtk_comparison.py lives under tests/ — run from that directory
+            # so the module resolves (a bare module name from v2/ would not).
+            cd "$root/qodec/evals/interop/v2/tests"
+            ${pyEnv}/bin/python -m unittest test_rtk_comparison.TestRealRtkIntegration -v
+          '';
+
+          github-actions-lint = pkgs.runCommand "check-github-actions-lint"
+            { nativeBuildInputs = [ pkgs.actionlint ]; } ''
+            actionlint -color ${./.github/workflows}/qodec-v2.yml
+            touch $out
+          '';
         };
       });
 }

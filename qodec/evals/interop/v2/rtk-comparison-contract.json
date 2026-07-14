@@ -1,0 +1,74 @@
+{
+  "contract_version": "rtk-qodec-comparison-v1",
+  "status": "observational-before-data",
+  "inherits_interop_contract": "interop-benchmark-v2",
+  "promotion_gate": false,
+  "rtk_source_sha": "5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2",
+  "note": "A NON-GATING observational experiment. It does NOT replace the frozen two-condition agent_ab_pilot in coverage-matrix.json, and it changes no frozen numeric gate. RTK is a lossy reducer; qodec/VG is a lossless notation layer. The first comparison MUST run with unmodified frozen VG.",
+  "logical_arms": {
+    "RAW": {
+      "composed_of": "raw+brief",
+      "description": "Native tool output, unreduced, with the notation brief control."
+    },
+    "QODEC": {
+      "composed_of": "VG+brief",
+      "description": "Frozen VG (fold-grep-guarded), lossless, with the notation brief."
+    },
+    "RTK": {
+      "composed_of": "RTK-reduced-output+brief",
+      "description": "RTK lossy reduction of the tool output, with the notation brief."
+    },
+    "RTK+QODEC": {
+      "composed_of": "RTK-reduced-output+VG+brief",
+      "description": "RTK reduction followed by frozen VG over the reduced output."
+    }
+  },
+  "shared_across_all_arms": [
+    "source command",
+    "fixture state",
+    "reader task",
+    "brief",
+    "model",
+    "tokenizer",
+    "runtime",
+    "generation parameters"
+  ],
+  "leaderboards": {
+    "transparency": {
+      "arms": ["RAW", "QODEC"],
+      "metrics": [
+        "exact-roundtrip",
+        "reader-retention",
+        "stable-losses",
+        "integrity-regressions",
+        "token-savings"
+      ],
+      "note": "Only lossless arms may enter the transparency leaderboard. RTK is excluded because it is lossy."
+    },
+    "end_to_end_utility": {
+      "arms": ["RAW", "QODEC", "RTK", "RTK+QODEC"],
+      "metrics": [
+        "task-or-reader-success",
+        "input-tokens",
+        "output-or-reasoning-tokens",
+        "tool-calls",
+        "raw-recovery-calls",
+        "latency",
+        "cost-per-successful-task"
+      ],
+      "note": "Compression percentage alone is never a final verdict. Utility is judged on success and total cost, not on how much text was removed."
+    }
+  },
+  "required_savings_columns": [
+    "qodec_vs_raw",
+    "rtk_vs_raw",
+    "qodec_incremental_after_rtk",
+    "hybrid_vs_raw"
+  ],
+  "token_accounting": {
+    "canonical_meter": "the same real target tokenizer used everywhere in v2",
+    "forbidden_as_canonical": "rtk chars/4 approximation",
+    "rtk_chars_over_4": "may be stored ONLY as an RTK-native diagnostic column, never used in a leaderboard"
+  },
+  "baseline_rule": "The first RTK comparison runs with unmodified frozen VG as an observational baseline. Only after that baseline may a separate future scope propose VG-RTK-v1, which receives a new policy name and source SHA and does NOT inherit frozen VG results as its own evidence."
+}

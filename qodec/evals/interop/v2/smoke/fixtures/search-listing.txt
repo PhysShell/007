@@ -1,0 +1,6 @@
+src/core/parse.rs:42:    let tmp = read_token();
+src/core/parse.rs:120:  let v: u32 = value;
+src/core/emit.rs:12:    let tmp = buffer.len();
+src/util/mod.rs:7:      pub fn helper() -> bool { true }
+tests/parse_test.rs:5:  assert_eq!(parse("x"), Ok(1));
+tests/emit_test.rs:9:   assert!(emit(&[]).is_empty());
