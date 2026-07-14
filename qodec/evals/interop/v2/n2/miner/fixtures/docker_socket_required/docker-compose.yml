@@ -1,0 +1,5 @@
+services:
+  test-runner:
+    image: example/test-runner
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
