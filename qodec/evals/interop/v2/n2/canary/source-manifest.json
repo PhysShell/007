@@ -31,11 +31,15 @@
       "--nologo",
       "--verbosity",
       "normal",
-      "--disable-build-servers"
+      "-p:UseSharedCompilation=false",
+      "--disable-build-servers",
+      "-m:1",
+      "-p:BuildInParallel=false",
+      "-p:RunAnalyzersInParallel=false"
     ],
     "network_during_execution": "denied",
     "restore": "not-performed",
-    "determinism_note": "Scope N2-A.1: --disable-build-servers added after workflow run 29371996936 found an intermittent producer-ordering defect (Roslyn shared-compiler-server scheduling caused CoreCompile diagnostics to interleave in different orders across independent builds, though the full warning multiset, exit code, and every other semantic field always matched). Proven deterministic across 6/6 repeated fresh builds on real ubuntu-24.04 GitHub-hosted runners via qodec/evals/interop/v2/n2/canary/tools/determinism_probe.py — see n2a-determinism-probe-report.json. -p:UseSharedCompilation=false alone was tested and found insufficient (1/6 divergence); --disable-build-servers alone was sufficient and is the minimal change."
+    "determinism_note": "Scope N2-A.1: workflow run 29371996936 found an intermittent producer-ordering defect (Roslyn shared-compiler-server scheduling caused CoreCompile diagnostics to interleave in different orders across independent builds, though the full warning multiset, exit code, and every other semantic field always matched). --disable-build-servers alone scored deterministic (6/6) in determinism_probe.py's same-runner, unconfined probe, but FAILED when actually proven across a real, separately-provisioned, Sandboy-confined capture-a/capture-b pair (workflow run 29374881325) — the probe's same-runner, unconfined methodology did not fully predict behavior under Sandboy confinement on genuinely independent runners. The full combination of all five tested flags (-p:UseSharedCompilation=false, --disable-build-servers, -m:1, -p:BuildInParallel=false, -p:RunAnalyzersInParallel=false) is adopted instead, and is being re-verified against the real Sandboy-confined two-runner pipeline before acceptance. See n2a-determinism-probe-report.json and n2a-hotfix-summary.md for the complete evidentiary trail, including the falsified minimal-flag attempt."
   },
   "selection_rationale": [
     "small public repository",
