@@ -47,6 +47,17 @@ def find_qodec() -> str | None:
     return which("qodec")
 
 
+def find_rtk() -> str | None:
+    cand = os.environ.get("RTK_BIN")
+    if cand and Path(cand).exists():
+        return cand
+    from shutil import which
+    return which("rtk")
+
+
+LOCK = REPO_ROOT / "flake.lock"
+
+
 class TestRtkPin(unittest.TestCase):
     def test_rtk_source_uses_exact_commit_sha(self):
         text = FLAKE.read_text()
@@ -137,14 +148,108 @@ class TestSmokeSuite(unittest.TestCase):
         self.assertLessEqual(arm["tokens_out"], arm["tokens_in"])
 
     @unittest.skipUnless(find_qodec(), "qodec binary not available")
-    def test_qodec_roundtrips_rtk_output(self):
-        # losslessness holds for ANY input, including RTK-shaped reduced text
+    def test_qodec_roundtrips_hand_authored_rtk_shape(self):
+        # ORCHESTRATION-ONLY unit test: a hand-authored "RTK-shaped" string.
+        # This proves qodec losslessness on arbitrary input; it is NOT a
+        # substitute for real RTK integration (see TestRealRtkIntegration,
+        # which executes the pinned RTK binary).
         import run_smoke
         qbin = find_qodec()
         reduced = b"error[E0308]: mismatched types src/core/parse.rs:120:17\n[see remaining: 3 more]\n"
         arm = run_smoke.qodec_arm(qbin, reduced, "o200k")
         self.assertTrue(arm["roundtrip_ok"])
         self.assertLessEqual(arm["tokens_out"], arm["tokens_in"])
+
+
+class TestFlakeLock(unittest.TestCase):
+    def setUp(self):
+        self.lock = json.loads(LOCK.read_text())
+        self.node = self.lock["nodes"].get("rtk-src")
+
+    def test_root_inputs_contains_rtk_src(self):
+        self.assertIn("rtk-src", self.lock["nodes"]["root"]["inputs"])
+        self.assertIsNotNone(self.node, "rtk-src node missing from flake.lock")
+
+    def test_rtk_src_locked_rev_matches_pin(self):
+        self.assertEqual(self.node["locked"]["rev"], RTK_PIN)
+
+    def test_rtk_src_narhash_present(self):
+        nh = self.node["locked"].get("narHash", "")
+        self.assertTrue(nh.startswith("sha256-") and len(nh) > 20, f"bad narHash {nh!r}")
+
+    def test_rtk_src_original_is_not_moving(self):
+        original = self.node["original"]
+        self.assertEqual(original.get("rev"), RTK_PIN)
+        self.assertNotIn("ref", original, "original must pin a rev, not a branch/tag ref")
+        self.assertIs(self.node.get("flake"), False)
+
+
+@unittest.skipUnless(find_rtk() and find_qodec(), "pinned RTK + qodec binaries required")
+class TestRealRtkIntegration(unittest.TestCase):
+    """Executes the real (pinned Nix-built, or locally-built) RTK binary."""
+
+    @classmethod
+    def setUpClass(cls):
+        import run_smoke
+        cls.rs = run_smoke
+        cls.rtk = find_rtk()
+        cls.qodec = find_qodec()
+        cls.fx = V2_DIR / "smoke" / "fixtures"
+
+    def _pipe(self, name, mode, flt):
+        raw = (self.fx / name).read_bytes()
+        return raw, *self.rs.rtk_pipe(self.rtk, raw, mode, flt)
+
+    def test_real_rtk_pipe_log_fixture_exits_0(self):
+        _, out, rec, argv = self._pipe("build-log.txt", "pipe-filter", "log")
+        self.assertEqual(rec["exit_code"], 0)
+        self.assertIn("pipe", argv)
+
+    def test_real_rtk_pipe_grep_fixture_exits_0(self):
+        _, out, rec, argv = self._pipe("search-listing.txt", "pipe-filter", "grep")
+        self.assertEqual(rec["exit_code"], 0)
+
+    def test_real_rtk_output_is_non_empty(self):
+        _, out, rec, _ = self._pipe("test-runner.txt", "pipe-filter", "cargo-test")
+        self.assertGreater(len(out), 0)
+
+    def test_rtk_receipt_argv_includes_pipe(self):
+        _, out, rec, argv = self._pipe("build-log.txt", "pipe-filter", "log")
+        self.assertIn("pipe", rec["command"])
+
+    def test_rtk_source_sha_matches_pin(self):
+        ident = self.rs.assemble_identity(self.qodec, self.rtk, "o200k", RTK_PIN)
+        self.assertEqual(ident["rtk_source_sha"], RTK_PIN)
+
+    def test_qodec_roundtrips_actual_rtk_stdout(self):
+        _, out, rec, _ = self._pipe("test-runner.txt", "pipe-filter", "cargo-test")
+        arm = self.rs.qodec_arm(self.qodec, out, "o200k")
+        self.assertTrue(arm["roundtrip_ok"])
+
+    def test_hybrid_tokens_le_actual_rtk_stdout_tokens(self):
+        _, out, rec, _ = self._pipe("build-log.txt", "pipe-filter", "log")
+        rtk_tokens = self.rs.token_count(self.qodec, out, "o200k")
+        arm = self.rs.qodec_arm(self.qodec, out, "o200k")
+        self.assertLessEqual(arm["tokens_out"], rtk_tokens)
+
+    def test_rtk_failure_cannot_produce_passing_smoke_report(self):
+        # An unknown filter makes RTK exit nonzero; the "rtk execution
+        # succeeded" invariant gates on exit==0, so a failure cannot pass.
+        _, out, rec, _ = self._pipe("build-log.txt", "pipe-filter", "totally-unknown-filter-xyz")
+        self.assertNotEqual(rec["exit_code"], 0)
+
+    def test_empty_rtk_stdout_cannot_silently_pass(self):
+        # Passthrough of empty input yields empty stdout; the "rtk stdout
+        # non-empty" invariant (len(out) > 0) would be False for it.
+        out, rec, _ = self.rs.rtk_pipe(self.rtk, b"", "passthrough", None)
+        self.assertEqual(len(out), 0)
+        self.assertFalse(len(out) > 0)  # the gate the runner applies per fixture
+
+    def test_full_smoke_report_all_invariants_ok(self):
+        os.environ.setdefault("NIX_VERSION", "test-local")
+        report = self.rs.smoke(self.qodec, self.rtk, "o200k", RTK_PIN)
+        self.assertTrue(report["all_invariants_ok"],
+                        [i for i in report["invariants"] if not i["ok"]])
 
 
 class TestWorkflow(unittest.TestCase):

@@ -99,8 +99,25 @@
           mkdir -p $out/qodec/evals/interop $out/.github/workflows
           cp -r ${./qodec/evals/interop/v2} $out/qodec/evals/interop/v2
           cp ${./flake.nix} $out/flake.nix
+          cp ${./flake.lock} $out/flake.lock
           cp ${./.github/workflows/qodec-v2.yml} $out/.github/workflows/qodec-v2.yml
           cp ${./.gitignore} $out/.gitignore
+        '';
+
+        # Reproducibility identity exported to the smoke runner. Everything here
+        # is purely derivable from the pinned flake — no impure `nix --version`.
+        identityExports = ''
+          export LC_ALL=C.UTF-8
+          export LANG=C.UTF-8
+          export TZ=UTC
+          export HOME=$(mktemp -d)
+          export NIX_SYSTEM=${system}
+          export NIX_VERSION=${pkgs.nix.version}
+          export NIXPKGS_REV=${nixpkgs.rev or "unknown"}
+          export REPO_COMMIT_SHA=${self.rev or self.dirtyRev or "uncommitted"}
+          export FLAKE_LOCK_SHA256=${builtins.hashFile "sha256" ./flake.lock}
+          export RUST_TOOLCHAIN_IDENTITY=${builtins.hashFile "sha256" ./rust-toolchain.toml}
+          export RTK_SOURCE_SHA=5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2
         '';
 
         runContractTests = pkgs.writeShellScript "qodec-v2-contract-test" ''
@@ -116,6 +133,7 @@
 
         runSmoke = pkgs.writeShellScript "qodec-rtk-smoke" ''
           set -euo pipefail
+          ${identityExports}
           out=''${SMOKE_OUT:-$(mktemp -d)/smoke}
           export PYTHONDONTWRITEBYTECODE=1
           exec ${pyEnv}/bin/python ${./qodec/evals/interop/v2/smoke}/run_smoke.py \
@@ -202,10 +220,20 @@
           '';
 
           qodec-rtk-smoke = pkgs.runCommand "check-qodec-rtk-smoke"
-            { nativeBuildInputs = [ pyEnv ]; } ''
+            { nativeBuildInputs = [ pyEnv qodec rtk-pinned ]; } ''
+            set -euo pipefail
+            ${identityExports}
             export SMOKE_OUT=$out/smoke
             mkdir -p $out
-            ${runSmoke}
+            # 1) real-RTK smoke: runs a real `rtk pipe` subcommand per fixture.
+            ${pyEnv}/bin/python ${./qodec/evals/interop/v2/smoke}/run_smoke.py \
+              --qodec ${qodec}/bin/qodec --rtk ${rtk-pinned}/bin/rtk \
+              --meter o200k --out "$SMOKE_OUT"
+            # 2) real RTK integration unittests (execute the pinned RTK binary).
+            root=$(mktemp -d); cp -r ${v2Root}/. "$root"; chmod -R u+w "$root"
+            export V2_REPO_ROOT="$root" QODEC_BIN=${qodec}/bin/qodec RTK_BIN=${rtk-pinned}/bin/rtk
+            cd "$root/qodec/evals/interop/v2"
+            ${pyEnv}/bin/python -m unittest test_rtk_comparison.TestRealRtkIntegration -v
           '';
 
           github-actions-lint = pkgs.runCommand "check-github-actions-lint"

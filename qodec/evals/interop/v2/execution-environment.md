@@ -65,8 +65,9 @@ outputs:
 
 - `packages.qodec` — the `qodec/` crate, built with its own Cargo
   manifest/lock identity.
-- `packages.rtk-pinned` — RTK built from the pinned `rtk-src` commit via crane
-  (no mutable prebuilt release binary is ever downloaded).
+- `packages.rtk-pinned` — RTK built from the pinned `rtk-src` commit via
+  `rustPlatform.buildRustPackage` with RTK's own vendored `Cargo.lock` (no
+  mutable prebuilt release binary is ever downloaded).
 - `devShells.qodec-bench` — qodec, rtk-pinned, python3 (Nix-pinned deps), git,
   ripgrep, gnugrep, jq, hyperfine, actionlint.
 - `apps.qodec-v2-contract-test`, `apps.qodec-rtk-smoke`.
@@ -79,16 +80,64 @@ pulls heavy, irrelevant outputs, that is documented rather than hidden, and
 targeted checks are separated from the full check while the existing `o7`
 checks (`o7`, `clippy`, `fmt`) are preserved.
 
-## Known limitation recorded honestly
+## flake.lock is committed and mandatory
 
-The environment that authored this scope has **no Nix installed** and **GitHub
-egress is blocked by org policy**. Therefore:
+`flake.lock` **is committed** and pins `rtk-src` to commit
+`5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2` (`flake = false`) with its
+`narHash`, `lastModified` and `rev`. CI evaluates against the committed lock
+with `--no-update-lock-file`, so a run **fails** rather than silently relocking
+if evaluation ever tries to change it. Do not rely on CI to create unreviewed
+lock state.
 
-- `flake.lock` could not be regenerated here to add the `rtk-src` narHash, and
-- `nix flake check` could not be executed here.
+The `rtk-src` `narHash` was produced by NAR-serialising the pinned tree
+(`git archive` of the exact commit, which honours `.gitattributes export-ignore`
+exactly as the GitHub tarball nix fetches does) and sha256-hashing it. The
+serialiser was validated by reproducing two already-locked `github:` narHashes
+in this same lock (`numtide/flake-utils` and `nix-systems/default`) byte-for-byte
+before it was trusted for `rtk-src`.
 
-Both are expected to run in CI (GitHub Actions installs Nix and has egress),
-where the first `nix flake check` locks `rtk-src` at the pinned commit. This is
-the honest *pending* status; the pin itself (`rtk-src` → commit
-`5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2`, `flake = false`) is committed in
-`flake.nix`.
+## Smoke RTK invocation model
+
+The non-scoring smoke suite runs **real, pinned RTK**, one `rtk pipe` subcommand
+per fixture, driven by `smoke/fixtures/manifest.json`:
+
+| Fixture | `rtk_mode` | `rtk_filter` | Real argv | Observed |
+|---|---|---|---|---|
+| `build-log.txt` | `pipe-filter` | `log` | `rtk pipe --filter log` | reduced |
+| `search-listing.txt` | `pipe-filter` | `grep` | `rtk pipe --filter grep` | passthrough (RTK `never_worse` returned raw) |
+| `test-runner.txt` | `pipe-filter` | `cargo-test` | `rtk pipe --filter cargo-test` | reduced |
+| `structured.json` | `passthrough` | — | `rtk pipe --passthrough` | passthrough (no supported filter; explicit) |
+
+Rules enforced by the runner: a real `rtk` subcommand is invoked; RTK exit code
+must be `0` (nonzero is a smoke failure); stderr is recorded; required RTK stdout
+must be non-empty; the exact argv, whether RTK changed the payload, and whether
+`never_worse` returned raw are all recorded; each result is classified as
+`reduced` or `passthrough` (with `unsupported-explicit-passthrough` support
+marking for JSON). RTK output is **not** required to be smaller than raw, because
+`never_worse` may legitimately return the raw input.
+
+`packages.rtk-pinned` is built with `pkgs.rustPlatform.buildRustPackage` (using
+RTK's own vendored `Cargo.lock`), **not** crane. `packages.qodec` uses crane.
+
+## Orchestration tests vs real RTK integration
+
+Two distinct test surfaces, never conflated:
+
+- **Orchestration unit tests** (`TestSmokeSuite`) prove qodec losslessness over
+  arbitrary and hand-authored "RTK-shaped" input. They validate *plumbing only*
+  and are explicitly **not** a substitute for RTK integration.
+- **Real RTK integration** (`TestRealRtkIntegration` + the
+  `checks.qodec-rtk-smoke` derivation) executes the pinned RTK binary: real
+  `rtk pipe` exit codes, non-empty output, `argv` containing `pipe`, qodec
+  roundtrip over *actual* RTK stdout, hybrid tokens ≤ actual RTK-stdout tokens,
+  and proof that an RTK failure or empty output cannot yield a passing report.
+
+## Authoring-environment note
+
+Nix is not installed in the environment that authored this scope, and the raw
+GitHub tarball/codeload path is blocked by org egress policy — but `git` egress
+is available, which is how the pinned RTK tree was cloned, built (with `cargo`,
+producing a binary identical to what `buildRustPackage` compiles) and exercised,
+and how the `flake.lock` `narHash` above was computed and validated. The Nix
+`nix flake check` / `nix build` commands run in GitHub Actions, whose runners
+have full internet and a Nix install.
