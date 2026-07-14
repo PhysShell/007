@@ -18,6 +18,7 @@ import json
 import shutil
 from pathlib import Path
 
+import score_reader as sr
 import score_vg
 from bench import ablation_policies as ap, qodec
 
@@ -30,36 +31,70 @@ def _sha(p: Path) -> str:
 
 
 def _stability(records) -> str:
-    """Canonical stability.txt: repeated (case,question,arm) and repeat agreement."""
+    """stability.txt on the scorer's FULL signature: repeats agree iff they agree
+    on (correct, format_compliant, normalized alias-leak set, normalized
+    invalid-identifier set) — score_reader.stability_signature, the exact rule the
+    scorer uses to mark a question (un)stable. Reporting only `correct` here would
+    hide a leak/format flip that the scorer counts as unstable."""
     grp: dict = {}
     for r in records:
         grp.setdefault((r["case"], r["question"], r["arm"]), []).append(r)
-    lines = ["# stability — repeated (case,question,arm) and whether repeats agree on correct"]
+    lines = ["# stability — repeated (case,question,arm); repeats agree on the full",
+             "# scorer signature (correct, format_compliant, alias_leaks, invalid_identifiers)"]
     for (case, q, arm) in sorted(grp):
         reps = sorted(grp[(case, q, arm)], key=lambda r: r["repeat"])
         if len(reps) < 2:
             continue
         correct = [bool(r["correct"]) for r in reps]
-        verdict = "STABLE" if len(set(correct)) == 1 else "UNSTABLE"
+        sigs = {sr.stability_signature(r) for r in reps}
+        verdict = "STABLE" if len(sigs) == 1 else "UNSTABLE"
         lines.append(f"{case:<21} {q:<13} {arm:<14} repeats={len(reps)} correct={correct} {verdict}")
     return "\n".join(lines) + "\n"
 
 
-def _realized_receipts(meta, cases) -> dict:
-    """Per-case realized VG stages, read from the L1 tool artifacts (offline)."""
+def _realized_receipts(meta, cases):
+    """Per-case realized VG stages, read from the L1 tool artifacts (offline).
+
+    Returns (raw_run_receipts, normalized_receipts). The raw form is the run-time
+    audit receipt (transform_applied = SHA change). The normalized form corrects
+    the passthrough-unwrap accounting via ap.normalize_realized and is written to
+    a SEPARATE derived artifact — the original is never overwritten."""
     l1 = Path(meta["l1_run"])
     if not l1.is_absolute():
         l1 = HERE / l1
     meter = (meta.get("tokenizer") or {}).get("meter") or "o200k"
     qb = str(qodec.binary())
-    out = {}
+    raw_recs, norm, raw_sha = {}, {}, {}
     for case in cases:
         m = (sorted(l1.glob(f"*/cases/{case}/*/transformed.txt"))
              or sorted(l1.glob(f"cases/{case}/*/transformed.txt")))
         raw = m[0].read_text(encoding="utf-8")
-        out[case] = ap.realized_stages_for_codec(VG_CODEC, raw, meter, qb, passthrough=True)
-    return {"codec": VG_CODEC, "l1_run": meta["l1_run"],
-            "qodec_binary_sha256": meta["qodec_version"].split(":")[-1], "receipts": out}
+        rec = ap.realized_stages_for_codec(VG_CODEC, raw, meter, qb, passthrough=True)
+        raw_recs[case] = rec
+        raw_sha[case] = ap._sha(raw)
+        norm[case] = ap.normalize_realized(rec, raw_sha[case])
+    qb_sha = meta["qodec_version"].split(":")[-1]
+    audit = {"codec": VG_CODEC, "l1_run": meta["l1_run"],
+             "qodec_binary_sha256": qb_sha, "receipts": raw_recs}
+    accepted = sorted(c for c in cases if norm[c]["stage2"]["candidate_accepted"])
+    attempted = sorted(c for c in cases if norm[c]["stage2"]["attempted"])
+    normalized = {
+        "derived_from": "realized-stage-receipts.json",
+        "method_version": ap.NORMALIZE_METHOD_VERSION,
+        "supersedes_interpretation":
+            "stage-2 transform_applied in the run-time audit receipt counts the "
+            "%q1-container -> naked-raw passthrough unwrap (a no-gain --passthrough) "
+            "as a mining transform. Normalized: candidate_accepted = a guarded mine "
+            "actually added >=1 alias; transform_applied now equals candidate_accepted; "
+            "final.passthrough_unwrapped flags the naked-raw no-gain cases. Corrected "
+            f"totals: stage-2 attempted {len(attempted)} case(s); guarded mining "
+            f"accepted {len(accepted)} case(s) {accepted}; the audit receipt and the "
+            "immutable run manifest hashes are unchanged.",
+        "codec": VG_CODEC, "l1_run": meta["l1_run"], "qodec_binary_sha256": qb_sha,
+        "stage2_attempted_cases": attempted, "guarded_mining_accepted_cases": accepted,
+        "receipts": norm,
+    }
+    return audit, normalized
 
 
 def curate(run: Path, out: Path, canon_snapshot: Path) -> None:
@@ -85,8 +120,11 @@ def curate(run: Path, out: Path, canon_snapshot: Path) -> None:
     v = score_vg.analyze_vg(meta, records, run)
     (out / "report.txt").write_text(score_vg.render(meta, v), encoding="utf-8")
     (out / "stability.txt").write_text(_stability(records), encoding="utf-8")
+    audit, normalized = _realized_receipts(meta, cases)
     (out / "realized-stage-receipts.json").write_text(
-        json.dumps(_realized_receipts(meta, cases), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        json.dumps(audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (out / "realized-stage-receipts-normalized.json").write_text(
+        json.dumps(normalized, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     (out / "README.md").write_text(_readme(meta, v), encoding="utf-8")
 
     # SHA256SUMS over every file except itself
@@ -145,14 +183,20 @@ closure ablation (`analysis/l2-qwen2.5-coder-7b-alias-fold-closure-v1`) showed t
 guard alone (SG) rescues 4/5 canonical losses but the simplified structural shelf
 is what carries the 5th; VG combines both.
 
-Realized per-case stages (`realized-stage-receipts.json`, re-derived offline from
-the L1 artifacts):
+Realized per-case stages — the run-time audit receipt is
+`realized-stage-receipts.json`; the passthrough-corrected interpretation is
+`realized-stage-receipts-normalized.json` (`derived_from` + `method_version`,
+original never overwritten):
 
 - **shelf distribution:** {v['shelf_distribution']}
-- **guarded mining applied** in {len(v['guarded_mining_applied_cases'])} case(s):
-  {v['guarded_mining_applied_cases']}
+- **stage-2 (guarded mine) attempted** in {len(v['stage2_attempted_cases'])} case(s):
+  {v['stage2_attempted_cases']}
+- **guarded mining accepted** (a guarded candidate actually added ≥1 alias) in
+  {len(v['guarded_mining_accepted_cases'])} case(s): {v['guarded_mining_accepted_cases']}.
+  The other stage-2 attempts are no-gain **passthrough unwraps** (`%q1` container →
+  naked raw), not mining transforms.
 - **VG == V (structural) byte-identical** in {len(v['vg_equals_v_cases'])} case(s):
-  {v['vg_equals_v_cases']} (the guard removed every mine candidate there)
+  {v['vg_equals_v_cases']} (the guard/shelf left nothing for the mine to add there)
 
 ## Gates (never moved after the result)
 

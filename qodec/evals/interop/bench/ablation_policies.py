@@ -284,6 +284,52 @@ def _realized(label, final_art, final_tokens, final_encoded, stage1_codec, mines
     }
 
 
+# Version of the normalization method below; recorded in the derived artifact so
+# a corrected receipt is traceable to the rule that produced it.
+NORMALIZE_METHOD_VERSION = "vg-passthrough-accounting/v1"
+
+
+def normalize_realized(receipt: dict, raw_payload_sha256: str) -> dict:
+    """Correct a realized-stages receipt for **passthrough accounting**.
+
+    A VG / structural run encoded with `--passthrough-on-no-gain` unwraps to the
+    naked raw payload whenever the whole pipeline yields no token gain. In that
+    case the stage-1 `%q1 <codec>` container → naked-raw byte change is NOT a
+    stage-2 mining transform — it is the passthrough unwrap. The raw
+    `_realized()` receipt (kept verbatim as the run-time audit receipt) records
+    `stage2.transform_applied = (final_sha != stage1_sha)`, which is true for that
+    unwrap even though no candidate was mined.
+
+    A guarded mine that ACCEPTS a candidate always adds ≥1 legend entry, so
+    `alias_entries_added > 0` is the crisp acceptance signal. This returns a
+    normalized COPY where:
+
+      * stage2.candidate_accepted = attempted AND alias_entries_added > 0
+      * stage2.transform_applied  = candidate_accepted  (no longer the raw unwrap)
+      * stage2.selected_miner     = None unless a candidate was accepted
+      * final.passthrough_unwrapped = final is the naked raw payload
+
+    The input is never mutated; the original receipt stays the audit record.
+    """
+    r = json.loads(json.dumps(receipt))          # deep copy, JSON-clean
+    s2, fin = r["stage2"], r["final"]
+    passthrough_unwrapped = (fin.get("outer_codec") is None
+                             and fin.get("artifact_sha256") == raw_payload_sha256)
+    accepted = bool(s2.get("attempted")) and int(s2.get("alias_entries_added") or 0) > 0
+    s2["candidate_accepted"] = accepted
+    s2["transform_applied"] = accepted
+    if not accepted:
+        s2["selected_miner"] = None
+    fin["passthrough_unwrapped"] = passthrough_unwrapped
+    return r
+
+
+def normalize_receipts(receipts: dict, raw_sha_by_case: dict) -> dict:
+    """Normalize a `{case: receipt}` map; raw_sha_by_case gives each case's raw
+    payload sha256 (needed to recognise the passthrough unwrap)."""
+    return {case: normalize_realized(rec, raw_sha_by_case[case]) for case, rec in receipts.items()}
+
+
 def _is_json(text: str) -> bool:
     try:
         json.loads(text)

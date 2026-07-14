@@ -54,11 +54,23 @@ class CanonicalSqueezeFailsVGGate(unittest.TestCase):
 
     def test_report_fields_present(self):
         for key in ("retention", "token_savings_vs_raw_brief", "shelf_distribution",
-                    "guarded_mining_applied_cases", "vg_equals_v_cases", "per_case"):
+                    "stage2_attempted_cases", "guarded_mining_accepted_cases",
+                    "vg_equals_v_cases", "per_case"):
             self.assertIn(key, self.v)
         s = self.v["token_savings_vs_raw_brief"]
         for k in ("total", "mean", "median", "percent"):
             self.assertIn(k, s)
+
+    def test_accepted_is_a_subset_of_attempted(self):
+        # A guarded mine can only be accepted where stage-2 was attempted.
+        self.assertTrue(set(self.v["guarded_mining_accepted_cases"])
+                        <= set(self.v["stage2_attempted_cases"]))
+
+    def test_passthrough_unwrap_is_not_counted_as_accepted(self):
+        # Any per-case row that unwrapped to naked raw must NOT be an accepted mine.
+        for case, pc in self.v["per_case"].items():
+            if pc["passthrough_unwrapped"]:
+                self.assertFalse(pc["guarded_mining_accepted"], case)
 
 
 class GateAssembly(unittest.TestCase):

@@ -1,0 +1,171 @@
+{
+  "codec": "fold-grep-guarded",
+  "derived_from": "realized-stage-receipts.json",
+  "guarded_mining_accepted_cases": [
+    "clap-derive-explore",
+    "rtk-rg-derive-clap"
+  ],
+  "l1_run": "results/rtk-codegraph-clap-v1",
+  "method_version": "vg-passthrough-accounting/v1",
+  "qodec_binary_sha256": "42867c51377e",
+  "receipts": {
+    "build-log-rtk-log": {
+      "alias_applied": false,
+      "arm": "VG",
+      "final": {
+        "artifact_sha256": "5ae681f10e98b0b2a934318adc430188892ee20d25ac989b450f8c05f4965076",
+        "outer_codec": null,
+        "passthrough_unwrapped": true,
+        "tokens": 188
+      },
+      "overall_alias_entries": 0,
+      "stage1": {
+        "alias_entries": 0,
+        "artifact_sha256": "e7d79a52e8759ebf76614c69cbfc67210d58eecc0e2bec434fb4ab29ecb64b41",
+        "attempted": true,
+        "selected_codec": "raw",
+        "tokens": 198,
+        "transform_applied": false
+      },
+      "stage2": {
+        "alias_entries_added": 0,
+        "artifact_sha256": "5ae681f10e98b0b2a934318adc430188892ee20d25ac989b450f8c05f4965076",
+        "attempted": true,
+        "candidate_accepted": false,
+        "input_artifact_sha256": "e7d79a52e8759ebf76614c69cbfc67210d58eecc0e2bec434fb4ab29ecb64b41",
+        "selected_miner": null,
+        "tokens": 188,
+        "transform_applied": false
+      },
+      "structural_applied": false
+    },
+    "clap-derive-explore": {
+      "alias_applied": true,
+      "arm": "VG",
+      "final": {
+        "artifact_sha256": "c9aa612904c58358930cdf5299b81f122981c415f1519ec48e4905673ec525c6",
+        "outer_codec": "mine",
+        "passthrough_unwrapped": false,
+        "tokens": 4286
+      },
+      "overall_alias_entries": 2,
+      "stage1": {
+        "alias_entries": 0,
+        "artifact_sha256": "e781e568ae88f77e6cacd333cffe1de6bdf7ad67954e67bc40d901576a315f1d",
+        "attempted": true,
+        "selected_codec": "raw",
+        "tokens": 4387,
+        "transform_applied": false
+      },
+      "stage2": {
+        "alias_entries_added": 2,
+        "artifact_sha256": "c9aa612904c58358930cdf5299b81f122981c415f1519ec48e4905673ec525c6",
+        "attempted": true,
+        "candidate_accepted": true,
+        "input_artifact_sha256": "e781e568ae88f77e6cacd333cffe1de6bdf7ad67954e67bc40d901576a315f1d",
+        "selected_miner": "guarded-mine-or-deep",
+        "tokens": 4286,
+        "transform_applied": true
+      },
+      "structural_applied": false
+    },
+    "rg-output-rtk-grep": {
+      "alias_applied": false,
+      "arm": "VG",
+      "final": {
+        "artifact_sha256": "efc7c153def1547954c8013dcbaf67fe4f040a77af33da2e134d07cd4083074a",
+        "outer_codec": null,
+        "passthrough_unwrapped": true,
+        "tokens": 475
+      },
+      "overall_alias_entries": 0,
+      "stage1": {
+        "alias_entries": 0,
+        "artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "attempted": true,
+        "selected_codec": "raw",
+        "tokens": 485,
+        "transform_applied": false
+      },
+      "stage2": {
+        "alias_entries_added": 0,
+        "artifact_sha256": "efc7c153def1547954c8013dcbaf67fe4f040a77af33da2e134d07cd4083074a",
+        "attempted": true,
+        "candidate_accepted": false,
+        "input_artifact_sha256": "6595b115c14f28faacd29ef06691f5ba6d30c1c50e32cdb4c5230b9c430cf63f",
+        "selected_miner": null,
+        "tokens": 475,
+        "transform_applied": false
+      },
+      "structural_applied": false
+    },
+    "rtk-rg-derive-clap": {
+      "alias_applied": true,
+      "arm": "VG",
+      "final": {
+        "artifact_sha256": "08870d4eba618c0934f3494862c30dfa780a948cc12bcdcd9e2fbea406fb5518",
+        "outer_codec": "mine",
+        "passthrough_unwrapped": false,
+        "tokens": 2781
+      },
+      "overall_alias_entries": 2,
+      "stage1": {
+        "alias_entries": 0,
+        "artifact_sha256": "8a3b7c38a10f1968c1085aaff69abd3d0a282b7adafc29e7df44e29f120b181b",
+        "attempted": true,
+        "selected_codec": "grep",
+        "tokens": 2799,
+        "transform_applied": true
+      },
+      "stage2": {
+        "alias_entries_added": 2,
+        "artifact_sha256": "08870d4eba618c0934f3494862c30dfa780a948cc12bcdcd9e2fbea406fb5518",
+        "attempted": true,
+        "candidate_accepted": true,
+        "input_artifact_sha256": "8a3b7c38a10f1968c1085aaff69abd3d0a282b7adafc29e7df44e29f120b181b",
+        "selected_miner": "guarded-mine-or-deep",
+        "tokens": 2781,
+        "transform_applied": true
+      },
+      "structural_applied": true
+    },
+    "rtk-rg-parser-clap": {
+      "alias_applied": false,
+      "arm": "VG",
+      "final": {
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "outer_codec": "grep",
+        "passthrough_unwrapped": false,
+        "tokens": 719
+      },
+      "overall_alias_entries": 0,
+      "stage1": {
+        "alias_entries": 0,
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "attempted": true,
+        "selected_codec": "grep",
+        "tokens": 719,
+        "transform_applied": true
+      },
+      "stage2": {
+        "alias_entries_added": 0,
+        "artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "attempted": true,
+        "candidate_accepted": false,
+        "input_artifact_sha256": "b1f7c3064308db3d03b1394e28bdcb2a57480b88a62ced4d3b14a0ed87509019",
+        "selected_miner": null,
+        "tokens": 719,
+        "transform_applied": false
+      },
+      "structural_applied": true
+    }
+  },
+  "stage2_attempted_cases": [
+    "build-log-rtk-log",
+    "clap-derive-explore",
+    "rg-output-rtk-grep",
+    "rtk-rg-derive-clap",
+    "rtk-rg-parser-clap"
+  ],
+  "supersedes_interpretation": "stage-2 transform_applied in the run-time audit receipt counts the %q1-container -> naked-raw passthrough unwrap (a no-gain --passthrough) as a mining transform. Normalized: candidate_accepted = a guarded mine actually added >=1 alias; transform_applied now equals candidate_accepted; final.passthrough_unwrapped flags the naked-raw no-gain cases. Corrected totals: stage-2 attempted 5 case(s); guarded mining accepted 2 case(s) ['clap-derive-explore', 'rtk-rg-derive-clap']; the audit receipt and the immutable run manifest hashes are unchanged."
+}

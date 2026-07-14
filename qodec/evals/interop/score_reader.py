@@ -45,6 +45,18 @@ def _mean(xs):
     return statistics.mean(xs) if xs else None
 
 
+def stability_signature(r: dict) -> tuple:
+    """The full repeat-agreement signature for a record: correctness, format
+    compliance, and the ACTUAL normalized sets of alias leaks and invalid
+    identifiers. A flip from one leaked alias to a different one (same count), or
+    invalid `Foo` becoming invalid `Bar`, marks the question unstable; a mere
+    reordering of the same set does not. Shared so `stability.txt` is generated
+    on exactly the signature the scorer uses to decide stability."""
+    return (r["correct"], r.get("format_compliant", not r["malformed"]),
+            tuple(sorted(set(r.get("alias_leaks") or []))),
+            tuple(sorted(set(r.get("invalid_identifiers") or []))))
+
+
 def analyze(meta: dict, records: list[dict]) -> dict:
     # index[(case, q, arm)] = {repeat: record}
     index: dict[tuple, dict] = defaultdict(dict)
@@ -58,15 +70,9 @@ def analyze(meta: dict, records: list[dict]) -> dict:
         return arms.get(0) or (arms[min(arms)] if arms else None)
 
     # Stability: for each (case,q,arm) with >1 repeat, do the repeats agree on the
-    # full signature — not just correctness, but format, and the ACTUAL normalized
-    # sets of alias leaks and invalid identifiers. So a flip from one leaked alias
-    # to a different one (same count), or invalid `Foo` becoming invalid `Bar`,
-    # marks the question unstable; a mere reordering of the same set does not.
-    def _sig(r):
-        return (r["correct"], r.get("format_compliant", not r["malformed"]),
-                tuple(sorted(set(r.get("alias_leaks") or []))),
-                tuple(sorted(set(r.get("invalid_identifiers") or []))))
-
+    # full signature (see stability_signature) — not just correctness, but format,
+    # and the ACTUAL normalized sets of alias leaks and invalid identifiers.
+    _sig = stability_signature
     unstable_q = set()
     for (case, q, arm), reps in index.items():
         if len(reps) > 1 and len({_sig(reps[k]) for k in reps}) > 1:

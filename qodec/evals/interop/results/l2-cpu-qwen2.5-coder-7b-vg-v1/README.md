@@ -46,14 +46,20 @@ closure ablation (`analysis/l2-qwen2.5-coder-7b-alias-fold-closure-v1`) showed t
 guard alone (SG) rescues 4/5 canonical losses but the simplified structural shelf
 is what carries the 5th; VG combines both.
 
-Realized per-case stages (`realized-stage-receipts.json`, re-derived offline from
-the L1 artifacts):
+Realized per-case stages — the run-time audit receipt is
+`realized-stage-receipts.json`; the passthrough-corrected interpretation is
+`realized-stage-receipts-normalized.json` (`derived_from` + `method_version`,
+original never overwritten):
 
 - **shelf distribution:** {'raw': 3, 'grep': 2}
-- **guarded mining applied** in 4 case(s):
-  ['build-log-rtk-log', 'clap-derive-explore', 'rg-output-rtk-grep', 'rtk-rg-derive-clap']
+- **stage-2 (guarded mine) attempted** in 5 case(s):
+  ['build-log-rtk-log', 'clap-derive-explore', 'rg-output-rtk-grep', 'rtk-rg-derive-clap', 'rtk-rg-parser-clap']
+- **guarded mining accepted** (a guarded candidate actually added ≥1 alias) in
+  2 case(s): ['clap-derive-explore', 'rtk-rg-derive-clap'].
+  The other stage-2 attempts are no-gain **passthrough unwraps** (`%q1` container →
+  naked raw), not mining transforms.
 - **VG == V (structural) byte-identical** in 3 case(s):
-  ['build-log-rtk-log', 'rg-output-rtk-grep', 'rtk-rg-parser-clap'] (the guard removed every mine candidate there)
+  ['build-log-rtk-log', 'rg-output-rtk-grep', 'rtk-rg-parser-clap'] (the guard/shelf left nothing for the mine to add there)
 
 ## Gates (never moved after the result)
 

@@ -6,7 +6,8 @@ stable VG losses=0  leaks=0  invalid Δ=0  malformed Δ=0
 token savings vs raw+brief: total=3379 mean=146.9 median=91 5.3%
 latency ms raw+brief=39668 vg=32198 (observation only)
 shelf distribution: {'raw': 3, 'grep': 2}
-guarded mining applied in 4 case(s): ['build-log-rtk-log', 'clap-derive-explore', 'rg-output-rtk-grep', 'rtk-rg-derive-clap']
+stage-2 attempted in 5 case(s): ['build-log-rtk-log', 'clap-derive-explore', 'rg-output-rtk-grep', 'rtk-rg-derive-clap', 'rtk-rg-parser-clap']
+guarded mining accepted in 2 case(s): ['clap-derive-explore', 'rtk-rg-derive-clap'] (passthrough-unwrap no-gain cases excluded)
 VG == V (structural) byte-identical in 3 case(s): ['build-log-rtk-log', 'rg-output-rtk-grep', 'rtk-rg-parser-clap']
 exact roundtrip all cases: True
 tokenizer parity: ok (spread 0.0)

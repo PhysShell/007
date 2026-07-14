@@ -56,31 +56,38 @@ def analyze_vg(meta, records, run_dir) -> dict:
     mal_rb = sum(1 for (c, q) in questions if prim.get((c, q, "raw+brief"), {}).get("malformed"))
     mal_eb = sum(1 for (c, q) in questions if prim.get((c, q, "encoded+brief"), {}).get("malformed"))
 
-    # per-case realized stages (offline): shelf, guarded-mining-applied, VG==V, roundtrip.
+    # per-case realized stages (offline): shelf, guarded-mining accounting (with the
+    # passthrough-unwrap normalization), VG==V, roundtrip.
     l1 = Path(meta["l1_run"])
     if not l1.is_absolute():
         l1 = Path(__file__).resolve().parent / l1
     meter = (meta.get("tokenizer") or {}).get("meter") or "o200k"
     qb = str(qodec.binary())
-    per_case, shelves, guarded_cases, vg_eq_v, roundtrip_ok = {}, {}, [], [], []
+    per_case, shelves = {}, {}
+    stage2_attempted_cases, guarded_accepted_cases, vg_eq_v, roundtrip_ok = [], [], [], []
     cases = sorted({c for (c, _q) in questions})
     for case in cases:
         m = sorted(l1.glob(f"*/cases/{case}/*/transformed.txt")) or sorted(l1.glob(f"cases/{case}/*/transformed.txt"))
         raw = m[0].read_text(encoding="utf-8")
-        st = ap.realized_stages_for_codec(VG_CODEC, raw, meter, qb, passthrough=True)
+        st = ap.normalize_realized(ap.realized_stages_for_codec(VG_CODEC, raw, meter, qb, passthrough=True), ap._sha(raw))
         v = ap.realized_stages_for_codec("structural", raw, meter, qb, passthrough=True)
         env = qodec.encode(raw, codec=VG_CODEC, meter=meter, passthrough=True)
         rt = (qodec.decode_envelope(env)[0] == raw)
         roundtrip_ok.append(rt)
         shelf = st["stage1"]["selected_codec"]
         shelves[shelf] = shelves.get(shelf, 0) + 1
-        guarded = st["stage2"]["attempted"] and st["stage2"]["transform_applied"]
-        if guarded:
-            guarded_cases.append(case)
+        attempted = st["stage2"]["attempted"]
+        accepted = st["stage2"]["candidate_accepted"]        # normalized: a real guarded mine, not the unwrap
+        passthrough = st["final"]["passthrough_unwrapped"]
+        if attempted:
+            stage2_attempted_cases.append(case)
+        if accepted:
+            guarded_accepted_cases.append(case)
         eqv = st["final"]["artifact_sha256"] == v["final"]["artifact_sha256"]
         if eqv:
             vg_eq_v.append(case)
-        per_case[case] = {"shelf": shelf, "guarded_mining_applied": guarded,
+        per_case[case] = {"shelf": shelf, "stage2_attempted": attempted,
+                          "guarded_mining_accepted": accepted, "passthrough_unwrapped": passthrough,
                           "vg_equals_v": eqv, "roundtrip_ok": rt}
 
     overall, loc, fc = a["groups"]["all"], a["groups"]["locator"], a["groups"]["facts/counts"]
@@ -122,7 +129,8 @@ def analyze_vg(meta, records, run_dir) -> dict:
         "latency_ms": {"raw_brief": a["integrity"]["latency_ms_raw+brief"],
                        "vg": a["integrity"]["latency_ms_encoded"]},
         "parity": a["parity"], "shelf_distribution": shelves,
-        "guarded_mining_applied_cases": guarded_cases,
+        "stage2_attempted_cases": stage2_attempted_cases,
+        "guarded_mining_accepted_cases": guarded_accepted_cases,
         "vg_equals_v_cases": vg_eq_v, "per_case": per_case,
         "roundtrip_all_ok": all(roundtrip_ok),
         "full_run_gate": full_gate, "vg_quality_gate": vg_gate,
@@ -144,7 +152,9 @@ def render(meta, v) -> str:
     o.append(f"latency ms raw+brief={v['latency_ms']['raw_brief']:.0f} vg={v['latency_ms']['vg']:.0f} (observation only)"
              if v['latency_ms']['raw_brief'] else "latency: n/a")
     o.append(f"shelf distribution: {v['shelf_distribution']}")
-    o.append(f"guarded mining applied in {len(v['guarded_mining_applied_cases'])} case(s): {v['guarded_mining_applied_cases']}")
+    o.append(f"stage-2 attempted in {len(v['stage2_attempted_cases'])} case(s): {v['stage2_attempted_cases']}")
+    o.append(f"guarded mining accepted in {len(v['guarded_mining_accepted_cases'])} case(s): {v['guarded_mining_accepted_cases']}"
+             " (passthrough-unwrap no-gain cases excluded)")
     o.append(f"VG == V (structural) byte-identical in {len(v['vg_equals_v_cases'])} case(s): {v['vg_equals_v_cases']}")
     o.append(f"exact roundtrip all cases: {v['roundtrip_all_ok']}")
     o.append(f"tokenizer parity: {'MISMATCH' if v['parity']['mismatch'] else 'ok'} (spread {v['parity']['arm_overhead_spread']})")
