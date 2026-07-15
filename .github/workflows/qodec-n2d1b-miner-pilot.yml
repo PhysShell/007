@@ -1,0 +1,179 @@
+# Scope N2-D1b — five-ecosystem repository-miner pilot (stage 1 of the
+# authorized N2-D1b execution-bridge build-out). Proves ONE case per
+# ecosystem (dotnet, rust, jvm-maven, jvm-gradle, python) end-to-end through
+# the D1b generic capture engine before scaling to the full 9-case x
+# capture-a/capture-b matrix. See qodec/evals/interop/v2/n2/d1-identity-lock/.
+#
+# Never reacquires source from upstream: every case's source.tar comes from
+# the already-durable, already-verified n2d0-durable-evidence-v1 release
+# (Scope N2-D0), downloaded via its public github.com/.../releases/download/
+# URL. Trusted dependency realization (network allowed) and the actual
+# Sandboy-confined capture (network denied) are separate steps, exactly as
+# for N2-A's canary. Landlock-confined execution requires a real kernel
+# feature this session's own sandbox does not expose to the guest — that is
+# exactly why this runs here, in a real GitHub Actions VM, rather than
+# locally.
+name: qodec-n2d1b-miner-pilot
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - claude/qodec-benchmark-v2-n2d-identity-lock
+    paths:
+      - ".github/workflows/qodec-n2d1b-miner-pilot.yml"
+
+permissions:
+  contents: read
+
+env:
+  LC_ALL: C.UTF-8
+  LANG: C.UTF-8
+  TZ: UTC
+  SANDBOY_COMMIT_SHA: e925058ddea405b5821fc0aed4882c76650dcbe9
+  N2D0_RELEASE_TAG: n2d0-durable-evidence-v1
+
+jobs:
+  pilot:
+    name: pilot-${{ matrix.case.ecosystem }}-${{ matrix.job }}
+    strategy:
+      fail-fast: false
+      matrix:
+        case:
+          - { case_id: repo-hyperfine, ecosystem: rust }
+          - { case_id: repo-docker-java-parser, ecosystem: jvm-maven }
+          - { case_id: repo-kubeops-generator, ecosystem: dotnet }
+          - { case_id: repo-pyflakes, ecosystem: python }
+          - { case_id: repo-spotless, ecosystem: jvm-gradle }
+        job: [capture-a, capture-b]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout 007
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout Own.NET/sandboy at the accepted S0 commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: PhysShell/Own.NET
+          ref: e925058ddea405b5821fc0aed4882c76650dcbe9
+          path: own-net
+          persist-credentials: false
+          fetch-depth: 1
+          sparse-checkout: |
+            sandboy
+          sparse-checkout-cone-mode: true
+
+      - name: Build the accepted Sandboy commit (release, locked)
+        working-directory: own-net/sandboy
+        run: cargo build --release --locked
+
+      - name: Verify Sandboy commit identity
+        working-directory: own-net
+        run: |
+          actual=$(git rev-parse HEAD)
+          if [ "$actual" != "$SANDBOY_COMMIT_SHA" ]; then
+            echo "::error::checked-out Sandboy HEAD $actual != accepted $SANDBOY_COMMIT_SHA"
+            exit 1
+          fi
+
+      - name: Download the durable n2c-acquisition source asset (never reacquired from upstream)
+        run: |
+          mkdir -p "$RUNNER_TEMP/source-artifact"
+          curl -sSL -o "$RUNNER_TEMP/source-artifact/acquisition.zip" \
+            "https://github.com/PhysShell/007/releases/download/${N2D0_RELEASE_TAG}/n2c-acquisition-${{ matrix.case.case_id }}.zip"
+          python3 -c "
+          import zipfile
+          with zipfile.ZipFile('$RUNNER_TEMP/source-artifact/acquisition.zip') as zf:
+              zf.extractall('$RUNNER_TEMP/source-artifact')
+          "
+          find "$RUNNER_TEMP/source-artifact" -maxdepth 2
+
+      # ---- ecosystem toolchain setup (trusted; network allowed here) ----
+      - name: Install Rust toolchain
+        if: matrix.case.ecosystem == 'rust'
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install JDK 11 (repo-docker-java-parser needs it; JDK 21 fails to compile its Scala plugin)
+        if: matrix.case.ecosystem == 'jvm-maven'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends openjdk-11-jdk-headless maven
+          echo "JAVA_HOME_11=/usr/lib/jvm/java-11-openjdk-amd64" >> "$GITHUB_ENV"
+
+      - name: Install JDK 21 + Gradle for the gradle ecosystem
+        if: matrix.case.ecosystem == 'jvm-gradle'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends openjdk-21-jdk-headless
+          echo "JAVA_HOME_21=/usr/lib/jvm/java-21-openjdk-amd64" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        if: matrix.case.ecosystem == 'dotnet'
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Confirm python3 (runner-preinstalled; repo-pyflakes uses the authorized erratum argv)
+        if: matrix.case.ecosystem == 'python'
+        run: python3 --version
+
+      # ---- trusted dependency realization (network allowed; case-specific) ----
+      - name: Trusted setup — cargo fetch
+        if: matrix.case.ecosystem == 'rust'
+        working-directory: ${{ runner.temp }}/source-artifact/${{ matrix.case.case_id }}/source
+        run: |
+          if [ ! -f Cargo.lock ]; then
+            cargo generate-lockfile
+            echo "generated Cargo.lock sha256: $(sha256sum Cargo.lock | cut -d' ' -f1)"
+          fi
+          cargo fetch --locked
+
+      - name: Trusted setup — mvn dependency:go-offline (JDK 11)
+        if: matrix.case.ecosystem == 'jvm-maven'
+        working-directory: ${{ runner.temp }}/source-artifact/${{ matrix.case.case_id }}/source
+        env:
+          JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+        run: mvn -B dependency:go-offline || true # some poms have no go-offline-resolvable deps; real test run below is authoritative
+
+      - name: Trusted setup — pip install pyflakes (editable)
+        if: matrix.case.ecosystem == 'python'
+        working-directory: ${{ runner.temp }}/source-artifact/${{ matrix.case.case_id }}/source
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv-${{ matrix.case.case_id }}"
+          "$RUNNER_TEMP/venv-${{ matrix.case.case_id }}/bin/pip" install --quiet .
+
+      - name: Trusted setup — gradle wrapper distribution fetch (JDK 21)
+        if: matrix.case.ecosystem == 'jvm-gradle'
+        working-directory: ${{ runner.temp }}/source-artifact/${{ matrix.case.case_id }}/source
+        env:
+          JAVA_HOME: /usr/lib/jvm/java-21-openjdk-amd64
+        run: ./gradlew --version
+
+      - name: Run the D1b generic capture (${{ matrix.job }})
+        run: |
+          mkdir -p "$RUNNER_TEMP/work-${{ matrix.case.case_id }}-${{ matrix.job }}" "$RUNNER_TEMP/out-${{ matrix.case.case_id }}-${{ matrix.job }}"
+          python3 qodec/evals/interop/v2/n2/d1-identity-lock/tools/run_pilot_case.py \
+            --case-id "${{ matrix.case.case_id }}" \
+            --ecosystem "${{ matrix.case.ecosystem }}" \
+            --job-name "${{ matrix.job }}" \
+            --source-artifact-dir "$RUNNER_TEMP/source-artifact/${{ matrix.case.case_id }}" \
+            --work-dir "$RUNNER_TEMP/work-${{ matrix.case.case_id }}-${{ matrix.job }}" \
+            --out-dir "$RUNNER_TEMP/out-${{ matrix.case.case_id }}-${{ matrix.job }}" \
+            --sandboy-bin "$GITHUB_WORKSPACE/own-net/sandboy/target/release/sandboy" \
+            --sandboy-commit-sha "$SANDBOY_COMMIT_SHA" \
+            --errata-path qodec/evals/interop/v2/n2/d1-identity-lock/execution-plan-errata.json \
+            --venv-python "$RUNNER_TEMP/venv-${{ matrix.case.case_id }}/bin/python" \
+            --java-home-11 /usr/lib/jvm/java-11-openjdk-amd64 \
+            --java-home-21 /usr/lib/jvm/java-21-openjdk-amd64
+
+      - name: Upload n2d1b-pilot-${{ matrix.case.case_id }}-${{ matrix.job }}
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: n2d1b-pilot-${{ matrix.case.case_id }}-${{ matrix.job }}
+          path: ${{ runner.temp }}/out-${{ matrix.case.case_id }}-${{ matrix.job }}
+          if-no-files-found: warn
+          retention-days: 90
