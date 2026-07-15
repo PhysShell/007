@@ -60,6 +60,28 @@
 # genuinely content-valid pilot run is confirmed by inspecting the actual
 # artifact bytes -- not reusing any raw input from runs #4-#6. The full
 # 9-case matrix is restored, and run twice, only after that.
+#
+# CI run #7 (commit a497f98) real-artifact inspection found those four
+# fixes did NOT resolve rust/python (identical errors) and surfaced two new
+# ones (maven, gradle). Root cause for rust+python: run_confined_build.sh's
+# `sudo --preserve-env=` list was hardcoded to N2-A's dotnet-only names,
+# silently stripping RUSTUP_TOOLCHAIN/VIRTUAL_ENV before Sandboy's own
+# env_allow ever saw them -- fixed by generalizing that list (canary
+# tooling change) to the union of every ecosystem's env_allow. Python also
+# had a second, independent bug: venv_root was computed with .resolve(),
+# which follows the venv's bin/python symlink to the base interpreter and
+# silently derives the wrong root -- fixed by dropping .resolve(). New:
+# maven's ~/.m2/repository (populated during trusted setup against the
+# real runner $HOME) was never exposed to the confined process's isolated
+# HOME -- fixed via an explicit MAVEN_OPTS -Dmaven.repo.local plus a
+# dedicated fs_rw policy entry. gradle's daemon failed to bind its own
+# client<->daemon TCP loopback port under Sandboy's (correctly) fully
+# closed tcp_bind policy -- fixed by disabling the daemon via GRADLE_OPTS
+# (frozen ./gradlew argv unchanged). dotnet/repo-kubeops-generator hit the
+# specific, pre-anticipated stop condition: the unchanged frozen `dotnet
+# test` argv still attempts its own implicit restore under network denial
+# even after a successful trusted restore -- left unresolved pending a
+# user decision (no argv change, no confinement loosening applied).
 name: qodec-n2d1b-miner-pilot
 
 on:

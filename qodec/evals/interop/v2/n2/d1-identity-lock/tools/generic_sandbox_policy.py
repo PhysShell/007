@@ -56,10 +56,17 @@ ECOSYSTEM_POLICY_HINTS = {
     "jvm-maven": {
         "env_allow": ["PATH", "HOME", "TMPDIR", "JAVA_HOME", "MAVEN_OPTS"],
         "extra_fs_ro_from_env": ["JAVA_HOME"],
-        "extra_fs_rw_from_env": [],  # ~/.m2 lives under HOME, already fs_rw
+        # MAVEN_LOCAL_REPO_PATH is a synthetic, policy-only key (never itself
+        # forwarded to the confined child -- MAVEN_OPTS's own
+        # -Dmaven.repo.local value is what Maven actually reads) pointing at
+        # the REAL ~/.m2/repository populated during trusted setup. fs_rw,
+        # not fs_ro: Maven writes _remote.repositories/resolver-status.
+        # markers into its local repo even when every artifact it needs is
+        # already cached.
+        "extra_fs_rw_from_env": ["MAVEN_LOCAL_REPO_PATH"],
     },
     "jvm-gradle": {
-        "env_allow": ["PATH", "HOME", "TMPDIR", "JAVA_HOME", "GRADLE_USER_HOME"],
+        "env_allow": ["PATH", "HOME", "TMPDIR", "JAVA_HOME", "GRADLE_USER_HOME", "GRADLE_OPTS"],
         "extra_fs_ro_from_env": ["JAVA_HOME"],
         "extra_fs_rw_from_env": ["GRADLE_USER_HOME"],
     },

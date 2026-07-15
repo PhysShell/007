@@ -200,18 +200,46 @@ def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
         )
     if ecosystem == "jvm-maven":
         java_home = args.java_home_11
+        # Maven's local repository cache (~/.m2/repository) was populated
+        # during trusted setup ("mvn dependency:go-offline") against the
+        # REAL, unconfined runner $HOME -- but the confined process's own
+        # HOME is a fresh, isolated home_dir with no relationship to it. A
+        # real capture (CI run #7) showed this surface as "[FATAL]
+        # Non-readable POM .../oss-parent-9.pom (Permission denied)" once
+        # the earlier /dev/null gap was fixed and Maven actually started.
+        # Point Maven at the real, already-populated repo explicitly via
+        # MAVEN_OPTS (frozen argv "mvn test" stays untouched), and expose
+        # that exact directory to the sandbox -- same discipline as
+        # CARGO_HOME/RUSTUP_HOME for rust.
+        real_m2_repo = str(Path.home() / ".m2" / "repository")
         return (
             lambda source_root: et.capture_maven_toolchain_identity(java_home=java_home),
-            {"JAVA_HOME": java_home},
+            {
+                "JAVA_HOME": java_home,
+                "MAVEN_OPTS": f"-Dmaven.repo.local={real_m2_repo}",
+                "MAVEN_LOCAL_REPO_PATH": real_m2_repo,
+            },
         )
     if ecosystem == "jvm-gradle":
         java_home = args.java_home_21
         gradle_user_home = str(Path.home() / ".gradle")
+        # A real capture (CI run #7) showed the Gradle daemon fail with
+        # "java.net.BindException: Permission denied" trying to bind its
+        # own client<->daemon TCP loopback port -- Sandboy's tcp_bind policy
+        # is (correctly) fully closed, and this is pure local IPC, not a
+        # network dependency the workload needs. Disabling the daemon via
+        # GRADLE_OPTS avoids the bind entirely without touching the frozen
+        # "./gradlew ..." argv -- still the exact same task, just run
+        # in-process instead of via a background daemon.
         return (
             lambda source_root: et.capture_gradle_toolchain_identity(
                 gradle_bin="./gradlew", java_home=java_home, cwd=source_root
             ),
-            {"JAVA_HOME": java_home, "GRADLE_USER_HOME": gradle_user_home},
+            {
+                "JAVA_HOME": java_home,
+                "GRADLE_USER_HOME": gradle_user_home,
+                "GRADLE_OPTS": "-Dorg.gradle.daemon=false",
+            },
         )
     if ecosystem == "python":
         python_bin = args.venv_python
@@ -220,7 +248,15 @@ def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
         # capture showed Python fail to even start with a PermissionError on
         # pyvenv.cfg until this exact directory was exposed to the sandbox
         # via VIRTUAL_ENV (see generic_sandbox_policy.py's python hints).
-        venv_root = str(Path(python_bin).resolve().parent.parent)
+        # NOTE: no .resolve() here -- python_bin is already the absolute
+        # $RUNNER_TEMP path the workflow passed in, and a venv's bin/python
+        # is itself a symlink to the base interpreter (e.g. /usr/bin/
+        # python3.x); .resolve() follows that symlink and silently computes
+        # the wrong root (e.g. "/usr" instead of the venv directory) -- a
+        # real capture (CI run #7) showed VIRTUAL_ENV set this way never
+        # actually exposed the real venv path and reproduced the identical
+        # PermissionError as before the fix existed.
+        venv_root = str(Path(python_bin).parent.parent)
         return (
             lambda source_root: et.capture_python_toolchain_identity(python_bin),
             {"VIRTUAL_ENV": venv_root, "PYTHONDONTWRITEBYTECODE": "1", "PIP_NO_INDEX": "1"},

@@ -42,7 +42,18 @@ SANDBOY_BIN=$1; POLICY=$2; CWD=$3; shift 3
 shift
 
 CALLER_USER=$(id -un)
-PRESERVE_ENV="PATH,HOME,TMPDIR,DOTNET_ROOT,DOTNET_CLI_TELEMETRY_OPTOUT,DOTNET_NOLOGO,DOTNET_SKIP_FIRST_TIME_EXPERIENCE,DOTNET_MULTILEVEL_LOOKUP,DOTNET_GENERATE_ASPNET_CERTIFICATE"
+# `sudo` strips almost every environment variable unless named here --
+# real N2-D1b evidence (CI run #7) showed RUSTUP_TOOLCHAIN and VIRTUAL_ENV
+# (both correctly set by the caller and correctly listed in the Sandboy
+# policy's own env_allow) produce byte-identical failures to before those
+# fixes existed, because this list -- written only for N2-A's dotnet-only
+# canary -- silently dropped them at the `sudo` layer, before Sandboy's own
+# confinement ever saw them. This is now the union of every env_allow name
+# across all 5 N2-D1b ecosystems (generic_sandbox_policy.py's
+# ECOSYSTEM_POLICY_HINTS), not just dotnet's -- a strict superset of the
+# original dotnet-only list, so N2-A's own (frozen, already-accepted) usage
+# is unaffected.
+PRESERVE_ENV="PATH,HOME,TMPDIR,DOTNET_ROOT,DOTNET_CLI_TELEMETRY_OPTOUT,DOTNET_NOLOGO,DOTNET_SKIP_FIRST_TIME_EXPERIENCE,DOTNET_MULTILEVEL_LOOKUP,DOTNET_GENERATE_ASPNET_CERTIFICATE,CARGO_HOME,RUSTUP_HOME,CARGO_NET_OFFLINE,RUSTUP_TOOLCHAIN,PYTHONDONTWRITEBYTECODE,PIP_NO_INDEX,VIRTUAL_ENV,JAVA_HOME,MAVEN_OPTS,GRADLE_USER_HOME,GRADLE_OPTS"
 
 ulimit -t 600                    # 600s CPU time
 ulimit -u 512                    # max processes/threads for this user
