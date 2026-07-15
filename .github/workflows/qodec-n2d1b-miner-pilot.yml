@@ -21,7 +21,14 @@
 # pre-substitution (stale-erratum refusal); no dotnet entry existed in
 # ECOSYSTEM_POLICY_HINTS; the gradle toolchain probe ran './gradlew' with no
 # cwd; and 'mvn --version' returned ANSI-colored text that broke the version
-# regex. See tools/generic_capture.py, tools/generic_sandbox_policy.py,
+# regex. CI run #3 (29418081991) got 8/10 jobs green (rust, jvm-maven,
+# python) and found two more real bugs, now fixed: this runner's installed
+# Gradle 9.4.1 replaced the old '^JVM:' --version line with 'Launcher JVM:'/
+# 'Daemon JVM:', breaking runtime_identifier parsing; and the sandboxed
+# dotnet test capture itself succeeded but receipt assembly crashed with
+# "unhashable type: 'dict'" because sanitizer.sanitize's rules_applied is a
+# list of {"rule":...,"replacements":...} dicts, not plain strings. See
+# tools/generic_capture.py, tools/generic_sandbox_policy.py,
 # tools/ecosystem_toolchain.py, tools/run_pilot_case.py.
 name: qodec-n2d1b-miner-pilot
 
