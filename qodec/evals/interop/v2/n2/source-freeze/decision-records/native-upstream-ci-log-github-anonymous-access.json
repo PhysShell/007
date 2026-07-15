@@ -1,0 +1,51 @@
+{
+  "decision_id": "native-upstream-ci-log-github-anonymous-access",
+  "scope": "PhysShell/007#54 N2-C closure",
+  "date": "2026-07-15",
+  "summary": "GitHub Actions' job-log endpoints (both the REST API and the public HTML commit-checks log-viewer path) were tested for genuinely credential-free, anonymous downloadability and confirmed NOT reproducibly acquirable for the 3 native-upstream-ci-log candidates originally selected on GitHub Actions. The 3 candidates were replaced with real, verified AppVeyor-hosted equivalents whose log endpoint IS confirmed anonymously downloadable. The native-upstream-ci-log = 3 quota and the credential-free acquisition rule were both preserved unchanged.",
+  "background": [
+    "The original acquisition design attached this workflow's own GITHUB_TOKEN to api.github.com requests for the job-logs endpoint, reasoning that GitHub's job-logs download endpoint returns 403 for a fully unauthenticated request even against a public repository (real CI run 29393029603).",
+    "This was challenged: the token used was scoped to a different repository (PhysShell/007), so a 401/403 response does not by itself prove genuine anonymous access is impossible — an authenticated-but-wrong-scope request behaves differently from a truly anonymous one, and the original test also omitted the X-GitHub-Api-Version header.",
+    "An independently-verified working reference was supplied: jqlang/jq, run_id 28568334149, job_id 84700257505, job name 'linux (amd64)' — real log bytes had previously been retrieved for this exact job. It was later established that this retrieval went through an installed GitHub App (i.e. an authenticated path), which proves the job's log bytes exist and are retrievable via SOME credentialed path, but does not by itself establish anonymous availability."
+  ],
+  "probes": [
+    {
+      "probe_id": "probe-ci-log-anonymous-access",
+      "workflow_run": "https://github.com/PhysShell/007/actions/runs/29395614569",
+      "commit": "ab93ef6a45f9575162b772b99fe12f951024f13c",
+      "method": "Plain curl GET against https://api.github.com/repos/{owner}/{repo}/actions/jobs/{job_id}/logs with Accept: application/vnd.github+json and X-GitHub-Api-Version: 2022-11-28 only. GITHUB_TOKEN, GH_TOKEN, GITHUB_AUTH_TOKEN, GITHUB_ENTERPRISE_TOKEN explicitly unset. No Authorization header constructed or sent.",
+      "anonymity_corroboration": "x-ratelimit-limit: 60 on every response (GitHub's unauthenticated per-IP tier; an authenticated request would show 5000+).",
+      "results": [
+        {"label": "jq-known-good-84700257505", "repo": "jqlang/jq", "job_id": "84700257505", "http_status": 403, "x_github_request_id": "7400:21D8C3:7B3B6F:1B5F191:6A572EAF", "body": "{\"message\": \"Must have admin rights to Repository.\", \"documentation_url\": \"https://docs.github.com/rest/actions/workflow-jobs#download-job-logs-for-a-workflow-run\", \"status\": \"403\"}"},
+        {"label": "curl-87202088495", "repo": "curl/curl", "job_id": "87202088495", "http_status": 403, "x_github_request_id": "7401:9ABDB:7A44B6:1B6EAF3:6A572EB0", "body": "same as above"},
+        {"label": "rust-lang-87199351258", "repo": "rust-lang/rust", "job_id": "87199351258", "http_status": 403, "x_github_request_id": "7402:2CF4BE:8175F9:1CD2134:6A572EB0", "body": "same as above"}
+      ],
+      "conclusion": "All 3 jobs, including the independently-verified reference, returned HTTP 403 under a genuinely anonymous, correctly-headed request. No redirects occurred (redirect_hop_count: 0 for all three)."
+    },
+    {
+      "probe_id": "probe-ci-log-html-viewer-access",
+      "workflow_run": "https://github.com/PhysShell/007/actions/runs/29398585305",
+      "commit": "13d09e07449955cea7d15b5f6ef91780f060f0ab",
+      "method": "Plain curl GET against github.com/{owner}/{repo}/commit/{head_sha}/checks/{job_id}/logs (the URL GitHub's own Actions web UI uses for public-repo 'raw logs'/'download log archive' links), with no cookie jar, no browser profile, no session of any kind, and no Authorization header. head_sha resolved via the already-anonymous run-metadata REST endpoint.",
+      "anonymity_corroboration": "Set-Cookie: logged_in=no on every response.",
+      "results": [
+        {"label": "jq-html-viewer-84700257505", "repo": "jqlang/jq", "job_id": "84700257505", "http_status": 404, "downloaded_byte_count": 310922, "content_type": "text/html; charset=utf-8", "note": "GitHub's standard 404 HTML page, not real log content"},
+        {"label": "curl-html-viewer-87202088495", "repo": "curl/curl", "job_id": "87202088495", "http_status": 404, "downloaded_byte_count": 310921, "content_type": "text/html; charset=utf-8", "note": "GitHub's standard 404 HTML page, not real log content"}
+      ],
+      "conclusion": "Both tested jobs, including the independently-verified reference, returned HTTP 404 (GitHub's standard not-found page) under a genuinely anonymous request. No redirects occurred."
+    }
+  ],
+  "decision": "The plain anonymous GitHub REST job-logs endpoint and the public HTML commit-checks log-viewer path are both falsified as anonymous acquisition paths for these 3 specific candidates. This does not amend the native-upstream-ci-log origin-kind requirement itself, does not change the quota (still 3), and does not weaken the credential-free acquisition rule. ci-log-curl-linux, ci-log-jq-ci, and ci-log-rust-lang-rust-ci are marked ineligible (requires_interactive_access_grant: true) with this evidence attached as acquisition_barrier_evidence.",
+  "replacement_candidates": {
+    "platform": "AppVeyor (ci.appveyor.com)",
+    "endpoint_verified_anonymous": "https://ci.appveyor.com/api/buildjobs/{job_id}/log — confirmed during N2-C closure research to return real runner output (git clone, cmake/msbuild build steps) via a plain, zero-credential HTTP GET for a public project, HTTP 200, content-type application/octet-stream.",
+    "candidates": [
+      {"candidate_id": "ci-log-nlohmann-json", "repository": "https://github.com/nlohmann/json", "license": "MIT", "appveyor_build_id": "54375733", "commit_sha": "872b9e234047e4a2cf29a5165e85b3a56a0647d2", "verified_2026-07-14_locally": {"selected_job_by_rule": "h8qx0g8r7694sf2c", "duration_seconds": 2801.6262, "downloaded_bytes": 39058, "sha256": "1f0dc4f6f2cb9a4758a5f90ed3d3b8a397d98566bbacde71f0bec69187da482c"}},
+      {"candidate_id": "ci-log-spdlog", "repository": "https://github.com/gabime/spdlog", "license": "MIT", "appveyor_build_id": "54361398", "commit_sha": "2ee3cf8204ed5048627644e00a51a7d93fbc4786", "verified_2026-07-11_locally": {"selected_job_by_rule": "4wh3j4uv5pestro8", "duration_seconds": 502.303144, "downloaded_bytes": 19550, "sha256": "e7aa5bf812957765aee1b7b092f324a9911c0a02d0bc0fff819b0d0e7fa64954"}},
+      {"candidate_id": "ci-log-jansson", "repository": "https://github.com/akheron/jansson", "license": "MIT", "appveyor_build_id": "54351973", "commit_sha": "851a2145e3256f2e67e5dfe24b0e456bf198b741", "verified_2026-07-09_locally": {"selected_job_by_rule": "cof4tos89xi4yry2", "duration_seconds": 316.999998, "downloaded_bytes": 49135, "sha256": "92e8d6d4835165c22f95b13d2d1b39c18efe52b6cd24bb6e09c331fc1787ae86"}}
+    ],
+    "note": "Local verification during discovery research confirms the anonymous path works and the deterministic job-selection rule is well-defined; the authoritative source_content_sha256/normalized_source_sha256 values locked into the registry come from the real trusted-source-acquisition CI job (identity-lock commit), not from this local research fetch, per the two-phase identity-lock process (section 5)."
+  },
+  "job_selection_rule_appveyor": "max(job.finished - job.started), tie-break lexicographically lowest job id (AppVeyor job ids are opaque alphanumeric strings, not numeric — same structure-only rule as the GitHub Actions rule, adapted for the id format).",
+  "workflow_infrastructure_note": "probe-ci-log-anonymous-access and probe-ci-log-html-viewer-access were temporary investigation-only workflow jobs, not part of the frozen final design. They are removed from qodec-n2-source-freeze.yml once this decision record captures their evidence; the real, permanent AppVeyor acquisition path lives in run_acquisition.py's _acquire_ci_run_appveyor."
+}

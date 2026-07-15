@@ -116,20 +116,55 @@ CANDIDATES = []
 
 # -- native-upstream-ci-log (3) --
 # job_selection_rule is decided NOW, deterministically, from job STRUCTURE
-# only (start/end timestamps + numeric job id) — never from log content,
-# QODEC, RTK, or token counts. The concrete winning job_id/name for each run
-# is resolved by the real trusted-acquisition CI job (this sandbox cannot
-# reach api.github.com for repos outside its declared GitHub scope) and then
-# locked into this registry via the identity-lock commit (section 5's
-# two-phase process) — never deferred until N2-D or influenced by benchmark
-# output.
+# only (start/end timestamps + job id) — never from log content, QODEC,
+# RTK, or token counts. The concrete winning job_id/name for each run is
+# resolved by the real trusted-acquisition CI job and then locked into this
+# registry via the identity-lock commit (section 5's two-phase process) —
+# never deferred until N2-D or influenced by benchmark output.
 _JOB_SELECTION_RULE = "max(job.completed_at - job.started_at), tie-break lowest numeric job id"
+
+# GitHub Actions job-log endpoints — REJECTED (see
+# decision-records/native-upstream-ci-log-github-anonymous-access.json for
+# full evidence). Two independent, genuinely credential-free, correctly
+# headed real CI probes (no Authorization header; GITHUB_TOKEN/GH_TOKEN/
+# GITHUB_AUTH_TOKEN/GITHUB_ENTERPRISE_TOKEN unset; unauthenticated
+# rate-limit tier confirmed via x-ratelimit-limit: 60) both failed to
+# retrieve real log bytes, including against a job independently verified
+# to contain retrievable log bytes through an authenticated path:
+#   1. Plain REST endpoint (.../actions/jobs/{job_id}/logs): all 3 jobs
+#      returned HTTP 403 {"message": "Must have admin rights to
+#      Repository."} (workflow run 29395614569).
+#   2. Public HTML commit-checks log-viewer path
+#      (github.com/{owner}/{repo}/commit/{sha}/checks/{job_id}/logs): both
+#      tested jobs returned HTTP 404 (GitHub's standard not-found page,
+#      confirmed anonymous via Set-Cookie: logged_in=no) (workflow run
+#      29398585305).
+# This falsifies anonymous acquisition for these 3 specific candidates, not
+# the native-upstream-ci-log origin kind itself — see the AppVeyor-based
+# replacements below, whose anonymous log endpoint was independently
+# verified to return real runner output (git clone/build steps), not a
+# receipt or error page.
+_GITHUB_ACTIONS_LOG_ANONYMOUS_ACCESS_BARRIER_EVIDENCE = (
+    "Two independent, genuinely credential-free real-CI probes (no Authorization header; "
+    "GITHUB_TOKEN/GH_TOKEN/GITHUB_AUTH_TOKEN/GITHUB_ENTERPRISE_TOKEN unset; unauthenticated "
+    "rate-limit tier x-ratelimit-limit: 60 confirmed) both failed to retrieve real log bytes: "
+    "(1) REST .../actions/jobs/{job_id}/logs returned HTTP 403 'Must have admin rights to "
+    "Repository.' for all 3 jobs, including a job independently verified elsewhere to contain "
+    "retrievable log bytes through an authenticated path (workflow run 29395614569); "
+    "(2) the public HTML commit-checks log-viewer path "
+    "github.com/{owner}/{repo}/commit/{sha}/checks/{job_id}/logs returned HTTP 404 (GitHub's "
+    "standard not-found page, confirmed anonymous via Set-Cookie: logged_in=no) for both tested "
+    "jobs (workflow run 29398585305). See "
+    "decision-records/native-upstream-ci-log-github-anonymous-access.json for full evidence."
+)
 CANDIDATES.append(artifact(
     "ci-log-curl-linux", "https://github.com/curl/curl/actions/runs/29367345523",
     "native-upstream-ci-log", "ci-build", "curl/curl (Daniel Stenberg et al.)",
     "immutable-run-or-artifact",
     {"repository_url": "https://github.com/curl/curl", "workflow_identity": ".github/workflows/linux.yml",
      "run_id": "29367345523", "ecosystem": "infrastructure-or-language-neutral",
+     "requires_interactive_access_grant": True,
+     "acquisition_barrier_evidence": _GITHUB_ACTIONS_LOG_ANONYMOUS_ACCESS_BARRIER_EVIDENCE,
      "job_selection_rule": _JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
      "log_acquisition_endpoint": "https://api.github.com/repos/curl/curl/actions/jobs/{job_id}/logs"},
     "MIT", "Public GitHub Actions run on a public repository, visible to any visitor by platform design; source license MIT (COPYING).",
@@ -141,6 +176,8 @@ CANDIDATES.append(artifact(
     "immutable-run-or-artifact",
     {"repository_url": "https://github.com/jqlang/jq", "workflow_identity": ".github/workflows/ci.yml",
      "run_id": "28568334149", "ecosystem": "infrastructure-or-language-neutral",
+     "requires_interactive_access_grant": True,
+     "acquisition_barrier_evidence": _GITHUB_ACTIONS_LOG_ANONYMOUS_ACCESS_BARRIER_EVIDENCE,
      "job_selection_rule": _JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
      "log_acquisition_endpoint": "https://api.github.com/repos/jqlang/jq/actions/jobs/{job_id}/logs"},
     "MIT", "Public GitHub Actions run on a public repository; source license MIT (COPYING), plus bundled oniguruma/decNumber licenses.",
@@ -152,10 +189,62 @@ CANDIDATES.append(artifact(
     "immutable-run-or-artifact",
     {"repository_url": "https://github.com/rust-lang/rust", "workflow_identity": ".github/workflows/ci.yml",
      "run_id": "29366449652", "ecosystem": "rust",
+     "requires_interactive_access_grant": True,
+     "acquisition_barrier_evidence": _GITHUB_ACTIONS_LOG_ANONYMOUS_ACCESS_BARRIER_EVIDENCE,
      "job_selection_rule": _JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
      "log_acquisition_endpoint": "https://api.github.com/repos/rust-lang/rust/actions/jobs/{job_id}/logs"},
     "MIT", "Public GitHub Actions run (bors merge-queue gate); source dual-licensed MIT/Apache-2.0 (COPYRIGHT).",
     "very-large", "~89-job matrix, 3h26m duration — one of the largest real CI logs available, good stress case", "medium",
+))
+
+# Real, verified replacements for the 3 GitHub-Actions-based candidates
+# above (section 10/13: rerun full deterministic selection after an
+# evidence-driven ineligibility, never a manual substitution). AppVeyor's
+# public buildjobs/{job_id}/log endpoint was independently verified during
+# N2-C closure research to return real runner output (git clone, cmake/
+# msbuild steps) for a fully anonymous, zero-credential request against
+# each of these three actively-maintained, MIT-licensed C/C++ libraries —
+# see decision-records/native-upstream-ci-log-github-anonymous-access.json.
+_APPVEYOR_JOB_SELECTION_RULE = (
+    "max(job.finished - job.started), tie-break lexicographically lowest job id "
+    "(AppVeyor job ids are opaque alphanumeric strings, not numeric — same "
+    "structure-only rule as _JOB_SELECTION_RULE, adapted for the id format)"
+)
+CANDIDATES.append(artifact(
+    "ci-log-nlohmann-json", "https://ci.appveyor.com/project/nlohmann/json/builds/54375733",
+    "native-upstream-ci-log", "ci-build", "nlohmann/json (Niels Lohmann et al.)",
+    "immutable-run-or-artifact",
+    {"repository_url": "https://github.com/nlohmann/json", "ci_platform": "appveyor",
+     "appveyor_project": "nlohmann/json", "run_id": "54375733", "commit_sha": "872b9e234047e4a2cf29a5165e85b3a56a0647d2",
+     "ecosystem": "infrastructure-or-language-neutral",
+     "job_selection_rule": _APPVEYOR_JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
+     "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log"},
+    "MIT", "Public AppVeyor build on a public GitHub repository, log endpoint independently verified anonymously downloadable; source license MIT (LICENSE.MIT).",
+    "medium", "8-job Windows CMake/MSBuild matrix (VS2015/2017/2019, x86/x64), verified real build 2026-07-14", "high",
+))
+CANDIDATES.append(artifact(
+    "ci-log-spdlog", "https://ci.appveyor.com/project/gabime/spdlog/builds/54361398",
+    "native-upstream-ci-log", "ci-build", "gabime/spdlog (Gabi Melman et al.)",
+    "immutable-run-or-artifact",
+    {"repository_url": "https://github.com/gabime/spdlog", "ci_platform": "appveyor",
+     "appveyor_project": "gabime/spdlog", "run_id": "54361398", "commit_sha": "2ee3cf8204ed5048627644e00a51a7d93fbc4786",
+     "ecosystem": "infrastructure-or-language-neutral",
+     "job_selection_rule": _APPVEYOR_JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
+     "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log"},
+    "MIT", "Public AppVeyor build on a public GitHub repository, log endpoint independently verified anonymously downloadable; source license MIT (LICENSE).",
+    "medium", "7-job Windows CMake/MSBuild matrix (VS2017/2019/2022, static/shared), verified real build 2026-07-11", "high",
+))
+CANDIDATES.append(artifact(
+    "ci-log-jansson", "https://ci.appveyor.com/project/akheron/jansson/builds/54351973",
+    "native-upstream-ci-log", "ci-build", "akheron/jansson (Petri Lehtinen et al.)",
+    "immutable-run-or-artifact",
+    {"repository_url": "https://github.com/akheron/jansson", "ci_platform": "appveyor",
+     "appveyor_project": "akheron/jansson", "run_id": "54351973", "commit_sha": "851a2145e3256f2e67e5dfe24b0e456bf198b741",
+     "ecosystem": "infrastructure-or-language-neutral",
+     "job_selection_rule": _APPVEYOR_JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
+     "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log"},
+    "MIT", "Public AppVeyor build on a public GitHub repository, log endpoint independently verified anonymously downloadable; source license MIT (LICENSE).",
+    "medium", "7-job Windows CMake matrix (VS2008 through VS2019), verified real build 2026-07-09", "high",
 ))
 
 # -- public-runtime-dataset (2) --

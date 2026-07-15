@@ -46,10 +46,12 @@
       "security_flags": [],
       "selection_status": "eligible",
       "source_identity": {
+        "acquisition_barrier_evidence": "Two independent, genuinely credential-free real-CI probes (no Authorization header; GITHUB_TOKEN/GH_TOKEN/GITHUB_AUTH_TOKEN/GITHUB_ENTERPRISE_TOKEN unset; unauthenticated rate-limit tier x-ratelimit-limit: 60 confirmed) both failed to retrieve real log bytes: (1) REST .../actions/jobs/{job_id}/logs returned HTTP 403 'Must have admin rights to Repository.' for all 3 jobs, including a job independently verified elsewhere to contain retrievable log bytes through an authenticated path (workflow run 29395614569); (2) the public HTML commit-checks log-viewer path github.com/{owner}/{repo}/commit/{sha}/checks/{job_id}/logs returned HTTP 404 (GitHub's standard not-found page, confirmed anonymous via Set-Cookie: logged_in=no) for both tested jobs (workflow run 29398585305). See decision-records/native-upstream-ci-log-github-anonymous-access.json for full evidence.",
         "identity_kind": "immutable-run-or-artifact",
         "job_selection_rule": "max(job.completed_at - job.started_at), tie-break lowest numeric job id",
         "log_acquisition_endpoint": "https://api.github.com/repos/curl/curl/actions/jobs/{job_id}/logs",
         "repository_url": "https://github.com/curl/curl",
+        "requires_interactive_access_grant": true,
         "run_id": "29367345523",
         "selected_job_ids": [],
         "selected_job_names": [],
@@ -117,10 +119,12 @@
       "security_flags": [],
       "selection_status": "eligible",
       "source_identity": {
+        "acquisition_barrier_evidence": "Two independent, genuinely credential-free real-CI probes (no Authorization header; GITHUB_TOKEN/GH_TOKEN/GITHUB_AUTH_TOKEN/GITHUB_ENTERPRISE_TOKEN unset; unauthenticated rate-limit tier x-ratelimit-limit: 60 confirmed) both failed to retrieve real log bytes: (1) REST .../actions/jobs/{job_id}/logs returned HTTP 403 'Must have admin rights to Repository.' for all 3 jobs, including a job independently verified elsewhere to contain retrievable log bytes through an authenticated path (workflow run 29395614569); (2) the public HTML commit-checks log-viewer path github.com/{owner}/{repo}/commit/{sha}/checks/{job_id}/logs returned HTTP 404 (GitHub's standard not-found page, confirmed anonymous via Set-Cookie: logged_in=no) for both tested jobs (workflow run 29398585305). See decision-records/native-upstream-ci-log-github-anonymous-access.json for full evidence.",
         "identity_kind": "immutable-run-or-artifact",
         "job_selection_rule": "max(job.completed_at - job.started_at), tie-break lowest numeric job id",
         "log_acquisition_endpoint": "https://api.github.com/repos/jqlang/jq/actions/jobs/{job_id}/logs",
         "repository_url": "https://github.com/jqlang/jq",
+        "requires_interactive_access_grant": true,
         "run_id": "28568334149",
         "selected_job_ids": [],
         "selected_job_names": [],
@@ -188,14 +192,235 @@
       "security_flags": [],
       "selection_status": "eligible",
       "source_identity": {
+        "acquisition_barrier_evidence": "Two independent, genuinely credential-free real-CI probes (no Authorization header; GITHUB_TOKEN/GH_TOKEN/GITHUB_AUTH_TOKEN/GITHUB_ENTERPRISE_TOKEN unset; unauthenticated rate-limit tier x-ratelimit-limit: 60 confirmed) both failed to retrieve real log bytes: (1) REST .../actions/jobs/{job_id}/logs returned HTTP 403 'Must have admin rights to Repository.' for all 3 jobs, including a job independently verified elsewhere to contain retrievable log bytes through an authenticated path (workflow run 29395614569); (2) the public HTML commit-checks log-viewer path github.com/{owner}/{repo}/commit/{sha}/checks/{job_id}/logs returned HTTP 404 (GitHub's standard not-found page, confirmed anonymous via Set-Cookie: logged_in=no) for both tested jobs (workflow run 29398585305). See decision-records/native-upstream-ci-log-github-anonymous-access.json for full evidence.",
         "identity_kind": "immutable-run-or-artifact",
         "job_selection_rule": "max(job.completed_at - job.started_at), tie-break lowest numeric job id",
         "log_acquisition_endpoint": "https://api.github.com/repos/rust-lang/rust/actions/jobs/{job_id}/logs",
         "repository_url": "https://github.com/rust-lang/rust",
+        "requires_interactive_access_grant": true,
         "run_id": "29366449652",
         "selected_job_ids": [],
         "selected_job_names": [],
         "workflow_identity": ".github/workflows/ci.yml"
+      },
+      "source_kind": "ci-run-artifact",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ]
+    },
+    {
+      "candidate_id": "ci-log-nlohmann-json",
+      "container_requirements": [],
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "medium",
+      "evidence_references": [
+        "https://ci.appveyor.com/project/nlohmann/json/builds/54375733"
+      ],
+      "expected_size_bucket": "medium",
+      "expected_size_confidence": "high",
+      "expected_size_estimation_basis": "8-job Windows CMake/MSBuild matrix (VS2015/2017/2019, x86/x64), verified real build 2026-07-14",
+      "external_service_requirements": [],
+      "license": {
+        "redistribution_allowed": true,
+        "redistribution_basis": "Public AppVeyor build on a public GitHub repository, log endpoint independently verified anonymously downloadable; source license MIT (LICENSE.MIT).",
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "not-applicable-non-repository",
+      "origin_family_group": "native-upstream-ci-log::ci-build",
+      "origin_kind": "native-upstream-ci-log",
+      "personal_data_review": {
+        "personal_data_present": false,
+        "sanitization_notes": ""
+      },
+      "primary_family": "ci-build",
+      "project": {
+        "entry_point": null
+      },
+      "public_canonical_url": "https://ci.appveyor.com/project/nlohmann/json/builds/54375733",
+      "publisher": {
+        "identity": "nlohmann/json (Niels Lohmann et al.)"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "appveyor_project": "nlohmann/json",
+        "ci_platform": "appveyor",
+        "commit_sha": "872b9e234047e4a2cf29a5165e85b3a56a0647d2",
+        "identity_kind": "immutable-run-or-artifact",
+        "job_selection_rule": "max(job.finished - job.started), tie-break lexicographically lowest job id (AppVeyor job ids are opaque alphanumeric strings, not numeric \u2014 same structure-only rule as _JOB_SELECTION_RULE, adapted for the id format)",
+        "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log",
+        "repository_url": "https://github.com/nlohmann/json",
+        "run_id": "54375733",
+        "selected_job_ids": [],
+        "selected_job_names": []
+      },
+      "source_kind": "ci-run-artifact",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ]
+    },
+    {
+      "candidate_id": "ci-log-spdlog",
+      "container_requirements": [],
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "medium",
+      "evidence_references": [
+        "https://ci.appveyor.com/project/gabime/spdlog/builds/54361398"
+      ],
+      "expected_size_bucket": "medium",
+      "expected_size_confidence": "high",
+      "expected_size_estimation_basis": "7-job Windows CMake/MSBuild matrix (VS2017/2019/2022, static/shared), verified real build 2026-07-11",
+      "external_service_requirements": [],
+      "license": {
+        "redistribution_allowed": true,
+        "redistribution_basis": "Public AppVeyor build on a public GitHub repository, log endpoint independently verified anonymously downloadable; source license MIT (LICENSE).",
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "not-applicable-non-repository",
+      "origin_family_group": "native-upstream-ci-log::ci-build",
+      "origin_kind": "native-upstream-ci-log",
+      "personal_data_review": {
+        "personal_data_present": false,
+        "sanitization_notes": ""
+      },
+      "primary_family": "ci-build",
+      "project": {
+        "entry_point": null
+      },
+      "public_canonical_url": "https://ci.appveyor.com/project/gabime/spdlog/builds/54361398",
+      "publisher": {
+        "identity": "gabime/spdlog (Gabi Melman et al.)"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "appveyor_project": "gabime/spdlog",
+        "ci_platform": "appveyor",
+        "commit_sha": "2ee3cf8204ed5048627644e00a51a7d93fbc4786",
+        "identity_kind": "immutable-run-or-artifact",
+        "job_selection_rule": "max(job.finished - job.started), tie-break lexicographically lowest job id (AppVeyor job ids are opaque alphanumeric strings, not numeric \u2014 same structure-only rule as _JOB_SELECTION_RULE, adapted for the id format)",
+        "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log",
+        "repository_url": "https://github.com/gabime/spdlog",
+        "run_id": "54361398",
+        "selected_job_ids": [],
+        "selected_job_names": []
+      },
+      "source_kind": "ci-run-artifact",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ]
+    },
+    {
+      "candidate_id": "ci-log-jansson",
+      "container_requirements": [],
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "medium",
+      "evidence_references": [
+        "https://ci.appveyor.com/project/akheron/jansson/builds/54351973"
+      ],
+      "expected_size_bucket": "medium",
+      "expected_size_confidence": "high",
+      "expected_size_estimation_basis": "7-job Windows CMake matrix (VS2008 through VS2019), verified real build 2026-07-09",
+      "external_service_requirements": [],
+      "license": {
+        "redistribution_allowed": true,
+        "redistribution_basis": "Public AppVeyor build on a public GitHub repository, log endpoint independently verified anonymously downloadable; source license MIT (LICENSE).",
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "not-applicable-non-repository",
+      "origin_family_group": "native-upstream-ci-log::ci-build",
+      "origin_kind": "native-upstream-ci-log",
+      "personal_data_review": {
+        "personal_data_present": false,
+        "sanitization_notes": ""
+      },
+      "primary_family": "ci-build",
+      "project": {
+        "entry_point": null
+      },
+      "public_canonical_url": "https://ci.appveyor.com/project/akheron/jansson/builds/54351973",
+      "publisher": {
+        "identity": "akheron/jansson (Petri Lehtinen et al.)"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "appveyor_project": "akheron/jansson",
+        "ci_platform": "appveyor",
+        "commit_sha": "851a2145e3256f2e67e5dfe24b0e456bf198b741",
+        "identity_kind": "immutable-run-or-artifact",
+        "job_selection_rule": "max(job.finished - job.started), tie-break lexicographically lowest job id (AppVeyor job ids are opaque alphanumeric strings, not numeric \u2014 same structure-only rule as _JOB_SELECTION_RULE, adapted for the id format)",
+        "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log",
+        "repository_url": "https://github.com/akheron/jansson",
+        "run_id": "54351973",
+        "selected_job_ids": [],
+        "selected_job_names": []
       },
       "source_kind": "ci-run-artifact",
       "status_history": [

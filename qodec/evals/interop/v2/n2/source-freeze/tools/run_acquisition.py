@@ -26,13 +26,27 @@ Source-kind handling:
     normalized tar of the actual tracked files), never metadata.
   - ci-run-artifact: fetches the run + jobs metadata (as before, now kept
     strictly as metadata_sha256 evidence), applies a deterministic,
-    structure-only job-selection rule (see _select_ci_job — never log
+    structure-only job-selection rule (see select_ci_job — never log
     content, QODEC, RTK, or token counts), then fetches and retains the
-    ACTUAL log bytes for that one selected job via GitHub's public
-    jobs/{id}/logs endpoint. If a candidate's registry entry already
-    records a locked-in selected_job_ids[0] (from a prior identity-lock
-    commit), that exact job is re-verified rather than re-selected — CI
-    must reacquire/revalidate and fail on drift, not silently re-decide.
+    ACTUAL log bytes for that one selected job. Two platforms are
+    supported, dispatched on source_identity.ci_platform:
+      - "github-actions" (default, _acquire_ci_run_github_actions): GitHub's
+        public jobs/{id}/logs endpoint. Real, credential-free probes (both
+        the plain REST endpoint and the HTML commit-checks log-viewer path)
+        confirmed this endpoint is NOT anonymously downloadable even for a
+        public repository — every native-upstream-ci-log candidate on this
+        platform is therefore ineligible (acquisition_barrier_evidence); a
+        read-only GITHUB_TOKEN is attached for api.github.com requests only
+        so this path still exists for future/re-evaluated candidates.
+      - "appveyor" (_acquire_ci_run_appveyor): AppVeyor's public
+        buildjobs/{id}/log endpoint, confirmed genuinely and reproducibly
+        downloadable with zero credentials for a public project. This is
+        the current real acquisition path for all three frozen
+        native-upstream-ci-log candidates.
+    If a candidate's registry entry already records a locked-in
+    selected_job_ids[0] (from a prior identity-lock commit), that exact job
+    is re-verified rather than re-selected — CI must reacquire/revalidate
+    and fail on drift, not silently re-decide.
   - bot-output-artifact: fetches the actual page/API response bytes (as
     before) and now RETAINS them under source/, not just their hash.
   - dataset-artifact / research-corpus-artifact: fetches the publisher's
@@ -127,7 +141,112 @@ def select_ci_job(jobs: list[dict]) -> dict:
     return min(jobs, key=lambda j: (-_job_duration_seconds(j), j["id"]))
 
 
+def _appveyor_job_duration_seconds(job: dict) -> float:
+    start, end = job.get("started"), job.get("finished")
+    if not start or not end:
+        return -1.0
+    try:
+        return (datetime.fromisoformat(end) - datetime.fromisoformat(start)).total_seconds()
+    except ValueError:
+        return -1.0
+
+
+def select_ci_job_appveyor(jobs: list[dict]) -> dict:
+    """Same rule as select_ci_job (N2-C closure section 2), adapted for
+    AppVeyor's non-numeric job ids: longest wall-clock duration, tie-broken
+    by the lexicographically lowest job id string. Still computed purely
+    from job structure (start/end timestamps, id) — never log content."""
+    if not jobs:
+        raise acquisition.RejectedCandidate("no jobs found for this build")
+    return min(jobs, key=lambda j: (-_appveyor_job_duration_seconds(j), j["jobId"]))
+
+
 def acquire_ci_run(candidate: dict, out_dir: Path) -> dict:
+    ident = candidate["source_identity"]
+    if ident.get("ci_platform") == "appveyor":
+        return _acquire_ci_run_appveyor(candidate, out_dir)
+    return _acquire_ci_run_github_actions(candidate, out_dir)
+
+
+def _acquire_ci_run_appveyor(candidate: dict, out_dir: Path) -> dict:
+    """AppVeyor's build-job log endpoint is genuinely, reproducibly
+    downloadable with zero credentials for a public project — confirmed by
+    real, credential-free CI probes against GitHub's own job-logs REST
+    endpoint (403) and its HTML commit-checks log-viewer path (404) for the
+    three native-upstream-ci-log candidates originally selected on GitHub
+    Actions (see the decision record this replacement is documented under).
+    This is the anonymous acquisition path for the replacement candidates."""
+    ident = candidate["source_identity"]
+    appveyor_project = ident["appveyor_project"]
+    build_id = ident["run_id"]
+
+    build_meta_bytes = _fetch(f"https://ci.appveyor.com/api/projects/{appveyor_project}/builds/{build_id}")
+    build_meta = json.loads(build_meta_bytes)
+    build = build_meta.get("build", {})
+    jobs = build.get("jobs", [])
+
+    locked_in = ident.get("selected_job_ids") or []
+    if locked_in:
+        wanted_id = locked_in[0]
+        matches = [j for j in jobs if j["jobId"] == wanted_id]
+        if not matches:
+            raise acquisition.RejectedCandidate(
+                f"locked-in job id {wanted_id!r} no longer present in AppVeyor build {build_id}'s job "
+                "list (upstream history changed) — candidate must be re-evaluated, not silently re-selected"
+            )
+        selected = matches[0]
+    else:
+        selected = select_ci_job_appveyor(jobs)
+
+    job_id = str(selected["jobId"])
+    job_name = selected.get("name", "")
+    log_url = f"https://ci.appveyor.com/api/buildjobs/{job_id}/log"
+    try:
+        log_bytes = _fetch_raw(log_url)
+    except (HTTPError, URLError) as e:
+        raise acquisition.RejectedCandidate(
+            f"cannot fetch real job-log bytes for job {job_id} ({job_name!r}) at {log_url}: {e} "
+            "— per section 2, an upstream log that cannot be technically acquired makes this "
+            "candidate ineligible; it must not be silently replaced by metadata"
+        ) from e
+
+    case_out = out_dir / candidate["candidate_id"]
+    source_dir = case_out / "source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    log_filename = f"job-{job_id}.log"
+    (source_dir / log_filename).write_bytes(log_bytes)
+
+    metadata_sha256 = sha256_bytes(build_meta_bytes)
+    source_content_sha256 = sha256_bytes(log_bytes)
+    normalized_source_sha256 = acquisition.build_normalized_archive(
+        case_out, [f"source/{log_filename}"], case_out / "normalized-source.tar"
+    )
+    file_manifest = [{"path": f"source/{log_filename}", "sha256": source_content_sha256}]
+    (case_out / "source-file-manifest.json").write_text(
+        json.dumps(file_manifest, indent=2, sort_keys=True) + "\n"
+    )
+
+    result = {
+        "candidate_id": candidate["candidate_id"],
+        "metadata_sha256": metadata_sha256,
+        "source_content_sha256": source_content_sha256,
+        "normalized_source_sha256": normalized_source_sha256,
+        "source_commit_sha": build.get("commitId"),
+        "selected_job_ids": [job_id],
+        "selected_job_names": [job_name],
+        "log_acquisition_endpoint": log_url,
+        "acquisition_size_bytes": len(log_bytes),
+        "media_type": "text/plain",
+        "acquisition_method": (
+            "appveyor-real-job-log-bytes-anonymous "
+            f"(job {job_id!r} {'re-verified against locked-in identity' if locked_in else 'selected via job_selection_rule'})"
+        ),
+    }
+    (case_out / "acquisition-receipt.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    return result
+
+
+def _acquire_ci_run_github_actions(candidate: dict, out_dir: Path) -> dict:
     ident = candidate["source_identity"]
     repo_url = ident["repository_url"]
     run_id = ident["run_id"]
