@@ -9,6 +9,11 @@ name: qodec-n2d0-durable-evidence-rescue
 
 on:
   workflow_dispatch: {}
+  push:
+    branches:
+      - claude/n2d0-durable-evidence-rescue
+    paths:
+      - .github/workflows/qodec-n2d0-durable-evidence-rescue.yml
 
 permissions:
   contents: write
