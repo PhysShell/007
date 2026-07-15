@@ -35,6 +35,18 @@
 # runs `cargo generate-lockfile` exactly ONCE and publishes it as an
 # immutable artifact both its capture-a and capture-b jobs consume via
 # `cargo fetch --locked`, never regenerating it per-capture.
+#
+# Stage-2 CI run #5 (29419265690, commit 1555a27) was fully green on the
+# first try: all 19 jobs (the lockfile job plus all 9 cases x capture-a/
+# capture-b) succeeded, including repo-requests' pytest-httpbin
+# loopback-network tests and repo-moshi's multi-module gradlew resolution --
+# no new bugs found. A subsequent commit (0121553) added a defensive
+# pre-flight check (verify_relative_argv0_exists in generic_capture.py) so
+# that a relative wrapper argv0 (e.g. ./gradlew) missing at the confined
+# build's cwd fails with a clear diagnostic rather than an opaque sandbox
+# error -- this addresses the real risk that repo-moshi's manifest names
+# project.entry_point "moshi" even though its gradlew wrapper (and the
+# frozen argv's cwd) is the repository root, not a moshi/ subdirectory.
 name: qodec-n2d1b-miner-pilot
 
 on:
