@@ -17,9 +17,32 @@ import os
 import sys
 import zipfile
 from pathlib import Path
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 USER_AGENT = "qodec-n2d0-durable-evidence-rescue (read-only artifact retrieval)"
+
+
+class _StripAuthOnCrossHostRedirect(HTTPRedirectHandler):
+    """The artifacts/{id}/zip endpoint 302s to a signed Azure Blob Storage
+    URL. Azure rejects the request (401) if GitHub's own Authorization
+    header is still attached — the same class of bug run_acquisition.py
+    (N2-C) already had to guard against for other hosts. Only strip the
+    header when the redirect target's host differs from the request that
+    produced it; same-host redirects (if any) keep it."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new_req = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new_req is not None and urlsplit(new_req.full_url).netloc != urlsplit(req.full_url).netloc:
+            new_req.remove_header("Authorization")
+        return new_req
+
+
+_OPENER = build_opener(_StripAuthOnCrossHostRedirect)
+
+
+def _urlopen(req, timeout):
+    return _OPENER.open(req, timeout=timeout)
 
 
 def _api(url: str, token: str) -> dict:
@@ -29,7 +52,7 @@ def _api(url: str, token: str) -> dict:
         "X-GitHub-Api-Version": "2022-11-28",
         "Authorization": f"Bearer {token}",
     })
-    with urlopen(req, timeout=60) as resp:  # noqa: S310 - authenticated same-repo metadata fetch only
+    with _urlopen(req, timeout=60) as resp:  # noqa: S310 - authenticated same-repo metadata fetch only
         return json.loads(resp.read())
 
 
@@ -61,7 +84,7 @@ def download_artifact(owner: str, repo: str, artifact_id: int, token: str, dest:
         "X-GitHub-Api-Version": "2022-11-28",
         "Authorization": f"Bearer {token}",
     })
-    with urlopen(req, timeout=300) as resp:  # noqa: S310 - authenticated same-repo artifact fetch only
+    with _urlopen(req, timeout=300) as resp:  # noqa: S310 - authenticated same-repo artifact fetch only
         data = resp.read()
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(data)
