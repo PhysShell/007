@@ -1,0 +1,1683 @@
+{
+  "alternate_case_count": 20,
+  "alternate_fallback_order": [
+    "repo-sds",
+    "repo-pip-tools",
+    "repo-procs",
+    "repo-fd",
+    "repo-kubernetes-validate",
+    "repo-dockerfile-parse",
+    "repo-classgraph",
+    "repo-bats-core",
+    "repo-flake8",
+    "repo-hadolint-example",
+    "repo-fzf",
+    "repo-moq",
+    "repo-helm-values",
+    "repo-dotnet-outdated",
+    "repo-nuget-samples-cpm",
+    "repo-detekt",
+    "repo-gson",
+    "repo-anyhow",
+    "repo-terraform-example-module",
+    "ci-log-nlohmann-json"
+  ],
+  "manifest_contract_version": "n2d0-durable-input-manifest-v1",
+  "manifest_sha256": "d48d1b1fe3ce6d0cc46af31c73155802d6eb11aa83e8b6550be37c3cfcde0a53",
+  "n2a_accepted_head_sha": "9c755dba8986323b1f18d49c26b53fec3aff5be4",
+  "n2a_entry": {
+    "accepted_head_sha": "9c755dba8986323b1f18d49c26b53fec3aff5be4",
+    "artifacts": {
+      "miner-canary-capture-a": {
+        "byte_size": 7463,
+        "contained_files": [
+          {
+            "path": "network-isolation-report.json",
+            "sha256": "9f631f6d59b5e3ca63a6f5c862dc9eef005efada0e9f77aca8ae1c84c52d6781",
+            "size": 747
+          },
+          {
+            "path": "raw.stderr",
+            "sha256": "c4d8b2324624ef10021fb9b5cee5ebcad706a7a683dd03149155bb1ba0498947",
+            "size": 189
+          },
+          {
+            "path": "raw.stdout",
+            "sha256": "09b023837a4a969f9bf12401595429aeefe65263a2705e8e3a3e62ee5aa437db",
+            "size": 27541
+          },
+          {
+            "path": "resource-limit-report.json",
+            "sha256": "363138525982e44f9ac44f4e393ef1df6991e21760d49e43f39e232274c2ad46",
+            "size": 765
+          },
+          {
+            "path": "sandboy-execution-receipt.json",
+            "sha256": "e05b5ae8bc72d72cd64049d9462da663e8870b20220acd954a4f2ceda9b45575",
+            "size": 2688
+          },
+          {
+            "path": "sanitization-report.json",
+            "sha256": "9a2b8bdd2fd0c7de31d45fa7e703dd96405935e0fad72102fc5b5f32fcd1dc9a",
+            "size": 707
+          },
+          {
+            "path": "snapshot-manifest.json",
+            "sha256": "18a445fb5c8c937f3eb25ffa4c1bb0f5cb51dd621dcad008c2da7e8fc9218859",
+            "size": 2325
+          }
+        ],
+        "durable_release_asset_name": "n2a-miner-canary-capture-a.zip",
+        "durable_release_asset_sha256": "98d93f4e4640c1c5846dc0f294145944e16d019131e91d2e6ffc3db1ddb1a165",
+        "durable_release_tag": "n2d0-durable-evidence-v1",
+        "original_artifact_digest_sha256": "98d93f4e4640c1c5846dc0f294145944e16d019131e91d2e6ffc3db1ddb1a165",
+        "original_artifact_id": 8330809678
+      },
+      "miner-canary-capture-b": {
+        "byte_size": 7466,
+        "contained_files": [
+          {
+            "path": "network-isolation-report.json",
+            "sha256": "d02be3aa2ceab9cd2bc39c09e77cad43433537990b0b7c5a062c721918c8f472",
+            "size": 747
+          },
+          {
+            "path": "raw.stderr",
+            "sha256": "c4d8b2324624ef10021fb9b5cee5ebcad706a7a683dd03149155bb1ba0498947",
+            "size": 189
+          },
+          {
+            "path": "raw.stdout",
+            "sha256": "3f3f7b5b54945db0af13d85dca92f8e7c4ad93eb76465521dbaf28cb6f00b679",
+            "size": 27541
+          },
+          {
+            "path": "resource-limit-report.json",
+            "sha256": "18d6ba02af1bb60c9b603de456d6c5f180cb5d23059b52308b61e8064f0e83aa",
+            "size": 766
+          },
+          {
+            "path": "sandboy-execution-receipt.json",
+            "sha256": "c54037716ac5bc5f4a3895e5f376a325f36232476d9643d7d568636268e5eb94",
+            "size": 2689
+          },
+          {
+            "path": "sanitization-report.json",
+            "sha256": "7b68945ab5391546cde6e351cd1ca257d7ad7710ccac2deb58532f9fb8d203cf",
+            "size": 707
+          },
+          {
+            "path": "snapshot-manifest.json",
+            "sha256": "9c6a188fd49c7dab8239794d6ade19433bd16531d57712c0dba7a3876d99b41a",
+            "size": 2325
+          }
+        ],
+        "durable_release_asset_name": "n2a-miner-canary-capture-b.zip",
+        "durable_release_asset_sha256": "e9530103e4c82852ed010e1e7b3883f1c16f27dc5d4a4e994e31fb6b32a1911b",
+        "durable_release_tag": "n2d0-durable-evidence-v1",
+        "original_artifact_digest_sha256": "e9530103e4c82852ed010e1e7b3883f1c16f27dc5d4a4e994e31fb6b32a1911b",
+        "original_artifact_id": 8330811157
+      },
+      "miner-canary-reports": {
+        "byte_size": 4176,
+        "contained_files": [
+          {
+            "path": "miner-canary-summary.md",
+            "sha256": "b0fa363da4405e7ed4e9c9025ace5d48530aecf20653da2c7e4f557bd4779e26",
+            "size": 2366
+          },
+          {
+            "path": "reproducibility-comparison-detail.md",
+            "sha256": "f6144e4ea3cb095b8442b9c68181b9c22d7f3354939bd8cc68fd5a364acc9120",
+            "size": 2907
+          },
+          {
+            "path": "reproducibility-report.json",
+            "sha256": "8c192cbcfd82050f55a133c5d02dc6011004a18a417f93015fac7e9c6a6d31e6",
+            "size": 4992
+          }
+        ],
+        "durable_release_asset_name": "n2a-miner-canary-reports.zip",
+        "durable_release_asset_sha256": "4f876a57d6c68579287e50d6d02686933012ca532e5fd57e0b809cfc6413ac11",
+        "durable_release_tag": "n2d0-durable-evidence-v1",
+        "original_artifact_digest_sha256": "4f876a57d6c68579287e50d6d02686933012ca532e5fd57e0b809cfc6413ac11",
+        "original_artifact_id": 8330813455
+      },
+      "miner-canary-source": {
+        "byte_size": 178993,
+        "contained_files": [
+          {
+            "path": "license-record.json",
+            "sha256": "59e770283d2821815769ea20f2bc00654e1ecf8987a3c6e75a32bcf5838bb6d1",
+            "size": 121
+          },
+          {
+            "path": "source-file-manifest.json",
+            "sha256": "1de12bbe7730757d89767147ac5b270d4fce992f4bf96ecf272dc873e9644460",
+            "size": 1396
+          },
+          {
+            "path": "source-manifest.json",
+            "sha256": "16e0b68c8e8f9e60653a5083b5e26684fb7667ee3c784552d38436892102f28d",
+            "size": 4166
+          },
+          {
+            "path": "source.tar",
+            "sha256": "47918b30ff8c2ab93cfb3d95277858662a09759cc64f9bd004a269ec20236202",
+            "size": 204800
+          }
+        ],
+        "durable_release_asset_name": "n2a-miner-canary-source.zip",
+        "durable_release_asset_sha256": "2a1869320a39c7c87ff5fa2a72558b87798252dacb3c60b2a6eee98fdc4615fe",
+        "durable_release_tag": "n2d0-durable-evidence-v1",
+        "original_artifact_digest_sha256": "2a1869320a39c7c87ff5fa2a72558b87798252dacb3c60b2a6eee98fdc4615fe",
+        "original_artifact_id": 8330799371
+      }
+    },
+    "canonical_benchmark_input_asset": "miner-canary-capture-a",
+    "canonical_capture": "capture-a",
+    "canonical_capture_selection_rule": "capture-a is the prespecified canonical benchmark input; capture-b is retained solely as reproducibility evidence, never chosen based on later QODEC/RTK results (N2-D0 contract).",
+    "license_reference": "MIT (danhpaiva/EncryptAesNet-console-app-csharp, per accepted N2-A source-manifest.json)",
+    "logical_id": "miner-canary-dotnet-001",
+    "reproducibility_evidence_capture": "capture-b",
+    "role": "n2a-canary",
+    "source_workflow_run_id": 29384147131,
+    "verification_timestamp": "2026-07-15T10:51:00Z",
+    "verifier_tool_identity": "n2d0-verify_n2a_evidence.py"
+  },
+  "n2a_source_workflow_run_id": 29384147131,
+  "n2c_accepted_head_sha": "acb57379e2d0b9ed6fe79fd45e7540d7d00d7490",
+  "n2c_entries": [
+    {
+      "byte_size": 10506,
+      "canonical_benchmark_input_path": "bot-dependabot-black-5206/normalized-source.tar",
+      "canonical_benchmark_input_sha256": "6ae3029791fb9ec1ea9422ddc2eccd2cf7a694a5ed92c8e0f020d12ce079df0e",
+      "contained_files": [
+        {
+          "path": "bot-dependabot-black-5206.acquisition.json",
+          "sha256": "4b37f1a47b403efd9600e175dc91537cb668b9890c92b6816b9f0663b80d1486",
+          "size": 447
+        },
+        {
+          "path": "bot-dependabot-black-5206/acquisition-receipt.json",
+          "sha256": "4b37f1a47b403efd9600e175dc91537cb668b9890c92b6816b9f0663b80d1486",
+          "size": 447
+        },
+        {
+          "path": "bot-dependabot-black-5206/normalized-source.tar",
+          "sha256": "6ae3029791fb9ec1ea9422ddc2eccd2cf7a694a5ed92c8e0f020d12ce079df0e",
+          "size": 30720
+        },
+        {
+          "path": "bot-dependabot-black-5206/source-file-manifest.json",
+          "sha256": "b309e3ecf8b3f0606c9813a910961ee924ab3e62fbd42e3bac6ae81a8ad0d8da",
+          "size": 129
+        },
+        {
+          "path": "bot-dependabot-black-5206/source/response.json",
+          "sha256": "e90cbdf387805ec7609e2d0b308ad7c10b35437a3f73a3dd2aeb6756b5375564",
+          "size": 23972
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-bot-dependabot-black-5206.zip",
+      "durable_release_asset_sha256": "ff20725343204f9b1025d1959ed1e078a208a1ede10864ddb690dade05dafde7",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "MIT",
+      "logical_id": "bot-dependabot-black-5206",
+      "original_artifact_digest_sha256": "ff20725343204f9b1025d1959ed1e078a208a1ede10864ddb690dade05dafde7",
+      "original_artifact_id": 8338361888,
+      "original_artifact_name": "acquisition-bot-dependabot-black-5206",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 29968,
+      "canonical_benchmark_input_path": "bot-syzbot-do-mkdirat/normalized-source.tar",
+      "canonical_benchmark_input_sha256": "24090fa8bbd949ba39bf93d72535322a98f41ddd6da5ad55ce154f5683eddf6f",
+      "contained_files": [
+        {
+          "path": "bot-syzbot-do-mkdirat.acquisition.json",
+          "sha256": "4521977650bffad23ffde987cf2eb1018f4bcdcd3aa0c1af036db9746bf6b0ae",
+          "size": 437
+        },
+        {
+          "path": "bot-syzbot-do-mkdirat/acquisition-receipt.json",
+          "sha256": "4521977650bffad23ffde987cf2eb1018f4bcdcd3aa0c1af036db9746bf6b0ae",
+          "size": 437
+        },
+        {
+          "path": "bot-syzbot-do-mkdirat/normalized-source.tar",
+          "sha256": "24090fa8bbd949ba39bf93d72535322a98f41ddd6da5ad55ce154f5683eddf6f",
+          "size": 143360
+        },
+        {
+          "path": "bot-syzbot-do-mkdirat/source-file-manifest.json",
+          "sha256": "450bce0b85d8b51df083d6ae67ef8e4f8ac5f57c17aedf9baf432c39954f01d4",
+          "size": 129
+        },
+        {
+          "path": "bot-syzbot-do-mkdirat/source/response.html",
+          "sha256": "59c17334b56333410323a894c45e928b0fb1836ad7f5933ec808c83a093889fb",
+          "size": 133208
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-bot-syzbot-do-mkdirat.zip",
+      "durable_release_asset_sha256": "63d8021356a0caf244a43df450f585d0a96b303527da0aaeff23cb93fe70bc51",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "CC0-1.0",
+      "logical_id": "bot-syzbot-do-mkdirat",
+      "original_artifact_digest_sha256": "63d8021356a0caf244a43df450f585d0a96b303527da0aaeff23cb93fe70bc51",
+      "original_artifact_id": 8338363726,
+      "original_artifact_name": "acquisition-bot-syzbot-do-mkdirat",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 14096,
+      "canonical_benchmark_input_path": "ci-log-jansson/normalized-source.tar",
+      "canonical_benchmark_input_sha256": "68fd60be3c3c6fbfe08d3b67d7166444fa67c5ea90eb448df61dcea56aa81626",
+      "contained_files": [
+        {
+          "path": "ci-log-jansson.acquisition.json",
+          "sha256": "bbbe4935417d70b8226b36eba86d88db15bb7cd29d0f5cdf0bea1c87e98bce60",
+          "size": 842
+        },
+        {
+          "path": "ci-log-jansson/acquisition-receipt.json",
+          "sha256": "bbbe4935417d70b8226b36eba86d88db15bb7cd29d0f5cdf0bea1c87e98bce60",
+          "size": 842
+        },
+        {
+          "path": "ci-log-jansson/normalized-source.tar",
+          "sha256": "68fd60be3c3c6fbfe08d3b67d7166444fa67c5ea90eb448df61dcea56aa81626",
+          "size": 51200
+        },
+        {
+          "path": "ci-log-jansson/source-file-manifest.json",
+          "sha256": "8d71c7c152b017ac26826f6a0033947b641a8e9469e62ca6a3eb2e9c869d353d",
+          "size": 140
+        },
+        {
+          "path": "ci-log-jansson/source/job-cof4tos89xi4yry2.log",
+          "sha256": "92e8d6d4835165c22f95b13d2d1b39c18efe52b6cd24bb6e09c331fc1787ae86",
+          "size": 49135
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-ci-log-jansson.zip",
+      "durable_release_asset_sha256": "27c1ff23bacbf7e9491463464e06b0d06435e5ed3ca40f4c1f9531489be0ff19",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "MIT",
+      "logical_id": "ci-log-jansson",
+      "original_artifact_digest_sha256": "27c1ff23bacbf7e9491463464e06b0d06435e5ed3ca40f4c1f9531489be0ff19",
+      "original_artifact_id": 8338356412,
+      "original_artifact_name": "acquisition-ci-log-jansson",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 25664,
+      "canonical_benchmark_input_path": "ci-log-nlog/normalized-source.tar",
+      "canonical_benchmark_input_sha256": "1de6a6f1a38d917ca69536e5b7aa16bd584aa90a7517390c0f5c6e9c6dfdbef4",
+      "contained_files": [
+        {
+          "path": "ci-log-nlog.acquisition.json",
+          "sha256": "8d576c5d9bdda432cffea4aa11f4f5c893852264bc7b6f0028facdbd38bb0e80",
+          "size": 780
+        },
+        {
+          "path": "ci-log-nlog/acquisition-receipt.json",
+          "sha256": "8d576c5d9bdda432cffea4aa11f4f5c893852264bc7b6f0028facdbd38bb0e80",
+          "size": 780
+        },
+        {
+          "path": "ci-log-nlog/normalized-source.tar",
+          "sha256": "1de6a6f1a38d917ca69536e5b7aa16bd584aa90a7517390c0f5c6e9c6dfdbef4",
+          "size": 163840
+        },
+        {
+          "path": "ci-log-nlog/source-file-manifest.json",
+          "sha256": "91326fc6d3de6847b8e74e386185c0d695e9aecb67c95413891f3f3b1a57847f",
+          "size": 140
+        },
+        {
+          "path": "ci-log-nlog/source/job-nh2g5c8x06txldor.log",
+          "sha256": "89f3dcc56160c7ec748df00103f079504a3f4b1375da1928c389314dbdedd87a",
+          "size": 159003
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-ci-log-nlog.zip",
+      "durable_release_asset_sha256": "38663b108e970d7304384365317f59d35d1af77ee48ec915c7bd684a2e6c850d",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "BSD-3-Clause",
+      "logical_id": "ci-log-nlog",
+      "original_artifact_digest_sha256": "38663b108e970d7304384365317f59d35d1af77ee48ec915c7bd684a2e6c850d",
+      "original_artifact_id": 8338364386,
+      "original_artifact_name": "acquisition-ci-log-nlog",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 14171,
+      "canonical_benchmark_input_path": "ci-log-nlohmann-json/normalized-source.tar",
+      "canonical_benchmark_input_sha256": "27c4d382addb8bc46c0e2c8a51caaf738aa8921b85f9311816cbe6b4971301a0",
+      "contained_files": [
+        {
+          "path": "ci-log-nlohmann-json.acquisition.json",
+          "sha256": "8b167969e59c5e661a07a6d96f5203b075c77787a125b926c329ca1c62f352ff",
+          "size": 958
+        },
+        {
+          "path": "ci-log-nlohmann-json/acquisition-receipt.json",
+          "sha256": "8b167969e59c5e661a07a6d96f5203b075c77787a125b926c329ca1c62f352ff",
+          "size": 958
+        },
+        {
+          "path": "ci-log-nlohmann-json/normalized-source.tar",
+          "sha256": "27c4d382addb8bc46c0e2c8a51caaf738aa8921b85f9311816cbe6b4971301a0",
+          "size": 40960
+        },
+        {
+          "path": "ci-log-nlohmann-json/source-file-manifest.json",
+          "sha256": "35dbb2c53568c45b94490a0c4eaa4a769429eda41ed9e9b717a7da6bdf58f60f",
+          "size": 140
+        },
+        {
+          "path": "ci-log-nlohmann-json/source/job-h8qx0g8r7694sf2c.log",
+          "sha256": "1f0dc4f6f2cb9a4758a5f90ed3d3b8a397d98566bbacde71f0bec69187da482c",
+          "size": 39058
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-ci-log-nlohmann-json.zip",
+      "durable_release_asset_sha256": "b13bdf8b1bb59e5e55d11ced2f76b6f916c83ee0fbe87b0c9d78cc6ec1ab9336",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "MIT",
+      "logical_id": "ci-log-nlohmann-json",
+      "original_artifact_digest_sha256": "b13bdf8b1bb59e5e55d11ced2f76b6f916c83ee0fbe87b0c9d78cc6ec1ab9336",
+      "original_artifact_id": 8338362575,
+      "original_artifact_name": "acquisition-ci-log-nlohmann-json",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 12749,
+      "canonical_benchmark_input_path": "ci-log-spdlog/normalized-source.tar",
+      "canonical_benchmark_input_sha256": "50ca37a1f64ee8101ec321519cb27752e888acc1aff8166328160a98001e1a96",
+      "contained_files": [
+        {
+          "path": "ci-log-spdlog.acquisition.json",
+          "sha256": "de362d50b451cab2f2c4bbfa2ee658c8e249417131f18f1af17c7ef24fb880ea",
+          "size": 994
+        },
+        {
+          "path": "ci-log-spdlog/acquisition-receipt.json",
+          "sha256": "de362d50b451cab2f2c4bbfa2ee658c8e249417131f18f1af17c7ef24fb880ea",
+          "size": 994
+        },
+        {
+          "path": "ci-log-spdlog/normalized-source.tar",
+          "sha256": "50ca37a1f64ee8101ec321519cb27752e888acc1aff8166328160a98001e1a96",
+          "size": 30720
+        },
+        {
+          "path": "ci-log-spdlog/source-file-manifest.json",
+          "sha256": "d1ca1c20cb6525bdb051ba17dd06f2c7e08ffc54f19be53a97610270ac96d650",
+          "size": 140
+        },
+        {
+          "path": "ci-log-spdlog/source/job-4wh3j4uv5pestro8.log",
+          "sha256": "e7aa5bf812957765aee1b7b092f324a9911c0a02d0bc0fff819b0d0e7fa64954",
+          "size": 19550
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-ci-log-spdlog.zip",
+      "durable_release_asset_sha256": "71fef0087eafc8d7a0f72c6481c58ca22236bd6b0bc07c8a5f4ffbb23723d4e7",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "MIT",
+      "logical_id": "ci-log-spdlog",
+      "original_artifact_digest_sha256": "71fef0087eafc8d7a0f72c6481c58ca22236bd6b0bc07c8a5f4ffbb23723d4e7",
+      "original_artifact_id": 8338359501,
+      "original_artifact_name": "acquisition-ci-log-spdlog",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 345308,
+      "canonical_benchmark_input_path": "dataset-loghub-v8/normalized-source.tar",
+      "canonical_benchmark_input_sha256": "5687c565e2eddd71f8f6278061906402682ac9ab27cf9b40f700258d08273686",
+      "contained_files": [
+        {
+          "path": "dataset-loghub-v8.acquisition.json",
+          "sha256": "ddf4c2124c03b982f8f79535aac9e1668480de54910db1bdaf36fe1bf64e18fa",
+          "size": 535
+        },
+        {
+          "path": "dataset-loghub-v8/acquisition-receipt.json",
+          "sha256": "ddf4c2124c03b982f8f79535aac9e1668480de54910db1bdaf36fe1bf64e18fa",
+          "size": 535
+        },
+        {
+          "path": "dataset-loghub-v8/normalized-source.tar",
+          "sha256": "5687c565e2eddd71f8f6278061906402682ac9ab27cf9b40f700258d08273686",
+          "size": 174080
+        },
+        {
+          "path": "dataset-loghub-v8/source-file-manifest.json",
+          "sha256": "539a0f65b892dfbecca1b9eee9e3d305d89fb08648e885786f188ab7da27b178",
+          "size": 132
+        },
+        {
+          "path": "dataset-loghub-v8/source/Proxifier.tar.gz",
+          "sha256": "b56d93eb87188e1284b5b35e92cb6f4151aec22975d82c5387d8e81a52d2a96d",
+          "size": 172346
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-dataset-loghub-v8.zip",
+      "durable_release_asset_sha256": "6833530d205121fb261d95adeb819879a2e04071f610eed8c35eabd96e29fba8",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "CC-BY-4.0",
+      "logical_id": "dataset-loghub-v8",
+      "original_artifact_digest_sha256": "6833530d205121fb261d95adeb819879a2e04071f610eed8c35eabd96e29fba8",
+      "original_artifact_id": 8338356714,
+      "original_artifact_name": "acquisition-dataset-loghub-v8",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 2981906,
+      "canonical_benchmark_input_path": "dataset-rtn-traffic-ids/normalized-source.tar",
+      "canonical_benchmark_input_sha256": "dafad1bc279d7b72c4113d733b560a4b0f4b989fb0f11dd8377a86d39a5f237a",
+      "contained_files": [
+        {
+          "path": "dataset-rtn-traffic-ids.acquisition.json",
+          "sha256": "95ac46e0c00cd3d94e8e502e4eede2223c31dbcf7404d796f6de926936935235",
+          "size": 542
+        },
+        {
+          "path": "dataset-rtn-traffic-ids/acquisition-receipt.json",
+          "sha256": "95ac46e0c00cd3d94e8e502e4eede2223c31dbcf7404d796f6de926936935235",
+          "size": 542
+        },
+        {
+          "path": "dataset-rtn-traffic-ids/normalized-source.tar",
+          "sha256": "dafad1bc279d7b72c4113d733b560a4b0f4b989fb0f11dd8377a86d39a5f237a",
+          "size": 37980160
+        },
+        {
+          "path": "dataset-rtn-traffic-ids/source-file-manifest.json",
+          "sha256": "10bd7d82157e40a21ad31899c39ec144ea6f4cb05492ef1e6931aee2607a7f8e",
+          "size": 139
+        },
+        {
+          "path": "dataset-rtn-traffic-ids/source/RTN_traffic_dataset.csv",
+          "sha256": "3cfc066b313627532970e548dcea5ab44f80a1062967535dafa2aade045d7e71",
+          "size": 37978049
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-dataset-rtn-traffic-ids.zip",
+      "durable_release_asset_sha256": "16470384fa86ebc96f9b7ab56d742e0a7099847cd384cdf0cdbb734bf1badd6f",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "CC-BY-4.0",
+      "logical_id": "dataset-rtn-traffic-ids",
+      "original_artifact_digest_sha256": "16470384fa86ebc96f9b7ab56d742e0a7099847cd384cdf0cdbb734bf1badd6f",
+      "original_artifact_id": 8338379751,
+      "original_artifact_name": "acquisition-dataset-rtn-traffic-ids",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 49610,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-anyhow.acquisition.json",
+          "sha256": "a87282564bd0507e55a111ab6f5a66f86159411c5ec35f25c30f9050f89945d6",
+          "size": 552
+        },
+        {
+          "path": "repo-anyhow/acquisition-receipt.json",
+          "sha256": "dbac2b8a6b466e39456811cd8e9aac9f161c62c7ea97e1abea5aa2f5b29d5f23",
+          "size": 584
+        },
+        {
+          "path": "repo-anyhow/source-file-manifest.json",
+          "sha256": "f55bd64c45335348998f05104cef79474c08941b99fe5f46b667ce8be7a37a9a",
+          "size": 6761
+        },
+        {
+          "path": "repo-anyhow/source.tar",
+          "sha256": "bb840c7351bdc6242c22e2907c42887d1792e0b63c1ae4ddd666b5826622207f",
+          "size": 276480
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-anyhow.zip",
+      "durable_release_asset_sha256": "feebd73867453c7af3306f7c3d1c48dca1dfd67fec5b8937f2a6ac63eb197857",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "Apache-2.0",
+      "logical_id": "repo-anyhow",
+      "original_artifact_digest_sha256": "feebd73867453c7af3306f7c3d1c48dca1dfd67fec5b8937f2a6ac63eb197857",
+      "original_artifact_id": 8338363704,
+      "original_artifact_name": "acquisition-repo-anyhow",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 198323,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-bats-core.acquisition.json",
+          "sha256": "e3e237ba9a8ca08f4ff95dcbfcb521feeaf10abeca0da0f87fba76f8eff59f28",
+          "size": 556
+        },
+        {
+          "path": "repo-bats-core/acquisition-receipt.json",
+          "sha256": "d4b67e02f64047f4b3f8942d59f16b989d350157b464050e36352e0f589717db",
+          "size": 588
+        },
+        {
+          "path": "repo-bats-core/source-file-manifest.json",
+          "sha256": "521ce5d5085a27d7aa96a3a54ecf05cee0da1188bdea243c4fded00524bb5e12",
+          "size": 55079
+        },
+        {
+          "path": "repo-bats-core/source.tar",
+          "sha256": "1269a3aebfaa75b06042915c63633fe3acdd9c576feb15a20df4bef019def697",
+          "size": 1003520
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-bats-core.zip",
+      "durable_release_asset_sha256": "026becb5c117455408fda9b07ad8f29b7b424ceca5804f90a641a42e52c5cfec",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "MIT",
+      "logical_id": "repo-bats-core",
+      "original_artifact_digest_sha256": "026becb5c117455408fda9b07ad8f29b7b424ceca5804f90a641a42e52c5cfec",
+      "original_artifact_id": 8338360349,
+      "original_artifact_name": "acquisition-repo-bats-core",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 15354456,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-classgraph.acquisition.json",
+          "sha256": "51f69951ae6d0aaa5a159278fb0502aa63efa4ef62361c41af9a269f08f55ddb",
+          "size": 557
+        },
+        {
+          "path": "repo-classgraph/acquisition-receipt.json",
+          "sha256": "858d9865dc5062a839f6110bb74248f8d4936b711cd7c5886d7be6aee1d40f0c",
+          "size": 589
+        },
+        {
+          "path": "repo-classgraph/source-file-manifest.json",
+          "sha256": "4f05bc77627503c9c1e948569791f57fb91506e49589b772bd80972dbcab60f7",
+          "size": 72207
+        },
+        {
+          "path": "repo-classgraph/source.tar",
+          "sha256": "3eb47ef759f3d3b0db528f766c5d20c7e24d6ad770b87781c4c3ede96d856bab",
+          "size": 27095040
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-classgraph.zip",
+      "durable_release_asset_sha256": "af56689f752590fbc7387e2c735a1af7640f753908422314962cb167232ac164",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "MIT",
+      "logical_id": "repo-classgraph",
+      "original_artifact_digest_sha256": "af56689f752590fbc7387e2c735a1af7640f753908422314962cb167232ac164",
+      "original_artifact_id": 8338363361,
+      "original_artifact_name": "acquisition-repo-classgraph",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 3198913,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-detekt.acquisition.json",
+          "sha256": "79faf6ce57d1f5c9df48fbccdd2a9c54ea450309c96a6465e885be3b5f50efcf",
+          "size": 554
+        },
+        {
+          "path": "repo-detekt/acquisition-receipt.json",
+          "sha256": "827d84fae4094888daaaef1d60a687b0ab0703debd15f054db055a318741cf35",
+          "size": 586
+        },
+        {
+          "path": "repo-detekt/source-file-manifest.json",
+          "sha256": "2c205b43db42120459c7a9abfb5a5d94c5899a6872d1c99889efcced46b9e9c9",
+          "size": 353004
+        },
+        {
+          "path": "repo-detekt/source.tar",
+          "sha256": "0ed27e9b14b87179d1a46eaf88092274c81fbce839fbc1cef07394012a30ae36",
+          "size": 12974080
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-detekt.zip",
+      "durable_release_asset_sha256": "ce42ecfdce17e7de3f7f0a03f4caeed5258b63a328e5c4dd4261a875bc8e8518",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "Apache-2.0",
+      "logical_id": "repo-detekt",
+      "original_artifact_digest_sha256": "ce42ecfdce17e7de3f7f0a03f4caeed5258b63a328e5c4dd4261a875bc8e8518",
+      "original_artifact_id": 8338364040,
+      "original_artifact_name": "acquisition-repo-detekt",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 20157,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-docker-java-parser.acquisition.json",
+          "sha256": "bad45ae21317c195f0b535da69a921c2ded8ec8a6f8e61856adfb5fb54abb3d1",
+          "size": 564
+        },
+        {
+          "path": "repo-docker-java-parser/acquisition-receipt.json",
+          "sha256": "88138a2edaba7b14c8ceb9d71ae98be3b0fc8a866c87880178d0659f7362f18c",
+          "size": 596
+        },
+        {
+          "path": "repo-docker-java-parser/source-file-manifest.json",
+          "sha256": "febb711980a277e84d7b08e8873b5729834dbda688432de2853cf0f0e9515a8f",
+          "size": 3307
+        },
+        {
+          "path": "repo-docker-java-parser/source.tar",
+          "sha256": "e647c8fa1abbe73c03e8a08ef4c06f65bf5083383da6af3a138d270af211f459",
+          "size": 102400
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-docker-java-parser.zip",
+      "durable_release_asset_sha256": "fed1499092e0fd3efecf0a0f57816bba65af9dbd0437789ab9f7d56384028c48",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "Apache-2.0",
+      "logical_id": "repo-docker-java-parser",
+      "original_artifact_digest_sha256": "fed1499092e0fd3efecf0a0f57816bba65af9dbd0437789ab9f7d56384028c48",
+      "original_artifact_id": 8338356103,
+      "original_artifact_name": "acquisition-repo-docker-java-parser",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 33538,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-dockerfile-parse.acquisition.json",
+          "sha256": "b4c3e5d9730ccd0f9d5b392ea344153e7cb28916d5f676f50632f13a73e0897c",
+          "size": 562
+        },
+        {
+          "path": "repo-dockerfile-parse/acquisition-receipt.json",
+          "sha256": "e9772411a467128512e1e7b080ddecd6381b83adeb011f34fd6af2186577eb7d",
+          "size": 594
+        },
+        {
+          "path": "repo-dockerfile-parse/source-file-manifest.json",
+          "sha256": "135aea48c86bf5ce74d342976a4a933f79cd4cc36a45ce42f10e817565d4f343",
+          "size": 4008
+        },
+        {
+          "path": "repo-dockerfile-parse/source.tar",
+          "sha256": "a11ba11e8bae49f9ad806826ee7064dcd7a6cd60e65f6c56ed8c7b091a4f6f60",
+          "size": 163840
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-dockerfile-parse.zip",
+      "durable_release_asset_sha256": "448b807f8d3e24de3c5c735b5c40ac340a45a9f2def364659e4e80c4294a7de9",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "BSD-3-Clause",
+      "logical_id": "repo-dockerfile-parse",
+      "original_artifact_digest_sha256": "448b807f8d3e24de3c5c735b5c40ac340a45a9f2def364659e4e80c4294a7de9",
+      "original_artifact_id": 8338357562,
+      "original_artifact_name": "acquisition-repo-dockerfile-parse",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 34020,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-dockerfile-parser-rs.acquisition.json",
+          "sha256": "c863fe85be40d4090a5c3313c94769aac20b78510f8a930ff1297cfb110fd881",
+          "size": 566
+        },
+        {
+          "path": "repo-dockerfile-parser-rs/acquisition-receipt.json",
+          "sha256": "9aba33154af586825dd43a7410993da532f8712b24836c166c7c9ac5d1327b19",
+          "size": 598
+        },
+        {
+          "path": "repo-dockerfile-parser-rs/source-file-manifest.json",
+          "sha256": "6d1ce2f4515d9dcafdf45567cf35fc18af73ec5b55fdc02085b45db6a5d34263",
+          "size": 3985
+        },
+        {
+          "path": "repo-dockerfile-parser-rs/source.tar",
+          "sha256": "898fc0869782af2dbf5fc42a3953f76e3ba6e22777049d28fd1bd43779973378",
+          "size": 174080
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-dockerfile-parser-rs.zip",
+      "durable_release_asset_sha256": "620aa5e82703a9b9fbd16217b7d0d3c915251981fda5a815069ca8f2adfe17c1",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "MIT",
+      "logical_id": "repo-dockerfile-parser-rs",
+      "original_artifact_digest_sha256": "620aa5e82703a9b9fbd16217b7d0d3c915251981fda5a815069ca8f2adfe17c1",
+      "original_artifact_id": 8338356209,
+      "original_artifact_name": "acquisition-repo-dockerfile-parser-rs",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 187613,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-dotnet-outdated.acquisition.json",
+          "sha256": "50c5c8a744672cc2f8c1c636f3e18c60a7e072644f266eeba1f736cb9b253c93",
+          "size": 562
+        },
+        {
+          "path": "repo-dotnet-outdated/acquisition-receipt.json",
+          "sha256": "c89e228fd624d34ecb705f0bcbbff4955d5e1c0c6a317207f41e6f9cafee1340",
+          "size": 594
+        },
+        {
+          "path": "repo-dotnet-outdated/source-file-manifest.json",
+          "sha256": "d2065aebb68600c8e520ddc45656edc4e1693a73105e6c64df095812acedf161",
+          "size": 16776
+        },
+        {
+          "path": "repo-dotnet-outdated/source.tar",
+          "sha256": "2cc4855c34eff1058ff1b7261bb35b7e3c57c40c18308772cdedb4b0c26b2593",
+          "size": 675840
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-dotnet-outdated.zip",
+      "durable_release_asset_sha256": "722e28fa9becc3b5623cf8db13b506b7c20d1dcfeab618d6caed8b8a70ebbc57",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "MIT",
+      "logical_id": "repo-dotnet-outdated",
+      "original_artifact_digest_sha256": "722e28fa9becc3b5623cf8db13b506b7c20d1dcfeab618d6caed8b8a70ebbc57",
+      "original_artifact_id": 8338363365,
+      "original_artifact_name": "acquisition-repo-dotnet-outdated",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 141443,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-fd.acquisition.json",
+          "sha256": "58a738e180e2b1f903e6caf930ad1fc06ab09d7fed63daa7ebdec0649f4cc846",
+          "size": 548
+        },
+        {
+          "path": "repo-fd/acquisition-receipt.json",
+          "sha256": "a11c1caa15c192d97952e40fdb5278a447c076453cf7bf0bc3359b0c3982a823",
+          "size": 580
+        },
+        {
+          "path": "repo-fd/source-file-manifest.json",
+          "sha256": "05719b8a8d0f102e6473ce77fc128c7d7c5a79722a62a20babc42ff615290f78",
+          "size": 7290
+        },
+        {
+          "path": "repo-fd/source.tar",
+          "sha256": "77faa752e1e4c0be7df70c6e7917968c800527854ee0981dd6b9a804f41b73de",
+          "size": 624640
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-fd.zip",
+      "durable_release_asset_sha256": "91790efa78fd15e50e8334aa7aa281544c59bc2a3cb99fa2f8cb312520646e80",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "Apache-2.0",
+      "logical_id": "repo-fd",
+      "original_artifact_digest_sha256": "91790efa78fd15e50e8334aa7aa281544c59bc2a3cb99fa2f8cb312520646e80",
+      "original_artifact_id": 8338362206,
+      "original_artifact_name": "acquisition-repo-fd",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 148667,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-flake8.acquisition.json",
+          "sha256": "d0da0d739f6ffaedb70657e97430a8fac1fe5dafe1f56033b8ffa6ff2f67b2ec",
+          "size": 553
+        },
+        {
+          "path": "repo-flake8/acquisition-receipt.json",
+          "sha256": "4ce652e56dcfc3c18f0eac2ce8d7a2375e5c951c32192ade7a584b47d11ef93b",
+          "size": 585
+        },
+        {
+          "path": "repo-flake8/source-file-manifest.json",
+          "sha256": "0b510af9df5298a128b69141ddea26879dd755fc144c37896990c9d45c720d3f",
+          "size": 29443
+        },
+        {
+          "path": "repo-flake8/source.tar",
+          "sha256": "e0fa6a9faec46cba0d97bc4dca898d6eab920cadd4f1c992dab1eec56715ccdb",
+          "size": 686080
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-flake8.zip",
+      "durable_release_asset_sha256": "3a1837748fbff06fd4dd8a0a3b9a7b7d18a3a7824f7223c98350c25f37eecdeb",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "MIT",
+      "logical_id": "repo-flake8",
+      "original_artifact_digest_sha256": "3a1837748fbff06fd4dd8a0a3b9a7b7d18a3a7824f7223c98350c25f37eecdeb",
+      "original_artifact_id": 8338359586,
+      "original_artifact_name": "acquisition-repo-flake8",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 454831,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-fzf.acquisition.json",
+          "sha256": "084003114fc607c80a989e3be5c296d061d506004fb693e17051042b91e2eb1a",
+          "size": 550
+        },
+        {
+          "path": "repo-fzf/acquisition-receipt.json",
+          "sha256": "2592cd4df76f0d1dbe7232efb70165bdac13461f4ebe5cfb65a63230a42181b0",
+          "size": 582
+        },
+        {
+          "path": "repo-fzf/source-file-manifest.json",
+          "sha256": "2f27e495b4fc72b805a66c508632d09e6c94e6bfcb24d5f74c462e991baf3717",
+          "size": 19026
+        },
+        {
+          "path": "repo-fzf/source.tar",
+          "sha256": "f6279cb8a7ccd48d9a3134ed7f4d6b4a3f040682cd5167649b3aa159f8d1b5ff",
+          "size": 1843200
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-fzf.zip",
+      "durable_release_asset_sha256": "127c5eaf90d6279eae989966a417a8c470f662b4aafde3f763c5a280e8885a2e",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "MIT",
+      "logical_id": "repo-fzf",
+      "original_artifact_digest_sha256": "127c5eaf90d6279eae989966a417a8c470f662b4aafde3f763c5a280e8885a2e",
+      "original_artifact_id": 8338363443,
+      "original_artifact_name": "acquisition-repo-fzf",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 500933,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-gson.acquisition.json",
+          "sha256": "9fee78462ce24edd0ebb57b113e485e108b2d15e2d759cf8899f5b7e5c8d572a",
+          "size": 551
+        },
+        {
+          "path": "repo-gson/acquisition-receipt.json",
+          "sha256": "0dae84376d27ec26fba44768d55594df33127e20c4aee09e82d824afcc1acd78",
+          "size": 583
+        },
+        {
+          "path": "repo-gson/source-file-manifest.json",
+          "sha256": "4811f8c5a7c5bdd7919822b69a7bd4ac3654a1681deb3dcb42ffedb15774fea3",
+          "size": 51906
+        },
+        {
+          "path": "repo-gson/source.tar",
+          "sha256": "488e9edc6341c78d52755aab33e9810c8cda50817a665481d42bb638abdea3b6",
+          "size": 2539520
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-gson.zip",
+      "durable_release_asset_sha256": "d7684d8dc67487ec854fc7554099e9c80314a911c79d58c59ec9a39d5293f377",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "Apache-2.0",
+      "logical_id": "repo-gson",
+      "original_artifact_digest_sha256": "d7684d8dc67487ec854fc7554099e9c80314a911c79d58c59ec9a39d5293f377",
+      "original_artifact_id": 8338357288,
+      "original_artifact_name": "acquisition-repo-gson",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 3435,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-hadolint-example.acquisition.json",
+          "sha256": "38ba1cbf708a4e85287e2216111d68227f46f64340e87035cf48286629aec90c",
+          "size": 561
+        },
+        {
+          "path": "repo-hadolint-example/acquisition-receipt.json",
+          "sha256": "8e2182bd41a2a8f94121f5787f8dfe4339a41579edc879f6730b619ac48122a4",
+          "size": 593
+        },
+        {
+          "path": "repo-hadolint-example/source-file-manifest.json",
+          "sha256": "332e84dff024c813b530dc88cfcaad8ccb9b2cc5bf8b9ba62c3b958f432c01df",
+          "size": 480
+        },
+        {
+          "path": "repo-hadolint-example/source.tar",
+          "sha256": "0a7a8cbb6bd7d90b358419beafbd465739b14358238b2727daa6810146dcc2a2",
+          "size": 10240
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-hadolint-example.zip",
+      "durable_release_asset_sha256": "f80ca5d3a763333d72ef2fc987ece87ce1d3f7130079940c2cf5a222a46ed47f",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "MIT",
+      "logical_id": "repo-hadolint-example",
+      "original_artifact_digest_sha256": "f80ca5d3a763333d72ef2fc987ece87ce1d3f7130079940c2cf5a222a46ed47f",
+      "original_artifact_id": 8338365380,
+      "original_artifact_name": "acquisition-repo-hadolint-example",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 1462853,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-helm-values.acquisition.json",
+          "sha256": "c18528b00750d6ffabea5e5dc06f01d6f29e6a595d4a62bdac56a7aa7383b375",
+          "size": 558
+        },
+        {
+          "path": "repo-helm-values/acquisition-receipt.json",
+          "sha256": "007611a76714c77e9bf1373b546efed3d6f0ef498175a1c044cabed5b3f63f36",
+          "size": 590
+        },
+        {
+          "path": "repo-helm-values/source-file-manifest.json",
+          "sha256": "feed4abbfbe0d1754e35e649bcd4d28ef08534095df7be6b6e77235d0b75500f",
+          "size": 35435
+        },
+        {
+          "path": "repo-helm-values/source.tar",
+          "sha256": "7b4bf8d80f555b084e144bd1099ebde420ccafa6623b315628daf60a14bf4bb6",
+          "size": 2232320
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-helm-values.zip",
+      "durable_release_asset_sha256": "005dd900fba6d10becac8e470e0510d1a6a8502cac0427a052cba0dda02465ec",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "Apache-2.0",
+      "logical_id": "repo-helm-values",
+      "original_artifact_digest_sha256": "005dd900fba6d10becac8e470e0510d1a6a8502cac0427a052cba0dda02465ec",
+      "original_artifact_id": 8338364303,
+      "original_artifact_name": "acquisition-repo-helm-values",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 193547,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-hyperfine.acquisition.json",
+          "sha256": "832fb93282c0d8fb039a92d839546b66db4958a0696e1def36348934764cd76e",
+          "size": 555
+        },
+        {
+          "path": "repo-hyperfine/acquisition-receipt.json",
+          "sha256": "37db08ebf5bd73aa7e4bbeaa30007364cb7eaf996d5955dc982b13538bbd1145",
+          "size": 587
+        },
+        {
+          "path": "repo-hyperfine/source-file-manifest.json",
+          "sha256": "1758598f6794d55bb31e11e8cc0e12c23401900bd1c7a7f217307ba5e1f0135b",
+          "size": 8348
+        },
+        {
+          "path": "repo-hyperfine/source.tar",
+          "sha256": "2bf0eae973eb7384df7bda5f5ebabcff2967d1d964252478c265bd1aced4cf24",
+          "size": 532480
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-hyperfine.zip",
+      "durable_release_asset_sha256": "876b2196360c491ab979fd12f215503eed86926badb274c9244bff1a95e39fb6",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "Apache-2.0",
+      "logical_id": "repo-hyperfine",
+      "original_artifact_digest_sha256": "876b2196360c491ab979fd12f215503eed86926badb274c9244bff1a95e39fb6",
+      "original_artifact_id": 8338356226,
+      "original_artifact_name": "acquisition-repo-hyperfine",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 1695137,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-kubeops-generator.acquisition.json",
+          "sha256": "2c3aafd6681ef1c249abcc13b4852c8d8c646c45c83c1214565023269c6b9c25",
+          "size": 564
+        },
+        {
+          "path": "repo-kubeops-generator/acquisition-receipt.json",
+          "sha256": "c6cdf354aa3d5fd3ce495aa9b462c359d7f2fedb2735d1dd4f5972ecbd5a5344",
+          "size": 596
+        },
+        {
+          "path": "repo-kubeops-generator/source-file-manifest.json",
+          "sha256": "3b95753b5ffa2e7637e6c1c73e8c47e2f42819bac3292398b52555bc7e1d5df1",
+          "size": 93110
+        },
+        {
+          "path": "repo-kubeops-generator/source.tar",
+          "sha256": "f89e1b38e3337caab1dfe7b449fffd1e186179fc9fa5f234ce2f7f57287dc979",
+          "size": 4751360
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-kubeops-generator.zip",
+      "durable_release_asset_sha256": "167719274cf1eaefb9cddb507280025cdcbdf427352ce24484706bf5b392152c",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "Apache-2.0",
+      "logical_id": "repo-kubeops-generator",
+      "original_artifact_digest_sha256": "167719274cf1eaefb9cddb507280025cdcbdf427352ce24484706bf5b392152c",
+      "original_artifact_id": 8338359928,
+      "original_artifact_name": "acquisition-repo-kubeops-generator",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 10157880,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-kubernetes-validate.acquisition.json",
+          "sha256": "6529955acac8593e3abfd1236c84ec2b7a8abc79cce7aa315bc78edef83dbcaf",
+          "size": 568
+        },
+        {
+          "path": "repo-kubernetes-validate/acquisition-receipt.json",
+          "sha256": "661b635b08f711487c6fcf55c45ff1e7eefc12856431acf2de309269c5cc0450",
+          "size": 600
+        },
+        {
+          "path": "repo-kubernetes-validate/source-file-manifest.json",
+          "sha256": "0f7ceaaf410c07111d2dc3d91ae09e3aad50ea81e2e9b420b73f03c0c871cb0e",
+          "size": 3120424
+        },
+        {
+          "path": "repo-kubernetes-validate/source.tar",
+          "sha256": "dae9b0b2562c4375f8536982960d3cae39278d372f345e3dc3fb804299bb034c",
+          "size": 74209280
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-kubernetes-validate.zip",
+      "durable_release_asset_sha256": "cf931d49509c82f95fb164384138e9a547e88028d7fd426fb3557606933f31b8",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "Apache-2.0",
+      "logical_id": "repo-kubernetes-validate",
+      "original_artifact_digest_sha256": "cf931d49509c82f95fb164384138e9a547e88028d7fd426fb3557606933f31b8",
+      "original_artifact_id": 8338361122,
+      "original_artifact_name": "acquisition-repo-kubernetes-validate",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 398364,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-moq.acquisition.json",
+          "sha256": "a61bda10630b1e03cf71a04099f472cb73f293f22490c94e7bf1a62a0346155a",
+          "size": 550
+        },
+        {
+          "path": "repo-moq/acquisition-receipt.json",
+          "sha256": "7d01a6efb2503f189f85117c337805948d4bbdf5f9920ed617c03a33fe0967dc",
+          "size": 582
+        },
+        {
+          "path": "repo-moq/source-file-manifest.json",
+          "sha256": "fbf5254f5e56fc3e909a489156b8877ff0962160d8b8f35ec074e41b73827234",
+          "size": 46046
+        },
+        {
+          "path": "repo-moq/source.tar",
+          "sha256": "7261dd79fa32423f325558901761f54b9c7314a8ecf69a6686ded74b4064980a",
+          "size": 2467840
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-moq.zip",
+      "durable_release_asset_sha256": "c07fdc96426ecb2b17d7c2c9075b343fb097174ae4d1af3f456865d596410396",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "BSD-3-Clause",
+      "logical_id": "repo-moq",
+      "original_artifact_digest_sha256": "c07fdc96426ecb2b17d7c2c9075b343fb097174ae4d1af3f456865d596410396",
+      "original_artifact_id": 8338359173,
+      "original_artifact_name": "acquisition-repo-moq",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 287081,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-moshi.acquisition.json",
+          "sha256": "789f19863d81ee6e7a49800ef01acce556d3c3db8d508696add1cc592f49ed9c",
+          "size": 552
+        },
+        {
+          "path": "repo-moshi/acquisition-receipt.json",
+          "sha256": "edd85fe71c628d38e07366d1ba41481ada0cef357d41c496009b9df549fe016b",
+          "size": 584
+        },
+        {
+          "path": "repo-moshi/source-file-manifest.json",
+          "sha256": "86f53fb73acf1960ef1d861f8e6fc5f5711748f51d47175e979f7acfa9d7a8db",
+          "size": 31262
+        },
+        {
+          "path": "repo-moshi/source.tar",
+          "sha256": "00b6b71337dea3280ab409d26e8392b1eb58ed9d5f66adc81d8a760b2f7cdaf6",
+          "size": 1413120
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-moshi.zip",
+      "durable_release_asset_sha256": "ccff9d0de8aff490ab74a217a2ad6acf2c61af25e4502829209eff333193af56",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "Apache-2.0",
+      "logical_id": "repo-moshi",
+      "original_artifact_digest_sha256": "ccff9d0de8aff490ab74a217a2ad6acf2c61af25e4502829209eff333193af56",
+      "original_artifact_id": 8338362275,
+      "original_artifact_name": "acquisition-repo-moshi",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 464600,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-nuget-samples-cpm.acquisition.json",
+          "sha256": "30bdf53d69ebf9d88d23dde35bf982a9a878e85208a04ebeb70a58d5ec0a2ef4",
+          "size": 564
+        },
+        {
+          "path": "repo-nuget-samples-cpm/acquisition-receipt.json",
+          "sha256": "d339d3c52d3098fa0e3bbdc073f880f103ec614ece058872e47194d29a77ca34",
+          "size": 596
+        },
+        {
+          "path": "repo-nuget-samples-cpm/source-file-manifest.json",
+          "sha256": "529bd0ca3e9a60f6853cd7ab897afa3865f35e0f211720c37d2f8667f1094890",
+          "size": 47788
+        },
+        {
+          "path": "repo-nuget-samples-cpm/source.tar",
+          "sha256": "9020368d662b3b04a64da297924c5bdd8b1b3794662f70b9c5bf357c57bb5203",
+          "size": 1576960
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-nuget-samples-cpm.zip",
+      "durable_release_asset_sha256": "b5732a05d88c4a2f25143f31696ad0b4b7de8aed163da59ba7762fe6ac41c799",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "Apache-2.0",
+      "logical_id": "repo-nuget-samples-cpm",
+      "original_artifact_digest_sha256": "b5732a05d88c4a2f25143f31696ad0b4b7de8aed163da59ba7762fe6ac41c799",
+      "original_artifact_id": 8338360935,
+      "original_artifact_name": "acquisition-repo-nuget-samples-cpm",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 177462,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-pip-tools.acquisition.json",
+          "sha256": "36dd6c79ebb24dab2f456d27e3566240625e2c5895f4e1d03b7a6f2fa27dbbff",
+          "size": 556
+        },
+        {
+          "path": "repo-pip-tools/acquisition-receipt.json",
+          "sha256": "0a3f6166033c6920ee98ef45ec3242b6809dc4efd0471e6ad42ea61c3746edb3",
+          "size": 588
+        },
+        {
+          "path": "repo-pip-tools/source-file-manifest.json",
+          "sha256": "6320ec612715464c2b7366f0859f7a548928e6d6af1e353c66106cfbf8b5b61f",
+          "size": 22340
+        },
+        {
+          "path": "repo-pip-tools/source.tar",
+          "sha256": "58640e14b7cc3e51c89bd1a550ae2e49deba4d827869dba7adba9bf1c194b3ec",
+          "size": 798720
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-pip-tools.zip",
+      "durable_release_asset_sha256": "438a4fd2ab314a73555134baafc55f234bf00e7baf89163fbc881963f8bb6929",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "BSD-3-Clause",
+      "logical_id": "repo-pip-tools",
+      "original_artifact_digest_sha256": "438a4fd2ab314a73555134baafc55f234bf00e7baf89163fbc881963f8bb6929",
+      "original_artifact_id": 8338365231,
+      "original_artifact_name": "acquisition-repo-pip-tools",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 1113249,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-procs.acquisition.json",
+          "sha256": "413242658af2cc3fea743aac66f167269f8446d85618e8bc363743afe38e2e3e",
+          "size": 552
+        },
+        {
+          "path": "repo-procs/acquisition-receipt.json",
+          "sha256": "d04cb6cf903fce7d748c0a7ddc074c82c50045e24bbc6057734aadc59be305b9",
+          "size": 584
+        },
+        {
+          "path": "repo-procs/source-file-manifest.json",
+          "sha256": "27609bc3f15593a75cbadcba2c2d971c3ef2648e8e468701dc8b4cd02c6ad446",
+          "size": 16068
+        },
+        {
+          "path": "repo-procs/source.tar",
+          "sha256": "14e59a642a977ab4678156d9793c230db43a93b47bd9a615c1859533be0bc01f",
+          "size": 1699840
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-procs.zip",
+      "durable_release_asset_sha256": "684083bad5b4c67ee31bc80506bbc3b41b9da00838689b9ed72fc8f886cac7ff",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "MIT",
+      "logical_id": "repo-procs",
+      "original_artifact_digest_sha256": "684083bad5b4c67ee31bc80506bbc3b41b9da00838689b9ed72fc8f886cac7ff",
+      "original_artifact_id": 8338360496,
+      "original_artifact_name": "acquisition-repo-procs",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 65102,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-pyflakes.acquisition.json",
+          "sha256": "687e5c58458c048352f888ecf0b82fcf5e782e26f3e172a9a9917f502602307a",
+          "size": 554
+        },
+        {
+          "path": "repo-pyflakes/acquisition-receipt.json",
+          "sha256": "4ad4bc1e0584ff71b27aeb8093353e536b78b8f703ef9a96520f1267dc6f914a",
+          "size": 586
+        },
+        {
+          "path": "repo-pyflakes/source-file-manifest.json",
+          "sha256": "bf6d517c1feed500c5711f16ffbf382aae3458b7fa7841c82996e03bfc1a8e60",
+          "size": 4063
+        },
+        {
+          "path": "repo-pyflakes/source.tar",
+          "sha256": "4dfe80499d91f501aa4fa742cb8cc09318bd984ffd175b8de0ad3868cdd3d96e",
+          "size": 337920
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-pyflakes.zip",
+      "durable_release_asset_sha256": "90f440fd8a2a18130166d012e5ca0d903ff6653e22c00f55c1f2bacce839e8fd",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "MIT",
+      "logical_id": "repo-pyflakes",
+      "original_artifact_digest_sha256": "90f440fd8a2a18130166d012e5ca0d903ff6653e22c00f55c1f2bacce839e8fd",
+      "original_artifact_id": 8338356286,
+      "original_artifact_name": "acquisition-repo-pyflakes",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 3337705,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-requests.acquisition.json",
+          "sha256": "c1284c3c07dbe14e88485d3cc3582154d5dadb921fd4f598f538eb24e2272c05",
+          "size": 555
+        },
+        {
+          "path": "repo-requests/acquisition-receipt.json",
+          "sha256": "090b93b8395bbb18fba38204540ad2119bcc135c6e12c9f6ed715aba6ea86cd2",
+          "size": 587
+        },
+        {
+          "path": "repo-requests/source-file-manifest.json",
+          "sha256": "8aeeba57c840f8c8945d3f254252c25b9dd4c2b8e7e42bf613e969d1201eba36",
+          "size": 16599
+        },
+        {
+          "path": "repo-requests/source.tar",
+          "sha256": "37fb6b0957bcde366fef4b35a6f3d1e2e8afc3d26f4e130f60df2bdfa34fcb5e",
+          "size": 4556800
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-requests.zip",
+      "durable_release_asset_sha256": "fca6bd7fda8459da859b3319732cb12381fb0053c7834b68dd788e5cb711d1f3",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "Apache-2.0",
+      "logical_id": "repo-requests",
+      "original_artifact_digest_sha256": "fca6bd7fda8459da859b3319732cb12381fb0053c7834b68dd788e5cb711d1f3",
+      "original_artifact_id": 8338357509,
+      "original_artifact_name": "acquisition-repo-requests",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 168190,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-rustlings.acquisition.json",
+          "sha256": "23ce090dce3a1952da9f987dc8f0568efabb6f64a2547e232c16fabdf17df2c3",
+          "size": 556
+        },
+        {
+          "path": "repo-rustlings/acquisition-receipt.json",
+          "sha256": "cbfddca837e97318c6eaebc98eecc5b3d8aa08595431f0db7586b12a2fea5dbb",
+          "size": 588
+        },
+        {
+          "path": "repo-rustlings/source-file-manifest.json",
+          "sha256": "2b5f61f062cb0e3b4a33d0c2dd4cf3b95282f7987010dd0e990d515ea30773e4",
+          "size": 39220
+        },
+        {
+          "path": "repo-rustlings/source.tar",
+          "sha256": "7852586fb974e861d7b96ccf55f546e1fa28abd599552ff5d4b2f826b713a6bd",
+          "size": 757760
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-rustlings.zip",
+      "durable_release_asset_sha256": "28b56a666d36345607985bb5eaf39aeea4e7a664f3f156bcf69d4a3595ba00a9",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "MIT",
+      "logical_id": "repo-rustlings",
+      "original_artifact_digest_sha256": "28b56a666d36345607985bb5eaf39aeea4e7a664f3f156bcf69d4a3595ba00a9",
+      "original_artifact_id": 8338356517,
+      "original_artifact_name": "acquisition-repo-rustlings",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 27655,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-sds.acquisition.json",
+          "sha256": "ab6677d41983dff3f53833a69036113eaf392cbe1a5305affb32fdcb1a7c0ae2",
+          "size": 548
+        },
+        {
+          "path": "repo-sds/acquisition-receipt.json",
+          "sha256": "28c0d362cced4ce61962bf97436b0ed463aacf3e7d9b2ea10c9351930f771dd4",
+          "size": 580
+        },
+        {
+          "path": "repo-sds/source-file-manifest.json",
+          "sha256": "88ad780f6d2b338b328b0c6a2d96cf63f41bf6972fa66a8b48184522ae853151",
+          "size": 1030
+        },
+        {
+          "path": "repo-sds/source.tar",
+          "sha256": "2fe6b34b49710ee14774cbdcf06e22e3c28363406553a1f163c8593d2aa9dc7e",
+          "size": 102400
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-sds.zip",
+      "durable_release_asset_sha256": "5f88898e889068883c6a2e567ed1724e8015f41220662d2e302441def7947c03",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "BSD-2-Clause",
+      "logical_id": "repo-sds",
+      "original_artifact_digest_sha256": "5f88898e889068883c6a2e567ed1724e8015f41220662d2e302441def7947c03",
+      "original_artifact_id": 8338366562,
+      "original_artifact_name": "acquisition-repo-sds",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 1292012,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-spotless.acquisition.json",
+          "sha256": "1c7fa2da74afc202fd3dbc3e783178a67f4dbcf57bc20dbdc252fe399b28c0f6",
+          "size": 556
+        },
+        {
+          "path": "repo-spotless/acquisition-receipt.json",
+          "sha256": "042f9bdf0c00f9724db6d79292b57df634ef57094a4f5c6c9b4991ff0961dff2",
+          "size": 588
+        },
+        {
+          "path": "repo-spotless/source-file-manifest.json",
+          "sha256": "c8763789b20f44eed2b21e8ebe8e1c9f209d2baeb11232a2483ab1f3d0371ad1",
+          "size": 216681
+        },
+        {
+          "path": "repo-spotless/source.tar",
+          "sha256": "e1cba9726e1a458262265c14ef7a645db8f577a93bc63ab90f70ce24206b536a",
+          "size": 5273600
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-spotless.zip",
+      "durable_release_asset_sha256": "9807537a8921652fb2020f0a4f16eb66e0d3bfd78eec9696349f6e376405a788",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "Apache-2.0",
+      "logical_id": "repo-spotless",
+      "original_artifact_digest_sha256": "9807537a8921652fb2020f0a4f16eb66e0d3bfd78eec9696349f6e376405a788",
+      "original_artifact_id": 8338356388,
+      "original_artifact_name": "acquisition-repo-spotless",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 1053050,
+      "canonical_benchmark_input_path": null,
+      "canonical_benchmark_input_sha256": null,
+      "contained_files": [
+        {
+          "path": "repo-terraform-example-module.acquisition.json",
+          "sha256": "79d5708b70ab72ad769cd28c3e5ce100a598a4c04374473adb69a1d713d1eb1a",
+          "size": 570
+        },
+        {
+          "path": "repo-terraform-example-module/acquisition-receipt.json",
+          "sha256": "a60792e81b8492e9e150634f7025a1a03e19a0c53787ae711201f9c7b1a14c8a",
+          "size": 602
+        },
+        {
+          "path": "repo-terraform-example-module/source-file-manifest.json",
+          "sha256": "be3b42188395b46dde0cddaecb9f119c9ffc22728e53c855870da7916001e01f",
+          "size": 5394
+        },
+        {
+          "path": "repo-terraform-example-module/source.tar",
+          "sha256": "4015d7b6a7a8d800bcb8b21faba2c3710293fa92a89d7f27cb44aa8961464502",
+          "size": 1208320
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-repo-terraform-example-module.zip",
+      "durable_release_asset_sha256": "8b9e403698b2e896128e32e1665245842d1fbf8ede3209b4bebcfdd60ca12be9",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "Apache-2.0",
+      "logical_id": "repo-terraform-example-module",
+      "original_artifact_digest_sha256": "8b9e403698b2e896128e32e1665245842d1fbf8ede3209b4bebcfdd60ca12be9",
+      "original_artifact_id": 8338365517,
+      "original_artifact_name": "acquisition-repo-terraform-example-module",
+      "role": "alternate",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    },
+    {
+      "byte_size": 759247,
+      "canonical_benchmark_input_path": "research-corpus-loghub2/normalized-source.tar",
+      "canonical_benchmark_input_sha256": "46a2a9329aa467a60339e9604c870b9c0ad315dae0326a287dd421f46e2c81a7",
+      "contained_files": [
+        {
+          "path": "research-corpus-loghub2.acquisition.json",
+          "sha256": "9fbcd05c0f4fba474543e6361a578ad14d1f264f5123057e79c6d87259661103",
+          "size": 537
+        },
+        {
+          "path": "research-corpus-loghub2/acquisition-receipt.json",
+          "sha256": "9fbcd05c0f4fba474543e6361a578ad14d1f264f5123057e79c6d87259661103",
+          "size": 537
+        },
+        {
+          "path": "research-corpus-loghub2/normalized-source.tar",
+          "sha256": "46a2a9329aa467a60339e9604c870b9c0ad315dae0326a287dd421f46e2c81a7",
+          "size": 389120
+        },
+        {
+          "path": "research-corpus-loghub2/source-file-manifest.json",
+          "sha256": "0f397a14b0255213f32f7a0061ddc9b094b4ca0bfc5adc23c51ee53645c4acaf",
+          "size": 129
+        },
+        {
+          "path": "research-corpus-loghub2/source/Proxifier.zip",
+          "sha256": "81ed024487d2b5fb71fe592d67149e0d09ef5ba66a948ccf550f3ef502dc9d8f",
+          "size": 380635
+        }
+      ],
+      "durable_release_asset_name": "n2c-acquisition-research-corpus-loghub2.zip",
+      "durable_release_asset_sha256": "cef45d628f7af153da21baa70052ec7349bc2803097417c7647d6dcefe5ef4e0",
+      "durable_release_tag": "n2d0-durable-evidence-v1",
+      "license_reference": "CC-BY-4.0",
+      "logical_id": "research-corpus-loghub2",
+      "original_artifact_digest_sha256": "cef45d628f7af153da21baa70052ec7349bc2803097417c7647d6dcefe5ef4e0",
+      "original_artifact_id": 8338361104,
+      "original_artifact_name": "acquisition-research-corpus-loghub2",
+      "role": "primary",
+      "source_workflow_run_id": 29404265568,
+      "verification_timestamp": "2026-07-15T10:51:00Z",
+      "verifier_tool_identity": "n2d0-verify_n2c_evidence.py"
+    }
+  ],
+  "n2c_source_workflow_run_id": "29404265568",
+  "primary_case_count": 17,
+  "verified_at": "2026-07-15T10:51:00Z"
+}

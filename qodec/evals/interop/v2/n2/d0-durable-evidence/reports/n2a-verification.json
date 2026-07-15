@@ -1,0 +1,16 @@
+{
+  "capture_agreement": {
+    "agrees": true,
+    "overall_reproducible": true,
+    "source_file": "miner-canary-reports/reproducibility-report.json"
+  },
+  "identity": {
+    "all_digests_verified": true,
+    "head_sha_matches_accepted": true,
+    "head_shas_observed": [
+      "9c755dba8986323b1f18d49c26b53fec3aff5be4"
+    ],
+    "missing_required_artifacts": []
+  },
+  "pass": true
+}

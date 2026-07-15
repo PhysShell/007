@@ -1,0 +1,13 @@
+{
+  "file_hash_problems": [],
+  "pass": true,
+  "receipt_field_problems": [],
+  "role_check": {
+    "duplicates": [],
+    "expected_count": 37,
+    "fetched_count": 37,
+    "missing": [],
+    "roles_match": true,
+    "unexpected": []
+  }
+}

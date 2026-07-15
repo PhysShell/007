@@ -1,0 +1,13 @@
+{
+  "alternate_ids_match": true,
+  "assets_downloaded": 47,
+  "assets_verified_ok": 47,
+  "n2_primary_set_size_including_n2a_canary": 18,
+  "n2a_canary_present": true,
+  "n2c_alternate_case_count_expected": 20,
+  "n2c_alternate_case_count_reconstructed": 20,
+  "n2c_primary_case_count_expected": 17,
+  "n2c_primary_case_count_reconstructed": 17,
+  "primary_ids_match": true,
+  "problems": []
+}
