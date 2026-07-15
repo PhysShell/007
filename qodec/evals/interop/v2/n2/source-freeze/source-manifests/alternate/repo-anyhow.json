@@ -14,7 +14,7 @@
     "size_estimation_basis": "tiny error-handling crate, ideal minimal clippy/build-warning target",
     "trusted_dependency_realization": "no-lockfile-restore-required"
   },
-  "fallback_priority": 17,
+  "fallback_priority": 18,
   "fallback_quota_groups": [
     "repository-miner::static-analysis-lint-compiler",
     "rust"

@@ -1,11 +1,11 @@
 {
-  "case_id": "ci-log-rust-lang-rust-ci",
-  "ecosystem": "rust",
+  "case_id": "ci-log-nlog",
+  "ecosystem": "dotnet",
   "execution_expectation": {
     "argv": [],
     "command_class": "",
     "execution_plan_status": "frozen",
-    "expected_size_bucket": "very-large",
+    "expected_size_bucket": "medium",
     "extraction_recipe": {
       "archive_member": null,
       "encoding": "utf-8",
@@ -16,7 +16,7 @@
       "starting_line_or_byte_offset": 0
     },
     "network_during_untrusted_execution": "denied",
-    "size_estimation_basis": "~89-job matrix, 3h26m duration \u2014 one of the largest real CI logs available, good stress case",
+    "size_estimation_basis": "2-job Windows/Linux .NET build+test matrix (Visual Studio 2026 image, Ubuntu2204 image), verified real build 2026-07-14",
     "trusted_dependency_realization": "not-applicable-non-repository"
   },
   "fallback_priority": null,
@@ -24,7 +24,7 @@
   "license_identity": {
     "license_sha256": null,
     "redistribution_allowed": true,
-    "spdx": "MIT"
+    "spdx": "BSD-3-Clause"
   },
   "origin_kind": "native-upstream-ci-log",
   "primary_family": "ci-build",
@@ -35,13 +35,13 @@
   "selection_role": "primary",
   "source_identity": {
     "acquisition_size_bytes": null,
-    "canonical_url": "https://github.com/rust-lang/rust/actions/runs/29366449652",
-    "commit_sha": null,
+    "canonical_url": "https://ci.appveyor.com/project/NLog/NLog/builds/54377650",
+    "commit_sha": "736854b49cad342a98ce0e56f59c94914e0b555c",
     "durable_object_identity": null,
     "durable_sha256": null,
     "exact_download_url": null,
-    "job_selection_rule": "max(job.completed_at - job.started_at), tie-break lowest numeric job id",
-    "log_acquisition_endpoint": "https://api.github.com/repos/rust-lang/rust/actions/jobs/{job_id}/logs",
+    "job_selection_rule": "max(job.finished - job.started), tie-break lexicographically lowest job id (AppVeyor job ids are opaque alphanumeric strings, not numeric \u2014 same structure-only rule as _JOB_SELECTION_RULE, adapted for the id format)",
+    "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log",
     "media_type": null,
     "metadata_sha256": null,
     "normalized_archive_sha256": null,

@@ -16,7 +16,7 @@
     "size_estimation_basis": "NuGet outdated-package listing/diagnostic CLI",
     "trusted_dependency_realization": "no-lockfile-restore-required"
   },
-  "fallback_priority": 13,
+  "fallback_priority": 14,
   "fallback_quota_groups": [
     "repository-miner::search-listing-diagnostic",
     "dotnet"

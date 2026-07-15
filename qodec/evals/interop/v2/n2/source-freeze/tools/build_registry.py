@@ -246,6 +246,30 @@ CANDIDATES.append(artifact(
     "MIT", "Public AppVeyor build on a public GitHub repository, log endpoint independently verified anonymously downloadable; source license MIT (LICENSE).",
     "medium", "7-job Windows CMake matrix (VS2008 through VS2019), verified real build 2026-07-09", "high",
 ))
+# Fourth real, verified native-upstream-ci-log candidate — added honestly to
+# the eligible pool alongside the three above, NOT forced into the primary
+# set. Restores a genuine ecosystem=dotnet representative in this bucket
+# (the ineligible ci-log-rust-lang-rust-ci candidate's ecosystem="rust" tag
+# was, as an incidental side effect, the only slack the ecosystem-minimum
+# reconciliation swap (selection.py) had to satisfy quota-contract.json's
+# dotnet:2 minimum; an extensive real search for an actively-maintained
+# Rust project on AppVeyor found none — every Rust crate that ever used
+# AppVeyor abandoned it years ago — so the correct fix is a genuine dotnet
+# candidate in THIS bucket, not a fabricated ecosystem tag on a C/C++ one).
+# Deterministic selection + the unmodified reconciliation algorithm decide
+# which 3 of these 4 eligible candidates end up primary.
+CANDIDATES.append(artifact(
+    "ci-log-nlog", "https://ci.appveyor.com/project/NLog/NLog/builds/54377650",
+    "native-upstream-ci-log", "ci-build", "NLog/NLog (Jaroslaw Kowalski et al.)",
+    "immutable-run-or-artifact",
+    {"repository_url": "https://github.com/NLog/NLog", "ci_platform": "appveyor",
+     "appveyor_project": "NLog/NLog", "run_id": "54377650", "commit_sha": "736854b49cad342a98ce0e56f59c94914e0b555c",
+     "ecosystem": "dotnet",
+     "job_selection_rule": _APPVEYOR_JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
+     "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log"},
+    "BSD-3-Clause", "Public AppVeyor build on a public GitHub repository, log endpoint independently verified anonymously downloadable; source license BSD-3-Clause (LICENSE.txt).",
+    "medium", "2-job Windows/Linux .NET build+test matrix (Visual Studio 2026 image, Ubuntu2204 image), verified real build 2026-07-14", "high",
+))
 
 # -- public-runtime-dataset (2) --
 # Exact archive member selected NOW, deterministically, by publisher-declared

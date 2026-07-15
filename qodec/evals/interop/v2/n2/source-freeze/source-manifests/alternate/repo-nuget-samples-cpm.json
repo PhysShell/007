@@ -15,7 +15,7 @@
     "size_estimation_basis": "official NuGet-team central-package-management dependency-resolution example",
     "trusted_dependency_realization": "no-lockfile-restore-required"
   },
-  "fallback_priority": 14,
+  "fallback_priority": 15,
   "fallback_quota_groups": [
     "repository-miner::dependency-package-manager",
     "dotnet"

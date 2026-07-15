@@ -14,7 +14,7 @@
     "size_estimation_basis": "purpose-built Kotlin static-analysis tool (large repo, backup lint candidate)",
     "trusted_dependency_realization": "no-lockfile-restore-required"
   },
-  "fallback_priority": 15,
+  "fallback_priority": 16,
   "fallback_quota_groups": [
     "repository-miner::static-analysis-lint-compiler",
     "jvm"

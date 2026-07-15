@@ -1,0 +1,17 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "ci-log-nlog",
+  "license_source_url": "https://ci.appveyor.com/project/NLog/NLog/builds/54377650",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "BSD-3-Clause",
+  "redistribution_allowed": true,
+  "redistribution_basis": "Public AppVeyor build on a public GitHub repository, log endpoint independently verified anonymously downloadable; source license BSD-3-Clause (LICENSE.txt).",
+  "review_evidence": [
+    "https://ci.appveyor.com/project/NLog/NLog/builds/54377650"
+  ],
+  "source_code_license": "BSD-3-Clause",
+  "spdx": "BSD-3-Clause"
+}

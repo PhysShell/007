@@ -1,11 +1,11 @@
 {
-  "case_id": "ci-log-jq-ci",
+  "case_id": "ci-log-jansson",
   "ecosystem": "infrastructure-or-language-neutral",
   "execution_expectation": {
     "argv": [],
     "command_class": "",
     "execution_plan_status": "frozen",
-    "expected_size_bucket": "large",
+    "expected_size_bucket": "medium",
     "extraction_recipe": {
       "archive_member": null,
       "encoding": "utf-8",
@@ -16,7 +16,7 @@
       "starting_line_or_byte_offset": 0
     },
     "network_during_untrusted_execution": "denied",
-    "size_estimation_basis": "jq CI matrix (Linux/macOS/Windows + dist/docker/release jobs), ~16 min, 24 build artifacts",
+    "size_estimation_basis": "7-job Windows CMake matrix (VS2008 through VS2019), verified real build 2026-07-09",
     "trusted_dependency_realization": "not-applicable-non-repository"
   },
   "fallback_priority": null,
@@ -35,13 +35,13 @@
   "selection_role": "primary",
   "source_identity": {
     "acquisition_size_bytes": null,
-    "canonical_url": "https://github.com/jqlang/jq/actions/runs/28568334149",
-    "commit_sha": null,
+    "canonical_url": "https://ci.appveyor.com/project/akheron/jansson/builds/54351973",
+    "commit_sha": "851a2145e3256f2e67e5dfe24b0e456bf198b741",
     "durable_object_identity": null,
     "durable_sha256": null,
     "exact_download_url": null,
-    "job_selection_rule": "max(job.completed_at - job.started_at), tie-break lowest numeric job id",
-    "log_acquisition_endpoint": "https://api.github.com/repos/jqlang/jq/actions/jobs/{job_id}/logs",
+    "job_selection_rule": "max(job.finished - job.started), tie-break lexicographically lowest job id (AppVeyor job ids are opaque alphanumeric strings, not numeric \u2014 same structure-only rule as _JOB_SELECTION_RULE, adapted for the id format)",
+    "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log",
     "media_type": null,
     "metadata_sha256": null,
     "normalized_archive_sha256": null,

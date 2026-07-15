@@ -439,6 +439,79 @@
       ]
     },
     {
+      "candidate_id": "ci-log-nlog",
+      "container_requirements": [],
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "dotnet",
+      "ecosystem_quota_group": "dotnet",
+      "estimated_resource_class": "medium",
+      "evidence_references": [
+        "https://ci.appveyor.com/project/NLog/NLog/builds/54377650"
+      ],
+      "expected_size_bucket": "medium",
+      "expected_size_confidence": "high",
+      "expected_size_estimation_basis": "2-job Windows/Linux .NET build+test matrix (Visual Studio 2026 image, Ubuntu2204 image), verified real build 2026-07-14",
+      "external_service_requirements": [],
+      "license": {
+        "redistribution_allowed": true,
+        "redistribution_basis": "Public AppVeyor build on a public GitHub repository, log endpoint independently verified anonymously downloadable; source license BSD-3-Clause (LICENSE.txt).",
+        "spdx": "BSD-3-Clause",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "not-applicable-non-repository",
+      "origin_family_group": "native-upstream-ci-log::ci-build",
+      "origin_kind": "native-upstream-ci-log",
+      "personal_data_review": {
+        "personal_data_present": false,
+        "sanitization_notes": ""
+      },
+      "primary_family": "ci-build",
+      "project": {
+        "entry_point": null
+      },
+      "public_canonical_url": "https://ci.appveyor.com/project/NLog/NLog/builds/54377650",
+      "publisher": {
+        "identity": "NLog/NLog (Jaroslaw Kowalski et al.)"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "appveyor_project": "NLog/NLog",
+        "ci_platform": "appveyor",
+        "commit_sha": "736854b49cad342a98ce0e56f59c94914e0b555c",
+        "identity_kind": "immutable-run-or-artifact",
+        "job_selection_rule": "max(job.finished - job.started), tie-break lexicographically lowest job id (AppVeyor job ids are opaque alphanumeric strings, not numeric \u2014 same structure-only rule as _JOB_SELECTION_RULE, adapted for the id format)",
+        "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log",
+        "repository_url": "https://github.com/NLog/NLog",
+        "run_id": "54377650",
+        "selected_job_ids": [],
+        "selected_job_names": []
+      },
+      "source_kind": "ci-run-artifact",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ]
+    },
+    {
       "candidate_id": "dataset-loghub-v8",
       "container_requirements": [],
       "discovery": {

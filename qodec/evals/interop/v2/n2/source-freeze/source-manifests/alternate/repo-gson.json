@@ -14,7 +14,7 @@
     "size_estimation_basis": "Maven-built JSON library, standard mvn test JUnit suite",
     "trusted_dependency_realization": "no-lockfile-restore-required"
   },
-  "fallback_priority": 16,
+  "fallback_priority": 17,
   "fallback_quota_groups": [
     "repository-miner::test",
     "jvm"

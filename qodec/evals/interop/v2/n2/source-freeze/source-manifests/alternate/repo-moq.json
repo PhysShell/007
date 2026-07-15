@@ -1,40 +1,43 @@
 {
-  "case_id": "repo-terraform-example-module",
-  "ecosystem": "infrastructure-or-language-neutral",
+  "case_id": "repo-moq",
+  "ecosystem": "dotnet",
   "execution_expectation": {
-    "argv": [],
-    "command_class": "terraform init && terraform validate",
-    "execution_plan_status": "requires-n2d-probe",
-    "expected_size_bucket": "small",
+    "argv": [
+      "dotnet",
+      "test"
+    ],
+    "command_class": "dotnet test",
+    "execution_plan_status": "frozen",
+    "expected_size_bucket": "medium",
     "extraction_recipe": null,
     "network_during_untrusted_execution": "denied",
-    "size_estimation_basis": "canonical minimal Terraform module scaffold for validate/lint CI checks",
+    "size_estimation_basis": "popular .NET mocking framework, dotnet test suite",
     "trusted_dependency_realization": "no-lockfile-restore-required"
   },
-  "fallback_priority": 19,
+  "fallback_priority": 12,
   "fallback_quota_groups": [
-    "repository-miner::container-orchestration-deployment",
-    "infrastructure-or-language-neutral"
+    "repository-miner::test",
+    "dotnet"
   ],
   "license_identity": {
     "license_sha256": null,
     "redistribution_allowed": true,
-    "spdx": "Apache-2.0"
+    "spdx": "BSD-3-Clause"
   },
   "origin_kind": "repository-miner",
-  "primary_family": "container-orchestration-deployment",
+  "primary_family": "test",
   "project": {
-    "adapter": "infrastructure-or-language-neutral",
+    "adapter": "dotnet",
     "ambiguous": false,
     "detection_confidence": "high",
-    "entry_point": "main.tf"
+    "entry_point": "src/Moq.Tests"
   },
   "secondary_tags": [],
   "selection_role": "alternate",
   "source_identity": {
     "acquisition_size_bytes": null,
-    "canonical_url": "https://github.com/cloudposse/terraform-example-module",
-    "commit_sha": "98dac4e5e89c4060c7eb655a9e58da39336ee1dc",
+    "canonical_url": "https://github.com/devlooped/moq",
+    "commit_sha": "89a5be629c752960fe403e95ff583e4ae6f00542",
     "durable_object_identity": null,
     "durable_sha256": null,
     "exact_download_url": null,
