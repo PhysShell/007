@@ -2,9 +2,14 @@
   "case_id": "repo-bats-core",
   "ecosystem": "infrastructure-or-language-neutral",
   "execution_expectation": {
-    "argv": [],
+    "argv": [
+      "./bin/bats",
+      "test/"
+    ],
     "command_class": "./bin/bats test/",
+    "execution_plan_status": "frozen",
     "expected_size_bucket": "small",
+    "extraction_recipe": null,
     "network_during_untrusted_execution": "denied",
     "size_estimation_basis": "Bash Automated Testing System, TAP-style test-log output",
     "trusted_dependency_realization": "no-lockfile-restore-required"
@@ -30,11 +35,27 @@
   "secondary_tags": [],
   "selection_role": "alternate",
   "source_identity": {
+    "acquisition_size_bytes": null,
     "canonical_url": "https://github.com/bats-core/bats-core",
     "commit_sha": "c18b2f7a7e56dde24b4a6ae706a4ecee3ec824ad",
+    "durable_object_identity": null,
+    "durable_sha256": null,
+    "exact_download_url": null,
+    "job_selection_rule": null,
+    "log_acquisition_endpoint": null,
+    "media_type": null,
+    "metadata_sha256": null,
     "normalized_archive_sha256": null,
+    "normalized_source_sha256": null,
     "object_id_or_doi": null,
     "original_sha256": null,
+    "publisher_checksum_algorithm": null,
+    "publisher_reported_checksum": null,
+    "selected_exact_file": null,
+    "selected_job_ids": [],
+    "selected_job_names": [],
+    "source_commit_sha": null,
+    "source_content_sha256": null,
     "tree_sha": null
   },
   "source_kind": "repository-execution"

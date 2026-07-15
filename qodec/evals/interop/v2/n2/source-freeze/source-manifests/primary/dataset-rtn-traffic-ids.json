@@ -1,22 +1,22 @@
 {
-  "case_id": "bot-dependabot-black-5206",
-  "ecosystem": "python",
+  "case_id": "dataset-rtn-traffic-ids",
+  "ecosystem": "infrastructure-or-language-neutral",
   "execution_expectation": {
     "argv": [],
     "command_class": "",
     "execution_plan_status": "frozen",
-    "expected_size_bucket": "small",
+    "expected_size_bucket": "medium",
     "extraction_recipe": {
       "archive_member": null,
       "encoding": "utf-8",
       "ending_condition": "end-of-file",
-      "input_file_identity": "source/response.json",
+      "input_file_identity": "source/RTN_traffic_dataset.csv",
       "line_ending_policy": "preserve-original",
       "maximum_extracted_source_bytes": 4194304,
       "starting_line_or_byte_offset": 0
     },
     "network_during_untrusted_execution": "denied",
-    "size_estimation_basis": "single dependency-bump PR: title, diff (one line), 90 check results",
+    "size_estimation_basis": "single structured CSV of captured network-traffic/IDS events, 37978049 bytes per Zenodo API metadata (independently re-downloaded and MD5-verified during discovery research)",
     "trusted_dependency_realization": "not-applicable-non-repository"
   },
   "fallback_priority": null,
@@ -24,38 +24,38 @@
   "license_identity": {
     "license_sha256": null,
     "redistribution_allowed": true,
-    "spdx": "MIT"
+    "spdx": "CC-BY-4.0"
   },
-  "origin_kind": "kernel-or-infrastructure-bot",
-  "primary_family": "dependency-package-manager",
+  "origin_kind": "public-runtime-dataset",
+  "primary_family": "runtime",
   "project": {
     "entry_point": null
   },
   "secondary_tags": [],
   "selection_role": "primary",
   "source_identity": {
-    "acquisition_size_bytes": null,
-    "canonical_url": "https://github.com/psf/black/pull/5206",
+    "acquisition_size_bytes": 37978049,
+    "canonical_url": "https://zenodo.org/records/18910837",
     "commit_sha": null,
     "durable_object_identity": null,
     "durable_sha256": null,
-    "exact_download_url": null,
+    "exact_download_url": "https://zenodo.org/api/records/18910837/files/RTN_traffic_dataset.csv/content",
     "job_selection_rule": null,
     "log_acquisition_endpoint": null,
-    "media_type": "application/json",
+    "media_type": "text/csv",
     "metadata_sha256": null,
     "normalized_archive_sha256": null,
     "normalized_source_sha256": null,
-    "object_id_or_doi": "psf/black#5206",
+    "object_id_or_doi": "10.5281/zenodo.18910837",
     "original_sha256": null,
-    "publisher_checksum_algorithm": null,
-    "publisher_reported_checksum": null,
-    "selected_exact_file": null,
+    "publisher_checksum_algorithm": "md5",
+    "publisher_reported_checksum": "81e307809d1d0ddeb31c934c689d5b19",
+    "selected_exact_file": "RTN_traffic_dataset.csv",
     "selected_job_ids": [],
     "selected_job_names": [],
     "source_commit_sha": null,
     "source_content_sha256": null,
     "tree_sha": null
   },
-  "source_kind": "bot-output-artifact"
+  "source_kind": "dataset-artifact"
 }

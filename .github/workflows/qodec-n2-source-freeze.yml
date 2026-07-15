@@ -262,7 +262,7 @@ jobs:
           path: ${{ runner.temp }}/acquisition
           merge-multiple: true
 
-      - name: Verify no archive-traversal/absolute-path/device-file/symlink/encrypted-member findings
+      - name: Verify no archive-traversal/absolute-path/device-file/symlink/encrypted-member findings, and that every acquisition holds real content
         run: |
           mkdir -p "$RUNNER_TEMP/reports"
           python3 - <<'PYEOF'
@@ -274,18 +274,34 @@ jobs:
           acq_dir = Path("${{ runner.temp }}/acquisition")
           findings = []
           checked = 0
-          for tar_path in acq_dir.rglob("source.tar"):
-              checked += 1
-              try:
-                  archive_security.assert_safe(tar_path)
-              except archive_security.RejectedArchive as e:
-                  findings.append(str(e))
-          report = {"archives_checked": checked, "findings": findings, "pass": not findings}
+          # source.tar (repository-execution) and normalized-source.tar (the
+          # four non-repository source kinds, N2-C closure section 2-4) are
+          # both archives we built ourselves, but still get the same
+          # defense-in-depth traversal/symlink/device/encryption scan.
+          for pattern in ("source.tar", "normalized-source.tar"):
+              for tar_path in acq_dir.rglob(pattern):
+                  checked += 1
+                  try:
+                      archive_security.assert_safe(tar_path)
+                  except archive_security.RejectedArchive as e:
+                      findings.append(str(e))
+
+          content_only = archive_security.find_content_only_acquisitions(acq_dir)
+
+          report = {
+              "archives_checked": checked,
+              "findings": findings,
+              "content_only_acquisitions": content_only,
+              "pass": not findings and not content_only,
+          }
           Path("${{ runner.temp }}/reports/archive-security-report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
           if findings:
               print(f"::error::archive security findings: {findings}", file=sys.stderr)
               sys.exit(1)
-          print(f"archive-security: {checked} archives checked, zero findings")
+          if content_only:
+              print(f"::error::acquisition directories with no real source content, receipt only: {content_only}", file=sys.stderr)
+              sys.exit(1)
+          print(f"archive-security: {checked} archives checked, zero findings, zero receipt-only acquisitions")
           PYEOF
 
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
@@ -311,45 +327,12 @@ jobs:
           path: ${{ runner.temp }}/acquisition
           merge-multiple: true
 
-      - name: Fold real acquisition hashes into the candidate registry + source manifests
+      - name: Fold real acquisition identity into currently-null registry fields, or verify a fresh re-acquisition still matches already-committed (identity-locked) values
         run: |
           mkdir -p "$RUNNER_TEMP/reports"
-          python3 - <<'PYEOF'
-          import json, sys
-          from pathlib import Path
-          reg_path = Path("qodec/evals/interop/v2/n2/source-freeze/candidate-registry.json")
-          registry = json.loads(reg_path.read_text())
-          acq_dir = Path("${{ runner.temp }}/acquisition")
-          updated = []
-          for acq_file in acq_dir.glob("*.acquisition.json"):
-              result = json.loads(acq_file.read_text())
-              cid = result["candidate_id"]
-              for c in registry["candidates"]:
-                  if c["candidate_id"] == cid:
-                      c["source_identity"]["normalized_archive_sha256"] = result.get("normalized_archive_sha256")
-                      c["source_identity"]["original_content_sha256"] = result.get("original_sha256")
-                      if "git_tree_sha" in result:
-                          c["source_identity"]["tree_sha"] = result["git_tree_sha"]
-                      if "license_sha256" in result:
-                          c["source_identity"]["license_sha256"] = result["license_sha256"]
-                      updated.append(cid)
-          reg_path.write_text(json.dumps(registry, indent=2, sort_keys=True) + "\n")
-          print(f"updated {len(updated)} candidates with real acquisition identity")
-
-          sys.path.insert(0, "qodec/evals/interop/v2/n2/source-freeze/tools")
-          import registry as registry_mod, eligibility as eligibility_mod, selection as selection_mod, generate_manifests
-          reg = registry_mod.load_registry(reg_path)
-          reports = eligibility_mod.evaluate_registry(reg)
-          eligible_ids = {r["candidate_id"] for r in reports if r["eligible"]}
-          eligible = [c for c in reg["candidates"] if c["candidate_id"] in eligible_ids]
-          result = selection_mod.run_selection(eligible)
-          by_id = {c["candidate_id"]: c for c in eligible}
-          outcome = generate_manifests.generate_all(result["primary_case_ids"], result["alternate_case_ids"], by_id, selection_mod.load_quota_contract())
-          Path("${{ runner.temp }}/reports/source-identity-report.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
-          if outcome["errors"]:
-              print(f"::error::source-identity manifest regeneration errors: {outcome['errors']}", file=sys.stderr)
-              sys.exit(1)
-          PYEOF
+          python3 qodec/evals/interop/v2/n2/source-freeze/tools/generate_ci_reports.py fold-or-verify-identity \
+            --acquisition-dir "${{ runner.temp }}/acquisition" \
+            --out "$RUNNER_TEMP/reports/source-identity-report.json"
 
       - name: Stage updated registry/manifests/license-records under a single predictable root
         run: |
@@ -439,6 +422,9 @@ jobs:
       - source-identity
       - pre-qodec-seal
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -448,36 +434,50 @@ jobs:
         with:
           path: ${{ runner.temp }}/all-artifacts
 
-      - name: Build n2c-artifact-index (artifact name, digest, contained files, per-file SHA256)
+      - name: Query the real GitHub Actions Artifacts API for this run's artifact IDs + archive digests
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$RUNNER_TEMP/reports"
           python3 - <<'PYEOF'
-          import hashlib
           import json
+          import os
           from pathlib import Path
+          from urllib.request import Request, urlopen
 
-          root = Path("${{ runner.temp }}/all-artifacts")
-          index = []
-          for artifact_dir in sorted(root.iterdir()):
-              if not artifact_dir.is_dir():
-                  continue
-              files = []
-              for f in sorted(artifact_dir.rglob("*")):
-                  if f.is_file():
-                      files.append({
-                          "path": str(f.relative_to(artifact_dir)),
-                          "sha256": hashlib.sha256(f.read_bytes()).hexdigest(),
-                      })
-              index.append({
-                  "artifact_name": artifact_dir.name,
-                  "source_workflow_run": "${{ github.run_id }}",
-                  "head_sha": "${{ github.sha }}",
-                  "file_count": len(files),
-                  "files": files,
+          token = os.environ["GH_TOKEN"]
+          repo = "${{ github.repository }}"
+          run_id = "${{ github.run_id }}"
+          artifacts = []
+          page = 1
+          while True:
+              url = f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100&page={page}"
+              req = Request(url, headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+                  "User-Agent": "qodec-n2c-artifact-contract",
               })
-          Path("${{ runner.temp }}/reports/n2c-artifact-index.json").write_text(json.dumps(index, indent=2, sort_keys=True) + "\n")
-          print(f"indexed {len(index)} artifacts")
+              with urlopen(req, timeout=60) as resp:  # noqa: S310 - own repo's Actions API, read-only
+                  data = json.loads(resp.read())
+              batch = data.get("artifacts", [])
+              if not batch:
+                  break
+              artifacts.extend(batch)
+              page += 1
+          Path("${{ runner.temp }}/reports/api-artifacts.json").write_text(json.dumps(artifacts, indent=2, sort_keys=True) + "\n")
+          print(f"fetched {len(artifacts)} artifact records from the real GitHub Actions Artifacts API")
           PYEOF
+
+      - name: Build n2c-artifact-index (real artifact_id/archive_digest, contained files, per-file SHA256, logical vs execution SHA)
+        run: |
+          python3 qodec/evals/interop/v2/n2/source-freeze/tools/generate_ci_reports.py build-artifact-index \
+            --all-artifacts-root "${{ runner.temp }}/all-artifacts" \
+            --api-artifacts-json "${{ runner.temp }}/reports/api-artifacts.json" \
+            --source-workflow-run "${{ github.run_id }}" \
+            --logical-head-sha "${{ github.event.pull_request.head.sha || github.sha }}" \
+            --execution-sha "${{ github.sha }}" \
+            --self-artifact-name "n2c-artifact-index" \
+            --out "$RUNNER_TEMP/reports/n2c-artifact-index.json"
 
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:

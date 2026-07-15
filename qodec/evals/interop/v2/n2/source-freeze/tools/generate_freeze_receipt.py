@@ -55,8 +55,13 @@ def build_freeze_receipt(main_sha: str, workflow_run_ids: list, freeze_timestamp
     quota_contract = selection_mod.load_quota_contract()
     selection = selection_mod.run_selection(eligible, policy, quota_contract)
 
+    # Primary order carries no semantic meaning, so it is sorted for stable,
+    # readable output. Alternate order is NOT sorted — section 7 requires
+    # the receipt to preserve selection's exact deterministic fallback
+    # order (selection["alternate_case_ids"] is already in rank order; see
+    # selection.py's run_selection), never alphabetical.
     primary_ids = sorted(selection["primary_case_ids"])
-    alternate_ids = sorted(selection["alternate_case_ids"])
+    alternate_ids = list(selection["alternate_case_ids"])
 
     manifest_hashes = {}
     for role, ids in (("primary", primary_ids), ("alternate", alternate_ids)):
@@ -72,11 +77,37 @@ def build_freeze_receipt(main_sha: str, workflow_run_ids: list, freeze_timestamp
             license_record_hashes[cid] = sha256_bytes(path.read_bytes())
 
     by_id = {c["candidate_id"]: c for c in reg["candidates"]}
-    normalized_archive_hashes = {
-        cid: by_id[cid]["source_identity"].get("normalized_archive_sha256")
-        for cid in primary_ids + alternate_ids
-    }
-    acquisition_complete = all(v is not None for v in normalized_archive_hashes.values())
+    all_ids = primary_ids + alternate_ids
+
+    def _ident(cid: str, field: str):
+        return by_id[cid]["source_identity"].get(field)
+
+    normalized_archive_hashes = {cid: _ident(cid, "normalized_archive_sha256") for cid in all_ids}
+    metadata_hashes = {cid: _ident(cid, "metadata_sha256") for cid in all_ids}
+    source_content_hashes = {cid: _ident(cid, "source_content_sha256") for cid in all_ids}
+    normalized_source_hashes = {cid: _ident(cid, "normalized_source_sha256") for cid in all_ids}
+
+    def _acquisition_complete_for(cid: str) -> bool:
+        # Repository sources: real content identity IS
+        # normalized_archive_sha256 (a genuine tar-of-tracked-files hash).
+        # Every other source kind must show BOTH source_content_sha256 (the
+        # actual downloaded bytes) and normalized_source_sha256 (the
+        # deterministic archive wrapping them) — a metadata_sha256 alone
+        # never counts, per the N2-C closure correction (section 1).
+        if by_id[cid]["source_kind"] == "repository-execution":
+            return normalized_archive_hashes[cid] is not None
+        return source_content_hashes[cid] is not None and normalized_source_hashes[cid] is not None
+
+    acquisition_complete = all(_acquisition_complete_for(cid) for cid in all_ids)
+
+    alternate_fallback_order = [
+        {
+            "case_id": cid,
+            "fallback_priority": priority,
+            "fallback_quota_groups": [by_id[cid]["origin_family_group"], by_id[cid]["ecosystem_quota_group"]],
+        }
+        for priority, cid in enumerate(alternate_ids, start=1)
+    ]
 
     candidate_registry_sha256 = sha256_bytes(
         (SOURCE_FREEZE_DIR / "candidate-registry.json").read_bytes()
@@ -100,9 +131,13 @@ def build_freeze_receipt(main_sha: str, workflow_run_ids: list, freeze_timestamp
         "quota_contract_sha256": quota_contract_sha256,
         "selected_primary_case_ids": primary_ids,
         "selected_alternate_case_ids": alternate_ids,
+        "alternate_fallback_order": alternate_fallback_order,
         "source_manifest_sha256": manifest_hashes,
         "license_record_sha256": license_record_hashes,
         "normalized_archive_sha256": normalized_archive_hashes,
+        "metadata_sha256": metadata_hashes,
+        "source_content_sha256": source_content_hashes,
+        "normalized_source_sha256": normalized_source_hashes,
         "acquisition_complete": acquisition_complete,
         "selection_report_sha256": selection_report_sha256,
         "selection_trace_sha256": selection_trace_sha256,
@@ -150,8 +185,11 @@ def build_summary_md(receipt: dict) -> str:
         "## Selected primary case IDs\n",
     ]
     lines += [f"- {cid}" for cid in receipt["selected_primary_case_ids"]]
-    lines += ["\n## Frozen alternate case IDs\n"]
-    lines += [f"- {cid}" for cid in receipt["selected_alternate_case_ids"]]
+    lines += ["\n## Frozen alternate case IDs, in deterministic fallback-priority order\n"]
+    lines += [
+        f"{entry['fallback_priority']}. {entry['case_id']} (quota groups: {', '.join(entry['fallback_quota_groups'])})"
+        for entry in receipt["alternate_fallback_order"]
+    ]
     lines += [
         "\n## Non-goals confirmed unstarted\n",
         "N2-D canonical execution/capture, N2-E RTK mapping, N2-F four-arm benchmark, "

@@ -2,9 +2,15 @@
   "case_id": "repo-kubeops-generator",
   "ecosystem": "dotnet",
   "execution_expectation": {
-    "argv": [],
+    "argv": [
+      "dotnet",
+      "test",
+      "test/KubeOps.Generator.Test/KubeOps.Generator.Test.csproj"
+    ],
     "command_class": "dotnet test test/KubeOps.Generator.Test/KubeOps.Generator.Test.csproj",
+    "execution_plan_status": "frozen",
     "expected_size_bucket": "medium",
+    "extraction_recipe": null,
     "network_during_untrusted_execution": "denied",
     "size_estimation_basis": "scoped single xUnit test project within a larger operator-SDK solution",
     "trusted_dependency_realization": "no-lockfile-restore-required"
@@ -27,11 +33,27 @@
   "secondary_tags": [],
   "selection_role": "primary",
   "source_identity": {
+    "acquisition_size_bytes": null,
     "canonical_url": "https://github.com/buehler/dotnet-operator-sdk",
     "commit_sha": "9f44d7ca3b545b0db2fdb990374c58f0205d0eef",
+    "durable_object_identity": null,
+    "durable_sha256": null,
+    "exact_download_url": null,
+    "job_selection_rule": null,
+    "log_acquisition_endpoint": null,
+    "media_type": null,
+    "metadata_sha256": null,
     "normalized_archive_sha256": null,
+    "normalized_source_sha256": null,
     "object_id_or_doi": null,
     "original_sha256": null,
+    "publisher_checksum_algorithm": null,
+    "publisher_reported_checksum": null,
+    "selected_exact_file": null,
+    "selected_job_ids": [],
+    "selected_job_names": [],
+    "source_commit_sha": null,
+    "source_content_sha256": null,
     "tree_sha": null
   },
   "source_kind": "repository-execution"

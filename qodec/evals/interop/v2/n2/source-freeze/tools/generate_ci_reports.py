@@ -22,6 +22,8 @@ import license_review  # noqa: E402
 import frozen_base_check  # noqa: E402
 import generate_manifests  # noqa: E402
 import generate_freeze_receipt  # noqa: E402
+import identity_lock  # noqa: E402
+import artifact_index  # noqa: E402
 
 SOURCE_FREEZE_DIR = TOOLS_DIR.parent
 
@@ -158,10 +160,67 @@ def cmd_acquisition_matrix(args):
     return 0
 
 
+def cmd_fold_or_verify_identity(args):
+    """Section 5 (N2-C closure): fold real acquisition results into
+    currently-null candidate-registry.json identity fields, or verify a
+    fresh re-acquisition still matches already-committed (identity-locked)
+    values — failing the build on any drift. Then regenerates source
+    manifests + license records from the (possibly just-updated) registry."""
+    reg_path = SOURCE_FREEZE_DIR / "candidate-registry.json"
+    reg = registry.load_registry(reg_path)
+
+    acquisition_results = []
+    for acq_file in sorted(Path(args.acquisition_dir).glob("*.acquisition.json")):
+        acquisition_results.append(json.loads(acq_file.read_text()))
+
+    report = identity_lock.fold_or_verify(reg, acquisition_results)
+    reg_path.write_text(json.dumps(reg, indent=2, sort_keys=True) + "\n")
+
+    reports = eligibility.evaluate_registry(reg)
+    eligible_ids = {r["candidate_id"] for r in reports if r["eligible"]}
+    eligible = [c for c in reg["candidates"] if c["candidate_id"] in eligible_ids]
+    result = selection.run_selection(eligible)
+    by_id = {c["candidate_id"]: c for c in eligible}
+    manifest_outcome = generate_manifests.generate_all(
+        result["primary_case_ids"], result["alternate_case_ids"], by_id, selection.load_quota_contract()
+    )
+    report["manifest_errors"] = manifest_outcome["errors"]
+
+    Path(args.out).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    if report["drift"]:
+        print(f"::error::identity-lock drift detected (committed value differs from a fresh re-acquisition): "
+              f"{report['drift']}", file=sys.stderr)
+        return 1
+    if manifest_outcome["errors"]:
+        print(f"::error::manifest regeneration errors after identity fold: {manifest_outcome['errors']}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_freeze_receipt(args):
     receipt = generate_freeze_receipt.build_freeze_receipt(args.main_sha, args.workflow_run_ids or [], args.freeze_timestamp)
     Path(args.out).write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
     Path(args.out_md).write_text(generate_freeze_receipt.build_summary_md(receipt))
+    return 0
+
+
+def cmd_build_artifact_index(args):
+    """Section 8: real artifact_id/archive_digest come from the GitHub
+    Actions Artifacts REST API response the workflow already queried (never
+    fabricated); logical_head_sha and execution_sha are kept as two
+    distinct fields so a pull_request run's synthetic merge commit is never
+    mislabeled as the accepted branch head."""
+    api_artifacts = json.loads(Path(args.api_artifacts_json).read_text())
+    index = artifact_index.build_index(
+        Path(args.all_artifacts_root), api_artifacts, args.source_workflow_run,
+        args.logical_head_sha, args.execution_sha, args.self_artifact_name,
+    )
+    errors = artifact_index.validate_artifact_index(index)
+    Path(args.out).write_text(json.dumps(index, indent=2, sort_keys=True) + "\n")
+    if errors:
+        print(f"::error::artifact index validation failed: {errors}", file=sys.stderr)
+        return 1
+    print(f"indexed {len(index)} artifacts")
     return 0
 
 
@@ -232,6 +291,11 @@ def main() -> int:
     p.add_argument("--out", required=True)
     p.set_defaults(func=cmd_acquisition_matrix)
 
+    p = sub.add_parser("fold-or-verify-identity")
+    p.add_argument("--acquisition-dir", required=True)
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=cmd_fold_or_verify_identity)
+
     p = sub.add_parser("freeze-receipt")
     p.add_argument("--main-sha", required=True)
     p.add_argument("--workflow-run-ids", nargs="*")
@@ -239,6 +303,16 @@ def main() -> int:
     p.add_argument("--out", required=True)
     p.add_argument("--out-md", required=True)
     p.set_defaults(func=cmd_freeze_receipt)
+
+    p = sub.add_parser("build-artifact-index")
+    p.add_argument("--all-artifacts-root", required=True)
+    p.add_argument("--api-artifacts-json", required=True)
+    p.add_argument("--source-workflow-run", required=True)
+    p.add_argument("--logical-head-sha", required=True)
+    p.add_argument("--execution-sha", required=True)
+    p.add_argument("--self-artifact-name", required=True)
+    p.add_argument("--out", required=True)
+    p.set_defaults(func=cmd_build_artifact_index)
 
     p = sub.add_parser("seal-check")
     p.add_argument("--repo-root", required=True)

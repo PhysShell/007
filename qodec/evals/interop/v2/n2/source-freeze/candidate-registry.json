@@ -47,8 +47,12 @@
       "selection_status": "eligible",
       "source_identity": {
         "identity_kind": "immutable-run-or-artifact",
+        "job_selection_rule": "max(job.completed_at - job.started_at), tie-break lowest numeric job id",
+        "log_acquisition_endpoint": "https://api.github.com/repos/curl/curl/actions/jobs/{job_id}/logs",
         "repository_url": "https://github.com/curl/curl",
         "run_id": "29367345523",
+        "selected_job_ids": [],
+        "selected_job_names": [],
         "workflow_identity": ".github/workflows/linux.yml"
       },
       "source_kind": "ci-run-artifact",
@@ -114,8 +118,12 @@
       "selection_status": "eligible",
       "source_identity": {
         "identity_kind": "immutable-run-or-artifact",
+        "job_selection_rule": "max(job.completed_at - job.started_at), tie-break lowest numeric job id",
+        "log_acquisition_endpoint": "https://api.github.com/repos/jqlang/jq/actions/jobs/{job_id}/logs",
         "repository_url": "https://github.com/jqlang/jq",
         "run_id": "28568334149",
+        "selected_job_ids": [],
+        "selected_job_names": [],
         "workflow_identity": ".github/workflows/ci.yml"
       },
       "source_kind": "ci-run-artifact",
@@ -181,8 +189,12 @@
       "selection_status": "eligible",
       "source_identity": {
         "identity_kind": "immutable-run-or-artifact",
+        "job_selection_rule": "max(job.completed_at - job.started_at), tie-break lowest numeric job id",
+        "log_acquisition_endpoint": "https://api.github.com/repos/rust-lang/rust/actions/jobs/{job_id}/logs",
         "repository_url": "https://github.com/rust-lang/rust",
         "run_id": "29366449652",
+        "selected_job_ids": [],
+        "selected_job_names": [],
         "workflow_identity": ".github/workflows/ci.yml"
       },
       "source_kind": "ci-run-artifact",
@@ -216,7 +228,7 @@
       ],
       "expected_size_bucket": "very-large",
       "expected_size_confidence": "high",
-      "expected_size_estimation_basis": "19 system/app log files, 6.0 GB total per Zenodo API metadata",
+      "expected_size_estimation_basis": "19 system/app log files, 6.0 GB total per Zenodo API metadata; Proxifier.tar.gz (172346 bytes) selected as the one exact frozen archive member",
       "external_service_requirements": [],
       "license": {
         "redistribution_allowed": true,
@@ -247,8 +259,16 @@
       "security_flags": [],
       "selection_status": "eligible",
       "source_identity": {
+        "acquisition_size_bytes": 172346,
+        "archive_member": "Proxifier.log",
+        "exact_download_url": "https://zenodo.org/api/records/8196385/files/Proxifier.tar.gz/content",
         "identity_kind": "immutable-object-or-doi",
-        "object_id_or_doi": "10.5281/zenodo.8196385"
+        "media_type": "application/gzip",
+        "object_id_or_doi": "10.5281/zenodo.8196385",
+        "publisher_checksum_algorithm": "md5",
+        "publisher_reported_checksum": "2612fce12cc3d16599ddb3db8e9c477a",
+        "selected_exact_file": "Proxifier.tar.gz",
+        "selection_rule": "smallest file by publisher-declared byte size among the record's 19 files (verified via Zenodo API); archive_member is the archive's sole member (verified by direct extraction listing)"
       },
       "source_kind": "dataset-artifact",
       "status_history": [
@@ -285,7 +305,7 @@
       "external_service_requirements": [],
       "license": {
         "redistribution_allowed": true,
-        "redistribution_basis": "Explicit public-domain waiver stated on the publisher page (CC0-equivalent).",
+        "redistribution_basis": "Explicit public-domain waiver stated on the publisher page (CC0-equivalent) \u2014 redistribution basis is clear, but the source itself is not technically acquirable without an interactive access grant (see acquisition_barrier_evidence).",
         "spdx": "CC0-1.0",
         "status": "clear"
       },
@@ -312,8 +332,82 @@
       "security_flags": [],
       "selection_status": "eligible",
       "source_identity": {
+        "acquisition_barrier_evidence": "Fetched https://csr.lanl.gov/data/2017/ directly and inspected the page markup: the actual per-day download links are rendered as <a class=\"fenced-href\" data-prefix=\"/data-fence/\" data-suffix=\"...\"> with an empty <span class=\"fenced-path\"></span> populated only after an interactive 'please provide your email address' request flow \u2014 there is no static, reproducible, unauthenticated download URL a trusted credential-free CI job can fetch.",
         "identity_kind": "immutable-object-or-doi",
-        "object_id_or_doi": "csr.lanl.gov/data/2017 (fixed per-day filenames, no DOI)"
+        "object_id_or_doi": "csr.lanl.gov/data/2017 (fixed per-day filenames, no DOI)",
+        "requires_interactive_access_grant": true
+      },
+      "source_kind": "dataset-artifact",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ]
+    },
+    {
+      "candidate_id": "dataset-rtn-traffic-ids",
+      "container_requirements": [],
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "medium",
+      "evidence_references": [
+        "https://zenodo.org/records/18910837"
+      ],
+      "expected_size_bucket": "medium",
+      "expected_size_confidence": "high",
+      "expected_size_estimation_basis": "single structured CSV of captured network-traffic/IDS events, 37978049 bytes per Zenodo API metadata (independently re-downloaded and MD5-verified during discovery research)",
+      "external_service_requirements": [],
+      "license": {
+        "redistribution_allowed": true,
+        "redistribution_basis": "Zenodo record license.id=cc-by-4.0 (versioned, immutable DOI record, published 2026-03-08).",
+        "spdx": "CC-BY-4.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "not-applicable-non-repository",
+      "origin_family_group": "public-runtime-dataset::runtime",
+      "origin_kind": "public-runtime-dataset",
+      "personal_data_review": {
+        "personal_data_present": false,
+        "sanitization_notes": ""
+      },
+      "primary_family": "runtime",
+      "project": {
+        "entry_point": null
+      },
+      "public_canonical_url": "https://zenodo.org/records/18910837",
+      "publisher": {
+        "identity": "Chaudhari, R. and Deshpande, M. (Zenodo)"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "acquisition_size_bytes": 37978049,
+        "exact_download_url": "https://zenodo.org/api/records/18910837/files/RTN_traffic_dataset.csv/content",
+        "identity_kind": "immutable-object-or-doi",
+        "media_type": "text/csv",
+        "object_id_or_doi": "10.5281/zenodo.18910837",
+        "publisher_checksum_algorithm": "md5",
+        "publisher_reported_checksum": "81e307809d1d0ddeb31c934c689d5b19",
+        "selected_exact_file": "RTN_traffic_dataset.csv",
+        "selection_rule": "sole non-pcap file in the record; independently downloaded and MD5-verified against the Zenodo API's own published checksum during N2-C closure research"
       },
       "source_kind": "dataset-artifact",
       "status_history": [
@@ -378,6 +472,7 @@
       "selection_status": "eligible",
       "source_identity": {
         "identity_kind": "immutable-run-or-artifact",
+        "media_type": "text/html",
         "object_id_or_doi": "extid:919c5a9be8433b8bf201"
       },
       "source_kind": "bot-output-artifact",
@@ -443,6 +538,7 @@
       "selection_status": "eligible",
       "source_identity": {
         "identity_kind": "immutable-run-or-artifact",
+        "media_type": "application/json",
         "object_id_or_doi": "psf/black#5206"
       },
       "source_kind": "bot-output-artifact",
@@ -476,7 +572,7 @@
       ],
       "expected_size_bucket": "large",
       "expected_size_confidence": "high",
-      "expected_size_estimation_basis": "14 curated/re-annotated log-parsing datasets, 965.6 MB total per Zenodo API metadata",
+      "expected_size_estimation_basis": "14 curated/re-annotated log-parsing datasets, 965.6 MB total per Zenodo API metadata; Proxifier.zip (380635 bytes) selected as the one exact frozen archive member",
       "external_service_requirements": [],
       "license": {
         "redistribution_allowed": true,
@@ -507,8 +603,16 @@
       "security_flags": [],
       "selection_status": "eligible",
       "source_identity": {
+        "acquisition_size_bytes": 380635,
+        "archive_member": "Proxifier/Proxifier_full.log",
+        "exact_download_url": "https://zenodo.org/api/records/8275861/files/Proxifier.zip/content",
         "identity_kind": "immutable-object-or-doi",
-        "object_id_or_doi": "10.5281/zenodo.8275861"
+        "media_type": "application/zip",
+        "object_id_or_doi": "10.5281/zenodo.8275861",
+        "publisher_checksum_algorithm": "md5",
+        "publisher_reported_checksum": "2e4b67dc68c3a4f1c18e267c341c52a2",
+        "selected_exact_file": "Proxifier.zip",
+        "selection_rule": "smallest file by publisher-declared byte size among the record's 14 files (verified via Zenodo API); archive_member is the sole member whose filename ends in '.log' (excluding the sibling derived _structured.csv/_templates.csv files, verified by direct extraction listing)"
       },
       "source_kind": "research-corpus-artifact",
       "status_history": [

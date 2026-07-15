@@ -2,9 +2,13 @@
   "case_id": "repo-pip-tools",
   "ecosystem": "python",
   "execution_expectation": {
-    "argv": [],
+    "argv": [
+      "pip-compile"
+    ],
     "command_class": "pip-compile",
+    "execution_plan_status": "frozen",
     "expected_size_bucket": "small",
+    "extraction_recipe": null,
     "network_during_untrusted_execution": "denied",
     "size_estimation_basis": "pip-compile/pip-sync output is literally dependency-resolution logging",
     "trusted_dependency_realization": "no-lockfile-restore-required"
@@ -30,11 +34,27 @@
   "secondary_tags": [],
   "selection_role": "alternate",
   "source_identity": {
+    "acquisition_size_bytes": null,
     "canonical_url": "https://github.com/jazzband/pip-tools",
     "commit_sha": "9a2d2c12a798d1986807a718e2ab0c92f1f9f81c",
+    "durable_object_identity": null,
+    "durable_sha256": null,
+    "exact_download_url": null,
+    "job_selection_rule": null,
+    "log_acquisition_endpoint": null,
+    "media_type": null,
+    "metadata_sha256": null,
     "normalized_archive_sha256": null,
+    "normalized_source_sha256": null,
     "object_id_or_doi": null,
     "original_sha256": null,
+    "publisher_checksum_algorithm": null,
+    "publisher_reported_checksum": null,
+    "selected_exact_file": null,
+    "selected_job_ids": [],
+    "selected_job_names": [],
+    "source_commit_sha": null,
+    "source_content_sha256": null,
     "tree_sha": null
   },
   "source_kind": "repository-execution"

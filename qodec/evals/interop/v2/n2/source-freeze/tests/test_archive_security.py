@@ -133,5 +133,58 @@ class TestZipSecurity(unittest.TestCase):
                 archive_security.assert_safe(path)
 
 
+class TestContentOnlyAcquisitionDetection(unittest.TestCase):
+    """Section 11 (N2-C closure): the artifact-contract job must fail if an
+    acquisition directory holds only a receipt where actual source bytes
+    are required."""
+
+    def setUp(self):
+        import tempfile
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmpdir.name)
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_repository_case_with_real_source_tar_passes(self):
+        case = self.root / "repo-example"
+        case.mkdir()
+        (case / "source.tar").write_bytes(b"not empty")
+        (case / "acquisition-receipt.json").write_text("{}")
+        offenders = archive_security.find_content_only_acquisitions(self.root)
+        self.assertEqual(offenders, [])
+
+    def test_non_repository_case_with_real_source_directory_passes(self):
+        case = self.root / "ci-log-example"
+        case.mkdir()
+        (case / "source").mkdir()
+        (case / "source" / "job-1.log").write_bytes(b"real log bytes")
+        (case / "acquisition-receipt.json").write_text("{}")
+        offenders = archive_security.find_content_only_acquisitions(self.root)
+        self.assertEqual(offenders, [])
+
+    def test_receipt_only_case_is_flagged(self):
+        case = self.root / "ci-log-missing-content"
+        case.mkdir()
+        (case / "acquisition-receipt.json").write_text("{}")
+        (case / "source-file-manifest.json").write_text("[]")
+        offenders = archive_security.find_content_only_acquisitions(self.root)
+        self.assertEqual(offenders, ["ci-log-missing-content"])
+
+    def test_empty_source_directory_is_flagged(self):
+        case = self.root / "empty-source-dir"
+        (case / "source").mkdir(parents=True)
+        (case / "acquisition-receipt.json").write_text("{}")
+        offenders = archive_security.find_content_only_acquisitions(self.root)
+        self.assertEqual(offenders, ["empty-source-dir"])
+
+    def test_empty_source_tar_is_flagged(self):
+        case = self.root / "empty-tar"
+        case.mkdir()
+        (case / "source.tar").write_bytes(b"")
+        offenders = archive_security.find_content_only_acquisitions(self.root)
+        self.assertEqual(offenders, ["empty-tar"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -46,6 +46,7 @@ NON_REPOSITORY_RULES = [
     "no_private_credentials_required",
     "no_ineliminable_pii_or_secret_exposure",
     "publisher_identity_present",
+    "no_interactive_access_gate",
 ]
 
 
@@ -138,6 +139,16 @@ def _evaluate_non_repository_rule(rule: str, candidate: dict) -> tuple[bool, str
     if rule == "publisher_identity_present":
         ok = bool(publisher.get("identity"))
         return ok, f"publisher.identity={publisher.get('identity')!r}"
+    if rule == "no_interactive_access_gate":
+        # Section 10 (N2-C closure): "Publicly downloadable" via a browser is
+        # not the same as acquirable by a trusted, credential-free CI job. A
+        # source whose real download URL is only issued after an interactive
+        # registration/email-request flow (verified by inspecting the actual
+        # publisher page, not assumed) has no stable, reproducible,
+        # unauthenticated acquisition URL and must be rejected here rather
+        # than silently degraded to a metadata-only "acquisition."
+        gated = bool(ident.get("requires_interactive_access_grant", False))
+        return not gated, f"requires_interactive_access_grant={gated}"
     raise ValueError(f"unknown non-repository rule {rule!r}")
 
 

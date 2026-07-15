@@ -113,7 +113,25 @@
             "artifact_id": { "type": ["string", "null"] },
             "artifact_digest": { "type": ["string", "null"] },
             "original_content_sha256": { "type": ["string", "null"] },
-            "normalized_archive_sha256": { "type": ["string", "null"] }
+            "normalized_archive_sha256": { "type": ["string", "null"] },
+            "metadata_sha256": { "type": ["string", "null"] },
+            "source_content_sha256": { "type": ["string", "null"] },
+            "normalized_source_sha256": { "type": ["string", "null"] },
+            "source_commit_sha": { "type": ["string", "null"] },
+            "job_selection_rule": { "type": ["string", "null"] },
+            "selected_job_ids": { "type": "array", "items": { "type": "string" } },
+            "selected_job_names": { "type": "array", "items": { "type": "string" } },
+            "log_acquisition_endpoint": { "type": ["string", "null"] },
+            "selected_exact_file": { "type": ["string", "null"] },
+            "archive_member": { "type": ["string", "null"] },
+            "exact_download_url": { "type": ["string", "null"] },
+            "publisher_reported_checksum": { "type": ["string", "null"] },
+            "publisher_checksum_algorithm": { "type": ["string", "null"] },
+            "media_type": { "type": ["string", "null"] },
+            "acquisition_size_bytes": { "type": ["integer", "null"] },
+            "requires_interactive_access_grant": { "type": "boolean" },
+            "durable_object_identity": { "type": ["string", "null"] },
+            "durable_sha256": { "type": ["string", "null"] }
           }
         },
         "license": {

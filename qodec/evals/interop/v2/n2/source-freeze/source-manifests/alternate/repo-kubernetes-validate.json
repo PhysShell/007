@@ -2,9 +2,13 @@
   "case_id": "repo-kubernetes-validate",
   "ecosystem": "python",
   "execution_expectation": {
-    "argv": [],
+    "argv": [
+      "pytest"
+    ],
     "command_class": "pytest",
+    "execution_plan_status": "frozen",
     "expected_size_bucket": "small",
+    "extraction_recipe": null,
     "network_during_untrusted_execution": "denied",
     "size_estimation_basis": "pure-Python static K8s YAML validator against bundled JSON schemas",
     "trusted_dependency_realization": "no-lockfile-restore-required"
@@ -30,11 +34,27 @@
   "secondary_tags": [],
   "selection_role": "alternate",
   "source_identity": {
+    "acquisition_size_bytes": null,
     "canonical_url": "https://github.com/willthames/kubernetes-validate",
     "commit_sha": "3f6f61dd54df4d721f52953557281209b2f12d7c",
+    "durable_object_identity": null,
+    "durable_sha256": null,
+    "exact_download_url": null,
+    "job_selection_rule": null,
+    "log_acquisition_endpoint": null,
+    "media_type": null,
+    "metadata_sha256": null,
     "normalized_archive_sha256": null,
+    "normalized_source_sha256": null,
     "object_id_or_doi": null,
     "original_sha256": null,
+    "publisher_checksum_algorithm": null,
+    "publisher_reported_checksum": null,
+    "selected_exact_file": null,
+    "selected_job_ids": [],
+    "selected_job_names": [],
+    "source_commit_sha": null,
+    "source_content_sha256": null,
     "tree_sha": null
   },
   "source_kind": "repository-execution"

@@ -164,16 +164,27 @@ def acquire_repository_candidate(repo_dir: Path, candidate: dict, out_dir: Path,
         json.dumps(file_manifest, indent=2, sort_keys=True) + "\n"
     )
 
-    return {
+    result = {
         "candidate_id": candidate["candidate_id"],
         "actual_head_sha": identity["head_sha"],
         "git_tree_sha": identity["git_tree_sha"],
         "normalized_archive_sha256": archive_sha256,
         "license_sha256": license_sha256,
+        # For repository-execution candidates, real source content IS the
+        # normalized tar of tracked files above (already a genuine content
+        # hash, never metadata) — the metadata/content/normalized-source
+        # triad introduced for the four non-repository origin kinds does not
+        # apply to a multi-file git tree, so these stay null by design (see
+        # source-manifest.schema.json's non-repository-only requirement).
+        "metadata_sha256": None,
+        "source_content_sha256": None,
+        "normalized_source_sha256": None,
         "tracked_file_count": len(files),
         "acquisition_runner_identity": runner_identity,
         "acquisition_workflow_run_id": workflow_run_id,
     }
+    (case_out / "acquisition-receipt.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    return result
 
 
 def verify_downloaded_artifact(artifact_path: Path, expected_sha256: str | None = None) -> dict:

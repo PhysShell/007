@@ -102,3 +102,31 @@ def assert_safe(path: Path) -> dict:
     if findings.get("encrypted_members"):
         raise RejectedArchive(f"{path}: password-protected/encrypted archive members: {findings['encrypted_members']}")
     return findings
+
+
+# Minimum plausible size for a "real" acquired source file — well below any
+# genuine log/dataset/repo-tar content, but enough to reject a truncated or
+# accidentally-empty placeholder.
+_MIN_REAL_CONTENT_BYTES = 1
+
+
+def find_content_only_acquisitions(acquisition_root: Path) -> list[str]:
+    """Section 11: 'The artifact-contract job must fail if the acquisition
+    artifact contains only a receipt where actual source bytes are
+    required.' Returns the list of candidate_ids under acquisition_root
+    whose directory holds ONLY a receipt/manifest (acquisition-receipt.json,
+    source-file-manifest.json, <id>.acquisition.json) with no real content
+    file (source.tar for repository-execution, or a non-empty source/
+    directory for every other source kind)."""
+    offenders = []
+    for case_dir in sorted(acquisition_root.iterdir()):
+        if not case_dir.is_dir():
+            continue
+        has_repo_tar = (case_dir / "source.tar").is_file() and (case_dir / "source.tar").stat().st_size >= _MIN_REAL_CONTENT_BYTES
+        source_dir = case_dir / "source"
+        has_source_dir_content = source_dir.is_dir() and any(
+            f.is_file() and f.stat().st_size >= _MIN_REAL_CONTENT_BYTES for f in source_dir.rglob("*")
+        )
+        if not has_repo_tar and not has_source_dir_content:
+            offenders.append(case_dir.name)
+    return offenders

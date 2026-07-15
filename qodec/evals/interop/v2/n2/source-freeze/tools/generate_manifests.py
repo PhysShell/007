@@ -11,6 +11,7 @@ workflow's trusted-source-acquisition job).
 from __future__ import annotations
 
 import json
+import shlex
 import sys
 from pathlib import Path
 
@@ -23,10 +24,73 @@ import license_review  # noqa: E402
 
 MANIFEST_SCHEMA = json.loads((SOURCE_FREEZE_DIR / "schemas" / "source-manifest.schema.json").read_text())
 
+_COMPOUND_SHELL_MARKERS = (" && ", " || ", " | ", ";")
+_MAX_EXTRACTED_SOURCE_BYTES = 4 * 1024 * 1024  # 4 MiB, matching N2-D's max canonical raw log size
+
+
+def _repository_execution_plan(candidate: dict) -> dict:
+    """A repository-execution case gets a real argv array split from its
+    already-recorded expected_capture_command_class, UNLESS that command is
+    a multi-step shell pipeline (contains &&/||/|/;) that cannot be
+    expressed as one argv array without a shell — in that case the plan is
+    explicitly marked unresolved (requires-n2d-probe) rather than silently
+    truncating to a single step or writing an empty argv while claiming the
+    plan is frozen (section 6)."""
+    cmd = (candidate.get("expected_capture_command_class") or "").strip()
+    if not cmd or any(marker in cmd for marker in _COMPOUND_SHELL_MARKERS):
+        return {"argv": [], "execution_plan_status": "requires-n2d-probe", "extraction_recipe": None}
+    try:
+        argv = shlex.split(cmd)
+    except ValueError:
+        argv = []
+    if not argv:
+        return {"argv": [], "execution_plan_status": "requires-n2d-probe", "extraction_recipe": None}
+    return {"argv": argv, "execution_plan_status": "frozen", "extraction_recipe": None}
+
+
+def _non_repository_extraction_recipe(candidate: dict) -> dict:
+    """Every non-repository case gets a deterministic extraction recipe
+    instead of an empty argv + null entry point (section 6). The recipe is
+    built entirely from already-frozen source structure (which exact file/
+    archive member was selected, its media type) and a predeclared size
+    cap — never from QODEC/RTK output, token counts, or post-hoc content
+    inspection (section 3)."""
+    source_kind = candidate["source_kind"]
+    ident = candidate["source_identity"]
+    if source_kind == "ci-run-artifact":
+        job_ids = ident.get("selected_job_ids") or []
+        input_id = f"source/job-{job_ids[0]}.log" if job_ids else None
+        archive_member = None
+    elif source_kind == "bot-output-artifact":
+        is_html = (ident.get("object_id_or_doi") or "").startswith("extid:")
+        input_id = f"source/response.{'html' if is_html else 'json'}"
+        archive_member = None
+    elif source_kind in ("dataset-artifact", "research-corpus-artifact"):
+        exact_file = ident.get("selected_exact_file")
+        input_id = f"source/{exact_file}" if exact_file else None
+        archive_member = ident.get("archive_member")
+    else:
+        input_id = None
+        archive_member = None
+    return {
+        "input_file_identity": input_id,
+        "archive_member": archive_member,
+        "encoding": "utf-8",
+        "line_ending_policy": "preserve-original",
+        "starting_line_or_byte_offset": 0,
+        "ending_condition": "end-of-file",
+        "maximum_extracted_source_bytes": _MAX_EXTRACTED_SOURCE_BYTES,
+    }
+
 
 def build_source_manifest(candidate: dict, role: str, fallback_priority: int | None,
                            fallback_quota_groups: list) -> dict:
     ident = candidate["source_identity"]
+    if candidate["source_kind"] == "repository-execution":
+        plan = _repository_execution_plan(candidate)
+    else:
+        plan = {"argv": [], "execution_plan_status": "frozen",
+                "extraction_recipe": _non_repository_extraction_recipe(candidate)}
     return {
         "case_id": candidate["candidate_id"],
         "selection_role": role,
@@ -44,6 +108,22 @@ def build_source_manifest(candidate: dict, role: str, fallback_priority: int | N
             "object_id_or_doi": ident.get("object_id_or_doi"),
             "original_sha256": ident.get("original_content_sha256"),
             "normalized_archive_sha256": ident.get("normalized_archive_sha256"),
+            "metadata_sha256": ident.get("metadata_sha256"),
+            "source_content_sha256": ident.get("source_content_sha256"),
+            "normalized_source_sha256": ident.get("normalized_source_sha256"),
+            "source_commit_sha": ident.get("source_commit_sha"),
+            "job_selection_rule": ident.get("job_selection_rule"),
+            "selected_job_ids": ident.get("selected_job_ids", []),
+            "selected_job_names": ident.get("selected_job_names", []),
+            "log_acquisition_endpoint": ident.get("log_acquisition_endpoint"),
+            "selected_exact_file": ident.get("selected_exact_file"),
+            "exact_download_url": ident.get("exact_download_url"),
+            "publisher_reported_checksum": ident.get("publisher_reported_checksum"),
+            "publisher_checksum_algorithm": ident.get("publisher_checksum_algorithm"),
+            "media_type": ident.get("media_type"),
+            "acquisition_size_bytes": ident.get("acquisition_size_bytes"),
+            "durable_object_identity": ident.get("durable_object_identity"),
+            "durable_sha256": ident.get("durable_sha256"),
         },
         "license_identity": {
             "spdx": candidate["license"]["spdx"],
@@ -61,7 +141,9 @@ def build_source_manifest(candidate: dict, role: str, fallback_priority: int | N
             "network_during_untrusted_execution": "denied",
             "expected_size_bucket": candidate["expected_size_bucket"],
             "size_estimation_basis": candidate["expected_size_estimation_basis"],
-            "argv": [],
+            "argv": plan["argv"],
+            "execution_plan_status": plan["execution_plan_status"],
+            "extraction_recipe": plan["extraction_recipe"],
         },
     }
 

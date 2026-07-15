@@ -165,6 +165,27 @@ class TestNegativePaths(unittest.TestCase):
         self.assertFalse(report["eligible"])
         self.assertEqual(report["rejection_reason"], "no_ineliminable_pii_or_secret_exposure")
 
+    def test_interactive_access_gate_rejected_for_non_repository_candidate(self):
+        # N2-C closure section 10: "publicly downloadable" via a browser is
+        # not the same as acquirable by a trusted, credential-free CI job.
+        c = _non_repo_candidate(
+            "public-runtime-dataset",
+            source_identity={"identity_kind": "immutable-object-or-doi", "object_id_or_doi": "csr.lanl.gov/data/2017",
+                              "requires_interactive_access_grant": True},
+        )
+        report = eligibility.evaluate(c)
+        self.assertFalse(report["eligible"])
+        self.assertEqual(report["rejection_reason"], "no_interactive_access_gate")
+
+    def test_real_registry_rejects_lanl_for_interactive_access_gate(self):
+        sys.path.insert(0, str(TOOLS))
+        import registry as registry_mod
+        reg = registry_mod.load_registry(SOURCE_FREEZE_DIR / "candidate-registry.json")
+        lanl = next(c for c in reg["candidates"] if c["candidate_id"] == "dataset-lanl-unified-2017")
+        report = eligibility.evaluate(lanl)
+        self.assertFalse(report["eligible"])
+        self.assertEqual(report["rejection_reason"], "no_interactive_access_gate")
+
     def test_qodec_field_in_candidate_rejected_upstream_of_eligibility(self):
         # eligibility itself never reads such a field; the registry-level
         # seal (test_registry.py) is what rejects it before evaluate() runs.

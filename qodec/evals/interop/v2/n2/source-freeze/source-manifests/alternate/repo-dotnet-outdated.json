@@ -2,9 +2,16 @@
   "case_id": "repo-dotnet-outdated",
   "ecosystem": "dotnet",
   "execution_expectation": {
-    "argv": [],
+    "argv": [
+      "dotnet",
+      "run",
+      "--",
+      "--version"
+    ],
     "command_class": "dotnet run -- --version",
+    "execution_plan_status": "frozen",
     "expected_size_bucket": "small",
+    "extraction_recipe": null,
     "network_during_untrusted_execution": "denied",
     "size_estimation_basis": "NuGet outdated-package listing/diagnostic CLI",
     "trusted_dependency_realization": "no-lockfile-restore-required"
@@ -30,11 +37,27 @@
   "secondary_tags": [],
   "selection_role": "alternate",
   "source_identity": {
+    "acquisition_size_bytes": null,
     "canonical_url": "https://github.com/dotnet-outdated/dotnet-outdated",
     "commit_sha": "3b4f62e3c7e9c6b6e82144274c36a58abd30e276",
+    "durable_object_identity": null,
+    "durable_sha256": null,
+    "exact_download_url": null,
+    "job_selection_rule": null,
+    "log_acquisition_endpoint": null,
+    "media_type": null,
+    "metadata_sha256": null,
     "normalized_archive_sha256": null,
+    "normalized_source_sha256": null,
     "object_id_or_doi": null,
     "original_sha256": null,
+    "publisher_checksum_algorithm": null,
+    "publisher_reported_checksum": null,
+    "selected_exact_file": null,
+    "selected_job_ids": [],
+    "selected_job_names": [],
+    "source_commit_sha": null,
+    "source_content_sha256": null,
     "tree_sha": null
   },
   "source_kind": "repository-execution"

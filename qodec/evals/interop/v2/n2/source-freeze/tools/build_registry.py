@@ -115,12 +115,23 @@ CANDIDATES = []
 # ---------------------------------------------------------------------------
 
 # -- native-upstream-ci-log (3) --
+# job_selection_rule is decided NOW, deterministically, from job STRUCTURE
+# only (start/end timestamps + numeric job id) — never from log content,
+# QODEC, RTK, or token counts. The concrete winning job_id/name for each run
+# is resolved by the real trusted-acquisition CI job (this sandbox cannot
+# reach api.github.com for repos outside its declared GitHub scope) and then
+# locked into this registry via the identity-lock commit (section 5's
+# two-phase process) — never deferred until N2-D or influenced by benchmark
+# output.
+_JOB_SELECTION_RULE = "max(job.completed_at - job.started_at), tie-break lowest numeric job id"
 CANDIDATES.append(artifact(
     "ci-log-curl-linux", "https://github.com/curl/curl/actions/runs/29367345523",
     "native-upstream-ci-log", "ci-build", "curl/curl (Daniel Stenberg et al.)",
     "immutable-run-or-artifact",
     {"repository_url": "https://github.com/curl/curl", "workflow_identity": ".github/workflows/linux.yml",
-     "run_id": "29367345523", "ecosystem": "infrastructure-or-language-neutral"},
+     "run_id": "29367345523", "ecosystem": "infrastructure-or-language-neutral",
+     "job_selection_rule": _JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
+     "log_acquisition_endpoint": "https://api.github.com/repos/curl/curl/actions/jobs/{job_id}/logs"},
     "MIT", "Public GitHub Actions run on a public repository, visible to any visitor by platform design; source license MIT (COPYING).",
     "large", "curl's Linux CI matrix runs ~47 jobs, ~9 min; expect a large aggregate log", "medium",
 ))
@@ -129,7 +140,9 @@ CANDIDATES.append(artifact(
     "native-upstream-ci-log", "ci-build", "jqlang/jq (itchyny et al.)",
     "immutable-run-or-artifact",
     {"repository_url": "https://github.com/jqlang/jq", "workflow_identity": ".github/workflows/ci.yml",
-     "run_id": "28568334149", "ecosystem": "infrastructure-or-language-neutral"},
+     "run_id": "28568334149", "ecosystem": "infrastructure-or-language-neutral",
+     "job_selection_rule": _JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
+     "log_acquisition_endpoint": "https://api.github.com/repos/jqlang/jq/actions/jobs/{job_id}/logs"},
     "MIT", "Public GitHub Actions run on a public repository; source license MIT (COPYING), plus bundled oniguruma/decNumber licenses.",
     "large", "jq CI matrix (Linux/macOS/Windows + dist/docker/release jobs), ~16 min, 24 build artifacts", "medium",
 ))
@@ -138,29 +151,71 @@ CANDIDATES.append(artifact(
     "native-upstream-ci-log", "ci-build", "rust-lang/rust (rust-bors[bot] merge queue)",
     "immutable-run-or-artifact",
     {"repository_url": "https://github.com/rust-lang/rust", "workflow_identity": ".github/workflows/ci.yml",
-     "run_id": "29366449652", "ecosystem": "rust"},
+     "run_id": "29366449652", "ecosystem": "rust",
+     "job_selection_rule": _JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
+     "log_acquisition_endpoint": "https://api.github.com/repos/rust-lang/rust/actions/jobs/{job_id}/logs"},
     "MIT", "Public GitHub Actions run (bors merge-queue gate); source dual-licensed MIT/Apache-2.0 (COPYRIGHT).",
     "very-large", "~89-job matrix, 3h26m duration — one of the largest real CI logs available, good stress case", "medium",
 ))
 
 # -- public-runtime-dataset (2) --
+# Exact archive member selected NOW, deterministically, by publisher-declared
+# byte size alone (smallest file in the record) — never by peeking at log
+# content, QODEC, RTK, or token counts. This bounds CI download time/disk
+# for a record whose FULL file set is multi-GB, per section 3.
 CANDIDATES.append(artifact(
     "dataset-loghub-v8", "https://zenodo.org/records/8196385",
     "public-runtime-dataset", "runtime", "LogPAI (Zhu, He, He, Liu, Lyu)",
     "immutable-object-or-doi",
-    {"object_id_or_doi": "10.5281/zenodo.8196385", "ecosystem": "infrastructure-or-language-neutral"},
+    {"object_id_or_doi": "10.5281/zenodo.8196385", "ecosystem": "infrastructure-or-language-neutral",
+     "selected_exact_file": "Proxifier.tar.gz",
+     "exact_download_url": "https://zenodo.org/api/records/8196385/files/Proxifier.tar.gz/content",
+     "publisher_reported_checksum": "2612fce12cc3d16599ddb3db8e9c477a", "publisher_checksum_algorithm": "md5",
+     "acquisition_size_bytes": 172346, "media_type": "application/gzip",
+     "archive_member": "Proxifier.log",
+     "selection_rule": "smallest file by publisher-declared byte size among the record's 19 files (verified via Zenodo API); "
+                        "archive_member is the archive's sole member (verified by direct extraction listing)"},
     "CC-BY-4.0", "Zenodo record license.id=cc-by-4.0 (versioned, immutable DOI record).",
-    "very-large", "19 system/app log files, 6.0 GB total per Zenodo API metadata", "high",
+    "very-large", "19 system/app log files, 6.0 GB total per Zenodo API metadata; Proxifier.tar.gz (172346 bytes) selected as the one exact frozen archive member", "high",
     sanitization_notes="Real production/lab system logs; not sanitized per publisher README, but content is operational events, not user PII.",
 ))
 CANDIDATES.append(artifact(
     "dataset-lanl-unified-2017", "https://csr.lanl.gov/data/2017/",
     "public-runtime-dataset", "runtime", "Los Alamos National Laboratory CSR group",
     "immutable-object-or-doi",
-    {"object_id_or_doi": "csr.lanl.gov/data/2017 (fixed per-day filenames, no DOI)", "ecosystem": "infrastructure-or-language-neutral"},
-    "CC0-1.0", "Explicit public-domain waiver stated on the publisher page (CC0-equivalent).",
+    {"object_id_or_doi": "csr.lanl.gov/data/2017 (fixed per-day filenames, no DOI)", "ecosystem": "infrastructure-or-language-neutral",
+     "requires_interactive_access_grant": True,
+     "acquisition_barrier_evidence": (
+         "Fetched https://csr.lanl.gov/data/2017/ directly and inspected the page markup: the actual "
+         "per-day download links are rendered as <a class=\"fenced-href\" data-prefix=\"/data-fence/\" "
+         "data-suffix=\"...\"> with an empty <span class=\"fenced-path\"></span> populated only after "
+         "an interactive 'please provide your email address' request flow — there is no static, "
+         "reproducible, unauthenticated download URL a trusted credential-free CI job can fetch."
+     )},
+    "CC0-1.0", "Explicit public-domain waiver stated on the publisher page (CC0-equivalent) — redistribution basis is clear, "
+    "but the source itself is not technically acquirable without an interactive access grant (see acquisition_barrier_evidence).",
     "very-large", "90 days of host/network logs, per-day .bz2 files, no consolidated size published", "medium",
     sanitization_notes="Publisher explicitly deidentified host/user/domain names before release.",
+))
+# Real, verified replacement for dataset-lanl-unified-2017 (section 10:
+# rerun full deterministic selection after an evidence-driven ineligibility,
+# never a manual substitution). Independently fetched and checksum-verified
+# during N2-C closure research: https://zenodo.org/api/records/18910837 —
+# single CSV file, MD5 matches Zenodo's own published checksum exactly.
+CANDIDATES.append(artifact(
+    "dataset-rtn-traffic-ids", "https://zenodo.org/records/18910837",
+    "public-runtime-dataset", "runtime", "Chaudhari, R. and Deshpande, M. (Zenodo)",
+    "immutable-object-or-doi",
+    {"object_id_or_doi": "10.5281/zenodo.18910837", "ecosystem": "infrastructure-or-language-neutral",
+     "selected_exact_file": "RTN_traffic_dataset.csv",
+     "exact_download_url": "https://zenodo.org/api/records/18910837/files/RTN_traffic_dataset.csv/content",
+     "publisher_reported_checksum": "81e307809d1d0ddeb31c934c689d5b19", "publisher_checksum_algorithm": "md5",
+     "acquisition_size_bytes": 37978049, "media_type": "text/csv",
+     "selection_rule": "sole non-pcap file in the record; independently downloaded and MD5-verified against the "
+                        "Zenodo API's own published checksum during N2-C closure research"},
+    "CC-BY-4.0", "Zenodo record license.id=cc-by-4.0 (versioned, immutable DOI record, published 2026-03-08).",
+    "medium", "single structured CSV of captured network-traffic/IDS events, 37978049 bytes per Zenodo API metadata "
+    "(independently re-downloaded and MD5-verified during discovery research)", "high",
 ))
 
 # -- kernel-or-infrastructure-bot (2) --
@@ -168,7 +223,8 @@ CANDIDATES.append(artifact(
     "bot-syzbot-do-mkdirat", "https://syzkaller.appspot.com/bug?extid=919c5a9be8433b8bf201",
     "kernel-or-infrastructure-bot", "search-listing-diagnostic", "syzbot (Google syzkaller)",
     "immutable-run-or-artifact",
-    {"object_id_or_doi": "extid:919c5a9be8433b8bf201", "ecosystem": "infrastructure-or-language-neutral"},
+    {"object_id_or_doi": "extid:919c5a9be8433b8bf201", "ecosystem": "infrastructure-or-language-neutral",
+     "media_type": "text/html"},
     "CC0-1.0", "Google-run public infrastructure explicitly designed for public consumption; content is factual kernel crash/stack-trace data.",
     "small", "single bug report page: stack trace + bisection status, no attachments", "medium",
 ))
@@ -176,7 +232,8 @@ CANDIDATES.append(artifact(
     "bot-dependabot-black-5206", "https://github.com/psf/black/pull/5206",
     "kernel-or-infrastructure-bot", "dependency-package-manager", "dependabot[bot] on psf/black",
     "immutable-run-or-artifact",
-    {"object_id_or_doi": "psf/black#5206", "ecosystem": "python"},
+    {"object_id_or_doi": "psf/black#5206", "ecosystem": "python",
+     "media_type": "application/json"},
     "MIT", "psf/black is MIT-licensed; PR diff/metadata publicly viewable per GitHub ToS, content is a routine GH-Actions-version-bump manifest diff.",
     "small", "single dependency-bump PR: title, diff (one line), 90 check results", "high",
 ))
@@ -186,9 +243,17 @@ CANDIDATES.append(artifact(
     "research-corpus-loghub2", "https://zenodo.org/records/8275861",
     "reproducible-research-corpus", "search-listing-diagnostic", "LogPAI (ISSTA'24 companion dataset)",
     "immutable-object-or-doi",
-    {"object_id_or_doi": "10.5281/zenodo.8275861", "ecosystem": "infrastructure-or-language-neutral"},
+    {"object_id_or_doi": "10.5281/zenodo.8275861", "ecosystem": "infrastructure-or-language-neutral",
+     "selected_exact_file": "Proxifier.zip",
+     "exact_download_url": "https://zenodo.org/api/records/8275861/files/Proxifier.zip/content",
+     "publisher_reported_checksum": "2e4b67dc68c3a4f1c18e267c341c52a2", "publisher_checksum_algorithm": "md5",
+     "acquisition_size_bytes": 380635, "media_type": "application/zip",
+     "archive_member": "Proxifier/Proxifier_full.log",
+     "selection_rule": "smallest file by publisher-declared byte size among the record's 14 files (verified via Zenodo API); "
+                        "archive_member is the sole member whose filename ends in '.log' (excluding the sibling "
+                        "derived _structured.csv/_templates.csv files, verified by direct extraction listing)"},
     "CC-BY-4.0", "Zenodo record license.id=cc-by-4.0; explicitly the companion artifact to the ISSTA 2024 log-parsing evaluation paper (arXiv:2308.10828).",
-    "large", "14 curated/re-annotated log-parsing datasets, 965.6 MB total per Zenodo API metadata", "high",
+    "large", "14 curated/re-annotated log-parsing datasets, 965.6 MB total per Zenodo API metadata; Proxifier.zip (380635 bytes) selected as the one exact frozen archive member", "high",
 ))
 
 # -- repository-miner: container-orchestration-deployment (3) --

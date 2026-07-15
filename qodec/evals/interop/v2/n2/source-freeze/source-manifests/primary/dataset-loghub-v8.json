@@ -4,9 +4,19 @@
   "execution_expectation": {
     "argv": [],
     "command_class": "",
+    "execution_plan_status": "frozen",
     "expected_size_bucket": "very-large",
+    "extraction_recipe": {
+      "archive_member": "Proxifier.log",
+      "encoding": "utf-8",
+      "ending_condition": "end-of-file",
+      "input_file_identity": "source/Proxifier.tar.gz",
+      "line_ending_policy": "preserve-original",
+      "maximum_extracted_source_bytes": 4194304,
+      "starting_line_or_byte_offset": 0
+    },
     "network_during_untrusted_execution": "denied",
-    "size_estimation_basis": "19 system/app log files, 6.0 GB total per Zenodo API metadata",
+    "size_estimation_basis": "19 system/app log files, 6.0 GB total per Zenodo API metadata; Proxifier.tar.gz (172346 bytes) selected as the one exact frozen archive member",
     "trusted_dependency_realization": "not-applicable-non-repository"
   },
   "fallback_priority": null,
@@ -24,11 +34,27 @@
   "secondary_tags": [],
   "selection_role": "primary",
   "source_identity": {
+    "acquisition_size_bytes": 172346,
     "canonical_url": "https://zenodo.org/records/8196385",
     "commit_sha": null,
+    "durable_object_identity": null,
+    "durable_sha256": null,
+    "exact_download_url": "https://zenodo.org/api/records/8196385/files/Proxifier.tar.gz/content",
+    "job_selection_rule": null,
+    "log_acquisition_endpoint": null,
+    "media_type": "application/gzip",
+    "metadata_sha256": null,
     "normalized_archive_sha256": null,
+    "normalized_source_sha256": null,
     "object_id_or_doi": "10.5281/zenodo.8196385",
     "original_sha256": null,
+    "publisher_checksum_algorithm": "md5",
+    "publisher_reported_checksum": "2612fce12cc3d16599ddb3db8e9c477a",
+    "selected_exact_file": "Proxifier.tar.gz",
+    "selected_job_ids": [],
+    "selected_job_names": [],
+    "source_commit_sha": null,
+    "source_content_sha256": null,
     "tree_sha": null
   },
   "source_kind": "dataset-artifact"

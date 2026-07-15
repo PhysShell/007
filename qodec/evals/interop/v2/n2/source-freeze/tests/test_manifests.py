@@ -57,6 +57,48 @@ class TestRealManifestsOnDisk(unittest.TestCase):
                     self.assertNotIn(" | ", item)
                     self.assertNotIn(";", item)
 
+    def test_every_repository_manifest_has_frozen_argv_or_explicit_probe_marker(self):
+        # Section 6: never an empty argv silently claiming the plan is
+        # frozen — either a real argv (status "frozen") or an explicit
+        # "requires-n2d-probe" marker, never anything else.
+        import json
+        for role in ("primary", "alternate"):
+            for path in (SOURCE_FREEZE_DIR / "source-manifests" / role).glob("*.json"):
+                manifest = json.loads(path.read_text())
+                if manifest["source_kind"] != "repository-execution":
+                    continue
+                exe = manifest["execution_expectation"]
+                self.assertIn(exe["execution_plan_status"], ("frozen", "requires-n2d-probe"))
+                if exe["execution_plan_status"] == "frozen":
+                    self.assertTrue(exe["argv"], f"{manifest['case_id']}: frozen plan must have a real argv")
+                else:
+                    self.assertEqual(exe["argv"], [], f"{manifest['case_id']}: requires-n2d-probe must have empty argv")
+
+    def test_every_non_repository_manifest_has_extraction_recipe_not_bare_empty_argv(self):
+        import json
+        for role in ("primary", "alternate"):
+            for path in (SOURCE_FREEZE_DIR / "source-manifests" / role).glob("*.json"):
+                manifest = json.loads(path.read_text())
+                if manifest["source_kind"] == "repository-execution":
+                    continue
+                exe = manifest["execution_expectation"]
+                self.assertEqual(exe["argv"], [])
+                self.assertEqual(exe["execution_plan_status"], "frozen")
+                self.assertIsNotNone(exe["extraction_recipe"], f"{manifest['case_id']}: non-repository case needs a deterministic extraction recipe")
+                recipe = exe["extraction_recipe"]
+                self.assertIn("maximum_extracted_source_bytes", recipe)
+                self.assertGreater(recipe["maximum_extracted_source_bytes"], 0)
+
+    def test_repo_fd_and_terraform_compound_commands_marked_requires_probe(self):
+        # Real registry data: these two alternates have a "&&"-joined
+        # multi-step capture command that cannot be a single argv array.
+        import json
+        for cid in ("repo-fd", "repo-terraform-example-module"):
+            path = SOURCE_FREEZE_DIR / "source-manifests" / "alternate" / f"{cid}.json"
+            manifest = json.loads(path.read_text())
+            self.assertEqual(manifest["execution_expectation"]["execution_plan_status"], "requires-n2d-probe")
+            self.assertEqual(manifest["execution_expectation"]["argv"], [])
+
 
 class TestManifestRejectsShellString(unittest.TestCase):
     def test_manifest_with_shell_string_argv_fails_schema(self):
@@ -78,6 +120,40 @@ class TestManifestRejectsShellString(unittest.TestCase):
         # directly; here we confirm argv defaults to an empty list, never a
         # bare string.
         self.assertIsInstance(manifest["execution_expectation"]["argv"], list)
+
+    def test_compound_shell_command_marked_requires_probe_not_truncated(self):
+        candidate = {
+            "candidate_id": "c2", "source_kind": "repository-execution", "origin_kind": "repository-miner",
+            "ecosystem": "rust", "primary_family": "test", "secondary_tags": [],
+            "source_identity": {"identity_kind": "git-commit", "commit_sha": "a" * 40},
+            "license": {"spdx": "MIT", "redistribution_allowed": True},
+            "project": {"entry_point": "Cargo.toml"},
+            "public_canonical_url": "https://github.com/example/example",
+            "expected_capture_command_class": "cargo run -- --version && cargo run -- .",
+            "expected_size_bucket": "small", "expected_size_estimation_basis": "test",
+        }
+        manifest = generate_manifests.build_source_manifest(candidate, "primary", None, [])
+        exe = manifest["execution_expectation"]
+        self.assertEqual(exe["execution_plan_status"], "requires-n2d-probe")
+        self.assertEqual(exe["argv"], [])
+
+    def test_non_repository_candidate_gets_extraction_recipe(self):
+        candidate = {
+            "candidate_id": "c3", "source_kind": "dataset-artifact", "origin_kind": "public-runtime-dataset",
+            "ecosystem": "infrastructure-or-language-neutral", "primary_family": "runtime", "secondary_tags": [],
+            "source_identity": {"identity_kind": "immutable-object-or-doi", "object_id_or_doi": "10.5281/zenodo.1",
+                                 "selected_exact_file": "data.tar.gz", "archive_member": "data.log"},
+            "license": {"spdx": "CC0-1.0", "redistribution_allowed": True},
+            "project": {"entry_point": None},
+            "public_canonical_url": "https://zenodo.org/records/1",
+            "expected_size_bucket": "small", "expected_size_estimation_basis": "test",
+        }
+        manifest = generate_manifests.build_source_manifest(candidate, "primary", None, [])
+        exe = manifest["execution_expectation"]
+        self.assertEqual(exe["execution_plan_status"], "frozen")
+        self.assertEqual(exe["argv"], [])
+        self.assertEqual(exe["extraction_recipe"]["input_file_identity"], "source/data.tar.gz")
+        self.assertEqual(exe["extraction_recipe"]["archive_member"], "data.log")
 
 
 if __name__ == "__main__":
