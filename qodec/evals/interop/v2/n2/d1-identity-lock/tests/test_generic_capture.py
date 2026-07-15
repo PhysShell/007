@@ -105,6 +105,46 @@ class TestRunOneCaptureContentGate(unittest.TestCase):
             self.assertTrue(report["accepted"])
             self.assertEqual(receipt["content_validation_report_sha256"], hashlib_sha256_of_report(report))
 
+    def test_project_writable_files_relative_is_pre_touched_and_granted_fs_rw(self):
+        # A real capture (CI run #8) showed repo-docker-java-parser's own
+        # pom.xml write "dependency.tree" directly into the (otherwise
+        # read-only) project root -- a FILE, not one of the known
+        # build-output directories already covered by
+        # project_writable_dirs_relative.
+        import tempfile
+        import unittest.mock as mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source_artifact_dir = self._make_source_artifact_dir(tmp_path)
+            work_dir = tmp_path / "work"
+            out_dir = tmp_path / "out"
+            fake_result = {
+                "raw_stdout": b"[INFO] BUILD SUCCESS\n", "raw_stderr": b"", "exit_code": 0,
+                "wall_time_s": 1.0, "peak_rss_kb": 1024,
+            }
+            with mock.patch.object(gc.capture_build, "run_real_build", return_value=fake_result):
+                gc.run_one_capture(
+                    case_id="repo-docker-java-parser", ecosystem="jvm-maven", job_name="capture-a",
+                    source_artifact_dir=source_artifact_dir, work_dir=work_dir, out_dir=out_dir,
+                    frozen_argv=["mvn", "test"], errata_path=REAL_ERRATA_PATH,
+                    sandboy_bin=Path("/nonexistent/sandboy"), sandboy_commit_sha="e" * 40,
+                    toolchain_capture_fn=lambda source_root: {
+                        "resolved_version": "3.8.7", "runtime_identifier": "11",
+                        "mvn_binary_path": "/usr/bin/true", "mvn_binary_sha256": "a" * 64,
+                    },
+                    toolchain_env_values={"JAVA_HOME": "/usr/lib/jvm/java-11"},
+                    canonical_stream="stdout", primary_stream_rationale="test",
+                    project_writable_dirs_relative=["target"],
+                    project_writable_files_relative=["dependency.tree"],
+                    requested_version_or_range="11", resolver_mechanism="test",
+                )
+            source_root = work_dir / "source"
+            self.assertTrue((source_root / "dependency.tree").is_file())
+            policy_text = (work_dir / "policy.toml").read_text()
+            fs_rw_line = next(line for line in policy_text.splitlines() if line.startswith("fs_rw"))
+            self.assertIn(str(source_root / "dependency.tree"), fs_rw_line)
+
 
 def hashlib_sha256_of_report(report: dict) -> str:
     import hashlib

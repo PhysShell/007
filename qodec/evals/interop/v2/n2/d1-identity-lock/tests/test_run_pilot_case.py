@@ -19,6 +19,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 sys.path.insert(0, str(TOOLS))
@@ -67,9 +68,22 @@ class TestMavenLocalRepoExposure(unittest.TestCase):
 
 
 class TestGradleDaemonDisabled(unittest.TestCase):
-    def test_gradle_opts_disables_the_daemon(self):
-        _toolchain_fn, env_values = rpc.build_toolchain_fn_and_env("jvm-gradle", _args())
-        self.assertIn("-Dorg.gradle.daemon=false", env_values["GRADLE_OPTS"])
+    def test_gradle_properties_under_gradle_user_home_disables_the_daemon(self):
+        # First attempt (CI run #7/#8) was GRADLE_OPTS=-Dorg.gradle.daemon=
+        # false -- real evidence showed Gradle instead forked a fresh
+        # "single-use" daemon (still a daemon, still the same TCP bind)
+        # because the injected JVM arg didn't match any idle default
+        # daemon. org.gradle.daemon=false only reliably disables the daemon
+        # from a gradle.properties file under GRADLE_USER_HOME.
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_home = Path(tmp)
+            with mock.patch.object(rpc.Path, "home", return_value=fake_home):
+                _toolchain_fn, env_values = rpc.build_toolchain_fn_and_env("jvm-gradle", _args())
+            gradle_user_home = fake_home / ".gradle"
+            self.assertEqual(env_values["GRADLE_USER_HOME"], str(gradle_user_home))
+            self.assertNotIn("GRADLE_OPTS", env_values)
+            props = (gradle_user_home / "gradle.properties").read_text()
+            self.assertIn("org.gradle.daemon=false", props)
 
 
 if __name__ == "__main__":

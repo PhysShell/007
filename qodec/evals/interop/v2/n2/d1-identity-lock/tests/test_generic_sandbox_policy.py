@@ -146,6 +146,20 @@ class TestBuildPolicy(unittest.TestCase):
         )
         self.assertIn('"RUSTUP_TOOLCHAIN"', text)
 
+    def test_rust_policy_makes_real_tmp_writable(self):
+        # A real capture (CI run #8, once RUSTUP_TOOLCHAIN actually reached
+        # the confined process) showed rustc's linker fail with "Cannot
+        # create temporary file in /tmp/: Permission denied" -- the system
+        # linker hardcodes /tmp regardless of TMPDIR, same class of gap as
+        # dotnet's real /tmp/.dotnet/shm finding.
+        text = gsp.build_policy(
+            ecosystem="rust", source_root=Path("/src"), home_dir=Path("/h"),
+            tmp_dir=Path("/job-tmp"), capture_out_dir=Path("/o"),
+            project_writable_dirs=[], env_values={},
+        )
+        fs_rw_line = next(line for line in text.splitlines() if line.startswith("fs_rw"))
+        self.assertIn('"/tmp"', fs_rw_line)
+
     def test_dotnet_policy_makes_real_tmp_writable(self):
         # The dotnet CLI's first-run NuGet-migrations named mutex hardcodes
         # /tmp/.dotnet/shm regardless of TMPDIR/HOME -- a real N2-A canary run

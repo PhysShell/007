@@ -44,6 +44,12 @@ CASES = {
         "canonical_stream": "stdout",
         "canonical_stream_rationale": "Maven's console reporter (including surefire test results) writes to stdout by documented convention; stderr carries JVM/process-level errors only.",
         "project_writable_dirs_relative": ["target"],
+        # A real capture (CI run #8) showed this project's own pom.xml binds
+        # maven-dependency-plugin:tree to the default execution, which
+        # serializes to "dependency.tree" directly in the project root --
+        # not a build-output directory -- and failed with Permission denied
+        # under the (correctly) read-only source root.
+        "project_writable_files_relative": ["dependency.tree"],
         "requested_version_or_range": "11",
         "resolver_mechanism": "explicit JDK pin -- JDK 21 fails with a real 'bad constant pool index' error in the Scala 2.13.6 compiler-bridge (classfile-version incompatibility), verified by dry run",
     },
@@ -222,24 +228,30 @@ def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
         )
     if ecosystem == "jvm-gradle":
         java_home = args.java_home_21
-        gradle_user_home = str(Path.home() / ".gradle")
+        gradle_user_home = Path.home() / ".gradle"
         # A real capture (CI run #7) showed the Gradle daemon fail with
         # "java.net.BindException: Permission denied" trying to bind its
         # own client<->daemon TCP loopback port -- Sandboy's tcp_bind policy
         # is (correctly) fully closed, and this is pure local IPC, not a
-        # network dependency the workload needs. Disabling the daemon via
-        # GRADLE_OPTS avoids the bind entirely without touching the frozen
-        # "./gradlew ..." argv -- still the exact same task, just run
-        # in-process instead of via a background daemon.
+        # network dependency the workload needs.
+        #
+        # First attempt (CI run #8) was GRADLE_OPTS=-Dorg.gradle.daemon=false
+        # -- this did NOT work: Gradle's own stdout showed "a single-use
+        # Daemon process will be forked" because the injected JVM arg no
+        # longer matched any already-idle default daemon, so Gradle forked a
+        # FRESH daemon variant instead of skipping the daemon -- still a
+        # daemon, still the same bind. org.gradle.daemon=false only reliably
+        # disables the daemon (client runs the build in-process) when it
+        # comes from gradle.properties under GRADLE_USER_HOME, not from a
+        # JVM system property -- so write that file directly (trusted,
+        # unconfined) instead. Frozen "./gradlew ..." argv is unchanged.
+        gradle_user_home.mkdir(parents=True, exist_ok=True)
+        (gradle_user_home / "gradle.properties").write_text("org.gradle.daemon=false\n")
         return (
             lambda source_root: et.capture_gradle_toolchain_identity(
                 gradle_bin="./gradlew", java_home=java_home, cwd=source_root
             ),
-            {
-                "JAVA_HOME": java_home,
-                "GRADLE_USER_HOME": gradle_user_home,
-                "GRADLE_OPTS": "-Dorg.gradle.daemon=false",
-            },
+            {"JAVA_HOME": java_home, "GRADLE_USER_HOME": str(gradle_user_home)},
         )
     if ecosystem == "python":
         python_bin = args.venv_python
@@ -388,6 +400,7 @@ def main() -> int:
             canonical_stream=case["canonical_stream"],
             primary_stream_rationale=case["canonical_stream_rationale"],
             project_writable_dirs_relative=case["project_writable_dirs_relative"],
+            project_writable_files_relative=case.get("project_writable_files_relative", []),
             requested_version_or_range=case["requested_version_or_range"],
             resolver_mechanism=case["resolver_mechanism"],
             trusted_setup_fn=trusted_setup_fn,

@@ -132,7 +132,8 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
                      canonical_stream: str, primary_stream_rationale: str,
                      project_writable_dirs_relative: list[str],
                      requested_version_or_range: str, resolver_mechanism: str,
-                     trusted_setup_fn=None, argv0_override: str | None = None) -> dict:
+                     trusted_setup_fn=None, argv0_override: str | None = None,
+                     project_writable_files_relative: list[str] = ()) -> dict:
     """Runs exactly one capture (capture-a or capture-b) for one
     repository-miner case. `trusted_setup_fn(source_root) -> dict | None` is
     called with network allowed, before the confined run; its return value
@@ -195,12 +196,24 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
     writable_dirs = [source_root / rel for rel in project_writable_dirs_relative]
     for d in writable_dirs:
         d.mkdir(parents=True, exist_ok=True)
+    # Some projects' own pom.xml/build.gradle write specific FILES directly
+    # into the (otherwise read-only) source root rather than into a known
+    # build-output directory -- a real capture showed repo-docker-java-
+    # parser's pom.xml bind maven-dependency-plugin:tree to the default
+    # execution, serializing to "dependency.tree" at the project root, which
+    # failed with Permission denied under a read-only source_root. Pre-touch
+    # (never truncate an already-populated file) and grant fs_rw to the
+    # EXACT file, not the whole source root.
+    writable_files = [source_root / rel for rel in project_writable_files_relative]
+    for f in writable_files:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.touch(exist_ok=True)
 
     policy_path = work_dir / "policy.toml"
     policy_sha256, canonical_policy_sha256 = gsp.write_policy(
         policy_path, work_dir=work_dir, ecosystem=ecosystem,
         source_root=source_root, home_dir=home_dir, tmp_dir=tmp_dir,
-        capture_out_dir=capture_out_dir, project_writable_dirs=writable_dirs,
+        capture_out_dir=capture_out_dir, project_writable_dirs=writable_dirs + writable_files,
         env_values=toolchain_env_values,
     )
 

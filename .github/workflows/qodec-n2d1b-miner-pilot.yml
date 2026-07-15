@@ -82,6 +82,21 @@
 # test` argv still attempts its own implicit restore under network denial
 # even after a successful trusted restore -- left unresolved pending a
 # user decision (no argv change, no confinement loosening applied).
+#
+# CI run #8 (commit 72038d9) confirmed the preserve-env fix worked -- no
+# more rustup/venv infra-failure signatures at all -- and surfaced the real
+# NEXT layer for each: rust's linker failed with "Cannot create temporary
+# file in /tmp/: Permission denied" (fixed: /tmp fs_rw, same class as
+# dotnet's earlier /tmp/.dotnet/shm finding); pyflakes ran genuinely
+# cleanly (exit 0, no infra signature) with zero violations -- this is the
+# pre-documented "genuinely empty pyflakes result" stop condition, not a
+# bug, and is NOT being routed around. maven's ~/.m2 fix worked but hit a
+# second real issue: this project's own pom.xml writes "dependency.tree"
+# directly into the (read-only) project root (fixed: pre-touch + grant
+# fs_rw to that exact file). gradle's first daemon-disable attempt
+# (GRADLE_OPTS) backfired -- Gradle forked a fresh single-use daemon
+# instead of skipping it -- fixed via gradle.properties under
+# GRADLE_USER_HOME instead, the documented mechanism.
 name: qodec-n2d1b-miner-pilot
 
 on:

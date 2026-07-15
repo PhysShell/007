@@ -41,6 +41,14 @@ ECOSYSTEM_POLICY_HINTS = {
         ],
         "extra_fs_ro_from_env": ["RUSTUP_HOME"],
         "extra_fs_rw_from_env": ["CARGO_HOME"],
+        # A real capture (CI run #8, once RUSTUP_TOOLCHAIN actually started
+        # reaching the confined process) showed rustc's linker step fail
+        # with "Cannot create temporary file in /tmp/: Permission denied" --
+        # the system linker (cc/ld) hardcodes /tmp for its own temp object
+        # files regardless of TMPDIR. Same class of gap as dotnet's real
+        # /tmp/.dotnet/shm finding (N2-A): the job's own dedicated tmp_dir
+        # isn't enough, the real system /tmp itself must be fs_rw too.
+        "extra_fs_rw_fixed": [Path("/tmp")],
     },
     "python": {
         "env_allow": ["PATH", "HOME", "TMPDIR", "PYTHONDONTWRITEBYTECODE", "PIP_NO_INDEX", "VIRTUAL_ENV"],
