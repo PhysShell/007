@@ -97,6 +97,24 @@
 # (GRADLE_OPTS) backfired -- Gradle forked a fresh single-use daemon
 # instead of skipping it -- fixed via gradle.properties under
 # GRADLE_USER_HOME instead, the documented mechanism.
+#
+# CI run #9 (commit cf89173): rust is now genuinely content-valid --
+# real "hyperfine 1.20.0" output, accepted=true, confirmed by downloading
+# and inspecting canonical-raw-input.bin directly (not just job
+# conclusion). maven's dependency.tree fix worked; a real, DIFFERENT
+# gap followed: dependency:go-offline never resolves scala-maven-plugin's
+# own lazily-fetched compiler-bridge sources jar, so the confined
+# (network-denied) run failed on that specific artifact -- fixed by
+# priming ~/.m2 with a real (network-allowed) `mvn test` during trusted
+# setup, discarding its output; the confined run remains the sole
+# authoritative capture. gradle's gradle.properties fix did NOT work
+# either -- IDENTICAL "single-use Daemon process will be forked" message.
+# Root cause: Sandboy's tcp_bind is a Vec<u16> of specific ports (Landlock
+# scopes ports, not addresses -- see sandboy's own README), but Gradle's
+# daemon binds an OS-chosen ephemeral port with no documented way to pin
+# it. There is no small, correct port allowlist to add. This is a THIRD
+# stop condition (alongside pyflakes' empty-result and dotnet's implicit-
+# restore) requiring a user decision -- not resolved automatically.
 name: qodec-n2d1b-miner-pilot
 
 on:
@@ -306,7 +324,20 @@ jobs:
         working-directory: ${{ runner.temp }}/source-artifact/${{ matrix.case.case_id }}/source
         env:
           JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
-        run: mvn -B dependency:go-offline || true # some poms have no go-offline-resolvable deps; real test run below is authoritative
+        run: |
+          mvn -B dependency:go-offline || true # some poms have no go-offline-resolvable deps
+          # A real capture (CI run #9) showed dependency:go-offline alone
+          # doesn't cover artifacts plugins resolve lazily at their own
+          # execution time -- scala-maven-plugin fetches its own
+          # compiler-bridge (org.scala-sbt:compiler-bridge_2.13:sources)
+          # only when actually invoked, never during dependency:go-offline.
+          # Prime the real ~/.m2 by running the real goal once here, network
+          # allowed; its own output (and any build artifacts it leaves in
+          # THIS scratch extraction) is discarded -- the confined capture
+          # below always re-extracts a pristine source.tar into its own
+          # separate work_dir/source, never this directory, so this
+          # priming run is the sole authoritative, captured execution.
+          mvn -B test || true
 
       - name: Trusted setup — pip install pyflakes (editable)
         if: matrix.case.case_id == 'repo-pyflakes'
