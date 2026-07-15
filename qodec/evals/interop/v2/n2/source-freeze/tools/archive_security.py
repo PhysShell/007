@@ -7,6 +7,7 @@ encrypted archive with a guessed/embedded password.
 """
 from __future__ import annotations
 
+import posixpath
 import tarfile
 import zipfile
 from pathlib import Path
@@ -25,6 +26,24 @@ def _is_traversal_or_absolute(member_name: str) -> bool:
     return ".." in parts
 
 
+def _symlink_escapes_root(member_name: str, target: str) -> bool:
+    """A relative symlink target containing '..' does not necessarily escape
+    the archive root — it only escapes if, resolved against the symlink's
+    OWN parent directory (not the archive root), it lands above the root.
+    Many legitimate same-repository symlinks (test fixtures, shared assets)
+    use '../' to reach a sibling directory a few levels up without ever
+    leaving the archive."""
+    target_posix = target.replace("\\", "/")
+    if target_posix.startswith("/"):
+        return True
+    if ":" in target_posix[:3]:  # Windows drive-absolute target
+        return True
+    member_posix = member_name.replace("\\", "/")
+    parent = posixpath.dirname(member_posix)
+    resolved = posixpath.normpath(posixpath.join(parent, target_posix))
+    return resolved.startswith("../") or resolved == ".." or resolved.startswith("/")
+
+
 def inspect_tar(path: Path) -> dict:
     findings = {"absolute_or_traversal_paths": [], "device_files": [], "unsafe_symlinks": [], "member_count": 0}
     try:
@@ -40,7 +59,7 @@ def inspect_tar(path: Path) -> dict:
             findings["device_files"].append(m.name)
         if m.issym() or m.islnk():
             target = m.linkname
-            if target.startswith("/") or _is_traversal_or_absolute(target):
+            if _symlink_escapes_root(m.name, target):
                 findings["unsafe_symlinks"].append({"name": m.name, "target": target})
     return findings
 

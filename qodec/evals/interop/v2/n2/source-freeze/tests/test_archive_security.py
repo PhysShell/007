@@ -68,6 +68,26 @@ class TestTarSecurity(unittest.TestCase):
         findings = archive_security.assert_safe(path)
         self.assertEqual(findings["unsafe_symlinks"], [])
 
+    def test_relative_symlink_with_dotdot_that_stays_inside_root_passes(self):
+        # Regression: a symlink target containing ".." is not automatically
+        # an escape — it must be resolved against the symlink's OWN parent
+        # directory. "docs/static/img/logo.png" -> "../../../res/logo.png"
+        # resolves to "res/logo.png", still inside the archive root.
+        path = _make_tar(self.tmp_path, [
+            ("res/logo.png", b"png", {}),
+            ("docs/static/img/logo.png", b"", {"type": tarfile.SYMTYPE, "linkname": "../../../res/logo.png"}),
+        ])
+        findings = archive_security.assert_safe(path)
+        self.assertEqual(findings["unsafe_symlinks"], [])
+
+    def test_relative_symlink_that_actually_escapes_root_rejected(self):
+        # One more ".." than needed to reach the root escapes above it.
+        path = _make_tar(self.tmp_path, [
+            ("docs/static/img/logo.png", b"", {"type": tarfile.SYMTYPE, "linkname": "../../../../res/logo.png"}),
+        ])
+        with self.assertRaises(archive_security.RejectedArchive):
+            archive_security.assert_safe(path)
+
 
 class TestZipSecurity(unittest.TestCase):
     def setUp(self):
