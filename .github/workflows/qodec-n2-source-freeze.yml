@@ -351,13 +351,29 @@ jobs:
               sys.exit(1)
           PYEOF
 
+      - name: Stage updated registry/manifests/license-records under a single predictable root
+        run: |
+          # actions/upload-artifact computes an unpredictable common-ancestor
+          # prefix when given a mix of absolute ($RUNNER_TEMP/...) and
+          # workspace-relative (qodec/...) paths in one call — the resulting
+          # artifact layout does not match the plain relative path
+          # pre-qodec-seal expects when it downloads into ".". Stage
+          # everything under $RUNNER_TEMP first so both uploaded paths share
+          # one real filesystem ancestor and the artifact layout is exact.
+          mkdir -p "$RUNNER_TEMP/updated-source-freeze/source-freeze"
+          cp qodec/evals/interop/v2/n2/source-freeze/candidate-registry.json \
+            "$RUNNER_TEMP/updated-source-freeze/source-freeze/candidate-registry.json"
+          cp -r qodec/evals/interop/v2/n2/source-freeze/source-manifests \
+            "$RUNNER_TEMP/updated-source-freeze/source-freeze/source-manifests"
+          cp -r qodec/evals/interop/v2/n2/source-freeze/license-records \
+            "$RUNNER_TEMP/updated-source-freeze/source-freeze/license-records"
+
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
         with:
           name: source-identity-reports
           path: |
             ${{ runner.temp }}/reports/source-identity-report.json
-            qodec/evals/interop/v2/n2/source-freeze/candidate-registry.json
-            qodec/evals/interop/v2/n2/source-freeze/source-manifests
+            ${{ runner.temp }}/updated-source-freeze
           if-no-files-found: error
           retention-days: 90
 
@@ -373,13 +389,23 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: source-identity-reports
-          path: .
+          path: ${{ runner.temp }}/downloaded-source-identity
+
+      - name: Overwrite checked-out registry/manifests/license-records with the real-hash versions from source-identity
+        run: |
+          cp "$RUNNER_TEMP/downloaded-source-identity/updated-source-freeze/source-freeze/candidate-registry.json" \
+            qodec/evals/interop/v2/n2/source-freeze/candidate-registry.json
+          cp -r "$RUNNER_TEMP/downloaded-source-identity/updated-source-freeze/source-freeze/source-manifests/." \
+            qodec/evals/interop/v2/n2/source-freeze/source-manifests/
+          cp -r "$RUNNER_TEMP/downloaded-source-identity/updated-source-freeze/source-freeze/license-records/." \
+            qodec/evals/interop/v2/n2/source-freeze/license-records/
 
       - name: Render final n2-source-freeze.json + summary, run sealing checks
         run: |
           mkdir -p "$RUNNER_TEMP/reports"
+          MAIN_SHA=$(python3 -c "import sys; sys.path.insert(0, 'qodec/evals/interop/v2/n2/source-freeze/tools'); import frozen_base_check; print(frozen_base_check.BASE_MAIN_SHA)")
           python3 qodec/evals/interop/v2/n2/source-freeze/tools/generate_ci_reports.py freeze-receipt \
-            --main-sha "$(git rev-parse HEAD)" \
+            --main-sha "$MAIN_SHA" \
             --workflow-run-ids "${{ github.run_id }}" \
             --freeze-timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --out "$RUNNER_TEMP/reports/n2-source-freeze.json" \
