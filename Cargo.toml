@@ -2,7 +2,7 @@
 name = "o7"
 version = "0.1.0"
 edition = "2021"
-description = "007 — private harness: one isolated, gated agent run over a target repo"
+description = "007 — personal harness: one isolated, gated agent run over a target repo"
 publish = false
 
 [[bin]]
@@ -17,6 +17,16 @@ toml = "0.8"
 anyhow = "1"
 sha1 = "0.10"
 sha2 = "0.10"
+# `invoke.rs` only: independently re-validates a backend's structured output
+# against a caller-supplied JSON Schema. Default features pull in `reqwest`
+# (remote $ref resolution) -- explicitly off: a schema-validating primitive
+# must not gain a network path from a dependency default, especially one
+# fed an arbitrary caller-supplied schema file. License spot-checked (MIT,
+# matching deny.toml's allowlist) for jsonschema + its direct new transitive
+# deps -- `cargo deny check` itself was not run against this addition
+# (cargo-deny isn't installed here and a from-source install didn't finish
+# inside a reasonable wait); re-run it before treating this as fully vetted.
+jsonschema = { version = "0.47", default-features = false }
 
 # Lints. Curated to pass `clippy --all-targets -D warnings` clean on today's code
 # (ratchet, not a blast): the broad pedantic/nursery families are deliberately

@@ -1,9 +1,14 @@
 # 007 (`o7`)
 
-Private, personal harness that drives `claude`/`codex` (subscription auth, no API
+Personal harness that drives `claude`/`codex` (subscription auth, no API
 keys) over the public repos **Own.NET** and **OwnAudit** — from the outside, via
-their CLIs. Keep this repo private: subscription-auth/agent-routing code must not
-land in a public tree.
+their CLIs. **This repo is public.** That is fine: the orchestration/routing
+code here is not a secret. What must never land in it, public or not, is any
+credential, OAuth/session-storage artifact, or environment dump — auth stays
+external, handled by `claude login`/`codex login` against the CLIs themselves,
+never read or stored by this project. See
+[`docs/public-governance.md`](docs/public-governance.md) for the full boundary
+and the secret-scan result this claim rests on.
 
 ## MVP — one isolated, gated run (the "unit")
 

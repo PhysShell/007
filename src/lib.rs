@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod gate;
+pub mod invoke;
 pub mod judge;
 pub mod record;
 pub mod verdict;
