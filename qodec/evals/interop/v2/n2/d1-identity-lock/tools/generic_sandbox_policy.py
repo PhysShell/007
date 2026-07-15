@@ -71,7 +71,14 @@ ECOSYSTEM_POLICY_HINTS = {
         # not fs_ro: Maven writes _remote.repositories/resolver-status.
         # markers into its local repo even when every artifact it needs is
         # already cached.
-        "extra_fs_rw_from_env": ["MAVEN_LOCAL_REPO_PATH"],
+        # SBT_GLOBAL_BASE_PATH is likewise synthetic/policy-only -- MAVEN_
+        # OPTS's own -Dsbt.global.base value is what zinc actually reads --
+        # pointing at the REAL ~/.sbt populated during trusted setup (a
+        # cache root entirely separate from ~/.m2, used by scala-maven-
+        # plugin's embedded zinc compiler for its compiler-bridge cache; a
+        # real capture, CI run #11, showed this hit the exact same
+        # never-exposed-to-confined-HOME gap as ~/.m2 did).
+        "extra_fs_rw_from_env": ["MAVEN_LOCAL_REPO_PATH", "SBT_GLOBAL_BASE_PATH"],
         # A real capture (CI run #10, once the compiler-bridge was actually
         # cached in ~/.m2) showed scala-maven-plugin unpack its
         # compiler-bridge sources jar via a hardcoded /tmp path --

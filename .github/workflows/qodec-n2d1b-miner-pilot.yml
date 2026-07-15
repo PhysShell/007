@@ -133,6 +133,16 @@
 # is unrelated to the PRESERVE_ENV/run_confined_build.sh change (every
 # env/argv/policy field was identical) and is out of scope for N2-D1b --
 # N2-A is frozen and already merged. Reported to the user, not touched.
+#
+# CI run #11 (commit 1bd3df2): the /tmp fix worked -- no more
+# AccessDeniedException -- but scala-maven-plugin's embedded zinc compiler
+# then failed with "FileNotFoundException: /home/runner/.sbt/1.0/zinc/...
+# (Permission denied)": zinc caches its compiler-bridge under $HOME/.sbt, a
+# cache root entirely separate from ~/.m2, populated by the same
+# trusted-setup `mvn test` priming run but never exposed to the confined
+# process's isolated HOME. Fixed by pinning -Dsbt.global.base to the real
+# ~/.sbt (same MAVEN_OPTS mechanism as maven.repo.local) and granting it
+# fs_rw, mirroring the MAVEN_LOCAL_REPO_PATH pattern exactly.
 name: qodec-n2d1b-miner-pilot
 
 on:

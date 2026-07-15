@@ -66,6 +66,16 @@ class TestMavenLocalRepoExposure(unittest.TestCase):
         self.assertIn(f"-Dmaven.repo.local={real_m2_repo}", env_values["MAVEN_OPTS"])
         self.assertEqual(env_values["MAVEN_LOCAL_REPO_PATH"], real_m2_repo)
 
+    def test_maven_opts_points_at_real_sbt_cache_and_policy_key_matches(self):
+        # A real capture (CI run #11) showed scala-maven-plugin's embedded
+        # zinc compiler cache its compiler-bridge under $HOME/.sbt -- a
+        # cache root entirely separate from ~/.m2, hitting the exact same
+        # never-exposed-to-confined-HOME gap.
+        _toolchain_fn, env_values = rpc.build_toolchain_fn_and_env("jvm-maven", _args())
+        real_sbt_cache = str(Path.home() / ".sbt")
+        self.assertIn(f"-Dsbt.global.base={real_sbt_cache}", env_values["MAVEN_OPTS"])
+        self.assertEqual(env_values["SBT_GLOBAL_BASE_PATH"], real_sbt_cache)
+
 
 class TestGradleDaemonDisabled(unittest.TestCase):
     def test_gradle_properties_under_gradle_user_home_disables_the_daemon(self):

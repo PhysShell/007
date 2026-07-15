@@ -218,12 +218,23 @@ def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
         # that exact directory to the sandbox -- same discipline as
         # CARGO_HOME/RUSTUP_HOME for rust.
         real_m2_repo = str(Path.home() / ".m2" / "repository")
+        # A real capture (CI run #11) showed scala-maven-plugin's embedded
+        # zinc compiler cache its compiler-bridge under $HOME/.sbt/1.0/zinc/
+        # -- a DIFFERENT cache root than ~/.m2, populated by the same
+        # trusted-setup `mvn test` priming run against the real $HOME, and
+        # likewise never exposed to the confined process's isolated HOME
+        # ("FileNotFoundException: /home/runner/.sbt/.../compiler-bridge...
+        # (Permission denied)"). zinc resolves this via the
+        # sbt.global.base system property (falls back to ${user.home}/.sbt
+        # otherwise) -- pin it explicitly, same MAVEN_OPTS mechanism.
+        real_sbt_cache = str(Path.home() / ".sbt")
         return (
             lambda source_root: et.capture_maven_toolchain_identity(java_home=java_home),
             {
                 "JAVA_HOME": java_home,
-                "MAVEN_OPTS": f"-Dmaven.repo.local={real_m2_repo}",
+                "MAVEN_OPTS": f"-Dmaven.repo.local={real_m2_repo} -Dsbt.global.base={real_sbt_cache}",
                 "MAVEN_LOCAL_REPO_PATH": real_m2_repo,
+                "SBT_GLOBAL_BASE_PATH": real_sbt_cache,
             },
         )
     if ecosystem == "jvm-gradle":
