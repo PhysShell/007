@@ -44,7 +44,7 @@
     "durable_sha256": null,
     "exact_download_url": null,
     "job_selection_rule": "max(job.finished - job.started), tie-break lexicographically lowest job id (AppVeyor job ids are opaque alphanumeric strings, not numeric \u2014 same structure-only rule as _JOB_SELECTION_RULE, adapted for the id format)",
-    "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log",
+    "log_acquisition_endpoint": null,
     "media_type": null,
     "metadata_sha256": null,
     "normalized_archive_sha256": null,

@@ -166,7 +166,7 @@ CANDIDATES.append(artifact(
      "requires_interactive_access_grant": True,
      "acquisition_barrier_evidence": _GITHUB_ACTIONS_LOG_ANONYMOUS_ACCESS_BARRIER_EVIDENCE,
      "job_selection_rule": _JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
-     "log_acquisition_endpoint": "https://api.github.com/repos/curl/curl/actions/jobs/{job_id}/logs"},
+     "log_acquisition_endpoint": None},  # resolved job_id folded in by real acquisition (identity_lock.py)
     "MIT", "Public GitHub Actions run on a public repository, visible to any visitor by platform design; source license MIT (COPYING).",
     "large", "curl's Linux CI matrix runs ~47 jobs, ~9 min; expect a large aggregate log", "medium",
 ))
@@ -179,7 +179,7 @@ CANDIDATES.append(artifact(
      "requires_interactive_access_grant": True,
      "acquisition_barrier_evidence": _GITHUB_ACTIONS_LOG_ANONYMOUS_ACCESS_BARRIER_EVIDENCE,
      "job_selection_rule": _JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
-     "log_acquisition_endpoint": "https://api.github.com/repos/jqlang/jq/actions/jobs/{job_id}/logs"},
+     "log_acquisition_endpoint": None},  # resolved job_id folded in by real acquisition (identity_lock.py)
     "MIT", "Public GitHub Actions run on a public repository; source license MIT (COPYING), plus bundled oniguruma/decNumber licenses.",
     "large", "jq CI matrix (Linux/macOS/Windows + dist/docker/release jobs), ~16 min, 24 build artifacts", "medium",
 ))
@@ -192,7 +192,7 @@ CANDIDATES.append(artifact(
      "requires_interactive_access_grant": True,
      "acquisition_barrier_evidence": _GITHUB_ACTIONS_LOG_ANONYMOUS_ACCESS_BARRIER_EVIDENCE,
      "job_selection_rule": _JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
-     "log_acquisition_endpoint": "https://api.github.com/repos/rust-lang/rust/actions/jobs/{job_id}/logs"},
+     "log_acquisition_endpoint": None},  # resolved job_id folded in by real acquisition (identity_lock.py)
     "MIT", "Public GitHub Actions run (bors merge-queue gate); source dual-licensed MIT/Apache-2.0 (COPYRIGHT).",
     "very-large", "~89-job matrix, 3h26m duration — one of the largest real CI logs available, good stress case", "medium",
 ))
@@ -218,7 +218,7 @@ CANDIDATES.append(artifact(
      "appveyor_project": "nlohmann/json", "run_id": "54375733", "commit_sha": "872b9e234047e4a2cf29a5165e85b3a56a0647d2",
      "ecosystem": "infrastructure-or-language-neutral",
      "job_selection_rule": _APPVEYOR_JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
-     "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log"},
+     "log_acquisition_endpoint": None},  # resolved job_id folded in by real acquisition (identity_lock.py)
     "MIT", "Public AppVeyor build on a public GitHub repository, log endpoint independently verified anonymously downloadable; source license MIT (LICENSE.MIT).",
     "medium", "8-job Windows CMake/MSBuild matrix (VS2015/2017/2019, x86/x64), verified real build 2026-07-14", "high",
 ))
@@ -230,7 +230,7 @@ CANDIDATES.append(artifact(
      "appveyor_project": "gabime/spdlog", "run_id": "54361398", "commit_sha": "2ee3cf8204ed5048627644e00a51a7d93fbc4786",
      "ecosystem": "infrastructure-or-language-neutral",
      "job_selection_rule": _APPVEYOR_JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
-     "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log"},
+     "log_acquisition_endpoint": None},  # resolved job_id folded in by real acquisition (identity_lock.py)
     "MIT", "Public AppVeyor build on a public GitHub repository, log endpoint independently verified anonymously downloadable; source license MIT (LICENSE).",
     "medium", "7-job Windows CMake/MSBuild matrix (VS2017/2019/2022, static/shared), verified real build 2026-07-11", "high",
 ))
@@ -242,7 +242,7 @@ CANDIDATES.append(artifact(
      "appveyor_project": "akheron/jansson", "run_id": "54351973", "commit_sha": "851a2145e3256f2e67e5dfe24b0e456bf198b741",
      "ecosystem": "infrastructure-or-language-neutral",
      "job_selection_rule": _APPVEYOR_JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
-     "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log"},
+     "log_acquisition_endpoint": None},  # resolved job_id folded in by real acquisition (identity_lock.py)
     "MIT", "Public AppVeyor build on a public GitHub repository, log endpoint independently verified anonymously downloadable; source license MIT (LICENSE).",
     "medium", "7-job Windows CMake matrix (VS2008 through VS2019), verified real build 2026-07-09", "high",
 ))
@@ -266,7 +266,7 @@ CANDIDATES.append(artifact(
      "appveyor_project": "NLog/NLog", "run_id": "54377650", "commit_sha": "736854b49cad342a98ce0e56f59c94914e0b555c",
      "ecosystem": "dotnet",
      "job_selection_rule": _APPVEYOR_JOB_SELECTION_RULE, "selected_job_ids": [], "selected_job_names": [],
-     "log_acquisition_endpoint": "https://ci.appveyor.com/api/buildjobs/{job_id}/log"},
+     "log_acquisition_endpoint": None},  # resolved job_id folded in by real acquisition (identity_lock.py)
     "BSD-3-Clause", "Public AppVeyor build on a public GitHub repository, log endpoint independently verified anonymously downloadable; source license BSD-3-Clause (LICENSE.txt).",
     "medium", "2-job Windows/Linux .NET build+test matrix (Visual Studio 2026 image, Ubuntu2204 image), verified real build 2026-07-14", "high",
 ))
