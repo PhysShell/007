@@ -90,6 +90,16 @@ jobs:
           "
           find "$RUNNER_TEMP/source-artifact" -maxdepth 2
 
+      # A scratch extraction for the trusted-setup steps below only. The confined
+      # run's own verify+extract, inside generic_capture.py, always re-extracts
+      # fresh from the pristine source.tar for the actual capture -- these two
+      # extractions are intentionally independent.
+      - name: Extract source.tar for trusted-setup steps
+        run: |
+          mkdir -p "$RUNNER_TEMP/source-artifact/${{ matrix.case.case_id }}/source"
+          tar -xf "$RUNNER_TEMP/source-artifact/${{ matrix.case.case_id }}/source.tar" \
+            -C "$RUNNER_TEMP/source-artifact/${{ matrix.case.case_id }}/source"
+
       # ---- ecosystem toolchain setup (trusted; network allowed here) ----
       - name: Install Rust toolchain
         if: matrix.case.ecosystem == 'rust'

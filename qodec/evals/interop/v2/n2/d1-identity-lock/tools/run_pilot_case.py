@@ -165,7 +165,7 @@ def main() -> int:
     try:
         receipt = gc.run_one_capture(
             case_id=args.case_id, ecosystem=args.ecosystem, job_name=args.job_name,
-            source_artifact_dir=Path(args.source_artifact_dir) / args.case_id,
+            source_artifact_dir=Path(args.source_artifact_dir),
             work_dir=Path(args.work_dir), out_dir=Path(args.out_dir),
             frozen_argv=effective_frozen_argv_for_resolution,
             errata_path=Path(args.errata_path),
