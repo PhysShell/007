@@ -1,0 +1,145 @@
+name: qodec-n2d0-durable-evidence-rescue
+
+# N2-D0: one-shot rescue of N2-C's and N2-A.1's real acquisition/capture
+# bytes out of expiring GitHub Actions artifacts into a durable GitHub
+# Release. Manual trigger only — this is not a recurring gate, and must
+# never re-run against a different source run without an explicit,
+# reviewed change to this file. Does not execute QODEC, RTK, or any
+# downloaded content; does not modify N2-C; does not touch main.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  N2C_RUN_ID: "29404265568"
+  N2C_HEAD_SHA: "acb57379e2d0b9ed6fe79fd45e7540d7d00d7490"
+  N2A_RUN_ID: "29384147131"
+  N2A_HEAD_SHA: "9c755dba8986323b1f18d49c26b53fec3aff5be4"
+  RELEASE_TAG: "n2d0-durable-evidence-v1"
+
+jobs:
+  rescue-and-publish:
+    name: rescue-and-publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Confirm the two source runs are the accepted, unmodified runs this workflow is pinned to
+        run: |
+          test "${{ env.N2C_RUN_ID }}" = "29404265568"
+          test "${{ env.N2C_HEAD_SHA }}" = "acb57379e2d0b9ed6fe79fd45e7540d7d00d7490"
+          test "${{ env.N2A_RUN_ID }}" = "29384147131"
+          test "${{ env.N2A_HEAD_SHA }}" = "9c755dba8986323b1f18d49c26b53fec3aff5be4"
+          echo "pinned source-run identities confirmed"
+
+      - name: Fetch N2-C evidence (37 acquisition-* artifacts + 6 supporting reports) from run ${{ env.N2C_RUN_ID }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/n2c"
+          python3 qodec/evals/interop/v2/n2/d0-durable-evidence/tools/zip_fetch.py \
+            --owner PhysShell --repo 007 --run-id "${{ env.N2C_RUN_ID }}" \
+            --artifact-names "n2c-artifact-index,n2-source-freeze,source-identity-reports,archive-security-reports,quota-selection-report,selection-determinism-report" \
+            --include-prefix "acquisition-" \
+            --out-dir "$RUNNER_TEMP/n2c" \
+            --archive-security-path qodec/evals/interop/v2/n2/source-freeze/tools/archive_security.py
+
+      - name: Fetch N2-A.1 accepted canary evidence (4 artifacts) from run ${{ env.N2A_RUN_ID }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/n2a"
+          python3 qodec/evals/interop/v2/n2/d0-durable-evidence/tools/zip_fetch.py \
+            --owner PhysShell --repo 007 --run-id "${{ env.N2A_RUN_ID }}" \
+            --artifact-names "miner-canary-source,miner-canary-capture-a,miner-canary-capture-b,miner-canary-reports" \
+            --out-dir "$RUNNER_TEMP/n2a" \
+            --archive-security-path qodec/evals/interop/v2/n2/source-freeze/tools/archive_security.py
+
+      - name: Verify N2-C evidence against the accepted artifact index, folded identities, and final selection
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          ARTIFACT_INDEX=$(find "$RUNNER_TEMP/n2c/n2c-artifact-index" -name "n2c-artifact-index.json")
+          SOURCE_FREEZE=$(find "$RUNNER_TEMP/n2c/n2-source-freeze" -name "n2-source-freeze.json")
+          QUOTA_REPORT=$(find "$RUNNER_TEMP/n2c/quota-selection-report" -name "quota-selection-report.json")
+          echo "artifact_index=$ARTIFACT_INDEX source_freeze=$SOURCE_FREEZE quota_report=$QUOTA_REPORT"
+          python3 qodec/evals/interop/v2/n2/d0-durable-evidence/tools/verify_n2c_evidence.py \
+            --fetch-report "$RUNNER_TEMP/n2c/fetch-report.json" \
+            --artifact-index "$ARTIFACT_INDEX" \
+            --n2-source-freeze "$SOURCE_FREEZE" \
+            --quota-selection-report "$QUOTA_REPORT" \
+            --extract-root "$RUNNER_TEMP/n2c" \
+            --out "$RUNNER_TEMP/reports/n2c-verification.json"
+
+      - name: Verify N2-A.1 evidence (run identity + capture-a/capture-b agreement)
+        run: |
+          python3 qodec/evals/interop/v2/n2/d0-durable-evidence/tools/verify_n2a_evidence.py \
+            --fetch-report "$RUNNER_TEMP/n2a/fetch-report.json" \
+            --extract-root "$RUNNER_TEMP/n2a" \
+            --out "$RUNNER_TEMP/reports/n2a-verification.json"
+
+      - name: Stage every fetched artifact zip as a durable release asset (byte-identical to the original download)
+        run: |
+          mkdir -p "$RUNNER_TEMP/release-assets"
+          for z in "$RUNNER_TEMP"/n2c/*.zip; do
+            base=$(basename "$z" .zip)
+            cp "$z" "$RUNNER_TEMP/release-assets/n2c-${base}.zip"
+          done
+          for z in "$RUNNER_TEMP"/n2a/*.zip; do
+            base=$(basename "$z" .zip)
+            cp "$z" "$RUNNER_TEMP/release-assets/n2a-${base}.zip"
+          done
+          ls -la "$RUNNER_TEMP/release-assets" | tee "$RUNNER_TEMP/reports/release-assets-listing.txt"
+          du -ch "$RUNNER_TEMP/release-assets"/*.zip | tail -1
+
+      - name: Create (or reuse) the N2-D0 durable-evidence release and upload every asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "${{ env.RELEASE_TAG }}" --repo PhysShell/007 >/dev/null 2>&1; then
+            gh release create "${{ env.RELEASE_TAG }}" \
+              --repo PhysShell/007 \
+              --title "N2-D0 durable evidence: N2-C run ${{ env.N2C_RUN_ID }} + N2-A.1 run ${{ env.N2A_RUN_ID }}" \
+              --notes "Durable, independently-verifiable copies of N2-C's (head ${{ env.N2C_HEAD_SHA }}) and N2-A.1's (head ${{ env.N2A_HEAD_SHA }}) accepted real acquisition/capture evidence, rescued from expiring GitHub Actions artifacts by the N2-D0 scope. See durable-input-manifest.json in qodec/evals/interop/v2/n2/d0-durable-evidence/ for the full, hash-locked inventory. Not a benchmark result; contains no QODEC/RTK output." \
+              --target "$(git rev-parse HEAD)"
+          fi
+          gh release upload "${{ env.RELEASE_TAG }}" "$RUNNER_TEMP/release-assets"/*.zip \
+            --repo PhysShell/007 --clobber
+
+      - name: Record real release-asset identities (name -> download URL, id) as reported by GitHub after upload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${{ env.RELEASE_TAG }}" --repo PhysShell/007 --json tagName,assets \
+            > "$RUNNER_TEMP/reports/release-assets.json"
+          cat "$RUNNER_TEMP/reports/release-assets.json"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: n2d0-rescue-reports
+          path: |
+            ${{ runner.temp }}/n2c/fetch-report.json
+            ${{ runner.temp }}/n2a/fetch-report.json
+            ${{ runner.temp }}/reports/n2c-verification.json
+            ${{ runner.temp }}/reports/n2a-verification.json
+            ${{ runner.temp }}/reports/release-assets.json
+            ${{ runner.temp }}/reports/release-assets-listing.txt
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Fail the job if any verification did not pass (assets are already uploaded for inspection either way)
+        run: |
+          python3 -c "
+          import json, sys
+          n2c = json.load(open('$RUNNER_TEMP/reports/n2c-verification.json'))
+          n2a = json.load(open('$RUNNER_TEMP/reports/n2a-verification.json'))
+          print('n2c pass:', n2c['pass'])
+          print('n2a pass:', n2a['pass'])
+          sys.exit(0 if n2c['pass'] and n2a['pass'] else 1)
+          "

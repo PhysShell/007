@@ -1,0 +1,90 @@
+{
+  "scope_id": "N2-D0",
+  "scope_name": "durable evidence rescue and benchmark-input lock",
+  "purpose": "Rescue N2-C's and N2-A.1's real acquisition/capture evidence out of expiring GitHub Actions artifacts into durable, independently-verifiable storage, before any N2-D arm-identity/tokenizer/determinism/benchmark work begins. N2-D0 performs no comparison, no execution, and no measurement of QODEC or RTK.",
+  "frozen_boundary": {
+    "n2c_head_sha": "acb57379e2d0b9ed6fe79fd45e7540d7d00d7490",
+    "n2c_pr": "PhysShell/007#54",
+    "rule": "N2-C is immutable. PR #54, every N2-C file, the N2-C workflow, the committed N2-C registry, and qodec/evals/interop/v2/n2/source-freeze/** must not be modified by N2-D0. lock_durable_sources.py must not be run against its default destination (it writes into the frozen N2-C tree and mutates the N2-C registry); its verification/content-addressing logic may be read-only reused or adapted, but every new file and identity created here belongs to N2-D0."
+  },
+  "durable_storage_decision": {
+    "mechanism": "GitHub Release + tag, dedicated to N2-D0",
+    "rejected_mechanisms": ["committing raw acquisition archives into ordinary git history", "Git LFS"],
+    "committed_to_git": [
+      "this contract (n2d0-contract.json)",
+      "retrieval and verification tooling (tools/*.py)",
+      "the durable-input manifest (durable-input-manifest.json)",
+      "small evidence reports (reports/*.json)",
+      "release/tag and asset identities (recorded inside the manifest)"
+    ],
+    "stored_as_release_assets": "the actual acquisition/capture archives (original GitHub Actions artifact ZIPs, re-uploaded byte-identical)",
+    "independent_verifiability_requirement": "the committed manifest must let anyone verify durable storage using only public, anonymous HTTP requests to the release-asset download URLs plus the hashes already committed in this manifest — even if a release asset were later replaced or deleted, the manifest alone proves what SHOULD be there and lets drift be detected."
+  },
+  "n2c_evidence_to_preserve": {
+    "repository": "PhysShell/007",
+    "workflow_run_id": "29404265568",
+    "logical_head_sha": "acb57379e2d0b9ed6fe79fd45e7540d7d00d7490",
+    "accepted_conclusion": "success",
+    "required_artifacts": [
+      "37 acquisition-* artifacts (one per eligible N2-C candidate, 17 primary + 20 alternate)",
+      "n2c-artifact-index",
+      "n2-source-freeze",
+      "source-identity-reports",
+      "archive-security-reports",
+      "quota-selection-report",
+      "selection-determinism-report"
+    ],
+    "reacquisition_forbidden": true
+  },
+  "n2a_evidence_to_preserve": {
+    "repository": "PhysShell/007",
+    "accepted_pr": "PhysShell/007#52",
+    "accepted_head_sha": "9c755dba8986323b1f18d49c26b53fec3aff5be4",
+    "identification_rule": "identified from PR #52's own accepted evidence trail (the three verification runs listed on the final head), not inferred from the latest or an investigation-only run",
+    "workflow_run_id": "29384147131",
+    "required_artifacts": ["miner-canary-source", "miner-canary-capture-a", "miner-canary-capture-b", "miner-canary-reports"],
+    "canonical_input_rule": {
+      "canonical": "capture-a",
+      "reproducibility_evidence_only": "capture-b",
+      "rule": "Unless the accepted evidence dictates otherwise, capture-a is the canonical benchmark input; capture-b is retained solely as reproducibility evidence. Never choose between captures based on later QODEC or RTK results."
+    },
+    "if_missing": "stop and report the gap; never silently regenerate the capture and call it the original evidence"
+  },
+  "verification_chain": [
+    "1. workflow run ID, head SHA, workflow identity, and successful conclusion",
+    "2. artifact names and artifact IDs",
+    "3. downloaded artifact archive digest against GitHub artifact metadata and the accepted artifact index",
+    "4. every contained file against n2c-artifact-index.json",
+    "5. each acquisition receipt and normalized archive against the folded identities in the accepted n2-source-freeze and source-identity-reports artifacts",
+    "6. candidate count and role mapping against the accepted final selection report",
+    "7. no missing, duplicate, unexpected, or extra candidate artifacts",
+    "archive-safety validation (archive_security.assert_safe, read-only-reused from N2-C) is performed before extracting any downloaded artifact"
+  ],
+  "explicit_disclosure": "The checked-in N2-C candidate-registry.json and source-manifests intentionally leave real-acquisition identity fields null pre-lock (per N2-C's own documented two-phase identity-lock contract). The folded, real values exist only in the accepted n2-source-freeze and source-identity-reports workflow artifacts from run 29404265568 — that is what this verification chain actually checks against, never the committed registry's null placeholders.",
+  "publication_proof_required": [
+    "download every asset again through the public release-asset path without a repository checkout or local build cache",
+    "verify every release-asset SHA256",
+    "unpack safely",
+    "re-verify the complete contained-file hash map",
+    "reconstruct the 18-case N2 primary input set (N2-A canary + 17 N2-C primary cases) and the 20-case alternate order",
+    "prove the reconstructed set matches the accepted N2-C selection and the accepted N2-A canary identity",
+    "a release upload succeeding is NOT itself acceptance evidence -- only the post-publication download and re-verification is"
+  ],
+  "scope_boundary_prohibited_actions": [
+    "execute QODEC", "execute RTK", "compute token counts", "instantiate the tokenizer",
+    "inspect comparative arm outputs", "call a model", "modify candidate selection",
+    "modify fallback ordering", "reacquire upstream source content", "declare or imply a benchmark winner"
+  ],
+  "stop_after_reporting": [
+    "the N2-D0 contract", "the exact release/tag design", "the complete artifact inventory and total sizes",
+    "N2-A accepted-run identification", "any missing or expired artifacts",
+    "the implementation checkpoint, if all required bytes are still available",
+    "post-publication anonymous verification evidence"
+  ],
+  "carried_forward_findings_for_the_later_n2d_contract": {
+    "qodec_identity": "must include both the source-boundary commit touching qodec/src/** and the full built-binary SHA256 (qodec has no --version flag; identity is sha256(binary), not a git tag)",
+    "rtk_identity": "tools.lock.toml pins rtk v0.42.4 (cargo install --git https://github.com/rtk-ai/rtk --tag v0.42.4, sha256 61683c0a25fb58e2e8e7d5a8067c6111956be75225daa2edfbc389a066f7133f), but qodec/evals/interop/v2/pilot/pilot-manifest.json records a DIFFERENT observed RTK build identity (short-hash 5d32d073) exhibiting real, observed nondeterminism on --filter log. These two identities must be reconciled before any N2-D canary is run.",
+    "tokenizer_identity": "must pin the exact o200k_base implementation/dependency lock and test vectors, not merely the string \"o200k_base\" -- a real, in-repo candidate already exists at qodec/src/meter.rs (Bpe wrapping tiktoken_rs::o200k_base()).",
+    "n1_continuity_set": "qodec/evals/interop/v2/pilot/ (10 real cases, pilot-manifest.json) -- NOT qodec/evals/interop/v2/corpus/**, which is an unrelated, empty (benchmark_case_count: 0) corpus-compiler scaffold."
+  }
+}
