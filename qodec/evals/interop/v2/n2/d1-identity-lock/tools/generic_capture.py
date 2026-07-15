@@ -88,6 +88,19 @@ def apply_durable_byte_cap(data: bytes) -> bytes:
     return data[:MAXIMUM_EXTRACTED_SOURCE_BYTES]
 
 
+def dedupe_sanitizer_rule_names(*reports: dict) -> list[str]:
+    """sanitizer.sanitize's rules_applied is a list of
+    {"rule": name, "replacements": count} dicts, not rule-name strings --
+    set()-ing the dicts directly raises "unhashable type: 'dict'" the moment
+    any rule actually matches (a real repo-kubeops-generator/dotnet capture
+    hit this: dotnet test's real "Time Elapsed HH:MM:SS.ffffff" line matched
+    the dotnet_time_elapsed_line rule)."""
+    names: set[str] = set()
+    for report in reports:
+        names.update(entry["rule"] for entry in report.get("rules_applied", []))
+    return sorted(names)
+
+
 def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
                      source_artifact_dir: Path, work_dir: Path, out_dir: Path,
                      frozen_argv: list[str], errata_path: Path,
@@ -214,7 +227,7 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
         "termination": {"exit_code": result["exit_code"]},
         "sanitization": {
             "profile_version": "n2a-canary-sanitizer-v1",
-            "transformations": sorted(set(stdout_report.get("rules_applied", []) + stderr_report.get("rules_applied", []))),
+            "transformations": dedupe_sanitizer_rule_names(stdout_report, stderr_report),
         },
         "reproducibility": {"class": "expected-semantically-reproducible"},
         "trusted_dependency_realization": trusted_setup_result,

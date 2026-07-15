@@ -15,6 +15,29 @@ import generic_capture as gc  # noqa: E402
 REAL_ERRATA_PATH = REPO_ROOT / "qodec/evals/interop/v2/n2/d1-identity-lock/execution-plan-errata.json"
 
 
+class TestDedupeSanitizerRuleNames(unittest.TestCase):
+    def test_empty_reports_produce_empty_list(self):
+        self.assertEqual(gc.dedupe_sanitizer_rule_names({}, {}), [])
+
+    def test_dict_shaped_rules_applied_does_not_raise(self):
+        # A real repo-kubeops-generator/dotnet capture crashed with
+        # "TypeError: unhashable type: 'dict'" because rules_applied is a
+        # list of {"rule": ..., "replacements": ...} dicts (sanitizer.py's
+        # real shape), not plain rule-name strings -- set()-ing them
+        # directly blew up the moment any real rule matched (here:
+        # dotnet_time_elapsed_line, from dotnet test's real "Time Elapsed
+        # HH:MM:SS.ffffff" output line).
+        stdout_report = {"rules_applied": [{"rule": "dotnet_time_elapsed_line", "replacements": 1}]}
+        stderr_report = {"rules_applied": [{"rule": "ansi_csi", "replacements": 3}]}
+        result = gc.dedupe_sanitizer_rule_names(stdout_report, stderr_report)
+        self.assertEqual(result, ["ansi_csi", "dotnet_time_elapsed_line"])
+
+    def test_duplicate_rule_names_across_streams_are_deduped(self):
+        stdout_report = {"rules_applied": [{"rule": "cr", "replacements": 2}]}
+        stderr_report = {"rules_applied": [{"rule": "cr", "replacements": 5}]}
+        self.assertEqual(gc.dedupe_sanitizer_rule_names(stdout_report, stderr_report), ["cr"])
+
+
 class TestResolveEffectiveArgv(unittest.TestCase):
     def _write_errata(self, tmp_path, case_id, original_argv, corrected_argv):
         entry = {
