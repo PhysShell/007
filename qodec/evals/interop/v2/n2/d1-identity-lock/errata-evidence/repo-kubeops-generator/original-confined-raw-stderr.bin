@@ -1,0 +1,3 @@
+sandboy: warning: Landlock only PARTIALLY enforced (kernel too old for some access rights)
+An issue was encountered verifying workloads. For more information, run "dotnet workload update".
+Command exited with non-zero status 1

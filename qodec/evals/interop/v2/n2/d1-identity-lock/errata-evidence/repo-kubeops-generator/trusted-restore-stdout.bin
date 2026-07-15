@@ -1,0 +1,5 @@
+  Determining projects to restore...
+  Restored /tmp/claude-0/-home-user/44120920-171e-5825-aedb-d8481afe2e32/scratchpad/kubeops-restore-evidence/source/test/KubeOps.Generator.Test.Entities/KubeOps.Generator.Test.Entities.csproj (in 9.21 sec).
+  Restored /tmp/claude-0/-home-user/44120920-171e-5825-aedb-d8481afe2e32/scratchpad/kubeops-restore-evidence/source/src/KubeOps.Abstractions/KubeOps.Abstractions.csproj (in 9.19 sec).
+  Restored /tmp/claude-0/-home-user/44120920-171e-5825-aedb-d8481afe2e32/scratchpad/kubeops-restore-evidence/source/src/KubeOps.Generator/KubeOps.Generator.csproj (in 9.19 sec).
+  Restored /tmp/claude-0/-home-user/44120920-171e-5825-aedb-d8481afe2e32/scratchpad/kubeops-restore-evidence/source/test/KubeOps.Generator.Test/KubeOps.Generator.Test.csproj (in 9.24 sec).

@@ -37,6 +37,7 @@ for p in (CANARY_TOOLS, MINER_TOOLS, CORPUS_TOOLS, TOOLS_DIR):
 import capture_build  # noqa: E402
 import content_acceptance  # noqa: E402
 import generic_sandbox_policy as gsp  # noqa: E402
+import network_enforcement_probe  # noqa: E402
 import receipt_contract  # noqa: E402
 import toolchain_identity  # noqa: E402
 from sanitizer import sanitize  # noqa: E402
@@ -220,6 +221,31 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
     launcher_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home_dir), "TMPDIR": str(tmp_dir)}
     launcher_env.update(toolchain_env_values)
 
+    # jvm-gradle's policy disables Sandboy's own Landlock TCP mediation
+    # (network_enforcement_mode = "outer-netns-loopback-only" -- see
+    # generic_sandbox_policy.py) -- verify, in the EXACT same envelope
+    # (same sandboy_bin, same policy_path, same source_root, same env) the
+    # capture that follows uses, that this narrow exception is genuinely
+    # what it claims: real external connectivity still blocked, real
+    # dynamic loopback bind+connect genuinely allowed. Never asserted,
+    # always independently re-proven on every jvm-gradle job.
+    network_enforcement_report = None
+    if ecosystem == "jvm-gradle":
+        network_enforcement_report = network_enforcement_probe.run_gradle_network_enforcement_checks(
+            sandboy_bin=sandboy_bin, policy_path=policy_path, cwd=source_root, env=launcher_env,
+        )
+        (out_dir / "network-enforcement-probe-report.json").write_text(
+            json.dumps(network_enforcement_report, indent=2, sort_keys=True) + "\n"
+        )
+        if not network_enforcement_report["enforcement_exception_verified"]:
+            raise GenericCaptureFailure(
+                f"{case_id}/{job_name}: network_enforcement_mode=outer-netns-loopback-only failed live "
+                f"verification: external_connectivity_confirmed_blocked="
+                f"{network_enforcement_report['external_connectivity_confirmed_blocked']} "
+                f"loopback_bind_connect_confirmed_allowed="
+                f"{network_enforcement_report['loopback_bind_connect_confirmed_allowed']}"
+            )
+
     verify_relative_argv0_exists(effective_argv[0], source_root)
     result = capture_build.run_real_build(sandboy_bin, policy_path, source_root, effective_argv, launcher_env)
 
@@ -240,7 +266,7 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
     content_report = content_acceptance.validate_capture_content(
         case_id=case_id, canonical_stream_bytes=canonical_capped,
         raw_stdout=result["raw_stdout"], raw_stderr=result["raw_stderr"],
-        exit_code=result["exit_code"],
+        exit_code=result["exit_code"], execution_argv_resolution=resolution,
     )
     (out_dir / "content-validation-report.json").write_text(
         json.dumps(content_report, indent=2, sort_keys=True) + "\n"
@@ -297,6 +323,7 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
         "content_validation_report_sha256": sha256_bytes(
             (json.dumps(content_report, indent=2, sort_keys=True) + "\n").encode()
         ),
+        "network_enforcement_exception": network_enforcement_report,
     }
     schema_errors = receipt_contract.validate_receipt(receipt)
     if schema_errors:

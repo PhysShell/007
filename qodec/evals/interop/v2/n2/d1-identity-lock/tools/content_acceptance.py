@@ -11,6 +11,30 @@ from __future__ import annotations
 
 import re
 
+# D1b decision identity for the one, narrow authorization under which an
+# empty canonical stream is not an automatic rejection: repo-pyflakes may
+# legitimately execute successfully and find zero violations. Authorized
+# 2026-07-15, in response to real CI evidence (post venv/PRESERVE_ENV fix)
+# showing repo-pyflakes run cleanly (exit 0, no infrastructure-failure
+# signature, harmless-Landlock-warning-only stderr) against the authorized
+# "pyflakes/" erratum with genuinely zero stdout bytes. Every other case
+# keeps the unconditional nonempty-canonical-stream requirement.
+PYFLAKES_EMPTY_OUTPUT_AUTHORIZATION_ID = "n2d1b-pyflakes-empty-output-authorization-2026-07-15"
+
+_RUNTIME_FAILURE_STDERR_RE = re.compile(r"(Traceback \(most recent call last\)|^Error:|Exception:)", re.MULTILINE)
+
+
+def _stderr_free_of_pyflakes_runtime_failure(stderr: bytes) -> bool:
+    """True if stderr shows no Python traceback/exception/error -- after
+    stripping the expected, harmless "Landlock only PARTIALLY enforced"
+    warning line present on every real run (including genuinely successful
+    ones), which must never itself count as a failure signal."""
+    text = stderr.decode("utf-8", errors="replace")
+    text_without_harmless_warning = "\n".join(
+        line for line in text.splitlines() if "Landlock only PARTIALLY enforced" not in line
+    )
+    return not _RUNTIME_FAILURE_STDERR_RE.search(text_without_harmless_warning)
+
 # Real infrastructure-failure signatures found by inspecting run #6's actual
 # captured stderr bytes -- never invented, never guessed. Each is specific
 # enough not to false-positive on legitimate workload output (e.g. NOT the
@@ -115,11 +139,17 @@ class ContentAcceptanceFailure(Exception):
 
 
 def validate_capture_content(*, case_id: str, canonical_stream_bytes: bytes,
-                              raw_stdout: bytes, raw_stderr: bytes, exit_code: int) -> dict:
+                              raw_stdout: bytes, raw_stderr: bytes, exit_code: int,
+                              execution_argv_resolution: str | None = None) -> dict:
     """Returns a content-validation-report dict. Never raises itself --
     the caller (generic_capture.run_one_capture) decides whether to raise
     based on report['accepted'], so the report can always be written to
-    disk first, including for a rejected capture."""
+    disk first, including for a rejected capture.
+
+    `execution_argv_resolution` is generic_capture.resolve_effective_argv's
+    own resolution string ("frozen" or "authorized-n2d1b-erratum") -- it
+    gates the one narrow repo-pyflakes empty-output authorization below;
+    every other case's acceptance is unaffected by it."""
     try:
         canonical_text = canonical_stream_bytes.decode("utf-8", errors="strict")
         is_valid_utf8 = True
@@ -144,19 +174,45 @@ def validate_capture_content(*, case_id: str, canonical_stream_bytes: bytes,
         "no_infrastructure_failure_detected": infra_failure is None,
         "case_semantic_marker_found": semantic_ok,
     }
-    accepted = all(checks.values())
 
-    rejection_reasons = []
-    if not is_valid_utf8:
-        rejection_reasons.append("canonical stream is not valid UTF-8")
-    if not is_nonempty:
-        rejection_reasons.append("canonical stream is empty")
-    if not term_allowed:
-        rejection_reasons.append(f"exit code {exit_code} is an abnormal/non-workload termination")
-    if infra_failure is not None:
-        rejection_reasons.append(f"detected known infrastructure failure: {infra_failure}")
-    if not semantic_ok:
-        rejection_reasons.append(f"case-specific semantic marker not found: {semantic_description}")
+    # The ONE narrow, explicitly authorized exception to the global
+    # nonempty-canonical-stream requirement: repo-pyflakes may legitimately
+    # execute successfully and find zero violations. Every condition below
+    # must hold -- this never applies to any other case_id, and a missing/
+    # wrong execution_argv_resolution (e.g. an un-updated caller) fails
+    # closed into the ordinary nonempty-required path.
+    is_authorized_pyflakes_empty_result = (
+        case_id == "repo-pyflakes"
+        and len(canonical_stream_bytes) == 0
+        and len(raw_stdout) == 0
+        and exit_code == 0
+        and infra_failure is None
+        and execution_argv_resolution == "authorized-n2d1b-erratum"
+        and _stderr_free_of_pyflakes_runtime_failure(raw_stderr)
+    )
+
+    if is_authorized_pyflakes_empty_result:
+        accepted = is_valid_utf8 and term_allowed and infra_failure is None
+        rejection_reasons = []
+        content_classification = "successful-empty-domain-result"
+        empty_output_authorized = True
+        approving_decision_identity = PYFLAKES_EMPTY_OUTPUT_AUTHORIZATION_ID
+    else:
+        accepted = all(checks.values())
+        rejection_reasons = []
+        if not is_valid_utf8:
+            rejection_reasons.append("canonical stream is not valid UTF-8")
+        if not is_nonempty:
+            rejection_reasons.append("canonical stream is empty")
+        if not term_allowed:
+            rejection_reasons.append(f"exit code {exit_code} is an abnormal/non-workload termination")
+        if infra_failure is not None:
+            rejection_reasons.append(f"detected known infrastructure failure: {infra_failure}")
+        if not semantic_ok:
+            rejection_reasons.append(f"case-specific semantic marker not found: {semantic_description}")
+        content_classification = "genuine-workload-output" if accepted else "rejected"
+        empty_output_authorized = False
+        approving_decision_identity = None
 
     return {
         "report_type": "n2d1b-content-validation-report-v1",
@@ -167,4 +223,7 @@ def validate_capture_content(*, case_id: str, canonical_stream_bytes: bytes,
         "case_semantic_marker_description": semantic_description,
         "accepted": accepted,
         "rejection_reasons": rejection_reasons,
+        "content_classification": content_classification,
+        "empty_output_authorized": empty_output_authorized,
+        "approving_decision_identity": approving_decision_identity,
     }

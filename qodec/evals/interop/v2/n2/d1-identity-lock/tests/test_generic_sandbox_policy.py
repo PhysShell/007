@@ -174,6 +174,33 @@ class TestBuildPolicy(unittest.TestCase):
         fs_rw_line = next(line for line in text.splitlines() if line.startswith("fs_rw"))
         self.assertIn('"/tmp"', fs_rw_line)
 
+    def test_gradle_policy_declares_outer_netns_loopback_only_network_enforcement_mode(self):
+        # D1b authorization (2026-07-15): Gradle's daemon needs an
+        # OS-chosen loopback port Landlock's fixed-port-list tcp_bind
+        # cannot express -- Landlock's own TCP mediation is disabled for
+        # jvm-gradle ONLY, relying on the outer netns for real confinement.
+        text = gsp.build_policy(
+            ecosystem="jvm-gradle", source_root=Path("/src"), home_dir=Path("/h"),
+            tmp_dir=Path("/t"), capture_out_dir=Path("/o"),
+            project_writable_dirs=[], env_values={},
+        )
+        self.assertIn('network_enforcement_mode = "outer-netns-loopback-only"', text)
+        # Still an empty fixed port allowlist -- Sandboy's own validation
+        # requires this alongside the mode declaration.
+        self.assertIn("tcp_connect = []", text)
+        self.assertIn("tcp_bind = []", text)
+
+    def test_no_other_ecosystem_declares_network_enforcement_mode(self):
+        for ecosystem in gsp.ECOSYSTEM_POLICY_HINTS:
+            if ecosystem == "jvm-gradle":
+                continue
+            text = gsp.build_policy(
+                ecosystem=ecosystem, source_root=Path("/src"), home_dir=Path("/h"),
+                tmp_dir=Path("/t"), capture_out_dir=Path("/o"),
+                project_writable_dirs=[], env_values={},
+            )
+            self.assertNotIn("network_enforcement_mode", text)
+
     def test_dotnet_policy_makes_real_tmp_writable(self):
         # The dotnet CLI's first-run NuGet-migrations named mutex hardcodes
         # /tmp/.dotnet/shm regardless of TMPDIR/HOME -- a real N2-A canary run

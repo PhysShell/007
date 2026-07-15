@@ -91,6 +91,20 @@ ECOSYSTEM_POLICY_HINTS = {
         "env_allow": ["PATH", "HOME", "TMPDIR", "JAVA_HOME", "GRADLE_USER_HOME", "GRADLE_OPTS"],
         "extra_fs_ro_from_env": ["JAVA_HOME"],
         "extra_fs_rw_from_env": ["GRADLE_USER_HOME"],
+        # Real evidence (CI runs #9-#11): two independent, argv/env-only
+        # attempts (GRADLE_OPTS, then gradle.properties) to make Gradle skip
+        # its daemon both failed identically -- "java.net.BindException:
+        # Permission denied" trying to bind its own client<->daemon loopback
+        # IPC port. Gradle's daemon architecture always needs SOME loopback
+        # TCP port, chosen by the OS, for this; Sandboy's Landlock tcp_bind
+        # is a fixed port list (Landlock scopes ports, not addresses -- see
+        # sandboy's own README) with no way to express "any port, loopback
+        # only". D1b-authorized (2026-07-15): disable Landlock's own TCP
+        # mediation for jvm-gradle ONLY, relying solely on the outer netns
+        # (unshare --net + loopback-only interface, already unconditional
+        # for every ecosystem) for real network confinement. Filesystem,
+        # seccomp, and env_clear mediation are unaffected.
+        "network_enforcement_mode": "outer-netns-loopback-only",
     },
     "dotnet": {
         # Mirrors canary/tools/sandboy_policy.py's proven N2-A dotnet policy
@@ -148,6 +162,9 @@ def build_policy(*, ecosystem: str, source_root: Path, home_dir: Path, tmp_dir: 
         "tcp_bind = []",
         f"env_allow = {_toml_str_list([Path(n) for n in hints['env_allow']])}",
     ]
+    network_enforcement_mode = hints.get("network_enforcement_mode")
+    if network_enforcement_mode:
+        lines.append(f'network_enforcement_mode = "{network_enforcement_mode}"')
     return "\n".join(lines) + "\n"
 
 

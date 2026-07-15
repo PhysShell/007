@@ -143,6 +143,30 @@
 # process's isolated HOME. Fixed by pinning -Dsbt.global.base to the real
 # ~/.sbt (same MAVEN_OPTS mechanism as maven.repo.local) and granting it
 # fs_rw, mirroring the MAVEN_LOCAL_REPO_PATH pattern exactly.
+#
+# D1b authorization (2026-07-15) -- maven now content-valid; five remaining
+# resolutions applied before this re-run:
+#   1. repo-pyflakes: content_acceptance.py now accepts a genuinely empty
+#      canonical stream ONLY for repo-pyflakes, ONLY when exit=0, no infra
+#      failure, the authorized erratum resolved, and clean stderr --
+#      recorded as content_classification="successful-empty-domain-result".
+#   2. repo-kubeops-generator: a second AUTHORIZED_ERRATUM entry appends
+#      only --no-restore after real, evidenced trusted-restore success
+#      (execution-plan-errata.json, errata-evidence/repo-kubeops-generator/).
+#   3. jvm-gradle: Sandboy (Own.NET commit c7c2dcd) adds
+#      network_enforcement_mode = "outer-netns-loopback-only", disabling
+#      ONLY Landlock's own TCP mediation for this ecosystem (fs/seccomp/env
+#      unaffected) -- live-verified via negative external-connectivity +
+#      positive loopback bind/connect probes in the same envelope on every
+#      job (network_enforcement_probe.py), never merely declared.
+#   4. Fixed-visible-path discipline: --work-dir no longer embeds the job
+#      name (${{ matrix.job }}) -- capture-a/b are separate jobs on
+#      separate, disposable runners, so an identical literal work path
+#      never collides, and now can't itself cause the two captures'
+#      absolute-path-echoing output to differ.
+#   5. Full five-case pilot re-run follows; Stage 1 acceptance is withheld
+#      until all ten captures pass AND each pair has exact canonical
+#      raw-byte equality.
 name: qodec-n2d1b-miner-pilot
 
 on:
@@ -160,7 +184,11 @@ env:
   LC_ALL: C.UTF-8
   LANG: C.UTF-8
   TZ: UTC
-  SANDBOY_COMMIT_SHA: e925058ddea405b5821fc0aed4882c76650dcbe9
+  # N2-D1b-owned pin, independent of N2-A/B/C's own e925058 pin (untouched,
+  # still frozen there) -- c7c2dcd adds network_enforcement_mode =
+  # "outer-netns-loopback-only" (D1b authorization, 2026-07-15), needed
+  # only by jvm-gradle captures in this workflow.
+  SANDBOY_COMMIT_SHA: c7c2dcdc6c80eb5f0b629245e0bf6ca4746e8783
   N2D0_RELEASE_TAG: n2d0-durable-evidence-v1
 
 jobs:
@@ -248,11 +276,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Checkout Own.NET/sandboy at the accepted S0 commit
+      - name: Checkout Own.NET/sandboy at the N2-D1b-pinned commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: PhysShell/Own.NET
-          ref: e925058ddea405b5821fc0aed4882c76650dcbe9
+          ref: c7c2dcdc6c80eb5f0b629245e0bf6ca4746e8783
           path: own-net
           persist-credentials: false
           fetch-depth: 1
@@ -390,7 +418,14 @@ jobs:
 
       - name: Run the D1b generic capture (${{ matrix.job }})
         run: |
-          mkdir -p "$RUNNER_TEMP/work-${{ matrix.case.case_id }}-${{ matrix.job }}" "$RUNNER_TEMP/out-${{ matrix.case.case_id }}-${{ matrix.job }}"
+          # Fixed-visible-path discipline (D1b decision, 2026-07-15): the
+          # WORK path (which becomes source_root, visible in any absolute
+          # path a workload's own output echoes) is the same literal string
+          # for capture-a and capture-b -- they run as separate jobs on
+          # separate, disposable runners, so reusing an identical path never
+          # collides. Only the OUT path (artifacts only, never echoed into
+          # captured output) stays job-specific.
+          mkdir -p "$RUNNER_TEMP/n2d1b-stable/${{ matrix.case.case_id }}/work" "$RUNNER_TEMP/out-${{ matrix.case.case_id }}-${{ matrix.job }}"
           published_lockfile_arg=()
           if [ "${{ matrix.case.case_id }}" = "repo-dockerfile-parser-rs" ]; then
             published_lockfile_arg=(--published-lockfile "$RUNNER_TEMP/dfpr-published-lockfile/Cargo.lock")
@@ -400,7 +435,7 @@ jobs:
             --ecosystem "${{ matrix.case.ecosystem }}" \
             --job-name "${{ matrix.job }}" \
             --source-artifact-dir "$RUNNER_TEMP/source-artifact/${{ matrix.case.case_id }}" \
-            --work-dir "$RUNNER_TEMP/work-${{ matrix.case.case_id }}-${{ matrix.job }}" \
+            --work-dir "$RUNNER_TEMP/n2d1b-stable/${{ matrix.case.case_id }}/work" \
             --out-dir "$RUNNER_TEMP/out-${{ matrix.case.case_id }}-${{ matrix.job }}" \
             --sandboy-bin "$GITHUB_WORKSPACE/own-net/sandboy/target/release/sandboy" \
             --sandboy-commit-sha "$SANDBOY_COMMIT_SHA" \

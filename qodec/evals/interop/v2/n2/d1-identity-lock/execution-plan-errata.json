@@ -3,6 +3,72 @@
   "entries": [
     {
       "approving_scope": "N2-D1b",
+      "authorized_timestamp": "2026-07-15T16:00:00Z",
+      "case_id": "repo-kubeops-generator",
+      "corrected_argv_validation_evidence": {
+        "exit_code": 0,
+        "note": "Real local validation (same D1b validation environment, dotnet 10.0.302) proving the corrected argv genuinely completes against the same freshly restored source tree: real VSTest completion summary produced, exit code 0.",
+        "observed_vstest_summary": "Passed!  - Failed:     0, Passed:    61, Skipped:     0, Total:    61, Duration: 5 s - KubeOps.Generator.Test.dll (net10.0)",
+        "stderr_evidence_path": "qodec/evals/interop/v2/n2/d1-identity-lock/errata-evidence/repo-kubeops-generator/corrected-argv-validation-stderr.bin",
+        "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stdout_evidence_path": "qodec/evals/interop/v2/n2/d1-identity-lock/errata-evidence/repo-kubeops-generator/corrected-argv-validation-stdout.bin",
+        "stdout_sha256": "880556dfbfb774ab93efcb78a45518ae8a65ec634b10db078c0a8b182f29413a",
+        "validated_argv": [
+          "dotnet",
+          "test",
+          "test/KubeOps.Generator.Test/KubeOps.Generator.Test.csproj",
+          "--no-restore"
+        ]
+      },
+      "corrected_effective_argv": [
+        "dotnet",
+        "test",
+        "test/KubeOps.Generator.Test/KubeOps.Generator.Test.csproj",
+        "--no-restore"
+      ],
+      "correction_rule": "The exact pinned source commit and frozen test target are unchanged. Real capture evidence (CI runs #7 through #12 of qodec-n2d1b-miner-pilot.yml) shows the unmodified frozen argv, run confined with network denied AFTER a real, successful trusted `dotnet restore` on the exact same fresh source tree, still performs its own implicit re-restore and fails with NU1301 (\"Unable to load the service index for source https://api.nuget.org/v3/index.json\") -- `dotnet test` always re-verifies/re-restores unless told not to. Appending only `--no-restore` is the smallest possible fix that suppresses this one redundant, already-satisfied action; it does not retarget the project, change test selection, alter the target framework, or touch `--no-build`. This correction does not change the source, tool, command class, case family, selected primary role, or corpus quotas.",
+      "durable_source_tar_sha256": "f89e1b38e3337caab1dfe7b449fffd1e186179fc9fa5f234ce2f7f57287dc979",
+      "erratum_class": "confinement-implicit-network-suppression-correction",
+      "frozen_n2c_manifest_path": "qodec/evals/interop/v2/n2/source-freeze/source-manifests/primary/repo-kubeops-generator.json",
+      "frozen_n2c_manifest_sha256": "8b4d8321cfadc0efb95b876cf2b1b2885b8940121d174154602c6eaef45134c6",
+      "original_confined_run_evidence": {
+        "detected_infrastructure_failure": "nuget-restore-failure-nu1301",
+        "job_name": "pilot-repo-kubeops-generator-capture-a",
+        "note": "Real confined-run output under the UNCHANGED frozen argv, captured by CI run #9 (workflow run 29425497514, commit cf89173, job pilot-repo-kubeops-generator-capture-a) -- trusted restore had already succeeded (the failure is a content-acceptance rejection, never a 'trusted dotnet restore failed' exception), yet the confined `dotnet test` (no --no-restore) still attempted its own implicit restore under network denial and failed with NU1301.",
+        "raw_stderr_evidence_path": "qodec/evals/interop/v2/n2/d1-identity-lock/errata-evidence/repo-kubeops-generator/original-confined-raw-stderr.bin",
+        "raw_stderr_sha256": "dbfbc12985b0c3b931e343ba91f38965dc6a61dfdbc7dc27c932716f7049d135",
+        "raw_stdout_evidence_path": "qodec/evals/interop/v2/n2/d1-identity-lock/errata-evidence/repo-kubeops-generator/original-confined-raw-stdout.bin",
+        "raw_stdout_sha256": "d6c07872d5ec5eb4fdfb1c3c5cbf9b74256ab8c70f1fd1dc4232637723a49e79",
+        "workflow_run_id": 29425497514
+      },
+      "original_frozen_argv": [
+        "dotnet",
+        "test",
+        "test/KubeOps.Generator.Test/KubeOps.Generator.Test.csproj"
+      ],
+      "pinned_source_commit_sha": "9f44d7ca3b545b0db2fdb990374c58f0205d0eef",
+      "status": "AUTHORIZED_ERRATUM",
+      "trusted_restore_evidence": {
+        "dotnet_binary_sha256": "55117d7d1f27537ee6e7a81b8b9f84f0b50c8cbd2d1d1e21684c31db1518230a",
+        "dotnet_sdk_version": "10.0.302",
+        "generated_assets": [
+          "test/KubeOps.Generator.Test/obj/project.assets.json"
+        ],
+        "note": "Real trusted `dotnet restore` executed against the exact fresh, verified (archive-sha256-matched) pinned-commit source tree, network allowed, independent of and prior to any confined capture -- dotnet 10.0.302 (local D1b validation environment; CI's own pinned dotnet-version is 10.0.x/actions/setup-dotnet, not required to be byte-identical for this rationale-validating evidence).",
+        "restore_argv": [
+          "dotnet",
+          "restore",
+          "test/KubeOps.Generator.Test/KubeOps.Generator.Test.csproj"
+        ],
+        "restore_exit_code": 0,
+        "restore_stderr_evidence_path": "qodec/evals/interop/v2/n2/d1-identity-lock/errata-evidence/repo-kubeops-generator/trusted-restore-stderr.bin",
+        "restore_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "restore_stdout_evidence_path": "qodec/evals/interop/v2/n2/d1-identity-lock/errata-evidence/repo-kubeops-generator/trusted-restore-stdout.bin",
+        "restore_stdout_sha256": "d53fd42a264b33df40ee1b14fda46d44f1fc1f2ba0d641d7c5d41b58d3ada5fe"
+      }
+    },
+    {
+      "approving_scope": "N2-D1b",
       "authorized_timestamp": "2026-07-15T13:00:00Z",
       "case_id": "repo-pyflakes",
       "corrected_effective_argv": [
@@ -13,6 +79,7 @@
       ],
       "correction_rule": "The exact pinned source commit is unchanged. The frozen tree contains no src/ directory. The real package source directory is pyflakes/. The original command therefore cannot perform its intended static-analysis workload. Replacing only the nonexistent assumed source root with the actual package root is the smallest evidence-based correction. This correction does not change the source, tool, command class, case family, selected primary role, or corpus quotas. Not '.', not pytest/tox/flake8, not any other workload.",
       "durable_source_tar_sha256": "4dfe80499d91f501aa4fa742cb8cc09318bd984ffd175b8de0ad3868cdd3d96e",
+      "erratum_class": "path-correction",
       "frozen_n2c_manifest_path": "qodec/evals/interop/v2/n2/source-freeze/source-manifests/primary/repo-pyflakes.json",
       "frozen_n2c_manifest_sha256": "e8d73a9fc7a53d757de7d93db237169187182b5830a931266e572edb820019b6",
       "original_dry_run_exit_code": 1,
@@ -40,6 +107,6 @@
     }
   ],
   "errata_contract_version": "n2d1b-execution-plan-errata-v1",
-  "errata_sha256": "3cb2f630eeee9c94841019314bcb89a40f0126d17efe6bd2bc49e65f530593e5",
-  "rule": "An erratum is authorized ONLY when the frozen argv is provably unexecutable against the exact frozen, pinned-commit source tree (a real 'no such file or directory' / equivalent failure, not a toolchain or dependency issue), AND the correction is the smallest possible fix (replacing only the nonexistent assumed path with the real one), AND it changes nothing else about the case (source, tool, command class, family, primary/alternate role, quotas)."
+  "errata_sha256": "20bad3cd253d215a237511df9985ebdbcf25d12f4cdb0d2588dbdb657bec2297",
+  "rule": "An erratum is authorized ONLY under one of two narrow classes, never a silent substitution, and never a change to N2-C's own files: (A) path correction -- the frozen argv is provably unexecutable against the exact frozen, pinned-commit source tree (a real 'no such file or directory' / equivalent failure, not a toolchain or dependency issue), and the correction is the smallest possible fix (replacing only the nonexistent assumed path with the real one); or (B) confinement-implicit-network-suppression correction -- the frozen argv is otherwise correct against the real source tree, but performs an implicit, redundant network-dependent action (e.g. its own re-restore) under the sandbox's legitimate, permanent network denial, EVEN AFTER a documented, real trusted restore/setup succeeded on the exact same fresh source tree used for confinement, and the correction is the smallest possible fix that suppresses ONLY that redundant action (e.g. appending a single --no-restore-style flag), never retargeting the project, test selection, framework, or build configuration. Either class must change nothing else about the case (source, tool, command class, family, primary/alternate role, quotas)."
 }

@@ -5,6 +5,7 @@ never before it.
 import json
 import sys
 import unittest
+import unittest.mock as mock
 from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
@@ -149,6 +150,94 @@ class TestRunOneCaptureContentGate(unittest.TestCase):
 def hashlib_sha256_of_report(report: dict) -> str:
     import hashlib
     return hashlib.sha256((json.dumps(report, indent=2, sort_keys=True) + "\n").encode()).hexdigest()
+
+
+class TestGradleNetworkEnforcementWiring(unittest.TestCase):
+    """jvm-gradle's network_enforcement_mode = "outer-netns-loopback-only"
+    must be LIVE-VERIFIED, in the same envelope, before every jvm-gradle
+    capture -- never merely declared in the policy and trusted."""
+
+    def _make_source_artifact_dir(self, tmp_path):
+        import hashlib
+        import tarfile
+
+        source_artifact_dir = tmp_path / "source-artifact"
+        source_artifact_dir.mkdir()
+        tar_path = source_artifact_dir / "source.tar"
+        src_file = tmp_path / "hello.txt"
+        src_file.write_text("hello\n")
+        gradlew_file = tmp_path / "gradlew"
+        gradlew_file.write_text("#!/bin/sh\n")
+        with tarfile.open(tar_path, "w") as tar:
+            tar.add(src_file, arcname="hello.txt")
+            tar.add(gradlew_file, arcname="gradlew")
+        archive_sha256 = hashlib.sha256(tar_path.read_bytes()).hexdigest()
+        (source_artifact_dir / "acquisition-receipt.json").write_text(json.dumps({
+            "actual_head_sha": "deadbeef" * 5,
+            "normalized_archive_sha256": archive_sha256,
+            "license_sha256": "cafe" * 16,
+        }))
+        return source_artifact_dir
+
+    def _run(self, tmp_path, *, probe_verified: bool, gradle_stdout: bytes):
+        probe_report = {
+            "report_type": "n2d1b-gradle-network-enforcement-probe-v1",
+            "network_enforcement_mode": "outer-netns-loopback-only",
+            "negative_external_connectivity_probe": {"exit_code": 0 if probe_verified else 1},
+            "positive_loopback_bind_connect_probe": {"exit_code": 0},
+            "external_connectivity_confirmed_blocked": probe_verified,
+            "loopback_bind_connect_confirmed_allowed": True,
+            "enforcement_exception_verified": probe_verified,
+        }
+        source_artifact_dir = self._make_source_artifact_dir(tmp_path)
+        work_dir = tmp_path / "work"
+        out_dir = tmp_path / "out"
+        fake_result = {
+            "raw_stdout": gradle_stdout, "raw_stderr": b"", "exit_code": 0,
+            "wall_time_s": 1.0, "peak_rss_kb": 1024,
+        }
+        with mock.patch.object(gc, "network_enforcement_probe") as fake_probe_module, \
+                mock.patch.object(gc.capture_build, "run_real_build", return_value=fake_result):
+            fake_probe_module.run_gradle_network_enforcement_checks.return_value = probe_report
+            return gc.run_one_capture(
+                case_id="repo-spotless", ecosystem="jvm-gradle", job_name="capture-a",
+                source_artifact_dir=source_artifact_dir, work_dir=work_dir, out_dir=out_dir,
+                frozen_argv=["./gradlew", "spotlessCheck"], errata_path=REAL_ERRATA_PATH,
+                sandboy_bin=Path("/nonexistent/sandboy"), sandboy_commit_sha="e" * 40,
+                toolchain_capture_fn=lambda source_root: {
+                    "resolved_version": "9.4.1", "runtime_identifier": "21",
+                    "gradle_binary_path": "/usr/bin/true", "gradle_binary_sha256": "a" * 64,
+                },
+                toolchain_env_values={"JAVA_HOME": "/usr/lib/jvm/java-21"},
+                canonical_stream="stdout", primary_stream_rationale="test",
+                project_writable_dirs_relative=[],
+                requested_version_or_range="9.4.1", resolver_mechanism="test",
+            ), out_dir
+
+    def test_verified_enforcement_lets_the_real_capture_proceed(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, out_dir = self._run(
+                Path(tmp), probe_verified=True, gradle_stdout=b"BUILD SUCCESSFUL in 3s\n",
+            )
+            self.assertIsNotNone(receipt["network_enforcement_exception"])
+            self.assertTrue(receipt["network_enforcement_exception"]["enforcement_exception_verified"])
+            self.assertTrue((out_dir / "network-enforcement-probe-report.json").exists())
+            self.assertTrue((out_dir / "receipt.json").exists())
+
+    def test_unverified_enforcement_fails_closed_before_the_real_gradle_run(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            with self.assertRaises(gc.GenericCaptureFailure):
+                self._run(tmp_path, probe_verified=False, gradle_stdout=b"BUILD SUCCESSFUL in 3s\n")
+            out_dir = tmp_path / "out"
+            report = json.loads((out_dir / "network-enforcement-probe-report.json").read_text())
+            self.assertFalse(report["enforcement_exception_verified"])
+            # The real gradle capture must never have been promoted to a receipt.
+            self.assertFalse((out_dir / "receipt.json").exists())
 
 
 class TestVerifyRelativeArgv0Exists(unittest.TestCase):

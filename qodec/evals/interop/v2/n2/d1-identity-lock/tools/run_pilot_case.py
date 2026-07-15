@@ -385,6 +385,14 @@ def main() -> int:
                 str(p.relative_to(source_root))
                 for p in (source_root / Path(project_relpath).parent / "obj").glob("project.assets.json")
             ) if (source_root / Path(project_relpath).parent / "obj").is_dir() else []
+            if not generated_assets:
+                # Required for the repo-kubeops-generator --no-restore
+                # erratum: exit 0 alone doesn't prove restore assets are
+                # actually present before confinement -- assert it directly.
+                raise gc.GenericCaptureFailure(
+                    f"trusted `dotnet restore {project_relpath}` reported exit 0 but produced no "
+                    "project.assets.json -- restore assets are not present before confinement"
+                )
             return {
                 "note": "trusted dependency realization: `dotnet restore` on the same fresh source_root later used for the confined capture (network allowed here; capture itself never contacts the network)",
                 "restore_argv": restore_argv,

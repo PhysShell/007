@@ -154,9 +154,10 @@ class TestValidateCaptureContent(unittest.TestCase):
         self.assertTrue(report["accepted"])
 
     def test_genuinely_empty_pyflakes_after_clean_run_is_rejected_not_synthesized(self):
-        # Requirement: a genuinely empty pyflakes result (e.g. zero
-        # diagnostics after a real, successful run) must STOP -- never fall
-        # back to stderr, concatenate streams, or synthesize output.
+        # Without the authorized erratum resolution signal (e.g. a caller
+        # that never passes execution_argv_resolution), a genuinely empty
+        # pyflakes result still fails closed -- the bypass below requires
+        # ALL of its conditions, not just emptiness+exit-0.
         report = ca.validate_capture_content(
             case_id="repo-pyflakes", canonical_stream_bytes=b"",
             raw_stdout=b"", raw_stderr=b"", exit_code=0,
@@ -186,8 +187,102 @@ class TestValidateCaptureContent(unittest.TestCase):
             raw_stdout=b"", raw_stderr=REAL_RUSTUP_FAILURE_STDERR, exit_code=1,
         )
         for key in ("report_type", "case_id", "exit_code", "checks", "infrastructure_failure_detected",
-                    "case_semantic_marker_description", "accepted", "rejection_reasons"):
+                    "case_semantic_marker_description", "accepted", "rejection_reasons",
+                    "content_classification", "empty_output_authorized", "approving_decision_identity"):
             self.assertIn(key, report)
+
+
+class TestAuthorizedPyflakesEmptyOutput(unittest.TestCase):
+    """D1b decision (2026-07-15): repo-pyflakes, and ONLY repo-pyflakes, may
+    pass with a genuinely empty canonical stream when every one of the
+    authorized conditions holds. Every other case keeps the unconditional
+    nonempty-canonical-stream requirement."""
+
+    def test_empty_pyflakes_exit_0_clean_stderr_authorized_erratum_passes(self):
+        report = ca.validate_capture_content(
+            case_id="repo-pyflakes", canonical_stream_bytes=b"",
+            raw_stdout=b"", raw_stderr=HARMLESS_LANDLOCK_WARNING_STDERR, exit_code=0,
+            execution_argv_resolution="authorized-n2d1b-erratum",
+        )
+        self.assertTrue(report["accepted"])
+        self.assertEqual(report["rejection_reasons"], [])
+        self.assertEqual(report["content_classification"], "successful-empty-domain-result")
+        self.assertTrue(report["empty_output_authorized"])
+        self.assertEqual(report["approving_decision_identity"], ca.PYFLAKES_EMPTY_OUTPUT_AUTHORIZATION_ID)
+        self.assertFalse(report["checks"]["canonical_is_nonempty"])
+
+    def test_empty_pyflakes_with_nonzero_exit_fails(self):
+        report = ca.validate_capture_content(
+            case_id="repo-pyflakes", canonical_stream_bytes=b"",
+            raw_stdout=b"", raw_stderr=HARMLESS_LANDLOCK_WARNING_STDERR, exit_code=1,
+            execution_argv_resolution="authorized-n2d1b-erratum",
+        )
+        self.assertFalse(report["accepted"])
+        self.assertFalse(report["empty_output_authorized"])
+
+    def test_empty_pyflakes_with_infrastructure_signature_fails(self):
+        report = ca.validate_capture_content(
+            case_id="repo-pyflakes", canonical_stream_bytes=b"",
+            raw_stdout=b"", raw_stderr=REAL_VENV_FAILURE_STDERR, exit_code=0,
+            execution_argv_resolution="authorized-n2d1b-erratum",
+        )
+        self.assertFalse(report["accepted"])
+        self.assertEqual(report["infrastructure_failure_detected"], "python-venv-permission-denied")
+        self.assertFalse(report["empty_output_authorized"])
+
+    def test_empty_pyflakes_without_the_authorized_erratum_resolution_fails(self):
+        # Exit 0 and clean stderr alone are not sufficient -- the effective
+        # argv must specifically be the authorized pyflakes erratum.
+        report = ca.validate_capture_content(
+            case_id="repo-pyflakes", canonical_stream_bytes=b"",
+            raw_stdout=b"", raw_stderr=HARMLESS_LANDLOCK_WARNING_STDERR, exit_code=0,
+            execution_argv_resolution="frozen",
+        )
+        self.assertFalse(report["accepted"])
+        self.assertFalse(report["empty_output_authorized"])
+
+    def test_empty_pyflakes_with_traceback_in_stderr_fails(self):
+        stderr = HARMLESS_LANDLOCK_WARNING_STDERR + b"Traceback (most recent call last):\n  File \"x.py\"\nValueError\n"
+        report = ca.validate_capture_content(
+            case_id="repo-pyflakes", canonical_stream_bytes=b"",
+            raw_stdout=b"", raw_stderr=stderr, exit_code=0,
+            execution_argv_resolution="authorized-n2d1b-erratum",
+        )
+        self.assertFalse(report["accepted"])
+        self.assertFalse(report["empty_output_authorized"])
+
+    def test_empty_output_for_any_other_case_still_fails(self):
+        # The exact same otherwise-qualifying conditions, for a DIFFERENT
+        # case_id, must never trigger the bypass -- it is repo-pyflakes-only.
+        report = ca.validate_capture_content(
+            case_id="repo-hyperfine", canonical_stream_bytes=b"",
+            raw_stdout=b"", raw_stderr=HARMLESS_LANDLOCK_WARNING_STDERR, exit_code=0,
+            execution_argv_resolution="authorized-n2d1b-erratum",
+        )
+        self.assertFalse(report["accepted"])
+        self.assertFalse(report["empty_output_authorized"])
+        self.assertIsNone(report["approving_decision_identity"])
+
+    def test_nonempty_pyflakes_violations_remain_accepted_when_semantically_valid(self):
+        stdout = b"foo.py:1:1 'os' imported but unused\n"
+        report = ca.validate_capture_content(
+            case_id="repo-pyflakes", canonical_stream_bytes=stdout,
+            raw_stdout=stdout, raw_stderr=HARMLESS_LANDLOCK_WARNING_STDERR, exit_code=1,
+            execution_argv_resolution="authorized-n2d1b-erratum",
+        )
+        self.assertTrue(report["accepted"])
+        self.assertFalse(report["empty_output_authorized"])
+        self.assertEqual(report["content_classification"], "genuine-workload-output")
+
+    def test_empty_string_sha256_is_the_well_known_constant(self):
+        # Documents the invariant referenced by the D1b authorization: a
+        # genuinely empty canonical stream always hashes to the same
+        # well-known SHA-256 of the empty byte string, for both captures.
+        import hashlib
+        self.assertEqual(
+            hashlib.sha256(b"").hexdigest(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        )
 
 
 if __name__ == "__main__":
