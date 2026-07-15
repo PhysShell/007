@@ -281,7 +281,7 @@ jobs:
               except archive_security.RejectedArchive as e:
                   findings.append(str(e))
           report = {"archives_checked": checked, "findings": findings, "pass": not findings}
-          Path("$RUNNER_TEMP/reports/archive-security-report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+          Path("${{ runner.temp }}/reports/archive-security-report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
           if findings:
               print(f"::error::archive security findings: {findings}", file=sys.stderr)
               sys.exit(1)
@@ -345,7 +345,7 @@ jobs:
           result = selection_mod.run_selection(eligible)
           by_id = {c["candidate_id"]: c for c in eligible}
           outcome = generate_manifests.generate_all(result["primary_case_ids"], result["alternate_case_ids"], by_id, selection_mod.load_quota_contract())
-          Path("$RUNNER_TEMP/reports/source-identity-report.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
+          Path("${{ runner.temp }}/reports/source-identity-report.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
           if outcome["errors"]:
               print(f"::error::source-identity manifest regeneration errors: {outcome['errors']}", file=sys.stderr)
               sys.exit(1)
@@ -449,7 +449,7 @@ jobs:
                   "file_count": len(files),
                   "files": files,
               })
-          Path("$RUNNER_TEMP/reports/n2c-artifact-index.json").write_text(json.dumps(index, indent=2, sort_keys=True) + "\n")
+          Path("${{ runner.temp }}/reports/n2c-artifact-index.json").write_text(json.dumps(index, indent=2, sort_keys=True) + "\n")
           print(f"indexed {len(index)} artifacts")
           PYEOF
 
