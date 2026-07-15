@@ -47,6 +47,19 @@
 # error -- this addresses the real risk that repo-moshi's manifest names
 # project.entry_point "moshi" even though its gradlew wrapper (and the
 # frozen argv's cwd) is the repository root, not a moshi/ subdirectory.
+#
+# REVOKED (commit 87c303a): real inspection of run #6's actual captured
+# bytes -- not just receipt schema and job conclusion -- found all 18
+# captures were infrastructure/sandbox failures, not genuine workload
+# output (see capture-content-audit-run6.json). A fail-closed
+# content-acceptance gate (tools/content_acceptance.py) plus fixes for all
+# four root causes (missing /dev/null, missing Python venv exposure,
+# rustup default-toolchain resolution, missing dotnet trusted restore) were
+# added in commit 260b4af. Per the required re-run discipline, the matrix
+# below is scoped back down to the original 5 pilot cases ONLY until a
+# genuinely content-valid pilot run is confirmed by inspecting the actual
+# artifact bytes -- not reusing any raw input from runs #4-#6. The full
+# 9-case matrix is restored, and run twice, only after that.
 name: qodec-n2d1b-miner-pilot
 
 on:
@@ -129,16 +142,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Scoped back down to the original 5 pilot cases only, per the
+        # required re-run discipline after the Stage 1/2 revocation -- see
+        # the REVOKED note above. Re-expand to the full 9-case set (the
+        # commented-out entries below) only after this 5-case run passes
+        # real content-level acceptance, inspected at the byte level.
         case:
           - { case_id: repo-hyperfine, ecosystem: rust }
           - { case_id: repo-docker-java-parser, ecosystem: jvm-maven }
           - { case_id: repo-kubeops-generator, ecosystem: dotnet }
           - { case_id: repo-pyflakes, ecosystem: python }
           - { case_id: repo-spotless, ecosystem: jvm-gradle }
-          - { case_id: repo-rustlings, ecosystem: rust }
-          - { case_id: repo-dockerfile-parser-rs, ecosystem: rust }
-          - { case_id: repo-requests, ecosystem: python }
-          - { case_id: repo-moshi, ecosystem: jvm-gradle }
+          # - { case_id: repo-rustlings, ecosystem: rust }
+          # - { case_id: repo-dockerfile-parser-rs, ecosystem: rust }
+          # - { case_id: repo-requests, ecosystem: python }
+          # - { case_id: repo-moshi, ecosystem: jvm-gradle }
         job: [capture-a, capture-b]
     runs-on: ubuntu-24.04
     steps:
