@@ -121,13 +121,7 @@ jobs:
   determinism-probe:
     name: determinism-probe (investigation only — never part of the acceptance gate)
     needs: trusted-source-acquisition
-    # TEMPORARY during Scope N2-A.1 investigation: this session's API token
-    # cannot dispatch workflow_dispatch events (403 Resource not accessible
-    # by integration), so the probe is run via ordinary pull_request pushes
-    # for now. Re-gated to workflow_dispatch-only (see commented condition
-    # below) before this PR is finalized — never merged in this permissive
-    # state.
-    if: true # TODO(n2a.1): restore to: github.event_name == 'workflow_dispatch' && inputs.run_determinism_probe == true
+    if: github.event_name == 'workflow_dispatch' && inputs.run_determinism_probe == true
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout 007 (tooling only — no third-party source here)
