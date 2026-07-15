@@ -52,6 +52,25 @@ REAL_GRADLE_VERSION = (
     "OS:           Linux 6.18.5 amd64\n"
 )
 
+# Real captured output from this session's actual Gradle 9.4.1 install
+# (via ./gradlew --version) -- Gradle 9.x dropped the old "JVM:" line for
+# separate "Launcher JVM:"/"Daemon JVM:" lines, which broke the '^JVM:'
+# anchor entirely and produced a None runtime_identifier (a real capture
+# failure for both repo-spotless jobs).
+REAL_GRADLE_9X_VERSION = (
+    "\n------------------------------------------------------------\n"
+    "Gradle 9.4.1\n"
+    "------------------------------------------------------------\n\n"
+    "Build time:    2026-03-19 08:46:28 UTC\n"
+    "Revision:      2d6327017519d23b96af35865dc997fcb544fb40\n\n"
+    "Kotlin:        2.3.0\n"
+    "Groovy:        4.0.29\n"
+    "Ant:           Apache Ant(TM) version 1.10.15 compiled on August 25 2024\n"
+    "Launcher JVM:  21.0.11 (Ubuntu 21.0.11+10-1-24.04.2-Ubuntu)\n"
+    "Daemon JVM:    /usr/lib/jvm/java-21-openjdk-amd64 (no Daemon JVM specified, using current Java home)\n"
+    "OS:            Linux 6.17.0-1020-azure amd64\n"
+)
+
 
 class TestFirstMatch(unittest.TestCase):
     def test_rustc_release_extraction(self):
@@ -88,6 +107,20 @@ class TestFirstMatch(unittest.TestCase):
         import re
         jvm = et._first_match(r"^JVM:\s*(\S+)", REAL_GRADLE_VERSION, re.MULTILINE)
         self.assertEqual(jvm, "21.0.10")
+
+    def test_gradle_9x_version_extraction(self):
+        import re
+        version = et._first_match(r"^Gradle\s+(\S+)\s*$", REAL_GRADLE_9X_VERSION, re.MULTILINE)
+        self.assertEqual(version, "9.4.1")
+
+    def test_gradle_9x_jvm_extraction_uses_launcher_jvm_line(self):
+        # Gradle 9.x's real --version output has no bare "JVM:" line at all
+        # (only "Launcher JVM:"/"Daemon JVM:") -- the old anchor silently
+        # returns None here, which is exactly the real bug.
+        import re
+        self.assertIsNone(et._first_match(r"^JVM:\s*(\S+)", REAL_GRADLE_9X_VERSION, re.MULTILINE))
+        jvm = et._first_match(r"^(?:Launcher JVM|JVM):\s*(\S+)", REAL_GRADLE_9X_VERSION, re.MULTILINE)
+        self.assertEqual(jvm, "21.0.11")
 
     def test_no_match_returns_none(self):
         self.assertIsNone(et._first_match(r"^nonexistent:\s*(\S+)$", REAL_RUSTC_VERBOSE))
@@ -134,26 +167,42 @@ class TestCaptureMavenIdentityRealAnsi(unittest.TestCase):
 
 
 class TestCaptureGradleIdentityCwd(unittest.TestCase):
+    def _write_fake_gradlew(self, source_root, version_output):
+        import stat
+
+        gradlew = source_root / "gradlew"
+        escaped = version_output.replace("'", "'\\''")
+        gradlew.write_text(f"#!/bin/sh\nprintf '%s' '{escaped}'\n")
+        gradlew.chmod(gradlew.stat().st_mode | stat.S_IEXEC)
+        return gradlew
+
     def test_relative_wrapper_resolves_against_supplied_cwd(self):
         # A real capture failed with FileNotFoundError('./gradlew') because
         # the toolchain probe ran with no cwd, so the relative wrapper path
         # was looked up against the calling process's own CWD rather than
         # the extracted source tree where gradlew actually lives.
-        import stat
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
             source_root = Path(tmp)
-            gradlew = source_root / "gradlew"
-            gradlew.write_text(
-                "#!/bin/sh\necho '------------------------------------------------------------'\n"
-                "echo 'Gradle 8.14.3'\necho '------------------------------------------------------------'\n"
-                "echo\necho 'JVM:          21.0.10 (Ubuntu)'\n"
-            )
-            gradlew.chmod(gradlew.stat().st_mode | stat.S_IEXEC)
+            self._write_fake_gradlew(source_root, REAL_GRADLE_VERSION)
             identity = et.capture_gradle_toolchain_identity(gradle_bin="./gradlew", cwd=str(source_root))
         self.assertEqual(identity["resolved_version"], "8.14.3")
+        self.assertEqual(identity["runtime_identifier"], "21.0.10")
         self.assertEqual(identity["gradle_binary_path"], str((source_root / "gradlew").resolve()))
+
+    def test_gradle_9x_real_output_end_to_end(self):
+        # Full regression for the real repo-spotless capture-a/capture-b
+        # failure: this runner's actual installed Gradle is 9.4.1, whose
+        # --version output uses "Launcher JVM:" instead of "JVM:".
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source_root = Path(tmp)
+            self._write_fake_gradlew(source_root, REAL_GRADLE_9X_VERSION)
+            identity = et.capture_gradle_toolchain_identity(gradle_bin="./gradlew", cwd=str(source_root))
+        self.assertEqual(identity["resolved_version"], "9.4.1")
+        self.assertEqual(identity["runtime_identifier"], "21.0.11")
 
 
 class TestRealLocalToolchainCapture(unittest.TestCase):

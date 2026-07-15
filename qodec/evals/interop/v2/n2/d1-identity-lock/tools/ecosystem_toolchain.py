@@ -142,7 +142,14 @@ def capture_gradle_toolchain_identity(
     text = r.stdout
     clean_text = _strip_ansi(text)
     gradle_version = _first_match(r"^Gradle\s+(\S+)\s*$", clean_text, re.MULTILINE)
-    jvm_version = _first_match(r"^JVM:\s*(\S+)", clean_text, re.MULTILINE)
+    # Gradle 9.x's real --version output dropped the old "JVM:" line for
+    # separate "Launcher JVM:"/"Daemon JVM:" lines -- a real capture against
+    # this runner's installed Gradle 9.4.1 showed the old '^JVM:' anchor
+    # never match at all, producing a None runtime_identifier (another
+    # identity-missing hard failure). "Launcher JVM" is the JVM Gradle
+    # itself actually launched under; check it first, falling back to the
+    # older "JVM:" line for pre-9.x Gradle.
+    jvm_version = _first_match(r"^(?:Launcher JVM|JVM):\s*(\S+)", clean_text, re.MULTILINE)
     gradle_binary_abs = str((Path(cwd) / gradle_path).resolve()) if cwd and gradle_path and not Path(gradle_path).is_absolute() else gradle_path
     return {
         "ecosystem": "jvm-gradle",
