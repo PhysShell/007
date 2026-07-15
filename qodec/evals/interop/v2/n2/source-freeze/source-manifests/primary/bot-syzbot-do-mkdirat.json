@@ -1,0 +1,35 @@
+{
+  "case_id": "bot-syzbot-do-mkdirat",
+  "ecosystem": "infrastructure-or-language-neutral",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "",
+    "expected_size_bucket": "small",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "single bug report page: stack trace + bisection status, no attachments",
+    "trusted_dependency_realization": "not-applicable-non-repository"
+  },
+  "fallback_priority": null,
+  "fallback_quota_groups": [],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "CC0-1.0"
+  },
+  "origin_kind": "kernel-or-infrastructure-bot",
+  "primary_family": "search-listing-diagnostic",
+  "project": {
+    "entry_point": null
+  },
+  "secondary_tags": [],
+  "selection_role": "primary",
+  "source_identity": {
+    "canonical_url": "https://syzkaller.appspot.com/bug?extid=919c5a9be8433b8bf201",
+    "commit_sha": null,
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": "extid:919c5a9be8433b8bf201",
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "bot-output-artifact"
+}

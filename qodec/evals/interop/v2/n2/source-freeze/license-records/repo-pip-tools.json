@@ -1,0 +1,18 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "repo-pip-tools",
+  "license_source_url": "https://github.com/jazzband/pip-tools",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "BSD-3-Clause",
+  "redistribution_allowed": true,
+  "redistribution_basis": "BSD 3-Clause license explicitly permits redistribution and modification, with attribution and a no-endorsement clause.",
+  "review_evidence": [
+    "https://github.com/jazzband/pip-tools",
+    "https://github.com/jazzband/pip-tools/commit/9a2d2c12a798d1986807a718e2ab0c92f1f9f81c"
+  ],
+  "source_code_license": "BSD-3-Clause",
+  "spdx": "BSD-3-Clause"
+}

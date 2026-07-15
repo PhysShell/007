@@ -1,0 +1,18 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "repo-dockerfile-parse",
+  "license_source_url": "https://github.com/containerbuildsystem/dockerfile-parse",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "BSD-3-Clause",
+  "redistribution_allowed": true,
+  "redistribution_basis": "BSD 3-Clause license explicitly permits redistribution and modification, with attribution and a no-endorsement clause.",
+  "review_evidence": [
+    "https://github.com/containerbuildsystem/dockerfile-parse",
+    "https://github.com/containerbuildsystem/dockerfile-parse/commit/3a4360f78e60ac72b6ffc627135fca27c180c4ad"
+  ],
+  "source_code_license": "BSD-3-Clause",
+  "spdx": "BSD-3-Clause"
+}

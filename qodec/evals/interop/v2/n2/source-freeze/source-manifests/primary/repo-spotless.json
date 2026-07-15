@@ -1,0 +1,38 @@
+{
+  "case_id": "repo-spotless",
+  "ecosystem": "jvm-gradle",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "./gradlew spotlessCheck",
+    "expected_size_bucket": "medium",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "Gradle-native code-formatting/lint tool",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": null,
+  "fallback_quota_groups": [],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "Apache-2.0"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "static-analysis-lint-compiler",
+  "project": {
+    "adapter": "jvm-gradle",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "plugin-gradle"
+  },
+  "secondary_tags": [],
+  "selection_role": "primary",
+  "source_identity": {
+    "canonical_url": "https://github.com/diffplug/spotless",
+    "commit_sha": "03d43ba2cdc81050e07b62646c08b22e39505368",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

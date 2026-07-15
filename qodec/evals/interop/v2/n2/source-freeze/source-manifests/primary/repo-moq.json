@@ -1,0 +1,38 @@
+{
+  "case_id": "repo-moq",
+  "ecosystem": "dotnet",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "dotnet test",
+    "expected_size_bucket": "medium",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "popular .NET mocking framework, dotnet test suite",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": null,
+  "fallback_quota_groups": [],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "BSD-3-Clause"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "test",
+  "project": {
+    "adapter": "dotnet",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "src/Moq.Tests"
+  },
+  "secondary_tags": [],
+  "selection_role": "primary",
+  "source_identity": {
+    "canonical_url": "https://github.com/devlooped/moq",
+    "commit_sha": "89a5be629c752960fe403e95ff583e4ae6f00542",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

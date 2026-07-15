@@ -1,0 +1,35 @@
+{
+  "case_id": "research-corpus-loghub2",
+  "ecosystem": "infrastructure-or-language-neutral",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "",
+    "expected_size_bucket": "large",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "14 curated/re-annotated log-parsing datasets, 965.6 MB total per Zenodo API metadata",
+    "trusted_dependency_realization": "not-applicable-non-repository"
+  },
+  "fallback_priority": null,
+  "fallback_quota_groups": [],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "CC-BY-4.0"
+  },
+  "origin_kind": "reproducible-research-corpus",
+  "primary_family": "search-listing-diagnostic",
+  "project": {
+    "entry_point": null
+  },
+  "secondary_tags": [],
+  "selection_role": "primary",
+  "source_identity": {
+    "canonical_url": "https://zenodo.org/records/8275861",
+    "commit_sha": null,
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": "10.5281/zenodo.8275861",
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "research-corpus-artifact"
+}

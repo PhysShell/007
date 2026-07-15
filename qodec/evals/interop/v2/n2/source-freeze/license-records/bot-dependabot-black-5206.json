@@ -1,0 +1,17 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "bot-dependabot-black-5206",
+  "license_source_url": "https://github.com/psf/black/pull/5206",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "MIT",
+  "redistribution_allowed": true,
+  "redistribution_basis": "psf/black is MIT-licensed; PR diff/metadata publicly viewable per GitHub ToS, content is a routine GH-Actions-version-bump manifest diff.",
+  "review_evidence": [
+    "https://github.com/psf/black/pull/5206"
+  ],
+  "source_code_license": "MIT",
+  "spdx": "MIT"
+}

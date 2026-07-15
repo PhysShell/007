@@ -1,0 +1,18 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "repo-spotless",
+  "license_source_url": "https://github.com/diffplug/spotless",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "Apache-2.0",
+  "redistribution_allowed": true,
+  "redistribution_basis": "Apache License 2.0 explicitly permits redistribution and modification, with attribution and a NOTICE-preservation requirement.",
+  "review_evidence": [
+    "https://github.com/diffplug/spotless",
+    "https://github.com/diffplug/spotless/commit/03d43ba2cdc81050e07b62646c08b22e39505368"
+  ],
+  "source_code_license": "Apache-2.0",
+  "spdx": "Apache-2.0"
+}

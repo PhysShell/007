@@ -1,0 +1,41 @@
+{
+  "case_id": "repo-hadolint-example",
+  "ecosystem": "infrastructure-or-language-neutral",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "hadolint original/Dockerfile",
+    "expected_size_bucket": "small",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "tiny before/after Dockerfile pair purpose-built for hadolint linting",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": 10,
+  "fallback_quota_groups": [
+    "repository-miner::container-orchestration-deployment",
+    "infrastructure-or-language-neutral"
+  ],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "MIT"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "container-orchestration-deployment",
+  "project": {
+    "adapter": "infrastructure-or-language-neutral",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "original/Dockerfile"
+  },
+  "secondary_tags": [],
+  "selection_role": "alternate",
+  "source_identity": {
+    "canonical_url": "https://github.com/bvwells/hadolint-example",
+    "commit_sha": "0eeab40958f549fbe2b44885ad1a8140c7ac95b1",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

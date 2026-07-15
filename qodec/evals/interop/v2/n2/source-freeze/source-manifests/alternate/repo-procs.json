@@ -1,0 +1,41 @@
+{
+  "case_id": "repo-procs",
+  "ecosystem": "rust",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "cargo run",
+    "expected_size_bucket": "small",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "modern ps replacement, process listing/diagnostic table",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": 3,
+  "fallback_quota_groups": [
+    "repository-miner::search-listing-diagnostic",
+    "rust"
+  ],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "MIT"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "search-listing-diagnostic",
+  "project": {
+    "adapter": "rust",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "Cargo.toml"
+  },
+  "secondary_tags": [],
+  "selection_role": "alternate",
+  "source_identity": {
+    "canonical_url": "https://github.com/dalance/procs",
+    "commit_sha": "4e40d1e962f513920e75ff97f1abfa2330511ec3",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

@@ -1,0 +1,17 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "bot-syzbot-do-mkdirat",
+  "license_source_url": "https://syzkaller.appspot.com/bug?extid=919c5a9be8433b8bf201",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "CC0-1.0",
+  "redistribution_allowed": true,
+  "redistribution_basis": "Google-run public infrastructure explicitly designed for public consumption; content is factual kernel crash/stack-trace data.",
+  "review_evidence": [
+    "https://syzkaller.appspot.com/bug?extid=919c5a9be8433b8bf201"
+  ],
+  "source_code_license": "CC0-1.0",
+  "spdx": "CC0-1.0"
+}

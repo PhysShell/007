@@ -1,0 +1,41 @@
+{
+  "case_id": "repo-terraform-example-module",
+  "ecosystem": "infrastructure-or-language-neutral",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "terraform init && terraform validate",
+    "expected_size_bucket": "small",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "canonical minimal Terraform module scaffold for validate/lint CI checks",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": 18,
+  "fallback_quota_groups": [
+    "repository-miner::container-orchestration-deployment",
+    "infrastructure-or-language-neutral"
+  ],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "Apache-2.0"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "container-orchestration-deployment",
+  "project": {
+    "adapter": "infrastructure-or-language-neutral",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "main.tf"
+  },
+  "secondary_tags": [],
+  "selection_role": "alternate",
+  "source_identity": {
+    "canonical_url": "https://github.com/cloudposse/terraform-example-module",
+    "commit_sha": "98dac4e5e89c4060c7eb655a9e58da39336ee1dc",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

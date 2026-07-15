@@ -1,0 +1,41 @@
+{
+  "case_id": "repo-flake8",
+  "ecosystem": "python",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "python -m flake8 src/",
+    "expected_size_bucket": "small",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "the linter itself; running it over any target is the archetypal lint-log",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": 9,
+  "fallback_quota_groups": [
+    "repository-miner::static-analysis-lint-compiler",
+    "python"
+  ],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "MIT"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "static-analysis-lint-compiler",
+  "project": {
+    "adapter": "python",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "pyproject.toml"
+  },
+  "secondary_tags": [],
+  "selection_role": "alternate",
+  "source_identity": {
+    "canonical_url": "https://github.com/PyCQA/flake8",
+    "commit_sha": "01b972636056a0ed581db62e260ef8df1ce470de",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

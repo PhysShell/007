@@ -1,0 +1,38 @@
+{
+  "case_id": "repo-hyperfine",
+  "ecosystem": "rust",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "cargo run -- --version",
+    "expected_size_bucket": "small",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "command-line benchmarking tool, rich structured stdout",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": null,
+  "fallback_quota_groups": [],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "Apache-2.0"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "runtime",
+  "project": {
+    "adapter": "rust",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "Cargo.toml"
+  },
+  "secondary_tags": [],
+  "selection_role": "primary",
+  "source_identity": {
+    "canonical_url": "https://github.com/sharkdp/hyperfine",
+    "commit_sha": "f12f3d9f86f3643b3b7deace5e160b1f0f44d2b7",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

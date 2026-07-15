@@ -1,0 +1,17 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "ci-log-jq-ci",
+  "license_source_url": "https://github.com/jqlang/jq/actions/runs/28568334149",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "MIT",
+  "redistribution_allowed": true,
+  "redistribution_basis": "Public GitHub Actions run on a public repository; source license MIT (COPYING), plus bundled oniguruma/decNumber licenses.",
+  "review_evidence": [
+    "https://github.com/jqlang/jq/actions/runs/28568334149"
+  ],
+  "source_code_license": "MIT",
+  "spdx": "MIT"
+}

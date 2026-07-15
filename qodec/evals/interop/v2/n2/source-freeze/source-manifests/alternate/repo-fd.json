@@ -1,0 +1,41 @@
+{
+  "case_id": "repo-fd",
+  "ecosystem": "rust",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "cargo run -- --version && cargo run -- .",
+    "expected_size_bucket": "small",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "small find-alternative CLI, run and capture stdout/stderr",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": 4,
+  "fallback_quota_groups": [
+    "repository-miner::runtime",
+    "rust"
+  ],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "Apache-2.0"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "runtime",
+  "project": {
+    "adapter": "rust",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "Cargo.toml"
+  },
+  "secondary_tags": [],
+  "selection_role": "alternate",
+  "source_identity": {
+    "canonical_url": "https://github.com/sharkdp/fd",
+    "commit_sha": "5a5852e15b44d4917a6098b1c01d3bb535b7717f",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

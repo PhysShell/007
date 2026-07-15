@@ -1,0 +1,18 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "repo-sds",
+  "license_source_url": "https://github.com/antirez/sds",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "BSD-2-Clause",
+  "redistribution_allowed": true,
+  "redistribution_basis": "BSD 2-Clause license explicitly permits redistribution and modification in source form, with attribution.",
+  "review_evidence": [
+    "https://github.com/antirez/sds",
+    "https://github.com/antirez/sds/commit/5347739b1581fcba74fd5cab1fc21d2aef317d71"
+  ],
+  "source_code_license": "BSD-2-Clause",
+  "spdx": "BSD-2-Clause"
+}

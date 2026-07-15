@@ -1,0 +1,18 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "repo-hadolint-example",
+  "license_source_url": "https://github.com/bvwells/hadolint-example",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "MIT",
+  "redistribution_allowed": true,
+  "redistribution_basis": "MIT license explicitly permits use, copying, modification, and redistribution, with attribution.",
+  "review_evidence": [
+    "https://github.com/bvwells/hadolint-example",
+    "https://github.com/bvwells/hadolint-example/commit/0eeab40958f549fbe2b44885ad1a8140c7ac95b1"
+  ],
+  "source_code_license": "MIT",
+  "spdx": "MIT"
+}

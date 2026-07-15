@@ -1,0 +1,38 @@
+{
+  "case_id": "repo-dockerfile-parser-rs",
+  "ecosystem": "rust",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "cargo test",
+    "expected_size_bucket": "small",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "pure-Rust Dockerfile parser, small crate",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": null,
+  "fallback_quota_groups": [],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "MIT"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "container-orchestration-deployment",
+  "project": {
+    "adapter": "rust",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "Cargo.toml"
+  },
+  "secondary_tags": [],
+  "selection_role": "primary",
+  "source_identity": {
+    "canonical_url": "https://github.com/HewlettPackard/dockerfile-parser-rs",
+    "commit_sha": "bc52c98c6fbb2267d8c71bf000d5022b9ce75533",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

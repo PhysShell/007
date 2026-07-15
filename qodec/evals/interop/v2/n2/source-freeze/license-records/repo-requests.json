@@ -1,0 +1,18 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "repo-requests",
+  "license_source_url": "https://github.com/psf/requests",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "Apache-2.0",
+  "redistribution_allowed": true,
+  "redistribution_basis": "Apache License 2.0 explicitly permits redistribution and modification, with attribution and a NOTICE-preservation requirement.",
+  "review_evidence": [
+    "https://github.com/psf/requests",
+    "https://github.com/psf/requests/commit/f361ead047be5cb873174218582f7d8b9fcd9f49"
+  ],
+  "source_code_license": "Apache-2.0",
+  "spdx": "Apache-2.0"
+}

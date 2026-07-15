@@ -1,0 +1,38 @@
+{
+  "case_id": "repo-pyflakes",
+  "ecosystem": "python",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "python -m pyflakes src/",
+    "expected_size_bucket": "small",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "minimal Python source checker",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": null,
+  "fallback_quota_groups": [],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "MIT"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "static-analysis-lint-compiler",
+  "project": {
+    "adapter": "python",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "pyproject.toml"
+  },
+  "secondary_tags": [],
+  "selection_role": "primary",
+  "source_identity": {
+    "canonical_url": "https://github.com/PyCQA/pyflakes",
+    "commit_sha": "59ec4593efd4c69ce00fdb13c40fcf5f3212ab10",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

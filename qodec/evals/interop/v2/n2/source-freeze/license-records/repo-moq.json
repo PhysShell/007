@@ -1,0 +1,18 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "repo-moq",
+  "license_source_url": "https://github.com/devlooped/moq",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "BSD-3-Clause",
+  "redistribution_allowed": true,
+  "redistribution_basis": "BSD 3-Clause license explicitly permits redistribution and modification, with attribution and a no-endorsement clause.",
+  "review_evidence": [
+    "https://github.com/devlooped/moq",
+    "https://github.com/devlooped/moq/commit/89a5be629c752960fe403e95ff583e4ae6f00542"
+  ],
+  "source_code_license": "BSD-3-Clause",
+  "spdx": "BSD-3-Clause"
+}

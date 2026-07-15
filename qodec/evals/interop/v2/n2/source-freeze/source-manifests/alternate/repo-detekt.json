@@ -1,0 +1,41 @@
+{
+  "case_id": "repo-detekt",
+  "ecosystem": "jvm-gradle",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "./gradlew detekt",
+    "expected_size_bucket": "large",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "purpose-built Kotlin static-analysis tool (large repo, backup lint candidate)",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": 15,
+  "fallback_quota_groups": [
+    "repository-miner::static-analysis-lint-compiler",
+    "jvm"
+  ],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "Apache-2.0"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "static-analysis-lint-compiler",
+  "project": {
+    "adapter": "jvm-gradle",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "detekt-cli"
+  },
+  "secondary_tags": [],
+  "selection_role": "alternate",
+  "source_identity": {
+    "canonical_url": "https://github.com/detekt/detekt",
+    "commit_sha": "64aa5c4ba591292415bc2aa1c4cfb5fe36b49efd",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

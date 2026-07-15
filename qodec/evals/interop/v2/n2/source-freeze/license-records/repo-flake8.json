@@ -1,0 +1,18 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "repo-flake8",
+  "license_source_url": "https://github.com/PyCQA/flake8",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "MIT",
+  "redistribution_allowed": true,
+  "redistribution_basis": "MIT license explicitly permits use, copying, modification, and redistribution, with attribution.",
+  "review_evidence": [
+    "https://github.com/PyCQA/flake8",
+    "https://github.com/PyCQA/flake8/commit/01b972636056a0ed581db62e260ef8df1ce470de"
+  ],
+  "source_code_license": "MIT",
+  "spdx": "MIT"
+}

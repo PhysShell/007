@@ -1,0 +1,17 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "research-corpus-loghub2",
+  "license_source_url": "https://zenodo.org/records/8275861",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "CC-BY-4.0",
+  "redistribution_allowed": true,
+  "redistribution_basis": "Zenodo record license.id=cc-by-4.0; explicitly the companion artifact to the ISSTA 2024 log-parsing evaluation paper (arXiv:2308.10828).",
+  "review_evidence": [
+    "https://zenodo.org/records/8275861"
+  ],
+  "source_code_license": "CC-BY-4.0",
+  "spdx": "CC-BY-4.0"
+}

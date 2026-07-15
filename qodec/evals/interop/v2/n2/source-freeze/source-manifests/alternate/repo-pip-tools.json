@@ -1,0 +1,41 @@
+{
+  "case_id": "repo-pip-tools",
+  "ecosystem": "python",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "pip-compile",
+    "expected_size_bucket": "small",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "pip-compile/pip-sync output is literally dependency-resolution logging",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": 2,
+  "fallback_quota_groups": [
+    "repository-miner::dependency-package-manager",
+    "python"
+  ],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "BSD-3-Clause"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "dependency-package-manager",
+  "project": {
+    "adapter": "python",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "pyproject.toml"
+  },
+  "secondary_tags": [],
+  "selection_role": "alternate",
+  "source_identity": {
+    "canonical_url": "https://github.com/jazzband/pip-tools",
+    "commit_sha": "9a2d2c12a798d1986807a718e2ab0c92f1f9f81c",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

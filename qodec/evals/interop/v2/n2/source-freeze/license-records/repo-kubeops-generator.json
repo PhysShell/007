@@ -1,0 +1,18 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "repo-kubeops-generator",
+  "license_source_url": "https://github.com/buehler/dotnet-operator-sdk",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "Apache-2.0",
+  "redistribution_allowed": true,
+  "redistribution_basis": "Apache License 2.0 explicitly permits redistribution and modification, with attribution and a NOTICE-preservation requirement.",
+  "review_evidence": [
+    "https://github.com/buehler/dotnet-operator-sdk",
+    "https://github.com/buehler/dotnet-operator-sdk/commit/9f44d7ca3b545b0db2fdb990374c58f0205d0eef"
+  ],
+  "source_code_license": "Apache-2.0",
+  "spdx": "Apache-2.0"
+}

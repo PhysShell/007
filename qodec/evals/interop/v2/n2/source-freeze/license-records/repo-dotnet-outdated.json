@@ -1,0 +1,18 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "repo-dotnet-outdated",
+  "license_source_url": "https://github.com/dotnet-outdated/dotnet-outdated",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "MIT",
+  "redistribution_allowed": true,
+  "redistribution_basis": "MIT license explicitly permits use, copying, modification, and redistribution, with attribution.",
+  "review_evidence": [
+    "https://github.com/dotnet-outdated/dotnet-outdated",
+    "https://github.com/dotnet-outdated/dotnet-outdated/commit/3b4f62e3c7e9c6b6e82144274c36a58abd30e276"
+  ],
+  "source_code_license": "MIT",
+  "spdx": "MIT"
+}

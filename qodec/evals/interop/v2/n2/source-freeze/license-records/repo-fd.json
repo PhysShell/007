@@ -1,0 +1,18 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "repo-fd",
+  "license_source_url": "https://github.com/sharkdp/fd",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "Apache-2.0",
+  "redistribution_allowed": true,
+  "redistribution_basis": "Apache License 2.0 explicitly permits redistribution and modification, with attribution and a NOTICE-preservation requirement.",
+  "review_evidence": [
+    "https://github.com/sharkdp/fd",
+    "https://github.com/sharkdp/fd/commit/5a5852e15b44d4917a6098b1c01d3bb535b7717f"
+  ],
+  "source_code_license": "Apache-2.0",
+  "spdx": "Apache-2.0"
+}

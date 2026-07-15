@@ -1,0 +1,41 @@
+{
+  "case_id": "repo-nuget-samples-cpm",
+  "ecosystem": "dotnet",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "dotnet restore CentralPackageManagementExample",
+    "expected_size_bucket": "small",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "official NuGet-team central-package-management dependency-resolution example",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": 14,
+  "fallback_quota_groups": [
+    "repository-miner::dependency-package-manager",
+    "dotnet"
+  ],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "Apache-2.0"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "dependency-package-manager",
+  "project": {
+    "adapter": "dotnet",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "CentralPackageManagementExample"
+  },
+  "secondary_tags": [],
+  "selection_role": "alternate",
+  "source_identity": {
+    "canonical_url": "https://github.com/NuGet/Samples",
+    "commit_sha": "ec30a2b7c54c2d09e5a476444a2c7a8f2f289d49",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

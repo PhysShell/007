@@ -1,0 +1,41 @@
+{
+  "case_id": "repo-classgraph",
+  "ecosystem": "jvm-maven",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "mvn test",
+    "expected_size_bucket": "medium",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "classpath scanning/listing tool",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": 7,
+  "fallback_quota_groups": [
+    "repository-miner::search-listing-diagnostic",
+    "jvm"
+  ],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "MIT"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "search-listing-diagnostic",
+  "project": {
+    "adapter": "jvm-maven",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "pom.xml"
+  },
+  "secondary_tags": [],
+  "selection_role": "alternate",
+  "source_identity": {
+    "canonical_url": "https://github.com/classgraph/classgraph",
+    "commit_sha": "a03ed5611c6c844c0deb6b32b77a5ba8753d1604",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

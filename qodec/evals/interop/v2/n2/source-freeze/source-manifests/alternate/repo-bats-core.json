@@ -1,0 +1,41 @@
+{
+  "case_id": "repo-bats-core",
+  "ecosystem": "infrastructure-or-language-neutral",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "./bin/bats test/",
+    "expected_size_bucket": "small",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "Bash Automated Testing System, TAP-style test-log output",
+    "trusted_dependency_realization": "no-lockfile-restore-required"
+  },
+  "fallback_priority": 8,
+  "fallback_quota_groups": [
+    "repository-miner::test",
+    "infrastructure-or-language-neutral"
+  ],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "MIT"
+  },
+  "origin_kind": "repository-miner",
+  "primary_family": "test",
+  "project": {
+    "adapter": "infrastructure-or-language-neutral",
+    "ambiguous": false,
+    "detection_confidence": "high",
+    "entry_point": "bin/bats"
+  },
+  "secondary_tags": [],
+  "selection_role": "alternate",
+  "source_identity": {
+    "canonical_url": "https://github.com/bats-core/bats-core",
+    "commit_sha": "c18b2f7a7e56dde24b4a6ae706a4ecee3ec824ad",
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "repository-execution"
+}

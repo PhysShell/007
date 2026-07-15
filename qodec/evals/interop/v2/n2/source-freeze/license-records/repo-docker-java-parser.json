@@ -1,0 +1,18 @@
+{
+  "attribution_requirements": "Retain upstream copyright/license notice.",
+  "candidate_id": "repo-docker-java-parser",
+  "license_source_url": "https://github.com/yonimoses/docker-java-parser",
+  "license_status": "clear",
+  "license_text_sha256": null,
+  "log_or_data_redistribution_basis": null,
+  "modification_requirements": "None beyond attribution, per the stated SPDX license.",
+  "publisher_stated_license": "Apache-2.0",
+  "redistribution_allowed": true,
+  "redistribution_basis": "Apache License 2.0 explicitly permits redistribution and modification, with attribution and a NOTICE-preservation requirement.",
+  "review_evidence": [
+    "https://github.com/yonimoses/docker-java-parser",
+    "https://github.com/yonimoses/docker-java-parser/commit/bc41f15b9f69879e414002feb5e73bfaac61862e"
+  ],
+  "source_code_license": "Apache-2.0",
+  "spdx": "Apache-2.0"
+}

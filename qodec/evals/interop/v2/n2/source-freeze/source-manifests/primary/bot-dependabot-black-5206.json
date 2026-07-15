@@ -1,0 +1,35 @@
+{
+  "case_id": "bot-dependabot-black-5206",
+  "ecosystem": "python",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "",
+    "expected_size_bucket": "small",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "single dependency-bump PR: title, diff (one line), 90 check results",
+    "trusted_dependency_realization": "not-applicable-non-repository"
+  },
+  "fallback_priority": null,
+  "fallback_quota_groups": [],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "MIT"
+  },
+  "origin_kind": "kernel-or-infrastructure-bot",
+  "primary_family": "dependency-package-manager",
+  "project": {
+    "entry_point": null
+  },
+  "secondary_tags": [],
+  "selection_role": "primary",
+  "source_identity": {
+    "canonical_url": "https://github.com/psf/black/pull/5206",
+    "commit_sha": null,
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": "psf/black#5206",
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "bot-output-artifact"
+}

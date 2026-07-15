@@ -1,0 +1,35 @@
+{
+  "case_id": "ci-log-rust-lang-rust-ci",
+  "ecosystem": "rust",
+  "execution_expectation": {
+    "argv": [],
+    "command_class": "",
+    "expected_size_bucket": "very-large",
+    "network_during_untrusted_execution": "denied",
+    "size_estimation_basis": "~89-job matrix, 3h26m duration \u2014 one of the largest real CI logs available, good stress case",
+    "trusted_dependency_realization": "not-applicable-non-repository"
+  },
+  "fallback_priority": null,
+  "fallback_quota_groups": [],
+  "license_identity": {
+    "license_sha256": null,
+    "redistribution_allowed": true,
+    "spdx": "MIT"
+  },
+  "origin_kind": "native-upstream-ci-log",
+  "primary_family": "ci-build",
+  "project": {
+    "entry_point": null
+  },
+  "secondary_tags": [],
+  "selection_role": "primary",
+  "source_identity": {
+    "canonical_url": "https://github.com/rust-lang/rust/actions/runs/29366449652",
+    "commit_sha": null,
+    "normalized_archive_sha256": null,
+    "object_id_or_doi": null,
+    "original_sha256": null,
+    "tree_sha": null
+  },
+  "source_kind": "ci-run-artifact"
+}
