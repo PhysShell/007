@@ -60,6 +60,13 @@ CASES = {
         ],
         "requested_version_or_range": "10.0.x",
         "resolver_mechanism": "actions/setup-dotnet dotnet-version 10.0.x -- explicit pin, verified by dry run (project targets net10.0; N2-A's own .NET 8 SDK does not support it)",
+        # A real capture showed this case's confined "dotnet test" attempt
+        # its own NuGet restore under network denial and fail with NU1301 --
+        # there was no dotnet-specific trusted-restore step at all (unlike
+        # N2-A's own dotnet_adapter.realize_dependencies_trusted). Restore
+        # must run, trusted (network allowed), on the SAME fresh source_root
+        # later used for the confined capture, before policy application.
+        "dotnet_restore_project_relpath": "test/KubeOps.Generator.Test/KubeOps.Generator.Test.csproj",
     },
     "repo-pyflakes": {
         "ecosystem": "python",
@@ -152,6 +159,18 @@ CASES = {
 }
 
 
+def _resolve_dotnet_bin() -> tuple[str | None, str]:
+    """Returns (dotnet_root, dotnet_bin) using the exact same resolution
+    dotnet_adapter.resolve_dotnet_bin uses elsewhere in this project --
+    shared here so main()'s trusted-restore step and
+    build_toolchain_fn_and_env's identity-capture closure can never resolve
+    to two different dotnet binaries."""
+    import os
+
+    dotnet_root = os.environ.get("DOTNET_ROOT") or None
+    return dotnet_root, dotnet_adapter.resolve_dotnet_bin(dotnet_root, "dotnet")
+
+
 def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
     """Every returned closure takes one argument, `source_root` (the
     extracted case source tree) -- only jvm-gradle's actually needs it
@@ -162,9 +181,22 @@ def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
     if ecosystem == "rust":
         cargo_home = str(Path.home() / ".cargo")
         rustup_home = str(Path.home() / ".rustup")
+        # A real capture showed rustup fail to resolve ANY default toolchain
+        # purely from RUSTUP_HOME/settings.toml once inside Sandboy
+        # confinement ("no default is configured"), despite RUSTUP_HOME
+        # being fs_ro-allowed and this exact resolution succeeding outside
+        # confinement. Resolve the toolchain name explicitly here (outside
+        # confinement, where it works) and pass it in as RUSTUP_TOOLCHAIN,
+        # which rustup documents as taking precedence over settings.toml and
+        # needs no file read inside the sandbox to take effect. The frozen
+        # "cargo ..." argv itself is unchanged.
+        rustup_toolchain = et.resolve_rustup_active_toolchain_name()
+        env_values = {"CARGO_HOME": cargo_home, "RUSTUP_HOME": rustup_home, "CARGO_NET_OFFLINE": "true"}
+        if rustup_toolchain:
+            env_values["RUSTUP_TOOLCHAIN"] = rustup_toolchain
         return (
-            lambda source_root: et.capture_rust_toolchain_identity(),
-            {"CARGO_HOME": cargo_home, "RUSTUP_HOME": rustup_home, "CARGO_NET_OFFLINE": "true"},
+            lambda source_root: et.capture_rust_toolchain_identity(cwd=source_root),
+            env_values,
         )
     if ecosystem == "jvm-maven":
         java_home = args.java_home_11
@@ -183,15 +215,18 @@ def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
         )
     if ecosystem == "python":
         python_bin = args.venv_python
+        # The venv root (pyvenv.cfg, site-packages, the interpreter itself)
+        # lives under $RUNNER_TEMP, entirely outside source_root -- a real
+        # capture showed Python fail to even start with a PermissionError on
+        # pyvenv.cfg until this exact directory was exposed to the sandbox
+        # via VIRTUAL_ENV (see generic_sandbox_policy.py's python hints).
+        venv_root = str(Path(python_bin).resolve().parent.parent)
         return (
             lambda source_root: et.capture_python_toolchain_identity(python_bin),
-            {},
+            {"VIRTUAL_ENV": venv_root, "PYTHONDONTWRITEBYTECODE": "1", "PIP_NO_INDEX": "1"},
         )
     if ecosystem == "dotnet":
-        import os
-
-        dotnet_root = os.environ.get("DOTNET_ROOT") or None
-        dotnet_bin = dotnet_adapter.resolve_dotnet_bin(dotnet_root, "dotnet")
+        dotnet_root, dotnet_bin = _resolve_dotnet_bin()
 
         def _capture(source_root):
             raw = dotnet_adapter.capture_toolchain_identity(dotnet_bin)
@@ -271,6 +306,35 @@ def main() -> int:
                 "published_lockfile_path": str(published_lockfile_path),
                 "published_lockfile_sha256": published_lockfile_sha256,
                 "cargo_fetch_exit_code": r.returncode,
+            }
+    elif case.get("dotnet_restore_project_relpath"):
+        project_relpath = case["dotnet_restore_project_relpath"]
+        _, dotnet_bin = _resolve_dotnet_bin()
+
+        def trusted_setup_fn(source_root):
+            import hashlib as _hashlib
+            import subprocess
+
+            restore_argv = [dotnet_bin, "restore", project_relpath]
+            r = subprocess.run(restore_argv, cwd=source_root, capture_output=True, text=True)
+            if r.returncode != 0:
+                raise gc.GenericCaptureFailure(
+                    f"trusted `dotnet restore {project_relpath}` failed (exit {r.returncode}): {r.stderr[-2000:]}"
+                )
+            identity = dotnet_adapter.capture_toolchain_identity(dotnet_bin)
+            generated_assets = sorted(
+                str(p.relative_to(source_root))
+                for p in (source_root / Path(project_relpath).parent / "obj").glob("project.assets.json")
+            ) if (source_root / Path(project_relpath).parent / "obj").is_dir() else []
+            return {
+                "note": "trusted dependency realization: `dotnet restore` on the same fresh source_root later used for the confined capture (network allowed here; capture itself never contacts the network)",
+                "restore_argv": restore_argv,
+                "restore_exit_code": r.returncode,
+                "restore_stdout_sha256": _hashlib.sha256(r.stdout.encode()).hexdigest(),
+                "restore_stderr_sha256": _hashlib.sha256(r.stderr.encode()).hexdigest(),
+                "dotnet_sdk_version": identity["sdk_version"],
+                "dotnet_binary_sha256": identity["dotnet_binary_sha256"],
+                "generated_assets": generated_assets,
             }
     else:
         def trusted_setup_fn(source_root):

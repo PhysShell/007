@@ -35,6 +35,7 @@ for p in (CANARY_TOOLS, MINER_TOOLS, CORPUS_TOOLS, TOOLS_DIR):
     sys.path.insert(0, str(p))
 
 import capture_build  # noqa: E402
+import content_acceptance  # noqa: E402
 import generic_sandbox_policy as gsp  # noqa: E402
 import receipt_contract  # noqa: E402
 import toolchain_identity  # noqa: E402
@@ -218,6 +219,24 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
     canonical_bytes = result["raw_stdout"] if canonical_stream == "stdout" else result["raw_stderr"]
     canonical_capped = apply_durable_byte_cap(canonical_bytes)
 
+    # Fail-closed content-acceptance gate: a schema-valid receipt is NOT a
+    # valid capture. Real inspection of CI run #6's 18 "successful" captures
+    # found every one was an infrastructure/sandbox failure (empty or
+    # non-workload stdout) that nothing here had ever validated against.
+    # This report is written for BOTH accepted and rejected captures.
+    content_report = content_acceptance.validate_capture_content(
+        case_id=case_id, canonical_stream_bytes=canonical_capped,
+        raw_stdout=result["raw_stdout"], raw_stderr=result["raw_stderr"],
+        exit_code=result["exit_code"],
+    )
+    (out_dir / "content-validation-report.json").write_text(
+        json.dumps(content_report, indent=2, sort_keys=True) + "\n"
+    )
+    if not content_report["accepted"]:
+        raise GenericCaptureFailure(
+            f"{case_id}/{job_name}: capture content rejected: {'; '.join(content_report['rejection_reasons'])}"
+        )
+
     receipt = {
         "receipt_contract_version": "n2b-receipt-contract-v1",
         "case_id": case_id,
@@ -262,6 +281,9 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
         "peak_rss_kb": result["peak_rss_kb"],
         "sanitized_stdout_sha256": stdout_report["sanitized_sha256"],
         "sanitized_stderr_sha256": stderr_report["sanitized_sha256"],
+        "content_validation_report_sha256": sha256_bytes(
+            (json.dumps(content_report, indent=2, sort_keys=True) + "\n").encode()
+        ),
     }
     schema_errors = receipt_contract.validate_receipt(receipt)
     if schema_errors:

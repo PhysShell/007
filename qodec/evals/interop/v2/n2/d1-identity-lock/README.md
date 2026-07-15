@@ -69,6 +69,37 @@ N2-D2 can proceed.
 - `tests/test_tokenizer_conformance.py` — committed conformance fixtures for
   the o200k meter (real qodec binary, no estimates)
 
+## Scope N2-D1b status (repository-miner raw-input capture)
+
+**Stage 1 (five-ecosystem pilot) and Stage 2 (full 9-case matrix) acceptance
+claims are REVOKED.** CI runs #1 through #6 of
+`qodec-n2d1b-miner-pilot.yml` all reported job-level "success", and were
+initially reported as accepted evidence -- but real inspection of the
+actual captured bytes (not just receipt schema and CI conclusion) found
+every one of the 18 captures in the "accepted" run was an infrastructure/
+sandbox failure, not genuine workload output: rustup couldn't resolve its
+default toolchain inside Sandboy confinement (rust), `/dev/null` was never
+in the sandbox policy (jvm-maven, jvm-gradle), the per-job Python venv
+directory was never exposed to the sandbox (python), and there was no
+dotnet-specific trusted-restore step so the confined run attempted its own
+NuGet restore under network denial and failed (dotnet).
+
+See:
+- [`capture-content-audit-run6.json`](capture-content-audit-run6.json) —
+  per-capture real hashes, byte sizes, and root-cause classification for
+  all 18 captures.
+- [`stage1-and-stage2-acceptance-revocation.json`](stage1-and-stage2-acceptance-revocation.json) —
+  the formal revocation record: what remains valid (CI-plumbing evidence
+  only), what does not (any raw input from runs #1-#6), and what must
+  happen before re-acceptance (a fail-closed content-acceptance gate, then
+  a from-scratch re-run, inspected at the byte level).
+
+A fail-closed content-acceptance gate (`tools/content_acceptance.py`) has
+since been added to the capture engine, plus fixes for all four root
+causes above. The five-ecosystem pilot and full matrix must both pass
+content-level acceptance on fresh captures before any new Stage 1/Stage 2
+acceptance record may be built.
+
 ## What N2-D1 does not do
 
 Execute the determinism canary (N2-D2) or the primary token benchmark

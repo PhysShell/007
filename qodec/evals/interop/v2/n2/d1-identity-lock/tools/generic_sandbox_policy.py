@@ -22,19 +22,35 @@ BASELINE_FS_RO = [
     Path("/proc"), Path("/sys"), Path("/dev/urandom"), Path("/dev/random"),
 ]
 
+# /dev/null needs read+write (shell redirection like `> /dev/null 2>&1`
+# opens it for writing; some tools also read from it) -- a real capture
+# showed mvn's and gradlew's own launcher scripts fail outright with
+# "cannot create /dev/null: Permission denied" without this. Exactly this
+# one device node, not the whole /dev tree.
+BASELINE_FS_RW = [Path("/dev/null")]
+
 # Per-ecosystem env_allow + extra fs_rw (dependency cache dirs that must be
 # WRITABLE even under network-denied execution, since a case's dependencies
 # were already realized there during trusted setup) + extra fs_ro (toolchain
 # install roots beyond the project/source tree itself).
 ECOSYSTEM_POLICY_HINTS = {
     "rust": {
-        "env_allow": ["PATH", "HOME", "TMPDIR", "CARGO_HOME", "RUSTUP_HOME", "CARGO_NET_OFFLINE"],
+        "env_allow": [
+            "PATH", "HOME", "TMPDIR", "CARGO_HOME", "RUSTUP_HOME", "CARGO_NET_OFFLINE",
+            "RUSTUP_TOOLCHAIN",
+        ],
         "extra_fs_ro_from_env": ["RUSTUP_HOME"],
         "extra_fs_rw_from_env": ["CARGO_HOME"],
     },
     "python": {
-        "env_allow": ["PATH", "HOME", "TMPDIR", "PYTHONDONTWRITEBYTECODE", "PIP_NO_INDEX"],
-        "extra_fs_ro_from_env": [],
+        "env_allow": ["PATH", "HOME", "TMPDIR", "PYTHONDONTWRITEBYTECODE", "PIP_NO_INDEX", "VIRTUAL_ENV"],
+        # The venv root (pyvenv.cfg, site-packages, the interpreter binary
+        # itself) lives under $RUNNER_TEMP, entirely outside source_root --
+        # a real capture showed Python fail to even start with
+        # "PermissionError: .../pyvenv.cfg" until this exact directory was
+        # made fs_ro-visible. Read+execute only; the interpreter never needs
+        # to write into its own venv during a capture.
+        "extra_fs_ro_from_env": ["VIRTUAL_ENV"],
         "extra_fs_rw_from_env": [],
     },
     "jvm-maven": {
@@ -88,7 +104,7 @@ def build_policy(*, ecosystem: str, source_root: Path, home_dir: Path, tmp_dir: 
         if value:
             fs_ro.append(Path(value))
 
-    fs_rw = [home_dir, tmp_dir, capture_out_dir, *project_writable_dirs]
+    fs_rw = list(BASELINE_FS_RW) + [home_dir, tmp_dir, capture_out_dir, *project_writable_dirs]
     for env_name in hints["extra_fs_rw_from_env"]:
         value = env_values.get(env_name)
         if value:

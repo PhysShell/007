@@ -72,6 +72,80 @@ class TestBuildPolicy(unittest.TestCase):
         fs_ro_line = next(line for line in text.splitlines() if line.startswith("fs_ro"))
         self.assertIn("/usr/share/dotnet", fs_ro_line)
 
+    def test_dev_null_is_present_and_writable_for_every_ecosystem(self):
+        # A real capture (mvn/gradlew launcher scripts) failed with
+        # "cannot create /dev/null: Permission denied" -- /dev/null was
+        # never in the policy at all, only /dev/urandom and /dev/random.
+        for ecosystem in gsp.ECOSYSTEM_POLICY_HINTS:
+            text = gsp.build_policy(
+                ecosystem=ecosystem, source_root=Path("/src"), home_dir=Path("/h"),
+                tmp_dir=Path("/t"), capture_out_dir=Path("/o"),
+                project_writable_dirs=[], env_values={},
+            )
+            fs_rw_line = next(line for line in text.splitlines() if line.startswith("fs_rw"))
+            self.assertIn('"/dev/null"', fs_rw_line)
+
+    def test_dev_urandom_and_dev_random_remain_present(self):
+        for ecosystem in gsp.ECOSYSTEM_POLICY_HINTS:
+            text = gsp.build_policy(
+                ecosystem=ecosystem, source_root=Path("/src"), home_dir=Path("/h"),
+                tmp_dir=Path("/t"), capture_out_dir=Path("/o"),
+                project_writable_dirs=[], env_values={},
+            )
+            fs_ro_line = next(line for line in text.splitlines() if line.startswith("fs_ro"))
+            self.assertIn('"/dev/urandom"', fs_ro_line)
+            self.assertIn('"/dev/random"', fs_ro_line)
+
+    def test_no_broad_dev_tree_rule_is_introduced(self):
+        # Exactly the three named device nodes -- never a bare "/dev" entry
+        # that would open the whole device tree.
+        for ecosystem in gsp.ECOSYSTEM_POLICY_HINTS:
+            text = gsp.build_policy(
+                ecosystem=ecosystem, source_root=Path("/src"), home_dir=Path("/h"),
+                tmp_dir=Path("/t"), capture_out_dir=Path("/o"),
+                project_writable_dirs=[], env_values={},
+            )
+            for line in text.splitlines():
+                if line.startswith("fs_ro") or line.startswith("fs_rw"):
+                    self.assertNotIn('"/dev"', line)
+                    self.assertNotIn('"/dev/"', line)
+
+    def test_python_policy_exposes_exact_venv_root_read_only(self):
+        text = gsp.build_policy(
+            ecosystem="python", source_root=Path("/src"), home_dir=Path("/h"),
+            tmp_dir=Path("/t"), capture_out_dir=Path("/o"),
+            project_writable_dirs=[],
+            env_values={"VIRTUAL_ENV": "/runner-temp/venv-repo-pyflakes"},
+        )
+        fs_ro_line = next(line for line in text.splitlines() if line.startswith("fs_ro"))
+        fs_rw_line = next(line for line in text.splitlines() if line.startswith("fs_rw"))
+        self.assertIn('"/runner-temp/venv-repo-pyflakes"', fs_ro_line)
+        # Read-only: the interpreter never needs to write into its own venv
+        # during a capture -- the venv is not made writable.
+        self.assertNotIn('"/runner-temp/venv-repo-pyflakes"', fs_rw_line)
+        self.assertIn('"VIRTUAL_ENV"', text)
+
+    def test_python_policy_does_not_expose_unrelated_sibling_paths(self):
+        # Only the exact venv root for THIS job -- not the whole
+        # $RUNNER_TEMP directory tree that houses sibling jobs' venvs too.
+        text = gsp.build_policy(
+            ecosystem="python", source_root=Path("/src"), home_dir=Path("/h"),
+            tmp_dir=Path("/t"), capture_out_dir=Path("/o"),
+            project_writable_dirs=[],
+            env_values={"VIRTUAL_ENV": "/runner-temp/venv-repo-pyflakes"},
+        )
+        fs_ro_line = next(line for line in text.splitlines() if line.startswith("fs_ro"))
+        self.assertNotIn('"/runner-temp"]', fs_ro_line)
+        self.assertNotIn('"/runner-temp/venv-repo-requests"', fs_ro_line)
+
+    def test_rust_env_allow_includes_rustup_toolchain(self):
+        text = gsp.build_policy(
+            ecosystem="rust", source_root=Path("/src"), home_dir=Path("/h"),
+            tmp_dir=Path("/t"), capture_out_dir=Path("/o"),
+            project_writable_dirs=[], env_values={},
+        )
+        self.assertIn('"RUSTUP_TOOLCHAIN"', text)
+
     def test_dotnet_policy_makes_real_tmp_writable(self):
         # The dotnet CLI's first-run NuGet-migrations named mutex hardcodes
         # /tmp/.dotnet/shm regardless of TMPDIR/HOME -- a real N2-A canary run

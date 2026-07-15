@@ -15,6 +15,102 @@ import generic_capture as gc  # noqa: E402
 REAL_ERRATA_PATH = REPO_ROOT / "qodec/evals/interop/v2/n2/d1-identity-lock/execution-plan-errata.json"
 
 
+class TestRunOneCaptureContentGate(unittest.TestCase):
+    """Integration-level tests proving the fail-closed content-acceptance
+    gate (content_acceptance.py) actually gates run_one_capture -- a
+    schema-valid receipt alone can no longer make a capture report success."""
+
+    def _make_source_artifact_dir(self, tmp_path):
+        import hashlib
+        import tarfile
+
+        source_artifact_dir = tmp_path / "source-artifact"
+        source_artifact_dir.mkdir()
+        tar_path = source_artifact_dir / "source.tar"
+        src_file = tmp_path / "hello.txt"
+        src_file.write_text("hello\n")
+        with tarfile.open(tar_path, "w") as tar:
+            tar.add(src_file, arcname="hello.txt")
+        archive_sha256 = hashlib.sha256(tar_path.read_bytes()).hexdigest()
+        (source_artifact_dir / "acquisition-receipt.json").write_text(json.dumps({
+            "actual_head_sha": "deadbeef" * 5,
+            "normalized_archive_sha256": archive_sha256,
+            "license_sha256": "cafe" * 16,
+        }))
+        return source_artifact_dir
+
+    def _fake_toolchain_capture_fn(self, source_root):
+        return {
+            "resolved_version": "1.97.0",
+            "runtime_identifier": "x86_64-unknown-linux-gnu",
+            "rustc_binary_path": "/usr/bin/true",
+            "rustc_binary_sha256": "a" * 64,
+        }
+
+    def _run(self, tmp_path, raw_stdout: bytes, raw_stderr: bytes, exit_code: int):
+        import unittest.mock as mock
+
+        source_artifact_dir = self._make_source_artifact_dir(tmp_path)
+        work_dir = tmp_path / "work"
+        out_dir = tmp_path / "out"
+        fake_result = {
+            "raw_stdout": raw_stdout, "raw_stderr": raw_stderr, "exit_code": exit_code,
+            "wall_time_s": 1.0, "peak_rss_kb": 1024,
+        }
+        with mock.patch.object(gc.capture_build, "run_real_build", return_value=fake_result):
+            return gc.run_one_capture(
+                case_id="repo-rustlings", ecosystem="rust", job_name="capture-a",
+                source_artifact_dir=source_artifact_dir, work_dir=work_dir, out_dir=out_dir,
+                frozen_argv=["cargo", "test"], errata_path=REAL_ERRATA_PATH,
+                sandboy_bin=Path("/nonexistent/sandboy"), sandboy_commit_sha="e" * 40,
+                toolchain_capture_fn=self._fake_toolchain_capture_fn,
+                toolchain_env_values={"CARGO_HOME": str(tmp_path / "cargo-home")},
+                canonical_stream="stdout", primary_stream_rationale="test",
+                project_writable_dirs_relative=[],
+                requested_version_or_range="stable", resolver_mechanism="test",
+            ), out_dir
+
+    def test_infrastructure_failure_output_is_rejected_not_promoted_to_a_receipt(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            real_rustup_stderr = (
+                b"error: rustup could not choose a version of cargo to run, because one wasn't "
+                b"specified explicitly, and no default is configured.\n"
+            )
+            with self.assertRaises(gc.GenericCaptureFailure):
+                self._run(tmp_path, raw_stdout=b"", raw_stderr=real_rustup_stderr, exit_code=1)
+            out_dir = tmp_path / "out"
+            # The content-validation-report.json must exist and record the
+            # rejection EVEN THOUGH the capture failed -- per spec, failed
+            # captures must still get a structured report.
+            report = json.loads((out_dir / "content-validation-report.json").read_text())
+            self.assertFalse(report["accepted"])
+            self.assertEqual(report["infrastructure_failure_detected"], "rustup-no-default-toolchain")
+            # No receipt.json should exist for a rejected capture -- a
+            # schema-valid receipt must never be produced without a passing
+            # content-validation report.
+            self.assertFalse((out_dir / "receipt.json").exists())
+
+    def test_genuinely_valid_capture_produces_a_receipt_referencing_its_validation_report(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            valid_stdout = b"running 3 tests\ntest result: ok. 3 passed; 0 failed; 0 ignored\n"
+            receipt, out_dir = self._run(tmp_path, raw_stdout=valid_stdout, raw_stderr=b"", exit_code=0)
+            self.assertTrue((out_dir / "receipt.json").exists())
+            report = json.loads((out_dir / "content-validation-report.json").read_text())
+            self.assertTrue(report["accepted"])
+            self.assertEqual(receipt["content_validation_report_sha256"], hashlib_sha256_of_report(report))
+
+
+def hashlib_sha256_of_report(report: dict) -> str:
+    import hashlib
+    return hashlib.sha256((json.dumps(report, indent=2, sort_keys=True) + "\n").encode()).hexdigest()
+
+
 class TestVerifyRelativeArgv0Exists(unittest.TestCase):
     def test_absolute_argv0_is_never_checked(self):
         # Only relative wrapper-style argv0s (./gradlew, ../foo) are checked;

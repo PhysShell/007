@@ -44,16 +44,37 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text)
 
 
-def capture_rust_toolchain_identity(cargo_bin: str = "cargo", rustc_bin: str = "rustc") -> dict:
+def capture_rust_toolchain_identity(
+    cargo_bin: str = "cargo", rustc_bin: str = "rustc", cwd: str | Path | None = None
+) -> dict:
+    import os
+
     cargo_path = _resolve(cargo_bin)
     rustc_path = _resolve(rustc_bin)
     rustc_r = subprocess.run([rustc_path or rustc_bin, "--version", "--verbose"],
-                              capture_output=True, text=True, check=False)
+                              capture_output=True, text=True, check=False, cwd=cwd)
     cargo_r = subprocess.run([cargo_path or cargo_bin, "--version"],
-                              capture_output=True, text=True, check=False)
+                              capture_output=True, text=True, check=False, cwd=cwd)
     resolved_version = _first_match(r"^release:\s*(\S+)\s*$", rustc_r.stdout, re.MULTILINE)
     commit_hash = _first_match(r"^commit-hash:\s*(\S+)\s*$", rustc_r.stdout, re.MULTILINE)
     host = _first_match(r"^host:\s*(\S+)\s*$", rustc_r.stdout, re.MULTILINE)
+
+    # Real evidence for the "rustup could not choose a version of cargo to
+    # run, because one wasn't specified explicitly, and no default is
+    # configured" failure seen inside Sandboy confinement: capture rustup's
+    # own view of toolchain resolution (outside confinement, where it always
+    # worked) so the confined failure can be diagnosed and compared against
+    # a known-good baseline, rather than guessed at.
+    rustup_path = _resolve("rustup")
+    active_toolchain_r = which_cargo_r = which_rustc_r = None
+    if rustup_path:
+        active_toolchain_r = subprocess.run([rustup_path, "show", "active-toolchain"],
+                                             capture_output=True, text=True, check=False, cwd=cwd)
+        which_cargo_r = subprocess.run([rustup_path, "which", "cargo"],
+                                        capture_output=True, text=True, check=False, cwd=cwd)
+        which_rustc_r = subprocess.run([rustup_path, "which", "rustc"],
+                                        capture_output=True, text=True, check=False, cwd=cwd)
+
     return {
         "ecosystem": "rust",
         "rustc_binary_path": rustc_path,
@@ -66,7 +87,33 @@ def capture_rust_toolchain_identity(cargo_bin: str = "cargo", rustc_bin: str = "
         "resolved_version": resolved_version,
         "runtime_identifier": host,
         "commit_hash": commit_hash,
+        "rustup_binary_path": rustup_path,
+        "rustup_show_active_toolchain_raw": active_toolchain_r.stdout.strip() if active_toolchain_r else None,
+        "rustup_show_active_toolchain_exit_code": active_toolchain_r.returncode if active_toolchain_r else None,
+        "rustup_which_cargo_raw": which_cargo_r.stdout.strip() if which_cargo_r else None,
+        "rustup_which_rustc_raw": which_rustc_r.stdout.strip() if which_rustc_r else None,
+        "rustup_home": os.environ.get("RUSTUP_HOME"),
+        "cargo_home": os.environ.get("CARGO_HOME"),
     }
+
+
+def resolve_rustup_active_toolchain_name(cwd: str | Path | None = None) -> str | None:
+    """Parses the toolchain name (e.g. "stable-x86_64-unknown-linux-gnu")
+    out of `rustup show active-toolchain`'s first line, for use as an
+    explicit RUSTUP_TOOLCHAIN override -- set because a real capture showed
+    rustup fail to resolve ANY default toolchain purely from RUSTUP_HOME/
+    settings.toml once inside Sandboy confinement (the shim's read of
+    settings.toml apparently doesn't survive Landlock's partial enforcement
+    intact); RUSTUP_TOOLCHAIN, if set, is documented to take precedence over
+    settings.toml and needs no file read to resolve."""
+    rustup_path = _resolve("rustup")
+    if not rustup_path:
+        return None
+    r = subprocess.run([rustup_path, "show", "active-toolchain"], capture_output=True, text=True, check=False, cwd=cwd)
+    if r.returncode != 0 or not r.stdout.strip():
+        return None
+    # First line looks like "stable-x86_64-unknown-linux-gnu (default)"
+    return r.stdout.strip().splitlines()[0].split()[0]
 
 
 def capture_python_toolchain_identity(python_bin: str = "python3") -> dict:
