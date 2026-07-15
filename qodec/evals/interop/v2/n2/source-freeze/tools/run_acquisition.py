@@ -48,6 +48,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -64,13 +65,30 @@ import acquisition  # noqa: E402
 USER_AGENT = "qodec-n2c-source-freeze (trusted-acquisition; static-inspection-only)"
 
 
+def _github_auth_headers(url: str) -> dict:
+    """GitHub's job-logs download endpoint (unlike the run/jobs metadata
+    endpoints) returns 403 for a fully unauthenticated request even against
+    a public repository — confirmed empirically in real CI (run
+    29393029603). Attaching this workflow's own read-only GITHUB_TOKEN
+    (present only for authentication/rate-limiting purposes; it grants no
+    elevated access to a foreign repository beyond what that repository
+    already exposes publicly) unlocks the same publicly-visible log
+    content. Only ever sent to api.github.com — never to Zenodo/syzkaller,
+    which reject unexpected auth headers."""
+    if "api.github.com" not in url:
+        return {}
+    token = os.environ.get("GITHUB_TOKEN", "")
+    return {"Authorization": f"Bearer {token}"} if token else {}
+
+
 def _fetch(url: str, timeout: int = 60) -> bytes:
     # GitHub's API needs its own versioned media type to return JSON in the
     # expected shape; other public APIs used here (Zenodo, syzkaller) return
     # 406 Not Acceptable if sent that GitHub-specific Accept header — a real
     # failure discovered in CI (workflow run 29387543211) and fixed here.
     accept = "application/vnd.github+json" if "api.github.com" in url else "application/json"
-    req = Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
+    headers = {"User-Agent": USER_AGENT, "Accept": accept, **_github_auth_headers(url)}
+    req = Request(url, headers=headers)
     with urlopen(req, timeout=timeout) as resp:  # noqa: S310 - public metadata/content fetch only, no execution
         return resp.read()
 
@@ -81,7 +99,8 @@ def _fetch_raw(url: str, timeout: int = 120) -> bytes:
     override needed since these aren't api.github.com JSON endpoints, except
     the job-logs endpoint which IS api.github.com but returns a redirect to
     a plain-text blob; urlopen follows the redirect automatically."""
-    req = Request(url, headers={"User-Agent": USER_AGENT})
+    headers = {"User-Agent": USER_AGENT, **_github_auth_headers(url)}
+    req = Request(url, headers=headers)
     with urlopen(req, timeout=timeout) as resp:  # noqa: S310 - public content fetch only, no execution
         return resp.read()
 

@@ -230,6 +230,15 @@ jobs:
           path: candidate-checkout
 
       - name: Run trusted acquisition (static inspection / metadata fetch only — no execution)
+        env:
+          # Attached only to api.github.com requests (see
+          # run_acquisition.py's _github_auth_headers) — GitHub's job-logs
+          # download endpoint returns 403 for a fully unauthenticated
+          # request even against a public repository (confirmed in real
+          # CI); this read-only token unlocks the same publicly-visible
+          # log content without granting any elevated access to a foreign
+          # repository.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$RUNNER_TEMP/acquisition"
           python3 source-freeze-repo/qodec/evals/interop/v2/n2/source-freeze/tools/run_acquisition.py \
