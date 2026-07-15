@@ -1,0 +1,181 @@
+{
+  "scope_id": "N2-D1",
+  "scope_name": "arm identity, tokenizer lock, execution policy (identity-lock phase of N2-D)",
+  "purpose": "Lock raw-arm, QODEC, RTK, and tokenizer identity plus the execution policy BEFORE any determinism canary (N2-D2) or benchmark execution (N2-D3). Report ambiguities rather than resolve them by running anything or by picking whichever choice looks best.",
+  "frozen_inputs": {
+    "n2d0_closure_head": "4e40b6f393cbdaf1bfcc36b8c422f7e17ae41dee",
+    "durable_release_tag": "n2d0-durable-evidence-v1",
+    "durable_input_manifest_sha256": "d48d1b1fe3ce6d0cc46af31c73155802d6eb11aa83e8b6550be37c3cfcde0a53",
+    "primary_set_rule": "N2-A canonical canary input (capture-a) + 17 N2-C primary cases = 18 primary cases. Alternates are frozen fallback only, substituted solely on independent retrieval/integrity failure of a primary durable asset, never for any other reason.",
+    "n2c_primary_case_ids": [
+      "bot-dependabot-black-5206", "bot-syzbot-do-mkdirat", "ci-log-jansson", "ci-log-nlog",
+      "ci-log-spdlog", "dataset-loghub-v8", "dataset-rtn-traffic-ids", "repo-docker-java-parser",
+      "repo-dockerfile-parser-rs", "repo-hyperfine", "repo-kubeops-generator", "repo-moshi",
+      "repo-pyflakes", "repo-requests", "repo-rustlings", "repo-spotless", "research-corpus-loghub2"
+    ]
+  },
+
+  "section_1_raw_arm_identity": {
+    "status": "PARTIALLY LOCKED — see identified_ambiguities.repository_miner_raw_input",
+    "resolved_cases": {
+      "description": "8 of 17 N2-C primary cases (origin kinds native-upstream-ci-log, kernel-or-infrastructure-bot, public-runtime-dataset, reproducible-research-corpus) plus the N2-A canary already have a durable, hash-locked canonical input file. Per-case durable asset name and canonical_benchmark_input_sha256 are read directly from durable-input-manifest.json — this contract does not re-quote them (they are already self-hash-locked there); N2-D tooling MUST re-read the manifest at execution time, never hardcode these hashes into runner code.",
+      "case_ids": [
+        "bot-dependabot-black-5206", "bot-syzbot-do-mkdirat", "ci-log-jansson", "ci-log-nlog",
+        "ci-log-spdlog", "dataset-loghub-v8", "dataset-rtn-traffic-ids", "research-corpus-loghub2"
+      ],
+      "canonical_input_path_convention": "<case>/normalized-source.tar inside the durable n2c-acquisition-<case>.zip asset"
+    },
+    "unresolved_cases": {
+      "description": "9 of 17 N2-C primary cases are origin_kind=repository-miner. Their durable asset (n2c-acquisition-repo-*.zip) contains only source.tar (the repo source tree) plus a FROZEN execution plan (argv, e.g. ['cargo','test'], ['pytest'], ['dotnet','test',...]) with execution_plan_status=frozen — the plan was locked by N2-C, but the plan was never EXECUTED. There is no raw benchmark input (build/test log) for these cases yet, and durable-input-manifest.json correctly records canonical_benchmark_input_sha256=null for all 9 — this is not a manifest bug, it reflects that the raw input does not exist yet.",
+      "case_ids": [
+        "repo-docker-java-parser", "repo-dockerfile-parser-rs", "repo-hyperfine",
+        "repo-kubeops-generator", "repo-moshi", "repo-pyflakes", "repo-requests",
+        "repo-rustlings", "repo-spotless"
+      ],
+      "see": "identified_ambiguities.repository_miner_raw_input"
+    },
+    "n2a_canary_input": {
+      "durable_release_asset": "n2a-miner-canary-capture-a.zip",
+      "durable_release_asset_sha256": "98d93f4e4640c1c5846dc0f294145944e16d019131e91d2e6ffc3db1ddb1a165",
+      "canonical_stream_decision": "raw.stdout (NEW N2-D1 decision, not previously declared by N2-A). Rationale: `dotnet build --verbosity normal` writes CoreCompile diagnostics/build output to stdout; N2-A.1's own documented determinism issue (source-manifest.json build.determinism_note) is specifically about CoreCompile diagnostic ORDERING in that stream. raw.stderr is preserved in the durable asset as supplementary evidence only, never as the benchmark input, unless this decision is revised before N2-D2 runs.",
+      "contained_file": "raw.stdout",
+      "note": "Exact SHA256 of raw.stdout is read from the durable asset's own contained-file hash map (already present in durable-input-manifest.json's n2a_entry.artifacts['miner-canary-capture-a'].contained_files) — not re-quoted here for the same reason as resolved_cases above."
+    },
+    "byte_to_text_decoding_policy": {
+      "policy": "fail-closed on invalid UTF-8",
+      "evidence": "qodec/src/main.rs reads every input file via std::fs::read_to_string (confirmed by source inspection, lines reading a.input/a.questions/a.answers/etc.), which returns an Err on any byte sequence that is not valid UTF-8 — it does NOT lossy-substitute (no String::from_utf8_lossy anywhere in the input path).",
+      "consequence_for_n2d3": "Any primary case whose raw bytes are not valid UTF-8 will make the QODEC arm invocation fail with a non-zero exit and an I/O error on stderr. This MUST be recorded as a real per-case failure (N2-D3's 'record failures without silently dropping cases'), never worked around by an undocumented re-encoding of the input — that would break input parity between arms.",
+      "raw_byte_count": "computed independently of decoding (len of the raw bytes on disk), so it is always available even for a case that fails to decode."
+    },
+    "line_ending_policy": "preserve-original — no CRLF/LF normalization anywhere in the qodec input path or in N2-C's own extraction_recipe.line_ending_policy field (confirmed identical value on the ci-log-nlog primary source manifest, a dotnet/Windows-built CI log where this matters most).",
+    "separator_and_trailing_newline_policy": "byte-exact as captured; qodec's fs::read_to_string preserves a trailing newline (or its absence) verbatim, and tokenization is computed over exactly that string with no trimming."
+  },
+
+  "section_2_qodec_identity": {
+    "status": "LOCKED (build must still happen; every field below is either already fixed by source inspection or is a live-capture field with an established, reused capture mechanism)",
+    "source_crate": "qodec/ (separate crate from workspace root o7, own Cargo.toml/Cargo.lock)",
+    "canonical_build_mechanism": "flake.nix packages.qodec (Crane-based: craneLib.buildPackage over craneLib.cleanCargoSource ./qodec, rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml via rust-overlay) — NOT tools.lock.toml's ad hoc `cargo build --release` lane.",
+    "build_mechanism_resolution_rule": "Nix build chosen over ad hoc cargo build --release because it is the only one of the two that pins a concrete, reproducible toolchain (rust-overlay + flake.lock, vs. whatever `rustup` resolves 'stable' to on the day of an ad hoc build) and a fully content-addressed source tree. This mirrors the RTK build-mechanism resolution below and keeps both arms built by the same reproducibility standard.",
+    "source_boundary_commit": "the exact 007 repository commit this N2-D branch is built from at execution time (git rev-parse HEAD) — recorded live per run, never hardcoded, per execution-environment.md's qodec_tree_sha / qodec_source_sha fields (`repo:<repository_commit_sha>+qodec-tree:<qodec_tree_sha>`).",
+    "qodec_cargo_lock_sha256": "5cca0ab6c59828e0784fcc12541e1c0327fabc4b2e3c05dd77af365fd49d2977",
+    "rust_toolchain": {
+      "requested": "stable (rust-toolchain.toml: channel=\"stable\", components=[\"rustfmt\",\"clippy\",\"rust-src\"])",
+      "requested_file_sha256": "f72fb053f443640dd84234abf7450e350015972506de06a4ed22e8b0df3f6bcb",
+      "resolution_rule": "The concrete rustc/cargo version is resolved by rust-overlay against flake.lock's pinned nixpkgs/rust-overlay revision (flake.lock sha256 75708d790dd63c3aac0723c2a5349987ce64a7df6214023bae7afce49afec3d0), NOT by whatever ad hoc `rustup` toolchain happens to be installed on a given machine (confirmed to float: this sandbox's ad hoc rustup resolved 'stable' to rustc 1.97.0 (2d8144b78 2026-07-07) on 2026-07-15, which is not necessarily what the Nix build resolves).",
+      "resolved_field_required": "exact rustc/cargo version string actually used, captured live from the Nix build output and recorded per-run — same requested/resolved/executed separation established by N2-B's toolchain_identity.py."
+    },
+    "release_binary_sha256": "not yet known — must be captured live from the actual `packages.qodec` build output and recorded per the identity-lock evidence report before N2-D2/N2-D3 proceed. This is an expected live-capture field, not an unresolved ambiguity (same treatment as every prior scope's binary hashes in this project).",
+    "argv_and_configuration": {
+      "canonical_invocation": ["qodec", "encode", "--codec", "fold-grep-guarded", "--meter", "o200k", "--passthrough-on-no-gain", "--json"],
+      "rationale": "Matches the N1 pilot's own frozen CODEC/METER constants (qodec/evals/interop/v2/pilot/tools/pilot_lib.py: CODEC=\"fold-grep-guarded\", METER=\"o200k\") and the pre-existing rtk-comparison-contract.json's QODEC logical-arm definition (\"Frozen VG (fold-grep-guarded)\") and flake.nix's own qodec package description (\"fold-grep-guarded is the VG policy\") — three independent, pre-existing sources agree. Reusing it (rather than qodec's raw CLI default of --codec squeeze) preserves N1/N2 continuity, which the frozen N2-D0 contract's carried-forward finding required be considered.",
+      "no_fallback_rule": "no --passthrough-on-no-gain substitute and no alternate --codec if this invocation fails or times out on a given case — a failure is recorded as a failure (N2-D3 failure policy), never silently retried under a different configuration."
+    },
+    "output_format_identity": {
+      "envelope": "single-line JSON: {\"encoded\":bool,\"codec\":str,\"content\":str,\"tokens_in\":int,\"tokens_out\":int,\"meter\":str} on stdout (confirmed in qodec/src/main.rs's --json branch comment: \"the contract qodec/evals/interop/ calls qodec through\").",
+      "tokens_in_semantics": "meter.count(raw_input_text) — i.e. this envelope's own tokens_in field IS the RAW arm's token count for the same input, obtained for free from the same invocation. N2-D3 must read it from here rather than invoking a separate raw-count step, to guarantee raw and QODEC token counts come from literally the same meter call sequence.",
+      "tokens_out_semantics": "meter.count(encoded_content) — the QODEC arm's token count.",
+      "decode_verification": "qodec decode (argv: [\"qodec\",\"decode\"], stdin=content) MUST reproduce the exact original bytes when encoded=true; this is a lossless-notation-layer invariant already relied on by rtk-comparison-contract.json's transparency leaderboard and MUST be checked per case in N2-D3, not assumed."
+    }
+  },
+
+  "section_3_rtk_identity": {
+    "status": "LOCKED for build identity; PARTIALLY LOCKED for argv (see identified_ambiguities.rtk_filter_determinism)",
+    "discrepancy_identified": "tools.lock.toml pins RTK via `cargo install --git https://github.com/rtk-ai/rtk --tag v0.42.4` with a locally-observed binary sha256 61683c0a25fb58e2e8e7d5a8067c6111956be75225daa2edfbc389a066f7133f. The N1 pilot's real, accepted execution receipts (qodec/evals/interop/v2/pilot/cases/*/receipts/rtk.json, all 10 cases) instead record rtk_source_sha=5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2 and tool_binary_sha256=41f316adf7b30a568208a0a4f824bffb266ecb6d01bd9de81bed58e1d469dfcf, built via flake.nix's packages.rtk-pinned (buildRustPackage over the exact-commit source `github:rtk-ai/rtk/5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2` (flake=false, unfiltered on purpose since build.rs reads src/filters/*.toml), RTK's own complete vendored Cargo.lock (203 packages), same rust-overlay stable toolchain as qodec. Both nominally claim version 0.42.4 — this is a build-provenance discrepancy (ad hoc mutable-tag cargo-install vs. Nix commit-pinned vendored build), not a version disagreement.",
+    "canonical_identity_selected": "flake.nix packages.rtk-pinned, source commit 5d32d0736f686b69d1e8b9dc45c007d4eb77a0a2, binary sha256 41f316adf7b30a568208a0a4f824bffb266ecb6d01bd9de81bed58e1d469dfcf (already observed consistently across all 10 real N1 pilot receipts — internally reproducible on that evidence).",
+    "selection_rule_applied": "Reproducibility and compatibility, not benchmark performance, per the N2-D directive: a git tag is a mutable ref (can be force-moved) while a commit SHA is immutable; `cargo install --git --tag` re-resolves dependency versions against crates.io at install time with no vendoring guarantee, while the Nix build vendors RTK's complete Cargo.lock and pins the exact same toolchain used to build QODEC. tools.lock.toml's ad hoc pin (sha256 61683c0a...) is retired as non-canonical for N2-D — it is not declared wrong or unsafe, only less reproducible than the alternative already in active use by the accepted N1 pilot evidence.",
+    "argv_and_configuration": {
+      "binary": "rtk (from packages.rtk-pinned)",
+      "available_pipe_filters": ["log", "grep", "git-diff", "cargo-test"],
+      "empirically_verified": {
+        "grep": "deterministic — used for both N1 ripgrep-output cases, single fixed output across the accepted pilot runs.",
+        "log": "NON-deterministic — N1 pilot README documents 5 distinct outputs across 20 runs of `rtk pipe --filter log` over identical rustc stderr (unordered-map ordering). This filter is PROHIBITED for any N2-D case regardless of how well its content shape matches (e.g. the 3 ci-log-* cases look like a natural fit for --filter log but MUST NOT use it)."
+      },
+      "never_exercised": ["git-diff", "cargo-test"],
+      "selection_policy": "1) Use `rtk pipe --filter grep` only if the raw input is genuinely ripgrep/grep-match-shaped (none of the 18 N2-D primary cases are). 2) Never use `rtk pipe --filter log`, regardless of content shape. 3) Do not select `--filter git-diff` or `--filter cargo-test` based on a case merely looking like a plausible match — neither has ever been determinism-tested; using an unverified filter risks repeating exactly the log-filter failure mode undetected. 4) Default for every other case: `rtk pipe --passthrough` (deterministic by construction — RTK returns the input byte-identical). Applying this policy to the 18 N2-D primary cases means all 18 currently resolve to `rtk pipe --passthrough` under the evidence on record today.",
+      "see": "identified_ambiguities.rtk_filter_determinism for the path to unblock git-diff/cargo-test before N2-D3, if desired.",
+      "no_fallback_rule": "no alternate filter or version if the selected invocation fails or times out on a given case — recorded as a failure, never silently retried."
+    }
+  },
+
+  "section_4_tokenizer_identity": {
+    "status": "LOCKED",
+    "encoding_identity": "o200k_base — CONFIRMED, not merely assumed. qodec/src/meter.rs's Bpe::o200k() calls tiktoken_rs::o200k_base() directly (source inspection); inspection does not disprove the expectation, it confirms it.",
+    "library": "tiktoken-rs",
+    "library_version": "0.7.0 (pinned in qodec/Cargo.lock, confirmed via `grep -A2 'name = \"tiktoken-rs\"' qodec/Cargo.lock`)",
+    "qodec_cargo_lock_sha256": "5cca0ab6c59828e0784fcc12541e1c0327fabc4b2e3c05dd77af365fd49d2977 (same lockfile as QODEC identity — tiktoken-rs is a qodec dependency, not a separate tool)",
+    "implementation_sha256": {
+      "meter_rs_source_sha256": "23e27ec0b05ef6aae325187580587317ab28346ead3ab559f705bd8c269dca15",
+      "note": "There is no standalone tokenizer script. The o200k meter is compiled into the qodec binary; the qodec release binary SHA256 (section_2, captured live) IS the tokenizer implementation identity for run purposes. meter_rs_source_sha256 pins the wrapper source at the specific commit N2-D builds from."
+    },
+    "uniform_measurement_mechanism": {
+      "description": "N2-D does not build a separate standalone token-counting script. It reuses qodec's own `encode --meter o200k --json` envelope as the uniform o200k counter for all three arms, exactly as N1 pilot's pilot_lib.py:token_count() already established: RAW token count = tokens_in from encoding the raw input; QODEC token count = tokens_out from that same call; RTK token count = tokens_in from a SECOND `qodec encode --json` call over RTK's output text (tokens_out/content/encoded from that second call are discarded — qodec is used purely as a counter there).",
+      "argv_for_rtk_output_counting": ["qodec", "encode", "--codec", "fold-grep-guarded", "--meter", "o200k", "--passthrough-on-no-gain", "--json"],
+      "byte_handling": "same fail-closed UTF-8 policy as section_1 applies to counting RTK's output — if RTK's output is not valid UTF-8, the counting call fails and that case's RTK token count is recorded as a failure, not silently estimated."
+    },
+    "conformance_fixtures": {
+      "status": "COMMITTED — 4 tests, all passing against the real qodec binary",
+      "test_file": "qodec/evals/interop/v2/n2/d1-identity-lock/tests/test_tokenizer_conformance.py",
+      "derivation_method": "Every expected count was derived by actually running a real qodec release binary (built ad hoc via `cargo build --release` in this sandbox for verification only — not the canonical N2-D build mechanism, see section_2) over the exact fixture bytes; none are hand-computed or guessed.",
+      "fixtures": [
+        {"input": "\"\" (empty)", "tokens_in": 0},
+        {"input": "\"hello world\\n\"", "tokens_in": 3},
+        {"input": "\"hello world\\n\\n\"", "tokens_in": 3, "note": "observed fact: an extra trailing newline does not add a token for this fixture; not generalized to other content"},
+        {"input": "\"日本語テスト\" (non-ASCII, multi-byte BPE)", "tokens_in": 4},
+        {"input": "a rustc-error-shaped line + location line", "tokens_in": 27},
+        {"input": "invalid UTF-8 (lone continuation byte 0xFF 0xFE ...)", "expected_behavior": "non-zero exit, empty stdout — fails closed, does not lossy-decode and fabricate a count"}
+      ]
+    }
+  },
+
+  "section_5_execution_policy": {
+    "status": "LOCKED — reused wholesale from the pre-existing, already-committed execution-environment.md contract; N2-D adds no new numeric policy of its own.",
+    "canonical_document": "qodec/evals/interop/v2/execution-environment.md",
+    "adopted_fields": [
+      "flake_lock_sha256", "nix_system", "nix_version", "nixpkgs_revision", "rust_toolchain_identity",
+      "repository_commit_sha", "qodec_tree_sha", "qodec_source_sha", "qodec_binary_sha256",
+      "rtk_source_sha", "rtk_binary_sha256", "tool_versions", "tokenizer_identity", "tokenizer_sha256",
+      "locale", "timezone", "environment_variable_allowlist", "command", "cwd",
+      "stdin_sha256", "stdout_sha256", "stderr_sha256", "exit_code", "wall_time_s"
+    ],
+    "locale": "C.UTF-8 (fixed, per execution-environment.md)",
+    "timezone": "UTC (fixed, per execution-environment.md)",
+    "network_policy": "Nix is the canonical execution environment; network-dependent captures are forbidden in ordinary CI (workflow_dispatch/schedule only, publishing checksummed artifacts) per execution-environment.md. For N2-D specifically: QODEC and RTK invocations over the 8 resolved primary cases + N2-A canary require NO network (static file input). The 9 repository-miner cases' build/test execution is a separate, heavier concern — see identified_ambiguities.repository_miner_raw_input for its own network policy (network_during_untrusted_execution: denied, per each case's frozen N2-C execution_expectation).",
+    "clean_work_directory_per_run": "required — every QODEC/RTK invocation runs in a freshly created, empty working directory; no cross-case or cross-arm cache reuse (matches N2-C/N2-A's existing sandbox discipline).",
+    "resource_limits": "reuse Sandboy S0's frozen sandbox policy generator (Own.NET#277, merged) for any process invocation — its concrete CPU/memory/timeout/output-size numbers are the authoritative source and are not re-transcribed here to avoid transcription drift; N2-D tooling must generate the policy from that same generator, never hand-copy numbers.",
+    "stdout_stderr_capture": "both streams captured and SHA256'd independently per invocation (never merged) — matches execution-environment.md's stdin_sha256/stdout_sha256/stderr_sha256 fields and pilot_lib.py's _run() helper.",
+    "no_fallback_rule": "if an arm's invocation fails (non-zero exit, timeout, or a captured stream that fails a downstream decode/count step), that case is recorded as a failure for that arm. No retry under a different command, flag, or tool version. No silent exclusion from aggregate reporting — N2-D3's failure policy governs."
+  },
+
+  "identified_ambiguities": {
+    "repository_miner_raw_input": {
+      "severity": "blocking for 9 of 17 N2-C primary cases (53%)",
+      "description": "N2-C froze a source tree + an execution plan (argv) for each repository-miner case but never executed it. Producing the raw benchmark input (a build/test log) requires an actual build/test run of each repo under its own ecosystem toolchain (cargo/rust x3, maven/JDK x1, dotnet x1, gradle x2, python x2) inside an isolated, network-appropriately-restricted sandbox, then capturing + sanitizing the resulting stdout/stderr — structurally the same kind of operation N2-A/N2-B's already-frozen miner framework (toolchain_identity.py, build_detector.py, per-ecosystem ToolAdapters, Sandboy S0 policy, capture_build.py, sanitizer.py) was built for, just scaled from 1 case to 9 across 5 ecosystems.",
+      "resolution_path_proposed": "Reuse the frozen N2-B miner framework (already merged, not modified) to execute each case's exact frozen argv against its exact frozen source tree inside Sandboy S0 confinement, capture+sanitize via the existing capture_build.py/sanitizer.py, and register the resulting sanitized log's SHA256 as that case's canonical_benchmark_input in a follow-up durable-manifest addendum — with the miner framework's own commit/version pinned as an explicit raw-arm-identity component for these 9 cases specifically (they are the only ones whose raw input identity depends on a build tool, not just static content).",
+      "why_not_done_in_n2d1": "Executing 9 real repository builds is itself a form of running the benchmark's precondition, not identity-locking — it requires installing 5 language toolchains and real (though network-denied per-case) build execution, which the N2-D directive's phase structure (identity lock -> canary -> benchmark) and its explicit 'do not run the full benchmark immediately' instruction place outside N2-D1. Silently doing it now, or silently declaring these 9 cases 'unresolvable, drop them', would both violate the instruction to stop and report ambiguity rather than resolve it unilaterally.",
+      "decision_needed_from_user": "Whether to (a) authorize a distinct N2-D1b sub-phase that runs the miner-framework capture for these 9 cases (reusing frozen tooling, not modifying it) before N2-D2/D3, or (b) exclude repository-miner cases from the primary aggregate for now and report them separately as 'pending raw-input capture', or (c) some other resolution."
+    },
+    "rtk_filter_determinism": {
+      "severity": "non-blocking but material — determines whether RTK acts as a real reducer or an effective passthrough for all 18 N2-D primary cases",
+      "description": "Under the strict, prespecified selection policy in section_3 (never use an unverified-for-determinism filter regardless of content-shape fit), all 18 N2-D primary cases currently resolve to `rtk pipe --passthrough`, since none are ripgrep-shaped (the only filter with verified determinism) and `--filter log` (the natural fit for the 3 ci-log-* cases and, once captured, for the 9 repository-miner build-log cases) is proven non-deterministic. This makes RTK's real reduction behavior currently untested on any of N2-D's actual corpus shapes.",
+      "resolution_path_proposed": "Run an explicit, symmetric determinism sub-probe for `--filter git-diff` and `--filter cargo-test` — structurally identical to N1's own log-filter probe (same input, repeated a fixed N>=20 times, require byte-identical output) — over a representative, already-frozen sample of the relevant N2-D content shapes (e.g. a git-diff-shaped input for git-diff, a cargo-test-shaped input once a rust repository-miner case is captured, for cargo-test) BEFORE N2-D3. If a filter passes, it may be added to the selection policy for content matching its shape; if not, passthrough remains the correct, honestly-reported answer for that shape.",
+      "why_not_done_in_n2d1": "Same reasoning as above: running a 20-repetition probe is execution, not identity-locking, and doing it now without an explicit go-ahead would pre-empt the phase boundary the N2-D directive establishes.",
+      "decision_needed_from_user": "Whether to authorize a bounded git-diff/cargo-test determinism sub-probe before N2-D2, or accept RTK-as-passthrough for the initial N2-D benchmark and revisit later."
+    }
+  },
+
+  "carried_forward_from_n2d0": {
+    "qodec_identity_must_include_source_boundary_and_binary_hash": "addressed in section_2 (source_boundary_commit + release_binary_sha256, both live-capture fields with a defined mechanism).",
+    "rtk_lock_toml_vs_n1_pilot_discrepancy": "addressed in section_3 (resolved in favor of the Nix commit-pinned build).",
+    "tokenizer_identity_must_include_exact_o200k_base_implementation_and_test_vectors": "addressed in section_4 (implementation_sha256 fields locked; conformance_fixtures flagged as remaining work before N2-D2).",
+    "n1_continuity_set_is_pilot_not_corpus_scaffold": "confirmed unchanged — qodec/evals/interop/v2/pilot/ is the N1 continuity set; not touched by N2-D1."
+  },
+
+  "stop_and_report": {
+    "instruction": "Per the governing N2-D directive: stop first after presenting this N2-D1 contract and identity evidence. Do not proceed to N2-D2 (determinism canary) or N2-D3 (primary token benchmark) in this same action. Do not run QODEC or RTK. Do not tokenize anything beyond the conformance-fixture work still to be committed.",
+    "open_items_before_n2d2_can_start": [
+      "User decision on identified_ambiguities.repository_miner_raw_input",
+      "User decision on identified_ambiguities.rtk_filter_determinism",
+      "Live-capture QODEC release binary SHA256, resolved Rust toolchain version, and RTK build reproduction under this exact branch, once the above are settled"
+    ]
+  }
+}
