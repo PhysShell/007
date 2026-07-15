@@ -553,20 +553,31 @@ fn call_claude(
     spawn_with_timeout(cmd, prompt, timeout)
 }
 
-/// Read-only `codex exec` call. Flags match `judge.rs::call_codex`'s proven
-/// set exactly (`--sandbox read-only`, `--skip-git-repo-check`,
-/// `--ephemeral`, `--color never`, `--output-last-message <file>`, stdout
-/// discarded) — deliberately, not by omission: this MVP does not add
-/// `-c features.shell_tool=false` or any other flag `judge.rs` doesn't
-/// already carry, because that pair is the only codex integration in this
-/// codebase with any real verification history, and an unverified extra
-/// flag risks a hard failure on every codex call rather than a safety gain
-/// (see `docs/o7-invoke.md`). Unlike claude, no `--json-schema`-equivalent
-/// is assumed to exist (unverified, codex not installed in this build
-/// environment); the schema is instead appended to the prompt as an
-/// instruction, and `run`'s independent `jsonschema` validation is what
-/// actually enforces it — the same "output re-validated by o7 itself"
-/// property claude gets from `--json-schema` plus the same re-validation.
+/// Read-only `codex exec` call. Base flags match `judge.rs::call_codex`'s
+/// proven set (`--sandbox read-only`, `--skip-git-repo-check`, `--ephemeral`,
+/// `--color never`, `--output-last-message <file>`, stdout discarded), plus
+/// `-c features.shell_tool=false` on top of it (`judge.rs` doesn't carry
+/// this; Demand Radar's now-deleted `codex_cli.py` did). **Neither
+/// `--sandbox read-only` nor `-c features.shell_tool=false` is verified
+/// against a live `codex` install** (not installed in this build
+/// environment) — `--sandbox read-only` denies writes but does not disable
+/// network, and whether `features.shell_tool=false` actually removes the
+/// shell tool (as opposed to just restricting what it can do inside the
+/// sandbox) has never been observed. Docs/callers must **not** describe
+/// Codex's Zone 2 posture as "no shell" the way Claude's `--tools ""` earns
+/// that claim structurally — an earlier version of this comment did exactly
+/// that, and it was wrong (see `docs/o7-invoke.md`'s "Capability profiles"
+/// section here, and `demand-radar/docs/trust-boundaries.md` for the
+/// caller-side refusal this motivated). Include the flag anyway (defense
+/// in depth: it can only add restriction, and an invalid
+/// config key fails loudly rather than silently running less restricted)
+/// but callers processing untrusted external content must not select
+/// `--engine codex` until this is live-verified. Unlike claude, no
+/// `--json-schema`-equivalent is assumed to exist either; the schema is
+/// instead appended to the prompt as an instruction, and `run`'s independent
+/// `jsonschema` validation is what actually enforces it — the same "output
+/// re-validated by o7 itself" property claude gets from `--json-schema`
+/// plus the same re-validation.
 fn call_codex(
     prompt: &str,
     schema: &serde_json::Value,
@@ -597,6 +608,8 @@ fn call_codex(
         .arg("--ephemeral")
         .arg("--color")
         .arg("never")
+        .arg("-c")
+        .arg("features.shell_tool=false")
         .arg("--output-last-message")
         .arg(&last_msg)
         .arg("-")
