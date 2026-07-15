@@ -1,0 +1,461 @@
+# Scope N2-C — real source discovery and pre-QODEC corpus freeze (QODEC
+# Scope N2 sourcing addendum). Forms and freezes a real source set for 18
+# new N2 cases (10 existing N1 cases + 18 new = 28 total) before any QODEC,
+# RTK, token-counting, or reader/model evaluation. See
+# qodec/evals/interop/v2/n2/source-freeze/.
+#
+# N2-C performs real candidate discovery, static source inspection, license
+# review, deterministic quota-aware selection, and immutable source
+# acquisition — it never runs repository-controlled code (no restore/build/
+# test/lint/package-manager/container/binary execution), never calls QODEC
+# or RTK, never computes a token metric, never calls a model.
+#
+# Trust boundary: `trusted-source-acquisition` is the ONLY job with outbound
+# network access — it checks out/downloads and hashes; it never executes
+# anything from an acquired source. Every other job operates only on this
+# repository's own committed registry/manifest/report data.
+name: qodec-n2-source-freeze
+
+on:
+  pull_request:
+    paths:
+      - "qodec/evals/interop/v2/n2/source-freeze/**"
+      - ".github/workflows/qodec-n2-source-freeze.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  LC_ALL: C.UTF-8
+  LANG: C.UTF-8
+  TZ: UTC
+
+jobs:
+  frozen-base:
+    name: frozen-base
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify N2-A/N2-A.1/N2-B frozen paths + Sandboy pin are unchanged
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 qodec/evals/interop/v2/n2/source-freeze/tools/generate_ci_reports.py frozen-base \
+            --repo-root . \
+            --out "$RUNNER_TEMP/reports/n2c-frozen-base-report.json"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: n2c-frozen-base-report
+          path: ${{ runner.temp }}/reports/n2c-frozen-base-report.json
+          if-no-files-found: error
+          retention-days: 90
+
+  registry-validation:
+    name: registry-validation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate candidate-registry.json against schema + transition state machine
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 qodec/evals/interop/v2/n2/source-freeze/tools/generate_ci_reports.py registry-validation \
+            --out "$RUNNER_TEMP/reports/candidate-registry-validation.json"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: candidate-registry
+          path: |
+            qodec/evals/interop/v2/n2/source-freeze/candidate-registry.json
+            qodec/evals/interop/v2/n2/source-freeze/schemas/candidate-registry.schema.json
+            ${{ runner.temp }}/reports/candidate-registry-validation.json
+          if-no-files-found: error
+          retention-days: 90
+
+  candidate-inspection:
+    name: candidate-inspection
+    needs: registry-validation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Render candidate-inspection-reports (discovered/inspected/eligible/rejected counts)
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 qodec/evals/interop/v2/n2/source-freeze/tools/generate_ci_reports.py candidate-inspection \
+            --out "$RUNNER_TEMP/reports/candidate-inspection-reports.json"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: candidate-inspection-reports
+          path: ${{ runner.temp }}/reports/candidate-inspection-reports.json
+          if-no-files-found: error
+          retention-days: 90
+
+  license-review:
+    name: license-review
+    needs: registry-validation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Validate license records + apply hard-reject rules
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 qodec/evals/interop/v2/n2/source-freeze/tools/generate_ci_reports.py license-review \
+            --out "$RUNNER_TEMP/reports/license-review-reports.json"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: license-review-reports
+          path: |
+            ${{ runner.temp }}/reports/license-review-reports.json
+            qodec/evals/interop/v2/n2/source-freeze/license-records
+          if-no-files-found: error
+          retention-days: 90
+
+  eligibility-and-ranking:
+    name: eligibility-and-ranking
+    needs: registry-validation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Evaluate eligibility (frozen N2-B rules + N2-C extension) and deterministic ranking
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 qodec/evals/interop/v2/n2/source-freeze/tools/generate_ci_reports.py eligibility-and-ranking \
+            --out "$RUNNER_TEMP/reports/eligibility-and-ranking-report.json"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: eligibility-reports
+          path: ${{ runner.temp }}/reports/eligibility-and-ranking-report.json
+          if-no-files-found: error
+          retention-days: 90
+
+  quota-selection:
+    name: quota-selection
+    needs: eligibility-and-ranking
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Run deterministic quota-aware selection, generate manifests, emit acquisition matrix
+        id: matrix
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 qodec/evals/interop/v2/n2/source-freeze/tools/generate_ci_reports.py quota-selection \
+            --out "$RUNNER_TEMP/reports/quota-selection-report.json"
+          python3 qodec/evals/interop/v2/n2/source-freeze/tools/generate_ci_reports.py generate-manifests \
+            --out "$RUNNER_TEMP/reports/generate-manifests-report.json"
+          python3 qodec/evals/interop/v2/n2/source-freeze/tools/generate_ci_reports.py acquisition-matrix \
+            --out "$RUNNER_TEMP/reports/acquisition-matrix.json"
+          echo "matrix=$(cat "$RUNNER_TEMP/reports/acquisition-matrix.json")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: quota-selection-report
+          path: |
+            ${{ runner.temp }}/reports/quota-selection-report.json
+            ${{ runner.temp }}/reports/generate-manifests-report.json
+            qodec/evals/interop/v2/n2/source-freeze/source-manifests
+          if-no-files-found: error
+          retention-days: 90
+
+  selection-determinism:
+    name: selection-determinism
+    needs: registry-validation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Assert byte-identical selection across two independent runs
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 qodec/evals/interop/v2/n2/source-freeze/tools/generate_ci_reports.py selection-determinism \
+            --out "$RUNNER_TEMP/reports/selection-determinism-report.json"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: selection-determinism-report
+          path: ${{ runner.temp }}/reports/selection-determinism-report.json
+          if-no-files-found: error
+          retention-days: 90
+
+  trusted-source-acquisition:
+    name: trusted-source-acquisition (${{ matrix.candidate.candidate_id }})
+    needs: quota-selection
+    strategy:
+      fail-fast: false
+      matrix:
+        candidate: ${{ fromJson(needs.quota-selection.outputs.matrix).include }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          path: source-freeze-repo
+
+      - name: Checkout candidate source (repository-execution candidates only)
+        if: matrix.candidate.source_kind == 'repository-execution'
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: ${{ matrix.candidate.repository }}
+          ref: ${{ matrix.candidate.ref }}
+          persist-credentials: false
+          fetch-depth: 1
+          path: candidate-checkout
+
+      - name: Run trusted acquisition (static inspection / metadata fetch only — no execution)
+        run: |
+          mkdir -p "$RUNNER_TEMP/acquisition"
+          python3 source-freeze-repo/qodec/evals/interop/v2/n2/source-freeze/tools/run_acquisition.py \
+            --registry source-freeze-repo/qodec/evals/interop/v2/n2/source-freeze/candidate-registry.json \
+            --candidate-id "${{ matrix.candidate.candidate_id }}" \
+            --checkout-dir candidate-checkout \
+            --out-dir "$RUNNER_TEMP/acquisition" \
+            --workflow-run-id "${{ github.run_id }}" \
+            --runner-identity "${{ runner.name }}"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: acquisition-${{ matrix.candidate.candidate_id }}
+          path: ${{ runner.temp }}/acquisition
+          if-no-files-found: error
+          retention-days: 90
+
+  archive-security:
+    name: archive-security
+    needs: trusted-source-acquisition
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: acquisition-*
+          path: ${{ runner.temp }}/acquisition
+          merge-multiple: true
+
+      - name: Verify no archive-traversal/absolute-path/device-file/symlink/encrypted-member findings
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 - <<'PYEOF'
+          import json, sys
+          from pathlib import Path
+          sys.path.insert(0, "qodec/evals/interop/v2/n2/source-freeze/tools")
+          import archive_security
+
+          acq_dir = Path("${{ runner.temp }}/acquisition")
+          findings = []
+          checked = 0
+          for tar_path in acq_dir.rglob("source.tar"):
+              checked += 1
+              try:
+                  archive_security.assert_safe(tar_path)
+              except archive_security.RejectedArchive as e:
+                  findings.append(str(e))
+          report = {"archives_checked": checked, "findings": findings, "pass": not findings}
+          Path("$RUNNER_TEMP/reports/archive-security-report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+          if findings:
+              print(f"::error::archive security findings: {findings}", file=sys.stderr)
+              sys.exit(1)
+          print(f"archive-security: {checked} archives checked, zero findings")
+          PYEOF
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: archive-security-reports
+          path: ${{ runner.temp }}/reports/archive-security-report.json
+          if-no-files-found: error
+          retention-days: 90
+
+  source-identity:
+    name: source-identity
+    needs: archive-security
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: acquisition-*
+          path: ${{ runner.temp }}/acquisition
+          merge-multiple: true
+
+      - name: Fold real acquisition hashes into the candidate registry + source manifests
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 - <<'PYEOF'
+          import json, sys
+          from pathlib import Path
+          reg_path = Path("qodec/evals/interop/v2/n2/source-freeze/candidate-registry.json")
+          registry = json.loads(reg_path.read_text())
+          acq_dir = Path("${{ runner.temp }}/acquisition")
+          updated = []
+          for acq_file in acq_dir.glob("*.acquisition.json"):
+              result = json.loads(acq_file.read_text())
+              cid = result["candidate_id"]
+              for c in registry["candidates"]:
+                  if c["candidate_id"] == cid:
+                      c["source_identity"]["normalized_archive_sha256"] = result.get("normalized_archive_sha256")
+                      c["source_identity"]["original_content_sha256"] = result.get("original_sha256")
+                      if "git_tree_sha" in result:
+                          c["source_identity"]["tree_sha"] = result["git_tree_sha"]
+                      if "license_sha256" in result:
+                          c["source_identity"]["license_sha256"] = result["license_sha256"]
+                      updated.append(cid)
+          reg_path.write_text(json.dumps(registry, indent=2, sort_keys=True) + "\n")
+          print(f"updated {len(updated)} candidates with real acquisition identity")
+
+          sys.path.insert(0, "qodec/evals/interop/v2/n2/source-freeze/tools")
+          import registry as registry_mod, eligibility as eligibility_mod, selection as selection_mod, generate_manifests
+          reg = registry_mod.load_registry(reg_path)
+          reports = eligibility_mod.evaluate_registry(reg)
+          eligible_ids = {r["candidate_id"] for r in reports if r["eligible"]}
+          eligible = [c for c in reg["candidates"] if c["candidate_id"] in eligible_ids]
+          result = selection_mod.run_selection(eligible)
+          by_id = {c["candidate_id"]: c for c in eligible}
+          outcome = generate_manifests.generate_all(result["primary_case_ids"], result["alternate_case_ids"], by_id, selection_mod.load_quota_contract())
+          Path("$RUNNER_TEMP/reports/source-identity-report.json").write_text(json.dumps(outcome, indent=2, sort_keys=True) + "\n")
+          if outcome["errors"]:
+              print(f"::error::source-identity manifest regeneration errors: {outcome['errors']}", file=sys.stderr)
+              sys.exit(1)
+          PYEOF
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: source-identity-reports
+          path: |
+            ${{ runner.temp }}/reports/source-identity-report.json
+            qodec/evals/interop/v2/n2/source-freeze/candidate-registry.json
+            qodec/evals/interop/v2/n2/source-freeze/source-manifests
+          if-no-files-found: error
+          retention-days: 90
+
+  pre-qodec-seal:
+    name: pre-qodec-seal
+    needs: source-identity
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: source-identity-reports
+          path: .
+
+      - name: Render final n2-source-freeze.json + summary, run sealing checks
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 qodec/evals/interop/v2/n2/source-freeze/tools/generate_ci_reports.py freeze-receipt \
+            --main-sha "$(git rev-parse HEAD)" \
+            --workflow-run-ids "${{ github.run_id }}" \
+            --freeze-timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --out "$RUNNER_TEMP/reports/n2-source-freeze.json" \
+            --out-md "$RUNNER_TEMP/reports/n2-source-freeze-summary.md"
+          python3 qodec/evals/interop/v2/n2/source-freeze/tools/generate_ci_reports.py seal-check \
+            --repo-root . \
+            --out "$RUNNER_TEMP/reports/seal-check-report.json"
+          cat "$RUNNER_TEMP/reports/n2-source-freeze-summary.md"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: n2-source-freeze
+          path: |
+            ${{ runner.temp }}/reports/n2-source-freeze.json
+            ${{ runner.temp }}/reports/n2-source-freeze-summary.md
+            ${{ runner.temp }}/reports/seal-check-report.json
+          if-no-files-found: error
+          retention-days: 90
+
+  artifact-contract:
+    name: artifact-contract
+    needs:
+      - frozen-base
+      - candidate-inspection
+      - license-review
+      - eligibility-and-ranking
+      - quota-selection
+      - selection-determinism
+      - archive-security
+      - source-identity
+      - pre-qodec-seal
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: ${{ runner.temp }}/all-artifacts
+
+      - name: Build n2c-artifact-index (artifact name, digest, contained files, per-file SHA256)
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          python3 - <<'PYEOF'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          root = Path("${{ runner.temp }}/all-artifacts")
+          index = []
+          for artifact_dir in sorted(root.iterdir()):
+              if not artifact_dir.is_dir():
+                  continue
+              files = []
+              for f in sorted(artifact_dir.rglob("*")):
+                  if f.is_file():
+                      files.append({
+                          "path": str(f.relative_to(artifact_dir)),
+                          "sha256": hashlib.sha256(f.read_bytes()).hexdigest(),
+                      })
+              index.append({
+                  "artifact_name": artifact_dir.name,
+                  "source_workflow_run": "${{ github.run_id }}",
+                  "head_sha": "${{ github.sha }}",
+                  "file_count": len(files),
+                  "files": files,
+              })
+          Path("$RUNNER_TEMP/reports/n2c-artifact-index.json").write_text(json.dumps(index, indent=2, sort_keys=True) + "\n")
+          print(f"indexed {len(index)} artifacts")
+          PYEOF
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: n2c-artifact-index
+          path: ${{ runner.temp }}/reports/n2c-artifact-index.json
+          if-no-files-found: error
+          retention-days: 90
