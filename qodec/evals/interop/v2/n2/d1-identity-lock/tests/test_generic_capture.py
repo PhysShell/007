@@ -15,6 +15,42 @@ import generic_capture as gc  # noqa: E402
 REAL_ERRATA_PATH = REPO_ROOT / "qodec/evals/interop/v2/n2/d1-identity-lock/execution-plan-errata.json"
 
 
+class TestVerifyRelativeArgv0Exists(unittest.TestCase):
+    def test_absolute_argv0_is_never_checked(self):
+        # Only relative wrapper-style argv0s (./gradlew, ../foo) are checked;
+        # an absolute path (e.g. a resolved venv python) is the caller's own
+        # responsibility and must not be second-guessed here.
+        gc.verify_relative_argv0_exists("/usr/bin/python3", Path("/does/not/exist"))  # must not raise
+
+    def test_bare_command_name_is_never_checked(self):
+        gc.verify_relative_argv0_exists("cargo", Path("/does/not/exist"))  # must not raise
+
+    def test_existing_relative_wrapper_passes(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp)
+            (cwd / "gradlew").write_text("#!/bin/sh\n")
+            gc.verify_relative_argv0_exists("./gradlew", cwd)  # must not raise
+
+    def test_missing_relative_wrapper_raises_with_clear_diagnostic(self):
+        # This is exactly the real risk flagged for repo-moshi: its manifest
+        # names project.entry_point "moshi" even though the frozen argv's
+        # wrapper actually lives at the repository root, not under moshi/.
+        # If cwd were ever wrongly derived from entry_point instead of the
+        # true source_root, this must fail loudly here, not as an opaque
+        # sandbox/ENOENT error deep inside the confined run.
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cwd = Path(tmp) / "moshi"  # wrong cwd: gradlew is NOT here
+            cwd.mkdir()
+            with self.assertRaises(gc.GenericCaptureFailure) as ctx:
+                gc.verify_relative_argv0_exists("./gradlew", cwd)
+            self.assertIn("./gradlew", str(ctx.exception))
+            self.assertIn(str(cwd), str(ctx.exception))
+
+
 class TestDedupeSanitizerRuleNames(unittest.TestCase):
     def test_empty_reports_produce_empty_list(self):
         self.assertEqual(gc.dedupe_sanitizer_rule_names({}, {}), [])

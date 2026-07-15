@@ -88,6 +88,28 @@ def apply_durable_byte_cap(data: bytes) -> bytes:
     return data[:MAXIMUM_EXTRACTED_SOURCE_BYTES]
 
 
+def verify_relative_argv0_exists(argv0: str, cwd: Path) -> None:
+    """The confined build always runs with cwd=source_root (the repo root of
+    the case's own fresh extraction) -- never a subdirectory named after a
+    manifest's `project.entry_point` (which can name a specific module
+    without meaning "run from there"; repo-moshi's manifest says entry_point
+    "moshi" but its gradlew wrapper lives at the repository root, and the
+    frozen argv is the wrapper's own relative path, not entry_point). For a
+    relative wrapper argv0 (e.g. "./gradlew"), fail loudly and specifically
+    here if it doesn't actually exist at that cwd, rather than letting a
+    wrong assumption surface later as an opaque sandbox/ENOENT error."""
+    if not argv0.startswith(("./", "../")):
+        return
+    resolved = (cwd / argv0).resolve()
+    if not resolved.is_file():
+        raise GenericCaptureFailure(
+            f"relative argv0 {argv0!r} does not exist at the confined build's cwd "
+            f"({cwd}) -- resolved path {resolved} is not a file. Do not assume a "
+            f"manifest's project.entry_point names the command's cwd; verify where "
+            f"the wrapper actually lives in the real extracted source tree."
+        )
+
+
 def dedupe_sanitizer_rule_names(*reports: dict) -> list[str]:
     """sanitizer.sanitize's rules_applied is a list of
     {"rule": name, "replacements": count} dicts, not rule-name strings --
@@ -184,6 +206,7 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
     launcher_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home_dir), "TMPDIR": str(tmp_dir)}
     launcher_env.update(toolchain_env_values)
 
+    verify_relative_argv0_exists(effective_argv[0], source_root)
     result = capture_build.run_real_build(sandboy_bin, policy_path, source_root, effective_argv, launcher_env)
 
     (out_dir / "raw.stdout").write_bytes(result["raw_stdout"])
