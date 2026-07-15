@@ -13,6 +13,16 @@
 # feature this session's own sandbox does not expose to the guest — that is
 # exactly why this runs here, in a real GitHub Actions VM, rather than
 # locally.
+#
+# Re-run history: CI run #1 (29417042823) hit two real path bugs (double
+# case-id nesting; source.tar never extracted before trusted setup) -- both
+# fixed. CI run #2 (29417313334) hit four more real bugs, all now fixed:
+# repo-pyflakes's erratum lookup was broken by a caller-side argv0
+# pre-substitution (stale-erratum refusal); no dotnet entry existed in
+# ECOSYSTEM_POLICY_HINTS; the gradle toolchain probe ran './gradlew' with no
+# cwd; and 'mvn --version' returned ANSI-colored text that broke the version
+# regex. See tools/generic_capture.py, tools/generic_sandbox_policy.py,
+# tools/ecosystem_toolchain.py, tools/run_pilot_case.py.
 name: qodec-n2d1b-miner-pilot
 
 on:
