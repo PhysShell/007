@@ -1,20 +1,15 @@
 name: qodec-n2d0-durable-evidence-rescue
 
-# N2-D0: one-shot rescue of N2-C's and N2-A.1's real acquisition/capture.
-# (retry after fixing the acquisition-*.zip/acquisition-* glob collision)
+# N2-D0: one-shot rescue of N2-C's and N2-A.1's real acquisition/capture
 # bytes out of expiring GitHub Actions artifacts into a durable GitHub
-# Release. Manual trigger only — this is not a recurring gate, and must
-# never re-run against a different source run without an explicit,
-# reviewed change to this file. Does not execute QODEC, RTK, or any
-# downloaded content; does not modify N2-C; does not touch main.
+# Release. Succeeded as run 29409445736, publishing release
+# n2d0-durable-evidence-v1. Manual trigger only — this is not a recurring
+# gate, and must never re-run against a different source run without an
+# explicit, reviewed change to this file. Does not execute QODEC, RTK, or
+# any downloaded content; does not modify N2-C; does not touch main.
 
 on:
   workflow_dispatch: {}
-  push:
-    branches:
-      - claude/n2d0-durable-evidence-rescue
-    paths:
-      - .github/workflows/qodec-n2d0-durable-evidence-rescue.yml
 
 permissions:
   contents: write
