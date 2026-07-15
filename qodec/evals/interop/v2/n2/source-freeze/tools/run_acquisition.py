@@ -43,7 +43,12 @@ USER_AGENT = "qodec-n2c-source-freeze (trusted-acquisition; static-inspection-on
 
 
 def _fetch(url: str, timeout: int = 60) -> bytes:
-    req = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"})
+    # GitHub's API needs its own versioned media type to return JSON in the
+    # expected shape; other public APIs used here (Zenodo, syzkaller) return
+    # 406 Not Acceptable if sent that GitHub-specific Accept header — a real
+    # failure discovered in CI (workflow run 29387543211) and fixed here.
+    accept = "application/vnd.github+json" if "api.github.com" in url else "application/json"
+    req = Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
     with urlopen(req, timeout=timeout) as resp:  # noqa: S310 - public metadata only, no execution
         return resp.read()
 
@@ -86,15 +91,27 @@ def acquire_bot_output(candidate: dict) -> dict:
 
 def acquire_dataset_or_research_corpus(candidate: dict) -> dict:
     ident = candidate["source_identity"]
-    doi = ident["object_id_or_doi"]
-    record_id = doi.rsplit(".", 1)[-1]
-    data = _fetch(f"https://zenodo.org/api/records/{record_id}")
+    doi = ident["object_id_or_doi"] or ""
+    if doi.startswith("10."):
+        # A real DOI: "10.5281/zenodo.<record_id>" — extract the numeric
+        # record ID and fetch Zenodo's own versioned record metadata.
+        record_id = doi.rsplit(".", 1)[-1]
+        data = _fetch(f"https://zenodo.org/api/records/{record_id}")
+        method = ("zenodo-api-record-metadata (see candidate discovery notes for the publisher's "
+                  "own per-file MD5 checksums of the underlying multi-GB dataset — not re-downloaded here)")
+    else:
+        # No DOI exists for this candidate (confirmed during discovery
+        # research, e.g. the LANL Unified Host/Network Dataset — recorded
+        # here rather than in Zenodo) — the immutable identity is the
+        # publisher's own canonical page, fetched directly instead.
+        data = _fetch(candidate["public_canonical_url"])
+        method = "direct-fetch-of-publisher-canonical-page (no DOI/Zenodo record exists for this dataset)"
     return {
         "candidate_id": candidate["candidate_id"],
         "original_sha256": sha256_bytes(data),
-        "normalized_archive_sha256": sha256_bytes(data),  # Zenodo's own versioned record metadata is the acquired identity artifact
+        "normalized_archive_sha256": sha256_bytes(data),
         "size_bytes": len(data),
-        "acquisition_method": "zenodo-api-record-metadata (see candidate discovery notes for the publisher's own per-file MD5 checksums of the underlying multi-GB dataset — not re-downloaded here)",
+        "acquisition_method": method,
     }
 
 

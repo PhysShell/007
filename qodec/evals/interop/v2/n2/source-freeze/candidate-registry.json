@@ -1167,7 +1167,7 @@
       "external_service_requirements": [],
       "git_lfs_status": "none",
       "license": {
-        "license_file": "LICENSE",
+        "license_file": "LICENSE.txt",
         "redistribution_allowed": true,
         "spdx": "Apache-2.0",
         "status": "clear"
@@ -1783,7 +1783,7 @@
       "external_service_requirements": [],
       "git_lfs_status": "none",
       "license": {
-        "license_file": "LICENSE",
+        "license_file": "LICENSE-ClassGraph.txt",
         "redistribution_allowed": true,
         "spdx": "MIT",
         "status": "clear"

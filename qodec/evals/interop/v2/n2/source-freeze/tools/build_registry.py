@@ -258,7 +258,7 @@ CANDIDATES.append(repo(
 CANDIDATES.append(repo(
     "repo-spotless", "https://github.com/diffplug/spotless", "diffplug", "spotless",
     "03d43ba2cdc81050e07b62646c08b22e39505368", None,
-    "jvm-gradle", "static-analysis-lint-compiler", "Apache-2.0", "LICENSE",
+    "jvm-gradle", "static-analysis-lint-compiler", "Apache-2.0", "LICENSE.txt",
     "plugin-gradle", "jvm-gradle", "medium", "Gradle-native code-formatting/lint tool", "medium",
     capture_cmd="./gradlew spotlessCheck",
 ))
@@ -315,7 +315,7 @@ CANDIDATES.append(repo(
 CANDIDATES.append(repo(
     "repo-classgraph", "https://github.com/classgraph/classgraph", "classgraph", "classgraph",
     "a03ed5611c6c844c0deb6b32b77a5ba8753d1604", None,
-    "jvm-maven", "search-listing-diagnostic", "MIT", "LICENSE", "pom.xml", "jvm-maven", "medium",
+    "jvm-maven", "search-listing-diagnostic", "MIT", "LICENSE-ClassGraph.txt", "pom.xml", "jvm-maven", "medium",
     "classpath scanning/listing tool", "medium", capture_cmd="mvn test",
 ))
 CANDIDATES.append(repo(
