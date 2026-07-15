@@ -1,0 +1,34 @@
+{
+  "$comment": "Scope N2-C license-record.json schema (section 11). One record per primary/alternate case.",
+  "type": "object",
+  "required": [
+    "candidate_id",
+    "license_status",
+    "spdx",
+    "publisher_stated_license",
+    "license_source_url",
+    "license_text_sha256",
+    "source_code_license",
+    "redistribution_basis",
+    "attribution_requirements",
+    "modification_requirements",
+    "redistribution_allowed",
+    "review_evidence"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "candidate_id": { "type": "string", "minLength": 1 },
+    "license_status": { "type": "string", "enum": ["clear", "missing", "ambiguous"] },
+    "spdx": { "type": ["string", "null"] },
+    "publisher_stated_license": { "type": ["string", "null"] },
+    "license_source_url": { "type": "string", "minLength": 1 },
+    "license_text_sha256": { "type": ["string", "null"], "pattern": "^([0-9a-f]{64})?$" },
+    "source_code_license": { "type": ["string", "null"] },
+    "log_or_data_redistribution_basis": { "type": ["string", "null"] },
+    "redistribution_basis": { "type": "string", "minLength": 1 },
+    "attribution_requirements": { "type": "string" },
+    "modification_requirements": { "type": "string" },
+    "redistribution_allowed": { "type": ["boolean", "string"], "enum": [true, false, "unclear"] },
+    "review_evidence": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+  }
+}

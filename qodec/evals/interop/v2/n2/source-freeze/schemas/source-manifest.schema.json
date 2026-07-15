@@ -1,0 +1,99 @@
+{
+  "$comment": "Scope N2-C per-case source manifest schema (section 17). One manifest per frozen primary/alternate case.",
+  "type": "object",
+  "required": [
+    "case_id",
+    "selection_role",
+    "fallback_priority",
+    "source_kind",
+    "origin_kind",
+    "ecosystem",
+    "primary_family",
+    "secondary_tags",
+    "source_identity",
+    "license_identity",
+    "project",
+    "execution_expectation"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "case_id": { "type": "string", "minLength": 1 },
+    "selection_role": { "type": "string", "enum": ["primary", "alternate"] },
+    "fallback_priority": { "type": ["integer", "null"] },
+    "fallback_quota_groups": { "type": "array", "items": { "type": "string" } },
+    "source_kind": {
+      "type": "string",
+      "enum": ["repository-execution", "ci-run-artifact", "dataset-artifact", "bot-output-artifact", "research-corpus-artifact", "n2a-reference-only"]
+    },
+    "origin_kind": {
+      "type": "string",
+      "enum": [
+        "repository-miner",
+        "native-upstream-ci-log",
+        "public-runtime-dataset",
+        "kernel-or-infrastructure-bot",
+        "reproducible-research-corpus",
+        "n2a-reference-only"
+      ]
+    },
+    "ecosystem": {
+      "type": "string",
+      "enum": ["dotnet", "rust", "python", "jvm-maven", "jvm-gradle", "infrastructure-or-language-neutral"]
+    },
+    "primary_family": {
+      "type": "string",
+      "enum": [
+        "ci-build", "test", "runtime", "container-orchestration-deployment",
+        "static-analysis-lint-compiler", "search-listing-diagnostic", "dependency-package-manager"
+      ]
+    },
+    "secondary_tags": { "type": "array", "items": { "type": "string" } },
+    "source_identity": {
+      "type": "object",
+      "required": ["canonical_url"],
+      "additionalProperties": true,
+      "properties": {
+        "canonical_url": { "type": "string", "minLength": 1 },
+        "commit_sha": { "type": ["string", "null"] },
+        "tree_sha": { "type": ["string", "null"] },
+        "object_id_or_doi": { "type": ["string", "null"] },
+        "original_sha256": { "type": ["string", "null"] },
+        "normalized_archive_sha256": { "type": ["string", "null"] }
+      }
+    },
+    "license_identity": {
+      "type": "object",
+      "required": ["spdx", "license_sha256", "redistribution_allowed"],
+      "additionalProperties": true,
+      "properties": {
+        "spdx": { "type": ["string", "null"] },
+        "license_sha256": { "type": ["string", "null"] },
+        "redistribution_allowed": { "type": "boolean" }
+      }
+    },
+    "project": {
+      "type": "object",
+      "required": ["entry_point"],
+      "additionalProperties": true,
+      "properties": {
+        "entry_point": { "type": ["string", "null"] },
+        "adapter": { "type": ["string", "null"] },
+        "detection_confidence": { "type": ["string", "null"] },
+        "ambiguities": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "execution_expectation": {
+      "type": "object",
+      "required": ["command_class", "trusted_dependency_realization", "network_during_untrusted_execution", "expected_size_bucket", "size_estimation_basis"],
+      "additionalProperties": true,
+      "properties": {
+        "command_class": { "type": "string" },
+        "trusted_dependency_realization": { "type": "string" },
+        "network_during_untrusted_execution": { "type": "string", "enum": ["denied"] },
+        "expected_size_bucket": { "type": "string", "enum": ["small", "medium", "large", "very-large"] },
+        "size_estimation_basis": { "type": "string" },
+        "argv": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

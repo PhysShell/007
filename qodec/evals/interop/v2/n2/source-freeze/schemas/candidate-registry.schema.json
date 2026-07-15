@@ -1,0 +1,219 @@
+{
+  "$comment": "Scope N2-C candidate registry schema. Generalizes N2-B's repository-only schema (qodec/evals/interop/v2/n2/miner/schemas/candidate-registry.schema.json, frozen, unchanged) to cover all five N2-C origin kinds. A candidate whose origin_kind is 'repository-miner' additionally carries every field N2-B's frozen eligibility.py/scorer.py read (see tools/n2b_bridge.py), so those frozen functions can run on it unmodified.",
+  "type": "object",
+  "required": ["registry_version", "candidates"],
+  "additionalProperties": false,
+  "properties": {
+    "registry_version": { "type": "string", "minLength": 1 },
+    "candidates": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/candidate" }
+    }
+  },
+  "definitions": {
+    "candidate": {
+      "type": "object",
+      "required": [
+        "candidate_id",
+        "public_canonical_url",
+        "source_kind",
+        "origin_kind",
+        "ecosystem",
+        "primary_family",
+        "secondary_tags",
+        "publisher",
+        "discovery",
+        "source_identity",
+        "license",
+        "project",
+        "network_requirements",
+        "external_service_requirements",
+        "container_requirements",
+        "security_flags",
+        "estimated_resource_class",
+        "expected_size_bucket",
+        "expected_size_estimation_basis",
+        "expected_size_confidence",
+        "reproducibility_class",
+        "offline_feasibility",
+        "selection_status",
+        "evidence_references",
+        "status_history"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "candidate_id": { "type": "string", "minLength": 1 },
+        "public_canonical_url": { "type": "string", "pattern": "^https://" },
+        "source_kind": {
+          "type": "string",
+          "enum": ["repository-execution", "ci-run-artifact", "dataset-artifact", "bot-output-artifact", "research-corpus-artifact", "n2a-reference-only"]
+        },
+        "origin_kind": {
+          "type": "string",
+          "enum": [
+            "repository-miner",
+            "native-upstream-ci-log",
+            "public-runtime-dataset",
+            "kernel-or-infrastructure-bot",
+            "reproducible-research-corpus",
+            "n2a-reference-only"
+          ]
+        },
+        "ecosystem": {
+          "type": "string",
+          "enum": ["dotnet", "rust", "python", "jvm-maven", "jvm-gradle", "infrastructure-or-language-neutral"]
+        },
+        "primary_family": {
+          "type": "string",
+          "enum": [
+            "ci-build",
+            "test",
+            "runtime",
+            "container-orchestration-deployment",
+            "static-analysis-lint-compiler",
+            "search-listing-diagnostic",
+            "dependency-package-manager"
+          ]
+        },
+        "secondary_tags": { "type": "array", "items": { "type": "string" } },
+        "publisher": {
+          "type": "object",
+          "required": ["identity"],
+          "additionalProperties": true,
+          "properties": {
+            "identity": { "type": "string", "minLength": 1 },
+            "publication_or_creation_timestamp": { "type": ["string", "null"] }
+          }
+        },
+        "discovery": {
+          "type": "object",
+          "required": ["timestamp", "mechanism"],
+          "additionalProperties": true,
+          "properties": {
+            "timestamp": { "type": "string", "minLength": 1 },
+            "mechanism": { "type": "string", "minLength": 1 }
+          }
+        },
+        "source_identity": {
+          "type": "object",
+          "required": ["identity_kind"],
+          "additionalProperties": true,
+          "properties": {
+            "identity_kind": { "type": "string", "enum": ["git-commit", "immutable-object-or-doi", "immutable-run-or-artifact"] },
+            "repository_url": { "type": ["string", "null"] },
+            "owner": { "type": ["string", "null"] },
+            "name": { "type": ["string", "null"] },
+            "commit_sha": { "type": ["string", "null"], "pattern": "^([0-9a-f]{40})?$" },
+            "tree_sha": { "type": ["string", "null"] },
+            "default_branch_informational_only": { "type": ["string", "null"] },
+            "object_id_or_doi": { "type": ["string", "null"] },
+            "workflow_identity": { "type": ["string", "null"] },
+            "run_id": { "type": ["string", "null"] },
+            "job_id": { "type": ["string", "null"] },
+            "artifact_id": { "type": ["string", "null"] },
+            "artifact_digest": { "type": ["string", "null"] },
+            "original_content_sha256": { "type": ["string", "null"] },
+            "normalized_archive_sha256": { "type": ["string", "null"] }
+          }
+        },
+        "license": {
+          "type": "object",
+          "required": ["status", "spdx", "redistribution_allowed"],
+          "additionalProperties": true,
+          "properties": {
+            "status": { "type": "string", "enum": ["clear", "missing", "ambiguous"] },
+            "spdx": { "type": ["string", "null"] },
+            "redistribution_allowed": { "type": "boolean" },
+            "license_record_ref": { "type": ["string", "null"] }
+          }
+        },
+        "project": {
+          "type": "object",
+          "required": ["entry_point"],
+          "additionalProperties": true,
+          "properties": {
+            "entry_point": { "type": ["string", "null"] },
+            "adapter": { "type": ["string", "null"] },
+            "detection_confidence": { "type": ["string", "null"] },
+            "ambiguous": { "type": "boolean" },
+            "ambiguities": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "toolchain_request": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "requested_version_or_range": { "type": "string" },
+            "resolver_mechanism": { "type": "string" }
+          }
+        },
+        "dependency_lock": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "present": { "type": "boolean" },
+            "files": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "network_requirements": {
+          "type": "object",
+          "required": ["required_during_untrusted_execution"],
+          "additionalProperties": true,
+          "properties": {
+            "required_during_untrusted_execution": { "type": "boolean" },
+            "notes": { "type": "string" }
+          }
+        },
+        "submodule_status": { "type": "string", "enum": ["none", "present"] },
+        "git_lfs_status": { "type": "string", "enum": ["none", "present"] },
+        "private_feed_status": { "type": "string", "enum": ["none", "required"] },
+        "external_service_requirements": { "type": "array", "items": { "type": "string" } },
+        "container_requirements": { "type": "array", "items": { "type": "string" } },
+        "security_flags": { "type": "array", "items": { "type": "string" } },
+        "estimated_resource_class": { "type": "string", "enum": ["small", "medium", "large"] },
+        "expected_capture_command_class": { "type": "string" },
+        "expected_size_bucket": { "type": "string", "enum": ["small", "medium", "large", "very-large"] },
+        "expected_size_estimation_basis": { "type": "string", "minLength": 1 },
+        "expected_size_confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+        "reproducibility_class": {
+          "type": "string",
+          "enum": ["expected-byte-reproducible", "expected-semantically-reproducible", "unknown"]
+        },
+        "offline_feasibility": {
+          "type": "string",
+          "enum": ["offline-ready-by-inspection", "offline-feasible-with-trusted-realization", "requires-n2d-execution-probe", "ineligible", "not-applicable-non-repository"]
+        },
+        "personal_data_review": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "personal_data_present": { "type": "boolean" },
+            "sanitization_notes": { "type": "string" }
+          }
+        },
+        "selection_status": {
+          "type": "string",
+          "enum": ["discovered", "inspected", "ineligible", "eligible", "selected-primary", "selected-alternate", "frozen", "rejected-after-selection"]
+        },
+        "rejection_reason": { "type": ["string", "null"] },
+        "fallback_priority": { "type": ["integer", "null"] },
+        "fallback_quota_groups": { "type": "array", "items": { "type": "string" } },
+        "evidence_references": { "type": "array", "items": { "type": "string" } },
+        "status_history": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["status", "registry_version"],
+            "additionalProperties": true,
+            "properties": {
+              "status": { "type": "string" },
+              "registry_version": { "type": "string" },
+              "reason": { "type": ["string", "null"] },
+              "override": { "type": ["object", "null"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}

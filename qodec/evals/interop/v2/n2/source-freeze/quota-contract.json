@@ -1,0 +1,40 @@
+{
+  "quota_contract_version": "n2c-quota-contract-v1",
+  "note": "These are REMAINING minimums for the 17 new primary selections N2-C must make — N2-A (miner-canary-dotnet-001) already occupies one repository-miner / ci-build / dotnet slot and is not re-selected or re-scored here. Full 18-case totals equal these targets plus N2-A's one contribution to each dimension it touches.",
+  "total_new_primary_target": 17,
+  "total_new_case_target_including_n2a": 18,
+  "minimum_alternates": 8,
+  "quotas": {
+    "origin_kind": {
+      "repository-miner": 9,
+      "native-upstream-ci-log": 3,
+      "public-runtime-dataset": 2,
+      "kernel-or-infrastructure-bot": 2,
+      "reproducible-research-corpus": 1
+    },
+    "primary_family": {
+      "ci-build": 3,
+      "test": 3,
+      "runtime": 3,
+      "container-orchestration-deployment": 3,
+      "static-analysis-lint-compiler": 2,
+      "search-listing-diagnostic": 2,
+      "dependency-package-manager": 1
+    },
+    "ecosystem_quota_group": {
+      "dotnet": 2,
+      "rust": 3,
+      "python": 3,
+      "jvm": 3,
+      "infrastructure-or-language-neutral": 4
+    }
+  },
+  "flexible_slots": 2,
+  "flexible_slot_policy": "After the greedy quota-filling pass (quotas above sum to 15 ecosystem-dimension + 17 origin/family-dimension slots), any remaining primary slots up to total_new_primary_target are filled by walking the SAME deterministic ranked-and-tie-broken candidate order and taking the next eligible, not-yet-selected candidates in rank order — no manual reordering, no re-ranking, no fresh scoring pass.",
+  "n2a_reference": {
+    "case_id": "miner-canary-dotnet-001",
+    "origin_kind": "repository-miner",
+    "primary_family": "ci-build",
+    "ecosystem_quota_group": "dotnet"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "policy_version": "n2c-scoring-policy-v1",
+  "quota_group_dimension": "origin_kind",
+  "features": [
+    { "key": "license_clarity", "weight": 10 },
+    { "key": "immutable_source_completeness", "weight": 8 },
+    { "key": "offline_execution_feasibility", "weight": 10 },
+    { "key": "dependency_lock_quality", "weight": 8 },
+    { "key": "build_detector_confidence", "weight": 8 },
+    { "key": "expected_family_coverage", "weight": 6 },
+    { "key": "expected_ecosystem_coverage", "weight": 6 },
+    { "key": "expected_size_bucket", "weight": 4 },
+    { "key": "security_risk_inverse", "weight": 8 },
+    { "key": "estimated_ci_resource_cost_inverse", "weight": 4 },
+    { "key": "reproducibility_expectation", "weight": 6 },
+    { "key": "source_provenance_completeness", "weight": 6 }
+  ],
+  "forbidden_feature_markers": [
+    "qodec", "rtk", "token", "hybrid_reduction", "winning_arm",
+    "desired_aggregate_benchmark_result", "manual_preference_after_benchmark",
+    "github_stars", "star_count", "popularity"
+  ],
+  "tie_break": "sha256(candidate_id + commit_sha)",
+  "note": "Feature keys and tie-break formula are computed by frozen N2-B scorer.py (score_candidate/tie_break_value), unchanged, via n2b_bridge.score_via_n2b. This file supplies only weights/quota-group-dimension, which score_candidate already takes as a parameter — no N2-B code edited."
+}
