@@ -50,6 +50,13 @@ def _run_probe(sandboy_bin: Path, policy_path: Path, cwd: Path, env: dict, scrip
         "exit_code": result["exit_code"],
         "raw_stdout_sha256": sha256_bytes(result["raw_stdout"]),
         "raw_stderr_sha256": sha256_bytes(result["raw_stderr"]),
+        # This is a diagnostic-only probe report (never the canonical
+        # benchmark stream), so the decoded text -- not just its hash -- is
+        # recorded directly: a zero-stdout, exit-code-2 probe failure (e.g. a
+        # Sandboy config/policy-load error, per main.rs's own exit-code
+        # convention) is otherwise undiagnosable from the artifact alone.
+        "raw_stdout_text": result["raw_stdout"].decode("utf-8", errors="replace"),
+        "raw_stderr_text": result["raw_stderr"].decode("utf-8", errors="replace"),
         "parsed_result": parsed,
     }
 

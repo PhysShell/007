@@ -114,8 +114,26 @@ ECOSYSTEM_POLICY_HINTS = {
             "PATH", "HOME", "TMPDIR", "DOTNET_ROOT", "DOTNET_CLI_TELEMETRY_OPTOUT",
             "DOTNET_NOLOGO", "DOTNET_SKIP_FIRST_TIME_EXPERIENCE",
             "DOTNET_MULTILEVEL_LOOKUP", "DOTNET_GENERATE_ASPNET_CERTIFICATE",
+            "NUGET_PACKAGES",
         ],
-        "extra_fs_ro_from_env": ["DOTNET_ROOT"],
+        # A real capture (repo-kubeops-generator, run #13, after the
+        # --no-restore erratum let the process get past the frozen argv's
+        # own implicit-restore/NU1301 failure) showed MSBuild fail with
+        # "MSB4024: The imported project file
+        # '.../microsoft.testing.platform/1.9.1/buildTransitive/net9.0/
+        # Microsoft.Testing.Platform.props' could not be loaded. Access to
+        # the path ... is denied." -- the trusted `dotnet restore` step ran
+        # unconfined against the real, ambient $HOME, so NuGet's global
+        # packages folder (the default $HOME/.nuget/packages, unless
+        # NUGET_PACKAGES overrides it) landed there; the confined process's
+        # own isolated HOME has no relationship to that real path, and
+        # MSBuild still needs read access to already-restored packages'
+        # .props/.targets even with --no-restore (it only skips re-running
+        # the restore operation itself, not every file NuGet restored).
+        # NUGET_PACKAGES is forwarded verbatim (not a MAVEN_OPTS-style
+        # indirection -- NuGet reads this env var directly) so the confined
+        # child resolves the exact same real path trusted setup populated.
+        "extra_fs_ro_from_env": ["DOTNET_ROOT", "NUGET_PACKAGES"],
         "extra_fs_rw_from_env": [],
         # The dotnet CLI's first-run NuGet-migrations named mutex hardcodes
         # /tmp/.dotnet/shm (ignoring TMPDIR/HOME) -- a real N2-A canary run

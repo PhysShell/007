@@ -300,6 +300,14 @@ def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
         env_values = {"DOTNET_CLI_TELEMETRY_OPTOUT": "1", "DOTNET_NOLOGO": "1"}
         if dotnet_root:
             env_values["DOTNET_ROOT"] = dotnet_root
+        # The trusted `dotnet restore` step (run_pilot_case's
+        # dotnet_restore_project_relpath trusted_setup_fn) runs unconfined,
+        # inheriting the real ambient $HOME -- so NuGet's global packages
+        # folder, absent any override, is the real $HOME/.nuget/packages.
+        # Forward that exact real path so the confined child's
+        # NUGET_PACKAGES resolves identically (see generic_sandbox_policy.py's
+        # dotnet extra_fs_ro_from_env comment for the real evidence).
+        env_values["NUGET_PACKAGES"] = str(Path.home() / ".nuget" / "packages")
         return _capture, env_values
     raise ValueError(f"unknown ecosystem {ecosystem!r}")
 
