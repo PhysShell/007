@@ -1,0 +1,12 @@
+.github
+.gitignore
+AUTHORS
+LICENSE
+MANIFEST.in
+NEWS.rst
+README.rst
+bin
+pyflakes
+setup.cfg
+setup.py
+tox.ini

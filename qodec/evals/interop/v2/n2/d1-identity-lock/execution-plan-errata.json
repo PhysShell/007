@@ -1,0 +1,45 @@
+{
+  "approving_scope": "N2-D1b",
+  "entries": [
+    {
+      "approving_scope": "N2-D1b",
+      "authorized_timestamp": "2026-07-15T13:00:00Z",
+      "case_id": "repo-pyflakes",
+      "corrected_effective_argv": [
+        "python",
+        "-m",
+        "pyflakes",
+        "pyflakes/"
+      ],
+      "correction_rule": "The exact pinned source commit is unchanged. The frozen tree contains no src/ directory. The real package source directory is pyflakes/. The original command therefore cannot perform its intended static-analysis workload. Replacing only the nonexistent assumed source root with the actual package root is the smallest evidence-based correction. This correction does not change the source, tool, command class, case family, selected primary role, or corpus quotas. Not '.', not pytest/tox/flake8, not any other workload.",
+      "durable_source_tar_sha256": "4dfe80499d91f501aa4fa742cb8cc09318bd984ffd175b8de0ad3868cdd3d96e",
+      "frozen_n2c_manifest_path": "qodec/evals/interop/v2/n2/source-freeze/source-manifests/primary/repo-pyflakes.json",
+      "frozen_n2c_manifest_sha256": "e8d73a9fc7a53d757de7d93db237169187182b5830a931266e572edb820019b6",
+      "original_dry_run_exit_code": 1,
+      "original_frozen_argv": [
+        "python",
+        "-m",
+        "pyflakes",
+        "src/"
+      ],
+      "original_stderr_sha256": "e0b9e670e339a84e24440589e85672eae2fe8faf54cf5c9e08209797117a1b61",
+      "original_stderr_text": "src/: No such file or directory",
+      "pinned_source_commit_sha": "59ec4593efd4c69ce00fdb13c40fcf5f3212ab10",
+      "producing_investigation_context": {
+        "branch": "claude/qodec-benchmark-v2-n2d-identity-lock",
+        "note": "Original dry run and tree verification performed directly against the durable n2d0-durable-evidence-v1 release asset (n2c-acquisition-repo-pyflakes.zip), independent of any N2-C committed registry field.",
+        "parent_commit_sha": "c3150b260a35d3df610f4a24bec01681812a381b"
+      },
+      "retained_stderr_evidence_path": "qodec/evals/interop/v2/n2/d1-identity-lock/errata-evidence/repo-pyflakes/original-stderr.bin",
+      "status": "AUTHORIZED_ERRATUM",
+      "verified_pyflakes_directory_entry_count": 21,
+      "verified_pyflakes_directory_present": true,
+      "verified_src_directory_present": false,
+      "verified_tree_evidence_path": "qodec/evals/interop/v2/n2/d1-identity-lock/errata-evidence/repo-pyflakes/acquisition-tree-top-level-listing.txt",
+      "verified_tree_evidence_sha256": "6c2022162f1d35c2c3b0073589c621a174a640b622fd50a2b70e798c1f6763d7"
+    }
+  ],
+  "errata_contract_version": "n2d1b-execution-plan-errata-v1",
+  "errata_sha256": "3cb2f630eeee9c94841019314bcb89a40f0126d17efe6bd2bc49e65f530593e5",
+  "rule": "An erratum is authorized ONLY when the frozen argv is provably unexecutable against the exact frozen, pinned-commit source tree (a real 'no such file or directory' / equivalent failure, not a toolchain or dependency issue), AND the correction is the smallest possible fix (replacing only the nonexistent assumed path with the real one), AND it changes nothing else about the case (source, tool, command class, family, primary/alternate role, quotas)."
+}
