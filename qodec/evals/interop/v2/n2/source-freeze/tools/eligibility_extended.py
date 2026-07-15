@@ -140,13 +140,16 @@ def _evaluate_non_repository_rule(rule: str, candidate: dict) -> tuple[bool, str
         ok = bool(publisher.get("identity"))
         return ok, f"publisher.identity={publisher.get('identity')!r}"
     if rule == "no_interactive_access_gate":
-        # Section 10 (N2-C closure): "Publicly downloadable" via a browser is
-        # not the same as acquirable by a trusted, credential-free CI job. A
-        # source whose real download URL is only issued after an interactive
-        # registration/email-request flow (verified by inspecting the actual
-        # publisher page, not assumed) has no stable, reproducible,
-        # unauthenticated acquisition URL and must be rejected here rather
-        # than silently degraded to a metadata-only "acquisition."
+        # Section 10 (N2-C closure): "Publicly downloadable" means a stable,
+        # reproducible, unauthenticated acquisition path exists for a trusted
+        # job that holds no out-of-band access grant — not gated behind a
+        # browser's interactive registration flow (e.g. LANL's data-fence
+        # email-request UI, verified by direct page fetch). This rule is
+        # driven purely by requires_interactive_access_grant on the
+        # candidate's source_identity; it does not itself decide whether any
+        # particular platform/endpoint qualifies as gated — that
+        # determination must be backed by real, verified acquisition
+        # evidence (see acquisition_barrier_evidence where set), not assumed.
         gated = bool(ident.get("requires_interactive_access_grant", False))
         return not gated, f"requires_interactive_access_grant={gated}"
     raise ValueError(f"unknown non-repository rule {rule!r}")
