@@ -1,6 +1,7 @@
 name: qodec-n2d0-durable-evidence-rescue
 
-# N2-D0: one-shot rescue of N2-C's and N2-A.1's real acquisition/capture
+# N2-D0: one-shot rescue of N2-C's and N2-A.1's real acquisition/capture.
+# (retry after fixing the Azure-blob-redirect Authorization-header bug)
 # bytes out of expiring GitHub Actions artifacts into a durable GitHub
 # Release. Manual trigger only — this is not a recurring gate, and must
 # never re-run against a different source run without an explicit,
