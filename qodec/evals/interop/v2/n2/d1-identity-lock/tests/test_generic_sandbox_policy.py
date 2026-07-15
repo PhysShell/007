@@ -160,6 +160,20 @@ class TestBuildPolicy(unittest.TestCase):
         fs_rw_line = next(line for line in text.splitlines() if line.startswith("fs_rw"))
         self.assertIn('"/tmp"', fs_rw_line)
 
+    def test_maven_policy_makes_real_tmp_writable(self):
+        # A real capture (CI run #10) showed scala-maven-plugin unpack its
+        # compiler-bridge sources jar via a hardcoded /tmp path --
+        # "AccessDeniedException: /tmp/scala-maven-plugin-compiler-bridge-
+        # sources...", ignoring TMPDIR -- same class of gap as rust's
+        # linker and dotnet's /tmp/.dotnet/shm findings.
+        text = gsp.build_policy(
+            ecosystem="jvm-maven", source_root=Path("/src"), home_dir=Path("/h"),
+            tmp_dir=Path("/job-tmp"), capture_out_dir=Path("/o"),
+            project_writable_dirs=[], env_values={},
+        )
+        fs_rw_line = next(line for line in text.splitlines() if line.startswith("fs_rw"))
+        self.assertIn('"/tmp"', fs_rw_line)
+
     def test_dotnet_policy_makes_real_tmp_writable(self):
         # The dotnet CLI's first-run NuGet-migrations named mutex hardcodes
         # /tmp/.dotnet/shm regardless of TMPDIR/HOME -- a real N2-A canary run

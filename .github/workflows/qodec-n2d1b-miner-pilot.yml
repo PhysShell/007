@@ -115,6 +115,24 @@
 # it. There is no small, correct port allowlist to add. This is a THIRD
 # stop condition (alongside pyflakes' empty-result and dotnet's implicit-
 # restore) requiring a user decision -- not resolved automatically.
+#
+# CI run #10 (commit e855002): maven's mvn-test priming worked -- the
+# compiler-bridge is now genuinely cached -- but scala-maven-plugin then
+# unpacks it via a hardcoded /tmp path ("AccessDeniedException: /tmp/
+# scala-maven-plugin-compiler-bridge-sources..."), the exact same class of
+# gap as rust's linker and dotnet's /tmp/.dotnet/shm findings -- fixed by
+# the same /tmp fs_rw grant, now added for jvm-maven too.
+#
+# Side note (not part of this scope): this push, like every push touching
+# qodec/evals/interop/v2/n2/canary/**, also re-triggers N2-A's own frozen
+# canary workflow via its pull_request path filter (run 29426023565). It
+# failed on captured_twice_reproducibly -- every compared field matched
+# byte-for-byte (argv, environment_allowlist, canonical_policy_sha256,
+# dotnet identity, exit_code) EXCEPT sanitized_stdout_sha256, i.e. the
+# dotnet build's own raw stdout genuinely differed between two runs. This
+# is unrelated to the PRESERVE_ENV/run_confined_build.sh change (every
+# env/argv/policy field was identical) and is out of scope for N2-D1b --
+# N2-A is frozen and already merged. Reported to the user, not touched.
 name: qodec-n2d1b-miner-pilot
 
 on:

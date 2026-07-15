@@ -72,6 +72,13 @@ ECOSYSTEM_POLICY_HINTS = {
         # markers into its local repo even when every artifact it needs is
         # already cached.
         "extra_fs_rw_from_env": ["MAVEN_LOCAL_REPO_PATH"],
+        # A real capture (CI run #10, once the compiler-bridge was actually
+        # cached in ~/.m2) showed scala-maven-plugin unpack its
+        # compiler-bridge sources jar via a hardcoded /tmp path --
+        # "AccessDeniedException: /tmp/scala-maven-plugin-compiler-bridge-
+        # sources...", ignoring TMPDIR. Same class of gap as rust's linker
+        # and dotnet's /tmp/.dotnet/shm findings.
+        "extra_fs_rw_fixed": [Path("/tmp")],
     },
     "jvm-gradle": {
         "env_allow": ["PATH", "HOME", "TMPDIR", "JAVA_HOME", "GRADLE_USER_HOME", "GRADLE_OPTS"],
