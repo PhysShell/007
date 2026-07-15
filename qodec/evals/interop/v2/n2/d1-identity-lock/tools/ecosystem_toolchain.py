@@ -30,6 +30,20 @@ def _resolve(bin_hint: str) -> str | None:
     return which or (bin_hint if Path(bin_hint).is_file() else None)
 
 
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def _strip_ansi(text: str) -> str:
+    """Some installed `mvn`/`gradle` builds emit ANSI color codes on
+    --version even with stdout piped (not a real terminal) -- a real capture
+    showed 'mvn --version' returning '\\x1b[1mApache Maven 3.8.7\\x1b[m\\n...',
+    which silently broke the '^Apache Maven' anchor and produced a None
+    resolved_version (classified as an identity-missing hard failure). Strip
+    escapes only for parsing; the raw captured text (with escapes) is still
+    recorded as evidence."""
+    return _ANSI_ESCAPE_RE.sub("", text)
+
+
 def capture_rust_toolchain_identity(cargo_bin: str = "cargo", rustc_bin: str = "rustc") -> dict:
     cargo_path = _resolve(cargo_bin)
     rustc_path = _resolve(rustc_bin)
@@ -86,9 +100,10 @@ def capture_maven_toolchain_identity(mvn_bin: str = "mvn", java_home: str | None
         env["PATH"] = f"{java_home}/bin:{env.get('PATH', '')}"
     r = subprocess.run([mvn_path or mvn_bin, "--version"], capture_output=True, text=True, check=False, env=env)
     text = r.stdout
-    maven_version = _first_match(r"^Apache Maven\s+(\S+)", text, re.MULTILINE)
-    java_version = _first_match(r"^Java version:\s*([^,]+),", text, re.MULTILINE)
-    java_home_reported = _first_match(r"^Java version:.*runtime:\s*(\S+)\s*$", text, re.MULTILINE)
+    clean_text = _strip_ansi(text)
+    maven_version = _first_match(r"^Apache Maven\s+(\S+)", clean_text, re.MULTILINE)
+    java_version = _first_match(r"^Java version:\s*([^,]+),", clean_text, re.MULTILINE)
+    java_home_reported = _first_match(r"^Java version:.*runtime:\s*(\S+)\s*$", clean_text, re.MULTILINE)
     java_bin = None
     if java_home:
         candidate = Path(java_home) / "bin" / "java"
@@ -107,22 +122,32 @@ def capture_maven_toolchain_identity(mvn_bin: str = "mvn", java_home: str | None
     }
 
 
-def capture_gradle_toolchain_identity(gradle_bin: str = "gradle", java_home: str | None = None) -> dict:
-    gradle_path = _resolve(gradle_bin)
+def capture_gradle_toolchain_identity(
+    gradle_bin: str = "gradle", java_home: str | None = None, cwd: str | Path | None = None
+) -> dict:
+    """`gradle_bin` is commonly a project-relative wrapper ("./gradlew") --
+    `cwd` must be the extracted source tree root, or a relative wrapper path
+    resolves against the calling process's own CWD instead (a real capture
+    showed this fail with FileNotFoundError: './gradlew')."""
+    gradle_path = _resolve(gradle_bin) if not str(gradle_bin).startswith(("./", "../")) else gradle_bin
     env = None
     if java_home:
         import os
         env = dict(os.environ)
         env["JAVA_HOME"] = java_home
         env["PATH"] = f"{java_home}/bin:{env.get('PATH', '')}"
-    r = subprocess.run([gradle_path or gradle_bin, "--version"], capture_output=True, text=True, check=False, env=env)
+    r = subprocess.run(
+        [gradle_path or gradle_bin, "--version"], capture_output=True, text=True, check=False, env=env, cwd=cwd
+    )
     text = r.stdout
-    gradle_version = _first_match(r"^Gradle\s+(\S+)\s*$", text, re.MULTILINE)
-    jvm_version = _first_match(r"^JVM:\s*(\S+)", text, re.MULTILINE)
+    clean_text = _strip_ansi(text)
+    gradle_version = _first_match(r"^Gradle\s+(\S+)\s*$", clean_text, re.MULTILINE)
+    jvm_version = _first_match(r"^JVM:\s*(\S+)", clean_text, re.MULTILINE)
+    gradle_binary_abs = str((Path(cwd) / gradle_path).resolve()) if cwd and gradle_path and not Path(gradle_path).is_absolute() else gradle_path
     return {
         "ecosystem": "jvm-gradle",
-        "gradle_binary_path": gradle_path,
-        "gradle_binary_sha256": _sha256_file(gradle_path) if gradle_path else None,
+        "gradle_binary_path": gradle_binary_abs,
+        "gradle_binary_sha256": _sha256_file(gradle_binary_abs) if gradle_binary_abs else None,
         "gradle_version_raw": text,
         "resolved_version": gradle_version,
         "runtime_identifier": jvm_version,

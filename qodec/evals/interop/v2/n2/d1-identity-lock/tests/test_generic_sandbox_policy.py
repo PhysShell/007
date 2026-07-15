@@ -58,6 +58,33 @@ class TestBuildPolicy(unittest.TestCase):
         fs_ro_line = next(line for line in text.splitlines() if line.startswith("fs_ro"))
         self.assertIn("/my/source", fs_ro_line)
 
+    def test_dotnet_ecosystem_has_policy_hints(self):
+        # A real capture (pilot-dotnet-capture-a/b) failed with ValueError:
+        # "no policy hints for ecosystem 'dotnet'" -- dotnet was missing from
+        # ECOSYSTEM_POLICY_HINTS even though generic_capture.py calls
+        # write_policy unconditionally for all 5 ecosystems.
+        text = gsp.build_policy(
+            ecosystem="dotnet", source_root=Path("/src"), home_dir=Path("/h"),
+            tmp_dir=Path("/t"), capture_out_dir=Path("/o"),
+            project_writable_dirs=[], env_values={"DOTNET_ROOT": "/usr/share/dotnet"},
+        )
+        self.assertIn('"DOTNET_ROOT"', text)
+        fs_ro_line = next(line for line in text.splitlines() if line.startswith("fs_ro"))
+        self.assertIn("/usr/share/dotnet", fs_ro_line)
+
+    def test_dotnet_policy_makes_real_tmp_writable(self):
+        # The dotnet CLI's first-run NuGet-migrations named mutex hardcodes
+        # /tmp/.dotnet/shm regardless of TMPDIR/HOME -- a real N2-A canary run
+        # showed EACCES there until the real system /tmp (not just the job's
+        # own dedicated tmp_dir) was made fs_rw.
+        text = gsp.build_policy(
+            ecosystem="dotnet", source_root=Path("/src"), home_dir=Path("/h"),
+            tmp_dir=Path("/job-tmp"), capture_out_dir=Path("/o"),
+            project_writable_dirs=[], env_values={},
+        )
+        fs_rw_line = next(line for line in text.splitlines() if line.startswith("fs_rw"))
+        self.assertIn('"/tmp"', fs_rw_line)
+
 
 class TestWritePolicy(unittest.TestCase):
     def test_write_policy_produces_stable_canonical_hash_independent_of_workdir(self):

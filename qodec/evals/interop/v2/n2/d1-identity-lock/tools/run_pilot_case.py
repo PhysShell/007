@@ -82,36 +82,47 @@ CASES = {
 
 
 def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
+    """Every returned closure takes one argument, `source_root` (the
+    extracted case source tree) -- only jvm-gradle's actually needs it
+    (gradlew is a project-relative wrapper; a real capture failed with
+    FileNotFoundError('./gradlew') when the toolchain probe ran with no
+    cwd), but a uniform one-arg calling convention keeps generic_capture.py
+    ecosystem-agnostic."""
     if ecosystem == "rust":
         cargo_home = str(Path.home() / ".cargo")
         rustup_home = str(Path.home() / ".rustup")
         return (
-            lambda: et.capture_rust_toolchain_identity(),
+            lambda source_root: et.capture_rust_toolchain_identity(),
             {"CARGO_HOME": cargo_home, "RUSTUP_HOME": rustup_home, "CARGO_NET_OFFLINE": "true"},
         )
     if ecosystem == "jvm-maven":
         java_home = args.java_home_11
         return (
-            lambda: et.capture_maven_toolchain_identity(java_home=java_home),
+            lambda source_root: et.capture_maven_toolchain_identity(java_home=java_home),
             {"JAVA_HOME": java_home},
         )
     if ecosystem == "jvm-gradle":
         java_home = args.java_home_21
         gradle_user_home = str(Path.home() / ".gradle")
         return (
-            lambda: et.capture_gradle_toolchain_identity(gradle_bin="./gradlew", java_home=java_home),
+            lambda source_root: et.capture_gradle_toolchain_identity(
+                gradle_bin="./gradlew", java_home=java_home, cwd=source_root
+            ),
             {"JAVA_HOME": java_home, "GRADLE_USER_HOME": gradle_user_home},
         )
     if ecosystem == "python":
         python_bin = args.venv_python
         return (
-            lambda: et.capture_python_toolchain_identity(python_bin),
+            lambda source_root: et.capture_python_toolchain_identity(python_bin),
             {},
         )
     if ecosystem == "dotnet":
-        dotnet_bin = dotnet_adapter.resolve_dotnet_bin(None, "dotnet")
+        import os
 
-        def _capture():
+        dotnet_root = os.environ.get("DOTNET_ROOT") or None
+        dotnet_bin = dotnet_adapter.resolve_dotnet_bin(dotnet_root, "dotnet")
+
+        def _capture(source_root):
             raw = dotnet_adapter.capture_toolchain_identity(dotnet_bin)
             return {
                 **raw,
@@ -121,18 +132,11 @@ def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
                 "rustc_binary_sha256": raw["dotnet_binary_sha256"],
             }
 
-        return _capture, {"DOTNET_CLI_TELEMETRY_OPTOUT": "1", "DOTNET_NOLOGO": "1"}
+        env_values = {"DOTNET_CLI_TELEMETRY_OPTOUT": "1", "DOTNET_NOLOGO": "1"}
+        if dotnet_root:
+            env_values["DOTNET_ROOT"] = dotnet_root
+        return _capture, env_values
     raise ValueError(f"unknown ecosystem {ecosystem!r}")
-
-
-def resolve_effective_bin(ecosystem: str, frozen_argv: list[str], args) -> list[str]:
-    """Substitutes an interpreter/wrapper binary for ecosystems where the
-    frozen argv's first token needs an absolute/venv path -- never changes
-    any OTHER argument."""
-    argv = list(frozen_argv)
-    if ecosystem == "python" and argv and argv[0] == "python":
-        argv[0] = args.venv_python
-    return argv
 
 
 def main() -> int:
@@ -157,7 +161,15 @@ def main() -> int:
     assert case["ecosystem"] == args.ecosystem
 
     toolchain_fn, env_values = build_toolchain_fn_and_env(args.ecosystem, args)
-    effective_frozen_argv_for_resolution = resolve_effective_bin(args.ecosystem, case["frozen_argv"], args)
+    # The erratum resolver inside gc.run_one_capture compares frozen_argv
+    # against the erratum's original_frozen_argv VERBATIM -- passing the
+    # already-venv-substituted argv here (as an earlier version of this
+    # script did) made that comparison fail for repo-pyflakes, since the
+    # substituted argv0 never matches the pure recorded original. The pure,
+    # untouched frozen argv goes in; any interpreter-path substitution is
+    # applied via argv0_override, AFTER erratum resolution, inside
+    # run_one_capture itself.
+    argv0_override = args.venv_python if args.ecosystem == "python" and args.venv_python else None
 
     def trusted_setup_fn(source_root):
         return {"note": "trusted dependency realization already performed as an earlier, separate CI step (network allowed there); this capture step never contacts the network."}
@@ -167,7 +179,7 @@ def main() -> int:
             case_id=args.case_id, ecosystem=args.ecosystem, job_name=args.job_name,
             source_artifact_dir=Path(args.source_artifact_dir),
             work_dir=Path(args.work_dir), out_dir=Path(args.out_dir),
-            frozen_argv=effective_frozen_argv_for_resolution,
+            frozen_argv=case["frozen_argv"],
             errata_path=Path(args.errata_path),
             sandboy_bin=Path(args.sandboy_bin), sandboy_commit_sha=args.sandboy_commit_sha,
             toolchain_capture_fn=toolchain_fn, toolchain_env_values=env_values,
@@ -177,6 +189,7 @@ def main() -> int:
             requested_version_or_range=case["requested_version_or_range"],
             resolver_mechanism=case["resolver_mechanism"],
             trusted_setup_fn=trusted_setup_fn,
+            argv0_override=argv0_override,
         )
     except gc.GenericCaptureFailure as e:
         Path(args.out_dir).mkdir(parents=True, exist_ok=True)

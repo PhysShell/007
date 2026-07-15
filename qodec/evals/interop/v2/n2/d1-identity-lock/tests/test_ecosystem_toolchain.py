@@ -31,6 +31,14 @@ REAL_MVN_VERSION = (
     'OS name: "linux", version: "6.18.5", arch: "amd64", family: "unix"\n'
 )
 
+REAL_MVN_VERSION_WITH_ANSI = (
+    "\x1b[1mApache Maven 3.8.7\x1b[m (a9e5626df0eef4e6e3e0e07e5e4dd8fd4b3f0c1e)\n"
+    "Maven home: /usr/share/maven\n"
+    "Java version: 11.0.31, vendor: Ubuntu, runtime: /usr/lib/jvm/java-11-openjdk-amd64\n"
+    "Default locale: en, platform encoding: UTF-8\n"
+    'OS name: "linux", version: "6.17.0-1018-azure", arch: "amd64", family: "unix"\n'
+)
+
 REAL_GRADLE_VERSION = (
     "------------------------------------------------------------\n"
     "Gradle 8.14.3\n"
@@ -83,6 +91,69 @@ class TestFirstMatch(unittest.TestCase):
 
     def test_no_match_returns_none(self):
         self.assertIsNone(et._first_match(r"^nonexistent:\s*(\S+)$", REAL_RUSTC_VERBOSE))
+
+
+class TestStripAnsi(unittest.TestCase):
+    def test_strips_color_codes(self):
+        self.assertEqual(et._strip_ansi("\x1b[1mApache Maven 3.8.7\x1b[m"), "Apache Maven 3.8.7")
+
+    def test_leaves_plain_text_unchanged(self):
+        self.assertEqual(et._strip_ansi(REAL_MVN_VERSION), REAL_MVN_VERSION)
+
+    def test_maven_version_anchor_matches_only_after_stripping(self):
+        # A real 'mvn --version' output with ANSI color codes broke the
+        # '^Apache Maven' anchor entirely (the line literally starts with an
+        # escape sequence) -- silently producing a None resolved_version,
+        # which toolchain_identity.is_hard_failure then classified as an
+        # identity-missing hard failure for two real capture jobs.
+        self.assertIsNone(
+            et._first_match(r"^Apache Maven\s+(\S+)", REAL_MVN_VERSION_WITH_ANSI, __import__("re").MULTILINE)
+        )
+        cleaned = et._strip_ansi(REAL_MVN_VERSION_WITH_ANSI)
+        self.assertEqual(et._first_match(r"^Apache Maven\s+(\S+)", cleaned, __import__("re").MULTILINE), "3.8.7")
+
+
+class TestCaptureMavenIdentityRealAnsi(unittest.TestCase):
+    def test_capture_maven_toolchain_identity_handles_ansi_output(self):
+        # Full end-to-end regression for the real ANSI-breaks-parsing bug:
+        # stub out subprocess.run to return exactly the real captured
+        # ANSI-wrapped mvn --version text, and confirm resolved_version
+        # survives.
+        import subprocess
+        import unittest.mock as mock
+
+        fake_result = subprocess.CompletedProcess(
+            args=["mvn", "--version"], returncode=0, stdout=REAL_MVN_VERSION_WITH_ANSI, stderr=""
+        )
+        with mock.patch.object(et.shutil, "which", return_value="/usr/bin/mvn"), \
+             mock.patch.object(et.subprocess, "run", return_value=fake_result), \
+             mock.patch.object(et, "_sha256_file", return_value="deadbeef"):
+            identity = et.capture_maven_toolchain_identity(java_home="/usr/lib/jvm/java-11-openjdk-amd64")
+        self.assertEqual(identity["resolved_version"], "3.8.7")
+        self.assertEqual(identity["runtime_identifier"], "11.0.31")
+
+
+class TestCaptureGradleIdentityCwd(unittest.TestCase):
+    def test_relative_wrapper_resolves_against_supplied_cwd(self):
+        # A real capture failed with FileNotFoundError('./gradlew') because
+        # the toolchain probe ran with no cwd, so the relative wrapper path
+        # was looked up against the calling process's own CWD rather than
+        # the extracted source tree where gradlew actually lives.
+        import stat
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source_root = Path(tmp)
+            gradlew = source_root / "gradlew"
+            gradlew.write_text(
+                "#!/bin/sh\necho '------------------------------------------------------------'\n"
+                "echo 'Gradle 8.14.3'\necho '------------------------------------------------------------'\n"
+                "echo\necho 'JVM:          21.0.10 (Ubuntu)'\n"
+            )
+            gradlew.chmod(gradlew.stat().st_mode | stat.S_IEXEC)
+            identity = et.capture_gradle_toolchain_identity(gradle_bin="./gradlew", cwd=str(source_root))
+        self.assertEqual(identity["resolved_version"], "8.14.3")
+        self.assertEqual(identity["gradle_binary_path"], str((source_root / "gradlew").resolve()))
 
 
 class TestRealLocalToolchainCapture(unittest.TestCase):

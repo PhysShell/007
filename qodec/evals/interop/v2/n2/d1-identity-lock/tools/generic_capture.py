@@ -96,11 +96,18 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
                      canonical_stream: str, primary_stream_rationale: str,
                      project_writable_dirs_relative: list[str],
                      requested_version_or_range: str, resolver_mechanism: str,
-                     trusted_setup_fn=None) -> dict:
+                     trusted_setup_fn=None, argv0_override: str | None = None) -> dict:
     """Runs exactly one capture (capture-a or capture-b) for one
     repository-miner case. `trusted_setup_fn(source_root) -> dict | None` is
     called with network allowed, before the confined run; its return value
-    (if any) is recorded as `trusted_dependency_realization`."""
+    (if any) is recorded as `trusted_dependency_realization`. `frozen_argv`
+    must be the case's untouched, pure frozen (or erratum-corrected) argv --
+    `argv0_override`, if given, replaces argv[0] (e.g. an interpreter's
+    venv-absolute path) AFTER erratum resolution, never before it, so the
+    erratum's exact-match comparison is never broken by a caller-side
+    substitution (a real capture showed this fail for repo-pyflakes:
+    resolve_effective_argv compared an already-venv-substituted argv against
+    the erratum's pure original_frozen_argv and refused it as stale)."""
     work_dir.mkdir(parents=True, exist_ok=True)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -110,8 +117,10 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
     verify_and_extract_source(source_tar, receipt_json["normalized_archive_sha256"], source_root)
 
     effective_argv, resolution, erratum_sha256 = resolve_effective_argv(case_id, frozen_argv, errata_path)
+    if argv0_override:
+        effective_argv = [argv0_override, *effective_argv[1:]]
 
-    toolchain_identity_raw = toolchain_capture_fn()
+    toolchain_identity_raw = toolchain_capture_fn(source_root)
     identity = toolchain_identity.build_toolchain_identity(
         requested_version_or_range=requested_version_or_range,
         resolver_mechanism=resolver_mechanism,
