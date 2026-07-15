@@ -340,6 +340,170 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  probe-ci-log-html-viewer-access:
+    name: probe-ci-log-html-viewer-access
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Credential-free probe of GitHub's public commit-checks HTML log-viewer download path (investigation only — does not affect acquisition or selection; no cookies/session/browser profile of any kind are ever used)
+        run: |
+          set +e
+          unset GITHUB_TOKEN
+          unset GH_TOKEN
+          unset GITHUB_AUTH_TOKEN
+          unset GITHUB_ENTERPRISE_TOKEN
+          mkdir -p "$RUNNER_TEMP/probe2"
+
+          # Resolves head_sha from the run-metadata endpoint, which is
+          # already established (this workflow's own non-CI-log candidates)
+          # to work fully unauthenticated for public repositories. This is
+          # public run/job identity lookup, not log content, and is the
+          # only extra request this bounded probe makes beyond the single
+          # HTML-viewer path under test.
+          resolve_head_sha() {
+            owner_repo="$1"; run_id="$2"
+            curl \
+              --fail-with-body --silent --show-error \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/${owner_repo}/actions/runs/${run_id}" \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["head_sha"])'
+          }
+
+          probe_html_viewer() {
+            label="$1"; owner_repo="$2"; job_id="$3"; head_sha="$4"
+            # The URL GitHub's own Actions web UI uses for its "raw logs" /
+            # "download log archive" links on a public repository's job
+            # page — no login, no cookie jar, no browser profile involved.
+            url="https://github.com/${owner_repo}/commit/${head_sha}/checks/${job_id}/logs"
+            out="$RUNNER_TEMP/probe2/${label}.log"
+            headers="$RUNNER_TEMP/probe2/${label}.headers"
+            curl \
+              --fail-with-body \
+              --location \
+              --silent \
+              --show-error \
+              --dump-header "$headers" \
+              --output "$out" \
+              -H 'Accept: text/html,application/xhtml+xml,*/*' \
+              "$url"
+            curl_exit=$?
+            python3 - "$label" "$out" "$headers" "$curl_exit" <<'PYEOF'
+          import hashlib
+          import json
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          label, out_path, headers_path, curl_exit = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3]), int(sys.argv[4])
+          runner_temp = Path(os.environ["RUNNER_TEMP"])
+
+          headers_text = headers_path.read_text(errors="replace") if headers_path.is_file() else ""
+
+          def _scrub(line: str) -> str:
+              # Never retain/print signed redirect query parameters (e.g. a
+              # blob-storage SAS token) that a Location: header may carry.
+              if line.lower().startswith("location:"):
+                  prefix, _, url_value = line.partition(":")
+                  base = url_value.strip().split("?", 1)[0]
+                  return f"{prefix}: {base}?<redacted-query>"
+              return line
+
+          sanitized_lines = [_scrub(line) for line in headers_text.splitlines()]
+          blocks, current = [], []
+          for line in sanitized_lines:
+              if line.strip() == "":
+                  if current:
+                      blocks.append(current)
+                      current = []
+              else:
+                  current.append(line)
+          if current:
+              blocks.append(current)
+
+          statuses = []
+          content_type = None
+          content_length = None
+          for block in blocks:
+              if block and block[0].startswith("HTTP/"):
+                  parts = block[0].split(" ", 2)
+                  statuses.append(" ".join(parts[1:]) if len(parts) > 1 else block[0])
+              for line in block:
+                  low = line.lower()
+                  if low.startswith("content-type:"):
+                      content_type = line.split(":", 1)[1].strip()
+                  if low.startswith("content-length:"):
+                      content_length = line.split(":", 1)[1].strip()
+
+          data = out_path.read_bytes() if out_path.is_file() else b""
+          sha256 = hashlib.sha256(data).hexdigest() if data else None
+          try:
+              json.loads(data.decode("utf-8"))
+              is_json = True
+          except Exception:
+              is_json = False
+          text_sample = data[:2000].decode("utf-8", errors="replace")
+          has_log_markers = bool(re.search(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", text_sample, re.MULTILINE)) \
+              or "##[group]" in text_sample or "##[endgroup]" in text_sample
+          looks_like_html_shell = "<html" in text_sample.lower() or "<!doctype html" in text_sample.lower()
+          first_lines = "\n".join(text_sample.splitlines()[:5])
+
+          report = {
+              "label": label,
+              "curl_exit_code": curl_exit,
+              "http_statuses_in_order": statuses,
+              "initial_http_status": statuses[0] if statuses else None,
+              "final_http_status": statuses[-1] if statuses else None,
+              "redirect_hop_count": max(0, len(statuses) - 1),
+              "content_type": content_type,
+              "content_length_header": content_length,
+              "downloaded_byte_count": len(data),
+              "sha256": sha256,
+              "parses_as_json": is_json,
+              "contains_real_log_markers": has_log_markers,
+              "looks_like_html_shell_not_log_bytes": looks_like_html_shell,
+              "first_non_secret_lines": first_lines,
+          }
+          (runner_temp / "probe2" / f"{label}.report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+          print(json.dumps(report, indent=2))
+          PYEOF
+          }
+
+          echo "GITHUB_TOKEN set: ${GITHUB_TOKEN:+yes}${GITHUB_TOKEN:-no}"
+          echo "GH_TOKEN set: ${GH_TOKEN:+yes}${GH_TOKEN:-no}"
+          echo "no cookie jar, no browser profile, no session of any kind is used by this probe"
+          echo "---"
+
+          # Known-good reference (see probe-ci-log-anonymous-access): real
+          # log bytes for this exact job were previously retrieved through
+          # an authenticated GitHub App install, which proved the bytes
+          # exist and are retrievable by *some* credentialed path, but did
+          # not establish anonymous availability. This bounded follow-up
+          # tests the one remaining credential-free acquisition path GitHub
+          # itself exposes on the public web UI.
+          jq_sha=$(resolve_head_sha "jqlang/jq" "28568334149")
+          echo "jqlang/jq head_sha: ${jq_sha}"
+          probe_html_viewer "jq-html-viewer-84700257505" "jqlang/jq" "84700257505" "${jq_sha}"
+          echo "---"
+
+          # One selected frozen candidate (ci-log-curl-linux), same
+          # deterministic job this workflow already acquires against.
+          curl_sha=$(resolve_head_sha "curl/curl" "29367345523")
+          echo "curl/curl head_sha: ${curl_sha}"
+          probe_html_viewer "curl-html-viewer-87202088495" "curl/curl" "87202088495" "${curl_sha}"
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: ci-log-html-viewer-probe
+          path: |
+            ${{ runner.temp }}/probe2/*.report.json
+            ${{ runner.temp }}/probe2/*.headers
+          if-no-files-found: error
+          retention-days: 90
+
   trusted-source-acquisition:
     name: trusted-source-acquisition (${{ matrix.candidate.candidate_id }})
     needs: quota-selection
