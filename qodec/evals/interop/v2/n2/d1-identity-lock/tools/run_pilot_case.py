@@ -10,6 +10,7 @@ no-op that just records that fact.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -76,6 +77,76 @@ CASES = {
         "canonical_stream_rationale": "Gradle's console output (task execution, spotlessCheck's own diagnostics) writes to stdout by documented convention.",
         "project_writable_dirs_relative": ["plugin-gradle/build", ".gradle"],
         "requested_version_or_range": "9.4.1",
+        "resolver_mechanism": "gradle wrapper (gradlew) self-managed distribution fetch, JDK 21",
+    },
+    "repo-rustlings": {
+        "ecosystem": "rust",
+        "frozen_argv": ["cargo", "test"],
+        "canonical_stream": "stdout",
+        "canonical_stream_rationale": (
+            "cargo test's own build-status preamble (Compiling/Finished) goes to stderr; "
+            "the test harness's own pass/fail report (the intended payload) goes to "
+            "stdout, per standard cargo-test convention -- same rationale as repo-hyperfine."
+        ),
+        "project_writable_dirs_relative": ["target"],
+        "requested_version_or_range": "stable",
+        "resolver_mechanism": "rustup toolchain resolution (no rust-toolchain.toml present; --default-toolchain stable)",
+    },
+    "repo-dockerfile-parser-rs": {
+        "ecosystem": "rust",
+        "frozen_argv": ["cargo", "test"],
+        "canonical_stream": "stdout",
+        "canonical_stream_rationale": "Same cargo-test convention as repo-hyperfine/repo-rustlings: build-status preamble to stderr, test harness report to stdout.",
+        "project_writable_dirs_relative": ["target"],
+        "requested_version_or_range": "stable",
+        "resolver_mechanism": "rustup toolchain resolution (no rust-toolchain.toml present; --default-toolchain stable)",
+        # This case's frozen acquisition has no committed Cargo.lock (a real,
+        # load-bearing dependency-resolution finding, not a source defect).
+        # Per explicit N2-D1b instruction: generate Cargo.lock exactly ONCE
+        # in a dedicated trusted job, publish it as an immutable D1b-owned
+        # dependency artifact, and make capture-a and capture-b consume the
+        # EXACT SAME published lockfile -- never generate separate lockfiles
+        # inside each capture.
+        "requires_published_lockfile": True,
+    },
+    "repo-requests": {
+        "ecosystem": "python",
+        "frozen_argv": ["pytest"],
+        "canonical_stream": "stdout",
+        "canonical_stream_rationale": "pytest's console report (collection, pass/fail summary) writes to stdout by documented convention.",
+        # pytest writes its cache (.pytest_cache/) directly into the
+        # rootdir by default (confirmed via a real local dry-run) -- the
+        # source tree itself is read-only under this policy, so this one
+        # directory must be pre-created and writable.
+        "project_writable_dirs_relative": [".pytest_cache"],
+        "requested_version_or_range": "3.x",
+        "resolver_mechanism": (
+            "runner-preinstalled python3, installed into a dedicated venv via the "
+            "repo's own documented `pip install -r requirements-dev.txt` (installs "
+            "requests[socks] editable plus pytest/pytest-cov/pytest-httpbin/httpbin/trustme)"
+        ),
+    },
+    "repo-moshi": {
+        "ecosystem": "jvm-gradle",
+        "frozen_argv": ["./gradlew", "test"],
+        "canonical_stream": "stdout",
+        "canonical_stream_rationale": "Gradle's console output (per-module test task execution and JUnit summary) writes to stdout by documented convention -- same as repo-spotless.",
+        # Multi-module Gradle project (see settings.gradle.kts); an
+        # unqualified `./gradlew test` runs the test task in every
+        # subproject that defines one. Every module's own build dir must be
+        # pre-created and writable, plus the root build/.gradle dirs.
+        "project_writable_dirs_relative": [
+            "build", ".gradle",
+            "moshi/build", "moshi/japicmp/build", "moshi/records-tests/build",
+            "moshi-adapters/build", "moshi-adapters/japicmp/build",
+            "moshi-kotlin/build",
+            "moshi-kotlin-codegen/build",
+            "moshi-kotlin-tests/build",
+            "moshi-kotlin-tests/codegen-only/build",
+            "moshi-kotlin-tests/extra-moshi-test-module/build",
+            "examples/build",
+        ],
+        "requested_version_or_range": "9.5.1",
         "resolver_mechanism": "gradle wrapper (gradlew) self-managed distribution fetch, JDK 21",
     },
 }
@@ -155,6 +226,12 @@ def main() -> int:
     ap.add_argument("--venv-python", default="")
     ap.add_argument("--java-home-11", default="")
     ap.add_argument("--java-home-21", default="")
+    ap.add_argument(
+        "--published-lockfile", default="",
+        help="Path to a pre-generated, immutable Cargo.lock artifact (repo-dockerfile-parser-rs only). "
+             "Copied into the case's extracted source tree, then `cargo fetch --locked` runs against it -- "
+             "never regenerated per-capture, so capture-a and capture-b consume the exact same lockfile.",
+    )
     args = ap.parse_args()
 
     case = CASES[args.case_id]
@@ -171,8 +248,33 @@ def main() -> int:
     # run_one_capture itself.
     argv0_override = args.venv_python if args.ecosystem == "python" and args.venv_python else None
 
-    def trusted_setup_fn(source_root):
-        return {"note": "trusted dependency realization already performed as an earlier, separate CI step (network allowed there); this capture step never contacts the network."}
+    if case.get("requires_published_lockfile"):
+        if not args.published_lockfile:
+            print(f"run_pilot_case: FAILED: {args.case_id} requires --published-lockfile, none given", file=sys.stderr)
+            return 1
+        published_lockfile_path = Path(args.published_lockfile)
+        published_lockfile_sha256 = hashlib.sha256(published_lockfile_path.read_bytes()).hexdigest()
+
+        def trusted_setup_fn(source_root):
+            import shutil
+            import subprocess
+
+            dest = source_root / "Cargo.lock"
+            shutil.copyfile(published_lockfile_path, dest)
+            r = subprocess.run(["cargo", "fetch", "--locked"], cwd=source_root, capture_output=True, text=True)
+            if r.returncode != 0:
+                raise gc.GenericCaptureFailure(
+                    f"cargo fetch --locked against published lockfile failed (exit {r.returncode}): {r.stderr[-2000:]}"
+                )
+            return {
+                "note": "trusted dependency realization: published Cargo.lock copied in, then `cargo fetch --locked` (network allowed here; capture itself never contacts the network)",
+                "published_lockfile_path": str(published_lockfile_path),
+                "published_lockfile_sha256": published_lockfile_sha256,
+                "cargo_fetch_exit_code": r.returncode,
+            }
+    else:
+        def trusted_setup_fn(source_root):
+            return {"note": "trusted dependency realization already performed as an earlier, separate CI step (network allowed there); this capture step never contacts the network."}
 
     try:
         receipt = gc.run_one_capture(

@@ -1,8 +1,7 @@
-# Scope N2-D1b — five-ecosystem repository-miner pilot (stage 1 of the
-# authorized N2-D1b execution-bridge build-out). Proves ONE case per
-# ecosystem (dotnet, rust, jvm-maven, jvm-gradle, python) end-to-end through
-# the D1b generic capture engine before scaling to the full 9-case x
-# capture-a/capture-b matrix. See qodec/evals/interop/v2/n2/d1-identity-lock/.
+# Scope N2-D1b — repository-miner raw-input capture (stage 1: five-ecosystem
+# pilot, now fully green across CI runs #1-4; stage 2: the full 9-case x
+# capture-a/capture-b matrix below). See
+# qodec/evals/interop/v2/n2/d1-identity-lock/.
 #
 # Never reacquires source from upstream: every case's source.tar comes from
 # the already-durable, already-verified n2d0-durable-evidence-v1 release
@@ -14,22 +13,28 @@
 # exactly why this runs here, in a real GitHub Actions VM, rather than
 # locally.
 #
-# Re-run history: CI run #1 (29417042823) hit two real path bugs (double
-# case-id nesting; source.tar never extracted before trusted setup) -- both
-# fixed. CI run #2 (29417313334) hit four more real bugs, all now fixed:
-# repo-pyflakes's erratum lookup was broken by a caller-side argv0
-# pre-substitution (stale-erratum refusal); no dotnet entry existed in
-# ECOSYSTEM_POLICY_HINTS; the gradle toolchain probe ran './gradlew' with no
-# cwd; and 'mvn --version' returned ANSI-colored text that broke the version
-# regex. CI run #3 (29418081991) got 8/10 jobs green (rust, jvm-maven,
-# python) and found two more real bugs, now fixed: this runner's installed
-# Gradle 9.4.1 replaced the old '^JVM:' --version line with 'Launcher JVM:'/
-# 'Daemon JVM:', breaking runtime_identifier parsing; and the sandboxed
-# dotnet test capture itself succeeded but receipt assembly crashed with
-# "unhashable type: 'dict'" because sanitizer.sanitize's rules_applied is a
-# list of {"rule":...,"replacements":...} dicts, not plain strings. See
+# Stage-1 re-run history: CI run #1 (29417042823) hit two real path bugs
+# (double case-id nesting; source.tar never extracted before trusted setup).
+# CI run #2 (29417313334) hit four more: repo-pyflakes's erratum lookup was
+# broken by a caller-side argv0 pre-substitution (stale-erratum refusal); no
+# dotnet entry existed in ECOSYSTEM_POLICY_HINTS; the gradle toolchain probe
+# ran './gradlew' with no cwd; and 'mvn --version' returned ANSI-colored text
+# that broke the version regex. CI run #3 (29418081991) got 8/10 green and
+# found two more: this runner's installed Gradle 9.4.1 replaced the old
+# '^JVM:' --version line with 'Launcher JVM:'/'Daemon JVM:'; and the
+# sandboxed dotnet test capture succeeded but receipt assembly crashed with
+# "unhashable type: 'dict'" (sanitizer.sanitize's rules_applied is a list of
+# {"rule":...,"replacements":...} dicts, not plain strings). CI run #4
+# (29418422603) was the first fully green 10/10 stage-1 run. See
 # tools/generic_capture.py, tools/generic_sandbox_policy.py,
 # tools/ecosystem_toolchain.py, tools/run_pilot_case.py.
+#
+# Stage 2 adds repo-rustlings, repo-moshi, repo-requests (already-proven
+# ecosystems), and repo-dockerfile-parser-rs -- whose frozen acquisition has
+# no committed Cargo.lock, so a dedicated lockfile-generation job (below)
+# runs `cargo generate-lockfile` exactly ONCE and publishes it as an
+# immutable artifact both its capture-a and capture-b jobs consume via
+# `cargo fetch --locked`, never regenerating it per-capture.
 name: qodec-n2d1b-miner-pilot
 
 on:
@@ -51,8 +56,64 @@ env:
   N2D0_RELEASE_TAG: n2d0-durable-evidence-v1
 
 jobs:
+  # Runs exactly ONCE, before the matrix, for the one case whose frozen
+  # acquisition has no committed Cargo.lock. Publishes the generated
+  # lockfile as an immutable artifact; both of that case's capture jobs
+  # download and consume the SAME file (never regenerate their own).
+  dockerfile-parser-rs-lockfile:
+    name: dockerfile-parser-rs-lockfile
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout 007
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Download the durable n2c-acquisition source asset (never reacquired from upstream)
+        run: |
+          mkdir -p "$RUNNER_TEMP/dfpr-lockfile"
+          curl -sSL -o "$RUNNER_TEMP/dfpr-lockfile/acquisition.zip" \
+            "https://github.com/PhysShell/007/releases/download/${N2D0_RELEASE_TAG}/n2c-acquisition-repo-dockerfile-parser-rs.zip"
+          python3 -c "
+          import zipfile
+          with zipfile.ZipFile('$RUNNER_TEMP/dfpr-lockfile/acquisition.zip') as zf:
+              zf.extractall('$RUNNER_TEMP/dfpr-lockfile')
+          "
+          mkdir -p "$RUNNER_TEMP/dfpr-lockfile/source"
+          tar -xf "$RUNNER_TEMP/dfpr-lockfile/repo-dockerfile-parser-rs/source.tar" -C "$RUNNER_TEMP/dfpr-lockfile/source"
+
+      - name: Generate Cargo.lock exactly once (trusted; network allowed)
+        working-directory: ${{ runner.temp }}/dfpr-lockfile/source
+        run: |
+          if [ -f Cargo.lock ]; then
+            echo "::error::repo-dockerfile-parser-rs's frozen source already has a Cargo.lock -- the dedicated lockfile job is unnecessary; investigate before proceeding."
+            exit 1
+          fi
+          cargo generate-lockfile
+          cargo --version > "$RUNNER_TEMP/dfpr-lockfile/cargo-version.txt"
+          rustc --version --verbose >> "$RUNNER_TEMP/dfpr-lockfile/cargo-version.txt"
+          sha256sum Cargo.lock | cut -d' ' -f1 > "$RUNNER_TEMP/dfpr-lockfile/cargo-lock.sha256"
+          cp Cargo.lock "$RUNNER_TEMP/dfpr-lockfile/Cargo.lock"
+
+      - name: Upload n2d1b-dockerfile-parser-rs-lockfile
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: n2d1b-dockerfile-parser-rs-lockfile
+          path: |
+            ${{ runner.temp }}/dfpr-lockfile/Cargo.lock
+            ${{ runner.temp }}/dfpr-lockfile/cargo-lock.sha256
+            ${{ runner.temp }}/dfpr-lockfile/cargo-version.txt
+          if-no-files-found: error
+          retention-days: 90
+
   pilot:
-    name: pilot-${{ matrix.case.ecosystem }}-${{ matrix.job }}
+    name: pilot-${{ matrix.case.case_id }}-${{ matrix.job }}
+    needs: [dockerfile-parser-rs-lockfile]
     strategy:
       fail-fast: false
       matrix:
@@ -62,6 +123,10 @@ jobs:
           - { case_id: repo-kubeops-generator, ecosystem: dotnet }
           - { case_id: repo-pyflakes, ecosystem: python }
           - { case_id: repo-spotless, ecosystem: jvm-gradle }
+          - { case_id: repo-rustlings, ecosystem: rust }
+          - { case_id: repo-dockerfile-parser-rs, ecosystem: rust }
+          - { case_id: repo-requests, ecosystem: python }
+          - { case_id: repo-moshi, ecosystem: jvm-gradle }
         job: [capture-a, capture-b]
     runs-on: ubuntu-24.04
     steps:
@@ -147,12 +212,23 @@ jobs:
         if: matrix.case.ecosystem == 'python'
         run: python3 --version
 
+      # ---- repo-dockerfile-parser-rs only: fetch the ONE published lockfile ----
+      - name: Download the published Cargo.lock (repo-dockerfile-parser-rs only)
+        if: matrix.case.case_id == 'repo-dockerfile-parser-rs'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: n2d1b-dockerfile-parser-rs-lockfile
+          path: ${{ runner.temp }}/dfpr-published-lockfile
+
       # ---- trusted dependency realization (network allowed; case-specific) ----
       - name: Trusted setup — cargo fetch
         if: matrix.case.ecosystem == 'rust'
         working-directory: ${{ runner.temp }}/source-artifact/${{ matrix.case.case_id }}/source
         run: |
-          if [ ! -f Cargo.lock ]; then
+          if [ "${{ matrix.case.case_id }}" = "repo-dockerfile-parser-rs" ]; then
+            # Consume the ONE published lockfile -- never regenerate it here.
+            cp "$RUNNER_TEMP/dfpr-published-lockfile/Cargo.lock" Cargo.lock
+          elif [ ! -f Cargo.lock ]; then
             cargo generate-lockfile
             echo "generated Cargo.lock sha256: $(sha256sum Cargo.lock | cut -d' ' -f1)"
           fi
@@ -166,11 +242,18 @@ jobs:
         run: mvn -B dependency:go-offline || true # some poms have no go-offline-resolvable deps; real test run below is authoritative
 
       - name: Trusted setup — pip install pyflakes (editable)
-        if: matrix.case.ecosystem == 'python'
+        if: matrix.case.case_id == 'repo-pyflakes'
         working-directory: ${{ runner.temp }}/source-artifact/${{ matrix.case.case_id }}/source
         run: |
           python3 -m venv "$RUNNER_TEMP/venv-${{ matrix.case.case_id }}"
           "$RUNNER_TEMP/venv-${{ matrix.case.case_id }}/bin/pip" install --quiet .
+
+      - name: Trusted setup — pip install requests dev requirements (repo's own documented dev-install path)
+        if: matrix.case.case_id == 'repo-requests'
+        working-directory: ${{ runner.temp }}/source-artifact/${{ matrix.case.case_id }}/source
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv-${{ matrix.case.case_id }}"
+          "$RUNNER_TEMP/venv-${{ matrix.case.case_id }}/bin/pip" install --quiet -r requirements-dev.txt
 
       - name: Trusted setup — gradle wrapper distribution fetch (JDK 21)
         if: matrix.case.ecosystem == 'jvm-gradle'
@@ -182,6 +265,10 @@ jobs:
       - name: Run the D1b generic capture (${{ matrix.job }})
         run: |
           mkdir -p "$RUNNER_TEMP/work-${{ matrix.case.case_id }}-${{ matrix.job }}" "$RUNNER_TEMP/out-${{ matrix.case.case_id }}-${{ matrix.job }}"
+          published_lockfile_arg=()
+          if [ "${{ matrix.case.case_id }}" = "repo-dockerfile-parser-rs" ]; then
+            published_lockfile_arg=(--published-lockfile "$RUNNER_TEMP/dfpr-published-lockfile/Cargo.lock")
+          fi
           python3 qodec/evals/interop/v2/n2/d1-identity-lock/tools/run_pilot_case.py \
             --case-id "${{ matrix.case.case_id }}" \
             --ecosystem "${{ matrix.case.ecosystem }}" \
@@ -194,7 +281,8 @@ jobs:
             --errata-path qodec/evals/interop/v2/n2/d1-identity-lock/execution-plan-errata.json \
             --venv-python "$RUNNER_TEMP/venv-${{ matrix.case.case_id }}/bin/python" \
             --java-home-11 /usr/lib/jvm/java-11-openjdk-amd64 \
-            --java-home-21 /usr/lib/jvm/java-21-openjdk-amd64
+            --java-home-21 /usr/lib/jvm/java-21-openjdk-amd64 \
+            "${published_lockfile_arg[@]}"
 
       - name: Upload n2d1b-pilot-${{ matrix.case.case_id }}-${{ matrix.job }}
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
