@@ -1,36 +1,34 @@
 {
-  "quota_contract_version": "n2c-quota-contract-v1",
-  "note": "These are REMAINING minimums for the 17 new primary selections N2-C must make — N2-A (miner-canary-dotnet-001) already occupies one repository-miner / ci-build / dotnet slot and is not re-selected or re-scored here. Full 18-case totals equal these targets plus N2-A's one contribution to each dimension it touches.",
+  "quota_contract_version": "n2c-quota-contract-v2",
+  "note": "These are REMAINING targets for the 17 new primary selections N2-C must make — N2-A (miner-canary-dotnet-001) already occupies one repository-miner / ci-build / dotnet slot and is not re-selected or re-scored here. Full 18-case totals equal these targets plus N2-A's one contribution to each dimension it touches.",
   "total_new_primary_target": 17,
   "total_new_case_target_including_n2a": 18,
   "minimum_alternates": 8,
+  "combined_dimension_rationale": "Frozen N2-B quota_planner.plan_selection is a greedy, single-pass, no-backtracking algorithm (empirically verified: running it with origin_kind + primary_family + ecosystem as three separate dimensions correctly fills every target but needs 22-26 candidates to do it, since any candidate that satisfies only ONE currently-open dimension still gets consumed). Collapsing origin_kind and primary_family into one combined 'origin_family_group' dimension, whose target values sum to exactly 17, makes the SAME frozen algorithm produce exactly 17 by construction (each candidate has exactly one combined value, so a target can never be filled past its exact count). Ecosystem minimums are then verified as a post-hoc check on the resulting 17 (selection.py's ECOSYSTEM_MINIMUMS check) rather than a second live greedy dimension — real-candidate ecosystem diversity was curated during discovery specifically so the two checks agree without any manual reordering.",
   "quotas": {
-    "origin_kind": {
-      "repository-miner": 9,
-      "native-upstream-ci-log": 3,
-      "public-runtime-dataset": 2,
-      "kernel-or-infrastructure-bot": 2,
-      "reproducible-research-corpus": 1
-    },
-    "primary_family": {
-      "ci-build": 3,
-      "test": 3,
-      "runtime": 3,
-      "container-orchestration-deployment": 3,
-      "static-analysis-lint-compiler": 2,
-      "search-listing-diagnostic": 2,
-      "dependency-package-manager": 1
-    },
-    "ecosystem_quota_group": {
-      "dotnet": 2,
-      "rust": 3,
-      "python": 3,
-      "jvm": 3,
-      "infrastructure-or-language-neutral": 4
+    "origin_family_group": {
+      "repository-miner::container-orchestration-deployment": 3,
+      "repository-miner::test": 3,
+      "repository-miner::runtime": 1,
+      "repository-miner::static-analysis-lint-compiler": 2,
+      "native-upstream-ci-log::ci-build": 3,
+      "public-runtime-dataset::runtime": 2,
+      "kernel-or-infrastructure-bot::search-listing-diagnostic": 1,
+      "kernel-or-infrastructure-bot::dependency-package-manager": 1,
+      "reproducible-research-corpus::search-listing-diagnostic": 1
     }
   },
-  "flexible_slots": 2,
-  "flexible_slot_policy": "After the greedy quota-filling pass (quotas above sum to 15 ecosystem-dimension + 17 origin/family-dimension slots), any remaining primary slots up to total_new_primary_target are filled by walking the SAME deterministic ranked-and-tie-broken candidate order and taking the next eligible, not-yet-selected candidates in rank order — no manual reordering, no re-ranking, no fresh scoring pass.",
+  "origin_kind_targets": {
+    "repository-miner": 9, "native-upstream-ci-log": 3, "public-runtime-dataset": 2,
+    "kernel-or-infrastructure-bot": 2, "reproducible-research-corpus": 1
+  },
+  "primary_family_targets": {
+    "ci-build": 3, "test": 3, "runtime": 3, "container-orchestration-deployment": 3,
+    "static-analysis-lint-compiler": 2, "search-listing-diagnostic": 2, "dependency-package-manager": 1
+  },
+  "ecosystem_minimums": {
+    "dotnet": 2, "rust": 3, "python": 3, "jvm": 3, "infrastructure-or-language-neutral": 4
+  },
   "n2a_reference": {
     "case_id": "miner-canary-dotnet-001",
     "origin_kind": "repository-miner",

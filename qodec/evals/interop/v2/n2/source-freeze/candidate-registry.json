@@ -1,0 +1,2921 @@
+{
+  "candidates": [
+    {
+      "candidate_id": "ci-log-curl-linux",
+      "container_requirements": [],
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "medium",
+      "evidence_references": [
+        "https://github.com/curl/curl/actions/runs/29367345523"
+      ],
+      "expected_size_bucket": "large",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "curl's Linux CI matrix runs ~47 jobs, ~9 min; expect a large aggregate log",
+      "external_service_requirements": [],
+      "license": {
+        "redistribution_allowed": true,
+        "redistribution_basis": "Public GitHub Actions run on a public repository, visible to any visitor by platform design; source license MIT (COPYING).",
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "not-applicable-non-repository",
+      "origin_family_group": "native-upstream-ci-log::ci-build",
+      "origin_kind": "native-upstream-ci-log",
+      "personal_data_review": {
+        "personal_data_present": false,
+        "sanitization_notes": ""
+      },
+      "primary_family": "ci-build",
+      "project": {
+        "entry_point": null
+      },
+      "public_canonical_url": "https://github.com/curl/curl/actions/runs/29367345523",
+      "publisher": {
+        "identity": "curl/curl (Daniel Stenberg et al.)"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "identity_kind": "immutable-run-or-artifact",
+        "repository_url": "https://github.com/curl/curl",
+        "run_id": "29367345523",
+        "workflow_identity": ".github/workflows/linux.yml"
+      },
+      "source_kind": "ci-run-artifact",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ]
+    },
+    {
+      "candidate_id": "ci-log-jq-ci",
+      "container_requirements": [],
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "medium",
+      "evidence_references": [
+        "https://github.com/jqlang/jq/actions/runs/28568334149"
+      ],
+      "expected_size_bucket": "large",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "jq CI matrix (Linux/macOS/Windows + dist/docker/release jobs), ~16 min, 24 build artifacts",
+      "external_service_requirements": [],
+      "license": {
+        "redistribution_allowed": true,
+        "redistribution_basis": "Public GitHub Actions run on a public repository; source license MIT (COPYING), plus bundled oniguruma/decNumber licenses.",
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "not-applicable-non-repository",
+      "origin_family_group": "native-upstream-ci-log::ci-build",
+      "origin_kind": "native-upstream-ci-log",
+      "personal_data_review": {
+        "personal_data_present": false,
+        "sanitization_notes": ""
+      },
+      "primary_family": "ci-build",
+      "project": {
+        "entry_point": null
+      },
+      "public_canonical_url": "https://github.com/jqlang/jq/actions/runs/28568334149",
+      "publisher": {
+        "identity": "jqlang/jq (itchyny et al.)"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "identity_kind": "immutable-run-or-artifact",
+        "repository_url": "https://github.com/jqlang/jq",
+        "run_id": "28568334149",
+        "workflow_identity": ".github/workflows/ci.yml"
+      },
+      "source_kind": "ci-run-artifact",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ]
+    },
+    {
+      "candidate_id": "ci-log-rust-lang-rust-ci",
+      "container_requirements": [],
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "rust",
+      "ecosystem_quota_group": "rust",
+      "estimated_resource_class": "medium",
+      "evidence_references": [
+        "https://github.com/rust-lang/rust/actions/runs/29366449652"
+      ],
+      "expected_size_bucket": "very-large",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "~89-job matrix, 3h26m duration \u2014 one of the largest real CI logs available, good stress case",
+      "external_service_requirements": [],
+      "license": {
+        "redistribution_allowed": true,
+        "redistribution_basis": "Public GitHub Actions run (bors merge-queue gate); source dual-licensed MIT/Apache-2.0 (COPYRIGHT).",
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "not-applicable-non-repository",
+      "origin_family_group": "native-upstream-ci-log::ci-build",
+      "origin_kind": "native-upstream-ci-log",
+      "personal_data_review": {
+        "personal_data_present": false,
+        "sanitization_notes": ""
+      },
+      "primary_family": "ci-build",
+      "project": {
+        "entry_point": null
+      },
+      "public_canonical_url": "https://github.com/rust-lang/rust/actions/runs/29366449652",
+      "publisher": {
+        "identity": "rust-lang/rust (rust-bors[bot] merge queue)"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "identity_kind": "immutable-run-or-artifact",
+        "repository_url": "https://github.com/rust-lang/rust",
+        "run_id": "29366449652",
+        "workflow_identity": ".github/workflows/ci.yml"
+      },
+      "source_kind": "ci-run-artifact",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ]
+    },
+    {
+      "candidate_id": "dataset-loghub-v8",
+      "container_requirements": [],
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "medium",
+      "evidence_references": [
+        "https://zenodo.org/records/8196385"
+      ],
+      "expected_size_bucket": "very-large",
+      "expected_size_confidence": "high",
+      "expected_size_estimation_basis": "19 system/app log files, 6.0 GB total per Zenodo API metadata",
+      "external_service_requirements": [],
+      "license": {
+        "redistribution_allowed": true,
+        "redistribution_basis": "Zenodo record license.id=cc-by-4.0 (versioned, immutable DOI record).",
+        "spdx": "CC-BY-4.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "not-applicable-non-repository",
+      "origin_family_group": "public-runtime-dataset::runtime",
+      "origin_kind": "public-runtime-dataset",
+      "personal_data_review": {
+        "personal_data_present": false,
+        "sanitization_notes": "Real production/lab system logs; not sanitized per publisher README, but content is operational events, not user PII."
+      },
+      "primary_family": "runtime",
+      "project": {
+        "entry_point": null
+      },
+      "public_canonical_url": "https://zenodo.org/records/8196385",
+      "publisher": {
+        "identity": "LogPAI (Zhu, He, He, Liu, Lyu)"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "identity_kind": "immutable-object-or-doi",
+        "object_id_or_doi": "10.5281/zenodo.8196385"
+      },
+      "source_kind": "dataset-artifact",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ]
+    },
+    {
+      "candidate_id": "dataset-lanl-unified-2017",
+      "container_requirements": [],
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "medium",
+      "evidence_references": [
+        "https://csr.lanl.gov/data/2017/"
+      ],
+      "expected_size_bucket": "very-large",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "90 days of host/network logs, per-day .bz2 files, no consolidated size published",
+      "external_service_requirements": [],
+      "license": {
+        "redistribution_allowed": true,
+        "redistribution_basis": "Explicit public-domain waiver stated on the publisher page (CC0-equivalent).",
+        "spdx": "CC0-1.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "not-applicable-non-repository",
+      "origin_family_group": "public-runtime-dataset::runtime",
+      "origin_kind": "public-runtime-dataset",
+      "personal_data_review": {
+        "personal_data_present": false,
+        "sanitization_notes": "Publisher explicitly deidentified host/user/domain names before release."
+      },
+      "primary_family": "runtime",
+      "project": {
+        "entry_point": null
+      },
+      "public_canonical_url": "https://csr.lanl.gov/data/2017/",
+      "publisher": {
+        "identity": "Los Alamos National Laboratory CSR group"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "identity_kind": "immutable-object-or-doi",
+        "object_id_or_doi": "csr.lanl.gov/data/2017 (fixed per-day filenames, no DOI)"
+      },
+      "source_kind": "dataset-artifact",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ]
+    },
+    {
+      "candidate_id": "bot-syzbot-do-mkdirat",
+      "container_requirements": [],
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "medium",
+      "evidence_references": [
+        "https://syzkaller.appspot.com/bug?extid=919c5a9be8433b8bf201"
+      ],
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "single bug report page: stack trace + bisection status, no attachments",
+      "external_service_requirements": [],
+      "license": {
+        "redistribution_allowed": true,
+        "redistribution_basis": "Google-run public infrastructure explicitly designed for public consumption; content is factual kernel crash/stack-trace data.",
+        "spdx": "CC0-1.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "not-applicable-non-repository",
+      "origin_family_group": "kernel-or-infrastructure-bot::search-listing-diagnostic",
+      "origin_kind": "kernel-or-infrastructure-bot",
+      "personal_data_review": {
+        "personal_data_present": false,
+        "sanitization_notes": ""
+      },
+      "primary_family": "search-listing-diagnostic",
+      "project": {
+        "entry_point": null
+      },
+      "public_canonical_url": "https://syzkaller.appspot.com/bug?extid=919c5a9be8433b8bf201",
+      "publisher": {
+        "identity": "syzbot (Google syzkaller)"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "identity_kind": "immutable-run-or-artifact",
+        "object_id_or_doi": "extid:919c5a9be8433b8bf201"
+      },
+      "source_kind": "bot-output-artifact",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ]
+    },
+    {
+      "candidate_id": "bot-dependabot-black-5206",
+      "container_requirements": [],
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "python",
+      "ecosystem_quota_group": "python",
+      "estimated_resource_class": "medium",
+      "evidence_references": [
+        "https://github.com/psf/black/pull/5206"
+      ],
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "high",
+      "expected_size_estimation_basis": "single dependency-bump PR: title, diff (one line), 90 check results",
+      "external_service_requirements": [],
+      "license": {
+        "redistribution_allowed": true,
+        "redistribution_basis": "psf/black is MIT-licensed; PR diff/metadata publicly viewable per GitHub ToS, content is a routine GH-Actions-version-bump manifest diff.",
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "not-applicable-non-repository",
+      "origin_family_group": "kernel-or-infrastructure-bot::dependency-package-manager",
+      "origin_kind": "kernel-or-infrastructure-bot",
+      "personal_data_review": {
+        "personal_data_present": false,
+        "sanitization_notes": ""
+      },
+      "primary_family": "dependency-package-manager",
+      "project": {
+        "entry_point": null
+      },
+      "public_canonical_url": "https://github.com/psf/black/pull/5206",
+      "publisher": {
+        "identity": "dependabot[bot] on psf/black"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "identity_kind": "immutable-run-or-artifact",
+        "object_id_or_doi": "psf/black#5206"
+      },
+      "source_kind": "bot-output-artifact",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ]
+    },
+    {
+      "candidate_id": "research-corpus-loghub2",
+      "container_requirements": [],
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "medium",
+      "evidence_references": [
+        "https://zenodo.org/records/8275861"
+      ],
+      "expected_size_bucket": "large",
+      "expected_size_confidence": "high",
+      "expected_size_estimation_basis": "14 curated/re-annotated log-parsing datasets, 965.6 MB total per Zenodo API metadata",
+      "external_service_requirements": [],
+      "license": {
+        "redistribution_allowed": true,
+        "redistribution_basis": "Zenodo record license.id=cc-by-4.0; explicitly the companion artifact to the ISSTA 2024 log-parsing evaluation paper (arXiv:2308.10828).",
+        "spdx": "CC-BY-4.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "not-applicable-non-repository",
+      "origin_family_group": "reproducible-research-corpus::search-listing-diagnostic",
+      "origin_kind": "reproducible-research-corpus",
+      "personal_data_review": {
+        "personal_data_present": false,
+        "sanitization_notes": ""
+      },
+      "primary_family": "search-listing-diagnostic",
+      "project": {
+        "entry_point": null
+      },
+      "public_canonical_url": "https://zenodo.org/records/8275861",
+      "publisher": {
+        "identity": "LogPAI (ISSTA'24 companion dataset)"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "identity_kind": "immutable-object-or-doi",
+        "object_id_or_doi": "10.5281/zenodo.8275861"
+      },
+      "source_kind": "research-corpus-artifact",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ]
+    },
+    {
+      "candidate_id": "repo-kubeops-generator",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "dotnet",
+      "ecosystem_quota_group": "dotnet",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/buehler/dotnet-operator-sdk",
+        "https://github.com/buehler/dotnet-operator-sdk/commit/9f44d7ca3b545b0db2fdb990374c58f0205d0eef"
+      ],
+      "expected_capture_command_class": "dotnet test test/KubeOps.Generator.Test/KubeOps.Generator.Test.csproj",
+      "expected_size_bucket": "medium",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "scoped single xUnit test project within a larger operator-SDK solution",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "Apache-2.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::container-orchestration-deployment",
+      "origin_kind": "repository-miner",
+      "primary_family": "container-orchestration-deployment",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "dotnet",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "test/KubeOps.Generator.Test/KubeOps.Generator.Test.csproj"
+      },
+      "public_canonical_url": "https://github.com/buehler/dotnet-operator-sdk",
+      "publisher": {
+        "identity": "buehler"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "9f44d7ca3b545b0db2fdb990374c58f0205d0eef",
+        "identity_kind": "git-commit",
+        "name": "dotnet-operator-sdk",
+        "owner": "buehler",
+        "repository_url": "https://github.com/buehler/dotnet-operator-sdk",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-dockerfile-parser-rs",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "rust",
+      "ecosystem_quota_group": "rust",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/HewlettPackard/dockerfile-parser-rs",
+        "https://github.com/HewlettPackard/dockerfile-parser-rs/commit/bc52c98c6fbb2267d8c71bf000d5022b9ce75533"
+      ],
+      "expected_capture_command_class": "cargo test",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "pure-Rust Dockerfile parser, small crate",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::container-orchestration-deployment",
+      "origin_kind": "repository-miner",
+      "primary_family": "container-orchestration-deployment",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "rust",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "Cargo.toml"
+      },
+      "public_canonical_url": "https://github.com/HewlettPackard/dockerfile-parser-rs",
+      "publisher": {
+        "identity": "HewlettPackard"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "bc52c98c6fbb2267d8c71bf000d5022b9ce75533",
+        "identity_kind": "git-commit",
+        "name": "dockerfile-parser-rs",
+        "owner": "HewlettPackard",
+        "repository_url": "https://github.com/HewlettPackard/dockerfile-parser-rs",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-helm-values",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "jvm-gradle",
+      "ecosystem_quota_group": "jvm",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/fstaudt/helm-values",
+        "https://github.com/fstaudt/helm-values/commit/bcc4dc7cd7cd667995a9e6f1811335d8a239bc5c"
+      ],
+      "expected_capture_command_class": "./gradlew :helm-values-shared:test",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "scoped single Gradle module, excludes IntelliJ-plugin sibling module",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "Apache-2.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::container-orchestration-deployment",
+      "origin_kind": "repository-miner",
+      "primary_family": "container-orchestration-deployment",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "jvm-gradle",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "helm-values-shared"
+      },
+      "public_canonical_url": "https://github.com/fstaudt/helm-values",
+      "publisher": {
+        "identity": "fstaudt"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "bcc4dc7cd7cd667995a9e6f1811335d8a239bc5c",
+        "identity_kind": "git-commit",
+        "name": "helm-values",
+        "owner": "fstaudt",
+        "repository_url": "https://github.com/fstaudt/helm-values",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-moq",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "dotnet",
+      "ecosystem_quota_group": "dotnet",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/devlooped/moq",
+        "https://github.com/devlooped/moq/commit/89a5be629c752960fe403e95ff583e4ae6f00542"
+      ],
+      "expected_capture_command_class": "dotnet test",
+      "expected_size_bucket": "medium",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "popular .NET mocking framework, dotnet test suite",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "License.txt",
+        "redistribution_allowed": true,
+        "spdx": "BSD-3-Clause",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::test",
+      "origin_kind": "repository-miner",
+      "primary_family": "test",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "dotnet",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "src/Moq.Tests"
+      },
+      "public_canonical_url": "https://github.com/devlooped/moq",
+      "publisher": {
+        "identity": "devlooped"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "89a5be629c752960fe403e95ff583e4ae6f00542",
+        "identity_kind": "git-commit",
+        "name": "moq",
+        "owner": "devlooped",
+        "repository_url": "https://github.com/devlooped/moq",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-rustlings",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "rust",
+      "ecosystem_quota_group": "rust",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/rust-lang/rustlings",
+        "https://github.com/rust-lang/rustlings/commit/925321705edd96b39995f77edf437f7db6f9b16a"
+      ],
+      "expected_capture_command_class": "cargo test",
+      "expected_size_bucket": "medium",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "official Rust exercise suite, cargo test-style checks",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::test",
+      "origin_kind": "repository-miner",
+      "primary_family": "test",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "rust",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "Cargo.toml"
+      },
+      "public_canonical_url": "https://github.com/rust-lang/rustlings",
+      "publisher": {
+        "identity": "rust-lang"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "925321705edd96b39995f77edf437f7db6f9b16a",
+        "identity_kind": "git-commit",
+        "name": "rustlings",
+        "owner": "rust-lang",
+        "repository_url": "https://github.com/rust-lang/rustlings",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-moshi",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "jvm-gradle",
+      "ecosystem_quota_group": "jvm",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/square/moshi",
+        "https://github.com/square/moshi/commit/889013ec2edb8d8034902662a1dc8c4f3b3f8111"
+      ],
+      "expected_capture_command_class": "./gradlew test",
+      "expected_size_bucket": "medium",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "compact Gradle-built JSON library, JUnit suite",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE.txt",
+        "redistribution_allowed": true,
+        "spdx": "Apache-2.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::test",
+      "origin_kind": "repository-miner",
+      "primary_family": "test",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "jvm-gradle",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "moshi"
+      },
+      "public_canonical_url": "https://github.com/square/moshi",
+      "publisher": {
+        "identity": "square"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "889013ec2edb8d8034902662a1dc8c4f3b3f8111",
+        "identity_kind": "git-commit",
+        "name": "moshi",
+        "owner": "square",
+        "repository_url": "https://github.com/square/moshi",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-fd",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "rust",
+      "ecosystem_quota_group": "rust",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/sharkdp/fd",
+        "https://github.com/sharkdp/fd/commit/5a5852e15b44d4917a6098b1c01d3bb535b7717f"
+      ],
+      "expected_capture_command_class": "cargo run -- --version && cargo run -- .",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "small find-alternative CLI, run and capture stdout/stderr",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE-APACHE",
+        "redistribution_allowed": true,
+        "spdx": "Apache-2.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::runtime",
+      "origin_kind": "repository-miner",
+      "primary_family": "runtime",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "rust",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "Cargo.toml"
+      },
+      "public_canonical_url": "https://github.com/sharkdp/fd",
+      "publisher": {
+        "identity": "sharkdp"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "5a5852e15b44d4917a6098b1c01d3bb535b7717f",
+        "identity_kind": "git-commit",
+        "name": "fd",
+        "owner": "sharkdp",
+        "repository_url": "https://github.com/sharkdp/fd",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-flake8",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "python",
+      "ecosystem_quota_group": "python",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/PyCQA/flake8",
+        "https://github.com/PyCQA/flake8/commit/01b972636056a0ed581db62e260ef8df1ce470de"
+      ],
+      "expected_capture_command_class": "python -m flake8 src/",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "the linter itself; running it over any target is the archetypal lint-log",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::static-analysis-lint-compiler",
+      "origin_kind": "repository-miner",
+      "primary_family": "static-analysis-lint-compiler",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "python",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "pyproject.toml"
+      },
+      "public_canonical_url": "https://github.com/PyCQA/flake8",
+      "publisher": {
+        "identity": "PyCQA"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "01b972636056a0ed581db62e260ef8df1ce470de",
+        "identity_kind": "git-commit",
+        "name": "flake8",
+        "owner": "PyCQA",
+        "repository_url": "https://github.com/PyCQA/flake8",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-spotless",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "jvm-gradle",
+      "ecosystem_quota_group": "jvm",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/diffplug/spotless",
+        "https://github.com/diffplug/spotless/commit/03d43ba2cdc81050e07b62646c08b22e39505368"
+      ],
+      "expected_capture_command_class": "./gradlew spotlessCheck",
+      "expected_size_bucket": "medium",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "Gradle-native code-formatting/lint tool",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "Apache-2.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::static-analysis-lint-compiler",
+      "origin_kind": "repository-miner",
+      "primary_family": "static-analysis-lint-compiler",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "jvm-gradle",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "plugin-gradle"
+      },
+      "public_canonical_url": "https://github.com/diffplug/spotless",
+      "publisher": {
+        "identity": "diffplug"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "03d43ba2cdc81050e07b62646c08b22e39505368",
+        "identity_kind": "git-commit",
+        "name": "spotless",
+        "owner": "diffplug",
+        "repository_url": "https://github.com/diffplug/spotless",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-hyperfine",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "rust",
+      "ecosystem_quota_group": "rust",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/sharkdp/hyperfine",
+        "https://github.com/sharkdp/hyperfine/commit/f12f3d9f86f3643b3b7deace5e160b1f0f44d2b7"
+      ],
+      "expected_capture_command_class": "cargo run -- --version",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "command-line benchmarking tool, rich structured stdout",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE-APACHE",
+        "redistribution_allowed": true,
+        "spdx": "Apache-2.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::runtime",
+      "origin_kind": "repository-miner",
+      "primary_family": "runtime",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "rust",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "Cargo.toml"
+      },
+      "public_canonical_url": "https://github.com/sharkdp/hyperfine",
+      "publisher": {
+        "identity": "sharkdp"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "f12f3d9f86f3643b3b7deace5e160b1f0f44d2b7",
+        "identity_kind": "git-commit",
+        "name": "hyperfine",
+        "owner": "sharkdp",
+        "repository_url": "https://github.com/sharkdp/hyperfine",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-procs",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "rust",
+      "ecosystem_quota_group": "rust",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/dalance/procs",
+        "https://github.com/dalance/procs/commit/4e40d1e962f513920e75ff97f1abfa2330511ec3"
+      ],
+      "expected_capture_command_class": "cargo run",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "modern ps replacement, process listing/diagnostic table",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::search-listing-diagnostic",
+      "origin_kind": "repository-miner",
+      "primary_family": "search-listing-diagnostic",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "rust",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "Cargo.toml"
+      },
+      "public_canonical_url": "https://github.com/dalance/procs",
+      "publisher": {
+        "identity": "dalance"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "4e40d1e962f513920e75ff97f1abfa2330511ec3",
+        "identity_kind": "git-commit",
+        "name": "procs",
+        "owner": "dalance",
+        "repository_url": "https://github.com/dalance/procs",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-anyhow",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "rust",
+      "ecosystem_quota_group": "rust",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/dtolnay/anyhow",
+        "https://github.com/dtolnay/anyhow/commit/5bdb0e24db3994be119d42f18fe2d655e1f68f4a"
+      ],
+      "expected_capture_command_class": "cargo clippy",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "tiny error-handling crate, ideal minimal clippy/build-warning target",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE-APACHE",
+        "redistribution_allowed": true,
+        "spdx": "Apache-2.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::static-analysis-lint-compiler",
+      "origin_kind": "repository-miner",
+      "primary_family": "static-analysis-lint-compiler",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "rust",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "Cargo.toml"
+      },
+      "public_canonical_url": "https://github.com/dtolnay/anyhow",
+      "publisher": {
+        "identity": "dtolnay"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "5bdb0e24db3994be119d42f18fe2d655e1f68f4a",
+        "identity_kind": "git-commit",
+        "name": "anyhow",
+        "owner": "dtolnay",
+        "repository_url": "https://github.com/dtolnay/anyhow",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-requests",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "python",
+      "ecosystem_quota_group": "python",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/psf/requests",
+        "https://github.com/psf/requests/commit/f361ead047be5cb873174218582f7d8b9fcd9f49"
+      ],
+      "expected_capture_command_class": "pytest",
+      "expected_size_bucket": "medium",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "HTTP library, pytest suite runs offline via mocked responses",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "Apache-2.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::test",
+      "origin_kind": "repository-miner",
+      "primary_family": "test",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "python",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "pyproject.toml"
+      },
+      "public_canonical_url": "https://github.com/psf/requests",
+      "publisher": {
+        "identity": "psf"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "f361ead047be5cb873174218582f7d8b9fcd9f49",
+        "identity_kind": "git-commit",
+        "name": "requests",
+        "owner": "psf",
+        "repository_url": "https://github.com/psf/requests",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-pyflakes",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "python",
+      "ecosystem_quota_group": "python",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/PyCQA/pyflakes",
+        "https://github.com/PyCQA/pyflakes/commit/59ec4593efd4c69ce00fdb13c40fcf5f3212ab10"
+      ],
+      "expected_capture_command_class": "python -m pyflakes src/",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "minimal Python source checker",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::static-analysis-lint-compiler",
+      "origin_kind": "repository-miner",
+      "primary_family": "static-analysis-lint-compiler",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "python",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "pyproject.toml"
+      },
+      "public_canonical_url": "https://github.com/PyCQA/pyflakes",
+      "publisher": {
+        "identity": "PyCQA"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "59ec4593efd4c69ce00fdb13c40fcf5f3212ab10",
+        "identity_kind": "git-commit",
+        "name": "pyflakes",
+        "owner": "PyCQA",
+        "repository_url": "https://github.com/PyCQA/pyflakes",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-pip-tools",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "python",
+      "ecosystem_quota_group": "python",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/jazzband/pip-tools",
+        "https://github.com/jazzband/pip-tools/commit/9a2d2c12a798d1986807a718e2ab0c92f1f9f81c"
+      ],
+      "expected_capture_command_class": "pip-compile",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "pip-compile/pip-sync output is literally dependency-resolution logging",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "BSD-3-Clause",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::dependency-package-manager",
+      "origin_kind": "repository-miner",
+      "primary_family": "dependency-package-manager",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "python",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "pyproject.toml"
+      },
+      "public_canonical_url": "https://github.com/jazzband/pip-tools",
+      "publisher": {
+        "identity": "jazzband"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "9a2d2c12a798d1986807a718e2ab0c92f1f9f81c",
+        "identity_kind": "git-commit",
+        "name": "pip-tools",
+        "owner": "jazzband",
+        "repository_url": "https://github.com/jazzband/pip-tools",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-gson",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "jvm-maven",
+      "ecosystem_quota_group": "jvm",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/google/gson",
+        "https://github.com/google/gson/commit/c9f3fd55854a743b66f857ace3c7b268ea3e2ef7"
+      ],
+      "expected_capture_command_class": "mvn test",
+      "expected_size_bucket": "medium",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "Maven-built JSON library, standard mvn test JUnit suite",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "Apache-2.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::test",
+      "origin_kind": "repository-miner",
+      "primary_family": "test",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "jvm-maven",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "gson/pom.xml"
+      },
+      "public_canonical_url": "https://github.com/google/gson",
+      "publisher": {
+        "identity": "google"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "c9f3fd55854a743b66f857ace3c7b268ea3e2ef7",
+        "identity_kind": "git-commit",
+        "name": "gson",
+        "owner": "google",
+        "repository_url": "https://github.com/google/gson",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-classgraph",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "jvm-maven",
+      "ecosystem_quota_group": "jvm",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/classgraph/classgraph",
+        "https://github.com/classgraph/classgraph/commit/a03ed5611c6c844c0deb6b32b77a5ba8753d1604"
+      ],
+      "expected_capture_command_class": "mvn test",
+      "expected_size_bucket": "medium",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "classpath scanning/listing tool",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::search-listing-diagnostic",
+      "origin_kind": "repository-miner",
+      "primary_family": "search-listing-diagnostic",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "jvm-maven",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "pom.xml"
+      },
+      "public_canonical_url": "https://github.com/classgraph/classgraph",
+      "publisher": {
+        "identity": "classgraph"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "a03ed5611c6c844c0deb6b32b77a5ba8753d1604",
+        "identity_kind": "git-commit",
+        "name": "classgraph",
+        "owner": "classgraph",
+        "repository_url": "https://github.com/classgraph/classgraph",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-detekt",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "jvm-gradle",
+      "ecosystem_quota_group": "jvm",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/detekt/detekt",
+        "https://github.com/detekt/detekt/commit/64aa5c4ba591292415bc2aa1c4cfb5fe36b49efd"
+      ],
+      "expected_capture_command_class": "./gradlew detekt",
+      "expected_size_bucket": "large",
+      "expected_size_confidence": "low",
+      "expected_size_estimation_basis": "purpose-built Kotlin static-analysis tool (large repo, backup lint candidate)",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "Apache-2.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::static-analysis-lint-compiler",
+      "origin_kind": "repository-miner",
+      "primary_family": "static-analysis-lint-compiler",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "jvm-gradle",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "detekt-cli"
+      },
+      "public_canonical_url": "https://github.com/detekt/detekt",
+      "publisher": {
+        "identity": "detekt"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "64aa5c4ba591292415bc2aa1c4cfb5fe36b49efd",
+        "identity_kind": "git-commit",
+        "name": "detekt",
+        "owner": "detekt",
+        "repository_url": "https://github.com/detekt/detekt",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-kubernetes-validate",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "python",
+      "ecosystem_quota_group": "python",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/willthames/kubernetes-validate",
+        "https://github.com/willthames/kubernetes-validate/commit/3f6f61dd54df4d721f52953557281209b2f12d7c"
+      ],
+      "expected_capture_command_class": "pytest",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "pure-Python static K8s YAML validator against bundled JSON schemas",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "Apache-2.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::container-orchestration-deployment",
+      "origin_kind": "repository-miner",
+      "primary_family": "container-orchestration-deployment",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "python",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "pyproject.toml"
+      },
+      "public_canonical_url": "https://github.com/willthames/kubernetes-validate",
+      "publisher": {
+        "identity": "willthames"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "3f6f61dd54df4d721f52953557281209b2f12d7c",
+        "identity_kind": "git-commit",
+        "name": "kubernetes-validate",
+        "owner": "willthames",
+        "repository_url": "https://github.com/willthames/kubernetes-validate",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-dockerfile-parse",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "python",
+      "ecosystem_quota_group": "python",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/containerbuildsystem/dockerfile-parse",
+        "https://github.com/containerbuildsystem/dockerfile-parse/commit/3a4360f78e60ac72b6ffc627135fca27c180c4ad"
+      ],
+      "expected_capture_command_class": "pytest",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "canonical pure-Python Dockerfile parser (OSBS/Red Hat)",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "BSD-3-Clause",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::container-orchestration-deployment",
+      "origin_kind": "repository-miner",
+      "primary_family": "container-orchestration-deployment",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "python",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "setup.py"
+      },
+      "public_canonical_url": "https://github.com/containerbuildsystem/dockerfile-parse",
+      "publisher": {
+        "identity": "containerbuildsystem"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "3a4360f78e60ac72b6ffc627135fca27c180c4ad",
+        "identity_kind": "git-commit",
+        "name": "dockerfile-parse",
+        "owner": "containerbuildsystem",
+        "repository_url": "https://github.com/containerbuildsystem/dockerfile-parse",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-docker-java-parser",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "jvm-maven",
+      "ecosystem_quota_group": "jvm",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/yonimoses/docker-java-parser",
+        "https://github.com/yonimoses/docker-java-parser/commit/bc41f15b9f69879e414002feb5e73bfaac61862e"
+      ],
+      "expected_capture_command_class": "mvn test",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "Maven-built Java/Scala Dockerfile parser/linter",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "Apache-2.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::container-orchestration-deployment",
+      "origin_kind": "repository-miner",
+      "primary_family": "container-orchestration-deployment",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "jvm-maven",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "pom.xml"
+      },
+      "public_canonical_url": "https://github.com/yonimoses/docker-java-parser",
+      "publisher": {
+        "identity": "yonimoses"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "bc41f15b9f69879e414002feb5e73bfaac61862e",
+        "identity_kind": "git-commit",
+        "name": "docker-java-parser",
+        "owner": "yonimoses",
+        "repository_url": "https://github.com/yonimoses/docker-java-parser",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-dotnet-outdated",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "dotnet",
+      "ecosystem_quota_group": "dotnet",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/dotnet-outdated/dotnet-outdated",
+        "https://github.com/dotnet-outdated/dotnet-outdated/commit/3b4f62e3c7e9c6b6e82144274c36a58abd30e276"
+      ],
+      "expected_capture_command_class": "dotnet run -- --version",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "NuGet outdated-package listing/diagnostic CLI",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::search-listing-diagnostic",
+      "origin_kind": "repository-miner",
+      "primary_family": "search-listing-diagnostic",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "dotnet",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "src/DotNetOutdated"
+      },
+      "public_canonical_url": "https://github.com/dotnet-outdated/dotnet-outdated",
+      "publisher": {
+        "identity": "dotnet-outdated"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "3b4f62e3c7e9c6b6e82144274c36a58abd30e276",
+        "identity_kind": "git-commit",
+        "name": "dotnet-outdated",
+        "owner": "dotnet-outdated",
+        "repository_url": "https://github.com/dotnet-outdated/dotnet-outdated",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-nuget-samples-cpm",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "dotnet",
+      "ecosystem_quota_group": "dotnet",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/NuGet/Samples",
+        "https://github.com/NuGet/Samples/commit/ec30a2b7c54c2d09e5a476444a2c7a8f2f289d49"
+      ],
+      "expected_capture_command_class": "dotnet restore CentralPackageManagementExample",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "official NuGet-team central-package-management dependency-resolution example",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE.txt",
+        "redistribution_allowed": true,
+        "spdx": "Apache-2.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::dependency-package-manager",
+      "origin_kind": "repository-miner",
+      "primary_family": "dependency-package-manager",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "dotnet",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "CentralPackageManagementExample"
+      },
+      "public_canonical_url": "https://github.com/NuGet/Samples",
+      "publisher": {
+        "identity": "NuGet"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "ec30a2b7c54c2d09e5a476444a2c7a8f2f289d49",
+        "identity_kind": "git-commit",
+        "name": "Samples",
+        "owner": "NuGet",
+        "repository_url": "https://github.com/NuGet/Samples",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-terraform-example-module",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/cloudposse/terraform-example-module",
+        "https://github.com/cloudposse/terraform-example-module/commit/98dac4e5e89c4060c7eb655a9e58da39336ee1dc"
+      ],
+      "expected_capture_command_class": "terraform init && terraform validate",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "canonical minimal Terraform module scaffold for validate/lint CI checks",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "Apache-2.0",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::container-orchestration-deployment",
+      "origin_kind": "repository-miner",
+      "primary_family": "container-orchestration-deployment",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "infrastructure-or-language-neutral",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "main.tf"
+      },
+      "public_canonical_url": "https://github.com/cloudposse/terraform-example-module",
+      "publisher": {
+        "identity": "cloudposse"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "98dac4e5e89c4060c7eb655a9e58da39336ee1dc",
+        "identity_kind": "git-commit",
+        "name": "terraform-example-module",
+        "owner": "cloudposse",
+        "repository_url": "https://github.com/cloudposse/terraform-example-module",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-hadolint-example",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/bvwells/hadolint-example",
+        "https://github.com/bvwells/hadolint-example/commit/0eeab40958f549fbe2b44885ad1a8140c7ac95b1"
+      ],
+      "expected_capture_command_class": "hadolint original/Dockerfile",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "tiny before/after Dockerfile pair purpose-built for hadolint linting",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::container-orchestration-deployment",
+      "origin_kind": "repository-miner",
+      "primary_family": "container-orchestration-deployment",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "infrastructure-or-language-neutral",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "original/Dockerfile"
+      },
+      "public_canonical_url": "https://github.com/bvwells/hadolint-example",
+      "publisher": {
+        "identity": "bvwells"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "0eeab40958f549fbe2b44885ad1a8140c7ac95b1",
+        "identity_kind": "git-commit",
+        "name": "hadolint-example",
+        "owner": "bvwells",
+        "repository_url": "https://github.com/bvwells/hadolint-example",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-fzf",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/junegunn/fzf",
+        "https://github.com/junegunn/fzf/commit/24832e97ef9640e5f859ede8dc163cf3c27145cb"
+      ],
+      "expected_capture_command_class": "go test ./...",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "fuzzy-finder tool, natural filtered-listing output",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::search-listing-diagnostic",
+      "origin_kind": "repository-miner",
+      "primary_family": "search-listing-diagnostic",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "infrastructure-or-language-neutral",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "go.mod"
+      },
+      "public_canonical_url": "https://github.com/junegunn/fzf",
+      "publisher": {
+        "identity": "junegunn"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "24832e97ef9640e5f859ede8dc163cf3c27145cb",
+        "identity_kind": "git-commit",
+        "name": "fzf",
+        "owner": "junegunn",
+        "repository_url": "https://github.com/junegunn/fzf",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-bats-core",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/bats-core/bats-core",
+        "https://github.com/bats-core/bats-core/commit/c18b2f7a7e56dde24b4a6ae706a4ecee3ec824ad"
+      ],
+      "expected_capture_command_class": "./bin/bats test/",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "medium",
+      "expected_size_estimation_basis": "Bash Automated Testing System, TAP-style test-log output",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE.md",
+        "redistribution_allowed": true,
+        "spdx": "MIT",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::test",
+      "origin_kind": "repository-miner",
+      "primary_family": "test",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "infrastructure-or-language-neutral",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "bin/bats"
+      },
+      "public_canonical_url": "https://github.com/bats-core/bats-core",
+      "publisher": {
+        "identity": "bats-core"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "c18b2f7a7e56dde24b4a6ae706a4ecee3ec824ad",
+        "identity_kind": "git-commit",
+        "name": "bats-core",
+        "owner": "bats-core",
+        "repository_url": "https://github.com/bats-core/bats-core",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "repo-sds",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "infrastructure-or-language-neutral",
+      "ecosystem_quota_group": "infrastructure-or-language-neutral",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/antirez/sds",
+        "https://github.com/antirez/sds/commit/5347739b1581fcba74fd5cab1fc21d2aef317d71"
+      ],
+      "expected_capture_command_class": "make",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "high",
+      "expected_size_estimation_basis": "85KB standalone C string library, trivial Makefile build",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "license_file": "LICENSE",
+        "redistribution_allowed": true,
+        "spdx": "BSD-2-Clause",
+        "status": "clear"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::ci-build",
+      "origin_kind": "repository-miner",
+      "primary_family": "ci-build",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "infrastructure-or-language-neutral",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "Makefile"
+      },
+      "public_canonical_url": "https://github.com/antirez/sds",
+      "publisher": {
+        "identity": "antirez"
+      },
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "eligible",
+      "source_identity": {
+        "commit_sha": "5347739b1581fcba74fd5cab1fc21d2aef317d71",
+        "identity_kind": "git-commit",
+        "name": "sds",
+        "owner": "antirez",
+        "repository_url": "https://github.com/antirez/sds",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "eligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "rejected-burntsushi-xsv",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "rust",
+      "ecosystem_quota_group": "rust",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/BurntSushi/xsv",
+        "https://github.com/BurntSushi/xsv/commit/0000000000000000000000000000000000000000"
+      ],
+      "expected_capture_command_class": "",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "low",
+      "expected_size_estimation_basis": "not applicable \u2014 rejected",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "redistribution_allowed": false,
+        "spdx": null,
+        "status": "missing"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::test",
+      "origin_kind": "repository-miner",
+      "primary_family": "test",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "rust",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "unknown"
+      },
+      "public_canonical_url": "https://github.com/BurntSushi/xsv",
+      "publisher": {
+        "identity": "unknown"
+      },
+      "rejection_reason": "Unlicense is not on the approved redistribution-compatible license list (MIT/Apache-2.0/BSD-2/3-Clause only); repository is also archived/unmaintained.",
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "ineligible",
+      "source_identity": {
+        "commit_sha": "0000000000000000000000000000000000000000",
+        "identity_kind": "git-commit",
+        "name": "unknown",
+        "owner": "unknown",
+        "repository_url": "https://github.com/BurntSushi/xsv",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "reason": "Unlicense is not on the approved redistribution-compatible license list (MIT/Apache-2.0/BSD-2/3-Clause only); repository is also archived/unmaintained.",
+          "registry_version": "n2c-registry-v1",
+          "status": "ineligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "rejected-ziggyrafiq-dotnet8-xunit",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "dotnet",
+      "ecosystem_quota_group": "dotnet",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/ziggyrafiq/dotnet8-xunit-unit-testing-guide",
+        "https://github.com/ziggyrafiq/dotnet8-xunit-unit-testing-guide/commit/0000000000000000000000000000000000000000"
+      ],
+      "expected_capture_command_class": "",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "low",
+      "expected_size_estimation_basis": "not applicable \u2014 rejected",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "redistribution_allowed": false,
+        "spdx": null,
+        "status": "missing"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::test",
+      "origin_kind": "repository-miner",
+      "primary_family": "test",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "dotnet",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "unknown"
+      },
+      "public_canonical_url": "https://github.com/ziggyrafiq/dotnet8-xunit-unit-testing-guide",
+      "publisher": {
+        "identity": "unknown"
+      },
+      "rejection_reason": "README claims 'see LICENSE file' but no LICENSE file exists in the repository (confirmed 404 on raw fetch) \u2014 missing license.",
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "ineligible",
+      "source_identity": {
+        "commit_sha": "0000000000000000000000000000000000000000",
+        "identity_kind": "git-commit",
+        "name": "unknown",
+        "owner": "unknown",
+        "repository_url": "https://github.com/ziggyrafiq/dotnet8-xunit-unit-testing-guide",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "reason": "README claims 'see LICENSE file' but no LICENSE file exists in the repository (confirmed 404 on raw fetch) \u2014 missing license.",
+          "registry_version": "n2c-registry-v1",
+          "status": "ineligible"
+        }
+      ],
+      "submodule_status": "none"
+    },
+    {
+      "candidate_id": "rejected-devantler-kubernetes-validator",
+      "container_requirements": [],
+      "dependency_lock": {
+        "files": [],
+        "present": false
+      },
+      "discovery": {
+        "mechanism": "web-research-verified-via-public-api",
+        "timestamp": "2026-07-15T00:00:00Z"
+      },
+      "ecosystem": "dotnet",
+      "ecosystem_quota_group": "dotnet",
+      "estimated_resource_class": "small",
+      "evidence_references": [
+        "https://github.com/devantler/dotnet-kubernetes-validator",
+        "https://github.com/devantler/dotnet-kubernetes-validator/commit/0000000000000000000000000000000000000000"
+      ],
+      "expected_capture_command_class": "",
+      "expected_size_bucket": "small",
+      "expected_size_confidence": "low",
+      "expected_size_estimation_basis": "not applicable \u2014 rejected",
+      "external_service_requirements": [],
+      "git_lfs_status": "none",
+      "license": {
+        "redistribution_allowed": false,
+        "spdx": null,
+        "status": "missing"
+      },
+      "network_requirements": {
+        "required_during_untrusted_execution": false
+      },
+      "offline_feasibility": "offline-ready-by-inspection",
+      "origin_family_group": "repository-miner::container-orchestration-deployment",
+      "origin_kind": "repository-miner",
+      "primary_family": "container-orchestration-deployment",
+      "private_feed_status": "none",
+      "project": {
+        "adapter": "dotnet",
+        "ambiguous": false,
+        "detection_confidence": "high",
+        "entry_point": "unknown"
+      },
+      "public_canonical_url": "https://github.com/devantler/dotnet-kubernetes-validator",
+      "publisher": {
+        "identity": "unknown"
+      },
+      "rejection_reason": "Repository retired/absorbed into devantler-tech/monorepo, which uses git submodules and no longer exposes this project as a standalone, independently-pinnable repository.",
+      "reproducibility_class": "expected-byte-reproducible",
+      "secondary_tags": [],
+      "security_flags": [],
+      "selection_status": "ineligible",
+      "source_identity": {
+        "commit_sha": "0000000000000000000000000000000000000000",
+        "identity_kind": "git-commit",
+        "name": "unknown",
+        "owner": "unknown",
+        "repository_url": "https://github.com/devantler/dotnet-kubernetes-validator",
+        "tree_sha": null
+      },
+      "source_kind": "repository-execution",
+      "status_history": [
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "discovered"
+        },
+        {
+          "registry_version": "n2c-registry-v1",
+          "status": "inspected"
+        },
+        {
+          "reason": "Repository retired/absorbed into devantler-tech/monorepo, which uses git submodules and no longer exposes this project as a standalone, independently-pinnable repository.",
+          "registry_version": "n2c-registry-v1",
+          "status": "ineligible"
+        }
+      ],
+      "submodule_status": "none"
+    }
+  ],
+  "registry_version": "n2c-registry-v1"
+}
