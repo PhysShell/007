@@ -144,6 +144,32 @@ class TestReceiptFieldValues(unittest.TestCase):
             self.assertEqual(len(problems), 1)
             self.assertIn("no acquisition-receipt.json", problems[0]["problem"])
 
+    def test_sibling_zip_file_is_not_mistaken_for_a_candidate(self):
+        """Regression: zip_fetch.py writes both acquisition-<id>.zip (the
+        raw download) and acquisition-<id>/ (its extracted tree) side by
+        side in the same directory. A glob of "acquisition-*" matches both
+        — the real rescue run (29409021060) hit this exact bug, reporting
+        "no acquisition-receipt.json found on disk" for every one of 37
+        candidates because it was iterating the .zip files, not the
+        extracted directories."""
+        import json
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "acquisition-ci-log-nlog.zip").write_bytes(b"not a real zip, just a sibling file")
+            case_dir = root / "acquisition-ci-log-nlog"
+            case_dir.mkdir()
+            (case_dir / "acquisition-receipt.json").write_text(json.dumps({
+                "metadata_sha256": "m1", "source_content_sha256": "c1", "normalized_source_sha256": "n1",
+            }))
+            freeze = {
+                "metadata_sha256": {"ci-log-nlog": "m1"},
+                "source_content_sha256": {"ci-log-nlog": "c1"},
+                "normalized_source_sha256": {"ci-log-nlog": "n1"},
+            }
+            problems = v.verify_receipt_field_values(root, freeze)
+            self.assertEqual(problems, [])
+
 
 if __name__ == "__main__":
     unittest.main()

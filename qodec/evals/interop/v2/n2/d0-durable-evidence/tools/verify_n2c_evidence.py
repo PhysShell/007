@@ -55,7 +55,11 @@ def verify_receipt_field_values(extract_root: Path, n2_source_freeze: dict) -> l
     n2-source-freeze.json's folded values for that candidate_id."""
     problems = []
     hash_fields = ("metadata_sha256", "source_content_sha256", "normalized_source_sha256")
-    for artifact_dir in sorted(extract_root.glob("acquisition-*")):
+    # zip_fetch.py writes both "acquisition-<id>.zip" (the raw download) and
+    # "acquisition-<id>/" (its extracted contents) side by side in the same
+    # directory — glob "acquisition-*" matches both, so only directories
+    # (the actual extracted trees) are real candidates here.
+    for artifact_dir in sorted(p for p in extract_root.glob("acquisition-*") if p.is_dir()):
         candidate_id = artifact_dir.name.removeprefix("acquisition-")
         receipts = list(artifact_dir.rglob("acquisition-receipt.json"))
         if not receipts:
