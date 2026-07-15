@@ -24,7 +24,7 @@ import n2a_compatibility  # noqa: E402
 import sandbox_planner  # noqa: E402
 from adapters import ADAPTERS, base  # noqa: E402
 
-BASE_COMMIT = "d7fd03fdc6fcbf731de81d538ab0f7bca512a607"
+BASE_COMMIT = "2276020dbb437383317f4dd4f7b82c26ec78c2b4"  # Scope N2-A.1 implementation commit (re-anchored per section 9's two-commit protocol)
 FROZEN_PATHS = [
     "qodec/evals/interop/v2/coverage-matrix.json",
     "qodec/evals/interop/v2/benchmark-contract.json",

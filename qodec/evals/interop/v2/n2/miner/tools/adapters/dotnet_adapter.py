@@ -125,8 +125,22 @@ def plan_untrusted_execution(manifest: dict) -> dict:
     entry_point = manifest["project"]["entry_point"]
     return {
         "argv": ["dotnet", "build", entry_point, "--configuration", "Release",
-                 "--no-restore", "--nologo", "--verbosity", "normal"],
+                 "--no-restore", "--nologo", "--verbosity", "normal",
+                 "-p:UseSharedCompilation=false", "--disable-build-servers", "-m:1",
+                 "-p:BuildInParallel=false", "-p:RunAnalyzersInParallel=false"],
         "network_during_execution": "denied",
+        "determinism_note": (
+            "Scope N2-A.1: the shared Roslyn/VBCSCompiler compilation server can "
+            "interleave CoreCompile diagnostics in different orders across "
+            "independent builds even with identical source/toolchain/environment "
+            "(observed in workflow run 29371996936). --disable-build-servers alone "
+            "was proven insufficient under real Sandboy-confined, separately-"
+            "provisioned capture (workflow run 29374881325); this full combination "
+            "was proven deterministic across three independent real capture-a/"
+            "capture-b comparisons (runs 29375074566, 29383202537, 29383433153). "
+            "Every ecosystem plan produced by this adapter carries these controls, "
+            "not just the N2-A reference case."
+        ),
     }
 
 

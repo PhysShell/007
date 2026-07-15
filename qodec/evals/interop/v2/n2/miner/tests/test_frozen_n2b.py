@@ -7,7 +7,10 @@ import sys
 import unittest
 from pathlib import Path
 
-BASE = "d7fd03fdc6fcbf731de81d538ab0f7bca512a607"  # accepted N2-A merge into 007 main
+BASE = "2276020dbb437383317f4dd4f7b82c26ec78c2b4"  # Scope N2-A.1 implementation commit — re-anchored per
+# section 9's two-commit protocol; supersedes the prior N2-A base
+# (d7fd03fdc6fcbf731de81d538ab0f7bca512a607) now that N2-A.1 has
+# intentionally changed canary/** and the canary workflow file.
 ACCEPTED_SANDBOY_COMMIT_SHA = "e925058ddea405b5821fc0aed4882c76650dcbe9"
 
 FROZEN_PATHS = [
