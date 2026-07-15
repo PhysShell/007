@@ -1,0 +1,76 @@
+{
+  "applicable_case_ids": [
+    "repo-docker-java-parser"
+  ],
+  "approving_decision_identity": "n2d1b-maven-canonicalization-authorization-2026-07-16",
+  "canonicalizer_module": "maven_canonicalizer.py",
+  "evidence_bounded_diff": "24c24\n< [\\x1b[1;34mINFO\\x1b[m] Storing buildNumber: null at timestamp: 1784136905453\n---\n> [\\x1b[1;34mINFO\\x1b[m] Storing buildNumber: null at timestamp: 1784136890043\n59c59\n< [\\x1b[1;34mINFO\\x1b[m] compile in 11.4 s\n---\n> [\\x1b[1;34mINFO\\x1b[m] compile in 10.5 s\n80c80\n< [\\x1b[1;34mINFO\\x1b[m] compile in 3.3 s\n---\n> [\\x1b[1;34mINFO\\x1b[m] compile in 3.1 s\n94c94\n< [\\x1b[1;34mINFO\\x1b[m] [\\x1b[1;32mTests run: [\\x1b[0;1;32m3[\\x1b[m, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.14 s - in com.github.thstock.djp.[\\x1b[1mScalaParserTest[\\x1b[m\n---\n> [\\x1b[1;34mINFO\\x1b[m] [\\x1b[1;32mTests run: [\\x1b[0;1;32m3[\\x1b[m, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.134 s - in com.github.thstock.djp.[\\x1b[1mScalaParserTest[\\x1b[m\n103,104c103,104\n< [\\x1b[1;34mINFO\\x1b[m] Total time:  18.865 s\n< [\\x1b[1;34mINFO\\x1b[m] Finished at: 2026-07-15T17:35:22Z\n---\n> [\\x1b[1;34mINFO\\x1b[m] Total time:  17.597 s\n> [\\x1b[1;34mINFO\\x1b[m] Finished at: 2026-07-15T17:35:06Z\n",
+  "evidence_run": {
+    "both_captures_independently_content_accepted": true,
+    "capture_a_artifact": {
+      "name": "n2d1b-pilot-repo-docker-java-parser-capture-a",
+      "raw_stdout_sha256": "64bf92980b12746bdea5e60379689dac48d2905564c1272ce22aba2fb39bd31d"
+    },
+    "capture_b_artifact": {
+      "name": "n2d1b-pilot-repo-docker-java-parser-capture-b",
+      "raw_stdout_sha256": "203d7b979043e11af350bee7335ff63906ede2873cc399ec1fec54f73272baa7"
+    },
+    "head_sha": "216116af7de9f56caa6dd44228715e798fe172e7",
+    "workflow_run_id": 29436883023
+  },
+  "policy_sha256": "d633497d6b2e5575bdaeb183ad10b140e2900df98d8299caa57772fd4d8b495c",
+  "policy_type": "n2d1b-capture-canonicalization-policy-v1",
+  "policy_version": 1,
+  "prohibited_transformations": [
+    "faking, freezing, or otherwise altering wall-clock time during the real build",
+    "altering the frozen Maven execution argv",
+    "trimming leading/trailing whitespace beyond a rule's own anchored match",
+    "deduplicating lines",
+    "removing lines",
+    "reordering lines",
+    "a generic 'number followed by seconds' replacement across arbitrary diagnostic lines",
+    "replacing test counts, failure counts, error counts, skipped counts, or suite names",
+    "applying any rule to a case_id outside applicable_case_ids",
+    "reusing the general-purpose canary sanitizer (sanitizer.sanitize) as the canonical-input transformer"
+  ],
+  "rules": [
+    {
+      "anchored_regex": "^\\[\u001b\\[1;34mINFO\u001b\\[m\\]\\ Storing\\ buildNumber:\\ null\\ at\\ timestamp:\\ (\\d+|<TIMESTAMP>)$",
+      "evidence_justification": "Diff hunk 24c24: buildnumber-maven-plugin (bound to the `validate` phase) prints its own wall-clock read with no known suppress/override property in this plugin version.",
+      "placeholder": "<TIMESTAMP>",
+      "rule_name": "buildnumber_timestamp",
+      "trigger_substring": "Storing buildNumber:"
+    },
+    {
+      "anchored_regex": "^\\[\u001b\\[1;34mINFO\u001b\\[m\\]\\ compile\\ in\\ (\\d+\\.\\d+|<ELAPSED>)\\ s$",
+      "evidence_justification": "Diff hunks 59c59 and 80c80: scala-maven-plugin prints a per-module 'compile in N s' line after each of this project's two Scala compilation units; both are real wall-clock durations of the live compiler invocation, not a config-controllable value.",
+      "placeholder": "<ELAPSED>",
+      "rule_name": "scala_compile_duration",
+      "trigger_substring": "compile in "
+    },
+    {
+      "anchored_regex": "^\\[\u001b\\[1;34mINFO\u001b\\[m\\]\\ \u001b\\[1;32mTests\\ run:\\ \u001b\\[0;1;32m(\\d+)\u001b\\[m,\\ Failures:\\ (\\d+),\\ Errors:\\ (\\d+),\\ Skipped:\\ (\\d+),\\ Time\\ elapsed:\\ (\\d+\\.\\d+|<ELAPSED>)\\ s\\ \\-\\ in\\ (.+)$",
+      "evidence_justification": "Diff hunk 94c94: surefire's own JUnit runner prints the real wall-clock elapsed time for the test class inside its 'Tests run: ...' summary line -- test counts/failures/errors/skipped/suite name are stable and must never be touched by this rule.",
+      "placeholder": "<ELAPSED>",
+      "rule_name": "surefire_time_elapsed",
+      "trigger_substring": "Time elapsed:"
+    },
+    {
+      "anchored_regex": "^\\[\u001b\\[1;34mINFO\u001b\\[m\\]\\ Total\\ time:\\ \\ (\\d+\\.\\d+ s|<ELAPSED>)$",
+      "evidence_justification": "Diff hunk 103,104c103,104 (first line): Maven core's own ExecutionEventLogger prints the real wall-clock total build duration; no suppress flag exists that keeps the BUILD SUCCESS/Tests-run banner while hiding only this line (`-q` would suppress both).",
+      "placeholder": "<ELAPSED>",
+      "rule_name": "maven_total_time",
+      "trigger_substring": "Total time:"
+    },
+    {
+      "anchored_regex": "^\\[\u001b\\[1;34mINFO\u001b\\[m\\]\\ Finished\\ at:\\ (\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z|<TIMESTAMP>)$",
+      "evidence_justification": "Diff hunk 103,104c103,104 (second line): Maven core's own ExecutionEventLogger prints the real wall-clock build-completion timestamp; same suppression constraint as maven_total_time.",
+      "placeholder": "<TIMESTAMP>",
+      "rule_name": "maven_finished_at",
+      "trigger_substring": "Finished at:"
+    }
+  ],
+  "scope_statement": "This policy applies ONLY to the case_id(s) listed in applicable_case_ids. Any other case found to need additional canonicalization rules must stop for separate D1b review -- this policy is not extended silently.",
+  "selected_source_stream": "stdout",
+  "utf8_and_line_ending_policy": "Input must be valid UTF-8 (strict decode); invalid UTF-8 is a hard failure, never a lossy replace. Line order, line count, and each line's own original line-ending sequence (or absence of one, for a final line with no trailing newline) are preserved exactly -- the canonicalizer only ever substitutes a rule-matched value within a line's own content, never its terminator."
+}

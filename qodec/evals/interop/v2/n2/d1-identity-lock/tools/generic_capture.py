@@ -37,12 +37,27 @@ for p in (CANARY_TOOLS, MINER_TOOLS, CORPUS_TOOLS, TOOLS_DIR):
 import capture_build  # noqa: E402
 import content_acceptance  # noqa: E402
 import generic_sandbox_policy as gsp  # noqa: E402
+import maven_canonicalizer  # noqa: E402
 import network_enforcement_probe  # noqa: E402
 import receipt_contract  # noqa: E402
 import toolchain_identity  # noqa: E402
 from sanitizer import sanitize  # noqa: E402
 
 MAXIMUM_EXTRACTED_SOURCE_BYTES = 4194304  # 4 MiB -- same durable-input cap as derive_raw_input.py
+
+CANONICALIZATION_POLICY_PATH = TOOLS_DIR.parent / "capture-canonicalization-policy.json"
+
+# D1b decision (2026-07-16): for the case_id(s) this policy names, the
+# canonical benchmark input is a deterministic derivation of the raw,
+# selected stream through a narrowly scoped canonicalization profile --
+# exact raw capture-a/capture-b byte equality is no longer required for
+# those cases, only exact CANONICAL equality (see
+# capture-canonicalization-policy.json / maven_canonicalizer.py). Every
+# other case is entirely unaffected: its canonical benchmark input remains
+# the raw, capped, selected stream verbatim, exactly as before this
+# decision.
+_CANONICALIZATION_POLICY = json.loads(CANONICALIZATION_POLICY_PATH.read_text())
+CANONICALIZED_CASE_IDS = frozenset(_CANONICALIZATION_POLICY["applicable_case_ids"])
 
 
 class GenericCaptureFailure(Exception):
@@ -255,16 +270,21 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
     sanitized_stdout, stdout_report = sanitize(result["raw_stdout"], tmp_root=str(work_dir))
     sanitized_stderr, stderr_report = sanitize(result["raw_stderr"], tmp_root=str(work_dir))
 
+    # `canonical_bytes` is the FULL (uncapped) selected stream -- immutable
+    # raw execution evidence, never itself mutated below.
     canonical_bytes = result["raw_stdout"] if canonical_stream == "stdout" else result["raw_stderr"]
-    canonical_capped = apply_durable_byte_cap(canonical_bytes)
+    raw_selected_capped = apply_durable_byte_cap(canonical_bytes)
 
     # Fail-closed content-acceptance gate: a schema-valid receipt is NOT a
     # valid capture. Real inspection of CI run #6's 18 "successful" captures
     # found every one was an infrastructure/sandbox failure (empty or
     # non-workload stdout) that nothing here had ever validated against.
-    # This report is written for BOTH accepted and rejected captures.
+    # This report is written for BOTH accepted and rejected captures. Always
+    # run against the REAL raw (capped) selected stream -- never the
+    # canonicalized derivation below -- so a canonicalization rule can never
+    # mask a genuine content failure.
     content_report = content_acceptance.validate_capture_content(
-        case_id=case_id, canonical_stream_bytes=canonical_capped,
+        case_id=case_id, canonical_stream_bytes=raw_selected_capped,
         raw_stdout=result["raw_stdout"], raw_stderr=result["raw_stderr"],
         exit_code=result["exit_code"], execution_argv_resolution=resolution,
     )
@@ -275,6 +295,35 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
         raise GenericCaptureFailure(
             f"{case_id}/{job_name}: capture content rejected: {'; '.join(content_report['rejection_reasons'])}"
         )
+
+    # D1b decision (2026-07-16): for case_ids named in
+    # capture-canonicalization-policy.json, the canonical benchmark input is
+    # a deterministic derivation of the full raw selected stream through a
+    # narrowly scoped, self-hash-locked canonicalization profile -- never a
+    # byte-prefix of raw stdout, always a documented transformation. Every
+    # other case is untouched: its canonical benchmark input remains the
+    # raw, capped, selected stream verbatim, exactly as before this
+    # decision.
+    canonicalization_report = None
+    if case_id in CANONICALIZED_CASE_IDS:
+        try:
+            canonical_pre_cap_bytes, canonicalization_report = maven_canonicalizer.canonicalize_stream(canonical_bytes)
+        except maven_canonicalizer.CanonicalizerError as e:
+            raise GenericCaptureFailure(f"{case_id}/{job_name}: canonicalization failed: {e}") from e
+        canonical_input_derivation = "case-specific-deterministic-canonicalization"
+        (out_dir / "canonicalization-report.json").write_text(
+            json.dumps(canonicalization_report, indent=2, sort_keys=True) + "\n"
+        )
+    else:
+        canonical_input_derivation = "raw-capped-stream"
+        canonical_pre_cap_bytes = canonical_bytes
+
+    canonical_capped = apply_durable_byte_cap(canonical_pre_cap_bytes)
+    try:
+        canonical_capped.decode("utf-8", errors="strict")
+        canonical_benchmark_input_is_valid_utf8 = True
+    except UnicodeDecodeError:
+        canonical_benchmark_input_is_valid_utf8 = False
 
     receipt = {
         "receipt_contract_version": "n2b-receipt-contract-v1",
@@ -314,8 +363,32 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
         "trusted_dependency_realization": trusted_setup_result,
         "canonical_stream": canonical_stream,
         "canonical_stream_rationale": primary_stream_rationale,
+        "canonical_input_derivation": canonical_input_derivation,
+        "raw_selected_stream_identity": {
+            "sha256": sha256_bytes(canonical_bytes),
+            "byte_size": len(canonical_bytes),
+        },
+        "canonicalization_policy_sha256": (
+            _CANONICALIZATION_POLICY["policy_sha256"] if canonicalization_report is not None else None
+        ),
+        "canonicalization_report_sha256": (
+            sha256_bytes((json.dumps(canonicalization_report, indent=2, sort_keys=True) + "\n").encode())
+            if canonicalization_report is not None else None
+        ),
+        "canonicalization_transformations": (
+            [
+                {"rule_name": name, "match_count": count}
+                for name, count in canonicalization_report["rule_match_counts"].items()
+            ] if canonicalization_report is not None else []
+        ),
+        "canonical_pre_cap_identity": {
+            "sha256": sha256_bytes(canonical_pre_cap_bytes),
+            "byte_size": len(canonical_pre_cap_bytes),
+        },
         "canonical_raw_input_sha256": sha256_bytes(canonical_capped),
         "canonical_raw_input_byte_size": len(canonical_capped),
+        "canonical_benchmark_input_is_valid_utf8": canonical_benchmark_input_is_valid_utf8,
+        "raw_capture_content_classification": content_report["content_classification"],
         "wall_time_s": result["wall_time_s"],
         "peak_rss_kb": result["peak_rss_kb"],
         "sanitized_stdout_sha256": stdout_report["sanitized_sha256"],

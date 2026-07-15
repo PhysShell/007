@@ -100,6 +100,33 @@ causes above. The five-ecosystem pilot and full matrix must both pass
 content-level acceptance on fresh captures before any new Stage 1/Stage 2
 acceptance record may be built.
 
+### Raw execution evidence vs. canonical benchmark input
+
+Every capture's `raw.stdout`/`raw.stderr` are **immutable raw execution
+evidence** -- written verbatim, never mutated, retained permanently
+alongside the canonical benchmark input. For all cases but one, the
+**canonical benchmark input** is that same raw (capped) selected stream,
+byte-for-byte (`canonical_input_derivation: "raw-capped-stream"` in the
+receipt).
+
+`repo-docker-java-parser` is the one exception (D1b-authorized
+2026-07-16): its canonical benchmark input is instead a **deterministic
+derivation** of the raw selected stream through an explicit, narrowly
+scoped, self-hash-locked canonicalization profile
+(`canonical_input_derivation: "case-specific-deterministic-canonicalization"`) --
+see [`capture-canonicalization-policy.json`](capture-canonicalization-policy.json)
+and [`tools/maven_canonicalizer.py`](tools/maven_canonicalizer.py). Real CI
+evidence (run 29436883023) showed capture-a/capture-b's raw Maven stdout
+differ in exactly five known wall-clock/timestamp presentation fields
+(buildnumber-maven-plugin's timestamp, scala-maven-plugin's per-module
+compile duration, surefire's test-elapsed field, and Maven core's total-time
+and finished-at lines) with no known config-level suppression -- so exact
+raw-byte equality is no longer required for this case, only exact
+*canonical* equality, verified by `tools/verify_pilot_pair_reproducibility.py`.
+This exception applies **only** to `repo-docker-java-parser`; any other
+case found to need canonicalization must stop for separate D1b review, per
+the policy's own `scope_statement`.
+
 ## What N2-D1 does not do
 
 Execute the determinism canary (N2-D2) or the primary token benchmark
