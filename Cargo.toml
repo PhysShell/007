@@ -2,7 +2,7 @@
 name = "o7"
 version = "0.1.0"
 edition = "2021"
-description = "007 — private harness: one isolated, gated agent run over a target repo"
+description = "007 — personal harness: one isolated, gated agent run over a target repo"
 publish = false
 
 [[bin]]
@@ -17,6 +17,26 @@ toml = "0.8"
 anyhow = "1"
 sha1 = "0.10"
 sha2 = "0.10"
+# `invoke.rs` only: independently re-validates a backend's structured output
+# against a caller-supplied JSON Schema. Default features pull in `reqwest`
+# (remote $ref resolution) -- explicitly off: a schema-validating primitive
+# must not gain a network path from a dependency default, especially one
+# fed an arbitrary caller-supplied schema file. `cargo deny check` run
+# against this addition: one new license to allow (`borrow-or-share` is
+# MIT-0, strictly more permissive than plain MIT -- added to deny.toml),
+# advisories/bans/sources all clean.
+jsonschema = { version = "0.47", default-features = false }
+
+# `invoke.rs` timeout path only (unix): SIGKILL the backend's WHOLE process
+# group, not just the direct child, so a descendant still holding the stdout/
+# stderr pipe can't keep the reader threads (and thus the "timeout" itself)
+# blocked forever. `nix::sys::signal::killpg` is used because the tree forbids
+# `unsafe` (`[lints.rust] unsafe_code = "forbid"`) and nix wraps the raw
+# syscall in a safe API. Unix-only by construction -- 007 runs on WSL2/Linux;
+# a Windows Job Object equivalent is explicitly out of scope. `nix` is MIT
+# (allowed in deny.toml); it pulls only bitflags/cfg-if/libc, all permissive.
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", default-features = false, features = ["signal"] }
 
 # Lints. Curated to pass `clippy --all-targets -D warnings` clean on today's code
 # (ratchet, not a blast): the broad pedantic/nursery families are deliberately

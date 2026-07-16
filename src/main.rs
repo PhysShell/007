@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use o7::agent::{self, Engine};
 use o7::gate::GateManifest;
+use o7::invoke;
 use o7::judge;
 use o7::record::{RunMeta, RunRecord};
 use o7::verdict::Verdict;
@@ -28,6 +29,8 @@ enum Cmd {
     Run(RunArgs),
     /// Judge: read-only FP-triage of analyzer findings -> fp-verdicts.json overlay.
     Judge(judge::JudgeArgs),
+    /// Invoke: one narrow, read-only, schema-bound single-shot agent call.
+    Invoke(invoke::InvokeArgs),
 }
 
 #[derive(Args)]
@@ -72,6 +75,7 @@ fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Run(a) => run(a),
         Cmd::Judge(a) => judge::run(&a),
+        Cmd::Invoke(a) => invoke::run(&a),
     }
 }
 

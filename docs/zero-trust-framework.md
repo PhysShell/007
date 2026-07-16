@@ -300,9 +300,11 @@ this order, none of it exotic:
 - `cargo-udeps` — unused dependencies are dead attack surface.
 - Dependency redundancy — two crates doing the same job is double audit
   burden for no benefit.
-- OpenSSF Scorecard — for the public sibling repos (Own.NET, OwnAudit); 007
-  itself stays private (per its own README) so Scorecard's public-repo signals
-  don't apply to it directly.
+- OpenSSF Scorecard — for the public sibling repos (Own.NET, OwnAudit).
+  007 itself is also public (see `docs/public-governance.md` — the README's
+  earlier "keep this private" claim was stale, not a decision); whether to
+  run Scorecard against 007's own tree too, given that, is an open backlog
+  question this note doesn't resequence.
 - `cargo-vet` — once the dependency graph is large enough that per-crate
   manual review stops scaling; premature today at 007's current dependency
   count (`clap`/`serde`/`serde_json`/`toml`/`anyhow`/`sha1`/`sha2`).
