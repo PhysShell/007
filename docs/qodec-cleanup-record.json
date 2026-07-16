@@ -3,7 +3,7 @@
   "history_rewritten": false,
   "old_main_before_sha": "9fdba97887f5a1dcd042ddd8142ceb731c5cccdf",
   "old_repository": "PhysShell/007",
-  "record_sha256": "sha256:da34135666baf7ff1267de891b448139efcf6e2a7ec1baec441114a013e6c2ca",
+  "record_sha256": "sha256:a5cccb95d5561df9092337678ce511b03dce75ec54685b76f809d018b098aee7",
   "record_type": "embedded-qodec-removal-v1",
   "removed_flake_outputs": [
     "apps.qodec-rtk-smoke",
@@ -24,6 +24,8 @@
     "checks.qodec-v2-no-benchmark-data",
     "checks.qodec-v2-pilot-capture",
     "checks.qodec-v2-pilot-reproduce",
+    "checks.qodec-v2-pilot-run",
+    "checks.qodec-v2-pilot-validate",
     "checks.rtk-pinned-build",
     "devShells.qodec-bench",
     "inputs.rtk-src",
