@@ -125,6 +125,41 @@ class TestBuildPolicy(unittest.TestCase):
         self.assertNotIn('"/runner-temp/venv-repo-pyflakes"', fs_rw_line)
         self.assertIn('"VIRTUAL_ENV"', text)
 
+    def test_python_policy_exposes_pinned_base_interpreter_root_read_only(self):
+        # PYTHON_BASE_INTERPRETER_ROOT is synthetic/policy-only (never itself
+        # forwarded to the confined child -- nothing reads this env var at
+        # runtime), pointing at the pinned actions/setup-python install root
+        # the venv's bin/python symlinks INTO. Real evidence (repo-pyflakes,
+        # CI run 29466573023): "sandboy: exec .../bin/python: Permission
+        # denied (os error 13)" until this root is granted fs_ro.
+        text = gsp.build_policy(
+            ecosystem="python", case_id="repo-pyflakes", source_root=Path("/src"), home_dir=Path("/h"),
+            tmp_dir=Path("/t"), capture_out_dir=Path("/o"),
+            project_writable_dirs=[],
+            env_values={
+                "VIRTUAL_ENV": "/runner-temp/venv-repo-pyflakes",
+                "PYTHON_BASE_INTERPRETER_ROOT": "/opt/hostedtoolcache/Python/3.12.3/x64",
+            },
+        )
+        fs_ro_line = next(line for line in text.splitlines() if line.startswith("fs_ro"))
+        fs_rw_line = next(line for line in text.splitlines() if line.startswith("fs_rw"))
+        self.assertIn('"/opt/hostedtoolcache/Python/3.12.3/x64"', fs_ro_line)
+        self.assertNotIn('"/opt/hostedtoolcache/Python/3.12.3/x64"', fs_rw_line)
+        # Synthetic, policy-only key -- never added to env_allow.
+        self.assertNotIn('"PYTHON_BASE_INTERPRETER_ROOT"', text)
+
+    def test_python_policy_omits_base_interpreter_root_when_not_pinned(self):
+        # Other python cases (e.g. repo-requests) have no pinned base
+        # interpreter -- absence of the key must not raise or inject a
+        # spurious fs_ro entry.
+        text = gsp.build_policy(
+            ecosystem="python", case_id="repo-requests", source_root=Path("/src"), home_dir=Path("/h"),
+            tmp_dir=Path("/t"), capture_out_dir=Path("/o"),
+            project_writable_dirs=[],
+            env_values={"VIRTUAL_ENV": "/runner-temp/venv-repo-requests"},
+        )
+        self.assertNotIn("hostedtoolcache", text)
+
     def test_python_policy_does_not_expose_unrelated_sibling_paths(self):
         # Only the exact venv root for THIS job -- not the whole
         # $RUNNER_TEMP directory tree that houses sibling jobs' venvs too.

@@ -291,13 +291,26 @@ def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
         # actually exposed the real venv path and reproduced the identical
         # PermissionError as before the fix existed.
         venv_root = str(Path(python_bin).parent.parent)
+        env_values = {"VIRTUAL_ENV": venv_root, "PYTHONDONTWRITEBYTECODE": "1", "PIP_NO_INDEX": "1"}
+        if args.python_base_interpreter:
+            # The venv's bin/python symlinks to the pinned actions/setup-python
+            # base interpreter (e.g. /opt/hostedtoolcache/Python/3.12.3/x64/
+            # bin/python3), a nonstandard toolchain root BASELINE_FS_RO never
+            # covers -- Sandboy's own Landlock exec denial on the symlink's
+            # real target ("Permission denied (os error 13)", CI run
+            # 29466573023) proved this, mirroring JAVA_HOME/DOTNET_ROOT's
+            # existing extra_fs_ro_from_env grants. Synthetic, policy-only key
+            # (parent-of-parent of the base interpreter path): never itself
+            # read by Python at runtime, so it is NOT added to env_allow.
+            base_interpreter_root = str(Path(args.python_base_interpreter).parent.parent)
+            env_values["PYTHON_BASE_INTERPRETER_ROOT"] = base_interpreter_root
         return (
             lambda source_root: et.capture_python_toolchain_identity(
                 python_bin,
                 base_interpreter_path=args.python_base_interpreter or None,
                 setup_python_action_commit=args.setup_python_action_commit or None,
             ),
-            {"VIRTUAL_ENV": venv_root, "PYTHONDONTWRITEBYTECODE": "1", "PIP_NO_INDEX": "1"},
+            env_values,
         )
     if ecosystem == "dotnet":
         dotnet_root, dotnet_bin = _resolve_dotnet_bin()

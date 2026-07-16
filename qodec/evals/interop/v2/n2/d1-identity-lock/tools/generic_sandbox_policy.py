@@ -61,7 +61,19 @@ ECOSYSTEM_POLICY_HINTS = {
         # "PermissionError: .../pyvenv.cfg" until this exact directory was
         # made fs_ro-visible. Read+execute only; the interpreter never needs
         # to write into its own venv during a capture.
-        "extra_fs_ro_from_env": ["VIRTUAL_ENV"],
+        # PYTHON_BASE_INTERPRETER_ROOT is a synthetic, policy-only key (never
+        # itself forwarded to the confined child -- nothing reads this env
+        # var at runtime) pointing at the pinned actions/setup-python install
+        # root (e.g. /opt/hostedtoolcache/Python/3.12.3/x64), which the venv's
+        # bin/python is a symlink INTO. Real evidence (repo-pyflakes, CI run
+        # 29466573023, after the setup-python pin let the venv's interpreter
+        # identity resolve correctly): "sandboy: exec .../venv-repo-pyflakes/
+        # bin/python: Permission denied (os error 13)" -- Sandboy's own
+        # Landlock denial on the symlink's REAL TARGET, which BASELINE_FS_RO
+        # never covers since hostedtoolcache is outside /usr,/bin,/lib. Same
+        # class of gap as JAVA_HOME/DOTNET_ROOT: any toolchain installed
+        # outside the baseline system paths needs its own explicit grant.
+        "extra_fs_ro_from_env": ["VIRTUAL_ENV", "PYTHON_BASE_INTERPRETER_ROOT"],
         "extra_fs_rw_from_env": [],
     },
     "jvm-maven": {

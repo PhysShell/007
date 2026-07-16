@@ -493,6 +493,29 @@ jobs:
           JAVA_HOME: /usr/lib/jvm/java-21-openjdk-amd64
         run: ./gradlew --version
 
+      - name: Trusted setup — prime com.diffplug.spotless plugin resolution (repo-spotless only)
+        if: matrix.case.case_id == 'repo-spotless'
+        working-directory: ${{ runner.temp }}/source-artifact/${{ matrix.case.case_id }}/source
+        env:
+          JAVA_HOME: /usr/lib/jvm/java-21-openjdk-amd64
+        run: |
+          # Real evidence (CI run 29466573023, AFTER the network-enforcement
+          # probe's own fs_ro fix was confirmed working -- both probes
+          # exit 0): the confined capture's frozen `./gradlew spotlessCheck`
+          # then failed with "Plugin [id: 'com.diffplug.spotless', version:
+          # '8.7.0', apply: false] was not found" -- resolving the plugin
+          # itself needs the real Gradle Plugin Portal, real external
+          # network the loopback-only exception correctly does NOT grant
+          # (the SAME run's negative probe confirmed real external targets
+          # stay unreachable). Same class of gap as Maven's own
+          # compiler-bridge finding above: prime GRADLE_USER_HOME's
+          # (already fs_rw-granted) cache by running the real frozen task
+          # once here, network allowed; its own output is discarded -- the
+          # confined capture below always re-extracts a pristine source.tar
+          # into its own separate work_dir/source, so this priming run is
+          # not itself the captured execution.
+          ./gradlew spotlessCheck || true
+
       - name: Run the D1b generic capture (${{ matrix.job }})
         run: |
           # Fixed-visible-path discipline (D1b decision, 2026-07-15): the

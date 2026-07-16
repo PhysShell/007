@@ -31,6 +31,8 @@ def _args(**overrides):
         "java_home_11": "/usr/lib/jvm/java-11-openjdk-amd64",
         "java_home_21": "/usr/lib/jvm/java-21-openjdk-amd64",
         "venv_python": "",
+        "python_base_interpreter": "",
+        "setup_python_action_commit": "",
     }
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -57,6 +59,28 @@ class TestPythonVenvRootComputation(unittest.TestCase):
             # The bug this guards against: .resolve() following the symlink
             # would have produced the base interpreter's grandparent instead.
             self.assertNotEqual(env_values["VIRTUAL_ENV"], str(fake_base_python.parent.parent))
+            self.assertNotIn("PYTHON_BASE_INTERPRETER_ROOT", env_values)
+
+    def test_pinned_base_interpreter_root_is_the_grandparent_of_the_base_interpreter_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            base_interpreter = tmp_path / "hostedtoolcache" / "Python" / "3.12.3" / "x64" / "bin" / "python3"
+            base_interpreter.parent.mkdir(parents=True)
+            base_interpreter.write_text("#!/bin/sh\n")
+
+            venv_root = tmp_path / "venv-repo-pyflakes"
+            (venv_root / "bin").mkdir(parents=True)
+            venv_python = venv_root / "bin" / "python"
+            venv_python.symlink_to(base_interpreter)
+
+            _toolchain_fn, env_values = rpc.build_toolchain_fn_and_env(
+                "python",
+                _args(venv_python=str(venv_python), python_base_interpreter=str(base_interpreter)),
+            )
+            self.assertEqual(
+                env_values["PYTHON_BASE_INTERPRETER_ROOT"],
+                str(tmp_path / "hostedtoolcache" / "Python" / "3.12.3" / "x64"),
+            )
 
 
 class TestMavenLocalRepoExposure(unittest.TestCase):
