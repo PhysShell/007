@@ -11,10 +11,16 @@
 # on flake.lock/flake.nix, so rtk-pinned/qodec are not rebuilt cold every run.
 # This uses GitHub's built-in Actions cache — NO Cachix/FlakeHub secret. Saving
 # the cache needs `actions: write` (the only scope beyond contents: read).
+# MIGRATION NOTICE: QODEC has been extracted to the standalone
+# PhysShell/qodec repository (see qodec/docs/migration/README.md and
+# PhysShell/qodec's MIGRATION_PROVENANCE.json), which now runs this same
+# corpus-compiler CI on its own pull_request trigger. This copy's automatic
+# trigger has been retired so unrelated 007 changes no longer run it; it
+# is kept workflow_dispatch-only as historical record. Do not re-enable
+# automatic triggers or resume benchmark work on this copy.
 name: qodec-v2-corpus
 
 on:
-  pull_request:
   workflow_dispatch:
 
 permissions:

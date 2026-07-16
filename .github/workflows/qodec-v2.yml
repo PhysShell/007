@@ -8,12 +8,16 @@
 # Third-party actions are pinned to full immutable commit SHAs (never @main /
 # @master / a floating tag). The trailing comment records the human-readable
 # release for each pin. Verify the SHA against upstream before trusting a pin.
+# MIGRATION NOTICE: QODEC has been extracted to the standalone
+# PhysShell/qodec repository (see qodec/docs/migration/README.md and
+# PhysShell/qodec's MIGRATION_PROVENANCE.json), which now runs this same
+# Nix-driven CI on its own pull_request/push triggers. This copy's automatic
+# triggers have been retired so unrelated 007 changes no longer run it; it
+# is kept workflow_dispatch-only as historical record. Do not re-enable
+# automatic triggers or resume benchmark work on this copy.
 name: qodec-v2
 
 on:
-  pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 # Least privilege: read-only. No write scopes are granted.

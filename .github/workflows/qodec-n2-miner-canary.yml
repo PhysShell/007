@@ -23,19 +23,16 @@
 # Sandboy S0 gate) are injected into the capture jobs and proven absent from
 # the captured build output; this reuses the accepted S0 evidence rather than
 # re-running the full S0 feasibility suite here.
+# MIGRATION NOTICE: QODEC has been extracted to the standalone
+# PhysShell/qodec repository (see qodec/docs/migration/README.md and
+# PhysShell/qodec's MIGRATION_PROVENANCE.json). This workflow's automatic
+# pull_request trigger has been retired so unrelated 007 changes no longer
+# run it; it is kept workflow_dispatch-only as historical record of the
+# Scope N2-A canary evidence trail. Do not re-enable automatic triggers or
+# resume benchmark work on this copy -- new QODEC CI runs in PhysShell/qodec.
 name: qodec-n2-miner-canary
 
 on:
-  pull_request:
-    paths:
-      # Scope N2-A.1: narrowed from "qodec/evals/interop/v2/n2/**" — that
-      # broad filter also matched qodec/evals/interop/v2/n2/miner/** (Scope
-      # N2-B), so every N2-B-only push was incidentally re-executing this
-      # real, third-party-executing canary. It must still run when its own
-      # implementation or workflow changes; it must not run for changes
-      # confined to the miner/ tree.
-      - "qodec/evals/interop/v2/n2/canary/**"
-      - ".github/workflows/qodec-n2-miner-canary.yml"
   workflow_dispatch:
     inputs:
       run_determinism_probe:
