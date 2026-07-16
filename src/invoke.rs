@@ -30,6 +30,12 @@ const READ_ONLY_DATA_PROFILE: &str = "read-only-data";
 /// Backend subprocess timed out and had to be killed before finishing.
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
+/// Bounded wait for the best-effort `<binary> --version` probe. A hung or
+/// pathologically slow `--version` must never stall the real call; on timeout
+/// the probe yields `None` (`command_version` stays null), exactly like any
+/// other probe failure.
+const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[derive(clap::Args)]
 pub struct InvokeArgs {
     /// Backend agent CLI: claude | codex.
@@ -134,6 +140,14 @@ pub fn run(a: &InvokeArgs) -> Result<()> {
         );
     }
     let engine: Engine = a.engine.parse()?;
+
+    // Run-dir integrity: the out dir must be absent or an existing EMPTY dir,
+    // checked BEFORE the version probe or any backend spawn. A non-empty --out
+    // is refused, never partially overwritten -- otherwise a stale result.json
+    // from a previous PASS could be mistaken for the output of this run (which,
+    // if it FAILs, writes no result.json of its own).
+    ensure_empty_out(&a.out)?;
+
     let command_version = detect_version(engine.label());
 
     let prompt = std::fs::read_to_string(&a.prompt_file)
@@ -160,8 +174,7 @@ pub fn run(a: &InvokeArgs) -> Result<()> {
             .push(sha256_hex_file(p).with_context(|| format!("hashing input {}", p.display()))?);
     }
 
-    std::fs::create_dir_all(&a.out)
-        .with_context(|| format!("creating run dir {}", a.out.display()))?;
+    // `ensure_empty_out` above already created (or validated-empty) the dir.
     std::fs::write(a.out.join("prompt.txt"), &prompt)
         .with_context(|| format!("writing {}/prompt.txt", a.out.display()))?;
     let prompt_hash = sha256_hex_text(&prompt);
@@ -223,7 +236,7 @@ pub fn run(a: &InvokeArgs) -> Result<()> {
     let (status, structured, error_kind): (InvokeStatus, Option<serde_json::Value>, Option<&str>) =
         if call.timed_out {
             (InvokeStatus::BlockedTimeout, None, Some("timeout"))
-        } else if call.exit_code != Some(0) && any_marker(&combined_lower, AUTH_FAILURE_MARKERS) {
+        } else if call.exit_code != Some(0) && is_auth_failure(&combined_lower, engine) {
             (InvokeStatus::BlockedAuth, None, Some("auth"))
         } else if call.exit_code != Some(0) && any_marker(&combined_lower, USAGE_LIMIT_MARKERS) {
             (InvokeStatus::BlockedUsage, None, Some("usage_limit"))
@@ -301,6 +314,31 @@ fn display(p: &Path) -> String {
     p.display().to_string()
 }
 
+/// The run dir must be absent or an existing EMPTY directory. A non-empty
+/// `--out` is refused up front — this module writes only the files a given
+/// outcome produces (a FAIL leaves no `result.json`), so a stale `result.json`
+/// from a previous PASS reused into a later FAILED run would masquerade as that
+/// run's output. No selective per-file cleanup: the whole dir is required
+/// clean, which one `read_dir` verifies. Refusal happens before the version
+/// probe or any backend spawn (see `run`).
+fn ensure_empty_out(out: &Path) -> Result<()> {
+    match std::fs::read_dir(out) {
+        Ok(mut entries) => {
+            if entries.next().is_some() {
+                anyhow::bail!(
+                    "--out {} is not empty; refusing to run into a dir that may already \
+                     hold a previous run's result.json/meta.json -- use a fresh or empty dir",
+                    out.display()
+                );
+            }
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir_all(out)
+            .with_context(|| format!("creating run dir {}", out.display())),
+        Err(e) => Err(e).with_context(|| format!("inspecting run dir {}", out.display())),
+    }
+}
+
 /// NOT RFC3339 -- deliberately `"epoch:<seconds>"` instead. No chrono
 /// dependency for one timestamp: seconds-since-epoch is exact, sortable, and
 /// unambiguous; a caller that wants a `datetime` (Demand Radar's
@@ -337,9 +375,45 @@ fn strip_provider_api_keys(cmd: &mut Command) {
 /// comparing a populated field on one side against always-null on the other.
 /// `None` on any failure (including "not installed" -- `run` already
 /// classifies that case from the real call, not from this probe).
+///
+/// Provider API keys are stripped here too (`strip_provider_api_keys`): the
+/// probe is a provider subprocess like any other, so the docs' claim "keys
+/// stripped before every provider subprocess" stays literally true rather than
+/// true-for-the-call-but-not-the-probe. Bounded by `VERSION_PROBE_TIMEOUT` so a
+/// hung `--version` degrades to `None` instead of stalling the whole invoke;
+/// `stdin` is closed and `stderr` discarded so neither can block the probe.
 fn detect_version(binary: &str) -> Option<String> {
-    let out = Command::new(binary).arg("--version").output().ok()?;
-    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let mut cmd = Command::new(binary);
+    cmd.arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    strip_provider_api_keys(&mut cmd);
+    let mut child = cmd.spawn().ok()?;
+
+    let start = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break Some(s),
+            Ok(None) => {}
+            Err(_) => return None,
+        }
+        if start.elapsed() >= VERSION_PROBE_TIMEOUT {
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    if status.is_none() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return None;
+    }
+
+    // `--version` output is tiny, so reading after exit cannot deadlock on a
+    // full pipe buffer the way a chatty backend would.
+    let mut buf = String::new();
+    child.stdout.take()?.read_to_string(&mut buf).ok()?;
+    let text = buf.trim().to_string();
     if text.is_empty() {
         None
     } else {
@@ -380,17 +454,34 @@ fn strip_dollar_schema(schema: &serde_json::Value) -> serde_json::Value {
     v
 }
 
-const AUTH_FAILURE_MARKERS: &[&str] = &[
+/// Engine-agnostic auth-failure phrases. Deliberately specific: bare "login"
+/// and bare "please run" were REMOVED — both fire on unrelated diagnostics
+/// ("failed to login to the database", "please run cargo test") and a
+/// false BLOCKED_AUTH hides the real error. What stays here reads as an
+/// auth problem in isolation.
+const AUTH_MARKERS_SHARED: &[&str] = &[
     "not logged in",
     "please log in",
-    "please run `claude login`",
-    "please run",
-    "login",
-    "/login",
-    "authentication",
-    "unauthorized",
     "no active session",
+    "unauthorized",
+    "authentication",
 ];
+/// Claude-specific auth phrases. `"claude login"` also covers the longer
+/// "please run `claude login`" the CLI prints (substring match).
+const AUTH_MARKERS_CLAUDE: &[&str] = &["claude login", "/login"];
+/// Codex-specific auth phrases.
+const AUTH_MARKERS_CODEX: &[&str] = &["codex login"];
+
+/// Is this (already lowercased) combined stdout+stderr an auth failure for
+/// `engine`? Shared phrases plus that engine's own — never the other engine's
+/// (a codex-login hint in a claude run is not a claude auth failure).
+fn is_auth_failure(haystack: &str, engine: Engine) -> bool {
+    let engine_markers = match engine {
+        Engine::Claude => AUTH_MARKERS_CLAUDE,
+        Engine::Codex => AUTH_MARKERS_CODEX,
+    };
+    any_marker(haystack, AUTH_MARKERS_SHARED) || any_marker(haystack, engine_markers)
+}
 const USAGE_LIMIT_MARKERS: &[&str] = &[
     "usage limit",
     "rate limit",
@@ -445,6 +536,18 @@ fn spawn_with_timeout(
     timeout: Duration,
 ) -> Result<std::result::Result<RawCall, NotInstalled>> {
     cmd.stdin(Stdio::piped());
+    // Put the backend in its own process group (leader = the child itself) so
+    // the timeout path can SIGKILL the WHOLE group — child plus any descendant
+    // it spawned — not just the direct child. A descendant that inherited and
+    // still holds the stdout/stderr pipe would otherwise keep the reader
+    // threads blocked on `read_to_end` after we killed only the parent, so the
+    // join below (and thus the "timeout") would hang forever. Unix-only; 007
+    // runs on WSL2/Linux and a Windows Job Object equivalent is out of scope.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Err(NotInstalled)),
@@ -487,6 +590,19 @@ fn spawn_with_timeout(
 
     let timed_out = status.is_none();
     if timed_out {
+        // Kill the whole group BEFORE joining the reader/writer threads: on
+        // unix, SIGKILL the process group (pgid == child pid, from
+        // process_group(0) above) so a pipe-holding descendant dies too and the
+        // readers see EOF. `child.kill()` alone would leave that descendant
+        // holding the pipe and hang the joins. `nix::killpg` wraps the syscall
+        // safely (the tree forbids `unsafe`). The direct-child kill still runs
+        // as a belt-and-braces reap (and is the only step on non-unix).
+        #[cfg(unix)]
+        {
+            use nix::sys::signal::{killpg, Signal};
+            use nix::unistd::Pid;
+            let _ = killpg(Pid::from_raw(child.id() as i32), Signal::SIGKILL);
+        }
         let _ = child.kill();
         let _ = child.wait();
     }
@@ -553,31 +669,61 @@ fn call_claude(
     spawn_with_timeout(cmd, prompt, timeout)
 }
 
-/// Read-only `codex exec` call. Base flags match `judge.rs::call_codex`'s
-/// proven set (`--sandbox read-only`, `--skip-git-repo-check`, `--ephemeral`,
-/// `--color never`, `--output-last-message <file>`, stdout discarded), plus
-/// `-c features.shell_tool=false` on top of it (`judge.rs` doesn't carry
-/// this; Demand Radar's now-deleted `codex_cli.py` did). **Neither
-/// `--sandbox read-only` nor `-c features.shell_tool=false` is verified
-/// against a live `codex` install** (not installed in this build
-/// environment) — `--sandbox read-only` denies writes but does not disable
-/// network, and whether `features.shell_tool=false` actually removes the
-/// shell tool (as opposed to just restricting what it can do inside the
-/// sandbox) has never been observed. Docs/callers must **not** describe
-/// Codex's Zone 2 posture as "no shell" the way Claude's `--tools ""` earns
-/// that claim structurally — an earlier version of this comment did exactly
-/// that, and it was wrong (see `docs/o7-invoke.md`'s "Capability profiles"
-/// section here, and `demand-radar/docs/trust-boundaries.md` for the
-/// caller-side refusal this motivated). Include the flag anyway (defense
-/// in depth: it can only add restriction, and an invalid
-/// config key fails loudly rather than silently running less restricted)
-/// but callers processing untrusted external content must not select
-/// `--engine codex` until this is live-verified. Unlike claude, no
-/// `--json-schema`-equivalent is assumed to exist either; the schema is
-/// instead appended to the prompt as an instruction, and `run`'s independent
-/// `jsonschema` validation is what actually enforces it — the same "output
-/// re-validated by o7 itself" property claude gets from `--json-schema`
-/// plus the same re-validation.
+/// Build the read-only `codex exec` argv, WITHOUT spawning — so an argv test
+/// can assert the isolation flags and cwd without a live binary. Base flags
+/// match `judge.rs::call_codex`'s proven set (`--sandbox read-only`,
+/// `--skip-git-repo-check`, `--ephemeral`, `--color never`,
+/// `--output-last-message <file>`, stdout discarded), plus the ambient-context
+/// isolation this general primitive needs and `judge`'s narrower call did not:
+///
+/// - `-c features.shell_tool=false` — defense in depth (see the caveat below);
+/// - `--ignore-user-config` — refuse the user-level `~/.codex/config.toml`;
+/// - `--ignore-rules` — refuse ambient project/user rule files;
+/// - `current_dir(cwd)` — the caller sets a FRESH EMPTY temp dir, so codex
+///   cannot discover a project `.codex/config.toml` / `AGENTS.md` by walking up
+///   from wherever `o7` happened to be invoked.
+///
+/// Together these are the codex-side analogue of claude's `--setting-sources
+/// ""` + `--strict-mcp-config`: no ambient user/project context leaks into a
+/// closed-world call.
+///
+/// **Caveat, unchanged:** neither `--sandbox read-only` nor
+/// `features.shell_tool=false` is verified against a live `codex` install
+/// (none in this build environment). `--sandbox read-only` denies writes but
+/// does not disable network, and whether `features.shell_tool=false` actually
+/// removes the shell tool (vs. restricting it inside the sandbox) has never
+/// been observed. Docs/callers must **not** describe codex's posture as "no
+/// shell" the way claude's `--tools ""` earns that claim structurally (see
+/// `docs/o7-invoke.md`); a caller processing untrusted external content must
+/// not select `--engine codex` until this is live-verified. Unlike claude, no
+/// `--json-schema`-equivalent is assumed; the schema is appended to the prompt
+/// and `run`'s independent `jsonschema` validation is what enforces it.
+fn codex_command(model: Option<&str>, cwd: &Path, last_msg: &Path) -> Command {
+    let mut cmd = Command::new("codex");
+    strip_provider_api_keys(&mut cmd);
+    cmd.current_dir(cwd)
+        .arg("exec")
+        .arg("--ignore-user-config")
+        .arg("--ignore-rules")
+        .arg("--sandbox")
+        .arg("read-only")
+        .arg("--skip-git-repo-check")
+        .arg("--ephemeral")
+        .arg("--color")
+        .arg("never")
+        .arg("-c")
+        .arg("features.shell_tool=false")
+        .arg("--output-last-message")
+        .arg(last_msg)
+        .arg("-")
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    if let Some(m) = model {
+        cmd.arg("--model").arg(m);
+    }
+    cmd
+}
+
 fn call_codex(
     prompt: &str,
     schema: &serde_json::Value,
@@ -591,51 +737,41 @@ fn call_codex(
         serde_json::to_string_pretty(schema).unwrap_or_default()
     );
 
+    // A fresh, EMPTY per-call working directory: codex is launched from here so
+    // it cannot inherit a project `.codex/config.toml` / `AGENTS.md` / other
+    // cwd-context. Removed unconditionally after the call (it also holds the
+    // `--output-last-message` side-channel file).
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos());
-    let last_msg = std::env::temp_dir().join(format!(
-        "o7-invoke-codex-{}-{nanos}.txt",
+    let cwd = std::env::temp_dir().join(format!(
+        "o7-invoke-codex-cwd-{}-{nanos}",
         std::process::id()
     ));
+    std::fs::create_dir_all(&cwd)
+        .with_context(|| format!("creating codex isolated cwd {}", cwd.display()))?;
+    let last_msg = cwd.join("last-message.txt");
 
-    let mut cmd = Command::new("codex");
-    strip_provider_api_keys(&mut cmd);
-    cmd.arg("exec")
-        .arg("--sandbox")
-        .arg("read-only")
-        .arg("--skip-git-repo-check")
-        .arg("--ephemeral")
-        .arg("--color")
-        .arg("never")
-        .arg("-c")
-        .arg("features.shell_tool=false")
-        .arg("--output-last-message")
-        .arg(&last_msg)
-        .arg("-")
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped());
-    if let Some(m) = model {
-        cmd.arg("--model").arg(m);
-    }
-
-    let outcome = spawn_with_timeout(cmd, &augmented, timeout)?;
-    let mut call = match outcome {
-        Err(ni) => return Ok(Err(ni)),
-        Ok(c) => c,
-    };
+    let cmd = codex_command(model, &cwd, &last_msg);
+    let outcome = spawn_with_timeout(cmd, &augmented, timeout);
 
     // The answer lives in `last_msg`, never in stdout (judge.rs's own
-    // rationale: codex's stdout carries a session preamble whose stray `[`
-    // or `{` could fool a bracket-slicing extractor into a bogus "answer").
-    if !call.timed_out {
-        let text = std::fs::read_to_string(&last_msg).unwrap_or_default();
-        let _ = std::fs::remove_file(&last_msg);
-        call.stdout = text.into_bytes();
-    } else {
-        let _ = std::fs::remove_file(&last_msg);
-    }
-    Ok(Ok(call))
+    // rationale: codex's stdout carries a session preamble whose stray `[` or
+    // `{` could fool a bracket-slicing extractor into a bogus "answer"). Remove
+    // the isolated dir (side-channel file included) whatever the outcome.
+    let result = match outcome {
+        Ok(Ok(mut call)) => {
+            if !call.timed_out {
+                call.stdout = std::fs::read_to_string(&last_msg)
+                    .unwrap_or_default()
+                    .into_bytes();
+            }
+            Ok(Ok(call))
+        }
+        other => other,
+    };
+    let _ = std::fs::remove_dir_all(&cwd);
+    result
 }
 
 /// Turn one call's raw bytes into a JSON `Value` to schema-check, per
@@ -755,15 +891,145 @@ mod tests {
     }
 
     #[test]
-    fn any_marker_matches_case_folded_input() {
-        assert!(any_marker(
-            "please run `claude login` first",
-            AUTH_FAILURE_MARKERS
-        ));
+    fn usage_markers_match_case_folded_input() {
         assert!(any_marker(
             "you have hit your usage limit",
             USAGE_LIMIT_MARKERS
         ));
-        assert!(!any_marker("everything is fine", AUTH_FAILURE_MARKERS));
+        assert!(!any_marker("everything is fine", USAGE_LIMIT_MARKERS));
+    }
+
+    #[test]
+    fn real_auth_markers_still_classify() {
+        // The specific phrases each engine actually prints on an auth failure.
+        assert!(is_auth_failure(
+            "please run `claude login` first",
+            Engine::Claude
+        ));
+        assert!(is_auth_failure("error: not logged in", Engine::Claude));
+        assert!(is_auth_failure(
+            "run `codex login` to authenticate",
+            Engine::Codex
+        ));
+        assert!(is_auth_failure("no active session", Engine::Codex));
+    }
+
+    #[test]
+    fn unrelated_login_and_please_run_text_is_not_auth_failure() {
+        // Negative controls: bare "login" / "please run" were removed precisely
+        // because they fire on ordinary diagnostics that have nothing to do with
+        // auth. A false BLOCKED_AUTH here would bury the real error.
+        assert!(!is_auth_failure(
+            "failed to login to the postgres database at db:5432",
+            Engine::Claude
+        ));
+        assert!(!is_auth_failure(
+            "please run cargo test to reproduce this failure",
+            Engine::Claude
+        ));
+        assert!(!is_auth_failure(
+            "please run cargo test to reproduce this failure",
+            Engine::Codex
+        ));
+        // Cross-engine: a codex-login hint is not a claude auth failure.
+        assert!(!is_auth_failure("hint: try `codex login`", Engine::Claude));
+    }
+
+    #[test]
+    fn codex_command_is_ambient_isolated() {
+        // The argv MUST carry both ambient-config refusals and run from the
+        // caller-supplied fresh cwd (change 1). No live codex binary needed.
+        let cwd = Path::new("/tmp/o7-invoke-codex-cwd-test");
+        let last = cwd.join("last-message.txt");
+        let cmd = codex_command(None, cwd, &last);
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            args.iter().any(|a| a == "--ignore-user-config"),
+            "missing --ignore-user-config: {args:?}"
+        );
+        assert!(
+            args.iter().any(|a| a == "--ignore-rules"),
+            "missing --ignore-rules: {args:?}"
+        );
+        // Still closed-world on the sandbox/shell axis.
+        assert!(args.iter().any(|a| a == "read-only"));
+        assert!(args.iter().any(|a| a == "features.shell_tool=false"));
+        // Launched from the isolated cwd, not wherever o7 was invoked.
+        assert_eq!(cmd.get_current_dir(), Some(cwd));
+    }
+
+    #[test]
+    fn ensure_empty_out_contract() {
+        // absent -> created; existing-empty -> ok; non-empty -> refused.
+        // The non-empty case is the regression: a stale result.json from a
+        // previous PASS must NOT be reusable as the next run's dir (change 3).
+        let base =
+            std::env::temp_dir().join(format!("o7-invoke-out-contract-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+
+        let target = base.join("run");
+        assert!(
+            ensure_empty_out(&target).is_ok(),
+            "absent dir must be created"
+        );
+        assert!(target.is_dir());
+        assert!(
+            ensure_empty_out(&target).is_ok(),
+            "existing empty dir must be accepted"
+        );
+
+        assert!(
+            std::fs::write(target.join("result.json"), "{}").is_ok(),
+            "test setup: writing the stale result.json failed"
+        );
+        assert!(
+            ensure_empty_out(&target).is_err(),
+            "a dir holding a stale result.json must be refused"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn timeout_kills_descendants_holding_pipe() {
+        // Regression (change 2): the direct child (bash) stays alive on `wait`
+        // while a background `sleep` descendant inherits and HOLDS the stdout
+        // pipe. Killing only bash would leave `sleep` holding the pipe and hang
+        // the stdout reader forever; the process-group SIGKILL must reap the
+        // descendant so the call returns (timed_out) in bounded time. A channel
+        // + recv_timeout converts any regression-induced hang into a clean
+        // failure instead of an infinite test.
+        use std::sync::mpsc;
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut cmd = Command::new("bash");
+            cmd.arg("-c")
+                .arg("sleep 300 & wait")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            let outcome = spawn_with_timeout(cmd, "", Duration::from_secs(1))
+                .map(|inner| inner.map(|c| c.timed_out).map_err(|_| "not_installed"));
+            let _ = tx.send(outcome);
+        });
+        // recv_timeout returning Err (a timeout on OUR side) is the regression
+        // signature: spawn_with_timeout hung on the reader join because the
+        // descendant kept the pipe open. Assert on a bool so no `panic!` is
+        // needed (the tree denies `clippy::panic`, even in tests).
+        let returned = rx.recv_timeout(Duration::from_secs(30));
+        assert!(
+            returned.is_ok(),
+            "spawn_with_timeout did not return within 30s -- process-group kill \
+             regressed (a descendant kept the stdout pipe open)"
+        );
+        // When it did return with a real call (bash present), it must be a
+        // timeout; an Err inner ("not_installed") means bash is absent on this
+        // runner, which leaves nothing to assert.
+        if let Ok(Ok(Ok(timed_out))) = returned {
+            assert!(timed_out, "expected a timeout");
+        }
     }
 }

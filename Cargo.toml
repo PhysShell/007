@@ -27,6 +27,17 @@ sha2 = "0.10"
 # advisories/bans/sources all clean.
 jsonschema = { version = "0.47", default-features = false }
 
+# `invoke.rs` timeout path only (unix): SIGKILL the backend's WHOLE process
+# group, not just the direct child, so a descendant still holding the stdout/
+# stderr pipe can't keep the reader threads (and thus the "timeout" itself)
+# blocked forever. `nix::sys::signal::killpg` is used because the tree forbids
+# `unsafe` (`[lints.rust] unsafe_code = "forbid"`) and nix wraps the raw
+# syscall in a safe API. Unix-only by construction -- 007 runs on WSL2/Linux;
+# a Windows Job Object equivalent is explicitly out of scope. `nix` is MIT
+# (allowed in deny.toml); it pulls only bitflags/cfg-if/libc, all permissive.
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", default-features = false, features = ["signal"] }
+
 # Lints. Curated to pass `clippy --all-targets -D warnings` clean on today's code
 # (ratchet, not a blast): the broad pedantic/nursery families are deliberately
 # left off — see docs/verification.md for the tracked follow-ups.

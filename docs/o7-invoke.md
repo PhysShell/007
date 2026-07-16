@@ -35,6 +35,12 @@ Writes `<run-dir>/{prompt.txt, stdout.raw, stderr.log, result.json (if
 any), meta.json}`. Exit `0` on `PASS`, `1` on every `BLOCKED_*`/`FAIL_*`
 status — callers must read `meta.json`, not just the exit code.
 
+The `--out` dir must be **absent or empty**: a non-empty one is refused up
+front, before the version probe or any backend spawn, and never partially
+overwritten. A given outcome writes only its own files (a `FAIL` leaves no
+`result.json`), so refusing a dirty dir is what stops a previous run's stale
+`result.json` from masquerading as this run's output.
+
 ## Capability profiles
 
 Exactly one exists: `read-only-data`. An unrecognized profile name is
@@ -46,13 +52,22 @@ not a silent fallback to some default posture. `read-only-data` maps to:
   Verified live against a real `claude` install (v2.1.210) in the
   environment this was built in.
 - **Codex**: `--sandbox read-only` + `-c features.shell_tool=false` +
-  `--skip-git-repo-check` + `--ephemeral`. **Neither flag has been
-  exercised against a real `codex` binary** — `codex` is not installed
-  anywhere this was built or tested. `--sandbox read-only` is documented
-  (by `judge.rs`'s own comments) to deny writes without disabling network;
-  whether `features.shell_tool=false` removes the shell tool the way
-  Claude's `--tools ""` does, or merely narrows what it can do inside the
-  sandbox, has never been observed.
+  `--skip-git-repo-check` + `--ephemeral`, plus **ambient-context
+  isolation**: `--ignore-user-config` (refuse the user-level
+  `~/.codex/config.toml`), `--ignore-rules` (refuse ambient rule files), and
+  launch from a **fresh empty temp working directory** (removed after the
+  call) so no project `.codex/config.toml` / `AGENTS.md` is discovered by
+  walking up from wherever `o7` ran — the codex-side analogue of Claude's
+  `--setting-sources ""` + `--strict-mcp-config`. **None of these flags has
+  been exercised against a real `codex` binary** — `codex` is not installed
+  anywhere this was built or tested. `--sandbox read-only` is documented (by
+  `judge.rs`'s own comments) to deny writes without disabling network;
+  whether `features.shell_tool=false` removes the shell tool the way Claude's
+  `--tools ""` does, or merely narrows what it can do inside the sandbox, has
+  never been observed. So the honest closed-world claim for codex today is
+  **"ambient user/project context refused, writes denied"** — *not* "no
+  shell" and *not* "no network"; that gap is what keeps `--engine codex`
+  unfit for untrusted content until live-verified (below).
 
 **`o7 invoke` itself does not refuse `--engine codex`** — it is a general
 primitive, and a caller reaching for codex purely to check
@@ -85,13 +100,23 @@ decides `schema_valid` regardless of engine.
 
 Neither engine's credential storage is read directly — both shell out to
 whichever CLI the user already authenticated interactively. `ANTHROPIC_API_KEY`/
-`CLAUDE_API_KEY`/`OPENAI_API_KEY`/`CODEX_API_KEY` are stripped from the
-subprocess environment before every call, for both engines
-(`strip_provider_api_keys`) — added here rather than assumed from
-`judge.rs`, which strips neither, after comparing what each existing
-integration actually stripped and finding neither prior implementation
-(this repo's `judge.rs`, Demand Radar's now-deleted `codex_cli.py`) covered
-both engines consistently.
+`CLAUDE_API_KEY`/`OPENAI_API_KEY`/`CODEX_API_KEY` are stripped
+(`strip_provider_api_keys`) before **every provider subprocess** — the real
+call *and* the best-effort `--version` probe (the probe also runs under a
+short bounded timeout, degrading to `command_version: null` rather than
+stalling the call). This holds for both engines regardless of which is
+selected — added here rather than assumed from `judge.rs`, which strips
+neither, after comparing what each existing integration actually stripped and
+finding neither prior implementation (this repo's `judge.rs`, Demand Radar's
+now-deleted `codex_cli.py`) covered both engines consistently.
+
+Auth-failure classification uses **engine-specific** markers (Claude's
+`claude login` / `/login`, Codex's `codex login`) on top of a small shared
+set (`not logged in`, `please log in`, `no active session`, `unauthorized`,
+`authentication`). Bare `login` and bare `please run` are deliberately *not*
+markers: they fire on ordinary diagnostics ("failed to login to the
+database", "please run cargo test") and a false `BLOCKED_AUTH` would bury the
+real error.
 
 ## What's needed to lift the Codex restriction
 
