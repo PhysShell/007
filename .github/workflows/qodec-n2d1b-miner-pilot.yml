@@ -230,10 +230,24 @@
 # history the frozen tarball-snapshot acquisition model structurally cannot
 # provide, with no known override. Replaced in this pilot's jvm-gradle slot
 # by the already-frozen repo-moshi case (same ecosystem, also an N2-C
-# primary case). NETWORK_ENFORCEMENT_AUTHORIZED_CASES above still lists
-# repo-spotless as historically accurate (that specific finding was
-# genuinely validated before the unrelated git-ratchet blocker surfaced),
-# not because the case is still active.
+# primary case).
+#
+# D1b authorization (2026-07-16, updated): repo-moshi itself then hit the
+# identical class of Gradle-daemon loopback-bind failure repo-spotless
+# originally did (real evidence, run 29469116485) -- authorized separately
+# for repo-moshi; repo-spotless's own entry is intentionally REVOKED from
+# NETWORK_ENFORCEMENT_AUTHORIZED_CASES (generic_sandbox_policy.py), not
+# left in place, since the case itself remains rejected. After that, a
+# genuine capture-a/capture-b pair (both real BUILD SUCCESSFUL, identity
+# fields matching) still failed canonical-byte equality twice more: first
+# from Gradle's own parallel task-log interleaving (fixed via a
+# repo-moshi-only deterministic scheduling profile -- org.gradle.parallel=
+# false, org.gradle.workers.max=1, plain non-interactive console -- see
+# run_pilot_case.py), then, with every task line finally byte-identical and
+# same-order, from the build-completion banner's own wall-clock duration
+# (fixed via a narrowly scoped gradle_canonicalizer.py rule, independent of
+# maven_canonicalizer.py and vstest_canonicalizer.py -- see
+# gradle-capture-canonicalization-policy.json).
 name: qodec-n2d1b-miner-pilot
 
 on:

@@ -18,6 +18,7 @@ TOOLS = Path(__file__).resolve().parents[1] / "tools"
 REPO_ROOT = Path(__file__).resolve().parents[7]
 sys.path.insert(0, str(TOOLS))
 import generic_capture as gc  # noqa: E402
+import gradle_canonicalizer as gcz  # noqa: E402
 import maven_canonicalizer as mc  # noqa: E402
 import verify_pilot_pair_reproducibility as verifier  # noqa: E402
 import vstest_canonicalizer as vc  # noqa: E402
@@ -298,6 +299,122 @@ class TestVstestCanonicalizedPairVerification(unittest.TestCase):
             self.assertFalse(result["valid"])
             failed_checks = [c["name"] for c in result["checks"] if not c["passed"]]
             self.assertIn("canonicalization_reproduces_without_error", failed_checks)
+
+
+def _make_gradle_source_artifact_dir(tmp_path):
+    # repo-moshi's frozen argv is "./gradlew test" -- the shared
+    # _make_source_artifact_dir helper's tarball has no gradlew wrapper,
+    # which verify_relative_argv0_exists correctly rejects.
+    import hashlib
+    import tarfile
+
+    source_artifact_dir = tmp_path / "source-artifact"
+    source_artifact_dir.mkdir(exist_ok=True)
+    tar_path = source_artifact_dir / "source.tar"
+    src_file = tmp_path / "hello.txt"
+    src_file.write_text("hello\n")
+    gradlew_file = tmp_path / "gradlew"
+    gradlew_file.write_text("#!/bin/sh\n")
+    with tarfile.open(tar_path, "w") as tar:
+        tar.add(src_file, arcname="hello.txt")
+        tar.add(gradlew_file, arcname="gradlew")
+    archive_sha256 = hashlib.sha256(tar_path.read_bytes()).hexdigest()
+    (source_artifact_dir / "acquisition-receipt.json").write_text(json.dumps({
+        "actual_head_sha": "deadbeef" * 5,
+        "normalized_archive_sha256": archive_sha256,
+        "license_sha256": "cafe" * 16,
+    }))
+    return source_artifact_dir
+
+
+def _run_real_moshi_capture(tmp_path, *, job_name: str, stdout: bytes, source_artifact_dir=None) -> Path:
+    # repo-moshi's network_enforcement_mode exception requires a
+    # LIVE-verified probe before the real workload runs (D1b, 2026-07-16) --
+    # mock the probe module itself, never fake a verified receipt by hand.
+    if source_artifact_dir is None:
+        source_artifact_dir = _make_gradle_source_artifact_dir(tmp_path)
+    work_dir = tmp_path / f"work-{job_name}"
+    out_dir = tmp_path / f"out-{job_name}"
+    fake_result = {"raw_stdout": stdout, "raw_stderr": b"", "exit_code": 0, "wall_time_s": 1.0, "peak_rss_kb": 1024}
+    probe_report = {
+        "report_type": "n2d1b-network-enforcement-probe-v1",
+        "authorized_case_id": "repo-moshi",
+        "network_enforcement_mode": "outer-netns-loopback-only",
+        "negative_external_connectivity_probe": {"exit_code": 0},
+        "positive_loopback_bind_connect_probe": {"exit_code": 0},
+        "external_connectivity_confirmed_blocked": True,
+        "loopback_bind_connect_confirmed_allowed": True,
+        "enforcement_exception_verified": True,
+    }
+    with mock.patch.object(gc, "network_enforcement_probe") as fake_probe_module, \
+            mock.patch.object(gc.capture_build, "run_real_build", return_value=fake_result):
+        fake_probe_module.run_network_enforcement_checks.return_value = probe_report
+        gc.run_one_capture(
+            case_id="repo-moshi", ecosystem="jvm-gradle", job_name=job_name,
+            source_artifact_dir=source_artifact_dir, work_dir=work_dir, out_dir=out_dir,
+            frozen_argv=["./gradlew", "test"], errata_path=REAL_ERRATA_PATH,
+            sandboy_bin=Path("/nonexistent/sandboy"), sandboy_commit_sha="e" * 40,
+            toolchain_capture_fn=lambda source_root: {
+                "resolved_version": "9.5.1", "runtime_identifier": "21",
+                "gradle_binary_path": "/usr/bin/true", "gradle_binary_sha256": "a" * 64,
+            },
+            toolchain_env_values={"JAVA_HOME": "/usr/lib/jvm/java-21"},
+            canonical_stream="stdout", primary_stream_rationale="test",
+            project_writable_dirs_relative=[],
+            requested_version_or_range="9.5.1", resolver_mechanism="test",
+        )
+    return out_dir
+
+
+class TestGradleCanonicalizedPairVerification(unittest.TestCase):
+    """repo-moshi's Gradle canonicalization profile (D1b, 2026-07-16),
+    authorized only AFTER the deterministic scheduling profile (real CI
+    evidence, run 29474204715) made every task-execution line byte-identical
+    and same-order between capture-a/capture-b, leaving the build-completion
+    banner's wall-clock duration as the sole remaining raw difference."""
+
+    def _stdout(self, *, duration="1m 50s", tasks="42 actionable tasks: 42 executed") -> bytes:
+        return (
+            "> Task :moshi:compileJava\n"
+            "> Task :moshi:test\n"
+            "\n"
+            f"BUILD SUCCESSFUL in {duration}\n"
+            f"{tasks}\n"
+        ).encode("utf-8")
+
+    def test_real_evidence_shaped_pair_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            stdout_a = self._stdout(duration="1m 50s")
+            stdout_b = self._stdout(duration="1m 11s")
+            self.assertNotEqual(stdout_a, stdout_b)
+            shared_source = _make_gradle_source_artifact_dir(tmp_path)
+            dir_a = _run_real_moshi_capture(tmp_path, job_name="capture-a", stdout=stdout_a,
+                                             source_artifact_dir=shared_source)
+            dir_b = _run_real_moshi_capture(tmp_path, job_name="capture-b", stdout=stdout_b,
+                                             source_artifact_dir=shared_source)
+            report = verifier.verify_pair(dir_a, dir_b)
+            self.assertTrue(report["passed"], report)
+            self.assertTrue(report["canonical_bytes_equal"])
+            self.assertEqual(report["identity_mismatches"], [])
+
+    def test_changed_task_count_still_fails_pair_verification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            stdout_a = self._stdout(duration="1m 50s", tasks="42 actionable tasks: 42 executed")
+            stdout_b = self._stdout(duration="1m 11s", tasks="41 actionable tasks: 41 executed")
+            shared_source = _make_gradle_source_artifact_dir(tmp_path)
+            dir_a = _run_real_moshi_capture(tmp_path, job_name="capture-a", stdout=stdout_a,
+                                             source_artifact_dir=shared_source)
+            dir_b = _run_real_moshi_capture(tmp_path, job_name="capture-b", stdout=stdout_b,
+                                             source_artifact_dir=shared_source)
+            report = verifier.verify_pair(dir_a, dir_b)
+            self.assertFalse(report["passed"], report)
+            self.assertFalse(report["canonical_bytes_equal"])
+
+    def test_another_gradle_case_cannot_use_this_profile(self):
+        self.assertEqual(gc.CANONICALIZATION_MODULE_BY_CASE_ID["repo-moshi"], gcz)
+        self.assertNotIn("repo-spotless", gc.CANONICALIZATION_MODULE_BY_CASE_ID)
 
 
 class TestVerifyPairFailureModes(unittest.TestCase):

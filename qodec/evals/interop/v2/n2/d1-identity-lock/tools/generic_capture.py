@@ -37,6 +37,7 @@ for p in (CANARY_TOOLS, MINER_TOOLS, CORPUS_TOOLS, TOOLS_DIR):
 import capture_build  # noqa: E402
 import content_acceptance  # noqa: E402
 import generic_sandbox_policy as gsp  # noqa: E402
+import gradle_canonicalizer  # noqa: E402
 import maven_canonicalizer  # noqa: E402
 import network_enforcement_probe  # noqa: E402
 import receipt_contract  # noqa: E402
@@ -48,6 +49,7 @@ MAXIMUM_EXTRACTED_SOURCE_BYTES = 4194304  # 4 MiB -- same durable-input cap as d
 
 CANONICALIZATION_POLICY_PATH = TOOLS_DIR.parent / "capture-canonicalization-policy.json"
 VSTEST_CANONICALIZATION_POLICY_PATH = TOOLS_DIR.parent / "vstest-capture-canonicalization-policy.json"
+GRADLE_CANONICALIZATION_POLICY_PATH = TOOLS_DIR.parent / "gradle-capture-canonicalization-policy.json"
 
 # D1b decision (2026-07-16): for the case_id(s) each policy below names, the
 # canonical benchmark input is a deterministic derivation of the raw,
@@ -58,17 +60,19 @@ VSTEST_CANONICALIZATION_POLICY_PATH = TOOLS_DIR.parent / "vstest-capture-canonic
 # selected stream verbatim, exactly as before this decision.
 #
 # Each profile is independently self-hash-locked and verified against its
-# OWN canonicalizer module's RULES (fail closed at import time if either
-# policy has been tampered with or has drifted from its module) -- Maven's
-# and VSTest's profiles are never merged, and a case_id must never appear in
-# more than one profile's applicable_case_ids ("do not add the rule to the
-# Maven-specific canonicalizer or silently broaden either profile", D1b
-# 2026-07-16).
+# OWN canonicalizer module's RULES (fail closed at import time if any
+# policy has been tampered with or has drifted from its module) -- Maven's,
+# VSTest's, and Gradle's profiles are never merged, and a case_id must
+# never appear in more than one profile's applicable_case_ids ("do not add
+# the rule to the Maven-specific canonicalizer or silently broaden either
+# profile", D1b 2026-07-16).
 _CANONICALIZATION_POLICY = maven_canonicalizer.load_and_verify_policy(CANONICALIZATION_POLICY_PATH)
 _VSTEST_CANONICALIZATION_POLICY = vstest_canonicalizer.load_and_verify_policy(VSTEST_CANONICALIZATION_POLICY_PATH)
+_GRADLE_CANONICALIZATION_POLICY = gradle_canonicalizer.load_and_verify_policy(GRADLE_CANONICALIZATION_POLICY_PATH)
 _CANONICALIZATION_PROFILES = [
     (_CANONICALIZATION_POLICY, maven_canonicalizer),
     (_VSTEST_CANONICALIZATION_POLICY, vstest_canonicalizer),
+    (_GRADLE_CANONICALIZATION_POLICY, gradle_canonicalizer),
 ]
 _all_canonicalized_case_ids = [
     cid for policy, _module in _CANONICALIZATION_PROFILES for cid in policy["applicable_case_ids"]
