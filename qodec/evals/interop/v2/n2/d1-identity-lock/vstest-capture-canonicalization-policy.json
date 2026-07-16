@@ -2,7 +2,7 @@
   "applicable_case_ids": [
     "repo-kubeops-generator"
   ],
-  "approving_decision_identity": "n2d1b-vstest-canonicalization-authorization-2026-07-16",
+  "approving_decision_identity": "n2d1b-vstest-canonicalization-authorization-2026-07-16-v2-msbuild-order",
   "canonicalizer_module": "vstest_canonicalizer.py",
   "evidence_bounded_diff": "--- capture-a\n+++ capture-b\n@@ -11,2 +11,2 @@\n\n-Passed!  - Failed:     0, Passed:    61, Skipped:     0, Total:    61, Duration: 2 s - KubeOps.Generator.Test.dll (net10.0)\n+Passed!  - Failed:     0, Passed:    61, Skipped:     0, Total:    61, Duration: 1 s - KubeOps.Generator.Test.dll (net10.0)\n",
   "evidence_run": {
@@ -14,21 +14,23 @@
     },
     "workflow_run_id": 29466573023
   },
-  "policy_sha256": "b089ebb058cd371b7ac9bf1712a66cc13a9caf10c177021f9208644156fd31c7",
+  "policy_sha256": "c6728ad1447dc9ab328bee526f60fb33b29d3346f0db8d3b617ef4352db7df59",
   "policy_type": "n2d1b-capture-canonicalization-policy-v1",
-  "policy_version": 1,
+  "policy_version": 2,
   "prohibited_transformations": [
     "faking, freezing, or otherwise altering wall-clock time during the real test run",
     "altering the frozen/authorized dotnet test execution argv",
-    "trimming leading/trailing whitespace beyond the rule's own anchored match",
+    "trimming leading/trailing whitespace beyond a rule's own anchored match",
     "deduplicating lines",
     "removing lines",
-    "reordering lines",
+    "reordering any line other than the two exact, named MSBuild completion lines authorized below",
+    "disabling MSBuild parallelism or otherwise making pair verification generally order-insensitive",
     "a generic 'number followed by seconds' replacement across arbitrary diagnostic lines",
     "replacing Failed/Passed/Skipped/Total counts, or the assembly/TFM tail",
-    "applying this rule to a case_id outside applicable_case_ids",
+    "applying either rule to a case_id outside applicable_case_ids",
     "reusing the general-purpose canary sanitizer (sanitizer.sanitize) as the canonical-input transformer",
-    "adding this rule to maven_canonicalizer.py or broadening capture-canonicalization-policy.json's scope"
+    "adding either rule to maven_canonicalizer.py or broadening capture-canonicalization-policy.json's scope",
+    "sorting every MSBuild '->' line or any project line outside the two authorized project names"
   ],
   "rules": [
     {
@@ -41,5 +43,25 @@
   ],
   "scope_statement": "This policy applies ONLY to the case_id(s) listed in applicable_case_ids. Any other case found to need additional canonicalization rules must stop for separate D1b review -- this policy is not extended silently, and is never merged with capture-canonicalization-policy.json (Maven).",
   "selected_source_stream": "stdout",
+  "structural_evidence_bounded_diff": "--- capture-a\n+++ capture-b\n@@ -5,4 +5,4 @@\n /home/runner/.nuget/packages/microsoft.sourcelink.common/10.0.300/build/Microsoft.SourceLink.Common.targets(56,5): warning : Source control information is not available - the generated source link is empty. [.../KubeOps.Generator.csproj]\n-  KubeOps.Generator.Test.Entities -> .../KubeOps.Generator.Test.Entities.dll\n-  KubeOps.Generator -> .../KubeOps.Generator.dll\n+  KubeOps.Generator -> .../KubeOps.Generator.dll\n+  KubeOps.Generator.Test.Entities -> .../KubeOps.Generator.Test.Entities.dll\n   KubeOps.Generator.Test -> .../KubeOps.Generator.Test.dll\n",
+  "structural_evidence_run": {
+    "confirmed_intermittent_by_workflow_run_id": 29470199739,
+    "workflow_run_id": 29469560893
+  },
+  "structural_rules": [
+    {
+      "authorized_project_order": [
+        "KubeOps.Generator",
+        "KubeOps.Generator.Test.Entities"
+      ],
+      "evidence_justification": "Run 29469560893's raw stdout: capture-a printed \"KubeOps.Generator.Test.Entities -> ...dll\" then \"KubeOps.Generator -> ...dll\"; capture-b printed them in the opposite order -- byte-identical content otherwise, and a third project's completion line (\"KubeOps.Generator.Test -> ...dll\") stayed in the same relative position in both. MSBuild builds independent projects concurrently by default and prints each project's own completion line as soon as that project finishes, so which of two independently-building projects finishes first is a genuine wall-clock race, not a content difference -- confirmed intermittent by a later run (29470199739) where the same two projects happened to complete in the same order and canonical_bytes_equal was true without this rule.",
+      "line_grammar": "  <ProjectName> -> <path>",
+      "operation_type": "bounded_permutation",
+      "rule_name": "msbuild_completion_pair_order"
+    }
+  ],
+  "superseded_decision_identities": [
+    "n2d1b-vstest-canonicalization-authorization-2026-07-16"
+  ],
   "utf8_and_line_ending_policy": "Input must be valid UTF-8 (strict decode); invalid UTF-8 is a hard failure, never a lossy replace. Line order, line count, and each line's own original line-ending sequence (or absence of one, for a final line with no trailing newline) are preserved exactly -- the canonicalizer only ever substitutes the rule-matched duration value within a line's own content, never its terminator."
 }

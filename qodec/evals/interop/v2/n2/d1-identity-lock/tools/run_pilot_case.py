@@ -167,8 +167,17 @@ CASES = {
         # unqualified `./gradlew test` runs the test task in every
         # subproject that defines one. Every module's own build dir must be
         # pre-created and writable, plus the root build/.gradle dirs.
+        #
+        # ".kotlin" (real capture, CI run 29470199739, AFTER the Kotlin
+        # compiler daemon's own real-system-/tmp lock-file gap was already
+        # fixed): the Kotlin Gradle plugin also writes a per-invocation
+        # session marker under the PROJECT root's own .kotlin/sessions/
+        # directory -- "java.nio.file.NoSuchFileException: .../work/source/
+        # .kotlin/sessions/kotlin-compiler-<hash>.salive" -- distinct from
+        # the real system /tmp finding; this path lives inside source_root
+        # itself and was never in this list.
         "project_writable_dirs_relative": [
-            "build", ".gradle",
+            "build", ".gradle", ".kotlin",
             "moshi/build", "moshi/japicmp/build", "moshi/records-tests/build",
             "moshi-adapters/build", "moshi-adapters/japicmp/build",
             "moshi-kotlin/build",
