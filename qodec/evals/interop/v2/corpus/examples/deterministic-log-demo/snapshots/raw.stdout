@@ -1,7 +1,0 @@
-[build] compiling module core v0.1.0
-[build] compiling module core v0.1.0
-[build] compiling module core v0.1.0
-[build] linking target/demo
-warning: unused variable `tmp` at src/core/parse.rs:42
-error[E0308]: mismatched types at src/core/parse.rs:120
-[build] finished: 1 failed check, 1 flagged item

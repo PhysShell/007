@@ -1,8 +1,0 @@
-[
-  {"id":"q1","question":"What exception type is thrown first in the log?","accept":["NullReferenceException"]},
-  {"id":"q2","question":"In which method of UserEditorViewModel did the first exception originate (the deepest application frame)?","accept":["Validate"]},
-  {"id":"q3","question":"What source line number does the Validate() frame point to?","accept":["96"]},
-  {"id":"q4","question":"What exception type is wrapped inside the AggregateException?","accept":["TimeoutException"]},
-  {"id":"q5","question":"Which SessionService method appears in the second trace?","accept":["OpenAsync"]},
-  {"id":"q6","question":"Which DevExpress grid control class raised the ItemsSource-related frames?","accept":["GridControl"]}
-]

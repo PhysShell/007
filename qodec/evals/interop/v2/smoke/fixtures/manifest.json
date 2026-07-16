@@ -1,6 +1,0 @@
-[
-  { "fixture": "build-log.txt",      "rtk_mode": "pipe-filter", "rtk_filter": "log" },
-  { "fixture": "search-listing.txt", "rtk_mode": "pipe-filter", "rtk_filter": "grep" },
-  { "fixture": "test-runner.txt",    "rtk_mode": "pipe-filter", "rtk_filter": "cargo-test" },
-  { "fixture": "structured.json",    "rtk_mode": "passthrough", "rtk_filter": null }
-]
