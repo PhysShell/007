@@ -1,8 +1,0 @@
-[
-  {"id":"q1","question":"How many errors did the build finish with?","accept":["2", "two"]},
-  {"id":"q2","question":"What compiler error code do both errors share?","accept":["CS1061"]},
-  {"id":"q3","question":"Which property is missing on the UserSession type?","accept":["Token"]},
-  {"id":"q4","question":"Which assembly has version conflicts per warning MSB3277?","accept":["DevExpress.Xpf.Core"]},
-  {"id":"q5","question":"Which warning code repeats about a non-nullable property?","accept":["CS8618"]},
-  {"id":"q6","question":"What was the total elapsed build time?","accept":["02:14", "2:14"]}
-]

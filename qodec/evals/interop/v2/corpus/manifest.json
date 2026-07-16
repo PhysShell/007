@@ -1,7 +1,0 @@
-{
-  "contract_version": "interop-corpus-compiler-v1",
-  "benchmark_cases": [],
-  "demonstration_cases": [
-    "deterministic-log-demo"
-  ]
-}

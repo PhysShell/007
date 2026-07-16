@@ -1,8 +1,0 @@
-[
-  {"id":"q1","question":"Which rule does finding OWN0501 violate?","accept":["static-observable"]},
-  {"id":"q2","question":"What severity does finding OWN0301 carry?","accept":["low"]},
-  {"id":"q3","question":"Which file contains finding OWN0402?","accept":["GridHost.xaml.cs"]},
-  {"id":"q4","question":"How many findings are marked suspect_fp = true?","accept":["5", "five"]},
-  {"id":"q5","question":"Which method is the CancellationToken not forwarded to in UserService.cs?","accept":["UpsertAsync"]},
-  {"id":"q6","question":"Name one file with a static-observable finding.","accept":["GlobalState.cs", "SessionCache.cs"]}
-]

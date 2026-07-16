@@ -1,8 +1,0 @@
-[
- {"id":"q1","question":"On which line of DatabaseOptimizationWindow.xaml.cs is the never-disposed CancellationTokenSource field reported?","accept":["22"]},
- {"id":"q2","question":"What is the rule code of the finding about a static (process-lived) event source?","accept":["OWN014"]},
- {"id":"q3","question":"Which file contains the finding reported at line 13228?","accept":["MainWindow.xaml.cs"]},
- {"id":"q4","question":"What is the name of the IDisposable Timer field that is never disposed?","accept":["_timer"]},
- {"id":"q5","question":"How many findings are shown (not counting the hidden ones)?","accept":["13"]},
- {"id":"q6","question":"Which handler is subscribed to 'GoodyList.ListChanged'?","accept":["CheckCount"]}
-]

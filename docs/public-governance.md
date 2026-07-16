@@ -32,9 +32,7 @@ does not expose Own.NET's or OwnAudit's source, nor any credential.
   nothing of that shape to accidentally commit if that boundary holds.
 - `.env` files, machine-specific auth artifacts, or environment dumps.
 - Real run records that happen to embed proprietary target-repo source
-  (`judge/proof.*`, `judge/*.verdicts.json` — already gitignored) or sealed
-  benchmark material (`qodec/evals/interop/v2/private/` — already
-  gitignored).
+  (`judge/proof.*`, `judge/*.verdicts.json` — already gitignored).
 
 **Authorization stays external.** `o7` never stores, reads, or manages
 `claude`/`codex` credentials itself — auth is `claude login` / `codex login`

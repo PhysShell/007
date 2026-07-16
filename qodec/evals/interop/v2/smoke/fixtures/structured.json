@@ -1,1 +1,0 @@
-{"tool":"cargo-test","exit_code":101,"summary":{"passed":5,"failed":1,"ignored":0},"failures":[{"name":"emit::roundtrips","file":"tests/emit_test.rs","line":9}],"warnings":[{"code":"unused_variables","count":3}]}

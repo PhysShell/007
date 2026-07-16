@@ -1,7 +1,15 @@
 # Token Codec (`qodec`) — lossless, tokenizer-aware context encoding
 
+> **Migrated:** the `qodec/` code this document describes has been extracted
+> to the standalone [`PhysShell/qodec`](https://github.com/PhysShell/qodec)
+> repository — see [`docs/qodec-migrated.md`](qodec-migrated.md). This
+> remains as the historical design record and measured results from before
+> the migration; local paths below (`qodec/...`) no longer exist in this
+> repository.
+
 - **Status:** Experiment (working lab, measured; not wired into `o7`)
-- **Code:** `qodec/` (standalone crate, own lockfile; deliberately not part of the `o7` binary)
+- **Code:** now in `PhysShell/qodec` (standalone crate, own lockfile; was
+  deliberately not part of the `o7` binary)
 
 ## Summary
 

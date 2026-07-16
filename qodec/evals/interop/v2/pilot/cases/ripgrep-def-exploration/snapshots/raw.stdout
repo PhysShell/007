@@ -1,4 +1,0 @@
-fixture/src/handler.rs:1:fn handle_request() {}
-fixture/src/handler.rs:2:fn handle_error() {}
-fixture/src/worker.py:1:def run_worker():
-fixture/src/worker.py:5:def stop_worker():
