@@ -669,5 +669,126 @@ class TestMavenCanonicalizationWiring(unittest.TestCase):
             self.assertEqual((out_dir / "canonical-raw-input.bin").read_bytes(), raw)
 
 
+class TestVstestCanonicalizationWiring(unittest.TestCase):
+    """repo-kubeops-generator's canonical benchmark input must be the
+    VSTEST-canonicalized stream, dispatched to vstest_canonicalizer.py (NOT
+    maven_canonicalizer.py) -- while raw.stdout/raw.stderr and content
+    acceptance must still see the real, untouched raw bytes. D1b
+    authorization (2026-07-16), evidence: CI run 29466573023."""
+
+    def _vstest_stdout(self, *, duration: str) -> bytes:
+        lines = [
+            "Test run for /work/KubeOps.Generator.Test.dll (net10.0)",
+            "",
+            (
+                f"Passed!  - Failed:     0, Passed:    61, Skipped:     0, Total:    61, "
+                f"Duration: {duration} s - KubeOps.Generator.Test.dll (net10.0)"
+            ),
+        ]
+        return ("\n".join(lines) + "\n").encode("utf-8")
+
+    def _make_source_artifact_dir(self, tmp_path):
+        import hashlib
+        import tarfile
+
+        source_artifact_dir = tmp_path / "source-artifact"
+        source_artifact_dir.mkdir(exist_ok=True)
+        tar_path = source_artifact_dir / "source.tar"
+        src_file = tmp_path / "hello.txt"
+        src_file.write_text("hello\n")
+        with tarfile.open(tar_path, "w") as tar:
+            tar.add(src_file, arcname="hello.txt")
+        archive_sha256 = hashlib.sha256(tar_path.read_bytes()).hexdigest()
+        (source_artifact_dir / "acquisition-receipt.json").write_text(json.dumps({
+            "actual_head_sha": "deadbeef" * 5,
+            "normalized_archive_sha256": archive_sha256,
+            "license_sha256": "cafe" * 16,
+        }))
+        return source_artifact_dir
+
+    def _run(self, tmp_path, *, job_name: str, stdout: bytes, source_artifact_dir=None):
+        probe_report = {
+            "report_type": "n2d1b-network-enforcement-probe-v1",
+            "authorized_case_id": "repo-kubeops-generator",
+            "network_enforcement_mode": "outer-netns-loopback-only",
+            "negative_external_connectivity_probe": {"exit_code": 0},
+            "positive_loopback_bind_connect_probe": {"exit_code": 0},
+            "external_connectivity_confirmed_blocked": True,
+            "loopback_bind_connect_confirmed_allowed": True,
+            "enforcement_exception_verified": True,
+        }
+        if source_artifact_dir is None:
+            source_artifact_dir = self._make_source_artifact_dir(tmp_path)
+        work_dir = tmp_path / f"work-{job_name}"
+        out_dir = tmp_path / f"out-{job_name}"
+        fake_result = {"raw_stdout": stdout, "raw_stderr": b"", "exit_code": 0, "wall_time_s": 1.0, "peak_rss_kb": 1024}
+        with mock.patch.object(gc, "network_enforcement_probe") as fake_probe_module, \
+                mock.patch.object(gc.capture_build, "run_real_build", return_value=fake_result):
+            fake_probe_module.run_network_enforcement_checks.return_value = probe_report
+            receipt = gc.run_one_capture(
+                case_id="repo-kubeops-generator", ecosystem="dotnet", job_name=job_name,
+                source_artifact_dir=source_artifact_dir, work_dir=work_dir, out_dir=out_dir,
+                frozen_argv=["dotnet", "test", "test/KubeOps.Generator.Test/KubeOps.Generator.Test.csproj"],
+                errata_path=REAL_ERRATA_PATH,
+                sandboy_bin=Path("/nonexistent/sandboy"), sandboy_commit_sha="e" * 40,
+                toolchain_capture_fn=lambda source_root: {
+                    "resolved_version": "10.0.100", "runtime_identifier": "linux-x64",
+                    "rustc_binary_path": "/usr/bin/true", "rustc_binary_sha256": "a" * 64,
+                },
+                toolchain_env_values={"DOTNET_ROOT": "/usr/share/dotnet"},
+                canonical_stream="stdout", primary_stream_rationale="test",
+                project_writable_dirs_relative=[],
+                requested_version_or_range="10.0.x", resolver_mechanism="test",
+            )
+        return receipt, out_dir
+
+    def test_canonical_benchmark_input_is_the_vstest_canonicalized_stream(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            stdout = self._vstest_stdout(duration="2")
+            receipt, out_dir = self._run(tmp_path, job_name="capture-a", stdout=stdout)
+            self.assertEqual(receipt["canonical_input_derivation"], "case-specific-deterministic-canonicalization")
+            self.assertIsNotNone(receipt["canonicalization_policy_sha256"])
+            self.assertIsNotNone(receipt["canonicalization_report_sha256"])
+            self.assertTrue((out_dir / "canonicalization-report.json").exists())
+            canonical_bytes = (out_dir / "canonical-raw-input.bin").read_bytes()
+            self.assertNotIn(b"Duration: 2 s", canonical_bytes)
+            self.assertIn(b"<ELAPSED>", canonical_bytes)
+            # raw.stdout must remain the real, untouched raw evidence.
+            self.assertEqual((out_dir / "raw.stdout").read_bytes(), stdout)
+            self.assertIn(b"Duration: 2 s", (out_dir / "raw.stdout").read_bytes())
+
+    def test_capture_a_and_capture_b_canonicalize_to_identical_bytes(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            stdout_a = self._vstest_stdout(duration="2")
+            stdout_b = self._vstest_stdout(duration="1")
+            self.assertNotEqual(stdout_a, stdout_b)
+            shared_source = self._make_source_artifact_dir(tmp_path)
+            _, out_dir_a = self._run(tmp_path, job_name="capture-a", stdout=stdout_a,
+                                      source_artifact_dir=shared_source)
+            _, out_dir_b = self._run(tmp_path, job_name="capture-b", stdout=stdout_b,
+                                      source_artifact_dir=shared_source)
+            canonical_a = (out_dir_a / "canonical-raw-input.bin").read_bytes()
+            canonical_b = (out_dir_b / "canonical-raw-input.bin").read_bytes()
+            self.assertEqual(canonical_a, canonical_b)
+
+    def test_uses_vstest_module_not_maven_module(self):
+        self.assertIs(gc.CANONICALIZATION_MODULE_BY_CASE_ID["repo-kubeops-generator"], gc.vstest_canonicalizer)
+        self.assertIs(
+            gc.CANONICALIZATION_MODULE_BY_CASE_ID["repo-docker-java-parser"], gc.maven_canonicalizer
+        )
+
+    def test_a_case_id_cannot_appear_in_more_than_one_profile(self):
+        all_ids = [
+            cid for policy, _module in gc._CANONICALIZATION_PROFILES for cid in policy["applicable_case_ids"]
+        ]
+        self.assertEqual(len(all_ids), len(set(all_ids)))
+
+
 if __name__ == "__main__":
     unittest.main()

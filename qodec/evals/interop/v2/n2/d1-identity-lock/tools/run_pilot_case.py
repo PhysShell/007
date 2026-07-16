@@ -99,7 +99,15 @@ CASES = {
         "frozen_argv": ["./gradlew", "spotlessCheck"],
         "canonical_stream": "stdout",
         "canonical_stream_rationale": "Gradle's console output (task execution, spotlessCheck's own diagnostics) writes to stdout by documented convention.",
-        "project_writable_dirs_relative": ["plugin-gradle/build", ".gradle"],
+        # Root "build" is required in addition to the plugin-gradle module's
+        # own build dir: the configuration-cache-report feature writes its
+        # report under the ROOT project's build/reports/configuration-cache/
+        # regardless of which subproject the actual task runs in -- a real
+        # capture (CI run 29467180079) showed "Could not create
+        # configuration-cache-report directory '.../build/reports/
+        # configuration-cache/...'" until this was granted (same class of
+        # gap repo-moshi's own root "build" entry already documents).
+        "project_writable_dirs_relative": ["build", "plugin-gradle/build", ".gradle"],
         "requested_version_or_range": "9.4.1",
         "resolver_mechanism": "gradle wrapper (gradlew) self-managed distribution fetch, JDK 21",
     },
@@ -269,11 +277,16 @@ def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
         # unconfined) instead. Frozen "./gradlew ..." argv is unchanged.
         gradle_user_home.mkdir(parents=True, exist_ok=True)
         (gradle_user_home / "gradle.properties").write_text("org.gradle.daemon=false\n")
+        real_m2_repo_for_gradle = str(Path.home() / ".m2" / "repository")
         return (
             lambda source_root: et.capture_gradle_toolchain_identity(
                 gradle_bin="./gradlew", java_home=java_home, cwd=source_root
             ),
-            {"JAVA_HOME": java_home, "GRADLE_USER_HOME": str(gradle_user_home)},
+            {
+                "JAVA_HOME": java_home,
+                "GRADLE_USER_HOME": str(gradle_user_home),
+                "GRADLE_M2_REPO_PATH": real_m2_repo_for_gradle,
+            },
         )
     if ecosystem == "python":
         python_bin = args.venv_python

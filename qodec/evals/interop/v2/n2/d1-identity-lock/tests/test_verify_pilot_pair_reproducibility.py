@@ -20,6 +20,7 @@ sys.path.insert(0, str(TOOLS))
 import generic_capture as gc  # noqa: E402
 import maven_canonicalizer as mc  # noqa: E402
 import verify_pilot_pair_reproducibility as verifier  # noqa: E402
+import vstest_canonicalizer as vc  # noqa: E402
 
 REAL_ERRATA_PATH = REPO_ROOT / "qodec/evals/interop/v2/n2/d1-identity-lock/execution-plan-errata.json"
 ESC = "\x1b"
@@ -116,6 +117,53 @@ def _run_real_rust_capture(tmp_path, *, job_name: str, stdout: bytes, source_art
     return out_dir
 
 
+def _run_real_kubeops_capture(tmp_path, *, job_name: str, stdout: bytes, source_artifact_dir=None) -> Path:
+    # repo-kubeops-generator's network_enforcement_mode exception requires a
+    # LIVE-verified probe before the real workload runs (D1b, 2026-07-16) --
+    # mock the probe module itself (same discipline as
+    # test_generic_capture.py's TestKubeopsGeneratorNetworkEnforcementWiring),
+    # never fake a verified receipt by hand.
+    if source_artifact_dir is None:
+        source_artifact_dir = _make_source_artifact_dir(tmp_path)
+    work_dir = tmp_path / f"work-{job_name}"
+    out_dir = tmp_path / f"out-{job_name}"
+    fake_result = {"raw_stdout": stdout, "raw_stderr": b"", "exit_code": 0, "wall_time_s": 1.0, "peak_rss_kb": 1024}
+    probe_report = {
+        "report_type": "n2d1b-network-enforcement-probe-v1",
+        "authorized_case_id": "repo-kubeops-generator",
+        "network_enforcement_mode": "outer-netns-loopback-only",
+        "negative_external_connectivity_probe": {"exit_code": 0},
+        "positive_loopback_bind_connect_probe": {"exit_code": 0},
+        "external_connectivity_confirmed_blocked": True,
+        "loopback_bind_connect_confirmed_allowed": True,
+        "enforcement_exception_verified": True,
+    }
+    with mock.patch.object(gc, "network_enforcement_probe") as fake_probe_module, \
+            mock.patch.object(gc.capture_build, "run_real_build", return_value=fake_result):
+        fake_probe_module.run_network_enforcement_checks.return_value = probe_report
+        gc.run_one_capture(
+            case_id="repo-kubeops-generator", ecosystem="dotnet", job_name=job_name,
+            source_artifact_dir=source_artifact_dir, work_dir=work_dir, out_dir=out_dir,
+            frozen_argv=["dotnet", "test", "test/KubeOps.Generator.Test/KubeOps.Generator.Test.csproj"],
+            errata_path=REAL_ERRATA_PATH,
+            sandboy_bin=Path("/nonexistent/sandboy"), sandboy_commit_sha="e" * 40,
+            toolchain_capture_fn=lambda source_root: {
+                "resolved_version": "10.0.100", "runtime_identifier": "linux-x64",
+                # No "dotnet_binary_path" fallback exists in generic_capture.py's
+                # executed_binary_absolute_path OR-chain (only rustc/python/mvn/
+                # gradle) -- rustc_binary_path is reused here as the existing
+                # dotnet wiring test (TestKubeopsGeneratorNetworkEnforcementWiring)
+                # already does, for the same reason.
+                "rustc_binary_path": "/usr/bin/true", "rustc_binary_sha256": "a" * 64,
+            },
+            toolchain_env_values={"DOTNET_ROOT": "/usr/share/dotnet"},
+            canonical_stream="stdout", primary_stream_rationale="test",
+            project_writable_dirs_relative=[],
+            requested_version_or_range="10.0.x", resolver_mechanism="test",
+        )
+    return out_dir
+
+
 class TestVerifyOneCaptureHappyPath(unittest.TestCase):
     def test_a_genuine_capture_passes_every_check(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -166,6 +214,90 @@ class TestVerifyPairHappyPath(unittest.TestCase):
                                             source_artifact_dir=shared_source)
             report = verifier.verify_pair(dir_a, dir_b)
             self.assertTrue(report["passed"], report)
+
+
+def _vstest_stdout(*, failed="0", passed="61", skipped="0", total="61", duration="2") -> bytes:
+    lines = [
+        "Test run for /work/KubeOps.Generator.Test.dll (net10.0)",
+        "",
+        "Starting test execution, please wait...",
+        "",
+        (
+            f"Passed!  - Failed:     {failed}, Passed:    {passed}, Skipped:     {skipped}, "
+            f"Total:    {total}, Duration: {duration} s - KubeOps.Generator.Test.dll (net10.0)"
+        ),
+    ]
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+class TestVstestCanonicalizedPairVerification(unittest.TestCase):
+    """repo-kubeops-generator's VSTest canonicalization profile (D1b,
+    2026-07-16), authorized after real CI evidence (run 29466573023) showed
+    capture-a/capture-b's VSTest completion banner differ only in wall-clock
+    "Duration: N s", with identical Failed/Passed/Skipped/Total counts and
+    all identity fields matching exactly."""
+
+    def test_real_evidence_shaped_pair_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            stdout_a = _vstest_stdout(duration="2")
+            stdout_b = _vstest_stdout(duration="1")
+            self.assertNotEqual(stdout_a, stdout_b)
+            shared_source = _make_source_artifact_dir(tmp_path)
+            dir_a = _run_real_kubeops_capture(tmp_path, job_name="capture-a", stdout=stdout_a,
+                                               source_artifact_dir=shared_source)
+            dir_b = _run_real_kubeops_capture(tmp_path, job_name="capture-b", stdout=stdout_b,
+                                               source_artifact_dir=shared_source)
+            report = verifier.verify_pair(dir_a, dir_b)
+            self.assertTrue(report["passed"], report)
+            self.assertTrue(report["canonical_bytes_equal"])
+            self.assertEqual(report["identity_mismatches"], [])
+
+    def test_changed_pass_count_still_fails_pair_verification(self):
+        # A genuinely different test result (60 passed instead of 61) must
+        # never be canonicalized away -- the canonicalization profile only
+        # ever touches the Duration field.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            stdout_a = _vstest_stdout(passed="61", total="61", duration="2")
+            stdout_b = _vstest_stdout(passed="60", total="61", duration="1")
+            shared_source = _make_source_artifact_dir(tmp_path)
+            dir_a = _run_real_kubeops_capture(tmp_path, job_name="capture-a", stdout=stdout_a,
+                                               source_artifact_dir=shared_source)
+            dir_b = _run_real_kubeops_capture(tmp_path, job_name="capture-b", stdout=stdout_b,
+                                               source_artifact_dir=shared_source)
+            report = verifier.verify_pair(dir_a, dir_b)
+            self.assertFalse(report["passed"], report)
+            self.assertFalse(report["canonical_bytes_equal"])
+
+    def test_another_dotnet_case_cannot_use_this_profile(self):
+        # Only repo-kubeops-generator is in vstest-capture-canonicalization-
+        # policy.json's applicable_case_ids -- another dotnet case's raw
+        # stream must remain the uncanonicalized "raw-capped-stream"
+        # derivation, byte-for-byte, never routed through vstest_canonicalizer.
+        self.assertNotIn("repo-kubeops-generator-other", gc.CANONICALIZED_CASE_IDS)
+        self.assertEqual(gc.CANONICALIZATION_MODULE_BY_CASE_ID["repo-kubeops-generator"], vc)
+
+    def test_malformed_vstest_grammar_fails_closed(self):
+        # A real capture whose raw evidence doesn't match the authorized
+        # grammar must fail canonicalization reproduction, not silently pass.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            out_dir = _run_real_kubeops_capture(
+                tmp_path, job_name="capture-a", stdout=_vstest_stdout(duration="2"),
+            )
+            # Tamper with the committed raw.stdout so it no longer matches
+            # the authorized banner grammar (Duration value replaced with
+            # non-numeric text) -- the verifier must independently re-derive
+            # canonical bytes from THIS raw evidence, not merely trust the
+            # already-committed canonical-raw-input.bin.
+            raw_path = out_dir / "raw.stdout"
+            tampered = raw_path.read_bytes().replace(b"Duration: 2 s", b"Duration: N/A s")
+            raw_path.write_bytes(tampered)
+            result = verifier.verify_one_capture(out_dir)
+            self.assertFalse(result["valid"])
+            failed_checks = [c["name"] for c in result["checks"] if not c["passed"]]
+            self.assertIn("canonicalization_reproduces_without_error", failed_checks)
 
 
 class TestVerifyPairFailureModes(unittest.TestCase):
@@ -523,7 +655,7 @@ class TestPinnedPythonPairVerification(unittest.TestCase):
 
 class TestIdempotence(unittest.TestCase):
     def test_non_canonicalized_derivation_is_vacuously_idempotent(self):
-        self.assertTrue(verifier._is_idempotent("raw-capped-stream", b"anything"))
+        self.assertTrue(verifier._is_idempotent("raw-capped-stream", "repo-hyperfine", b"anything"))
 
     def test_canonicalized_derivation_checks_real_idempotence(self):
         raw = _maven_stdout(
@@ -531,7 +663,28 @@ class TestIdempotence(unittest.TestCase):
             finished_at="2026-07-15T17:35:22Z",
         )
         canonical, _ = mc.canonicalize_stream(raw)
-        self.assertTrue(verifier._is_idempotent("case-specific-deterministic-canonicalization", canonical))
+        self.assertTrue(
+            verifier._is_idempotent(
+                "case-specific-deterministic-canonicalization", "repo-docker-java-parser", canonical
+            )
+        )
+
+    def test_vstest_canonicalized_derivation_checks_real_idempotence(self):
+        raw = (
+            b"Passed!  - Failed:     0, Passed:    61, Skipped:     0, Total:    61, "
+            b"Duration: 2 s - KubeOps.Generator.Test.dll (net10.0)\n"
+        )
+        canonical, _ = vc.canonicalize_stream(raw)
+        self.assertTrue(
+            verifier._is_idempotent(
+                "case-specific-deterministic-canonicalization", "repo-kubeops-generator", canonical
+            )
+        )
+
+    def test_unregistered_case_id_is_not_idempotent(self):
+        self.assertFalse(
+            verifier._is_idempotent("case-specific-deterministic-canonicalization", "repo-nonexistent", b"anything")
+        )
 
 
 if __name__ == "__main__":

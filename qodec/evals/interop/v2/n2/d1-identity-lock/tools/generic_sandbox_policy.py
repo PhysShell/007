@@ -104,7 +104,19 @@ ECOSYSTEM_POLICY_HINTS = {
     },
     "jvm-gradle": {
         "env_allow": ["PATH", "HOME", "TMPDIR", "JAVA_HOME", "GRADLE_USER_HOME", "GRADLE_OPTS"],
-        "extra_fs_ro_from_env": ["JAVA_HOME"],
+        # GRADLE_M2_REPO_PATH is a synthetic, policy-only key (never itself
+        # forwarded to the confined child -- nothing reads this env var at
+        # runtime), pointing at the real ~/.m2/repository. Real evidence
+        # (repo-spotless, CI run 29467180079): a p2/equo-based subproject
+        # plugin hardcodes the ambient ~/.m2/repository for its own Maven-
+        # style artifact cache (not GRADLE_USER_HOME), independent of which
+        # Gradle ecosystem is in play -- "java.io.UncheckedIOException:
+        # Failed to create MD5 hash for file: /home/runner/.m2/repository/
+        # dev/equo/p2-data/queries/version (Permission denied)". Read-only:
+        # the failing operation only computes a hash of an already-cached
+        # file (the jvm-maven ecosystem's own MAVEN_LOCAL_REPO_PATH grants
+        # fs_rw for its own case; nothing here writes to this path).
+        "extra_fs_ro_from_env": ["JAVA_HOME", "GRADLE_M2_REPO_PATH"],
         "extra_fs_rw_from_env": ["GRADLE_USER_HOME"],
         # Real evidence (CI runs #9-#11): two independent, argv/env-only
         # attempts (GRADLE_OPTS, then gradle.properties) to make Gradle skip

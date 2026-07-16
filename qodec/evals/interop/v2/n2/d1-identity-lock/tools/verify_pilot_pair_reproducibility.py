@@ -47,8 +47,31 @@ for p in (MINER_TOOLS, TOOLS_DIR):
 
 import maven_canonicalizer  # noqa: E402
 import receipt_contract  # noqa: E402
+import vstest_canonicalizer  # noqa: E402
 
 POLICY_PATH = TOOLS_DIR.parent / "capture-canonicalization-policy.json"
+VSTEST_POLICY_PATH = TOOLS_DIR.parent / "vstest-capture-canonicalization-policy.json"
+
+# Case-id-scoped dispatch -- mirrors generic_capture.py's own
+# CANONICALIZATION_MODULE_BY_CASE_ID single source of truth. Each profile is
+# independently self-hash-locked and verified against its OWN canonicalizer
+# module's RULES; Maven's and VSTest's profiles are never merged. Reads
+# POLICY_PATH/VSTEST_POLICY_PATH fresh (module globals, not baked into a
+# dict at import time) so tests can mock.patch.object either path to
+# exercise tamper-detection.
+_CANONICALIZER_MODULES_BY_CASE_ID = {
+    "repo-docker-java-parser": maven_canonicalizer,
+    "repo-kubeops-generator": vstest_canonicalizer,
+}
+
+
+def _canonicalizer_for_case_id(case_id: str):
+    module = _CANONICALIZER_MODULES_BY_CASE_ID.get(case_id)
+    if module is maven_canonicalizer:
+        return module, POLICY_PATH
+    if module is vstest_canonicalizer:
+        return module, VSTEST_POLICY_PATH
+    return None, None
 
 # Dotted paths, not whole nested dicts -- sandbox_identity.policy_sha256 in
 # particular embeds this job's own absolute work_dir path (capture-a and
@@ -181,12 +204,21 @@ def verify_one_capture(out_dir: Path) -> dict:
     expected_report: dict | None = None
 
     if derivation == "case-specific-deterministic-canonicalization":
-        try:
-            policy = maven_canonicalizer.load_and_verify_policy(POLICY_PATH)
-            _check("canonicalization_policy_integrity", True)
-        except maven_canonicalizer.PolicyIntegrityError as e:
-            _check("canonicalization_policy_integrity", False, str(e))
-            policy = None
+        canon_module, canon_policy_path = _canonicalizer_for_case_id(case_id)
+        _check(
+            "case_recognized_for_canonicalization",
+            canon_module is not None,
+            f"case_id={case_id!r} is not registered in any canonicalization profile's dispatch",
+        )
+
+        policy = None
+        if canon_module is not None:
+            try:
+                policy = canon_module.load_and_verify_policy(canon_policy_path)
+                _check("canonicalization_policy_integrity", True)
+            except canon_module.PolicyIntegrityError as e:
+                _check("canonicalization_policy_integrity", False, str(e))
+                policy = None
 
         if policy is not None:
             _check(
@@ -199,12 +231,13 @@ def verify_one_capture(out_dir: Path) -> dict:
                 case_id in policy["applicable_case_ids"],
                 f"case_id={case_id!r} applicable_case_ids={policy['applicable_case_ids']}",
             )
-        try:
-            expected_pre_cap, expected_report = maven_canonicalizer.canonicalize_stream(raw_selected)
-            _check("canonicalization_reproduces_without_error", True)
-        except maven_canonicalizer.CanonicalizerError as e:
-            _check("canonicalization_reproduces_without_error", False, str(e))
-            expected_pre_cap, expected_report = raw_selected, None
+        if canon_module is not None:
+            try:
+                expected_pre_cap, expected_report = canon_module.canonicalize_stream(raw_selected)
+                _check("canonicalization_reproduces_without_error", True)
+            except canon_module.CanonicalizerError as e:
+                _check("canonicalization_reproduces_without_error", False, str(e))
+                expected_pre_cap, expected_report = raw_selected, None
 
         report_path = out_dir / "canonicalization-report.json"
         if report_path.is_file() and expected_report is not None:
@@ -257,7 +290,7 @@ def verify_one_capture(out_dir: Path) -> dict:
     )
     _check(
         "idempotent_on_its_own_rederived_bytes",
-        _is_idempotent(derivation, expected_canonical),
+        _is_idempotent(derivation, case_id, expected_canonical),
         "re-canonicalizing the rederived canonical bytes changed them -- not idempotent",
     )
 
@@ -272,12 +305,15 @@ def verify_one_capture(out_dir: Path) -> dict:
     }
 
 
-def _is_idempotent(derivation: str, canonical_bytes: bytes) -> bool:
+def _is_idempotent(derivation: str, case_id: str, canonical_bytes: bytes) -> bool:
     if derivation != "case-specific-deterministic-canonicalization":
         return True  # no canonicalization applied -- vacuously idempotent
+    canon_module, _policy_path = _canonicalizer_for_case_id(case_id)
+    if canon_module is None:
+        return False
     try:
-        reencoded, _ = maven_canonicalizer.canonicalize_stream(canonical_bytes)
-    except maven_canonicalizer.CanonicalizerError:
+        reencoded, _ = canon_module.canonicalize_stream(canonical_bytes)
+    except canon_module.CanonicalizerError:
         return False
     return reencoded == canonical_bytes
 

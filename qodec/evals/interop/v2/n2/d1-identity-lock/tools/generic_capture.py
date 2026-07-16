@@ -41,26 +41,50 @@ import maven_canonicalizer  # noqa: E402
 import network_enforcement_probe  # noqa: E402
 import receipt_contract  # noqa: E402
 import toolchain_identity  # noqa: E402
+import vstest_canonicalizer  # noqa: E402
 from sanitizer import sanitize  # noqa: E402
 
 MAXIMUM_EXTRACTED_SOURCE_BYTES = 4194304  # 4 MiB -- same durable-input cap as derive_raw_input.py
 
 CANONICALIZATION_POLICY_PATH = TOOLS_DIR.parent / "capture-canonicalization-policy.json"
+VSTEST_CANONICALIZATION_POLICY_PATH = TOOLS_DIR.parent / "vstest-capture-canonicalization-policy.json"
 
-# D1b decision (2026-07-16): for the case_id(s) this policy names, the
+# D1b decision (2026-07-16): for the case_id(s) each policy below names, the
 # canonical benchmark input is a deterministic derivation of the raw,
-# selected stream through a narrowly scoped canonicalization profile --
+# selected stream through that narrowly scoped canonicalization profile --
 # exact raw capture-a/capture-b byte equality is no longer required for
-# those cases, only exact CANONICAL equality (see
-# capture-canonicalization-policy.json / maven_canonicalizer.py). Every
-# other case is entirely unaffected: its canonical benchmark input remains
-# the raw, capped, selected stream verbatim, exactly as before this
-# decision.
-# Fail closed at import time (not merely trusting the file's own embedded
-# hash) if the policy has been tampered with, or if its documented rules
-# have drifted from the actual maven_canonicalizer.RULES this process runs.
+# those cases, only exact CANONICAL equality. Every other case is entirely
+# unaffected: its canonical benchmark input remains the raw, capped,
+# selected stream verbatim, exactly as before this decision.
+#
+# Each profile is independently self-hash-locked and verified against its
+# OWN canonicalizer module's RULES (fail closed at import time if either
+# policy has been tampered with or has drifted from its module) -- Maven's
+# and VSTest's profiles are never merged, and a case_id must never appear in
+# more than one profile's applicable_case_ids ("do not add the rule to the
+# Maven-specific canonicalizer or silently broaden either profile", D1b
+# 2026-07-16).
 _CANONICALIZATION_POLICY = maven_canonicalizer.load_and_verify_policy(CANONICALIZATION_POLICY_PATH)
-CANONICALIZED_CASE_IDS = frozenset(_CANONICALIZATION_POLICY["applicable_case_ids"])
+_VSTEST_CANONICALIZATION_POLICY = vstest_canonicalizer.load_and_verify_policy(VSTEST_CANONICALIZATION_POLICY_PATH)
+_CANONICALIZATION_PROFILES = [
+    (_CANONICALIZATION_POLICY, maven_canonicalizer),
+    (_VSTEST_CANONICALIZATION_POLICY, vstest_canonicalizer),
+]
+_all_canonicalized_case_ids = [
+    cid for policy, _module in _CANONICALIZATION_PROFILES for cid in policy["applicable_case_ids"]
+]
+if len(_all_canonicalized_case_ids) != len(set(_all_canonicalized_case_ids)):
+    raise ValueError(
+        f"a case_id appears in more than one canonicalization profile's applicable_case_ids: "
+        f"{_all_canonicalized_case_ids}"
+    )
+CANONICALIZATION_MODULE_BY_CASE_ID = {
+    cid: module for policy, module in _CANONICALIZATION_PROFILES for cid in policy["applicable_case_ids"]
+}
+CANONICALIZATION_POLICY_SHA256_BY_CASE_ID = {
+    cid: policy["policy_sha256"] for policy, _module in _CANONICALIZATION_PROFILES for cid in policy["applicable_case_ids"]
+}
+CANONICALIZED_CASE_IDS = frozenset(CANONICALIZATION_MODULE_BY_CASE_ID)
 
 
 class GenericCaptureFailure(Exception):
@@ -312,9 +336,10 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
     # decision.
     canonicalization_report = None
     if case_id in CANONICALIZED_CASE_IDS:
+        canon_module = CANONICALIZATION_MODULE_BY_CASE_ID[case_id]
         try:
-            canonical_pre_cap_bytes, canonicalization_report = maven_canonicalizer.canonicalize_stream(canonical_bytes)
-        except maven_canonicalizer.CanonicalizerError as e:
+            canonical_pre_cap_bytes, canonicalization_report = canon_module.canonicalize_stream(canonical_bytes)
+        except canon_module.CanonicalizerError as e:
             raise GenericCaptureFailure(f"{case_id}/{job_name}: canonicalization failed: {e}") from e
         canonical_input_derivation = "case-specific-deterministic-canonicalization"
         (out_dir / "canonicalization-report.json").write_text(
@@ -405,7 +430,7 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
             "byte_size": len(canonical_bytes),
         },
         "canonicalization_policy_sha256": (
-            _CANONICALIZATION_POLICY["policy_sha256"] if canonicalization_report is not None else None
+            CANONICALIZATION_POLICY_SHA256_BY_CASE_ID.get(case_id) if canonicalization_report is not None else None
         ),
         "canonicalization_report_sha256": (
             sha256_bytes((json.dumps(canonicalization_report, indent=2, sort_keys=True) + "\n").encode())

@@ -1,0 +1,45 @@
+{
+  "applicable_case_ids": [
+    "repo-kubeops-generator"
+  ],
+  "approving_decision_identity": "n2d1b-vstest-canonicalization-authorization-2026-07-16",
+  "canonicalizer_module": "vstest_canonicalizer.py",
+  "evidence_bounded_diff": "--- capture-a\n+++ capture-b\n@@ -11,2 +11,2 @@\n\n-Passed!  - Failed:     0, Passed:    61, Skipped:     0, Total:    61, Duration: 2 s - KubeOps.Generator.Test.dll (net10.0)\n+Passed!  - Failed:     0, Passed:    61, Skipped:     0, Total:    61, Duration: 1 s - KubeOps.Generator.Test.dll (net10.0)\n",
+  "evidence_run": {
+    "both_captures_independently_content_accepted": true,
+    "identity_mismatches_were_empty": true,
+    "pair_reproducibility_artifact": {
+      "artifact_id": 8363205429,
+      "name": "n2d1b-pair-reproducibility-repo-kubeops-generator"
+    },
+    "workflow_run_id": 29466573023
+  },
+  "policy_sha256": "b089ebb058cd371b7ac9bf1712a66cc13a9caf10c177021f9208644156fd31c7",
+  "policy_type": "n2d1b-capture-canonicalization-policy-v1",
+  "policy_version": 1,
+  "prohibited_transformations": [
+    "faking, freezing, or otherwise altering wall-clock time during the real test run",
+    "altering the frozen/authorized dotnet test execution argv",
+    "trimming leading/trailing whitespace beyond the rule's own anchored match",
+    "deduplicating lines",
+    "removing lines",
+    "reordering lines",
+    "a generic 'number followed by seconds' replacement across arbitrary diagnostic lines",
+    "replacing Failed/Passed/Skipped/Total counts, or the assembly/TFM tail",
+    "applying this rule to a case_id outside applicable_case_ids",
+    "reusing the general-purpose canary sanitizer (sanitizer.sanitize) as the canonical-input transformer",
+    "adding this rule to maven_canonicalizer.py or broadening capture-canonicalization-policy.json's scope"
+  ],
+  "rules": [
+    {
+      "anchored_regex": "^Passed!\\ \\ \\-\\ Failed:\\ \\ \\ \\ \\ (\\d+),\\ Passed:\\ \\ \\ \\ (\\d+),\\ Skipped:\\ \\ \\ \\ \\ (\\d+),\\ Total:\\ \\ \\ \\ (\\d+),\\ Duration:\\ (\\d+(?:\\.\\d+)?|<ELAPSED>)\\ s\\ \\-\\ (.+)$",
+      "evidence_justification": "capture-a's raw stdout line 12 vs capture-b's: VSTest's own completion-banner logger prints the real wall-clock duration of its own test run (\"Duration: N s\"), with no known suppression flag; the identical Failed/Passed/Skipped/Total counts and the identical assembly/TFM tail (\"KubeOps.Generator.Test.dll (net10.0)\") prove both runs performed the same real work and differ only in this presentation field.",
+      "placeholder": "<ELAPSED>",
+      "rule_name": "vstest_duration",
+      "trigger_substring": "Duration: "
+    }
+  ],
+  "scope_statement": "This policy applies ONLY to the case_id(s) listed in applicable_case_ids. Any other case found to need additional canonicalization rules must stop for separate D1b review -- this policy is not extended silently, and is never merged with capture-canonicalization-policy.json (Maven).",
+  "selected_source_stream": "stdout",
+  "utf8_and_line_ending_policy": "Input must be valid UTF-8 (strict decode); invalid UTF-8 is a hard failure, never a lossy replace. Line order, line count, and each line's own original line-ending sequence (or absence of one, for a final line with no trailing newline) are preserved exactly -- the canonicalizer only ever substitutes the rule-matched duration value within a line's own content, never its terminator."
+}
