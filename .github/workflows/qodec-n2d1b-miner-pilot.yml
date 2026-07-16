@@ -508,6 +508,32 @@ jobs:
           JAVA_HOME: /usr/lib/jvm/java-21-openjdk-amd64
         run: ./gradlew --version
 
+      - name: Trusted setup — prime com.vanniktech.maven.publish plugin resolution (repo-moshi only)
+        if: matrix.case.case_id == 'repo-moshi'
+        working-directory: ${{ runner.temp }}/source-artifact/${{ matrix.case.case_id }}/source
+        env:
+          JAVA_HOME: /usr/lib/jvm/java-21-openjdk-amd64
+        run: |
+          # Real evidence (CI run 29469560893, AFTER repo-moshi's own
+          # network-enforcement exception was verified working -- both
+          # probes exit 0): the confined capture's frozen `./gradlew test`
+          # then failed with "Plugin [id: 'com.vanniktech.maven.publish',
+          # version: '0.36.0', apply: false] was not found" -- resolving
+          # the plugin itself needs the real Gradle Plugin Portal/MavenRepo,
+          # real external network the loopback-only exception correctly
+          # does NOT grant. Same class of gap as repo-spotless's own
+          # (since-removed) com.diffplug.spotless finding and Maven's own
+          # compiler-bridge finding: prime GRADLE_USER_HOME's (already
+          # fs_rw-granted) cache by running the real frozen task once here,
+          # network allowed, --no-daemon (see repo-spotless's own
+          # since-revoked priming step for why: a lingering daemon holds an
+          # exclusive lock on the shared journal-1 file the confined run
+          # then contends for); its own output is discarded -- the confined
+          # capture below always re-extracts a pristine source.tar into its
+          # own separate work_dir/source, so this priming run is not itself
+          # the captured execution.
+          ./gradlew --no-daemon test || true
+
       - name: Run the D1b generic capture (${{ matrix.job }})
         run: |
           # Fixed-visible-path discipline (D1b decision, 2026-07-15): the
