@@ -96,6 +96,23 @@ trigger it (`strip_dollar_schema`). Codex gets no assumed
 its prompt as an instruction instead, and the same independent validator
 decides `schema_valid` regardless of engine.
 
+### Claude `--output-format json` envelope compatibility
+
+The `result` field of Claude's JSON envelope has been observed in two shapes
+across CLI versions, so `o7` accepts exactly those two and nothing looser:
+
+- **2.1.210** returned a **bare JSON** value in `result`;
+- **2.1.162** returned **one full ```json fenced block** in `result`
+  (` ```json\n<JSON>\n``` `), even with `--json-schema`;
+- `o7` accepts exactly those two shapes — an absent/other/uppercase/`json
+  extra` tag, prose outside the one block, a second block, or unbalanced
+  fences all fall through to `FAIL_INVALID_OUTPUT`;
+- the raw stdout on disk (`stdout.raw`) is unchanged — this only affects how
+  `result` is read;
+- the extracted value is then **independently schema-validated** (a
+  syntactically valid but schema-violating value is `FAIL_SCHEMA`, not
+  `FAIL_INVALID_OUTPUT`).
+
 ## Auth
 
 Neither engine's credential storage is read directly — both shell out to

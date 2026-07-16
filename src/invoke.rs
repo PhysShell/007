@@ -243,16 +243,7 @@ pub fn run(a: &InvokeArgs) -> Result<()> {
         } else if call.exit_code != Some(0) {
             (InvokeStatus::FailInvalidOutput, None, Some("nonzero_exit"))
         } else {
-            match extract_final_json(&call, engine) {
-                None => (InvokeStatus::FailInvalidOutput, None, Some("invalid_json")),
-                Some(v) => {
-                    if validator.is_valid(&v) {
-                        (InvokeStatus::Pass, Some(v), None)
-                    } else {
-                        (InvokeStatus::FailSchema, Some(v), Some("schema_violation"))
-                    }
-                }
-            }
+            classify_extracted(extract_final_json(&call, engine), &validator)
         };
 
     let structured_output_path = if structured.is_some() {
@@ -775,41 +766,55 @@ fn call_codex(
 }
 
 /// Parse the text claude carries in its `--output-format json` `result`
-/// field. Deliberately STRICT — narrower than the codex fallback's
-/// bracket-slice: the trimmed payload must be EITHER a bare JSON value, OR
-/// exactly one complete ```-fenced block that occupies the WHOLE trimmed
-/// payload (no prose before/after, no second block). claude 2.1.162's `result`
-/// comes back fence-wrapped (```json\n{...}\n```) even with `--json-schema`,
-/// while 2.1.210 returned bare JSON — both must parse, and nothing looser may.
+/// field, accepting EXACTLY the two shapes observed in the wild and nothing
+/// else:
+///
+/// 1. a **bare JSON value** after surrounding whitespace is trimmed (claude
+///    2.1.210); or
+/// 2. exactly one ```` ```json ```` fenced block spanning the WHOLE trimmed
+///    payload — literally ```` ```json\n<JSON>\n``` ```` (claude 2.1.162's
+///    shape even with `--json-schema`).
+///
+/// The grammar is deliberately not widened past that: only the literal
+/// lowercase `json` tag with a newline is a fence here — an absent tag, a
+/// different tag (`text`, `JSON`, `json extra`), prose outside the one block, a
+/// second block, or unbalanced fences all yield `None` (→ FAIL_INVALID_OUTPUT).
 /// `call_claude`'s argv is unchanged; this only relaxes how its `result` text
-/// is read. Never panics: `trim`/`strip_prefix`/`strip_suffix`/`find`/
-/// `split_at` on char-boundary-safe ASCII delimiters plus `serde_json`.
+/// is read. Never panics: `trim`/`strip_prefix`/`strip_suffix`/`contains` plus
+/// `serde_json` (whose `from_str` itself rejects a payload with trailing
+/// content, so two JSON values in one fence do not parse).
 fn parse_claude_result_payload(result_text: &str) -> Option<serde_json::Value> {
     let trimmed = result_text.trim();
+    // Shape 1: bare JSON value.
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
         return Some(v);
     }
-    let inner = strip_single_full_fence(trimmed)?;
-    serde_json::from_str(inner).ok()
+    // Shape 2: one full ```json block, and only that.
+    let body = trimmed.strip_prefix("```json\n")?.strip_suffix("```")?;
+    if body.contains("```") {
+        return None; // a second fence -> not a single block
+    }
+    serde_json::from_str(body.trim()).ok()
 }
 
-/// If `s` (already trimmed) is EXACTLY one complete fenced block — opens with
-/// ``` plus an optional single-token language tag on the first line, and the
-/// closing ``` terminates the whole payload — return the inner content. Any
-/// text outside the one fence, or a second fence within, yields `None`.
-fn strip_single_full_fence(s: &str) -> Option<&str> {
-    let after_open = s.strip_prefix("```")?;
-    let nl = after_open.find('\n')?;
-    let (tag, rest) = after_open.split_at(nl); // `rest` starts with the '\n'
-    if tag.contains('`') {
-        return None; // a stray ``` inside prose, not a real opening fence
+/// Terminal status for a clean call (exit 0, not timed out) from its extracted
+/// JSON. Split out of `run` so the distinction is unit-testable: a value that
+/// is syntactically valid JSON but violates the schema is **FAIL_SCHEMA** (it
+/// reached the validator), never FAIL_INVALID_OUTPUT (which is only for output
+/// that did not yield a JSON value at all).
+fn classify_extracted(
+    extracted: Option<serde_json::Value>,
+    validator: &jsonschema::Validator,
+) -> (
+    InvokeStatus,
+    Option<serde_json::Value>,
+    Option<&'static str>,
+) {
+    match extracted {
+        None => (InvokeStatus::FailInvalidOutput, None, Some("invalid_json")),
+        Some(v) if validator.is_valid(&v) => (InvokeStatus::Pass, Some(v), None),
+        Some(v) => (InvokeStatus::FailSchema, Some(v), Some("schema_violation")),
     }
-    let body = rest.strip_prefix('\n')?;
-    let inner = body.strip_suffix("```")?; // closing fence must end the payload
-    if inner.contains("```") {
-        return None; // more than one block
-    }
-    Some(inner.trim())
 }
 
 /// Turn one call's raw bytes into a JSON `Value` to schema-check, per
@@ -913,31 +918,40 @@ mod tests {
     }
 
     #[test]
-    fn claude_result_payload_accepts_bare_and_one_full_fence_only() {
+    fn claude_result_payload_accepts_only_bare_or_json_fence() {
         // Shape 1: bare JSON (2.1.210).
         assert_eq!(
             parse_claude_result_payload("  {\"ok\": true}  "),
             Some(serde_json::json!({"ok": true}))
         );
-        // Shape 2a: one full fenced block WITH a language tag (2.1.162).
+        // Shape 2: one full ```json block (2.1.162) -- the ONLY accepted fence.
         assert_eq!(
             parse_claude_result_payload("```json\n{\"ok\": true}\n```"),
-            Some(serde_json::json!({"ok": true}))
-        );
-        // Shape 2b: one full fenced block WITHOUT a language tag.
-        assert_eq!(
-            parse_claude_result_payload("```\n{\"ok\": true}\n```"),
             Some(serde_json::json!({"ok": true}))
         );
     }
 
     #[test]
-    fn claude_result_payload_rejects_anything_looser() {
-        // Prose before the fence -> not "the entire payload".
+    fn claude_result_payload_rejects_anything_but_the_two_shapes() {
+        // Wrong language tag.
+        assert!(parse_claude_result_payload("```text\n{\"ok\": true}\n```").is_none());
+        // Absent language tag (an untagged fence is NOT accepted).
+        assert!(parse_claude_result_payload("```\n{\"ok\": true}\n```").is_none());
+        // Uppercase tag -- only lowercase `json`.
+        assert!(parse_claude_result_payload("```JSON\n{\"ok\": true}\n```").is_none());
+        // Extra text after the tag on the fence line.
+        assert!(parse_claude_result_payload("```json extra\n{\"ok\": true}\n```").is_none());
+        // Prose before the fence.
         assert!(parse_claude_result_payload("sure:\n```json\n{\"ok\": true}\n```").is_none());
         // Prose after the closing fence.
         assert!(
             parse_claude_result_payload("```json\n{\"ok\": true}\n```\nhope that helps").is_none()
+        );
+        // Unclosed fence.
+        assert!(parse_claude_result_payload("```json\n{\"ok\": true}").is_none());
+        // Two JSON values inside one fence (serde rejects trailing content).
+        assert!(
+            parse_claude_result_payload("```json\n{\"ok\": true}\n{\"ok\": false}\n```").is_none()
         );
         // Two fenced blocks.
         assert!(parse_claude_result_payload("```json\n{}\n```\n```json\n{}\n```").is_none());
@@ -945,6 +959,41 @@ mod tests {
         assert!(parse_claude_result_payload("```json\nnot json at all\n```").is_none());
         // Bare-ish but with trailing prose -> not a bare JSON value.
         assert!(parse_claude_result_payload("{\"ok\": true} then some words").is_none());
+    }
+
+    #[test]
+    fn schema_invalid_object_is_fail_schema_not_invalid_output() {
+        // A value that is valid JSON syntax but violates the schema must be
+        // FAIL_SCHEMA (it reached the validator), never FAIL_INVALID_OUTPUT.
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"],
+            "additionalProperties": false
+        });
+        let validator = match jsonschema::validator_for(&schema) {
+            Ok(v) => v,
+            Err(_) => return, // schema build failure is environmental, not under test
+        };
+
+        // {"ok": 123}: parses as JSON, violates {ok: boolean} -> FAIL_SCHEMA.
+        let wrong_type = serde_json::json!({"ok": 123});
+        let (status, structured, error_kind) =
+            classify_extracted(Some(wrong_type.clone()), &validator);
+        assert_eq!(status, InvokeStatus::FailSchema);
+        assert_eq!(error_kind, Some("schema_violation"));
+        assert_eq!(structured, Some(wrong_type)); // the offending value is still recorded
+
+        // A schema-valid value -> PASS.
+        let (ok_status, _, ok_kind) =
+            classify_extracted(Some(serde_json::json!({"ok": true})), &validator);
+        assert_eq!(ok_status, InvokeStatus::Pass);
+        assert_eq!(ok_kind, None);
+
+        // No value extracted at all -> FAIL_INVALID_OUTPUT (the other branch).
+        let (none_status, _, none_kind) = classify_extracted(None, &validator);
+        assert_eq!(none_status, InvokeStatus::FailInvalidOutput);
+        assert_eq!(none_kind, Some("invalid_json"));
     }
 
     #[test]
