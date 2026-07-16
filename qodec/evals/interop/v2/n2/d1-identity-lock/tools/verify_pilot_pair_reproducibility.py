@@ -65,6 +65,16 @@ IDENTITY_FIELD_PATHS = [
     "sandbox_identity.sandboy_commit_sha",
     "canonical_policy_sha256",
     "canonical_stream", "canonicalization_policy_sha256", "canonical_input_derivation",
+    "raw_capture_content_classification",
+    # D1b authorization (2026-07-16): repo-pyflakes' python3 is now a
+    # pinned actions/setup-python interpreter, not the runner-ambient one --
+    # base AND executed venv interpreter identity must both match exactly
+    # across capture-a/capture-b (this is NOT informational-only). Deliberately
+    # excludes host_runtime_identifier (platform.platform(), which embeds the
+    # runner's own kernel release) -- see toolchain_resolved.runtime_identifier
+    # above for the field that IS the strict, comparable Python ABI identity.
+    "toolchain_identity_provenance.resolved_base_interpreter_sha256",
+    "toolchain_identity_provenance.executed_venv_interpreter_sha256",
 ]
 
 

@@ -102,28 +102,9 @@ ECOSYSTEM_POLICY_HINTS = {
         # TCP port, chosen by the OS, for this; Sandboy's Landlock tcp_bind
         # is a fixed port list (Landlock scopes ports, not addresses -- see
         # sandboy's own README) with no way to express "any port, loopback
-        # only". D1b-authorized (2026-07-15): disable Landlock's own TCP
-        # mediation for jvm-gradle ONLY, relying solely on the outer netns
-        # (unshare --net + loopback-only interface, already unconditional
-        # for every ecosystem) for real network confinement. Filesystem,
-        # seccomp, and env_clear mediation are unaffected.
-        "network_enforcement_mode": "outer-netns-loopback-only",
-        # Real evidence (CI run #14, 216116a's successor): the network-
-        # enforcement probes (canary/tools/network_probe.py,
-        # d1-identity-lock/tools/loopback_bind_probe.py) run in the EXACT
-        # same envelope/policy as the real jvm-gradle capture that follows
-        # -- but that policy's fs_ro never granted read access to the 007
-        # checkout's own tools directories those scripts live in, since no
-        # OTHER ecosystem's real argv ever needs to read a file from the
-        # checkout itself (only from source_root). Confined python3 failed
-        # with "can't open file '.../network_probe.py': [Errno 13]
-        # Permission denied" -- exit code 2 is Python's OWN "couldn't open
-        # the script" convention, not Sandboy's config-error exit code as
-        # first hypothesized; Sandboy itself started fine (the "Landlock
-        # only PARTIALLY enforced" warning proves it). Mirrors N2-A's own
-        # proven sandboy_policy.py repo_tools_dir grant for this exact
-        # reason (its own network_probe.py needs the identical access).
-        "extra_fs_ro_fixed": [CANARY_TOOLS_DIR, TOOLS_DIR],
+        # only". The resulting network_enforcement_mode escape hatch is now
+        # authorized per case_id (NETWORK_ENFORCEMENT_AUTHORIZED_CASES
+        # below), not per ecosystem -- see build_policy().
     },
     "dotnet": {
         # Mirrors canary/tools/sandboy_policy.py's proven N2-A dotnet policy
@@ -162,21 +143,43 @@ ECOSYSTEM_POLICY_HINTS = {
     },
 }
 
+# D1b authorization (2026-07-16): network_enforcement_mode is selected by
+# explicit case_id, never by ecosystem alone -- "Do not grant it to the
+# entire dotnet ecosystem" applies equally to jvm-gradle (a later Stage-2
+# gradle case, e.g. repo-moshi, is NOT authorized just because repo-spotless
+# is; a later case needing this must stop for separate D1b review, per this
+# policy's own narrow-scope discipline). Real evidence for each:
+#   - repo-spotless: Gradle's daemon binds an OS-chosen loopback IPC port
+#     Landlock's fixed-port tcp_bind list cannot express (D1b, 2026-07-15).
+#   - repo-kubeops-generator: VSTest's own SocketServer.Start (client<->
+#     test-host communication) hit the identical class of failure --
+#     "System.Net.Sockets.SocketException (13): Permission denied" binding
+#     its own loopback TCP port -- confirmed via real CI run 29465040390
+#     evidence AFTER the NuGet-packages fix let trusted restore + compile
+#     genuinely succeed (D1b, 2026-07-16).
+NETWORK_ENFORCEMENT_AUTHORIZED_CASES = {
+    "repo-spotless": "outer-netns-loopback-only",
+    "repo-kubeops-generator": "outer-netns-loopback-only",
+}
+
 
 def _toml_str_list(paths: list[Path]) -> str:
     return "[" + ", ".join(f'"{p}"' for p in paths) + "]"
 
 
-def build_policy(*, ecosystem: str, source_root: Path, home_dir: Path, tmp_dir: Path,
+def build_policy(*, ecosystem: str, case_id: str, source_root: Path, home_dir: Path, tmp_dir: Path,
                   capture_out_dir: Path, project_writable_dirs: list[Path],
                   env_values: dict[str, str]) -> str:
     """`env_values` maps every name in this ecosystem's env_allow to its
     concrete, dedicated (non-host) value for THIS job -- used both to render
     fs_ro/fs_rw entries for env-pointed directories and (by the caller) as
-    the actual child-process environment."""
+    the actual child-process environment. `case_id` is required (not merely
+    ecosystem) because network_enforcement_mode is authorized per exact
+    case_id -- see NETWORK_ENFORCEMENT_AUTHORIZED_CASES."""
     if ecosystem not in ECOSYSTEM_POLICY_HINTS:
         raise ValueError(f"no policy hints for ecosystem {ecosystem!r}")
     hints = ECOSYSTEM_POLICY_HINTS[ecosystem]
+    network_enforcement_mode = NETWORK_ENFORCEMENT_AUTHORIZED_CASES.get(case_id)
 
     fs_ro = list(BASELINE_FS_RO) + [source_root]
     for env_name in hints["extra_fs_ro_from_env"]:
@@ -184,6 +187,20 @@ def build_policy(*, ecosystem: str, source_root: Path, home_dir: Path, tmp_dir: 
         if value:
             fs_ro.append(Path(value))
     fs_ro.extend(hints.get("extra_fs_ro_fixed", []))
+    if network_enforcement_mode:
+        # The network-enforcement probes (canary/tools/network_probe.py,
+        # d1-identity-lock/tools/loopback_bind_probe.py) run in the EXACT
+        # same envelope/policy as the real capture that follows -- but no
+        # ecosystem's own real argv ever needs to read a file from the 007
+        # checkout itself (only from source_root), so fs_ro never granted
+        # this. Real evidence (CI run #14): confined python3 failed with
+        # "can't open file '.../network_probe.py': [Errno 13] Permission
+        # denied" -- exit code 2 is Python's OWN "couldn't open the script"
+        # convention, not Sandboy's config-error exit code as first
+        # hypothesized (Sandboy itself started fine). Mirrors N2-A's own
+        # proven sandboy_policy.py repo_tools_dir grant for the identical
+        # reason.
+        fs_ro.extend([CANARY_TOOLS_DIR, TOOLS_DIR])
 
     fs_rw = list(BASELINE_FS_RW) + [home_dir, tmp_dir, capture_out_dir, *project_writable_dirs]
     for env_name in hints["extra_fs_rw_from_env"]:
@@ -193,14 +210,13 @@ def build_policy(*, ecosystem: str, source_root: Path, home_dir: Path, tmp_dir: 
     fs_rw.extend(hints.get("extra_fs_rw_fixed", []))
 
     lines = [
-        f"# Generated by generic_sandbox_policy.py for N2-D1b ({ecosystem}). Do not edit by hand.",
+        f"# Generated by generic_sandbox_policy.py for N2-D1b ({ecosystem}/{case_id}). Do not edit by hand.",
         f"fs_ro = {_toml_str_list(fs_ro)}",
         f"fs_rw = {_toml_str_list(fs_rw)}",
         "tcp_connect = []",
         "tcp_bind = []",
         f"env_allow = {_toml_str_list([Path(n) for n in hints['env_allow']])}",
     ]
-    network_enforcement_mode = hints.get("network_enforcement_mode")
     if network_enforcement_mode:
         lines.append(f'network_enforcement_mode = "{network_enforcement_mode}"')
     return "\n".join(lines) + "\n"

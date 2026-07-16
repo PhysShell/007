@@ -198,7 +198,7 @@ class TestGradleNetworkEnforcementWiring(unittest.TestCase):
         }
         with mock.patch.object(gc, "network_enforcement_probe") as fake_probe_module, \
                 mock.patch.object(gc.capture_build, "run_real_build", return_value=fake_result):
-            fake_probe_module.run_gradle_network_enforcement_checks.return_value = probe_report
+            fake_probe_module.run_network_enforcement_checks.return_value = probe_report
             return gc.run_one_capture(
                 case_id="repo-spotless", ecosystem="jvm-gradle", job_name="capture-a",
                 source_artifact_dir=source_artifact_dir, work_dir=work_dir, out_dir=out_dir,
@@ -238,6 +238,154 @@ class TestGradleNetworkEnforcementWiring(unittest.TestCase):
             self.assertFalse(report["enforcement_exception_verified"])
             # The real gradle capture must never have been promoted to a receipt.
             self.assertFalse((out_dir / "receipt.json").exists())
+
+
+class TestKubeopsGeneratorNetworkEnforcementWiring(unittest.TestCase):
+    """D1b authorization (2026-07-16): repo-kubeops-generator's VSTest
+    test-host hit the identical class of loopback-bind failure as Gradle's
+    daemon -- network_enforcement_mode is authorized for this EXACT case_id
+    (gsp.NETWORK_ENFORCEMENT_AUTHORIZED_CASES), not the whole dotnet
+    ecosystem, and must be LIVE-VERIFIED before the real capture, exactly
+    like repo-spotless."""
+
+    def _make_source_artifact_dir(self, tmp_path):
+        import hashlib
+        import tarfile
+
+        source_artifact_dir = tmp_path / "source-artifact"
+        source_artifact_dir.mkdir()
+        tar_path = source_artifact_dir / "source.tar"
+        src_file = tmp_path / "hello.txt"
+        src_file.write_text("hello\n")
+        with tarfile.open(tar_path, "w") as tar:
+            tar.add(src_file, arcname="hello.txt")
+        archive_sha256 = hashlib.sha256(tar_path.read_bytes()).hexdigest()
+        (source_artifact_dir / "acquisition-receipt.json").write_text(json.dumps({
+            "actual_head_sha": "deadbeef" * 5,
+            "normalized_archive_sha256": archive_sha256,
+            "license_sha256": "cafe" * 16,
+        }))
+        return source_artifact_dir
+
+    def _run(self, tmp_path, *, case_id: str, probe_verified: bool, dotnet_stdout: bytes):
+        probe_report = {
+            "report_type": "n2d1b-network-enforcement-probe-v1",
+            "authorized_case_id": case_id,
+            "network_enforcement_mode": "outer-netns-loopback-only",
+            "negative_external_connectivity_probe": {"exit_code": 0 if probe_verified else 1},
+            "positive_loopback_bind_connect_probe": {"exit_code": 0},
+            "external_connectivity_confirmed_blocked": probe_verified,
+            "loopback_bind_connect_confirmed_allowed": True,
+            "enforcement_exception_verified": probe_verified,
+        }
+        source_artifact_dir = self._make_source_artifact_dir(tmp_path)
+        work_dir = tmp_path / "work"
+        out_dir = tmp_path / "out"
+        fake_result = {
+            "raw_stdout": dotnet_stdout, "raw_stderr": b"", "exit_code": 0,
+            "wall_time_s": 1.0, "peak_rss_kb": 1024,
+        }
+        with mock.patch.object(gc, "network_enforcement_probe") as fake_probe_module, \
+                mock.patch.object(gc.capture_build, "run_real_build", return_value=fake_result):
+            fake_probe_module.run_network_enforcement_checks.return_value = probe_report
+            receipt = gc.run_one_capture(
+                case_id=case_id, ecosystem="dotnet", job_name="capture-a",
+                source_artifact_dir=source_artifact_dir, work_dir=work_dir, out_dir=out_dir,
+                frozen_argv=["dotnet", "test", "test/KubeOps.Generator.Test/KubeOps.Generator.Test.csproj"],
+                errata_path=REAL_ERRATA_PATH,
+                sandboy_bin=Path("/nonexistent/sandboy"), sandboy_commit_sha="e" * 40,
+                toolchain_capture_fn=lambda source_root: {
+                    "resolved_version": "10.0.100", "runtime_identifier": "linux-x64",
+                    "rustc_binary_path": "/usr/bin/true", "rustc_binary_sha256": "a" * 64,
+                },
+                toolchain_env_values={"DOTNET_ROOT": "/usr/share/dotnet"},
+                canonical_stream="stdout", primary_stream_rationale="test",
+                project_writable_dirs_relative=[],
+                requested_version_or_range="10.0.x", resolver_mechanism="test",
+            )
+            return receipt, out_dir, fake_probe_module
+
+    def test_repo_kubeops_generator_receives_the_exception_and_is_live_verified(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, out_dir, _ = self._run(
+                Path(tmp), case_id="repo-kubeops-generator", probe_verified=True,
+                dotnet_stdout=b"Passed!  - Failed: 0, Passed: 3, Skipped: 0, Total: 3\n",
+            )
+            self.assertIsNotNone(receipt["network_enforcement_exception"])
+            self.assertEqual(receipt["network_enforcement_exception"]["authorized_case_id"], "repo-kubeops-generator")
+            self.assertTrue(receipt["network_enforcement_exception"]["enforcement_exception_verified"])
+            self.assertTrue((out_dir / "network-enforcement-probe-report.json").exists())
+            self.assertTrue((out_dir / "receipt.json").exists())
+
+    def test_failed_probe_stops_the_capture_before_the_real_workload_runs(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            with self.assertRaises(gc.GenericCaptureFailure):
+                self._run(
+                    tmp_path, case_id="repo-kubeops-generator", probe_verified=False,
+                    dotnet_stdout=b"Passed!  - Failed: 0, Passed: 3, Skipped: 0, Total: 3\n",
+                )
+            out_dir = tmp_path / "out"
+            report = json.loads((out_dir / "network-enforcement-probe-report.json").read_text())
+            self.assertFalse(report["enforcement_exception_verified"])
+            self.assertFalse((out_dir / "receipt.json").exists())
+
+    def test_an_unauthorized_dotnet_case_never_invokes_the_probe_module(self):
+        # A dotnet case OTHER than repo-kubeops-generator must never even
+        # call into network_enforcement_probe -- the gate is
+        # `case_id in NETWORK_ENFORCEMENT_AUTHORIZED_CASES`, checked before
+        # any probe invocation. This case_id has no registered
+        # content-acceptance semantic validator, so the capture still fails
+        # overall (an unrelated, expected reason) -- what matters here is
+        # that the probe module itself was never called before that point.
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            source_artifact_dir = self._make_source_artifact_dir(tmp_path)
+            work_dir = tmp_path / "work"
+            out_dir = tmp_path / "out"
+            fake_result = {
+                "raw_stdout": b"Passed!  - Failed: 0, Passed: 3, Skipped: 0, Total: 3\n", "raw_stderr": b"",
+                "exit_code": 0, "wall_time_s": 1.0, "peak_rss_kb": 1024,
+            }
+            with mock.patch.object(gc, "network_enforcement_probe") as fake_probe_module, \
+                    mock.patch.object(gc.capture_build, "run_real_build", return_value=fake_result):
+                with self.assertRaises(gc.GenericCaptureFailure):
+                    gc.run_one_capture(
+                        case_id="repo-some-other-dotnet-case", ecosystem="dotnet", job_name="capture-a",
+                        source_artifact_dir=source_artifact_dir, work_dir=work_dir, out_dir=out_dir,
+                        frozen_argv=["dotnet", "test"], errata_path=REAL_ERRATA_PATH,
+                        sandboy_bin=Path("/nonexistent/sandboy"), sandboy_commit_sha="e" * 40,
+                        toolchain_capture_fn=lambda source_root: {
+                            "resolved_version": "10.0.100", "runtime_identifier": "linux-x64",
+                            "rustc_binary_path": "/usr/bin/true", "rustc_binary_sha256": "a" * 64,
+                        },
+                        toolchain_env_values={"DOTNET_ROOT": "/usr/share/dotnet"},
+                        canonical_stream="stdout", primary_stream_rationale="test",
+                        project_writable_dirs_relative=[],
+                        requested_version_or_range="10.0.x", resolver_mechanism="test",
+                    )
+                fake_probe_module.run_network_enforcement_checks.assert_not_called()
+            self.assertFalse((out_dir / "network-enforcement-probe-report.json").exists())
+
+    def test_receipt_binds_exception_mode_case_identity_and_full_probe_report(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, _, _ = self._run(
+                Path(tmp), case_id="repo-kubeops-generator", probe_verified=True,
+                dotnet_stdout=b"Passed!  - Failed: 0, Passed: 3, Skipped: 0, Total: 3\n",
+            )
+            exc = receipt["network_enforcement_exception"]
+            self.assertEqual(exc["network_enforcement_mode"], "outer-netns-loopback-only")
+            self.assertEqual(exc["authorized_case_id"], "repo-kubeops-generator")
+            self.assertIn("negative_external_connectivity_probe", exc)
+            self.assertIn("positive_loopback_bind_connect_probe", exc)
 
 
 class TestVerifyRelativeArgv0Exists(unittest.TestCase):

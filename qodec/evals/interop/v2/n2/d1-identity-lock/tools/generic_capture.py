@@ -230,7 +230,7 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
 
     policy_path = work_dir / "policy.toml"
     policy_sha256, canonical_policy_sha256 = gsp.write_policy(
-        policy_path, work_dir=work_dir, ecosystem=ecosystem,
+        policy_path, work_dir=work_dir, ecosystem=ecosystem, case_id=case_id,
         source_root=source_root, home_dir=home_dir, tmp_dir=tmp_dir,
         capture_out_dir=capture_out_dir, project_writable_dirs=writable_dirs + writable_files,
         env_values=toolchain_env_values,
@@ -239,18 +239,21 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
     launcher_env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home_dir), "TMPDIR": str(tmp_dir)}
     launcher_env.update(toolchain_env_values)
 
-    # jvm-gradle's policy disables Sandboy's own Landlock TCP mediation
-    # (network_enforcement_mode = "outer-netns-loopback-only" -- see
-    # generic_sandbox_policy.py) -- verify, in the EXACT same envelope
-    # (same sandboy_bin, same policy_path, same source_root, same env) the
-    # capture that follows uses, that this narrow exception is genuinely
-    # what it claims: real external connectivity still blocked, real
-    # dynamic loopback bind+connect genuinely allowed. Never asserted,
-    # always independently re-proven on every jvm-gradle job.
+    # D1b-authorized, per exact case_id (never a whole ecosystem --
+    # gsp.NETWORK_ENFORCEMENT_AUTHORIZED_CASES is the single source of
+    # truth): this case's policy disables Sandboy's own Landlock TCP
+    # mediation (network_enforcement_mode = "outer-netns-loopback-only") --
+    # verify, in the EXACT same envelope (same sandboy_bin, same
+    # policy_path, same source_root, same env) the capture that follows
+    # uses, that this narrow exception is genuinely what it claims: real
+    # external connectivity still blocked, real dynamic loopback
+    # bind+connect genuinely allowed. Never asserted, always independently
+    # re-proven on every authorized job. The workload never starts if
+    # either probe fails.
     network_enforcement_report = None
-    if ecosystem == "jvm-gradle":
-        network_enforcement_report = network_enforcement_probe.run_gradle_network_enforcement_checks(
-            sandboy_bin=sandboy_bin, policy_path=policy_path, cwd=source_root, env=launcher_env,
+    if case_id in gsp.NETWORK_ENFORCEMENT_AUTHORIZED_CASES:
+        network_enforcement_report = network_enforcement_probe.run_network_enforcement_checks(
+            case_id=case_id, sandboy_bin=sandboy_bin, policy_path=policy_path, cwd=source_root, env=launcher_env,
         )
         (out_dir / "network-enforcement-probe-report.json").write_text(
             json.dumps(network_enforcement_report, indent=2, sort_keys=True) + "\n"
@@ -343,6 +346,28 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
         },
         "adapter_identity": {"name": f"n2d1b-generic-capture-{ecosystem}", "version": "1"},
         **identity,
+        # Provenance-only fields, present for every ecosystem's receipt but
+        # only ever populated (non-None) for python: platform.platform()
+        # (host_runtime_identifier) embeds the runner's own kernel release,
+        # not Python toolchain identity, so it is recorded here for evidence
+        # but deliberately EXCLUDED from toolchain_resolved.runtime_identifier
+        # (which is instead a stable Python ABI identity for python --
+        # see ecosystem_toolchain.capture_python_toolchain_identity) and
+        # never compared across independent runners in a pairwise
+        # reproducibility check.
+        "host_runtime_identifier": toolchain_identity_raw.get("host_runtime_identifier"),
+        "toolchain_identity_provenance": {
+            "python_version_raw": toolchain_identity_raw.get("python_version_raw"),
+            "sys_implementation_name": toolchain_identity_raw.get("sys_implementation_name"),
+            "sys_implementation_cache_tag": toolchain_identity_raw.get("sys_implementation_cache_tag"),
+            "sysconfig_soabi": toolchain_identity_raw.get("sysconfig_soabi"),
+            "sysconfig_platform": toolchain_identity_raw.get("sysconfig_platform"),
+            "resolved_base_interpreter_path": toolchain_identity_raw.get("resolved_base_interpreter_path"),
+            "resolved_base_interpreter_sha256": toolchain_identity_raw.get("resolved_base_interpreter_sha256"),
+            "executed_venv_interpreter_path": toolchain_identity_raw.get("executed_venv_interpreter_path"),
+            "executed_venv_interpreter_sha256": toolchain_identity_raw.get("executed_venv_interpreter_sha256"),
+            "setup_python_action_commit": toolchain_identity_raw.get("setup_python_action_commit"),
+        },
         "sandbox_identity": {"sandboy_commit_sha": sandboy_commit_sha, "policy_sha256": policy_sha256},
         # The raw policy_sha256 above embeds this job's own absolute
         # work_dir path (e.g. capture-a vs capture-b's separate runner

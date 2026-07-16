@@ -223,6 +223,54 @@ class TestRealLocalToolchainCapture(unittest.TestCase):
         self.assertIsNotNone(identity["resolved_version"])
         self.assertIsNotNone(identity["python_binary_sha256"])
 
+    def test_python_identity_stable_abi_runtime_identifier_vs_host_runtime_identifier(self):
+        # D1b authorization (2026-07-16): runtime_identifier must be a
+        # STABLE Python ABI identity (implementation/version/cache_tag/
+        # SOABI/platform ABI) -- comparable across independent runners --
+        # never platform.platform() (which embeds the runner's own KERNEL
+        # release). That real, host-specific value is recorded separately
+        # as host_runtime_identifier, informational only.
+        identity = et.capture_python_toolchain_identity(sys.executable)
+        self.assertIsNotNone(identity["runtime_identifier"])
+        self.assertIsNotNone(identity["host_runtime_identifier"])
+        self.assertNotEqual(identity["runtime_identifier"], identity["host_runtime_identifier"])
+        self.assertIn(identity["sys_implementation_name"], identity["runtime_identifier"])
+        self.assertIn(identity["resolved_version"], identity["runtime_identifier"])
+        # platform.platform()'s kernel-release text must never leak into the
+        # stable identifier.
+        self.assertNotIn("Linux-", identity["runtime_identifier"])
+
+    def test_python_identity_records_sys_and_sysconfig_fields(self):
+        identity = et.capture_python_toolchain_identity(sys.executable)
+        self.assertEqual(identity["sys_implementation_name"], "cpython")
+        self.assertIsNotNone(identity["sys_implementation_cache_tag"])
+        self.assertIsNotNone(identity["sysconfig_platform"])
+
+    def test_python_identity_distinguishes_base_and_venv_interpreter_paths(self):
+        identity = et.capture_python_toolchain_identity(
+            sys.executable, base_interpreter_path="/opt/pinned-python/bin/python3.12",
+        )
+        self.assertEqual(identity["resolved_base_interpreter_path"], "/opt/pinned-python/bin/python3.12")
+        self.assertEqual(identity["executed_venv_interpreter_path"], sys.executable)
+        # The pinned base path doesn't exist in this test environment, so its
+        # sha256 is None -- but it must never silently fall back to hashing
+        # the venv interpreter instead (that would defeat the distinction).
+        self.assertIsNone(identity["resolved_base_interpreter_sha256"])
+        self.assertIsNotNone(identity["executed_venv_interpreter_sha256"])
+
+    def test_python_identity_defaults_base_interpreter_to_the_executed_one_when_not_given(self):
+        identity = et.capture_python_toolchain_identity(sys.executable)
+        self.assertEqual(identity["resolved_base_interpreter_path"], identity["executed_venv_interpreter_path"])
+        self.assertEqual(identity["resolved_base_interpreter_sha256"], identity["executed_venv_interpreter_sha256"])
+
+    def test_python_identity_records_setup_python_action_commit_when_given(self):
+        identity = et.capture_python_toolchain_identity(sys.executable, setup_python_action_commit="a" * 40)
+        self.assertEqual(identity["setup_python_action_commit"], "a" * 40)
+
+    def test_python_identity_setup_python_action_commit_defaults_to_none(self):
+        identity = et.capture_python_toolchain_identity(sys.executable)
+        self.assertIsNone(identity["setup_python_action_commit"])
+
 
 if __name__ == "__main__":
     unittest.main()

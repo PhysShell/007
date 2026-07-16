@@ -45,10 +45,11 @@ REAL_POSITIVE_DENIED = json.dumps({"result": "DENIED", "errno": 13, "error": "[E
 
 
 class TestRunGradleNetworkEnforcementChecks(unittest.TestCase):
-    def _run(self, negative_stdout, negative_exit, positive_stdout, positive_exit):
+    def _run(self, negative_stdout, negative_exit, positive_stdout, positive_exit, case_id="repo-spotless"):
         fake = _fake_run_real_build_factory(negative_stdout, negative_exit, positive_stdout, positive_exit)
         with mock.patch.object(nep.capture_build, "run_real_build", side_effect=fake):
-            return nep.run_gradle_network_enforcement_checks(
+            return nep.run_network_enforcement_checks(
+                case_id=case_id,
                 sandboy_bin=Path("/nonexistent/sandboy"), policy_path=Path("/nonexistent/policy.toml"),
                 cwd=Path("/nonexistent/cwd"), env={},
             )
@@ -83,8 +84,12 @@ class TestRunGradleNetworkEnforcementChecks(unittest.TestCase):
 
     def test_report_type_and_mode_fields_present(self):
         report = self._run(REAL_NEGATIVE_ALL_BLOCKED, 0, REAL_POSITIVE_ALLOWED, 0)
-        self.assertEqual(report["report_type"], "n2d1b-gradle-network-enforcement-probe-v1")
+        self.assertEqual(report["report_type"], "n2d1b-network-enforcement-probe-v1")
         self.assertEqual(report["network_enforcement_mode"], "outer-netns-loopback-only")
+
+    def test_authorized_case_id_recorded_in_report(self):
+        report = self._run(REAL_NEGATIVE_ALL_BLOCKED, 0, REAL_POSITIVE_ALLOWED, 0, case_id="repo-kubeops-generator")
+        self.assertEqual(report["authorized_case_id"], "repo-kubeops-generator")
 
 
 if __name__ == "__main__":

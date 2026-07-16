@@ -193,6 +193,31 @@
 # maven_canonicalizer.load_and_verify_policy() at import time (fail
 # closed on a tampered or code-drifted policy) rather than merely trusting
 # the policy file's own embedded hash.
+#
+# D1b authorization (2026-07-16), two resolutions from run 29465040390's
+# real evidence:
+#   A. network_enforcement_mode = "outer-netns-loopback-only" extended to
+#      repo-kubeops-generator specifically (its VSTest test-host hit the
+#      identical class of loopback-bind failure as Gradle's daemon:
+#      "System.Net.Sockets.SocketException (13): Permission denied" in
+#      SocketServer.Start, AFTER the NuGet-packages fix let trusted restore
+#      + compile genuinely succeed). generic_sandbox_policy.py's API is
+#      refactored so the exception is selected by exact case_id
+#      (NETWORK_ENFORCEMENT_AUTHORIZED_CASES = {repo-spotless,
+#      repo-kubeops-generator}), never by ecosystem -- a later gradle or
+#      dotnet case sharing the ecosystem does NOT inherit it.
+#   B. repo-pyflakes' python3 is pinned via actions/setup-python (real,
+#      verified commit a26af69be951a213d495a4c3e4e4022e16d87065, tag
+#      v5.6.0), python-version 3.12.3, architecture x64 -- real evidence
+#      (pair-verify-repo-pyflakes, this same run) showed the runner-ambient
+#      interpreter genuinely differ in binary SHA256/ABI between two
+#      separate ephemeral runners. executed_binary_sha256 remains a STRICT
+#      pairwise-equality requirement, never made informational-only.
+#      toolchain_resolved.runtime_identifier is redefined as a stable
+#      Python ABI identity (implementation + version + cache_tag + SOABI +
+#      platform ABI); platform.platform() (which embeds the runner's own
+#      kernel release) moves to a separate host_runtime_identifier
+#      provenance field, recorded but never compared across runners.
 name: qodec-n2d1b-miner-pilot
 
 on:
@@ -382,8 +407,27 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      - name: Confirm python3 (runner-preinstalled; repo-pyflakes uses the authorized erratum argv)
-        if: matrix.case.ecosystem == 'python'
+      # D1b authorization (2026-07-16): repo-pyflakes' python3 is no longer
+      # the runner-ambient, unpinned interpreter -- real CI evidence
+      # (pair-verify-repo-pyflakes, run 29465040390) showed it genuinely
+      # differ in binary SHA256/ABI between two separate ephemeral runners.
+      # Pinned to a real, verified actions/setup-python commit (tag
+      # v5.6.0, confirmed via `git ls-remote --tags`), not merely a
+      # guessed/typed SHA.
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        if: matrix.case.case_id == 'repo-pyflakes'
+        with:
+          python-version: "3.12.3"
+          architecture: "x64"
+
+      - name: Resolve pinned Python base interpreter path (repo-pyflakes only)
+        if: matrix.case.case_id == 'repo-pyflakes'
+        run: |
+          echo "PYTHON_BASE_INTERPRETER=$(python3 -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
+          python3 --version
+
+      - name: Confirm python3 (runner-preinstalled; only for python cases other than repo-pyflakes)
+        if: matrix.case.ecosystem == 'python' && matrix.case.case_id != 'repo-pyflakes'
         run: python3 --version
 
       # ---- repo-dockerfile-parser-rs only: fetch the ONE published lockfile ----
@@ -463,6 +507,13 @@ jobs:
           if [ "${{ matrix.case.case_id }}" = "repo-dockerfile-parser-rs" ]; then
             published_lockfile_arg=(--published-lockfile "$RUNNER_TEMP/dfpr-published-lockfile/Cargo.lock")
           fi
+          pinned_python_arg=()
+          if [ "${{ matrix.case.case_id }}" = "repo-pyflakes" ]; then
+            pinned_python_arg=(
+              --python-base-interpreter "$PYTHON_BASE_INTERPRETER"
+              --setup-python-action-commit "a26af69be951a213d495a4c3e4e4022e16d87065"
+            )
+          fi
           python3 qodec/evals/interop/v2/n2/d1-identity-lock/tools/run_pilot_case.py \
             --case-id "${{ matrix.case.case_id }}" \
             --ecosystem "${{ matrix.case.ecosystem }}" \
@@ -476,7 +527,7 @@ jobs:
             --venv-python "$RUNNER_TEMP/venv-${{ matrix.case.case_id }}/bin/python" \
             --java-home-11 /usr/lib/jvm/java-11-openjdk-amd64 \
             --java-home-21 /usr/lib/jvm/java-21-openjdk-amd64 \
-            "${published_lockfile_arg[@]}"
+            "${published_lockfile_arg[@]}" "${pinned_python_arg[@]}"
 
       - name: Upload n2d1b-pilot-${{ matrix.case.case_id }}-${{ matrix.job }}
         uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3

@@ -80,8 +80,19 @@ CASES = {
         "canonical_stream": "stdout",
         "canonical_stream_rationale": "pyflakes writes every violation it finds directly to stdout by documented convention; exit code alone signals pass/fail.",
         "project_writable_dirs_relative": [],
-        "requested_version_or_range": "3.x",
-        "resolver_mechanism": "runner-preinstalled python3, installed into a dedicated venv via trusted `pip install .`",
+        "requested_version_or_range": "3.12.3",
+        # D1b authorization (2026-07-16): the GH runner's ambient,
+        # pre-installed python3 was shown by real CI evidence (pair-verify-
+        # repo-pyflakes, run 29465040390) to genuinely differ in binary
+        # SHA256/ABI between two separate ephemeral runners -- replaced with
+        # an exact pinned actions/setup-python (v5.6.0, x64), and a venv
+        # created FROM that resolved interpreter, never the ambient one.
+        "resolver_mechanism": (
+            "actions/setup-python (pinned commit a26af69be951a213d495a4c3e4e4022e16d87065, "
+            "tag v5.6.0), python-version 3.12.3, architecture x64 -- explicit pin, not the "
+            "runner-ambient interpreter; installed into a dedicated venv (created FROM that "
+            "resolved interpreter) via trusted `pip install .`"
+        ),
     },
     "repo-spotless": {
         "ecosystem": "jvm-gradle",
@@ -281,7 +292,11 @@ def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
         # PermissionError as before the fix existed.
         venv_root = str(Path(python_bin).parent.parent)
         return (
-            lambda source_root: et.capture_python_toolchain_identity(python_bin),
+            lambda source_root: et.capture_python_toolchain_identity(
+                python_bin,
+                base_interpreter_path=args.python_base_interpreter or None,
+                setup_python_action_commit=args.setup_python_action_commit or None,
+            ),
             {"VIRTUAL_ENV": venv_root, "PYTHONDONTWRITEBYTECODE": "1", "PIP_NO_INDEX": "1"},
         )
     if ecosystem == "dotnet":
@@ -326,6 +341,11 @@ def main() -> int:
     ap.add_argument("--sandboy-commit-sha", required=True)
     ap.add_argument("--errata-path", required=True)
     ap.add_argument("--venv-python", default="")
+    ap.add_argument("--python-base-interpreter", default="",
+                     help="Absolute path of the actions/setup-python-resolved interpreter the venv "
+                          "(--venv-python) was created FROM -- repo-pyflakes only.")
+    ap.add_argument("--setup-python-action-commit", default="",
+                     help="Exact pinned actions/setup-python commit SHA used -- repo-pyflakes only.")
     ap.add_argument("--java-home-11", default="")
     ap.add_argument("--java-home-21", default="")
     ap.add_argument(

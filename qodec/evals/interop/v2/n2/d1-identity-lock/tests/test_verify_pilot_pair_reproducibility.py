@@ -314,6 +314,213 @@ class TestUncoveredLines(unittest.TestCase):
         self.assertEqual({u["side"] for u in uncovered}, {"a", "b"})
 
 
+def _run_real_pyflakes_capture(tmp_path, *, job_name: str, identity: dict, source_artifact_dir=None) -> Path:
+    if source_artifact_dir is None:
+        source_artifact_dir = _make_source_artifact_dir(tmp_path)
+    work_dir = tmp_path / f"work-{job_name}"
+    out_dir = tmp_path / f"out-{job_name}"
+    fake_result = {"raw_stdout": b"", "raw_stderr": b"", "exit_code": 0, "wall_time_s": 1.0, "peak_rss_kb": 1024}
+    with mock.patch.object(gc.capture_build, "run_real_build", return_value=fake_result):
+        gc.run_one_capture(
+            case_id="repo-pyflakes", ecosystem="python", job_name=job_name,
+            source_artifact_dir=source_artifact_dir, work_dir=work_dir, out_dir=out_dir,
+            frozen_argv=["python", "-m", "pyflakes", "src/"], errata_path=REAL_ERRATA_PATH,
+            sandboy_bin=Path("/nonexistent/sandboy"), sandboy_commit_sha="e" * 40,
+            toolchain_capture_fn=lambda source_root: identity,
+            # Real production venv path is job-independent -- `python3 -m venv
+            # "$RUNNER_TEMP/venv-${{ matrix.case.case_id }}"` never embeds the
+            # job name, so capture-a/capture-b share the identical literal
+            # VIRTUAL_ENV string (same "fixed-visible-path" discipline as
+            # --work-dir) -- mirrored here, not per-job, so this fixture
+            # doesn't manufacture its own spurious canonical_policy_sha256
+            # mismatch.
+            toolchain_env_values={"VIRTUAL_ENV": str(tmp_path / "venv-repo-pyflakes")},
+            canonical_stream="stdout", primary_stream_rationale="test",
+            project_writable_dirs_relative=[],
+            requested_version_or_range="3.12.3", resolver_mechanism="test",
+        )
+    return out_dir
+
+
+def _pinned_python_identity(*, base_sha256: str, venv_sha256: str, resolved_version: str = "3.12.3",
+                             cache_tag: str = "cpython-312", soabi: str = "cpython-312-x86_64-linux-gnu",
+                             sysconfig_platform: str = "linux-x86_64", host_runtime_identifier: str) -> dict:
+    runtime_identifier = f"cpython-{resolved_version}-{cache_tag}-{soabi}-{sysconfig_platform}"
+    return {
+        "resolved_version": resolved_version,
+        "runtime_identifier": runtime_identifier,
+        "python_binary_path": "/opt/pinned-python/bin/python3.12",
+        "python_binary_sha256": venv_sha256,
+        "host_runtime_identifier": host_runtime_identifier,
+        "sys_implementation_name": "cpython",
+        "sys_implementation_cache_tag": cache_tag,
+        "sysconfig_soabi": soabi,
+        "sysconfig_platform": sysconfig_platform,
+        "resolved_base_interpreter_path": "/opt/pinned-python/bin/python3.12",
+        "resolved_base_interpreter_sha256": base_sha256,
+        "executed_venv_interpreter_path": "/opt/pinned-python/bin/python3.12",
+        "executed_venv_interpreter_sha256": venv_sha256,
+        "setup_python_action_commit": "a26af69be951a213d495a4c3e4e4022e16d87065",
+    }
+
+
+class TestPinnedPythonPairVerification(unittest.TestCase):
+    """D1b authorization (2026-07-16), Part B: pyflakes' python3 is now a
+    pinned actions/setup-python interpreter, never the runner-ambient one.
+    executed_binary_sha256 (and the new base/venv interpreter fields) stay a
+    STRICT pairwise-equality requirement -- never made informational-only."""
+
+    SHA_A = "a" * 64
+    SHA_B = "b" * 64
+
+    def test_differing_host_kernel_releases_do_not_fail_a_pair(self):
+        # host_runtime_identifier (platform.platform(), which embeds the
+        # runner's own kernel release) legitimately differs between two
+        # separate GH runners -- this alone must never fail the pair.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            identity_a = _pinned_python_identity(
+                base_sha256=self.SHA_A, venv_sha256=self.SHA_A,
+                host_runtime_identifier="Linux-6.8.0-1015-azure-x86_64-with-glibc2.39",
+            )
+            identity_b = _pinned_python_identity(
+                base_sha256=self.SHA_A, venv_sha256=self.SHA_A,
+                host_runtime_identifier="Linux-6.9.1-2003-azure-x86_64-with-glibc2.39",
+            )
+            shared_source = _make_source_artifact_dir(tmp_path)
+            dir_a = _run_real_pyflakes_capture(tmp_path, job_name="capture-a", identity=identity_a,
+                                                source_artifact_dir=shared_source)
+            dir_b = _run_real_pyflakes_capture(tmp_path, job_name="capture-b", identity=identity_b,
+                                                source_artifact_dir=shared_source)
+            report = verifier.verify_pair(dir_a, dir_b)
+            self.assertTrue(report["passed"], report)
+            self.assertEqual(report["identity_mismatches"], [])
+
+    def test_differing_python_binary_hashes_fail(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            identity_a = _pinned_python_identity(
+                base_sha256=self.SHA_A, venv_sha256=self.SHA_A, host_runtime_identifier="Linux-a",
+            )
+            identity_b = _pinned_python_identity(
+                base_sha256=self.SHA_B, venv_sha256=self.SHA_B, host_runtime_identifier="Linux-a",
+            )
+            shared_source = _make_source_artifact_dir(tmp_path)
+            dir_a = _run_real_pyflakes_capture(tmp_path, job_name="capture-a", identity=identity_a,
+                                                source_artifact_dir=shared_source)
+            dir_b = _run_real_pyflakes_capture(tmp_path, job_name="capture-b", identity=identity_b,
+                                                source_artifact_dir=shared_source)
+            report = verifier.verify_pair(dir_a, dir_b)
+            self.assertFalse(report["passed"])
+            self.assertIn("toolchain_executed.executed_binary_sha256", report["identity_mismatches"])
+            self.assertIn("toolchain_identity_provenance.resolved_base_interpreter_sha256",
+                          report["identity_mismatches"])
+            self.assertIn("toolchain_identity_provenance.executed_venv_interpreter_sha256",
+                          report["identity_mismatches"])
+
+    def test_differing_soabi_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            identity_a = _pinned_python_identity(
+                base_sha256=self.SHA_A, venv_sha256=self.SHA_A, host_runtime_identifier="Linux-a",
+                soabi="cpython-312-x86_64-linux-gnu",
+            )
+            identity_b = _pinned_python_identity(
+                base_sha256=self.SHA_A, venv_sha256=self.SHA_A, host_runtime_identifier="Linux-a",
+                soabi="cpython-312-aarch64-linux-gnu",
+            )
+            shared_source = _make_source_artifact_dir(tmp_path)
+            dir_a = _run_real_pyflakes_capture(tmp_path, job_name="capture-a", identity=identity_a,
+                                                source_artifact_dir=shared_source)
+            dir_b = _run_real_pyflakes_capture(tmp_path, job_name="capture-b", identity=identity_b,
+                                                source_artifact_dir=shared_source)
+            report = verifier.verify_pair(dir_a, dir_b)
+            self.assertFalse(report["passed"])
+            self.assertIn("toolchain_resolved.runtime_identifier", report["identity_mismatches"])
+
+    def test_differing_cache_tag_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            identity_a = _pinned_python_identity(
+                base_sha256=self.SHA_A, venv_sha256=self.SHA_A, host_runtime_identifier="Linux-a",
+                cache_tag="cpython-312",
+            )
+            identity_b = _pinned_python_identity(
+                base_sha256=self.SHA_A, venv_sha256=self.SHA_A, host_runtime_identifier="Linux-a",
+                cache_tag="cpython-313",
+            )
+            shared_source = _make_source_artifact_dir(tmp_path)
+            dir_a = _run_real_pyflakes_capture(tmp_path, job_name="capture-a", identity=identity_a,
+                                                source_artifact_dir=shared_source)
+            dir_b = _run_real_pyflakes_capture(tmp_path, job_name="capture-b", identity=identity_b,
+                                                source_artifact_dir=shared_source)
+            report = verifier.verify_pair(dir_a, dir_b)
+            self.assertFalse(report["passed"])
+            self.assertIn("toolchain_resolved.runtime_identifier", report["identity_mismatches"])
+
+    def test_differing_resolved_version_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            identity_a = _pinned_python_identity(
+                base_sha256=self.SHA_A, venv_sha256=self.SHA_A, host_runtime_identifier="Linux-a",
+                resolved_version="3.12.3",
+            )
+            identity_b = _pinned_python_identity(
+                base_sha256=self.SHA_A, venv_sha256=self.SHA_A, host_runtime_identifier="Linux-a",
+                resolved_version="3.12.4",
+            )
+            shared_source = _make_source_artifact_dir(tmp_path)
+            dir_a = _run_real_pyflakes_capture(tmp_path, job_name="capture-a", identity=identity_a,
+                                                source_artifact_dir=shared_source)
+            dir_b = _run_real_pyflakes_capture(tmp_path, job_name="capture-b", identity=identity_b,
+                                                source_artifact_dir=shared_source)
+            report = verifier.verify_pair(dir_a, dir_b)
+            self.assertFalse(report["passed"])
+            self.assertIn("toolchain_resolved.resolved_version", report["identity_mismatches"])
+            self.assertIn("toolchain_resolved.runtime_identifier", report["identity_mismatches"])
+
+    def test_ambient_unpinned_python_cannot_be_promoted_to_accepted_evidence(self):
+        # An "ambient" capture never records resolved_base_interpreter_path/
+        # sha256 distinctly (both None -- no setup-python step ran) and the
+        # real system python happened to differ between two separate
+        # runners, exactly as observed in real CI (pair-verify-repo-pyflakes,
+        # run 29465040390) -- this must still fail the pair, not be waved
+        # through as "informational only".
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            ambient_identity_a = {
+                "resolved_version": "3.11.15",
+                "runtime_identifier": "cpython-3.11.15-cpython-311-cpython-311-x86_64-linux-gnu-linux-x86_64",
+                "python_binary_path": "/usr/bin/python3",
+                "python_binary_sha256": "1" * 64,
+                "host_runtime_identifier": "Linux-6.8.0-1015-azure-x86_64-with-glibc2.39",
+                "sys_implementation_name": "cpython",
+                "sys_implementation_cache_tag": "cpython-311",
+                "sysconfig_soabi": "cpython-311-x86_64-linux-gnu",
+                "sysconfig_platform": "linux-x86_64",
+                "resolved_base_interpreter_path": "/usr/bin/python3",
+                "resolved_base_interpreter_sha256": "1" * 64,
+                "executed_venv_interpreter_path": "/usr/bin/python3",
+                "executed_venv_interpreter_sha256": "1" * 64,
+                "setup_python_action_commit": None,
+            }
+            ambient_identity_b = dict(ambient_identity_a)
+            ambient_identity_b.update({
+                "python_binary_sha256": "2" * 64,
+                "resolved_base_interpreter_sha256": "2" * 64,
+                "executed_venv_interpreter_sha256": "2" * 64,
+                "host_runtime_identifier": "Linux-6.9.1-2003-azure-x86_64-with-glibc2.39",
+            })
+            shared_source = _make_source_artifact_dir(tmp_path)
+            dir_a = _run_real_pyflakes_capture(tmp_path, job_name="capture-a", identity=ambient_identity_a,
+                                                source_artifact_dir=shared_source)
+            dir_b = _run_real_pyflakes_capture(tmp_path, job_name="capture-b", identity=ambient_identity_b,
+                                                source_artifact_dir=shared_source)
+            report = verifier.verify_pair(dir_a, dir_b)
+            self.assertFalse(report["passed"])
+            self.assertIn("toolchain_executed.executed_binary_sha256", report["identity_mismatches"])
+
+
 class TestIdempotence(unittest.TestCase):
     def test_non_canonicalized_derivation_is_vacuously_idempotent(self):
         self.assertTrue(verifier._is_idempotent("raw-capped-stream", b"anything"))

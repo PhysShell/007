@@ -9,6 +9,7 @@ the identity probe and the actual executed binary diverge.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shutil
 import subprocess
@@ -116,24 +117,81 @@ def resolve_rustup_active_toolchain_name(cwd: str | Path | None = None) -> str |
     return r.stdout.strip().splitlines()[0].split()[0]
 
 
-def capture_python_toolchain_identity(python_bin: str = "python3") -> dict:
+def capture_python_toolchain_identity(python_bin: str = "python3", *, base_interpreter_path: str | None = None,
+                                       setup_python_action_commit: str | None = None) -> dict:
+    """`python_bin` is the executed venv interpreter (e.g. `$RUNNER_TEMP/
+    venv-repo-pyflakes/bin/python`). `base_interpreter_path`, when given, is
+    the pinned interpreter `actions/setup-python` resolved BEFORE the venv
+    was created from it (D1b authorization 2026-07-16: pyflakes' python3 is
+    no longer the GH runner's ambient, unpinned system interpreter -- two
+    separate ephemeral runners were shown, by real CI evidence, to
+    genuinely ship a different python3 binary).
+
+    `runtime_identifier` here is a STABLE Python ABI identity (implementation
+    + version + cache tag + SOABI + platform ABI) -- comparable across
+    independent runners by construction. `platform.platform()` (which
+    embeds the runner's own KERNEL release, not Python toolchain identity)
+    is recorded separately as `host_runtime_identifier`, informational-only,
+    never part of the strict pairwise-identity comparison."""
     python_path = _resolve(python_bin)
     r = subprocess.run([python_path or python_bin, "--version"], capture_output=True, text=True, check=False)
     # `python --version` writes to stdout on 3.4+; some very old builds wrote
     # to stderr -- check both rather than assume.
     version_text = (r.stdout or r.stderr).strip()
     resolved_version = _first_match(r"Python\s+(\S+)", version_text)
+
+    abi_r = subprocess.run(
+        [python_path or python_bin, "-c",
+         "import json, sys, sysconfig; "
+         "print(json.dumps({"
+         "'implementation_name': sys.implementation.name, "
+         "'cache_tag': sys.implementation.cache_tag, "
+         "'soabi': sysconfig.get_config_var('SOABI'), "
+         "'platform': sysconfig.get_platform(), "
+         "}))"],
+        capture_output=True, text=True, check=False,
+    )
+    try:
+        abi = json.loads(abi_r.stdout.strip()) if abi_r.stdout.strip() else {}
+    except json.JSONDecodeError:
+        abi = {}
+
     platform_r = subprocess.run(
         [python_path or python_bin, "-c", "import platform; print(platform.platform())"],
         capture_output=True, text=True, check=False,
     )
+
+    stable_abi_runtime_identifier = None
+    if resolved_version and abi.get("implementation_name") and abi.get("cache_tag") and abi.get("platform"):
+        # SOABI is legitimately None on some platforms (e.g. Windows) --
+        # included when present, omitted (not a hyphen to a literal "None"
+        # string) otherwise, so the identifier stays meaningful either way.
+        parts = [abi["implementation_name"], resolved_version, abi["cache_tag"]]
+        if abi.get("soabi"):
+            parts.append(abi["soabi"])
+        parts.append(abi["platform"])
+        stable_abi_runtime_identifier = "-".join(parts)
+
+    resolved_base_path = base_interpreter_path or python_path
     return {
         "ecosystem": "python",
         "python_binary_path": python_path,
         "python_binary_sha256": _sha256_file(python_path) if python_path else None,
         "python_version_raw": version_text,
         "resolved_version": resolved_version,
-        "runtime_identifier": platform_r.stdout.strip() or None,
+        "runtime_identifier": stable_abi_runtime_identifier,
+        # Provenance-only, NOT compared across independent runners (embeds
+        # the runner's own kernel release, not Python toolchain identity).
+        "host_runtime_identifier": platform_r.stdout.strip() or None,
+        "sys_implementation_name": abi.get("implementation_name"),
+        "sys_implementation_cache_tag": abi.get("cache_tag"),
+        "sysconfig_soabi": abi.get("soabi"),
+        "sysconfig_platform": abi.get("platform"),
+        "resolved_base_interpreter_path": resolved_base_path,
+        "resolved_base_interpreter_sha256": _sha256_file(resolved_base_path) if resolved_base_path else None,
+        "executed_venv_interpreter_path": python_path,
+        "executed_venv_interpreter_sha256": _sha256_file(python_path) if python_path else None,
+        "setup_python_action_commit": setup_python_action_commit,
     }
 
 
