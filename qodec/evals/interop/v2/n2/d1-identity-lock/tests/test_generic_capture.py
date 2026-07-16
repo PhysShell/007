@@ -200,18 +200,23 @@ class TestGradleNetworkEnforcementWiring(unittest.TestCase):
                 mock.patch.object(gc.capture_build, "run_real_build", return_value=fake_result):
             fake_probe_module.run_network_enforcement_checks.return_value = probe_report
             return gc.run_one_capture(
-                case_id="repo-spotless", ecosystem="jvm-gradle", job_name="capture-a",
+                # repo-moshi (D1b, 2026-07-16): repo-spotless's own network
+                # exception was revoked when the case itself was rejected
+                # for an unrelated reason (REJECTED_ACQUISITION_MODEL_
+                # INCOMPATIBLE) and repo-moshi separately authorized in its
+                # place -- see NETWORK_ENFORCEMENT_AUTHORIZED_CASES.
+                case_id="repo-moshi", ecosystem="jvm-gradle", job_name="capture-a",
                 source_artifact_dir=source_artifact_dir, work_dir=work_dir, out_dir=out_dir,
-                frozen_argv=["./gradlew", "spotlessCheck"], errata_path=REAL_ERRATA_PATH,
+                frozen_argv=["./gradlew", "test"], errata_path=REAL_ERRATA_PATH,
                 sandboy_bin=Path("/nonexistent/sandboy"), sandboy_commit_sha="e" * 40,
                 toolchain_capture_fn=lambda source_root: {
-                    "resolved_version": "9.4.1", "runtime_identifier": "21",
+                    "resolved_version": "9.5.1", "runtime_identifier": "21",
                     "gradle_binary_path": "/usr/bin/true", "gradle_binary_sha256": "a" * 64,
                 },
                 toolchain_env_values={"JAVA_HOME": "/usr/lib/jvm/java-21"},
                 canonical_stream="stdout", primary_stream_rationale="test",
                 project_writable_dirs_relative=[],
-                requested_version_or_range="9.4.1", resolver_mechanism="test",
+                requested_version_or_range="9.5.1", resolver_mechanism="test",
             ), out_dir
 
     def test_verified_enforcement_lets_the_real_capture_proceed(self):
@@ -225,6 +230,18 @@ class TestGradleNetworkEnforcementWiring(unittest.TestCase):
             self.assertTrue(receipt["network_enforcement_exception"]["enforcement_exception_verified"])
             self.assertTrue((out_dir / "network-enforcement-probe-report.json").exists())
             self.assertTrue((out_dir / "receipt.json").exists())
+
+    def test_receipt_binds_case_scoped_authorization_and_probe_report(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            receipt, _out_dir = self._run(
+                Path(tmp), probe_verified=True, gradle_stdout=b"BUILD SUCCESSFUL in 3s\n",
+            )
+            exc = receipt["network_enforcement_exception"]
+            self.assertEqual(exc["network_enforcement_mode"], "outer-netns-loopback-only")
+            self.assertIn("negative_external_connectivity_probe", exc)
+            self.assertIn("positive_loopback_bind_connect_probe", exc)
 
     def test_unverified_enforcement_fails_closed_before_the_real_gradle_run(self):
         import tempfile

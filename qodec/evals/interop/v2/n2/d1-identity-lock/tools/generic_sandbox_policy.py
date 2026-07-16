@@ -169,21 +169,32 @@ ECOSYSTEM_POLICY_HINTS = {
 
 # D1b authorization (2026-07-16): network_enforcement_mode is selected by
 # explicit case_id, never by ecosystem alone -- "Do not grant it to the
-# entire dotnet ecosystem" applies equally to jvm-gradle (a later Stage-2
-# gradle case, e.g. repo-moshi, is NOT authorized just because repo-spotless
-# is; a later case needing this must stop for separate D1b review, per this
-# policy's own narrow-scope discipline). Real evidence for each:
-#   - repo-spotless: Gradle's daemon binds an OS-chosen loopback IPC port
-#     Landlock's fixed-port tcp_bind list cannot express (D1b, 2026-07-15).
+# entire dotnet ecosystem" applies equally to jvm-gradle (a case needing this
+# must stop for separate D1b review, per this policy's own narrow-scope
+# discipline -- it is never inherited merely because a case shares an
+# ecosystem with an already-authorized one). Real evidence for each:
 #   - repo-kubeops-generator: VSTest's own SocketServer.Start (client<->
-#     test-host communication) hit the identical class of failure --
-#     "System.Net.Sockets.SocketException (13): Permission denied" binding
-#     its own loopback TCP port -- confirmed via real CI run 29465040390
-#     evidence AFTER the NuGet-packages fix let trusted restore + compile
-#     genuinely succeed (D1b, 2026-07-16).
+#     test-host communication) hit "System.Net.Sockets.SocketException (13):
+#     Permission denied" binding its own loopback TCP port -- confirmed via
+#     real CI run 29465040390 evidence AFTER the NuGet-packages fix let
+#     trusted restore + compile genuinely succeed (D1b, 2026-07-16).
+#   - repo-moshi: after repo-spotless's own separate rejection
+#     (REJECTED_ACQUISITION_MODEL_INCOMPATIBLE -- see
+#     repo-spotless-rejection-record.json) and its substitution into the
+#     pilot's jvm-gradle slot, repo-moshi hit the identical class of Gradle-
+#     daemon loopback-bind failure repo-spotless originally did --
+#     "java.net.BindException: Permission denied" -- confirmed via real CI
+#     run 29469116485 (D1b, 2026-07-16), separately authorized here (not
+#     inherited from repo-spotless's now-revoked entry).
+#
+# REVOKED: repo-spotless's own entry (originally authorized 2026-07-15 on
+# the identical daemon-bind evidence) is intentionally NOT present below --
+# repo-spotless itself is rejected for an unrelated reason (its upstream
+# build's unconditional git-ratchet dependency) and must not be silently
+# restored to this authorized set.
 NETWORK_ENFORCEMENT_AUTHORIZED_CASES = {
-    "repo-spotless": "outer-netns-loopback-only",
     "repo-kubeops-generator": "outer-netns-loopback-only",
+    "repo-moshi": "outer-netns-loopback-only",
 }
 
 

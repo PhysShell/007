@@ -237,8 +237,12 @@ class TestNetworkEnforcementModeIsCaseIdScoped(unittest.TestCase):
             project_writable_dirs=[], env_values={},
         )
 
-    def test_repo_spotless_receives_the_exception(self):
-        text = self._build(ecosystem="jvm-gradle", case_id="repo-spotless")
+    def test_repo_moshi_receives_the_exception(self):
+        # D1b, 2026-07-16: real CI evidence (run 29469116485) showed the
+        # identical class of Gradle-daemon loopback-bind failure
+        # repo-spotless originally hit -- authorized separately, not
+        # inherited from repo-spotless's now-revoked entry.
+        text = self._build(ecosystem="jvm-gradle", case_id="repo-moshi")
         self.assertIn('network_enforcement_mode = "outer-netns-loopback-only"', text)
         self.assertIn("tcp_connect = []", text)
         self.assertIn("tcp_bind = []", text)
@@ -249,6 +253,16 @@ class TestNetworkEnforcementModeIsCaseIdScoped(unittest.TestCase):
         self.assertIn("tcp_connect = []", text)
         self.assertIn("tcp_bind = []", text)
 
+    def test_repo_spotless_is_not_restored_to_the_authorized_set(self):
+        # repo-spotless is REJECTED_ACQUISITION_MODEL_INCOMPATIBLE (see
+        # repo-spotless-rejection-record.json) for a reason entirely
+        # unrelated to network enforcement -- its own separate, previously-
+        # valid daemon-bind finding must not be used to silently restore it
+        # to the authorized set.
+        text = self._build(ecosystem="jvm-gradle", case_id="repo-spotless")
+        self.assertNotIn("network_enforcement_mode", text)
+        self.assertNotIn("repo-spotless", gsp.NETWORK_ENFORCEMENT_AUTHORIZED_CASES)
+
     def test_another_dotnet_case_does_not_receive_it(self):
         # Same ecosystem as repo-kubeops-generator, different case_id --
         # "Do not grant it to the entire dotnet ecosystem."
@@ -256,11 +270,11 @@ class TestNetworkEnforcementModeIsCaseIdScoped(unittest.TestCase):
         self.assertNotIn("network_enforcement_mode", text)
 
     def test_another_gradle_case_does_not_receive_it(self):
-        # Same ecosystem as repo-spotless (a later Stage-2 gradle case,
-        # e.g. repo-moshi) -- not authorized just because its ecosystem
-        # sibling is; a later case needing this must stop for separate
-        # D1b review, per the policy's own narrow-scope discipline.
-        text = self._build(ecosystem="jvm-gradle", case_id="repo-moshi")
+        # Same ecosystem as repo-moshi, different case_id -- not authorized
+        # just because its ecosystem sibling is; a later case needing this
+        # must stop for separate D1b review, per the policy's own
+        # narrow-scope discipline.
+        text = self._build(ecosystem="jvm-gradle", case_id="repo-some-other-gradle-case")
         self.assertNotIn("network_enforcement_mode", text)
 
     def test_an_unauthorized_case_cannot_request_it_via_any_ecosystem(self):
@@ -271,7 +285,7 @@ class TestNetworkEnforcementModeIsCaseIdScoped(unittest.TestCase):
     def test_only_the_two_authorized_cases_exist(self):
         self.assertEqual(
             set(gsp.NETWORK_ENFORCEMENT_AUTHORIZED_CASES),
-            {"repo-spotless", "repo-kubeops-generator"},
+            {"repo-moshi", "repo-kubeops-generator"},
         )
 
     def test_both_authorized_cases_grant_read_access_to_probe_script_directories(self):
@@ -283,7 +297,7 @@ class TestNetworkEnforcementModeIsCaseIdScoped(unittest.TestCase):
         # "can't open file '.../network_probe.py': [Errno 13] Permission
         # denied" (exit code 2, Python's own convention for a script it
         # can't open -- not Sandboy's).
-        for ecosystem, case_id in (("jvm-gradle", "repo-spotless"), ("dotnet", "repo-kubeops-generator")):
+        for ecosystem, case_id in (("jvm-gradle", "repo-moshi"), ("dotnet", "repo-kubeops-generator")):
             text = self._build(ecosystem=ecosystem, case_id=case_id)
             fs_ro_line = next(line for line in text.splitlines() if line.startswith("fs_ro"))
             self.assertIn(str(gsp.CANARY_TOOLS_DIR), fs_ro_line)
