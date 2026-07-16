@@ -514,7 +514,17 @@ jobs:
           # confined capture below always re-extracts a pristine source.tar
           # into its own separate work_dir/source, so this priming run is
           # not itself the captured execution.
-          ./gradlew spotlessCheck || true
+          #
+          # --no-daemon (real evidence, CI run 29466993434): without it, this
+          # priming invocation starts a Gradle Daemon that survives past this
+          # step (Gradle daemons are long-lived by design) and holds an
+          # exclusive lock on the shared GRADLE_USER_HOME's
+          # caches/journal-1 file; the confined capture's own gradlew
+          # invocation then timed out waiting for that same lock ("Timeout
+          # waiting to lock journal cache ... Owner PID: 3916, Our PID:
+          # 4208" -- PID 3916 is exactly the priming daemon, later reaped as
+          # an orphan process in this job's own post-cleanup log).
+          ./gradlew --no-daemon spotlessCheck || true
 
       - name: Run the D1b generic capture (${{ matrix.job }})
         run: |
