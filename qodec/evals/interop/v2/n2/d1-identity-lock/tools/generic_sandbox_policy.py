@@ -104,6 +104,16 @@ ECOSYSTEM_POLICY_HINTS = {
     },
     "jvm-gradle": {
         "env_allow": ["PATH", "HOME", "TMPDIR", "JAVA_HOME", "GRADLE_USER_HOME", "GRADLE_OPTS"],
+        # A real capture (repo-moshi, CI run 29469716117, AFTER its own
+        # plugin-resolution and network-exception gaps were each separately
+        # fixed) showed the Kotlin compiler daemon hardcode a lock/marker
+        # file under the real system /tmp -- "java.nio.file.
+        # AccessDeniedException: /tmp/kotlin-compiler-in-moshiroot-
+        # <hash>.alive" -- ignoring TMPDIR/HOME entirely. Same class of gap
+        # as rust's linker, dotnet's /tmp/.dotnet/shm, and Maven's
+        # scala-compiler-bridge findings above: the job's own dedicated
+        # tmp_dir isn't enough, the real system /tmp itself must be fs_rw.
+        "extra_fs_rw_fixed": [Path("/tmp")],
         # GRADLE_M2_REPO_PATH is a synthetic, policy-only key (never itself
         # forwarded to the confined child -- nothing reads this env var at
         # runtime), pointing at the real ~/.m2/repository. Real evidence

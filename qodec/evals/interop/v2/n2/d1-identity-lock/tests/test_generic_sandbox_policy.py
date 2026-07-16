@@ -195,6 +195,21 @@ class TestBuildPolicy(unittest.TestCase):
         fs_rw_line = next(line for line in text.splitlines() if line.startswith("fs_rw"))
         self.assertIn('"/tmp"', fs_rw_line)
 
+    def test_jvm_gradle_policy_makes_real_tmp_writable(self):
+        # A real capture (repo-moshi, CI run 29469716117) showed the Kotlin
+        # compiler daemon hardcode a lock/marker file under /tmp --
+        # "AccessDeniedException: /tmp/kotlin-compiler-in-moshiroot-
+        # <hash>.alive", ignoring TMPDIR -- same class of gap as rust's
+        # linker, Maven's compiler-bridge, and dotnet's /tmp/.dotnet/shm
+        # findings.
+        text = gsp.build_policy(
+            ecosystem="jvm-gradle", case_id="repo-moshi", source_root=Path("/src"), home_dir=Path("/h"),
+            tmp_dir=Path("/job-tmp"), capture_out_dir=Path("/o"),
+            project_writable_dirs=[], env_values={},
+        )
+        fs_rw_line = next(line for line in text.splitlines() if line.startswith("fs_rw"))
+        self.assertIn('"/tmp"', fs_rw_line)
+
     def test_maven_policy_makes_real_tmp_writable(self):
         # A real capture (CI run #10) showed scala-maven-plugin unpack its
         # compiler-bridge sources jar via a hardcoded /tmp path --
