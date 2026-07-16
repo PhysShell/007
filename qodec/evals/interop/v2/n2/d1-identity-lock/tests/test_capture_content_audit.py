@@ -100,16 +100,31 @@ class TestAcceptanceRevocation(unittest.TestCase):
         revoked_paths = {r["path"] for r in self.record["revoked_records"]}
         self.assertIn("qodec/evals/interop/v2/n2/d1-identity-lock/stage1-pilot-evidence.json", revoked_paths)
 
-    def test_revoked_record_hash_matches_the_real_committed_file(self):
-        # The revocation must reference the actual, unmodified stage1 file's
-        # own self-hash -- not a stale or invented value.
+    def test_revoked_record_hash_pins_the_frozen_historical_version(self):
+        # The revocation is a historical snapshot: it must reference the
+        # exact self-hash of the stage1 file version that existed AT THE
+        # TIME of revocation (run 29418422603, repo-spotless-era) by a
+        # frozen literal constant in the builder -- not whatever the live
+        # stage1-pilot-evidence.json says today, since that file has since
+        # been legitimately rebuilt and formally re-accepted.
         entry = next(r for r in self.record["revoked_records"]
                      if r["path"] == "qodec/evals/interop/v2/n2/d1-identity-lock/stage1-pilot-evidence.json")
-        self.assertEqual(entry["record_sha256"], self.stage1_evidence["record_sha256"])
+        self.assertEqual(entry["record_sha256"], revocation_builder.STAGE1_REVOKED_VERSION_RECORD_SHA256)
+        self.assertNotEqual(entry["record_sha256"], self.stage1_evidence["record_sha256"])
 
-    def test_stage1_pilot_evidence_json_itself_was_not_modified(self):
-        # Revocation must not rewrite history -- the original file's self-hash
-        # must still verify against its own committed content.
+    def test_superseded_by_references_the_live_reaccepted_stage1_record(self):
+        # The re-acceptance reference, by contrast, must track the current
+        # live file -- proving the formal sign-off's record is exactly what
+        # is committed today, for Stage 1 only.
+        superseded_by = self.record["superseded_by"]
+        self.assertEqual(superseded_by["new_stage1_evidence_record_sha256"],
+                          self.stage1_evidence["record_sha256"])
+        self.assertIn("stage_1_five_ecosystem_pilot only", superseded_by["scope"])
+        self.assertIn("stage_2_full_nine_case_matrix", superseded_by["scope"])
+
+    def test_current_stage1_pilot_evidence_json_self_hash_verifies_and_is_accepted(self):
+        # The live file (rebuilt under the new formal sign-off) must itself
+        # be internally consistent and carry the accepted status.
         self.assertTrue(_self_hash_ok(self.stage1_evidence))
         self.assertEqual(self.stage1_evidence["status"], "STAGE_1_ACCEPTED_COMPLETE")
 

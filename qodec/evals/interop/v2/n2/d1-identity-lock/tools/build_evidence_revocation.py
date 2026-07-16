@@ -7,6 +7,18 @@ is content-invalid -- infrastructure/sandbox failures, not genuine
 workload output. stage1-pilot-evidence.json is NOT deleted or edited; this
 record supersedes its ACCEPTANCE STATUS only, and states plainly what it
 still is valid for.
+
+This record is itself a frozen historical snapshot: `revoked_records`
+below pins the exact self-hash of the specific stage1-pilot-evidence.json
+version that was revoked at the time (run 29418422603, repo-spotless-era),
+by literal constant -- not by re-reading whatever the file says today.
+stage1-pilot-evidence.json has since been legitimately rebuilt from
+scratch and formally re-accepted by the user (2026-07-16 sign-off) after
+satisfying every criterion this record's own `path_to_re_acceptance`
+demanded (fail-closed content-acceptance gate; from-scratch re-run;
+byte-level content validation). `superseded_by` records that
+re-acceptance for Stage 1 ONLY -- Stage 2's revocation remains in effect
+until the full nine-case matrix is itself re-run and re-accepted.
 """
 from __future__ import annotations
 
@@ -15,7 +27,19 @@ import json
 from pathlib import Path
 
 OUT_PATH = Path(__file__).resolve().parents[1] / "stage1-and-stage2-acceptance-revocation.json"
-STAGE1_EVIDENCE_PATH = Path(__file__).resolve().parents[1] / "stage1-pilot-evidence.json"
+
+# Frozen historical identity of the specific stage1-pilot-evidence.json
+# version this record revoked -- literal, not re-derived, so this record's
+# meaning does not silently drift if the live file is later rebuilt.
+STAGE1_REVOKED_VERSION_RECORD_SHA256 = "eb1b1e385b53bc6714ad3bd45eda5da1037b4b6a9bd18a9c4ec9ccc797653261"
+STAGE1_REVOKED_VERSION_STATUS = "STAGE_1_ACCEPTED_COMPLETE"
+
+# Frozen identity of the record that formally re-accepted Stage 1, lifting
+# this revocation for Stage 1 only.
+STAGE1_REACCEPTANCE_DECISION_IDENTITY = "n2d1b-stage1-acceptance-formal-signoff-2026-07-16"
+STAGE1_REACCEPTANCE_WORKFLOW_RUN_ID = 29474805883
+STAGE1_REACCEPTANCE_TESTED_HEAD_SHA = "c51eacca7edd9b73f58c740f5de31998304cf85c"
+STAGE1_REACCEPTANCE_RECORD_SHA256 = "ad71afd35e1af0668277e494c6594040fef21f44b55dc11564450437c72c345e"
 
 
 def canonicalize_and_hash(body: dict) -> tuple[str, str]:
@@ -24,16 +48,31 @@ def canonicalize_and_hash(body: dict) -> tuple[str, str]:
 
 
 def build_record() -> dict:
-    stage1_evidence = json.loads(STAGE1_EVIDENCE_PATH.read_text())
     body = {
         "record_type": "n2d1b-acceptance-revocation-v1",
         "revoked_records": [
             {
                 "path": "qodec/evals/interop/v2/n2/d1-identity-lock/stage1-pilot-evidence.json",
-                "record_sha256": stage1_evidence["record_sha256"],
-                "previously_claimed_status": stage1_evidence["status"],
+                "record_sha256": STAGE1_REVOKED_VERSION_RECORD_SHA256,
+                "previously_claimed_status": STAGE1_REVOKED_VERSION_STATUS,
             },
         ],
+        "superseded_by": {
+            "scope": "stage_1_five_ecosystem_pilot only -- stage_2_full_nine_case_matrix revocation remains in effect",
+            "approving_decision_identity": STAGE1_REACCEPTANCE_DECISION_IDENTITY,
+            "workflow_run_id": STAGE1_REACCEPTANCE_WORKFLOW_RUN_ID,
+            "tested_head_sha": STAGE1_REACCEPTANCE_TESTED_HEAD_SHA,
+            "new_stage1_evidence_record_sha256": STAGE1_REACCEPTANCE_RECORD_SHA256,
+            "re_acceptance_criteria_satisfied": (
+                "Fail-closed content-acceptance gate added to generic_capture.py; "
+                "five-ecosystem pilot re-run from scratch with no reuse of runs "
+                "#4-#6 raw input; every capture inspected and confirmed content-"
+                "valid at the actual byte level; independent pair-reproducibility "
+                "verification for all five cases; case-scoped network-enforcement "
+                "and canonicalization exceptions each separately authorized and "
+                "evidence-gated."
+            ),
+        },
         "revocation_reason": (
             "Real inspection of the actual captured bytes (see "
             "capture-content-audit-run6.json, built by downloading and reading "
