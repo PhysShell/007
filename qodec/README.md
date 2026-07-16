@@ -1,5 +1,11 @@
 # qodec — Q's codec lab
 
+> **Migrated:** QODEC now lives in the standalone [`PhysShell/qodec`](https://github.com/PhysShell/qodec)
+> repository. New development happens there; this copy is retained as
+> historical evidence for `007`'s N2 benchmark work and is no longer
+> actively maintained. See `PhysShell/qodec`'s `docs/migration/README.md`
+> and `MIGRATION_PROVENANCE.json` for the extraction record.
+
 Token-aware **lossless** encode/decode experiments for agent context. Q hands
 the agents compact gear; this is the workbench where the gear is measured.
 

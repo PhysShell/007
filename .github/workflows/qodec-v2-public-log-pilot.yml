@@ -12,14 +12,17 @@
 # committed flake.lock is mandatory (--no-update-lock-file). The Nix store is
 # cached (built-in Actions cache, no external secret); saving it needs
 # actions: write — the only scope beyond contents: read.
+# MIGRATION NOTICE: QODEC has been extracted to the standalone
+# PhysShell/qodec repository (see qodec/docs/migration/README.md and
+# PhysShell/qodec's MIGRATION_PROVENANCE.json), which now runs this same
+# pilot CI on its own pull_request/workflow_dispatch triggers. This copy's
+# automatic triggers have been retired so unrelated 007 changes no longer
+# run it; it is kept workflow_dispatch-only as historical record. Do not
+# re-enable automatic triggers or resume benchmark work on this copy.
 name: qodec-v2-public-log-pilot
 
 on:
-  pull_request:
   workflow_dispatch:
-  push:
-    branches:
-      - claude/qodec-benchmark-v2-public-log-pilot-n1
 
 permissions:
   contents: read

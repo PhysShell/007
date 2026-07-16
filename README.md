@@ -99,7 +99,9 @@ task-specific, evidence-backed agent context),
 
 Working experiment: **`qodec/`** — token-aware lossless codec lab (measured
 context encoding for agent payloads; design record and bench numbers in
-`docs/token-codec.md`).
+`docs/token-codec.md`). Migrated to the standalone
+[`PhysShell/qodec`](https://github.com/PhysShell/qodec) repository; this
+copy is retained as historical evidence for the N2 benchmark work.
 
 Sibling project (separate, in Own.NET): **sandboy** — a Landlock + seccomp
 *wrap-the-child* confinement (`sandboy run --policy step.toml -- <cmd>`), the

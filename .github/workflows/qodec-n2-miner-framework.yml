@@ -11,13 +11,16 @@
 # already-accepted N2-A source-manifest.json (never re-executed). It produces
 # PLANS and PROVISIONAL selection reports, never a corpus freeze, and never
 # calls QODEC, RTK, or any model.
+# MIGRATION NOTICE: QODEC has been extracted to the standalone
+# PhysShell/qodec repository (see qodec/docs/migration/README.md and
+# PhysShell/qodec's MIGRATION_PROVENANCE.json). This workflow's automatic
+# pull_request trigger has been retired so unrelated 007 changes no longer
+# run it; it is kept workflow_dispatch-only as historical record of the
+# Scope N2-B evidence trail. Do not re-enable automatic triggers or resume
+# benchmark work on this copy -- new QODEC CI runs in PhysShell/qodec.
 name: qodec-n2-miner-framework
 
 on:
-  pull_request:
-    paths:
-      - "qodec/evals/interop/v2/n2/miner/**"
-      - ".github/workflows/qodec-n2-miner-framework.yml"
   workflow_dispatch:
 
 permissions:
