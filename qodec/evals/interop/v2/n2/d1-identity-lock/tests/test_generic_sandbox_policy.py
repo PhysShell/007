@@ -190,6 +190,24 @@ class TestBuildPolicy(unittest.TestCase):
         self.assertIn("tcp_connect = []", text)
         self.assertIn("tcp_bind = []", text)
 
+    def test_gradle_policy_grants_read_access_to_its_own_probe_script_directories(self):
+        # Real evidence (CI run #14): the network-enforcement probes
+        # (canary/tools/network_probe.py, d1-identity-lock/tools/
+        # loopback_bind_probe.py) run through the SAME policy as the real
+        # jvm-gradle capture, but that policy never granted read access to
+        # the 007 checkout's own tools directories -- confined python3
+        # failed with "can't open file '.../network_probe.py': [Errno 13]
+        # Permission denied" (exit code 2, Python's own convention for a
+        # script it can't open -- not Sandboy's).
+        text = gsp.build_policy(
+            ecosystem="jvm-gradle", source_root=Path("/src"), home_dir=Path("/h"),
+            tmp_dir=Path("/t"), capture_out_dir=Path("/o"),
+            project_writable_dirs=[], env_values={},
+        )
+        fs_ro_line = next(line for line in text.splitlines() if line.startswith("fs_ro"))
+        self.assertIn(str(gsp.CANARY_TOOLS_DIR), fs_ro_line)
+        self.assertIn(str(gsp.TOOLS_DIR), fs_ro_line)
+
     def test_no_other_ecosystem_declares_network_enforcement_mode(self):
         for ecosystem in gsp.ECOSYSTEM_POLICY_HINTS:
             if ecosystem == "jvm-gradle":

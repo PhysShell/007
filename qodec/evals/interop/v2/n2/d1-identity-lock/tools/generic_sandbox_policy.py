@@ -17,6 +17,9 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+TOOLS_DIR = Path(__file__).resolve().parent
+CANARY_TOOLS_DIR = TOOLS_DIR.parents[1] / "canary" / "tools"
+
 BASELINE_FS_RO = [
     Path("/usr"), Path("/bin"), Path("/lib"), Path("/lib64"), Path("/etc"),
     Path("/proc"), Path("/sys"), Path("/dev/urandom"), Path("/dev/random"),
@@ -105,6 +108,22 @@ ECOSYSTEM_POLICY_HINTS = {
         # for every ecosystem) for real network confinement. Filesystem,
         # seccomp, and env_clear mediation are unaffected.
         "network_enforcement_mode": "outer-netns-loopback-only",
+        # Real evidence (CI run #14, 216116a's successor): the network-
+        # enforcement probes (canary/tools/network_probe.py,
+        # d1-identity-lock/tools/loopback_bind_probe.py) run in the EXACT
+        # same envelope/policy as the real jvm-gradle capture that follows
+        # -- but that policy's fs_ro never granted read access to the 007
+        # checkout's own tools directories those scripts live in, since no
+        # OTHER ecosystem's real argv ever needs to read a file from the
+        # checkout itself (only from source_root). Confined python3 failed
+        # with "can't open file '.../network_probe.py': [Errno 13]
+        # Permission denied" -- exit code 2 is Python's OWN "couldn't open
+        # the script" convention, not Sandboy's config-error exit code as
+        # first hypothesized; Sandboy itself started fine (the "Landlock
+        # only PARTIALLY enforced" warning proves it). Mirrors N2-A's own
+        # proven sandboy_policy.py repo_tools_dir grant for this exact
+        # reason (its own network_probe.py needs the identical access).
+        "extra_fs_ro_fixed": [CANARY_TOOLS_DIR, TOOLS_DIR],
     },
     "dotnet": {
         # Mirrors canary/tools/sandboy_policy.py's proven N2-A dotnet policy
@@ -164,6 +183,7 @@ def build_policy(*, ecosystem: str, source_root: Path, home_dir: Path, tmp_dir: 
         value = env_values.get(env_name)
         if value:
             fs_ro.append(Path(value))
+    fs_ro.extend(hints.get("extra_fs_ro_fixed", []))
 
     fs_rw = list(BASELINE_FS_RW) + [home_dir, tmp_dir, capture_out_dir, *project_writable_dirs]
     for env_name in hints["extra_fs_rw_from_env"]:
