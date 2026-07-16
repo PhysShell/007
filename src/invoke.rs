@@ -774,9 +774,47 @@ fn call_codex(
     result
 }
 
+/// Parse the text claude carries in its `--output-format json` `result`
+/// field. Deliberately STRICT — narrower than the codex fallback's
+/// bracket-slice: the trimmed payload must be EITHER a bare JSON value, OR
+/// exactly one complete ```-fenced block that occupies the WHOLE trimmed
+/// payload (no prose before/after, no second block). claude 2.1.162's `result`
+/// comes back fence-wrapped (```json\n{...}\n```) even with `--json-schema`,
+/// while 2.1.210 returned bare JSON — both must parse, and nothing looser may.
+/// `call_claude`'s argv is unchanged; this only relaxes how its `result` text
+/// is read. Never panics: `trim`/`strip_prefix`/`strip_suffix`/`find`/
+/// `split_at` on char-boundary-safe ASCII delimiters plus `serde_json`.
+fn parse_claude_result_payload(result_text: &str) -> Option<serde_json::Value> {
+    let trimmed = result_text.trim();
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        return Some(v);
+    }
+    let inner = strip_single_full_fence(trimmed)?;
+    serde_json::from_str(inner).ok()
+}
+
+/// If `s` (already trimmed) is EXACTLY one complete fenced block — opens with
+/// ``` plus an optional single-token language tag on the first line, and the
+/// closing ``` terminates the whole payload — return the inner content. Any
+/// text outside the one fence, or a second fence within, yields `None`.
+fn strip_single_full_fence(s: &str) -> Option<&str> {
+    let after_open = s.strip_prefix("```")?;
+    let nl = after_open.find('\n')?;
+    let (tag, rest) = after_open.split_at(nl); // `rest` starts with the '\n'
+    if tag.contains('`') {
+        return None; // a stray ``` inside prose, not a real opening fence
+    }
+    let body = rest.strip_prefix('\n')?;
+    let inner = body.strip_suffix("```")?; // closing fence must end the payload
+    if inner.contains("```") {
+        return None; // more than one block
+    }
+    Some(inner.trim())
+}
+
 /// Turn one call's raw bytes into a JSON `Value` to schema-check, per
-/// engine's own envelope shape. Never panics: only `find`/`rfind` on ASCII
-/// delimiters (always char-boundary-safe) plus `serde_json::from_str`.
+/// engine's own envelope shape. Never panics: `find`/`rfind`/`strip_*` on
+/// ASCII delimiters (always char-boundary-safe) plus `serde_json::from_str`.
 fn extract_final_json(call: &RawCall, engine: Engine) -> Option<serde_json::Value> {
     match engine {
         Engine::Claude => {
@@ -784,7 +822,7 @@ fn extract_final_json(call: &RawCall, engine: Engine) -> Option<serde_json::Valu
             let stdout = String::from_utf8_lossy(&call.stdout);
             let envelope: serde_json::Value = serde_json::from_str(&stdout).ok()?;
             let result_text = envelope.get("result")?.as_str()?;
-            serde_json::from_str(result_text).ok()
+            parse_claude_result_payload(result_text)
         }
         Engine::Codex => {
             let text = String::from_utf8_lossy(&call.stdout);
@@ -852,6 +890,61 @@ mod tests {
         };
         let parsed = extract_final_json(&call, Engine::Claude);
         assert_eq!(parsed, Some(serde_json::json!({"acknowledged": true})));
+    }
+
+    #[test]
+    fn extract_final_json_claude_envelope_fenced_result() {
+        // claude 2.1.162: the `result` field is a ```json fenced block, not
+        // bare JSON. The envelope still parses; the strict payload parser peels
+        // the single full-payload fence.
+        let inner = "```json\n{\"ok\": true}\n```";
+        let stdout = serde_json::to_vec(&serde_json::json!({"result": inner, "session_id": "x"}))
+            .unwrap_or_default();
+        let call = RawCall {
+            timed_out: false,
+            exit_code: Some(0),
+            stdout,
+            stderr: Vec::new(),
+        };
+        assert_eq!(
+            extract_final_json(&call, Engine::Claude),
+            Some(serde_json::json!({"ok": true}))
+        );
+    }
+
+    #[test]
+    fn claude_result_payload_accepts_bare_and_one_full_fence_only() {
+        // Shape 1: bare JSON (2.1.210).
+        assert_eq!(
+            parse_claude_result_payload("  {\"ok\": true}  "),
+            Some(serde_json::json!({"ok": true}))
+        );
+        // Shape 2a: one full fenced block WITH a language tag (2.1.162).
+        assert_eq!(
+            parse_claude_result_payload("```json\n{\"ok\": true}\n```"),
+            Some(serde_json::json!({"ok": true}))
+        );
+        // Shape 2b: one full fenced block WITHOUT a language tag.
+        assert_eq!(
+            parse_claude_result_payload("```\n{\"ok\": true}\n```"),
+            Some(serde_json::json!({"ok": true}))
+        );
+    }
+
+    #[test]
+    fn claude_result_payload_rejects_anything_looser() {
+        // Prose before the fence -> not "the entire payload".
+        assert!(parse_claude_result_payload("sure:\n```json\n{\"ok\": true}\n```").is_none());
+        // Prose after the closing fence.
+        assert!(
+            parse_claude_result_payload("```json\n{\"ok\": true}\n```\nhope that helps").is_none()
+        );
+        // Two fenced blocks.
+        assert!(parse_claude_result_payload("```json\n{}\n```\n```json\n{}\n```").is_none());
+        // Fenced, but the inner content is not valid JSON.
+        assert!(parse_claude_result_payload("```json\nnot json at all\n```").is_none());
+        // Bare-ish but with trailing prose -> not a bare JSON value.
+        assert!(parse_claude_result_payload("{\"ok\": true} then some words").is_none());
     }
 
     #[test]
