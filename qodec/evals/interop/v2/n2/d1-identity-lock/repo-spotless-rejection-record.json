@@ -1,0 +1,60 @@
+{
+  "acquisition_artifact_identity": {
+    "acquisition_model": "durable N2-C release-asset tarball (source.tar), no .git metadata",
+    "note": "Per-CI-run durable identity (archive_sha256, actual_head_sha) is populated at capture time from the N2-D0 durable release asset following the existing acquisition-receipt.json pattern shared by every repository-miner case -- the STATIC, frozen identity anchor is source_identity.commit_sha above, which is what this rejection is scoped against."
+  },
+  "approving_decision_identity": "n2d1b-repo-spotless-rejection-2026-07-16",
+  "case_id": "repo-spotless",
+  "classification": "REJECTED_ACQUISITION_MODEL_INCOMPATIBLE",
+  "frozen_execution_argv": [
+    "./gradlew",
+    "spotlessCheck"
+  ],
+  "observed_failure": {
+    "raw_stderr": "sandboy: warning: Landlock only PARTIALLY enforced (kernel too old for some access rights)\n[Resource-Usage] Failed to initialize JNA. Instantiated JNA is version '5.16.0'. Please update to 5.15.0 or later.\n\nFAILURE: Build failed with an exception.\n\n* What went wrong:\nCould not determine the dependencies of task ':lib:spotlessJavaCheck'.\n> Could not create task ':lib:spotlessJava'.\n   > Cannot find git repository in any parent directory\n\n* Try:\n> Run with --stacktrace option to get the stack trace.\n> Run with --info or --debug option to get more log output.\n> Get more help at https://help.gradle.org.\n\nBUILD FAILED in 11s\nCommand exited with non-zero status 1\n",
+    "raw_stderr_sha256": "e9e025d013539dd846acc2609721e633f28e0253e8c8f9399bbfb3c350eeb0e8",
+    "workflow_run_ids": [
+      29466993434,
+      29467180079,
+      29467952842
+    ]
+  },
+  "prohibited_workarounds": [
+    "patching upstream build scripts (build.gradle, gradle/spotless.gradle, or any other upstream file)",
+    "adding ratchetFrom null or any other upstream source-level override",
+    "synthesizing a .git directory, commit, or ref in source_root",
+    "pointing an origin/main ref at HEAD or any other fabricated git history",
+    "cloning or fetching the upstream repository during a D1b confined capture",
+    "loosening content_acceptance.py's semantic-marker requirement for this or any other case",
+    "classifying this failure as a Sandboy/sandbox-policy defect"
+  ],
+  "rationale": "repo-spotless's own upstream build unconditionally requires real git history reachable from an origin/main ref (via ratchetFrom) for every non-root subproject's spotlessJava task, with no config/property/CLI override. The frozen acquisition model for this D1b effort is a content-addressed tarball snapshot with no .git directory -- these two things are structurally incompatible, independent of network policy, plugin caching, Gradle daemon behavior, or filesystem confinement (all of which were separately diagnosed and fixed in this same investigation, and are NOT the cause of this failure).",
+  "record_sha256": "f6849f50d97566346d0f1eca55a6efd91ab0d7362964f9d8b4ba00ad4ccb288c",
+  "record_type": "n2d1b-repository-case-rejection-record-v1",
+  "record_version": 1,
+  "replacement_case_id": "repo-moshi",
+  "replacement_selection_procedure": "For the five-ecosystem pilot: repo-moshi (already a frozen N2-C primary case, same jvm-gradle ecosystem, candidate_id 'repo-moshi' in candidate-registry.json, commit 889013ec2edb8d8034902662a1dc8c4f3b3f8111) takes repo-spotless's pilot slot -- selected because it was already frozen and eligible, not hand-picked for this substitution. For the final nine-case repository-miner set: use the pre-existing deterministic candidate-selection policy (N2-B's eligibility.py/scorer.py/quota_planner.py, applied to candidate-registry.json's jvm-gradle-ecosystem candidates) to select the next eligible Gradle alternate -- never a hand-picked or QODEC/RTK/token-count/output-size re-ranked substitute.",
+  "source_identity": {
+    "canonical_url": "https://github.com/diffplug/spotless",
+    "commit_sha": "03d43ba2cdc81050e07b62646c08b22e39505368",
+    "source_manifest": "qodec/evals/interop/v2/n2/source-freeze/source-manifests/primary/repo-spotless.json"
+  },
+  "upstream_evidence": {
+    "only_known_disable_mechanism": {
+      "excerpt": "ratchetFrom null",
+      "line": 21,
+      "note": "A source-level edit disabling ratchet for one specific format target only -- not a property or CLI override.",
+      "path": "gradle/spotless-freshmark.gradle"
+    },
+    "root_build_gradle": {
+      "excerpt": "allprojects {\n\tapply from: rootProject.file('gradle/error-prone.gradle')\n\tapply from: rootProject.file('gradle/spotless.gradle')\n}",
+      "lines": "21-24",
+      "path": "build.gradle"
+    },
+    "spotless_convention_script": {
+      "excerpt": "ratchetFrom 'origin/main'",
+      "line": 6,
+      "path": "gradle/spotless.gradle"
+    }
+  }
+}

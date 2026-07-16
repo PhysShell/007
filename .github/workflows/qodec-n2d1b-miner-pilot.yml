@@ -218,6 +218,22 @@
 #      platform ABI); platform.platform() (which embeds the runner's own
 #      kernel release) moves to a separate host_runtime_identifier
 #      provenance field, recorded but never compared across runners.
+#
+# D1b decision (2026-07-16): repo-spotless is REJECTED_ACQUISITION_MODEL_
+# INCOMPATIBLE (not a sandbox/tooling defect) -- see
+# repo-spotless-rejection-record.json. After the equo/p2 ~/.m2 fs_ro fix and
+# the root "build" writable-dir fix resolved two genuinely sandbox-side
+# gaps (CI run 29467952842), the confined capture still failed with "Cannot
+# find git repository in any parent directory": repo-spotless's own
+# upstream build.gradle unconditionally applies `ratchetFrom 'origin/main'`
+# (gradle/spotless.gradle) to every non-root subproject, requiring real git
+# history the frozen tarball-snapshot acquisition model structurally cannot
+# provide, with no known override. Replaced in this pilot's jvm-gradle slot
+# by the already-frozen repo-moshi case (same ecosystem, also an N2-C
+# primary case). NETWORK_ENFORCEMENT_AUTHORIZED_CASES above still lists
+# repo-spotless as historically accurate (that specific finding was
+# genuinely validated before the unrelated git-ratchet blocker surfaced),
+# not because the case is still active.
 name: qodec-n2d1b-miner-pilot
 
 on:
@@ -321,11 +337,10 @@ jobs:
           - { case_id: repo-docker-java-parser, ecosystem: jvm-maven }
           - { case_id: repo-kubeops-generator, ecosystem: dotnet }
           - { case_id: repo-pyflakes, ecosystem: python }
-          - { case_id: repo-spotless, ecosystem: jvm-gradle }
+          - { case_id: repo-moshi, ecosystem: jvm-gradle }
           # - { case_id: repo-rustlings, ecosystem: rust }
           # - { case_id: repo-dockerfile-parser-rs, ecosystem: rust }
           # - { case_id: repo-requests, ecosystem: python }
-          # - { case_id: repo-moshi, ecosystem: jvm-gradle }
         job: [capture-a, capture-b]
     runs-on: ubuntu-24.04
     steps:
@@ -493,39 +508,6 @@ jobs:
           JAVA_HOME: /usr/lib/jvm/java-21-openjdk-amd64
         run: ./gradlew --version
 
-      - name: Trusted setup — prime com.diffplug.spotless plugin resolution (repo-spotless only)
-        if: matrix.case.case_id == 'repo-spotless'
-        working-directory: ${{ runner.temp }}/source-artifact/${{ matrix.case.case_id }}/source
-        env:
-          JAVA_HOME: /usr/lib/jvm/java-21-openjdk-amd64
-        run: |
-          # Real evidence (CI run 29466573023, AFTER the network-enforcement
-          # probe's own fs_ro fix was confirmed working -- both probes
-          # exit 0): the confined capture's frozen `./gradlew spotlessCheck`
-          # then failed with "Plugin [id: 'com.diffplug.spotless', version:
-          # '8.7.0', apply: false] was not found" -- resolving the plugin
-          # itself needs the real Gradle Plugin Portal, real external
-          # network the loopback-only exception correctly does NOT grant
-          # (the SAME run's negative probe confirmed real external targets
-          # stay unreachable). Same class of gap as Maven's own
-          # compiler-bridge finding above: prime GRADLE_USER_HOME's
-          # (already fs_rw-granted) cache by running the real frozen task
-          # once here, network allowed; its own output is discarded -- the
-          # confined capture below always re-extracts a pristine source.tar
-          # into its own separate work_dir/source, so this priming run is
-          # not itself the captured execution.
-          #
-          # --no-daemon (real evidence, CI run 29466993434): without it, this
-          # priming invocation starts a Gradle Daemon that survives past this
-          # step (Gradle daemons are long-lived by design) and holds an
-          # exclusive lock on the shared GRADLE_USER_HOME's
-          # caches/journal-1 file; the confined capture's own gradlew
-          # invocation then timed out waiting for that same lock ("Timeout
-          # waiting to lock journal cache ... Owner PID: 3916, Our PID:
-          # 4208" -- PID 3916 is exactly the priming daemon, later reaped as
-          # an orphan process in this job's own post-cleanup log).
-          ./gradlew --no-daemon spotlessCheck || true
-
       - name: Run the D1b generic capture (${{ matrix.job }})
         run: |
           # Fixed-visible-path discipline (D1b decision, 2026-07-15): the
@@ -591,7 +573,7 @@ jobs:
           - repo-docker-java-parser
           - repo-kubeops-generator
           - repo-pyflakes
-          - repo-spotless
+          - repo-moshi
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout 007
