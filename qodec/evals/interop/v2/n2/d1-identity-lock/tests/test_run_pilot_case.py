@@ -33,6 +33,7 @@ def _args(**overrides):
         "venv_python": "",
         "python_base_interpreter": "",
         "setup_python_action_commit": "",
+        "case_id": "repo-hyperfine",
     }
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -118,6 +119,81 @@ class TestGradleDaemonDisabled(unittest.TestCase):
             self.assertNotIn("GRADLE_OPTS", env_values)
             props = (gradle_user_home / "gradle.properties").read_text()
             self.assertIn("org.gradle.daemon=false", props)
+            self.assertNotIn("org.gradle.parallel", props)
+
+
+class TestGradleDeterministicSchedulingProfile(unittest.TestCase):
+    """D1b authorization (2026-07-16, repo-moshi only): a real pair (both
+    genuine BUILD SUCCESSFUL, all identity fields matching) still failed
+    canonical-byte equality because Gradle's own parallel task scheduler
+    interleaves per-task console lines nondeterministically -- force fully
+    serial scheduling and a plain console, scoped to repo-moshi ONLY."""
+
+    def test_repo_moshi_gets_the_deterministic_scheduling_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_home = Path(tmp)
+            with mock.patch.object(rpc.Path, "home", return_value=fake_home):
+                toolchain_fn, env_values = rpc.build_toolchain_fn_and_env(
+                    "jvm-gradle", _args(case_id="repo-moshi")
+                )
+            gradle_user_home = fake_home / ".gradle"
+            props = (gradle_user_home / "gradle.properties").read_text()
+            self.assertIn("org.gradle.daemon=false", props)
+            self.assertIn("org.gradle.parallel=false", props)
+            self.assertIn("org.gradle.workers.max=1", props)
+            self.assertIn("org.gradle.console=plain", props)
+            self.assertIn("org.gradle.console.interactive=false", props)
+            # Synthetic profile fields surface through the toolchain-identity
+            # closure (mirroring how python's provenance fields flow into the
+            # receipt), never invented independently of what was actually
+            # written to gradle.properties.
+            with mock.patch.object(
+                rpc.et, "capture_gradle_toolchain_identity",
+                return_value={"resolved_version": "9.5.1", "runtime_identifier": "21"},
+            ):
+                raw = toolchain_fn(Path("/fake/source"))
+            self.assertEqual(raw["gradle_scheduling_profile_sha256"], __import__("hashlib").sha256(props.encode()).hexdigest())
+            self.assertEqual(raw["gradle_scheduling_profile_properties"], props)
+            self.assertEqual(raw["gradle_scheduling_profile_gradle_user_home"], str(gradle_user_home))
+
+    def test_another_gradle_case_does_not_get_the_scheduling_profile(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_home = Path(tmp)
+            with mock.patch.object(rpc.Path, "home", return_value=fake_home):
+                toolchain_fn, env_values = rpc.build_toolchain_fn_and_env(
+                    "jvm-gradle", _args(case_id="repo-some-other-gradle-case")
+                )
+            gradle_user_home = fake_home / ".gradle"
+            props = (gradle_user_home / "gradle.properties").read_text()
+            self.assertNotIn("org.gradle.parallel", props)
+            with mock.patch.object(
+                rpc.et, "capture_gradle_toolchain_identity",
+                return_value={"resolved_version": "9.5.1", "runtime_identifier": "21"},
+            ):
+                raw = toolchain_fn(Path("/fake/source"))
+            self.assertNotIn("gradle_scheduling_profile_sha256", raw)
+
+    def test_frozen_argv_with_conflicting_flag_fails_closed(self):
+        original = rpc.CASES["repo-moshi"]["frozen_argv"]
+        rpc.CASES["repo-moshi"]["frozen_argv"] = ["./gradlew", "test", "--max-workers=4"]
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                fake_home = Path(tmp)
+                with mock.patch.object(rpc.Path, "home", return_value=fake_home):
+                    with self.assertRaises(SystemExit):
+                        rpc.build_toolchain_fn_and_env("jvm-gradle", _args(case_id="repo-moshi"))
+        finally:
+            rpc.CASES["repo-moshi"]["frozen_argv"] = original
+
+    def test_conflicting_ambient_gradle_opts_fails_closed(self):
+        import os
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_home = Path(tmp)
+            with mock.patch.object(rpc.Path, "home", return_value=fake_home), \
+                    mock.patch.dict(os.environ, {"GRADLE_OPTS": "-Dorg.gradle.workers.max=4"}):
+                with self.assertRaises(SystemExit):
+                    rpc.build_toolchain_fn_and_env("jvm-gradle", _args(case_id="repo-moshi"))
 
 
 if __name__ == "__main__":

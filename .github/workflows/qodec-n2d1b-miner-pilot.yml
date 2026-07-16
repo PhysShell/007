@@ -532,6 +532,22 @@ jobs:
           # capture below always re-extracts a pristine source.tar into its
           # own separate work_dir/source, so this priming run is not itself
           # the captured execution.
+          #
+          # D1b authorization (2026-07-16): the SAME deterministic
+          # scheduling profile the confined capture uses (below, via
+          # run_pilot_case.py) is written here too, so any GRADLE_USER_HOME
+          # cache state this priming run populates (JARs, incremental
+          # compilation history) was itself produced under the identical
+          # serial-scheduling regime -- never a different one silently
+          # inherited into the authoritative capture.
+          mkdir -p "$HOME/.gradle"
+          cat > "$HOME/.gradle/gradle.properties" <<'EOF'
+          org.gradle.daemon=false
+          org.gradle.parallel=false
+          org.gradle.workers.max=1
+          org.gradle.console=plain
+          org.gradle.console.interactive=false
+          EOF
           ./gradlew --no-daemon test || true
 
       - name: Run the D1b generic capture (${{ matrix.job }})

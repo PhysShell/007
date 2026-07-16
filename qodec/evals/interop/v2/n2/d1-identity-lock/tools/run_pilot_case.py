@@ -266,6 +266,8 @@ def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
             },
         )
     if ecosystem == "jvm-gradle":
+        import os
+
         java_home = args.java_home_21
         gradle_user_home = Path.home() / ".gradle"
         # A real capture (CI run #7) showed the Gradle daemon fail with
@@ -284,13 +286,56 @@ def build_toolchain_fn_and_env(ecosystem: str, args) -> tuple:
         # comes from gradle.properties under GRADLE_USER_HOME, not from a
         # JVM system property -- so write that file directly (trusted,
         # unconfined) instead. Frozen "./gradlew ..." argv is unchanged.
+        #
+        # D1b authorization (2026-07-16, repo-moshi only): a real pair
+        # (both genuine BUILD SUCCESSFUL, all identity fields matching)
+        # still failed canonical-byte equality because Gradle's own
+        # parallel task scheduler interleaves per-task console progress/
+        # completion lines in whatever order concurrent worker threads
+        # happen to finish -- a real wall-clock race, not a content
+        # difference. Force fully serial, deterministic scheduling and a
+        # plain, non-interactive console renderer so task lines print in
+        # one deterministic order, rather than building a broad
+        # post-capture task-log reordering/multiset comparison. Scoped to
+        # repo-moshi ONLY (case_id-checked, never ecosystem-wide); frozen
+        # "./gradlew test" argv is unchanged.
+        gradle_scheduling_profile_sha256 = None
+        gradle_properties_text = "org.gradle.daemon=false\n"
+        if args.case_id == "repo-moshi":
+            frozen_argv_for_case = CASES[args.case_id]["frozen_argv"]
+            if any("--parallel" in tok or "--max-workers" in tok for tok in frozen_argv_for_case):
+                raise SystemExit(
+                    "repo-moshi: frozen argv contains a --parallel/--max-workers override that "
+                    "would conflict with the authorized deterministic scheduling profile"
+                )
+            ambient_gradle_opts = os.environ.get("GRADLE_OPTS", "")
+            if "org.gradle.parallel" in ambient_gradle_opts or "org.gradle.workers.max" in ambient_gradle_opts:
+                raise SystemExit(
+                    "repo-moshi: ambient GRADLE_OPTS conflicts with the authorized deterministic "
+                    f"scheduling profile: {ambient_gradle_opts!r}"
+                )
+            gradle_properties_text = (
+                "org.gradle.daemon=false\n"
+                "org.gradle.parallel=false\n"
+                "org.gradle.workers.max=1\n"
+                "org.gradle.console=plain\n"
+                "org.gradle.console.interactive=false\n"
+            )
+            gradle_scheduling_profile_sha256 = hashlib.sha256(gradle_properties_text.encode()).hexdigest()
         gradle_user_home.mkdir(parents=True, exist_ok=True)
-        (gradle_user_home / "gradle.properties").write_text("org.gradle.daemon=false\n")
+        (gradle_user_home / "gradle.properties").write_text(gradle_properties_text)
         real_m2_repo_for_gradle = str(Path.home() / ".m2" / "repository")
+
+        def _capture_gradle_identity(source_root):
+            raw = et.capture_gradle_toolchain_identity(gradle_bin="./gradlew", java_home=java_home, cwd=source_root)
+            if gradle_scheduling_profile_sha256 is not None:
+                raw["gradle_scheduling_profile_sha256"] = gradle_scheduling_profile_sha256
+                raw["gradle_scheduling_profile_properties"] = gradle_properties_text
+                raw["gradle_scheduling_profile_gradle_user_home"] = str(gradle_user_home)
+            return raw
+
         return (
-            lambda source_root: et.capture_gradle_toolchain_identity(
-                gradle_bin="./gradlew", java_home=java_home, cwd=source_root
-            ),
+            _capture_gradle_identity,
             {
                 "JAVA_HOME": java_home,
                 "GRADLE_USER_HOME": str(gradle_user_home),

@@ -393,6 +393,21 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
             "executed_venv_interpreter_sha256": toolchain_identity_raw.get("executed_venv_interpreter_sha256"),
             "setup_python_action_commit": toolchain_identity_raw.get("setup_python_action_commit"),
         },
+        # D1b authorization (2026-07-16, repo-moshi only): a deterministic
+        # Gradle scheduling profile (org.gradle.parallel=false,
+        # org.gradle.workers.max=1, plain non-interactive console) forces
+        # single-threaded, deterministic task-log ordering -- present
+        # (non-None) only for the case_id(s) run_pilot_case.py authorizes
+        # this for, never inferred or reconstructed here.
+        "gradle_scheduling_profile": (
+            {
+                "profile_sha256": toolchain_identity_raw["gradle_scheduling_profile_sha256"],
+                "properties": toolchain_identity_raw["gradle_scheduling_profile_properties"],
+                "gradle_user_home": toolchain_identity_raw["gradle_scheduling_profile_gradle_user_home"],
+            }
+            if "gradle_scheduling_profile_sha256" in toolchain_identity_raw
+            else None
+        ),
         "sandbox_identity": {"sandboy_commit_sha": sandboy_commit_sha, "policy_sha256": policy_sha256},
         # The raw policy_sha256 above embeds this job's own absolute
         # work_dir path (e.g. capture-a vs capture-b's separate runner
