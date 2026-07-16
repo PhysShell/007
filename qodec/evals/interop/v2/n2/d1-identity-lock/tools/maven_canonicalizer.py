@@ -31,14 +31,20 @@ applicable_case_ids for the single source of truth on scope.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 ESC = "\x1b"
 
 
 class CanonicalizerError(Exception):
+    pass
+
+
+class PolicyIntegrityError(Exception):
     pass
 
 
@@ -219,3 +225,59 @@ def canonicalize_stream(raw_bytes: bytes) -> tuple[bytes, dict]:
         "replacements": replacements,
     }
     return canonical_bytes, report
+
+
+def load_and_verify_policy(policy_path: Path) -> dict:
+    """Loads capture-canonicalization-policy.json and verifies it against
+    the ACTUAL running code before returning it -- never merely trusts the
+    `policy_sha256` field embedded in the file itself. Raises
+    PolicyIntegrityError (fail closed) if:
+
+      - the file's own self-hash does not verify (tampered or corrupted);
+      - its documented `rules` do not match maven_canonicalizer.RULES
+        exactly (rule set, anchored_regex, trigger_substring, placeholder)
+        -- a policy file describing different rules than the code that
+        actually runs must never be silently trusted;
+      - `applicable_case_ids` is empty or missing.
+
+    Both generic_capture.py (at capture time) and
+    verify_pilot_pair_reproducibility.py (at verification time) call this
+    SAME function, so neither can drift from the other's notion of what the
+    policy actually authorizes.
+    """
+    body = json.loads(policy_path.read_text())
+    if "policy_sha256" not in body:
+        raise PolicyIntegrityError(f"{policy_path}: missing policy_sha256 -- not a self-hash-locked policy record")
+    recorded = body["policy_sha256"]
+    without_hash = {k: v for k, v in body.items() if k != "policy_sha256"}
+    canonical_text = json.dumps(without_hash, indent=2, sort_keys=True) + "\n"
+    recomputed = hashlib.sha256(canonical_text.encode("utf-8")).hexdigest()
+    if recomputed != recorded:
+        raise PolicyIntegrityError(
+            f"{policy_path}: policy_sha256 {recorded} does not match recomputed {recomputed} "
+            "-- refusing to trust a tampered or corrupted canonicalization policy"
+        )
+
+    documented_rules = {r["rule_name"]: r for r in body.get("rules", [])}
+    code_rule_names = {rule.name for rule in RULES}
+    if set(documented_rules) != code_rule_names:
+        raise PolicyIntegrityError(
+            f"{policy_path}: documented rule set {sorted(documented_rules)} does not match "
+            f"maven_canonicalizer.RULES {sorted(code_rule_names)} -- policy and code have drifted"
+        )
+    for rule in RULES:
+        documented = documented_rules[rule.name]
+        if (
+            documented["anchored_regex"] != rule.pattern.pattern
+            or documented["trigger_substring"] != rule.trigger
+            or documented["placeholder"] != rule.placeholder
+        ):
+            raise PolicyIntegrityError(
+                f"{policy_path}: rule {rule.name!r} in the policy file does not match the "
+                "actual maven_canonicalizer.py rule it is supposed to document"
+            )
+
+    if not body.get("applicable_case_ids"):
+        raise PolicyIntegrityError(f"{policy_path}: applicable_case_ids is empty or missing")
+
+    return body

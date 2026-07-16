@@ -56,7 +56,10 @@ CANONICALIZATION_POLICY_PATH = TOOLS_DIR.parent / "capture-canonicalization-poli
 # other case is entirely unaffected: its canonical benchmark input remains
 # the raw, capped, selected stream verbatim, exactly as before this
 # decision.
-_CANONICALIZATION_POLICY = json.loads(CANONICALIZATION_POLICY_PATH.read_text())
+# Fail closed at import time (not merely trusting the file's own embedded
+# hash) if the policy has been tampered with, or if its documented rules
+# have drifted from the actual maven_canonicalizer.RULES this process runs.
+_CANONICALIZATION_POLICY = maven_canonicalizer.load_and_verify_policy(CANONICALIZATION_POLICY_PATH)
 CANONICALIZED_CASE_IDS = frozenset(_CANONICALIZATION_POLICY["applicable_case_ids"])
 
 
@@ -341,6 +344,14 @@ def run_one_capture(*, case_id: str, ecosystem: str, job_name: str,
         "adapter_identity": {"name": f"n2d1b-generic-capture-{ecosystem}", "version": "1"},
         **identity,
         "sandbox_identity": {"sandboy_commit_sha": sandboy_commit_sha, "policy_sha256": policy_sha256},
+        # The raw policy_sha256 above embeds this job's own absolute
+        # work_dir path (e.g. capture-a vs capture-b's separate runner
+        # temp dirs) and so is EXPECTED to differ between capture-a and
+        # capture-b even when every semantic policy field is identical --
+        # canonical_policy_sha256 (gsp.canonical_policy_text's <WORKDIR>
+        # substitution) is the field a pairwise reproducibility check must
+        # compare instead.
+        "canonical_policy_sha256": canonical_policy_sha256,
         "outer_isolation": {"network_isolation": True, "wall_clock_timeout_s": 1200},
         "resource_limits": {
             "cpu_time_limit_s": 600, "process_count_limit": 512,

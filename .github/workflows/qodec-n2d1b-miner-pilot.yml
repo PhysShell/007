@@ -167,6 +167,32 @@
 #   5. Full five-case pilot re-run follows; Stage 1 acceptance is withheld
 #      until all ten captures pass AND each pair has exact canonical
 #      raw-byte equality.
+#
+# D1b authorization (2026-07-16) -- repo-docker-java-parser's canonical
+# benchmark input is now a documented, self-hash-locked canonicalization
+# derivation of its raw stdout, not required to be raw-byte-identical
+# across capture-a/capture-b (see capture-canonicalization-policy.json,
+# tools/maven_canonicalizer.py). Commit 2ef3923 implemented the policy and
+# canonicalizer but had three real gaps in the evidence path, found by
+# review before any CI re-run had actually happened (this workflow's own
+# push path filter only matched the workflow file itself, so 2ef3923 never
+# triggered a real pilot run despite an earlier claim that one was
+# pending): (1) the fix above -- paths now also cover
+# d1-identity-lock/** and canary/tools/**; (2) no job ever downloaded a
+# capture-a/capture-b pair and compared them -- added the pair-verify job
+# below, one per pilot case, gated on the verifier's own exit code; (3)
+# the verifier only compared two already-produced canonical files against
+# each other and trusted their receipts' own recorded hashes -- rewritten
+# so every capture independently re-derives its expected canonical bytes
+# FROM its own raw execution evidence (via the same load_and_verify_policy
+# + canonicalize_stream the capture itself used) before any capture is
+# ever compared to another, and "no raw difference left unexplained" is
+# now checked by each differing line's own content hash within its own
+# side, never by a raw line-number union across two independently-diffed
+# sides. generic_capture.py itself also now calls
+# maven_canonicalizer.load_and_verify_policy() at import time (fail
+# closed on a tampered or code-drifted policy) rather than merely trusting
+# the policy file's own embedded hash.
 name: qodec-n2d1b-miner-pilot
 
 on:
@@ -176,6 +202,13 @@ on:
       - claude/qodec-benchmark-v2-n2d-identity-lock
     paths:
       - ".github/workflows/qodec-n2d1b-miner-pilot.yml"
+      # A prior push (2ef3923, the Maven canonicalization authorization)
+      # touched only tools/tests under d1-identity-lock and canary/tools --
+      # none of which matched this filter, so the pilot silently did NOT
+      # re-run despite the commit message claiming "awaiting a fresh CI
+      # run". Fixed: this workflow's own code lives under these two trees.
+      - "qodec/evals/interop/v2/n2/d1-identity-lock/**"
+      - "qodec/evals/interop/v2/n2/canary/tools/**"
 
 permissions:
   contents: read
@@ -451,5 +484,62 @@ jobs:
         with:
           name: n2d1b-pilot-${{ matrix.case.case_id }}-${{ matrix.job }}
           path: ${{ runner.temp }}/out-${{ matrix.case.case_id }}-${{ matrix.job }}
+          if-no-files-found: warn
+          retention-days: 90
+
+  # Real gate on pairwise reproducibility -- until this job existed, a
+  # green 10/10 `pilot` matrix only proved each capture-a/capture-b
+  # succeeded INDEPENDENTLY; nothing downloaded the pair and actually
+  # compared them. tools/verify_pilot_pair_reproducibility.py
+  # independently re-derives each capture's canonical benchmark input FROM
+  # its own raw execution evidence (never merely trusting the receipt's own
+  # recorded hashes or comparing two already-produced files against only
+  # each other) before comparing capture-a against capture-b.
+  pair-verify:
+    name: pair-verify-${{ matrix.case_id }}
+    needs: [pilot]
+    if: always()
+    strategy:
+      fail-fast: false
+      matrix:
+        case_id:
+          - repo-hyperfine
+          - repo-docker-java-parser
+          - repo-kubeops-generator
+          - repo-pyflakes
+          - repo-spotless
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout 007
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Download capture-a artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: n2d1b-pilot-${{ matrix.case_id }}-capture-a
+          path: ${{ runner.temp }}/pair/${{ matrix.case_id }}/capture-a
+
+      - name: Download capture-b artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: n2d1b-pilot-${{ matrix.case_id }}-capture-b
+          path: ${{ runner.temp }}/pair/${{ matrix.case_id }}/capture-b
+
+      - name: Run pairwise reproducibility verifier
+        run: |
+          mkdir -p "$RUNNER_TEMP/pair-report"
+          python3 qodec/evals/interop/v2/n2/d1-identity-lock/tools/verify_pilot_pair_reproducibility.py \
+            "$RUNNER_TEMP/pair/${{ matrix.case_id }}/capture-a" \
+            "$RUNNER_TEMP/pair/${{ matrix.case_id }}/capture-b" \
+            > "$RUNNER_TEMP/pair-report/pair-reproducibility-report.json"
+
+      - name: Upload n2d1b-pair-reproducibility-${{ matrix.case_id }}
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: always()
+        with:
+          name: n2d1b-pair-reproducibility-${{ matrix.case_id }}
+          path: ${{ runner.temp }}/pair-report
           if-no-files-found: warn
           retention-days: 90
