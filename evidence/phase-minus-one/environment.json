@@ -1,0 +1,33 @@
+{
+  "host": {
+    "os": "Linux 6.18.38 x86_64 (NixOS)",
+    "arch": "x86_64",
+    "cpu_cores": 12,
+    "ram": "31Gi",
+    "disk_free_home": "327G"
+  },
+  "toolchain": {
+    "provisioning": "Provided via `nix shell nixpkgs#{cargo,rustc,clippy,gcc,pkg-config,nodejs,python3}` — the host has no global rust/node toolchain (NixOS, tools live in per-project shells). Consilium ships no flake.nix or rust-toolchain.toml, so a current nixpkgs stable toolchain was used.",
+    "rustc": "1.96.1 (31fca3adb 2026-06-26)",
+    "cargo": "1.96.2 (356927216 2026-06-26)",
+    "clippy": "0.1.96",
+    "node": "v24.18.0",
+    "npm": "11.16.0",
+    "nix": "2.34.8"
+  },
+  "providers": {
+    "claude_cli": "available + authed (subscription OAuth, apiKeySource=none); used for the Stage E probe. Version = the operator's local Claude Code (running this study).",
+    "codex_cli": "NOT INSTALLED locally (`command -v codex` empty). Stage E Codex probe = BLOCKED. Installing/logging in is disallowed by scope + stop-conditions, so not attempted.",
+    "gemini_cli": "not run (out of scope).",
+    "grok_cli": "not run (out of scope)."
+  },
+  "repos": {
+    "o7_head": "bf68e91b102859d74ffb9cd4acc12e4b90ad9958",
+    "consilium_head": "191f2d5f81458e041f60a734c60095e251e521b4",
+    "consilium_clone": "shallow (depth=1); full history not fetched. No test in the core suite required history; if a future step needs tags/history, unshallow first."
+  },
+  "notes": [
+    "All builds/tests ran on the local host, NOT the tandem VPS: the VPS is 1 core / 2 GB with no Rust toolchain and would OOM/BLOCK the required cargo builds. Evidence + the research branch live in the local 007 clone; nothing pushed.",
+    "The workspace/desktop build requires system GUI libraries (dbus-1, webkit2gtk, gtk3, libsoup) not present in the nix shell used; this is an environment limitation, documented as such, not fixed (per 'do not fix upstream failures')."
+  ]
+}

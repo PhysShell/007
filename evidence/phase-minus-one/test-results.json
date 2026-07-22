@@ -1,0 +1,44 @@
+{
+  "consilium_sha": "191f2d5f81458e041f60a734c60095e251e521b4",
+  "summary": "core crate + UI fully green (480 Rust tests, 68 UI tests, 0 clippy warnings); the desktop/Tauri workspace member is BLOCKED on missing system GUI libraries (environment), not a code defect.",
+  "rust": {
+    "core_crate": "consilium (v0.2.0, edition 2021)",
+    "commands": [
+      { "cmd": "cargo build -p consilium", "status": "PASS", "exit": 0, "notes": "clean build (~60s); rusqlite bundled compiles SQLite from source" },
+      { "cmd": "cargo test -p consilium", "status": "PASS", "exit": 0, "totals": { "passed": 480, "failed": 0, "ignored": 0, "test_binaries": 16 }, "notes": "default run (no --ignored) → no live-provider tests → zero quota. Suites: adapters, sessions, runner, resilience, conduct (3953 LoC), council, review, eval, mcp, server, trust, worktree, preflight, auto, tokenizer, etc." },
+      { "cmd": "cargo clippy -p consilium --all-targets", "status": "PASS", "exit": 0, "warnings": 0 }
+    ]
+  },
+  "workspace": {
+    "commands": [
+      { "cmd": "cargo build --workspace", "status": "BLOCKED", "exit": 101, "reason": "environment: desktop/src-tauri → libdbus-sys build fails: system library `dbus-1` not found via pkg-config (transitive Tauri v2 GUI dep: dbus-1, webkit2gtk, gtk3, libsoup). Not a Consilium code defect; core builds fine in isolation." },
+      { "cmd": "cargo test --workspace", "status": "BLOCKED", "exit": 101, "reason": "same as above — the workspace cannot link the Tauri desktop crate in this headless nix shell." }
+    ]
+  },
+  "ui": {
+    "dir": "ui/ (consilium-ui v0.2.0, React + Vite + TypeScript, npm)",
+    "commands": [
+      { "cmd": "npm ci", "status": "PASS", "exit": 0 },
+      { "cmd": "npm run typecheck (tsc -b)", "status": "PASS", "exit": 0 },
+      { "cmd": "npm test (vitest run)", "status": "PASS", "exit": 0, "totals": { "test_files": 5, "tests": 68, "failed": 0 } },
+      { "cmd": "npm run build (tsc -b && vite build)", "status": "PASS", "exit": 0, "notes": "41 modules transformed, built in 349ms" }
+    ]
+  },
+  "zero_quota_e2e": {
+    "status": "PASS",
+    "evidence": "zero-quota-e2e.md, raw/zero-quota-e2e.log",
+    "note": "The '480 tests' figure is zero-quota COVERAGE across all pipeline layers, not one E2E scenario. These are named, isolated, reproducible zero-quota E2E flows (scripted adapters, no network/quota):",
+    "flows": [
+      { "test": "conduct_test::happy_path_single_subtask (conduct_test.rs:168)", "path": "scripted adapter -> sessions::spawn -> conduct(plan/route/worker/capture) -> terminal Accept (completed:[1], out.txt written)", "status": "PASS" },
+      { "test": "server_test::ws_streams_conduct_events_then_terminal_frame (server_test.rs:57)", "path": "WS client -> adapter -> session -> conduct -> normalized event frames -> terminal ServerFrame", "status": "PASS" },
+      { "test": "conduct_test::failing_tests_force_rework_even_if_conductor_would_accept (conduct_test.rs:2176)", "path": "adapter -> session -> conduct -> verify(ran, failed) -> grounding veto -> terminal", "status": "PASS", "note": "the flow that traverses the VERIFY stage to a terminal outcome" }
+    ]
+  },
+  "provider_probes": {
+    "claude": { "status": "PASS", "calls_used": 1, "budget": 2, "evidence": "raw/claude-probe.redacted.json", "redaction": "Unredacted raw stream-json trace was removed (it leaked session/uuid/request ids, cwd, and local mcp_servers/skills/slash_commands); the kept artifact replaces all identifiers with stable placeholders. No API/OAuth token was present.", "highlights": "exit 0, result 'consilium-phase-minus-one-claude-ok'; apiKeySource=none (subscription OAuth); observed model init 'claude-opus-4-8[1m]' vs assistant 'claude-opus-4-8' -> canonicalize as base_model='claude-opus-4-8' + context_profile='1m' + service_tier='standard' (Exact must compare these SEPARATELY, not by stripping the suffix); dedicated rate_limit_event (five_hour) present in stream." },
+    "codex": { "status": "BLOCKED", "calls_used": 0, "budget": 2, "reason": "codex CLI not installed locally; installing/login disallowed by scope + stop-conditions." },
+    "gemini": { "status": "NOT_RUN", "reason": "out of scope (would need separate install/login/spend)." },
+    "grok": { "status": "NOT_RUN", "reason": "out of scope." }
+  },
+  "acceptance_gate_2_verdict": "Consilium built and tested: core + UI PASS with real command output; workspace/desktop failure honestly documented as an environment (system-lib) limitation. Upstream failures were NOT patched."
+}

@@ -1,0 +1,583 @@
+   Compiling consilium v0.2.0 (/home/physshell/Documents/repos/consilium/core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.60s
+     Running unittests src/lib.rs (target/debug/deps/consilium-83049049086298d1)
+
+running 306 tests
+test adapters::claude::tests::classifies_other_as_transient ... ok
+test adapters::claude::tests::classifies_model_unavailable ... ok
+test adapters::claude::tests::build_command_uses_stream_json_and_model ... ok
+test adapters::claude::tests::classifies_rate_limit ... ok
+test adapters::claude::tests::deliberation_run_has_no_write_flags ... ok
+test adapters::claude::tests::garbage_line_yields_no_events ... ok
+test adapters::claude::tests::error_result_maps_to_failed ... ok
+test adapters::claude::tests::usage_sums_cache_tokens ... ok
+test adapters::claude::tests::parses_basic_session_fixture ... ok
+test adapters::claude::tests::write_run_enables_scoped_edits ... ok
+test adapters::codex::tests::advisory_run_skips_git_repo_check ... ok
+test adapters::codex::tests::build_command_uses_exec_json ... ok
+test adapters::codex::tests::classifies_model_unavailable ... ok
+test adapters::codex::tests::classifies_rate_limit ... ok
+test adapters::codex::tests::context_length_error_is_transient_not_model_unavailable ... ok
+test adapters::codex::tests::execution_run_keeps_git_repo_safeguard ... ok
+test adapters::codex::tests::garbage_line_yields_no_events ... ok
+test adapters::codex::tests::turn_failed_maps_to_failed ... ok
+test adapters::codex::tests::usage_does_not_double_count_cached_subset ... ok
+test adapters::codex::tests::parses_recorded_real_output_if_present ... ok
+test adapters::codex::tests::parses_basic_session_fixture ... ok
+test adapters::codex::tests::deliberation_run_has_no_write_flags ... ok
+test adapters::gemini::tests::classifies_model_unavailable ... ok
+test adapters::codex::tests::write_run_enables_scoped_edits ... ok
+test adapters::gemini::tests::build_command_uses_agy_print_and_model ... ok
+test adapters::gemini::tests::classifies_rate_limit ... ok
+test adapters::gemini::tests::empty_output_yields_failed ... ok
+test adapters::gemini::tests::plain_text_output_becomes_message_and_completed ... ok
+test adapters::gemini::tests::unknown_error_is_transient ... ok
+test adapters::gemini::tests::write_run_auto_approves_edits ... ok
+test adapters::grok::tests::advisory_run_never_passes_permission_flag ... ok
+test adapters::grok::tests::ambiguous_single_number_does_not_emit_usage ... ok
+test adapters::grok::tests::build_command_uses_streaming_json_and_model ... ok
+test adapters::grok::tests::classifies_auth_shaped_strings_as_transient ... ok
+test adapters::grok::tests::classifies_model_unavailable ... ok
+test adapters::grok::tests::context_length_error_is_transient_not_model_unavailable ... ok
+test adapters::grok::tests::error_output_produces_no_fabricated_success_events ... ok
+test adapters::grok::tests::garbage_lines_yield_no_events ... ok
+test adapters::grok::tests::no_usage_field_emits_no_usage_event ... ok
+test adapters::grok::tests::parse_final_is_a_noop_when_parse_line_already_saw_a_terminal_marker ... ok
+test adapters::grok::tests::parse_final_salvages_last_text_when_no_terminal_marker_seen ... ok
+test adapters::grok::tests::parses_recorded_real_output_if_present ... ok
+test adapters::grok::tests::parses_basic_session_fixture ... ok
+test adapters::grok::tests::unknown_error_is_transient ... ok
+test auth::tests::classify_missing_cli ... ok
+test adapters::grok::tests::write_run_auto_approves_edits_only ... ok
+test auth::tests::classify_ready_needs_login_and_down ... ok
+test adapters::grok::tests::recorded_subscription_error_maps_to_failed_and_transient ... ok
+test auth::tests::cli_binary_maps_each_provider ... ok
+test adapters::claude::tests::parses_recorded_real_output_if_present ... ok
+test auth::tests::guidance_for_down_echoes_detail_not_login ... ok
+test auth::tests::guidance_for_missing_says_install ... ok
+test auth::tests::guidance_gives_login_command_for_needs_login ... ok
+test auth::tests::is_auth_failure_matches_auth_shaped_details ... ok
+test auth::tests::primary_model_is_the_first_catalog_entry_per_provider ... ok
+test catalog::tests::catalog_covers_all_four_providers ... ok
+test catalog::tests::catalog_entries_are_unique_by_provider_and_model ... ok
+test catalog::tests::claude_uses_setup_token_others_cli_login ... ok
+test catalog::tests::entries_for_filters_by_provider ... ok
+test catalog::tests::grok_scores_are_modest_and_never_beat_the_curated_default_lineup ... ok
+test catalog::tests::is_superseded_flags_only_explicitly_retired_models ... ok
+test catalog::tests::scores_are_in_range ... ok
+test catalog::tests::superseded_models_have_a_current_top_replacement ... ok
+test catalog::tests::top_model_is_the_first_entry_per_provider ... ok
+test config::tests::conductor_memory_defaults_to_enabled ... ok
+test config::tests::conductor_memory_omitted_field_resolves_to_enabled_default ... ok
+test config::tests::default_conductor_has_a_sonnet_fallback ... ok
+test config::tests::cross_family_review_defaults_off_and_parses ... ok
+test config::tests::default_config_when_file_missing ... ok
+test config::tests::provider_grok_parses_in_role_config ... ok
+test config::tests::conductor_memory_parses_and_round_trips ... ok
+test config::tests::rejects_unknown_provider ... ok
+test config::tests::parses_spec_example ... ok
+test config::tests::role_with_fallbacks_builds_ordered_ladder ... ok
+test config::tests::role_without_fallbacks_parses_and_has_single_rung_ladder ... ok
+test config::tests::default_config_round_trips_through_json ... ok
+test config::tests::replan_and_budget_default_off_and_parse_camelcase ... ok
+test config::tests::verify_config_parses ... ok
+test config::tests::verify_timeout_secs_parses_camelcase_and_round_trips ... ok
+test doctor::tests::preflight_report_is_alive_and_dead_filter_by_exact_pair ... ok
+test doctor::tests::collects_distinct_models_across_ladders ... ok
+test confine::tests::nonexistent_path_is_rejected ... ok
+test doctor::tests::preflight_report_keeps_conductor_alive_when_other_model_is_dead ... ok
+test doctor::tests::collects_distinct_models_with_overlapping_fallbacks ... ok
+test doctor::tests::preflight_report_marks_only_conductor_candidate_dead ... ok
+test confine::tests::dotdot_escape_is_rejected ... ok
+test confine::tests::parent_is_rejected ... ok
+test doctor::tests::remediation_hint_matches_known_failures ... ok
+test confine::tests::root_itself_is_allowed ... ok
+test confine::tests::subdir_is_allowed ... ok
+test event::tests::agent_event_serializes_with_snake_case_tag ... ok
+test event::tests::agent_event_round_trips ... ok
+test event::tests::provider_parses_from_str ... ok
+test doctor::tests::probe_label_maps_failure_kind ... ok
+test confine::tests::symlink_escape_is_rejected ... ok
+test confine::tests::unrelated_temp_dir_is_rejected ... ok
+test event::tests::ts_usage_tokens_are_number_not_bigint ... ok
+test models::tests::default_config_has_no_stale_models ... ok
+test models::tests::detects_superseded_codex_model_and_suggests_top ... ok
+test doctor::tests::reports_missing_cli ... ok
+test models::tests::still_endorsed_models_are_not_flagged ... ok
+test models::tests::uncurated_cross_family_fallback_is_never_stale_or_rewritten ... ok
+test models::tests::upgrade_is_immutable_and_a_noop_without_a_chosen_model ... ok
+test models::tests::upgrade_preserves_role_hints ... ok
+test models::tests::upgrade_swaps_only_superseded_models ... ok
+test event::export_bindings_provider ... ok
+test doctor::tests::detects_installed_cli_and_version ... ok
+test event::export_bindings_agentevent ... ok
+test doctor::tests::version_falls_back_to_stderr ... ok
+test orchestrator::conduct::tests::arbiter_parses_fail ... ok
+test orchestrator::conduct::tests::arbiter_parses_ship ... ok
+test orchestrator::conduct::tests::arbiter_template_example_parses ... ok
+test doctor::tests::silent_binary_yields_no_version ... ok
+test orchestrator::conduct::tests::arbiter_unknown_maps_to_fail ... ok
+test orchestrator::conduct::tests::build_progress_recites_task_and_plan_checklist ... ok
+test orchestrator::conduct::tests::build_progress_falls_back_to_prompt_when_title_empty ... ok
+test orchestrator::conduct::tests::cross_family_degrades_when_single_family ... ok
+test orchestrator::conduct::tests::build_subtask_entry_summary_is_mechanical_only ... ok
+test orchestrator::conduct::tests::cross_family_fronts_a_different_family ... ok
+test orchestrator::conduct::tests::cross_family_noop_when_reviewer_already_different ... ok
+test orchestrator::conduct::tests::cross_family_reorders_multi_rung_stably ... ok
+test orchestrator::conduct::tests::decompose_template_emits_depends_on_edge ... ok
+test orchestrator::conduct::tests::decompose_template_example_parses_as_plan ... ok
+test orchestrator::conduct::tests::evaluation_template_example_parses ... ok
+test orchestrator::conduct::tests::fold_lines_bounds_even_tiny_cap ... ok
+test orchestrator::conduct::tests::last_verify_uses_the_most_recent_attempt ... ok
+test orchestrator::conduct::tests::malformed_plan_returns_none ... ok
+test orchestrator::changes::tests::non_git_directory_is_an_error_not_no_changes ... ok
+test orchestrator::conduct::tests::parses_evaluation_variants ... ok
+test orchestrator::conduct::tests::mem_blackboard_off_is_none ... ok
+test orchestrator::conduct::tests::mem_gates_return_none_when_off ... ok
+test orchestrator::conduct::tests::parses_plan ... ok
+test orchestrator::conduct::tests::parses_supervisor_verdict ... ok
+test orchestrator::conduct::tests::parses_triage ... ok
+test orchestrator::conduct::tests::render_attempt_history_includes_feedback_and_decision ... ok
+test orchestrator::conduct::tests::render_attempt_history_respects_cap ... ok
+test orchestrator::conduct::tests::render_blackboard_empty_is_none ... ok
+test orchestrator::conduct::tests::render_blackboard_files_only_when_no_prior_subtasks ... ok
+test orchestrator::conduct::tests::render_blackboard_is_status_only_and_lists_files ... ok
+test orchestrator::conduct::tests::render_ledger_and_history_empty_are_none ... ok
+test orchestrator::conduct::tests::render_ledger_fits_uses_all_lines_no_marker ... ok
+test orchestrator::conduct::tests::supervisor_template_example_parses ... ok
+test orchestrator::conduct::tests::render_ledger_folds_under_cap_with_marker ... ok
+test orchestrator::conduct::tests::subtask_depends_on_defaults_empty_and_parses ... ok
+test orchestrator::conduct::tests::triage_template_example_parses ... ok
+test orchestrator::conduct::tests::unknown_decision_maps_to_rework ... ok
+test orchestrator::conduct::tests::unknown_supervisor_status_maps_to_concern ... ok
+test orchestrator::conduct::tests::waves_order_respects_depends_on_even_when_listed_out_of_order ... ok
+test orchestrator::council::tests::malformed_output_yields_none ... ok
+test orchestrator::council::tests::parses_bare_json_with_trailing_prose ... ok
+test orchestrator::council::tests::parses_json_after_stray_braces ... ok
+test orchestrator::council::tests::parses_well_formed_scores_block ... ok
+test orchestrator::council::tests::template_json_example_parses_as_score ... ok
+test orchestrator::eval::tests::approach_parse_roundtrips ... ok
+test orchestrator::eval::tests::aggregate_computes_rate_stability_and_unscored ... ok
+test orchestrator::council::tests::parses_bare_json_without_fence ... ok
+test orchestrator::eval::tests::dry_run_plan_lists_matrix_without_running ... ok
+test orchestrator::eval::tests::parse_approaches_dedups_and_validates ... ok
+test orchestrator::eval::tests::median_handles_even_and_odd ... ok
+test orchestrator::eval::tests::report_serializes_with_expected_shape ... ok
+test orchestrator::operator::tests::checkpoint_without_scope_is_a_no_op ... ok
+test orchestrator::operator::tests::interject_before_checkpoint_is_drained_once ... ok
+test orchestrator::changes::tests::capture_changed_files_empty_on_clean_tree ... ok
+test orchestrator::operator::tests::resume_without_pause_is_harmless ... ok
+test orchestrator::prompts::tests::answer_prompt_contains_question ... ok
+test orchestrator::prompts::tests::decompose_demands_concrete_constraints_with_exemplar ... ok
+test orchestrator::prompts::tests::decompose_evaluation_replan_are_byte_identical_with_no_operator_notes ... ok
+test orchestrator::prompts::tests::decompose_evaluation_replan_include_operator_notes_when_some ... ok
+test orchestrator::prompts::tests::diff_review_demands_edge_case_hunt ... ok
+test orchestrator::prompts::tests::diff_review_prompt_embeds_diff_and_contract ... ok
+test orchestrator::prompts::tests::evaluation_includes_memory_blocks_when_some ... ok
+test orchestrator::prompts::tests::evaluation_omits_memory_blocks_when_none ... ok
+test orchestrator::prompts::tests::initial_prompt_prepends_scope_discipline_without_blackboard ... ok
+test orchestrator::prompts::tests::initial_prompt_wraps_blackboard_when_some ... ok
+test orchestrator::prompts::tests::operator_notes_block_is_empty_string_when_none ... ok
+test orchestrator::prompts::tests::operator_notes_never_reach_worker_or_supervisor_or_arbiter_prompts ... ok
+test orchestrator::changes::tests::captures_untracked_files_with_content ... ok
+test orchestrator::prompts::tests::replan_demands_concrete_constraints_and_keeps_invariants ... ok
+test orchestrator::prompts::tests::review_prompt_lists_anonymized_answers ... ok
+test orchestrator::prompts::tests::rework_includes_history_only_when_some ... ok
+test orchestrator::prompts::tests::supervisor_and_arbiter_carry_ledger_when_some ... ok
+test orchestrator::review::tests::capitalized_critical_still_gates ... ok
+test orchestrator::review::tests::empty_findings_means_clean ... ok
+test orchestrator::changes::tests::huge_untracked_file_is_capped ... ok
+test orchestrator::changes::tests::clean_tree_reports_no_changes ... ok
+test orchestrator::review::tests::malformed_verdict_yields_none ... ok
+test orchestrator::prompts::tests::synthesis_prompt_includes_answers_and_reviews ... ok
+test orchestrator::review::tests::missing_severity_maps_to_minor ... ok
+test orchestrator::review::tests::null_severity_maps_to_minor ... ok
+test orchestrator::review::tests::parses_findings_block ... ok
+test orchestrator::review::tests::real_verdict_after_template_example_wins ... ok
+test orchestrator::review::tests::sparse_finding_does_not_sink_sibling_critical ... ok
+test orchestrator::review::tests::unknown_severity_maps_to_minor ... ok
+test orchestrator::review::tests::template_json_example_parses_as_verdict ... ok
+test orchestrator::review::tests::verdict_with_trailing_prose_parses ... ok
+test orchestrator::roles::tests::adapter_for_maps_each_provider ... ok
+test orchestrator::roles::tests::request_for_carries_model_and_prompt ... ok
+test orchestrator::roles::tests::resolves_role_to_a_rung_per_ladder_entry ... ok
+test orchestrator::routing::tests::empty_workers_is_error ... ok
+test orchestrator::routing::tests::by_provider_picks_least_loaded ... ok
+test orchestrator::routing::tests::old_usage_outside_window_ignored ... ok
+test orchestrator::stagnation::tests::different_changes_or_verify_differ ... ok
+test orchestrator::routing::tests::picks_least_loaded_worker ... ok
+test orchestrator::stagnation::tests::stall_is_a_repeat_of_a_prior_attempt ... ok
+test orchestrator::stagnation::tests::the_changes_verify_boundary_is_unambiguous ... ok
+test orchestrator::stagnation::tests::identical_inputs_share_a_fingerprint ... ok
+test orchestrator::topology::tests::completed_dependency_from_a_prior_plan_is_satisfied ... ok
+test orchestrator::topology::tests::cycle_is_an_error ... ok
+test orchestrator::topology::tests::diamond_groups_the_middle_pair ... ok
+test orchestrator::topology::tests::duplicate_ids_are_an_error ... ok
+test orchestrator::topology::tests::empty_plan_is_no_waves ... ok
+test orchestrator::topology::tests::linear_chain_is_one_per_wave ... ok
+test orchestrator::routing::tests::ties_break_by_config_order ... ok
+test orchestrator::topology::tests::no_deps_is_one_wave_in_original_order ... ok
+test orchestrator::topology::tests::self_edge_is_an_error ... ok
+test orchestrator::topology::tests::unknown_dependency_is_an_error ... ok
+test orchestrator::transcript::tests::run_ids_are_unique_and_sorted_by_time ... ok
+test orchestrator::verify::tests::command_timeout_resolves_config_or_default ... ok
+test orchestrator::changes::tests::multibyte_content_truncates_without_panicking ... ok
+test orchestrator::verify::tests::detects_cargo_repo ... ok
+test orchestrator::verify::tests::config_commands_override_detection ... ok
+test orchestrator::transcript::tests::writes_and_reads_back_run_json ... ok
+test orchestrator::verify::tests::empty_dir_detects_nothing ... ok
+test orchestrator::verify::tests::detects_npm_repo ... ok
+test orchestrator::changes::tests::capture_changed_files_lists_deleted ... ok
+test orchestrator::changes::tests::capture_changed_files_lists_modified_and_untracked ... ok
+test orchestrator::changes::tests::captures_tracked_modifications ... ok
+test orchestrator::transcript::tests::loads_transcript_by_id ... ok
+test orchestrator::operator::tests::pause_blocks_checkpoint_until_resume ... ok
+test orchestrator::operator::tests::pause_emits_paused_and_resumed_exactly_once_each ... ok
+test orchestrator::transcript::tests::searches_transcripts_and_respects_limits ... ok
+test orchestrator::operator::tests::resume_before_pause_observed_does_not_leak_a_phantom_wake ... ok
+test orchestrator::verify::tests::run_verify_fails_when_test_fails ... ok
+test orchestrator::changes::tests::capture_changed_files_lists_renamed_target ... ok
+test orchestrator::verify::tests::run_verify_reports_not_run_when_no_commands ... ok
+test protocol::export_bindings_authstate ... ok
+test orchestrator::verify::tests::run_verify_lint_failure_does_not_block ... ok
+test orchestrator::verify::tests::run_verify_lint_launch_error_does_not_block ... ok
+test protocol::export_bindings_configsummary ... ok
+test protocol::tests::cancel_request_parses ... ok
+test protocol::tests::config_summary_formats_roles ... ok
+test protocol::tests::from_conduct_outcome_maps_fields ... ok
+test protocol::tests::pause_resume_interject_requests_parse ... ok
+test protocol::tests::run_cancelled_serializes_with_exact_tag ... ok
+test protocol::tests::run_complete_serializes_with_exact_tag_and_fields ... ok
+test protocol::tests::run_error_and_error_tags ... ok
+test protocol::tests::server_frame_tags_disjoint_from_agent_event_tags ... ok
+test protocol::tests::session_request_parses_and_rejects ... ok
+test protocol::tests::ts_control_frame_keeps_nullable_fields ... ok
+test quota::tests::empty_store_returns_zero ... ok
+test orchestrator::verify::tests::run_verify_passes_when_commands_succeed ... ok
+test quota::tests::estimated_records_count_toward_totals ... ok
+test quota::tests::records_and_aggregates_usage ... ok
+test quota::tests::estimated_totals_isolate_estimated_rows ... ok
+test recommend::tests::claude_only_prefers_opus_for_conductor_with_sonnet_fallback ... ok
+test recommend::tests::empty_available_is_an_error ... ok
+test recommend::tests::full_catalog_reproduces_the_curated_default_lineup ... ok
+test recommend::tests::single_provider_fills_every_role_and_never_errors ... ok
+test recommend::tests::workers_are_distinct_providers ... ok
+test quota::tests::window_excludes_old_rows ... ok
+test protocol::export_bindings_providerusage ... ok
+test protocol::export_bindings_serverframe ... ok
+test protocol::export_bindings_sessionrequest ... ok
+test protocol::export_bindings_versioninfo ... ok
+test safety::commands::export_bindings_commandsource ... ok
+test protocol::export_bindings_providerstatus ... ok
+test safety::git::export_bindings_repositorykind ... ok
+test protocol::export_bindings_quotasnapshot ... ok
+test safety::git::tests::recursive_cleanup_revalidates_quarantined_child_identity ... ok
+test safety::commands::export_bindings_verificationcommand ... ok
+test safety::git::export_bindings_repositorystate ... ok
+test protocol::export_bindings_doctorreport ... ok
+test safety::preflight::export_bindings_executionmode ... ok
+test safety::git::tests::generated_entry_substitution_is_detected_without_recursive_deletion ... ok
+test safety::preflight::export_bindings_readinessstate ... ok
+test safety::preflight::export_bindings_providerreadiness ... ok
+test server::tests::origin_allowed_localhost_port ... ok
+test server::tests::origin_allowed_loopback_ipv4_port ... ok
+test server::tests::origin_allowed_loopback_ipv6_bracketed ... ok
+test server::tests::origin_allowed_none_permits_non_browser_clients ... ok
+test server::tests::origin_allowed_rejects_attacker_subdomain_of_localhost ... ok
+test server::tests::origin_allowed_rejects_external_domain ... ok
+test server::tests::origin_allowed_rejects_localhost_subdomain ... ok
+test server::tests::origin_allowed_rejects_tauri_localhost_suffix_attack ... ok
+test server::tests::origin_allowed_tauri_linux_host ... ok
+test server::tests::origin_allowed_tauri_macos_scheme ... ok
+test server::tests::provider_status_maps_auth_states ... ok
+test safety::git::tests::early_hook_error_releases_reserved_entry ... ok
+test server::tests::ws_sink_forwards_serialized_events ... ok
+test tokenizer::tests::counts_unicode_scalars_not_bytes ... ok
+test tokenizer::tests::empty_is_zero ... ok
+test tokenizer::tests::rounds_up_quarter_chars ... ok
+test wizard::tests::build_config_keeps_roles_and_default_rest ... ok
+test wizard::tests::providers_in_lists_distinct_providers_of_the_default_lineup ... ok
+test wizard::tests::providers_in_single_provider_lineup_is_one ... ok
+test server::tests::quota_snapshot_reports_recorded_usage_per_provider ... ok
+test safety::preflight::export_bindings_roleassignment ... ok
+test safety::preflight::export_bindings_safetypreflightreport ... ok
+test safety::git::tests::state_root_substitution_is_detected_and_preserved ... ok
+test safety::git::tests::worktrees_parent_substitution_is_detected_and_preserved ... ok
+test safety::git::tests::partial_git_add_failure_cleans_only_descriptor_bound_entry ... ok
+test safety::git::tests::post_git_entry_substitution_fails_closed_and_preserves_both_trees ... ok
+test safety::git::tests::missing_entry_cleanup_rechecks_registration_after_prune_race ... ok
+test orchestrator::verify::tests::run_verify_lint_timeout_is_advisory ... ok
+test orchestrator::verify::tests::run_resolved_verify_executes_disclosed_command_and_recorded_timeout ... ok
+test orchestrator::verify::tests::run_verify_timeout_kills_hanging_command ... ok
+
+test result: ok. 306 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.63s
+
+     Running unittests src/main.rs (target/debug/deps/consilium-7c487b801ca43c48)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/auto_test.rs (target/debug/deps/auto_test-2d35032d3050884b)
+
+running 5 tests
+test trivial_skips_council ... ok
+test check_command_success ... ok
+test check_command_failure_reported ... ok
+test standard_runs_council_then_conduct ... ok
+test check_command_timeout_kills_child ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.84s
+
+     Running tests/conduct_test.rs (target/debug/deps/conduct_test-1c7da3a722531178)
+
+running 48 tests
+test budget_exceeded_stops_at_subtask_boundary ... ok
+test budget_trip_is_terminal_even_with_replans ... ok
+test capture_failure_propagates_as_error ... ok
+test attempt_history_threads_prior_feedback ... ok
+test blackboard_disabled_is_byte_identical ... ok
+test blackboard_threads_prior_subtasks_to_worker ... ok
+test conduct_worker_falls_back ... ok
+test blackboard_accumulates_across_three_subtasks ... ok
+test decompose_session_failure_surfaces_real_error ... ok
+test critical_review_forces_rework ... ok
+test cross_family_degrades_same_family_when_no_other_family ... ok
+test cross_family_review_routes_to_a_different_family ... ok
+test arbiter_fails_on_exhaustion ... ok
+test cross_family_off_emits_no_marker ... ok
+test arbiter_ships_on_exhaustion ... ok
+test arbiter_failure_at_exhaustion_fails_closed ... ok
+test dependent_subtask_is_skipped_when_prerequisite_fails ... ok
+test cross_family_arbiter_runs_and_ships ... ok
+test arbiter_receives_memory_blocks ... ok
+test happy_path_single_subtask ... ok
+test fail_on_second_preserves_first ... ok
+test generous_budget_runs_all_subtasks ... ok
+test memory_disabled_is_byte_identical ... ok
+test failing_tests_force_rework_even_if_conductor_would_accept ... ok
+test independent_subtask_runs_despite_an_earlier_failure ... ok
+test grounding_override_recorded_in_history ... ok
+test no_verifier_is_recorded_as_unverified ... ok
+test no_operator_handle_installed_is_byte_identical ... ok
+test multi_rework_history_accumulates ... ok
+test operator_interject_reaches_evaluation_not_decompose_or_worker ... ok
+test replan_disabled_by_default_still_fails ... ok
+test operator_interject_reaches_replan_prompt ... ok
+test plan_ledger_threads_prior_subtasks ... ok
+test reviewer_failure_degrades_to_accept ... ok
+test replan_rescues_a_failed_run ... ok
+test rework_stall_breaks_early ... ok
+test supervisor_concern_threads_note_into_evaluation ... ok
+test rework_then_accept ... ok
+test rework_exhaustion_fails ... ok
+test replan_with_cross_plan_depends_on_succeeds ... ok
+test supervisor_halt_aborts ... ok
+test supervisor_failure_degrades_instead_of_killing_the_run ... ok
+test supervisor_ok_does_not_interfere ... ok
+test worker_failure_counts_as_attempt ... ok
+test two_subtasks_complete_in_order ... ok
+test supervisor_receives_plan_ledger ... ok
+test operator_pause_parks_between_subtasks_then_resume_completes_run ... ok
+test budget_preserves_completed_subtasks_on_trip ... ok
+
+test result: ok. 48 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.78s
+
+     Running tests/council_test.rs (target/debug/deps/council_test-871f46136722d076)
+
+running 5 tests
+test council_fails_when_all_members_fail ... ok
+test full_council_flow_with_scripted_members ... ok
+test transcript_preserves_review_attribution ... ok
+test council_proceeds_when_one_member_fails ... ok
+test council_member_falls_back_to_second_model ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.12s
+
+     Running tests/eval_test.rs (target/debug/deps/eval_test-b351d094936c4607)
+
+running 8 tests
+test unscored_when_no_verifier_resolves ... ok
+test solo_completes_but_broken_tree_scores_fail ... ok
+test solo_passing_scores_success_and_records_tokens ... ok
+test unprotected_tampered_oracle_is_scored_as_is ... ok
+test protected_paths_restore_the_oracle_before_scoring ... ok
+test conduct_no_grounding_green_pipeline_broken_tree_scores_fail ... ok
+test conduct_approach_runs_and_scores_via_external_verify ... ok
+test aggregates_over_multiple_trials ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+
+     Running tests/mcp_test.rs (target/debug/deps/mcp_test-24abeade232c4176)
+
+running 24 tests
+test council_run_empty_question_returns_error ... ok
+test council_run_cwd_outside_launch_root_is_rejected ... ok
+test quota_status_reports_recorded_totals ... ok
+test page_in_loads_run_by_id_and_digests_it ... ok
+test review_diff_cwd_outside_launch_root_is_rejected ... ok
+test review_diff_empty_diff_returns_error ... ok
+test review_diff_default_cwd_is_launch_root_and_allowed ... ok
+test review_diff_important_only_is_not_critical_but_findings_surface ... ok
+test review_diff_clean_verdict_has_no_findings ... ok
+test review_diff_parses_verdict_and_flags_critical ... ok
+test review_diff_unparseable_output_fails_closed ... ok
+test run_worker_non_git_cwd_degrades_changes_to_none ... ok
+test search_recall_returns_hits ... ok
+test run_worker_path_escape_cwd_is_rejected ... ok
+test run_worker_nonexistent_cwd_is_rejected ... ok
+test mcp_stdio_server_lists_all_tools ... ok
+test run_worker_cwd_outside_launch_root_is_rejected ... ok
+test run_worker_cwd_subdir_of_launch_root_is_allowed ... ok
+test run_worker_unknown_label_returns_structured_error ... ok
+test council_run_returns_synthesis_and_answers ... ok
+test run_worker_routes_writes_captures_and_uses_scoped_flags ... ok
+test run_worker_runs_the_configured_verifier ... ok
+test review_diff_all_rungs_fail_returns_error ... ok
+test run_worker_all_rungs_fail_returns_structured_error ... ok
+
+test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.18s
+
+     Running tests/preflight_test.rs (target/debug/deps/preflight_test-ae2144e13ab2051e)
+
+running 11 tests
+test command_digest_is_stable_sha256_and_changes_with_command ... ok
+test attached_inspection_rejects_symlink_escape ... ok
+test attached_inspection_rejects_paths_outside_launch_root ... ok
+test configured_commands_preserve_per_field_provenance_and_timeout ... ok
+test safety_enums_serialize_as_snake_case ... ok
+test safety_bindings_target_workspace_and_use_js_numbers ... ok
+test attached_inspection_accepts_paths_inside_launch_root_and_discloses_acknowledgement ... ok
+test non_git_write_has_no_fake_safe_default ... ok
+test git_root_ending_in_whitespace_is_preserved ... ok
+test git_repository_without_head_does_not_offer_safe_worktree ... ok
+test standalone_git_write_defaults_to_safe_worktree ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/resilience_test.rs (target/debug/deps/resilience_test-16c1d109a298b6dc)
+
+running 10 tests
+test first_rung_success_no_fallback ... ok
+test spawn_error_demotes_to_next_rung ... ok
+test dead_rung_is_skipped_on_reuse ... ok
+test all_rungs_fail_returns_error ... ok
+test transient_retry_recovers_on_same_rung ... ok
+test model_unavailable_demotes_loudly_and_marks_dead ... ok
+test rate_limited_retries_same_rung_and_recovers ... ok
+test rate_limited_model_is_demoted_but_not_marked_dead ... ok
+test rate_limit_circuit_breaker_trips_cold_after_threshold ... ok
+test backoff_is_applied_before_each_retry ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.27s
+
+     Running tests/review_test.rs (target/debug/deps/review_test-b48573b180f71bb9)
+
+running 3 tests
+test review_fails_when_reviewer_fails ... ok
+test unparseable_review_still_returns_raw_text ... ok
+test reviews_a_diff_and_returns_verdict ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/runner_test.rs (target/debug/deps/runner_test-0e76fcc0ab773974)
+
+running 7 tests
+test failed_event_yields_failed_status ... ok
+test progress_sink_in_scope_receives_every_event ... ok
+test no_usage_estimate_is_provider_agnostic ... ok
+test collects_final_text_and_records_usage ... ok
+test no_usage_event_records_estimated_quota ... ok
+test timeout_yields_timedout_status ... ok
+test timeout_kills_child_so_it_cannot_keep_writing ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.25s
+
+     Running tests/server_test.rs (target/debug/deps/server_test-e422993c37deb6ca)
+
+running 9 tests
+test ws_bad_first_frame_returns_error_then_closes ... ok
+test ws_pause_resume_interject_as_first_frame_are_errors ... ok
+test ws_run_error_terminal_frame_on_failed_run ... ok
+test ws_second_concurrent_session_is_refused ... ok
+test ws_streams_conduct_events_then_terminal_frame ... ok
+test ws_cancel_while_paused_terminates_promptly ... ok
+test ws_interject_frame_yields_operator_note_event_mid_run ... ok
+test ws_pause_frame_parks_run_then_resume_completes_it ... ok
+test ws_cancel_frame_yields_run_cancelled_and_kills_worker ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.77s
+
+     Running tests/sessions_test.rs (target/debug/deps/sessions_test-b1015e3a4fc3dbc7)
+
+running 6 tests
+test advisory_plus_write_combination_is_rejected ... ok
+test missing_binary_returns_spawn_error ... ok
+test nonzero_exit_includes_stderr_tail ... ok
+test nonzero_exit_emits_failed_event ... ok
+test streams_events_from_process_in_order ... ok
+test large_stderr_does_not_deadlock ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/trust_test.rs (target/debug/deps/trust_test-2aae232be9642dfb)
+
+running 8 tests
+test destination_inspection_error_prevents_serialization ... ok
+test state_directory_symlink_is_rejected ... ok
+test corrupt_trust_state_fails_closed_without_replacing_it ... ok
+test trust_state_symlink_is_rejected_without_touching_its_target ... ok
+test changing_a_repository_command_invalidates_trust ... ok
+test trust_state_is_owner_only ... ok
+test permissive_existing_trust_file_is_tightened_before_reading ... ok
+test open_store_remains_bound_to_original_directory_after_parent_substitution ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/worktree_test.rs (target/debug/deps/worktree_test-95c42b43e261fc4c)
+
+running 29 tests
+test cross_process_reopen_helper ... ok
+test permissive_existing_state_root_is_rejected_without_chmod ... ok
+test git_root_ending_in_newline_preserves_the_path_byte ... ok
+test existing_symlink_component_cannot_hide_state_root_inside_source ... ok
+test clean_source_at_base_is_applyable ... ok
+test non_git_and_unborn_repositories_are_rejected ... ok
+
+running 1 test
+test paths_with_spaces_and_dash_prefixed_components_work ... ok
+test locked_registration_is_preserved_and_reported ... ok
+test edits_happen_only_in_detached_worktree ... ok
+test forged_summary_cannot_reopen_cleanup_authority ... ok
+test cross_process_reopen_helper ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 0.02s
+
+test persisted_summary_can_be_securely_reopened_after_process_boundary ... ok
+test dirty_tracked_source_uses_head_and_preserves_operator_bytes ... ok
+test repository_fsmonitor_is_not_executed_during_applyability_check ... ok
+test repository_fsmonitor_is_not_executed_during_inspection ... ok
+test remove_worktree_is_idempotent ... ok
+test source_root_itself_cannot_be_used_as_state_root ... ok
+test remove_worktree_succeeds_after_external_removal_and_prune ... ok
+test remove_worktree_succeeds_after_external_directory_removal ... ok
+test symlinked_state_root_is_rejected_without_touching_target ... ok
+test state_root_inside_source_is_rejected_before_any_mutation ... ok
+test corrupted_handle_cannot_remove_an_unrelated_registered_worktree ... ok
+test raw_materialization_preserves_executable_symlink_and_gitlink_without_filters ... ok
+test repository_post_checkout_hook_cannot_mutate_source ... ok
+test serialized_prepared_worktree_exposes_only_the_documented_fields ... ok
+test repository_process_filter_is_not_executed ... ok
+test repository_smudge_filter_is_not_executed ... ok
+test repository_subdirectory_resolves_to_canonical_root ... ok
+test untracked_source_file_is_absent_from_worktree_and_preserved ... ok
+test tracked_staged_untracked_and_changed_head_are_not_applyable ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.31s
+
+   Doc-tests consilium
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

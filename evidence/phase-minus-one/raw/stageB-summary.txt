@@ -1,0 +1,9 @@
+cargo-build-core exit=0
+cargo-test-core exit=0
+cargo-clippy-core exit=0
+cargo-build-workspace exit=101
+cargo-test-workspace exit=101
+npm-ci exit=0
+npm-typecheck exit=0
+npm-test exit=0
+npm-build exit=0

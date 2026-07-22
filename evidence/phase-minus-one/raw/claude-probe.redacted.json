@@ -1,0 +1,50 @@
+{
+  "probe": "claude",
+  "status": "PASS",
+  "exit_code": 0,
+  "max_calls_budget": 2,
+  "calls_used": 1,
+  "redaction_note": "The full stream-json raw trace was NOT retained: it carried a session id, request/uuid ids, cwd, and the local Claude Code environment's mcp_servers/skills/slash_commands/memory path. Only the fields needed for the study's conclusions are kept below; all identifiers are replaced by stable placeholders (the same session id appeared 4x in the original and is shown once as <redacted-session-id>). No API/OAuth token was present in the trace.",
+  "init": {
+    "subtype": "init",
+    "session_id": "<redacted-session-id>",
+    "cwd": "<redacted-cwd>",
+    "permissionMode": "default",
+    "apiKeySource": "none",
+    "output_style": "default",
+    "tools_count": 29
+  },
+  "observed_model": {
+    "raw_init": "claude-opus-4-8[1m]",
+    "raw_assistant": "claude-opus-4-8",
+    "base_model": "claude-opus-4-8",
+    "context_profile": "1m",
+    "service_tier": "standard",
+    "exact_policy_note": "ModelPolicy::Exact must compare base_model, context_profile, and (if it becomes load-bearing) service_tier as SEPARATE fields — not by naively stripping the [..] suffix. The init string carries the context profile ([1m]) that the assistant string omits; over-aggressive normalization that discards the suffix would mask a genuine profile change, while a naive string compare of raw_init vs raw_assistant would false-positive here."
+  },
+  "rate_limit_event": {
+    "status": "allowed",
+    "rateLimitType": "five_hour",
+    "resetsAt": 1784678400,
+    "overageStatus": "rejected",
+    "overageDisabledReason": "org_level_disabled",
+    "isUsingOverage": false,
+    "note": "This dedicated rate_limit_event is exactly the signal Consilium's Claude adapter DROPS (adapters/claude.rs:54-104 only handle system/assistant/result). See event-mapping.json (o7_event rate_limit = missing)."
+  },
+  "result": {
+    "subtype": "success",
+    "is_error": false,
+    "result": "consilium-phase-minus-one-claude-ok",
+    "num_turns": 1,
+    "duration_ms": 2100,
+    "total_cost_usd": 0.044134,
+    "session_id": "<redacted-session-id>",
+    "usage": {
+      "input_tokens": 3135,
+      "cache_creation_input_tokens": 2047,
+      "cache_read_input_tokens": 15028,
+      "output_tokens": 19,
+      "service_tier": "standard"
+    }
+  }
+}

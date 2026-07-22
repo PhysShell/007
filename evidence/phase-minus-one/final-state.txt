@@ -1,0 +1,48 @@
+# Final Git state — Phase -1 research branch
+# Base: main (bf68e91). Branch: research/consilium-phase-minus-one.
+
+## git status --short
+?? evidence/phase-minus-one/final-state.txt
+(empty above = clean working tree)
+
+## git diff --stat main...HEAD
+ docs/research/consilium-phase-minus-one.md         | 121 +++++
+ evidence/phase-minus-one/007-current-state.md      | 121 +++++
+ evidence/phase-minus-one/README.md                 |  40 ++
+ evidence/phase-minus-one/commands.ndjson           |  15 +
+ evidence/phase-minus-one/consilium-module-map.md   | 185 +++++++
+ evidence/phase-minus-one/environment.json          |  33 ++
+ evidence/phase-minus-one/event-mapping.json        | 107 ++++
+ evidence/phase-minus-one/identities.json           |  25 +
+ evidence/phase-minus-one/mcp-assessment.md         |  43 ++
+ evidence/phase-minus-one/open-questions.md         |  21 +
+ evidence/phase-minus-one/raw/cargo-build-core.log  | 313 +++++++++++
+ .../phase-minus-one/raw/cargo-build-workspace.log  | 405 ++++++++++++++
+ evidence/phase-minus-one/raw/cargo-clippy-core.log | 131 +++++
+ evidence/phase-minus-one/raw/cargo-test-core.log   | 583 +++++++++++++++++++++
+ .../phase-minus-one/raw/cargo-test-workspace.log   | 137 +++++
+ .../phase-minus-one/raw/claude-probe.redacted.json |  50 ++
+ evidence/phase-minus-one/raw/npm-build.log         |  13 +
+ evidence/phase-minus-one/raw/npm-ci.log            |  12 +
+ evidence/phase-minus-one/raw/npm-test.log          |  13 +
+ evidence/phase-minus-one/raw/npm-typecheck.log     |   4 +
+ evidence/phase-minus-one/raw/stageB-summary.txt    |   9 +
+ evidence/phase-minus-one/raw/versions.txt          |   8 +
+ evidence/phase-minus-one/raw/zero-quota-e2e.log    |  22 +
+ evidence/phase-minus-one/reuse-matrix.json         | 334 ++++++++++++
+ evidence/phase-minus-one/roadmap-delta.md          |  60 +++
+ evidence/phase-minus-one/rungraph-divergence.md    |  57 ++
+ evidence/phase-minus-one/security-boundaries.md    |  48 ++
+ evidence/phase-minus-one/strategy-comparison.md    |  66 +++
+ evidence/phase-minus-one/test-results.json         |  44 ++
+ evidence/phase-minus-one/web-ui-assessment.md      |  41 ++
+ evidence/phase-minus-one/worktree-safety.md        |  73 +++
+ evidence/phase-minus-one/zero-quota-e2e.md         |  33 ++
+ 32 files changed, 3167 insertions(+)
+
+## git log -1 --oneline
+fb0454f docs: complete Consilium phase-minus-one study
+
+# NOTE: this file is folded into the commit above via --amend, so the
+# published HEAD hash after force-push differs from the git-log hash shown
+# here by exactly that amend (identical subject/tree apart from this file).

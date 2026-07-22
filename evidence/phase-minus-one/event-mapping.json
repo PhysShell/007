@@ -1,0 +1,107 @@
+[
+  {
+    "consilium_event": "SessionStarted",
+    "o7_event": "init/system + model-info",
+    "mapping": "lossy",
+    "missing_fields": ["permission_mode", "tools", "cwd", "reliable_model"],
+    "notes": "event.rs:45-49 carries session_id, provider, Option<model>. Populated for Claude from system/init (adapters/claude.rs:55-59) but ALWAYS None for Codex (adapters/codex.rs:55-57), so it cannot reliably anchor a 007 model-info event. The model is never read by any consumer, so it cannot back an Exact-policy check. The rich init line (permissionMode, tools, mcp_servers in the recorded Claude fixture) is discarded."
+  },
+  {
+    "consilium_event": "Thinking",
+    "o7_event": "assistant message (reasoning)",
+    "mapping": "lossy",
+    "missing_fields": ["delta_granularity", "reasoning_vs_visible_tag"],
+    "notes": "event.rs:50-52. Emitted as whole reasoning blocks (adapters/claude.rs:68-70 'thinking', adapters/codex.rs:64-66 'reasoning'). 007's event list has no dedicated thinking event, so folding into assistant-message loses the reasoning/visible distinction; also no streaming deltas (whole-block only)."
+  },
+  {
+    "consilium_event": "Message",
+    "o7_event": "assistant message",
+    "mapping": "lossy",
+    "missing_fields": ["delta", "message_id", "stop_reason"],
+    "notes": "event.rs:53-55. Whole assistant text block, not incremental (adapters/claude.rs:65-67, adapters/codex.rs:61-63). 007 supports assistant message +delta; Consilium emits only complete blocks, so the delta/streaming capability cannot be fed. Text content itself is lossless."
+  },
+  {
+    "consilium_event": "ToolCall",
+    "o7_event": "tool.started / tool.completed",
+    "mapping": "incompatible",
+    "missing_fields": ["tool_call_id", "status", "result_output", "lifecycle_phase"],
+    "notes": "event.rs:56-59 is a SINGLE flat event (name+detail string) with no start/complete split and no tool id. Worse, the lifecycle point differs by provider: Claude emits it at tool_use REQUEST time (adapters/claude.rs:71-74) while Codex emits it at item.completed, i.e. AFTER completion (adapters/codex.rs:58-71). The same variant therefore means 'started' for one adapter and 'completed' for the other, so it cannot be split into 007's separate tool.started/tool.completed without provider-specific reinterpretation."
+  },
+  {
+    "consilium_event": "FileChanged",
+    "o7_event": "tool.completed (file mutation)",
+    "mapping": "missing",
+    "missing_fields": ["all — never produced"],
+    "notes": "event.rs:60-62 is defined but NO adapter emits it: Claude never produces it; Codex has a TODO to map file-change items but currently routes them into the ToolCall catch-all instead (adapters/codex.rs:67-71). A 007 file-mutation signal has no live producer today."
+  },
+  {
+    "consilium_event": "Usage",
+    "o7_event": "usage",
+    "mapping": "lossy",
+    "missing_fields": ["cache_read_tokens", "cache_creation_tokens", "reasoning_tokens", "cost_usd", "per_model_breakdown"],
+    "notes": "event.rs:63-68 carries only input_tokens+output_tokens. Claude pre-sums cache tokens into input (adapters/claude.rs:85-87) and Codex folds reasoning into output (adapters/codex.rs:83-84), so the cache/reasoning/cost breakdown 007 usage would want is collapsed and unrecoverable. Per-turn usage in the raw Claude stream is also dropped (only the terminal result is read)."
+  },
+  {
+    "consilium_event": "Completed",
+    "o7_event": "result/terminal",
+    "mapping": "lossy",
+    "missing_fields": ["exit_status", "stop_reason", "terminal_reason", "num_turns"],
+    "notes": "event.rs:69-71 carries only an Option<result> text. Correctly NOT a verdict: it sets run status and feeds final_text (runner.rs:73-92), and acceptance is parsed separately from the text (review.rs:93). 007 must likewise treat this terminal event as DONE-only, never as acceptance. Claude drops stop_reason/terminal_reason/cost from the result line (adapters/claude.rs:81-101); Codex sets result:None entirely (adapters/codex.rs:87)."
+  },
+  {
+    "consilium_event": "Failed",
+    "o7_event": "error",
+    "mapping": "lossy",
+    "missing_fields": ["error_kind", "retryable", "status_code", "rate_limit_reset"],
+    "notes": "event.rs:72-74 carries only an error string. The failover-relevant classification (ModelUnavailable/RateLimited/Transient) is computed post-hoc by string-matching the error text (adapters/claude.rs:37-48, adapters/codex.rs:36-45), NOT carried on the event, and it conflates true rate-limits with a plain error (007 wants a distinct rate_limit event — see below)."
+  },
+  {
+    "consilium_event": "Paused",
+    "o7_event": "(none — orchestration control)",
+    "mapping": "incompatible",
+    "missing_fields": ["not-in-007-model"],
+    "notes": "event.rs:77 is an operator/orchestration control emitted via the progress side-channel (operator.rs:153), not through the adapter/session event stream. 007's per-worker append-only ledger has no pause concept in the given event set; it would need a separate control-plane channel."
+  },
+  {
+    "consilium_event": "Resumed",
+    "o7_event": "(none — orchestration control)",
+    "mapping": "incompatible",
+    "missing_fields": ["not-in-007-model"],
+    "notes": "event.rs:80, operator-resume control emitted via progress::emit (operator.rs:155). Same as Paused: orchestration control, not a worker ledger event in 007's model."
+  },
+  {
+    "consilium_event": "OperatorNote",
+    "o7_event": "(none — operator injection)",
+    "mapping": "incompatible",
+    "missing_fields": ["not-in-007-model"],
+    "notes": "event.rs:84-86, an operator note drained at a conduct boundary and echoed for the UI (conduct.rs:365 via progress::emit). No 007 equivalent in the enumerated event set; it is a human-in-the-loop injection, not model output."
+  },
+  {
+    "consilium_event": "(none)",
+    "o7_event": "permission.requested",
+    "mapping": "missing",
+    "missing_fields": ["tool", "input", "decision"],
+    "notes": "007-needed event Consilium CANNOT emit. Permissions are pre-decided via launch flags (claude --permission-mode acceptEdits adapters/claude.rs:30-32; codex --sandbox workspace-write adapters/codex.rs:25-27) and auto-approved; the Claude result's permission_denials array (recorded fixture) is never parsed. No live permission-request or permission-mode-change event exists."
+  },
+  {
+    "consilium_event": "(none)",
+    "o7_event": "rate_limit",
+    "mapping": "missing",
+    "missing_fields": ["status", "resets_at", "overage_status", "rate_limit_type"],
+    "notes": "007-needed event Consilium CANNOT emit. Claude's stream emits a dedicated rate_limit_event line (recorded fixture: resetsAt, overageStatus, out_of_credits), but parse_line only handles system/assistant/result (adapters/claude.rs:54-104) so it is dropped. Rate-limiting is only inferred after the fact by string-matching a terminal Failed error (adapters/claude.rs:43-44, adapters/codex.rs:40-41). NOTE: verified live against the Stage E Claude probe, which DID emit a rate_limit_event (five_hour, overageStatus rejected) that Consilium's adapter would discard."
+  },
+  {
+    "consilium_event": "(none)",
+    "o7_event": "tool.completed (with result/status)",
+    "mapping": "missing",
+    "missing_fields": ["tool_call_id", "status", "output"],
+    "notes": "007-needed event Consilium CANNOT cleanly emit. There is no started/completed pairing: a single flat ToolCall (event.rs:56-59) carries no tool id, status, or result, and fires at inconsistent lifecycle points across providers (request-time for Claude, completion-time for Codex)."
+  },
+  {
+    "consilium_event": "(none)",
+    "o7_event": "model-info / model-drift",
+    "mapping": "missing",
+    "missing_fields": ["observed_model", "requested_model", "drift_detected"],
+    "notes": "007-needed event Consilium CANNOT emit — the critical Exact-policy gap. There is no ModelPolicy/Exact/drift anywhere in core/src. The only observed model lives on SessionStarted.model (adapters/claude.rs:58) and is never compared to req.model; for Codex it is hard-None (adapters/codex.rs:55-57), making drift detection impossible. Meanwhile automatic failover across a model ladder is always on (resilience.rs:190-317), which Exact must forbid. Stage E probe evidence: init model 'claude-opus-4-8[1m]' vs assistant model 'claude-opus-4-8'. The correct canonicalization is NOT 'strip everything in brackets' but structured: base_model='claude-opus-4-8', context_profile='1m', service_tier='standard'. ModelPolicy::Exact must check base_model, context_profile, and (if load-bearing) service_tier as SEPARATE fields — a naive raw-string compare false-positives on the suffix, while over-aggressive suffix-stripping would mask a genuine context-profile change."
+  }
+]

@@ -1,0 +1,25 @@
+{
+  "captured_at_note": "Timestamps recorded from git metadata, not wall clock (agent has no clock access).",
+  "o7": {
+    "repository_path": "/home/physshell/Documents/repos/007",
+    "origin": "git@github.com:PhysShell/007.git",
+    "head_sha": "bf68e91b102859d74ffb9cd4acc12e4b90ad9958",
+    "base_branch": "main",
+    "research_branch": "research/consilium-phase-minus-one",
+    "worktree_state_at_start": "clean",
+    "in_sync_with_origin_main": true
+  },
+  "consilium": {
+    "origin_url": "https://github.com/TemurTurayev/consilium",
+    "clone_path": "/home/physshell/Documents/repos/consilium",
+    "clone_method": "git clone --depth=1 (shallow)",
+    "resolved_default_branch": "main",
+    "origin_main_head_sha": "191f2d5f81458e041f60a734c60095e251e521b4",
+    "head_commit_date": "2026-07-16 08:30:58 +0500",
+    "head_commit_author": "Temur Turayev",
+    "core_crate_version": "0.2.0",
+    "license": "MIT",
+    "workspace_members": ["core", "desktop/src-tauri"],
+    "notes": "SHA resolved independently from live origin/main, NOT taken from the task prompt. Shallow clone (depth=1): full history not available; flagged if any test needs it."
+  }
+}

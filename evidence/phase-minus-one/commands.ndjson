@@ -1,0 +1,15 @@
+{"stage":"B","label":"cargo-build-core","cwd":"/home/physshell/Documents/repos/consilium","exit":0,"cmd":"cargo build -p consilium"}
+{"stage":"B","label":"cargo-test-core","cwd":"/home/physshell/Documents/repos/consilium","exit":0,"cmd":"cargo test -p consilium"}
+{"stage":"B","label":"cargo-clippy-core","cwd":"/home/physshell/Documents/repos/consilium","exit":0,"cmd":"cargo clippy -p consilium --all-targets"}
+{"stage":"B","label":"cargo-build-workspace","cwd":"/home/physshell/Documents/repos/consilium","exit":101,"cmd":"cargo build --workspace"}
+{"stage":"B","label":"cargo-test-workspace","cwd":"/home/physshell/Documents/repos/consilium","exit":101,"cmd":"cargo test --workspace"}
+{"stage":"B","label":"npm-ci","cwd":"/home/physshell/Documents/repos/consilium/ui","exit":0,"cmd":"npm ci"}
+{"stage":"B","label":"npm-typecheck","cwd":"/home/physshell/Documents/repos/consilium/ui","exit":0,"cmd":"npm run typecheck"}
+{"stage":"B","label":"npm-test","cwd":"/home/physshell/Documents/repos/consilium/ui","exit":0,"cmd":"npm test"}
+{"stage":"B","label":"npm-build","cwd":"/home/physshell/Documents/repos/consilium/ui","exit":0,"cmd":"npm run build"}
+{"stage":"setup","label":"clone-consilium","cwd":"/home/physshell/Documents/repos","exit":0,"cmd":"git clone --depth=1 https://github.com/TemurTurayev/consilium consilium"}
+{"stage":"setup","label":"resolve-consilium-sha","cwd":"consilium","exit":0,"cmd":"git rev-parse HEAD -> 191f2d5f81458e041f60a734c60095e251e521b4"}
+{"stage":"git","label":"research-branch","cwd":"007","exit":0,"cmd":"git checkout -b research/consilium-phase-minus-one"}
+{"stage":"E","label":"claude-probe","cwd":"scratchpad","exit":0,"cmd":"claude -p --output-format stream-json --verbose --max-turns 1 \"Reply exactly: consilium-phase-minus-one-claude-ok\""}
+{"stage":"E","label":"codex-probe","cwd":"-","exit":null,"cmd":"codex exec (BLOCKED: codex CLI not installed; install/login disallowed by scope)"}
+{"stage":"toolchain","label":"nix-shell","cwd":"-","exit":0,"cmd":"nix shell nixpkgs#cargo nixpkgs#rustc nixpkgs#clippy nixpkgs#gcc nixpkgs#pkg-config nixpkgs#nodejs -c <build>"}

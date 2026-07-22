@@ -1,0 +1,13 @@
+
+> consilium-ui@0.2.0 test
+> vitest run
+
+
+ RUN  v4.1.9 /home/physshell/Documents/repos/consilium/ui
+
+
+ Test Files  5 passed (5)
+      Tests  68 passed (68)
+   Start at  01:08:32
+   Duration  270ms (transform 153ms, setup 0ms, import 259ms, tests 26ms, environment 0ms)
+
