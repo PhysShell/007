@@ -165,6 +165,11 @@ pub enum FailMode {
 #[derive(Clone)]
 pub struct RecordingSink {
     observations: Arc<Mutex<Vec<WorkerObservation>>>,
+    /// Every observation kind `publish()` is CALLED with, recorded even when the
+    /// publish then fails. Lets a test prove an observation was ATTEMPTED (published
+    /// to the authoritative stream) even though the failing one is not kept in
+    /// `observations`.
+    attempted: Arc<Mutex<Vec<&'static str>>>,
     fail_mode: FailMode,
     failed: Arc<AtomicBool>,
 }
@@ -173,6 +178,7 @@ impl RecordingSink {
     pub fn new() -> Self {
         Self {
             observations: Arc::new(Mutex::new(Vec::new())),
+            attempted: Arc::new(Mutex::new(Vec::new())),
             fail_mode: FailMode::Never,
             failed: Arc::new(AtomicBool::new(false)),
         }
@@ -201,6 +207,12 @@ impl RecordingSink {
 
     pub fn kinds(&self) -> Vec<&'static str> {
         self.observations().iter().map(observation_kind).collect()
+    }
+
+    /// Every observation kind the sink was ASKED to publish, including one it failed
+    /// on (which never lands in [`RecordingSink::kinds`]).
+    pub fn attempted_kinds(&self) -> Vec<&'static str> {
+        self.attempted.lock().unwrap().clone()
     }
 
     pub fn count(&self, kind: &str) -> usize {
@@ -253,6 +265,10 @@ impl Default for RecordingSink {
 #[async_trait]
 impl ObservationSink for RecordingSink {
     async fn publish(&self, observation: WorkerObservation) -> Result<(), ObservationError> {
+        self.attempted
+            .lock()
+            .unwrap()
+            .push(observation_kind(&observation));
         let should_fail = match self.fail_mode {
             FailMode::Never => false,
             FailMode::OnFirstOutput => {

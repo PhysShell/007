@@ -29,8 +29,14 @@ timeout).
 
 `WorkerResult`: `ExitedNormally(code)`, `ExitedBySignal(sig)`, `CancelledGracefully`,
 `CancelledForcefully`, `FailedToStart(e)`, `BoundaryFailure(e)`, `ObservationFailure(e)`,
-`CleanupFailure(e)`. **If the process exited cleanly but the owned group could not be
-proven gone, the result is `CleanupFailure` — never a success.**
+`OutputFailure(e)`, `CleanupFailure(e)`. **If the process exited cleanly but the owned
+group could not be proven gone, the result is `CleanupFailure` — never a success.**
+
+When faults co-occur, terminal precedence is fixed:
+`CleanupFailure > ObservationFailure > Boundary/Output outcome`. An unprovable/failed
+cleanup (possible leaked processes) dominates everything; a lost authoritative sink then
+dominates a boundary/output fault (and the ObservationFailure message preserves that
+underlying fault so it is not erased).
 
 ## Observations are NOT ledger events
 The supervisor publishes `WorkerObservation`s (an INTERNAL lifecycle model:
@@ -51,7 +57,11 @@ and `Running`, and does not return until cleanup is complete. The host escalatio
 1. record the request, 2. SIGTERM the whole group, 3. wait the grace period,
 4. if survivors remain, SIGKILL the whole group, 5. reap the direct child,
 6. verify the group is gone, 7. only then publish the terminal completion. It is never
-just `child.kill()` (that would kill the leader and orphan its descendants).
+just `child.kill()` (that would kill the leader and orphan its descendants). A **failed**
+graceful stop never waits the grace and then reports a graceful cancel: it force-closes
+immediately and preserves the boundary fault. Any emergency force-stop taken on a fault
+path is a real teardown action, so it is published as `ForceStopSent` on the
+authoritative stream BEFORE it is performed — never an invisible SIGKILL.
 
 ## Drop semantics
 Dropping the last `WorkerHandle` requests cancellation (it does not silently walk
@@ -77,20 +87,35 @@ UTF-8), each with its own monotonic sequence. Per-stream order is guaranteed; gl
 stdout-vs-stderr interleaving is not. Chunk size and the internal channel are bounded, so
 memory never grows without limit; trailing output is drained before the terminal result;
 and if the sink cannot keep up within the backpressure timeout, the worker fails closed
-(`ObservationFailure`) rather than silently truncating.
+(`ObservationFailure`) rather than silently truncating. The trailing-output drain is
+itself **bounded**: on a cleanup error the supervisor does not wait on pipe closure at all
+(it aborts the readers and lets `CleanupFailure` dominate), and even after a verified-empty
+group the drain has a deadline — because a descendant that ESCAPED the owned group can keep
+an inherited pipe open forever. A drain that hits that deadline is an `OutputFailure`,
+never a clean pass.
 
 ## Heartbeat
 A heartbeat means **the supervisor is alive and owns a live process** — NOT that the
 process is doing useful work. It is driven by a monotonic timer, independent of
 stdout/stderr; it flows during silence, stops after the terminal state, and the absence
 of output is never treated as a hang. Any hang/timeout policy belongs to a future
-manager/o7d, not to the worker.
+manager/o7d, not to the worker. When heartbeats are **disabled** no timer is constructed
+at all; when **enabled** the interval is validated pre-spawn (non-zero and ≤ `MAX_TIMEOUT`,
+like the other timer durations) so an absurd `Duration::MAX` interval is a `FailedToStart`,
+not a later missed-tick `Instant + period` overflow.
 
 ## Orphan detection — exact scope
 PR 2 guarantees, while the supervisor is alive: the leader exiting while descendants
 remain is detected and the group cleaned; cancel/drop terminates the whole group; the
 terminal result is not produced until cleanup is verified; the direct child is reaped (no
 zombie); and no owned process survives a normal lifecycle.
+
+The membership scan (`/proc`) is the AUTHORITATIVE proof, so it fails closed on anything
+it cannot positively resolve: a top-level `/proc` failure, a directory-ENTRY I/O error,
+or a per-PID `stat` I/O error (EACCES/EIO/…) all propagate; a `stat` that reads but does
+not parse is a membership failure; and only a confirmed `NotFound` (the PID vanished) is
+treated as a benign exit race. It never treats "unknown" as "gone", so a live member
+whose `stat` errors can never be silently dropped from the proof.
 
 **Deferred (NOT PR 2):** orphan RECOVERY after the daemon (o7d) itself is SIGKILLed. Once
 the in-memory supervisor is gone, a raw PID is insufficient (PID reuse) and reliable

@@ -98,6 +98,18 @@ async fn duration_max_backpressure_timeout_fails_before_spawn() {
 }
 
 #[tokio::test]
+async fn duration_max_heartbeat_interval_fails_before_spawn_no_panic() {
+    // An ENABLED `Duration::MAX` interval would overflow the Tokio `Interval`
+    // missed-tick `Instant + period` AFTER spawn — reject it pre-spawn instead.
+    let mut spec = child_spec("hb-max", "exit0");
+    spec.heartbeat = HeartbeatPolicy {
+        enabled: true,
+        interval: Duration::MAX,
+    };
+    assert_rejected_before_spawn(spec).await;
+}
+
+#[tokio::test]
 async fn combined_output_budget_overflow_fails_before_spawn() {
     // Each field within its own max, but 16 MiB × 65_536 ≈ 1 TiB combined.
     let mut spec = child_spec("budget", "exit0");

@@ -99,6 +99,10 @@ pub struct MockBoundary {
     stdout_delay: Duration,
     stdout_chunks: Vec<Vec<u8>>,
     stdout_error: Option<String>,
+    /// stdout is a reader that never yields and never closes (always `Pending`),
+    /// modelling a descendant that escaped the owned group but still holds the
+    /// inherited pipe open, so the drain can never observe EOF.
+    stdout_pending: bool,
     leader_exit: BoundaryExit,
     wait_gate: WaitGate,
     membership: Membership,
@@ -118,6 +122,7 @@ impl MockBoundary {
             stdout_delay: Duration::ZERO,
             stdout_chunks: Vec::new(),
             stdout_error: None,
+            stdout_pending: false,
             leader_exit: BoundaryExit::Code(0),
             wait_gate: WaitGate::Immediate,
             membership: Membership::Empty,
@@ -169,6 +174,16 @@ impl MockBoundary {
         self.stdout_chunks = chunks;
         self.stdout_error = Some(error.to_owned());
         self.stdout_delay = delay;
+        self
+    }
+
+    /// stdout is a pipe that NEVER closes and never yields — the reader task stays
+    /// pending forever. Models a descendant that escaped the owned group yet still
+    /// holds the inherited stdout pipe open, so `out_rx.recv()` would block forever
+    /// unless the drain is bounded. The leader exits immediately (default), so the run
+    /// reaches the drain/cleanup phase with a still-open pipe.
+    pub fn with_pending_stdout(mut self) -> Self {
+        self.stdout_pending = true;
         self
     }
 
@@ -258,7 +273,11 @@ impl ProcessBoundary for MockBoundary {
             // the await below; `guard`'s Drop then records the cancel-safe cleanup.
             tokio::time::sleep(self.spawn_delay).await;
         }
-        let stdout = if self.stdout_chunks.is_empty() && self.stdout_error.is_none() {
+        let stdout = if self.stdout_pending {
+            // A stream that never yields and never closes — the reader stays pending,
+            // so only a BOUNDED drain can keep the supervisor from hanging on it.
+            Some(Box::pin(PendingReader) as BoundaryStream)
+        } else if self.stdout_chunks.is_empty() && self.stdout_error.is_none() {
             None
         } else {
             Some(Box::pin(ScriptedReader::new(
@@ -354,6 +373,23 @@ impl BoundaryProcess for MockProcess {
             Membership::Empty => Ok(Vec::new()),
             Membership::Error(err) => Err(BoundaryError::Membership(err.clone())),
         }
+    }
+}
+
+/// An `AsyncRead` that is ALWAYS `Pending`: it never yields bytes and never reaches
+/// EOF, modelling an inherited pipe an escaped descendant holds open forever. The
+/// reader task blocked on it only ends when the supervisor aborts it (via
+/// `JoinSet::shutdown`), so it proves the trailing-output drain is bounded.
+struct PendingReader;
+
+impl AsyncRead for PendingReader {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        _buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        // Never register a waker: this future is parked until the task is aborted.
+        Poll::Pending
     }
 }
 

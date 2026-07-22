@@ -109,6 +109,8 @@ pub enum SpecError {
     },
     #[error("heartbeat.interval must be > 0 when heartbeat is enabled")]
     ZeroHeartbeatInterval,
+    #[error("heartbeat.interval {0:?} exceeds the maximum {MAX_TIMEOUT:?}")]
+    HeartbeatIntervalTooLarge(Duration),
     #[error("cancellation.graceful_timeout {0:?} exceeds the maximum {MAX_TIMEOUT:?}")]
     GracefulTimeoutTooLarge(Duration),
     #[error("output.sink_backpressure_timeout {0:?} exceeds the maximum {MAX_TIMEOUT:?}")]
@@ -163,6 +165,16 @@ impl WorkerSpec {
         }
         if self.heartbeat.enabled && self.heartbeat.interval.is_zero() {
             return Err(SpecError::ZeroHeartbeatInterval);
+        }
+        // An ENABLED heartbeat drives a Tokio `Interval` whose missed-tick logic
+        // computes `Instant + period`; an unbounded interval (e.g. `Duration::MAX`)
+        // would overflow it AFTER spawn. Bound it like the other timer durations, so
+        // an absurd heartbeat is a pre-spawn `FailedToStart`, not a later panic. A
+        // DISABLED heartbeat never constructs a timer, so its interval is unbounded.
+        if self.heartbeat.enabled && self.heartbeat.interval > MAX_TIMEOUT {
+            return Err(SpecError::HeartbeatIntervalTooLarge(
+                self.heartbeat.interval,
+            ));
         }
         // Timer-bound durations must be representable: an unbounded grace/timeout
         // would overflow `Instant::now() + d` or panic a timer AFTER spawn.
@@ -302,5 +314,41 @@ mod tests {
             spec.validate(),
             Err(SpecError::BackpressureTimeoutTooLarge(Duration::MAX))
         );
+    }
+
+    #[test]
+    fn rejects_unrepresentable_heartbeat_interval_only_when_enabled() {
+        // An ENABLED `Duration::MAX` interval would overflow the Tokio `Interval`
+        // missed-tick `Instant + period` AFTER spawn — reject it pre-spawn.
+        let mut spec = valid_spec();
+        spec.heartbeat = crate::heartbeat::HeartbeatPolicy {
+            enabled: true,
+            interval: Duration::MAX,
+        };
+        assert_eq!(
+            spec.validate(),
+            Err(SpecError::HeartbeatIntervalTooLarge(Duration::MAX))
+        );
+
+        // Exactly at the ceiling is allowed; one step over is rejected.
+        let mut spec = valid_spec();
+        spec.heartbeat = crate::heartbeat::HeartbeatPolicy {
+            enabled: true,
+            interval: MAX_TIMEOUT,
+        };
+        assert!(spec.validate().is_ok());
+        spec.heartbeat.interval = MAX_TIMEOUT + Duration::from_secs(1);
+        assert!(matches!(
+            spec.validate(),
+            Err(SpecError::HeartbeatIntervalTooLarge(_))
+        ));
+
+        // A DISABLED heartbeat never builds a timer, so even `Duration::MAX` is fine.
+        let mut spec = valid_spec();
+        spec.heartbeat = crate::heartbeat::HeartbeatPolicy {
+            enabled: false,
+            interval: Duration::MAX,
+        };
+        assert!(spec.validate().is_ok());
     }
 }

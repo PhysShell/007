@@ -28,6 +28,11 @@ const GROUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// How long, after SIGKILL, we allow the kernel to reap the group before declaring
 /// a cleanup failure.
 const CLEANUP_GRACE: Duration = Duration::from_millis(500);
+/// How long to wait for trailing output to drain (pipes closing) after cleanup has
+/// verified the owned group is gone. A descendant that ESCAPED the owned group can
+/// still hold an inherited pipe open, so this wait is bounded and its expiry is a
+/// failure — the drain must never hang, and never silently pass on a timeout.
+const DRAIN_GRACE: Duration = Duration::from_millis(500);
 
 /// The single terminal outcome of a worker.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,6 +235,22 @@ impl Publisher {
     }
 }
 
+/// Build the message for an `ObservationFailure` that dominates a co-occurring
+/// boundary/output fault. Losing the authoritative sink is the reported terminal, but
+/// the underlying run-loop fault must not be erased — it is preserved in the message
+/// so the combined failure is legible.
+fn observation_failure_message(pubr: &Publisher, base: &WorkerResult) -> String {
+    let sink_error = pubr.error();
+    match base {
+        WorkerResult::BoundaryFailure(underlying) | WorkerResult::OutputFailure(underlying) => {
+            format!("{sink_error}; underlying fault preserved: {underlying}")
+        }
+        // A `SinkFailed` base is the SAME sink loss (no distinct underlying fault); any
+        // success/cancel base carries no fault to preserve.
+        _ => sink_error,
+    }
+}
+
 fn advance(state: &mut WorkerState, to: WorkerState) -> Result<(), String> {
     if state.can_transition_to(to) {
         *state = to;
@@ -423,19 +444,16 @@ async fn manage(
     drop(out_tx);
 
     let started = Instant::now();
+    // Construct NO timer when heartbeats are disabled: a disabled+zero interval is a
+    // legal spec, and `validate()` only bounds the interval (non-zero, ≤ MAX_TIMEOUT)
+    // when heartbeats are ENABLED. Building the `Interval` solely under `enabled` means
+    // no unvalidated, possibly-`Duration::MAX` period ever reaches the timer.
     let heartbeat_enabled = spec.heartbeat.enabled;
-    // The timer is only ticked while `heartbeat_enabled`, but it is constructed
-    // unconditionally, so it must have a valid NON-ZERO period even when heartbeats
-    // are disabled (a disabled+zero interval is a legal spec). `validate()` already
-    // guarantees a non-zero period whenever heartbeats are enabled; this clamp
-    // keeps `interval()` from panicking on the harmless disabled+zero case.
-    let heartbeat_period = if spec.heartbeat.interval.is_zero() {
-        Duration::from_secs(1)
-    } else {
-        spec.heartbeat.interval
-    };
-    let mut heartbeat = tokio::time::interval(heartbeat_period);
-    heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut heartbeat = heartbeat_enabled.then(|| {
+        let mut interval = tokio::time::interval(spec.heartbeat.interval);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        interval
+    });
     let mut heartbeat_seq: u64 = 0;
     let mut output_open = true;
 
@@ -458,7 +476,7 @@ async fn manage(
                     None => { output_open = false; }
                 }
             }
-            _ = heartbeat.tick(), if heartbeat_enabled => {
+            _ = next_heartbeat(heartbeat.as_mut()), if heartbeat_enabled => {
                 let observation = WorkerObservation::Heartbeat {
                     worker_id: spec.worker_id.clone(),
                     sequence: heartbeat_seq,
@@ -491,6 +509,13 @@ async fn manage(
         termination,
         Termination::SinkFailed(_) | Termination::OutputFailed(_) | Termination::BoundaryFailed(_)
     ) {
+        // This emergency SIGKILL is a REAL teardown action, so it must not be
+        // invisible to the authoritative stream (PR-4's source-of-truth adapter maps
+        // it to a canonical event). Publish — and honor — `ForceStopSent` before
+        // performing it. If the sink is already dead (`SinkFailed`) this is a no-op;
+        // if it dies HERE, `!pubr.alive` makes `ObservationFailure` dominate the
+        // boundary/output fault in the terminal-precedence check below.
+        let _ = pubr.emit(WorkerObservation::ForceStopSent).await;
         let _ = process.force_stop().await;
         let _ = process.wait().await;
     }
@@ -502,22 +527,43 @@ async fn manage(
     // Drain remaining output (pipes closing), then join readers. A read error seen
     // ONLY during the drain (leader already exited) must NOT be silently dropped —
     // it means output faithfulness was lost after the exit.
+    //
+    // The drain MUST be bounded. `out_rx.recv()` only returns `None` once every
+    // reader task has ended, which happens when the pipes close. But:
+    //   * if cleanup FAILED the owned set is not proven gone, so a survivor can hold
+    //     its pipe open forever; and
+    //   * even after a VERIFIED-empty group, a descendant that ESCAPED the host group
+    //     (its own session/group) can still hold an inherited stdout/stderr pipe open.
+    // Either way an unbounded `recv()` would hang and the promised failure terminal
+    // (CleanupFailure / a drain fault) would never be produced. So: skip the wait
+    // entirely on a cleanup error (let CleanupFailure dominate), and otherwise bound
+    // the drain with a deadline whose expiry is itself a failure — never a clean pass.
     let mut drain_output_error: Option<String> = None;
-    if pubr.alive {
-        while let Some(message) = out_rx.recv().await {
-            match message {
-                ReaderMessage::Chunk(chunk) => {
-                    if !pubr.emit(WorkerObservation::OutputChunk(chunk)).await {
-                        break;
+    let mut drain_timed_out = false;
+    if cleanup.is_ok() && pubr.alive {
+        let drain = async {
+            while let Some(message) = out_rx.recv().await {
+                match message {
+                    ReaderMessage::Chunk(chunk) => {
+                        if !pubr.emit(WorkerObservation::OutputChunk(chunk)).await {
+                            break;
+                        }
+                    }
+                    ReaderMessage::ReadError(message) => {
+                        return Some(message);
                     }
                 }
-                ReaderMessage::ReadError(message) => {
-                    drain_output_error = Some(message);
-                    break;
-                }
             }
+            None
+        };
+        match tokio::time::timeout(DRAIN_GRACE, drain).await {
+            Ok(read_error) => drain_output_error = read_error,
+            Err(_) => drain_timed_out = true,
         }
     }
+    // Abort/join the reader tasks unconditionally, so a permanently-pending reader
+    // (blocked on a pipe an escaped descendant still holds open) cannot outlive the
+    // supervisor. `shutdown()` aborts each task and awaits it — bounded by construction.
     readers.shutdown().await;
 
     let _ = advance(state, WorkerState::Exited);
@@ -547,17 +593,28 @@ async fn manage(
         Termination::OutputFailed(message) => WorkerResult::OutputFailure(message),
         Termination::BoundaryFailed(message) => WorkerResult::BoundaryFailure(message),
     };
-    // Precedence: unprovable/failed cleanup (leaked processes) dominates; then a
-    // fault that ended the run loop; then a read error seen during the drain; then a
-    // lost sink; otherwise the run's own outcome.
+    // Terminal precedence — CleanupFailure > ObservationFailure > Boundary/Output:
+    //   1. an unprovable/failed cleanup (possible leaked processes) dominates all;
+    //   2. a lost authoritative sink dominates a boundary/output fault — if the run
+    //      ALSO ended on a boundary/output fault, that fault is preserved in the
+    //      ObservationFailure message so it is never erased;
+    //   3. a boundary/output fault that ended the run loop (sink still alive);
+    //   4. a bounded-drain timeout or a drain-time read error (output faithfulness
+    //      lost after the exit) — always a failure, never a clean pass;
+    //   5. otherwise the run's own outcome.
     let result = if let Err(message) = cleanup {
         WorkerResult::CleanupFailure(message)
+    } else if !pubr.alive {
+        WorkerResult::ObservationFailure(observation_failure_message(pubr, &base))
     } else if base.is_failure() {
         base
+    } else if drain_timed_out {
+        WorkerResult::OutputFailure(format!(
+            "trailing output drain exceeded {DRAIN_GRACE:?}; output faithfulness unproven \
+             (a descendant that escaped the owned group may still hold a pipe open)"
+        ))
     } else if let Some(message) = drain_output_error {
         WorkerResult::OutputFailure(message)
-    } else if !pubr.alive {
-        WorkerResult::ObservationFailure(pubr.error())
     } else {
         base
     };
@@ -700,6 +757,19 @@ async fn abandon_and_verify(
         return Err(format!("force stop failed during cleanup: {err}"));
     }
     cleanup_group(process, pubr).await
+}
+
+/// Tick an OPTIONAL heartbeat timer. When heartbeats are disabled there is no
+/// timer, so this stays pending forever (the select branch is also gated on
+/// `heartbeat_enabled`, so it is never actually polled in that case — the `pending`
+/// arm just keeps the future total without an `unwrap`).
+async fn next_heartbeat(heartbeat: Option<&mut tokio::time::Interval>) {
+    match heartbeat {
+        Some(interval) => {
+            interval.tick().await;
+        }
+        None => std::future::pending().await,
+    }
 }
 
 /// Resolve once cancellation has been requested (cancel-safe).
