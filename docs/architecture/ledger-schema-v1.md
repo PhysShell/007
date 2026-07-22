@@ -83,9 +83,13 @@ and root runs need.)
 
 ## Schema version guards (on open)
 - A `user_version` **newer** than this build supports → `SCHEMA_TOO_NEW` (an old binary
-  must not write a new DB).
-- After migrating, the live schema is validated against the expected tables/columns; a
-  DB that only *claims* the current version but is incomplete → `INTEGRITY` failure.
+  must not write a new DB). Checked **before** any persistent change (before WAL).
+- After migrating, the live schema is **attested** against a fresh reference built from
+  `SCHEMA_V1`: every table, index, trigger and view is compared by full DDL and the
+  object sets must be **exactly equal**. A missing, differing, or **unexpected** object
+  (e.g. an injected trigger/view) → `INTEGRITY` failure. Column names alone are not
+  enough — the composite FKs, the `CHECK`, and the partial unique index are all part of
+  the compared DDL.
 
 ## The sequence invariant
 - `sequence` is **per conversation**, not global — there is no single global cursor.

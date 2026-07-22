@@ -58,16 +58,20 @@ then visible to every subsequent connection.
 - Cross-machine replication or backup — out of scope for PR 1.
 
 ## Open sequence (exact order in `sqlite.rs::init`)
-1. Set `busy_timeout`, `foreign_keys`, `synchronous`, `journal_mode = WAL`, and
-   **verify** they took effect (fail closed otherwise).
-2. **Refuse a too-new database:** if `user_version` > the version this build supports,
-   return `SCHEMA_TOO_NEW` — an older binary must never write a newer schema.
-3. Apply versioned migrations (idempotent; no-op on an up-to-date DB).
-4. Run `PRAGMA quick_check` (the cheaper, justified variant of `integrity_check`); a
+1. Set `busy_timeout` (per-connection; does not touch the file).
+2. **Refuse a too-new database FIRST**, before any persistent change: read
+   `user_version`; if it exceeds the version this build supports, return
+   `SCHEMA_TOO_NEW`. This runs *before* `journal_mode = WAL` (the only persistent
+   pragma), so an old binary never even switches a newer DB to WAL.
+3. Set `foreign_keys`, `synchronous`, `journal_mode = WAL`, and **verify** they took
+   effect (fail closed otherwise).
+4. Apply versioned migrations (idempotent; no-op on an up-to-date DB).
+5. Run `PRAGMA quick_check` (the cheaper, justified variant of `integrity_check`); a
    non-`ok` result fails closed.
-5. **Validate the live schema** against the expected tables/columns, so a database that
-   merely *claims* the current `user_version` but is structurally incomplete fails
-   closed rather than being written to.
+6. **Attest the full schema**: compare every table, index, trigger and view (with full
+   DDL) against a fresh reference built from this build's `SCHEMA_V1`, requiring EXACT
+   equality. A missing, differing, or **unexpected** object (e.g. an injected trigger
+   that would delete rows) fails closed rather than being written to.
 
 ## Recovery (separate, caller-driven)
 - `recover_scan()` reports runs/attempts still in `running` state — i.e. interrupted by

@@ -184,3 +184,31 @@ async fn too_new_guard_precedes_persistent_changes() {
         "a too-new DB must be left untouched (not switched to WAL)"
     );
 }
+
+// An UNEXPECTED schema object (a trigger that would silently subvert the
+// append-only ledger) must be rejected at open — attestation covers triggers and
+// views and requires exact equality with the reference schema.
+#[tokio::test]
+async fn unexpected_trigger_fails_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("trojan.db");
+
+    // A legitimate v1 database …
+    SqliteLedger::open(&path).unwrap();
+    // … then someone adds a trigger that deletes each event right after insert.
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER destroy_event AFTER INSERT ON event \
+             BEGIN DELETE FROM event WHERE event_id = NEW.event_id; END;",
+        )
+        .unwrap();
+    }
+
+    let err = SqliteLedger::open(&path).unwrap_err();
+    assert_eq!(
+        err.code(),
+        "INTEGRITY",
+        "an unexpected trigger must be rejected at open"
+    );
+}

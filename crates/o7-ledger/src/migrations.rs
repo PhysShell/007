@@ -126,14 +126,18 @@ fn normalize_ddl(sql: &str) -> String {
     sql.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Read our own `CREATE TABLE`/`CREATE INDEX` statements from `sqlite_master`,
-/// keyed by object name and whitespace-normalized. Auto-created indexes (from
-/// PK/UNIQUE, whose `sql` is NULL) are skipped — the constraints they back live
-/// inside the table DDL, which IS compared.
+/// Read every user-defined `sqlite_master` object — tables, indexes, TRIGGERS and
+/// VIEWS — keyed by name and whitespace-normalized. Triggers/views matter because
+/// an unexpected trigger could silently sabotage the append-only ledger (e.g.
+/// delete a row right after it is inserted). Internal `sqlite_%` objects (incl.
+/// auto-indexes from PK/UNIQUE, whose `sql` is NULL) are excluded — the
+/// constraints they back live inside the table DDL, which IS compared, and users
+/// cannot create `sqlite_`-prefixed objects.
 fn schema_objects(conn: &Connection) -> Result<BTreeMap<String, String>, LedgerError> {
     let mut stmt = conn.prepare(
         "SELECT name, sql FROM sqlite_master \
-         WHERE type IN ('table', 'index') AND sql IS NOT NULL AND name NOT LIKE 'sqlite_%'",
+         WHERE type IN ('table', 'index', 'trigger', 'view') \
+         AND sql IS NOT NULL AND name NOT LIKE 'sqlite_%'",
     )?;
     let rows = stmt.query_map([], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -146,19 +150,32 @@ fn schema_objects(conn: &Connection) -> Result<BTreeMap<String, String>, LedgerE
     Ok(map)
 }
 
-/// Verify the LIVE schema (full DDL — columns, foreign keys, CHECK constraints,
-/// the partial unique index) matches a fresh reference built from this build's
-/// `SCHEMA_V1`. A database that merely claims the current `user_version` but is
-/// missing any structure fails closed.
+/// Attest the LIVE schema against a fresh reference built from this build's
+/// `SCHEMA_V1`, requiring EXACT equality of the full object set — every table,
+/// index, trigger and view, with matching DDL (columns, foreign keys, CHECK
+/// constraints, the partial unique index). A missing, differing, OR **unexpected**
+/// object fails closed. The last case matters: an extra trigger/view could
+/// silently subvert append-only guarantees, so anything not in the reference is
+/// rejected.
 ///
 /// # Errors
-/// [`LedgerError::Integrity`] on any missing or differing object; SQLite errors.
+/// [`LedgerError::Integrity`] on any missing, differing, or unexpected object;
+/// SQLite errors.
 pub fn validate_schema(conn: &Connection) -> Result<(), LedgerError> {
     let reference = Connection::open_in_memory()?;
     reference.execute_batch(SCHEMA_V1)?;
     let expected = schema_objects(&reference)?;
     let actual = schema_objects(conn)?;
 
+    // Reject any object the reference does not define (extra trigger/view/table/…).
+    for name in actual.keys() {
+        if !expected.contains_key(name) {
+            return Err(LedgerError::Integrity(format!(
+                "unexpected schema object `{name}` (possible tampering)"
+            )));
+        }
+    }
+    // Every expected object must be present and identical.
     for (name, want) in &expected {
         match actual.get(name) {
             None => {
