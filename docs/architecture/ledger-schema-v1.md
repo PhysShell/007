@@ -62,6 +62,31 @@ Index: `idx_event_conversation_sequence(conversation_id, sequence)`.
 | `result_reference` | TEXT | id of the produced entity/event |
 | `created_at` | INTEGER | |
 
+## Cross-entity integrity (the ledger enforces these itself)
+Independent foreign keys are not enough — these composite constraints stop the
+inconsistent references a less-careful caller could otherwise create:
+- `run` has `UNIQUE(conversation_id, run_id)`; `event` has
+  `FOREIGN KEY (conversation_id, run_id) REFERENCES run(conversation_id, run_id)`, so an
+  event can only reference a run **in its own conversation**.
+- `run_attempt` has `UNIQUE(run_id, attempt_id)`; `event` has
+  `FOREIGN KEY (run_id, attempt_id) REFERENCES run_attempt(run_id, attempt_id)` plus
+  `CHECK (attempt_id IS NULL OR run_id IS NOT NULL)`, so an event's attempt must belong
+  to its run.
+- `run` has `FOREIGN KEY (conversation_id, parent_run_id) REFERENCES run(conversation_id,
+  run_id)`, so a **parent run must live in the same conversation**.
+- `CREATE UNIQUE INDEX idx_one_running_attempt ON run_attempt(run_id) WHERE status =
+  'running'` — **at most one running attempt per run**.
+
+(Composite FKs use MATCH SIMPLE: when a nullable column such as `run_id`/`parent_run_id`
+is NULL, the FK is not enforced, which is exactly what conversation- or run-less events
+and root runs need.)
+
+## Schema version guards (on open)
+- A `user_version` **newer** than this build supports → `SCHEMA_TOO_NEW` (an old binary
+  must not write a new DB).
+- After migrating, the live schema is validated against the expected tables/columns; a
+  DB that only *claims* the current version but is incomplete → `INTEGRITY` failure.
+
 ## The sequence invariant
 - `sequence` is **per conversation**, not global — there is no single global cursor.
 - Uniqueness is enforced by `UNIQUE(conversation_id, sequence)`.
@@ -107,4 +132,11 @@ modes, model drift, delegation, artifacts, gates.
 running`, `failed → completed`, `cancelled → completed`, and anything else.
 
 **Attempt:** `running → {completed, failed, cancelled, interrupted}`. Attempts never
-restart — a new attempt row is created instead.
+restart — a new attempt row is created instead. `create_attempt` requires the run to be
+`running` and refuses a second running attempt.
+
+**Atomic couplings:** a run leaving `running` (complete/fail/cancel/interrupt) finishes
+its running attempt in the same transaction; `resume_interrupted_run` transitions
+`interrupted → running` **and** creates a fresh running attempt in one transaction (first
+closing any lingering running attempt). So run and attempt state are never left
+inconsistent.

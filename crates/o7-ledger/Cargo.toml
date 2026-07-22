@@ -9,13 +9,6 @@ publish = false
 name = "o7_ledger"
 path = "src/lib.rs"
 
-# A tiny helper binary used ONLY by the crash-durability integration test: it is
-# spawned as a real subprocess and SIGKILLed at a controlled point, so the test
-# exercises a genuine process abort rather than a simulated `return Err`.
-[[bin]]
-name = "ledger-crash-helper"
-path = "src/bin/ledger-crash-helper.rs"
-
 [dependencies]
 # Bundled SQLite: compiled from source, so there is NO system libsqlite dependency
 # (the same choice Consilium made). This is the only persistence engine.
@@ -34,6 +27,9 @@ tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-t
 
 [dev-dependencies]
 tempfile = "3"
+# Used only by the crash-durability test to hold an uncommitted transaction open
+# in a re-exec'd child process. Same version/features as the main dep.
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 # Mirror the workspace-root crate's discipline: no unsafe, no panics-by-default.
 [lints.rust]

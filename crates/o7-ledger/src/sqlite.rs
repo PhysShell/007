@@ -30,10 +30,25 @@ pub const EVENT_SCHEMA_VERSION: u32 = 1;
 
 const BUSY_TIMEOUT_MS: u64 = 5000;
 
+/// The effective durability pragmas of an open ledger.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PragmaReport {
+    pub journal_mode: String,
+    pub foreign_keys: bool,
+    /// SQLite `synchronous` level: 0=OFF, 1=NORMAL, 2=FULL, 3=EXTRA.
+    pub synchronous: i64,
+}
+
 /// A durable, append-only ledger backed by a single SQLite database.
 #[derive(Clone)]
 pub struct SqliteLedger {
     conn: Arc<Mutex<Connection>>,
+}
+
+impl std::fmt::Debug for SqliteLedger {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SqliteLedger").finish_non_exhaustive()
+    }
 }
 
 impl SqliteLedger {
@@ -47,35 +62,60 @@ impl SqliteLedger {
     /// or a migration error.
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, LedgerError> {
         let conn = Connection::open(path)?;
-        Self::init(conn)
+        Self::init(conn, true)
     }
 
     /// Open an in-memory ledger (for tests/logic). WAL/durability pragmas that do
-    /// not apply to `:memory:` are simply inert.
+    /// not apply to `:memory:` are simply inert, so WAL/synchronous are not
+    /// asserted here (foreign keys still are).
     ///
     /// # Errors
     /// Propagates SQLite/migration errors.
     pub fn open_in_memory() -> Result<Self, LedgerError> {
         let conn = Connection::open_in_memory()?;
-        Self::init(conn)
+        Self::init(conn, false)
     }
 
-    fn init(conn: Connection) -> Result<Self, LedgerError> {
+    fn init(conn: Connection, expect_wal: bool) -> Result<Self, LedgerError> {
         conn.busy_timeout(Duration::from_millis(BUSY_TIMEOUT_MS))?;
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL;")?;
-        // journal_mode returns the resulting mode as a row ("wal", or "memory"
-        // for an in-memory db); read it rather than pragma_update.
-        let _mode: String = conn.query_row("PRAGMA journal_mode = WAL;", [], |row| row.get(0))?;
-        // Cheaper justified variant of integrity_check; still detects corruption.
+        // journal_mode returns the RESULTING mode ("wal", or "memory" for an
+        // in-memory db). Verify the pragmas actually took effect — otherwise the
+        // durability documentation would be a lie on a filesystem without WAL.
+        let journal: String = conn.query_row("PRAGMA journal_mode = WAL;", [], |row| row.get(0))?;
+        verify_effective_pragmas(&conn, expect_wal, &journal)?;
+
+        let mut conn = conn;
+        // Order: migrations first (which refuse a too-new DB), then a cheap
+        // integrity check, then a structural schema check (catches a DB that
+        // merely claims the current user_version but is incomplete).
+        migrations::apply(&mut conn)?;
         let check: String = conn.query_row("PRAGMA quick_check;", [], |row| row.get(0))?;
         if check != "ok" {
             return Err(LedgerError::Integrity(check));
         }
-        let mut conn = conn;
-        migrations::apply(&mut conn)?;
+        migrations::validate_schema(&conn)?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
+    }
+
+    /// Report the effective durability pragmas (for tests/diagnostics).
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn pragma_report(&self) -> Result<PragmaReport, LedgerError> {
+        self.with_conn(|conn| {
+            let journal_mode: String = conn.query_row("PRAGMA journal_mode;", [], |r| r.get(0))?;
+            let foreign_keys: i64 = conn.query_row("PRAGMA foreign_keys;", [], |r| r.get(0))?;
+            let synchronous: i64 = conn.query_row("PRAGMA synchronous;", [], |r| r.get(0))?;
+            Ok(PragmaReport {
+                journal_mode,
+                foreign_keys: foreign_keys == 1,
+                synchronous,
+            })
+        })
+        .await
     }
 
     async fn with_tx<T, F>(&self, work: F) -> Result<T, LedgerError>
@@ -306,6 +346,16 @@ impl SqliteLedger {
                 "UPDATE run SET status = ?1, finished_at = ?2 WHERE run_id = ?3",
                 params![target.as_str(), finished_at, run_id.as_str()],
             )?;
+            // A run leaving `running` finishes its (at most one) running attempt,
+            // so a terminal/interrupted run never leaves a dangling running attempt.
+            if target.is_terminal() || target == RunStatus::Interrupted {
+                let attempt_status = terminal_attempt_status(target);
+                tx.execute(
+                    "UPDATE run_attempt SET status = ?1, finished_at = ?2 \
+                     WHERE run_id = ?3 AND status = 'running'",
+                    params![attempt_status.as_str(), now, run_id.as_str()],
+                )?;
+            }
             emit_event(
                 tx,
                 &NewEvent {
@@ -331,8 +381,26 @@ impl SqliteLedger {
     /// [`LedgerError::NotFound`] if the run does not exist; SQLite errors.
     pub async fn create_attempt(&self, run_id: crate::RunId) -> Result<RunAttempt, LedgerError> {
         self.with_tx(move |tx| {
-            if load_run(tx, run_id.as_str())?.is_none() {
-                return Err(LedgerError::NotFound(format!("run {run_id}")));
+            let run = load_run(tx, run_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("run {run_id}")))?;
+            // An attempt only exists while its run is running.
+            if run.status != RunStatus::Running {
+                return Err(LedgerError::InvalidState(format!(
+                    "cannot create an attempt: run {run_id} is {}, not running",
+                    run.status.as_str()
+                )));
+            }
+            // At most one running attempt per run (also enforced by a partial
+            // unique index; this gives a clean typed error before hitting it).
+            let running: i64 = tx.query_row(
+                "SELECT count(*) FROM run_attempt WHERE run_id = ?1 AND status = 'running'",
+                params![run_id.as_str()],
+                |row| row.get(0),
+            )?;
+            if running > 0 {
+                return Err(LedgerError::InvalidState(format!(
+                    "run {run_id} already has a running attempt"
+                )));
             }
             let next_number: i64 = tx.query_row(
                 "SELECT COALESCE(MAX(attempt_number), 0) + 1 FROM run_attempt WHERE run_id = ?1",
@@ -389,6 +457,84 @@ impl SqliteLedger {
             )?;
             load_attempt(tx, attempt_id.as_str())?
                 .ok_or_else(|| LedgerError::NotFound(format!("attempt {attempt_id}")))
+        })
+        .await
+    }
+
+    /// Atomically resume an interrupted run: transition it `interrupted →
+    /// running` AND create a new running attempt, in one transaction. Any
+    /// lingering running attempt of the run is first marked `interrupted`.
+    /// Returns the new attempt.
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] if the run is missing; [`LedgerError::InvalidState`]
+    /// if the run is not `interrupted`; SQLite errors.
+    pub async fn resume_interrupted_run(
+        &self,
+        run_id: crate::RunId,
+    ) -> Result<RunAttempt, LedgerError> {
+        self.with_tx(move |tx| {
+            let current = load_run(tx, run_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("run {run_id}")))?;
+            if current.status != RunStatus::Interrupted {
+                return Err(LedgerError::InvalidState(format!(
+                    "cannot resume: run {run_id} is {}, not interrupted",
+                    current.status.as_str()
+                )));
+            }
+            let now = now_millis();
+            // Defensively close any still-running attempt so the new one does not
+            // collide with the one-running-attempt invariant.
+            tx.execute(
+                "UPDATE run_attempt SET status = 'interrupted', finished_at = ?1 \
+                 WHERE run_id = ?2 AND status = 'running'",
+                params![now, run_id.as_str()],
+            )?;
+            // interrupted -> running (transition validated centrally).
+            validate_run_transition(current.status, RunStatus::Running)?;
+            tx.execute(
+                "UPDATE run SET status = 'running', finished_at = NULL WHERE run_id = ?1",
+                params![run_id.as_str()],
+            )?;
+            emit_event(
+                tx,
+                &NewEvent {
+                    event_id: EventId::generate(),
+                    conversation_id: current.conversation_id.clone(),
+                    run_id: Some(run_id.clone()),
+                    attempt_id: None,
+                    event_type: EventType::RunStarted,
+                    schema_version: EVENT_SCHEMA_VERSION,
+                    payload: serde_json::json!({ "resumed": true }),
+                },
+                now,
+            )?;
+            let next_number: i64 = tx.query_row(
+                "SELECT COALESCE(MAX(attempt_number), 0) + 1 FROM run_attempt WHERE run_id = ?1",
+                params![run_id.as_str()],
+                |row| row.get(0),
+            )?;
+            let attempt = RunAttempt {
+                attempt_id: crate::AttemptId::generate(),
+                run_id: run_id.clone(),
+                attempt_number: u32::try_from(next_number)
+                    .map_err(|_| LedgerError::Integrity("attempt_number overflow".to_owned()))?,
+                status: AttemptStatus::Running,
+                started_at: now,
+                finished_at: None,
+            };
+            tx.execute(
+                "INSERT INTO run_attempt (attempt_id, run_id, attempt_number, status, started_at, finished_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
+                params![
+                    attempt.attempt_id.as_str(),
+                    attempt.run_id.as_str(),
+                    next_number,
+                    attempt.status.as_str(),
+                    now,
+                ],
+            )?;
+            Ok(attempt)
         })
         .await
     }
@@ -522,6 +668,17 @@ impl SqliteLedger {
         self.with_conn(move |conn| load_run(conn, run_id.as_str()))
             .await
     }
+
+    /// Load an attempt by id (read-only), if present.
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn attempt(
+        &self,
+        attempt_id: crate::AttemptId,
+    ) -> Result<Option<RunAttempt>, LedgerError> {
+        self.with_conn(move |conn| load_attempt(conn, attempt_id.as_str()))
+            .await
+    }
 }
 
 impl Ledger for SqliteLedger {
@@ -562,6 +719,48 @@ impl Ledger for SqliteLedger {
 }
 
 // ---- sync helpers (operate on a Connection or an open Transaction) ----
+
+/// Verify the durability pragmas actually took effect. Foreign keys must always
+/// be on; WAL + `synchronous = FULL` are asserted for file-backed databases
+/// (they are inert, hence not asserted, for `:memory:`).
+fn verify_effective_pragmas(
+    conn: &Connection,
+    expect_wal: bool,
+    journal_mode: &str,
+) -> Result<(), LedgerError> {
+    let foreign_keys: i64 = conn.query_row("PRAGMA foreign_keys;", [], |row| row.get(0))?;
+    if foreign_keys != 1 {
+        return Err(LedgerError::Integrity(
+            "foreign_keys is not enabled".to_owned(),
+        ));
+    }
+    if expect_wal {
+        if !journal_mode.eq_ignore_ascii_case("wal") {
+            return Err(LedgerError::Integrity(format!(
+                "journal_mode is `{journal_mode}`, expected wal (durability requires WAL)"
+            )));
+        }
+        let synchronous: i64 = conn.query_row("PRAGMA synchronous;", [], |row| row.get(0))?;
+        if synchronous != 2 {
+            return Err(LedgerError::Integrity(format!(
+                "synchronous is {synchronous}, expected FULL(2)"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Map a terminal/interrupted RUN status to the attempt status its running
+/// attempt should receive. Only called when the run target is terminal or
+/// interrupted.
+fn terminal_attempt_status(run_target: RunStatus) -> AttemptStatus {
+    match run_target {
+        RunStatus::Failed => AttemptStatus::Failed,
+        RunStatus::Cancelled => AttemptStatus::Cancelled,
+        RunStatus::Interrupted => AttemptStatus::Interrupted,
+        _ => AttemptStatus::Completed,
+    }
+}
 
 /// Allocate the next per-conversation sequence and insert the event, returning
 /// the persisted row. Called inside an `IMMEDIATE` transaction only.

@@ -25,7 +25,7 @@ pub use models::{
     AttemptStatus, Conversation, ConversationStatus, EventType, Idempotency, IdempotencyRecord,
     NewEvent, NewRun, PersistedEvent, RecoveryState, Run, RunAttempt, RunStatus,
 };
-pub use sqlite::{SqliteLedger, EVENT_SCHEMA_VERSION, MAX_READ_LIMIT};
+pub use sqlite::{PragmaReport, SqliteLedger, EVENT_SCHEMA_VERSION, MAX_READ_LIMIT};
 
 /// The core append-only ledger contract: append an event, or replay a
 /// conversation's events by cursor. `append_event` returns only after a
@@ -82,6 +82,16 @@ pub enum LedgerError {
     #[error("not found: {0}")]
     NotFound(String),
 
+    /// An operation was attempted against an entity in an incompatible state
+    /// (e.g. creating an attempt on a run that is not running).
+    #[error("invalid state: {0}")]
+    InvalidState(String),
+
+    /// The database was created by a NEWER schema version than this binary
+    /// supports — refuse to touch it (an older binary must not write a newer DB).
+    #[error("schema too new: found v{found}, this build supports up to v{supported}")]
+    SchemaTooNew { found: u32, supported: u32 },
+
     /// Integrity/consistency violation (failed integrity check, or a stored
     /// value that cannot be interpreted).
     #[error("integrity: {0}")]
@@ -106,6 +116,8 @@ impl LedgerError {
             Self::IdempotencyConflict { .. } => "IDEMPOTENCY_CONFLICT",
             Self::ForbiddenTransition { .. } => "FORBIDDEN_TRANSITION",
             Self::NotFound(_) => "NOT_FOUND",
+            Self::InvalidState(_) => "INVALID_STATE",
+            Self::SchemaTooNew { .. } => "SCHEMA_TOO_NEW",
             Self::Integrity(_) => "INTEGRITY",
             Self::Join => "JOIN",
             Self::LockPoisoned => "LOCK_POISONED",
