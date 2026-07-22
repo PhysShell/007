@@ -93,6 +93,9 @@ enum Membership {
     /// Every query fails — the boundary can never prove the set's state, so
     /// cleanup must fail closed rather than assume "empty".
     Error(String),
+    /// This many members are ALWAYS present (never drains) — so `cleanup_group` reaches
+    /// its force-stop step and then keeps seeing survivors.
+    Present(usize),
 }
 
 /// A configurable, OS-free boundary. Defaults to the most boring possible run: a
@@ -111,6 +114,10 @@ pub struct MockBoundary {
     /// descendant that keeps WRITING (never idle, never EOF), so only a message/byte
     /// budget (not an idle timeout) can bound the drain.
     stdout_infinite: bool,
+    /// Like `stdout_infinite` but exactly ONE byte per read — an escaped descendant
+    /// dribbling output so slowly that only a total-time bound (not the byte budget)
+    /// stops it, especially under a slow-but-within-timeout sink.
+    stdout_infinite_one_byte: bool,
     /// If set, the leader exits this long after spawn (an ABSOLUTE deadline computed at
     /// spawn). `wait()` resolves via `sleep_until`, so it is cancel-safe: the supervisor
     /// dropping and recreating the `wait()` future across select iterations re-arms the
@@ -120,7 +127,15 @@ pub struct MockBoundary {
     wait_gate: WaitGate,
     membership: Membership,
     graceful_stop_error: Option<String>,
+    /// `request_graceful_stop()` never resolves — a hung boundary control op the
+    /// supervisor must bound and escalate past.
+    graceful_stop_pending: bool,
     force_stop_error: Option<String>,
+    /// `force_stop()` never resolves — a hung force delivery the supervisor must bound.
+    force_stop_pending: bool,
+    /// `remaining_members()` never resolves — a hung membership query the supervisor
+    /// must bound (never "unknown means empty").
+    membership_pending: bool,
     state: Arc<MockState>,
 }
 
@@ -137,12 +152,16 @@ impl MockBoundary {
             stdout_error: None,
             stdout_pending: false,
             stdout_infinite: false,
+            stdout_infinite_one_byte: false,
             leader_exit_after: None,
             leader_exit: BoundaryExit::Code(0),
             wait_gate: WaitGate::Immediate,
             membership: Membership::Empty,
             graceful_stop_error: None,
+            graceful_stop_pending: false,
             force_stop_error: None,
+            force_stop_pending: false,
+            membership_pending: false,
             state: Arc::new(MockState::default()),
         }
     }
@@ -218,6 +237,48 @@ impl MockBoundary {
     /// exits immediately, so the run reaches the drain with the stream still producing.
     pub fn with_infinite_stdout(mut self) -> Self {
         self.stdout_infinite = true;
+        self
+    }
+
+    /// Like [`MockBoundary::with_infinite_stdout`] but exactly ONE byte per read, so the
+    /// byte budget is approached only glacially — the TOTAL-time drain bound is what must
+    /// stop it, especially paired with a slow-but-within-timeout sink.
+    pub fn with_infinite_stdout_one_byte(mut self) -> Self {
+        self.stdout_infinite_one_byte = true;
+        self
+    }
+
+    /// `request_graceful_stop()` never resolves — a hung boundary control op. The
+    /// supervisor must bound it and escalate to force IMMEDIATELY (not wait the grace).
+    /// The leader dies on the escalated force-stop, so the escalation proves it completes
+    /// (a bounded `CancelledForcefully`), not merely that it fails.
+    pub fn with_pending_graceful_stop(mut self) -> Self {
+        self.graceful_stop_pending = true;
+        self.wait_gate = WaitGate::AfterForceStop;
+        self
+    }
+
+    /// `force_stop()` never resolves — a hung force delivery the supervisor must bound
+    /// (an unprovable teardown → bounded `CleanupFailure`). Leaves `wait_gate` alone (a
+    /// hung force never wakes an `AfterForceStop` wait anyway); compose with
+    /// [`MockBoundary::with_live_leader`] when the leader must stay alive until cancel.
+    pub fn with_pending_force_stop(mut self) -> Self {
+        self.force_stop_pending = true;
+        self
+    }
+
+    /// `remaining_members()` never resolves — a hung membership query the supervisor
+    /// must bound (never "unknown means empty").
+    pub fn with_pending_membership(mut self) -> Self {
+        self.membership_pending = true;
+        self
+    }
+
+    /// `remaining_members()` always reports `n` live members (the group never drains), so
+    /// `cleanup_group` reaches its force-stop step. Pair with a pending/failing force to
+    /// exercise the cleanup-path force bound.
+    pub fn with_present_members(mut self, n: usize) -> Self {
+        self.membership = Membership::Present(n);
         self
     }
 
@@ -332,7 +393,11 @@ impl ProcessBoundary for MockBoundary {
         } else if self.stdout_infinite {
             // A stream that keeps producing forever — only a message/byte BUDGET bounds
             // the drain (an idle timeout never fires because output never stops).
-            Some(Box::pin(InfiniteReader) as BoundaryStream)
+            Some(Box::pin(InfiniteReader { chunk: 8192 }) as BoundaryStream)
+        } else if self.stdout_infinite_one_byte {
+            // One byte per read forever — reaches the byte budget only glacially, so the
+            // TOTAL-time drain bound must stop it.
+            Some(Box::pin(InfiniteReader { chunk: 1 }) as BoundaryStream)
         } else if self.stdout_chunks.is_empty() && self.stdout_error.is_none() {
             None
         } else {
@@ -356,8 +421,11 @@ impl ProcessBoundary for MockBoundary {
                 .leader_exit_after
                 .map(|d| tokio::time::Instant::now() + d),
             membership: self.membership.clone(),
+            membership_pending: self.membership_pending,
             graceful_stop_error: self.graceful_stop_error.clone(),
+            graceful_stop_pending: self.graceful_stop_pending,
             force_stop_error: self.force_stop_error.clone(),
+            force_stop_pending: self.force_stop_pending,
             force_notify: Arc::new(Notify::new()),
             force_succeeded: Arc::new(AtomicBool::new(false)),
             state: Arc::clone(&self.state),
@@ -380,8 +448,11 @@ struct MockProcess {
     /// precedence over `wait_gate` when set.
     wait_deadline: Option<tokio::time::Instant>,
     membership: Membership,
+    membership_pending: bool,
     graceful_stop_error: Option<String>,
+    graceful_stop_pending: bool,
     force_stop_error: Option<String>,
+    force_stop_pending: bool,
     force_notify: Arc<Notify>,
     /// Set true ONLY when a `force_stop()` succeeds — the re-checkable flag an
     /// `AfterForceStop` `wait()` gates on. A failed force-stop never sets it, so a
@@ -409,6 +480,11 @@ impl BoundaryProcess for MockProcess {
 
     async fn request_graceful_stop(&mut self) -> Result<(), BoundaryError> {
         self.state.graceful_stops.fetch_add(1, Ordering::SeqCst);
+        if self.graceful_stop_pending {
+            // A hung graceful stop: never resolves. The supervisor must bound it and
+            // escalate to force.
+            std::future::pending::<()>().await;
+        }
         if let Some(err) = &self.graceful_stop_error {
             return Err(BoundaryError::Signal(err.clone()));
         }
@@ -417,6 +493,11 @@ impl BoundaryProcess for MockProcess {
 
     async fn force_stop(&mut self) -> Result<(), BoundaryError> {
         self.state.force_stops.fetch_add(1, Ordering::SeqCst);
+        if self.force_stop_pending {
+            // A hung force delivery: never resolves. The supervisor must bound it; it
+            // never wakes a gated wait() (the kill was never delivered).
+            std::future::pending::<()>().await;
+        }
         if let Some(err) = &self.force_stop_error {
             // A FAILED force-stop must NOT wake a gated wait(): the boundary could not
             // deliver the kill, so it has no basis to report the leader gone. (Masking
@@ -459,9 +540,21 @@ impl BoundaryProcess for MockProcess {
 
     async fn remaining_members(&self) -> Result<Vec<ProcessIdentity>, BoundaryError> {
         self.state.membership_queries.fetch_add(1, Ordering::SeqCst);
+        if self.membership_pending {
+            // A hung membership query: never resolves. The supervisor must bound it and
+            // treat the timeout as an unprovable teardown.
+            std::future::pending::<()>().await;
+        }
         match &self.membership {
             Membership::Empty => Ok(Vec::new()),
             Membership::Error(err) => Err(BoundaryError::Membership(err.clone())),
+            Membership::Present(n) => Ok((0..*n)
+                .map(|i| ProcessIdentity {
+                    pid: 500_000 + i as i32,
+                    process_group: 424_242,
+                    start_time_ticks: 7,
+                })
+                .collect()),
         }
     }
 }
@@ -470,10 +563,13 @@ impl BoundaryProcess for MockProcess {
 /// EOF, modelling an inherited pipe an escaped descendant holds open forever. The
 /// reader task blocked on it only ends when the supervisor aborts it (via
 /// `JoinSet::shutdown`), so it proves the trailing-output drain is bounded.
-/// An `AsyncRead` that yields a small fixed chunk on EVERY read and NEVER reaches EOF —
+/// An `AsyncRead` that yields up to `chunk` bytes on EVERY read and NEVER reaches EOF —
 /// an escaped descendant that keeps writing forever. An idle timeout never fires (output
-/// never stops), so only the drain's message/byte BUDGET can bound it.
-struct InfiniteReader;
+/// never stops); a large `chunk` reaches the BYTE budget quickly, while `chunk == 1`
+/// dribbles so slowly that only the TOTAL-TIME bound stops it.
+struct InfiniteReader {
+    chunk: usize,
+}
 
 impl AsyncRead for InfiniteReader {
     fn poll_read(
@@ -481,11 +577,8 @@ impl AsyncRead for InfiniteReader {
         _cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        // Fill the read buffer (capped) each time — larger chunks reach the drain's
-        // BYTE budget in a modest number of messages, keeping the test fast while the
-        // stream still never ends.
         const FILLER: [u8; 8192] = [b'x'; 8192];
-        let n = buf.remaining().min(FILLER.len());
+        let n = buf.remaining().min(self.chunk).min(FILLER.len());
         if let Some(head) = FILLER.get(..n) {
             buf.put_slice(head);
         }

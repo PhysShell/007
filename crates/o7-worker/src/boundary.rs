@@ -143,9 +143,22 @@ pub trait BoundaryProcess: Send {
     fn take_stderr(&mut self) -> Option<BoundaryStream>;
 
     /// Ask the whole set to stop gracefully (e.g. SIGTERM to the group).
+    ///
+    /// CANCEL-SAFETY CONTRACT: the supervisor BOUNDS this call with a timeout and drops
+    /// the future if it does not complete in time (a hung boundary must not stall
+    /// cancellation). Dropping a partially-run `request_graceful_stop` must not corrupt
+    /// the boundary or leak a signal — after a drop the set is left in a well-defined
+    /// state and a subsequent `force_stop()` remains valid. A graceful-stop timeout is
+    /// treated as "graceful did not take" and escalates immediately to a forceful stop.
     async fn request_graceful_stop(&mut self) -> Result<(), BoundaryError>;
 
     /// Force the whole set to stop (e.g. SIGKILL to the group).
+    ///
+    /// CANCEL-SAFETY CONTRACT: the supervisor BOUNDS this call with a timeout and drops
+    /// the future if it does not complete in time. Dropping a partially-run `force_stop`
+    /// must not corrupt the boundary; a force-stop that times out is treated as an
+    /// UNPROVABLE teardown (the set may still be alive), yielding a bounded
+    /// `CleanupFailure` rather than a hang.
     async fn force_stop(&mut self) -> Result<(), BoundaryError>;
 
     /// Wait for the leader to exit.
@@ -166,5 +179,12 @@ pub trait BoundaryProcess: Send {
     async fn wait(&mut self) -> Result<BoundaryExit, BoundaryError>;
 
     /// Which processes of the owned set are still alive.
+    ///
+    /// CANCEL-SAFETY CONTRACT: the supervisor BOUNDS this query with a timeout and drops
+    /// the future if it does not complete in time. Dropping a partially-run
+    /// `remaining_members` must not corrupt the boundary and a subsequent call must
+    /// still return an accurate set. A membership query that times out is treated as an
+    /// UNPROVABLE teardown (the set's state is unknown), yielding a bounded
+    /// `CleanupFailure` — never "unknown means empty".
     async fn remaining_members(&self) -> Result<Vec<ProcessIdentity>, BoundaryError>;
 }

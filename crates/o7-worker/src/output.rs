@@ -45,3 +45,26 @@ impl Default for OutputPolicy {
         }
     }
 }
+
+/// Headroom added to the trailing-output BYTE budget above the configured in-flight
+/// channel buffer, covering output the OS pipe (and the reader's own buffer) still holds
+/// when the leader exits. Legitimate trailing output cannot exceed the channel buffer
+/// plus the pipe capacity (the process has already exited, so no NEW data arrives); a
+/// Linux pipe is 64 KiB by default and at most ~1 MiB, so 2 MiB is comfortably above any
+/// real trailing burst while still bounding an ESCAPED descendant that keeps writing.
+pub const TRAILING_DRAIN_PIPE_ALLOWANCE_BYTES: usize = 2 * 1024 * 1024;
+
+impl OutputPolicy {
+    /// The trailing-output BYTE budget for the post-exit drain: the configured in-flight
+    /// channel buffer plus [`TRAILING_DRAIN_PIPE_ALLOWANCE_BYTES`]. The drain fails
+    /// closed only once trailing output EXCEEDS this (an escaped descendant writing
+    /// without end); output that merely REACHES it and is then followed by EOF is a
+    /// clean drain. A byte budget (not a message count) is used so a tiny
+    /// `max_chunk_bytes` cannot inflate legitimate output into a false overflow.
+    #[must_use]
+    pub fn trailing_drain_byte_budget(&self) -> usize {
+        self.channel_capacity
+            .saturating_mul(self.max_chunk_bytes)
+            .saturating_add(TRAILING_DRAIN_PIPE_ALLOWANCE_BYTES)
+    }
+}

@@ -61,13 +61,19 @@ just `child.kill()` (that would kill the leader and orphan its descendants). A *
 graceful stop never waits the grace and then reports a graceful cancel: it force-closes
 immediately and preserves the boundary fault. Any emergency force-stop taken on a fault
 path is a real teardown action, so it is published as `ForceStopSent` on the
-authoritative stream BEFORE it is performed — never an invisible SIGKILL. Every reap
-(`wait()`) performed AFTER a force-stop is **bounded**: a boundary whose `force_stop()`
-fails while the leader stays alive, or whose `wait()` never completes, cannot hang the
-supervisor — an un-reapable teardown is reported as a bounded `CleanupFailure` instead of
-an infinite wait. `BoundaryProcess::wait()` therefore carries an explicit cancel-safety
-contract (the `select!` loop drops and recreates the pending `wait()` future each
-iteration; a leader exit reached while it was not polled must still be observed).
+authoritative stream BEFORE it is performed — never an invisible SIGKILL.
+
+**Every boundary control/query op is bounded.** `request_graceful_stop`, `force_stop`,
+`remaining_members`, and the post-force reap (`wait()`) each run under a timeout, so a
+hung boundary can never stall cancellation/cleanup. A graceful-stop timeout escalates to
+force immediately; a force-stop, membership, or reap timeout is an UNPROVABLE teardown
+that yields a bounded `CleanupFailure` — never an infinite wait, never "unknown means
+empty". These four trait methods therefore carry explicit **cancel-safety** contracts
+(their futures are dropped when the timeout fires; `wait()` is additionally dropped and
+recreated by the `select!` loop on every iteration, so a leader exit reached while it was
+not polled must still be observed). When several teardown ops fail together, the terminal
+`CleanupFailure` **composes every fault** (force, then reap, then membership/cleanup) in
+execution order — no underlying failure is masked.
 
 ## Drop semantics
 Dropping the last `WorkerHandle` requests cancellation (it does not silently walk
@@ -94,14 +100,19 @@ stdout-vs-stderr interleaving is not. Chunk size and the internal channel are bo
 memory never grows without limit; trailing output is drained before the terminal result;
 and if the sink cannot keep up within the backpressure timeout, the worker fails closed
 (`ObservationFailure`) rather than silently truncating. The trailing-output drain is
-itself **bounded**, by three SEPARATE limits so no one of them cancels a healthy publish:
+itself **bounded**, by FOUR SEPARATE limits so no one of them cancels a healthy publish:
 on a cleanup error the supervisor does not wait on pipe closure at all (it aborts the
 readers and lets `CleanupFailure` dominate); the wait for the NEXT trailing message has an
 idle timeout (an escaped descendant may hold an inherited pipe open with no further
 output); each trailing PUBLISH keeps its own `sink_backpressure_timeout` — the drain never
-wraps it, so a slow-but-within-contract sink is delivered, not drain-cancelled; and a
-trailing BYTE budget (the configured channel buffer plus a pipe allowance) bounds an
-escaped descendant that keeps WRITING forever. Any of the idle-timeout / byte-budget /
+wraps it, so a slow-but-within-contract sink is delivered, not drain-cancelled; a trailing
+BYTE budget (the configured channel buffer plus a pipe allowance) bounds an escaped
+descendant that keeps WRITING forever (trailing output that *exceeds* the budget fails;
+output that merely *reaches* it and is then followed by EOF is a clean drain); and an
+absolute TOTAL-TIME deadline (`MAX_TRAILING_DRAIN`), checked between messages, bounds a
+one-byte-per-message producer that could otherwise drive effectively unbounded sequential
+publishes under a slow-but-legal sink — the worst-case terminal is `MAX_TRAILING_DRAIN +
+one sink_backpressure_timeout`. Any of the idle-timeout / byte-budget / total-time /
 read-error outcomes is an `OutputFailure`, never a clean pass, and it is preserved even
 when the terminal sink then fails (the dominating `ObservationFailure` carries it).
 

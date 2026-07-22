@@ -34,6 +34,20 @@ const CLEANUP_GRACE: Duration = Duration::from_millis(500);
 /// hang the supervisor. A reap that exceeds this is a teardown that cannot be proven,
 /// which the caller turns into a bounded `CleanupFailure` — never an unbounded wait.
 const REAP_TIMEOUT: Duration = Duration::from_millis(500);
+/// How long a single boundary CONTROL/QUERY op (`request_graceful_stop`, `force_stop`,
+/// `remaining_members`) may take before it is abandoned. Each is bounded so a hung
+/// boundary cannot stall cancellation/cleanup: a graceful-stop timeout escalates to
+/// force immediately, and a force-stop / membership timeout is an unprovable teardown
+/// that yields a bounded `CleanupFailure`.
+const BOUNDARY_OP_TIMEOUT: Duration = Duration::from_millis(500);
+/// Absolute ceiling on the TOTAL post-exit trailing-output drain. Bounds the drain's
+/// wall-clock even when each individual publish stays within `sink_backpressure_timeout`
+/// and the byte budget is never reached (an escaped descendant emitting one byte per
+/// message could otherwise drive effectively unbounded sequential publishes). Checked
+/// BETWEEN messages, so it never cancels an already-running publish before that
+/// publish's own timeout: the worst-case terminal is `MAX_TRAILING_DRAIN + one
+/// sink_backpressure_timeout`.
+pub const MAX_TRAILING_DRAIN: Duration = Duration::from_secs(3);
 /// How long to wait for the NEXT trailing-output message (a chunk, a read error, or
 /// EOF) during the post-exit drain. This bounds ONLY the wait for pipe/reader activity
 /// — it is NOT wrapped around the sink publish, which has its own
@@ -41,15 +55,6 @@ const REAP_TIMEOUT: Duration = Duration::from_millis(500);
 /// can hold an inherited pipe open with no further output; if nothing arrives within
 /// this idle window the drain concludes (a failure when the pipes never closed).
 const DRAIN_IDLE_TIMEOUT: Duration = Duration::from_millis(500);
-/// Headroom added to the trailing-output BYTE budget above the configured in-flight
-/// channel buffer, to cover output the OS pipe (and the reader's own buffer) still
-/// holds when the leader exits. Legitimate trailing output cannot exceed the channel
-/// buffer plus the pipe capacity (the process has already exited, so no NEW data
-/// arrives); a Linux pipe is 64 KiB by default and at most ~1 MiB, so 4 MiB is
-/// comfortably above any real trailing burst while still bounding an ESCAPED descendant
-/// that keeps writing new data forever. A byte budget (not a message count) is used so
-/// a tiny `max_chunk_bytes` cannot inflate legitimate output into a false overflow.
-const TRAILING_DRAIN_PIPE_ALLOWANCE_BYTES: usize = 4 * 1024 * 1024;
 
 /// The single terminal outcome of a worker.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -521,10 +526,10 @@ async fn manage(
     };
 
     // Reap the leader in the fault paths (Natural/Cancelled already waited). A
-    // killed-but-unreaped child is a zombie cleanup would mistake for a survivor. A
-    // force/reap fault here means teardown could not be proven → folded into the
-    // cleanup outcome so `CleanupFailure` dominates within a known bound.
-    let mut reap_error: Option<String> = None;
+    // killed-but-unreaped child is a zombie cleanup would mistake for a survivor. Every
+    // teardown fault (force, reap, then cleanup below) is ACCUMULATED in execution order
+    // and composed into one `CleanupFailure`, so no underlying failure is dropped.
+    let mut teardown_faults: Vec<String> = Vec::new();
     if matches!(
         termination,
         Termination::SinkFailed(_) | Termination::OutputFailed(_) | Termination::BoundaryFailed(_)
@@ -536,60 +541,66 @@ async fn manage(
         // if it dies HERE, `!pubr.alive` makes `ObservationFailure` dominate the
         // boundary/output fault in the terminal-precedence check below.
         let _ = pubr.emit(WorkerObservation::ForceStopSent).await;
-        let force = process.force_stop().await;
-        // BOUNDED reap: a boundary whose `wait()` never resolves must not hang here.
-        // A failed force or a reap that could not complete means teardown is unprovable;
-        // record it so `CleanupFailure` can dominate within a known bound.
-        let reap = bounded_reap(process.as_mut()).await;
-        reap_error = match (force, reap) {
-            (Err(err), _) => Some(format!("force stop failed during teardown: {err}")),
-            (Ok(()), Err(err)) => Some(err),
-            (Ok(()), Ok(_)) => None,
-        };
+        // BOUNDED force + reap: a hung force delivery or a `wait()` that never resolves
+        // must not hang here. Collect BOTH faults (a failed force AND a failed reap are
+        // distinct, independently-diagnostic problems).
+        if let Err(err) = bounded_force_stop(process.as_mut()).await {
+            teardown_faults.push(err);
+        }
+        if let Err(err) = bounded_reap(process.as_mut()).await {
+            teardown_faults.push(err);
+        }
     }
 
-    // Verified cleanup FIRST — kill any surviving group members so their pipes
-    // close (otherwise draining could block on a grandchild that only dies now).
-    // A post-force reap fault (force failed, or a `wait()` that never completed within
-    // the bound) is ALSO an unprovable teardown, so fold it in: either fault yields a
-    // bounded `CleanupFailure`. A genuine cleanup (membership) error takes the message.
-    let cleanup = match (cleanup_group(process.as_mut(), pubr).await, reap_error) {
-        (Err(message), _) => Err(message),
-        (Ok(()), Some(message)) => Err(message),
-        (Ok(()), None) => Ok(()),
+    // Verified cleanup — kill any surviving group members so their pipes close
+    // (otherwise draining could block on a grandchild that only dies now). Its fault
+    // (membership/force/survivors), if any, is appended AFTER the force/reap faults so
+    // the combined `CleanupFailure` preserves every underlying failure in order.
+    if let Err(message) = cleanup_group(process.as_mut(), pubr).await {
+        teardown_faults.push(message);
+    }
+    let cleanup: Result<(), String> = if teardown_faults.is_empty() {
+        Ok(())
+    } else {
+        Err(teardown_faults.join("; "))
     };
 
     // Drain remaining output (pipes closing), then join readers. A read error seen
     // ONLY during the drain (leader already exited) must NOT be silently dropped —
     // it means output faithfulness was lost after the exit.
     //
-    // The drain MUST be bounded, but the bound must NOT cancel a healthy in-flight sink
+    // The drain MUST be bounded, but no bound may cancel a healthy in-flight sink
     // publish. `out_rx.recv()` only returns `None` once every reader task ends (pipes
     // closed); an escaped descendant can hold an inherited pipe open — with no further
-    // output, or by writing forever — so an unbounded drain would hang. Three separate
-    // bounds, none of which caps a legitimate publish:
+    // output, or by writing forever — so an unbounded drain would hang. FOUR bounds,
+    // none of which caps a legitimate publish:
     //   * per-message WAIT: bound how long we wait for the next chunk/error/EOF
     //     (`DRAIN_IDLE_TIMEOUT`). An idle-but-open pipe expires here.
     //   * per-message PUBLISH: `pubr.emit` keeps its own `sink_backpressure_timeout`;
     //     the drain never wraps it, so a slow-but-within-contract sink is not cancelled.
-    //   * total BUDGET: a continuously-writing escaped descendant never goes idle, so
-    //     cap the number of trailing messages drained.
+    //   * BYTE budget: total trailing bytes exceeding the configured buffer + pipe
+    //     allowance means an escaped descendant is writing new data without end.
+    //   * TOTAL-TIME deadline (`MAX_TRAILING_DRAIN`): checked BETWEEN messages, so even a
+    //     one-byte-per-message producer under a slow-but-legal sink cannot drive an
+    //     effectively unbounded number of sequential publishes. It never interrupts an
+    //     in-flight publish, so the worst case is `MAX_TRAILING_DRAIN + one sink timeout`.
     // On a cleanup error the owned set is not proven gone, so skip the drain entirely
     // and let `CleanupFailure` dominate.
     let mut drain_output_error: Option<String> = None;
     let mut drain_timed_out = false;
     let mut drain_budget_exceeded = false;
+    let mut drain_deadline_exceeded = false;
     if cleanup.is_ok() && pubr.alive {
-        // Byte budget: the configured in-flight buffer plus a pipe allowance. Above this,
-        // trailing output can only be an escaped descendant writing WITHOUT end (the
-        // leader already exited), so stop and fail closed.
-        let byte_budget = spec
-            .output
-            .channel_capacity
-            .saturating_mul(spec.output.max_chunk_bytes)
-            .saturating_add(TRAILING_DRAIN_PIPE_ALLOWANCE_BYTES);
+        let byte_budget = spec.output.trailing_drain_byte_budget();
+        let total_deadline = Instant::now() + MAX_TRAILING_DRAIN;
         let mut drained_bytes: usize = 0;
         loop {
+            // Check the absolute total-drain deadline BEFORE accepting the next message
+            // or starting the next publish — never mid-publish.
+            if Instant::now() >= total_deadline {
+                drain_deadline_exceeded = true;
+                break;
+            }
             // Bound the WAIT for the next message only — never the publish below.
             let message = match tokio::time::timeout(DRAIN_IDLE_TIMEOUT, out_rx.recv()).await {
                 Ok(Some(message)) => message,
@@ -607,9 +618,9 @@ async fn manage(
                         break; // sink lost mid-drain → caught by `!pubr.alive` below.
                     }
                     drained_bytes = drained_bytes.saturating_add(len);
-                    if drained_bytes >= byte_budget {
-                        // Still producing past the budget: an escaped descendant is
-                        // writing without end. Stop and fail closed.
+                    // EXCEEDING the budget fails closed; merely REACHING it does not —
+                    // legitimate output of exactly the budget size, then EOF, is clean.
+                    if drained_bytes > byte_budget {
                         drain_budget_exceeded = true;
                         break;
                     }
@@ -675,6 +686,12 @@ async fn manage(
              an escaped descendant is writing without end, so faithful capture is unproven"
                 .to_owned(),
         )
+    } else if drain_deadline_exceeded {
+        WorkerResult::OutputFailure(format!(
+            "trailing output drain exceeded its total time budget of {MAX_TRAILING_DRAIN:?} \
+             while output kept arriving; an escaped descendant is writing without end, so \
+             faithful capture is unproven"
+        ))
     } else if let Some(message) = drain_output_error {
         WorkerResult::OutputFailure(message)
     } else {
@@ -716,11 +733,15 @@ async fn run_cancellation(
     // must still proceed, so it is not an early return.
     let _ = pubr.emit(WorkerObservation::CancellationRequested).await;
     let deadline = Instant::now() + grace;
-    // If the graceful stop itself FAILS, do not wait the grace period and then claim
-    // a graceful cancel: force the group now and preserve the boundary fault. manage()
-    // force-reaps and verifies cleanup before the terminal result.
-    if let Err(err) = process.request_graceful_stop().await {
-        return Termination::BoundaryFailed(format!("graceful stop failed: {err}"));
+    // The graceful stop is BOUNDED. If it FAILS, do not wait the grace period and then
+    // claim a graceful cancel: preserve the boundary fault (manage() force-reaps and
+    // verifies cleanup before the terminal). If it TIMES OUT, the boundary never even
+    // acknowledged the graceful request — escalate to force IMMEDIATELY rather than
+    // waiting out the grace.
+    match bounded_graceful_stop(process).await {
+        GracefulStop::Ok => {}
+        GracefulStop::Failed(err) => return Termination::BoundaryFailed(err),
+        GracefulStop::TimedOut => return force_after_grace(process, pubr, None).await,
     }
     let _ = pubr.emit(WorkerObservation::GracefulStopSent).await;
 
@@ -736,7 +757,10 @@ async fn run_cancellation(
 
     // Leader gone; wait for the rest of the group to drain within the remaining grace.
     loop {
-        match process.remaining_members().await {
+        // BOUNDED membership: a hung query cannot be proven empty, so we cannot claim a
+        // graceful cancel — escalate to force (whose cleanup then yields a bounded
+        // CleanupFailure if the group still cannot be verified gone).
+        match bounded_members(process).await {
             Ok(members) if members.is_empty() => {
                 return Termination::Cancelled {
                     forceful: false,
@@ -744,7 +768,7 @@ async fn run_cancellation(
                 };
             }
             Ok(_) => {}
-            Err(err) => return Termination::BoundaryFailed(err.to_string()),
+            Err(_) => return force_after_grace(process, pubr, exit).await,
         }
         if Instant::now() >= deadline {
             return force_after_grace(process, pubr, exit).await;
@@ -762,8 +786,9 @@ async fn force_after_grace(
     exit: Option<BoundaryExit>,
 ) -> Termination {
     let _ = pubr.emit(WorkerObservation::ForceStopSent).await;
-    if let Err(err) = process.force_stop().await {
-        return Termination::BoundaryFailed(err.to_string());
+    // BOUNDED force-stop: a hung force delivery must not stall cancellation.
+    if let Err(err) = bounded_force_stop(process).await {
+        return Termination::BoundaryFailed(err);
     }
     let exit = match exit {
         Some(exit) => Some(exit),
@@ -782,31 +807,26 @@ async fn force_after_grace(
     }
 }
 
-/// Kill the whole owned group if anything remains, then PROVE it is gone. A
-/// membership-query error is a cleanup failure (never "unknown means empty").
+/// Kill the whole owned group if anything remains, then PROVE it is gone. Every
+/// boundary op is BOUNDED: a membership-query or force-stop that errors OR times out is
+/// a cleanup failure (never "unknown means empty", never an unbounded wait).
 async fn cleanup_group(
     process: &mut dyn BoundaryProcess,
     pubr: &mut Publisher,
 ) -> Result<(), String> {
-    let remaining = process
-        .remaining_members()
-        .await
-        .map_err(|e| format!("membership query failed: {e}"))?;
+    let remaining = bounded_members(process).await?;
     if remaining.is_empty() {
         return Ok(());
     }
     let _ = pubr
         .emit(WorkerObservation::DescendantsRemaining(remaining))
         .await;
-    if let Err(err) = process.force_stop().await {
-        return Err(format!("force stop during cleanup failed: {err}"));
-    }
+    bounded_force_stop(process)
+        .await
+        .map_err(|e| format!("force stop during cleanup: {e}"))?;
     let deadline = Instant::now() + CLEANUP_GRACE;
     loop {
-        let survivors = process
-            .remaining_members()
-            .await
-            .map_err(|e| format!("membership query failed: {e}"))?;
+        let survivors = bounded_members(process).await?;
         if survivors.is_empty() {
             return Ok(());
         }
@@ -835,27 +855,81 @@ async fn bounded_reap(process: &mut dyn BoundaryProcess) -> Result<BoundaryExit,
     }
 }
 
+/// Outcome of a BOUNDED graceful stop: it succeeded, it returned an error, or it did
+/// not complete within [`BOUNDARY_OP_TIMEOUT`]. A timeout is distinct because it
+/// escalates immediately to force rather than being reported as a boundary error.
+enum GracefulStop {
+    Ok,
+    Failed(String),
+    TimedOut,
+}
+
+/// Bound `request_graceful_stop` — a hung boundary must not stall cancellation.
+async fn bounded_graceful_stop(process: &mut dyn BoundaryProcess) -> GracefulStop {
+    match tokio::time::timeout(BOUNDARY_OP_TIMEOUT, process.request_graceful_stop()).await {
+        Ok(Ok(())) => GracefulStop::Ok,
+        Ok(Err(err)) => GracefulStop::Failed(format!("graceful stop failed: {err}")),
+        Err(_) => GracefulStop::TimedOut,
+    }
+}
+
+/// Bound `force_stop` — a hung force delivery is an unprovable teardown, not a hang.
+async fn bounded_force_stop(process: &mut dyn BoundaryProcess) -> Result<(), String> {
+    match tokio::time::timeout(BOUNDARY_OP_TIMEOUT, process.force_stop()).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(err)) => Err(format!("force stop failed: {err}")),
+        Err(_) => Err(format!(
+            "force stop did not complete within {BOUNDARY_OP_TIMEOUT:?}; teardown unprovable"
+        )),
+    }
+}
+
+/// Bound `remaining_members` — a hung membership query is an unprovable teardown,
+/// never "unknown means empty". Takes `&mut` (not `&`) so the awaited future stays
+/// `Send`: `&dyn BoundaryProcess` would require `Sync`, which the trait does not demand.
+async fn bounded_members(
+    process: &mut dyn BoundaryProcess,
+) -> Result<Vec<ProcessIdentity>, String> {
+    match tokio::time::timeout(BOUNDARY_OP_TIMEOUT, process.remaining_members()).await {
+        Ok(Ok(members)) => Ok(members),
+        // `BoundaryError::Membership` already reads "membership query failed: …" — do not
+        // re-prefix it.
+        Ok(Err(err)) => Err(err.to_string()),
+        Err(_) => Err(format!(
+            "membership query did not complete within {BOUNDARY_OP_TIMEOUT:?}; teardown unprovable"
+        )),
+    }
+}
+
 /// Abandon a live, boundary-owned process on a post-spawn fault: force-kill the
 /// set, reap the leader (so it is not mistaken for a survivor), then PROVE the group
-/// is gone. Any force/reap/membership fault is preserved as an `Err` so the caller can
-/// let `CleanupFailure` dominate — never a best-effort kill that leaves the group
-/// unverified, and never an unbounded wait on a boundary that will not complete.
+/// is gone. Every boundary op is BOUNDED, and ALL faults (force, reap, then cleanup)
+/// are accumulated in execution order into one `Err` so the caller lets a combined
+/// `CleanupFailure` dominate — never a best-effort kill that leaves the group
+/// unverified, never an unbounded wait, and never a single fault masking the others.
 async fn abandon_and_verify(
     process: &mut dyn BoundaryProcess,
     pubr: &mut Publisher,
 ) -> Result<(), String> {
-    let force = process.force_stop().await;
-    // Reap the leader regardless of the force result, so a zombie leader cannot be
-    // mistaken for a live member during verification — but BOUNDED, so a `wait()` that
-    // never completes cannot hang the abandon path.
-    let reap = bounded_reap(process).await;
-    if let Err(err) = force {
-        return Err(format!("force stop failed during cleanup: {err}"));
+    let mut faults: Vec<String> = Vec::new();
+    // Force-kill the set (bounded), then reap the leader regardless of the force result
+    // (bounded) so a zombie leader cannot be mistaken for a live member. Collect BOTH.
+    if let Err(err) = bounded_force_stop(process).await {
+        faults.push(err);
     }
-    // A force that succeeded but a leader that could not be reaped within the bound is
-    // an unprovable teardown: surface it rather than silently proceeding to verify.
-    reap?;
-    cleanup_group(process, pubr).await
+    if let Err(err) = bounded_reap(process).await {
+        faults.push(err);
+    }
+    // Still attempt verification and append its fault too — more diagnostic signal, and
+    // it may prove the group gone even when the reap could not be observed.
+    if let Err(err) = cleanup_group(process, pubr).await {
+        faults.push(err);
+    }
+    if faults.is_empty() {
+        Ok(())
+    } else {
+        Err(faults.join("; "))
+    }
 }
 
 /// Tick an OPTIONAL heartbeat timer. When heartbeats are disabled there is no
