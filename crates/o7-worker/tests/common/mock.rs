@@ -75,10 +75,14 @@ impl MockState {
 enum WaitGate {
     /// Resolves immediately — the leader has already exited.
     Immediate,
-    /// Resolves only once `force_stop()` has been called — models a live leader
-    /// that dies only when killed (so another select branch, e.g. a read error,
-    /// can win first).
+    /// Resolves only once `force_stop()` has SUCCEEDED — models a live leader that dies
+    /// only when killed (so another select branch, e.g. a read error, can win first). A
+    /// FAILED `force_stop()` does NOT wake it: a boundary that could not deliver the
+    /// kill has no reason to report the leader gone.
     AfterForceStop,
+    /// NEVER resolves — models a boundary whose `wait()` hangs forever (a stuck Sandboy
+    /// reap). The supervisor must bound every post-force reap so this cannot hang it.
+    Never,
 }
 
 /// How the mock answers the AUTHORITATIVE membership query.
@@ -103,6 +107,15 @@ pub struct MockBoundary {
     /// modelling a descendant that escaped the owned group but still holds the
     /// inherited pipe open, so the drain can never observe EOF.
     stdout_pending: bool,
+    /// stdout yields a small chunk on EVERY read, forever — models an escaped
+    /// descendant that keeps WRITING (never idle, never EOF), so only a message/byte
+    /// budget (not an idle timeout) can bound the drain.
+    stdout_infinite: bool,
+    /// If set, the leader exits this long after spawn (an ABSOLUTE deadline computed at
+    /// spawn). `wait()` resolves via `sleep_until`, so it is cancel-safe: the supervisor
+    /// dropping and recreating the `wait()` future across select iterations re-arms the
+    /// SAME deadline and never postpones the exit.
+    leader_exit_after: Option<Duration>,
     leader_exit: BoundaryExit,
     wait_gate: WaitGate,
     membership: Membership,
@@ -123,6 +136,8 @@ impl MockBoundary {
             stdout_chunks: Vec::new(),
             stdout_error: None,
             stdout_pending: false,
+            stdout_infinite: false,
+            leader_exit_after: None,
             leader_exit: BoundaryExit::Code(0),
             wait_gate: WaitGate::Immediate,
             membership: Membership::Empty,
@@ -184,6 +199,43 @@ impl MockBoundary {
     /// reaches the drain/cleanup phase with a still-open pipe.
     pub fn with_pending_stdout(mut self) -> Self {
         self.stdout_pending = true;
+        self
+    }
+
+    /// stdout stays quiet for `delay` (past the leader's exit), then yields `chunks`
+    /// and reaches EOF — a legitimate delayed TRAILING chunk with no error. Lets a test
+    /// prove a slow-but-within-contract sink publish during the drain is NOT cancelled
+    /// by the drain's per-message idle bound. The leader exits immediately.
+    pub fn with_trailing_stdout(mut self, chunks: Vec<Vec<u8>>, delay: Duration) -> Self {
+        self.stdout_chunks = chunks;
+        self.stdout_delay = delay;
+        self
+    }
+
+    /// stdout yields a small chunk on every read and NEVER reaches EOF — an escaped
+    /// descendant that keeps writing forever. Only a message/byte budget can bound the
+    /// drain here (an idle timeout never fires because output never stops). The leader
+    /// exits immediately, so the run reaches the drain with the stream still producing.
+    pub fn with_infinite_stdout(mut self) -> Self {
+        self.stdout_infinite = true;
+        self
+    }
+
+    /// The leader's `wait()` NEVER resolves — models a boundary whose reap hangs. Every
+    /// post-force reap the supervisor performs must be bounded, so this cannot hang it.
+    /// A failed `force_stop()` will not wake it either (see [`WaitGate::AfterForceStop`]).
+    pub fn with_pending_wait(mut self) -> Self {
+        self.wait_gate = WaitGate::Never;
+        self
+    }
+
+    /// The leader exits `delay` after spawn, via a cancel-safe `sleep_until` on an
+    /// absolute deadline. Used to prove `BoundaryProcess::wait()` cancel-safety: the
+    /// supervisor drops/recreates the `wait()` future on every select iteration, and the
+    /// exit must still be observed once the deadline passes (a relative timer would be
+    /// reset by each drop and never fire).
+    pub fn with_leader_exit_after(mut self, delay: Duration) -> Self {
+        self.leader_exit_after = Some(delay);
         self
     }
 
@@ -277,6 +329,10 @@ impl ProcessBoundary for MockBoundary {
             // A stream that never yields and never closes — the reader stays pending,
             // so only a BOUNDED drain can keep the supervisor from hanging on it.
             Some(Box::pin(PendingReader) as BoundaryStream)
+        } else if self.stdout_infinite {
+            // A stream that keeps producing forever — only a message/byte BUDGET bounds
+            // the drain (an idle timeout never fires because output never stops).
+            Some(Box::pin(InfiniteReader) as BoundaryStream)
         } else if self.stdout_chunks.is_empty() && self.stdout_error.is_none() {
             None
         } else {
@@ -295,10 +351,15 @@ impl ProcessBoundary for MockBoundary {
             stdout: Mutex::new(stdout),
             leader_exit: self.leader_exit,
             wait_gate: self.wait_gate,
+            // Absolute deadline computed ONCE at spawn — cancel-safe across wait() drops.
+            wait_deadline: self
+                .leader_exit_after
+                .map(|d| tokio::time::Instant::now() + d),
             membership: self.membership.clone(),
             graceful_stop_error: self.graceful_stop_error.clone(),
             force_stop_error: self.force_stop_error.clone(),
             force_notify: Arc::new(Notify::new()),
+            force_succeeded: Arc::new(AtomicBool::new(false)),
             state: Arc::clone(&self.state),
         };
         guard.commit();
@@ -315,10 +376,17 @@ struct MockProcess {
     stdout: Mutex<Option<BoundaryStream>>,
     leader_exit: BoundaryExit,
     wait_gate: WaitGate,
+    /// Absolute exit deadline (see [`MockBoundary::with_leader_exit_after`]). Takes
+    /// precedence over `wait_gate` when set.
+    wait_deadline: Option<tokio::time::Instant>,
     membership: Membership,
     graceful_stop_error: Option<String>,
     force_stop_error: Option<String>,
     force_notify: Arc<Notify>,
+    /// Set true ONLY when a `force_stop()` succeeds — the re-checkable flag an
+    /// `AfterForceStop` `wait()` gates on. A failed force-stop never sets it, so a
+    /// gated `wait()` stays pending (the supervisor must bound it).
+    force_succeeded: Arc<AtomicBool>,
     state: Arc<MockState>,
 }
 
@@ -349,19 +417,41 @@ impl BoundaryProcess for MockProcess {
 
     async fn force_stop(&mut self) -> Result<(), BoundaryError> {
         self.state.force_stops.fetch_add(1, Ordering::SeqCst);
-        // Wake any wait() that is gated on a force-stop, even when reporting an
-        // error, so a gated wait() cannot hang after a failed force-stop.
-        self.force_notify.notify_one();
         if let Some(err) = &self.force_stop_error {
+            // A FAILED force-stop must NOT wake a gated wait(): the boundary could not
+            // deliver the kill, so it has no basis to report the leader gone. (Masking
+            // this is exactly what hid the unbounded-reap bug.)
             return Err(BoundaryError::Signal(err.clone()));
         }
+        // Only a SUCCESSFUL force-stop wakes an `AfterForceStop` wait().
+        self.force_succeeded.store(true, Ordering::SeqCst);
+        self.force_notify.notify_one();
         Ok(())
     }
 
     async fn wait(&mut self) -> Result<BoundaryExit, BoundaryError> {
-        if let WaitGate::AfterForceStop = self.wait_gate {
-            if self.state.force_stops.load(Ordering::SeqCst) == 0 {
-                self.force_notify.notified().await;
+        // An absolute deadline takes precedence: `sleep_until` is cancel-safe, so the
+        // supervisor dropping/recreating this future across select iterations re-arms the
+        // SAME deadline and the exit still fires. (A relative `sleep` would be a bug —
+        // each recreate would restart it and the leader would never appear to exit.)
+        if let Some(deadline) = self.wait_deadline {
+            tokio::time::sleep_until(deadline).await;
+            return Ok(self.leader_exit);
+        }
+        match self.wait_gate {
+            WaitGate::Immediate => {}
+            WaitGate::AfterForceStop => {
+                // Gate on a re-checkable flag (robust to the supervisor dropping and
+                // recreating this future across select iterations), woken only by a
+                // SUCCESSFUL force-stop. A failed force-stop leaves it pending.
+                while !self.force_succeeded.load(Ordering::SeqCst) {
+                    self.force_notify.notified().await;
+                }
+            }
+            WaitGate::Never => {
+                // A boundary whose reap never completes. Every post-force reap the
+                // supervisor performs must be bounded, or it would hang here.
+                std::future::pending::<()>().await;
             }
         }
         Ok(self.leader_exit)
@@ -380,6 +470,29 @@ impl BoundaryProcess for MockProcess {
 /// EOF, modelling an inherited pipe an escaped descendant holds open forever. The
 /// reader task blocked on it only ends when the supervisor aborts it (via
 /// `JoinSet::shutdown`), so it proves the trailing-output drain is bounded.
+/// An `AsyncRead` that yields a small fixed chunk on EVERY read and NEVER reaches EOF —
+/// an escaped descendant that keeps writing forever. An idle timeout never fires (output
+/// never stops), so only the drain's message/byte BUDGET can bound it.
+struct InfiniteReader;
+
+impl AsyncRead for InfiniteReader {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        // Fill the read buffer (capped) each time — larger chunks reach the drain's
+        // BYTE budget in a modest number of messages, keeping the test fast while the
+        // stream still never ends.
+        const FILLER: [u8; 8192] = [b'x'; 8192];
+        let n = buf.remaining().min(FILLER.len());
+        if let Some(head) = FILLER.get(..n) {
+            buf.put_slice(head);
+        }
+        Poll::Ready(Ok(()))
+    }
+}
+
 struct PendingReader;
 
 impl AsyncRead for PendingReader {

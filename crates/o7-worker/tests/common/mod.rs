@@ -194,6 +194,11 @@ pub struct RecordingSink {
     attempted: Arc<Mutex<Vec<&'static str>>>,
     fail_mode: FailMode,
     failed: Arc<AtomicBool>,
+    /// If set, `publish()` sleeps for the given duration on observations of this kind
+    /// BEFORE recording — a slow (but not failed) sink. `emit` wraps `publish` in
+    /// `sink_backpressure_timeout`, so this exercises the backpressure contract: a
+    /// delay under the timeout still delivers; a delay over it is a timeout failure.
+    delay_on: Option<(&'static str, Duration)>,
 }
 
 impl RecordingSink {
@@ -203,6 +208,7 @@ impl RecordingSink {
             attempted: Arc::new(Mutex::new(Vec::new())),
             fail_mode: FailMode::Never,
             failed: Arc::new(AtomicBool::new(false)),
+            delay_on: None,
         }
     }
 
@@ -216,6 +222,14 @@ impl RecordingSink {
     pub fn failing_on_kind(kind: &'static str) -> Self {
         let mut sink = Self::new();
         sink.fail_mode = FailMode::OnKind(kind);
+        sink
+    }
+
+    /// A sink that is SLOW (not failed) on observations of `kind`: each such publish
+    /// sleeps `delay` before succeeding, so backpressure — not loss — is exercised.
+    pub fn delaying_on_kind(kind: &'static str, delay: Duration) -> Self {
+        let mut sink = Self::new();
+        sink.delay_on = Some((kind, delay));
         sink
     }
 
@@ -291,6 +305,13 @@ impl ObservationSink for RecordingSink {
             .lock()
             .unwrap()
             .push(observation_kind(&observation));
+        // A slow (but not failed) publish: sleep INSIDE the future the supervisor wraps
+        // in `sink_backpressure_timeout`, so the drain's own bounds must not cancel it.
+        if let Some((kind, delay)) = self.delay_on {
+            if observation_kind(&observation) == kind {
+                tokio::time::sleep(delay).await;
+            }
+        }
         let should_fail = match self.fail_mode {
             FailMode::Never => false,
             FailMode::OnFirstOutput => {

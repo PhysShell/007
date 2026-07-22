@@ -149,6 +149,20 @@ pub trait BoundaryProcess: Send {
     async fn force_stop(&mut self) -> Result<(), BoundaryError>;
 
     /// Wait for the leader to exit.
+    ///
+    /// CANCEL-SAFETY CONTRACT: the returned future MUST be cancel-safe. The supervisor
+    /// polls `wait()` inside a `tokio::select!` and DROPS the pending future whenever
+    /// another branch (output, heartbeat, cancellation) wins, then calls `wait()` again
+    /// on the next iteration. Dropping a pending `wait()` therefore must lose no
+    /// progress: a leader exit that became ready while the future was not being polled
+    /// must still be observed by a subsequent `wait()` call, and the exit status must
+    /// never be consumed-and-lost by a dropped future. Concretely, model the exit on an
+    /// ABSOLUTE deadline / a re-checkable readiness flag, not a relative timer restarted
+    /// on each poll. Tokio's `Child::wait` satisfies this; a custom boundary (e.g.
+    /// Sandboy) must uphold it too. After a `force_stop()`, callers additionally BOUND
+    /// each reap, so a `wait()` that never completes cannot hang the supervisor — but a
+    /// bounded-out reap is reported as an unprovable teardown, so a compliant boundary
+    /// should still complete `wait()` promptly once the leader is gone.
     async fn wait(&mut self) -> Result<BoundaryExit, BoundaryError>;
 
     /// Which processes of the owned set are still alive.

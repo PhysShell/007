@@ -61,7 +61,13 @@ just `child.kill()` (that would kill the leader and orphan its descendants). A *
 graceful stop never waits the grace and then reports a graceful cancel: it force-closes
 immediately and preserves the boundary fault. Any emergency force-stop taken on a fault
 path is a real teardown action, so it is published as `ForceStopSent` on the
-authoritative stream BEFORE it is performed — never an invisible SIGKILL.
+authoritative stream BEFORE it is performed — never an invisible SIGKILL. Every reap
+(`wait()`) performed AFTER a force-stop is **bounded**: a boundary whose `force_stop()`
+fails while the leader stays alive, or whose `wait()` never completes, cannot hang the
+supervisor — an un-reapable teardown is reported as a bounded `CleanupFailure` instead of
+an infinite wait. `BoundaryProcess::wait()` therefore carries an explicit cancel-safety
+contract (the `select!` loop drops and recreates the pending `wait()` future each
+iteration; a leader exit reached while it was not polled must still be observed).
 
 ## Drop semantics
 Dropping the last `WorkerHandle` requests cancellation (it does not silently walk
@@ -88,11 +94,16 @@ stdout-vs-stderr interleaving is not. Chunk size and the internal channel are bo
 memory never grows without limit; trailing output is drained before the terminal result;
 and if the sink cannot keep up within the backpressure timeout, the worker fails closed
 (`ObservationFailure`) rather than silently truncating. The trailing-output drain is
-itself **bounded**: on a cleanup error the supervisor does not wait on pipe closure at all
-(it aborts the readers and lets `CleanupFailure` dominate), and even after a verified-empty
-group the drain has a deadline — because a descendant that ESCAPED the owned group can keep
-an inherited pipe open forever. A drain that hits that deadline is an `OutputFailure`,
-never a clean pass.
+itself **bounded**, by three SEPARATE limits so no one of them cancels a healthy publish:
+on a cleanup error the supervisor does not wait on pipe closure at all (it aborts the
+readers and lets `CleanupFailure` dominate); the wait for the NEXT trailing message has an
+idle timeout (an escaped descendant may hold an inherited pipe open with no further
+output); each trailing PUBLISH keeps its own `sink_backpressure_timeout` — the drain never
+wraps it, so a slow-but-within-contract sink is delivered, not drain-cancelled; and a
+trailing BYTE budget (the configured channel buffer plus a pipe allowance) bounds an
+escaped descendant that keeps WRITING forever. Any of the idle-timeout / byte-budget /
+read-error outcomes is an `OutputFailure`, never a clean pass, and it is preserved even
+when the terminal sink then fails (the dominating `ObservationFailure` carries it).
 
 ## Heartbeat
 A heartbeat means **the supervisor is alive and owns a live process** — NOT that the

@@ -28,11 +28,28 @@ const GROUP_POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// How long, after SIGKILL, we allow the kernel to reap the group before declaring
 /// a cleanup failure.
 const CLEANUP_GRACE: Duration = Duration::from_millis(500);
-/// How long to wait for trailing output to drain (pipes closing) after cleanup has
-/// verified the owned group is gone. A descendant that ESCAPED the owned group can
-/// still hold an inherited pipe open, so this wait is bounded and its expiry is a
-/// failure — the drain must never hang, and never silently pass on a timeout.
-const DRAIN_GRACE: Duration = Duration::from_millis(500);
+/// How long a single post-force-stop leader reap (`wait()`) may take before it is
+/// abandoned. After a `force_stop()` the kernel reaps a real child promptly; a
+/// boundary whose `wait()` never completes (a hung Sandboy, a stuck mock) must NOT
+/// hang the supervisor. A reap that exceeds this is a teardown that cannot be proven,
+/// which the caller turns into a bounded `CleanupFailure` — never an unbounded wait.
+const REAP_TIMEOUT: Duration = Duration::from_millis(500);
+/// How long to wait for the NEXT trailing-output message (a chunk, a read error, or
+/// EOF) during the post-exit drain. This bounds ONLY the wait for pipe/reader activity
+/// — it is NOT wrapped around the sink publish, which has its own
+/// `OutputPolicy::sink_backpressure_timeout`. A descendant that ESCAPED the owned group
+/// can hold an inherited pipe open with no further output; if nothing arrives within
+/// this idle window the drain concludes (a failure when the pipes never closed).
+const DRAIN_IDLE_TIMEOUT: Duration = Duration::from_millis(500);
+/// Headroom added to the trailing-output BYTE budget above the configured in-flight
+/// channel buffer, to cover output the OS pipe (and the reader's own buffer) still
+/// holds when the leader exits. Legitimate trailing output cannot exceed the channel
+/// buffer plus the pipe capacity (the process has already exited, so no NEW data
+/// arrives); a Linux pipe is 64 KiB by default and at most ~1 MiB, so 4 MiB is
+/// comfortably above any real trailing burst while still bounding an ESCAPED descendant
+/// that keeps writing new data forever. A byte budget (not a message count) is used so
+/// a tiny `max_chunk_bytes` cannot inflate legitimate output into a false overflow.
+const TRAILING_DRAIN_PIPE_ALLOWANCE_BYTES: usize = 4 * 1024 * 1024;
 
 /// The single terminal outcome of a worker.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -504,7 +521,10 @@ async fn manage(
     };
 
     // Reap the leader in the fault paths (Natural/Cancelled already waited). A
-    // killed-but-unreaped child is a zombie cleanup would mistake for a survivor.
+    // killed-but-unreaped child is a zombie cleanup would mistake for a survivor. A
+    // force/reap fault here means teardown could not be proven → folded into the
+    // cleanup outcome so `CleanupFailure` dominates within a known bound.
+    let mut reap_error: Option<String> = None;
     if matches!(
         termination,
         Termination::SinkFailed(_) | Termination::OutputFailed(_) | Termination::BoundaryFailed(_)
@@ -516,49 +536,89 @@ async fn manage(
         // if it dies HERE, `!pubr.alive` makes `ObservationFailure` dominate the
         // boundary/output fault in the terminal-precedence check below.
         let _ = pubr.emit(WorkerObservation::ForceStopSent).await;
-        let _ = process.force_stop().await;
-        let _ = process.wait().await;
+        let force = process.force_stop().await;
+        // BOUNDED reap: a boundary whose `wait()` never resolves must not hang here.
+        // A failed force or a reap that could not complete means teardown is unprovable;
+        // record it so `CleanupFailure` can dominate within a known bound.
+        let reap = bounded_reap(process.as_mut()).await;
+        reap_error = match (force, reap) {
+            (Err(err), _) => Some(format!("force stop failed during teardown: {err}")),
+            (Ok(()), Err(err)) => Some(err),
+            (Ok(()), Ok(_)) => None,
+        };
     }
 
     // Verified cleanup FIRST — kill any surviving group members so their pipes
     // close (otherwise draining could block on a grandchild that only dies now).
-    let cleanup = cleanup_group(process.as_mut(), pubr).await;
+    // A post-force reap fault (force failed, or a `wait()` that never completed within
+    // the bound) is ALSO an unprovable teardown, so fold it in: either fault yields a
+    // bounded `CleanupFailure`. A genuine cleanup (membership) error takes the message.
+    let cleanup = match (cleanup_group(process.as_mut(), pubr).await, reap_error) {
+        (Err(message), _) => Err(message),
+        (Ok(()), Some(message)) => Err(message),
+        (Ok(()), None) => Ok(()),
+    };
 
     // Drain remaining output (pipes closing), then join readers. A read error seen
     // ONLY during the drain (leader already exited) must NOT be silently dropped —
     // it means output faithfulness was lost after the exit.
     //
-    // The drain MUST be bounded. `out_rx.recv()` only returns `None` once every
-    // reader task has ended, which happens when the pipes close. But:
-    //   * if cleanup FAILED the owned set is not proven gone, so a survivor can hold
-    //     its pipe open forever; and
-    //   * even after a VERIFIED-empty group, a descendant that ESCAPED the host group
-    //     (its own session/group) can still hold an inherited stdout/stderr pipe open.
-    // Either way an unbounded `recv()` would hang and the promised failure terminal
-    // (CleanupFailure / a drain fault) would never be produced. So: skip the wait
-    // entirely on a cleanup error (let CleanupFailure dominate), and otherwise bound
-    // the drain with a deadline whose expiry is itself a failure — never a clean pass.
+    // The drain MUST be bounded, but the bound must NOT cancel a healthy in-flight sink
+    // publish. `out_rx.recv()` only returns `None` once every reader task ends (pipes
+    // closed); an escaped descendant can hold an inherited pipe open — with no further
+    // output, or by writing forever — so an unbounded drain would hang. Three separate
+    // bounds, none of which caps a legitimate publish:
+    //   * per-message WAIT: bound how long we wait for the next chunk/error/EOF
+    //     (`DRAIN_IDLE_TIMEOUT`). An idle-but-open pipe expires here.
+    //   * per-message PUBLISH: `pubr.emit` keeps its own `sink_backpressure_timeout`;
+    //     the drain never wraps it, so a slow-but-within-contract sink is not cancelled.
+    //   * total BUDGET: a continuously-writing escaped descendant never goes idle, so
+    //     cap the number of trailing messages drained.
+    // On a cleanup error the owned set is not proven gone, so skip the drain entirely
+    // and let `CleanupFailure` dominate.
     let mut drain_output_error: Option<String> = None;
     let mut drain_timed_out = false;
+    let mut drain_budget_exceeded = false;
     if cleanup.is_ok() && pubr.alive {
-        let drain = async {
-            while let Some(message) = out_rx.recv().await {
-                match message {
-                    ReaderMessage::Chunk(chunk) => {
-                        if !pubr.emit(WorkerObservation::OutputChunk(chunk)).await {
-                            break;
-                        }
+        // Byte budget: the configured in-flight buffer plus a pipe allowance. Above this,
+        // trailing output can only be an escaped descendant writing WITHOUT end (the
+        // leader already exited), so stop and fail closed.
+        let byte_budget = spec
+            .output
+            .channel_capacity
+            .saturating_mul(spec.output.max_chunk_bytes)
+            .saturating_add(TRAILING_DRAIN_PIPE_ALLOWANCE_BYTES);
+        let mut drained_bytes: usize = 0;
+        loop {
+            // Bound the WAIT for the next message only — never the publish below.
+            let message = match tokio::time::timeout(DRAIN_IDLE_TIMEOUT, out_rx.recv()).await {
+                Ok(Some(message)) => message,
+                Ok(None) => break, // all readers ended: pipes closed, clean drain.
+                Err(_) => {
+                    drain_timed_out = true;
+                    break;
+                }
+            };
+            match message {
+                ReaderMessage::Chunk(chunk) => {
+                    let len = chunk.bytes.len();
+                    // `emit` is bounded by `sink_backpressure_timeout`, NOT the drain.
+                    if !pubr.emit(WorkerObservation::OutputChunk(chunk)).await {
+                        break; // sink lost mid-drain → caught by `!pubr.alive` below.
                     }
-                    ReaderMessage::ReadError(message) => {
-                        return Some(message);
+                    drained_bytes = drained_bytes.saturating_add(len);
+                    if drained_bytes >= byte_budget {
+                        // Still producing past the budget: an escaped descendant is
+                        // writing without end. Stop and fail closed.
+                        drain_budget_exceeded = true;
+                        break;
                     }
                 }
+                ReaderMessage::ReadError(message) => {
+                    drain_output_error = Some(message);
+                    break;
+                }
             }
-            None
-        };
-        match tokio::time::timeout(DRAIN_GRACE, drain).await {
-            Ok(read_error) => drain_output_error = read_error,
-            Err(_) => drain_timed_out = true,
         }
     }
     // Abort/join the reader tasks unconditionally, so a permanently-pending reader
@@ -605,9 +665,16 @@ async fn manage(
         base
     } else if drain_timed_out {
         WorkerResult::OutputFailure(format!(
-            "trailing output drain exceeded {DRAIN_GRACE:?}; output faithfulness unproven \
-             (a descendant that escaped the owned group may still hold a pipe open)"
+            "trailing output drain saw no further output for {DRAIN_IDLE_TIMEOUT:?} but the \
+             pipes never closed; output faithfulness unproven (a descendant that escaped the \
+             owned group may still hold a pipe open)"
         ))
+    } else if drain_budget_exceeded {
+        WorkerResult::OutputFailure(
+            "trailing output drain exceeded its byte budget while output kept arriving; \
+             an escaped descendant is writing without end, so faithful capture is unproven"
+                .to_owned(),
+        )
     } else if let Some(message) = drain_output_error {
         WorkerResult::OutputFailure(message)
     } else {
@@ -700,9 +767,13 @@ async fn force_after_grace(
     }
     let exit = match exit {
         Some(exit) => Some(exit),
-        None => match process.wait().await {
+        // BOUNDED reap: a boundary whose `wait()` never resolves after a successful
+        // force-stop must not hang cancellation. A timed-out/failed reap is a boundary
+        // fault; manage() then force-reaps (also bounded) and lets cleanup precedence
+        // produce a bounded terminal.
+        None => match bounded_reap(process).await {
             Ok(exit) => Some(exit),
-            Err(err) => return Termination::BoundaryFailed(err.to_string()),
+            Err(err) => return Termination::BoundaryFailed(err),
         },
     };
     Termination::Cancelled {
@@ -749,22 +820,41 @@ async fn cleanup_group(
     }
 }
 
+/// Reap the leader after a force-stop, BOUNDED by [`REAP_TIMEOUT`]. Returns the exit
+/// when observed, or an `Err` when `wait()` itself failed or did not complete in time.
+/// The bound is what keeps a boundary whose `wait()` never resolves from hanging the
+/// supervisor forever; the caller lets an `Err` make teardown unprovable (a bounded
+/// `CleanupFailure` / `BoundaryFailure`) instead of blocking.
+async fn bounded_reap(process: &mut dyn BoundaryProcess) -> Result<BoundaryExit, String> {
+    match tokio::time::timeout(REAP_TIMEOUT, process.wait()).await {
+        Ok(Ok(exit)) => Ok(exit),
+        Ok(Err(err)) => Err(format!("leader wait failed after force-stop: {err}")),
+        Err(_) => Err(format!(
+            "leader did not exit within {REAP_TIMEOUT:?} of force-stop; teardown unprovable"
+        )),
+    }
+}
+
 /// Abandon a live, boundary-owned process on a post-spawn fault: force-kill the
 /// set, reap the leader (so it is not mistaken for a survivor), then PROVE the group
-/// is gone. Any force/membership fault is preserved as an `Err` so the caller can
+/// is gone. Any force/reap/membership fault is preserved as an `Err` so the caller can
 /// let `CleanupFailure` dominate — never a best-effort kill that leaves the group
-/// unverified.
+/// unverified, and never an unbounded wait on a boundary that will not complete.
 async fn abandon_and_verify(
     process: &mut dyn BoundaryProcess,
     pubr: &mut Publisher,
 ) -> Result<(), String> {
     let force = process.force_stop().await;
     // Reap the leader regardless of the force result, so a zombie leader cannot be
-    // mistaken for a live member during verification.
-    let _ = process.wait().await;
+    // mistaken for a live member during verification — but BOUNDED, so a `wait()` that
+    // never completes cannot hang the abandon path.
+    let reap = bounded_reap(process).await;
     if let Err(err) = force {
         return Err(format!("force stop failed during cleanup: {err}"));
     }
+    // A force that succeeded but a leader that could not be reaped within the bound is
+    // an unprovable teardown: surface it rather than silently proceeding to verify.
+    reap?;
     cleanup_group(process, pubr).await
 }
 
