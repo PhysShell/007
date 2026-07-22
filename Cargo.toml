@@ -1,3 +1,12 @@
+# 007 is now a workspace: the existing `o7` CLI stays the root package; new
+# foundation crates live under `crates/`. The ledger (durable source of truth)
+# is a SEPARATE crate — it must not be hidden inside the CLI crate.
+# `fuzz/` is excluded so cargo-fuzz keeps managing it independently.
+[workspace]
+members = ["crates/o7-ledger"]
+exclude = ["fuzz"]
+resolver = "2"
+
 [package]
 name = "o7"
 version = "0.1.0"

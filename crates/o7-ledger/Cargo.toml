@@ -1,0 +1,51 @@
+[package]
+name = "o7-ledger"
+version = "0.1.0"
+edition = "2021"
+description = "007 append-only ledger: durable source of truth for conversations, runs, attempts and events"
+publish = false
+
+[lib]
+name = "o7_ledger"
+path = "src/lib.rs"
+
+# A tiny helper binary used ONLY by the crash-durability integration test: it is
+# spawned as a real subprocess and SIGKILLed at a controlled point, so the test
+# exercises a genuine process abort rather than a simulated `return Err`.
+[[bin]]
+name = "ledger-crash-helper"
+path = "src/bin/ledger-crash-helper.rs"
+
+[dependencies]
+# Bundled SQLite: compiled from source, so there is NO system libsqlite dependency
+# (the same choice Consilium made). This is the only persistence engine.
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "1"
+# Request digests for idempotency (scope+key+digest). sha2 is already allowed in the
+# workspace's deny.toml (used by the `o7` crate).
+sha2 = "0.10"
+# The Ledger trait is async (per the PR-1 contract). SQLite is synchronous, so the
+# blocking work runs on tokio's blocking pool via spawn_blocking; the connection is
+# never held across an `.await`.
+tokio = { version = "1", default-features = false, features = ["rt", "rt-multi-thread", "macros", "sync"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+# Mirror the workspace-root crate's discipline: no unsafe, no panics-by-default.
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
