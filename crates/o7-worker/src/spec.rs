@@ -6,6 +6,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::boundary::BoundaryRequirement;
 use crate::cancellation::CancellationPolicy;
@@ -71,6 +72,16 @@ pub struct WorkerSpec {
 pub const MAX_CHUNK_BYTES: usize = 16 * 1024 * 1024;
 /// Hard upper bound on the internal output channel capacity.
 pub const MAX_CHANNEL_CAPACITY: usize = 65_536;
+/// Hard upper bound on the COMBINED in-flight output buffer
+/// (`max_chunk_bytes × channel_capacity`). The per-field maxima alone would permit
+/// `16 MiB × 65 536 ≈ 1 TiB` of queued payload; this caps the product (== 256 MiB,
+/// i.e. `MAX_CHUNK_BYTES × 16`).
+pub const MAX_TOTAL_BUFFER_BYTES: usize = 256 * 1024 * 1024;
+/// Hard upper bound on any policy timeout/grace fed to a timer. Bounds
+/// `Instant::now() + d` and `tokio::time::timeout(d, ..)` so an unrepresentable
+/// duration (e.g. `Duration::MAX`) is rejected before spawn instead of panicking
+/// the supervisor after it owns a live process.
+pub const MAX_TIMEOUT: Duration = Duration::from_secs(3600);
 
 /// A statically-detectable problem with a [`WorkerSpec`]. All are caught BEFORE
 /// spawning, so an invalid policy is a `FailedToStart`, never a supervisor panic.
@@ -88,8 +99,20 @@ pub enum SpecError {
     ZeroChannelCapacity,
     #[error("output.channel_capacity {0} exceeds the maximum {MAX_CHANNEL_CAPACITY}")]
     ChannelCapacityTooLarge(usize),
+    #[error(
+        "combined output buffer max_chunk_bytes {max_chunk_bytes} × channel_capacity \
+         {channel_capacity} exceeds the maximum {MAX_TOTAL_BUFFER_BYTES} bytes"
+    )]
+    OutputBudgetTooLarge {
+        max_chunk_bytes: usize,
+        channel_capacity: usize,
+    },
     #[error("heartbeat.interval must be > 0 when heartbeat is enabled")]
     ZeroHeartbeatInterval,
+    #[error("cancellation.graceful_timeout {0:?} exceeds the maximum {MAX_TIMEOUT:?}")]
+    GracefulTimeoutTooLarge(Duration),
+    #[error("output.sink_backpressure_timeout {0:?} exceeds the maximum {MAX_TIMEOUT:?}")]
+    BackpressureTimeoutTooLarge(Duration),
 }
 
 impl WorkerSpec {
@@ -125,8 +148,33 @@ impl WorkerSpec {
                 self.output.channel_capacity,
             ));
         }
+        // Combined in-flight buffer ceiling. `checked_mul` treats an overflowing
+        // product as "too large" rather than wrapping to a small, deceptive value.
+        let within_budget = self
+            .output
+            .max_chunk_bytes
+            .checked_mul(self.output.channel_capacity)
+            .is_some_and(|total| total <= MAX_TOTAL_BUFFER_BYTES);
+        if !within_budget {
+            return Err(SpecError::OutputBudgetTooLarge {
+                max_chunk_bytes: self.output.max_chunk_bytes,
+                channel_capacity: self.output.channel_capacity,
+            });
+        }
         if self.heartbeat.enabled && self.heartbeat.interval.is_zero() {
             return Err(SpecError::ZeroHeartbeatInterval);
+        }
+        // Timer-bound durations must be representable: an unbounded grace/timeout
+        // would overflow `Instant::now() + d` or panic a timer AFTER spawn.
+        if self.cancellation.graceful_timeout > MAX_TIMEOUT {
+            return Err(SpecError::GracefulTimeoutTooLarge(
+                self.cancellation.graceful_timeout,
+            ));
+        }
+        if self.output.sink_backpressure_timeout > MAX_TIMEOUT {
+            return Err(SpecError::BackpressureTimeoutTooLarge(
+                self.output.sink_backpressure_timeout,
+            ));
         }
         Ok(())
     }
@@ -214,5 +262,45 @@ mod tests {
             interval: Duration::ZERO,
         };
         assert!(spec.validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_combined_output_budget_even_when_each_field_is_legal() {
+        // Both fields within their own maxima, but the PRODUCT (~1 TiB) is not.
+        let mut spec = valid_spec();
+        spec.output.max_chunk_bytes = MAX_CHUNK_BYTES;
+        spec.output.channel_capacity = MAX_CHANNEL_CAPACITY;
+        assert!(matches!(
+            spec.validate(),
+            Err(SpecError::OutputBudgetTooLarge { .. })
+        ));
+
+        // Exactly at the ceiling is allowed; one capacity step over is rejected.
+        let mut spec = valid_spec();
+        spec.output.max_chunk_bytes = MAX_CHUNK_BYTES; // 16 MiB
+        spec.output.channel_capacity = 16; // 16 MiB × 16 == 256 MiB
+        assert!(spec.validate().is_ok());
+        spec.output.channel_capacity = 17; // 272 MiB
+        assert!(matches!(
+            spec.validate(),
+            Err(SpecError::OutputBudgetTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_unrepresentable_timeouts() {
+        let mut spec = valid_spec();
+        spec.cancellation.graceful_timeout = Duration::MAX;
+        assert_eq!(
+            spec.validate(),
+            Err(SpecError::GracefulTimeoutTooLarge(Duration::MAX))
+        );
+
+        let mut spec = valid_spec();
+        spec.output.sink_backpressure_timeout = Duration::MAX;
+        assert_eq!(
+            spec.validate(),
+            Err(SpecError::BackpressureTimeoutTooLarge(Duration::MAX))
+        );
     }
 }

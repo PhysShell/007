@@ -54,9 +54,14 @@ and `Running`, and does not return until cleanup is complete. The host escalatio
 just `child.kill()` (that would kill the leader and orphan its descendants).
 
 ## Drop semantics
-Dropping the last `WorkerHandle` requests cancellation (it never silently detaches).
-The supervisor task is independent and observed via `WorkerJoin` — there are no
-detached, unobservable tasks. Async cleanup happens in the task, not in `Drop`.
+Dropping the last `WorkerHandle` requests cancellation (it does not silently walk
+away — it signals the supervisor to tear down). Dropping a `WorkerJoin` *does* detach
+the supervisor task (as dropping any Tokio `JoinHandle` does) and discards its
+terminal `WorkerResult` — but detaching is not orphaning: the task keeps running,
+still owns the boundary process, and performs its own verified cleanup, and its
+completion stays observable via the terminal watch behind `WorkerHandle::cancel`. So
+a dropped join loses the RESULT, not the cleanup. Async cleanup happens in the task,
+not in `Drop`.
 
 ## Environment isolation
 `UnconfinedHostBoundary` is not a sandbox, but the environment is still strictly

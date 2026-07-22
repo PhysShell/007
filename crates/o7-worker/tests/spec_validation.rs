@@ -83,6 +83,30 @@ async fn zero_heartbeat_interval_fails_before_spawn() {
 }
 
 #[tokio::test]
+async fn duration_max_graceful_timeout_fails_before_spawn_no_panic() {
+    // `Instant::now() + Duration::MAX` would panic the supervisor after spawn.
+    let mut spec = child_spec("grace-max", "exit0");
+    spec.cancellation.graceful_timeout = Duration::MAX;
+    assert_rejected_before_spawn(spec).await;
+}
+
+#[tokio::test]
+async fn duration_max_backpressure_timeout_fails_before_spawn() {
+    let mut spec = child_spec("bp-max", "exit0");
+    spec.output.sink_backpressure_timeout = Duration::MAX;
+    assert_rejected_before_spawn(spec).await;
+}
+
+#[tokio::test]
+async fn combined_output_budget_overflow_fails_before_spawn() {
+    // Each field within its own max, but 16 MiB × 65_536 ≈ 1 TiB combined.
+    let mut spec = child_spec("budget", "exit0");
+    spec.output.max_chunk_bytes = MAX_CHUNK_BYTES;
+    spec.output.channel_capacity = MAX_CHANNEL_CAPACITY;
+    assert_rejected_before_spawn(spec).await;
+}
+
+#[tokio::test]
 async fn zero_heartbeat_interval_ok_when_disabled() {
     // A zero interval is harmless when heartbeats are off — the timer is never
     // constructed, so this must still run.

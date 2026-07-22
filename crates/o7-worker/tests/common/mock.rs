@@ -10,6 +10,7 @@
 //! `unwrap`/indexing/`dead_code` are permitted here too.
 
 use std::collections::VecDeque;
+use std::future::Future;
 use std::io;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -95,11 +96,14 @@ enum Membership {
 pub struct MockBoundary {
     attestation: BoundaryAttestation,
     spawn_delay: Duration,
+    stdout_delay: Duration,
     stdout_chunks: Vec<Vec<u8>>,
     stdout_error: Option<String>,
     leader_exit: BoundaryExit,
     wait_gate: WaitGate,
     membership: Membership,
+    graceful_stop_error: Option<String>,
+    force_stop_error: Option<String>,
     state: Arc<MockState>,
 }
 
@@ -111,11 +115,14 @@ impl MockBoundary {
                 enforcement: EnforcementLevel::None,
             },
             spawn_delay: Duration::ZERO,
+            stdout_delay: Duration::ZERO,
             stdout_chunks: Vec::new(),
             stdout_error: None,
             leader_exit: BoundaryExit::Code(0),
             wait_gate: WaitGate::Immediate,
             membership: Membership::Empty,
+            graceful_stop_error: None,
+            force_stop_error: None,
             state: Arc::new(MockState::default()),
         }
     }
@@ -143,10 +150,47 @@ impl MockBoundary {
         self
     }
 
+    /// The leader stays alive until it is force-stopped — a live process to cancel
+    /// or abandon (so the run doesn't end via a "leader already exited").
+    pub fn with_live_leader(mut self) -> Self {
+        self.wait_gate = WaitGate::AfterForceStop;
+        self
+    }
+
+    /// stdout stays quiet for `delay` (past the leader's exit), then yields `chunks`
+    /// and a fatal read error — so the error is seen during the POST-EXIT drain, not
+    /// the run loop. The leader exits immediately.
+    pub fn with_stdout_error_after_exit(
+        mut self,
+        chunks: Vec<Vec<u8>>,
+        error: &str,
+        delay: Duration,
+    ) -> Self {
+        self.stdout_chunks = chunks;
+        self.stdout_error = Some(error.to_owned());
+        self.stdout_delay = delay;
+        self
+    }
+
     /// Every membership query fails: the boundary can never prove the owned set is
     /// gone, so cleanup must fail closed.
     pub fn with_membership_error(mut self, error: &str) -> Self {
         self.membership = Membership::Error(error.to_owned());
+        self
+    }
+
+    /// `request_graceful_stop()` fails; the leader stays alive until force-stopped so
+    /// there is a live process at cancel time.
+    pub fn with_graceful_stop_error(mut self, error: &str) -> Self {
+        self.graceful_stop_error = Some(error.to_owned());
+        self.wait_gate = WaitGate::AfterForceStop;
+        self
+    }
+
+    /// `force_stop()` fails (still counted + reaped), so verified cleanup cannot be
+    /// proven and `CleanupFailure` must dominate.
+    pub fn with_force_stop_error(mut self, error: &str) -> Self {
+        self.force_stop_error = Some(error.to_owned());
         self
     }
 
@@ -218,6 +262,7 @@ impl ProcessBoundary for MockBoundary {
             None
         } else {
             Some(Box::pin(ScriptedReader::new(
+                self.stdout_delay,
                 self.stdout_chunks.clone(),
                 self.stdout_error.clone(),
             )) as BoundaryStream)
@@ -232,6 +277,8 @@ impl ProcessBoundary for MockBoundary {
             leader_exit: self.leader_exit,
             wait_gate: self.wait_gate,
             membership: self.membership.clone(),
+            graceful_stop_error: self.graceful_stop_error.clone(),
+            force_stop_error: self.force_stop_error.clone(),
             force_notify: Arc::new(Notify::new()),
             state: Arc::clone(&self.state),
         };
@@ -250,6 +297,8 @@ struct MockProcess {
     leader_exit: BoundaryExit,
     wait_gate: WaitGate,
     membership: Membership,
+    graceful_stop_error: Option<String>,
+    force_stop_error: Option<String>,
     force_notify: Arc<Notify>,
     state: Arc<MockState>,
 }
@@ -273,13 +322,20 @@ impl BoundaryProcess for MockProcess {
 
     async fn request_graceful_stop(&mut self) -> Result<(), BoundaryError> {
         self.state.graceful_stops.fetch_add(1, Ordering::SeqCst);
+        if let Some(err) = &self.graceful_stop_error {
+            return Err(BoundaryError::Signal(err.clone()));
+        }
         Ok(())
     }
 
     async fn force_stop(&mut self) -> Result<(), BoundaryError> {
         self.state.force_stops.fetch_add(1, Ordering::SeqCst);
-        // Wake any wait() that is gated on a force-stop.
+        // Wake any wait() that is gated on a force-stop, even when reporting an
+        // error, so a gated wait() cannot hang after a failed force-stop.
         self.force_notify.notify_one();
+        if let Some(err) = &self.force_stop_error {
+            return Err(BoundaryError::Signal(err.clone()));
+        }
         Ok(())
     }
 
@@ -301,17 +357,20 @@ impl BoundaryProcess for MockProcess {
     }
 }
 
-/// An `AsyncRead` that yields a fixed script of byte chunks and then, optionally, a
-/// single fatal I/O error. Always ready (never `Pending`), which is all a fault
-/// test needs.
+/// An `AsyncRead` that optionally stays `Pending` for a delay, then yields a fixed
+/// script of byte chunks and then, optionally, a single fatal I/O error. The delay
+/// lets a test make the leader exit BEFORE the stream produces, so the read error is
+/// seen during the post-exit drain.
 struct ScriptedReader {
+    delay: Option<Pin<Box<tokio::time::Sleep>>>,
     chunks: VecDeque<Vec<u8>>,
     error: Option<String>,
 }
 
 impl ScriptedReader {
-    fn new(chunks: Vec<Vec<u8>>, error: Option<String>) -> Self {
+    fn new(delay: Duration, chunks: Vec<Vec<u8>>, error: Option<String>) -> Self {
         Self {
+            delay: (!delay.is_zero()).then(|| Box::pin(tokio::time::sleep(delay))),
             chunks: chunks.into_iter().collect(),
             error,
         }
@@ -321,10 +380,16 @@ impl ScriptedReader {
 impl AsyncRead for ScriptedReader {
     fn poll_read(
         self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         let this = self.get_mut();
+        if let Some(delay) = this.delay.as_mut() {
+            match delay.as_mut().poll(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(()) => this.delay = None,
+            }
+        }
         if let Some(chunk) = this.chunks.front_mut() {
             let n = chunk.len().min(buf.remaining());
             if let Some(head) = chunk.get(..n) {

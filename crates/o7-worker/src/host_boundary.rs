@@ -4,6 +4,7 @@
 //! [`EnforcementLevel::None`] and is deliberately named `Unconfined` so nobody
 //! mistakes lifecycle control for a sandbox.
 
+use std::io;
 use std::os::unix::process::ExitStatusExt as _;
 use std::process::Stdio;
 
@@ -55,15 +56,24 @@ impl ProcessBoundary for UnconfinedHostBoundary {
         cmd.kill_on_drop(true);
 
         let child = cmd.spawn().map_err(BoundaryError::Spawn)?;
-        let pid = i32::try_from(child.id().unwrap_or(0)).unwrap_or(0);
-        // The child leads its own group, so pgid == pid. Read the live identity
-        // (start-time included) where possible.
+        // A missing / zero / out-of-range PID must FAIL CLOSED: `killpg(0, …)` (or a
+        // bogus id) would signal the SUPERVISOR'S OWN process group. Never build a
+        // boundary around an id we cannot target in isolation. On error the child is
+        // killed by `kill_on_drop` as `child` drops here.
+        let pid = signalable_pid(child.id())?;
+        // The child leads its own group (spawned with `process_group(0)`), so
+        // pgid == pid. Read the live identity (start-time included) where possible.
         let identity = ProcessIdentity::read(pid).unwrap_or(ProcessIdentity {
             pid,
             process_group: pid,
             start_time_ticks: 0,
         });
         let pgid = identity.process_group;
+        if pgid <= 0 {
+            return Err(BoundaryError::Signal(format!(
+                "refusing to own a boundary with non-positive process group {pgid}"
+            )));
+        }
 
         Ok(Box::new(HostBoundaryProcess {
             child,
@@ -143,5 +153,35 @@ impl BoundaryProcess for HostBoundaryProcess {
     async fn remaining_members(&self) -> Result<Vec<ProcessIdentity>, BoundaryError> {
         ProcessIdentity::enumerate_group(self.pgid)
             .map_err(|e| BoundaryError::Membership(e.to_string()))
+    }
+}
+
+/// Validate the raw child PID into a signalable process id. A missing / zero /
+/// negative / out-of-`i32`-range id is refused, because `killpg` on process group 0
+/// targets the CALLER's own group and a bogus id targets the wrong processes — so we
+/// must never build a boundary around an id we cannot signal in isolation.
+fn signalable_pid(raw: Option<u32>) -> Result<i32, BoundaryError> {
+    match raw.and_then(|id| i32::try_from(id).ok()) {
+        Some(pid) if pid > 0 => Ok(pid),
+        _ => Err(BoundaryError::Spawn(io::Error::other(
+            "spawned child has no valid PID; refusing to build an unsignalable boundary",
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::signalable_pid;
+
+    #[test]
+    fn signalable_pid_refuses_missing_zero_and_out_of_range() {
+        // No PID (child already reaped) → refuse.
+        assert!(signalable_pid(None).is_err());
+        // PID 0 would make killpg target the supervisor's own group → refuse.
+        assert!(signalable_pid(Some(0)).is_err());
+        // A u32 that does not fit in i32 → refuse rather than truncate.
+        assert!(signalable_pid(Some(u32::MAX)).is_err());
+        // A normal PID is accepted unchanged.
+        assert_eq!(signalable_pid(Some(12_345)).ok(), Some(12_345));
     }
 }

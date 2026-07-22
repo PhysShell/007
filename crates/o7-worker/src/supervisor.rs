@@ -132,11 +132,15 @@ impl Drop for WorkerHandle {
 
 /// Observes the supervisor task to completion (independent of the handle).
 ///
-/// Dropping a `WorkerJoin` without calling [`WorkerJoin::join`] only discards the
-/// RESULT value — it does NOT detach the worker: the supervisor task still runs to
-/// completion (it owns the boundary process and performs cleanup), and its
-/// completion remains observable via [`WorkerHandle::cancel`]'s terminal signal.
-#[must_use = "dropping WorkerJoin discards the worker's terminal result; join() it or keep it"]
+/// Dropping a `WorkerJoin` without calling [`WorkerJoin::join`] DETACHES the
+/// supervisor task — exactly as dropping any Tokio [`JoinHandle`] does — and
+/// discards its terminal [`WorkerResult`]. `#[must_use]` only nudges you not to do
+/// that by accident; it does not change the detach semantics. Crucially, detaching
+/// does NOT cancel or orphan the run: the supervisor task keeps running, still owns
+/// the boundary process, and performs its own verified cleanup, so a dropped join
+/// loses the RESULT VALUE, not the cleanup. Its completion also remains observable
+/// through [`WorkerHandle::cancel`]'s terminal signal.
+#[must_use = "dropping WorkerJoin detaches the task and discards its terminal result; join() it or keep it"]
 pub struct WorkerJoin {
     task: JoinHandle<WorkerResult>,
 }
@@ -279,8 +283,12 @@ async fn run_inner(
     }
 
     // Cancel BEFORE spawn: never launch a process we were already told to abandon.
+    // The sink is authoritative even here — losing it is an ObservationFailure, not
+    // a graceful cancel.
     if *request_rx.borrow_and_update() {
-        let _ = pubr.emit(WorkerObservation::CancellationRequested).await;
+        if !pubr.emit(WorkerObservation::CancellationRequested).await {
+            return WorkerResult::ObservationFailure(pubr.error());
+        }
         return cancelled_before_running(&mut state);
     }
 
@@ -306,22 +314,32 @@ async fn run_inner(
             Err(err) => return fail_to_start(&mut state, err.to_string()),
         },
         _ = wait_cancel(&mut request_rx) => {
-            let _ = pubr.emit(WorkerObservation::CancellationRequested).await;
+            // The spawn future is dropped (cancel-safe: nothing is owned). The sink
+            // is still authoritative — a failed publish is an ObservationFailure.
+            if !pubr.emit(WorkerObservation::CancellationRequested).await {
+                return WorkerResult::ObservationFailure(pubr.error());
+            }
             return cancelled_before_running(&mut state);
         }
     };
 
+    // From here a live process is owned: every early exit must go through VERIFIED
+    // cleanup (force-kill, reap, prove the group gone), never a best-effort kill.
     let identity = process.identity();
     if let Err(e) = advance(&mut state, WorkerState::Running) {
-        force_cleanup(process.as_mut()).await;
+        let _ = abandon_and_verify(process.as_mut(), &mut pubr).await;
         return WorkerResult::CleanupFailure(e);
     }
     if !pubr
         .emit(WorkerObservation::Spawned(identity.clone()))
         .await
     {
-        force_cleanup(process.as_mut()).await;
-        return WorkerResult::ObservationFailure(pubr.error());
+        // A lost sink on Spawned still owns a live process. Prove cleanup: an
+        // unprovable/failed cleanup (leaked processes) DOMINATES the sink failure.
+        return match abandon_and_verify(process.as_mut(), &mut pubr).await {
+            Err(message) => WorkerResult::CleanupFailure(message),
+            Ok(()) => WorkerResult::ObservationFailure(pubr.error()),
+        };
     }
 
     manage(
@@ -481,7 +499,10 @@ async fn manage(
     // close (otherwise draining could block on a grandchild that only dies now).
     let cleanup = cleanup_group(process.as_mut(), pubr).await;
 
-    // Drain remaining output (pipes closing), then join readers.
+    // Drain remaining output (pipes closing), then join readers. A read error seen
+    // ONLY during the drain (leader already exited) must NOT be silently dropped —
+    // it means output faithfulness was lost after the exit.
+    let mut drain_output_error: Option<String> = None;
     if pubr.alive {
         while let Some(message) = out_rx.recv().await {
             match message {
@@ -490,7 +511,10 @@ async fn manage(
                         break;
                     }
                 }
-                ReaderMessage::ReadError(_) => break,
+                ReaderMessage::ReadError(message) => {
+                    drain_output_error = Some(message);
+                    break;
+                }
             }
         }
     }
@@ -523,8 +547,15 @@ async fn manage(
         Termination::OutputFailed(message) => WorkerResult::OutputFailure(message),
         Termination::BoundaryFailed(message) => WorkerResult::BoundaryFailure(message),
     };
+    // Precedence: unprovable/failed cleanup (leaked processes) dominates; then a
+    // fault that ended the run loop; then a read error seen during the drain; then a
+    // lost sink; otherwise the run's own outcome.
     let result = if let Err(message) = cleanup {
         WorkerResult::CleanupFailure(message)
+    } else if base.is_failure() {
+        base
+    } else if let Some(message) = drain_output_error {
+        WorkerResult::OutputFailure(message)
     } else if !pubr.alive {
         WorkerResult::ObservationFailure(pubr.error())
     } else {
@@ -548,11 +579,17 @@ async fn run_cancellation(
     grace: Duration,
     pubr: &mut Publisher,
 ) -> Termination {
+    // A lost sink here is caught by the `!pubr.alive` terminal check, but teardown
+    // must still proceed, so it is not an early return.
     let _ = pubr.emit(WorkerObservation::CancellationRequested).await;
     let deadline = Instant::now() + grace;
-    if process.request_graceful_stop().await.is_ok() {
-        let _ = pubr.emit(WorkerObservation::GracefulStopSent).await;
+    // If the graceful stop itself FAILS, do not wait the grace period and then claim
+    // a graceful cancel: force the group now and preserve the boundary fault. manage()
+    // force-reaps and verifies cleanup before the terminal result.
+    if let Err(err) = process.request_graceful_stop().await {
+        return Termination::BoundaryFailed(format!("graceful stop failed: {err}"));
     }
+    let _ = pubr.emit(WorkerObservation::GracefulStopSent).await;
 
     // Reap the leader (a zombie leader would otherwise count as a live member).
     let exit = match tokio::time::timeout(grace, process.wait()).await {
@@ -646,10 +683,23 @@ async fn cleanup_group(
     }
 }
 
-/// Best-effort force-kill + reap when the sink is already dead (no publishing).
-async fn force_cleanup(process: &mut dyn BoundaryProcess) {
-    let _ = process.force_stop().await;
+/// Abandon a live, boundary-owned process on a post-spawn fault: force-kill the
+/// set, reap the leader (so it is not mistaken for a survivor), then PROVE the group
+/// is gone. Any force/membership fault is preserved as an `Err` so the caller can
+/// let `CleanupFailure` dominate — never a best-effort kill that leaves the group
+/// unverified.
+async fn abandon_and_verify(
+    process: &mut dyn BoundaryProcess,
+    pubr: &mut Publisher,
+) -> Result<(), String> {
+    let force = process.force_stop().await;
+    // Reap the leader regardless of the force result, so a zombie leader cannot be
+    // mistaken for a live member during verification.
     let _ = process.wait().await;
+    if let Err(err) = force {
+        return Err(format!("force stop failed during cleanup: {err}"));
+    }
+    cleanup_group(process, pubr).await
 }
 
 /// Resolve once cancellation has been requested (cancel-safe).
