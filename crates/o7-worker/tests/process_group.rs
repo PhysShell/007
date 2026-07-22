@@ -10,7 +10,6 @@
 mod common;
 
 use common::*;
-use o7_worker::ProcessIdentity;
 
 // (20) A grandchild in the leader's group is terminated together with the leader.
 #[tokio::test]
@@ -29,7 +28,7 @@ async fn grandchild_is_killed_with_the_group() {
     );
     let pgid = sink.spawned_identity().unwrap().process_group;
     assert!(
-        ProcessIdentity::enumerate_group(pgid).is_empty(),
+        group_is_empty(pgid),
         "no group member may survive cancellation"
     );
 }
@@ -49,5 +48,5 @@ async fn terminal_not_published_until_group_gone() {
     assert_eq!(kinds.last(), Some(&"cleanup_completed"), "obs: {kinds:?}");
 
     let pgid = sink.spawned_identity().unwrap().process_group;
-    assert!(ProcessIdentity::enumerate_group(pgid).is_empty());
+    assert!(group_is_empty(pgid));
 }

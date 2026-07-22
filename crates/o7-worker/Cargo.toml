@@ -2,7 +2,7 @@
 name = "o7-worker"
 version = "0.1.0"
 edition = "2021"
-description = "007 generic worker runtime: own a process tree via a ProcessBoundary, stream typed observations, cancel and clean up deterministically. No provider/model/ledger knowledge."
+description = "007 generic worker runtime: own a host process group via a ProcessBoundary, stream typed observations, cancel and clean up deterministically. No provider/model/ledger knowledge."
 publish = false
 
 [lib]

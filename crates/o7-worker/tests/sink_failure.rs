@@ -10,7 +10,6 @@
 mod common;
 
 use common::*;
-use o7_worker::ProcessIdentity;
 
 // (15) A sink failure cancels the worker and cleans up.
 #[tokio::test]
@@ -27,7 +26,7 @@ async fn sink_failure_cancels_and_cleans_up() {
         .spawned_identity()
         .expect("spawned recorded before the failure");
     assert!(
-        ProcessIdentity::enumerate_group(identity.process_group).is_empty(),
+        group_is_empty(identity.process_group),
         "the worker process must be cleaned up after a sink failure"
     );
     drop(handle);

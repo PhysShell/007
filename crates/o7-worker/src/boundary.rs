@@ -1,5 +1,7 @@
-//! The process-boundary abstraction. A boundary OWNS a set of processes (a whole
-//! process group / tree), not just the leader PID — so a later Sandboy
+//! The process-boundary abstraction. A boundary OWNS a set of processes (the
+//! members of a host process GROUP — not just the leader PID, but also not a
+//! whole tree/cgroup: a descendant that leaves the group by starting its own
+//! group/session is no longer owned) — so a later Sandboy
 //! implementation can use cgroups/namespaces/etc. instead of a POSIX process
 //! group without the generic supervisor ever knowing the difference.
 //!
@@ -10,12 +12,18 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::pin::Pin;
 
 use async_trait::async_trait;
-use tokio::process::{ChildStderr, ChildStdout};
+use tokio::io::AsyncRead;
 
 use crate::process_identity::ProcessIdentity;
 use crate::spec::StdinMode;
+
+/// An owned output stream (stdout or stderr) of a boundary process. Boxed +
+/// pinned so a boundary can back it with a real child pipe or, in tests, an
+/// injected reader.
+pub type BoundaryStream = Pin<Box<dyn AsyncRead + Send>>;
 
 /// Which boundary implementation is in use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,7 +104,9 @@ pub enum BoundaryError {
     Signal(String),
     #[error("waiting for the process failed: {0}")]
     Wait(#[source] std::io::Error),
-    #[error("boundary is only supported on Unix")]
+    #[error("membership query failed: {0}")]
+    Membership(String),
+    #[error("boundary is only supported on Linux")]
     UnsupportedPlatform,
 }
 
@@ -105,6 +115,12 @@ pub enum BoundaryError {
 pub trait ProcessBoundary: Send + Sync {
     /// Launch the process. On success the returned [`BoundaryProcess`] owns the
     /// entire process set.
+    ///
+    /// CANCEL-SAFETY CONTRACT: the returned future MUST be cancel-safe. If it is
+    /// dropped before completing, the boundary must not leak a process — any
+    /// partially-created process must be terminated/cleaned up as the future
+    /// drops (so a cancel racing with a spawn can never leave an ownerless
+    /// process). The supervisor relies on this to cancel during `Starting`.
     async fn spawn(
         &self,
         spec: BoundarySpawnSpec,
@@ -121,10 +137,10 @@ pub trait BoundaryProcess: Send {
     /// Identity of the leader process.
     fn identity(&self) -> ProcessIdentity;
 
-    /// Take ownership of the child's stdout pipe (once).
-    fn take_stdout(&mut self) -> Option<ChildStdout>;
-    /// Take ownership of the child's stderr pipe (once).
-    fn take_stderr(&mut self) -> Option<ChildStderr>;
+    /// Take ownership of the stdout stream (once).
+    fn take_stdout(&mut self) -> Option<BoundaryStream>;
+    /// Take ownership of the stderr stream (once).
+    fn take_stderr(&mut self) -> Option<BoundaryStream>;
 
     /// Ask the whole set to stop gracefully (e.g. SIGTERM to the group).
     async fn request_graceful_stop(&mut self) -> Result<(), BoundaryError>;

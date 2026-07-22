@@ -11,7 +11,6 @@
 mod common;
 
 use common::*;
-use o7_worker::ProcessIdentity;
 
 // (21) The leader exits but a grandchild remains: the supervisor detects and
 // cleans it.
@@ -26,10 +25,7 @@ async fn supervisor_detects_and_cleans_remaining_grandchild() {
     );
 
     let pgid = sink.spawned_identity().unwrap().process_group;
-    assert!(
-        ProcessIdentity::enumerate_group(pgid).is_empty(),
-        "the orphan must be cleaned up"
-    );
+    assert!(group_is_empty(pgid), "the orphan must be cleaned up");
 }
 
 // (33) A normal run leaves no live owned descendants.
@@ -38,7 +34,7 @@ async fn no_live_owned_descendants_after_run() {
     let sink = RecordingSink::new();
     run_to_completion(child_spec("orph33", "grandchild_then_exit"), &sink).await;
     let pgid = sink.spawned_identity().unwrap().process_group;
-    assert!(ProcessIdentity::enumerate_group(pgid).is_empty());
+    assert!(group_is_empty(pgid));
 }
 
 // (34) The direct child is reaped — no zombie remains in the owned group.
@@ -50,5 +46,5 @@ async fn no_zombie_direct_child() {
     // A zombie would still appear in /proc with the leader's pgid; the group being
     // empty proves the direct child was reaped.
     let pgid = sink.spawned_identity().unwrap().process_group;
-    assert!(ProcessIdentity::enumerate_group(pgid).is_empty());
+    assert!(group_is_empty(pgid));
 }

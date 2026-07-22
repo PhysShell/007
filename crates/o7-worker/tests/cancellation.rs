@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use common::*;
-use o7_worker::{ProcessIdentity, WorkerResult};
+use o7_worker::WorkerResult;
 
 fn is_cancelled(result: &WorkerResult) -> bool {
     matches!(
@@ -39,6 +39,10 @@ async fn cancel_is_idempotent() {
 async fn concurrent_cancels_yield_one_result() {
     let sink = RecordingSink::new();
     let (handle, join) = start(child_spec("c17", "sleep"), &sink);
+    // Reach Running first, so the concurrent cancels all race the SAME live process
+    // (and produce exactly one CleanupCompleted). Cancelling before spawn is a
+    // distinct path with no cleanup to complete — covered by (24).
+    tokio::time::sleep(Duration::from_millis(250)).await;
     let handle = Arc::new(handle);
     let mut tasks = Vec::new();
     for _ in 0..5 {
@@ -58,6 +62,10 @@ async fn concurrent_cancels_yield_one_result() {
 async fn cooperative_process_stops_gracefully() {
     let sink = RecordingSink::new();
     let (handle, join) = start(child_spec("c18", "sleep"), &sink);
+    // Let the process actually spawn and reach Running: this test exercises the
+    // graceful SIGTERM path of a LIVE process. Cancelling before spawn is a
+    // separate (also-graceful) path with nothing to signal — covered by (24).
+    tokio::time::sleep(Duration::from_millis(250)).await;
     handle.cancel().await;
     let result = join.join().await;
     assert_eq!(
@@ -103,7 +111,7 @@ async fn cancel_during_start_leaves_no_lost_process() {
     );
     if let Some(identity) = sink.spawned_identity() {
         assert!(
-            ProcessIdentity::enumerate_group(identity.process_group).is_empty(),
+            group_is_empty(identity.process_group),
             "no owned process may survive"
         );
     }

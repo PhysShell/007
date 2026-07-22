@@ -66,22 +66,42 @@ pub struct WorkerSpec {
     pub boundary_requirement: BoundaryRequirement,
 }
 
-/// A statically-detectable problem with a [`WorkerSpec`].
+/// Hard upper bound on a single output chunk (defends against an absurd policy
+/// allocating enormous read buffers).
+pub const MAX_CHUNK_BYTES: usize = 16 * 1024 * 1024;
+/// Hard upper bound on the internal output channel capacity.
+pub const MAX_CHANNEL_CAPACITY: usize = 65_536;
+
+/// A statically-detectable problem with a [`WorkerSpec`]. All are caught BEFORE
+/// spawning, so an invalid policy is a `FailedToStart`, never a supervisor panic.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum SpecError {
     #[error("executable must be an absolute path (no PATH search, no shell): {0}")]
     RelativeExecutable(PathBuf),
     #[error("working_directory must be an absolute path: {0}")]
     RelativeWorkingDirectory(PathBuf),
+    #[error("output.max_chunk_bytes must be > 0")]
+    ZeroChunkSize,
+    #[error("output.max_chunk_bytes {0} exceeds the maximum {MAX_CHUNK_BYTES}")]
+    ChunkSizeTooLarge(usize),
+    #[error("output.channel_capacity must be > 0")]
+    ZeroChannelCapacity,
+    #[error("output.channel_capacity {0} exceeds the maximum {MAX_CHANNEL_CAPACITY}")]
+    ChannelCapacityTooLarge(usize),
+    #[error("heartbeat.interval must be > 0 when heartbeat is enabled")]
+    ZeroHeartbeatInterval,
 }
 
 impl WorkerSpec {
     /// Validate the invariants that can be checked without touching the
-    /// filesystem or spawning. (Existence of the executable / working directory is
-    /// surfaced as a spawn failure.)
+    /// filesystem or spawning. This runs BEFORE spawn, so any invalid policy
+    /// (zero/oversized channel or chunk, zero heartbeat interval) fails closed as
+    /// a `FailedToStart` rather than panicking the supervisor after it owns a
+    /// live process. (Existence of the executable / working directory is surfaced
+    /// as a spawn failure.)
     ///
     /// # Errors
-    /// [`SpecError`] for a relative executable or working directory.
+    /// [`SpecError`] for any violated invariant.
     pub fn validate(&self) -> Result<(), SpecError> {
         if !self.executable.is_absolute() {
             return Err(SpecError::RelativeExecutable(self.executable.clone()));
@@ -91,6 +111,108 @@ impl WorkerSpec {
                 self.working_directory.clone(),
             ));
         }
+        if self.output.max_chunk_bytes == 0 {
+            return Err(SpecError::ZeroChunkSize);
+        }
+        if self.output.max_chunk_bytes > MAX_CHUNK_BYTES {
+            return Err(SpecError::ChunkSizeTooLarge(self.output.max_chunk_bytes));
+        }
+        if self.output.channel_capacity == 0 {
+            return Err(SpecError::ZeroChannelCapacity);
+        }
+        if self.output.channel_capacity > MAX_CHANNEL_CAPACITY {
+            return Err(SpecError::ChannelCapacityTooLarge(
+                self.output.channel_capacity,
+            ));
+        }
+        if self.heartbeat.enabled && self.heartbeat.interval.is_zero() {
+            return Err(SpecError::ZeroHeartbeatInterval);
+        }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn valid_spec() -> WorkerSpec {
+        WorkerSpec {
+            worker_id: WorkerId::new("t"),
+            executable: PathBuf::from("/bin/true"),
+            arguments: Vec::new(),
+            working_directory: PathBuf::from("/"),
+            environment: BTreeMap::new(),
+            stdin: StdinMode::Null,
+            output: crate::output::OutputPolicy::default(),
+            cancellation: crate::cancellation::CancellationPolicy::default(),
+            heartbeat: crate::heartbeat::HeartbeatPolicy::default(),
+            boundary_requirement: crate::boundary::BoundaryRequirement::AllowUnconfined,
+        }
+    }
+
+    #[test]
+    fn accepts_a_valid_spec() {
+        assert!(valid_spec().validate().is_ok());
+    }
+
+    #[test]
+    fn rejects_relative_paths() {
+        let mut spec = valid_spec();
+        spec.executable = PathBuf::from("relative/exe");
+        assert!(matches!(
+            spec.validate(),
+            Err(SpecError::RelativeExecutable(_))
+        ));
+
+        let mut spec = valid_spec();
+        spec.working_directory = PathBuf::from("relative/dir");
+        assert!(matches!(
+            spec.validate(),
+            Err(SpecError::RelativeWorkingDirectory(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_zero_and_oversized_output_bounds() {
+        let mut spec = valid_spec();
+        spec.output.channel_capacity = 0;
+        assert_eq!(spec.validate(), Err(SpecError::ZeroChannelCapacity));
+
+        let mut spec = valid_spec();
+        spec.output.channel_capacity = MAX_CHANNEL_CAPACITY + 1;
+        assert_eq!(
+            spec.validate(),
+            Err(SpecError::ChannelCapacityTooLarge(MAX_CHANNEL_CAPACITY + 1))
+        );
+
+        let mut spec = valid_spec();
+        spec.output.max_chunk_bytes = 0;
+        assert_eq!(spec.validate(), Err(SpecError::ZeroChunkSize));
+
+        let mut spec = valid_spec();
+        spec.output.max_chunk_bytes = MAX_CHUNK_BYTES + 1;
+        assert_eq!(
+            spec.validate(),
+            Err(SpecError::ChunkSizeTooLarge(MAX_CHUNK_BYTES + 1))
+        );
+    }
+
+    #[test]
+    fn rejects_zero_heartbeat_only_when_enabled() {
+        let mut spec = valid_spec();
+        spec.heartbeat = crate::heartbeat::HeartbeatPolicy {
+            enabled: true,
+            interval: Duration::ZERO,
+        };
+        assert_eq!(spec.validate(), Err(SpecError::ZeroHeartbeatInterval));
+
+        let mut spec = valid_spec();
+        spec.heartbeat = crate::heartbeat::HeartbeatPolicy {
+            enabled: false,
+            interval: Duration::ZERO,
+        };
+        assert!(spec.validate().is_ok());
     }
 }

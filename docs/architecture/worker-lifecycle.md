@@ -1,6 +1,8 @@
 # Worker lifecycle (`o7-worker`)
 
-A generic runtime that launches ONE external process, owns its whole process tree,
+A generic runtime that launches ONE external process, owns its whole process GROUP
+(the members that remain in the host process group — not a tree/cgroup: a descendant
+that starts its own group/session escapes ownership),
 streams typed observations, cancels deterministically, and yields exactly one
 terminal result. It knows nothing about Claude/Codex/MCP/worktrees/verifiers/the
 ledger — those are other crates/PRs. Unix-only by construction.

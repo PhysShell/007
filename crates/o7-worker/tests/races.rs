@@ -19,6 +19,9 @@ use o7_worker::WorkerResult;
 async fn drop_handle_initiates_cleanup() {
     let sink = RecordingSink::new();
     let (handle, join) = start(child_spec("r23", "sleep"), &sink);
+    // Reach Running first so there is a live process to tear down (and a
+    // CleanupCompleted to observe); dropping before spawn is the no-process path.
+    tokio::time::sleep(Duration::from_millis(250)).await;
     drop(handle); // no explicit cancel — Drop must request it
     let result = join.join().await;
     assert!(

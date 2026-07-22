@@ -44,3 +44,41 @@ impl WorkerState {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::WorkerState::{Cancelling, Created, Exited, FailedToStart, Running, Starting};
+
+    #[test]
+    fn documented_transitions_are_allowed() {
+        assert!(Created.can_transition_to(Starting));
+        assert!(Starting.can_transition_to(Running));
+        assert!(Starting.can_transition_to(FailedToStart));
+        assert!(Starting.can_transition_to(Cancelling));
+        assert!(Running.can_transition_to(Cancelling));
+        assert!(Running.can_transition_to(Exited));
+        assert!(Cancelling.can_transition_to(Exited));
+    }
+
+    #[test]
+    fn undocumented_transitions_are_denied() {
+        // Must pass through Starting; no skipping, no going back, no leaving a
+        // terminal state.
+        assert!(!Created.can_transition_to(Running));
+        assert!(!Created.can_transition_to(Exited));
+        assert!(!Running.can_transition_to(Starting));
+        assert!(!Cancelling.can_transition_to(Running));
+        assert!(!Exited.can_transition_to(Running));
+        assert!(!FailedToStart.can_transition_to(Exited));
+    }
+
+    #[test]
+    fn only_exited_and_failed_are_terminal() {
+        assert!(Exited.is_terminal());
+        assert!(FailedToStart.is_terminal());
+        assert!(!Created.is_terminal());
+        assert!(!Starting.is_terminal());
+        assert!(!Running.is_terminal());
+        assert!(!Cancelling.is_terminal());
+    }
+}

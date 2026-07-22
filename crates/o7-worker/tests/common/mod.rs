@@ -28,9 +28,22 @@ use o7_worker::{
     WorkerSupervisor,
 };
 
+pub mod mock;
+
 /// The PR-2 host boundary as a trait object.
 pub fn host_boundary() -> Box<dyn ProcessBoundary> {
     Box::new(UnconfinedHostBoundary)
+}
+
+/// Start a worker on an ARBITRARY boundary (e.g. a fault-injecting mock). [`start`]
+/// uses the real host boundary; this drives the generic seam that the fault tests
+/// exercise.
+pub fn start_with(
+    spec: WorkerSpec,
+    boundary: Box<dyn ProcessBoundary>,
+    sink: &RecordingSink,
+) -> (o7_worker::WorkerHandle, WorkerJoin) {
+    WorkerSupervisor::start(spec, boundary, sink.arc())
 }
 
 /// Start a worker on the host boundary. The handle is returned so the caller can
@@ -44,6 +57,30 @@ pub fn start(spec: WorkerSpec, sink: &RecordingSink) -> (o7_worker::WorkerHandle
 pub async fn run_to_completion(spec: WorkerSpec, sink: &RecordingSink) -> WorkerResult {
     let (_handle, join) = start(spec, sink);
     join.join().await
+}
+
+/// Like [`run_to_completion`] but on an arbitrary boundary (e.g. a mock). The
+/// handle is held until the terminal result, so nothing is cancelled — dropping it
+/// early would request cancellation.
+pub async fn run_with(
+    spec: WorkerSpec,
+    boundary: Box<dyn ProcessBoundary>,
+    sink: &RecordingSink,
+) -> WorkerResult {
+    let (_handle, join) = start_with(spec, boundary, sink);
+    join.join().await
+}
+
+/// Live members of process group `pgid`. `enumerate_group` is now authoritative
+/// (`/proc` unreadable is an error, never "empty"); in tests `/proc` is always
+/// readable, so a query error is itself a test failure — never a silent "empty".
+pub fn group_members(pgid: i32) -> Vec<ProcessIdentity> {
+    ProcessIdentity::enumerate_group(pgid).expect("/proc enumeration must succeed in tests")
+}
+
+/// Whether process group `pgid` has no live members.
+pub fn group_is_empty(pgid: i32) -> bool {
+    group_members(pgid).is_empty()
 }
 
 pub const ENV_MODE: &str = "O7_WORKER_CHILD_MODE";
@@ -117,6 +154,12 @@ pub enum FailMode {
     /// Fail the first time an `OutputChunk` is published (simulates a lost sink
     /// mid-run).
     OnFirstOutput,
+    /// Fail the first time an observation of this exact kind is published (see
+    /// [`observation_kind`]) — e.g. `"exited"`, `"cleanup_completed"`,
+    /// `"descendants_remaining"`, `"graceful_stop_sent"`. Used to prove the sink
+    /// is authoritative on the TERMINAL/cleanup observations, not just mid-run
+    /// output.
+    OnKind(&'static str),
 }
 
 #[derive(Clone)]
@@ -138,6 +181,13 @@ impl RecordingSink {
     pub fn failing_on_output() -> Self {
         let mut sink = Self::new();
         sink.fail_mode = FailMode::OnFirstOutput;
+        sink
+    }
+
+    /// A sink that fails the first time the given observation kind is published.
+    pub fn failing_on_kind(kind: &'static str) -> Self {
+        let mut sink = Self::new();
+        sink.fail_mode = FailMode::OnKind(kind);
         sink
     }
 
@@ -203,11 +253,21 @@ impl Default for RecordingSink {
 #[async_trait]
 impl ObservationSink for RecordingSink {
     async fn publish(&self, observation: WorkerObservation) -> Result<(), ObservationError> {
-        if self.fail_mode == FailMode::OnFirstOutput
-            && matches!(observation, WorkerObservation::OutputChunk(_))
-            && !self.failed.swap(true, Ordering::SeqCst)
-        {
-            return Err(ObservationError("forced test sink failure".to_owned()));
+        let should_fail = match self.fail_mode {
+            FailMode::Never => false,
+            FailMode::OnFirstOutput => {
+                matches!(observation, WorkerObservation::OutputChunk(_))
+                    && !self.failed.swap(true, Ordering::SeqCst)
+            }
+            FailMode::OnKind(kind) => {
+                observation_kind(&observation) == kind && !self.failed.swap(true, Ordering::SeqCst)
+            }
+        };
+        if should_fail {
+            return Err(ObservationError(format!(
+                "forced test sink failure on {}",
+                observation_kind(&observation)
+            )));
         }
         self.observations.lock().unwrap().push(observation);
         Ok(())
@@ -323,6 +383,15 @@ fn worker_child_entry() {
             spawn_grandchild();
             sleep_forever();
         }
+        "leader_dies_grandchild_ignores_sigterm" => {
+            // A same-group descendant that IGNORES SIGTERM, while the LEADER keeps
+            // the default SIGTERM disposition. On the group SIGTERM the leader dies
+            // immediately but the descendant survives the grace period, forcing the
+            // supervisor to escalate to SIGKILL → a FORCEFUL cancellation whose set
+            // must still end up empty.
+            spawn_grandchild_mode("ignore_sigterm");
+            sleep_forever();
+        }
         other => {
             eprintln!("unknown child mode: {other}");
             std::process::exit(97);
@@ -352,6 +421,10 @@ fn sleep_forever() -> ! {
 }
 
 fn spawn_grandchild() {
+    spawn_grandchild_mode("sleep");
+}
+
+fn spawn_grandchild_mode(mode: &str) {
     let exe = std::env::current_exe().expect("current_exe");
     // No process_group() call → the grandchild inherits the leader's group, so it
     // is part of the owned set the supervisor must clean up.
@@ -362,7 +435,7 @@ fn spawn_grandchild() {
             "--nocapture",
             "common::worker_child_entry",
         ])
-        .env(ENV_MODE, "sleep")
+        .env(ENV_MODE, mode)
         .spawn();
     // The std Child is dropped without wait: std does not kill on drop, so the
     // grandchild keeps running (reparented to init when the leader exits).

@@ -10,11 +10,11 @@ use std::process::Stdio;
 use async_trait::async_trait;
 use nix::sys::signal::{killpg, Signal};
 use nix::unistd::Pid;
-use tokio::process::{Child, ChildStderr, ChildStdout, Command};
+use tokio::process::{Child, Command};
 
 use crate::boundary::{
     BoundaryAttestation, BoundaryError, BoundaryExit, BoundaryKind, BoundaryProcess,
-    BoundarySpawnSpec, EnforcementLevel, ProcessBoundary,
+    BoundarySpawnSpec, BoundaryStream, EnforcementLevel, ProcessBoundary,
 };
 use crate::process_identity::ProcessIdentity;
 use crate::spec::StdinMode;
@@ -30,6 +30,11 @@ impl ProcessBoundary for UnconfinedHostBoundary {
         &self,
         spec: BoundarySpawnSpec,
     ) -> Result<Box<dyn BoundaryProcess>, BoundaryError> {
+        // Membership/cleanup attestation relies on Linux `/proc`. Refuse anything
+        // else rather than pretend to enforce a boundary we cannot verify.
+        if !cfg!(target_os = "linux") {
+            return Err(BoundaryError::UnsupportedPlatform);
+        }
         let mut cmd = Command::new(&spec.executable);
         cmd.args(&spec.arguments);
         cmd.current_dir(&spec.working_directory);
@@ -98,12 +103,18 @@ impl BoundaryProcess for HostBoundaryProcess {
         self.identity.clone()
     }
 
-    fn take_stdout(&mut self) -> Option<ChildStdout> {
-        self.child.stdout.take()
+    fn take_stdout(&mut self) -> Option<BoundaryStream> {
+        self.child
+            .stdout
+            .take()
+            .map(|s| Box::pin(s) as BoundaryStream)
     }
 
-    fn take_stderr(&mut self) -> Option<ChildStderr> {
-        self.child.stderr.take()
+    fn take_stderr(&mut self) -> Option<BoundaryStream> {
+        self.child
+            .stderr
+            .take()
+            .map(|s| Box::pin(s) as BoundaryStream)
     }
 
     async fn request_graceful_stop(&mut self) -> Result<(), BoundaryError> {
@@ -130,6 +141,7 @@ impl BoundaryProcess for HostBoundaryProcess {
     }
 
     async fn remaining_members(&self) -> Result<Vec<ProcessIdentity>, BoundaryError> {
-        Ok(ProcessIdentity::enumerate_group(self.pgid))
+        ProcessIdentity::enumerate_group(self.pgid)
+            .map_err(|e| BoundaryError::Membership(e.to_string()))
     }
 }

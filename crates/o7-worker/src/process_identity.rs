@@ -30,16 +30,20 @@ impl ProcessIdentity {
         })
     }
 
-    /// Enumerate every live process whose process group equals `pgid`. Best
-    /// effort: unreadable/vanishing entries are skipped (a process may exit
-    /// mid-scan).
-    #[must_use]
-    pub fn enumerate_group(pgid: i32) -> Vec<Self> {
+    /// Enumerate every live process whose process group equals `pgid`.
+    ///
+    /// This is the AUTHORITATIVE membership check, so a failure to read `/proc`
+    /// (e.g. `/proc` unavailable — including any non-Linux host) is an ERROR, not
+    /// an empty set: cleanup must never treat "unknown" as "gone". Individual
+    /// entries that vanish mid-scan are skipped (a process may exit), which is
+    /// safe — a real member cannot disappear without actually exiting.
+    ///
+    /// # Errors
+    /// Returns the `/proc` read error if the directory cannot be enumerated.
+    pub fn enumerate_group(pgid: i32) -> std::io::Result<Vec<Self>> {
         let mut members = Vec::new();
-        let Ok(entries) = fs::read_dir("/proc") else {
-            return members;
-        };
-        for entry in entries.flatten() {
+        for entry in fs::read_dir("/proc")? {
+            let Ok(entry) = entry else { continue };
             let name = entry.file_name();
             let Some(name) = name.to_str() else { continue };
             let Ok(pid) = name.parse::<i32>() else {
@@ -51,7 +55,7 @@ impl ProcessIdentity {
                 }
             }
         }
-        members
+        Ok(members)
     }
 }
 

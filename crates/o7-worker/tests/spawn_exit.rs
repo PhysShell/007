@@ -67,10 +67,13 @@ async fn spawn_failure_leaves_no_process_state() {
     assert!(!sink.has("cleanup_completed"));
 }
 
-// (25) A natural-exit-vs-cancel race yields exactly ONE deterministic terminal
-// result (never two, never a panic).
+// (25) A natural-exit-vs-cancel race yields EXACTLY ONE VALID terminal result
+// (never two, never a panic). We do NOT promise a deterministic winner: the
+// supervisor's `select!` between the process exiting and a cancel request has no
+// defined precedence, so either a clean exit or a cancellation is acceptable — the
+// contract is "exactly one valid terminal", not "cancel/exit always wins".
 #[tokio::test]
-async fn natural_exit_vs_cancel_race_is_single_terminal() {
+async fn natural_exit_vs_cancel_race_yields_one_valid_terminal() {
     let sink = RecordingSink::new();
     let (handle, join) = start(child_spec("race", "exit0"), &sink);
     // Cancel roughly concurrently with the process exiting.
