@@ -124,3 +124,63 @@ async fn effective_pragmas_are_verified() {
     assert!(report.foreign_keys, "foreign_keys must be ON");
     assert_eq!(report.synchronous, 2, "synchronous must be FULL(2)");
 }
+
+// A DB with all the right table/column NAMES but WITHOUT the safety constraints
+// (composite FKs, the CHECK, the partial unique index) must fail closed — schema
+// validation compares full DDL, not just column names.
+#[tokio::test]
+async fn v1_lookalike_without_constraints_fails_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lookalike.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE conversation (conversation_id TEXT PRIMARY KEY, created_at INTEGER NOT NULL, status TEXT NOT NULL);
+             CREATE TABLE run (run_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, parent_run_id TEXT, agent TEXT NOT NULL, role TEXT NOT NULL, status TEXT NOT NULL, created_at INTEGER NOT NULL, finished_at INTEGER);
+             CREATE TABLE run_attempt (attempt_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, status TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER);
+             CREATE TABLE event (event_id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, run_id TEXT, attempt_id TEXT, sequence INTEGER NOT NULL, event_type TEXT NOT NULL, schema_version INTEGER NOT NULL, created_at INTEGER NOT NULL, payload_json TEXT NOT NULL);
+             CREATE TABLE idempotency_record (scope TEXT NOT NULL, key TEXT NOT NULL, request_digest TEXT NOT NULL, result_reference TEXT NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (scope, key));",
+        )
+        .unwrap();
+        conn.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION)
+            .unwrap();
+    }
+
+    let err = SqliteLedger::open(&path).unwrap_err();
+    assert_eq!(
+        err.code(),
+        "INTEGRITY",
+        "a v1-lookalike missing safety constraints must fail closed"
+    );
+}
+
+// The too-new guard must run BEFORE any persistent change: a too-new DB left in
+// journal_mode=DELETE must be rejected AND left in DELETE (not switched to WAL).
+#[tokio::test]
+async fn too_new_guard_precedes_persistent_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("too-new-delete.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", CURRENT_SCHEMA_VERSION + 5)
+            .unwrap();
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode;", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode.to_lowercase(), "delete", "precondition: DELETE mode");
+    }
+
+    let err = SqliteLedger::open(&path).unwrap_err();
+    assert_eq!(err.code(), "SCHEMA_TOO_NEW");
+
+    // Must NOT have switched the newer DB to WAL.
+    let conn = Connection::open(&path).unwrap();
+    let mode: String = conn
+        .query_row("PRAGMA journal_mode;", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        mode.to_lowercase(),
+        "delete",
+        "a too-new DB must be left untouched (not switched to WAL)"
+    );
+}

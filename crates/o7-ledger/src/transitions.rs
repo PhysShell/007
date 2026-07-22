@@ -5,11 +5,16 @@
 use crate::models::{AttemptStatus, RunStatus};
 use crate::LedgerError;
 
-/// Allowed run transitions:
-/// `queued → running`, `running → {completed, failed, cancelled, interrupted}`,
-/// `interrupted → running` (via a new attempt). Everything else — including
-/// `completed → running`, `failed → completed`, `cancelled → completed` — is
-/// forbidden.
+/// Allowed run transitions via the GENERAL path (`start_run`/`complete_run`/…):
+/// `queued → running` and `running → {completed, failed, cancelled, interrupted}`.
+/// Everything else — including `completed → running`, `failed → completed`,
+/// `cancelled → completed` — is forbidden here.
+///
+/// NOTE: `interrupted → running` is intentionally NOT in this set. Resuming an
+/// interrupted run is only possible through
+/// [`SqliteLedger::resume_interrupted_run`](crate::SqliteLedger::resume_interrupted_run),
+/// which performs that transition atomically together with a new attempt, so
+/// `start_run` cannot revive an interrupted run without one.
 #[must_use]
 pub fn run_transition_allowed(from: RunStatus, to: RunStatus) -> bool {
     use RunStatus::{Cancelled, Completed, Failed, Interrupted, Queued, Running};
@@ -20,7 +25,6 @@ pub fn run_transition_allowed(from: RunStatus, to: RunStatus) -> bool {
             | (Running, Failed)
             | (Running, Cancelled)
             | (Running, Interrupted)
-            | (Interrupted, Running)
     )
 }
 

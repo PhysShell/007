@@ -2,9 +2,13 @@
 //! Applying migrations is idempotent: already-applied versions are skipped, an
 //! empty database gets the full set, and re-running is a no-op. A database whose
 //! `user_version` is NEWER than this build supports is refused (an older binary
-//! must never write a newer schema). After migrating, the actual schema is
-//! validated so a database that merely CLAIMS to be v1 but lacks a table/column
-//! fails closed.
+//! must never write a newer schema). After migrating, the FULL live schema —
+//! tables, indexes, foreign keys, CHECK constraints, the partial unique index —
+//! is compared against a fresh reference built from this build's SCHEMA_V1, so a
+//! database that merely CLAIMS the current version but is missing a safety
+//! constraint (not just a column) fails closed.
+
+use std::collections::BTreeMap;
 
 use rusqlite::{Connection, TransactionBehavior};
 
@@ -34,10 +38,8 @@ CREATE TABLE run (
     status          TEXT NOT NULL,
     created_at      INTEGER NOT NULL,
     finished_at     INTEGER,
-    -- target for the composite foreign keys below (conversation-scoped identity)
     UNIQUE(conversation_id, run_id),
     FOREIGN KEY (conversation_id) REFERENCES conversation(conversation_id),
-    -- a parent run MUST live in the same conversation
     FOREIGN KEY (conversation_id, parent_run_id) REFERENCES run(conversation_id, run_id)
 );
 CREATE INDEX idx_run_conversation ON run(conversation_id);
@@ -50,11 +52,9 @@ CREATE TABLE run_attempt (
     started_at     INTEGER NOT NULL,
     finished_at    INTEGER,
     UNIQUE(run_id, attempt_number),
-    -- target for the composite (run_id, attempt_id) foreign key on event
     UNIQUE(run_id, attempt_id),
     FOREIGN KEY (run_id) REFERENCES run(run_id)
 );
--- At most ONE running attempt per run.
 CREATE UNIQUE INDEX idx_one_running_attempt ON run_attempt(run_id) WHERE status = 'running';
 
 CREATE TABLE event (
@@ -68,12 +68,9 @@ CREATE TABLE event (
     created_at      INTEGER NOT NULL,
     payload_json    TEXT NOT NULL,
     UNIQUE(conversation_id, sequence),
-    -- an attempt_id is only meaningful together with its run_id
     CHECK (attempt_id IS NULL OR run_id IS NOT NULL),
     FOREIGN KEY (conversation_id) REFERENCES conversation(conversation_id),
-    -- the referenced run MUST belong to this event's conversation
     FOREIGN KEY (conversation_id, run_id) REFERENCES run(conversation_id, run_id),
-    -- the referenced attempt MUST belong to this event's run
     FOREIGN KEY (run_id, attempt_id) REFERENCES run_attempt(run_id, attempt_id)
 );
 CREATE INDEX idx_event_conversation_sequence ON event(conversation_id, sequence);
@@ -87,61 +84,6 @@ CREATE TABLE idempotency_record (
     PRIMARY KEY (scope, key)
 );
 ";
-
-/// Expected tables and their columns for the current schema. Used by
-/// [`validate_schema`] so a database that merely claims the current
-/// `user_version` but lacks a table/column is rejected.
-const EXPECTED_SCHEMA: &[(&str, &[&str])] = &[
-    ("conversation", &["conversation_id", "created_at", "status"]),
-    (
-        "run",
-        &[
-            "run_id",
-            "conversation_id",
-            "parent_run_id",
-            "agent",
-            "role",
-            "status",
-            "created_at",
-            "finished_at",
-        ],
-    ),
-    (
-        "run_attempt",
-        &[
-            "attempt_id",
-            "run_id",
-            "attempt_number",
-            "status",
-            "started_at",
-            "finished_at",
-        ],
-    ),
-    (
-        "event",
-        &[
-            "event_id",
-            "conversation_id",
-            "run_id",
-            "attempt_id",
-            "sequence",
-            "event_type",
-            "schema_version",
-            "created_at",
-            "payload_json",
-        ],
-    ),
-    (
-        "idempotency_record",
-        &[
-            "scope",
-            "key",
-            "request_digest",
-            "result_reference",
-            "created_at",
-        ],
-    ),
-];
 
 /// Read the currently-applied schema version.
 ///
@@ -178,38 +120,58 @@ pub fn apply(conn: &mut Connection) -> Result<(), LedgerError> {
     Ok(())
 }
 
-/// Verify the live schema matches [`EXPECTED_SCHEMA`] — every expected table and
-/// column must exist. Catches a database that claims the current `user_version`
-/// but is structurally incomplete.
+/// Collapse whitespace so incidental formatting differences don't cause false
+/// mismatches; structural differences (a missing FK/CHECK/index) still show.
+fn normalize_ddl(sql: &str) -> String {
+    sql.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Read our own `CREATE TABLE`/`CREATE INDEX` statements from `sqlite_master`,
+/// keyed by object name and whitespace-normalized. Auto-created indexes (from
+/// PK/UNIQUE, whose `sql` is NULL) are skipped — the constraints they back live
+/// inside the table DDL, which IS compared.
+fn schema_objects(conn: &Connection) -> Result<BTreeMap<String, String>, LedgerError> {
+    let mut stmt = conn.prepare(
+        "SELECT name, sql FROM sqlite_master \
+         WHERE type IN ('table', 'index') AND sql IS NOT NULL AND name NOT LIKE 'sqlite_%'",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut map = BTreeMap::new();
+    for row in rows {
+        let (name, sql) = row?;
+        map.insert(name, normalize_ddl(&sql));
+    }
+    Ok(map)
+}
+
+/// Verify the LIVE schema (full DDL — columns, foreign keys, CHECK constraints,
+/// the partial unique index) matches a fresh reference built from this build's
+/// `SCHEMA_V1`. A database that merely claims the current `user_version` but is
+/// missing any structure fails closed.
 ///
 /// # Errors
-/// [`LedgerError::Integrity`] on a missing table or column; SQLite errors.
+/// [`LedgerError::Integrity`] on any missing or differing object; SQLite errors.
 pub fn validate_schema(conn: &Connection) -> Result<(), LedgerError> {
-    for (table, columns) in EXPECTED_SCHEMA {
-        let exists: i64 = conn.query_row(
-            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-            [table],
-            |row| row.get(0),
-        )?;
-        if exists == 0 {
-            return Err(LedgerError::Integrity(format!("missing table `{table}`")));
-        }
+    let reference = Connection::open_in_memory()?;
+    reference.execute_batch(SCHEMA_V1)?;
+    let expected = schema_objects(&reference)?;
+    let actual = schema_objects(conn)?;
 
-        let mut present = std::collections::BTreeSet::new();
-        {
-            // `table` is one of our trusted constants, not user input.
-            let mut stmt = conn.prepare(&format!("PRAGMA table_info(\"{table}\")"))?;
-            let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
-            for row in rows {
-                present.insert(row?);
-            }
-        }
-        for column in *columns {
-            if !present.contains(*column) {
+    for (name, want) in &expected {
+        match actual.get(name) {
+            None => {
                 return Err(LedgerError::Integrity(format!(
-                    "table `{table}` is missing column `{column}`"
-                )));
+                    "schema is missing object `{name}`"
+                )))
             }
+            Some(have) if have != want => {
+                return Err(LedgerError::Integrity(format!(
+                    "schema object `{name}` does not match the expected v{CURRENT_SCHEMA_VERSION} definition"
+                )))
+            }
+            Some(_) => {}
         }
     }
     Ok(())

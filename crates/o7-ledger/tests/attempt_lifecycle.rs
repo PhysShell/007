@@ -109,3 +109,26 @@ async fn resume_interrupted_run_is_atomic() {
         .unwrap_err();
     assert_eq!(err.code(), "INVALID_STATE");
 }
+
+// start_run must NOT revive an interrupted run (that would bypass the atomic
+// resume + new-attempt path). Only resume_interrupted_run may.
+#[tokio::test]
+async fn start_run_cannot_revive_interrupted_run() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let run_id = conv_and_run(&ledger).await;
+    ledger.start_run(run_id.clone()).await.unwrap(); // queued -> running
+    ledger.interrupt_run(run_id.clone()).await.unwrap(); // running -> interrupted
+
+    let err = ledger.start_run(run_id.clone()).await.unwrap_err();
+    assert_eq!(
+        err.code(),
+        "FORBIDDEN_TRANSITION",
+        "start_run must not make interrupted -> running"
+    );
+
+    // The only sanctioned path succeeds and creates a fresh attempt.
+    let attempt = ledger.resume_interrupted_run(run_id.clone()).await.unwrap();
+    assert_eq!(attempt.status, AttemptStatus::Running);
+    let run = ledger.run(run_id).await.unwrap().unwrap();
+    assert_eq!(run.status, RunStatus::Running);
+}

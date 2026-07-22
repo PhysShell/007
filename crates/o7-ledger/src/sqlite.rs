@@ -78,6 +78,18 @@ impl SqliteLedger {
 
     fn init(conn: Connection, expect_wal: bool) -> Result<Self, LedgerError> {
         conn.busy_timeout(Duration::from_millis(BUSY_TIMEOUT_MS))?;
+        // Refuse a too-new database BEFORE any PERSISTENT change. Reading
+        // user_version does not touch the file; `journal_mode = WAL` below DOES
+        // (and creates -wal/-shm). An old binary must not even switch a newer DB
+        // to WAL, so this guard runs first. (busy_timeout / foreign_keys /
+        // synchronous are per-connection and do not modify the file.)
+        let existing = migrations::current_version(&conn)?;
+        if existing > migrations::CURRENT_SCHEMA_VERSION {
+            return Err(LedgerError::SchemaTooNew {
+                found: existing,
+                supported: migrations::CURRENT_SCHEMA_VERSION,
+            });
+        }
         conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA synchronous = FULL;")?;
         // journal_mode returns the RESULTING mode ("wal", or "memory" for an
         // in-memory db). Verify the pragmas actually took effect — otherwise the
@@ -86,9 +98,8 @@ impl SqliteLedger {
         verify_effective_pragmas(&conn, expect_wal, &journal)?;
 
         let mut conn = conn;
-        // Order: migrations first (which refuse a too-new DB), then a cheap
-        // integrity check, then a structural schema check (catches a DB that
-        // merely claims the current user_version but is incomplete).
+        // Then migrations, a cheap integrity check, and a structural schema check
+        // (catches a DB that merely claims the current user_version but differs).
         migrations::apply(&mut conn)?;
         let check: String = conn.query_row("PRAGMA quick_check;", [], |row| row.get(0))?;
         if check != "ok" {
@@ -490,8 +501,10 @@ impl SqliteLedger {
                  WHERE run_id = ?2 AND status = 'running'",
                 params![now, run_id.as_str()],
             )?;
-            // interrupted -> running (transition validated centrally).
-            validate_run_transition(current.status, RunStatus::Running)?;
+            // interrupted -> running. This is the ONLY code path allowed to make
+            // this transition (the general run-transition table forbids it, so
+            // start_run cannot revive an interrupted run); the precondition is the
+            // explicit `status == Interrupted` check above.
             tx.execute(
                 "UPDATE run SET status = 'running', finished_at = NULL WHERE run_id = ?1",
                 params![run_id.as_str()],
@@ -621,6 +634,15 @@ impl SqliteLedger {
                     "UPDATE run SET status = 'interrupted' WHERE run_id = ?1",
                     params![run_id.as_str()],
                 )?;
+                // Close EVERY running attempt of this run — not only the ones the
+                // caller happened to list. The snapshot may be stale or partial;
+                // the ledger, holding the write transaction, is authoritative, so
+                // a run can never be left `interrupted` with a `running` attempt.
+                tx.execute(
+                    "UPDATE run_attempt SET status = 'interrupted', finished_at = ?1 \
+                     WHERE run_id = ?2 AND status = 'running'",
+                    params![now, run_id.as_str()],
+                )?;
                 emit_event(
                     tx,
                     &NewEvent {
@@ -635,15 +657,19 @@ impl SqliteLedger {
                     now,
                 )?;
             }
+            // Any explicitly-listed attempts whose run was NOT in the run list:
+            // close them too, but tolerate ones already closed above (idempotent).
             for attempt_id in &state.interrupted_attempts {
                 let current = load_attempt(tx, attempt_id.as_str())?
                     .ok_or_else(|| LedgerError::NotFound(format!("attempt {attempt_id}")))?;
-                validate_attempt_transition(current.status, AttemptStatus::Interrupted)?;
-                let now = now_millis();
-                tx.execute(
-                    "UPDATE run_attempt SET status = 'interrupted', finished_at = ?1 WHERE attempt_id = ?2",
-                    params![now, attempt_id.as_str()],
-                )?;
+                if current.status == AttemptStatus::Running {
+                    let now = now_millis();
+                    tx.execute(
+                        "UPDATE run_attempt SET status = 'interrupted', finished_at = ?1 \
+                         WHERE attempt_id = ?2 AND status = 'running'",
+                        params![now, attempt_id.as_str()],
+                    )?;
+                }
             }
             Ok(())
         })
