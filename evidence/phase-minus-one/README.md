@@ -4,6 +4,8 @@ Research-only. No 007 production code changed. Branch `research/consilium-phase-
 
 **Main report:** [`docs/research/consilium-phase-minus-one.md`](../../docs/research/consilium-phase-minus-one.md)
 
+**Operator decision (post-acceptance):** [`operator-decision.md`](operator-decision.md) — MCP bridge rejected permanently; 007 builds its own typed delegation protocol; council/conduct/MCP are reference-only; authoritative 9-PR execution sequence. Phase -1 remains ACCEPTED/CLOSED.
+
 ## Files
 | File | What it is | Stage |
 |---|---|---|

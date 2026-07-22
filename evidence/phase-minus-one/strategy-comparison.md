@@ -35,7 +35,7 @@ Grounding facts (from evidence): Consilium is **MIT** (vendoring/forking is lega
 - **Source-of-truth risk:** high if trusted; acceptable if strictly a sandboxed, advisory bridge.
 - **Effect on roadmap:** unblocks delegation now while the vendored worker layer is built.
 - **Exit strategy:** excellent — it is an external process; delete it when 007's own workers exist.
-- **Verdict: adopt as a temporary, sandboxed bridge only.**
+- **Verdict: OPERATOR-REJECTED (post Phase -1, see `operator-decision.md`).** A temporary bridge is not adopted: it would add a second worker-launch path, a second delegation protocol, a separate cancellation model, and no durable run identity, then demand a mandatory later removal. 007 builds its own typed delegation protocol instead; Consilium MCP schemas are reference-only.
 
 ### Strategy D — Ideas + fixtures only, reimplement everything
 - **Advantages:** maximum purity/control; zero coupling and zero upstream-sync risk; Consilium's excellent test fixtures (recorded Claude/Codex streams, hostile-repo worktree probes) seed 007's own tests.
@@ -46,7 +46,9 @@ Grounding facts (from evidence): Consilium is **MIT** (vendoring/forking is lega
 - **Exit strategy:** n/a.
 - **Verdict: correct for the incompatible core (failover, transcript, conduct's verdict, Tauri) and as the source of fixtures; wrong to apply wholesale.**
 
-## Recommended strategy — Hybrid **B (vendor) + C (temporary bridge)** with **D** for the incompatible core
+## Recommended strategy — Hybrid **B (vendor) + D (reference/reject)**
+
+> **Operator decision (post Phase -1, `operator-decision.md`):** the temporary MCP bridge (Strategy C) is **rejected permanently**. The strategy is now B (vendor selected modules) + D (reference/reject the rest); MCP is reference-only. Delegation is 007's own typed protocol with o7d as the sole source of truth.
 
 Not "partially reusable" — here are the exact boundaries.
 
@@ -56,11 +58,12 @@ Not "partially reusable" — here are the exact boundaries.
 - `quota.rs` → the append-only SQLite substrate for the event ledger **and** BudgetPolicy (add spend gate; fail-closed reads; run-event rows).
 - `safety/git.rs` + `fs.rs` + `trust.rs` + `commands.rs` → a standalone `worktree-isolation` crate **plus** wired trust-on-first-use (o7d as sole owner; never call it a sandbox).
 - `event.rs` + `protocol.rs` + `ui/src` (React) → the cockpit event/protocol/UI layer (extend events for permission/rate-limit/model-drift + tool start/complete; add run_id/seq/cursor; swap the one impure `useSession` hook).
-- `mcp.rs` tool **schemas** → the template for 007 typed delegation (add run_id + capability token + idempotency + seq).
 - `eval.rs`'s external-oracle + protected-path-restore pattern → 007's acceptance-testing harness.
 
-**Bridge (Strategy C), temporary:** stand up Consilium's MCP attached-conductor server *inside Sandboy* so a Claude session can drive Codex/Gemini workers immediately; treat all its output as advisory; retire it once the vendored worker layer lands.
+**No MCP bridge (operator decision):** the temporary Strategy-C MCP bridge is **rejected**. Delegation is 007's own typed protocol — a `delegation.requested` event on the ledger, with o7d checking role/budget/depth/exact-model/permission/paths/gates and itself creating the child run + worktree. `mcp.rs` **schemas are reference-only** (design input for that typed protocol; not vendored, no runtime dependency).
 
-**Reject as code / reference + fixtures only (Strategy D):** `resilience.rs` (always-on silent failover — incompatible with Exact), `models.rs` catalog auto-upgrade (keep-newest vs exact-pin), `transcript.rs` (post-hoc, no recovery), `conduct.rs`'s *verdict ownership* (relocate to o7d; the grounding-rule *idea* is adopted, the LLM-decider is not), and the Tauri in-process shell (wrong for android-first).
+**Reference only (not vendored):** `council` and `conduct` (adopt the grounding-rule *idea* with an o7d-owned verdict, not the engine), `mcp.rs` schemas, `topology`.
+
+**Reject as code / fixtures-only:** the **MCP runtime bridge**, `resilience.rs` (always-on silent failover — incompatible with Exact), `models.rs` catalog auto-upgrade (keep-newest vs exact-pin), `transcript.rs` (post-hoc, no recovery), `conduct.rs`'s *verdict ownership* (relocate to o7d), and the Tauri in-process shell (wrong for android-first).
 
 **Why this and not A:** 007's non-negotiable invariants (o7d owns the verdict; Exact forbids silent failover; browser-close must not kill the agent; append-only ledger with recovery; Sandboy is the process boundary) are exactly the things Consilium's *core* gets wrong, while its *peripheral* modules (isolation, oracle, lifecycle, UI, storage shape) are exactly what 007 lacks and are high quality. Depending on the whole (A) imports the conflicts; reimplementing the whole (D) discards the wins. B+C takes the wins, quarantines the conflicts, and keeps o7d authoritative — with a clean per-module exit.

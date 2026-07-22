@@ -1,6 +1,8 @@
 # Roadmap delta (proposed) — effect of the Consilium acquisition
 
-This is a **proposed** delta, not an edit to the real 007 roadmap. It assumes the recommended strategy: **vendor selected modules (B) + a temporary sandboxed MCP bridge (C), reject the incompatible core (D)**.
+This is a **proposed** delta, not an edit to the real 007 roadmap. It assumes the recommended strategy: **vendor selected modules (B) + reference/reject the rest (D)**.
+
+> **Operator decision (post Phase -1, `operator-decision.md`):** the temporary MCP bridge is **rejected permanently**; delegation is 007's own typed protocol with o7d as the sole source of truth; MCP/council/conduct are **reference only**. The authoritative 9-PR execution sequence lives in `operator-decision.md`; the PR notes below are aligned to it.
 
 ## Phases 007 can SHORTEN (borrow a proven, tested implementation)
 - **Worker process lifecycle** — `sessions.rs`+`runner.rs` give kill-on-drop, bounded backpressure, timeout-kills-child, real-process tests. Saves the from-scratch build; shortens to a wiring + Sandboy-pairing task.
@@ -33,11 +35,11 @@ This is a **proposed** delta, not an edit to the real 007 roadmap. It assumes th
 4. Extend `event.rs`/`protocol.rs` with permission.requested / rate_limit / model-info+drift / tool.started+completed + run_id/seq/cursor.
 5. Extend `quota.rs` into the event ledger + BudgetPolicy (fail-closed reads, spend gate, run-event rows).
 6. `ModelPolicy{Exact,ExplicitLadder}` enforced at the (rejected) failover choke point + a model-drift kill-switch fed by the new model-info event. **Stop-gate:** under Exact, any observed model change halts the run.
-7. Temporary MCP bridge PR: run Consilium's MCP server inside Sandboy as an advisory worker source. **Stop-gate:** its output is never a verdict; retire once vendored workers exist.
+7. **Native 007 delegation** (operator decision — NO MCP bridge): a typed `delegation.requested` event on the ledger; o7d checks role/budget/depth/exact-model/permission/paths/gates and itself creates the child run + worktree. Consilium MCP schemas are reference input only. **Stop-gate:** delegation is a typed event bound to a run_id, never an MCP tool call; o7d is the sole source of truth.
 8. Cockpit: vendor `ui/src`, swap `useSession` for a cursor/ledger client, remove UI-initiated run creation. **Stop-gate:** closing the browser leaves the run alive.
 
 ## Upstream dependencies this introduces
-- Runtime crates transitively via vendored modules: `rusqlite(bundled)`, `rustix`, `rmcp` (only if the MCP bridge is kept in-tree), `axum`/`tokio-tungstenite` (cockpit), `ts-rs` (or drop it and hand-write types). The `worktree-isolation` tier needs only `anyhow/serde/rand/rustix`.
+- Runtime crates transitively via vendored modules: `rusqlite(bundled)`, `rustix`, `axum`/`tokio-tungstenite` (cockpit), `ts-rs` (or drop it and hand-write types). **No `rmcp`** — the MCP bridge is rejected. The `worktree-isolation` tier needs only `anyhow/serde/rand/rustix`.
 - A one-time NOTICE/attribution for MIT-vendored code.
 
 ## Impact per named subsystem
@@ -48,8 +50,8 @@ This is a **proposed** delta, not an edit to the real 007 roadmap. It assumes th
 | **Codex adapter** | Vendor+adapt `adapters/codex.rs`; must source an observed model (else Exact fails closed for Codex). Codex probe still owed (CLI not installed). |
 | **normalized events** | Adopt `event.rs` shape, extend for the 5 missing/incompatible event types (see event-mapping.json), and persist them. |
 | **worktree lifecycle** | Big win: extract the hardened machinery; o7d becomes sole owner; wire it (Consilium never did). |
-| **MCP / delegation** | Use schemas as the typed-delegation template + a temporary bridge; never source-of-truth; add run_id/token/idempotency. |
-| **council skill** | Low-risk adopt as an advisory Skill; o7d keeps the verdict. |
+| **MCP / delegation** | **MCP bridge REJECTED (operator decision).** Build 007's own typed delegation (`delegation.requested`); MCP schemas reference-only, no runtime dependency. |
+| **council skill** | **Reference only (operator decision)** — not vendored; a design reference for a future advisory Skill; o7d keeps the verdict. |
 | **conduct / RunGraph** | Adopt the grounding-rule idea; reject shared-cwd sequential model + LLM verdict; give each agent its own worktree; relocate the verdict. Largest effort. |
 | **web cockpit** | Vendor UI + protocol scaffolding; rewrite `handle_session` for a run-registry + ledger cursor; decouple run from socket. |
 | **quota budgets** | Extend the append-only store into a fail-closed BudgetPolicy + ledger. |

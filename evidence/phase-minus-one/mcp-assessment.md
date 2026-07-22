@@ -1,5 +1,7 @@
 # Consilium MCP Layer — Assessment for 007
 
+> **Decision banner:** this is a Phase -1 *technical finding* on whether MCP is suitable as a bridge. The **operator has since rejected the MCP bridge permanently** (see [`operator-decision.md`](operator-decision.md)) — MCP is **reference-only**, no runtime dependency; 007 builds its own typed delegation protocol. The technical suitability below stands as analysis; it does not change the reject decision.
+
 Source of record: `core/src/mcp.rs` (module doc `mcp.rs:1-20`), tests in `core/tests/mcp_test.rs`, shared confinement in `core/src/confine.rs`, spawn invariant in `core/src/sessions.rs`.
 
 The MCP server runs in **attached-conductor mode over stdio** (`mcp.rs:796-804`, `serve_stdio`). Design intent is explicit: the conductor is the user's live interactive Claude Code session, and this server exposes Consilium's worker/quota primitives as tools so that session can orchestrate the "army" (Codex/Gemini/Grok/fallback Claude) without spending programmatic Claude credit (`mcp.rs:1-8`). It is a thin, stateless tool facade over existing library functions.
