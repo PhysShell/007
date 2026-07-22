@@ -10,6 +10,8 @@
 
 mod common;
 
+use std::time::Duration;
+
 use common::*;
 
 // (21) The leader exits but a grandchild remains: the supervisor detects and
@@ -37,14 +39,22 @@ async fn no_live_owned_descendants_after_run() {
     assert!(group_is_empty(pgid));
 }
 
-// (34) The direct child is reaped — no zombie remains in the owned group.
+// (34) The direct child is reaped — its `/proc/<pid>` entry is GONE, not a zombie.
 #[tokio::test]
 async fn no_zombie_direct_child() {
     let sink = RecordingSink::new();
     let result = run_to_completion(child_spec("orph34", "exit0"), &sink).await;
     assert_eq!(result.kind(), "EXITED_NORMALLY");
-    // A zombie would still appear in /proc with the leader's pgid; the group being
-    // empty proves the direct child was reaped.
-    let pgid = sink.spawned_identity().unwrap().process_group;
-    assert!(group_is_empty(pgid));
+
+    let identity = sink.spawned_identity().unwrap();
+    // Prove reaping with a RAW `/proc/<pid>` check, NOT the live-members scan: the scan
+    // treats a zombie as gone, so it could not tell "reaped" from "still a zombie". A
+    // truly reaped direct child has no `/proc/<pid>` entry at all.
+    assert!(
+        proc_pid_gone_within(identity.pid, Duration::from_secs(2)).await,
+        "the direct child's /proc/{} entry must disappear (reaped, not zombified)",
+        identity.pid
+    );
+    // And the owned group is empty by the authoritative membership scan.
+    assert!(group_is_empty(identity.process_group));
 }

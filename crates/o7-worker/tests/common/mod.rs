@@ -83,6 +83,28 @@ pub fn group_is_empty(pgid: i32) -> bool {
     group_members(pgid).is_empty()
 }
 
+/// Whether `/proc/<pid>` exists AT ALL — a RAW existence check that does NOT go
+/// through the live-members scan. A REAPED process has no `/proc/<pid>` entry; an
+/// unreaped zombie still does (with state `Z`). Proving a direct child was reaped
+/// therefore requires this raw check, because [`group_is_empty`] deliberately treats a
+/// zombie as gone and so could not distinguish "reaped" from "zombie".
+pub fn proc_pid_exists(pid: i32) -> bool {
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
+}
+
+/// Poll (bounded) until `/proc/<pid>` disappears, returning whether it did. Used to
+/// assert a direct child is genuinely REAPED, not merely killed-and-zombified.
+pub async fn proc_pid_gone_within(pid: i32, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    while proc_pid_exists(pid) {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    true
+}
+
 pub const ENV_MODE: &str = "O7_WORKER_CHILD_MODE";
 pub const ENV_CODE: &str = "O7_WORKER_CHILD_CODE";
 pub const ENV_PAYLOAD: &str = "O7_WORKER_CHILD_PAYLOAD";

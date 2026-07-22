@@ -239,14 +239,14 @@ impl Publisher {
 /// boundary/output fault. Losing the authoritative sink is the reported terminal, but
 /// the underlying run-loop fault must not be erased — it is preserved in the message
 /// so the combined failure is legible.
-fn observation_failure_message(pubr: &Publisher, base: &WorkerResult) -> String {
+fn observation_failure_message(pubr: &Publisher, effective: &WorkerResult) -> String {
     let sink_error = pubr.error();
-    match base {
+    match effective {
         WorkerResult::BoundaryFailure(underlying) | WorkerResult::OutputFailure(underlying) => {
             format!("{sink_error}; underlying fault preserved: {underlying}")
         }
-        // A `SinkFailed` base is the SAME sink loss (no distinct underlying fault); any
-        // success/cancel base carries no fault to preserve.
+        // An effective `ObservationFailure` (a run-loop `SinkFailed`) is the SAME sink
+        // loss — no distinct underlying fault; any success/cancel outcome carries none.
         _ => sink_error,
     }
 }
@@ -593,20 +593,15 @@ async fn manage(
         Termination::OutputFailed(message) => WorkerResult::OutputFailure(message),
         Termination::BoundaryFailed(message) => WorkerResult::BoundaryFailure(message),
     };
-    // Terminal precedence — CleanupFailure > ObservationFailure > Boundary/Output:
-    //   1. an unprovable/failed cleanup (possible leaked processes) dominates all;
-    //   2. a lost authoritative sink dominates a boundary/output fault — if the run
-    //      ALSO ended on a boundary/output fault, that fault is preserved in the
-    //      ObservationFailure message so it is never erased;
-    //   3. a boundary/output fault that ended the run loop (sink still alive);
-    //   4. a bounded-drain timeout or a drain-time read error (output faithfulness
-    //      lost after the exit) — always a failure, never a clean pass;
-    //   5. otherwise the run's own outcome.
-    let result = if let Err(message) = cleanup {
-        WorkerResult::CleanupFailure(message)
-    } else if !pubr.alive {
-        WorkerResult::ObservationFailure(observation_failure_message(pubr, &base))
-    } else if base.is_failure() {
+    // Fold the run outcome and any drain fault into a single EFFECTIVE result FIRST,
+    // before sink-loss precedence is applied. A bounded-drain timeout or a drain-time
+    // read error means output faithfulness was lost AFTER the exit, so it is an
+    // OutputFailure that overrides a clean/cancel outcome — but not a run-loop fault,
+    // which is already at least as severe. Materializing it here (rather than after the
+    // sink-loss check) is what stops a lost sink on `Exited`/`CleanupCompleted` from
+    // silently erasing the drain fault: the effective fault is carried into the
+    // ObservationFailure message below.
+    let effective = if base.is_failure() {
         base
     } else if drain_timed_out {
         WorkerResult::OutputFailure(format!(
@@ -617,6 +612,20 @@ async fn manage(
         WorkerResult::OutputFailure(message)
     } else {
         base
+    };
+
+    // Terminal precedence — CleanupFailure > ObservationFailure > Boundary/Output:
+    //   1. an unprovable/failed cleanup (possible leaked processes) dominates all;
+    //   2. a lost authoritative sink dominates the effective boundary/output fault —
+    //      and that effective fault (a run-loop fault OR a drain OutputFailure) is
+    //      preserved in the ObservationFailure message so it is never erased;
+    //   3. otherwise the effective outcome (run fault, drain fault, or clean result).
+    let result = if let Err(message) = cleanup {
+        WorkerResult::CleanupFailure(message)
+    } else if !pubr.alive {
+        WorkerResult::ObservationFailure(observation_failure_message(pubr, &effective))
+    } else {
+        effective
     };
 
     // If the sink is still usable and we failed, tell it (SupervisorFailed).

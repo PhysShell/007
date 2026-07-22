@@ -117,6 +117,19 @@ not parse is a membership failure; and only a confirmed `NotFound` (the PID vani
 treated as a benign exit race. It never treats "unknown" as "gone", so a live member
 whose `stat` errors can never be silently dropped from the proof.
 
+**Live vs terminated.** The scan parses each entry's scheduler `state` alongside its
+PGID. A **terminal corpse** — a zombie (`Z`, exited but not yet reaped) or dead (`X`/`x`)
+process — executes nothing and cannot be signalled, so it is treated as GONE even though
+it still carries the group's PGID in `/proc`; every other state (`R`/`S`/`D`/`T`/`t`/`I`,
+…) counts as live. This matters when the group's own init does not reap orphans: after the
+supervisor `SIGKILL`s an escaped descendant that has reparented away, the descendant
+becomes an unreapable zombie that would otherwise be miscounted as a live survivor forever,
+turning a successful teardown into a false `CleanupFailure`. Because the state is only read
+*after* a successful, parseable `stat`, a zombie is **proven** terminal — never confused
+with a `stat` the scan merely failed to read. Direct-child reaping is proven separately:
+after `wait()` the leader's `/proc/<pid>` entry is gone entirely (a raw path check, not the
+live-members scan, which by design would accept a zombie as gone).
+
 **Deferred (NOT PR 2):** orphan RECOVERY after the daemon (o7d) itself is SIGKILLed. Once
 the in-memory supervisor is gone, a raw PID is insufficient (PID reuse) and reliable
 adoption/cleanup needs cgroups/Sandboy or a persisted process identity. This is closed by
