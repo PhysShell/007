@@ -3,7 +3,7 @@
 # is a SEPARATE crate — it must not be hidden inside the CLI crate.
 # `fuzz/` is excluded so cargo-fuzz keeps managing it independently.
 [workspace]
-members = ["crates/o7-ledger"]
+members = ["crates/o7-ledger", "crates/o7-worker"]
 exclude = ["fuzz"]
 resolver = "2"
 

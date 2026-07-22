@@ -1,0 +1,52 @@
+[package]
+name = "o7-worker"
+version = "0.1.0"
+edition = "2021"
+description = "007 generic worker runtime: own a process tree via a ProcessBoundary, stream typed observations, cancel and clean up deterministically. No provider/model/ledger knowledge."
+publish = false
+
+[lib]
+name = "o7_worker"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", default-features = false, features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "process",
+    "io-util",
+    "time",
+] }
+bytes = "1"
+thiserror = "1"
+# Makes the ProcessBoundary/BoundaryProcess traits object-safe with async methods
+# (spawn returns Box<dyn BoundaryProcess>). MIT-licensed.
+async-trait = "0.1"
+# Unix-only: process-GROUP signalling (killpg) and pid types. Unix-only by
+# construction — 007 runs on Linux/WSL. nix wraps the raw syscalls in a safe API
+# (the tree forbids `unsafe`). nix is MIT (allowed in deny.toml).
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", default-features = false, features = ["signal", "process"] }
+
+[dev-dependencies]
+tempfile = "3"
+# Test children install a safe no-op SIGTERM handler (the tree forbids `unsafe`,
+# so nix's raw signal API is unusable in tests). signal-hook is MIT/Apache.
+signal-hook = "0.3"
+
+# Mirror the workspace discipline: no unsafe, no panics-by-default.
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
