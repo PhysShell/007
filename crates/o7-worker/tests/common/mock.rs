@@ -96,6 +96,10 @@ enum Membership {
     /// This many members are ALWAYS present (never drains) — so `cleanup_group` reaches
     /// its force-stop step and then keeps seeing survivors.
     Present(usize),
+    /// The FIRST query fails with this error; every subsequent query returns empty —
+    /// models a TRANSIENT membership failure that later recovers, to prove a single
+    /// failed query during the graceful drain is never reported as a clean cancel.
+    ErrorThenEmpty(String),
 }
 
 /// A configurable, OS-free boundary. Defaults to the most boring possible run: a
@@ -279,6 +283,14 @@ impl MockBoundary {
     /// exercise the cleanup-path force bound.
     pub fn with_present_members(mut self, n: usize) -> Self {
         self.membership = Membership::Present(n);
+        self
+    }
+
+    /// The FIRST `remaining_members()` query fails; every later one returns empty — a
+    /// TRANSIENT membership failure that recovers. Used to prove a failed query during
+    /// the graceful drain is never reported as a clean `CancelledForcefully`.
+    pub fn with_membership_error_then_empty(mut self, error: &str) -> Self {
+        self.membership = Membership::ErrorThenEmpty(error.to_owned());
         self
     }
 
@@ -539,7 +551,7 @@ impl BoundaryProcess for MockProcess {
     }
 
     async fn remaining_members(&self) -> Result<Vec<ProcessIdentity>, BoundaryError> {
-        self.state.membership_queries.fetch_add(1, Ordering::SeqCst);
+        let call = self.state.membership_queries.fetch_add(1, Ordering::SeqCst);
         if self.membership_pending {
             // A hung membership query: never resolves. The supervisor must bound it and
             // treat the timeout as an unprovable teardown.
@@ -555,6 +567,13 @@ impl BoundaryProcess for MockProcess {
                     start_time_ticks: 7,
                 })
                 .collect()),
+            Membership::ErrorThenEmpty(err) => {
+                if call == 0 {
+                    Err(BoundaryError::Membership(err.clone()))
+                } else {
+                    Ok(Vec::new())
+                }
+            }
         }
     }
 }

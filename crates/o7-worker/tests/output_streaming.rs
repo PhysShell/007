@@ -59,6 +59,7 @@ async fn output_channel_is_bounded_and_lossless() {
         max_chunk_bytes: 16,
         channel_capacity: 1,
         sink_backpressure_timeout: Duration::from_secs(30),
+        max_trailing_bytes: None,
     };
     let sink = RecordingSink::new();
     let result = run_to_completion(spec, &sink).await;

@@ -437,6 +437,18 @@ enum Termination {
     BoundaryFailed(String),
 }
 
+/// The PRIMARY fault message that initiated teardown, if the run ended on a fault. Used
+/// to prepend the cause to a composed `CleanupFailure` so it is never erased by the later
+/// force/reap/cleanup faults. A natural exit or a clean cancel has no primary fault.
+fn primary_fault_message(termination: &Termination) -> Option<String> {
+    match termination {
+        Termination::SinkFailed(m) => Some(format!("primary sink fault: {m}")),
+        Termination::OutputFailed(m) => Some(format!("primary output fault: {m}")),
+        Termination::BoundaryFailed(m) => Some(format!("primary boundary fault: {m}")),
+        Termination::Natural(_) | Termination::Cancelled { .. } => None,
+    }
+}
+
 async fn manage(
     spec: WorkerSpec,
     mut process: Box<dyn BoundaryProcess>,
@@ -559,10 +571,21 @@ async fn manage(
     if let Err(message) = cleanup_group(process.as_mut(), pubr).await {
         teardown_faults.push(message);
     }
+    // Compose the terminal cleanup outcome. When there ARE teardown faults, the primary
+    // fault that INITIATED teardown (the boundary/output/sink termination) is prepended,
+    // so the dominating `CleanupFailure` preserves the CAUSE in chronological order:
+    //   primary → force → reap → membership/cleanup.
+    // When teardown SUCCEEDS, there is nothing to prepend and the base fault stands (it
+    // already carries the cause), so a clean cancel/exit is not turned into a failure.
     let cleanup: Result<(), String> = if teardown_faults.is_empty() {
         Ok(())
     } else {
-        Err(teardown_faults.join("; "))
+        let mut composed = Vec::with_capacity(teardown_faults.len() + 1);
+        if let Some(primary) = primary_fault_message(&termination) {
+            composed.push(primary);
+        }
+        composed.extend(teardown_faults);
+        Err(composed.join("; "))
     };
 
     // Drain remaining output (pipes closing), then join readers. A read error seen
@@ -572,18 +595,17 @@ async fn manage(
     // The drain MUST be bounded, but no bound may cancel a healthy in-flight sink
     // publish. `out_rx.recv()` only returns `None` once every reader task ends (pipes
     // closed); an escaped descendant can hold an inherited pipe open — with no further
-    // output, or by writing forever — so an unbounded drain would hang. FOUR bounds,
-    // none of which caps a legitimate publish:
-    //   * per-message WAIT: bound how long we wait for the next chunk/error/EOF
-    //     (`DRAIN_IDLE_TIMEOUT`). An idle-but-open pipe expires here.
+    // output, or by writing forever — so an unbounded drain would hang. Bounds, none of
+    // which caps a legitimate publish:
+    //   * per-message WAIT: bounded by `min(DRAIN_IDLE_TIMEOUT, remaining total time)`, so
+    //     an idle-but-open pipe expires AND the wait never overshoots the total deadline.
     //   * per-message PUBLISH: `pubr.emit` keeps its own `sink_backpressure_timeout`;
     //     the drain never wraps it, so a slow-but-within-contract sink is not cancelled.
-    //   * BYTE budget: total trailing bytes exceeding the configured buffer + pipe
-    //     allowance means an escaped descendant is writing new data without end.
-    //   * TOTAL-TIME deadline (`MAX_TRAILING_DRAIN`): checked BETWEEN messages, so even a
-    //     one-byte-per-message producer under a slow-but-legal sink cannot drive an
-    //     effectively unbounded number of sequential publishes. It never interrupts an
-    //     in-flight publish, so the worst case is `MAX_TRAILING_DRAIN + one sink timeout`.
+    //   * TOTAL-TIME deadline (`MAX_TRAILING_DRAIN`): the hard ceiling for endless output.
+    //     Because the recv wait is capped by the remaining time and a publish is never
+    //     interrupted, the worst case is exactly `MAX_TRAILING_DRAIN + one sink timeout`.
+    //   * OPTIONAL explicit byte cap (`OutputPolicy::max_trailing_bytes`): a deliberate
+    //     caller ceiling, never inferred (a BoundaryStream's max buffering is unknown).
     // On a cleanup error the owned set is not proven gone, so skip the drain entirely
     // and let `CleanupFailure` dominate.
     let mut drain_output_error: Option<String> = None;
@@ -591,22 +613,35 @@ async fn manage(
     let mut drain_budget_exceeded = false;
     let mut drain_deadline_exceeded = false;
     if cleanup.is_ok() && pubr.alive {
-        let byte_budget = spec.output.trailing_drain_byte_budget();
+        // An EXPLICIT caller cap (never inferred): `None` applies no byte ceiling — a
+        // BoundaryStream's maximum post-exit buffering is unknown, so legitimate finite
+        // output of any size must drain to EOF cleanly. Endless output is bounded by the
+        // total-time deadline below regardless.
+        let byte_cap = spec.output.max_trailing_bytes;
         let total_deadline = Instant::now() + MAX_TRAILING_DRAIN;
         let mut drained_bytes: usize = 0;
         loop {
-            // Check the absolute total-drain deadline BEFORE accepting the next message
-            // or starting the next publish — never mid-publish.
-            if Instant::now() >= total_deadline {
+            // Bound the wait for the next message by the MINIMUM of the idle timeout and
+            // the remaining total-drain time, so the total ceiling is
+            // `MAX_TRAILING_DRAIN + one sink timeout` — never `+ DRAIN_IDLE_TIMEOUT` on
+            // top. This also serves as the pre-message total-deadline check.
+            let remaining = total_deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
                 drain_deadline_exceeded = true;
                 break;
             }
+            let recv_bound = DRAIN_IDLE_TIMEOUT.min(remaining);
             // Bound the WAIT for the next message only — never the publish below.
-            let message = match tokio::time::timeout(DRAIN_IDLE_TIMEOUT, out_rx.recv()).await {
+            let message = match tokio::time::timeout(recv_bound, out_rx.recv()).await {
                 Ok(Some(message)) => message,
                 Ok(None) => break, // all readers ended: pipes closed, clean drain.
                 Err(_) => {
-                    drain_timed_out = true;
+                    // Distinguish the total-deadline expiry from a mere idle gap.
+                    if Instant::now() >= total_deadline {
+                        drain_deadline_exceeded = true;
+                    } else {
+                        drain_timed_out = true;
+                    }
                     break;
                 }
             };
@@ -618,9 +653,9 @@ async fn manage(
                         break; // sink lost mid-drain → caught by `!pubr.alive` below.
                     }
                     drained_bytes = drained_bytes.saturating_add(len);
-                    // EXCEEDING the budget fails closed; merely REACHING it does not —
-                    // legitimate output of exactly the budget size, then EOF, is clean.
-                    if drained_bytes > byte_budget {
+                    // EXCEEDING an explicit cap fails closed; merely REACHING it does not —
+                    // output of exactly the cap size, then EOF, is a clean drain.
+                    if byte_cap.is_some_and(|cap| drained_bytes > cap) {
                         drain_budget_exceeded = true;
                         break;
                     }
@@ -682,8 +717,8 @@ async fn manage(
         ))
     } else if drain_budget_exceeded {
         WorkerResult::OutputFailure(
-            "trailing output drain exceeded its byte budget while output kept arriving; \
-             an escaped descendant is writing without end, so faithful capture is unproven"
+            "trailing output exceeded the configured max_trailing_bytes cap; \
+             output faithfulness unproven"
                 .to_owned(),
         )
     } else if drain_deadline_exceeded {
@@ -757,9 +792,12 @@ async fn run_cancellation(
 
     // Leader gone; wait for the rest of the group to drain within the remaining grace.
     loop {
-        // BOUNDED membership: a hung query cannot be proven empty, so we cannot claim a
-        // graceful cancel — escalate to force (whose cleanup then yields a bounded
-        // CleanupFailure if the group still cannot be verified gone).
+        // BOUNDED membership. A query error/timeout means the AUTHORITATIVE membership
+        // mechanism FAILED — that fault must not vanish into a clean cancel. Route it
+        // through the manage() fault path as a `BoundaryFailed`: manage force-kills the
+        // group and verifies cleanup, then composes the outcome — a recovered cleanup
+        // yields `BoundaryFailure` (preserving this fault), an unprovable one yields
+        // `CleanupFailure` (composing both). Never a clean `CancelledForcefully`.
         match bounded_members(process).await {
             Ok(members) if members.is_empty() => {
                 return Termination::Cancelled {
@@ -768,7 +806,11 @@ async fn run_cancellation(
                 };
             }
             Ok(_) => {}
-            Err(_) => return force_after_grace(process, pubr, exit).await,
+            Err(fault) => {
+                return Termination::BoundaryFailed(format!(
+                    "membership query during graceful drain: {fault}"
+                ));
+            }
         }
         if Instant::now() >= deadline {
             return force_after_grace(process, pubr, exit).await;

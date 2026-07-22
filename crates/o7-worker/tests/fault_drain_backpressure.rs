@@ -70,24 +70,24 @@ async fn trailing_publish_slower_than_sink_timeout_is_observation_failure() {
     );
 }
 
-// A descendant that keeps WRITING forever (never idle, never EOF) must be bounded by the
-// trailing message/byte budget → a bounded OutputFailure, never an infinite drain.
+// A descendant that keeps WRITING forever, under an EXPLICIT `max_trailing_bytes` cap,
+// must trip that cap → a bounded OutputFailure, never an infinite drain.
 #[tokio::test]
-async fn continuously_producing_escaped_stream_is_bounded_output_failure() {
+async fn continuously_producing_escaped_stream_trips_explicit_byte_cap() {
     let boundary = MockBoundary::new().with_infinite_stdout();
     let sink = RecordingSink::new();
 
-    let result = tokio::time::timeout(
-        OUTER_BOUND,
-        run_with(child_spec("bp-inf", "unused"), boundary.boxed(), &sink),
-    )
-    .await
-    .expect("an endless producer must be bounded by the drain budget, not hang");
+    let mut spec = child_spec("bp-inf", "unused");
+    spec.output.max_trailing_bytes = Some(256 * 1024); // deliberate 256 KiB ceiling
+
+    let result = tokio::time::timeout(OUTER_BOUND, run_with(spec, boundary.boxed(), &sink))
+        .await
+        .expect("an endless producer under an explicit cap must be bounded, not hang");
 
     assert_eq!(
         result.kind(),
         "OUTPUT_FAILURE",
-        "an endless escaped stream must trip the drain budget: {result:?}"
+        "an endless escaped stream must trip the explicit byte cap: {result:?}"
     );
     assert!(
         !matches!(result, WorkerResult::ExitedNormally(_)),
@@ -95,12 +95,50 @@ async fn continuously_producing_escaped_stream_is_bounded_output_failure() {
     );
 }
 
-// An endless ONE-BYTE-per-message producer under a slow-but-within-timeout sink cannot
-// reach the byte budget in any reasonable time (that would need hundreds of millions of
-// publishes), so the ABSOLUTE total-drain deadline must bound it. The terminal must land
-// at approximately `MAX_TRAILING_DRAIN + one sink timeout`, never open-ended.
+// Blocker regression: a LEGITIMATE finite stream far LARGER than the previously-inferred
+// budget (channel_capacity*max_chunk_bytes + 2 MiB), followed by EOF, must be a CLEAN
+// exit under the default policy — it is NOT an endless escaped writer. The old code
+// wrongly failed this because the finite data exceeded a hidden capacity assumption.
 #[tokio::test]
-async fn endless_one_byte_producer_with_slow_sink_is_bounded_by_total_drain_deadline() {
+async fn large_finite_trailing_stream_then_eof_is_clean_under_default_policy() {
+    // Under the OLD inferred budget this config gave 16 MiB + 2 MiB = 18 MiB; a 20 MiB
+    // finite stream exceeded it and was misclassified. Default policy has NO byte cap.
+    let mut spec = child_spec("bp-finite-big", "unused");
+    spec.output.channel_capacity = 1;
+    spec.output.max_chunk_bytes = 16 * 1024 * 1024;
+    assert_eq!(
+        spec.output.max_trailing_bytes, None,
+        "default: no inferred cap"
+    );
+
+    let twenty_mib = 20 * 1024 * 1024;
+    let boundary = MockBoundary::new()
+        .with_trailing_stdout(vec![vec![b'x'; twenty_mib]], Duration::from_millis(80));
+    let sink = RecordingSink::new();
+
+    let result = tokio::time::timeout(OUTER_BOUND, run_with(spec, boundary.boxed(), &sink))
+        .await
+        .expect("must resolve within bound");
+
+    assert_eq!(
+        result,
+        WorkerResult::ExitedNormally(0),
+        "a large finite trailing stream + EOF must be a clean exit, not an escaped writer: {result:?}"
+    );
+    assert_eq!(
+        sink.stdout().len(),
+        twenty_mib,
+        "all finite bytes delivered"
+    );
+}
+
+// Exact total-drain wall-clock: an endless ONE-BYTE-per-message producer (no explicit
+// byte cap) under a slow-but-within-timeout sink is bounded ONLY by the absolute
+// total-drain deadline. Because the per-message recv wait is capped by the REMAINING
+// total time (not a full idle timeout on top), the terminal lands within
+// `MAX_TRAILING_DRAIN + one sink timeout` — proving the tightened receive bound.
+#[tokio::test]
+async fn endless_one_byte_producer_bounded_exactly_by_total_drain_plus_one_sink_timeout() {
     let boundary = MockBoundary::new().with_infinite_stdout_one_byte();
     // Each output publish takes 20ms — well within the 1s sink timeout, so no publish is
     // ever cancelled; the total-drain deadline is the only thing that can stop this.
@@ -108,12 +146,15 @@ async fn endless_one_byte_producer_with_slow_sink_is_bounded_by_total_drain_dead
 
     let mut spec = child_spec("bp-1byte", "unused");
     spec.output.sink_backpressure_timeout = Duration::from_secs(1);
+    // No byte cap: the time deadline is the sole bound under test.
+    assert_eq!(spec.output.max_trailing_bytes, None);
+
+    let max_drain = o7_worker::supervisor::MAX_TRAILING_DRAIN;
+    let sink_timeout = spec.output.sink_backpressure_timeout;
 
     let started = std::time::Instant::now();
     let result = tokio::time::timeout(
-        o7_worker::supervisor::MAX_TRAILING_DRAIN
-            + spec.output.sink_backpressure_timeout
-            + Duration::from_secs(3),
+        max_drain + sink_timeout + Duration::from_secs(3),
         run_with(spec, boundary.boxed(), &sink),
     )
     .await
@@ -125,37 +166,32 @@ async fn endless_one_byte_producer_with_slow_sink_is_bounded_by_total_drain_dead
         "OUTPUT_FAILURE",
         "the total-drain deadline must fail closed: {result:?}"
     );
-    // Bounded by ~ total-drain allowance + one sink timeout (plus scheduling slack).
+    // Genuinely ran until the deadline...
     assert!(
-        elapsed
-            <= o7_worker::supervisor::MAX_TRAILING_DRAIN
-                + Duration::from_millis(20)
-                + Duration::from_secs(2),
-        "terminal not bounded by ~total-drain + one sink timeout: {elapsed:?}"
+        elapsed >= max_drain,
+        "must reach the total-drain deadline: {elapsed:?}"
     );
-    // And it genuinely reached the deadline (didn't trip the byte budget early): at
-    // ~1 byte / 20ms it drained only ~a few hundred bytes, far under the multi-MiB budget.
+    // ...and did NOT overshoot by a full extra idle timeout: the ceiling is
+    // MAX_TRAILING_DRAIN + one sink timeout (+ scheduling/spawn slack), NOT + idle timeout.
     assert!(
-        elapsed >= o7_worker::supervisor::MAX_TRAILING_DRAIN,
-        "must have run until the total-drain deadline: {elapsed:?}"
+        elapsed <= max_drain + sink_timeout + Duration::from_secs(1),
+        "terminal not bounded by ~total-drain + one sink timeout: {elapsed:?}"
     );
 }
 
-// Trailing output of EXACTLY the byte budget, then EOF, must SUCCEED. Reaching the budget
+// Trailing output of EXACTLY the explicit cap, then EOF, must SUCCEED. Reaching the cap
 // is not exceeding it — only strictly more trailing output fails closed. Regression for
-// the off-by-one `>=` boundary that rejected legitimate exact-size output before its EOF.
+// the off-by-one boundary that rejected legitimate exact-size output before its EOF.
 #[tokio::test]
-async fn trailing_output_of_exactly_the_budget_then_eof_succeeds() {
-    // A small configured buffer keeps the budget close to the fixed pipe allowance.
+async fn trailing_output_of_exactly_the_cap_then_eof_succeeds() {
+    let cap = 512 * 1024;
     let mut spec = child_spec("bp-exact", "unused");
-    spec.output.channel_capacity = 1;
-    spec.output.max_chunk_bytes = 64 * 1024;
-    let budget = spec.output.trailing_drain_byte_budget();
+    spec.output.max_trailing_bytes = Some(cap);
 
-    // Deliver EXACTLY `budget` bytes as a single trailing burst (arriving ~80ms after the
+    // Deliver EXACTLY `cap` bytes as a single trailing burst (arriving ~80ms after the
     // leader exit, so it is drained, not consumed in the run loop), then EOF.
-    let boundary = MockBoundary::new()
-        .with_trailing_stdout(vec![vec![b'x'; budget]], Duration::from_millis(80));
+    let boundary =
+        MockBoundary::new().with_trailing_stdout(vec![vec![b'x'; cap]], Duration::from_millis(80));
     let sink = RecordingSink::new();
 
     let result = tokio::time::timeout(OUTER_BOUND, run_with(spec, boundary.boxed(), &sink))
@@ -165,21 +201,20 @@ async fn trailing_output_of_exactly_the_budget_then_eof_succeeds() {
     assert_eq!(
         result,
         WorkerResult::ExitedNormally(0),
-        "exactly-budget trailing output then EOF must be a clean exit: {result:?}"
+        "exactly-cap trailing output then EOF must be a clean exit: {result:?}"
     );
-    assert_eq!(sink.stdout().len(), budget, "all budget bytes delivered");
+    assert_eq!(sink.stdout().len(), cap, "all cap bytes delivered");
 }
 
-// One byte OVER the budget must fail closed — the complement of the exact-budget case.
+// One byte OVER the explicit cap must fail closed — the complement of the exact-cap case.
 #[tokio::test]
-async fn trailing_output_one_byte_over_the_budget_fails() {
+async fn trailing_output_one_byte_over_the_cap_fails() {
+    let cap = 512 * 1024;
     let mut spec = child_spec("bp-over", "unused");
-    spec.output.channel_capacity = 1;
-    spec.output.max_chunk_bytes = 64 * 1024;
-    let budget = spec.output.trailing_drain_byte_budget();
+    spec.output.max_trailing_bytes = Some(cap);
 
     let boundary = MockBoundary::new()
-        .with_trailing_stdout(vec![vec![b'x'; budget + 1]], Duration::from_millis(80));
+        .with_trailing_stdout(vec![vec![b'x'; cap + 1]], Duration::from_millis(80));
     let sink = RecordingSink::new();
 
     let result = tokio::time::timeout(OUTER_BOUND, run_with(spec, boundary.boxed(), &sink))
@@ -189,6 +224,6 @@ async fn trailing_output_one_byte_over_the_budget_fails() {
     assert_eq!(
         result.kind(),
         "OUTPUT_FAILURE",
-        "trailing output exceeding the budget must fail closed: {result:?}"
+        "trailing output exceeding the cap must fail closed: {result:?}"
     );
 }

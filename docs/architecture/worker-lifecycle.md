@@ -72,8 +72,12 @@ empty". These four trait methods therefore carry explicit **cancel-safety** cont
 (their futures are dropped when the timeout fires; `wait()` is additionally dropped and
 recreated by the `select!` loop on every iteration, so a leader exit reached while it was
 not polled must still be observed). When several teardown ops fail together, the terminal
-`CleanupFailure` **composes every fault** (force, then reap, then membership/cleanup) in
-execution order — no underlying failure is masked.
+`CleanupFailure` **composes every fault** in chronological order — the PRIMARY fault that
+initiated teardown (the boundary/output/sink termination), then force, then reap, then
+membership/cleanup — so `CleanupFailure` dominates without ever erasing the cause. A
+membership query that fails DURING the graceful drain is likewise never reported as a
+clean `CancelledForcefully`: it routes through the fault path, becoming a `BoundaryFailure`
+if cleanup later recovers or a composed `CleanupFailure` if it stays unprovable.
 
 ## Drop semantics
 Dropping the last `WorkerHandle` requests cancellation (it does not silently walk
@@ -100,21 +104,23 @@ stdout-vs-stderr interleaving is not. Chunk size and the internal channel are bo
 memory never grows without limit; trailing output is drained before the terminal result;
 and if the sink cannot keep up within the backpressure timeout, the worker fails closed
 (`ObservationFailure`) rather than silently truncating. The trailing-output drain is
-itself **bounded**, by FOUR SEPARATE limits so no one of them cancels a healthy publish:
+itself **bounded**, by limits none of which cancels a healthy publish:
 on a cleanup error the supervisor does not wait on pipe closure at all (it aborts the
-readers and lets `CleanupFailure` dominate); the wait for the NEXT trailing message has an
-idle timeout (an escaped descendant may hold an inherited pipe open with no further
-output); each trailing PUBLISH keeps its own `sink_backpressure_timeout` — the drain never
-wraps it, so a slow-but-within-contract sink is delivered, not drain-cancelled; a trailing
-BYTE budget (the configured channel buffer plus a pipe allowance) bounds an escaped
-descendant that keeps WRITING forever (trailing output that *exceeds* the budget fails;
-output that merely *reaches* it and is then followed by EOF is a clean drain); and an
-absolute TOTAL-TIME deadline (`MAX_TRAILING_DRAIN`), checked between messages, bounds a
-one-byte-per-message producer that could otherwise drive effectively unbounded sequential
-publishes under a slow-but-legal sink — the worst-case terminal is `MAX_TRAILING_DRAIN +
-one sink_backpressure_timeout`. Any of the idle-timeout / byte-budget / total-time /
-read-error outcomes is an `OutputFailure`, never a clean pass, and it is preserved even
-when the terminal sink then fails (the dominating `ObservationFailure` carries it).
+readers and lets `CleanupFailure` dominate); the wait for the NEXT trailing message is
+bounded by `min(idle timeout, remaining total time)` (an escaped descendant may hold an
+inherited pipe open with no further output, and the wait never overshoots the total
+deadline); each trailing PUBLISH keeps its own `sink_backpressure_timeout` — the drain
+never wraps it, so a slow-but-within-contract sink is delivered, not drain-cancelled; and
+an absolute TOTAL-TIME deadline (`MAX_TRAILING_DRAIN`), checked between messages, is the
+hard ceiling for endless output — the worst-case terminal is exactly `MAX_TRAILING_DRAIN +
+one sink_backpressure_timeout`. There is deliberately **no inferred byte budget**: a
+`BoundaryStream` is an arbitrary `AsyncRead` with no contract on maximum post-exit
+buffering, so legitimate finite output of any size drains to EOF cleanly; a caller that
+wants a byte ceiling sets the EXPLICIT `OutputPolicy::max_trailing_bytes` (output
+*exceeding* it fails; output that merely *reaches* it, then hits EOF, is clean). Any of the
+idle-timeout / total-time / explicit-cap / read-error outcomes is an `OutputFailure`, never
+a clean pass, and it is preserved even when the terminal sink then fails (the dominating
+`ObservationFailure` carries it).
 
 ## Heartbeat
 A heartbeat means **the supervisor is alive and owns a live process** — NOT that the
