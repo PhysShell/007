@@ -80,6 +80,40 @@ async fn transient_drain_membership_failure_then_recovery_is_boundary_failure_no
     );
 }
 
+// Adversarial ONE-SHOT boundary: the first wait() returns the exit; a SECOND completed
+// wait() would ERROR. During cancellation the leader is reaped once (run_cancellation),
+// then a transient drain membership failure (Error → Empty) occurs. The supervisor must
+// NOT wait() again — the result must be BoundaryFailure (cleanup recovered), and exactly
+// ONE wait() must have completed. (The old code's emergency reap called wait() twice,
+// turning this into a spurious CleanupFailure on a one-shot boundary.)
+#[tokio::test]
+async fn one_shot_boundary_recovery_is_boundary_failure_without_a_second_wait() {
+    let boundary = MockBoundary::new()
+        .with_leader_exit_after(Duration::from_millis(150))
+        .with_one_shot_wait()
+        .with_membership_error_then_empty("transient proc failure");
+    let state = boundary.state();
+    let sink = RecordingSink::new();
+
+    let result = cancel_then_join(boundary, "drain-oneshot", &sink).await;
+
+    assert_eq!(
+        result.kind(),
+        "BOUNDARY_FAILURE",
+        "a one-shot boundary's recovery must not become a spurious CleanupFailure: {result:?}"
+    );
+    assert!(
+        message(&result).contains("transient proc failure"),
+        "the membership fault must be preserved: {}",
+        message(&result)
+    );
+    assert_eq!(
+        state.wait_completions(),
+        1,
+        "the leader exit must be consumed exactly ONCE — no redundant second wait()"
+    );
+}
+
 // PERSISTENT membership failure during graceful drain AND cleanup: the terminal is a
 // CleanupFailure that COMPOSES both the drain membership fault and the cleanup fault.
 #[tokio::test]

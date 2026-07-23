@@ -37,6 +37,10 @@ pub struct MockState {
     graceful_stops: AtomicUsize,
     force_stops: AtomicUsize,
     membership_queries: AtomicUsize,
+    /// Number of times `wait()` ran to COMPLETION (returned) — NOT counting futures that
+    /// were polled then dropped (cancel-safe recreation). Lets a test prove the leader's
+    /// exit is consumed exactly once.
+    wait_completions: AtomicUsize,
 }
 
 impl MockState {
@@ -67,6 +71,11 @@ impl MockState {
 
     pub fn membership_queries(&self) -> usize {
         self.membership_queries.load(Ordering::SeqCst)
+    }
+
+    /// How many `wait()` calls ran to completion (returned a result).
+    pub fn wait_completions(&self) -> usize {
+        self.wait_completions.load(Ordering::SeqCst)
     }
 }
 
@@ -127,6 +136,10 @@ pub struct MockBoundary {
     /// dropping and recreating the `wait()` future across select iterations re-arms the
     /// SAME deadline and never postpones the exit.
     leader_exit_after: Option<Duration>,
+    /// A ONE-SHOT wait: the first `wait()` that completes returns the exit; any later
+    /// completed `wait()` ERRORS. Models a boundary whose exit status is consumed once
+    /// and not repeatable — so the supervisor must never `wait()` twice on a reaped leader.
+    one_shot_wait: bool,
     leader_exit: BoundaryExit,
     wait_gate: WaitGate,
     membership: Membership,
@@ -158,6 +171,7 @@ impl MockBoundary {
             stdout_infinite: false,
             stdout_infinite_one_byte: false,
             leader_exit_after: None,
+            one_shot_wait: false,
             leader_exit: BoundaryExit::Code(0),
             wait_gate: WaitGate::Immediate,
             membership: Membership::Empty,
@@ -312,6 +326,14 @@ impl MockBoundary {
         self
     }
 
+    /// The leader's exit is ONE-SHOT: the first completed `wait()` returns it; any later
+    /// completed `wait()` errors. The supervisor must never `wait()` twice on an
+    /// already-reaped leader, so this must not turn a recovery into a spurious failure.
+    pub fn with_one_shot_wait(mut self) -> Self {
+        self.one_shot_wait = true;
+        self
+    }
+
     /// Every membership query fails: the boundary can never prove the owned set is
     /// gone, so cleanup must fail closed.
     pub fn with_membership_error(mut self, error: &str) -> Self {
@@ -432,6 +454,8 @@ impl ProcessBoundary for MockBoundary {
             wait_deadline: self
                 .leader_exit_after
                 .map(|d| tokio::time::Instant::now() + d),
+            one_shot_wait: self.one_shot_wait,
+            wait_consumed: Arc::new(AtomicBool::new(false)),
             membership: self.membership.clone(),
             membership_pending: self.membership_pending,
             graceful_stop_error: self.graceful_stop_error.clone(),
@@ -459,6 +483,10 @@ struct MockProcess {
     /// Absolute exit deadline (see [`MockBoundary::with_leader_exit_after`]). Takes
     /// precedence over `wait_gate` when set.
     wait_deadline: Option<tokio::time::Instant>,
+    one_shot_wait: bool,
+    /// Set once a `wait()` has COMPLETED — a one-shot boundary errors on any later
+    /// completed wait.
+    wait_consumed: Arc<AtomicBool>,
     membership: Membership,
     membership_pending: bool,
     graceful_stop_error: Option<String>,
@@ -471,6 +499,16 @@ struct MockProcess {
     /// gated `wait()` stays pending (the supervisor must bound it).
     force_succeeded: Arc<AtomicBool>,
     state: Arc<MockState>,
+}
+
+impl MockProcess {
+    /// Record a completed `wait()` (consumes the one-shot exit, counts the completion)
+    /// and return the leader exit.
+    fn complete_wait(&self) -> BoundaryExit {
+        self.wait_consumed.store(true, Ordering::SeqCst);
+        self.state.wait_completions.fetch_add(1, Ordering::SeqCst);
+        self.leader_exit
+    }
 }
 
 #[async_trait]
@@ -523,13 +561,20 @@ impl BoundaryProcess for MockProcess {
     }
 
     async fn wait(&mut self) -> Result<BoundaryExit, BoundaryError> {
+        // A ONE-SHOT boundary errors on any wait AFTER the exit was already consumed —
+        // checked up front so a recreated future (before consumption) is unaffected.
+        if self.one_shot_wait && self.wait_consumed.load(Ordering::SeqCst) {
+            return Err(BoundaryError::Wait(io::Error::other(
+                "one-shot wait already consumed",
+            )));
+        }
         // An absolute deadline takes precedence: `sleep_until` is cancel-safe, so the
         // supervisor dropping/recreating this future across select iterations re-arms the
         // SAME deadline and the exit still fires. (A relative `sleep` would be a bug —
         // each recreate would restart it and the leader would never appear to exit.)
         if let Some(deadline) = self.wait_deadline {
             tokio::time::sleep_until(deadline).await;
-            return Ok(self.leader_exit);
+            return Ok(self.complete_wait());
         }
         match self.wait_gate {
             WaitGate::Immediate => {}
@@ -547,7 +592,7 @@ impl BoundaryProcess for MockProcess {
                 std::future::pending::<()>().await;
             }
         }
-        Ok(self.leader_exit)
+        Ok(self.complete_wait())
     }
 
     async fn remaining_members(&self) -> Result<Vec<ProcessIdentity>, BoundaryError> {

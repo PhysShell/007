@@ -378,10 +378,15 @@ async fn run_inner(
         .await
     {
         // A lost sink on Spawned still owns a live process. Prove cleanup: an
-        // unprovable/failed cleanup (leaked processes) DOMINATES the sink failure.
+        // unprovable/failed cleanup (leaked processes) DOMINATES the sink failure — but
+        // the PRIMARY sink fault (the lost Spawned publish) is preserved FIRST so the
+        // cause is never erased.
+        let sink_fault = pubr.error();
         return match abandon_and_verify(process.as_mut(), &mut pubr).await {
-            Err(message) => WorkerResult::CleanupFailure(message),
-            Ok(()) => WorkerResult::ObservationFailure(pubr.error()),
+            Err(message) => {
+                WorkerResult::CleanupFailure(format!("primary sink fault: {sink_fault}; {message}"))
+            }
+            Ok(()) => WorkerResult::ObservationFailure(sink_fault),
         };
     }
 
@@ -425,16 +430,38 @@ enum Phase {
     BoundaryFailed(String),
 }
 
-/// Reasons the run phase ended, before final cleanup.
+/// Reasons the run phase ended, before final cleanup. The fault variants carry `reaped`:
+/// `Some(exit)` when the leader's exit was ALREADY successfully observed before the fault
+/// (so the emergency teardown must NOT `wait()` again — a one-shot boundary cannot repeat
+/// a consumed exit), `None` when the leader is still live / unreaped.
 enum Termination {
     Natural(BoundaryExit),
     Cancelled {
         forceful: bool,
         exit: Option<BoundaryExit>,
     },
-    SinkFailed(String),
-    OutputFailed(String),
-    BoundaryFailed(String),
+    SinkFailed {
+        message: String,
+        reaped: Option<BoundaryExit>,
+    },
+    OutputFailed {
+        message: String,
+        reaped: Option<BoundaryExit>,
+    },
+    BoundaryFailed {
+        message: String,
+        reaped: Option<BoundaryExit>,
+    },
+}
+
+impl Termination {
+    /// A boundary fault whose leader is NOT yet reaped (the common case).
+    fn boundary_failed(message: String) -> Self {
+        Self::BoundaryFailed {
+            message,
+            reaped: None,
+        }
+    }
 }
 
 /// The PRIMARY fault message that initiated teardown, if the run ended on a fault. Used
@@ -442,9 +469,24 @@ enum Termination {
 /// force/reap/cleanup faults. A natural exit or a clean cancel has no primary fault.
 fn primary_fault_message(termination: &Termination) -> Option<String> {
     match termination {
-        Termination::SinkFailed(m) => Some(format!("primary sink fault: {m}")),
-        Termination::OutputFailed(m) => Some(format!("primary output fault: {m}")),
-        Termination::BoundaryFailed(m) => Some(format!("primary boundary fault: {m}")),
+        Termination::SinkFailed { message, .. } => Some(format!("primary sink fault: {message}")),
+        Termination::OutputFailed { message, .. } => {
+            Some(format!("primary output fault: {message}"))
+        }
+        Termination::BoundaryFailed { message, .. } => {
+            Some(format!("primary boundary fault: {message}"))
+        }
+        Termination::Natural(_) | Termination::Cancelled { .. } => None,
+    }
+}
+
+/// Whether this termination is a fault (needs emergency teardown), and — if so — the
+/// already-observed leader exit (so the caller can skip a redundant `wait()`).
+fn fault_reaped(termination: &Termination) -> Option<Option<BoundaryExit>> {
+    match termination {
+        Termination::SinkFailed { reaped, .. }
+        | Termination::OutputFailed { reaped, .. }
+        | Termination::BoundaryFailed { reaped, .. } => Some(*reaped),
         Termination::Natural(_) | Termination::Cancelled { .. } => None,
     }
 }
@@ -528,9 +570,15 @@ async fn manage(
 
     let termination = match phase {
         Phase::Natural(exit) => Termination::Natural(exit),
-        Phase::SinkFailed(m) => Termination::SinkFailed(m),
-        Phase::OutputFailed(m) => Termination::OutputFailed(m),
-        Phase::BoundaryFailed(m) => Termination::BoundaryFailed(m),
+        Phase::SinkFailed(m) => Termination::SinkFailed {
+            message: m,
+            reaped: None,
+        },
+        Phase::OutputFailed(m) => Termination::OutputFailed {
+            message: m,
+            reaped: None,
+        },
+        Phase::BoundaryFailed(m) => Termination::boundary_failed(m),
         Phase::CancelRequested => {
             let _ = advance(state, WorkerState::Cancelling);
             run_cancellation(process.as_mut(), spec.cancellation.graceful_timeout, pubr).await
@@ -542,10 +590,7 @@ async fn manage(
     // teardown fault (force, reap, then cleanup below) is ACCUMULATED in execution order
     // and composed into one `CleanupFailure`, so no underlying failure is dropped.
     let mut teardown_faults: Vec<String> = Vec::new();
-    if matches!(
-        termination,
-        Termination::SinkFailed(_) | Termination::OutputFailed(_) | Termination::BoundaryFailed(_)
-    ) {
+    if let Some(already_reaped) = fault_reaped(&termination) {
         // This emergency SIGKILL is a REAL teardown action, so it must not be
         // invisible to the authoritative stream (PR-4's source-of-truth adapter maps
         // it to a canonical event). Publish — and honor — `ForceStopSent` before
@@ -553,14 +598,18 @@ async fn manage(
         // if it dies HERE, `!pubr.alive` makes `ObservationFailure` dominate the
         // boundary/output fault in the terminal-precedence check below.
         let _ = pubr.emit(WorkerObservation::ForceStopSent).await;
-        // BOUNDED force + reap: a hung force delivery or a `wait()` that never resolves
-        // must not hang here. Collect BOTH faults (a failed force AND a failed reap are
-        // distinct, independently-diagnostic problems).
+        // BOUNDED force: a hung force delivery must not hang here.
         if let Err(err) = bounded_force_stop(process.as_mut()).await {
             teardown_faults.push(err);
         }
-        if let Err(err) = bounded_reap(process.as_mut()).await {
-            teardown_faults.push(err);
+        // BOUNDED reap — but ONLY if the leader was not already reaped. Re-calling
+        // `wait()` after a successful, consumed exit is not part of the trait contract
+        // (a one-shot boundary would error), so a fault whose leader is already reaped
+        // must not `wait()` again.
+        if already_reaped.is_none() {
+            if let Err(err) = bounded_reap(process.as_mut()).await {
+                teardown_faults.push(err);
+            }
         }
     }
 
@@ -648,17 +697,24 @@ async fn manage(
             match message {
                 ReaderMessage::Chunk(chunk) => {
                     let len = chunk.bytes.len();
+                    // ENFORCE the explicit cap BEFORE publishing (a true ceiling, not a
+                    // post-hoc alarm): if this whole chunk would push the total OVER the
+                    // cap, do NOT publish it — chunks stay atomic (never a partial chunk).
+                    // Reaching the cap exactly is allowed; only strictly exceeding fails.
+                    if let Some(cap) = byte_cap {
+                        let within = drained_bytes
+                            .checked_add(len)
+                            .is_some_and(|total| total <= cap);
+                        if !within {
+                            drain_budget_exceeded = true;
+                            break; // chunk NOT published
+                        }
+                    }
                     // `emit` is bounded by `sink_backpressure_timeout`, NOT the drain.
                     if !pubr.emit(WorkerObservation::OutputChunk(chunk)).await {
                         break; // sink lost mid-drain → caught by `!pubr.alive` below.
                     }
                     drained_bytes = drained_bytes.saturating_add(len);
-                    // EXCEEDING an explicit cap fails closed; merely REACHING it does not —
-                    // output of exactly the cap size, then EOF, is a clean drain.
-                    if byte_cap.is_some_and(|cap| drained_bytes > cap) {
-                        drain_budget_exceeded = true;
-                        break;
-                    }
                 }
                 ReaderMessage::ReadError(message) => {
                     drain_output_error = Some(message);
@@ -677,7 +733,10 @@ async fn manage(
     let reported_exit = match &termination {
         Termination::Natural(exit) => Some(*exit),
         Termination::Cancelled { exit, .. } => *exit,
-        _ => None,
+        // A fault whose leader was already reaped can still report that exit.
+        Termination::SinkFailed { reaped, .. }
+        | Termination::OutputFailed { reaped, .. }
+        | Termination::BoundaryFailed { reaped, .. } => *reaped,
     };
     if let Some(exit) = reported_exit {
         let _ = pubr.emit(WorkerObservation::Exited(exit)).await;
@@ -695,9 +754,9 @@ async fn manage(
             forceful: false, ..
         } => WorkerResult::CancelledGracefully,
         Termination::Cancelled { forceful: true, .. } => WorkerResult::CancelledForcefully,
-        Termination::SinkFailed(message) => WorkerResult::ObservationFailure(message),
-        Termination::OutputFailed(message) => WorkerResult::OutputFailure(message),
-        Termination::BoundaryFailed(message) => WorkerResult::BoundaryFailure(message),
+        Termination::SinkFailed { message, .. } => WorkerResult::ObservationFailure(message),
+        Termination::OutputFailed { message, .. } => WorkerResult::OutputFailure(message),
+        Termination::BoundaryFailed { message, .. } => WorkerResult::BoundaryFailure(message),
     };
     // Fold the run outcome and any drain fault into a single EFFECTIVE result FIRST,
     // before sink-loss precedence is applied. A bounded-drain timeout or a drain-time
@@ -733,27 +792,50 @@ async fn manage(
         base
     };
 
-    // Terminal precedence — CleanupFailure > ObservationFailure > Boundary/Output:
-    //   1. an unprovable/failed cleanup (possible leaked processes) dominates all;
-    //   2. a lost authoritative sink dominates the effective boundary/output fault —
-    //      and that effective fault (a run-loop fault OR a drain OutputFailure) is
-    //      preserved in the ObservationFailure message so it is never erased;
-    //   3. otherwise the effective outcome (run fault, drain fault, or clean result).
-    let result = if let Err(message) = cleanup {
-        WorkerResult::CleanupFailure(message)
-    } else if !pubr.alive {
-        WorkerResult::ObservationFailure(observation_failure_message(pubr, &effective))
-    } else {
-        effective
-    };
-
-    // If the sink is still usable and we failed, tell it (SupervisorFailed).
-    if pubr.alive && result.is_failure() {
+    // Terminal precedence is computed by `finalize`, which reads the CURRENT sink-alive
+    // state. It must be applied AFTER the `SupervisorFailed` publish, because that publish
+    // is itself an authoritative action that can lose the sink. So: compute a TENTATIVE
+    // result to obtain the message, attempt the `SupervisorFailed` publish (honoring its
+    // outcome via `pubr.alive`), then re-finalize with the post-publish sink state.
+    let tentative = finalize(&cleanup, pubr, &effective);
+    if pubr.alive && tentative.is_failure() {
         let _ = pubr
-            .emit(WorkerObservation::SupervisorFailed(result.message()))
+            .emit(WorkerObservation::SupervisorFailed(tentative.message()))
             .await;
     }
-    result
+    finalize(&cleanup, pubr, &effective)
+}
+
+/// Terminal precedence — CleanupFailure > ObservationFailure > Boundary/Output — using
+/// the CURRENT sink-alive state. When cleanup failed, `CleanupFailure` dominates but a
+/// concurrently-lost sink is still preserved in the message. When cleanup succeeded but
+/// the sink was lost, the effective boundary/output fault is preserved inside the
+/// `ObservationFailure` message. Otherwise the effective outcome stands.
+fn finalize(
+    cleanup: &Result<(), String>,
+    pubr: &Publisher,
+    effective: &WorkerResult,
+) -> WorkerResult {
+    match cleanup {
+        Err(message) => {
+            if pubr.alive {
+                WorkerResult::CleanupFailure(message.clone())
+            } else {
+                // The authoritative sink was ALSO lost — preserve BOTH faults.
+                WorkerResult::CleanupFailure(format!(
+                    "{message}; observation sink lost: {}",
+                    pubr.error()
+                ))
+            }
+        }
+        Ok(()) => {
+            if pubr.alive {
+                effective.clone()
+            } else {
+                WorkerResult::ObservationFailure(observation_failure_message(pubr, effective))
+            }
+        }
+    }
 }
 
 /// Group-based cancellation: SIGTERM the group; graceful means the WHOLE owned set
@@ -775,7 +857,7 @@ async fn run_cancellation(
     // waiting out the grace.
     match bounded_graceful_stop(process).await {
         GracefulStop::Ok => {}
-        GracefulStop::Failed(err) => return Termination::BoundaryFailed(err),
+        GracefulStop::Failed(err) => return Termination::boundary_failed(err),
         GracefulStop::TimedOut => return force_after_grace(process, pubr, None).await,
     }
     let _ = pubr.emit(WorkerObservation::GracefulStopSent).await;
@@ -783,7 +865,7 @@ async fn run_cancellation(
     // Reap the leader (a zombie leader would otherwise count as a live member).
     let exit = match tokio::time::timeout(grace, process.wait()).await {
         Ok(Ok(exit)) => Some(exit),
-        Ok(Err(err)) => return Termination::BoundaryFailed(err.to_string()),
+        Ok(Err(err)) => return Termination::boundary_failed(err.to_string()),
         Err(_) => {
             // Leader itself did not exit within grace → force the group.
             return force_after_grace(process, pubr, None).await;
@@ -807,9 +889,12 @@ async fn run_cancellation(
             }
             Ok(_) => {}
             Err(fault) => {
-                return Termination::BoundaryFailed(format!(
-                    "membership query during graceful drain: {fault}"
-                ));
+                // The leader was ALREADY reaped above (`exit`), so carry it so manage()
+                // does NOT `wait()` again — a one-shot boundary cannot repeat the exit.
+                return Termination::BoundaryFailed {
+                    message: format!("membership query during graceful drain: {fault}"),
+                    reaped: exit,
+                };
             }
         }
         if Instant::now() >= deadline {
@@ -830,7 +915,7 @@ async fn force_after_grace(
     let _ = pubr.emit(WorkerObservation::ForceStopSent).await;
     // BOUNDED force-stop: a hung force delivery must not stall cancellation.
     if let Err(err) = bounded_force_stop(process).await {
-        return Termination::BoundaryFailed(err);
+        return Termination::boundary_failed(err);
     }
     let exit = match exit {
         Some(exit) => Some(exit),
@@ -840,7 +925,7 @@ async fn force_after_grace(
         // produce a bounded terminal.
         None => match bounded_reap(process).await {
             Ok(exit) => Some(exit),
-            Err(err) => return Termination::BoundaryFailed(err),
+            Err(err) => return Termination::boundary_failed(err),
         },
     };
     Termination::Cancelled {

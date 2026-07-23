@@ -77,7 +77,12 @@ initiated teardown (the boundary/output/sink termination), then force, then reap
 membership/cleanup — so `CleanupFailure` dominates without ever erasing the cause. A
 membership query that fails DURING the graceful drain is likewise never reported as a
 clean `CancelledForcefully`: it routes through the fault path, becoming a `BoundaryFailure`
-if cleanup later recovers or a composed `CleanupFailure` if it stays unprovable.
+if cleanup later recovers or a composed `CleanupFailure` if it stays unprovable — and,
+because the leader was already reaped there, the emergency teardown does NOT `wait()` again
+(a one-shot boundary's consumed exit is never re-requested). The terminal result is
+computed AFTER the final `SupervisorFailed` publish, so a sink lost on that very publish
+still becomes an `ObservationFailure` (preserving the run fault), and a concurrently-lost
+sink is preserved even when `CleanupFailure` dominates.
 
 ## Drop semantics
 Dropping the last `WorkerHandle` requests cancellation (it does not silently walk
@@ -116,8 +121,11 @@ hard ceiling for endless output — the worst-case terminal is exactly `MAX_TRAI
 one sink_backpressure_timeout`. There is deliberately **no inferred byte budget**: a
 `BoundaryStream` is an arbitrary `AsyncRead` with no contract on maximum post-exit
 buffering, so legitimate finite output of any size drains to EOF cleanly; a caller that
-wants a byte ceiling sets the EXPLICIT `OutputPolicy::max_trailing_bytes` (output
-*exceeding* it fails; output that merely *reaches* it, then hits EOF, is clean). Any of the
+wants a byte ceiling sets the EXPLICIT `OutputPolicy::max_trailing_bytes`. The cap is
+ENFORCED before publishing: a chunk that would push the total over the cap is not
+published at all (chunks stay atomic — never a partial), so the cap is a true ceiling, not
+a post-hoc alarm. Output that merely *reaches* it, then hits EOF, is clean; only strictly
+*exceeding* it fails. Any of the
 idle-timeout / total-time / explicit-cap / read-error outcomes is an `OutputFailure`, never
 a clean pass, and it is preserved even when the terminal sink then fails (the dominating
 `ObservationFailure` carries it).

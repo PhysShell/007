@@ -179,17 +179,16 @@ async fn endless_one_byte_producer_bounded_exactly_by_total_drain_plus_one_sink_
     );
 }
 
-// Trailing output of EXACTLY the explicit cap, then EOF, must SUCCEED. Reaching the cap
-// is not exceeding it — only strictly more trailing output fails closed. Regression for
-// the off-by-one boundary that rejected legitimate exact-size output before its EOF.
+// Trailing output of EXACTLY the explicit cap, then EOF, must SUCCEED and deliver exactly
+// `cap` bytes. Reaching the cap is not exceeding it.
 #[tokio::test]
 async fn trailing_output_of_exactly_the_cap_then_eof_succeeds() {
-    let cap = 512 * 1024;
+    let cap = 1000;
     let mut spec = child_spec("bp-exact", "unused");
     spec.output.max_trailing_bytes = Some(cap);
+    // `max_chunk_bytes` >= the chunk, so it is ONE atomic OutputChunk (not split).
+    spec.output.max_chunk_bytes = 64 * 1024;
 
-    // Deliver EXACTLY `cap` bytes as a single trailing burst (arriving ~80ms after the
-    // leader exit, so it is drained, not consumed in the run loop), then EOF.
     let boundary =
         MockBoundary::new().with_trailing_stdout(vec![vec![b'x'; cap]], Duration::from_millis(80));
     let sink = RecordingSink::new();
@@ -203,18 +202,20 @@ async fn trailing_output_of_exactly_the_cap_then_eof_succeeds() {
         WorkerResult::ExitedNormally(0),
         "exactly-cap trailing output then EOF must be a clean exit: {result:?}"
     );
-    assert_eq!(sink.stdout().len(), cap, "all cap bytes delivered");
+    assert_eq!(sink.stdout().len(), cap, "exactly cap bytes delivered");
 }
 
-// One byte OVER the explicit cap must fail closed — the complement of the exact-cap case.
+// A single oversized chunk (cap+1 as ONE atomic OutputChunk) must fail closed AND deliver
+// ZERO bytes from it — the cap is ENFORCED before publish, not a post-hoc alarm.
 #[tokio::test]
-async fn trailing_output_one_byte_over_the_cap_fails() {
-    let cap = 512 * 1024;
+async fn single_oversized_chunk_is_withheld_entirely() {
+    let cap = 1000;
     let mut spec = child_spec("bp-over", "unused");
     spec.output.max_trailing_bytes = Some(cap);
+    spec.output.max_chunk_bytes = 64 * 1024; // the whole 1500-byte chunk is one OutputChunk
 
-    let boundary = MockBoundary::new()
-        .with_trailing_stdout(vec![vec![b'x'; cap + 1]], Duration::from_millis(80));
+    let boundary =
+        MockBoundary::new().with_trailing_stdout(vec![vec![b'x'; 1500]], Duration::from_millis(80));
     let sink = RecordingSink::new();
 
     let result = tokio::time::timeout(OUTER_BOUND, run_with(spec, boundary.boxed(), &sink))
@@ -224,6 +225,44 @@ async fn trailing_output_one_byte_over_the_cap_fails() {
     assert_eq!(
         result.kind(),
         "OUTPUT_FAILURE",
-        "trailing output exceeding the cap must fail closed: {result:?}"
+        "an over-cap chunk must fail closed: {result:?}"
+    );
+    assert_eq!(
+        sink.stdout().len(),
+        0,
+        "the over-cap chunk must NOT be published (zero bytes delivered from it)"
+    );
+}
+
+// Several chunks where the LAST crosses the cap: earlier chunks remain, the crossing
+// chunk is withheld entirely.
+#[tokio::test]
+async fn crossing_chunk_is_withheld_earlier_chunks_remain() {
+    let cap = 1000;
+    let mut spec = child_spec("bp-cross", "unused");
+    spec.output.max_trailing_bytes = Some(cap);
+    spec.output.max_chunk_bytes = 64 * 1024; // each 600-byte Vec is one atomic OutputChunk
+
+    // 600 (ok, total 600) then 600 (would be 1200 > 1000 → withheld).
+    let boundary = MockBoundary::new().with_trailing_stdout(
+        vec![vec![b'a'; 600], vec![b'b'; 600]],
+        Duration::from_millis(80),
+    );
+    let sink = RecordingSink::new();
+
+    let result = tokio::time::timeout(OUTER_BOUND, run_with(spec, boundary.boxed(), &sink))
+        .await
+        .expect("must resolve within bound");
+
+    assert_eq!(
+        result.kind(),
+        "OUTPUT_FAILURE",
+        "the crossing chunk must fail closed: {result:?}"
+    );
+    // Only the first 600-byte chunk was delivered; the crossing chunk was withheld whole.
+    assert_eq!(
+        sink.stdout(),
+        vec![b'a'; 600],
+        "earlier chunk kept, crossing chunk withheld entirely"
     );
 }
