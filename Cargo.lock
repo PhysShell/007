@@ -832,6 +832,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "o7-worktree"
+version = "0.1.0"
+dependencies = [
+ "nix",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
