@@ -17,6 +17,7 @@
 
 pub mod command;
 pub mod evidence;
+pub mod runner;
 pub mod trust;
 pub mod verdict;
 
@@ -25,5 +26,9 @@ pub use command::{
     MAX_TIMEOUT,
 };
 pub use evidence::{AttestedEnforcement, VerifierEvidence, VerifierOutcome};
-pub use trust::{CommandDigest, ExecutableIdentity, TrustAnchor, TrustError, TrustStore};
+pub use runner::{Verifier, VerifyError};
+pub use trust::{
+    structural_command_digest, CommandDigest, ExecutableIdentity, TrustAnchor, TrustError,
+    TrustStore,
+};
 pub use verdict::{adjudicate, Verdict};

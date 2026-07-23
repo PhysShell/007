@@ -36,6 +36,17 @@ bytes = "1"
 
 [dev-dependencies]
 tempfile = "3"
+# Integration tests drive the async runner and implement a fault-injectable fake
+# boundary, so they need a runtime, the async-trait macro, and tokio's AsyncRead.
+tokio = { version = "1", default-features = false, features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "io-util",
+] }
+async-trait = "0.1"
 
 [lints.rust]
 unsafe_code = "forbid"

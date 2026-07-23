@@ -147,6 +147,24 @@ pub enum TrustError {
 /// Compute the command digest over exactly the bound fields: repository identity,
 /// executable path + identity, argv, and cwd policy. Domain-separated and length-framed
 /// so no two distinct commands collide by concatenation ambiguity.
+/// The STRUCTURAL command digest: canonical repository identity + executable path +
+/// argv + cwd policy, WITHOUT the executable's content. It identifies the command for
+/// evidence and is computable without reading the binary (so evidence exists even when
+/// the executable is missing). It is NOT the trust key — trust additionally binds the
+/// executable identity (see [`TrustAnchor`]).
+#[must_use]
+pub fn structural_command_digest(
+    repo: &CanonicalRepoId,
+    command: &TrustedCommand,
+) -> CommandDigest {
+    let mut hasher = Sha256::new();
+    hasher.update(b"o7-verifier-command-structural\0v1\0");
+    fold_structural(&mut hasher, repo, command);
+    CommandDigest(hex_lower(&hasher.finalize()))
+}
+
+/// The trust key: the structural digest PLUS the executable content identity, so a
+/// swapped binary at the same path invalidates trust.
 fn command_digest(
     repo: &CanonicalRepoId,
     command: &TrustedCommand,
@@ -154,27 +172,30 @@ fn command_digest(
 ) -> CommandDigest {
     let mut hasher = Sha256::new();
     hasher.update(b"o7-verifier-command\0v1\0");
-    // Canonical repository identity.
-    framed(&mut hasher, repo.git_common_dir.as_os_str().as_bytes());
-    framed(&mut hasher, &repo.dev.to_le_bytes());
-    framed(&mut hasher, &repo.ino.to_le_bytes());
-    // Executable path + content identity.
-    framed(&mut hasher, command.executable.as_os_str().as_bytes());
+    fold_structural(&mut hasher, repo, command);
     framed(&mut hasher, exe_identity.as_str().as_bytes());
+    CommandDigest(hex_lower(&hasher.finalize()))
+}
+
+/// Fold the structural fields (repo identity, exe path, argv, cwd policy) — everything
+/// bound EXCEPT the executable's content — into `hasher`.
+fn fold_structural(hasher: &mut Sha256, repo: &CanonicalRepoId, command: &TrustedCommand) {
+    framed(hasher, repo.git_common_dir.as_os_str().as_bytes());
+    framed(hasher, &repo.dev.to_le_bytes());
+    framed(hasher, &repo.ino.to_le_bytes());
+    framed(hasher, command.executable.as_os_str().as_bytes());
     // argv, each element framed (so `["ab","c"]` != `["a","bc"]`).
-    framed(&mut hasher, &(command.arguments.len() as u64).to_le_bytes());
+    framed(hasher, &(command.arguments.len() as u64).to_le_bytes());
     for arg in &command.arguments {
-        framed(&mut hasher, arg.as_bytes());
+        framed(hasher, arg.as_bytes());
     }
-    // cwd policy.
     match &command.cwd_policy {
-        CwdPolicy::WorktreeRoot => framed(&mut hasher, b"worktree-root"),
+        CwdPolicy::WorktreeRoot => framed(hasher, b"worktree-root"),
         CwdPolicy::Absolute(path) => {
-            framed(&mut hasher, b"absolute");
-            framed(&mut hasher, path.as_os_str().as_bytes());
+            framed(hasher, b"absolute");
+            framed(hasher, path.as_os_str().as_bytes());
         }
     }
-    CommandDigest(hex_lower(&hasher.finalize()))
 }
 
 fn framed(hasher: &mut Sha256, bytes: &[u8]) {
