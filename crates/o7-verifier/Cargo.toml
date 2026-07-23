@@ -1,0 +1,52 @@
+[package]
+name = "o7-verifier"
+version = "0.1.0"
+edition = "2021"
+description = "007 trusted verifier: run an explicitly-trusted command (absolute exe + argv, no shell) through a ProcessBoundary and return EVIDENCE. The accept/reject verdict belongs to o7d, never the verifier."
+publish = false
+
+[lib]
+name = "o7_verifier"
+path = "src/lib.rs"
+
+[dependencies]
+# The boundary seam (ProcessBoundary, BoundaryRequirement, EnforcementLevel) and the
+# generic supervisor the verifier runs its command through. Production requires
+# RequireFullyEnforced; there is no fallback to an unconfined host boundary.
+o7-worker = { path = "../o7-worker" }
+# Canonical repository identity — trust is bound to it (repo config can never assign a
+# trusted command).
+o7-worktree = { path = "../o7-worktree" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+# Executable-identity and command digests that bind trust. Already allowed in deny.toml.
+sha2 = "0.10"
+# The verifier runs its command through the async WorkerSupervisor and bounds it with a
+# timeout, so it needs a runtime. Same features the sibling crates use.
+tokio = { version = "1", default-features = false, features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+] }
+async-trait = "0.1"
+bytes = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
