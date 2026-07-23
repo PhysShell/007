@@ -1,0 +1,34 @@
+{
+  "name": "cockpit-slice-0",
+  "private": true,
+  "version": "0.0.0-spike",
+  "type": "module",
+  "description": "UI-ONLY, PROVISIONAL spike prototype for the future 007 Cockpit (roadmap PR 9). Fixture-backed only. Draft / non-mergeable until the canonical event protocol is frozen in PR 4. Not production. Not PR 9.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "screenshots": "node scripts/screenshot.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jest-axe": "^9.0.0",
+    "jsdom": "^25.0.1",
+    "playwright": "^1.56.1",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.8"
+  }
+}

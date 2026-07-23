@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="007 Cockpit spike">
+  <rect width="512" height="512" rx="96" fill="#0b0f17" />
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#5b8cff" stroke-width="18" />
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#8b5bff" stroke-width="18" stroke-dasharray="60 880" stroke-linecap="round" transform="rotate(-90 256 256)" />
+  <text x="256" y="300" font-family="ui-monospace, monospace" font-size="150" font-weight="700" fill="#e6edf6" text-anchor="middle">o7</text>
+</svg>

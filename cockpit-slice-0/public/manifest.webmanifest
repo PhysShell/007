@@ -1,0 +1,19 @@
+{
+  "name": "007 Cockpit — Slice 0 (spike)",
+  "short_name": "Cockpit S0",
+  "description": "UI-only, fixture-backed spike prototype for the future 007 Cockpit. Draft / non-mergeable.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0f17",
+  "theme_color": "#0b0f17",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

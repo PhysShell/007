@@ -1,0 +1,53 @@
+# UI-ONLY spike gate — draft branch only. This is NOT part of the merge gate and
+# is intentionally separate from `.github/workflows/o7-worker-gate.yml` (which it
+# does not touch). It type-checks, tests, and builds the fixture-backed Cockpit
+# Slice 0 prototype under `cockpit-slice-0/`. Expected to be removed or folded
+# into a real UI pipeline at integration.
+name: cockpit-slice-0 ui (spike)
+
+on:
+  push:
+    branches: ["spike/cockpit-slice-0"]
+    paths:
+      - "cockpit-slice-0/**"
+      - ".github/workflows/cockpit-slice-0-ui.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: cockpit-slice-0
+
+jobs:
+  ui:
+    name: typecheck · test · build
+    runs-on: ubuntu-24.04
+    steps:
+      # Actions pinned to full-length commit SHAs (same convention as the worker gate).
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: cockpit-slice-0/package-lock.json
+
+      - name: Install (clean, from lockfile)
+        run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Test (reducer/view-model, components, a11y)
+        run: npm test
+
+      - name: Build (static bundle)
+        run: npm run build
