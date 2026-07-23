@@ -46,7 +46,11 @@ pub enum MaterializeError {
 }
 
 /// What was written, for the durable summary and for tests.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+///
+/// A stored summary is diagnostic only: it never confers deletion authority (that
+/// comes solely from live attestation), so a forged or stale summary in a durable
+/// record cannot authorize a delete.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MaterializeSummary {
     pub files: usize,
     pub symlinks: usize,

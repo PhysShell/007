@@ -95,6 +95,20 @@ pub enum AttestError {
     },
 }
 
+impl AttestError {
+    /// Whether the failure is "nothing is at the path" (a confirmed absence), as
+    /// opposed to "something is there but is not provably ours". Recovery treats a
+    /// provably-absent worktree as already gone (drop the stale record); it treats an
+    /// unprovable one as preserve-for-investigation (never delete).
+    #[must_use]
+    pub fn is_missing(&self) -> bool {
+        matches!(
+            self,
+            AttestError::Stat { source, .. } if source.kind() == std::io::ErrorKind::NotFound
+        )
+    }
+}
+
 /// Our effective uid — the owner every state directory must have.
 #[must_use]
 pub fn effective_uid() -> u32 {

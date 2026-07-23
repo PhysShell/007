@@ -20,6 +20,7 @@ pub mod git;
 pub mod identity;
 pub mod materialize;
 pub mod stateroot;
+pub mod store;
 pub mod worktree;
 
 pub use attest::{attest_owned_dir, effective_uid, AttestError, FsIdentity};
@@ -29,4 +30,7 @@ pub use identity::{
 };
 pub use materialize::{materialize, MaterializeError, MaterializeSummary};
 pub use stateroot::{StateRoot, StateRootError};
+pub use store::{
+    RecoveredWorktree, RecoveryOutcome, StoreError, WorktreeRecord, WorktreeStore, STATE_SCHEMA,
+};
 pub use worktree::{CleanupOutcome, Worktree, WorktreeError};

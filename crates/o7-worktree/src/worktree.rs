@@ -128,6 +128,27 @@ impl Worktree {
         })
     }
 
+    /// Reconstruct a handle for an already-materialized worktree from its recorded
+    /// fields. This does NOT prove anything — the durable store proves identity via
+    /// [`crate::attest::attest_owned_dir`] before calling this, and the returned handle
+    /// re-proves on every [`Worktree::attest`]/[`Worktree::cleanup`].
+    #[must_use]
+    pub(crate) fn adopt(
+        identity: WorktreeIdentity,
+        digest: IdentityDigest,
+        path: PathBuf,
+        fs_identity: FsIdentity,
+        summary: MaterializeSummary,
+    ) -> Self {
+        Self {
+            identity,
+            digest,
+            path,
+            fs_identity,
+            summary,
+        }
+    }
+
     #[must_use]
     pub fn identity(&self) -> &WorktreeIdentity {
         &self.identity
