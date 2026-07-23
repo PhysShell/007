@@ -114,6 +114,44 @@ async fn one_shot_boundary_recovery_is_boundary_failure_without_a_second_wait() 
     );
 }
 
+// Adversarial: force_after_grace receives the ALREADY-REAPED exit (the leader was reaped
+// in run_cancellation, then descendants remained through the grace, escalating to force).
+// The bounded force-stop FAILS. The already-reaped exit must be preserved into the fault
+// termination so manage() does NOT wait() a second time on the one-shot boundary — no
+// synthetic "one-shot wait already consumed" fault, and the terminal follows the ACTUAL
+// cleanup result (survivors never drain → CleanupFailure), with exactly one wait().
+#[tokio::test]
+async fn force_after_grace_force_error_preserves_reaped_exit_no_second_wait() {
+    let boundary = MockBoundary::new()
+        .with_leader_exit_after(Duration::from_millis(120)) // reaped once, within grace
+        .with_present_members(1) // survivors never drain → escalate to force, cleanup fails
+        .with_force_stop_error("SIGKILL delivery failed") // bounded force-stop FAILS
+        .with_one_shot_wait(); // a SECOND wait() would error
+    let state = boundary.state();
+    let sink = RecordingSink::new();
+
+    let result = cancel_then_join(boundary, "fag-force-err", &sink).await;
+
+    // Terminal follows the actual cleanup result: survivors + failing force → CleanupFailure.
+    assert_eq!(result.kind(), "CLEANUP_FAILURE", "got {result:?}");
+    let msg = message(&result);
+    // The REAL faults are present...
+    assert!(
+        msg.contains("SIGKILL delivery failed"),
+        "the force-stop fault must be preserved: {msg}"
+    );
+    // ...but NO synthetic reap fault from a redundant second wait().
+    assert!(
+        !msg.contains("one-shot wait already consumed"),
+        "the already-reaped exit must be preserved — no second wait(): {msg}"
+    );
+    assert_eq!(
+        state.wait_completions(),
+        1,
+        "the leader exit must be consumed exactly ONCE"
+    );
+}
+
 // PERSISTENT membership failure during graceful drain AND cleanup: the terminal is a
 // CleanupFailure that COMPOSES both the drain membership fault and the cleanup fault.
 #[tokio::test]

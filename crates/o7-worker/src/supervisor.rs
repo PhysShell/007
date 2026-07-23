@@ -913,9 +913,15 @@ async fn force_after_grace(
     exit: Option<BoundaryExit>,
 ) -> Termination {
     let _ = pubr.emit(WorkerObservation::ForceStopSent).await;
-    // BOUNDED force-stop: a hung force delivery must not stall cancellation.
+    // BOUNDED force-stop: a hung force delivery must not stall cancellation. PRESERVE the
+    // already-observed exit (the drain-loop path reaps the leader BEFORE escalating), so
+    // manage() does NOT `wait()` again — a one-shot boundary's consumed exit is not
+    // repeatable, and re-reaping would fabricate a spurious cleanup fault.
     if let Err(err) = bounded_force_stop(process).await {
-        return Termination::boundary_failed(err);
+        return Termination::BoundaryFailed {
+            message: err,
+            reaped: exit,
+        };
     }
     let exit = match exit {
         Some(exit) => Some(exit),

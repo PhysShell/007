@@ -79,7 +79,9 @@ membership query that fails DURING the graceful drain is likewise never reported
 clean `CancelledForcefully`: it routes through the fault path, becoming a `BoundaryFailure`
 if cleanup later recovers or a composed `CleanupFailure` if it stays unprovable — and,
 because the leader was already reaped there, the emergency teardown does NOT `wait()` again
-(a one-shot boundary's consumed exit is never re-requested). The terminal result is
+(a one-shot boundary's consumed exit is never re-requested). This holds even when the
+escalation's own force-stop fails: the already-observed exit is carried into the fault
+termination, so the teardown still skips the redundant reap. The terminal result is
 computed AFTER the final `SupervisorFailed` publish, so a sink lost on that very publish
 still becomes an `ObservationFailure` (preserving the run fault), and a concurrently-lost
 sink is preserved even when `CleanupFailure` dominates.
