@@ -9,9 +9,14 @@
 mod common;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use common::*;
 use o7_worker::WorkerResult;
+
+/// Generous but bounded ceiling for readiness waits — a spawn arrives in milliseconds;
+/// this only guards against a genuine hang, never a timing assumption.
+const READY_TIMEOUT: Duration = Duration::from_secs(10);
 
 // (1) A simple process runs and returns exit code 0.
 #[tokio::test]
@@ -76,11 +81,18 @@ async fn spawn_failure_leaves_no_process_state() {
 async fn natural_exit_vs_cancel_race_yields_one_valid_terminal() {
     let sink = RecordingSink::new();
     let (handle, join) = start(child_spec("race", "exit0"), &sink);
-    // Cancel roughly concurrently with the process exiting.
+    // Wait until the process has actually started, THEN cancel — so a natural exit and
+    // the cancellation may still race (exit0 exits almost immediately), but we never
+    // cancel before spawn (a different, no-process path).
+    sink.wait_for_kind_count("spawned", 1, READY_TIMEOUT)
+        .await
+        .unwrap();
     handle.cancel().await;
     let result = join.join().await;
 
-    // Whichever won, it is one valid terminal, and at most one cleanup_completed.
+    // Whichever won, it is one valid terminal from the SAME accepted set (the winner is
+    // deliberately non-deterministic), and a started worker completes cleanup exactly
+    // once.
     let valid = matches!(
         result,
         WorkerResult::ExitedNormally(_)
@@ -88,5 +100,10 @@ async fn natural_exit_vs_cancel_race_yields_one_valid_terminal() {
             | WorkerResult::CancelledForcefully
     );
     assert!(valid, "unexpected terminal: {result:?}");
-    assert!(sink.count("cleanup_completed") <= 1);
+    assert_eq!(
+        sink.count("cleanup_completed"),
+        1,
+        "exactly one cleanup_completed, obs: {:?}",
+        sink.kinds()
+    );
 }

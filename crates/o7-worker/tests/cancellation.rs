@@ -15,6 +15,10 @@ use std::time::Duration;
 use common::*;
 use o7_worker::WorkerResult;
 
+/// Generous but bounded ceiling for readiness waits — a spawn/marker arrives in
+/// milliseconds; this only guards against a genuine hang, never a timing assumption.
+const READY_TIMEOUT: Duration = Duration::from_secs(10);
+
 fn is_cancelled(result: &WorkerResult) -> bool {
     matches!(
         result,
@@ -22,16 +26,28 @@ fn is_cancelled(result: &WorkerResult) -> bool {
     )
 }
 
-// (16) cancel() is idempotent.
+// (16) cancel() is idempotent on a STARTED worker: cancelling a running process twice
+// still yields one cancellation and exactly one completed cleanup. (The no-process
+// cancel paths are covered by the cancel-before/during-spawn tests, so this test does
+// not need to preserve that ambiguity.)
 #[tokio::test]
 async fn cancel_is_idempotent() {
     let sink = RecordingSink::new();
     let (handle, join) = start(child_spec("c16", "sleep"), &sink);
+    // Wait until the worker has actually started before cancelling.
+    sink.wait_for_kind_count("spawned", 1, READY_TIMEOUT)
+        .await
+        .unwrap();
     handle.cancel().await;
     handle.cancel().await; // second time is a no-op that still resolves
     let result = join.join().await;
     assert!(is_cancelled(&result), "got {result:?}");
-    assert!(sink.count("cleanup_completed") <= 1);
+    assert_eq!(
+        sink.count("cleanup_completed"),
+        1,
+        "exactly one cleanup_completed, obs: {:?}",
+        sink.kinds()
+    );
 }
 
 // (17) Several concurrent cancels yield exactly one terminal result.
@@ -42,7 +58,9 @@ async fn concurrent_cancels_yield_one_result() {
     // Reach Running first, so the concurrent cancels all race the SAME live process
     // (and produce exactly one CleanupCompleted). Cancelling before spawn is a
     // distinct path with no cleanup to complete — covered by (24).
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    sink.wait_for_kind_count("spawned", 1, READY_TIMEOUT)
+        .await
+        .unwrap();
     let handle = Arc::new(handle);
     let mut tasks = Vec::new();
     for _ in 0..5 {
@@ -62,10 +80,12 @@ async fn concurrent_cancels_yield_one_result() {
 async fn cooperative_process_stops_gracefully() {
     let sink = RecordingSink::new();
     let (handle, join) = start(child_spec("c18", "sleep"), &sink);
-    // Let the process actually spawn and reach Running: this test exercises the
-    // graceful SIGTERM path of a LIVE process. Cancelling before spawn is a
-    // separate (also-graceful) path with nothing to signal — covered by (24).
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    // Wait for the spawn: this test exercises the graceful SIGTERM path of a LIVE
+    // process. Cancelling before spawn is a separate (also-graceful) path with nothing
+    // to signal — covered by (24).
+    sink.wait_for_kind_count("spawned", 1, READY_TIMEOUT)
+        .await
+        .unwrap();
     handle.cancel().await;
     let result = join.join().await;
     assert_eq!(
@@ -82,11 +102,13 @@ async fn cooperative_process_stops_gracefully() {
 #[tokio::test]
 async fn sigterm_ignoring_process_is_force_killed() {
     let sink = RecordingSink::new();
-    let (handle, join) = start(child_spec("c19", "ignore_sigterm"), &sink);
-    // Let the child install its SIGTERM handler before we signal it, otherwise
-    // the default SIGTERM disposition would kill it gracefully (a race, not the
-    // behaviour under test).
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    let (handle, join) = start(child_spec("c19", "ignore_sigterm_ready"), &sink);
+    // Wait for the child's explicit readiness marker, emitted only AFTER it installs its
+    // SIGTERM handler — otherwise the default SIGTERM disposition would kill it
+    // gracefully (a race, not the behaviour under test).
+    sink.wait_for_stdout_contains(READY_SIGTERM_HANDLER, READY_TIMEOUT)
+        .await
+        .unwrap();
     handle.cancel().await;
     let result = join.join().await;
     assert_eq!(
