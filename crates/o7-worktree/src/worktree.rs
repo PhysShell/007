@@ -18,6 +18,7 @@ use crate::attest::{attest_owned_dir, AttestError, FsIdentity, OWNER_ONLY};
 use crate::git::{GitError, HardenedGit};
 use crate::identity::{CommittedRevision, IdentityDigest, RunId, WorktreeIdentity};
 use crate::materialize::{materialize, MaterializeError, MaterializeSummary};
+use crate::reap::{remove_verified_dir, ReapError};
 use crate::stateroot::{StateRoot, StateRootError};
 
 /// A failure creating, attesting, or cleaning up a worktree.
@@ -31,6 +32,8 @@ pub enum WorktreeError {
     Materialize(#[from] MaterializeError),
     #[error(transparent)]
     Attest(#[from] AttestError),
+    #[error(transparent)]
+    Reap(#[from] ReapError),
     #[error("a worktree directory already exists at {0:?}")]
     AlreadyExists(PathBuf),
     #[error("i/o error at {path:?}: {source}")]
@@ -184,21 +187,23 @@ impl Worktree {
         Ok(())
     }
 
-    /// Delete this worktree — but ONLY after attestation proves ownership. If identity
-    /// cannot be proven, the directory is left untouched for investigation.
+    /// Delete this worktree — but ONLY after identity is proven on the OPEN directory
+    /// descriptor, then removed relative to that descriptor (never a re-resolved path),
+    /// so a swap of the path between the check and the delete cannot redirect the
+    /// removal at a victim tree. If identity cannot be proven, nothing is deleted and the
+    /// directory is left for investigation.
     ///
     /// # Errors
-    /// [`WorktreeError::Io`] if attestation succeeds but removal then fails.
+    /// [`WorktreeError::Reap`] if identity was proven but deletion then failed part way.
     pub fn cleanup(self) -> Result<CleanupOutcome, WorktreeError> {
-        match attest_owned_dir(&self.path, self.fs_identity) {
-            Ok(_) => {
-                std::fs::remove_dir_all(&self.path).map_err(|source| WorktreeError::Io {
-                    path: self.path.clone(),
-                    source,
-                })?;
-                Ok(CleanupOutcome::Removed)
+        match remove_verified_dir(&self.path, self.fs_identity) {
+            Ok(()) => Ok(CleanupOutcome::Removed),
+            // Already gone counts as removed — there is nothing to preserve.
+            Err(ReapError::Vanished(_)) => Ok(CleanupOutcome::Removed),
+            Err(err @ ReapError::Unproven { .. }) => {
+                Ok(CleanupOutcome::PreservedForInvestigation(err.to_string()))
             }
-            Err(err) => Ok(CleanupOutcome::PreservedForInvestigation(err.to_string())),
+            Err(err @ ReapError::Io { .. }) => Err(WorktreeError::Reap(err)),
         }
     }
 }

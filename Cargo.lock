@@ -852,6 +852,7 @@ name = "o7-worktree"
 version = "0.1.0"
 dependencies = [
  "nix",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

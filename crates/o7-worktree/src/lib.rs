@@ -19,6 +19,7 @@ pub mod attest;
 pub mod git;
 pub mod identity;
 pub mod materialize;
+pub mod reap;
 pub mod stateroot;
 pub mod store;
 pub mod worktree;
@@ -29,6 +30,7 @@ pub use identity::{
     CanonicalRepoId, CommittedRevision, IdentityDigest, IdentityError, RunId, WorktreeIdentity,
 };
 pub use materialize::{materialize, MaterializeError, MaterializeSummary};
+pub use reap::{remove_verified_dir, ReapError};
 pub use stateroot::{StateRoot, StateRootError};
 pub use store::{
     RecoveredWorktree, RecoveryOutcome, StoreError, WorktreeRecord, WorktreeStore, STATE_SCHEMA,

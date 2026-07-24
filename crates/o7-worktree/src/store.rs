@@ -34,6 +34,7 @@ use crate::identity::{
     CanonicalRepoId, CommittedRevision, IdentityDigest, RunId, WorktreeIdentity,
 };
 use crate::materialize::MaterializeSummary;
+use crate::reap::{remove_verified_dir, ReapError};
 use crate::stateroot::StateRoot;
 use crate::worktree::{CleanupOutcome, Worktree, WorktreeError};
 
@@ -337,29 +338,27 @@ impl WorktreeStore {
         // A tampered/forged record is never actioned — do NOT delete on its say-so.
         self.verify_record_integrity(&record)?;
 
-        match attest_owned_dir(&record.worktree_path, record.fs_identity) {
-            Ok(_) => {
-                std::fs::remove_dir_all(&record.worktree_path).map_err(|source| {
-                    StoreError::Io {
-                        path: record.worktree_path.clone(),
-                        source,
-                    }
-                })?;
+        // Race-safe deletion: prove identity on the OPEN directory descriptor and remove
+        // the tree relative to it, so a path swap between check and delete cannot
+        // redirect the removal at a victim tree.
+        match remove_verified_dir(&record.worktree_path, record.fs_identity) {
+            Ok(()) => {
                 state.records.remove(idx);
                 self.persist(&state)?;
                 Ok(CleanupOutcome::Removed)
             }
-            Err(err) if err.is_missing() => {
+            Err(ReapError::Vanished(_)) => {
                 // The directory is provably gone (e.g. an interrupted earlier cleanup):
                 // there is nothing to delete, so dropping the stale record is safe.
                 state.records.remove(idx);
                 self.persist(&state)?;
                 Ok(CleanupOutcome::Removed)
             }
-            Err(err) => {
+            Err(err @ ReapError::Unproven { .. }) => {
                 // Cannot prove ownership — preserve everything, keep the record.
                 Ok(CleanupOutcome::PreservedForInvestigation(err.to_string()))
             }
+            Err(err @ ReapError::Io { .. }) => Err(StoreError::Worktree(err.into())),
         }
     }
 
