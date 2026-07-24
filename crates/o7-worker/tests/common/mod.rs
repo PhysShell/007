@@ -21,6 +21,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tokio::sync::Notify;
+
 use o7_worker::{
     BoundaryRequirement, CancellationPolicy, HeartbeatPolicy, ObservationError, ObservationSink,
     OutputPolicy, OutputStream, ProcessBoundary, ProcessIdentity, StdinMode,
@@ -115,6 +117,13 @@ pub const END: &[u8] = b"\x1e\x1e<<<O7END>>>\x1e\x1e";
 /// A fixed non-UTF-8 payload used by the `print_nonutf8` child mode.
 pub const NON_UTF8: &[u8] = &[0x00, 0xFF, 0xFE, 0x80, 0x41, 0x00, 0xC0];
 
+/// Unique readiness markers a child fixture writes to stdout ONLY after a specific
+/// precondition holds, so a test can await the real condition (via
+/// [`RecordingSink::wait_for_stdout_contains`]) instead of assuming it after a fixed
+/// sleep. They travel through the same byte-preserving stdout pipe as any other output.
+pub const READY_GRANDCHILD: &[u8] = b"O7_READY_GRANDCHILD\n";
+pub const READY_SIGTERM_HANDLER: &[u8] = b"O7_READY_SIGTERM_HANDLER\n";
+
 /// Size of the `print_large` child payload — larger than the default 64 KiB
 /// chunk so output is split across many chunks.
 pub const LARGE_LEN: usize = 200_000;
@@ -194,6 +203,11 @@ pub struct RecordingSink {
     attempted: Arc<Mutex<Vec<&'static str>>>,
     fail_mode: FailMode,
     failed: Arc<AtomicBool>,
+    /// Woken after every SUCCESSFULLY recorded observation, so the readiness helpers
+    /// (`wait_for_kind_count`, `wait_for_stdout_contains`) can await a condition instead
+    /// of polling a fixed sleep. Shared across the sink's clones (the supervisor holds a
+    /// clone), so a notify from the supervisor's clone wakes a waiter on the test's sink.
+    notify: Arc<Notify>,
     /// If set, `publish()` sleeps for the given duration on observations of this kind
     /// BEFORE recording — a slow (but not failed) sink. `emit` wraps `publish` in
     /// `sink_backpressure_timeout`, so this exercises the backpressure contract: a
@@ -208,6 +222,7 @@ impl RecordingSink {
             attempted: Arc::new(Mutex::new(Vec::new())),
             fail_mode: FailMode::Never,
             failed: Arc::new(AtomicBool::new(false)),
+            notify: Arc::new(Notify::new()),
             delay_on: None,
         }
     }
@@ -290,6 +305,86 @@ impl RecordingSink {
     pub fn stderr(&self) -> Vec<u8> {
         self.stream_bytes(OutputStream::Stderr)
     }
+
+    /// Await until at least `minimum` observations of `kind` have been recorded, or the
+    /// bounded `timeout` elapses. Race-safe: the predicate is checked first, then the
+    /// notification future is armed (`enable()`) BEFORE re-checking, so a notify that
+    /// lands between the check and the await cannot be lost. Never an unbounded wait.
+    ///
+    /// Returns the observed count on success, or a diagnostic error (including the
+    /// current observation kinds) on timeout.
+    pub async fn wait_for_kind_count(
+        &self,
+        kind: &str,
+        minimum: usize,
+        timeout: Duration,
+    ) -> Result<usize, String> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let count = self.count(kind);
+            if count >= minimum {
+                return Ok(count);
+            }
+            // Arm the notification BEFORE the final re-check: `enable()` registers this
+            // future as a waiter, so a `notify_waiters()` after the re-check still wakes
+            // us (no lost wakeup between check and await).
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.count(kind) >= minimum {
+                return Ok(self.count(kind));
+            }
+            if tokio::time::timeout_at(deadline, notified).await.is_err() {
+                return Err(format!(
+                    "timed out after {timeout:?} waiting for >= {minimum} {kind:?} \
+                     observation(s); saw {} (kinds: {:?})",
+                    self.count(kind),
+                    self.kinds()
+                ));
+            }
+        }
+    }
+
+    /// Await until the recorded stdout contains `needle`, or the bounded `timeout`
+    /// elapses. Same race-safe arm-before-recheck discipline as
+    /// [`RecordingSink::wait_for_kind_count`]. Never an unbounded wait.
+    ///
+    /// Returns a diagnostic error (including the current stdout, lossily rendered) on
+    /// timeout.
+    pub async fn wait_for_stdout_contains(
+        &self,
+        needle: &[u8],
+        timeout: Duration,
+    ) -> Result<(), String> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if contains_subslice(&self.stdout(), needle) {
+                return Ok(());
+            }
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if contains_subslice(&self.stdout(), needle) {
+                return Ok(());
+            }
+            if tokio::time::timeout_at(deadline, notified).await.is_err() {
+                return Err(format!(
+                    "timed out after {timeout:?} waiting for stdout to contain {:?}; \
+                     current stdout: {:?}",
+                    String::from_utf8_lossy(needle),
+                    String::from_utf8_lossy(&self.stdout())
+                ));
+            }
+        }
+    }
+}
+
+/// Whether `haystack` contains `needle` as a contiguous subslice.
+fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    haystack.windows(needle.len()).any(|w| w == needle)
 }
 
 impl Default for RecordingSink {
@@ -329,6 +424,9 @@ impl ObservationSink for RecordingSink {
             )));
         }
         self.observations.lock().unwrap().push(observation);
+        // Wake readiness waiters AFTER the observation is durably recorded, so a waiter
+        // that re-checks its predicate on wake always sees this observation.
+        self.notify.notify_waiters();
         Ok(())
     }
 }
@@ -432,14 +530,31 @@ fn worker_child_entry() {
             let _ = signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&flag));
             sleep_forever();
         }
+        "ignore_sigterm_ready" => {
+            let flag = Arc::new(AtomicBool::new(false));
+            let _ = signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&flag));
+            // Announce readiness ONLY after the SIGTERM handler is installed, so the test
+            // never signals before the child can actually ignore it.
+            emit_marker(&mut std::io::stdout(), READY_SIGTERM_HANDLER);
+            sleep_forever();
+        }
         "grandchild_then_exit" => {
-            spawn_grandchild();
+            let _ = spawn_grandchild();
             // Give the grandchild a moment to appear in /proc, then exit.
             std::thread::sleep(Duration::from_millis(150));
             std::process::exit(0);
         }
         "grandchild_then_sleep" => {
-            spawn_grandchild();
+            let _ = spawn_grandchild();
+            sleep_forever();
+        }
+        "grandchild_then_sleep_ready" => {
+            // Announce readiness ONLY after the grandchild is actually spawned — never
+            // infer grandchild readiness from the leader's `Spawned` observation, which
+            // says nothing about the grandchild.
+            if spawn_grandchild().is_ok() {
+                emit_marker(&mut std::io::stdout(), READY_GRANDCHILD);
+            }
             sleep_forever();
         }
         "leader_dies_grandchild_ignores_sigterm" => {
@@ -448,7 +563,7 @@ fn worker_child_entry() {
             // immediately but the descendant survives the grace period, forcing the
             // supervisor to escalate to SIGKILL → a FORCEFUL cancellation whose set
             // must still end up empty.
-            spawn_grandchild_mode("ignore_sigterm");
+            let _ = spawn_grandchild_mode("ignore_sigterm");
             sleep_forever();
         }
         other => {
@@ -473,21 +588,35 @@ fn emit<W: Write>(w: &mut W, payload: Vec<u8>) {
     let _ = w.flush();
 }
 
+/// Write a raw readiness marker and flush it immediately, so a waiting test observes it
+/// with minimal latency. Markers are unique byte constants (see [`READY_GRANDCHILD`] /
+/// [`READY_SIGTERM_HANDLER`]) that pass through the same byte-preserving stdout pipe as
+/// any other child output.
+fn emit_marker<W: Write>(w: &mut W, marker: &[u8]) {
+    let _ = w.write_all(marker);
+    let _ = w.flush();
+}
+
 fn sleep_forever() -> ! {
     loop {
         std::thread::sleep(Duration::from_millis(200));
     }
 }
 
-fn spawn_grandchild() {
-    spawn_grandchild_mode("sleep");
+fn spawn_grandchild() -> std::io::Result<std::process::Child> {
+    spawn_grandchild_mode("sleep")
 }
 
-fn spawn_grandchild_mode(mode: &str) {
+/// Spawn a grandchild in the leader's process group. Returns the spawn result so a
+/// caller can announce readiness ONLY on a successful spawn. The returned `Child` is
+/// dropped without `wait` — std does not kill on drop, so the grandchild keeps running
+/// (reparented to init when the leader exits), which is exactly the owned-set member the
+/// supervisor must clean up.
+fn spawn_grandchild_mode(mode: &str) -> std::io::Result<std::process::Child> {
     let exe = std::env::current_exe().expect("current_exe");
     // No process_group() call → the grandchild inherits the leader's group, so it
     // is part of the owned set the supervisor must clean up.
-    let _child = std::process::Command::new(exe)
+    std::process::Command::new(exe)
         .args([
             "--ignored",
             "--exact",
@@ -495,7 +624,5 @@ fn spawn_grandchild_mode(mode: &str) {
             "common::worker_child_entry",
         ])
         .env(ENV_MODE, mode)
-        .spawn();
-    // The std Child is dropped without wait: std does not kill on drop, so the
-    // grandchild keeps running (reparented to init when the leader exits).
+        .spawn()
 }
