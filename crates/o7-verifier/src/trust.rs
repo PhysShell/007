@@ -39,10 +39,18 @@ impl ExecutableIdentity {
             path: path.to_path_buf(),
             source,
         })?;
+        Ok(Self::of_bytes(&bytes))
+    }
+
+    /// Hash already-read executable bytes — the exact bytes that will be run. The runner
+    /// uses this so the bytes it hashes for the trust check are the same bytes it stages
+    /// and executes, closing the hash-to-spawn TOCTOU.
+    #[must_use]
+    pub fn of_bytes(bytes: &[u8]) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(b"o7-verifier-exe\0v1\0");
-        hasher.update(&bytes);
-        Ok(Self(hex_lower(&hasher.finalize())))
+        hasher.update(bytes);
+        Self(hex_lower(&hasher.finalize()))
     }
 
     #[must_use]
@@ -80,12 +88,32 @@ impl TrustAnchor {
     /// [`TrustError`] if the executable cannot be read.
     pub fn compute(repo: &CanonicalRepoId, command: &TrustedCommand) -> Result<Self, TrustError> {
         let exe_identity = ExecutableIdentity::of_file(&command.executable)?;
+        Ok(Self::from_identity(repo, command, exe_identity))
+    }
+
+    /// Build the anchor from already-read executable bytes — the exact bytes the runner
+    /// will stage and execute. This is what closes the hash-to-spawn TOCTOU: the trust
+    /// decision is made over the same bytes that run, not over a path re-resolved later.
+    #[must_use]
+    pub fn for_executable_bytes(
+        repo: &CanonicalRepoId,
+        command: &TrustedCommand,
+        exe_bytes: &[u8],
+    ) -> Self {
+        Self::from_identity(repo, command, ExecutableIdentity::of_bytes(exe_bytes))
+    }
+
+    fn from_identity(
+        repo: &CanonicalRepoId,
+        command: &TrustedCommand,
+        exe_identity: ExecutableIdentity,
+    ) -> Self {
         let digest = command_digest(repo, command, &exe_identity);
-        Ok(Self {
+        Self {
             repo: repo.clone(),
             executable_identity: exe_identity,
             digest,
-        })
+        }
     }
 
     #[must_use]

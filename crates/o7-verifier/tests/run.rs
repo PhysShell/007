@@ -256,3 +256,43 @@ async fn real_host_boundary_timeout_kills_the_real_process() {
     assert_eq!(ev.outcome, VerifierOutcome::TimedOut);
     assert!(!adjudicate(&ev, BoundaryRequirement::AllowUnconfined).is_accepted());
 }
+
+// The runner executes a PRIVATE staged copy of the trusted bytes, not the operator's
+// path — so the bytes hashed for the trust check are the bytes that run (no
+// hash-to-spawn TOCTOU). A shell fixture that prints its own argv[0] proves it ran from
+// the owner-only staging directory, not from the operator path.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_executed_binary_is_the_staged_private_copy() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let exe_dir = tempfile::tempdir().unwrap();
+    let exe = exe_dir.path().join("verify.sh");
+    std::fs::write(&exe, b"#!/bin/sh\nprintf '%s' \"$0\"\n").unwrap();
+    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let root = worktree_root();
+    let repo = repo_id();
+    let mut cmd = command_for(exe.clone(), Duration::from_secs(10), 1 << 20);
+    cmd.arguments.clear();
+    let trust = trust_for(&repo, &cmd);
+
+    let ev = Verifier::with_requirement(BoundaryRequirement::AllowUnconfined)
+        .verify(
+            Box::new(UnconfinedHostBoundary),
+            &repo,
+            root.path(),
+            &cmd,
+            &trust,
+        )
+        .await;
+
+    assert_eq!(ev.outcome, VerifierOutcome::Completed { exit_code: 0 });
+    let printed = String::from_utf8_lossy(&ev.stdout);
+    assert!(
+        printed.contains("o7-verify-exe-"),
+        "expected the staged private copy path, got {printed:?}"
+    );
+    assert!(
+        !printed.contains(exe.to_str().unwrap()),
+        "ran the operator path instead of the staged copy: {printed:?}"
+    );
+}

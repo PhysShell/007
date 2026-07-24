@@ -33,6 +33,11 @@ tokio = { version = "1", default-features = false, features = [
 ] }
 async-trait = "0.1"
 bytes = "1"
+# Stage the exact trusted executable bytes into an owner-only (0700) temp directory and
+# run THAT copy, so the bytes hashed for the trust check are the bytes executed (closes
+# the hash-to-spawn TOCTOU). tempfile creates the dir securely (O_EXCL, 0700). Already
+# allowed in the workspace deny.toml.
+tempfile = "3"
 
 [dev-dependencies]
 tempfile = "3"

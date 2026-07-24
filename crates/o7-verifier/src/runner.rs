@@ -85,13 +85,23 @@ impl Verifier {
             );
         }
 
-        // 2. Trust — reading the executable binds its identity. Unreadable or untrusted
-        //    means the command is NOT run (never spawned).
-        let trusted = match TrustAnchor::compute(repo, command) {
-            Ok(anchor) => trust.is_trusted(&anchor),
-            Err(_) => false,
+        // 2. Trust — read the EXACT bytes we will run, hash THEM (not a path re-resolved
+        //    later), and require the command to be trusted. Unreadable or untrusted means
+        //    the command is NOT run (never spawned).
+        let exe_bytes = match std::fs::read(&command.executable) {
+            Ok(bytes) => bytes,
+            Err(_) => {
+                return not_run(
+                    &digest,
+                    enforcement,
+                    false,
+                    command.exit_policy.clone(),
+                    "command executable could not be read to bind its identity".to_owned(),
+                );
+            }
         };
-        if !trusted {
+        let anchor = TrustAnchor::for_executable_bytes(repo, command, &exe_bytes);
+        if !trust.is_trusted(&anchor) {
             return not_run(
                 &digest,
                 enforcement,
@@ -119,14 +129,31 @@ impl Verifier {
             };
         }
 
-        // 4. Spawn and run under the boundary, bounded by the timeout.
+        // 4. Stage the EXACT trusted bytes into an owner-only directory and run THAT copy.
+        //    The staged file lives in a 0700 dir only we can write, so it cannot be
+        //    swapped between hashing and exec — the operator path is never re-resolved at
+        //    spawn. The staged copy is removed when `staged` drops (after the run).
+        let staged = match stage_executable(&exe_bytes) {
+            Ok(staged) => staged,
+            Err(err) => {
+                return not_run(
+                    &digest,
+                    enforcement,
+                    true,
+                    command.exit_policy.clone(),
+                    format!("failed to stage the trusted executable: {err}"),
+                );
+            }
+        };
+
+        // 5. Spawn and run under the boundary, bounded by the timeout.
         let cwd = match &command.cwd_policy {
             CwdPolicy::WorktreeRoot => worktree_root.to_path_buf(),
             CwdPolicy::Absolute(path) => path.clone(),
         };
         let spec = WorkerSpec {
             worker_id: WorkerId::new(format!("verify-{}", digest.as_str())),
-            executable: command.executable.clone(),
+            executable: staged.path().to_path_buf(),
             arguments: command.arguments.clone(),
             working_directory: cwd,
             environment: command.environment.clone(),
@@ -167,6 +194,10 @@ impl Verifier {
             }
         };
 
+        // The staged executable was needed for the whole run; remove it now (the child
+        // has exited). Kept explicit so the lifetime is obvious.
+        drop(staged);
+
         let (stdout, stderr, budget_exceeded) = sink.snapshot();
         let outcome = map_outcome(&result, timed_out, budget_exceeded);
         VerifierEvidence {
@@ -197,6 +228,42 @@ fn not_run(
         stdout: Vec::new(),
         stderr: Vec::new(),
     }
+}
+
+/// A private copy of a trusted executable, in an owner-only directory, removed on drop.
+struct StagedExecutable {
+    _dir: tempfile::TempDir,
+    path: std::path::PathBuf,
+}
+
+impl StagedExecutable {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// Write `bytes` to a `0o500` file inside a freshly-created `0o700` temp directory and
+/// return a handle to it. The directory is created securely (O_EXCL, random name) and is
+/// writable only by us, so the staged file cannot be swapped between staging and exec —
+/// which is what closes the hash-to-spawn TOCTOU.
+fn stage_executable(bytes: &[u8]) -> std::io::Result<StagedExecutable> {
+    use std::io::Write as _;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    let dir = tempfile::Builder::new()
+        .prefix("o7-verify-exe-")
+        .tempdir()?;
+    let path = dir.path().join("exe");
+    // Created 0o500 (owner read+exec, no write); the write goes through the already-open
+    // fd, so the restrictive mode does not block staging but blocks any later writer.
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o500)
+        .open(&path)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    Ok(StagedExecutable { _dir: dir, path })
 }
 
 /// Map the worker's terminal result to a verifier outcome. A timeout is `TimedOut`
