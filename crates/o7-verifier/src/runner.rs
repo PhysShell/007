@@ -39,7 +39,19 @@
 //! bytes that run. This uses no `unsafe` (`memfd_create`/`F_ADD_SEALS`/`F_GET_SEALS` via
 //! rustix's safe wrappers) and does not change the frozen o7-worker `ProcessBoundary`/
 //! `BoundarySpawnSpec` seam, which still spawns from a PATH. (Requires `/proc` mounted;
-//! otherwise the run fails closed at spawn — see [`stage_executable`].)
+//! otherwise the run fails closed at spawn — see `stage_executable_seamed`.)
+//!
+//! EXECUTION CONTRACT for the boundary. The exec target is `/proc/<verifier_pid>/fd/<n>`,
+//! resolved by the boundary-spawned child, so the boundary MUST run that child able to see
+//! the verifier's own `/proc/<pid>/fd` — i.e. in the verifier's PID namespace and with a
+//! `/proc` that exposes it. The current host boundary (same UID, same PID namespace)
+//! satisfies this. A future fully-enforced boundary (Sandboy) that isolates the child in a
+//! separate PID namespace or restricts `/proc` would NOT resolve this path; there it fails
+//! CLOSED at spawn (unverified bytes are never run), and enabling it requires either
+//! preserving that resolution or teaching the frozen `BoundarySpawnSpec` seam to carry the
+//! sealed descriptor directly. This is a deliberate pre-spawn contract, not a run-time
+//! fallback: `production()` requires `RequireFullyEnforced`, so no such boundary is wired in
+//! yet.
 
 use std::path::Path;
 use std::sync::Arc;
