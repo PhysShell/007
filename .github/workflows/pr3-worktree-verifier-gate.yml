@@ -1,11 +1,14 @@
-name: pr3 worktree+verifier gate
+name: pr3 worktree+verifier tests
 
-# Hosted replay of the PR-3 gate: workspace fmt/clippy/check plus the o7-worktree and
-# o7-verifier test suites (substrate, durable recovery, trust/verdict, and the
-# boundary-integrated runner — including the real host-boundary end-to-end tests), and
-# cargo-deny. This is an infrastructure replay, NOT an independent code review: it runs
-# tests authored in this repository. Action pins are full-length commit SHAs
-# (immutable); tags in comments are informational.
+# Runs ONLY the o7-worktree and o7-verifier test suites (substrate, durable recovery,
+# race-safe cleanup, trust/verdict, and the boundary-integrated runner — including the
+# real host-boundary end-to-end tests). Workspace fmt / clippy / check and cargo-deny
+# are deliberately NOT repeated here: the `o7-worker gate` workflow already runs them
+# over the whole workspace (both new crates are members) and over the whole dependency
+# graph, so duplicating them would just run the same jobs twice per PR. This is an
+# infrastructure replay, NOT an independent code review: it runs tests authored in this
+# repository. Action pins are full-length commit SHAs (immutable); tags in comments are
+# informational.
 
 on:
   push:
@@ -22,8 +25,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  worktree-verifier-gate:
-    name: worktree+verifier gate
+  worktree-verifier-tests:
+    name: worktree+verifier tests
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -40,60 +43,12 @@ jobs:
           set -euo pipefail
           echo "tested_sha=$(git rev-parse HEAD)"
           echo "event=${GITHUB_EVENT_NAME}"
-          # The repository's toolchain is the floating `stable` channel (rust-toolchain.toml),
-          # NOT a pinned version — the exact resolved identity is recorded here.
           rustup show active-toolchain
           rustc -Vv
           cargo --version
-          git status --short
-
-      - name: Format
-        run: cargo fmt --all --check
-
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      - name: Workspace check
-        run: cargo check --workspace --all-targets --locked
 
       - name: o7-worktree tests
         run: cargo test -p o7-worktree --locked --no-fail-fast
 
       - name: o7-verifier tests
         run: cargo test -p o7-verifier --locked --no-fail-fast
-
-  dependency-policy:
-    name: dependency policy
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Checkout exact tested revision
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - name: Bans, licenses, sources
-        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
-        with:
-          command: check bans licenses sources
-          # Empty, so the action's default `--all-features` does not silently widen the
-          # dependency graph relative to the accepted local `cargo deny check`.
-          arguments: ""
-
-  advisories:
-    name: dependency advisories
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - name: Checkout exact tested revision
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-
-      - name: Advisories
-        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
-        with:
-          command: check advisories
-          arguments: ""
