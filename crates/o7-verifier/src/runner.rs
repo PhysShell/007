@@ -8,26 +8,36 @@
 //! boundary (Sandboy) exists, production execution is therefore unavailable by
 //! construction.
 //!
-//! Ordering of the pre-spawn gates: validate the command, then ACQUIRE and check trust
-//! (the executable is opened `O_NOFOLLOW`, proven a regular file, size-capped, and read
-//! from that descriptor to bind its identity; an unsafe/unreadable or untrusted
-//! executable ⇒ NotRun, never spawned), then check the boundary requirement. Only then is
-//! anything spawned. The run is bounded by the command timeout; a timeout cancels the
-//! worker, which tears down the WHOLE owned process set, and is reported as `TimedOut`
-//! (never a pass). Output is bounded by the command's budget; exceeding it fails the sink
-//! closed and is reported as `OutputLost` (never a silent truncation, never a pass).
+//! Ordering of the pre-spawn gates: validate the command, ACQUIRE the source bytes under a
+//! hardened open (`O_NOFOLLOW`, proven a regular file, size-capped), STAGE them into a
+//! fully-sealed anonymous `memfd`, then bind trust to the bytes read BACK from that sealed
+//! object and require the command to be trusted (an unsafe/unreadable acquisition, a staging
+//! failure, or an untrusted command ⇒ NotRun, never spawned), then check the boundary
+//! requirement. Only then is anything spawned. The run is bounded by the command timeout; a
+//! timeout cancels the worker, which tears down the WHOLE owned process set, and is reported
+//! as `TimedOut` (never a pass). Output is bounded by the command's budget; exceeding it
+//! fails the sink closed and is reported as `OutputLost` (never a silent truncation, never a
+//! pass).
 //!
-//! ACQUISITION and EXECUTION are both fd-exact against a same-UID attacker. Acquisition
-//! opens the trusted executable `O_NOFOLLOW`, proves it a regular file, and reads the exact
-//! bytes it hashes. Execution then materializes those exact bytes as a fully-SEALED,
-//! anonymous `memfd` (`F_SEAL_WRITE | GROW | SHRINK | SEAL`) and runs it through a
-//! `/proc/<pid>/fd/<n>` path backed by a held-open descriptor. Because the object is
-//! anonymous (no directory entry to swap) and immutable (writes are sealed even for the
-//! owner, and the seal cannot be removed), and because the kernel resolves the exec path
-//! THROUGH the descriptor to that object (the mechanism glibc's `fexecve` uses), the bytes
-//! executed are exactly the bytes hashed — a same-UID attacker can neither swap the path
-//! nor rewrite the content. This uses no `unsafe` (`memfd_create`/`F_ADD_SEALS` via rustix's
-//! safe wrappers) and does not change the frozen o7-worker `ProcessBoundary`/
+//! ACQUISITION and EXECUTION are both fd-exact against a same-UID attacker, and TRUST is
+//! bound to the bytes that will actually execute. Acquisition opens the trusted executable
+//! `O_NOFOLLOW`, proves it a regular file, and reads its exact bytes. Those bytes are written
+//! into a fully-SEALED, anonymous `memfd` (`F_SEAL_WRITE | GROW | SHRINK | SEAL`), and the
+//! command is executed through a `/proc/<pid>/fd/<n>` path backed by a held-open descriptor.
+//! Because the object is anonymous (no directory entry to swap) and immutable (writes are
+//! sealed even for the owner, and the seal cannot be removed), and because the kernel resolves
+//! the exec path THROUGH the descriptor to that object (the mechanism glibc's `fexecve` uses),
+//! the bytes executed cannot be swapped or rewritten by a same-UID attacker.
+//!
+//! Crucially, the trust decision is made over the bytes READ BACK from the sealed memfd — not
+//! over the source buffer that was written before sealing. There is an unavoidable window
+//! between `write` and `F_ADD_SEALS` in which a same-UID process could open the still-unsealed
+//! memfd (via `/proc/<pid>/fd`) and overwrite it; sealing would then freeze the attacker's
+//! bytes. Binding trust to the post-seal read-back closes that pre-seal race: any such
+//! mutation changes the sealed content, so the recomputed trust digest is not in the store and
+//! the command is NotRun — never spawned. The bytes hashed for trust are exactly the immutable
+//! bytes that run. This uses no `unsafe` (`memfd_create`/`F_ADD_SEALS`/`F_GET_SEALS` via
+//! rustix's safe wrappers) and does not change the frozen o7-worker `ProcessBoundary`/
 //! `BoundarySpawnSpec` seam, which still spawns from a PATH. (Requires `/proc` mounted;
 //! otherwise the run fails closed at spawn — see [`stage_executable`].)
 
@@ -87,6 +97,30 @@ impl Verifier {
         command: &TrustedCommand,
         trust: &TrustStore,
     ) -> VerifierEvidence {
+        self.verify_seamed(boundary, repo, worktree_root, command, trust, |_| {})
+            .await
+    }
+
+    /// The core of [`Verifier::verify`], with a test seam `pre_seal` invoked on the writable
+    /// memfd handle AFTER the source bytes are written but BEFORE the seals are applied.
+    ///
+    /// In production `pre_seal` is a no-op. A test uses it to model a SAME-UID attacker
+    /// mutating the still-unsealed memfd (via `/proc/<pid>/fd`) in the pre-seal window, to
+    /// prove that trust — bound to the bytes read BACK from the sealed object — detects the
+    /// mutation (unrecognized digest ⇒ NotRun) and NEVER spawns. The seam is the only way to
+    /// interpose deterministically in that otherwise-racy window.
+    async fn verify_seamed<F>(
+        &self,
+        boundary: Box<dyn ProcessBoundary>,
+        repo: &CanonicalRepoId,
+        worktree_root: &Path,
+        command: &TrustedCommand,
+        trust: &TrustStore,
+        pre_seal: F,
+    ) -> VerifierEvidence
+    where
+        F: FnOnce(&std::fs::File),
+    {
         let structural = structural_command_digest(repo, command);
         let attestation = boundary.attestation();
         let enforcement = Some(AttestedEnforcement::from(attestation.enforcement));
@@ -126,11 +160,9 @@ impl Verifier {
             );
         }
 
-        // 2. Trust — ACQUIRE the EXACT bytes we will run under a hardened open (O_NOFOLLOW,
-        //    proven regular file, size-capped, drift-checked), hash THEM (not a path
-        //    re-resolved later), and require the command to be trusted. An unsafe or
-        //    unreadable acquisition, or an untrusted command, means it is NOT run.
-        let exe_bytes = match acquire_executable(&command.executable) {
+        // 2. ACQUIRE the source bytes under a hardened open (O_NOFOLLOW, proven regular file,
+        //    size-capped, drift-checked). An unsafe or unreadable acquisition means NotRun.
+        let source_bytes = match acquire_executable(&command.executable) {
             Ok(bytes) => bytes,
             Err(reason) => {
                 return not_run(
@@ -145,7 +177,47 @@ impl Verifier {
                 );
             }
         };
-        let anchor = TrustAnchor::for_executable_bytes(repo, command, &exe_bytes);
+
+        // 3. STAGE the source bytes into a fully-sealed anonymous memfd — BEFORE the trust
+        //    check, so trust can bind to the immutable object rather than the source buffer.
+        //    `pre_seal` (a no-op in production) is invoked in the pre-seal window; sealing
+        //    then freezes whatever content the memfd holds and the seals are verified present.
+        let staged = match stage_executable_seamed(&source_bytes, pre_seal) {
+            Ok(staged) => staged,
+            Err(err) => {
+                return not_run(
+                    repo,
+                    command,
+                    &structural,
+                    None,
+                    None,
+                    enforcement,
+                    false,
+                    format!("failed to stage the trusted executable: {err}"),
+                );
+            }
+        };
+
+        // 4. Trust — bind it to the bytes READ BACK from the SEALED memfd (the exact immutable
+        //    bytes that will execute), not the source buffer. Any pre-seal mutation therefore
+        //    changes the sealed content and yields a different, untrusted digest ⇒ NotRun. An
+        //    untrusted command (or an unreadable sealed object) is never run.
+        let sealed_bytes = match staged.read_back() {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                return not_run(
+                    repo,
+                    command,
+                    &structural,
+                    None,
+                    None,
+                    enforcement,
+                    false,
+                    format!("failed to read back the sealed executable: {err}"),
+                );
+            }
+        };
+        let anchor = TrustAnchor::for_executable_bytes(repo, command, &sealed_bytes);
         let exe_identity = anchor.executable_identity.clone();
         let trust_digest = anchor.digest().clone();
         if !trust.is_trusted(&anchor) {
@@ -161,7 +233,7 @@ impl Verifier {
             );
         }
 
-        // 3. Boundary requirement — fail closed BEFORE spawn, no fallback.
+        // 5. Boundary requirement — fail closed BEFORE spawn, no fallback.
         if !self.requirement.is_satisfied_by(&attestation) {
             return evidence_of(
                 VerifierOutcome::BoundaryUnavailable {
@@ -182,27 +254,8 @@ impl Verifier {
             );
         }
 
-        // 4. Stage the EXACT trusted bytes into an owner-only directory and run THAT copy.
-        //    The staged file lives in a 0700 dir only we can write, so it cannot be
-        //    swapped between hashing and exec — the operator path is never re-resolved at
-        //    spawn. The staged copy is removed when `staged` drops (after the run).
-        let staged = match stage_executable(&exe_bytes) {
-            Ok(staged) => staged,
-            Err(err) => {
-                return not_run(
-                    repo,
-                    command,
-                    &structural,
-                    Some(exe_identity),
-                    Some(trust_digest),
-                    enforcement,
-                    true,
-                    format!("failed to stage the trusted executable: {err}"),
-                );
-            }
-        };
-
-        // 5. Spawn and run under the boundary, bounded by the timeout.
+        // 6. Spawn and run under the boundary, bounded by the timeout. The staged memfd is
+        //    executed through its /proc fd path and dropped after the run.
         let cwd = match &command.cwd_policy {
             CwdPolicy::WorktreeRoot => worktree_root.to_path_buf(),
             CwdPolicy::Absolute(path) => path.clone(),
@@ -408,6 +461,20 @@ impl StagedExecutable {
     fn path(&self) -> &Path {
         &self.proc_path
     }
+
+    /// Read the bytes back from the SEALED memfd through the held descriptor. Trust is bound
+    /// to THESE bytes — the immutable object that will actually execute — so a pre-seal
+    /// mutation (which sealing would otherwise freeze in place) changes what is trusted and
+    /// falls out of the store. The descriptor is read-only and freshly opened at offset 0,
+    /// and the object is sealed (no growth), so this yields exactly the executed bytes.
+    fn read_back(&self) -> std::io::Result<Vec<u8>> {
+        use std::io::Read as _;
+        let mut bytes = Vec::new();
+        // `impl Read for &File` reads without needing a mutable handle; the fd stays held
+        // for exec afterwards (exec resolves the /proc path independently of file position).
+        (&self._fd).read_to_end(&mut bytes)?;
+        Ok(bytes)
+    }
 }
 
 /// Materialize `bytes` as a fully-sealed, anonymous `memfd` and return a
@@ -428,11 +495,20 @@ impl StagedExecutable {
 ///
 /// RUNTIME PREREQUISITE: `/proc` must be mounted. On a host without it the run fails closed
 /// at spawn (`SpawnFailed`) rather than executing unverified bytes.
-fn stage_executable(bytes: &[u8]) -> std::io::Result<StagedExecutable> {
+///
+/// `pre_seal` is invoked on the writable memfd handle AFTER the bytes are written but BEFORE
+/// the seals are applied. In production it is a no-op; the runner's trust check binds to the
+/// bytes read back from the SEALED object (see [`StagedExecutable::read_back`]), so any
+/// mutation performed by the seam changes the sealed content and is caught. The seam exists to
+/// make the otherwise-racy pre-seal window deterministically testable.
+fn stage_executable_seamed<F>(bytes: &[u8], pre_seal: F) -> std::io::Result<StagedExecutable>
+where
+    F: FnOnce(&std::fs::File),
+{
     use std::io::Write as _;
     use std::os::fd::AsRawFd as _;
 
-    use rustix::fs::{fcntl_add_seals, memfd_create, MemfdFlags, SealFlags};
+    use rustix::fs::{fcntl_add_seals, fcntl_get_seals, memfd_create, MemfdFlags, SealFlags};
 
     // Anonymous, sealable, memory-backed file — no on-disk inode to chmod or replace.
     let memfd = memfd_create(
@@ -444,13 +520,24 @@ fn stage_executable(bytes: &[u8]) -> std::io::Result<StagedExecutable> {
     rw.write_all(bytes)?;
     rw.flush()?;
 
+    // Pre-seal window. In production this is a no-op; a test interposes here to model a
+    // same-UID attacker mutating the still-unsealed memfd. Trust binds to the post-seal
+    // read-back, so any mutation here is detected — never trusted, never spawned.
+    pre_seal(&rw);
+
     // Seal it fully immutable: no writes (even by the owner), no size change, and no future
     // change to the seals themselves. From here the bytes can never change.
-    fcntl_add_seals(
-        &rw,
-        SealFlags::WRITE | SealFlags::GROW | SealFlags::SHRINK | SealFlags::SEAL,
-    )
-    .map_err(std::io::Error::from)?;
+    let required = SealFlags::WRITE | SealFlags::GROW | SealFlags::SHRINK | SealFlags::SEAL;
+    fcntl_add_seals(&rw, required).map_err(std::io::Error::from)?;
+
+    // Prove the required seals are actually in force before trusting or executing the object.
+    // A sealing that silently did not take hold must fail closed, not run mutable bytes.
+    let seals = fcntl_get_seals(&rw).map_err(std::io::Error::from)?;
+    if !seals.contains(required) {
+        return Err(std::io::Error::other(
+            "required memfd seals are not in force after sealing",
+        ));
+    }
 
     // Take a READ-ONLY descriptor for exec (re-open the memfd via /proc/self/fd), then drop
     // the writable handle so the object has no writable open at exec time.
@@ -577,7 +664,7 @@ mod tests {
     /// hash-to-spawn TOCTOU that a plain read-only fd to a regular file leaves open.
     #[test]
     fn a_sealed_memfd_cannot_be_mutated_by_the_owning_uid() {
-        let staged = stage_executable(b"ORIGINAL-BYTES").expect("stage");
+        let staged = stage_executable_seamed(b"ORIGINAL-BYTES", |_| {}).expect("stage");
         let proc_path = staged.path().to_path_buf();
 
         // Same-UID owner tries to make it writable and overwrite it in place.
@@ -607,12 +694,129 @@ mod tests {
     /// with no directory entry an attacker could rename or replace.
     #[test]
     fn the_staged_executable_is_an_anonymous_memfd() {
-        let staged = stage_executable(b"payload").expect("stage");
+        let staged = stage_executable_seamed(b"payload", |_| {}).expect("stage");
         let target = std::fs::read_link(staged.path()).expect("readlink /proc fd");
         let shown = target.to_string_lossy();
         assert!(
             shown.contains("memfd:") && shown.contains("o7-verify-exe"),
             "expected an anonymous memfd target, got {shown:?}"
+        );
+    }
+
+    /// A pre-seal mutation of the sealed bytes is bound out and never spawned.
+    ///
+    /// This attacks the ONLY residual window: between `write` and `F_ADD_SEALS` a same-UID
+    /// process can open the still-unsealed memfd (via `/proc/<pid>/fd`) and overwrite it;
+    /// sealing then freezes the attacker's bytes. Because trust binds to the bytes read BACK
+    /// from the SEALED object (not the source buffer), the recomputed digest is the attacker's
+    /// — absent from the store — so the outcome is `NotRun` and the boundary is NEVER asked to
+    /// spawn. The seam injects exactly that pre-seal mutation, deterministically.
+    #[tokio::test]
+    async fn a_pre_seal_mutation_of_the_sealed_bytes_is_bound_out_and_never_spawned() {
+        use std::collections::BTreeMap;
+        use std::ffi::OsString;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        use o7_worker::{
+            BoundaryAttestation, BoundaryError, BoundaryKind, BoundaryProcess, BoundarySpawnSpec,
+            EnforcementLevel,
+        };
+
+        use crate::command::{CwdPolicy, ExitPolicy, OutputLimits, RequiredBoundary};
+        use crate::trust::TrustAnchor;
+
+        // A boundary that flags any spawn attempt and refuses — nothing may reach it here.
+        struct NeverSpawnBoundary {
+            spawned: Arc<AtomicBool>,
+        }
+        #[async_trait]
+        impl ProcessBoundary for NeverSpawnBoundary {
+            async fn spawn(
+                &self,
+                _spec: BoundarySpawnSpec,
+            ) -> Result<Box<dyn BoundaryProcess>, BoundaryError> {
+                self.spawned.store(true, Ordering::SeqCst);
+                Err(BoundaryError::Spawn(std::io::Error::other(
+                    "spawn must not be reached: a mutated executable was about to run",
+                )))
+            }
+            fn attestation(&self) -> BoundaryAttestation {
+                BoundaryAttestation {
+                    implementation: BoundaryKind::Sandboy,
+                    enforcement: EnforcementLevel::FullyEnforced,
+                }
+            }
+        }
+
+        // A trusted executable on disk: trust is computed over its ORIGINAL bytes.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let exe = dir.path().join("verify");
+        std::fs::write(&exe, b"ORIGINAL-TRUSTED-BYTES").expect("write exe");
+        let repo = CanonicalRepoId {
+            git_common_dir: std::path::PathBuf::from("/srv/repo/.git"),
+            dev: 66,
+            ino: 4242,
+        };
+        let mut environment = BTreeMap::new();
+        environment.insert(OsString::from("PATH"), OsString::from("/usr/bin:/bin"));
+        let command = TrustedCommand {
+            executable: exe,
+            arguments: vec![OsString::from("--verify")],
+            cwd_policy: CwdPolicy::WorktreeRoot,
+            environment,
+            timeout: std::time::Duration::from_secs(5),
+            output_limits: OutputLimits {
+                max_total_bytes: 1 << 20,
+            },
+            exit_policy: ExitPolicy::exactly_zero(),
+            boundary_requirement: RequiredBoundary::RequireFullyEnforced,
+        };
+        // Trust the ORIGINAL bytes (what an operator hashed and approved).
+        let mut trust = TrustStore::new();
+        trust.trust(&TrustAnchor::compute(&repo, &command).expect("compute anchor"));
+
+        let spawned = Arc::new(AtomicBool::new(false));
+        let boundary = Box::new(NeverSpawnBoundary {
+            spawned: Arc::clone(&spawned),
+        });
+        let root = tempfile::tempdir().expect("root");
+
+        // Same-UID attacker overwrites the still-unsealed memfd in the pre-seal window.
+        let ev = Verifier::production()
+            .verify_seamed(
+                boundary,
+                &repo,
+                root.path(),
+                &command,
+                &trust,
+                |rw: &std::fs::File| {
+                    use std::io::Write as _;
+                    use std::os::fd::AsRawFd as _;
+                    if let Ok(mut attacker) = std::fs::OpenOptions::new()
+                        .write(true)
+                        .truncate(false)
+                        .open(format!("/proc/self/fd/{}", rw.as_raw_fd()))
+                    {
+                        // Same length as ORIGINAL so it is a clean in-place overwrite; the
+                        // hash differs regardless. This is the byte the seal will freeze.
+                        let _ = attacker.write_all(b"EVIL-REPLACEMENT-BYTES");
+                        let _ = attacker.flush();
+                    }
+                },
+            )
+            .await;
+
+        // The sealed bytes are the attacker's, so trust (bound to the read-back) fails: NotRun.
+        assert!(
+            matches!(ev.outcome, VerifierOutcome::NotRun { .. }),
+            "expected NotRun for a pre-seal-mutated executable, got {:?}",
+            ev.outcome
+        );
+        assert!(!ev.trusted, "a mutated executable was reported trusted");
+        // And the boundary was never asked to spawn — the mutated bytes never ran.
+        assert!(
+            !spawned.load(Ordering::SeqCst),
+            "a pre-seal-mutated executable reached the boundary spawn"
         );
     }
 }

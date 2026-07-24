@@ -33,17 +33,14 @@ tokio = { version = "1", default-features = false, features = [
 ] }
 async-trait = "0.1"
 bytes = "1"
-# Stage the exact trusted executable bytes into an owner-only (0700) temp directory and
-# run THAT copy, so the bytes hashed for the trust check are the bytes executed (closes
-# the hash-to-spawn TOCTOU). tempfile creates the dir securely (O_EXCL, 0700). Already
-# allowed in the workspace deny.toml.
-tempfile = "3"
 # Harden executable ACQUISITION and EXECUTION via rustix's safe wrappers (the tree forbids
 # `unsafe`): open the trusted executable O_NOFOLLOW|O_NONBLOCK and prove it a size-capped
 # regular file (never a FIFO/device/socket/pseudo-file); and materialize the exact bytes as
-# a fully-sealed anonymous memfd (memfd_create + F_ADD_SEALS) executed through /proc/<pid>/fd
-# so the executed bytes are immutable even to a same-UID attacker. rustix is already a
-# workspace dependency (o7-worktree) and allowed in deny.toml.
+# a fully-sealed anonymous memfd (memfd_create + F_ADD_SEALS, seals verified with F_GET_SEALS)
+# executed through /proc/<pid>/fd. Trust is bound to the bytes read BACK from the sealed
+# object, so the executed bytes are immutable even to a same-UID attacker and the pre-seal
+# window is closed. rustix is already a workspace dependency (o7-worktree) and allowed in
+# deny.toml.
 rustix = { version = "1", default-features = false, features = ["fs", "std"] }
 
 [dev-dependencies]
