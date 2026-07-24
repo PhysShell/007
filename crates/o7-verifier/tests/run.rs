@@ -213,6 +213,10 @@ async fn a_symlinked_executable_is_refused() {
 
     let repo = repo_id();
     let cmd = command_for(link, Duration::from_secs(5), 1 << 20);
+    // TRUST the command (its identity resolved through the link's target), so the ONLY
+    // remaining rejection cause is acquisition — a NotRun here proves acquisition rejected
+    // the symlink, not that the command was untrusted.
+    let trust = trust_for(&repo, &cmd);
     let boundary = FakeBoundary::fully_enforced().exit_code(0);
     let state = boundary.state();
 
@@ -222,7 +226,7 @@ async fn a_symlinked_executable_is_refused() {
             &repo,
             worktree_root().path(),
             &cmd,
-            &TrustStore::new(),
+            &trust,
         )
         .await;
 
@@ -239,6 +243,8 @@ async fn a_device_node_executable_is_refused() {
         Duration::from_secs(5),
         1 << 20,
     );
+    // Trust the command so acquisition is the sole rejection cause.
+    let trust = trust_for(&repo, &cmd);
     let boundary = FakeBoundary::fully_enforced().exit_code(0);
     let state = boundary.state();
 
@@ -248,7 +254,7 @@ async fn a_device_node_executable_is_refused() {
             &repo,
             worktree_root().path(),
             &cmd,
-            &TrustStore::new(),
+            &trust,
         )
         .await;
 
@@ -269,6 +275,8 @@ async fn a_procfs_pseudo_file_executable_is_refused() {
         Duration::from_secs(5),
         1 << 20,
     );
+    // Trust the command so acquisition is the sole rejection cause.
+    let trust = trust_for(&repo, &cmd);
     let boundary = FakeBoundary::fully_enforced().exit_code(0);
     let state = boundary.state();
 
@@ -278,7 +286,7 @@ async fn a_procfs_pseudo_file_executable_is_refused() {
             &repo,
             worktree_root().path(),
             &cmd,
-            &TrustStore::new(),
+            &trust,
         )
         .await;
 

@@ -405,6 +405,13 @@ impl StagedExecutable {
 /// return a handle to it. The directory is created securely (O_EXCL, random name) and is
 /// writable only by us, so the staged file cannot be swapped between staging and exec —
 /// which is what closes the hash-to-spawn TOCTOU.
+///
+/// RUNTIME PREREQUISITE: the staging directory is created under `$TMPDIR` (falling back to
+/// `/tmp`), so that location must be exec-capable. On a host that mounts `$TMPDIR`
+/// `noexec`, the staged copy cannot be executed and the run fails closed at spawn
+/// (`SpawnFailed`) — point `TMPDIR` at an exec-capable filesystem for the verifier. (A
+/// future revision may accept a caller-supplied exec directory once the boundary grows a
+/// descriptor-based spawn; see the module-level note on execution.)
 fn stage_executable(bytes: &[u8]) -> std::io::Result<StagedExecutable> {
     use std::io::Write as _;
     use std::os::unix::fs::OpenOptionsExt as _;
