@@ -20,8 +20,6 @@
 //! is *provably* gone, preserving everything it cannot prove) and it NEVER deletes a
 //! directory it cannot prove ownership of, so there is no automatic repo-global purge.
 
-use std::io::Write as _;
-use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -35,8 +33,11 @@ use crate::identity::{
 };
 use crate::materialize::MaterializeSummary;
 use crate::reap::{remove_verified_dir, ReapError};
-use crate::stateroot::StateRoot;
+use crate::stateroot::{StateRoot, StateRootError};
 use crate::worktree::{CleanupOutcome, Worktree, WorktreeError};
+
+/// The durable state file's name under the state root.
+const STATE_FILE_NAME: &str = "worktrees.json";
 
 /// The durable state schema version. Bumped only on a breaking change; a mismatch is
 /// an error, never a silent migration.
@@ -96,6 +97,8 @@ pub enum StoreError {
     Worktree(#[from] WorktreeError),
     #[error(transparent)]
     Attest(#[from] AttestError),
+    #[error(transparent)]
+    StateRoot(#[from] StateRootError),
     #[error("run {0} is already tracked; use reopen, not create")]
     RunAlreadyTracked(String),
     #[error("run {0} is not tracked")]
@@ -147,40 +150,27 @@ impl WorktreeStore {
     }
 
     fn state_file(&self) -> PathBuf {
-        self.state_root.path().join("worktrees.json")
-    }
-
-    fn lock_file(&self) -> PathBuf {
-        self.state_root.path().join(".lock")
+        self.state_root.path().join(STATE_FILE_NAME)
     }
 
     /// Take the exclusive advisory lock that serializes every lifecycle operation.
-    /// Held until the returned guard drops. Cross-process (flock on the state root),
-    /// so two o7d instances never both mutate the state.
+    /// Held until the returned guard drops. Cross-process (flock on the state root's
+    /// `.lock`), so two o7d instances never both mutate the state. The lock file is
+    /// opened relative to the state root's bound descriptor, `O_NOFOLLOW`, and proven a
+    /// regular self-owned `0o600` file — a substituted `.lock` symlink fails closed.
     fn lock(&self) -> Result<Flock<std::fs::File>, StoreError> {
-        let path = self.lock_file();
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(&path)
-            .map_err(|source| StoreError::Io {
-                path: path.clone(),
-                source,
-            })?;
+        let file = self.state_root.open_lock_file()?;
         Flock::lock(file, FlockArg::LockExclusive).map_err(|(_, errno)| {
-            StoreError::Lock(format!("flock LOCK_EX on {path:?} failed: {errno}"))
+            StoreError::Lock(format!("flock LOCK_EX on the state root failed: {errno}"))
         })
     }
 
     fn load(&self) -> Result<StateFile, StoreError> {
-        let path = self.state_file();
-        match std::fs::read(&path) {
-            Ok(bytes) => {
+        match self.state_root.read_state_file(STATE_FILE_NAME)? {
+            Some(bytes) => {
                 let state: StateFile =
                     serde_json::from_slice(&bytes).map_err(|e| StoreError::Corrupt {
-                        path: path.clone(),
+                        path: self.state_file(),
                         detail: e.to_string(),
                     })?;
                 if state.schema != STATE_SCHEMA {
@@ -190,48 +180,22 @@ impl WorktreeStore {
                 }
                 Ok(state)
             }
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(StateFile {
+            None => Ok(StateFile {
                 schema: STATE_SCHEMA,
                 records: Vec::new(),
             }),
-            Err(source) => Err(StoreError::Io { path, source }),
         }
     }
 
-    /// Atomically persist state: write a 0600 temp file, fsync it, rename over the real
-    /// file, then fsync the directory so the rename is durable.
+    /// Atomically persist state through the state root's bound descriptor: a UNIQUE
+    /// `O_EXCL`/`O_NOFOLLOW`/`0o600` temp file is written and fsynced, `renameat` over the
+    /// real file relative to the same root, then the root descriptor is fsynced so the
+    /// rename is durable. A substituted temp or final path cannot redirect the write.
     fn persist(&self, state: &StateFile) -> Result<(), StoreError> {
         let json =
             serde_json::to_vec_pretty(state).map_err(|e| StoreError::Serialize(e.to_string()))?;
-        let final_path = self.state_file();
-        let tmp_path = self.state_root.path().join("worktrees.json.tmp");
-        {
-            let mut file = std::fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&tmp_path)
-                .map_err(|source| StoreError::Io {
-                    path: tmp_path.clone(),
-                    source,
-                })?;
-            file.write_all(&json).map_err(|source| StoreError::Io {
-                path: tmp_path.clone(),
-                source,
-            })?;
-            file.sync_all().map_err(|source| StoreError::Io {
-                path: tmp_path.clone(),
-                source,
-            })?;
-        }
-        std::fs::rename(&tmp_path, &final_path).map_err(|source| StoreError::Io {
-            path: final_path.clone(),
-            source,
-        })?;
-        if let Ok(dir) = std::fs::File::open(self.state_root.path()) {
-            let _ = dir.sync_all();
-        }
+        self.state_root
+            .write_state_file_atomic(STATE_FILE_NAME, &json)?;
         Ok(())
     }
 
@@ -439,38 +403,16 @@ impl WorktreeStore {
             .iter()
             .map(|r| r.identity_digest.as_str())
             .collect();
-        let root = self.state_root.path();
         let mut out = Vec::new();
-        let entries = match std::fs::read_dir(root) {
-            Ok(entries) => entries,
-            Err(source) => {
-                return Err(StoreError::Io {
-                    path: root.to_path_buf(),
-                    source,
-                })
-            }
-        };
-        for entry in entries {
-            let entry = entry.map_err(|source| StoreError::Io {
-                path: root.to_path_buf(),
-                source,
-            })?;
-            let file_type = match entry.file_type() {
-                Ok(ft) => ft,
-                Err(_) => continue,
-            };
-            // Only real directories are candidate worktrees; the state/lock files and
-            // any symlink are ignored here.
-            if !file_type.is_dir() {
+        // Read the state root's children from its bound descriptor, so an ancestor swap
+        // cannot redirect the listing. Only real directories are candidate worktrees; the
+        // state/lock files and any symlink are ignored here.
+        for child in self.state_root.list_children()? {
+            if !child.is_dir {
                 continue;
             }
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else {
-                out.push(entry.path());
-                continue;
-            };
-            if !known.contains(name) {
-                out.push(entry.path());
+            if !known.contains(child.name.as_str()) {
+                out.push(child.path);
             }
         }
         Ok(out)

@@ -34,7 +34,7 @@ pub use materialize::{
     MaterializeSummary,
 };
 pub use reap::{remove_verified_dir, ReapError};
-pub use stateroot::{StateRoot, StateRootError};
+pub use stateroot::{ChildEntry, StateRoot, StateRootError};
 pub use store::{
     RecoveredWorktree, RecoveryOutcome, StoreError, WorktreeRecord, WorktreeStore, STATE_SCHEMA,
 };

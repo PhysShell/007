@@ -11,10 +11,9 @@
 //! owns them; it provides no process confinement. Confinement is the ProcessBoundary
 //! (and, in production, Sandboy).
 
-use std::os::unix::fs::DirBuilderExt as _;
 use std::path::{Path, PathBuf};
 
-use crate::attest::{attest_owned_dir, AttestError, FsIdentity, OWNER_ONLY};
+use crate::attest::{attest_owned_dir, AttestError, FsIdentity};
 use crate::git::{GitError, HardenedGit};
 use crate::identity::{CommittedRevision, IdentityDigest, RunId, WorktreeIdentity};
 use crate::materialize::{
@@ -86,7 +85,6 @@ impl Worktree {
         let repo = git.canonical_repo_id()?;
         let identity = WorktreeIdentity::new(run_id, repo, revision.clone());
         let digest = identity.digest();
-        let path = state_root.worktree_path(&digest);
 
         // The agent's copy must live outside the operator's repository.
         state_root.ensure_outside_repo(&identity.repo.git_common_dir)?;
@@ -97,25 +95,15 @@ impl Worktree {
         // entry/blob/cumulative budget breach) fails closed here with nothing written.
         let plan = MaterializePlan::prepare(git, revision, &MaterializeLimits::default())?;
 
-        // Create the directory exclusively (never adopt a pre-existing path).
-        match std::fs::DirBuilder::new().mode(OWNER_ONLY).create(&path) {
-            Ok(()) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {
-                return Err(WorktreeError::AlreadyExists(path));
-            }
-            Err(source) => return Err(WorktreeError::Io { path, source }),
-        }
-        // Re-assert owner-only bits (umask may have cleared some).
-        std::fs::set_permissions(
-            &path,
-            std::os::unix::fs::PermissionsExt::from_mode(OWNER_ONLY),
-        )
-        .map_err(|source| WorktreeError::Io {
-            path: path.clone(),
-            source,
-        })?;
-
-        let fs_identity = FsIdentity::of_dir(&path)?;
+        // Create the worktree directory RELATIVE to the state root's bound descriptor:
+        // mkdirat under the proven root inode (never adopting a pre-existing path), then
+        // re-open O_NOFOLLOW and prove owner-only, returning the identity taken from the
+        // descriptor. An ancestor swap cannot redirect this at a victim location.
+        let (path, fs_identity) = match state_root.create_worktree_dir(&digest) {
+            Ok(pair) => pair,
+            Err(StateRootError::WorktreeExists(p)) => return Err(WorktreeError::AlreadyExists(p)),
+            Err(err) => return Err(WorktreeError::StateRoot(err)),
+        };
 
         // Turn the owned directory into a REAL, self-contained detached git worktree of
         // the committed revision (init + borrowed objects + detached HEAD + index), then
