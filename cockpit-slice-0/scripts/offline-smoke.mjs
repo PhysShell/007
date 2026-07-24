@@ -27,13 +27,19 @@ function fail(msg) {
 }
 
 async function main() {
-  const browser = await chromium.launch({
-    executablePath: CHROMIUM_FULL, // full Chromium — headless shell lacks SW support
+  // Service workers require the FULL Chromium, not the headless shell (which is
+  // Playwright's default for headless chromium and lacks SW support). Prefer an
+  // explicit full-Chromium binary; otherwise force the full build via
+  // `channel: "chromium"` (what `npx playwright install chromium` provides in CI).
+  const launchOptions = {
     headless: true,
     // Treat the virtual origin as secure so service workers + CacheStorage are
     // available exactly as they would be over https / on the phone.
     args: [...LAUNCH_ARGS, `--unsafely-treat-insecure-origin-as-secure=${ORIGIN}`],
-  });
+  };
+  if (CHROMIUM_FULL) launchOptions.executablePath = CHROMIUM_FULL;
+  else launchOptions.channel = "chromium";
+  const browser = await chromium.launch(launchOptions);
   const context = await browser.newContext({ serviceWorkers: "allow" });
 
   // The "server": SPA-fallback ON here so the first online load behaves normally.
