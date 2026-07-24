@@ -21,11 +21,31 @@
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
+use std::io::Read as _;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::identity::{CanonicalRepoId, CommittedRevision, IdentityError};
+
+/// Wall-clock ceiling for any single git child. A well-behaved repository resolves,
+/// lists, and reads well under this; a hung or deadlocked git is killed rather than
+/// blocking the caller forever.
+const GIT_WALL_CLOCK: Duration = Duration::from_secs(120);
+/// Byte ceiling for a control command's stdout (`init`, `update-ref`, `read-tree`,
+/// `rev-parse`): these emit at most a few lines, so a flood here is pathological.
+const MAX_CONTROL_STDOUT: u64 = 16 * 1024 * 1024;
+/// Byte ceiling for `ls-tree` stdout. Sized for very large trees while still bounding
+/// memory against a git that ignores the tree it was asked to list.
+const MAX_LS_TREE_STDOUT: u64 = 1024 * 1024 * 1024;
+/// Byte ceiling for `cat-file blob` stdout — a hard backstop over the per-blob budget
+/// the materialize preflight already enforces, so a whole-blob read is never unbounded.
+const MAX_BLOB_STDOUT: u64 = 1024 * 1024 * 1024;
+/// Byte ceiling for any child's stderr — only ever used to build an error message.
+const MAX_STDERR: u64 = 256 * 1024;
+/// How often the wait loop polls the child while enforcing the wall-clock deadline.
+const POLL_INTERVAL: Duration = Duration::from_millis(5);
 
 /// A failure reading the repository through hardened git.
 #[derive(Debug, thiserror::Error)]
@@ -37,6 +57,23 @@ pub enum GitError {
         command: String,
         status: String,
         stderr: String,
+    },
+    #[error("git {command} did not finish within {timeout:?}; the process was killed")]
+    Timeout {
+        command: String,
+        timeout: std::time::Duration,
+    },
+    #[error("git {command} produced more than {cap} bytes on {stream}; the process was killed")]
+    OutputTooLarge {
+        command: String,
+        stream: &'static str,
+        cap: u64,
+    },
+    #[error("draining git {command} output failed: {source}")]
+    Drain {
+        command: String,
+        #[source]
+        source: std::io::Error,
     },
     #[error("git {command} produced output that could not be parsed: {detail}")]
     Parse { command: String, detail: String },
@@ -151,15 +188,18 @@ impl HardenedGit {
         // spaces or odd bytes is unambiguous. -l: include the blob size, so the preflight
         // can enforce byte budgets before reading. Record:
         // "<mode> SP <type> SP <oid> SP <size> TAB <path>".
-        let raw = self.run_bytes(&[
-            OsStr::new("ls-tree"),
-            OsStr::new("-r"),
-            OsStr::new("-z"),
-            OsStr::new("-l"),
-            OsStr::new("--full-tree"),
-            OsStr::new("--end-of-options"),
-            OsStr::new(revision.as_str()),
-        ])?;
+        let raw = self.run(
+            &[
+                OsStr::new("ls-tree"),
+                OsStr::new("-r"),
+                OsStr::new("-z"),
+                OsStr::new("-l"),
+                OsStr::new("--full-tree"),
+                OsStr::new("--end-of-options"),
+                OsStr::new(revision.as_str()),
+            ],
+            MAX_LS_TREE_STDOUT,
+        )?;
         parse_ls_tree(&raw).map_err(|detail| GitError::Parse {
             command: "ls-tree".to_owned(),
             detail,
@@ -171,12 +211,15 @@ impl HardenedGit {
     /// # Errors
     /// [`GitError`] if the object is missing or git fails.
     pub fn cat_blob(&self, oid: &str) -> Result<Vec<u8>, GitError> {
-        self.run_bytes(&[
-            OsStr::new("cat-file"),
-            OsStr::new("blob"),
-            OsStr::new("--end-of-options"),
-            OsStr::new(oid),
-        ])
+        self.run(
+            &[
+                OsStr::new("cat-file"),
+                OsStr::new("blob"),
+                OsStr::new("--end-of-options"),
+                OsStr::new(oid),
+            ],
+            MAX_BLOB_STDOUT,
+        )
     }
 
     /// Turn an already-created (owner-only, empty) directory into a REAL, self-contained
@@ -205,7 +248,11 @@ impl HardenedGit {
     ) -> Result<(), GitError> {
         use std::os::unix::ffi::OsStrExt as _;
 
-        self.run_in(worktree_dir, &[OsStr::new("init"), OsStr::new("-q")])?;
+        self.run_in(
+            worktree_dir,
+            &[OsStr::new("init"), OsStr::new("-q")],
+            MAX_CONTROL_STDOUT,
+        )?;
 
         // Borrow the source objects. Written directly under our owner-only `.git`.
         let alternates = worktree_dir.join(".git/objects/info/alternates");
@@ -225,8 +272,13 @@ impl HardenedGit {
                 OsStr::new("HEAD"),
                 oid,
             ],
+            MAX_CONTROL_STDOUT,
         )?;
-        self.run_in(worktree_dir, &[OsStr::new("read-tree"), oid])?;
+        self.run_in(
+            worktree_dir,
+            &[OsStr::new("read-tree"), oid],
+            MAX_CONTROL_STDOUT,
+        )?;
         Ok(())
     }
 
@@ -291,38 +343,157 @@ impl HardenedGit {
         cmd
     }
 
-    fn run(&self, args: &[&OsStr]) -> Result<Vec<u8>, GitError> {
-        self.run_in(&self.repo, args)
+    fn run(&self, args: &[&OsStr], max_stdout: u64) -> Result<Vec<u8>, GitError> {
+        self.run_in(&self.repo, args, max_stdout)
     }
 
-    fn run_in(&self, dir: &Path, args: &[&OsStr]) -> Result<Vec<u8>, GitError> {
+    fn run_in(&self, dir: &Path, args: &[&OsStr], max_stdout: u64) -> Result<Vec<u8>, GitError> {
         let mut cmd = self.base_command_in(dir);
         cmd.args(args);
-        let out = cmd.output().map_err(GitError::Spawn)?;
-        if out.status.success() {
-            Ok(out.stdout)
-        } else {
-            Err(GitError::Command {
-                command: display_args(args),
-                status: out.status.to_string(),
-                stderr: String::from_utf8_lossy(&out.stderr).trim().to_owned(),
-            })
-        }
-    }
-
-    fn run_bytes(&self, args: &[&OsStr]) -> Result<Vec<u8>, GitError> {
-        self.run(args)
+        run_bounded(
+            cmd,
+            &display_args(args),
+            GIT_WALL_CLOCK,
+            max_stdout,
+            MAX_STDERR,
+        )
     }
 
     fn run_text(&self, args: &[&str]) -> Result<String, GitError> {
         let os: Vec<OsString> = args.iter().map(OsString::from).collect();
         let refs: Vec<&OsStr> = os.iter().map(OsString::as_os_str).collect();
-        let bytes = self.run(&refs)?;
+        let bytes = self.run(&refs, MAX_CONTROL_STDOUT)?;
         String::from_utf8(bytes).map_err(|e| GitError::Parse {
             command: display_args(&refs),
             detail: format!("non-utf8 output: {e}"),
         })
     }
+}
+
+/// Run a prepared command with a wall-clock deadline and independent per-stream byte
+/// caps, killing the child rather than blocking forever or buffering without bound.
+///
+/// stdout and stderr are each drained on their own thread into a `cap + 1`-bounded
+/// buffer, so neither a flooding writer nor a full-pipe stall can wedge the other. The
+/// wait loop polls the child until it exits or the deadline passes; on the deadline (or
+/// a wait error) the child is killed and reaped so no zombie or reader thread is left
+/// behind. A child that exits but overran its stdout cap is reported as
+/// [`GitError::OutputTooLarge`], never returned as truncated-but-successful output.
+fn run_bounded(
+    mut cmd: Command,
+    command: &str,
+    wall_clock: Duration,
+    max_stdout: u64,
+    max_stderr: u64,
+) -> Result<Vec<u8>, GitError> {
+    use std::os::unix::process::CommandExt as _;
+
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    // Put the child in its own process group (pgid == child pid) so that on the deadline
+    // we can SIGKILL the WHOLE group: a git that forked a helper cannot leave an orphan
+    // holding the output pipe open and blocking our drain threads. `process_group` is the
+    // safe, `unsafe`-free way to request this (no `pre_exec`).
+    cmd.process_group(0);
+    let mut child = cmd.spawn().map_err(GitError::Spawn)?;
+    let pgid = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap_or(0));
+
+    let stdout = child.stdout.take().ok_or_else(|| GitError::Drain {
+        command: command.to_owned(),
+        source: std::io::Error::other("child stdout pipe was not captured"),
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| GitError::Drain {
+        command: command.to_owned(),
+        source: std::io::Error::other("child stderr pipe was not captured"),
+    })?;
+    let out_join = std::thread::spawn(move || drain_capped(stdout, max_stdout));
+    let err_join = std::thread::spawn(move || drain_capped(stderr, max_stderr));
+
+    let deadline = Instant::now() + wall_clock;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    kill_group(pgid, &mut child);
+                    let _ = out_join.join();
+                    let _ = err_join.join();
+                    return Err(GitError::Timeout {
+                        command: command.to_owned(),
+                        timeout: wall_clock,
+                    });
+                }
+                std::thread::sleep(POLL_INTERVAL);
+            }
+            Err(source) => {
+                kill_group(pgid, &mut child);
+                let _ = out_join.join();
+                let _ = err_join.join();
+                return Err(GitError::Spawn(source));
+            }
+        }
+    };
+
+    let (stdout, stdout_overflow) = join_drain(out_join, command)?;
+    let (stderr, _stderr_overflow) = join_drain(err_join, command)?;
+
+    if stdout_overflow {
+        return Err(GitError::OutputTooLarge {
+            command: command.to_owned(),
+            stream: "stdout",
+            cap: max_stdout,
+        });
+    }
+    if status.success() {
+        Ok(stdout)
+    } else {
+        Err(GitError::Command {
+            command: command.to_owned(),
+            status: status.to_string(),
+            stderr: String::from_utf8_lossy(&stderr).trim().to_owned(),
+        })
+    }
+}
+
+/// SIGKILL the child's whole process group, then reap the leader so no zombie remains.
+/// Killing the group (not just the leader) reaps any helper the child forked, which
+/// releases the output pipe so the drain threads' `read_to_end` can return.
+fn kill_group(pgid: nix::unistd::Pid, child: &mut std::process::Child) {
+    let _ = nix::sys::signal::killpg(pgid, nix::sys::signal::Signal::SIGKILL);
+    // Belt-and-braces: also kill the leader directly in case the group could not be
+    // signalled (e.g. pgid was unavailable), then reap it.
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Read up to `cap + 1` bytes so an overrun is observable, truncating to `cap` and
+/// reporting `overflow = true` when the stream had more.
+fn drain_capped(reader: impl std::io::Read, cap: u64) -> std::io::Result<(Vec<u8>, bool)> {
+    let mut buf = Vec::new();
+    let read = reader.take(cap.saturating_add(1)).read_to_end(&mut buf)? as u64;
+    let overflow = read > cap;
+    if overflow {
+        buf.truncate(usize::try_from(cap).unwrap_or(usize::MAX));
+    }
+    Ok((buf, overflow))
+}
+
+/// Join a drain thread, mapping a panicked reader or an i/o error to [`GitError::Drain`].
+fn join_drain(
+    handle: std::thread::JoinHandle<std::io::Result<(Vec<u8>, bool)>>,
+    command: &str,
+) -> Result<(Vec<u8>, bool), GitError> {
+    handle
+        .join()
+        .map_err(|_| GitError::Drain {
+            command: command.to_owned(),
+            source: std::io::Error::other("output-draining thread panicked"),
+        })?
+        .map_err(|source| GitError::Drain {
+            command: command.to_owned(),
+            source,
+        })
 }
 
 fn display_args(args: &[&OsStr]) -> String {
@@ -421,5 +592,53 @@ mod tests {
     fn rejects_a_record_without_a_tab() {
         let raw = b"100644 blob aaaa 5 no-tab-here\0";
         assert!(parse_ls_tree(raw).is_err());
+    }
+
+    #[test]
+    fn a_hung_child_is_killed_at_the_wall_clock_deadline() {
+        // A child that never exits must not block the caller: the deadline fires, the
+        // process is killed, and Timeout is returned promptly (well under the sleep).
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", "sleep 30"]);
+        let start = Instant::now();
+        let result = run_bounded(cmd, "sleep 30", Duration::from_millis(150), 1024, 1024);
+        let elapsed = start.elapsed();
+        assert!(
+            matches!(result, Err(GitError::Timeout { .. })),
+            "expected Timeout, got {result:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "runner should return near the deadline, took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn a_child_that_overruns_the_stdout_cap_is_rejected_not_truncated() {
+        // The child writes far more than the cap but exits on its own; the runner must
+        // surface OutputTooLarge rather than silently returning a truncated success.
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", "printf 'x%.0s' $(seq 1 500)"]);
+        let result = run_bounded(cmd, "flood", Duration::from_secs(10), 100, 1024);
+        assert!(
+            matches!(
+                result,
+                Err(GitError::OutputTooLarge {
+                    stream: "stdout",
+                    cap: 100,
+                    ..
+                })
+            ),
+            "expected OutputTooLarge, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn a_well_behaved_child_returns_its_bytes() {
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", "printf 'hello'"]);
+        let out = run_bounded(cmd, "echo", Duration::from_secs(10), 1024, 1024)
+            .expect("well-behaved child succeeds");
+        assert_eq!(out, b"hello");
     }
 }

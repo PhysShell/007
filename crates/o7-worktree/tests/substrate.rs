@@ -138,6 +138,34 @@ fn produces_a_real_detached_git_worktree_without_touching_the_source() {
 }
 
 #[test]
+fn a_committed_replace_ref_does_not_rewrite_the_materialized_bytes() {
+    // A repository can carry a `refs/replace/<oid>` ref that silently swaps one object
+    // for another whenever git honors it. The substrate pins GIT_NO_REPLACE_OBJECTS=1, so
+    // materialization must read the ORIGINAL committed bytes, never the replacement.
+    let repo = TestRepo::init();
+    repo.write("a.txt", b"original\n");
+    repo.add_all();
+    let head = repo.commit("c1");
+
+    // The blob actually committed, and a different replacement blob.
+    let orig_blob = repo.git(&["rev-parse", "HEAD:a.txt"]);
+    let orig_blob = orig_blob.trim();
+    let repl_blob = repo.git_stdin(&["hash-object", "-w", "--stdin"], b"REPLACED-AND-LONGER\n");
+    repo.git(&["replace", orig_blob, &repl_blob]);
+
+    // Sanity: with replace honored (plain git), the original oid now reads as the
+    // replacement — proving the ref is live and would leak if we honored it.
+    let leaked = repo.git(&["cat-file", "blob", orig_blob]);
+    assert_eq!(leaked, "REPLACED-AND-LONGER\n");
+
+    let (_root_dir, sr) = state_root();
+    let wt = Worktree::create(&repo.hardened(), &sr, run_id("run1"), &head).unwrap();
+
+    // The materialized file is the committed content, not the replacement.
+    assert_eq!(read(&wt.path().join("a.txt")), b"original\n");
+}
+
+#[test]
 fn reserved_git_path_is_rejected_and_nothing_is_written() {
     let repo = TestRepo::init();
     // Seed a normal commit so the repo has a HEAD, then craft the hostile tree.
