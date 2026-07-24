@@ -356,12 +356,13 @@ async fn real_host_boundary_timeout_kills_the_real_process() {
     assert!(!adjudicate(&ev, &trust).is_accepted());
 }
 
-// The runner executes a PRIVATE staged copy of the trusted bytes, not the operator's
-// path — so the bytes hashed for the trust check are the bytes that run (no
-// hash-to-spawn TOCTOU). A shell fixture that prints its own argv[0] proves it ran from
-// the owner-only staging directory, not from the operator path.
+// The runner executes the staged bytes FD-EXACTLY, through a /proc/<pid>/fd/<n> path
+// backed by a held-open descriptor to the staged inode — so the bytes hashed for trust
+// are the bytes that run, immune to a directory-entry swap (no hash-to-spawn TOCTOU). A
+// shell fixture that prints its own argv[0] proves it ran through the /proc fd path, not
+// the operator path.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn the_executed_binary_is_the_staged_private_copy() {
+async fn the_executed_binary_is_the_fd_exact_staged_copy() {
     use std::os::unix::fs::PermissionsExt as _;
     let exe_dir = tempfile::tempdir().unwrap();
     let exe = exe_dir.path().join("verify.sh");
@@ -391,12 +392,14 @@ async fn the_executed_binary_is_the_staged_private_copy() {
 
     assert_eq!(ev.outcome, VerifierOutcome::Completed { exit_code: 0 });
     let printed = String::from_utf8_lossy(&ev.stdout);
+    // argv[0] is the /proc/<pid>/fd/<n> path — proof of fd-exact execution through the
+    // held descriptor, not a re-resolvable operator path.
     assert!(
-        printed.contains("o7-verify-exe-"),
-        "expected the staged private copy path, got {printed:?}"
+        printed.starts_with("/proc/") && printed.contains("/fd/"),
+        "expected an fd-exact /proc/<pid>/fd/<n> exec path, got {printed:?}"
     );
     assert!(
         !printed.contains(exe.to_str().unwrap()),
-        "ran the operator path instead of the staged copy: {printed:?}"
+        "ran the operator path instead of the fd-exact staged copy: {printed:?}"
     );
 }

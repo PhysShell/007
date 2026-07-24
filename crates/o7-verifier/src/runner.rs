@@ -17,16 +17,17 @@
 //! (never a pass). Output is bounded by the command's budget; exceeding it fails the sink
 //! closed and is reported as `OutputLost` (never a silent truncation, never a pass).
 //!
-//! ACQUISITION vs EXECUTION. This runner hardens the ACQUISITION of the trusted bytes
-//! (safe open + regular-file proof + staging the exact bytes into an owner-only 0500 copy
-//! that only we can have written) so the bytes hashed for trust are the bytes executed.
-//! It does NOT yet perform a fd-exact execution (`execveat` on an O_PATH fd, or a sealed
-//! `memfd`): that would require the spawn to hand the boundary a file DESCRIPTOR rather
-//! than a path, and both `execveat`/`memfd_create` and a descriptor-carrying spawn are
-//! blocked here — the crate tree sets `unsafe_code = "forbid"`, and the merged o7-worker
-//! `ProcessBoundary`/`BoundarySpawnSpec` seam (which spawns from a PATH) is frozen. Until
-//! the boundary grows a descriptor-based spawn, the residual path→exec window is closed
-//! only by the owner-only staging directory, not by a kernel-level fd-exact exec.
+//! ACQUISITION and EXECUTION are both fd-exact. Acquisition opens the trusted executable
+//! `O_NOFOLLOW`, proves it a regular file, and reads the exact bytes it hashes. Execution
+//! then stages those exact bytes into an owner-only `0500` copy and runs it through a
+//! `/proc/<pid>/fd/<n>` path backed by a held-open read-only descriptor to the staged
+//! inode. Because the kernel resolves that path THROUGH the descriptor (the same mechanism
+//! as glibc's `fexecve`), the bytes executed are exactly the bytes hashed even against a
+//! same-UID attacker who swaps the staging directory entry — closing the hash-to-spawn
+//! TOCTOU without `unsafe` (no `execveat`/`memfd_create`) and without changing the frozen
+//! o7-worker `ProcessBoundary`/`BoundarySpawnSpec` seam, which still spawns from a PATH.
+//! (Requires `/proc` and an exec-capable `$TMPDIR`; otherwise the run fails closed at
+//! spawn — see [`stage_executable`].)
 
 use std::path::Path;
 use std::sync::Arc;
@@ -389,31 +390,49 @@ fn acquire_executable(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// A private copy of a trusted executable, in an owner-only directory, removed on drop.
+/// A private copy of a trusted executable plus a held-open read-only descriptor to its
+/// exact inode. The executable is run through a magic `/proc/<pid>/fd/<n>` path, so it is
+/// executed FD-EXACTLY: the kernel resolves that path through the open descriptor to the
+/// very inode we staged and hashed, immune to any directory-entry swap. The descriptor is
+/// held for the whole run and the directory is removed on drop.
 struct StagedExecutable {
     _dir: tempfile::TempDir,
-    path: std::path::PathBuf,
+    /// Held open so `/proc/<pid>/fd/<n>` keeps resolving to the staged inode during exec.
+    _fd: std::fs::File,
+    proc_path: std::path::PathBuf,
 }
 
 impl StagedExecutable {
     fn path(&self) -> &Path {
-        &self.path
+        &self.proc_path
+    }
+
+    #[cfg(test)]
+    fn on_disk_dir(&self) -> &Path {
+        self._dir.path()
     }
 }
 
-/// Write `bytes` to a `0o500` file inside a freshly-created `0o700` temp directory and
-/// return a handle to it. The directory is created securely (O_EXCL, random name) and is
-/// writable only by us, so the staged file cannot be swapped between staging and exec —
-/// which is what closes the hash-to-spawn TOCTOU.
+/// Write `bytes` to a `0o500` file inside a freshly-created `0o700` temp directory, then
+/// hold a READ-ONLY descriptor to that exact inode and return a `/proc/<pid>/fd/<n>` path
+/// to run it through.
 ///
-/// RUNTIME PREREQUISITE: the staging directory is created under `$TMPDIR` (falling back to
-/// `/tmp`), so that location must be exec-capable. On a host that mounts `$TMPDIR`
-/// `noexec`, the staged copy cannot be executed and the run fails closed at spawn
-/// (`SpawnFailed`) — point `TMPDIR` at an exec-capable filesystem for the verifier. (A
-/// future revision may accept a caller-supplied exec directory once the boundary grows a
-/// descriptor-based spawn; see the module-level note on execution.)
+/// This closes the hash-to-spawn TOCTOU even against a same-UID attacker: a same-UID
+/// process owns the `0o700` staging directory and could rename/replace the directory
+/// entry, so a path-based exec is not swap-proof. Executing `/proc/<pid>/fd/<n>` instead
+/// makes the kernel resolve the executable THROUGH the descriptor we hold to the staged
+/// inode (the same mechanism glibc's `fexecve` uses), so the bytes executed are exactly
+/// the bytes hashed, regardless of any directory-entry swap. The read-only descriptor is
+/// obtained by re-opening `/proc/self/fd/<rw>` (never re-resolving the on-disk path), and
+/// the writable handle is dropped so no writer remains at exec time (no `ETXTBSY`).
+///
+/// RUNTIME PREREQUISITES: `/proc` must be mounted, and the staging directory (under
+/// `$TMPDIR`, falling back to `/tmp`) must be exec-capable. On a host with no `/proc` or a
+/// `noexec` `$TMPDIR`, the run fails closed at spawn (`SpawnFailed`) rather than executing
+/// unverified bytes.
 fn stage_executable(bytes: &[u8]) -> std::io::Result<StagedExecutable> {
     use std::io::Write as _;
+    use std::os::fd::AsRawFd as _;
     use std::os::unix::fs::OpenOptionsExt as _;
 
     let dir = tempfile::Builder::new()
@@ -422,14 +441,33 @@ fn stage_executable(bytes: &[u8]) -> std::io::Result<StagedExecutable> {
     let path = dir.path().join("exe");
     // Created 0o500 (owner read+exec, no write); the write goes through the already-open
     // fd, so the restrictive mode does not block staging but blocks any later writer.
-    let mut file = std::fs::OpenOptions::new()
+    let mut rw = std::fs::OpenOptions::new()
+        .read(true)
         .write(true)
         .create_new(true)
         .mode(0o500)
         .open(&path)?;
-    file.write_all(bytes)?;
-    file.sync_all()?;
-    Ok(StagedExecutable { _dir: dir, path })
+    rw.write_all(bytes)?;
+    rw.sync_all()?;
+
+    // Acquire a read-only descriptor to the SAME inode WITHOUT re-resolving the on-disk
+    // path (re-open the writable fd via /proc/self/fd), then drop the writable handle so
+    // there is no writer at exec time.
+    let ro = std::fs::OpenOptions::new()
+        .read(true)
+        .open(format!("/proc/self/fd/{}", rw.as_raw_fd()))?;
+    drop(rw);
+
+    let proc_path = std::path::PathBuf::from(format!(
+        "/proc/{}/fd/{}",
+        std::process::id(),
+        ro.as_raw_fd()
+    ));
+    Ok(StagedExecutable {
+        _dir: dir,
+        _fd: ro,
+        proc_path,
+    })
 }
 
 /// Map the worker's terminal result to a verifier outcome. A timeout is `TimedOut`
@@ -527,5 +565,32 @@ impl ObservationSink for CollectingSink {
             OutputStream::Stderr => guard.stderr.extend_from_slice(&chunk.bytes),
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod tests {
+    use super::*;
+
+    /// Fd-exact execution proof: after a same-UID attacker replaces the on-disk staging
+    /// entry with different bytes, the `/proc/<pid>/fd/<n>` path still resolves — through
+    /// the held descriptor — to the ORIGINAL staged inode. So the bytes that would be
+    /// executed are exactly the bytes hashed, closing the hash-to-spawn TOCTOU.
+    #[test]
+    fn proc_fd_path_reads_original_bytes_after_the_directory_entry_is_swapped() {
+        let staged = stage_executable(b"ORIGINAL-BYTES").expect("stage");
+        let on_disk = staged.on_disk_dir().join("exe");
+
+        // Same-UID swap of the directory entry (rename/replace the staged file).
+        std::fs::remove_file(&on_disk).expect("remove staged entry");
+        std::fs::write(&on_disk, b"EVIL-REPLACEMENT-CONTENT").expect("plant replacement");
+
+        // The exec path resolves through the fd to the original inode, not the replacement.
+        let via_fd = std::fs::read(staged.path()).expect("read via /proc fd");
+        assert_eq!(
+            via_fd, b"ORIGINAL-BYTES",
+            "the /proc fd path followed the swapped directory entry instead of the fd"
+        );
     }
 }
