@@ -8,6 +8,7 @@ members = [
     "crates/o7-worker",
     "crates/o7-worktree",
     "crates/o7-verifier",
+    "crates/o7-run",
 ]
 exclude = ["fuzz"]
 resolver = "2"
