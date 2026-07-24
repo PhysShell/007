@@ -138,6 +138,77 @@ fn produces_a_real_detached_git_worktree_without_touching_the_source() {
 }
 
 #[test]
+fn reserved_git_path_is_rejected_and_nothing_is_written() {
+    let repo = TestRepo::init();
+    // Seed a normal commit so the repo has a HEAD, then craft the hostile tree.
+    repo.write("seed.txt", b"seed\n");
+    repo.add_all();
+    let _ = repo.commit("seed");
+    let evil = repo.commit_with_dotgit_hook(b"#!/bin/sh\ntouch /tmp/o7-pwned\n");
+
+    let (root_dir, sr) = state_root();
+    let err = Worktree::create(&repo.hardened(), &sr, run_id("run1"), &evil).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            o7_worktree::WorktreeError::Materialize(
+                o7_worktree::MaterializeError::ReservedGitPath { .. }
+            )
+        ),
+        "expected ReservedGitPath, got {err:?}"
+    );
+    // Nothing was written: no worktree directory under the state root, so certainly no
+    // hook file.
+    let leftovers = absolute_paths_under(sr.path());
+    assert!(
+        leftovers.is_empty(),
+        "a hostile tree left files behind: {leftovers:?}"
+    );
+    let _ = root_dir;
+}
+
+#[test]
+fn oversized_and_unsupported_trees_fail_before_writing() {
+    use o7_worktree::{MaterializeError, MaterializeLimits, MaterializePlan};
+    let repo = TestRepo::init();
+    repo.write("small.txt", b"0123456789\n"); // 11 bytes
+    repo.add_all();
+    let head = repo.commit("c1");
+    let git = repo.hardened();
+
+    // A per-blob budget below the file size fails the preflight (read-only, nothing
+    // written).
+    let tight = MaterializeLimits {
+        max_blob_bytes: 4,
+        ..MaterializeLimits::default()
+    };
+    assert!(matches!(
+        MaterializePlan::prepare(&git, &head, &tight).unwrap_err(),
+        MaterializeError::BlobTooLarge { .. }
+    ));
+
+    // A cumulative-byte budget below the total also fails.
+    let tiny_total = MaterializeLimits {
+        max_total_bytes: 3,
+        ..MaterializeLimits::default()
+    };
+    assert!(matches!(
+        MaterializePlan::prepare(&git, &head, &tiny_total).unwrap_err(),
+        MaterializeError::TotalTooLarge { .. }
+    ));
+
+    // An entry-count budget of zero fails.
+    let no_entries = MaterializeLimits {
+        max_entries: 0,
+        ..MaterializeLimits::default()
+    };
+    assert!(matches!(
+        MaterializePlan::prepare(&git, &head, &no_entries).unwrap_err(),
+        MaterializeError::TooManyEntries { .. }
+    ));
+}
+
+#[test]
 fn materializes_symlinks_and_exec_bits_faithfully() {
     let repo = TestRepo::init();
     repo.write("plain.txt", b"plain\n");

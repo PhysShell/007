@@ -59,6 +59,10 @@ pub struct TreeEntry {
     pub mode: u32,
     /// The object id.
     pub oid: String,
+    /// The blob size in bytes as recorded by `ls-tree -l`, when the entry is a blob
+    /// (`None` for gitlinks, whose size git reports as `-`). Used by the preflight to
+    /// enforce blob and cumulative byte budgets BEFORE any bytes are read or written.
+    pub size: Option<u64>,
     /// The path relative to the tree root (git uses `/` separators, verbatim bytes).
     pub path: PathBuf,
 }
@@ -144,11 +148,14 @@ impl HardenedGit {
     /// [`GitError`] on a git failure or an unparseable record.
     pub fn list_tree(&self, revision: &CommittedRevision) -> Result<Vec<TreeEntry>, GitError> {
         // -z: NUL-terminated records with verbatim (unquoted) paths, so a path with
-        // spaces or odd bytes is unambiguous. Record: "<mode> SP <type> SP <oid> TAB <path>".
+        // spaces or odd bytes is unambiguous. -l: include the blob size, so the preflight
+        // can enforce byte budgets before reading. Record:
+        // "<mode> SP <type> SP <oid> SP <size> TAB <path>".
         let raw = self.run_bytes(&[
             OsStr::new("ls-tree"),
             OsStr::new("-r"),
             OsStr::new("-z"),
+            OsStr::new("-l"),
             OsStr::new("--full-tree"),
             OsStr::new("--end-of-options"),
             OsStr::new(revision.as_str()),
@@ -245,6 +252,11 @@ impl HardenedGit {
             ("GIT_CONFIG_SYSTEM", "/dev/null"),
             // Ignore the system-wide gitattributes (a filter/diff could be named there).
             ("GIT_ATTR_NOSYSTEM", "1"),
+            // Never honor refs/replace (a committed replace ref must not silently change
+            // the materialized tree) and never lazily fetch a missing object over the
+            // network (a partial-clone gap must fail, not phone home).
+            ("GIT_NO_REPLACE_OBJECTS", "1"),
+            ("GIT_NO_LAZY_FETCH", "1"),
             // No interactive prompts, no credential/askpass helpers, stable parsing.
             ("GIT_TERMINAL_PROMPT", "0"),
             ("GIT_OPTIONAL_LOCKS", "0"),
@@ -346,19 +358,33 @@ fn parse_ls_tree(raw: &[u8]) -> Result<Vec<TreeEntry>, String> {
             .ok_or_else(|| "ls-tree record path slice out of range".to_owned())?;
         let header =
             std::str::from_utf8(header).map_err(|e| format!("ls-tree header not utf8: {e}"))?;
-        let mut fields = header.split(' ');
+        // `-l` right-justifies the size, so the header has run-together spaces; split on
+        // whitespace. The path is AFTER the TAB, so it is never in `header`.
+        let mut fields = header.split_whitespace();
         let mode = fields.next().ok_or_else(|| "missing mode".to_owned())?;
         let _type = fields.next().ok_or_else(|| "missing type".to_owned())?;
         let oid = fields.next().ok_or_else(|| "missing oid".to_owned())?;
+        let size_field = fields.next().ok_or_else(|| "missing size".to_owned())?;
         if fields.next().is_some() {
             return Err("ls-tree header had unexpected extra fields".to_owned());
         }
         let mode =
             u32::from_str_radix(mode, 8).map_err(|e| format!("mode {mode:?} is not octal: {e}"))?;
+        // Blobs carry a byte size; a gitlink's size is reported as `-`.
+        let size = if size_field == "-" {
+            None
+        } else {
+            Some(
+                size_field
+                    .parse::<u64>()
+                    .map_err(|e| format!("size {size_field:?} is not a number: {e}"))?,
+            )
+        };
         let path = PathBuf::from(std::ffi::OsStr::from_bytes(path_bytes));
         entries.push(TreeEntry {
             mode,
             oid: oid.to_owned(),
+            size,
             path,
         });
     }
@@ -371,25 +397,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_modes_types_and_paths() {
-        // A blob, an executable, a symlink, a gitlink, and a path with a space.
-        let raw = b"100644 blob aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\treadme.md\0\
-100755 blob bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\tbin/run.sh\0\
-120000 blob cccccccccccccccccccccccccccccccccccccccc\tlink\0\
-160000 commit dddddddddddddddddddddddddddddddddddddddd\tvendor/sub\0\
-100644 blob eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\ta file\0";
+    fn parses_modes_types_sizes_and_paths() {
+        // `-l` format: "<mode> <type> <oid> <size> TAB <path>" (size right-justified, `-`
+        // for a gitlink). A blob, an executable, a symlink, a gitlink, and a spaced path.
+        let raw = b"100644 blob aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa       12\treadme.md\0\
+100755 blob bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb        7\tbin/run.sh\0\
+120000 blob cccccccccccccccccccccccccccccccccccccccc        9\tlink\0\
+160000 commit dddddddddddddddddddddddddddddddddddddddd        -\tvendor/sub\0\
+100644 blob eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee        3\ta file\0";
         let entries = parse_ls_tree(raw).expect("parse");
         assert_eq!(entries.len(), 5);
         assert!(entries[0].is_regular_file() && !entries[0].is_executable());
+        assert_eq!(entries[0].size, Some(12));
         assert!(entries[1].is_executable());
         assert!(entries[2].is_symlink());
         assert!(entries[3].is_gitlink());
+        assert_eq!(entries[3].size, None); // gitlink size is `-`
         assert_eq!(entries[4].path, PathBuf::from("a file"));
+        assert_eq!(entries[4].size, Some(3));
     }
 
     #[test]
     fn rejects_a_record_without_a_tab() {
-        let raw = b"100644 blob aaaa no-tab-here\0";
+        let raw = b"100644 blob aaaa 5 no-tab-here\0";
         assert!(parse_ls_tree(raw).is_err());
     }
 }

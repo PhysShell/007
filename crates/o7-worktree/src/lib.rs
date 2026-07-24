@@ -29,7 +29,10 @@ pub use git::{GitError, HardenedGit, TreeEntry};
 pub use identity::{
     CanonicalRepoId, CommittedRevision, IdentityDigest, IdentityError, RunId, WorktreeIdentity,
 };
-pub use materialize::{materialize, MaterializeError, MaterializeSummary};
+pub use materialize::{
+    materialize, materialize_with_limits, MaterializeError, MaterializeLimits, MaterializePlan,
+    MaterializeSummary,
+};
 pub use reap::{remove_verified_dir, ReapError};
 pub use stateroot::{StateRoot, StateRootError};
 pub use store::{

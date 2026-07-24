@@ -84,6 +84,51 @@ impl TestRepo {
         self.git(&["add", "-A"]);
     }
 
+    /// Run a plain git command feeding `stdin`, returning stdout.
+    pub fn git_stdin(&self, args: &[&str], stdin: &[u8]) -> String {
+        use std::io::Write as _;
+        let mut child = Command::new("git")
+            .args(args)
+            .current_dir(self.dir.path())
+            .env("HOME", self.home.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(stdin).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    }
+
+    /// Build (via plumbing that bypasses git's own path protections) a commit whose tree
+    /// contains an executable `.git/hooks/pre-commit` alongside a normal file, and return
+    /// its revision. Used to prove the substrate rejects reserved git-metadata paths.
+    pub fn commit_with_dotgit_hook(&self, hook_body: &[u8]) -> CommittedRevision {
+        let blob = self.git_stdin(&["hash-object", "-w", "--stdin"], hook_body);
+        let hooks = self.git_stdin(
+            &["mktree"],
+            format!("100755 blob {blob}\tpre-commit\n").as_bytes(),
+        );
+        let dotgit = self.git_stdin(
+            &["mktree"],
+            format!("040000 tree {hooks}\thooks\n").as_bytes(),
+        );
+        let normal = self.git_stdin(&["hash-object", "-w", "--stdin"], b"ok\n");
+        let root = self.git_stdin(
+            &["mktree"],
+            format!("040000 tree {dotgit}\t.git\n100644 blob {normal}\ta.txt\n").as_bytes(),
+        );
+        let commit = self.git_stdin(&["commit-tree", &root, "-m", "evil"], b"");
+        CommittedRevision::from_object_id(commit).unwrap()
+    }
+
     pub fn commit(&self, message: &str) -> CommittedRevision {
         self.git(&["commit", "-q", "-m", message]);
         self.head()

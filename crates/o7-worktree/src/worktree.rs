@@ -17,7 +17,9 @@ use std::path::{Path, PathBuf};
 use crate::attest::{attest_owned_dir, AttestError, FsIdentity, OWNER_ONLY};
 use crate::git::{GitError, HardenedGit};
 use crate::identity::{CommittedRevision, IdentityDigest, RunId, WorktreeIdentity};
-use crate::materialize::{materialize, MaterializeError, MaterializeSummary};
+use crate::materialize::{
+    MaterializeError, MaterializeLimits, MaterializePlan, MaterializeSummary,
+};
 use crate::reap::{remove_verified_dir, ReapError};
 use crate::stateroot::{StateRoot, StateRootError};
 
@@ -90,6 +92,11 @@ impl Worktree {
         state_root.ensure_outside_repo(&identity.repo.git_common_dir)?;
         state_root.ensure_outside_repo(git.repo())?;
 
+        // Preflight the WHOLE tree read-only, BEFORE creating any directory or git
+        // metadata: a hostile tree (reserved `.git` path, unsupported mode, or an
+        // entry/blob/cumulative budget breach) fails closed here with nothing written.
+        let plan = MaterializePlan::prepare(git, revision, &MaterializeLimits::default())?;
+
         // Create the directory exclusively (never adopt a pre-existing path).
         match std::fs::DirBuilder::new().mode(OWNER_ONLY).create(&path) {
             Ok(()) => {}
@@ -112,12 +119,12 @@ impl Worktree {
 
         // Turn the owned directory into a REAL, self-contained detached git worktree of
         // the committed revision (init + borrowed objects + detached HEAD + index), then
-        // fill the working tree from the object store — a genuine git worktree with no
-        // checkout, so no hook/filter/fsmonitor runs and no operator bytes leak in.
+        // write the validated plan — a genuine git worktree with no checkout, so no
+        // hook/filter/fsmonitor runs and no operator bytes leak in.
         let build = git
             .init_detached_worktree(&path, &identity.repo, revision)
             .map_err(WorktreeError::from)
-            .and_then(|()| materialize(git, revision, &path).map_err(WorktreeError::from));
+            .and_then(|()| plan.write(git, &path).map_err(WorktreeError::from));
         let summary = match build {
             Ok(summary) => summary,
             Err(err) => {

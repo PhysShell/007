@@ -31,6 +31,35 @@ pub enum MaterializeError {
     Git(#[from] GitError),
     #[error("unsafe tree path {path:?}: {reason}")]
     UnsafePath { path: PathBuf, reason: String },
+    #[error("tree entry {path:?} targets reserved git metadata (a `.git` component); refusing")]
+    ReservedGitPath { path: PathBuf },
+    #[error("tree path {path:?} is {len} bytes, exceeding the maximum {max}")]
+    PathTooLong {
+        path: PathBuf,
+        len: usize,
+        max: usize,
+    },
+    #[error("tree entry {path:?} has an unsupported mode {mode:#o}")]
+    UnsupportedMode { path: PathBuf, mode: u32 },
+    #[error("tree has {count} entries, exceeding the maximum {max}")]
+    TooManyEntries { count: usize, max: usize },
+    #[error("blob {path:?} is {size} bytes, exceeding the per-blob maximum {max}")]
+    BlobTooLarge { path: PathBuf, size: u64, max: u64 },
+    #[error("cumulative materialized bytes would exceed the maximum {max}")]
+    TotalTooLarge { max: u64 },
+    #[error("tree has {count} {kind}, exceeding the maximum {max}")]
+    TooMany {
+        kind: &'static str,
+        count: usize,
+        max: usize,
+    },
+    #[error("blob {oid} for {path:?} was {actual} bytes but the tree recorded {expected}")]
+    BlobSizeDrift {
+        oid: String,
+        path: PathBuf,
+        expected: u64,
+        actual: usize,
+    },
     #[error("i/o error at {path:?}: {source}")]
     Io {
         path: PathBuf,
@@ -43,6 +72,31 @@ pub enum MaterializeError {
         path: PathBuf,
         actual: usize,
     },
+}
+
+/// Hard bounds enforced on attacker-controlled committed data BEFORE any bytes are
+/// written, so a hostile tree cannot exhaust disk, inodes, or memory.
+#[derive(Debug, Clone, Copy)]
+pub struct MaterializeLimits {
+    pub max_entries: usize,
+    pub max_path_len: usize,
+    pub max_blob_bytes: u64,
+    pub max_total_bytes: u64,
+    pub max_files: usize,
+    pub max_symlinks: usize,
+}
+
+impl Default for MaterializeLimits {
+    fn default() -> Self {
+        Self {
+            max_entries: 1_000_000,
+            max_path_len: 4096,
+            max_blob_bytes: 512 * 1024 * 1024,
+            max_total_bytes: 8 * 1024 * 1024 * 1024,
+            max_files: 1_000_000,
+            max_symlinks: 1_000_000,
+        }
+    }
 }
 
 /// What was written, for the durable summary and for tests.
@@ -60,24 +114,186 @@ pub struct MaterializeSummary {
     pub skipped_gitlinks: usize,
 }
 
-/// Materialize `revision` from `repo` into `dest`.
-///
-/// `dest` must already exist and be an owned, `0o700` directory (the caller creates it
-/// under the state root). This function only writes *within* `dest`.
+/// Materialize `revision` from `repo` into `dest` under [`MaterializeLimits::default`].
 ///
 /// # Errors
-/// [`MaterializeError`] on any git failure, unsafe path, or i/o error.
+/// [`MaterializeError`] on any git failure, unsafe path, budget breach, or i/o error.
 pub fn materialize(
     git: &HardenedGit,
     revision: &CommittedRevision,
     dest: &Path,
 ) -> Result<MaterializeSummary, MaterializeError> {
-    let entries = git.list_tree(revision)?;
-    let mut summary = MaterializeSummary::default();
-    for entry in &entries {
-        materialize_entry(git, dest, entry, &mut summary)?;
+    materialize_with_limits(git, revision, dest, &MaterializeLimits::default())
+}
+
+/// Materialize `revision` from `repo` into `dest`, enforcing `limits`.
+///
+/// `dest` must already exist and be an owned, `0o700` directory (the caller creates it
+/// under the state root). This function only writes *within* `dest`, and it runs a
+/// COMPLETE preflight over every tree entry — validating paths (including rejecting any
+/// reserved `.git` component), modes, path lengths, and the entry/blob/cumulative byte
+/// budgets — BEFORE creating a single filesystem object, so a hostile tree fails closed
+/// with nothing written.
+///
+/// # Errors
+/// [`MaterializeError`] on any git failure, unsafe/reserved path, budget breach, or i/o
+/// error.
+pub fn materialize_with_limits(
+    git: &HardenedGit,
+    revision: &CommittedRevision,
+    dest: &Path,
+    limits: &MaterializeLimits,
+) -> Result<MaterializeSummary, MaterializeError> {
+    MaterializePlan::prepare(git, revision, limits)?.write(git, dest)
+}
+
+/// A validated materialization plan: the tree entries after a COMPLETE preflight. It is
+/// produced by a read-only [`MaterializePlan::prepare`] pass (no filesystem writes), so a
+/// hostile tree is rejected before any directory, `.git` metadata, or file is created.
+#[derive(Debug, Clone)]
+pub struct MaterializePlan {
+    entries: Vec<TreeEntry>,
+}
+
+impl MaterializePlan {
+    /// List the tree and run the full preflight (paths, reserved `.git`, modes, path
+    /// length, entry/blob/cumulative budgets). Purely read-only.
+    ///
+    /// # Errors
+    /// [`MaterializeError`] on any git failure, unsafe/reserved path, or budget breach.
+    pub fn prepare(
+        git: &HardenedGit,
+        revision: &CommittedRevision,
+        limits: &MaterializeLimits,
+    ) -> Result<Self, MaterializeError> {
+        let entries = git.list_tree(revision)?;
+        preflight(&entries, limits)?;
+        Ok(Self { entries })
     }
-    Ok(summary)
+
+    /// Write the validated plan into `dest` (which must be an owned `0o700` directory).
+    ///
+    /// # Errors
+    /// [`MaterializeError`] on a git or i/o failure while writing.
+    pub fn write(
+        &self,
+        git: &HardenedGit,
+        dest: &Path,
+    ) -> Result<MaterializeSummary, MaterializeError> {
+        let mut summary = MaterializeSummary::default();
+        for entry in &self.entries {
+            materialize_entry(git, dest, entry, &mut summary)?;
+        }
+        Ok(summary)
+    }
+}
+
+/// Validate EVERY entry before anything is written: safe relative paths, no reserved
+/// `.git` component, supported modes, bounded path length, and entry/blob/cumulative
+/// budgets. Returns the first violation; on success the write loop cannot breach a
+/// budget or touch git metadata.
+fn preflight(entries: &[TreeEntry], limits: &MaterializeLimits) -> Result<(), MaterializeError> {
+    if entries.len() > limits.max_entries {
+        return Err(MaterializeError::TooManyEntries {
+            count: entries.len(),
+            max: limits.max_entries,
+        });
+    }
+    let mut files = 0usize;
+    let mut symlinks = 0usize;
+    let mut total: u64 = 0;
+    for entry in entries {
+        let rel = safe_relative(&entry.path)?;
+        if first_component_is_reserved_git(&rel) {
+            return Err(MaterializeError::ReservedGitPath {
+                path: entry.path.clone(),
+            });
+        }
+        let len = os_path_len(&entry.path);
+        if len > limits.max_path_len {
+            return Err(MaterializeError::PathTooLong {
+                path: entry.path.clone(),
+                len,
+                max: limits.max_path_len,
+            });
+        }
+        if entry.is_gitlink() {
+            continue; // never materialized; contributes no bytes.
+        }
+        if !entry.is_regular_file() && !entry.is_symlink() {
+            return Err(MaterializeError::UnsupportedMode {
+                path: entry.path.clone(),
+                mode: entry.mode,
+            });
+        }
+        let size = entry
+            .size
+            .ok_or_else(|| MaterializeError::UnsupportedMode {
+                path: entry.path.clone(),
+                mode: entry.mode,
+            })?;
+        if size > limits.max_blob_bytes {
+            return Err(MaterializeError::BlobTooLarge {
+                path: entry.path.clone(),
+                size,
+                max: limits.max_blob_bytes,
+            });
+        }
+        total = total
+            .checked_add(size)
+            .filter(|t| *t <= limits.max_total_bytes)
+            .ok_or(MaterializeError::TotalTooLarge {
+                max: limits.max_total_bytes,
+            })?;
+        if entry.is_symlink() {
+            symlinks += 1;
+            if symlinks > limits.max_symlinks {
+                return Err(MaterializeError::TooMany {
+                    kind: "symlinks",
+                    count: symlinks,
+                    max: limits.max_symlinks,
+                });
+            }
+        } else {
+            files += 1;
+            if files > limits.max_files {
+                return Err(MaterializeError::TooMany {
+                    kind: "files",
+                    count: files,
+                    max: limits.max_files,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Whether the first path component is a reserved git-metadata name (`.git`, case- and
+/// trailing-dot/space-insensitive, plus the NTFS 8.3 short form) — which would collide
+/// with the real `.git` gitdir. Only the FIRST component matters: `.gitignore` /
+/// `.gitattributes` (legitimate files) are not first-component `.git`.
+fn first_component_is_reserved_git(rel: &Path) -> bool {
+    let Some(Component::Normal(first)) = rel.components().next() else {
+        return false;
+    };
+    let bytes = first.as_encoded_bytes();
+    // Strip trailing dots/spaces (FAT/NTFS fold these away) and lowercase ASCII.
+    let trimmed: Vec<u8> = bytes
+        .iter()
+        .rev()
+        .skip_while(|b| **b == b'.' || **b == b' ')
+        .copied()
+        .collect::<Vec<u8>>()
+        .into_iter()
+        .rev()
+        .map(|b| b.to_ascii_lowercase())
+        .collect();
+    trimmed == b".git" || trimmed == b"git~1"
+}
+
+fn os_path_len(path: &Path) -> usize {
+    use std::os::unix::ffi::OsStrExt as _;
+    path.as_os_str().as_bytes().len()
 }
 
 fn materialize_entry(
@@ -100,6 +316,20 @@ fn materialize_entry(
     }
 
     let bytes = git.cat_blob(&entry.oid)?;
+
+    // Defense in depth: the blob the preflight budgeted (via `ls-tree -l`) must be the
+    // blob we read. A content-addressed object cannot change size, so a mismatch means
+    // something is wrong — fail closed rather than write unbudgeted bytes.
+    if let Some(expected) = entry.size {
+        if bytes.len() as u64 != expected {
+            return Err(MaterializeError::BlobSizeDrift {
+                oid: entry.oid.clone(),
+                path: entry.path.clone(),
+                expected,
+                actual: bytes.len(),
+            });
+        }
+    }
 
     if entry.is_symlink() {
         if bytes.is_empty() {
