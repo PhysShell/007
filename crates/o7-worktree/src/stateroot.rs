@@ -28,6 +28,7 @@ use rustix::fs::{self, Mode, OFlags};
 
 use crate::attest::{effective_uid, FsIdentity, OWNER_ONLY};
 use crate::identity::IdentityDigest;
+use crate::reap::{remove_verified_child, ReapError};
 
 /// Process-unique counter so each atomic-write temp file has a distinct name (it is
 /// created `O_EXCL`, so a name collision would fail rather than adopt a foreign file).
@@ -199,6 +200,28 @@ impl StateRoot {
         verify_root_fd(&dir_fd, &full)?;
         let id = fs_identity_of(&dir_fd, &full)?;
         Ok((full, id))
+    }
+
+    /// Remove the worktree directory for `digest` RELATIVE to the bound root descriptor —
+    /// the deletion capability of the descriptor-bound state root. The quarantine-first,
+    /// identity-proven, removal-proven reap runs with the target addressed as a child of the
+    /// bound root fd, so no ancestor path is re-resolved and an ancestor swap cannot redirect
+    /// the deletion.
+    ///
+    /// # Errors
+    /// [`ReapError`]: `Unproven` if identity or removal cannot be proven (nothing deleted),
+    /// `Vanished` if already gone, `Io` if deletion fails after verification.
+    pub fn remove_worktree_dir(
+        &self,
+        digest: &IdentityDigest,
+        expected: FsIdentity,
+    ) -> Result<(), ReapError> {
+        // Re-prove the bound root before deleting anything relative to it.
+        self.reverify().map_err(|err| ReapError::Unproven {
+            path: self.path.clone(),
+            reason: format!("state root no longer proves ours before delete: {err}"),
+        })?;
+        remove_verified_child(self.root(), &self.path, digest.as_str(), expected)
     }
 
     /// Open (creating `0o600` if missing) the `.lock` control file RELATIVE to the bound

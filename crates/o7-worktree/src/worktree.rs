@@ -19,7 +19,7 @@ use crate::identity::{CommittedRevision, IdentityDigest, RunId, WorktreeIdentity
 use crate::materialize::{
     MaterializeError, MaterializeLimits, MaterializePlan, MaterializeSummary,
 };
-use crate::reap::{remove_verified_dir, ReapError};
+use crate::reap::ReapError;
 use crate::stateroot::{StateRoot, StateRootError};
 
 /// A failure creating, attesting, or cleaning up a worktree.
@@ -63,6 +63,9 @@ pub struct Worktree {
     path: PathBuf,
     fs_identity: FsIdentity,
     summary: MaterializeSummary,
+    /// The descriptor-bound state root the worktree lives under. Held so deletion runs
+    /// RELATIVE to the proven root fd (never a re-resolved parent path).
+    state_root: StateRoot,
 }
 
 impl Worktree {
@@ -123,11 +126,12 @@ impl Worktree {
         let summary = match build {
             Ok(summary) => summary,
             Err(err) => {
-                // We just created and own this directory; remove it race-safely — identity
-                // is proven on the OPEN fd, the directory is quarantined under a private
-                // name, re-proven, then cleared — so a failed create leaks nothing and the
+                // We just created and own this directory; remove it race-safely RELATIVE to
+                // the state root's bound fd — identity is proven on the open fd, the
+                // directory is quarantined under a private name, re-proven, cleared, and its
+                // removal is PROVEN (link count 0) — so a failed create leaks nothing and the
                 // cleanup can never be redirected at a victim tree.
-                let _ = remove_verified_dir(&path, fs_identity);
+                let _ = state_root.remove_worktree_dir(&digest, fs_identity);
                 return Err(err);
             }
         };
@@ -138,6 +142,7 @@ impl Worktree {
             path,
             fs_identity,
             summary,
+            state_root: state_root.clone(),
         })
     }
 
@@ -152,6 +157,7 @@ impl Worktree {
         path: PathBuf,
         fs_identity: FsIdentity,
         summary: MaterializeSummary,
+        state_root: StateRoot,
     ) -> Self {
         Self {
             identity,
@@ -159,6 +165,7 @@ impl Worktree {
             path,
             fs_identity,
             summary,
+            state_root,
         }
     }
 
@@ -198,15 +205,20 @@ impl Worktree {
     }
 
     /// Delete this worktree — but ONLY after identity is proven on the OPEN directory
-    /// descriptor, then removed relative to that descriptor (never a re-resolved path),
-    /// so a swap of the path between the check and the delete cannot redirect the
-    /// removal at a victim tree. If identity cannot be proven, nothing is deleted and the
-    /// directory is left for investigation.
+    /// descriptor (addressed RELATIVE to the state root's bound fd, never a re-resolved
+    /// parent path), quarantined, re-proven, cleared, and its removal PROVEN (link count 0).
+    /// A swap of the name between any check and the delete cannot redirect the removal at a
+    /// victim tree, and an empty-decoy swap can never yield a false success. If identity or
+    /// the removal cannot be proven, nothing is dropped and the directory is left for
+    /// investigation.
     ///
     /// # Errors
     /// [`WorktreeError::Reap`] if identity was proven but deletion then failed part way.
     pub fn cleanup(self) -> Result<CleanupOutcome, WorktreeError> {
-        match remove_verified_dir(&self.path, self.fs_identity) {
+        match self
+            .state_root
+            .remove_worktree_dir(&self.digest, self.fs_identity)
+        {
             Ok(()) => Ok(CleanupOutcome::Removed),
             // Already gone counts as removed — there is nothing to preserve.
             Err(ReapError::Vanished(_)) => Ok(CleanupOutcome::Removed),

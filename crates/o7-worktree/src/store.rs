@@ -32,7 +32,7 @@ use crate::identity::{
     CanonicalRepoId, CommittedRevision, IdentityDigest, RunId, WorktreeIdentity,
 };
 use crate::materialize::MaterializeSummary;
-use crate::reap::{remove_verified_dir, ReapError};
+use crate::reap::ReapError;
 use crate::stateroot::{StateRoot, StateRootError};
 use crate::worktree::{CleanupOutcome, Worktree, WorktreeError};
 
@@ -274,6 +274,7 @@ impl WorktreeStore {
             record.worktree_path.clone(),
             record.fs_identity,
             record.summary.clone(),
+            self.state_root.clone(),
         );
         Ok(RecoveredWorktree { worktree, record })
     }
@@ -302,10 +303,15 @@ impl WorktreeStore {
         // A tampered/forged record is never actioned — do NOT delete on its say-so.
         self.verify_record_integrity(&record)?;
 
-        // Race-safe deletion: prove identity on the OPEN directory descriptor and remove
-        // the tree relative to it, so a path swap between check and delete cannot
-        // redirect the removal at a victim tree.
-        match remove_verified_dir(&record.worktree_path, record.fs_identity) {
+        // Race-safe deletion RELATIVE to the state root's bound descriptor: identity is
+        // proven on the open fd, the directory is quarantined, re-proven, cleared, and its
+        // removal is PROVEN (link count 0) — so neither a path swap between check and delete
+        // nor an empty-decoy swap before the final rmdir can drop this record while the real
+        // inode survives.
+        match self
+            .state_root
+            .remove_worktree_dir(&record.identity_digest, record.fs_identity)
+        {
             Ok(()) => {
                 state.records.remove(idx);
                 self.persist(&state)?;

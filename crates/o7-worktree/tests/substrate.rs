@@ -562,6 +562,32 @@ fn init_detached_worktree_refuses_an_oversized_object_closure() {
 }
 
 #[test]
+fn cleanup_is_descriptor_bound_and_survives_a_renamed_state_root() {
+    // Deletion runs RELATIVE to the state root's bound fd, so it must still find and remove
+    // the worktree even after the state root DIRECTORY is renamed out from under its path.
+    let repo = TestRepo::init();
+    repo.write("a.txt", b"a\n");
+    repo.add_all();
+    let head = repo.commit("c1");
+
+    let (holder, sr) = state_root();
+    let root_path = sr.path().to_owned();
+    let wt = Worktree::create(&repo.hardened(), &sr, run_id("run1"), &head).unwrap();
+    let digest = wt.digest().as_str().to_owned();
+
+    // Rename the state root away; the bound fd still addresses the same inode.
+    let moved = holder.path().join("state_moved");
+    std::fs::rename(&root_path, &moved).unwrap();
+
+    // cleanup goes through the bound fd (openat on the root descriptor), not the stale path.
+    assert_eq!(wt.cleanup().unwrap(), CleanupOutcome::Removed);
+    assert!(
+        !moved.join(&digest).exists(),
+        "the worktree directory survived a descriptor-bound cleanup"
+    );
+}
+
+#[test]
 fn cleanup_removes_when_identity_is_proven() {
     let repo = TestRepo::init();
     repo.write("a.txt", b"a\n");
