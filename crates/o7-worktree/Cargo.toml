@@ -1,0 +1,49 @@
+[package]
+name = "o7-worktree"
+version = "0.1.0"
+edition = "2021"
+description = "007 worktree substrate: materialize ONLY a committed revision into an o7d-owned, identity-bound state root, and prove ownership before ever deleting. Not a sandbox."
+publish = false
+
+[lib]
+name = "o7_worktree"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+# Identity digests bind a worktree to (run_id, canonical repo identity, committed
+# revision). sha2 is already allowed in the workspace deny.toml.
+sha2 = "0.10"
+# Unix-only: effective uid (owner-only attestation), advisory file locking
+# (serialize o7d's create/reopen/cleanup/prune so there is never a double owner), and
+# `signal` for `killpg` — a hung git child is spawned in its own process group and the
+# WHOLE group is SIGKILLed on the wall-clock deadline, so an orphaned grandchild cannot
+# keep the output pipe open and wedge the caller. nix wraps the raw syscalls in a safe
+# API — the tree forbids `unsafe`. nix is MIT.
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", default-features = false, features = ["user", "fs", "signal"] }
+# Race-safe worktree deletion: open the directory by fd (O_NOFOLLOW), verify identity on
+# the OPEN fd, then remove the tree with *at syscalls relative to that fd — so deletion
+# operates on the exact inode we verified, never a re-resolved path. rustix wraps the raw
+# syscalls in a safe API (the tree forbids `unsafe`). Apache-2.0/MIT/BSD — allowed.
+rustix = { version = "1", default-features = false, features = ["fs", "std"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+# Mirror the workspace discipline: no unsafe, no panics-by-default.
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"

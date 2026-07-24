@@ -819,6 +819,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "o7-verifier"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "o7-worker",
+ "o7-worktree",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "o7-worker"
 version = "0.1.0"
 dependencies = [
@@ -829,6 +846,19 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "o7-worktree"
+version = "0.1.0"
+dependencies = [
+ "nix",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
 ]
 
 [[package]]

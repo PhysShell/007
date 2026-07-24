@@ -1,0 +1,54 @@
+name: pr3 worktree+verifier tests
+
+# Runs ONLY the o7-worktree and o7-verifier test suites (substrate, durable recovery,
+# race-safe cleanup, trust/verdict, and the boundary-integrated runner — including the
+# real host-boundary end-to-end tests). Workspace fmt / clippy / check and cargo-deny
+# are deliberately NOT repeated here: the `o7-worker gate` workflow already runs them
+# over the whole workspace (both new crates are members) and over the whole dependency
+# graph, so duplicating them would just run the same jobs twice per PR. This is an
+# infrastructure replay, NOT an independent code review: it runs tests authored in this
+# repository. Action pins are full-length commit SHAs (immutable); tags in comments are
+# informational.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  worktree-verifier-tests:
+    name: worktree+verifier tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact tested revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          # On a PR, test the PR HEAD (not the synthetic merge ref); on push/manual, the pushed SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Record execution identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "tested_sha=$(git rev-parse HEAD)"
+          echo "event=${GITHUB_EVENT_NAME}"
+          rustup show active-toolchain
+          rustc -Vv
+          cargo --version
+
+      - name: o7-worktree tests
+        run: cargo test -p o7-worktree --locked --no-fail-fast
+
+      - name: o7-verifier tests
+        run: cargo test -p o7-verifier --locked --no-fail-fast
