@@ -11,13 +11,21 @@ mod common;
 
 use common::*;
 
+/// Generous but bounded ceiling for readiness waits — a marker arrives in milliseconds;
+/// this only guards against a genuine hang, never a timing assumption.
+const READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 // (20) A grandchild in the leader's group is terminated together with the leader.
 #[tokio::test]
 async fn grandchild_is_killed_with_the_group() {
     let sink = RecordingSink::new();
-    let (handle, join) = start(child_spec("pg20", "grandchild_then_sleep"), &sink);
-    // Let the grandchild appear.
-    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    let (handle, join) = start(child_spec("pg20", "grandchild_then_sleep_ready"), &sink);
+    // Wait for the child's explicit readiness marker, emitted only AFTER the grandchild
+    // is actually spawned. This does NOT infer readiness from the leader's `Spawned`
+    // observation, which says nothing about the grandchild.
+    sink.wait_for_stdout_contains(READY_GRANDCHILD, READY_TIMEOUT)
+        .await
+        .unwrap();
     handle.cancel().await;
     let result = join.join().await;
 
