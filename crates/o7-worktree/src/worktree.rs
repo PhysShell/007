@@ -86,14 +86,21 @@ impl Worktree {
         let identity = WorktreeIdentity::new(run_id, repo, revision.clone());
         let digest = identity.digest();
 
-        // The agent's copy must live outside the operator's repository.
+        // The agent's copy must live outside the operator's repository. Check against the
+        // common git dir, the path git was bound to, AND the resolved top-level working
+        // tree — so a state root inside the checkout is rejected even when git is bound to
+        // a subdirectory (where the bound path alone would not contain the state root).
         state_root.ensure_outside_repo(&identity.repo.git_common_dir)?;
         state_root.ensure_outside_repo(git.repo())?;
+        if let Some(toplevel) = git.worktree_toplevel() {
+            state_root.ensure_outside_repo(&toplevel)?;
+        }
 
         // Preflight the WHOLE tree read-only, BEFORE creating any directory or git
         // metadata: a hostile tree (reserved `.git` path, unsupported mode, or an
         // entry/blob/cumulative budget breach) fails closed here with nothing written.
-        let plan = MaterializePlan::prepare(git, revision, &MaterializeLimits::default())?;
+        let limits = MaterializeLimits::default();
+        let plan = MaterializePlan::prepare(git, revision, &limits)?;
 
         // Create the worktree directory RELATIVE to the state root's bound descriptor:
         // mkdirat under the proven root inode (never adopting a pre-existing path), then
@@ -110,7 +117,7 @@ impl Worktree {
         // write the validated plan — a genuine git worktree with no checkout, so no
         // hook/filter/fsmonitor runs and no operator bytes leak in.
         let build = git
-            .init_detached_worktree(&path, &identity.repo, revision)
+            .init_detached_worktree(&path, &identity.repo, revision, limits.max_closure_bytes)
             .map_err(WorktreeError::from)
             .and_then(|()| plan.write(git, &path).map_err(WorktreeError::from));
         let summary = match build {

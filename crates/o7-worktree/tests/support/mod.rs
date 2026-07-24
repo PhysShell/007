@@ -24,10 +24,15 @@ pub struct TestRepo {
 
 impl TestRepo {
     pub fn init() -> Self {
+        Self::init_with_object_format("sha1")
+    }
+
+    /// A repository whose object store uses `object_format` (`"sha1"` or `"sha256"`).
+    pub fn init_with_object_format(object_format: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let home = tempfile::tempdir().unwrap();
         let repo = Self { dir, home };
-        repo.git(&["init", "-q", "-b", "main"]);
+        repo.git(&["init", "-q", "-b", "main", "--object-format", object_format]);
         repo.git(&["config", "user.email", "t@example.com"]);
         repo.git(&["config", "user.name", "Test"]);
         repo.git(&["config", "commit.gpgsign", "false"]);

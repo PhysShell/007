@@ -84,6 +84,11 @@ pub struct MaterializeLimits {
     pub max_total_bytes: u64,
     pub max_files: usize,
     pub max_symlinks: usize,
+    /// Ceiling on the on-disk size of the object CLOSURE copied into the worktree's own
+    /// objectdb (the commit's full reachable history, not just its working tree). The
+    /// working-tree budgets above do not bound history, so a repo with a tiny current tree
+    /// but huge old blobs is refused here before any objects are copied.
+    pub max_closure_bytes: u64,
 }
 
 impl Default for MaterializeLimits {
@@ -95,6 +100,7 @@ impl Default for MaterializeLimits {
             max_total_bytes: 8 * 1024 * 1024 * 1024,
             max_files: 1_000_000,
             max_symlinks: 1_000_000,
+            max_closure_bytes: 8 * 1024 * 1024 * 1024,
         }
     }
 }

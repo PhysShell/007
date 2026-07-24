@@ -75,6 +75,11 @@ pub enum GitError {
         #[source]
         source: std::io::Error,
     },
+    #[error(
+        "the object closure for the revision is {bytes} bytes on disk, over the \
+         {cap}-byte budget; refusing to copy it"
+    )]
+    ClosureTooLarge { bytes: u64, cap: u64 },
     #[error("git {command} produced output that could not be parsed: {detail}")]
     Parse { command: String, detail: String },
     #[error("resolving the git common directory failed: {0}")]
@@ -249,12 +254,23 @@ impl HardenedGit {
         worktree_dir: &Path,
         repo: &CanonicalRepoId,
         revision: &CommittedRevision,
+        max_closure_bytes: u64,
     ) -> Result<(), GitError> {
         use std::os::unix::ffi::OsStrExt as _;
 
+        // Create the worktree's gitdir with the SAME object format as the source repo. A
+        // SHA-256 source yields 64-hex commit ids; a default (SHA-1) `git init` would then
+        // reject those ids in update-ref/read-tree, so materialization would fail for every
+        // SHA-256 repository. Match the format up front.
+        let object_format = self.object_format()?;
         self.run_in(
             worktree_dir,
-            &[OsStr::new("init"), OsStr::new("-q")],
+            &[
+                OsStr::new("init"),
+                OsStr::new("-q"),
+                OsStr::new("--object-format"),
+                OsStr::new(object_format.as_str()),
+            ],
             MAX_CONTROL_STDOUT,
         )?;
 
@@ -286,7 +302,7 @@ impl HardenedGit {
         )?;
 
         // Copy the reachable object closure into our own objectdb, then cut the tether.
-        self.copy_object_closure(worktree_dir, revision)?;
+        self.copy_object_closure(worktree_dir, revision, max_closure_bytes)?;
         std::fs::remove_file(&alternates).map_err(|source| GitError::Metadata {
             path: alternates.clone(),
             source,
@@ -294,19 +310,63 @@ impl HardenedGit {
         Ok(())
     }
 
+    /// The source repository's object hash format, one of `"sha1"` / `"sha256"`.
+    fn object_format(&self) -> Result<String, GitError> {
+        let raw = self.run_text(&["rev-parse", "--show-object-format"])?;
+        let fmt = raw.trim().to_owned();
+        if fmt != "sha1" && fmt != "sha256" {
+            return Err(GitError::Parse {
+                command: "rev-parse --show-object-format".to_owned(),
+                detail: format!("unexpected object format {fmt:?}"),
+            });
+        }
+        Ok(fmt)
+    }
+
     /// Copy the entire object closure reachable from `revision` (the commit, its history,
     /// and every tree/blob) from the borrowed source objects into `worktree_dir`'s own
     /// object database, so it becomes self-contained.
     ///
-    /// `rev-list --objects --no-object-names <oid>` enumerates the closure as bare oids;
-    /// `pack-objects` reads that list on stdin and writes a single pack into
-    /// `.git/objects/pack`. Both run inside the worktree, where the alternates tether is
-    /// still present, so the source objects are readable exactly for this copy.
+    /// The closure is the WHOLE reachable history, which the working-tree preflight budgets
+    /// do NOT bound — so its on-disk size is measured first (`rev-list --disk-usage`) and
+    /// refused if it exceeds `max_closure_bytes`, closing the hole where a repo with a tiny
+    /// current tree but huge old blobs would pass the working-tree checks and then consume
+    /// arbitrary disk/time. Only within budget does `rev-list --objects` feed `pack-objects`.
     fn copy_object_closure(
         &self,
         worktree_dir: &Path,
         revision: &CommittedRevision,
+        max_closure_bytes: u64,
     ) -> Result<(), GitError> {
+        // Measure the on-disk size of the reachable closure WITHOUT writing anything.
+        let usage_raw = self.run_in(
+            worktree_dir,
+            &[
+                OsStr::new("rev-list"),
+                OsStr::new("--objects"),
+                OsStr::new("--disk-usage"),
+                OsStr::new("--end-of-options"),
+                OsStr::new(revision.as_str()),
+            ],
+            MAX_CONTROL_STDOUT,
+        )?;
+        let usage: u64 = std::str::from_utf8(&usage_raw)
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .ok_or_else(|| GitError::Parse {
+                command: "rev-list --disk-usage".to_owned(),
+                detail: format!(
+                    "unparseable disk-usage output: {:?}",
+                    String::from_utf8_lossy(&usage_raw)
+                ),
+            })?;
+        if usage > max_closure_bytes {
+            return Err(GitError::ClosureTooLarge {
+                bytes: usage,
+                cap: max_closure_bytes,
+            });
+        }
+
         let oids = self.run_in(
             worktree_dir,
             &[
@@ -329,6 +389,20 @@ impl HardenedGit {
             MAX_CONTROL_STDOUT,
         )?;
         Ok(())
+    }
+
+    /// The absolute top-level working-tree directory of the bound repository
+    /// (`rev-parse --show-toplevel`), resolved so a state root inside the operator's
+    /// checkout — even when git is bound to a SUBDIRECTORY — can be rejected. `None` if
+    /// there is no working tree (e.g. a bare repository).
+    pub fn worktree_toplevel(&self) -> Option<PathBuf> {
+        let raw = self.run_text(&["rev-parse", "--show-toplevel"]).ok()?;
+        let trimmed = raw.trim_end_matches(['\n', '\r']);
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(PathBuf::from(trimmed))
+        }
     }
 
     // ---- internals ----
@@ -475,7 +549,14 @@ fn run_bounded(
     // safe, `unsafe`-free way to request this (no `pre_exec`).
     cmd.process_group(0);
     let mut child = cmd.spawn().map_err(GitError::Spawn)?;
-    let pgid = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap_or(0));
+    // The child's pgid equals its pid. Guard against a 0 (or negative) value: `killpg(0,…)`
+    // targets the CALLER's process group, which would SIGKILL o7d itself. A real Linux pid
+    // always fits in a positive i32, so this only skips the group-kill in the impossible
+    // case, still killing the leader directly below.
+    let pgid = i32::try_from(child.id())
+        .ok()
+        .filter(|&p| p > 0)
+        .map(nix::unistd::Pid::from_raw);
 
     // Feed stdin on its own thread: a child that stops reading (or dies) must not block us.
     let stdin_join = match stdin {
@@ -556,11 +637,16 @@ fn run_bounded(
     }
 }
 
-/// SIGKILL the child's whole process group, then reap the leader so no zombie remains.
-/// Killing the group (not just the leader) reaps any helper the child forked, which
-/// releases the output pipe so the drain threads' `read_to_end` can return.
-fn kill_group(pgid: nix::unistd::Pid, child: &mut std::process::Child) {
-    let _ = nix::sys::signal::killpg(pgid, nix::sys::signal::Signal::SIGKILL);
+/// SIGKILL the child's whole process group (when a valid pgid is known), then reap the
+/// leader so no zombie remains. Killing the group (not just the leader) reaps any helper
+/// the child forked, which releases the output pipe so the drain threads' `read_to_end`
+/// can return. `pgid` is `None` only if the pid could not be represented as a positive
+/// process-group id, in which case the group kill is skipped rather than risking a
+/// `killpg(0, …)` that would signal the caller's OWN group.
+fn kill_group(pgid: Option<nix::unistd::Pid>, child: &mut std::process::Child) {
+    if let Some(pgid) = pgid {
+        let _ = nix::sys::signal::killpg(pgid, nix::sys::signal::Signal::SIGKILL);
+    }
     // Belt-and-braces: also kill the leader directly in case the group could not be
     // signalled (e.g. pgid was unavailable), then reap it.
     let _ = child.kill();

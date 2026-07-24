@@ -4,18 +4,25 @@
 //! authority comes from re-proving, against the live filesystem, that the directory at
 //! a path is *exactly* the one we created and own:
 //!
-//! * it is a directory reached without following a symlink (`symlink_metadata`);
+//! * it is a directory reached without following a symlink (`O_DIRECTORY | O_NOFOLLOW`);
 //! * its `(dev, ino)` equal what we recorded at create time — a rename of the path to
 //!   a different directory, or an inode replacement, moves these;
 //! * it is owned by our effective uid;
 //! * its permission bits are owner-only (`0o700`).
 //!
+//! Identity is read through ONE source — a rustix `fstat` on an `O_DIRECTORY | O_NOFOLLOW`
+//! descriptor — the SAME source `stateroot::create_worktree_dir` records with and `reap`
+//! verifies against. Using one `dev`/`ino` encoding everywhere avoids the glibc-vs-raw
+//! `dev_t` mismatch that a mix of std `MetadataExt` and rustix `fstat` would risk, which
+//! would otherwise fail deletion closed on a legitimate directory.
+//!
 //! Any failure is fail-closed: [`AttestError`] is returned and the caller must NOT
 //! delete — the files are preserved for investigation.
 
-use std::os::unix::fs::MetadataExt as _;
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
+use rustix::fs::{self, Mode, OFlags};
 use serde::{Deserialize, Serialize};
 
 /// The filesystem identity of a directory: the device and inode that a rename or
@@ -32,26 +39,48 @@ impl FsIdentity {
     /// # Errors
     /// [`AttestError`] if the path is missing, is a symlink, or is not a directory.
     pub fn of_dir(path: &Path) -> Result<Self, AttestError> {
-        let meta = std::fs::symlink_metadata(path).map_err(|source| AttestError::Stat {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        let file_type = meta.file_type();
-        if file_type.is_symlink() {
-            return Err(AttestError::SymlinkSubstitution {
-                path: path.to_path_buf(),
-            });
-        }
-        if !file_type.is_dir() {
-            return Err(AttestError::NotADirectory {
-                path: path.to_path_buf(),
-            });
-        }
+        let fd = open_dir_nofollow(path)?;
+        let st = fstat(&fd, path)?;
         Ok(Self {
-            dev: meta.dev(),
-            ino: meta.ino(),
+            dev: st.st_dev,
+            ino: st.st_ino,
         })
     }
+}
+
+/// Open `path` as a directory without following a final symlink, mapping the failure
+/// modes to the fail-closed [`AttestError`] variants. This is the single entry point for
+/// reading a directory's identity, so creation, attestation, and reaping all agree.
+fn open_dir_nofollow(path: &Path) -> Result<OwnedFd, AttestError> {
+    fs::open(
+        path,
+        OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::RDONLY,
+        Mode::empty(),
+    )
+    .map_err(|err| {
+        if err == rustix::io::Errno::LOOP {
+            // O_NOFOLLOW hit a symlink at the final component.
+            AttestError::SymlinkSubstitution {
+                path: path.to_path_buf(),
+            }
+        } else if err == rustix::io::Errno::NOTDIR {
+            AttestError::NotADirectory {
+                path: path.to_path_buf(),
+            }
+        } else {
+            AttestError::Stat {
+                path: path.to_path_buf(),
+                source: err.into(),
+            }
+        }
+    })
+}
+
+fn fstat(fd: &OwnedFd, path: &Path) -> Result<rustix::fs::Stat, AttestError> {
+    fs::fstat(fd).map_err(|err| AttestError::Stat {
+        path: path.to_path_buf(),
+        source: err.into(),
+    })
 }
 
 /// Required owner-only permission bits for a state directory.
@@ -124,24 +153,13 @@ pub fn effective_uid() -> u32 {
 /// # Errors
 /// [`AttestError`] on any identity, ownership, or permission mismatch.
 pub fn attest_owned_dir(path: &Path, expected: FsIdentity) -> Result<FsIdentity, AttestError> {
-    let meta = std::fs::symlink_metadata(path).map_err(|source| AttestError::Stat {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let file_type = meta.file_type();
-    if file_type.is_symlink() {
-        return Err(AttestError::SymlinkSubstitution {
-            path: path.to_path_buf(),
-        });
-    }
-    if !file_type.is_dir() {
-        return Err(AttestError::NotADirectory {
-            path: path.to_path_buf(),
-        });
-    }
+    // One identity source: fstat on an O_DIRECTORY|O_NOFOLLOW descriptor (a symlink fails
+    // as ELOOP, a non-directory as ENOTDIR), matching create/reap exactly.
+    let fd = open_dir_nofollow(path)?;
+    let st = fstat(&fd, path)?;
     let got = FsIdentity {
-        dev: meta.dev(),
-        ino: meta.ino(),
+        dev: st.st_dev,
+        ino: st.st_ino,
     };
     if got != expected {
         return Err(AttestError::IdentityMismatch {
@@ -153,14 +171,14 @@ pub fn attest_owned_dir(path: &Path, expected: FsIdentity) -> Result<FsIdentity,
         });
     }
     let euid = effective_uid();
-    if meta.uid() != euid {
+    if st.st_uid != euid {
         return Err(AttestError::Ownership {
             path: path.to_path_buf(),
             expected: euid,
-            found: meta.uid(),
+            found: st.st_uid,
         });
     }
-    let bits = meta.mode() & 0o777;
+    let bits = st.st_mode & 0o777;
     if bits != OWNER_ONLY {
         return Err(AttestError::Permissions {
             path: path.to_path_buf(),

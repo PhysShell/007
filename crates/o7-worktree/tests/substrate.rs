@@ -462,6 +462,106 @@ fn create_rejects_a_state_root_inside_the_repo() {
 }
 
 #[test]
+fn create_rejects_a_state_root_inside_the_repo_when_git_is_bound_to_a_subdirectory() {
+    // Git is bound to a SUBDIRECTORY of the checkout; a state root elsewhere inside the
+    // SAME working tree (not under .git, not under the bound subdir) must still be rejected
+    // via the resolved top-level working tree.
+    let repo = TestRepo::init();
+    repo.write("src/a.txt", b"a\n");
+    repo.add_all();
+    let head = repo.commit("c1");
+
+    let subdir = repo.path().join("src");
+    let git = o7_worktree::HardenedGit::new(&subdir);
+
+    // A state root under the working-tree root, but NOT under `src/` or `.git/`.
+    let inside = repo.path().join(".o7-state");
+    let sr = o7_worktree::StateRoot::open_or_create(&inside).unwrap();
+
+    let err = Worktree::create(&git, &sr, run_id("run1"), &head).unwrap_err();
+    assert!(
+        matches!(err, o7_worktree::WorktreeError::StateRoot(_)),
+        "expected InsideRepo rejection via the top-level working tree, got {err:?}"
+    );
+}
+
+#[test]
+fn materializes_a_sha256_repository() {
+    // A SHA-256 source repo yields 64-hex commit ids; the worktree gitdir must be created
+    // with a matching object format or update-ref/read-tree would reject the id.
+    let repo = TestRepo::init_with_object_format("sha256");
+    repo.write("a.txt", b"sha256\n");
+    repo.add_all();
+    let head = repo.commit("c1");
+    assert_eq!(
+        head.as_str().len(),
+        64,
+        "expected a 64-hex sha256 commit id"
+    );
+
+    let (_root_dir, sr) = state_root();
+    let wt = Worktree::create(&repo.hardened(), &sr, run_id("run1"), &head).unwrap();
+
+    assert_eq!(read(&wt.path().join("a.txt")), b"sha256\n");
+    let wt_git = o7_worktree::HardenedGit::new(wt.path());
+    assert_eq!(wt_git.resolve_commit("HEAD").unwrap(), head);
+}
+
+#[test]
+fn init_detached_worktree_refuses_an_oversized_object_closure() {
+    use std::os::unix::fs::DirBuilderExt as _;
+
+    let repo = TestRepo::init();
+    repo.write(
+        "a.txt",
+        b"some bytes that make the closure exceed one byte\n",
+    );
+    repo.add_all();
+    let head = repo.commit("c1");
+
+    let git = repo.hardened();
+    let repo_id = git.canonical_repo_id().unwrap();
+
+    // A fresh owner-only worktree directory outside the repo.
+    let holder = tempfile::tempdir().unwrap();
+    let wt_dir = holder.path().join("wt");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&wt_dir)
+        .unwrap();
+
+    // A 1-byte closure budget is smaller than any real closure, so the copy is refused
+    // BEFORE any pack is written.
+    let err = git
+        .init_detached_worktree(&wt_dir, &repo_id, &head, 1)
+        .unwrap_err();
+    assert!(
+        matches!(err, o7_worktree::GitError::ClosureTooLarge { .. }),
+        "expected ClosureTooLarge, got {err:?}"
+    );
+    // No pack was written under the worktree's objectdb.
+    let pack_dir = wt_dir.join(".git/objects/pack");
+    let packed = std::fs::read_dir(&pack_dir)
+        .map(|rd| {
+            rd.flatten()
+                .any(|e| e.file_name().to_string_lossy().ends_with(".pack"))
+        })
+        .unwrap_or(false);
+    assert!(!packed, "a pack was written despite exceeding the budget");
+
+    // A generous budget succeeds.
+    let holder2 = tempfile::tempdir().unwrap();
+    let wt_dir2 = holder2.path().join("wt");
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&wt_dir2)
+        .unwrap();
+    git.init_detached_worktree(&wt_dir2, &repo_id, &head, 8 * 1024 * 1024 * 1024)
+        .unwrap();
+    assert!(wt_dir2.join(".git").exists());
+}
+
+#[test]
 fn cleanup_removes_when_identity_is_proven() {
     let repo = TestRepo::init();
     repo.write("a.txt", b"a\n");
