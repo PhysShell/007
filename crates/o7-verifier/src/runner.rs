@@ -17,17 +17,19 @@
 //! (never a pass). Output is bounded by the command's budget; exceeding it fails the sink
 //! closed and is reported as `OutputLost` (never a silent truncation, never a pass).
 //!
-//! ACQUISITION and EXECUTION are both fd-exact. Acquisition opens the trusted executable
-//! `O_NOFOLLOW`, proves it a regular file, and reads the exact bytes it hashes. Execution
-//! then stages those exact bytes into an owner-only `0500` copy and runs it through a
-//! `/proc/<pid>/fd/<n>` path backed by a held-open read-only descriptor to the staged
-//! inode. Because the kernel resolves that path THROUGH the descriptor (the same mechanism
-//! as glibc's `fexecve`), the bytes executed are exactly the bytes hashed even against a
-//! same-UID attacker who swaps the staging directory entry — closing the hash-to-spawn
-//! TOCTOU without `unsafe` (no `execveat`/`memfd_create`) and without changing the frozen
-//! o7-worker `ProcessBoundary`/`BoundarySpawnSpec` seam, which still spawns from a PATH.
-//! (Requires `/proc` and an exec-capable `$TMPDIR`; otherwise the run fails closed at
-//! spawn — see [`stage_executable`].)
+//! ACQUISITION and EXECUTION are both fd-exact against a same-UID attacker. Acquisition
+//! opens the trusted executable `O_NOFOLLOW`, proves it a regular file, and reads the exact
+//! bytes it hashes. Execution then materializes those exact bytes as a fully-SEALED,
+//! anonymous `memfd` (`F_SEAL_WRITE | GROW | SHRINK | SEAL`) and runs it through a
+//! `/proc/<pid>/fd/<n>` path backed by a held-open descriptor. Because the object is
+//! anonymous (no directory entry to swap) and immutable (writes are sealed even for the
+//! owner, and the seal cannot be removed), and because the kernel resolves the exec path
+//! THROUGH the descriptor to that object (the mechanism glibc's `fexecve` uses), the bytes
+//! executed are exactly the bytes hashed — a same-UID attacker can neither swap the path
+//! nor rewrite the content. This uses no `unsafe` (`memfd_create`/`F_ADD_SEALS` via rustix's
+//! safe wrappers) and does not change the frozen o7-worker `ProcessBoundary`/
+//! `BoundarySpawnSpec` seam, which still spawns from a PATH. (Requires `/proc` mounted;
+//! otherwise the run fails closed at spawn — see [`stage_executable`].)
 
 use std::path::Path;
 use std::sync::Arc;
@@ -390,14 +392,14 @@ fn acquire_executable(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-/// A private copy of a trusted executable plus a held-open read-only descriptor to its
-/// exact inode. The executable is run through a magic `/proc/<pid>/fd/<n>` path, so it is
-/// executed FD-EXACTLY: the kernel resolves that path through the open descriptor to the
-/// very inode we staged and hashed, immune to any directory-entry swap. The descriptor is
-/// held for the whole run and the directory is removed on drop.
+/// The trusted executable bytes materialized as a SEALED, anonymous `memfd`, plus a
+/// held-open read-only descriptor to it. The command is run through a magic
+/// `/proc/<pid>/fd/<n>` path, so it is executed FD-EXACTLY *and* the backing object is
+/// immutable: there is no on-disk directory entry to swap, and the bytes cannot be changed
+/// by ANYONE — not even the owning UID — because `F_SEAL_WRITE` is in force and
+/// `F_SEAL_SEAL` forbids removing it. The descriptor is held for the whole run.
 struct StagedExecutable {
-    _dir: tempfile::TempDir,
-    /// Held open so `/proc/<pid>/fd/<n>` keeps resolving to the staged inode during exec.
+    /// Held open so `/proc/<pid>/fd/<n>` keeps resolving to the sealed memfd during exec.
     _fd: std::fs::File,
     proc_path: std::path::PathBuf,
 }
@@ -406,53 +408,52 @@ impl StagedExecutable {
     fn path(&self) -> &Path {
         &self.proc_path
     }
-
-    #[cfg(test)]
-    fn on_disk_dir(&self) -> &Path {
-        self._dir.path()
-    }
 }
 
-/// Write `bytes` to a `0o500` file inside a freshly-created `0o700` temp directory, then
-/// hold a READ-ONLY descriptor to that exact inode and return a `/proc/<pid>/fd/<n>` path
-/// to run it through.
+/// Materialize `bytes` as a fully-sealed, anonymous `memfd` and return a
+/// `/proc/<pid>/fd/<n>` path to execute it through.
 ///
-/// This closes the hash-to-spawn TOCTOU even against a same-UID attacker: a same-UID
-/// process owns the `0o700` staging directory and could rename/replace the directory
-/// entry, so a path-based exec is not swap-proof. Executing `/proc/<pid>/fd/<n>` instead
-/// makes the kernel resolve the executable THROUGH the descriptor we hold to the staged
-/// inode (the same mechanism glibc's `fexecve` uses), so the bytes executed are exactly
-/// the bytes hashed, regardless of any directory-entry swap. The read-only descriptor is
-/// obtained by re-opening `/proc/self/fd/<rw>` (never re-resolving the on-disk path), and
-/// the writable handle is dropped so no writer remains at exec time (no `ETXTBSY`).
+/// This closes the hash-to-spawn TOCTOU even against a SAME-UID attacker. A regular staged
+/// file is not enough: the owning UID can `chmod` its own file back to writable and rewrite
+/// the content in place, so a held read-only fd would then read mutated bytes. A memfd
+/// sealed with `F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK | F_SEAL_SEAL` cannot be written,
+/// resized, or un-sealed by anyone (not even the owner), and has no filesystem path to
+/// swap. Executing `/proc/<pid>/fd/<n>` makes the kernel resolve the program THROUGH the
+/// held descriptor to that immutable object (the mechanism glibc's `fexecve` uses), so the
+/// bytes executed are exactly the bytes hashed.
 ///
-/// RUNTIME PREREQUISITES: `/proc` must be mounted, and the staging directory (under
-/// `$TMPDIR`, falling back to `/tmp`) must be exec-capable. On a host with no `/proc` or a
-/// `noexec` `$TMPDIR`, the run fails closed at spawn (`SpawnFailed`) rather than executing
-/// unverified bytes.
+/// The seals are added while a writable handle is open (no writable mmap exists, so
+/// `F_SEAL_WRITE` succeeds); a read-only descriptor is then taken for exec and the writable
+/// handle dropped, so the object has no writable open at exec time (no `ETXTBSY`).
+///
+/// RUNTIME PREREQUISITE: `/proc` must be mounted. On a host without it the run fails closed
+/// at spawn (`SpawnFailed`) rather than executing unverified bytes.
 fn stage_executable(bytes: &[u8]) -> std::io::Result<StagedExecutable> {
     use std::io::Write as _;
     use std::os::fd::AsRawFd as _;
-    use std::os::unix::fs::OpenOptionsExt as _;
 
-    let dir = tempfile::Builder::new()
-        .prefix("o7-verify-exe-")
-        .tempdir()?;
-    let path = dir.path().join("exe");
-    // Created 0o500 (owner read+exec, no write); the write goes through the already-open
-    // fd, so the restrictive mode does not block staging but blocks any later writer.
-    let mut rw = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create_new(true)
-        .mode(0o500)
-        .open(&path)?;
+    use rustix::fs::{fcntl_add_seals, memfd_create, MemfdFlags, SealFlags};
+
+    // Anonymous, sealable, memory-backed file — no on-disk inode to chmod or replace.
+    let memfd = memfd_create(
+        "o7-verify-exe",
+        MemfdFlags::CLOEXEC | MemfdFlags::ALLOW_SEALING,
+    )
+    .map_err(std::io::Error::from)?;
+    let mut rw = std::fs::File::from(memfd);
     rw.write_all(bytes)?;
-    rw.sync_all()?;
+    rw.flush()?;
 
-    // Acquire a read-only descriptor to the SAME inode WITHOUT re-resolving the on-disk
-    // path (re-open the writable fd via /proc/self/fd), then drop the writable handle so
-    // there is no writer at exec time.
+    // Seal it fully immutable: no writes (even by the owner), no size change, and no future
+    // change to the seals themselves. From here the bytes can never change.
+    fcntl_add_seals(
+        &rw,
+        SealFlags::WRITE | SealFlags::GROW | SealFlags::SHRINK | SealFlags::SEAL,
+    )
+    .map_err(std::io::Error::from)?;
+
+    // Take a READ-ONLY descriptor for exec (re-open the memfd via /proc/self/fd), then drop
+    // the writable handle so the object has no writable open at exec time.
     let ro = std::fs::OpenOptions::new()
         .read(true)
         .open(format!("/proc/self/fd/{}", rw.as_raw_fd()))?;
@@ -463,11 +464,7 @@ fn stage_executable(bytes: &[u8]) -> std::io::Result<StagedExecutable> {
         std::process::id(),
         ro.as_raw_fd()
     ));
-    Ok(StagedExecutable {
-        _dir: dir,
-        _fd: ro,
-        proc_path,
-    })
+    Ok(StagedExecutable { _fd: ro, proc_path })
 }
 
 /// Map the worker's terminal result to a verifier outcome. A timeout is `TimedOut`
@@ -573,24 +570,49 @@ impl ObservationSink for CollectingSink {
 mod tests {
     use super::*;
 
-    /// Fd-exact execution proof: after a same-UID attacker replaces the on-disk staging
-    /// entry with different bytes, the `/proc/<pid>/fd/<n>` path still resolves — through
-    /// the held descriptor — to the ORIGINAL staged inode. So the bytes that would be
-    /// executed are exactly the bytes hashed, closing the hash-to-spawn TOCTOU.
+    /// Content-immutability proof against a SAME-UID attacker. The staged executable is a
+    /// sealed memfd, so the exact same-UID mutation that defeats a regular owned file —
+    /// chmod it writable, re-open for writing via /proc/<pid>/fd, and overwrite in place —
+    /// fails, and the bytes behind the exec path are unchanged. This closes the residual
+    /// hash-to-spawn TOCTOU that a plain read-only fd to a regular file leaves open.
     #[test]
-    fn proc_fd_path_reads_original_bytes_after_the_directory_entry_is_swapped() {
+    fn a_sealed_memfd_cannot_be_mutated_by_the_owning_uid() {
         let staged = stage_executable(b"ORIGINAL-BYTES").expect("stage");
-        let on_disk = staged.on_disk_dir().join("exe");
+        let proc_path = staged.path().to_path_buf();
 
-        // Same-UID swap of the directory entry (rename/replace the staged file).
-        std::fs::remove_file(&on_disk).expect("remove staged entry");
-        std::fs::write(&on_disk, b"EVIL-REPLACEMENT-CONTENT").expect("plant replacement");
+        // Same-UID owner tries to make it writable and overwrite it in place.
+        use std::os::unix::fs::PermissionsExt as _;
+        let _ = std::fs::set_permissions(&proc_path, std::fs::Permissions::from_mode(0o700));
+        let overwrite = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&proc_path)
+            .and_then(|mut f| {
+                use std::io::Write as _;
+                f.write_all(b"EVIL-REPLACEMENT-CONTENT")
+            });
+        assert!(
+            overwrite.is_err(),
+            "a sealed memfd was mutated by its owning UID: {overwrite:?}"
+        );
 
-        // The exec path resolves through the fd to the original inode, not the replacement.
-        let via_fd = std::fs::read(staged.path()).expect("read via /proc fd");
+        // The bytes behind the exec path are unchanged.
+        let via_fd = std::fs::read(&proc_path).expect("read via /proc fd");
         assert_eq!(
             via_fd, b"ORIGINAL-BYTES",
-            "the /proc fd path followed the swapped directory entry instead of the fd"
+            "the sealed executable's bytes changed under a same-UID write attempt"
+        );
+    }
+
+    /// The staged executable is anonymous: its `/proc/<pid>/fd` target is a `memfd:` object
+    /// with no directory entry an attacker could rename or replace.
+    #[test]
+    fn the_staged_executable_is_an_anonymous_memfd() {
+        let staged = stage_executable(b"payload").expect("stage");
+        let target = std::fs::read_link(staged.path()).expect("readlink /proc fd");
+        let shown = target.to_string_lossy();
+        assert!(
+            shown.contains("memfd:") && shown.contains("o7-verify-exe"),
+            "expected an anonymous memfd target, got {shown:?}"
         );
     }
 }
