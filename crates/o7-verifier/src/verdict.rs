@@ -9,7 +9,6 @@
 
 use o7_worker::BoundaryRequirement;
 
-use crate::command::ExitPolicy;
 use crate::evidence::{AttestedEnforcement, VerifierEvidence, VerifierOutcome};
 
 /// o7d's decision over a piece of verifier evidence.
@@ -34,17 +33,16 @@ impl Verdict {
 ///   * the boundary requirement is met by the attested enforcement (under
 ///     `RequireFullyEnforced`, only a `FullyEnforced` boundary qualifies — no fallback);
 ///   * the command was trusted at run time;
-///   * the outcome is a clean completion with an in-policy exit code.
+///   * the outcome is a clean completion with an exit code in the command's OWN BOUND
+///     exit policy.
 ///
-/// Every non-completion (not-run, spawn failure, timeout, signal, output loss,
-/// boundary-unavailable, fault) is rejected. Evidence can never accept itself: this
-/// function is the only path to [`Verdict::Accepted`].
+/// The exit policy is taken from the evidence itself (bound at run time from the trusted
+/// command), NOT supplied by the caller here — so o7d cannot widen the accepted codes
+/// after the run. Every non-completion (not-run, spawn failure, timeout, signal, output
+/// loss, boundary-unavailable, fault) is rejected. Evidence can never accept itself:
+/// this function is the only path to [`Verdict::Accepted`].
 #[must_use]
-pub fn adjudicate(
-    evidence: &VerifierEvidence,
-    exit_policy: &ExitPolicy,
-    requirement: BoundaryRequirement,
-) -> Verdict {
+pub fn adjudicate(evidence: &VerifierEvidence, requirement: BoundaryRequirement) -> Verdict {
     // 1. Boundary requirement — fail closed, no fallback.
     if let BoundaryRequirement::RequireFullyEnforced = requirement {
         match evidence.boundary_enforcement {
@@ -60,15 +58,16 @@ pub fn adjudicate(
     if !evidence.trusted {
         return Verdict::Rejected("command was not trusted at run time".to_owned());
     }
-    // 3. Outcome — only a clean, in-policy completion is a pass. Everything else is a
-    //    reject; enumerate so a new outcome variant forces a decision here.
+    // 3. Outcome — only a clean completion whose exit code is in the evidence's OWN bound
+    //    policy is a pass. Everything else is a reject; enumerate so a new outcome
+    //    variant forces a decision here.
     match &evidence.outcome {
         VerifierOutcome::Completed { exit_code } => {
-            if exit_policy.is_success(*exit_code) {
+            if evidence.exit_policy.is_success(*exit_code) {
                 Verdict::Accepted
             } else {
                 Verdict::Rejected(format!(
-                    "exit code {exit_code} is not in the success policy"
+                    "exit code {exit_code} is not in the command's bound success policy"
                 ))
             }
         }

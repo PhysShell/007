@@ -116,6 +116,70 @@ fn trust_can_be_revoked() {
     assert!(!store.is_trusted(&anchor));
 }
 
+// The trust binding covers the WHOLE command, not just repo+exe+argv+cwd: a different
+// environment allowlist, a widened exit policy, a longer timeout, or a larger output
+// budget each invalidates trust.
+#[test]
+fn trust_drifts_on_environment_exit_policy_timeout_and_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let exe = write_exe(dir.path(), "verify", b"x");
+    let repo = repo_id(1);
+    let base = command(exe.clone(), &["--all"], CwdPolicy::WorktreeRoot);
+    let anchor = TrustAnchor::compute(&repo, &base).unwrap();
+    let mut store = TrustStore::new();
+    store.trust(&anchor);
+    assert!(store.is_trusted(&anchor));
+
+    // environment drift.
+    let mut env_drift = base.clone();
+    env_drift
+        .environment
+        .insert(OsString::from("EVIL"), OsString::from("1"));
+    assert!(!store.is_trusted(&TrustAnchor::compute(&repo, &env_drift).unwrap()));
+
+    // exit-policy drift (widen to also accept 1).
+    let mut policy_drift = base.clone();
+    policy_drift.exit_policy = ExitPolicy::codes([0, 1]);
+    assert!(!store.is_trusted(&TrustAnchor::compute(&repo, &policy_drift).unwrap()));
+
+    // timeout drift.
+    let mut timeout_drift = base.clone();
+    timeout_drift.timeout = Duration::from_secs(31);
+    assert!(!store.is_trusted(&TrustAnchor::compute(&repo, &timeout_drift).unwrap()));
+
+    // output-budget drift.
+    let mut output_drift = base.clone();
+    output_drift.output_limits = OutputLimits {
+        max_total_bytes: base.output_limits.max_total_bytes + 1,
+    };
+    assert!(!store.is_trusted(&TrustAnchor::compute(&repo, &output_drift).unwrap()));
+
+    // the exact original command is still trusted.
+    assert!(store.is_trusted(&TrustAnchor::compute(&repo, &base).unwrap()));
+}
+
+// o7d adjudicates against the exit policy BOUND in the evidence — it cannot widen the
+// accepted codes after the run, because `adjudicate` has no policy parameter.
+#[test]
+fn adjudication_uses_the_bound_exit_policy_not_a_late_one() {
+    let full = Some(AttestedEnforcement::FullyEnforced);
+
+    // A completion with code 1 under a bound policy of {0} is rejected.
+    let mut strict = evidence(VerifierOutcome::Completed { exit_code: 1 }, true, full);
+    strict.exit_policy = ExitPolicy::exactly_zero();
+    assert!(!strict.is_pass_candidate());
+    assert!(!adjudicate(&strict, BoundaryRequirement::RequireFullyEnforced).is_accepted());
+
+    // The SAME completion is accepted only when the command's OWN bound policy admits 1.
+    let mut lenient = evidence(VerifierOutcome::Completed { exit_code: 1 }, true, full);
+    lenient.exit_policy = ExitPolicy::codes([0, 1]);
+    assert!(lenient.is_pass_candidate());
+    assert_eq!(
+        adjudicate(&lenient, BoundaryRequirement::RequireFullyEnforced),
+        Verdict::Accepted
+    );
+}
+
 fn evidence(
     outcome: VerifierOutcome,
     trusted: bool,
@@ -133,6 +197,7 @@ fn evidence(
                 .digest()
                 .clone()
         },
+        exit_policy: ExitPolicy::exactly_zero(),
         stdout: Vec::new(),
         stderr: Vec::new(),
     }
@@ -147,13 +212,9 @@ fn not_run_is_never_a_pass() {
         false,
         None,
     );
-    assert!(!ev.is_pass_candidate(&ExitPolicy::exactly_zero()));
+    assert!(!ev.is_pass_candidate());
     assert_eq!(
-        adjudicate(
-            &ev,
-            &ExitPolicy::exactly_zero(),
-            BoundaryRequirement::RequireFullyEnforced
-        ),
+        adjudicate(&ev, BoundaryRequirement::RequireFullyEnforced),
         Verdict::Rejected(
             "boundary requirement RequireFullyEnforced not met: attested None".to_owned()
         )
@@ -162,19 +223,17 @@ fn not_run_is_never_a_pass() {
 
 #[test]
 fn evidence_cannot_self_accept_only_o7d_adjudicates() {
-    let policy = ExitPolicy::exactly_zero();
-
     // A clean completion is only a CANDIDATE — the evidence never yields a verdict.
     let clean = evidence(
         VerifierOutcome::Completed { exit_code: 0 },
         true,
         Some(AttestedEnforcement::FullyEnforced),
     );
-    assert!(clean.is_pass_candidate(&policy));
+    assert!(clean.is_pass_candidate());
 
     // Trusted + fully-enforced + in-policy completion → o7d accepts.
     assert_eq!(
-        adjudicate(&clean, &policy, BoundaryRequirement::RequireFullyEnforced),
+        adjudicate(&clean, BoundaryRequirement::RequireFullyEnforced),
         Verdict::Accepted
     );
 
@@ -184,14 +243,9 @@ fn evidence_cannot_self_accept_only_o7d_adjudicates() {
         false,
         Some(AttestedEnforcement::FullyEnforced),
     );
-    assert!(untrusted.is_pass_candidate(&policy)); // the OUTCOME looks fine...
+    assert!(untrusted.is_pass_candidate()); // the OUTCOME looks fine...
     assert!(
-        !adjudicate(
-            &untrusted,
-            &policy,
-            BoundaryRequirement::RequireFullyEnforced
-        )
-        .is_accepted(),
+        !adjudicate(&untrusted, BoundaryRequirement::RequireFullyEnforced).is_accepted(),
         "an untrusted command was accepted"
     );
 
@@ -204,7 +258,7 @@ fn evidence_cannot_self_accept_only_o7d_adjudicates() {
     ] {
         let ev = evidence(VerifierOutcome::Completed { exit_code: 0 }, true, level);
         assert!(
-            !adjudicate(&ev, &policy, BoundaryRequirement::RequireFullyEnforced).is_accepted(),
+            !adjudicate(&ev, BoundaryRequirement::RequireFullyEnforced).is_accepted(),
             "accepted under insufficient enforcement {level:?}"
         );
     }
@@ -212,7 +266,6 @@ fn evidence_cannot_self_accept_only_o7d_adjudicates() {
 
 #[test]
 fn every_non_completion_and_bad_exit_is_rejected() {
-    let policy = ExitPolicy::exactly_zero();
     let full = Some(AttestedEnforcement::FullyEnforced);
     let non_completions = [
         VerifierOutcome::NotRun { reason: "x".into() },
@@ -226,12 +279,12 @@ fn every_non_completion_and_bad_exit_is_rejected() {
     for outcome in non_completions {
         let ev = evidence(outcome.clone(), true, full);
         assert!(
-            !ev.is_pass_candidate(&policy),
+            !ev.is_pass_candidate(),
             "{} was a pass candidate",
             outcome.kind()
         );
         assert!(
-            !adjudicate(&ev, &policy, BoundaryRequirement::RequireFullyEnforced).is_accepted(),
+            !adjudicate(&ev, BoundaryRequirement::RequireFullyEnforced).is_accepted(),
             "{} was accepted",
             outcome.kind()
         );
@@ -239,11 +292,6 @@ fn every_non_completion_and_bad_exit_is_rejected() {
 
     // A completion with an out-of-policy exit code is rejected too.
     let bad_exit = evidence(VerifierOutcome::Completed { exit_code: 1 }, true, full);
-    assert!(!bad_exit.is_pass_candidate(&policy));
-    assert!(!adjudicate(
-        &bad_exit,
-        &policy,
-        BoundaryRequirement::RequireFullyEnforced
-    )
-    .is_accepted());
+    assert!(!bad_exit.is_pass_candidate());
+    assert!(!adjudicate(&bad_exit, BoundaryRequirement::RequireFullyEnforced).is_accepted());
 }

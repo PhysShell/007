@@ -60,6 +60,13 @@ impl ExitPolicy {
     pub fn is_success(&self, code: i32) -> bool {
         self.success_codes.contains(&code)
     }
+
+    /// The success codes in ascending order — a deterministic ordering for binding the
+    /// policy into the trust digest, so a change to the accepted codes invalidates trust.
+    #[must_use]
+    pub fn success_codes_sorted(&self) -> Vec<i32> {
+        self.success_codes.iter().copied().collect()
+    }
 }
 
 /// Bounds on how much output the verifier will retain as evidence. Exceeding the cap is

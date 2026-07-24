@@ -1,11 +1,13 @@
 //! Trust binding and the trust store.
 //!
-//! Trust is bound to five things, exactly: the **canonical repository identity**, the
-//! **executable identity** (a content hash of the binary at its absolute path), the
-//! **argv**, the **cwd policy**, and the **command digest** over all of the above. Any
-//! drift in any of them yields a different digest, so the command is no longer trusted —
-//! a swapped binary, a changed argument, a different working directory, or a different
-//! repository all invalidate trust automatically.
+//! Trust is bound to the **canonical repository identity**, the **executable identity**
+//! (a content hash of the binary at its absolute path), and the **whole command
+//! specification** — executable path, argv, cwd policy, environment allowlist, exit
+//! policy, timeout, and output budget — folded into a single **command digest**. Any
+//! drift in any of them yields a different digest, so the command is no longer trusted:
+//! a swapped binary, a changed argument, a different working directory, a different
+//! environment, a widened exit policy, a longer timeout, a larger output budget, or a
+//! different repository all invalidate trust automatically.
 //!
 //! Trust is NEVER sourced from the repository. The [`TrustStore`] is populated by o7d
 //! from a source outside the repository (an operator decision), and nothing in this
@@ -144,21 +146,19 @@ pub enum TrustError {
     },
 }
 
-/// Compute the command digest over exactly the bound fields: repository identity,
-/// executable path + identity, argv, and cwd policy. Domain-separated and length-framed
-/// so no two distinct commands collide by concatenation ambiguity.
-/// The STRUCTURAL command digest: canonical repository identity + executable path +
-/// argv + cwd policy, WITHOUT the executable's content. It identifies the command for
-/// evidence and is computable without reading the binary (so evidence exists even when
-/// the executable is missing). It is NOT the trust key — trust additionally binds the
-/// executable identity (see [`TrustAnchor`]).
+/// The STRUCTURAL command digest: the canonical repository identity plus the WHOLE
+/// command specification EXCEPT the executable's content — executable path, argv, cwd
+/// policy, environment allowlist, exit policy, timeout, and output budget. It identifies
+/// the command for evidence and is computable without reading the binary (so evidence
+/// exists even when the executable is missing). It is NOT the trust key — trust
+/// additionally binds the executable identity (see [`TrustAnchor`]).
 #[must_use]
 pub fn structural_command_digest(
     repo: &CanonicalRepoId,
     command: &TrustedCommand,
 ) -> CommandDigest {
     let mut hasher = Sha256::new();
-    hasher.update(b"o7-verifier-command-structural\0v1\0");
+    hasher.update(b"o7-verifier-command-structural\0v2\0");
     fold_structural(&mut hasher, repo, command);
     CommandDigest(hex_lower(&hasher.finalize()))
 }
@@ -171,14 +171,17 @@ fn command_digest(
     exe_identity: &ExecutableIdentity,
 ) -> CommandDigest {
     let mut hasher = Sha256::new();
-    hasher.update(b"o7-verifier-command\0v1\0");
+    hasher.update(b"o7-verifier-command\0v2\0");
     fold_structural(&mut hasher, repo, command);
     framed(&mut hasher, exe_identity.as_str().as_bytes());
     CommandDigest(hex_lower(&hasher.finalize()))
 }
 
-/// Fold the structural fields (repo identity, exe path, argv, cwd policy) — everything
-/// bound EXCEPT the executable's content — into `hasher`.
+/// Fold the WHOLE command spec except the executable's content into `hasher`: repo
+/// identity, exe path, argv, cwd policy, environment allowlist, exit policy, timeout,
+/// and output budget. Binding all of it means trust cannot be reused with a different
+/// environment, a widened exit policy, a longer timeout, or a larger output budget —
+/// any of which would change what "the trusted command" actually does.
 fn fold_structural(hasher: &mut Sha256, repo: &CanonicalRepoId, command: &TrustedCommand) {
     framed(hasher, repo.git_common_dir.as_os_str().as_bytes());
     framed(hasher, &repo.dev.to_le_bytes());
@@ -196,6 +199,24 @@ fn fold_structural(hasher: &mut Sha256, repo: &CanonicalRepoId, command: &Truste
             framed(hasher, path.as_os_str().as_bytes());
         }
     }
+    // Environment allowlist. A `BTreeMap` iterates in sorted key order, so the binding
+    // is deterministic and independent of insertion order.
+    framed(hasher, &(command.environment.len() as u64).to_le_bytes());
+    for (key, value) in &command.environment {
+        framed(hasher, key.as_bytes());
+        framed(hasher, value.as_bytes());
+    }
+    // Exit policy (ascending codes), timeout, and output budget.
+    let codes = command.exit_policy.success_codes_sorted();
+    framed(hasher, &(codes.len() as u64).to_le_bytes());
+    for code in codes {
+        framed(hasher, &code.to_le_bytes());
+    }
+    framed(hasher, &command.timeout.as_nanos().to_le_bytes());
+    framed(
+        hasher,
+        &(command.output_limits.max_total_bytes as u64).to_le_bytes(),
+    );
 }
 
 fn framed(hasher: &mut Sha256, bytes: &[u8]) {

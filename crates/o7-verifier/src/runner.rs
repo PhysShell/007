@@ -28,7 +28,7 @@ use o7_worker::{
 };
 use o7_worktree::CanonicalRepoId;
 
-use crate::command::{CwdPolicy, TrustedCommand};
+use crate::command::{CwdPolicy, ExitPolicy, TrustedCommand};
 use crate::evidence::{AttestedEnforcement, VerifierEvidence, VerifierOutcome};
 use crate::trust::{structural_command_digest, CommandDigest, TrustAnchor, TrustStore};
 
@@ -80,6 +80,7 @@ impl Verifier {
                 &digest,
                 enforcement,
                 false,
+                command.exit_policy.clone(),
                 format!("invalid command: {err}"),
             );
         }
@@ -95,6 +96,7 @@ impl Verifier {
                 &digest,
                 enforcement,
                 false,
+                command.exit_policy.clone(),
                 "command is not trusted for this repository".to_owned(),
             );
         }
@@ -111,6 +113,7 @@ impl Verifier {
                 trusted: true,
                 boundary_enforcement: enforcement,
                 command_digest: digest,
+                exit_policy: command.exit_policy.clone(),
                 stdout: Vec::new(),
                 stderr: Vec::new(),
             };
@@ -171,6 +174,7 @@ impl Verifier {
             trusted: true,
             boundary_enforcement: enforcement,
             command_digest: digest,
+            exit_policy: command.exit_policy.clone(),
             stdout,
             stderr,
         }
@@ -181,6 +185,7 @@ fn not_run(
     digest: &CommandDigest,
     enforcement: Option<AttestedEnforcement>,
     trusted: bool,
+    exit_policy: ExitPolicy,
     reason: String,
 ) -> VerifierEvidence {
     VerifierEvidence {
@@ -188,6 +193,7 @@ fn not_run(
         trusted,
         boundary_enforcement: enforcement,
         command_digest: digest.clone(),
+        exit_policy,
         stdout: Vec::new(),
         stderr: Vec::new(),
     }

@@ -86,6 +86,10 @@ pub struct VerifierEvidence {
     pub boundary_enforcement: Option<AttestedEnforcement>,
     /// The digest of the command this evidence is about.
     pub command_digest: CommandDigest,
+    /// The exit policy the command was BOUND to (copied from the trusted command). The
+    /// verdict is evaluated against THIS policy, not one supplied later at adjudication
+    /// time — so o7d cannot widen the accepted exit codes after the fact.
+    pub exit_policy: ExitPolicy,
     /// Retained stdout (bounded by the command's output budget).
     pub stdout: Vec<u8>,
     /// Retained stderr (bounded by the command's output budget).
@@ -93,16 +97,17 @@ pub struct VerifierEvidence {
 }
 
 impl VerifierEvidence {
-    /// Whether this evidence could, on its face, be a pass under `policy`.
+    /// Whether this evidence could, on its face, be a pass under its OWN bound exit
+    /// policy.
     ///
     /// This is a NECESSARY condition, NEVER sufficient: it is true only for a clean
-    /// completion with an in-policy exit code. Every non-completion (not-run, spawn
-    /// failure, timeout, signal, output loss, boundary-unavailable, fault) is false. It
-    /// is deliberately NOT called `is_pass` — the accept/reject verdict is o7d's, in
-    /// [`crate::verdict`], which additionally requires trust and the boundary
-    /// requirement.
+    /// completion with an exit code in the command's bound policy. Every non-completion
+    /// (not-run, spawn failure, timeout, signal, output loss, boundary-unavailable,
+    /// fault) is false. It is deliberately NOT called `is_pass` — the accept/reject
+    /// verdict is o7d's, in [`crate::verdict`], which additionally requires trust and
+    /// the boundary requirement.
     #[must_use]
-    pub fn is_pass_candidate(&self, policy: &ExitPolicy) -> bool {
-        matches!(&self.outcome, VerifierOutcome::Completed { exit_code } if policy.is_success(*exit_code))
+    pub fn is_pass_candidate(&self) -> bool {
+        matches!(&self.outcome, VerifierOutcome::Completed { exit_code } if self.exit_policy.is_success(*exit_code))
     }
 }
