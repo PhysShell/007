@@ -1,15 +1,27 @@
 //! The verdict — o7d's authority, not the verifier's.
 //!
 //! Evidence describes what happened; only o7d turns evidence into an accept/reject
-//! decision. This module is that authority. It exists as a separate function precisely
-//! so a [`crate::evidence::VerifierEvidence`] can never "self-accept": there is no
-//! method on the evidence that yields [`Verdict::Accepted`], and this adjudication
-//! additionally re-checks trust and the boundary requirement, both of which the
-//! evidence alone cannot satisfy.
-
-use o7_worker::BoundaryRequirement;
+//! decision, and only against its own **trust store**. This module is that authority.
+//!
+//! [`adjudicate`] takes NO independent exit-policy or boundary argument. It RE-DERIVES the
+//! full trust digest from the evidence's own carried binding (repository, the exact
+//! command including its bound exit policy and boundary requirement, and the executable
+//! identity), requires that digest to equal the one the evidence claims AND to be present
+//! in o7d's [`TrustStore`], and only then evaluates the run-time observations (the
+//! attested enforcement against the command's BOUND requirement, and the exit code against
+//! the command's BOUND exit policy). Consequences:
+//!
+//!   * a forged `trusted = true` buys nothing — the flag is never read;
+//!   * a widened exit policy or a relaxed boundary requirement changes the digest, so it
+//!     is no longer in the store and is rejected;
+//!   * a command trusted for `RequireFullyEnforced` cannot be re-adjudicated as if it were
+//!     `AllowUnconfined` (there is no boundary parameter to relax, and the requirement is
+//!     bound into the digest);
+//!   * revoking the digest from the store makes prior evidence reject;
+//!   * a swapped executable (different identity) yields a different digest and rejects.
 
 use crate::evidence::{AttestedEnforcement, VerifierEvidence, VerifierOutcome};
+use crate::trust::{TrustAnchor, TrustStore};
 
 /// o7d's decision over a piece of verifier evidence.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,24 +39,56 @@ impl Verdict {
     }
 }
 
-/// Adjudicate evidence into a verdict — the step o7d owns.
+/// Adjudicate evidence into a verdict against o7d's trust store — the step o7d owns.
 ///
 /// Acceptance requires ALL of:
-///   * the boundary requirement is met by the attested enforcement (under
-///     `RequireFullyEnforced`, only a `FullyEnforced` boundary qualifies — no fallback);
-///   * the command was trusted at run time;
+///   * the evidence carries a trust binding (executable identity + claimed trust digest);
+///   * the trust digest RE-DERIVED from the evidence's own binding equals the claimed one
+///     (a self-inconsistent/forged evidence is rejected);
+///   * that digest is present in `trust_store` (revocation or any drift ⇒ absent ⇒ reject);
+///   * the attested enforcement satisfies the command's OWN BOUND boundary requirement
+///     (under `RequireFullyEnforced`, only `FullyEnforced` qualifies — no fallback);
 ///   * the outcome is a clean completion with an exit code in the command's OWN BOUND
 ///     exit policy.
 ///
-/// The exit policy is taken from the evidence itself (bound at run time from the trusted
-/// command), NOT supplied by the caller here — so o7d cannot widen the accepted codes
-/// after the run. Every non-completion (not-run, spawn failure, timeout, signal, output
-/// loss, boundary-unavailable, fault) is rejected. Evidence can never accept itself:
-/// this function is the only path to [`Verdict::Accepted`].
+/// Every non-completion (not-run, spawn failure, timeout, signal, output loss,
+/// boundary-unavailable, fault) is rejected. This is the ONLY path to [`Verdict::Accepted`];
+/// evidence can never accept itself.
 #[must_use]
-pub fn adjudicate(evidence: &VerifierEvidence, requirement: BoundaryRequirement) -> Verdict {
-    // 1. Boundary requirement — fail closed, no fallback.
-    if let BoundaryRequirement::RequireFullyEnforced = requirement {
+pub fn adjudicate(evidence: &VerifierEvidence, trust_store: &TrustStore) -> Verdict {
+    // 1. There must be a trust binding at all.
+    let (Some(exe_identity), Some(claimed_digest)) =
+        (&evidence.executable_identity, &evidence.trust_digest)
+    else {
+        return Verdict::Rejected(
+            "evidence carries no trust binding — nothing was trusted".to_owned(),
+        );
+    };
+
+    // 2. RE-DERIVE the full trust digest from the evidence's OWN carried binding. A forged
+    //    field (a widened exit policy, a relaxed boundary requirement, a swapped identity)
+    //    changes this digest; a mismatch with the claimed digest is a rejected forgery.
+    let anchor = TrustAnchor::from_parts(&evidence.repo, &evidence.command, exe_identity.clone());
+    if anchor.digest() != claimed_digest {
+        return Verdict::Rejected(
+            "evidence trust digest is inconsistent with its own command binding".to_owned(),
+        );
+    }
+
+    // 3. The re-derived digest must be in o7d's trust store. Revocation, exe drift, a
+    //    structural (non-trust) digest, or any spec drift all fall out here.
+    if !trust_store.is_trusted(&anchor) {
+        return Verdict::Rejected(
+            "the command is not in o7d's trust store (revoked, drifted, or never trusted)"
+                .to_owned(),
+        );
+    }
+
+    // 4. Boundary requirement — taken from the command's BOUND requirement, never a caller
+    //    argument. Fail closed, no fallback.
+    if let crate::command::RequiredBoundary::RequireFullyEnforced =
+        evidence.command.boundary_requirement
+    {
         match evidence.boundary_enforcement {
             Some(AttestedEnforcement::FullyEnforced) => {}
             other => {
@@ -54,16 +98,13 @@ pub fn adjudicate(evidence: &VerifierEvidence, requirement: BoundaryRequirement)
             }
         }
     }
-    // 2. Trust — a non-trusted command is never accepted.
-    if !evidence.trusted {
-        return Verdict::Rejected("command was not trusted at run time".to_owned());
-    }
-    // 3. Outcome — only a clean completion whose exit code is in the evidence's OWN bound
-    //    policy is a pass. Everything else is a reject; enumerate so a new outcome
-    //    variant forces a decision here.
+
+    // 5. Outcome — only a clean completion whose exit code is in the command's OWN bound
+    //    policy is a pass. Everything else rejects; enumerate so a new outcome variant
+    //    forces a decision here.
     match &evidence.outcome {
         VerifierOutcome::Completed { exit_code } => {
-            if evidence.exit_policy.is_success(*exit_code) {
+            if evidence.command.exit_policy.is_success(*exit_code) {
                 Verdict::Accepted
             } else {
                 Verdict::Rejected(format!(

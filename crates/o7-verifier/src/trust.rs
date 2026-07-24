@@ -22,7 +22,7 @@ use sha2::{Digest as _, Sha256};
 
 use o7_worktree::CanonicalRepoId;
 
-use crate::command::{CwdPolicy, TrustedCommand};
+use crate::command::{CwdPolicy, RequiredBoundary, TrustedCommand};
 
 /// A content hash of an executable — the "executable identity". Re-hashing at run time
 /// is what makes a swapped-out binary at the same path invalidate trust.
@@ -101,6 +101,19 @@ impl TrustAnchor {
         exe_bytes: &[u8],
     ) -> Self {
         Self::from_identity(repo, command, ExecutableIdentity::of_bytes(exe_bytes))
+    }
+
+    /// Build the anchor from an ALREADY-KNOWN executable identity — no file is read. This
+    /// is how [`crate::verdict::adjudicate`] recomputes the trust digest from the identity
+    /// carried in evidence, so a forged or tampered evidence field changes the digest and
+    /// falls out of the trust store.
+    #[must_use]
+    pub fn from_parts(
+        repo: &CanonicalRepoId,
+        command: &TrustedCommand,
+        executable_identity: ExecutableIdentity,
+    ) -> Self {
+        Self::from_identity(repo, command, executable_identity)
     }
 
     fn from_identity(
@@ -245,6 +258,14 @@ fn fold_structural(hasher: &mut Sha256, repo: &CanonicalRepoId, command: &Truste
         hasher,
         &(command.output_limits.max_total_bytes as u64).to_le_bytes(),
     );
+    // Boundary requirement — a distinct tag per variant, so trust for a fully-enforced
+    // boundary can never be reused for an unconfined one.
+    match command.boundary_requirement {
+        RequiredBoundary::AllowUnconfined => framed(hasher, b"boundary:allow-unconfined"),
+        RequiredBoundary::RequireFullyEnforced => {
+            framed(hasher, b"boundary:require-fully-enforced")
+        }
+    }
 }
 
 fn framed(hasher: &mut Sha256, bytes: &[u8]) {

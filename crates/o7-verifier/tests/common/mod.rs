@@ -26,7 +26,9 @@ use async_trait::async_trait;
 use tokio::io::{AsyncRead, ReadBuf};
 use tokio::sync::Notify;
 
-use o7_verifier::{CwdPolicy, ExitPolicy, OutputLimits, TrustAnchor, TrustStore, TrustedCommand};
+use o7_verifier::{
+    CwdPolicy, ExitPolicy, OutputLimits, RequiredBoundary, TrustAnchor, TrustStore, TrustedCommand,
+};
 use o7_worker::{
     BoundaryAttestation, BoundaryError, BoundaryExit, BoundaryKind, BoundaryProcess,
     BoundarySpawnSpec, BoundaryStream, EnforcementLevel, ProcessBoundary, ProcessIdentity,
@@ -255,6 +257,15 @@ pub fn make_exe(dir: &std::path::Path, name: &str) -> PathBuf {
 }
 
 pub fn command_for(exe: PathBuf, timeout: Duration, budget: usize) -> TrustedCommand {
+    command_for_boundary(exe, timeout, budget, RequiredBoundary::RequireFullyEnforced)
+}
+
+pub fn command_for_boundary(
+    exe: PathBuf,
+    timeout: Duration,
+    budget: usize,
+    boundary: RequiredBoundary,
+) -> TrustedCommand {
     let mut env = BTreeMap::new();
     env.insert(OsString::from("PATH"), OsString::from("/usr/bin:/bin"));
     TrustedCommand {
@@ -267,6 +278,7 @@ pub fn command_for(exe: PathBuf, timeout: Duration, budget: usize) -> TrustedCom
             max_total_bytes: budget,
         },
         exit_policy: ExitPolicy::exactly_zero(),
+        boundary_requirement: boundary,
     }
 }
 

@@ -22,8 +22,8 @@ pub mod trust;
 pub mod verdict;
 
 pub use command::{
-    CommandError, CwdPolicy, ExitPolicy, OutputLimits, TrustedCommand, MAX_OUTPUT_BYTES,
-    MAX_TIMEOUT,
+    CommandError, CwdPolicy, ExitPolicy, OutputLimits, RequiredBoundary, TrustedCommand,
+    MAX_OUTPUT_BYTES, MAX_TIMEOUT,
 };
 pub use evidence::{AttestedEnforcement, VerifierEvidence, VerifierOutcome};
 pub use runner::{Verifier, VerifyError};

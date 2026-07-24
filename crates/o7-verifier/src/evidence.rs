@@ -10,8 +10,10 @@
 use o7_worker::EnforcementLevel;
 use serde::{Deserialize, Serialize};
 
-use crate::command::ExitPolicy;
-use crate::trust::CommandDigest;
+use o7_worktree::CanonicalRepoId;
+
+use crate::command::TrustedCommand;
+use crate::trust::{CommandDigest, ExecutableIdentity};
 
 /// A serializable mirror of [`o7_worker::EnforcementLevel`], so evidence can be durably
 /// recorded (the worker enum is not itself serde-serializable). Attestation is always
@@ -75,21 +77,37 @@ impl VerifierOutcome {
     }
 }
 
-/// Everything a verifier run observed. This is evidence, not a decision.
+/// Everything a verifier run observed, plus the FULL trust binding it was run under. This
+/// is evidence, not a decision: it carries no `is_accepted` and no method yields a
+/// verdict. Adjudication is [`crate::verdict::adjudicate`], which RE-DERIVES the trust
+/// digest from the fields below and checks it against o7d's trust store — so a forged or
+/// deserialized evidence (a flipped `trusted`, a widened `command`, a substituted digest)
+/// cannot accept itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifierEvidence {
     pub outcome: VerifierOutcome,
-    /// Whether the command was trusted at run time. A non-trusted command is never run,
-    /// but this is carried so the evidence is self-describing.
+    /// Self-description only: whether the runner found the command trusted. Adjudication
+    /// NEVER consults this flag — it re-derives trust from the store — so flipping it to
+    /// `true` on a forged evidence buys nothing.
     pub trusted: bool,
-    /// The enforcement the boundary attested, when a boundary was consulted.
+    /// The enforcement the boundary attested, when a boundary was consulted (a run-time
+    /// OBSERVATION, checked against the command's bound requirement at adjudication).
     pub boundary_enforcement: Option<AttestedEnforcement>,
-    /// The digest of the command this evidence is about.
-    pub command_digest: CommandDigest,
-    /// The exit policy the command was BOUND to (copied from the trusted command). The
-    /// verdict is evaluated against THIS policy, not one supplied later at adjudication
-    /// time — so o7d cannot widen the accepted exit codes after the fact.
-    pub exit_policy: ExitPolicy,
+    /// The repository the run was bound to (part of the trust digest).
+    pub repo: CanonicalRepoId,
+    /// The exact command that was run — argv, cwd, env, exit policy, timeout, output
+    /// budget, and the BOUND boundary requirement. Adjudication reads the exit policy and
+    /// boundary requirement from HERE (never from a late caller argument) and folds the
+    /// whole thing back into the trust digest.
+    pub command: TrustedCommand,
+    /// The executable content identity the runner bound (`None` only when the executable
+    /// was never read — an invalid command or an unreadable file, which never passes).
+    pub executable_identity: Option<ExecutableIdentity>,
+    /// The EXACT full trust digest the runner computed over the bytes it ran (`None` when
+    /// no trust binding was formed). Re-derived and checked at adjudication.
+    pub trust_digest: Option<CommandDigest>,
+    /// The STRUCTURAL digest (no executable content). Diagnostic; NEVER the trust key.
+    pub structural_digest: CommandDigest,
     /// Retained stdout (bounded by the command's output budget).
     pub stdout: Vec<u8>,
     /// Retained stderr (bounded by the command's output budget).
@@ -104,10 +122,10 @@ impl VerifierEvidence {
     /// completion with an exit code in the command's bound policy. Every non-completion
     /// (not-run, spawn failure, timeout, signal, output loss, boundary-unavailable,
     /// fault) is false. It is deliberately NOT called `is_pass` — the accept/reject
-    /// verdict is o7d's, in [`crate::verdict`], which additionally requires trust and
-    /// the boundary requirement.
+    /// verdict is o7d's, in [`crate::verdict`], which additionally requires the trust
+    /// digest to be in the store and the boundary requirement to be met.
     #[must_use]
     pub fn is_pass_candidate(&self) -> bool {
-        matches!(&self.outcome, VerifierOutcome::Completed { exit_code } if self.exit_policy.is_success(*exit_code))
+        matches!(&self.outcome, VerifierOutcome::Completed { exit_code } if self.command.exit_policy.is_success(*exit_code))
     }
 }

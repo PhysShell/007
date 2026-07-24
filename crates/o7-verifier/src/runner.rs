@@ -28,9 +28,11 @@ use o7_worker::{
 };
 use o7_worktree::CanonicalRepoId;
 
-use crate::command::{CwdPolicy, ExitPolicy, TrustedCommand};
+use crate::command::{CwdPolicy, TrustedCommand};
 use crate::evidence::{AttestedEnforcement, VerifierEvidence, VerifierOutcome};
-use crate::trust::{structural_command_digest, CommandDigest, TrustAnchor, TrustStore};
+use crate::trust::{
+    structural_command_digest, CommandDigest, ExecutableIdentity, TrustAnchor, TrustStore,
+};
 
 /// A verifier, parameterized by the boundary requirement it enforces.
 #[derive(Debug, Clone, Copy)]
@@ -70,17 +72,41 @@ impl Verifier {
         command: &TrustedCommand,
         trust: &TrustStore,
     ) -> VerifierEvidence {
-        let digest = structural_command_digest(repo, command);
+        let structural = structural_command_digest(repo, command);
         let attestation = boundary.attestation();
         let enforcement = Some(AttestedEnforcement::from(attestation.enforcement));
+        let bound_req: BoundaryRequirement = command.boundary_requirement.into();
+
+        // 0. The verifier's configured requirement must MATCH the command's trust-bound
+        //    requirement — a production verifier never runs a command bound to a weaker
+        //    boundary, and never silently strengthens one bound to a stronger boundary.
+        if bound_req != self.requirement {
+            return not_run(
+                repo,
+                command,
+                &structural,
+                None,
+                None,
+                enforcement,
+                false,
+                format!(
+                    "verifier requirement {:?} does not match the command's trust-bound \
+                     requirement {bound_req:?}",
+                    self.requirement
+                ),
+            );
+        }
 
         // 1. Command shape.
         if let Err(err) = command.validate() {
             return not_run(
-                &digest,
+                repo,
+                command,
+                &structural,
+                None,
+                None,
                 enforcement,
                 false,
-                command.exit_policy.clone(),
                 format!("invalid command: {err}"),
             );
         }
@@ -92,41 +118,52 @@ impl Verifier {
             Ok(bytes) => bytes,
             Err(_) => {
                 return not_run(
-                    &digest,
+                    repo,
+                    command,
+                    &structural,
+                    None,
+                    None,
                     enforcement,
                     false,
-                    command.exit_policy.clone(),
                     "command executable could not be read to bind its identity".to_owned(),
                 );
             }
         };
         let anchor = TrustAnchor::for_executable_bytes(repo, command, &exe_bytes);
+        let exe_identity = anchor.executable_identity.clone();
+        let trust_digest = anchor.digest().clone();
         if !trust.is_trusted(&anchor) {
             return not_run(
-                &digest,
+                repo,
+                command,
+                &structural,
+                Some(exe_identity),
+                Some(trust_digest),
                 enforcement,
                 false,
-                command.exit_policy.clone(),
                 "command is not trusted for this repository".to_owned(),
             );
         }
 
         // 3. Boundary requirement — fail closed BEFORE spawn, no fallback.
         if !self.requirement.is_satisfied_by(&attestation) {
-            return VerifierEvidence {
-                outcome: VerifierOutcome::BoundaryUnavailable {
+            return evidence_of(
+                VerifierOutcome::BoundaryUnavailable {
                     reason: format!(
                         "required {:?}, boundary attests {:?}; no fallback",
                         self.requirement, attestation.enforcement
                     ),
                 },
-                trusted: true,
-                boundary_enforcement: enforcement,
-                command_digest: digest,
-                exit_policy: command.exit_policy.clone(),
-                stdout: Vec::new(),
-                stderr: Vec::new(),
-            };
+                repo,
+                command,
+                &structural,
+                Some(exe_identity),
+                Some(trust_digest),
+                enforcement,
+                true,
+                Vec::new(),
+                Vec::new(),
+            );
         }
 
         // 4. Stage the EXACT trusted bytes into an owner-only directory and run THAT copy.
@@ -137,10 +174,13 @@ impl Verifier {
             Ok(staged) => staged,
             Err(err) => {
                 return not_run(
-                    &digest,
+                    repo,
+                    command,
+                    &structural,
+                    Some(exe_identity),
+                    Some(trust_digest),
                     enforcement,
                     true,
-                    command.exit_policy.clone(),
                     format!("failed to stage the trusted executable: {err}"),
                 );
             }
@@ -152,7 +192,7 @@ impl Verifier {
             CwdPolicy::Absolute(path) => path.clone(),
         };
         let spec = WorkerSpec {
-            worker_id: WorkerId::new(format!("verify-{}", digest.as_str())),
+            worker_id: WorkerId::new(format!("verify-{}", structural.as_str())),
             executable: staged.path().to_path_buf(),
             arguments: command.arguments.clone(),
             working_directory: cwd,
@@ -200,34 +240,73 @@ impl Verifier {
 
         let (stdout, stderr, budget_exceeded) = sink.snapshot();
         let outcome = map_outcome(&result, timed_out, budget_exceeded);
-        VerifierEvidence {
+        evidence_of(
             outcome,
-            trusted: true,
-            boundary_enforcement: enforcement,
-            command_digest: digest,
-            exit_policy: command.exit_policy.clone(),
+            repo,
+            command,
+            &structural,
+            Some(exe_identity),
+            Some(trust_digest),
+            enforcement,
+            true,
             stdout,
             stderr,
-        }
+        )
     }
 }
 
-fn not_run(
-    digest: &CommandDigest,
+/// Assemble a [`VerifierEvidence`] carrying the full trust binding so adjudication can
+/// re-derive and check the trust digest.
+#[allow(clippy::too_many_arguments)]
+fn evidence_of(
+    outcome: VerifierOutcome,
+    repo: &CanonicalRepoId,
+    command: &TrustedCommand,
+    structural: &CommandDigest,
+    executable_identity: Option<ExecutableIdentity>,
+    trust_digest: Option<CommandDigest>,
     enforcement: Option<AttestedEnforcement>,
     trusted: bool,
-    exit_policy: ExitPolicy,
-    reason: String,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
 ) -> VerifierEvidence {
     VerifierEvidence {
-        outcome: VerifierOutcome::NotRun { reason },
+        outcome,
         trusted,
         boundary_enforcement: enforcement,
-        command_digest: digest.clone(),
-        exit_policy,
-        stdout: Vec::new(),
-        stderr: Vec::new(),
+        repo: repo.clone(),
+        command: command.clone(),
+        executable_identity,
+        trust_digest,
+        structural_digest: structural.clone(),
+        stdout,
+        stderr,
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn not_run(
+    repo: &CanonicalRepoId,
+    command: &TrustedCommand,
+    structural: &CommandDigest,
+    executable_identity: Option<ExecutableIdentity>,
+    trust_digest: Option<CommandDigest>,
+    enforcement: Option<AttestedEnforcement>,
+    trusted: bool,
+    reason: String,
+) -> VerifierEvidence {
+    evidence_of(
+        VerifierOutcome::NotRun { reason },
+        repo,
+        command,
+        structural,
+        executable_identity,
+        trust_digest,
+        enforcement,
+        trusted,
+        Vec::new(),
+        Vec::new(),
+    )
 }
 
 /// A private copy of a trusted executable, in an owner-only directory, removed on drop.

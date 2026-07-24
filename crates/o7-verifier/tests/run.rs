@@ -21,7 +21,9 @@ mod common;
 use std::time::Duration;
 
 use common::*;
-use o7_verifier::{adjudicate, AttestedEnforcement, Verifier, VerifierOutcome};
+use o7_verifier::{
+    adjudicate, AttestedEnforcement, RequiredBoundary, TrustStore, Verifier, VerifierOutcome,
+};
 use o7_worker::{BoundaryRequirement, EnforcementLevel, UnconfinedHostBoundary};
 
 fn worktree_root() -> tempfile::TempDir {
@@ -52,7 +54,7 @@ async fn production_accepts_a_clean_run_under_a_fully_enforced_boundary() {
     );
     assert!(ev.trusted);
     // Only o7d accepts — and it does, given trust + full enforcement + clean exit.
-    assert!(adjudicate(&ev, BoundaryRequirement::RequireFullyEnforced).is_accepted());
+    assert!(adjudicate(&ev, &trust).is_accepted());
 }
 
 #[tokio::test]
@@ -83,7 +85,7 @@ async fn production_refuses_an_unconfined_boundary_with_no_fallback() {
         !state.spawn_entered(),
         "a process was spawned under an unconfined boundary"
     );
-    assert!(!adjudicate(&ev, BoundaryRequirement::RequireFullyEnforced).is_accepted());
+    assert!(!adjudicate(&ev, &trust).is_accepted());
 }
 
 #[tokio::test]
@@ -127,7 +129,7 @@ async fn spawn_failure_is_not_a_pass() {
         .await;
 
     assert!(matches!(ev.outcome, VerifierOutcome::SpawnFailed { .. }));
-    assert!(!adjudicate(&ev, BoundaryRequirement::RequireFullyEnforced).is_accepted());
+    assert!(!adjudicate(&ev, &trust).is_accepted());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -155,7 +157,7 @@ async fn timeout_force_kills_the_whole_process_set_and_is_not_a_pass() {
         state.force_stops() >= 1,
         "the process set was not force-killed"
     );
-    assert!(!adjudicate(&ev, BoundaryRequirement::RequireFullyEnforced).is_accepted());
+    assert!(!adjudicate(&ev, &trust).is_accepted());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -173,7 +175,7 @@ async fn output_loss_is_not_a_pass() {
         .await;
 
     assert!(matches!(ev.outcome, VerifierOutcome::OutputLost { .. }));
-    assert!(!adjudicate(&ev, BoundaryRequirement::RequireFullyEnforced).is_accepted());
+    assert!(!adjudicate(&ev, &trust).is_accepted());
 }
 
 #[tokio::test]
@@ -195,7 +197,7 @@ async fn a_nonzero_exit_completes_but_o7d_rejects() {
 
     assert_eq!(ev.outcome, VerifierOutcome::Completed { exit_code: 1 });
     assert!(!ev.is_pass_candidate());
-    assert!(!adjudicate(&ev, BoundaryRequirement::RequireFullyEnforced).is_accepted());
+    assert!(!adjudicate(&ev, &trust).is_accepted());
 }
 
 // ---- end to end against the REAL host boundary (lifecycle only, no isolation) ----
@@ -205,10 +207,11 @@ async fn real_host_boundary_clean_run() {
     let root = worktree_root();
     let repo = repo_id();
     // /bin/true always exists and exits 0.
-    let mut cmd = command_for(
+    let mut cmd = command_for_boundary(
         std::path::PathBuf::from("/bin/true"),
         Duration::from_secs(10),
         1 << 20,
+        RequiredBoundary::AllowUnconfined,
     );
     cmd.arguments.clear();
     let trust = trust_for(&repo, &cmd);
@@ -225,9 +228,10 @@ async fn real_host_boundary_clean_run() {
         .await;
 
     assert_eq!(ev.outcome, VerifierOutcome::Completed { exit_code: 0 });
-    assert!(adjudicate(&ev, BoundaryRequirement::AllowUnconfined).is_accepted());
-    // But production would NOT accept an unconfined boundary.
-    assert!(!adjudicate(&ev, BoundaryRequirement::RequireFullyEnforced).is_accepted());
+    assert!(adjudicate(&ev, &trust).is_accepted());
+    // The digest is what gates: against an empty store (as after a revocation) the very
+    // same evidence is rejected — o7d's store is the sole authority.
+    assert!(!adjudicate(&ev, &TrustStore::new()).is_accepted());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -235,10 +239,11 @@ async fn real_host_boundary_timeout_kills_the_real_process() {
     let root = worktree_root();
     let repo = repo_id();
     // /bin/sleep runs far longer than the timeout; the supervisor must kill it.
-    let mut cmd = command_for(
+    let mut cmd = command_for_boundary(
         std::path::PathBuf::from("/bin/sleep"),
         Duration::from_millis(400),
         1 << 20,
+        RequiredBoundary::AllowUnconfined,
     );
     cmd.arguments = vec![std::ffi::OsString::from("30")];
     let trust = trust_for(&repo, &cmd);
@@ -254,7 +259,7 @@ async fn real_host_boundary_timeout_kills_the_real_process() {
         .await;
 
     assert_eq!(ev.outcome, VerifierOutcome::TimedOut);
-    assert!(!adjudicate(&ev, BoundaryRequirement::AllowUnconfined).is_accepted());
+    assert!(!adjudicate(&ev, &trust).is_accepted());
 }
 
 // The runner executes a PRIVATE staged copy of the trusted bytes, not the operator's
@@ -271,7 +276,12 @@ async fn the_executed_binary_is_the_staged_private_copy() {
 
     let root = worktree_root();
     let repo = repo_id();
-    let mut cmd = command_for(exe.clone(), Duration::from_secs(10), 1 << 20);
+    let mut cmd = command_for_boundary(
+        exe.clone(),
+        Duration::from_secs(10),
+        1 << 20,
+        RequiredBoundary::AllowUnconfined,
+    );
     cmd.arguments.clear();
     let trust = trust_for(&repo, &cmd);
 

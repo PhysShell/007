@@ -11,7 +11,38 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use o7_worker::BoundaryRequirement;
 use serde::{Deserialize, Serialize};
+
+/// A serializable mirror of [`o7_worker::BoundaryRequirement`], so the requirement can be
+/// bound into the trust digest and carried in durable evidence (the worker enum is not
+/// itself serde). Binding it to trust is what makes a command trusted-for-full-enforcement
+/// un-adjudicable as if it were trusted-for-unconfined.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RequiredBoundary {
+    /// Any boundary (including an unconfined host) is acceptable. Non-production only.
+    AllowUnconfined,
+    /// Only a fully-enforced boundary qualifies; no fallback.
+    RequireFullyEnforced,
+}
+
+impl From<RequiredBoundary> for BoundaryRequirement {
+    fn from(value: RequiredBoundary) -> Self {
+        match value {
+            RequiredBoundary::AllowUnconfined => Self::AllowUnconfined,
+            RequiredBoundary::RequireFullyEnforced => Self::RequireFullyEnforced,
+        }
+    }
+}
+
+impl From<BoundaryRequirement> for RequiredBoundary {
+    fn from(value: BoundaryRequirement) -> Self {
+        match value {
+            BoundaryRequirement::AllowUnconfined => Self::AllowUnconfined,
+            BoundaryRequirement::RequireFullyEnforced => Self::RequireFullyEnforced,
+        }
+    }
+}
 
 /// Hard upper bound on a verifier timeout — mirrors the worker's `MAX_TIMEOUT` so a
 /// duration that would overflow a timer is rejected before anything is spawned.
@@ -116,6 +147,10 @@ pub struct TrustedCommand {
     pub output_limits: OutputLimits,
     /// Explicit exit interpretation.
     pub exit_policy: ExitPolicy,
+    /// The boundary the command must run under. Bound into the trust digest, so a command
+    /// trusted for `RequireFullyEnforced` can never be adjudicated as if it had been
+    /// trusted for `AllowUnconfined` (its digest would differ and not be in the store).
+    pub boundary_requirement: RequiredBoundary,
 }
 
 impl TrustedCommand {
@@ -164,6 +199,7 @@ mod tests {
             timeout: Duration::from_secs(30),
             output_limits: OutputLimits::default(),
             exit_policy: ExitPolicy::exactly_zero(),
+            boundary_requirement: RequiredBoundary::RequireFullyEnforced,
         }
     }
 
