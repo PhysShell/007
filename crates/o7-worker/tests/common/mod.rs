@@ -532,10 +532,17 @@ fn worker_child_entry() {
         }
         "ignore_sigterm_ready" => {
             let flag = Arc::new(AtomicBool::new(false));
-            let _ = signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&flag));
-            // Announce readiness ONLY after the SIGTERM handler is installed, so the test
-            // never signals before the child can actually ignore it.
-            emit_marker(&mut std::io::stdout(), READY_SIGTERM_HANDLER);
+            let registered =
+                signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&flag));
+            // Announce readiness ONLY after the SIGTERM handler is actually installed
+            // (mirrors `grandchild_then_sleep_ready` gating its marker on a successful
+            // spawn). If registration fails, do NOT emit the marker — the waiting test
+            // then fails closed with a bounded-timeout diagnostic instead of signalling a
+            // child that never installed the handler (which would race the default
+            // SIGTERM disposition this test exists to avoid).
+            if registered.is_ok() {
+                emit_marker(&mut std::io::stdout(), READY_SIGTERM_HANDLER);
+            }
             sleep_forever();
         }
         "grandchild_then_exit" => {
