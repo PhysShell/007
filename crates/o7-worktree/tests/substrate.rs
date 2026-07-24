@@ -95,6 +95,49 @@ fn hooks_filters_and_fsmonitor_do_not_run() {
 }
 
 #[test]
+fn produces_a_real_detached_git_worktree_without_touching_the_source() {
+    let repo = TestRepo::init();
+    repo.write("a.txt", b"committed\n");
+    repo.write("dir/nested.txt", b"nested\n");
+    repo.add_all();
+    let head = repo.commit("c1");
+
+    let (_root_dir, sr) = state_root();
+    let wt = Worktree::create(&repo.hardened(), &sr, run_id("run1"), &head).unwrap();
+
+    // It is a real git worktree: a .git exists, HEAD is DETACHED exactly at the
+    // committed revision, and `git status` is clean (working tree matches the tree).
+    assert!(
+        wt.path().join(".git").exists(),
+        "no .git — not a real worktree"
+    );
+    let wt_git = o7_worktree::HardenedGit::new(wt.path());
+    assert_eq!(wt_git.resolve_commit("HEAD").unwrap(), head);
+
+    // Clean working tree (run plain git in the worktree with an isolated HOME).
+    let status = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(wt.path())
+        .env("HOME", repo.home.path())
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    assert!(
+        status.stdout.is_empty(),
+        "worktree is not clean: {:?}",
+        String::from_utf8_lossy(&status.stdout)
+    );
+
+    // The source repository is untouched: no linked-worktree admin entry was created in
+    // it (this substrate keeps everything self-contained under the state root).
+    assert!(
+        !repo.path().join(".git/worktrees").exists(),
+        "an admin entry was added to the source repo's .git/worktrees"
+    );
+}
+
+#[test]
 fn materializes_symlinks_and_exec_bits_faithfully() {
     let repo = TestRepo::init();
     repo.write("plain.txt", b"plain\n");

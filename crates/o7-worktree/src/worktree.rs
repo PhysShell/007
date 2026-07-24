@@ -110,15 +110,23 @@ impl Worktree {
 
         let fs_identity = FsIdentity::of_dir(&path)?;
 
-        let summary = match materialize(git, revision, &path) {
+        // Turn the owned directory into a REAL, self-contained detached git worktree of
+        // the committed revision (init + borrowed objects + detached HEAD + index), then
+        // fill the working tree from the object store — a genuine git worktree with no
+        // checkout, so no hook/filter/fsmonitor runs and no operator bytes leak in.
+        let build = git
+            .init_detached_worktree(&path, &identity.repo, revision)
+            .map_err(WorktreeError::from)
+            .and_then(|()| materialize(git, revision, &path).map_err(WorktreeError::from));
+        let summary = match build {
             Ok(summary) => summary,
             Err(err) => {
                 // We just created and own this directory; prove that, then remove the
-                // partial materialization so a failed create leaks nothing.
+                // partial worktree so a failed create leaks nothing.
                 if attest_owned_dir(&path, fs_identity).is_ok() {
                     let _ = std::fs::remove_dir_all(&path);
                 }
-                return Err(err.into());
+                return Err(err);
             }
         };
 

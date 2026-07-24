@@ -42,6 +42,12 @@ pub enum GitError {
     Parse { command: String, detail: String },
     #[error("resolving the git common directory failed: {0}")]
     CommonDir(#[source] std::io::Error),
+    #[error("writing the detached worktree gitdir metadata at {path:?} failed: {source}")]
+    Metadata {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[error(transparent)]
     Identity(#[from] IdentityError),
 }
@@ -166,12 +172,66 @@ impl HardenedGit {
         ])
     }
 
+    /// Turn an already-created (owner-only, empty) directory into a REAL, self-contained
+    /// detached git worktree of `revision`, WITHOUT a checkout:
+    ///
+    /// 1. `git init` a fresh gitdir inside the directory — self-contained, so there is no
+    ///    admin entry in the source repository and no repo-global prune is ever needed to
+    ///    clean it up (deletion is just removing the directory);
+    /// 2. borrow the source repository's objects via `objects/info/alternates` (no copy),
+    ///    so the committed revision is reachable;
+    /// 3. detach `HEAD` at `revision` (`update-ref --no-deref`, no working-tree change);
+    /// 4. populate the index from the committed tree (`read-tree`, no smudge, no checkout).
+    ///
+    /// The working-tree bytes are then written from the object store by
+    /// [`crate::materialize`], so no smudge filter, hook, or fsmonitor ever runs — yet the
+    /// result is a genuine git worktree (`git -C <dir> rev-parse HEAD` is the revision,
+    /// `git -C <dir> status` is clean).
+    ///
+    /// # Errors
+    /// [`GitError`] if any git step fails or the alternates file cannot be written.
+    pub fn init_detached_worktree(
+        &self,
+        worktree_dir: &Path,
+        repo: &CanonicalRepoId,
+        revision: &CommittedRevision,
+    ) -> Result<(), GitError> {
+        use std::os::unix::ffi::OsStrExt as _;
+
+        self.run_in(worktree_dir, &[OsStr::new("init"), OsStr::new("-q")])?;
+
+        // Borrow the source objects. Written directly under our owner-only `.git`.
+        let alternates = worktree_dir.join(".git/objects/info/alternates");
+        let mut line = repo.git_common_dir.join("objects").into_os_string();
+        line.push("\n");
+        std::fs::write(&alternates, line.as_bytes()).map_err(|source| GitError::Metadata {
+            path: alternates.clone(),
+            source,
+        })?;
+
+        let oid = OsStr::new(revision.as_str());
+        self.run_in(
+            worktree_dir,
+            &[
+                OsStr::new("update-ref"),
+                OsStr::new("--no-deref"),
+                OsStr::new("HEAD"),
+                oid,
+            ],
+        )?;
+        self.run_in(worktree_dir, &[OsStr::new("read-tree"), oid])?;
+        Ok(())
+    }
+
     // ---- internals ----
 
-    /// The explicit environment for every git child: cleared, then exactly this
-    /// allowlist. Nothing is inherited (no `GIT_*`, no `GIT_EXTERNAL_DIFF`, no
-    /// askpass, no proxy). Config that could name a helper is neutralized.
-    fn base_command(&self) -> Command {
+    /// The explicit environment for every git child, run with `-C dir`: cleared, then
+    /// exactly this allowlist. Nothing is inherited (no `GIT_*`, no `GIT_EXTERNAL_DIFF`,
+    /// no askpass, no proxy). Every place a repository could name a helper — hooks,
+    /// fsmonitor, filters, external diff, attributes/excludes files, editors,
+    /// auto-gc/maintenance — is neutralized per invocation, so even a checkout-shaped
+    /// command (`read-tree`, `init`) runs no repository-controlled code.
+    fn base_command_in(&self, dir: &Path) -> Command {
         let mut cmd = Command::new("git");
         cmd.env_clear();
         let env: BTreeMap<&str, &str> = [
@@ -183,6 +243,8 @@ impl HardenedGit {
             ("GIT_CONFIG_NOSYSTEM", "1"),
             ("GIT_CONFIG_GLOBAL", "/dev/null"),
             ("GIT_CONFIG_SYSTEM", "/dev/null"),
+            // Ignore the system-wide gitattributes (a filter/diff could be named there).
+            ("GIT_ATTR_NOSYSTEM", "1"),
             // No interactive prompts, no credential/askpass helpers, stable parsing.
             ("GIT_TERMINAL_PROMPT", "0"),
             ("GIT_OPTIONAL_LOCKS", "0"),
@@ -193,21 +255,36 @@ impl HardenedGit {
         .into_iter()
         .collect();
         cmd.envs(env);
-        cmd.arg("-C").arg(&self.repo);
-        // Defense in depth on top of plumbing-only: even a repo-local config pointing
-        // at a helper is overridden per invocation.
-        cmd.arg("-c").arg("core.hooksPath=/dev/null");
-        cmd.arg("-c").arg("core.fsmonitor=false");
-        cmd.arg("-c").arg("core.fsmonitorHookVersion=0");
-        cmd.arg("-c").arg("core.autocrlf=false");
-        cmd.arg("-c").arg("core.symlinks=true");
-        cmd.arg("-c").arg("diff.external=");
+        cmd.arg("-C").arg(dir);
+        // Defense in depth on top of plumbing-only: even a repo-local config pointing at a
+        // helper is overridden per invocation. Highest-precedence `-c` flags win over any
+        // included/repo config.
+        for kv in [
+            "core.hooksPath=/dev/null",
+            "core.fsmonitor=false",
+            "core.fsmonitorHookVersion=0",
+            "core.autocrlf=false",
+            "core.symlinks=true",
+            "core.attributesFile=/dev/null",
+            "core.excludesFile=/dev/null",
+            "core.editor=false",
+            "core.pager=cat",
+            "diff.external=",
+            "gc.auto=0",
+            "maintenance.auto=false",
+        ] {
+            cmd.arg("-c").arg(kv);
+        }
         cmd.stdin(std::process::Stdio::null());
         cmd
     }
 
     fn run(&self, args: &[&OsStr]) -> Result<Vec<u8>, GitError> {
-        let mut cmd = self.base_command();
+        self.run_in(&self.repo, args)
+    }
+
+    fn run_in(&self, dir: &Path, args: &[&OsStr]) -> Result<Vec<u8>, GitError> {
+        let mut cmd = self.base_command_in(dir);
         cmd.args(args);
         let out = cmd.output().map_err(GitError::Spawn)?;
         if out.status.success() {
