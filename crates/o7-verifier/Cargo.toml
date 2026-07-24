@@ -38,6 +38,11 @@ bytes = "1"
 # the hash-to-spawn TOCTOU). tempfile creates the dir securely (O_EXCL, 0700). Already
 # allowed in the workspace deny.toml.
 tempfile = "3"
+# Harden executable ACQUISITION: open the trusted executable O_NOFOLLOW|O_NONBLOCK, prove
+# it is a regular file (never a FIFO, device, socket, or pseudo-file), and read it under a
+# size cap — all via rustix's safe *at wrappers, since the tree forbids `unsafe`. rustix is
+# already a workspace dependency (o7-worktree) and allowed in deny.toml.
+rustix = { version = "1", default-features = false, features = ["fs", "std"] }
 
 [dev-dependencies]
 tempfile = "3"

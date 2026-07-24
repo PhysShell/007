@@ -8,13 +8,25 @@
 //! boundary (Sandboy) exists, production execution is therefore unavailable by
 //! construction.
 //!
-//! Ordering of the pre-spawn gates: validate the command, then check trust (reading the
-//! executable binds its identity; unreadable or untrusted ⇒ NotRun, never spawned),
-//! then check the boundary requirement. Only then is anything spawned. The run is
-//! bounded by the command timeout; a timeout cancels the worker, which tears down the
-//! WHOLE owned process set, and is reported as `TimedOut` (never a pass). Output is
-//! bounded by the command's budget; exceeding it fails the sink closed and is reported
-//! as `OutputLost` (never a silent truncation, never a pass).
+//! Ordering of the pre-spawn gates: validate the command, then ACQUIRE and check trust
+//! (the executable is opened `O_NOFOLLOW`, proven a regular file, size-capped, and read
+//! from that descriptor to bind its identity; an unsafe/unreadable or untrusted
+//! executable ⇒ NotRun, never spawned), then check the boundary requirement. Only then is
+//! anything spawned. The run is bounded by the command timeout; a timeout cancels the
+//! worker, which tears down the WHOLE owned process set, and is reported as `TimedOut`
+//! (never a pass). Output is bounded by the command's budget; exceeding it fails the sink
+//! closed and is reported as `OutputLost` (never a silent truncation, never a pass).
+//!
+//! ACQUISITION vs EXECUTION. This runner hardens the ACQUISITION of the trusted bytes
+//! (safe open + regular-file proof + staging the exact bytes into an owner-only 0500 copy
+//! that only we can have written) so the bytes hashed for trust are the bytes executed.
+//! It does NOT yet perform a fd-exact execution (`execveat` on an O_PATH fd, or a sealed
+//! `memfd`): that would require the spawn to hand the boundary a file DESCRIPTOR rather
+//! than a path, and both `execveat`/`memfd_create` and a descriptor-carrying spawn are
+//! blocked here — the crate tree sets `unsafe_code = "forbid"`, and the merged o7-worker
+//! `ProcessBoundary`/`BoundarySpawnSpec` seam (which spawns from a PATH) is frozen. Until
+//! the boundary grows a descriptor-based spawn, the residual path→exec window is closed
+//! only by the owner-only staging directory, not by a kernel-level fd-exact exec.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -111,12 +123,13 @@ impl Verifier {
             );
         }
 
-        // 2. Trust — read the EXACT bytes we will run, hash THEM (not a path re-resolved
-        //    later), and require the command to be trusted. Unreadable or untrusted means
-        //    the command is NOT run (never spawned).
-        let exe_bytes = match std::fs::read(&command.executable) {
+        // 2. Trust — ACQUIRE the EXACT bytes we will run under a hardened open (O_NOFOLLOW,
+        //    proven regular file, size-capped, drift-checked), hash THEM (not a path
+        //    re-resolved later), and require the command to be trusted. An unsafe or
+        //    unreadable acquisition, or an untrusted command, means it is NOT run.
+        let exe_bytes = match acquire_executable(&command.executable) {
             Ok(bytes) => bytes,
-            Err(_) => {
+            Err(reason) => {
                 return not_run(
                     repo,
                     command,
@@ -125,7 +138,7 @@ impl Verifier {
                     None,
                     enforcement,
                     false,
-                    "command executable could not be read to bind its identity".to_owned(),
+                    format!("command executable could not be safely acquired: {reason}"),
                 );
             }
         };
@@ -307,6 +320,73 @@ fn not_run(
         Vec::new(),
         Vec::new(),
     )
+}
+
+/// Hard ceiling on the size of a trusted executable we will read into memory (and stage).
+/// A generous bound for any real verifier binary; anything larger is refused rather than
+/// buffered without limit.
+const MAX_EXECUTABLE_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Safely ACQUIRE the trusted executable's bytes.
+///
+/// The path is opened `O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC` (so a symlink at the final
+/// component fails closed and opening a FIFO/device never blocks), the OPEN descriptor is
+/// proven to be a REGULAR file (never a FIFO, character/block device, socket, directory,
+/// or pseudo-file such as a procfs/sysfs entry), and the content is read from that same
+/// descriptor under a size cap with a drift check. Reading from the proven-regular
+/// descriptor (not re-opening the path) means the bytes returned are the bytes that were
+/// verified — the same bytes the runner then hashes and stages.
+fn acquire_executable(path: &Path) -> Result<Vec<u8>, String> {
+    use rustix::fs::{self, Mode, OFlags};
+    use std::io::Read as _;
+
+    let fd = fs::open(
+        path,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|err| {
+        if err == rustix::io::Errno::LOOP {
+            "the path is a symlink (O_NOFOLLOW)".to_owned()
+        } else {
+            format!("open failed: {err}")
+        }
+    })?;
+
+    let st = fs::fstat(&fd).map_err(|err| format!("fstat failed: {err}"))?;
+    // Must be a REGULAR file. This rejects FIFOs, char/block devices, sockets, and
+    // directories outright.
+    if (st.st_mode as u32 & 0o170_000) != 0o100_000 {
+        return Err("not a regular file (fifo, device, socket, or directory)".to_owned());
+    }
+    // A real executable has a positive, bounded size. A zero size is characteristic of a
+    // procfs/sysfs pseudo-file (which reports size 0 yet yields content), so reject it.
+    let size = u64::try_from(st.st_size).map_err(|_| "negative file size".to_owned())?;
+    if size == 0 {
+        return Err("empty or pseudo-file (reported size 0)".to_owned());
+    }
+    if size > MAX_EXECUTABLE_BYTES {
+        return Err(format!(
+            "executable is {size} bytes, over the {MAX_EXECUTABLE_BYTES}-byte cap"
+        ));
+    }
+
+    // Read from the proven descriptor under a cap of size+1, so a file that GREW between
+    // stat and read (or a pseudo-file whose content exceeds its reported size) is caught.
+    let mut file = std::fs::File::from(fd);
+    let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+    let read = file
+        .by_ref()
+        .take(size + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|err| format!("read failed: {err}"))?;
+    let read = read as u64;
+    if read != size {
+        return Err(format!(
+            "size drift: stat reported {size} bytes but the file yielded {read}"
+        ));
+    }
+    Ok(bytes)
 }
 
 /// A private copy of a trusted executable, in an owner-only directory, removed on drop.

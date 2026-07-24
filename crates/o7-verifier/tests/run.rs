@@ -200,6 +200,92 @@ async fn a_nonzero_exit_completes_but_o7d_rejects() {
     assert!(!adjudicate(&ev, &trust).is_accepted());
 }
 
+// ---- hardened executable acquisition (item 7): only a regular file is ever read ----
+
+/// A symlinked executable path is refused (O_NOFOLLOW): the exact bytes must be a real
+/// regular file, not a symlink the operator path could redirect.
+#[tokio::test]
+async fn a_symlinked_executable_is_refused() {
+    let exe_dir = tempfile::tempdir().unwrap();
+    let real = make_exe(exe_dir.path(), "real");
+    let link = exe_dir.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+
+    let repo = repo_id();
+    let cmd = command_for(link, Duration::from_secs(5), 1 << 20);
+    let boundary = FakeBoundary::fully_enforced().exit_code(0);
+    let state = boundary.state();
+
+    let ev = Verifier::production()
+        .verify(
+            boundary.boxed(),
+            &repo,
+            worktree_root().path(),
+            &cmd,
+            &TrustStore::new(),
+        )
+        .await;
+
+    assert!(matches!(ev.outcome, VerifierOutcome::NotRun { .. }));
+    assert!(!state.spawn_entered(), "a symlinked executable was spawned");
+}
+
+/// A device node (here `/dev/null`, a character device) is refused — never a regular file.
+#[tokio::test]
+async fn a_device_node_executable_is_refused() {
+    let repo = repo_id();
+    let cmd = command_for(
+        std::path::PathBuf::from("/dev/null"),
+        Duration::from_secs(5),
+        1 << 20,
+    );
+    let boundary = FakeBoundary::fully_enforced().exit_code(0);
+    let state = boundary.state();
+
+    let ev = Verifier::production()
+        .verify(
+            boundary.boxed(),
+            &repo,
+            worktree_root().path(),
+            &cmd,
+            &TrustStore::new(),
+        )
+        .await;
+
+    assert!(matches!(ev.outcome, VerifierOutcome::NotRun { .. }));
+    assert!(!state.spawn_entered(), "a device node was spawned");
+}
+
+/// A procfs pseudo-file (`/proc/self/status`, a regular file reporting size 0) is refused:
+/// a real executable has a positive, bounded size that matches the bytes it yields.
+#[tokio::test]
+async fn a_procfs_pseudo_file_executable_is_refused() {
+    if !std::path::Path::new("/proc/self/status").exists() {
+        return; // no procfs on this host; nothing to prove.
+    }
+    let repo = repo_id();
+    let cmd = command_for(
+        std::path::PathBuf::from("/proc/self/status"),
+        Duration::from_secs(5),
+        1 << 20,
+    );
+    let boundary = FakeBoundary::fully_enforced().exit_code(0);
+    let state = boundary.state();
+
+    let ev = Verifier::production()
+        .verify(
+            boundary.boxed(),
+            &repo,
+            worktree_root().path(),
+            &cmd,
+            &TrustStore::new(),
+        )
+        .await;
+
+    assert!(matches!(ev.outcome, VerifierOutcome::NotRun { .. }));
+    assert!(!state.spawn_entered(), "a procfs pseudo-file was spawned");
+}
+
 // ---- end to end against the REAL host boundary (lifecycle only, no isolation) ----
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

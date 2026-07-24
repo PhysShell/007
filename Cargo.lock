@@ -826,6 +826,7 @@ dependencies = [
  "bytes",
  "o7-worker",
  "o7-worktree",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",
