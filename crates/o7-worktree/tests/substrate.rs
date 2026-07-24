@@ -166,6 +166,86 @@ fn a_committed_replace_ref_does_not_rewrite_the_materialized_bytes() {
 }
 
 #[test]
+fn the_worktree_is_self_contained_after_the_source_objects_vanish() {
+    // The worktree copies the full object closure into its own objectdb and drops the
+    // alternates tether, so it must keep working as a real git repo even if the source
+    // repository's objects are later deleted.
+    let repo = TestRepo::init();
+    repo.write("a.txt", b"one\n");
+    repo.add_all();
+    let _c1 = repo.commit("c1");
+    repo.write("b.txt", b"two\n");
+    repo.add_all();
+    let head = repo.commit("c2");
+    let a_oid = repo.git(&["rev-parse", "HEAD:a.txt"]).trim().to_owned();
+
+    let (_root_dir, sr) = state_root();
+    let wt = Worktree::create(&repo.hardened(), &sr, run_id("run1"), &head).unwrap();
+    let wt_path = wt.path().to_owned();
+
+    // No alternates file remains: the worktree borrows nothing.
+    assert!(
+        !wt_path.join(".git/objects/info/alternates").exists(),
+        "alternates tether was not removed"
+    );
+
+    // Destroy the source object store entirely.
+    std::fs::remove_dir_all(repo.path().join(".git")).unwrap();
+
+    // A plain git in the worktree (isolated HOME, no borrowing) still resolves HEAD,
+    // reports a clean tree, reads a blob, walks the full history, and can commit.
+    let git = |args: &[&str]| -> (bool, String) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(&wt_path)
+            .env("HOME", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).trim().to_owned(),
+        )
+    };
+
+    let (ok, rev) = git(&["rev-parse", "HEAD"]);
+    assert!(ok, "rev-parse HEAD failed after source objects vanished");
+    assert_eq!(rev, head.as_str());
+
+    let (ok, status) = git(&["status", "--porcelain"]);
+    assert!(ok && status.is_empty(), "worktree not clean: {status:?}");
+
+    let (ok, blob) = git(&["cat-file", "blob", &a_oid]);
+    assert!(ok && blob == "one", "blob read failed: {blob:?}");
+
+    let (ok, log) = git(&["log", "--oneline"]);
+    assert!(ok, "log failed after source objects vanished");
+    assert_eq!(log.lines().count(), 2, "history incomplete: {log:?}");
+
+    // A brand-new commit succeeds against the self-contained objectdb.
+    std::fs::write(wt_path.join("c.txt"), b"three\n").unwrap();
+    let (ok, _) = git(&["add", "c.txt"]);
+    assert!(ok);
+    let (ok, _) = git(&[
+        "-c",
+        "user.email=t@example.com",
+        "-c",
+        "user.name=Test",
+        "commit",
+        "-q",
+        "-m",
+        "c3",
+    ]);
+    assert!(ok, "commit failed against the self-contained worktree");
+    let (ok, log) = git(&["log", "--oneline"]);
+    assert!(
+        ok && log.lines().count() == 3,
+        "new commit missing: {log:?}"
+    );
+}
+
+#[test]
 fn reserved_git_path_is_rejected_and_nothing_is_written() {
     let repo = TestRepo::init();
     // Seed a normal commit so the repo has a HEAD, then craft the hostile tree.

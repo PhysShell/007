@@ -228,18 +228,22 @@ impl HardenedGit {
     /// 1. `git init` a fresh gitdir inside the directory — self-contained, so there is no
     ///    admin entry in the source repository and no repo-global prune is ever needed to
     ///    clean it up (deletion is just removing the directory);
-    /// 2. borrow the source repository's objects via `objects/info/alternates` (no copy),
+    /// 2. TEMPORARILY borrow the source repository's objects via `objects/info/alternates`
     ///    so the committed revision is reachable;
     /// 3. detach `HEAD` at `revision` (`update-ref --no-deref`, no working-tree change);
-    /// 4. populate the index from the committed tree (`read-tree`, no smudge, no checkout).
+    /// 4. populate the index from the committed tree (`read-tree`, no smudge, no checkout);
+    /// 5. COPY the whole object closure reachable from `revision` into this worktree's own
+    ///    object database (`rev-list --objects` piped into `pack-objects`) and DELETE the
+    ///    alternates file, so the worktree no longer depends on the source repository.
     ///
     /// The working-tree bytes are then written from the object store by
     /// [`crate::materialize`], so no smudge filter, hook, or fsmonitor ever runs — yet the
-    /// result is a genuine git worktree (`git -C <dir> rev-parse HEAD` is the revision,
-    /// `git -C <dir> status` is clean).
+    /// result is a genuine, self-contained git worktree: `git -C <dir> rev-parse HEAD` is
+    /// the revision, `git -C <dir> status` is clean, and both keep working even if the
+    /// source repository's objects later vanish.
     ///
     /// # Errors
-    /// [`GitError`] if any git step fails or the alternates file cannot be written.
+    /// [`GitError`] if any git step fails or the alternates file cannot be written/removed.
     pub fn init_detached_worktree(
         &self,
         worktree_dir: &Path,
@@ -254,7 +258,8 @@ impl HardenedGit {
             MAX_CONTROL_STDOUT,
         )?;
 
-        // Borrow the source objects. Written directly under our owner-only `.git`.
+        // Borrow the source objects for the duration of the build. Written directly under
+        // our owner-only `.git`; removed in step 5 once the closure has been copied in.
         let alternates = worktree_dir.join(".git/objects/info/alternates");
         let mut line = repo.git_common_dir.join("objects").into_os_string();
         line.push("\n");
@@ -277,6 +282,50 @@ impl HardenedGit {
         self.run_in(
             worktree_dir,
             &[OsStr::new("read-tree"), oid],
+            MAX_CONTROL_STDOUT,
+        )?;
+
+        // Copy the reachable object closure into our own objectdb, then cut the tether.
+        self.copy_object_closure(worktree_dir, revision)?;
+        std::fs::remove_file(&alternates).map_err(|source| GitError::Metadata {
+            path: alternates.clone(),
+            source,
+        })?;
+        Ok(())
+    }
+
+    /// Copy the entire object closure reachable from `revision` (the commit, its history,
+    /// and every tree/blob) from the borrowed source objects into `worktree_dir`'s own
+    /// object database, so it becomes self-contained.
+    ///
+    /// `rev-list --objects --no-object-names <oid>` enumerates the closure as bare oids;
+    /// `pack-objects` reads that list on stdin and writes a single pack into
+    /// `.git/objects/pack`. Both run inside the worktree, where the alternates tether is
+    /// still present, so the source objects are readable exactly for this copy.
+    fn copy_object_closure(
+        &self,
+        worktree_dir: &Path,
+        revision: &CommittedRevision,
+    ) -> Result<(), GitError> {
+        let oids = self.run_in(
+            worktree_dir,
+            &[
+                OsStr::new("rev-list"),
+                OsStr::new("--objects"),
+                OsStr::new("--no-object-names"),
+                OsStr::new("--end-of-options"),
+                OsStr::new(revision.as_str()),
+            ],
+            MAX_LS_TREE_STDOUT,
+        )?;
+
+        // `pack-objects <base>` writes <base>-<hash>.pack/.idx; the objects then live in
+        // this worktree's own pack directory, no longer borrowed from the source.
+        let pack_base = worktree_dir.join(".git/objects/pack/o7-closure");
+        self.run_in_stdin(
+            worktree_dir,
+            &[OsStr::new("pack-objects"), pack_base.as_os_str()],
+            oids,
             MAX_CONTROL_STDOUT,
         )?;
         Ok(())
@@ -354,6 +403,29 @@ impl HardenedGit {
             cmd,
             &display_args(args),
             GIT_WALL_CLOCK,
+            None,
+            max_stdout,
+            MAX_STDERR,
+        )
+    }
+
+    /// Like [`Self::run_in`] but feeds `stdin` to the child (e.g. an oid list to
+    /// `pack-objects`). The bytes are written on their own thread so a child that stops
+    /// reading cannot deadlock the drain.
+    fn run_in_stdin(
+        &self,
+        dir: &Path,
+        args: &[&OsStr],
+        stdin: Vec<u8>,
+        max_stdout: u64,
+    ) -> Result<Vec<u8>, GitError> {
+        let mut cmd = self.base_command_in(dir);
+        cmd.args(args);
+        run_bounded(
+            cmd,
+            &display_args(args),
+            GIT_WALL_CLOCK,
+            Some(stdin),
             max_stdout,
             MAX_STDERR,
         )
@@ -383,12 +455,18 @@ fn run_bounded(
     mut cmd: Command,
     command: &str,
     wall_clock: Duration,
+    stdin: Option<Vec<u8>>,
     max_stdout: u64,
     max_stderr: u64,
 ) -> Result<Vec<u8>, GitError> {
+    use std::io::Write as _;
     use std::os::unix::process::CommandExt as _;
 
-    cmd.stdin(Stdio::null());
+    cmd.stdin(if stdin.is_some() {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    });
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     // Put the child in its own process group (pgid == child pid) so that on the deadline
@@ -398,6 +476,19 @@ fn run_bounded(
     cmd.process_group(0);
     let mut child = cmd.spawn().map_err(GitError::Spawn)?;
     let pgid = nix::unistd::Pid::from_raw(i32::try_from(child.id()).unwrap_or(0));
+
+    // Feed stdin on its own thread: a child that stops reading (or dies) must not block us.
+    let stdin_join = match stdin {
+        Some(bytes) => child.stdin.take().map(|mut pipe| {
+            std::thread::spawn(move || {
+                // A broken pipe (child exited early) is not our error to report.
+                let _ = pipe.write_all(&bytes);
+                let _ = pipe.flush();
+                // Dropping `pipe` closes the write end so the child sees EOF.
+            })
+        }),
+        None => None,
+    };
 
     let stdout = child.stdout.take().ok_or_else(|| GitError::Drain {
         command: command.to_owned(),
@@ -419,6 +510,9 @@ fn run_bounded(
                     kill_group(pgid, &mut child);
                     let _ = out_join.join();
                     let _ = err_join.join();
+                    if let Some(j) = stdin_join {
+                        let _ = j.join();
+                    }
                     return Err(GitError::Timeout {
                         command: command.to_owned(),
                         timeout: wall_clock,
@@ -430,11 +524,17 @@ fn run_bounded(
                 kill_group(pgid, &mut child);
                 let _ = out_join.join();
                 let _ = err_join.join();
+                if let Some(j) = stdin_join {
+                    let _ = j.join();
+                }
                 return Err(GitError::Spawn(source));
             }
         }
     };
 
+    if let Some(j) = stdin_join {
+        let _ = j.join();
+    }
     let (stdout, stdout_overflow) = join_drain(out_join, command)?;
     let (stderr, _stderr_overflow) = join_drain(err_join, command)?;
 
@@ -601,7 +701,14 @@ mod tests {
         let mut cmd = Command::new("/bin/sh");
         cmd.args(["-c", "sleep 30"]);
         let start = Instant::now();
-        let result = run_bounded(cmd, "sleep 30", Duration::from_millis(150), 1024, 1024);
+        let result = run_bounded(
+            cmd,
+            "sleep 30",
+            Duration::from_millis(150),
+            None,
+            1024,
+            1024,
+        );
         let elapsed = start.elapsed();
         assert!(
             matches!(result, Err(GitError::Timeout { .. })),
@@ -619,7 +726,7 @@ mod tests {
         // surface OutputTooLarge rather than silently returning a truncated success.
         let mut cmd = Command::new("/bin/sh");
         cmd.args(["-c", "printf 'x%.0s' $(seq 1 500)"]);
-        let result = run_bounded(cmd, "flood", Duration::from_secs(10), 100, 1024);
+        let result = run_bounded(cmd, "flood", Duration::from_secs(10), None, 100, 1024);
         assert!(
             matches!(
                 result,
@@ -637,7 +744,7 @@ mod tests {
     fn a_well_behaved_child_returns_its_bytes() {
         let mut cmd = Command::new("/bin/sh");
         cmd.args(["-c", "printf 'hello'"]);
-        let out = run_bounded(cmd, "echo", Duration::from_secs(10), 1024, 1024)
+        let out = run_bounded(cmd, "echo", Duration::from_secs(10), None, 1024, 1024)
             .expect("well-behaved child succeeds");
         assert_eq!(out, b"hello");
     }
