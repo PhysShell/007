@@ -14,6 +14,10 @@ use std::time::Duration;
 use common::*;
 use o7_worker::WorkerResult;
 
+/// Generous but bounded ceiling for readiness waits — a spawn/marker arrives in
+/// milliseconds; this only guards against a genuine hang, never a timing assumption.
+const READY_TIMEOUT: Duration = Duration::from_secs(10);
+
 // (23) Dropping the handle initiates cancellation + cleanup (observed via join).
 #[tokio::test]
 async fn drop_handle_initiates_cleanup() {
@@ -21,7 +25,9 @@ async fn drop_handle_initiates_cleanup() {
     let (handle, join) = start(child_spec("r23", "sleep"), &sink);
     // Reach Running first so there is a live process to tear down (and a
     // CleanupCompleted to observe); dropping before spawn is the no-process path.
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    sink.wait_for_kind_count("spawned", 1, READY_TIMEOUT)
+        .await
+        .unwrap();
     drop(handle); // no explicit cancel — Drop must request it
     let result = join.join().await;
     assert!(
@@ -46,7 +52,16 @@ async fn two_workers_do_not_mix() {
     let sink_b = RecordingSink::new();
     let (ha, ja) = start(spec_a, &sink_a);
     let (hb, jb) = start(spec_b, &sink_b);
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    // Wait until each worker has actually produced its own payload before cancelling, so
+    // the isolation assertions run against real output rather than a timing assumption.
+    sink_a
+        .wait_for_stdout_contains(b"AAAA-worker-a", READY_TIMEOUT)
+        .await
+        .unwrap();
+    sink_b
+        .wait_for_stdout_contains(b"BBBB-worker-b", READY_TIMEOUT)
+        .await
+        .unwrap();
     ha.cancel().await;
     hb.cancel().await;
     ja.join().await;
