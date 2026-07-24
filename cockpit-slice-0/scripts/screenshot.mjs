@@ -7,51 +7,22 @@
  * headless shell at a mobile and a desktop viewport. Animations are disabled so
  * output is stable across runs.
  */
-import { mkdir, readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-import { join, extname } from "node:path";
+import { mkdir } from "node:fs/promises";
 import { chromium } from "playwright";
+import {
+  ORIGIN,
+  CHROMIUM,
+  LAUNCH_ARGS,
+  makeServeRoute,
+} from "./serve-dist.mjs";
 
-const DIST = fileURLToPath(new URL("../dist/", import.meta.url));
 const OUT = new URL("../screenshots/", import.meta.url);
-const ORIGIN = "http://cockpit.local";
+const serveRoute = makeServeRoute({ spaFallback: true });
 
 const NO_ANIM = `*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}`;
 
 const MOBILE = { width: 390, height: 844, dsf: 2 };
 const DESKTOP = { width: 1440, height: 900, dsf: 1 };
-
-const CT = {
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".css": "text/css; charset=utf-8",
-  ".svg": "image/svg+xml",
-  ".json": "application/json",
-  ".webmanifest": "application/manifest+json",
-  ".map": "application/json",
-  ".png": "image/png",
-  ".ico": "image/x-icon",
-};
-
-async function serveRoute(route) {
-  const url = new URL(route.request().url());
-  let pathname = decodeURIComponent(url.pathname);
-  if (pathname === "/" || pathname.endsWith("/")) pathname += "index.html";
-  const filePath = join(DIST, pathname);
-  try {
-    const body = await readFile(filePath);
-    await route.fulfill({
-      body,
-      contentType: CT[extname(filePath)] || "application/octet-stream",
-    });
-  } catch {
-    // Fall back to the app shell (single-page).
-    await route.fulfill({
-      body: await readFile(join(DIST, "index.html")),
-      contentType: CT[".html"],
-    });
-  }
-}
 
 async function shot(browser, { width, height, dsf }, query, file, steps) {
   const context = await browser.newContext({
@@ -73,12 +44,9 @@ async function shot(browser, { width, height, dsf }, query, file, steps) {
 
 async function main() {
   await mkdir(OUT, { recursive: true });
-  const executablePath =
-    process.env.PW_CHROMIUM ||
-    "/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell";
   const browser = await chromium.launch({
-    executablePath,
-    args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
+    executablePath: CHROMIUM,
+    args: LAUNCH_ARGS,
   });
 
   const clickTab = (name) => async (page) =>

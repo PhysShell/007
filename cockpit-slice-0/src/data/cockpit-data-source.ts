@@ -3,27 +3,29 @@
  *  THE SEAM · presentation layer ⇆ data source
  * ============================================================================
  *
- * `CockpitEventSource` is the ONLY thing the presentation layer knows about where
- * its data comes from. It deals exclusively in UI-only fixture events; the fold
- * (./fold.ts) turns those into the view model the components render.
+ * The seam is split into TWO interfaces so the read path and the command path can
+ * be implemented by DIFFERENT things at integration:
  *
- * This is the integration seam. Today the only implementation is
- * `FixtureCockpitDataSource` (in-memory, deterministic, no I/O). After the
- * canonical event protocol is frozen (roadmap PR 4), a SECOND implementation —
- * a `LedgerCockpitAdapter` — will subscribe to canonical ledger events and MAP
- * each one into a `UiFixtureEvent` (or this event shape is replaced and the fold
- * updated). The presentation layer and the fold should not need to change: they
- * only ever see `UiFixtureEvent`s arriving through this interface.
+ *   • `CockpitReadSource`  — conversation discovery, snapshot, and subscription.
+ *                            After PR 4, a `LedgerCockpitAdapter` implements this
+ *                            by folding canonical ledger events into UiFixtureEvents.
+ *   • `CockpitCommandPort` — send / stop / permission / model-lock / reconnect.
+ *                            In production these are daemon/o7d-owned actions that
+ *                            travel over the real transport — NOT in-process calls.
  *
- * Deliberately NARROW: no run control, no worker handles, no transport. The UI
- * cannot start, own, or end a run through this interface — it can only observe,
- * and dispatch fixture-driven mock actions.
+ * The two are deliberately separate because they graduate separately: reads become
+ * a ledger projection; commands become authenticated RPCs into o7d. A fixture
+ * implementation is free to back BOTH with one in-memory store (as
+ * `FixtureCockpitDataSource` does here), but nothing in the presentation layer may
+ * assume they are the same object.
+ *
+ * Both remain NARROW: the UI can observe and can request mock commands, but it
+ * cannot start, own, or end a run through either interface.
  *
  * INVARIANT (architectural): the mock run/conversation state lives in the store,
  * which is a module-level singleton independent of any component. Subscribing and
  * unsubscribing (mount/unmount) NEVER mutate that state. Closing the client does
- * not stop a mock run. See fold.test-style coverage in
- * ./cockpit-data-source.test.ts.
+ * not stop a mock run. Covered by ./cockpit-data-source.test.ts.
  * ============================================================================
  */
 import type {
@@ -32,35 +34,32 @@ import type {
 } from "../types/ui-fixture-events";
 import { SCENARIOS, type UiFixtureScenario } from "../fixtures/catalog";
 
-/** Fixture-driven UI actions. None of these start/stop a real process; each just
- *  appends mock events to the in-memory store. Named UI-only + provisional. */
-export type UiCockpitAction =
-  | { readonly type: "composer.send"; readonly conversationId: string; readonly text: string }
-  | { readonly type: "composer.stop"; readonly conversationId: string }
-  | {
-      readonly type: "controls.setPermission";
-      readonly conversationId: string;
-      readonly mode: UiPermissionMode;
-    }
-  | {
-      readonly type: "controls.setModelLock";
-      readonly conversationId: string;
-      readonly locked: boolean;
-    }
-  | { readonly type: "connection.reconnect"; readonly conversationId: string };
-
 export type UiEventListener = (events: readonly UiFixtureEvent[]) => void;
+export type UiConversationsListener = (ids: readonly string[]) => void;
 
-export interface CockpitEventSource {
-  /** Stable, ordered list of conversation ids the source knows about. */
+/** READ side: conversation discovery + per-conversation snapshot/subscription. */
+export interface CockpitReadSource {
+  /** Current known conversation ids, in stable order. */
   listConversationIds(): readonly string[];
+  /** Subscribe to the SET of conversations (dynamic discovery). Fires immediately
+   *  with the current list, then again whenever the set changes. Returns an
+   *  unsubscribe fn. */
+  subscribeConversations(listener: UiConversationsListener): () => void;
   /** Everything delivered for a conversation so far (may be a partial history). */
   snapshot(conversationId: string): readonly UiFixtureEvent[];
-  /** Subscribe to subsequently-delivered event batches. Returns an unsubscribe fn.
+  /** Subscribe to subsequently-delivered event batches for one conversation.
    *  Unsubscribing removes ONLY the listener; it never touches store state. */
   subscribe(conversationId: string, listener: UiEventListener): () => void;
-  /** Apply a fixture-driven mock action. No real process is launched. */
-  dispatch(action: UiCockpitAction): void;
+}
+
+/** COMMAND side: fixture-driven mock commands. None launches a real process; each
+ *  appends mock events to the backing store. In production these are o7d-owned. */
+export interface CockpitCommandPort {
+  send(conversationId: string, text: string): void;
+  stop(conversationId: string): void;
+  setPermission(conversationId: string, mode: UiPermissionMode): void;
+  setModelLock(conversationId: string, locked: boolean): void;
+  reconnect(conversationId: string): void;
 }
 
 interface ConversationCell {
@@ -84,12 +83,15 @@ function orderedInsert(events: UiFixtureEvent[], ev: UiFixtureEvent): void {
 }
 
 /**
- * Deterministic, fixture-backed data source. Holds every scenario's delivered
- * event log in memory. All mock state lives here, decoupled from React.
+ * Deterministic, fixture-backed data source implementing BOTH seam interfaces
+ * over one in-memory store. All mock state lives here, decoupled from React.
  */
-export class FixtureCockpitDataSource implements CockpitEventSource {
+export class FixtureCockpitDataSource
+  implements CockpitReadSource, CockpitCommandPort
+{
   private readonly cells = new Map<string, ConversationCell>();
   private readonly order: string[] = [];
+  private readonly conversationListeners = new Set<UiConversationsListener>();
 
   constructor(scenarios: readonly UiFixtureScenario[] = SCENARIOS) {
     for (const scenario of scenarios) {
@@ -112,8 +114,19 @@ export class FixtureCockpitDataSource implements CockpitEventSource {
     }
   }
 
+  // --- CockpitReadSource ---------------------------------------------------
+
   listConversationIds(): readonly string[] {
     return this.order.slice();
+  }
+
+  subscribeConversations(listener: UiConversationsListener): () => void {
+    this.conversationListeners.add(listener);
+    // Fire immediately with the current set (dynamic-discovery contract).
+    listener(this.order.slice());
+    return () => {
+      this.conversationListeners.delete(listener);
+    };
   }
 
   snapshot(conversationId: string): readonly UiFixtureEvent[] {
@@ -129,93 +142,93 @@ export class FixtureCockpitDataSource implements CockpitEventSource {
     };
   }
 
-  dispatch(action: UiCockpitAction): void {
-    const cell = this.cell(action.conversationId);
-    switch (action.type) {
-      case "composer.send": {
-        const text = action.text.trim();
-        if (!text) return;
-        this.deliver(cell, [
-          {
-            kind: "userMessage",
-            id: `${cell.scenario.id}:sent:${cell.nextUiSeq}`,
-            conversationId: cell.scenario.id,
-            uiSeq: cell.nextUiSeq++,
-            text,
-          },
-        ]);
-        break;
-      }
-      case "composer.stop": {
-        const activeRun = this.findActiveRun(cell);
-        if (!activeRun) return;
-        this.deliver(cell, [
-          {
-            kind: "runStatus",
-            id: `${cell.scenario.id}:stop:${cell.nextUiSeq}`,
-            conversationId: cell.scenario.id,
-            uiSeq: cell.nextUiSeq++,
-            runId: activeRun.runId,
-            agent: activeRun.agent,
-            role: activeRun.role,
-            label: activeRun.label,
-            status: "cancelling",
-          },
-        ]);
-        break;
-      }
-      case "controls.setPermission": {
-        // Mock policy: requested applies immediately; `bypass` cannot take effect
-        // unless sandbox attestation is enforced (unknown in this spike) — so it
-        // resolves to `auto` as the effective mode, surfacing the requested≠effective
-        // gap the real controls must show honestly.
-        const effective =
-          action.mode === "bypass" ? "auto" : action.mode;
-        this.deliver(cell, [
-          {
-            kind: "controlState",
-            id: `${cell.scenario.id}:perm:${cell.nextUiSeq}`,
-            conversationId: cell.scenario.id,
-            uiSeq: cell.nextUiSeq++,
-            requestedPermission: action.mode,
-            effectivePermission: effective,
-          },
-        ]);
-        break;
-      }
-      case "controls.setModelLock": {
-        this.deliver(cell, [
-          {
-            kind: "controlState",
-            id: `${cell.scenario.id}:lock:${cell.nextUiSeq}`,
-            conversationId: cell.scenario.id,
-            uiSeq: cell.nextUiSeq++,
-            modelLocked: action.locked,
-          },
-        ]);
-        break;
-      }
-      case "connection.reconnect": {
-        const replay = cell.scenario.replay;
-        if (!replay) {
-          this.deliver(cell, [
-            {
-              kind: "connection",
-              id: `${cell.scenario.id}:reconn:${cell.nextUiSeq}`,
-              conversationId: cell.scenario.id,
-              uiSeq: cell.nextUiSeq++,
-              status: "connected",
-            },
-          ]);
-          return;
-        }
-        // Deliver the scripted replay batch — deliberately containing duplicate and
-        // out-of-order events plus the post-disconnect tail. The fold dedups/orders.
-        this.deliver(cell, replay.batch);
-        cell.replayed = true;
-        break;
-      }
+  // --- CockpitCommandPort --------------------------------------------------
+
+  send(conversationId: string, text: string): void {
+    const cell = this.cell(conversationId);
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    this.deliver(cell, [
+      {
+        kind: "userMessage",
+        id: `${cell.scenario.id}:sent:${cell.nextUiSeq}`,
+        conversationId: cell.scenario.id,
+        uiSeq: cell.nextUiSeq++,
+        text: trimmed,
+      },
+    ]);
+  }
+
+  stop(conversationId: string): void {
+    const cell = this.cell(conversationId);
+    const activeRun = this.findActiveRun(cell);
+    if (!activeRun) return;
+    this.deliver(cell, [
+      {
+        kind: "runStatus",
+        id: `${cell.scenario.id}:stop:${cell.nextUiSeq}`,
+        conversationId: cell.scenario.id,
+        uiSeq: cell.nextUiSeq++,
+        runId: activeRun.runId,
+        agent: activeRun.agent,
+        role: activeRun.role,
+        label: activeRun.label,
+        status: "cancelling",
+      },
+    ]);
+  }
+
+  setPermission(conversationId: string, mode: UiPermissionMode): void {
+    const cell = this.cell(conversationId);
+    // Mock policy: requested applies immediately; `bypass` cannot take effect
+    // unless sandbox attestation is enforced (unknown in this spike) — so it
+    // resolves to `auto` as the effective mode, surfacing the requested≠effective
+    // gap the real controls must show honestly.
+    const effective = mode === "bypass" ? "auto" : mode;
+    this.deliver(cell, [
+      {
+        kind: "controlState",
+        id: `${cell.scenario.id}:perm:${cell.nextUiSeq}`,
+        conversationId: cell.scenario.id,
+        uiSeq: cell.nextUiSeq++,
+        requestedPermission: mode,
+        effectivePermission: effective,
+      },
+    ]);
+  }
+
+  setModelLock(conversationId: string, locked: boolean): void {
+    const cell = this.cell(conversationId);
+    this.deliver(cell, [
+      {
+        kind: "controlState",
+        id: `${cell.scenario.id}:lock:${cell.nextUiSeq}`,
+        conversationId: cell.scenario.id,
+        uiSeq: cell.nextUiSeq++,
+        modelLocked: locked,
+      },
+    ]);
+  }
+
+  reconnect(conversationId: string): void {
+    const cell = this.cell(conversationId);
+    const replay = cell.scenario.replay;
+    if (!replay) {
+      this.deliver(cell, [
+        {
+          kind: "connection",
+          id: `${cell.scenario.id}:reconn:${cell.nextUiSeq}`,
+          conversationId: cell.scenario.id,
+          uiSeq: cell.nextUiSeq++,
+          status: "connected",
+        },
+      ]);
+      return;
     }
+    // Deliver the scripted replay batch — deliberately containing duplicate and
+    // out-of-order events plus the post-disconnect tail. The fold dedups/orders.
+    this.deliver(cell, replay.batch);
+    cell.replayed = true;
   }
 
   private deliver(cell: ConversationCell, batch: readonly UiFixtureEvent[]): void {
@@ -232,7 +245,9 @@ export class FixtureCockpitDataSource implements CockpitEventSource {
 
   private findActiveRun(
     cell: ConversationCell
-  ): { runId: string; agent: "claude" | "codex" | "system"; role?: string; label: string } | undefined {
+  ):
+    | { runId: string; agent: "claude" | "codex" | "system"; role?: string; label: string }
+    | undefined {
     const latest = new Map<
       string,
       { agent: "claude" | "codex" | "system"; role?: string; label: string; status: string }

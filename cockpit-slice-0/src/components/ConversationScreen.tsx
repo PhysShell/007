@@ -2,7 +2,10 @@
  * composer docked at the bottom. This is a seam consumer — it reads the live view
  * model via useConversation and dispatches mock actions — but owns no process. */
 import { useEffect, useState } from "react";
-import type { CockpitEventSource } from "../data/cockpit-data-source";
+import type {
+  CockpitReadSource,
+  CockpitCommandPort,
+} from "../data/cockpit-data-source";
 import type { UiPermissionMode } from "../types/ui-fixture-events";
 import { useConversation } from "../app/useCockpit";
 import { Timeline } from "./Timeline";
@@ -22,15 +25,17 @@ function connTone(status: string): UiTone {
 }
 
 export function ConversationScreen({
-  source,
+  read,
+  command,
   conversationId,
   onBack,
 }: {
-  source: CockpitEventSource;
+  read: CockpitReadSource;
+  command: CockpitCommandPort;
   conversationId: string;
   onBack?: () => void;
 }) {
-  const vm = useConversation(source, conversationId);
+  const vm = useConversation(read, conversationId);
   const [tab, setTab] = useState<Tab>("timeline");
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>();
 
@@ -91,20 +96,18 @@ export function ConversationScreen({
             controls={vm.controls}
             connection={vm.connection}
             onSetPermission={(mode: UiPermissionMode) =>
-              source.dispatch({ type: "controls.setPermission", conversationId, mode })
+              command.setPermission(conversationId, mode)
             }
-            onSetModelLock={(locked) =>
-              source.dispatch({ type: "controls.setModelLock", conversationId, locked })
-            }
-            onReconnect={() => source.dispatch({ type: "connection.reconnect", conversationId })}
+            onSetModelLock={(locked) => command.setModelLock(conversationId, locked)}
+            onReconnect={() => command.reconnect(conversationId)}
           />
         )}
       </div>
 
       <Composer
         state={vm.composer}
-        onSend={(text) => source.dispatch({ type: "composer.send", conversationId, text })}
-        onStop={() => source.dispatch({ type: "composer.stop", conversationId })}
+        onSend={(text) => command.send(conversationId, text)}
+        onStop={() => command.stop(conversationId)}
       />
     </section>
   );

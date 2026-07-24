@@ -12,10 +12,11 @@ Full rationale, invariants, and the integration plan live in
 
 ```bash
 npm install
-npm run dev        # local prototype
-npm test           # reducer/view-model + component + a11y (axe) checks
-npm run build      # type-check + static bundle
-npm run screenshots  # after build: mobile + desktop PNGs → ./screenshots
+npm run dev            # local prototype
+npm test               # reducer/view-model + component + a11y (axe) checks
+npm run build          # type-check + static bundle (+ generates the service worker)
+npm run offline-smoke  # after build: prove offline load (install online → render offline)
+npm run screenshots    # after build: mobile + desktop PNGs → ./screenshots
 ```
 
 ## What it does and does not do
@@ -38,6 +39,7 @@ src/app/         the one impure hook layer + top-level shell
 scripts/         screenshot capture (Playwright, offline via request interception)
 ```
 
-The **seam** (`src/data/cockpit-data-source.ts`) is the point where, after PR 4, a
-`LedgerCockpitAdapter` will fold canonical ledger events into the same view model
-with no change to the components.
+The **seam** (`src/data/cockpit-data-source.ts`) is split into a **`CockpitReadSource`**
+(discovery/snapshot/subscribe — a post-PR-4 `LedgerCockpitAdapter` implements this)
+and a **`CockpitCommandPort`** (send/stop/permission/model-lock/reconnect — real
+daemon/o7d transport implements this). The fixture backs both with one store.

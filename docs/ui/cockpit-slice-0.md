@@ -34,17 +34,29 @@ the same view model with no change to the components.
 
 ### The seam (the reason this spike exists)
 
+The seam is **split into a read side and a command side** (`src/data/cockpit-data-source.ts`),
+because the two graduate to *different* production implementations:
+
 ```
- fixtures ──▶ CockpitEventSource ──▶ fold() ──▶ UiConversationViewModel ──▶ components
- (UI-only)      (the seam)         (pure)         (UI-only, provisional)     (pure)
+                    ┌─ CockpitReadSource ──▶ fold() ──▶ UiConversationViewModel ─▶ components
+ fixture store ─────┤   (discovery/snapshot/subscribe)   (pure)   (UI-only, provisional)
+                    └─ CockpitCommandPort ◀── send/stop/permission/model-lock/reconnect (mock)
 ```
 
-- **`CockpitEventSource`** (`src/data/cockpit-data-source.ts`) is the only thing
-  the presentation layer knows about its data. Today the only implementation is
-  `FixtureCockpitDataSource`. **After PR 4**, a second implementation —
-  a `LedgerCockpitAdapter` — subscribes to canonical ledger events and maps each
-  one into the UI event shape (or the shape is replaced and the fold updated).
-  Components and the fold do not change.
+- **`CockpitReadSource`** — conversation discovery, snapshot, and per-conversation
+  subscription. **After PR 4**, a `LedgerCockpitAdapter` implements this side by
+  folding canonical ledger events into the UI event shape (or the shape is
+  replaced and the fold updated). Components and the fold do not change.
+- **`CockpitCommandPort`** — `send` / `stop` / `setPermission` / `setModelLock` /
+  `reconnect`. In production these become **daemon/o7d-owned actions over the real
+  transport** — authenticated RPCs, never in-process calls. The read adapter and
+  the command transport are deliberately separate objects; the presentation layer
+  must not assume they are the same thing (though the fixture backs both with one
+  store).
+- **Dynamic conversation discovery** is provided now via
+  `CockpitReadSource.subscribeConversations` (fires with the current set, then
+  again whenever it changes) — so discovery is a real part of the seam, not an
+  unresolved gap. The fixture set happens to be static.
 - **`fold()`** (`src/data/fold.ts`) deduplicates by event `id` and orders strictly
   by `uiSeq`, so duplicate and out-of-order delivery reconcile deterministically.
   This mirrors — in UI-only terms — the ledger's idempotency-key +
@@ -97,8 +109,14 @@ commitment; expect them to be revisited:
   attestation is unknown in the spike). Placeholder policy.
 - **Visual language**: dark theme, Claude=violet, Codex=teal, system/o7d=amber,
   user=blue. Cosmetic.
-- **PWA app-shell service worker** — shell caching only, to demonstrate an offline
-  state. Not a transport.
+- **PWA app-shell service worker** — a *real* precache of the built shell,
+  generated at build time by `vite.config.ts` (`cockpit-sw-precache`): it precaches
+  `index.html` + the **content-hashed JS/CSS** + manifest + icon, serves
+  navigations from the cached shell, and **never** falls back to `index.html` for a
+  missing JS/CSS/asset (a missing asset fails honestly). Proven by
+  `npm run offline-smoke`: install online, then a **fresh navigation while offline**
+  renders the Cockpit shell entirely from the precache. Still a shell cache only —
+  not a transport, and expected to be replaced by the production connectivity story.
 - **Composer send/stop/attachment** are fixture-driven mock actions that append
   mock events; attachments are placeholders.
 
@@ -138,14 +156,17 @@ When the spike graduates toward the real PR 9 Cockpit, these are the pieces that
 
 - **`src/fixtures/**` — the entire fixture catalog.** Replaced by real ledger
   data through the adapter.
-- **`FixtureCockpitDataSource`** and the mock `dispatch` actions. Replaced by
-  `LedgerCockpitAdapter` (subscribe) + real, daemon-owned actions (which must go
-  through o7d, never in-process).
+- **`FixtureCockpitDataSource`** and the mock command methods. The read side is
+  replaced by a `LedgerCockpitAdapter` (subscribe); the command side by real,
+  daemon-owned actions (which must go through o7d over the transport, never
+  in-process). The `CockpitReadSource` / `CockpitCommandPort` split is designed to
+  survive; the fixture object backing both is not.
 - **The UI-only event union and `uiSeq`/`id` keys** — replaced or re-derived from
   the canonical protocol once PR 4 lands; the UI-side dedup/order fold becomes a
   thin fallback behind the ledger's own guarantees.
-- **`public/service-worker.js` + `src/sw-register.ts`** — the shell-only SW.
-  Replaced by whatever the production connectivity/offline story is.
+- **The generated app-shell service worker (`vite.config.ts` `cockpit-sw-precache`)
+  + `src/sw-register.ts`** — a shell-only precache. Replaced by whatever the
+  production connectivity/offline story is.
 - **The mock permission/model rules** (e.g. `bypass → auto`) — replaced by the
   real policy engine's `requested`/`effective` values from o7d.
 - **`?c=<id>` deep-link shim** in `main.tsx` — replaced by real routing/session
@@ -183,6 +204,7 @@ same view model every run.
 | Component tests | `src/components/cockpit.test.tsx` |
 | Reducer / view-model tests | `src/data/fold.test.ts`, `src/data/cockpit-data-source.test.ts` |
 | Accessibility smoke checks | axe checks in `src/components/cockpit.test.tsx` |
+| Offline PWA smoke (install online → render offline) | `scripts/offline-smoke.mjs` (`npm run offline-smoke`) |
 | Deterministic fixture catalog | `src/fixtures/catalog.ts` |
 | Mobile + desktop screenshots | `cockpit-slice-0/screenshots/` |
 | This doc | `docs/ui/cockpit-slice-0.md` |

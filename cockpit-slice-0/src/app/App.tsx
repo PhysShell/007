@@ -2,20 +2,25 @@
  * Mobile-first — on a phone one pane shows at a time (list, or the selected
  * conversation); at ≥900px both panes show side by side. */
 import { useState } from "react";
-import type { CockpitEventSource } from "../data/cockpit-data-source";
+import type {
+  CockpitReadSource,
+  CockpitCommandPort,
+} from "../data/cockpit-data-source";
 import { fixtureDataSource } from "../data/cockpit-data-source";
 import { ConversationList } from "../components/ConversationList";
 import { ConversationScreen } from "../components/ConversationScreen";
 import { useConversationList } from "./useCockpit";
 
 export function App({
-  source = fixtureDataSource,
+  read = fixtureDataSource,
+  command = fixtureDataSource,
   initialConversationId = null,
 }: {
-  source?: CockpitEventSource;
+  read?: CockpitReadSource;
+  command?: CockpitCommandPort;
   initialConversationId?: string | null;
 }) {
-  const conversations = useConversationList(source);
+  const conversations = useConversationList(read);
   const [selectedId, setSelectedId] = useState<string | null>(initialConversationId);
 
   return (
@@ -35,7 +40,8 @@ export function App({
         <main className="detail-pane">
           {selectedId ? (
             <ConversationScreen
-              source={source}
+              read={read}
+              command={command}
               conversationId={selectedId}
               onBack={() => setSelectedId(null)}
             />

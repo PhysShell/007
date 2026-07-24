@@ -8,10 +8,15 @@ import { FixtureCockpitDataSource } from "../data/cockpit-data-source";
 import { foldConversation } from "../data/fold";
 
 const fresh = () => new FixtureCockpitDataSource();
+// One backing store wired to BOTH seam props (read + command).
+const both = () => {
+  const s = fresh();
+  return { read: s, command: s };
+};
 
 describe("conversation navigation", () => {
   it("lists conversations with unread + activity indicators", () => {
-    render(<App source={fresh()} />);
+    render(<App {...both()} />);
     expect(screen.getByText("Refactor the auth module")).toBeInTheDocument();
     expect(screen.getByText("Ship the retry-policy change")).toBeInTheDocument();
     // Activity dot present for an active conversation.
@@ -22,7 +27,7 @@ describe("conversation navigation", () => {
 
   it("opens a conversation on selection", async () => {
     const user = userEvent.setup();
-    render(<App source={fresh()} />);
+    render(<App {...both()} />);
     await user.click(screen.getByRole("button", { name: /Refactor the auth module/ }));
     expect(
       screen.getByRole("region", { name: /Conversation: Refactor the auth module/ })
@@ -32,14 +37,14 @@ describe("conversation navigation", () => {
 
 describe("timeline states", () => {
   it("renders the empty state and enables the composer", () => {
-    render(<App source={fresh()} initialConversationId="conv-empty" />);
+    render(<App {...both()} initialConversationId="conv-empty" />);
     expect(screen.getByText("No messages yet.")).toBeInTheDocument();
     expect(screen.getByLabelText("Message the agent")).not.toBeDisabled();
   });
 
   it("sending a message (mock action) appends it to the timeline", async () => {
     const user = userEvent.setup();
-    render(<App source={fresh()} initialConversationId="conv-empty" />);
+    render(<App {...both()} initialConversationId="conv-empty" />);
     await user.type(screen.getByLabelText("Message the agent"), "do the thing");
     await user.click(screen.getByRole("button", { name: /Send message/ }));
     // Scope to the conversation region (the list pane also shows it as a preview).
@@ -48,12 +53,12 @@ describe("timeline states", () => {
   });
 
   it("shows a streaming caret for an active streaming message", () => {
-    render(<App source={fresh()} initialConversationId="conv-claude-active" />);
+    render(<App {...both()} initialConversationId="conv-claude-active" />);
     expect(screen.getByRole("status", { name: "streaming" })).toBeInTheDocument();
   });
 
   it("shows a pending permission request card", () => {
-    render(<App source={fresh()} initialConversationId="conv-permission" />);
+    render(<App {...both()} initialConversationId="conv-permission" />);
     expect(
       screen.getByText("bash: rm -rf db/migrations/legacy")
     ).toBeInTheDocument();
@@ -61,20 +66,20 @@ describe("timeline states", () => {
   });
 
   it("shows a terminal failure + rejected result for a verifier failure", () => {
-    render(<App source={fresh()} initialConversationId="conv-verifier-failure" />);
+    render(<App {...both()} initialConversationId="conv-verifier-failure" />);
     expect(screen.getByText("Verifier gate failed")).toBeInTheDocument();
     expect(screen.getByText("REJECTED")).toBeInTheDocument();
   });
 
   it("shows an artifact + passing gate + accepted result", () => {
-    render(<App source={fresh()} initialConversationId="conv-artifact-gate" />);
+    render(<App {...both()} initialConversationId="conv-artifact-gate" />);
     expect(screen.getByText(/feat\/judge-jobs @ a1b2c3d/)).toBeInTheDocument();
     expect(screen.getByText("ACCEPTED")).toBeInTheDocument();
     expect(screen.getByText("passed")).toBeInTheDocument();
   });
 
   it("marks recovered historical items", () => {
-    render(<App source={fresh()} initialConversationId="conv-interrupted" />);
+    render(<App {...both()} initialConversationId="conv-interrupted" />);
     expect(screen.getAllByText("recovered").length).toBeGreaterThan(0);
     expect(screen.getByText("INTERRUPTED_BY_HOST_RESTART")).toBeInTheDocument();
   });
@@ -83,7 +88,7 @@ describe("timeline states", () => {
 describe("run graph", () => {
   it("nests a Codex child under its Claude parent and jumps to a run", async () => {
     const user = userEvent.setup();
-    render(<App source={fresh()} initialConversationId="conv-delegation" />);
+    render(<App {...both()} initialConversationId="conv-delegation" />);
     await user.click(screen.getByRole("tab", { name: "Runs" }));
     const childRun = screen.getByRole("button", {
       name: /Run Codex · write tests/,
@@ -101,7 +106,7 @@ describe("run graph", () => {
 describe("controls", () => {
   it("shows requested vs effective model drift", async () => {
     const user = userEvent.setup();
-    render(<App source={fresh()} initialConversationId="conv-model-mismatch" />);
+    render(<App {...both()} initialConversationId="conv-model-mismatch" />);
     await user.click(screen.getByRole("tab", { name: "Controls" }));
     expect(screen.getByText("model drift")).toBeInTheDocument();
     expect(screen.getByText("claude-sonnet-4")).toBeInTheDocument();
@@ -110,7 +115,7 @@ describe("controls", () => {
   it("permission selector is interactive in the mock state", async () => {
     const user = userEvent.setup();
     const source = fresh();
-    render(<App source={source} initialConversationId="conv-empty" />);
+    render(<App read={source} command={source} initialConversationId="conv-empty" />);
     await user.click(screen.getByRole("tab", { name: "Controls" }));
     await user.click(screen.getByRole("radio", { name: "auto" }));
     expect(screen.getByRole("radio", { name: "auto" })).toHaveAttribute(
@@ -120,7 +125,7 @@ describe("controls", () => {
   });
 
   it("offline conversation disables the composer", () => {
-    render(<App source={fresh()} initialConversationId="conv-replay" />);
+    render(<App {...both()} initialConversationId="conv-replay" />);
     expect(screen.getByLabelText("Message the agent")).toBeDisabled();
     expect(screen.getByText(/Offline —/)).toBeInTheDocument();
   });
@@ -133,7 +138,7 @@ describe("architectural invariant (via React lifecycle)", () => {
     expect(before.runGraph.byId["run-ca-1"].status).toBe("running");
 
     const view = render(
-      <ConversationScreen source={source} conversationId="conv-claude-active" />
+      <ConversationScreen read={source} command={source} conversationId="conv-claude-active" />
     );
     view.unmount(); // client closes / unmounts
 
@@ -145,14 +150,14 @@ describe("architectural invariant (via React lifecycle)", () => {
 
 describe("accessibility smoke checks", () => {
   it("the conversation list has no axe violations", async () => {
-    const { container } = render(<App source={fresh()} />);
+    const { container } = render(<App {...both()} />);
     expect(await axe(container)).toHaveNoViolations();
     cleanup();
   });
 
   it("a conversation timeline has no axe violations", async () => {
     const { container } = render(
-      <App source={fresh()} initialConversationId="conv-artifact-gate" />
+      <App {...both()} initialConversationId="conv-artifact-gate" />
     );
     expect(await axe(container)).toHaveNoViolations();
     cleanup();
@@ -161,7 +166,7 @@ describe("accessibility smoke checks", () => {
   it("the controls view has no axe violations", async () => {
     const user = userEvent.setup();
     const { container } = render(
-      <App source={fresh()} initialConversationId="conv-permission" />
+      <App {...both()} initialConversationId="conv-permission" />
     );
     await user.click(screen.getByRole("tab", { name: "Controls" }));
     expect(await axe(container)).toHaveNoViolations();

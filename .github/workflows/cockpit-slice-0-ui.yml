@@ -51,3 +51,33 @@ jobs:
 
       - name: Build (static bundle)
         run: npm run build
+
+  pwa-offline:
+    name: offline PWA smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: cockpit-slice-0/package-lock.json
+
+      - name: Install (clean, from lockfile)
+        run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+      - name: Install Playwright Chromium (full — service workers)
+        run: npx playwright install chromium
+
+      - name: Build (static bundle, generates the service worker)
+        run: npm run build
+
+      - name: Offline PWA smoke (install online, render offline from precache)
+        run: npm run offline-smoke
