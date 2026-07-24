@@ -128,11 +128,11 @@ impl Worktree {
         let summary = match build {
             Ok(summary) => summary,
             Err(err) => {
-                // We just created and own this directory; prove that, then remove the
-                // partial worktree so a failed create leaks nothing.
-                if attest_owned_dir(&path, fs_identity).is_ok() {
-                    let _ = std::fs::remove_dir_all(&path);
-                }
+                // We just created and own this directory; remove it race-safely — identity
+                // is proven on the OPEN fd, the directory is quarantined under a private
+                // name, re-proven, then cleared — so a failed create leaks nothing and the
+                // cleanup can never be redirected at a victim tree.
+                let _ = remove_verified_dir(&path, fs_identity);
                 return Err(err);
             }
         };
