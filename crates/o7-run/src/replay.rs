@@ -1,15 +1,12 @@
 //! Independent replay: re-derive a stored run's verdict and prove its artifacts.
 //!
-//! CONTRACT-ONLY (RED). This commit fixes the replay SURFACE and its acceptance criteria
-//! (encoded in `tests/replay_acceptance.rs`) but does NOT implement verification yet;
-//! [`replay`] and [`replay_verify`] return [`ReplayError::Unimplemented`], so a legacy or
-//! tampered run can never be silently reported as replay-verified.
-//!
-//! Replay is where the tamper-evidence becomes an assertion: it (1) validates event-chain
-//! continuity and per-event digests, (2) resolves every referenced artifact and checks its
-//! content digest, (3) folds the stream through the pure [`crate::reduce`] reducer, and (4)
-//! recomputes the verdict and — for [`replay_verify`] — compares it to the stored one. Any
-//! unexplained mismatch fails loudly.
+//! Replay is where the tamper-evidence becomes an assertion: it (1) classifies the record
+//! (legacy / canonical / malformed), (2) validates per-event digests and chain-link
+//! continuity, (3) folds the stream through the pure [`crate::reduce`] reducer (structural
+//! validation + verdict), (4) requires a sealed run, (5) resolves every referenced artifact
+//! and checks its content digest, and (6) returns the recomputed verdict plus the anchor
+//! digests. [`replay_verify`] additionally compares the recomputed verdict to a stored one.
+//! Any unexplained mismatch fails loudly; a legacy record is never reported as verified.
 //!
 //! What the chain proves, precisely: it detects any modification NOT accompanied by a
 //! consistent recomputation of every downstream digest. It does NOT prove authenticity
@@ -21,7 +18,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::event::{ArtifactRef, Digest256, RunEvent, RunEventKind};
-use crate::reduce::ReduceError;
+use crate::reduce::{reduce_all, ReduceError};
 use crate::state::Verdict;
 
 /// Resolves an [`ArtifactRef`]'s locator to its current bytes. Replay hashes the result and
@@ -136,9 +133,10 @@ pub enum ReplayError {
     #[error("run is legacy (no canonical events) and cannot be replayed")]
     LegacyNonReplayable,
 
-    /// Verification is not implemented in this (contract-only) commit.
-    #[error("replay verification is not implemented in this contract-only build")]
-    Unimplemented,
+    /// The reduced state could not be serialized to its normalized form (should be
+    /// impossible for a well-formed run; surfaced rather than panicked).
+    #[error("normalized state digest unavailable")]
+    StateDigestUnavailable,
 }
 
 /// Independently replay a stored run: verify the chain and artifacts and recompute the
@@ -151,11 +149,66 @@ pub fn replay(
     events: &[RunEvent],
     artifacts: &dyn ArtifactResolver,
 ) -> Result<ReplayReport, ReplayError> {
-    // CONTRACT-ONLY: see the module doc. Verification is specified by the acceptance tests
-    // in this commit and implemented next; until then replay is unavailable so a tampered or
-    // legacy run is never reported as verified.
-    let _ = (events, artifacts);
-    Err(ReplayError::Unimplemented)
+    // 1. A record with no canonical events is legacy — never "verified".
+    let Some(last) = events.last() else {
+        return Err(ReplayError::LegacyNonReplayable);
+    };
+
+    // 2. Per-event digest self-consistency and chain-link continuity. A deletion, reorder,
+    //    insertion, or in-place edit is caught here before anything is trusted.
+    let mut prev = Digest256::genesis();
+    for event in events {
+        if !event.digest_is_consistent() {
+            return Err(ReplayError::EventDigestMismatch {
+                sequence: event.sequence,
+            });
+        }
+        if event.previous_event_digest != prev {
+            return Err(ReplayError::ChainBroken {
+                sequence: event.sequence,
+            });
+        }
+        prev = event.event_digest.clone();
+    }
+
+    // 3. Structural validation + verdict via the pure reducer.
+    let state = reduce_all(events)?;
+
+    // 4. Only a sealed run has a fixed verdict to verify.
+    if !state.is_sealed() {
+        return Err(ReplayError::NotSealed);
+    }
+    let verdict = match state.verdict {
+        Some(v) => v,
+        None => return Err(ReplayError::NotSealed),
+    };
+
+    // 5. Resolve every referenced artifact and verify its content digest in place.
+    let mut artifacts_verified: u64 = 0;
+    for event in events {
+        for artifact in referenced_artifacts(&event.kind) {
+            let bytes = artifacts.resolve(artifact)?;
+            if Digest256::of_bytes(&bytes) != artifact.digest {
+                return Err(ReplayError::ArtifactDigestMismatch {
+                    locator: artifact.locator.clone(),
+                });
+            }
+            artifacts_verified += 1;
+        }
+    }
+
+    // 6. Anchors.
+    let normalized_state_digest = state
+        .normalized_digest()
+        .ok_or(ReplayError::StateDigestUnavailable)?;
+
+    Ok(ReplayReport {
+        verdict,
+        events_verified: events.len() as u64,
+        artifacts_verified,
+        final_event_digest: last.event_digest.clone(),
+        normalized_state_digest,
+    })
 }
 
 /// Replay a stored run AND assert the recomputed verdict equals `stored_verdict`.
@@ -168,6 +221,35 @@ pub fn replay_verify(
     artifacts: &dyn ArtifactResolver,
     stored_verdict: Verdict,
 ) -> Result<ReplayReport, ReplayError> {
-    let _ = (events, artifacts, stored_verdict);
-    Err(ReplayError::Unimplemented)
+    let report = replay(events, artifacts)?;
+    if report.verdict != stored_verdict {
+        return Err(ReplayError::VerdictMismatch {
+            recomputed: report.verdict,
+            stored: stored_verdict,
+        });
+    }
+    Ok(report)
+}
+
+/// The artifact references a single event carries (resolved and digest-checked by replay).
+fn referenced_artifacts(kind: &RunEventKind) -> Vec<&ArtifactRef> {
+    match kind {
+        RunEventKind::RunStarted { contract, task } => {
+            let mut refs = vec![task];
+            for p in &contract.policy_obligations {
+                refs.push(&p.policy);
+            }
+            refs
+        }
+        RunEventKind::WorktreeCreated { worktree } => vec![worktree],
+        RunEventKind::PatchCaptured { patch } => vec![patch],
+        RunEventKind::PolicyChecked { policy, .. } => vec![policy],
+        RunEventKind::GateFinished { log: Some(log), .. } => vec![log],
+        RunEventKind::SandboxEvidenceCaptured { report, .. } => vec![report],
+        RunEventKind::AgentStarted
+        | RunEventKind::AgentExited { .. }
+        | RunEventKind::GateStarted { .. }
+        | RunEventKind::GateFinished { log: None, .. }
+        | RunEventKind::RunSealed => Vec::new(),
+    }
 }
