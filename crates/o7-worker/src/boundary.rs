@@ -95,6 +95,45 @@ pub struct BoundarySpawnSpec {
     pub stdin: StdinMode,
 }
 
+/// The run-time proof a boundary establishes AT launch — distinct from the pre-spawn
+/// [`BoundaryAttestation`], which is only a configured claim. A confining boundary proves
+/// what it actually installed for THIS launch; the host boundary establishes nothing.
+///
+/// The supervisor publishes this before [`crate::WorkerObservation::Spawned`] and, under
+/// [`BoundaryRequirement::RequireFullyEnforced`], treats evidence that does not attest
+/// [`EnforcementLevel::FullyEnforced`] as a fail-closed error — so a boundary can never
+/// return a live process that merely *claims* confinement it did not establish.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BoundaryEvidence {
+    /// The attestation actually established by this launch (may differ from the configured
+    /// [`ProcessBoundary::attestation`]).
+    pub attestation: BoundaryAttestation,
+    /// The backend's raw report frame bytes, if any. Opaque here — a downstream adapter
+    /// stores it as a content-addressed artifact (o7-run's `SandboxEvidenceCaptured`) and
+    /// re-derives its meaning. `None` for a boundary that produces no report (the host).
+    pub report: Option<Vec<u8>>,
+}
+
+impl BoundaryEvidence {
+    /// Evidence for an unconfined launch: the given attestation, no report.
+    #[must_use]
+    pub fn unconfined(attestation: BoundaryAttestation) -> Self {
+        Self {
+            attestation,
+            report: None,
+        }
+    }
+}
+
+/// A successful launch: the owned process set PLUS the run-time [`BoundaryEvidence`] the
+/// launch established. Returned by [`ProcessBoundary::spawn`] so evidence is available to
+/// the supervisor and downstream BEFORE the process is trusted — a frozen interface that
+/// could only return a `BoundaryProcess` could never carry the required proof.
+pub struct BoundaryLaunch {
+    pub process: Box<dyn BoundaryProcess>,
+    pub evidence: BoundaryEvidence,
+}
+
 /// Errors from a boundary mechanism.
 #[derive(Debug, thiserror::Error)]
 pub enum BoundaryError {
@@ -113,18 +152,18 @@ pub enum BoundaryError {
 /// Spawns processes inside a boundary it owns.
 #[async_trait]
 pub trait ProcessBoundary: Send + Sync {
-    /// Launch the process. On success the returned [`BoundaryProcess`] owns the
-    /// entire process set.
+    /// Launch the process. On success the returned [`BoundaryLaunch`] owns the entire
+    /// process set AND carries the run-time [`BoundaryEvidence`] the launch established. A
+    /// confining boundary MUST NOT return a live process it could not confine: if it cannot
+    /// establish (and prove) the intended enforcement it fails closed here.
     ///
     /// CANCEL-SAFETY CONTRACT: the returned future MUST be cancel-safe. If it is
     /// dropped before completing, the boundary must not leak a process — any
-    /// partially-created process must be terminated/cleaned up as the future
-    /// drops (so a cancel racing with a spawn can never leave an ownerless
-    /// process). The supervisor relies on this to cancel during `Starting`.
-    async fn spawn(
-        &self,
-        spec: BoundarySpawnSpec,
-    ) -> Result<Box<dyn BoundaryProcess>, BoundaryError>;
+    /// partially-created process (including a backend spawned to read a report from) must be
+    /// terminated/cleaned up as the future drops (so a cancel racing with a spawn can never
+    /// leave an ownerless process). The supervisor relies on this to cancel during
+    /// `Starting`.
+    async fn spawn(&self, spec: BoundarySpawnSpec) -> Result<BoundaryLaunch, BoundaryError>;
 
     /// The boundary's honest attestation.
     fn attestation(&self) -> BoundaryAttestation;

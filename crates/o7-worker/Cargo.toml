@@ -21,11 +21,10 @@ tokio = { version = "1", default-features = false, features = [
 ] }
 bytes = "1"
 thiserror = "1"
-# Sandboy: parse the external backend's machine-readable enforcement report on the
-# untrusted path (deny_unknown_fields rejects a boolean `secure`; required fields reject a
-# missing dimension). Already accepted workspace-wide (o7-run, o7 CLI).
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# Sandboy: the pure wire protocol (policy digest, versioned length-bounded report frame,
+# identity binding) shared verbatim with the external backend. All report parsing lives
+# there, so o7-worker needs no serde of its own.
+o7-sandbox-protocol = { path = "../o7-sandbox-protocol" }
 # Makes the ProcessBoundary/BoundaryProcess traits object-safe with async methods
 # (spawn returns Box<dyn BoundaryProcess>). MIT-licensed.
 async-trait = "0.1"

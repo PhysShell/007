@@ -829,6 +829,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "o7-sandbox-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "o7-verifier"
 version = "0.1.0"
 dependencies = [
@@ -852,8 +862,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "nix",
- "serde",
- "serde_json",
+ "o7-sandbox-protocol",
  "signal-hook",
  "tempfile",
  "thiserror",

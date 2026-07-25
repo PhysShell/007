@@ -23,8 +23,9 @@ use tokio::io::{AsyncRead, ReadBuf};
 use tokio::sync::Notify;
 
 use o7_worker::{
-    BoundaryAttestation, BoundaryError, BoundaryExit, BoundaryKind, BoundaryProcess,
-    BoundarySpawnSpec, BoundaryStream, EnforcementLevel, ProcessBoundary, ProcessIdentity,
+    BoundaryAttestation, BoundaryError, BoundaryEvidence, BoundaryExit, BoundaryKind,
+    BoundaryLaunch, BoundaryProcess, BoundarySpawnSpec, BoundaryStream, EnforcementLevel,
+    ProcessBoundary, ProcessIdentity,
 };
 
 /// Observable record of what the mock boundary was asked to do. Cloned out via
@@ -153,6 +154,10 @@ pub struct MockBoundary {
     /// `remaining_members()` never resolves — a hung membership query the supervisor
     /// must bound (never "unknown means empty").
     membership_pending: bool,
+    /// Overrides the launch evidence returned by `spawn`. When `None`, evidence is
+    /// `unconfined(self.attestation)`. Set it to model a LYING boundary that attests one
+    /// level pre-spawn but establishes another at launch.
+    launch_evidence: Option<BoundaryEvidence>,
     state: Arc<MockState>,
 }
 
@@ -180,6 +185,7 @@ impl MockBoundary {
             force_stop_error: None,
             force_stop_pending: false,
             membership_pending: false,
+            launch_evidence: None,
             state: Arc::new(MockState::default()),
         }
     }
@@ -187,6 +193,19 @@ impl MockBoundary {
     /// A handle to inspect the boundary's effects after the run.
     pub fn state(&self) -> Arc<MockState> {
         Arc::clone(&self.state)
+    }
+
+    /// Set the boundary's (configured) attestation — what it CLAIMS pre-spawn.
+    pub fn with_attestation(mut self, attestation: BoundaryAttestation) -> Self {
+        self.attestation = attestation;
+        self
+    }
+
+    /// Override the launch evidence `spawn` returns, independent of the attestation — so a
+    /// test can model a boundary that ATTESTS one level but ESTABLISHES another.
+    pub fn with_launch_evidence(mut self, evidence: BoundaryEvidence) -> Self {
+        self.launch_evidence = Some(evidence);
+        self
     }
 
     /// Delay every spawn by `delay`. Per the `ProcessBoundary` cancel-safety
@@ -410,10 +429,7 @@ fn mock_identity() -> ProcessIdentity {
 
 #[async_trait]
 impl ProcessBoundary for MockBoundary {
-    async fn spawn(
-        &self,
-        _spec: BoundarySpawnSpec,
-    ) -> Result<Box<dyn BoundaryProcess>, BoundaryError> {
+    async fn spawn(&self, _spec: BoundarySpawnSpec) -> Result<BoundaryLaunch, BoundaryError> {
         let guard = SpawnGuard::enter(Arc::clone(&self.state));
         if !self.spawn_delay.is_zero() {
             // If the supervisor cancels during `Starting`, it drops this future at
@@ -467,7 +483,14 @@ impl ProcessBoundary for MockBoundary {
             state: Arc::clone(&self.state),
         };
         guard.commit();
-        Ok(Box::new(process))
+        let evidence = self
+            .launch_evidence
+            .clone()
+            .unwrap_or_else(|| BoundaryEvidence::unconfined(self.attestation));
+        Ok(BoundaryLaunch {
+            process: Box::new(process),
+            evidence,
+        })
     }
 
     fn attestation(&self) -> BoundaryAttestation {

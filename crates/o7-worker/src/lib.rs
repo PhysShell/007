@@ -23,15 +23,18 @@ pub mod host_boundary;
 pub mod observation;
 pub mod output;
 pub mod process_identity;
-pub mod sandbox;
 pub mod sandboy_boundary;
 pub mod spec;
 pub mod state;
 pub mod supervisor;
 
+/// The sandbox wire protocol (policy, report, frame) shared with the external backend.
+pub use o7_sandbox_protocol as sandbox_protocol;
+
 pub use boundary::{
-    BoundaryAttestation, BoundaryError, BoundaryExit, BoundaryKind, BoundaryProcess,
-    BoundaryRequirement, BoundarySpawnSpec, BoundaryStream, EnforcementLevel, ProcessBoundary,
+    BoundaryAttestation, BoundaryError, BoundaryEvidence, BoundaryExit, BoundaryKind,
+    BoundaryLaunch, BoundaryProcess, BoundaryRequirement, BoundarySpawnSpec, BoundaryStream,
+    EnforcementLevel, ProcessBoundary,
 };
 pub use cancellation::CancellationPolicy;
 pub use heartbeat::HeartbeatPolicy;
@@ -39,11 +42,7 @@ pub use host_boundary::UnconfinedHostBoundary;
 pub use observation::{ObservationError, ObservationSink, WorkerObservation};
 pub use output::{OutputChunk, OutputPolicy, OutputStream};
 pub use process_identity::ProcessIdentity;
-pub use sandbox::{
-    Enforcement, NetworkPolicy, ReportError, SandboxDimension, SandboxPolicy, SandboxPolicyError,
-    SandboxReport,
-};
-pub use sandboy_boundary::SandboyBoundary;
+pub use sandboy_boundary::{SandboyBoundary, SandboyLaunchError};
 pub use spec::{EnvironmentPolicy, SpecError, StdinMode, WorkerId, WorkerSpec};
 pub use state::WorkerState;
 pub use supervisor::{WorkerHandle, WorkerJoin, WorkerResult, WorkerSupervisor};

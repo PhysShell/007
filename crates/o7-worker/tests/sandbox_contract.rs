@@ -1,8 +1,9 @@
-//! Contract tests for the Sandboy confinement types: the per-dimension report (no boolean
-//! `secure`, every dimension explicit), its honest mapping to a [`BoundaryAttestation`],
-//! policy validation, and the fail-closed exec-permission gate that keeps PR 3's
-//! sealed-memfd exec working. These are all PURE and GREEN; the confined LIVE LAUNCH is
-//! pinned (RED) in the sibling `sandboy_launch.rs`.
+//! Contract tests for the Sandboy boundary's PURE, fail-closed surface: policy/backend
+//! validation, the confined-backend argv, the exec-permission gate that keeps PR 3's
+//! sealed-memfd exec working, honest attestation, and — the load-bearing part — the report
+//! VERIFICATION matrix: a report is trusted only when bound to this policy, launch, and
+//! target AND fully enforced; everything else fails closed. These are all GREEN. The confined
+//! LIVE LAUNCH matrix is pinned (RED) in the sibling `sandboy_launch.rs`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -14,17 +15,18 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use o7_worker::boundary::BoundarySpawnSpec;
+use o7_worker::sandbox_protocol::frame::encode;
+use o7_worker::sandbox_protocol::ids::{BackendIdentity, Digest256, LaunchNonce};
+use o7_worker::sandbox_protocol::policy::{Enforcement, NetworkPolicy, SandboxPolicy};
+use o7_worker::sandbox_protocol::report::SandboxReport;
+use o7_worker::sandbox_protocol::SCHEMA_VERSION;
 use o7_worker::{
-    BoundaryKind, BoundaryRequirement, Enforcement, EnforcementLevel, NetworkPolicy,
-    ProcessBoundary, ReportError, SandboxPolicy, SandboxPolicyError, SandboxReport,
-    SandboyBoundary,
+    BoundaryKind, BoundaryRequirement, EnforcementLevel, ProcessBoundary, SandboyBoundary,
+    SandboyLaunchError, StdinMode,
 };
 
-fn full_report_json(timeout: &str) -> String {
-    format!(
-        r#"{{"backend":"landlock-seccomp","filesystem":"enforced","network":"enforced","env":"enforced","process_tree":"enforced","timeout":"{timeout}"}}"#
-    )
-}
+const BACKEND: &str = "/usr/bin/sandboy";
 
 fn full_policy() -> SandboxPolicy {
     SandboxPolicy {
@@ -36,153 +38,76 @@ fn full_policy() -> SandboxPolicy {
     }
 }
 
-// --- The report rejects the shapes that let software lie about confinement ---
+fn boundary() -> SandboyBoundary {
+    SandboyBoundary::new(PathBuf::from(BACKEND), full_policy()).expect("valid boundary")
+}
+
+fn a_nonce() -> LaunchNonce {
+    LaunchNonce::from_bytes([0x11; 16])
+}
+
+fn a_target() -> Digest256 {
+    Digest256::of_bytes(b"the confined target bytes")
+}
+
+/// A report frame bound to `boundary`'s policy, `nonce`, and `target`, with each dimension set
+/// as given — so a test can forge a downgrade or a mis-binding on purpose.
+fn report_frame(
+    b: &SandboyBoundary,
+    nonce: &LaunchNonce,
+    target: &Digest256,
+    dims: [Enforcement; 5],
+) -> Vec<u8> {
+    let [filesystem, network, env, process_tree, timeout] = dims;
+    let report = SandboxReport {
+        schema_version: SCHEMA_VERSION,
+        backend: BackendIdentity::new("sandboy-linux", "0.1.0").unwrap(),
+        policy_digest: b.policy().digest(),
+        launch_nonce: nonce.clone(),
+        target_digest: target.clone(),
+        filesystem,
+        network,
+        env,
+        process_tree,
+        timeout,
+    };
+    encode(&report).expect("report encodes")
+}
+
+const ALL_ENFORCED: [Enforcement; 5] = [Enforcement::Enforced; 5];
+
+// --- construction is fail-closed ---
 
 #[test]
-fn a_boolean_secure_report_is_rejected() {
-    // issue #53: "Avoid boolean `secure: true`." An unknown field must fail to parse, not be
-    // silently ignored.
-    let bytes = br#"{"backend":"x","filesystem":"enforced","network":"enforced","env":"enforced","process_tree":"enforced","timeout":"enforced","secure":true}"#;
-    assert!(matches!(
-        SandboxReport::parse(bytes),
-        Err(ReportError::Malformed(_))
-    ));
+fn a_relative_backend_is_rejected() {
+    let err = SandboyBoundary::new(PathBuf::from("sandboy"), full_policy())
+        .expect_err("a PATH-relative backend must be refused");
+    assert!(matches!(err, SandboyLaunchError::RelativeBackend(_)));
 }
 
 #[test]
-fn a_report_missing_a_dimension_is_rejected() {
-    // Drop `timeout` — a missing dimension must be a parse error, never a silent "enforced".
-    let bytes = br#"{"backend":"x","filesystem":"enforced","network":"enforced","env":"enforced","process_tree":"enforced"}"#;
-    assert!(matches!(
-        SandboxReport::parse(bytes),
-        Err(ReportError::Malformed(_))
-    ));
+fn an_invalid_policy_is_rejected() {
+    let mut policy = full_policy();
+    policy.timeout = Duration::ZERO;
+    assert!(SandboyBoundary::new(PathBuf::from(BACKEND), policy).is_err());
 }
 
 #[test]
-fn a_report_with_no_backend_named_is_rejected() {
-    let bytes = full_report_json("enforced").replace("landlock-seccomp", "");
-    assert_eq!(
-        SandboxReport::parse(bytes.as_bytes()),
-        Err(ReportError::EmptyBackend)
-    );
-}
-
-#[test]
-fn a_well_formed_report_round_trips() {
-    let bytes = full_report_json("enforced");
-    let report = SandboxReport::parse(bytes.as_bytes()).expect("valid report parses");
-    let json = serde_json::to_vec(&report).unwrap();
-    let back = SandboxReport::parse(&json).expect("re-parses");
-    assert_eq!(report, back);
-}
-
-// --- The honest mapping: a downgrade can never present as full confinement ---
-
-#[test]
-fn an_all_enforced_report_is_fully_enforced_and_attests_sandboy() {
-    let report = SandboxReport::parse(full_report_json("enforced").as_bytes()).unwrap();
-    assert_eq!(report.enforcement_level(), EnforcementLevel::FullyEnforced);
-    let attestation = report.attestation();
+fn attestation_is_sandboy_fully_enforced_and_satisfies_the_requirement() {
+    let attestation = boundary().attestation();
     assert_eq!(attestation.implementation, BoundaryKind::Sandboy);
     assert_eq!(attestation.enforcement, EnforcementLevel::FullyEnforced);
+    assert!(BoundaryRequirement::RequireFullyEnforced.is_satisfied_by(&attestation));
 }
 
-#[test]
-fn any_downgraded_dimension_is_never_fully_enforced() {
-    // A single non-enforced dimension must drop the whole report below FullyEnforced, so it
-    // can never satisfy RequireFullyEnforced.
-    for downgraded in [
-        r#"{"backend":"x","filesystem":"partial","network":"enforced","env":"enforced","process_tree":"enforced","timeout":"enforced"}"#,
-        r#"{"backend":"x","filesystem":"enforced","network":"not_enforced","env":"enforced","process_tree":"enforced","timeout":"enforced"}"#,
-    ] {
-        let report = SandboxReport::parse(downgraded.as_bytes()).unwrap();
-        assert_ne!(
-            report.enforcement_level(),
-            EnforcementLevel::FullyEnforced,
-            "a downgraded dimension must not read as fully enforced: {downgraded}"
-        );
-        assert!(
-            !BoundaryRequirement::RequireFullyEnforced.is_satisfied_by(&report.attestation()),
-            "a downgraded report must not satisfy RequireFullyEnforced: {downgraded}"
-        );
-    }
-}
+// --- the exec gate: PR-3 sealed memfd ---
 
 #[test]
-fn an_all_not_enforced_report_is_none() {
-    let bytes = br#"{"backend":"x","filesystem":"not_enforced","network":"not_enforced","env":"not_enforced","process_tree":"not_enforced","timeout":"not_enforced"}"#;
-    let report = SandboxReport::parse(bytes).unwrap();
-    assert_eq!(report.enforcement_level(), EnforcementLevel::None);
-}
-
-#[test]
-fn a_mixed_report_is_partial() {
-    let bytes = br#"{"backend":"x","filesystem":"enforced","network":"not_enforced","env":"partial","process_tree":"enforced","timeout":"enforced"}"#;
-    let report = SandboxReport::parse(bytes).unwrap();
-    assert_eq!(report.enforcement_level(), EnforcementLevel::Partial);
-    assert_eq!(
-        report.dimension(o7_worker::SandboxDimension::Env),
-        Enforcement::Partial
-    );
-}
-
-// --- Policy validation: a degenerate policy never becomes a FullyEnforced boundary ---
-
-#[test]
-fn a_relative_worktree_is_rejected() {
-    let mut policy = full_policy();
-    policy.worktree = PathBuf::from("relative/dir");
-    assert!(matches!(
-        policy.validate(),
-        Err(SandboxPolicyError::RelativeWorktree(_))
-    ));
-}
-
-#[test]
-fn a_policy_with_no_exec_allowance_is_rejected() {
-    let mut policy = full_policy();
-    policy.allow_exec.clear();
-    assert_eq!(policy.validate(), Err(SandboxPolicyError::NoExecAllowance));
-}
-
-#[test]
-fn a_relative_exec_allowance_is_rejected() {
-    let mut policy = full_policy();
-    policy.allow_exec = vec![PathBuf::from("bin")];
-    assert!(matches!(
-        policy.validate(),
-        Err(SandboxPolicyError::RelativeExecAllowance(_))
-    ));
-}
-
-#[test]
-fn a_zero_timeout_is_rejected() {
-    let mut policy = full_policy();
-    policy.timeout = Duration::ZERO;
-    assert_eq!(policy.validate(), Err(SandboxPolicyError::ZeroTimeout));
-}
-
-#[test]
-fn new_rejects_an_invalid_policy_fail_closed() {
-    let mut policy = full_policy();
-    policy.timeout = Duration::ZERO;
-    assert!(SandboyBoundary::new(PathBuf::from("/usr/bin/sandboy"), policy).is_err());
-}
-
-// --- The load-bearing PR-3 invariant: the sealed-memfd exec path must be permitted ---
-
-#[test]
-fn the_sealed_memfd_exec_path_must_be_permitted_by_the_policy() {
-    // PR 3 execs a sealed memfd via /proc/<verifier_pid>/fd/<n>. Granting /proc permits it;
-    // granting nothing under /proc must fail closed.
+fn the_sealed_memfd_exec_path_must_be_permitted() {
     let sealed = Path::new("/proc/4242/fd/7");
-
-    let mut permits = full_policy();
-    permits.allow_exec = vec![PathBuf::from("/proc")];
     assert!(
-        permits.permits_exec(sealed),
-        "granting /proc must permit the sealed-memfd exec target"
+        full_policy().permits_exec(sealed),
+        "granting /proc permits it"
     );
 
     let mut denies = full_policy();
@@ -194,65 +119,160 @@ fn the_sealed_memfd_exec_path_must_be_permitted_by_the_policy() {
 }
 
 #[test]
-fn attestation_of_a_valid_boundary_is_sandboy_fully_enforced() {
-    let boundary = SandboyBoundary::new(PathBuf::from("/usr/bin/sandboy"), full_policy())
-        .expect("a full-confinement policy is accepted");
-    let attestation = boundary.attestation();
-    assert_eq!(attestation.implementation, BoundaryKind::Sandboy);
-    assert_eq!(attestation.enforcement, EnforcementLevel::FullyEnforced);
-    assert!(
-        BoundaryRequirement::RequireFullyEnforced.is_satisfied_by(&attestation),
-        "a configured Sandboy boundary must satisfy RequireFullyEnforced"
-    );
-}
-
-#[test]
 fn the_backend_invocation_wraps_the_target_after_a_separator() {
-    let boundary = SandboyBoundary::new(PathBuf::from("/usr/bin/sandboy"), full_policy()).unwrap();
-    let target = o7_worker::boundary::BoundarySpawnSpec {
+    let b = boundary();
+    let target = BoundarySpawnSpec {
         executable: PathBuf::from("/proc/4242/fd/7"),
         arguments: vec![OsString::from("--flag"), OsString::from("value")],
         working_directory: PathBuf::from("/work/run-1"),
         environment: Default::default(),
-        stdin: o7_worker::StdinMode::Null,
+        stdin: StdinMode::Null,
     };
-    let wrapped = boundary
-        .backend_spawn_spec(&target)
+    let wrapped = b
+        .backend_spawn_spec(&target, 3, &a_nonce())
         .expect("a permitted target is wrapped");
 
-    // The launched program is the backend, not the target.
-    assert_eq!(wrapped.executable, PathBuf::from("/usr/bin/sandboy"));
-    // The confinement flags precede the separator; the real target follows it.
-    let sep = wrapped
-        .arguments
-        .iter()
-        .position(|a| a == "--")
-        .expect("a `--` separator delimits the target");
-    let before: Vec<&OsString> = wrapped.arguments[..sep].iter().collect();
-    assert!(before.iter().any(|a| *a == "--deny-net"));
-    assert!(before.iter().any(|a| *a == "--report"));
+    assert_eq!(wrapped.executable, PathBuf::from(BACKEND));
+    let before_sep = |flag: &str| {
+        let sep = wrapped.arguments.iter().position(|a| a == "--").unwrap();
+        wrapped.arguments[..sep].iter().any(|a| a == flag)
+    };
+    assert!(before_sep("--deny-net"));
+    assert!(before_sep("--report-fd"));
+    assert!(before_sep("--launch-nonce"));
+    let sep = wrapped.arguments.iter().position(|a| a == "--").unwrap();
     assert_eq!(
         wrapped.arguments[sep + 1],
         OsString::from("/proc/4242/fd/7")
     );
     assert_eq!(wrapped.arguments[sep + 2], OsString::from("--flag"));
     assert_eq!(wrapped.arguments[sep + 3], OsString::from("value"));
+    // The nonce we passed is the one placed on the argv.
+    let np = wrapped
+        .arguments
+        .iter()
+        .position(|a| a == "--launch-nonce")
+        .unwrap();
+    assert_eq!(
+        wrapped.arguments[np + 1],
+        OsString::from(a_nonce().as_str())
+    );
 }
 
 #[test]
 fn wrapping_an_unpermitted_target_fails_closed() {
     let mut policy = full_policy();
     policy.allow_exec = vec![PathBuf::from("/usr/bin")];
-    let boundary = SandboyBoundary::new(PathBuf::from("/usr/bin/sandboy"), policy).unwrap();
-    let target = o7_worker::boundary::BoundarySpawnSpec {
+    let b = SandboyBoundary::new(PathBuf::from(BACKEND), policy).unwrap();
+    let target = BoundarySpawnSpec {
         executable: PathBuf::from("/proc/4242/fd/7"),
         arguments: vec![],
         working_directory: PathBuf::from("/work/run-1"),
         environment: Default::default(),
-        stdin: o7_worker::StdinMode::Null,
+        stdin: StdinMode::Null,
     };
-    assert!(
-        boundary.backend_spawn_spec(&target).is_err(),
-        "an exec target the policy does not permit must refuse to build a launch"
+    assert!(b.backend_spawn_spec(&target, 3, &a_nonce()).is_err());
+}
+
+// --- the report VERIFICATION matrix (pure, fail-closed) ---
+
+#[test]
+fn a_fully_bound_full_report_verifies_to_sandboy_evidence() {
+    let b = boundary();
+    let nonce = a_nonce();
+    let target = a_target();
+    let frame = report_frame(&b, &nonce, &target, ALL_ENFORCED);
+    let evidence = b
+        .verify_report(&frame, &nonce, &target)
+        .expect("a fully bound, fully enforced report is trusted");
+    assert_eq!(evidence.attestation.implementation, BoundaryKind::Sandboy);
+    assert_eq!(
+        evidence.attestation.enforcement,
+        EnforcementLevel::FullyEnforced
     );
+    assert_eq!(
+        evidence.report.as_deref(),
+        Some(frame.as_slice()),
+        "the raw frame is carried for content-addressed persistence"
+    );
+}
+
+#[test]
+fn a_downgraded_report_fails_closed() {
+    let b = boundary();
+    let nonce = a_nonce();
+    let target = a_target();
+    // Every single-dimension downgrade must be rejected.
+    for i in 0..5 {
+        let mut dims = ALL_ENFORCED;
+        dims[i] = Enforcement::Partial;
+        let frame = report_frame(&b, &nonce, &target, dims);
+        assert!(
+            matches!(
+                b.verify_report(&frame, &nonce, &target),
+                Err(SandboyLaunchError::NotFullyEnforced)
+            ),
+            "dimension {i} downgraded to Partial must fail closed"
+        );
+    }
+}
+
+#[test]
+fn a_report_bound_to_a_different_nonce_fails_closed() {
+    let b = boundary();
+    let target = a_target();
+    let frame = report_frame(&b, &a_nonce(), &target, ALL_ENFORCED);
+    let other = LaunchNonce::from_bytes([0x22; 16]);
+    assert!(matches!(
+        b.verify_report(&frame, &other, &target),
+        Err(SandboyLaunchError::NonceMismatch)
+    ));
+}
+
+#[test]
+fn a_report_bound_to_a_different_target_fails_closed() {
+    let b = boundary();
+    let nonce = a_nonce();
+    let frame = report_frame(&b, &nonce, &a_target(), ALL_ENFORCED);
+    let other = Digest256::of_bytes(b"a different target");
+    assert!(matches!(
+        b.verify_report(&frame, &nonce, &other),
+        Err(SandboyLaunchError::TargetMismatch)
+    ));
+}
+
+#[test]
+fn a_report_bound_to_a_different_policy_fails_closed() {
+    // A report minted against ANOTHER policy must not verify against this boundary.
+    let other_boundary = {
+        let mut p = full_policy();
+        p.timeout = Duration::from_secs(601);
+        SandboyBoundary::new(PathBuf::from(BACKEND), p).unwrap()
+    };
+    let nonce = a_nonce();
+    let target = a_target();
+    let foreign_frame = report_frame(&other_boundary, &nonce, &target, ALL_ENFORCED);
+    assert!(matches!(
+        boundary().verify_report(&foreign_frame, &nonce, &target),
+        Err(SandboyLaunchError::PolicyDigestMismatch)
+    ));
+}
+
+#[test]
+fn a_malformed_or_truncated_frame_fails_closed() {
+    let b = boundary();
+    let nonce = a_nonce();
+    let target = a_target();
+    let frame = report_frame(&b, &nonce, &target, ALL_ENFORCED);
+    // Truncate the body.
+    let cut = &frame[..frame.len() - 4];
+    assert!(matches!(
+        b.verify_report(cut, &nonce, &target),
+        Err(SandboyLaunchError::Frame(_))
+    ));
+    // Not even a frame.
+    assert!(matches!(
+        b.verify_report(b"not a frame", &nonce, &target),
+        Err(SandboyLaunchError::Frame(_))
+    ));
 }

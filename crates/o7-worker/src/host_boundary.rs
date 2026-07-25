@@ -14,8 +14,9 @@ use nix::unistd::Pid;
 use tokio::process::{Child, Command};
 
 use crate::boundary::{
-    BoundaryAttestation, BoundaryError, BoundaryExit, BoundaryKind, BoundaryProcess,
-    BoundarySpawnSpec, BoundaryStream, EnforcementLevel, ProcessBoundary,
+    BoundaryAttestation, BoundaryError, BoundaryEvidence, BoundaryExit, BoundaryKind,
+    BoundaryLaunch, BoundaryProcess, BoundarySpawnSpec, BoundaryStream, EnforcementLevel,
+    ProcessBoundary,
 };
 use crate::process_identity::ProcessIdentity;
 use crate::spec::StdinMode;
@@ -27,10 +28,7 @@ pub struct UnconfinedHostBoundary;
 
 #[async_trait]
 impl ProcessBoundary for UnconfinedHostBoundary {
-    async fn spawn(
-        &self,
-        spec: BoundarySpawnSpec,
-    ) -> Result<Box<dyn BoundaryProcess>, BoundaryError> {
+    async fn spawn(&self, spec: BoundarySpawnSpec) -> Result<BoundaryLaunch, BoundaryError> {
         // Membership/cleanup attestation relies on Linux `/proc`. Refuse anything
         // else rather than pretend to enforce a boundary we cannot verify.
         if !cfg!(target_os = "linux") {
@@ -75,11 +73,16 @@ impl ProcessBoundary for UnconfinedHostBoundary {
             )));
         }
 
-        Ok(Box::new(HostBoundaryProcess {
-            child,
-            identity,
-            pgid,
-        }))
+        Ok(BoundaryLaunch {
+            process: Box::new(HostBoundaryProcess {
+                child,
+                identity,
+                pgid,
+            }),
+            // The host boundary establishes NO confinement — honest, empty evidence. Usable
+            // only under `AllowUnconfined`; the supervisor rejects it for RequireFullyEnforced.
+            evidence: BoundaryEvidence::unconfined(self.attestation()),
+        })
     }
 
     fn attestation(&self) -> BoundaryAttestation {

@@ -30,8 +30,9 @@ use o7_verifier::{
     CwdPolicy, ExitPolicy, OutputLimits, RequiredBoundary, TrustAnchor, TrustStore, TrustedCommand,
 };
 use o7_worker::{
-    BoundaryAttestation, BoundaryError, BoundaryExit, BoundaryKind, BoundaryProcess,
-    BoundarySpawnSpec, BoundaryStream, EnforcementLevel, ProcessBoundary, ProcessIdentity,
+    BoundaryAttestation, BoundaryError, BoundaryEvidence, BoundaryExit, BoundaryKind,
+    BoundaryLaunch, BoundaryProcess, BoundarySpawnSpec, BoundaryStream, EnforcementLevel,
+    ProcessBoundary, ProcessIdentity,
 };
 use o7_worktree::CanonicalRepoId;
 
@@ -119,10 +120,7 @@ impl FakeBoundary {
 
 #[async_trait]
 impl ProcessBoundary for FakeBoundary {
-    async fn spawn(
-        &self,
-        _spec: BoundarySpawnSpec,
-    ) -> Result<Box<dyn BoundaryProcess>, BoundaryError> {
+    async fn spawn(&self, _spec: BoundarySpawnSpec) -> Result<BoundaryLaunch, BoundaryError> {
         self.state.spawn_entered.store(true, Ordering::SeqCst);
         if let Some(message) = &self.spawn_error {
             return Err(BoundaryError::Spawn(io::Error::other(message.clone())));
@@ -131,19 +129,22 @@ impl ProcessBoundary for FakeBoundary {
             Behavior::InfiniteStdout => Some(Box::pin(InfiniteReader) as BoundaryStream),
             _ => None,
         };
-        Ok(Box::new(FakeProcess {
-            identity: ProcessIdentity {
-                pid: 424_242,
-                process_group: 424_242,
-                start_time_ticks: 7,
-            },
-            behavior: self.behavior,
-            stdout: Mutex::new(stdout),
-            graceful_ok: Arc::new(AtomicBool::new(false)),
-            force_ok: Arc::new(AtomicBool::new(false)),
-            notify: Arc::new(Notify::new()),
-            state: Arc::clone(&self.state),
-        }))
+        Ok(BoundaryLaunch {
+            process: Box::new(FakeProcess {
+                identity: ProcessIdentity {
+                    pid: 424_242,
+                    process_group: 424_242,
+                    start_time_ticks: 7,
+                },
+                behavior: self.behavior,
+                stdout: Mutex::new(stdout),
+                graceful_ok: Arc::new(AtomicBool::new(false)),
+                force_ok: Arc::new(AtomicBool::new(false)),
+                notify: Arc::new(Notify::new()),
+                state: Arc::clone(&self.state),
+            }),
+            evidence: BoundaryEvidence::unconfined(self.attestation),
+        })
     }
 
     fn attestation(&self) -> BoundaryAttestation {
