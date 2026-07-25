@@ -49,14 +49,14 @@ fn launch_policy(allow_exec: Vec<PathBuf>) -> SandboxPolicy {
     }
 }
 
-/// A boundary whose backend runs in the given fake `mode`, configured via the TRUSTED
-/// control-plane env — NOT the target environment.
+/// A boundary whose backend runs in the given fake `mode`, configured via the TYPED
+/// control-plane config — NOT the target environment.
 fn boundary(allow_exec: Vec<PathBuf>, mode: &str) -> SandboyBoundary {
-    let mut backend_env = BTreeMap::new();
-    backend_env.insert(OsString::from("O7_FAKE_MODE"), OsString::from(mode));
     SandboyBoundary::new(fake_backend(), launch_policy(allow_exec))
         .expect("valid boundary")
-        .with_backend_env(backend_env)
+        .with_backend_config(o7_worker::BackendConfig {
+            fake_mode: Some(mode.to_owned()),
+        })
 }
 
 /// A target that touches `marker` then exits 0 — the target env is EMPTY (mode lives on the
@@ -224,15 +224,15 @@ impl NonceSource for FailingNonce {
 async fn an_rng_failure_fails_the_launch_before_any_backend_spawn() {
     // GREEN: minting happens before the backend is launched, and an RNG failure must fail
     // closed with no fallback.
-    let mut backend_env = BTreeMap::new();
-    backend_env.insert(OsString::from("O7_FAKE_MODE"), OsString::from("ok"));
     let b = SandboyBoundary::with_nonce_source(
         fake_backend(),
         launch_policy(vec![PathBuf::from("/bin")]),
         Arc::new(FailingNonce),
     )
     .unwrap()
-    .with_backend_env(backend_env);
+    .with_backend_config(o7_worker::BackendConfig {
+        fake_mode: Some("ok".to_owned()),
+    });
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("target-ran");
     let err = b

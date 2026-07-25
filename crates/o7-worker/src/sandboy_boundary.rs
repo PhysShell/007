@@ -131,15 +131,26 @@ pub struct NonceError(pub String);
 /// enforcement. Constructed only with a validated full-confinement policy and an
 /// acquisition-bound backend, so a constructed instance always intends `FullyEnforced` — there
 /// is no weaker mode and no silent fallback.
+/// TYPED backend control-plane configuration. Deliberately NOT an arbitrary environment map — a
+/// production caller cannot smuggle `LD_PRELOAD`/`LD_LIBRARY_PATH`/etc. into the trusted backend
+/// through it. The only knob is a TEST-ONLY fake-backend mode; a real backend ignores it, and
+/// production leaves it `None`, giving the backend an empty trusted environment.
+#[derive(Debug, Clone, Default)]
+pub struct BackendConfig {
+    /// TEST-ONLY: drives the controlled fake `sandboy` backend's misbehavior mode. A real backend
+    /// ignores this; it exists so tests configure the fake via the trusted control plane rather
+    /// than the untrusted target environment.
+    #[doc(hidden)]
+    pub fake_mode: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct SandboyBoundary {
     backend: BackendImage,
     policy: SandboxPolicy,
     nonce_source: Arc<dyn NonceSource>,
-    /// The TRUSTED control-plane environment handed to the backend (never the target's). Empty
-    /// in production; tests set backend configuration (e.g. a fake mode) here — NOT via the
-    /// untrusted target environment.
-    backend_env: BTreeMap<OsString, OsString>,
+    /// TYPED control-plane config for the backend (never the untrusted target's environment).
+    backend_config: BackendConfig,
 }
 
 impl std::fmt::Debug for SandboyBoundary {
@@ -224,17 +235,25 @@ impl SandboyBoundary {
             backend,
             policy,
             nonce_source,
-            backend_env: BTreeMap::new(),
+            backend_config: BackendConfig::default(),
         })
     }
 
-    /// Set the TRUSTED control-plane environment for the backend (default empty). This is the
-    /// backend's OWN environment, distinct from the untrusted target's — used for backend
-    /// configuration, never for passing target-controlled variables.
+    /// Set the TYPED backend control-plane config (default: no fake mode → empty trusted env).
     #[must_use]
-    pub fn with_backend_env(mut self, env: BTreeMap<OsString, OsString>) -> Self {
-        self.backend_env = env;
+    pub fn with_backend_config(mut self, config: BackendConfig) -> Self {
+        self.backend_config = config;
         self
+    }
+
+    /// The trusted control-plane environment derived from the typed config. Only a TEST-ONLY
+    /// fake mode ever populates it; production is empty.
+    fn backend_environment(&self) -> BTreeMap<OsString, OsString> {
+        let mut env = BTreeMap::new();
+        if let Some(mode) = &self.backend_config.fake_mode {
+            env.insert(OsString::from("O7_FAKE_MODE"), OsString::from(mode));
+        }
+        env
     }
 
     /// The policy this boundary installs.
@@ -330,7 +349,7 @@ impl SandboyBoundary {
             // environment. The target's own cwd/env travel to the backend out-of-band (a launch
             // request), never through the backend's process environment or a /proc-visible argv.
             working_directory: PathBuf::from("/"),
-            environment: self.backend_env.clone(),
+            environment: self.backend_environment(),
             stdin: spec.stdin,
         })
     }
