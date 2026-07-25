@@ -54,6 +54,9 @@ jobs:
       - name: Workspace check
         run: cargo check --workspace --all-targets --locked
 
+      - name: o7-run tests
+        run: cargo test -p o7-run --locked --no-fail-fast
+
       - name: o7-worker tests
         run: cargo test -p o7-worker --locked --no-fail-fast
 
