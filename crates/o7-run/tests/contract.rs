@@ -15,7 +15,7 @@ use common::*;
 use o7_run::event::{Digest256, GateOutcome, RunEventKind};
 use o7_run::ids::RunId;
 use o7_run::replay::{classify, Replayability};
-use o7_run::{RunEvent, RUN_EVENT_SCHEMA_VERSION, RUN_STATE_SCHEMA_VERSION};
+use o7_run::{RunEvent, RunState, RUN_EVENT_SCHEMA_VERSION, RUN_STATE_SCHEMA_VERSION};
 
 #[test]
 fn a_built_stream_is_internally_consistent() {
@@ -123,4 +123,18 @@ fn an_empty_id_is_rejected() {
 fn the_event_and_state_schema_versions_are_pinned() {
     assert_eq!(RUN_EVENT_SCHEMA_VERSION, 1);
     assert_eq!(RUN_STATE_SCHEMA_VERSION, 1);
+}
+
+#[test]
+fn the_normalized_state_anchor_has_a_frozen_known_answer() {
+    // A deliberate, pinned formula — SHA256("o7-run-state\0v1\0" || compact-json) as a SINGLE
+    // domain-separated hash — not merely "two executions agree". If this vector changes, the
+    // externally-anchorable state digest changed and the schema/formula version must move.
+    let digest = RunState::initial()
+        .normalized_digest()
+        .expect("initial state serializes");
+    assert_eq!(
+        digest.as_str(),
+        "28471aaece9a66ea54bbe0527ac7b09f296fc316b34031350e2fca46fb495c74"
+    );
 }

@@ -34,8 +34,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use crate::event::{
-    AgentOutcome, ArtifactRef, Digest256, GateOutcome, PolicyOutcome, RunContract,
-    SandboxEvidenceOutcome, RUN_EVENT_SCHEMA_VERSION,
+    AgentOutcome, ArtifactRef, Digest256, ExecutionSubject, GateOutcome, PolicyOutcome,
+    RunContract, SandboxEvidenceOutcome, RUN_EVENT_SCHEMA_VERSION,
 };
 use crate::ids::{GateId, RunEventId, RunId};
 
@@ -96,6 +96,23 @@ pub struct PolicyResult {
     pub outcome: PolicyOutcome,
 }
 
+/// The TYPED identity of a piece of sandbox evidence: which subject, under which policy. A
+/// typed key (not a delimiter-joined string over arbitrary gate ids) is injective by
+/// construction, so evidence can never be mis-attributed by a crafted id.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct SandboxEvidenceKey {
+    pub subject: ExecutionSubject,
+    pub policy_digest: Digest256,
+}
+
+/// One captured sandbox-evidence record: its typed identity and observed outcome. Held in a
+/// key-sorted `Vec` (deterministic, and JSON-serializable unlike a struct-keyed map).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxEvidenceEntry {
+    pub key: SandboxEvidenceKey,
+    pub outcome: SandboxEvidenceOutcome,
+}
+
 /// The pure, versioned reduced state. Serializes to a byte-stable normal form (`BTreeMap`/
 /// `BTreeSet` keep ordering deterministic), so replaying the same stream yields an
 /// identical serialization — the anchor for byte-stable replay and for
@@ -128,9 +145,9 @@ pub struct RunState {
     pub gates: BTreeMap<GateId, GateProgress>,
     /// Policy checks in stream order (verdict-bearing on `Denied`/`Error`).
     pub policy_results: Vec<PolicyResult>,
-    /// Captured sandbox evidence, keyed by a canonical `subject|policy_digest` string so a
-    /// requirement is only satisfied by evidence that matches its subject AND policy.
-    pub sandbox_evidence: BTreeMap<String, SandboxEvidenceOutcome>,
+    /// Captured sandbox evidence, key-sorted, so a requirement is only satisfied by evidence
+    /// that matches its subject AND policy — via a typed key, never a stringified one.
+    pub sandbox_evidence: Vec<SandboxEvidenceEntry>,
     /// The fixed verdict, present only once `Sealed`.
     pub verdict: Option<Verdict>,
 }
@@ -153,7 +170,7 @@ impl RunState {
             seen_event_ids: BTreeSet::new(),
             gates: BTreeMap::new(),
             policy_results: Vec::new(),
-            sandbox_evidence: BTreeMap::new(),
+            sandbox_evidence: Vec::new(),
             verdict: None,
         }
     }
@@ -164,20 +181,26 @@ impl RunState {
         matches!(self.phase, RunPhase::Sealed)
     }
 
-    /// A digest over the byte-stable normalized state serialization. Stable across replays
-    /// of the same stream, so it can be anchored in an external journal/signature to detect
-    /// a fully-recomputed (chain-consistent) rewrite that the hash chain alone cannot.
+    /// A digest over the byte-stable normalized state, anchorable in an external
+    /// journal/signature to detect a fully-recomputed (chain-consistent) rewrite the hash
+    /// chain alone cannot.
+    ///
+    /// FORMULA (frozen, single domain-separated hash — NOT a double hash):
+    /// `SHA256("o7-run-state\0v1\0" || serde_json::to_vec(state))`, where the JSON is this
+    /// struct's deterministic normal form (compact, no whitespace, struct field order, with
+    /// `BTreeMap`/`BTreeSet` and the key-sorted evidence `Vec` giving stable ordering). A
+    /// known-answer vector for [`RunState::initial`] is pinned in `tests/contract.rs`.
     ///
     /// # Errors
-    /// Returns `None` if the state cannot be serialized (it always can for well-formed
-    /// state; kept fallible rather than panicking to honor the no-panic discipline).
+    /// Returns `None` if the state cannot be serialized (it always can for well-formed state;
+    /// kept fallible rather than panicking to honor the no-panic discipline).
     #[must_use]
     pub fn normalized_digest(&self) -> Option<Digest256> {
         let json = serde_json::to_vec(self).ok()?;
         let mut h = Sha256::new();
         h.update(b"o7-run-state\0v1\0");
         h.update(&json);
-        Some(Digest256::of_bytes(&h.finalize()))
+        Some(Digest256::from_sha256(&h.finalize()))
     }
 }
 

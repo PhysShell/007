@@ -11,7 +11,7 @@
 //! payloads and checks each artifact's declared KIND); resolving and hashing artifact bytes
 //! belongs to [`crate::replay`].
 
-use crate::event::{ArtifactKind, RunEvent};
+use crate::event::{ArtifactKind, Digest256, ExecutionSubject, RunEvent};
 use crate::ids::{GateId, RunEventId, RunId};
 use crate::state::RunState;
 
@@ -106,6 +106,69 @@ pub enum ReduceError {
         expected: ArtifactKind,
         found: ArtifactKind,
     },
+
+    /// An artifact reference carried an empty locator.
+    #[error("empty artifact locator at sequence {sequence}")]
+    EmptyArtifactLocator { sequence: u64 },
+
+    /// A second `WorktreeCreated` (the singleton evidence slot cannot be overwritten).
+    #[error("duplicate WorktreeCreated at sequence {sequence}")]
+    DuplicateWorktree { sequence: u64 },
+
+    /// A second `PatchCaptured` (the singleton evidence slot cannot be overwritten).
+    #[error("duplicate PatchCaptured at sequence {sequence}")]
+    DuplicatePatch { sequence: u64 },
+
+    /// An agent event appeared although the contract declared `AgentObligation::NotUsed`.
+    #[error("disallowed agent event at sequence {sequence}: the contract declares no agent")]
+    DisallowedAgentEvent { sequence: u64 },
+
+    /// The contract declared the same policy digest in more than one obligation.
+    #[error("duplicate policy obligation for digest {policy_digest}")]
+    DuplicatePolicyInContract { policy_digest: Digest256 },
+
+    /// A `PolicyChecked` referenced a policy that was never declared as an obligation.
+    #[error("unknown policy {policy_digest} at sequence {sequence}: not a declared obligation")]
+    UnknownPolicy {
+        sequence: u64,
+        policy_digest: Digest256,
+    },
+
+    /// A second `PolicyChecked` for a policy already checked (no aggregation contract).
+    #[error("duplicate policy check for {policy_digest} at sequence {sequence}")]
+    DuplicatePolicyCheck {
+        sequence: u64,
+        policy_digest: Digest256,
+    },
+
+    /// A subject protected by a required policy started before that policy was checked
+    /// `Allowed`.
+    #[error("protected subject started before its policy was allowed at sequence {sequence}: {subject:?}")]
+    ProtectedStartBeforePolicyAllowed {
+        sequence: u64,
+        subject: ExecutionSubject,
+    },
+
+    /// The contract declared the same sandbox requirement (subject + policy) twice.
+    #[error("duplicate sandbox requirement: {subject:?} under {policy_digest}")]
+    DuplicateSandboxRequirement {
+        subject: ExecutionSubject,
+        policy_digest: Digest256,
+    },
+
+    /// A sandbox requirement named a `Gate` subject whose gate is not a declared obligation.
+    #[error("sandbox requirement references unknown gate {gate}")]
+    SandboxSubjectUnknownGate { gate: GateId },
+
+    /// A second `SandboxEvidenceCaptured` for the same (subject, policy) key (no aggregation
+    /// contract).
+    #[error("duplicate sandbox evidence at sequence {sequence}")]
+    DuplicateSandboxEvidence { sequence: u64 },
+
+    /// `SandboxEvidenceCaptured` for a (subject, policy) key that is not a declared
+    /// requirement.
+    #[error("sandbox evidence at sequence {sequence} does not match any declared requirement")]
+    UnrequiredSandboxEvidence { sequence: u64 },
 
     /// A transition that cannot happen (e.g. any non-`RunStarted` event before the run
     /// began) not covered by a more specific variant.

@@ -13,24 +13,30 @@
 use std::collections::HashMap;
 
 use o7_run::event::{
-    ArtifactKind, ArtifactRef, Digest256, GateApplicability, GateObligation, GateOutcome,
-    GateRequirement, RunContract, SandboxRequirement, RUN_EVENT_SCHEMA_VERSION,
+    AgentObligation, ArtifactKind, ArtifactRef, Digest256, ExecutionSubject, GateApplicability,
+    GateObligation, GateOutcome, GateRequirement, PolicyObligation, PolicyRequirement, RunContract,
+    SandboxRequirement, RUN_EVENT_SCHEMA_VERSION,
 };
 use o7_run::ids::{GateId, RunEventId, RunId};
 use o7_run::replay::{ArtifactError, ArtifactResolver};
 use o7_run::{AgentOutcome, RunEvent, RunEventKind};
 
-/// The run id every fixture stream is scoped to.
+// ---- id helpers (validated constructors; `from_raw` no longer exists) ----
+
 pub fn run_id() -> RunId {
-    RunId::from_raw("run-fixture-1")
+    RunId::new("run-fixture-1").expect("valid run id")
 }
 
-/// A gate id from a short name.
 pub fn gate(name: &str) -> GateId {
-    GateId::from_raw(name)
+    GateId::new(name).expect("valid gate id")
 }
 
-/// A required+applicable gate obligation.
+fn event_id(raw: impl Into<String>) -> RunEventId {
+    RunEventId::new(raw).expect("valid event id")
+}
+
+// ---- gate obligations ----
+
 pub fn req(name: &str) -> GateObligation {
     GateObligation {
         gate: gate(name),
@@ -39,7 +45,6 @@ pub fn req(name: &str) -> GateObligation {
     }
 }
 
-/// An optional gate obligation.
 pub fn opt(name: &str) -> GateObligation {
     GateObligation {
         gate: gate(name),
@@ -48,7 +53,6 @@ pub fn opt(name: &str) -> GateObligation {
     }
 }
 
-/// A required gate WAIVED for the given environment (declared skippable up front).
 pub fn waived(name: &str, environment: &str, reason: &str) -> GateObligation {
     GateObligation {
         gate: gate(name),
@@ -60,33 +64,84 @@ pub fn waived(name: &str, environment: &str, reason: &str) -> GateObligation {
     }
 }
 
-/// A Linux contract from gate obligations, with no sandbox requirements.
-pub fn contract(obligations: Vec<GateObligation>) -> RunContract {
+// ---- contracts ----
+
+/// The fully-explicit contract builder; the convenience helpers below wrap it.
+pub fn contract_full(
+    gates: Vec<GateObligation>,
+    policies: Vec<PolicyObligation>,
+    sandbox: Vec<SandboxRequirement>,
+    agent: AgentObligation,
+) -> RunContract {
     RunContract {
-        gate_obligations: obligations,
-        sandbox_requirements: Vec::new(),
+        gate_obligations: gates,
+        policy_obligations: policies,
+        sandbox_requirements: sandbox,
+        agent,
         runner_environment: "linux".to_owned(),
     }
 }
 
-/// A Linux contract with explicit sandbox requirements.
+/// A gate-only contract with NO agent (so streams without agent events are legitimate).
+pub fn contract(gates: Vec<GateObligation>) -> RunContract {
+    contract_full(gates, Vec::new(), Vec::new(), not_used())
+}
+
+/// A gate contract that REQUIRES an agent (for streams that emit agent events).
+pub fn contract_agent(gates: Vec<GateObligation>) -> RunContract {
+    contract_full(gates, Vec::new(), Vec::new(), AgentObligation::Required)
+}
+
+/// A contract with policy obligations and no agent.
+pub fn contract_policy(gates: Vec<GateObligation>, policies: Vec<PolicyObligation>) -> RunContract {
+    contract_full(gates, policies, Vec::new(), not_used())
+}
+
+/// A contract with sandbox requirements and no agent.
 pub fn contract_sandboxed(
-    obligations: Vec<GateObligation>,
+    gates: Vec<GateObligation>,
     sandbox: Vec<SandboxRequirement>,
 ) -> RunContract {
-    RunContract {
-        gate_obligations: obligations,
-        sandbox_requirements: sandbox,
-        runner_environment: "linux".to_owned(),
+    contract_full(gates, Vec::new(), sandbox, not_used())
+}
+
+pub fn not_used() -> AgentObligation {
+    AgentObligation::NotUsed {
+        reason: "no agent in this fixture".to_owned(),
     }
 }
+
+// ---- policy / sandbox helpers ----
+
+pub fn policy_artifact() -> ArtifactRef {
+    artifact(ArtifactKind::Policy, "policy.json", b"{\"net\":\"deny\"}")
+}
+
+pub fn required_policy(policy: ArtifactRef, protects: Vec<ExecutionSubject>) -> PolicyObligation {
+    PolicyObligation {
+        policy,
+        requirement: PolicyRequirement::Required,
+        protects,
+    }
+}
+
+pub fn sandbox_policy_digest() -> Digest256 {
+    Digest256::of_bytes(b"agent-confinement-policy-v1")
+}
+
+pub fn agent_sandbox_requirement() -> SandboxRequirement {
+    SandboxRequirement {
+        subject: ExecutionSubject::Agent,
+        policy_digest: sandbox_policy_digest(),
+    }
+}
+
+// ---- artifacts ----
 
 /// The canonical bytes of the fixture task artifact (so a replay resolver can seed matching
 /// content without drift).
 pub const TASK_BYTES: &[u8] = b"{\"goal\":\"fixture\"}";
 
-/// The task artifact every `RunStarted` binds to (its content is irrelevant to the reducer,
-/// which only checks the KIND; replay resolves and hashes it).
 pub fn task() -> ArtifactRef {
     artifact(ArtifactKind::Task, "task.json", TASK_BYTES)
 }
@@ -99,8 +154,7 @@ pub fn run_started(contract: RunContract) -> RunEventKind {
     }
 }
 
-/// An artifact reference whose digest matches `bytes`, paired with those bytes so a test can
-/// seed a resolver with matching (or, deliberately, mismatching) content.
+/// An artifact reference whose digest matches `bytes`.
 pub fn artifact(kind: ArtifactKind, locator: &str, bytes: &[u8]) -> ArtifactRef {
     ArtifactRef {
         kind,
@@ -109,17 +163,17 @@ pub fn artifact(kind: ArtifactKind, locator: &str, bytes: &[u8]) -> ArtifactRef 
     }
 }
 
-/// A normal agent exit with code 0.
 pub fn agent_ok() -> AgentOutcome {
     AgentOutcome::ExitedNormally { code: 0 }
 }
 
-/// Construct a single event with its `event_digest` correctly computed over its fields and
-/// its `previous_event_digest` set to `prev`. The low-level primitive for hand-building
-/// malformed streams.
+// ---- event / stream construction ----
+
+/// A single event with a correctly-computed `event_digest` and its `previous_event_digest`
+/// set to `prev`. The low-level primitive for hand-building malformed streams.
 pub fn make_event(run: &RunId, sequence: u64, prev: &Digest256, kind: RunEventKind) -> RunEvent {
     let mut event = RunEvent {
-        event_id: RunEventId::from_raw(format!("ev-{sequence}")),
+        event_id: event_id(format!("ev-{sequence}")),
         schema_version: RUN_EVENT_SCHEMA_VERSION,
         run_id: run.clone(),
         sequence,
@@ -132,19 +186,19 @@ pub fn make_event(run: &RunId, sequence: u64, prev: &Digest256, kind: RunEventKi
     event
 }
 
-/// Construct an event with FULL control over `event_id` and `schema_version` (and a
-/// correctly-computed `event_digest`). For structural tests that need to forge a duplicate
-/// id or an unsupported schema while keeping the single event internally consistent.
+/// An event with FULL control over `event_id` and `schema_version` (with a correctly-computed
+/// digest) — for forging a duplicate id or an unsupported schema while keeping the single
+/// event internally consistent.
 pub fn event_with(
     run: &RunId,
-    event_id: &str,
+    id: &str,
     schema: u32,
     sequence: u64,
     prev: &Digest256,
     kind: RunEventKind,
 ) -> RunEvent {
     let mut event = RunEvent {
-        event_id: RunEventId::from_raw(event_id),
+        event_id: event_id(id),
         schema_version: schema,
         run_id: run.clone(),
         sequence,
@@ -157,9 +211,8 @@ pub fn event_with(
     event
 }
 
-/// Build a correctly-chained stream from a list of event kinds: sequence 0..n, each
-/// `previous_event_digest` linked to its predecessor's `event_digest` (genesis for the
-/// first), and every `event_digest` computed. The canonical happy path.
+/// Build a correctly-chained stream: sequence 0..n, each `previous_event_digest` linked to
+/// its predecessor's `event_digest` (genesis for the first), every digest computed.
 pub fn chained(kinds: Vec<RunEventKind>) -> Vec<RunEvent> {
     let run = run_id();
     let mut prev = Digest256::genesis();
@@ -172,11 +225,11 @@ pub fn chained(kinds: Vec<RunEventKind>) -> Vec<RunEvent> {
     events
 }
 
-/// A minimal well-formed stream: start with a single required+applicable gate, run the agent
-/// to a clean exit, run the gate to `outcome`, then seal. Used by the verdict tests.
+/// A minimal well-formed stream: a required+applicable gate, a required agent that exits
+/// cleanly, the gate run to `outcome`, then seal. Used by the verdict tests.
 pub fn single_required_gate_stream(gate_name: &str, outcome: GateOutcome) -> Vec<RunEvent> {
     chained(vec![
-        run_started(contract(vec![req(gate_name)])),
+        run_started(contract_agent(vec![req(gate_name)])),
         RunEventKind::AgentStarted,
         RunEventKind::AgentExited {
             outcome: agent_ok(),
@@ -193,8 +246,7 @@ pub fn single_required_gate_stream(gate_name: &str, outcome: GateOutcome) -> Vec
     ])
 }
 
-/// An in-memory [`ArtifactResolver`] mapping locator → current bytes. Seed it with matching
-/// bytes for a clean replay, or with different bytes to simulate a post-seal edit.
+/// An in-memory [`ArtifactResolver`] mapping locator → current bytes.
 #[derive(Default)]
 pub struct MapResolver {
     map: HashMap<String, Vec<u8>>,
@@ -205,7 +257,6 @@ impl MapResolver {
         Self::default()
     }
 
-    /// Seed the CURRENT bytes stored at `locator` (what replay will resolve and hash).
     pub fn insert(&mut self, locator: &str, bytes: &[u8]) {
         self.map.insert(locator.to_owned(), bytes.to_vec());
     }

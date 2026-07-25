@@ -45,13 +45,6 @@ macro_rules! id_type {
             pub fn as_str(&self) -> &str {
                 &self.0
             }
-
-            /// Wrap an already-existing id string minted upstream (trusted, in-process).
-            /// The pure core never invents an id.
-            #[must_use]
-            pub fn from_raw(raw: impl Into<String>) -> Self {
-                Self(raw.into())
-            }
         }
 
         impl fmt::Display for $name {

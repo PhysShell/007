@@ -52,9 +52,10 @@ pub mod replay;
 pub mod state;
 
 pub use event::{
-    AgentOutcome, ArtifactKind, ArtifactRef, Digest256, DigestFormatError, ExecutionSubject,
-    GateApplicability, GateObligation, GateOutcome, GateRequirement, PolicyOutcome, RunContract,
-    RunEvent, RunEventKind, SandboxEvidenceOutcome, SandboxRequirement, RUN_EVENT_SCHEMA_VERSION,
+    AgentObligation, AgentOutcome, ArtifactKind, ArtifactRef, Digest256, DigestFormatError,
+    ExecutionSubject, GateApplicability, GateObligation, GateOutcome, GateRequirement,
+    PolicyObligation, PolicyOutcome, PolicyRequirement, RunContract, RunEvent, RunEventKind,
+    SandboxEvidenceOutcome, SandboxRequirement, RUN_EVENT_SCHEMA_VERSION,
 };
 pub use ids::{GateId, IdError, RunEventId, RunId};
 pub use reduce::{reduce, reduce_all, ReduceError};
@@ -63,6 +64,6 @@ pub use replay::{
     Replayability,
 };
 pub use state::{
-    AgentLifecycle, GateProgress, PolicyResult, RunPhase, RunState, Verdict,
-    RUN_STATE_SCHEMA_VERSION,
+    AgentLifecycle, GateProgress, PolicyResult, RunPhase, RunState, SandboxEvidenceEntry,
+    SandboxEvidenceKey, Verdict, RUN_STATE_SCHEMA_VERSION,
 };

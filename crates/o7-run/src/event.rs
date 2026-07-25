@@ -73,6 +73,14 @@ impl Digest256 {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Wrap the raw 32 bytes of a SHA-256 finalize as a canonical digest, WITHOUT hashing
+    /// again. Crate-internal so external callers still go through validated constructors;
+    /// used to anchor a single domain-separated hash (never a double hash).
+    #[must_use]
+    pub(crate) fn from_sha256(raw: &[u8]) -> Self {
+        Self(hex_lower(raw))
+    }
 }
 
 impl fmt::Display for Digest256 {
@@ -165,8 +173,9 @@ pub enum PolicyOutcome {
 }
 
 /// Which execution a sandbox obligation/evidence is about. Confinement evidence is bound to
-/// a SUBJECT so one blanket "confined: true" cannot satisfy every requirement.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// a SUBJECT so one blanket "confined: true" cannot satisfy every requirement. `Ord` so it
+/// can key a typed sandbox-evidence identity.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(tag = "subject", rename_all = "snake_case")]
 pub enum ExecutionSubject {
     /// The agent process.
@@ -229,18 +238,62 @@ pub struct GateObligation {
     pub applicability: GateApplicability,
 }
 
+/// Whether a policy check is required for the verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PolicyRequirement {
+    /// Must be checked and `Allowed` (or the run is not `Pass`).
+    Required,
+    /// Informational; never blocks the verdict.
+    Optional,
+}
+
+/// A pre-declared policy obligation: which policy (bound by digest) must be checked, whether
+/// it is required, and which subjects it PROTECTS. A protected subject may not start before
+/// this policy has been checked `Allowed` — so a stream cannot faithfully record that the
+/// horse left before the barn door was inspected. Matched to a `PolicyChecked` event by the
+/// policy artifact's digest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyObligation {
+    /// The policy definition (must be `ArtifactKind::Policy`).
+    pub policy: ArtifactRef,
+    pub requirement: PolicyRequirement,
+    /// Subjects whose start must be preceded by an `Allowed` check of this policy.
+    pub protects: Vec<ExecutionSubject>,
+}
+
+/// Whether a canonical run must run an agent. Declared up front so an agent cannot be made
+/// optional by omission — a run that loses both agent events during integration is caught,
+/// not silently passed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "agent", rename_all = "snake_case")]
+pub enum AgentObligation {
+    /// Exactly one terminal agent outcome is required; a clean `ExitedNormally { code: 0 }`
+    /// is neutral, anything else is `Error`.
+    Required,
+    /// No agent runs in this canonical run (e.g. an evidence-only or gate-only run), with an
+    /// auditable reason. Any agent event is then a structural error.
+    NotUsed { reason: String },
+}
+
 /// The obligations declared for a run BEFORE it executes: which gates must pass, which
-/// confinement must be evidenced, and the environment. Applicability and requirement are
-/// fixed here — they cannot be invented after the fact from observed events.
+/// policies must be checked, which confinement must be evidenced, whether an agent runs, and
+/// the environment. Requirement/applicability are fixed here — they cannot be invented after
+/// the fact from observed events.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunContract {
-    /// Every gate obligation, keyed by a unique gate id (duplicates are a structural
-    /// error).
+    /// Every gate obligation, keyed by a unique gate id (duplicates are a structural error).
     pub gate_obligations: Vec<GateObligation>,
-    /// Sandbox obligations that must each be satisfied by matching evidence.
+    /// Every policy obligation, keyed by a unique policy digest (duplicates are a structural
+    /// error).
+    pub policy_obligations: Vec<PolicyObligation>,
+    /// Sandbox obligations that must each be satisfied by matching evidence (duplicates are a
+    /// structural error).
     pub sandbox_requirements: Vec<SandboxRequirement>,
-    /// The runner environment tag (e.g. `linux`). Opaque to the reducer except for
-    /// matching a gate waiver's declared environment.
+    /// Whether an agent must run.
+    pub agent: AgentObligation,
+    /// The runner environment tag (e.g. `linux`). Opaque to the reducer except for matching a
+    /// gate waiver's declared environment.
     pub runner_environment: String,
 }
 
@@ -449,6 +502,15 @@ fn fold_contract(h: &mut Sha256, contract: &RunContract) {
         h.update([gate_requirement_tag(o.requirement)]);
         fold_applicability(h, &o.applicability);
     }
+    frame(h, &(contract.policy_obligations.len() as u64).to_le_bytes());
+    for p in &contract.policy_obligations {
+        fold_artifact(h, &p.policy);
+        h.update([policy_requirement_tag(p.requirement)]);
+        frame(h, &(p.protects.len() as u64).to_le_bytes());
+        for s in &p.protects {
+            fold_subject(h, s);
+        }
+    }
     frame(
         h,
         &(contract.sandbox_requirements.len() as u64).to_le_bytes(),
@@ -457,6 +519,7 @@ fn fold_contract(h: &mut Sha256, contract: &RunContract) {
         fold_subject(h, &r.subject);
         frame(h, r.policy_digest.as_str().as_bytes());
     }
+    fold_agent_obligation(h, &contract.agent);
     frame(h, contract.runner_environment.as_bytes());
 }
 
@@ -578,6 +641,23 @@ fn gate_requirement_tag(requirement: GateRequirement) -> u8 {
     match requirement {
         GateRequirement::Required => 1,
         GateRequirement::Optional => 2,
+    }
+}
+
+fn policy_requirement_tag(requirement: PolicyRequirement) -> u8 {
+    match requirement {
+        PolicyRequirement::Required => 1,
+        PolicyRequirement::Optional => 2,
+    }
+}
+
+fn fold_agent_obligation(h: &mut Sha256, agent: &AgentObligation) {
+    match agent {
+        AgentObligation::Required => h.update([1u8]),
+        AgentObligation::NotUsed { reason } => {
+            h.update([2u8]);
+            frame(h, reason.as_bytes());
+        }
     }
 }
 
