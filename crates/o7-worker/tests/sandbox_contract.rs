@@ -201,7 +201,7 @@ fn the_backend_invocation_runs_the_held_backend_with_trusted_cwd_and_env() {
         stdin: StdinMode::Null,
     };
     let wrapped = b
-        .backend_spawn_spec(&target, 3, 4, &a_nonce())
+        .backend_spawn_spec(&target, 3, 4, 5, &a_nonce())
         .expect("a permitted target is wrapped");
 
     // The launched program is the HELD backend descriptor, in a TRUSTED cwd, with a TRUSTED
@@ -221,24 +221,36 @@ fn the_backend_invocation_runs_the_held_backend_with_trusted_cwd_and_env() {
     };
     assert_eq!(arg_after("--report-fd"), OsString::from("3"));
     assert_eq!(arg_after("--control-fd"), OsString::from("4"));
+    assert_eq!(arg_after("--request-fd"), OsString::from("5"));
     assert_eq!(
         arg_after("--launch-nonce"),
         OsString::from(a_nonce().as_str())
     );
-    // The target cwd rides the (non-sensitive) argv; the target env does not appear anywhere.
-    assert_eq!(
-        arg_after("--target-cwd"),
-        OsString::from("/work/target-cwd")
-    );
+    // NONE of the target's argv/cwd/env appears on the /proc-visible backend argv — only the
+    // target executable descriptor follows the separator; everything else is in the request.
     let flat = wrapped.arguments.join(&OsString::from("\u{1f}"));
+    let flat = flat.to_string_lossy();
     assert!(
-        !flat.to_string_lossy().contains("LD_PRELOAD"),
-        "target env must not appear on the /proc-visible argv"
+        !flat.contains("LD_PRELOAD"),
+        "target env must not be on the argv"
+    );
+    assert!(
+        !flat.contains("--flag"),
+        "target args must not be on the argv"
+    );
+    assert!(
+        !flat.contains("/work/target-cwd"),
+        "target cwd must not be on the argv"
     );
     let sep = wrapped.arguments.iter().position(|a| a == "--").unwrap();
     assert_eq!(
         wrapped.arguments[sep + 1],
         OsString::from("/proc/4242/fd/7")
+    );
+    assert_eq!(
+        wrapped.arguments.len(),
+        sep + 2,
+        "only the target exec follows --"
     );
 }
 
@@ -254,7 +266,55 @@ fn wrapping_an_unpermitted_target_fails_closed() {
         environment: Default::default(),
         stdin: StdinMode::Null,
     };
-    assert!(b.backend_spawn_spec(&target, 3, 4, &a_nonce()).is_err());
+    assert!(b.backend_spawn_spec(&target, 3, 4, 5, &a_nonce()).is_err());
+}
+
+// --- the out-of-band launch request: env allowlist ---
+
+#[test]
+fn the_launch_request_carries_allowlisted_env_byte_exact() {
+    let mut policy = full_policy();
+    policy.env_allowlist = vec![OsString::from("PATH"), OsString::from("HOME")];
+    let b = SandboyBoundary::new(backend_image(), policy).unwrap();
+    let mut env = std::collections::BTreeMap::new();
+    env.insert(OsString::from("PATH"), OsString::from("/usr/bin"));
+    env.insert(OsString::from("HOME"), OsString::from("/root"));
+    let target = BoundarySpawnSpec {
+        executable: PathBuf::from("/proc/4242/fd/7"),
+        arguments: vec![OsString::from("-c"), OsString::from("exit 0")],
+        working_directory: PathBuf::from("/work"),
+        environment: env,
+        stdin: StdinMode::Null,
+    };
+    let req = b
+        .launch_request(&target, a_target(), &a_nonce())
+        .expect("allowlisted env is accepted");
+    // argv/cwd/env are carried in the request, byte-exact.
+    assert_eq!(req.argv, vec![b"-c".to_vec(), b"exit 0".to_vec()]);
+    assert_eq!(req.cwd, b"/work".to_vec());
+    let mut names: Vec<Vec<u8>> = req.env.iter().map(|e| e.name.clone()).collect();
+    names.sort();
+    assert_eq!(names, vec![b"HOME".to_vec(), b"PATH".to_vec()]);
+}
+
+#[test]
+fn a_disallowed_target_env_var_fails_closed_before_launch() {
+    // The target asks to keep a variable the policy does not allowlist → fail closed BEFORE the
+    // backend runs anything.
+    let b = boundary(); // allowlist = [PATH]
+    let mut env = std::collections::BTreeMap::new();
+    env.insert(OsString::from("LD_PRELOAD"), OsString::from("/evil.so"));
+    let target = BoundarySpawnSpec {
+        executable: PathBuf::from("/proc/4242/fd/7"),
+        arguments: vec![],
+        working_directory: PathBuf::from("/work"),
+        environment: env,
+        stdin: StdinMode::Null,
+    };
+    assert!(matches!(
+        b.launch_request(&target, a_target(), &a_nonce()),
+        Err(SandboyLaunchError::DisallowedEnv(_))
+    ));
 }
 
 // --- the report VERIFICATION matrix (pure, fail-closed) ---

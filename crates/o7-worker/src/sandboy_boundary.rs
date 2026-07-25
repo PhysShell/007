@@ -180,6 +180,9 @@ pub enum SandboyLaunchError {
     /// The backend did not establish full enforcement on every dimension.
     #[error("backend did not establish full enforcement (a dimension was downgraded)")]
     NotFullyEnforced,
+    /// The target requested an environment variable that the policy's allowlist does not permit.
+    #[error("target environment variable is not on the policy allowlist: {0:?}")]
+    DisallowedEnv(OsString),
 }
 
 impl From<crate::sealed::SealError> for SandboyLaunchError {
@@ -260,6 +263,7 @@ impl SandboyBoundary {
         spec: &BoundarySpawnSpec,
         report_fd: RawFd,
         control_fd: RawFd,
+        request_fd: RawFd,
         launch_nonce: &LaunchNonce,
     ) -> Result<BoundarySpawnSpec, BoundaryError> {
         if !self.policy.permits_exec(&spec.executable) {
@@ -278,6 +282,10 @@ impl SandboyBoundary {
             // GO here; a NACK/EOF makes it kill the cgroup and reap.
             OsString::from("--control-fd"),
             OsString::from(control_fd.to_string()),
+            // The request descriptor: the backend reads the exact execution (target argv/cwd/
+            // allowlisted-env/stdin) from here — never from the backend's own argv/env.
+            OsString::from("--request-fd"),
+            OsString::from(request_fd.to_string()),
             // The per-launch nonce the backend must echo, binding the report to THIS spawn.
             OsString::from("--launch-nonce"),
             OsString::from(launch_nonce.as_str()),
@@ -299,13 +307,12 @@ impl SandboyBoundary {
             arguments.push(OsString::from("--allow-env"));
             arguments.push(name.clone());
         }
-        // The target's cwd is not secret (unlike its env), so it may ride the argv; the
-        // target's ENVIRONMENT does not — it travels out-of-band to the confined target.
-        arguments.push(OsString::from("--target-cwd"));
-        arguments.push(spec.working_directory.clone().into_os_string());
+        // Only the target EXECUTABLE path (a /proc/<pid>/fd descriptor — not sensitive) follows
+        // the separator so the backend knows what object to run. The target's argv, cwd, and
+        // environment travel out-of-band in the LaunchRequest on --request-fd, never on this
+        // /proc-visible argv.
         arguments.push(OsString::from("--"));
         arguments.push(spec.executable.clone().into_os_string());
-        arguments.extend(spec.arguments.iter().cloned());
 
         Ok(BoundarySpawnSpec {
             // Exec the HELD backend object via its owned descriptor path, not a re-resolved
@@ -320,6 +327,54 @@ impl SandboyBoundary {
             working_directory: PathBuf::from("/"),
             environment: self.backend_env.clone(),
             stdin: spec.stdin,
+        })
+    }
+
+    /// Build the out-of-band [`LaunchRequest`] for a target `spec`, enforcing the environment
+    /// ALLOWLIST: every variable the target asks to keep must be named in
+    /// `policy.env_allowlist`, byte-exact, or the launch fails closed BEFORE the backend is
+    /// asked to run anything. The request carries the exact execution (target digest, argv, cwd,
+    /// allowlisted env, stdin, nonce) out-of-band — never on the backend's argv or environment.
+    ///
+    /// # Errors
+    /// [`SandboyLaunchError::DisallowedEnv`] if the target requests a non-allowlisted variable.
+    pub fn launch_request(
+        &self,
+        spec: &BoundarySpawnSpec,
+        target_digest: Digest256,
+        launch_nonce: &LaunchNonce,
+    ) -> Result<o7_sandbox_protocol::LaunchRequest, SandboyLaunchError> {
+        use std::os::unix::ffi::OsStrExt as _;
+        let allowed: std::collections::BTreeSet<&std::ffi::OsStr> = self
+            .policy
+            .env_allowlist
+            .iter()
+            .map(std::ffi::OsString::as_os_str)
+            .collect();
+        let mut env = Vec::new();
+        for (name, value) in &spec.environment {
+            if !allowed.contains(name.as_os_str()) {
+                return Err(SandboyLaunchError::DisallowedEnv(name.clone()));
+            }
+            env.push(o7_sandbox_protocol::EnvEntry {
+                name: name.as_bytes().to_vec(),
+                value: value.as_bytes().to_vec(),
+            });
+        }
+        Ok(o7_sandbox_protocol::LaunchRequest {
+            schema_version: o7_sandbox_protocol::SCHEMA_VERSION,
+            target_digest,
+            argv: spec
+                .arguments
+                .iter()
+                .map(|a| a.as_bytes().to_vec())
+                .collect(),
+            cwd: spec.working_directory.as_os_str().as_bytes().to_vec(),
+            env,
+            stdin: match spec.stdin {
+                crate::spec::StdinMode::Null => o7_sandbox_protocol::StdinKind::Null,
+            },
+            launch_nonce: launch_nonce.clone(),
         })
     }
 
@@ -378,7 +433,7 @@ impl ProcessBoundary for SandboyBoundary {
         // Fail closed BEFORE any launch if the target cannot execute under the policy. (Fixed
         // placeholder fds reuse the argv builder's permission gate; the live launch assigns the
         // real report/control descriptors.)
-        let _backend_spec = self.backend_spawn_spec(&spec, -1, -1, &nonce)?;
+        let _backend_spec = self.backend_spawn_spec(&spec, -1, -1, -1, &nonce)?;
         // RED: the confined live launch (verify the held backend object, open the report +
         // control pipes, spawn the monitor backend, read + verify the report, send GO, and wrap
         // it as a live BoundaryProcess with Reported evidence) is not implemented yet. Fail

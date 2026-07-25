@@ -18,6 +18,7 @@ pub mod frame;
 pub mod ids;
 pub mod policy;
 pub mod report;
+pub mod request;
 
 pub use frame::{FrameError, MAX_REPORT_BYTES};
 pub use ids::{BackendIdentity, Digest256, IdError, LaunchNonce};
@@ -26,6 +27,7 @@ pub use policy::{
     MIN_TIMEOUT,
 };
 pub use report::{ReportError, SandboxReport};
+pub use request::{EnvEntry, LaunchRequest, RequestFrameError, StdinKind, MAX_REQUEST_BYTES};
 
 /// The wire-format version. A report whose `schema_version` differs is rejected rather than
 /// coerced — a version bump is a deliberate, gated change.

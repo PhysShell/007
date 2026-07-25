@@ -216,6 +216,71 @@ fn the_policy_digest_changes_when_a_meaningful_field_changes() {
     assert_ne!(a.digest(), c.digest());
 }
 
+// --- launch request ---
+
+fn a_request() -> o7_sandbox_protocol::LaunchRequest {
+    o7_sandbox_protocol::LaunchRequest {
+        schema_version: SCHEMA_VERSION,
+        target_digest: a_digest("target"),
+        argv: vec![b"/bin/sh".to_vec(), b"-c".to_vec(), b"exit 0".to_vec()],
+        cwd: b"/work".to_vec(),
+        env: vec![
+            o7_sandbox_protocol::EnvEntry {
+                name: b"PATH".to_vec(),
+                value: b"/usr/bin".to_vec(),
+            },
+            o7_sandbox_protocol::EnvEntry {
+                name: b"HOME".to_vec(),
+                value: b"/root".to_vec(),
+            },
+        ],
+        stdin: o7_sandbox_protocol::StdinKind::Null,
+        launch_nonce: a_nonce(),
+    }
+}
+
+#[test]
+fn a_launch_request_frame_round_trips() {
+    let req = a_request();
+    let bytes = o7_sandbox_protocol::request::encode(&req).expect("encodes");
+    let back = o7_sandbox_protocol::request::decode(&bytes).expect("decodes");
+    assert_eq!(req, back);
+}
+
+#[test]
+fn a_truncated_or_oversized_request_is_rejected() {
+    let bytes = o7_sandbox_protocol::request::encode(&a_request()).unwrap();
+    assert!(o7_sandbox_protocol::request::decode(&bytes[..bytes.len() - 3]).is_err());
+    let mut over = ((o7_sandbox_protocol::MAX_REQUEST_BYTES + 1) as u32)
+        .to_be_bytes()
+        .to_vec();
+    over.extend_from_slice(b"{}");
+    assert!(matches!(
+        o7_sandbox_protocol::request::decode(&over),
+        Err(o7_sandbox_protocol::RequestFrameError::TooLarge { .. })
+    ));
+}
+
+#[test]
+fn the_launch_spec_digest_is_env_order_independent_but_argv_order_sensitive() {
+    let a = a_request();
+    let mut b = a_request();
+    b.env.reverse(); // env is a SET
+    assert_eq!(
+        a.spec_digest(),
+        b.spec_digest(),
+        "env order must not matter"
+    );
+
+    let mut c = a_request();
+    c.argv.reverse(); // argv is ORDERED
+    assert_ne!(a.spec_digest(), c.spec_digest(), "argv order must matter");
+
+    let mut d = a_request();
+    d.cwd = b"/elsewhere".to_vec();
+    assert_ne!(a.spec_digest(), d.spec_digest(), "cwd must matter");
+}
+
 #[test]
 fn the_policy_digest_has_a_frozen_known_answer() {
     // A deliberate, pinned canonical formula. If this vector changes, the policy-binding

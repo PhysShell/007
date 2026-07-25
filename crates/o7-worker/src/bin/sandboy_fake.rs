@@ -36,14 +36,13 @@ use o7_sandbox_protocol::SCHEMA_VERSION;
 struct Args {
     report_fd: i32,
     control_fd: i32,
+    request_fd: i32,
     nonce: String,
     worktree: PathBuf,
     timeout_ms: u128,
     allow_exec: Vec<PathBuf>,
     allow_env: Vec<OsString>,
-    target_cwd: PathBuf,
     target: PathBuf,
-    target_args: Vec<OsString>,
 }
 
 fn parse_args() -> Option<Args> {
@@ -53,42 +52,41 @@ fn parse_args() -> Option<Args> {
     }
     let mut report_fd = None;
     let mut control_fd = None;
+    let mut request_fd = None;
     let mut nonce = None;
     let mut worktree = None;
     let mut timeout_ms = None;
     let mut allow_exec = Vec::new();
     let mut allow_env = Vec::new();
-    let mut target_cwd = PathBuf::from("/");
     loop {
         let flag = it.next()?;
         let flag = flag.to_str()?;
         match flag {
             "--report-fd" => report_fd = Some(it.next()?.to_str()?.parse().ok()?),
             "--control-fd" => control_fd = Some(it.next()?.to_str()?.parse().ok()?),
+            "--request-fd" => request_fd = Some(it.next()?.to_str()?.parse().ok()?),
             "--launch-nonce" => nonce = Some(it.next()?.to_str()?.to_owned()),
             "--deny-net" => {}
             "--worktree" => worktree = Some(PathBuf::from(it.next()?)),
             "--timeout-ms" => timeout_ms = Some(it.next()?.to_str()?.parse().ok()?),
             "--allow-exec" => allow_exec.push(PathBuf::from(it.next()?)),
             "--allow-env" => allow_env.push(it.next()?),
-            "--target-cwd" => target_cwd = PathBuf::from(it.next()?),
             "--" => break,
             _ => return None,
         }
     }
+    // Only the target EXECUTABLE follows the separator; argv/cwd/env come from the request.
     let target = PathBuf::from(it.next()?);
-    let target_args: Vec<OsString> = it.collect();
     Some(Args {
         report_fd: report_fd?,
         control_fd: control_fd?,
+        request_fd: request_fd?,
         nonce: nonce?,
         worktree: worktree?,
         timeout_ms: timeout_ms?,
         allow_exec,
         allow_env,
-        target_cwd,
         target,
-        target_args,
     })
 }
 
@@ -119,10 +117,18 @@ fn run() -> i32 {
         return 70; // die before delivering anything
     }
 
+    // Read the out-of-band launch request (target argv/cwd/env/stdin + target_digest).
+    let request_path = format!("/proc/self/fd/{}", args.request_fd);
+    let request_bytes = std::fs::read(&request_path).unwrap_or_default();
+    let request = match o7_sandbox_protocol::request::decode(&request_bytes) {
+        Ok(r) => r,
+        Err(_) => return 63,
+    };
+
     let policy = reconstructed_policy(&args);
     let mut policy_digest = policy.digest();
-    let target_bytes = std::fs::read(&args.target).unwrap_or_default();
-    let mut target_digest = Digest256::of_bytes(&target_bytes);
+    // The report echoes the request's target digest (the exact sealed object the parent bound).
+    let mut target_digest = request.target_digest.clone();
     let mut nonce = args.nonce.clone();
     let mut backend = BackendIdentity::new("sandboy-linux", "0.1.0")
         .unwrap_or_else(|_| BackendIdentity::new("x", "x").expect("static identity"));
@@ -187,14 +193,26 @@ fn run() -> i32 {
     let _ = nix::unistd::close(args.control_fd);
 
     // MONITOR topology: start the target as a CHILD in its own process group and stay alive as
-    // the monitor. `env_clear()` means the target does NOT inherit the backend's trusted
-    // control-plane environment (in a real backend the target's allowlisted env would arrive
-    // out-of-band; the acceptance targets need none).
+    // the monitor. The target's argv/cwd/env come from the out-of-band REQUEST (allowlisted),
+    // never from the backend's own argv/env. `env_clear()` first, then set exactly the
+    // request's allowlisted env.
+    use std::os::unix::ffi::OsStrExt as _;
     let mut cmd = Command::new(&args.target);
-    cmd.args(&args.target_args)
-        .current_dir(&args.target_cwd)
-        .env_clear()
-        .process_group(0);
+    cmd.args(
+        request
+            .argv
+            .iter()
+            .map(|a| OsString::from(std::ffi::OsStr::from_bytes(a))),
+    )
+    .current_dir(PathBuf::from(std::ffi::OsStr::from_bytes(&request.cwd)))
+    .env_clear()
+    .process_group(0);
+    for entry in &request.env {
+        cmd.env(
+            std::ffi::OsStr::from_bytes(&entry.name),
+            std::ffi::OsStr::from_bytes(&entry.value),
+        );
+    }
     let mut child = match cmd.spawn() {
         Ok(child) => child,
         Err(e) => {
