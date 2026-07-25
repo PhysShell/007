@@ -376,15 +376,14 @@ async fn run_inner(
     // Defense in depth: the run-time evidence must ALSO satisfy the requirement. A confining
     // boundary is expected to fail closed inside spawn, but if it returned a live process
     // whose established evidence does not meet RequireFullyEnforced, tear it down and fail —
-    // never trust a process that only CLAIMED confinement it did not prove. (A missing report
-    // under RequireFullyEnforced is such a failure: `unconfined` evidence attests < FullyEnforced.)
-    if !spec
-        .boundary_requirement
-        .is_satisfied_by(&evidence.attestation)
-    {
+    // never trust a process that only CLAIMED confinement it did not prove. Under
+    // RequireFullyEnforced this requires a REPORTED evidence, fully enforced, whose
+    // implementation matches the configured one — so a missing report, a downgrade, or an
+    // implementation swap all fail closed here.
+    if !evidence.satisfies(spec.boundary_requirement, &attestation) {
         let message = format!(
-            "launch evidence does not satisfy the boundary requirement: required {:?}, launch established {:?}",
-            spec.boundary_requirement, evidence.attestation.enforcement
+            "launch evidence does not satisfy the boundary requirement: required {:?}, configured {:?}, launch established {:?}",
+            spec.boundary_requirement, attestation.implementation, evidence.established()
         );
         return match abandon_and_verify(process.as_mut(), &mut pubr).await {
             Err(cleanup) => WorkerResult::CleanupFailure(format!("{message}; {cleanup}")),

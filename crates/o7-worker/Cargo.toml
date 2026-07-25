@@ -28,6 +28,9 @@ o7-sandbox-protocol = { path = "../o7-sandbox-protocol" }
 # Makes the ProcessBoundary/BoundaryProcess traits object-safe with async methods
 # (spawn returns Box<dyn BoundaryProcess>). MIT-licensed.
 async-trait = "0.1"
+# Sandboy launch nonce: 128 bits straight from the OS CSPRNG, no timestamp/counter
+# fallback. Safe API over getrandom(2)/getentropy; MIT/Apache (allowed in deny.toml).
+getrandom = "0.2"
 # Unix-only: process-GROUP signalling (killpg) and pid types. Unix-only by
 # construction — 007 runs on Linux/WSL. nix wraps the raw syscalls in a safe API
 # (the tree forbids `unsafe`). nix is MIT (allowed in deny.toml).
@@ -39,6 +42,14 @@ tempfile = "3"
 # Test children install a safe no-op SIGTERM handler (the tree forbids `unsafe`,
 # so nix's raw signal API is unusable in tests). signal-hook is MIT/Apache.
 signal-hook = "0.3"
+# The sealed-memfd acceptance probe creates a REAL sealed memfd (memfd_create +
+# F_ADD_SEALS + F_GET_SEALS) via nix's safe API — the `fs` feature adds those.
+nix = { version = "0.29", default-features = false, features = [
+    "signal",
+    "process",
+    "fs",
+    "mman",
+] }
 
 # Mirror the workspace discipline: no unsafe, no panics-by-default.
 [lints.rust]

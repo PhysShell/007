@@ -87,26 +87,69 @@ artifact.
 
 A frozen interface that could only return a `BoundaryProcess` could never carry the required
 proof, so the seam evolved: `spawn` returns `BoundaryLaunch { process, evidence }`, where
-`BoundaryEvidence { attestation, report }` is the run-time proof established by THIS launch
-(distinct from the pre-spawn configured `attestation()`).
+`BoundaryEvidence` is the run-time proof established by THIS launch (distinct from the
+pre-spawn configured `attestation()`).
 
-- `SandboyBoundary::new` rejects a relative backend or a policy that cannot fully confine.
-- `attestation()` reflects the configured intent (`Sandboy` / `FullyEnforced`), so the
-  supervisor's `RequireFullyEnforced` gate passes only for a real backend + full policy.
-- The supervisor publishes `LaunchEvidence` BEFORE `Spawned`, and — defense in depth —
-  tears the process down and fails closed if the run-time evidence does not satisfy
-  `RequireFullyEnforced`. Missing evidence (an unconfined boundary) never satisfies it.
-- The downstream adapter persists `evidence.report` as o7-run's `SandboxEvidenceCaptured`.
+`BoundaryEvidence` is a two-variant ENUM, not a struct with an `Option<report>`, so "fully
+enforced but no report" is unrepresentable: a launch either established nothing
+(`Unconfined`) or established confinement and carries the verified `report` (`Reported`).
+There is no constructor that pairs `FullyEnforced` with an absent report.
+
+- `SandboyBoundary::new` rejects a relative backend descriptor or a policy that cannot fully
+  confine.
+- `attestation()` reflects the configured intent (`Sandboy` / `FullyEnforced`).
+- The supervisor publishes `LaunchEvidence` BEFORE `Spawned`, and — defense in depth — tears
+  the process down and fails closed unless `BoundaryEvidence::satisfies` holds: under
+  `RequireFullyEnforced` the evidence must be `Reported`, fully enforced, AND its
+  implementation must equal the configured one. A missing report, a downgrade, or an
+  implementation swap all fail closed.
+- The downstream adapter persists the `Reported` report bytes as o7-run's
+  `SandboxEvidenceCaptured`.
+
+## Decision 6 — trust is bound to OBJECTS, authorized by a barrier
+
+Gate-round-2 hardening, so a report can neither be forged by an unexpected backend nor
+authorize a target before the parent has verified it:
+
+- **Backend identity + object.** `SandboyBoundary` holds a `BackendImage { descriptor,
+  digest, identity }`: a HELD immutable descriptor (execed directly, so a post-construction
+  path swap cannot substitute a binary), its `digest` (re-checked against the held bytes
+  before launch — `verify_backend_object`), and the expected `BackendIdentity` the report
+  must echo (`verify_report` → `BackendMismatch`). A bare absolute path is an address, not an
+  identity; producing the sealed/held object is the caller's acquisition step (PR 3's
+  mechanism).
+- **Exact target binding.** The launch derives `target_digest` from the exact held bytes it
+  hands the backend; the report must echo it. The sealed-memfd probe builds a REAL sealed
+  memfd (`memfd_create` + `F_ADD_SEALS` + `F_GET_SEALS`) held by the parent and addressed as
+  `/proc/<parent_pid>/fd/<n>`.
+- **Parent authorization barrier.** A second descriptor, `--control-fd`, makes the launch
+  two-phase: the backend installs confinement, HOLDS the target before `exec`, emits the
+  report, and waits for the parent's GO byte. The parent decodes + verifies the report, then
+  sends GO — or, on any malformed / mis-bound / downgraded report, NACK / EOF / cancel, the
+  backend kills its cgroup and reaps. The target never runs on an unverified report.
+- **Report/protocol errors are typed.** `BoundaryError::Evidence` keeps launch report
+  failures distinct from a generic `Spawn` I/O error.
+- **Nonce from the OS CSPRNG.** The 128-bit launch nonce comes straight from `getrandom`
+  (`OsNonceSource`), no timestamp/counter fallback; an RNG failure fails the launch BEFORE any
+  backend spawn. The source is injectable for deterministic tests and a forced-failure test.
+- **Policy allowances/env are SETS.** `SandboxPolicy::validate` rejects a duplicate exec
+  allowance or env name loudly, rather than silently hashing a multiset (which would give two
+  same-meaning policies different digests).
 
 ## What this slice is (and is not)
 
 Landed here, PURE and GREEN: the `o7-sandbox-protocol` crate (policy digest, versioned
-length-bounded report frame, identity binding, KATs); the evolved evidence seam and its
-supervisor wiring; `SandboyBoundary`'s construction/argv/exec-gate and the report
-**verification** matrix (`verify_report` fails closed on any downgrade or mis-binding).
+length-bounded report frame, identity binding, KATs); the evolved evidence seam
+(`BoundaryEvidence` enum + `satisfies`) and its supervisor wiring; `SandboyBoundary`'s
+construction / argv (report + control descriptors) / exec-gate / backend-object + report
+**verification** matrix; the CSPRNG nonce source with its RNG-failure fail-closed; and the
+policy set-validation. The controlled fake `sandboy` backend is in-tree NOW, so the GREEN
+launch only has to make the existing acceptance tests pass — it cannot move the contract.
 
-Deliberately RED: the confined LIVE LAUNCH — wiring the report pipe, spawning + reaping the
-monitor backend, reading the frame, and returning a live `BoundaryProcess` — plus the
-sealed-memfd-under-Landlock probe. The launch-level negative matrix (backend exits before
-exec, cancel-mid-report leaves nothing, write-end closed to the target) lands WITH the live
-launch in the GREEN commit, where asserting those is no longer vacuous.
+Deliberately RED: the confined LIVE LAUNCH itself — verifying the held backend object, opening
+the report + control pipes, spawning + reaping the monitor backend, reading and verifying the
+frame, sending GO, and returning a live `BoundaryProcess` with `Reported` evidence. The full
+acceptance matrix against the fake backend (malformed / wrong-nonce / wrong-policy /
+wrong-target / wrong-backend / partial / premature-exit, and the valid-report + GO positive)
+and the real sealed-memfd probe are all RED today with SPECIFIC error/marker assertions — not
+vacuous `is_err()` — so GREEN turns them green without rewriting them.

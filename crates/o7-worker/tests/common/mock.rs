@@ -486,7 +486,7 @@ impl ProcessBoundary for MockBoundary {
         let evidence = self
             .launch_evidence
             .clone()
-            .unwrap_or_else(|| BoundaryEvidence::unconfined(self.attestation));
+            .unwrap_or(BoundaryEvidence::Unconfined);
         Ok(BoundaryLaunch {
             process: Box::new(process),
             evidence,

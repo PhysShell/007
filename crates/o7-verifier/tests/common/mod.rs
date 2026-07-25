@@ -143,7 +143,18 @@ impl ProcessBoundary for FakeBoundary {
                 notify: Arc::new(Notify::new()),
                 state: Arc::clone(&self.state),
             }),
-            evidence: BoundaryEvidence::unconfined(self.attestation),
+            // Establish run-time evidence consistent with the attestation, so a fully
+            // enforced fake satisfies RequireFullyEnforced (as the real Sandboy would):
+            // a FullyEnforced attestation yields a `Reported` evidence, anything less
+            // yields `Unconfined`.
+            evidence: if self.attestation.enforcement == EnforcementLevel::FullyEnforced {
+                BoundaryEvidence::Reported {
+                    attestation: self.attestation,
+                    report: b"fake-sandboy-report".to_vec(),
+                }
+            } else {
+                BoundaryEvidence::Unconfined
+            },
         })
     }
 

@@ -24,10 +24,20 @@ fn full_attestation() -> BoundaryAttestation {
     }
 }
 
-fn none_attestation() -> BoundaryAttestation {
+/// A `Reported` evidence attesting `attestation`, carrying a placeholder verified frame.
+fn reported(attestation: BoundaryAttestation) -> BoundaryEvidence {
+    BoundaryEvidence::Reported {
+        attestation,
+        report: b"verified-frame".to_vec(),
+    }
+}
+
+fn host_full_attestation() -> BoundaryAttestation {
+    // A NONSENSE run-time claim used only to prove the implementation-consistency check:
+    // "fully enforced" but by the UnconfinedHost implementation.
     BoundaryAttestation {
         implementation: BoundaryKind::UnconfinedHost,
-        enforcement: EnforcementLevel::None,
+        enforcement: EnforcementLevel::FullyEnforced,
     }
 }
 
@@ -48,17 +58,16 @@ async fn launch_evidence_is_published_before_spawned() {
     );
 }
 
-#[tokio::test]
-async fn a_boundary_that_attests_full_but_establishes_none_fails_closed() {
-    // The lying boundary: it PASSES the pre-spawn requirement check (attests FullyEnforced)
-    // but its launch evidence establishes None. Under RequireFullyEnforced the supervisor must
-    // tear the live process down and fail closed — never run it.
+/// Drive a boundary that attests `full_attestation()` pre-spawn but returns `evidence` at
+/// launch, under RequireFullyEnforced, and assert it fails closed with verified teardown and
+/// no trusted publish.
+async fn assert_fails_closed(evidence: BoundaryEvidence, id: &str) {
     let boundary = MockBoundary::new()
         .with_attestation(full_attestation())
-        .with_launch_evidence(BoundaryEvidence::unconfined(none_attestation()));
+        .with_launch_evidence(evidence);
     let state = boundary.state();
 
-    let mut spec = child_spec("lying-boundary", "exit0");
+    let mut spec = child_spec(id, "exit0");
     spec.boundary_requirement = BoundaryRequirement::RequireFullyEnforced;
     let sink = RecordingSink::new();
     let result = run_with(spec, Box::new(boundary), &sink).await;
@@ -66,13 +75,11 @@ async fn a_boundary_that_attests_full_but_establishes_none_fails_closed() {
     assert_eq!(
         result.kind(),
         "FAILED_TO_START",
-        "downgraded launch evidence must fail closed: {result:?}"
+        "must fail closed: {result:?}"
     );
-    // It failed AFTER spawn (the pre-spawn attestation passed), so the process was owned and
-    // must have been torn down — and the evidence was NOT published as trusted.
     assert!(
         !sink.has("launch_evidence"),
-        "downgraded evidence must not be published as established: {:?}",
+        "un-satisfying evidence must not be published as established: {:?}",
         sink.kinds()
     );
     assert!(
@@ -86,11 +93,37 @@ async fn a_boundary_that_attests_full_but_establishes_none_fails_closed() {
 }
 
 #[tokio::test]
-async fn full_evidence_under_require_fully_enforced_runs_normally() {
-    // The honest confining boundary: attests and establishes FullyEnforced → the run proceeds.
+async fn attests_full_but_establishes_no_report_fails_closed() {
+    // Full + NO report (Unconfined). The pre-spawn attestation passes, so the process is owned;
+    // the missing report must tear it down and fail closed — there is no "fully enforced with
+    // no report" path.
+    assert_fails_closed(BoundaryEvidence::Unconfined, "no-report").await;
+}
+
+#[tokio::test]
+async fn reported_evidence_with_a_mismatched_implementation_fails_closed() {
+    // A report that claims FullyEnforced but by the WRONG implementation (Host, while the
+    // boundary is configured Sandboy) must fail the configured/established consistency check.
+    assert_fails_closed(reported(host_full_attestation()), "impl-mismatch").await;
+}
+
+#[tokio::test]
+async fn reported_but_downgraded_evidence_fails_closed() {
+    // A Reported evidence that is only Partially enforced must fail closed too.
+    let downgraded = BoundaryAttestation {
+        implementation: BoundaryKind::Sandboy,
+        enforcement: EnforcementLevel::Partial,
+    };
+    assert_fails_closed(reported(downgraded), "downgraded").await;
+}
+
+#[tokio::test]
+async fn full_reported_evidence_under_require_fully_enforced_runs_normally() {
+    // The honest confining boundary: attests and REPORTS FullyEnforced by the matching
+    // implementation → the run proceeds and the evidence is published.
     let boundary = MockBoundary::new()
         .with_attestation(full_attestation())
-        .with_launch_evidence(BoundaryEvidence::unconfined(full_attestation()));
+        .with_launch_evidence(reported(full_attestation()));
 
     let mut spec = child_spec("honest-full", "exit0");
     spec.boundary_requirement = BoundaryRequirement::RequireFullyEnforced;

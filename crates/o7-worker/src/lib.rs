@@ -42,7 +42,9 @@ pub use host_boundary::UnconfinedHostBoundary;
 pub use observation::{ObservationError, ObservationSink, WorkerObservation};
 pub use output::{OutputChunk, OutputPolicy, OutputStream};
 pub use process_identity::ProcessIdentity;
-pub use sandboy_boundary::{SandboyBoundary, SandboyLaunchError};
+pub use sandboy_boundary::{
+    BackendImage, NonceError, NonceSource, OsNonceSource, SandboyBoundary, SandboyLaunchError,
+};
 pub use spec::{EnvironmentPolicy, SpecError, StdinMode, WorkerId, WorkerSpec};
 pub use state::WorkerState;
 pub use supervisor::{WorkerHandle, WorkerJoin, WorkerResult, WorkerSupervisor};

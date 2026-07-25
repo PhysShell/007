@@ -2,6 +2,7 @@
 //! it is reported against. The policy hashes to a canonical [`Digest256`] so a report can be
 //! bound to the exact policy that was installed.
 
+use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -86,6 +87,13 @@ pub enum SandboxPolicyError {
     RelativeExecAllowance(PathBuf),
     #[error("policy grants no executable path; nothing could be launched")]
     NoExecAllowance,
+    /// A duplicate exec allowance — allowances are a SET, so a repeat is a user error (and
+    /// would otherwise give two policies the same meaning but different digests).
+    #[error("duplicate exec allowance: {0}")]
+    DuplicateExecAllowance(PathBuf),
+    /// A duplicate env-allowlist name (same rationale).
+    #[error("duplicate env allowlist name: {0:?}")]
+    DuplicateEnvName(std::ffi::OsString),
     #[error(
         "timeout {0:?} is below the {MIN_TIMEOUT:?} minimum (would serialize to a zero deadline)"
     )]
@@ -107,9 +115,22 @@ impl SandboxPolicy {
         if self.allow_exec.is_empty() {
             return Err(SandboxPolicyError::NoExecAllowance);
         }
+        // Allowances/env are SETS: a duplicate is rejected loudly rather than silently
+        // canonicalized, so the user sees the error instead of an unnoticed policy-identity
+        // change (a hashed multiset masquerading as a set).
+        let mut seen_exec: BTreeSet<&[u8]> = BTreeSet::new();
         for path in &self.allow_exec {
             if !path.is_absolute() {
                 return Err(SandboxPolicyError::RelativeExecAllowance(path.clone()));
+            }
+            if !seen_exec.insert(path.as_os_str().as_encoded_bytes()) {
+                return Err(SandboxPolicyError::DuplicateExecAllowance(path.clone()));
+            }
+        }
+        let mut seen_env: BTreeSet<&[u8]> = BTreeSet::new();
+        for name in &self.env_allowlist {
+            if !seen_env.insert(name.as_encoded_bytes()) {
+                return Err(SandboxPolicyError::DuplicateEnvName(name.clone()));
             }
         }
         if self.timeout < MIN_TIMEOUT {

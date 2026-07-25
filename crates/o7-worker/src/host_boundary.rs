@@ -79,9 +79,9 @@ impl ProcessBoundary for UnconfinedHostBoundary {
                 identity,
                 pgid,
             }),
-            // The host boundary establishes NO confinement — honest, empty evidence. Usable
-            // only under `AllowUnconfined`; the supervisor rejects it for RequireFullyEnforced.
-            evidence: BoundaryEvidence::unconfined(self.attestation()),
+            // The host boundary establishes NO confinement — honest `Unconfined` evidence.
+            // Usable only under `AllowUnconfined`; it can never satisfy RequireFullyEnforced.
+            evidence: BoundaryEvidence::Unconfined,
         })
     }
 
