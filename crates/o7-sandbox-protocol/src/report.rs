@@ -21,13 +21,19 @@ pub struct SandboxReport {
     pub schema_version: u32,
     /// Which mechanism made the claim.
     pub backend: BackendIdentity,
+    /// The digest of the BACKEND object that made the claim — must equal the parent's trusted
+    /// [`crate::SandboxPolicy`]-adjacent backend image digest. Persisted so a later replay of the
+    /// raw report knows which exact backend binary was trusted.
+    pub backend_digest: Digest256,
     /// The digest of the policy that was installed — must equal the parent's own
     /// [`crate::SandboxPolicy::digest`].
     pub policy_digest: Digest256,
     /// The per-spawn nonce the parent minted — must equal what the parent sent.
     pub launch_nonce: LaunchNonce,
-    /// The digest of the exact executable that was confined (e.g. the sealed memfd bytes).
-    pub target_digest: Digest256,
+    /// The digest of the exact LAUNCH (target object + argv + cwd + allowlisted env + stdin),
+    /// i.e. [`crate::LaunchRequest::spec_digest`] — binds the report to the specific INVOCATION,
+    /// not merely to the binary.
+    pub launch_spec_digest: Digest256,
     pub filesystem: Enforcement,
     pub network: Enforcement,
     pub env: Enforcement,

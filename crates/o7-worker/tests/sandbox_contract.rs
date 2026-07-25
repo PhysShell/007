@@ -70,20 +70,23 @@ fn a_target() -> Digest256 {
     Digest256::of_bytes(b"the confined target bytes")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn report_frame(
     backend: BackendIdentity,
+    backend_digest: Digest256,
     policy_digest: Digest256,
     nonce: &LaunchNonce,
-    target: &Digest256,
+    launch_spec: &Digest256,
     dims: [Enforcement; 5],
 ) -> Vec<u8> {
     let [filesystem, network, env, process_tree, timeout] = dims;
     let report = SandboxReport {
         schema_version: SCHEMA_VERSION,
         backend,
+        backend_digest,
         policy_digest,
         launch_nonce: nonce.clone(),
-        target_digest: target.clone(),
+        launch_spec_digest: launch_spec.clone(),
         filesystem,
         network,
         env,
@@ -93,12 +96,13 @@ fn report_frame(
     encode(&report).expect("report encodes")
 }
 
-fn good_frame(b: &SandboyBoundary, nonce: &LaunchNonce, target: &Digest256) -> Vec<u8> {
+fn good_frame(b: &SandboyBoundary, nonce: &LaunchNonce, launch_spec: &Digest256) -> Vec<u8> {
     report_frame(
         b.backend().identity().clone(),
+        b.backend().digest().clone(),
         b.policy().digest(),
         nonce,
-        target,
+        launch_spec,
         ALL_ENFORCED,
     )
 }
@@ -348,6 +352,7 @@ fn a_report_from_the_wrong_backend_fails_closed() {
     let target = a_target();
     let frame = report_frame(
         BackendIdentity::new("totally-secure-trust-me", "9.9").unwrap(),
+        b.backend().digest().clone(),
         b.policy().digest(),
         &nonce,
         &target,
@@ -369,6 +374,7 @@ fn a_downgraded_report_fails_closed() {
         dims[i] = Enforcement::Partial;
         let frame = report_frame(
             b.backend().identity().clone(),
+            b.backend().digest().clone(),
             b.policy().digest(),
             &nonce,
             &target,
@@ -397,14 +403,35 @@ fn a_report_bound_to_a_different_nonce_fails_closed() {
 }
 
 #[test]
-fn a_report_bound_to_a_different_target_fails_closed() {
+fn a_report_bound_to_a_different_launch_spec_fails_closed() {
     let b = boundary();
     let nonce = a_nonce();
     let frame = good_frame(&b, &nonce, &a_target());
-    let other = Digest256::of_bytes(b"a different target");
+    let other = Digest256::of_bytes(b"a different launch spec");
     assert!(matches!(
         b.verify_report(&frame, &nonce, &other),
-        Err(SandboyLaunchError::TargetMismatch)
+        Err(SandboyLaunchError::LaunchSpecMismatch)
+    ));
+}
+
+#[test]
+fn a_report_with_the_wrong_backend_digest_fails_closed() {
+    // Even with the right backend NAME, a report whose backend_digest is not the trusted
+    // sealed object's digest must fail closed — identity is not enough.
+    let b = boundary();
+    let nonce = a_nonce();
+    let target = a_target();
+    let frame = report_frame(
+        b.backend().identity().clone(),
+        Digest256::of_bytes(b"an untrusted backend binary"),
+        b.policy().digest(),
+        &nonce,
+        &target,
+        ALL_ENFORCED,
+    );
+    assert!(matches!(
+        b.verify_report(&frame, &nonce, &target),
+        Err(SandboyLaunchError::BackendDigestMismatch)
     ));
 }
 
@@ -420,6 +447,7 @@ fn a_report_bound_to_a_different_policy_fails_closed() {
     };
     let frame = report_frame(
         b.backend().identity().clone(),
+        b.backend().digest().clone(),
         other_policy.digest(),
         &nonce,
         &target,

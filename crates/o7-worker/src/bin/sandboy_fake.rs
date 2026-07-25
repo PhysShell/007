@@ -127,8 +127,12 @@ fn run() -> i32 {
 
     let policy = reconstructed_policy(&args);
     let mut policy_digest = policy.digest();
-    // The report echoes the request's target digest (the exact sealed object the parent bound).
-    let mut target_digest = request.target_digest.clone();
+    // The report echoes the request's launch-spec digest (the exact invocation the parent bound)
+    // and the digest of THIS backend object (read back from /proc/self/exe — the sealed memfd we
+    // were launched from).
+    let mut launch_spec_digest = request.spec_digest();
+    let mut backend_digest =
+        Digest256::of_bytes(&std::fs::read("/proc/self/exe").unwrap_or_default());
     let mut nonce = args.nonce.clone();
     let mut backend = BackendIdentity::new("sandboy-linux", "0.1.0")
         .unwrap_or_else(|_| BackendIdentity::new("x", "x").expect("static identity"));
@@ -136,11 +140,12 @@ fn run() -> i32 {
 
     match mode.as_str() {
         "wrong_policy" => policy_digest = Digest256::of_bytes(b"a different policy"),
-        "wrong_target" => target_digest = Digest256::of_bytes(b"a different target"),
+        "wrong_target" => launch_spec_digest = Digest256::of_bytes(b"a different launch"),
         "wrong_nonce" => nonce = LaunchNonce::from_bytes([0xff; 16]).as_str().to_owned(),
         "wrong_backend" => {
             backend = BackendIdentity::new("trust-me", "9.9").expect("static identity");
         }
+        "wrong_backend_digest" => backend_digest = Digest256::of_bytes(b"a different backend"),
         "partial" => dims[1] = Enforcement::Partial,
         _ => {}
     }
@@ -156,9 +161,10 @@ fn run() -> i32 {
         let report = SandboxReport {
             schema_version: SCHEMA_VERSION,
             backend,
+            backend_digest,
             policy_digest,
             launch_nonce: nonce,
-            target_digest,
+            launch_spec_digest,
             filesystem: dims[0],
             network: dims[1],
             env: dims[2],

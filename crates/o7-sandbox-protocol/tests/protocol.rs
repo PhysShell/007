@@ -31,8 +31,9 @@ fn full_report() -> SandboxReport {
         schema_version: SCHEMA_VERSION,
         backend: BackendIdentity::new("sandboy-linux", "0.1.0").unwrap(),
         policy_digest: a_digest("policy"),
+        backend_digest: a_digest("backend"),
         launch_nonce: a_nonce(),
-        target_digest: a_digest("target"),
+        launch_spec_digest: a_digest("launch"),
         filesystem: Enforcement::Enforced,
         network: Enforcement::Enforced,
         env: Enforcement::Enforced,
@@ -93,7 +94,7 @@ fn an_oversized_declared_length_is_rejected_without_buffering() {
 
 #[test]
 fn a_boolean_secure_field_is_rejected() {
-    let json = br#"{"schema_version":1,"backend":{"name":"x","version":"1"},"policy_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","launch_nonce":"abababababababababababababababab","target_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","filesystem":"enforced","network":"enforced","env":"enforced","process_tree":"enforced","timeout":"enforced","secure":true}"#;
+    let json = br#"{"schema_version":1,"backend":{"name":"x","version":"1"},"backend_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","policy_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","launch_nonce":"abababababababababababababababab","launch_spec_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","filesystem":"enforced","network":"enforced","env":"enforced","process_tree":"enforced","timeout":"enforced","secure":true}"#;
     assert!(matches!(
         SandboxReport::parse(json),
         Err(ReportError::Malformed(_))
@@ -102,7 +103,7 @@ fn a_boolean_secure_field_is_rejected() {
 
 #[test]
 fn a_missing_dimension_is_rejected() {
-    let json = br#"{"schema_version":1,"backend":{"name":"x","version":"1"},"policy_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","launch_nonce":"abababababababababababababababab","target_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","filesystem":"enforced","network":"enforced","env":"enforced","process_tree":"enforced"}"#;
+    let json = br#"{"schema_version":1,"backend":{"name":"x","version":"1"},"backend_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","policy_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","launch_nonce":"abababababababababababababababab","launch_spec_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","filesystem":"enforced","network":"enforced","env":"enforced","process_tree":"enforced"}"#;
     assert!(matches!(
         SandboxReport::parse(json),
         Err(ReportError::Malformed(_))
@@ -123,7 +124,7 @@ fn a_wrong_schema_version_is_rejected() {
 #[test]
 fn a_malformed_binding_value_is_rejected() {
     // A non-hex policy digest must not deserialize.
-    let json = br#"{"schema_version":1,"backend":{"name":"x","version":"1"},"policy_digest":"not-a-digest","launch_nonce":"abababababababababababababababab","target_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","filesystem":"enforced","network":"enforced","env":"enforced","process_tree":"enforced","timeout":"enforced"}"#;
+    let json = br#"{"schema_version":1,"backend":{"name":"x","version":"1"},"backend_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","policy_digest":"not-a-digest","launch_nonce":"abababababababababababababababab","launch_spec_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","filesystem":"enforced","network":"enforced","env":"enforced","process_tree":"enforced","timeout":"enforced"}"#;
     assert!(matches!(
         SandboxReport::parse(json),
         Err(ReportError::Malformed(_))
@@ -132,7 +133,7 @@ fn a_malformed_binding_value_is_rejected() {
 
 #[test]
 fn an_anonymous_backend_is_rejected() {
-    let json = br#"{"schema_version":1,"backend":{"name":"","version":"1"},"policy_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","launch_nonce":"abababababababababababababababab","target_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","filesystem":"enforced","network":"enforced","env":"enforced","process_tree":"enforced","timeout":"enforced"}"#;
+    let json = br#"{"schema_version":1,"backend":{"name":"","version":"1"},"policy_digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","launch_nonce":"abababababababababababababababab","launch_spec_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","filesystem":"enforced","network":"enforced","env":"enforced","process_tree":"enforced","timeout":"enforced"}"#;
     assert!(matches!(
         SandboxReport::parse(json),
         Err(ReportError::Malformed(_))

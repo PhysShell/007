@@ -294,6 +294,7 @@ async fn the_exact_sealed_memfd_executes_and_the_report_binds_its_bytes() {
         environment: BTreeMap::new(),
         stdin: StdinMode::Null,
     };
+    let target_clone = target.clone();
 
     let mut launch = b
         .spawn(target)
@@ -305,10 +306,18 @@ async fn the_exact_sealed_memfd_executes_and_the_report_binds_its_bytes() {
     match &launch.evidence {
         BoundaryEvidence::Reported { report, .. } => {
             let decoded = o7_worker::sandbox_protocol::frame::decode(report).expect("report");
+            // Rebuild the exact launch request (using the nonce the report echoes) and confirm
+            // the report binds THIS launch spec over the EXACT sealed target bytes, plus the
+            // trusted backend digest.
+            let req = b
+                .launch_request(&target_clone, expected_target_digest, &decoded.launch_nonce)
+                .expect("request");
             assert_eq!(
-                decoded.target_digest, expected_target_digest,
-                "the report must bind the exact sealed bytes"
+                decoded.launch_spec_digest,
+                req.spec_digest(),
+                "the report must bind the exact launch spec + sealed bytes"
             );
+            assert_eq!(decoded.backend_digest, *b.backend().digest());
         }
         BoundaryEvidence::Unconfined => panic!("must report evidence"),
     }

@@ -9,17 +9,19 @@
 //! monitor enforcing the deadline + process-tree kill — it never `exec`s into the target.
 //!
 //! Trust is bound to OBJECTS, not paths:
-//! - the BACKEND is a [`BackendImage`] that OWNS a held read-only descriptor + its digest + the
-//!   expected [`BackendIdentity`]. The launch execs the held descriptor via
-//!   [`BackendImage::descriptor_path`] (not a re-resolved path, so a post-construction swap
-//!   cannot substitute a different binary), and the report must echo the expected identity;
-//! - the TARGET's digest is derived from the exact held bytes the backend confined, and the
-//!   report must echo it.
+//! - the BACKEND is a [`BackendImage`] that OWNS a SEALED, immutable `memfd` copy of the backend
+//!   binary + its digest + the expected [`BackendIdentity`]. The launch execs the sealed object
+//!   via [`BackendImage::descriptor_path`] (so neither a path swap NOR an in-place inode rewrite
+//!   can substitute a different binary), and the report must echo the expected identity AND the
+//!   backend digest;
+//! - the report also binds the `launch_spec_digest` — a digest over the exact INVOCATION (target
+//!   object + argv + cwd + allowlisted env + stdin), not merely which binary.
 //!
 //! Planes are SEPARATE: the backend is a TRUSTED launcher and runs from a fixed trusted cwd
 //! (`/`) with a trusted control-plane environment — never the untrusted target's cwd/env
-//! (LD_PRELOAD, …). The target's own cwd rides the (non-sensitive) argv; its environment
-//! travels out-of-band to the confined target, never through the backend's process env.
+//! (LD_PRELOAD, …). The target's argv, cwd, and (allowlisted) environment travel out-of-band in
+//! the [`o7_sandbox_protocol::LaunchRequest`] on `--request-fd`, never on the backend's
+//! /proc-visible argv or its process environment.
 //!
 //! Authorization is a BARRIER: the two-phase handshake (`--report-fd` for the report,
 //! `--control-fd` for the parent GO) means the backend holds the confined target BEFORE it
@@ -165,6 +167,9 @@ pub enum SandboyLaunchError {
     /// The report names a different backend than the expected identity.
     #[error("report backend identity does not match the expected backend")]
     BackendMismatch,
+    /// The report's backend digest does not match the trusted backend object.
+    #[error("report backend digest does not match the trusted backend object")]
+    BackendDigestMismatch,
     /// The report frame was malformed / oversized / truncated / trailing.
     #[error("report frame invalid: {0}")]
     Frame(#[from] FrameError),
@@ -174,9 +179,9 @@ pub enum SandboyLaunchError {
     /// The report is bound to a different (stale/replayed) launch.
     #[error("report launch_nonce does not match this launch")]
     NonceMismatch,
-    /// The report is bound to a different target than the one confined.
-    #[error("report target_digest does not match the confined target")]
-    TargetMismatch,
+    /// The report is bound to a different launch spec (target/argv/cwd/env/stdin) than confined.
+    #[error("report launch_spec_digest does not match the confined launch")]
+    LaunchSpecMismatch,
     /// The backend did not establish full enforcement on every dimension.
     #[error("backend did not establish full enforcement (a dimension was downgraded)")]
     NotFullyEnforced,
@@ -379,9 +384,10 @@ impl SandboyBoundary {
     }
 
     /// Verify a report frame and turn it into trusted [`BoundaryEvidence::Reported`], or FAIL
-    /// CLOSED. The report is trusted only if it echoes the expected BACKEND identity, and is
-    /// bound to THIS policy (`policy_digest`), THIS launch (`launch_nonce`), and the exact
-    /// `target` confined (`target_digest`), AND attests full enforcement on every dimension.
+    /// CLOSED. The report is trusted only if it echoes the expected BACKEND identity AND digest,
+    /// and is bound to THIS policy (`policy_digest`), THIS launch (`launch_nonce`), and the exact
+    /// LAUNCH SPEC confined (`launch_spec_digest` — target object + argv + cwd + env + stdin),
+    /// AND attests full enforcement on every dimension.
     ///
     /// # Errors
     /// [`SandboyLaunchError`] on a bad frame, a wrong backend, a binding mismatch, or a
@@ -390,11 +396,14 @@ impl SandboyBoundary {
         &self,
         frame_bytes: &[u8],
         launch_nonce: &LaunchNonce,
-        target_digest: &Digest256,
+        launch_spec_digest: &Digest256,
     ) -> Result<BoundaryEvidence, SandboyLaunchError> {
         let report = frame::decode(frame_bytes)?;
         if report.backend != *self.backend.identity() {
             return Err(SandboyLaunchError::BackendMismatch);
+        }
+        if report.backend_digest != *self.backend.digest() {
+            return Err(SandboyLaunchError::BackendDigestMismatch);
         }
         if report.policy_digest != self.policy.digest() {
             return Err(SandboyLaunchError::PolicyDigestMismatch);
@@ -402,8 +411,8 @@ impl SandboyBoundary {
         if report.launch_nonce != *launch_nonce {
             return Err(SandboyLaunchError::NonceMismatch);
         }
-        if report.target_digest != *target_digest {
-            return Err(SandboyLaunchError::TargetMismatch);
+        if report.launch_spec_digest != *launch_spec_digest {
+            return Err(SandboyLaunchError::LaunchSpecMismatch);
         }
         if !report.is_fully_enforced() {
             return Err(SandboyLaunchError::NotFullyEnforced);
