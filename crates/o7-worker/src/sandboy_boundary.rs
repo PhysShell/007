@@ -152,7 +152,10 @@ pub struct NonceError(pub String);
 pub struct BackendConfig {
     /// TEST-ONLY: drives the controlled fake `sandboy` backend's misbehavior mode. A real backend
     /// ignores this; it exists so tests configure the fake via the trusted control plane rather
-    /// than the untrusted target environment.
+    /// than the untrusted target environment. Compiled ONLY under the `test-harness` feature, so a
+    /// production build has no field through which any fake mode could be smuggled — the struct is
+    /// then provably empty.
+    #[cfg(feature = "test-harness")]
     #[doc(hidden)]
     pub fake_mode: Option<String>,
 }
@@ -163,10 +166,15 @@ pub struct SandboyBoundary {
     policy: SandboxPolicy,
     nonce_source: Arc<dyn NonceSource>,
     /// TYPED control-plane config for the backend (never the untrusted target's environment).
+    /// TEST-ONLY: its only field is the fake-backend knob, so it is carried only under
+    /// `test-harness`; a production boundary has no backend config at all.
+    #[cfg(feature = "test-harness")]
     backend_config: BackendConfig,
     /// TEST-ONLY: a barrier awaited AFTER GO is sent but BEFORE `BoundaryLaunch` is returned, so a
     /// test can cancel the `spawn` future at the exact instant the target tree is live but ownership
-    /// has not yet transferred — proving the drop-path group cleanup. Production leaves it `None`.
+    /// has not yet transferred — proving the drop-path group cleanup. Compiled only under
+    /// `test-harness`; production has no barrier and never awaits one.
+    #[cfg(feature = "test-harness")]
     post_go_barrier: Option<Arc<tokio::sync::Notify>>,
 }
 
@@ -252,12 +260,17 @@ impl SandboyBoundary {
             backend,
             policy,
             nonce_source,
+            #[cfg(feature = "test-harness")]
             backend_config: BackendConfig::default(),
+            #[cfg(feature = "test-harness")]
             post_go_barrier: None,
         })
     }
 
-    /// Set the TYPED backend control-plane config (default: no fake mode → empty trusted env).
+    /// TEST-ONLY: set the typed backend control-plane config (its only field is the fake-backend
+    /// mode). Compiled only under `test-harness`; production has no way to supply a fake mode.
+    #[cfg(feature = "test-harness")]
+    #[doc(hidden)]
     #[must_use]
     pub fn with_backend_config(mut self, config: BackendConfig) -> Self {
         self.backend_config = config;
@@ -266,7 +279,8 @@ impl SandboyBoundary {
 
     /// TEST-ONLY: install a barrier the `spawn` future awaits after GO but before it returns the
     /// `BoundaryLaunch`, so a cancellation test can drop the future while the target tree is live.
-    /// Never set in production (there is no way to notify it into a real launch path).
+    /// Compiled only under `test-harness`; production has no way to install one.
+    #[cfg(feature = "test-harness")]
     #[doc(hidden)]
     #[must_use]
     pub fn with_post_go_barrier(mut self, barrier: Arc<tokio::sync::Notify>) -> Self {
@@ -274,10 +288,12 @@ impl SandboyBoundary {
         self
     }
 
-    /// The trusted control-plane environment derived from the typed config. Only a TEST-ONLY
-    /// fake mode ever populates it; production is empty.
+    /// The trusted control-plane environment for the backend. Production is ALWAYS empty; only the
+    /// TEST-ONLY fake-backend mode (under `test-harness`) ever populates it.
     fn backend_environment(&self) -> BTreeMap<OsString, OsString> {
+        #[allow(unused_mut)]
         let mut env = BTreeMap::new();
+        #[cfg(feature = "test-harness")]
         if let Some(mode) = &self.backend_config.fake_mode {
             env.insert(OsString::from("O7_FAKE_MODE"), OsString::from(mode));
         }
@@ -785,7 +801,9 @@ impl ProcessBoundary for SandboyBoundary {
 
         // TEST-ONLY barrier: GO is delivered and the backend is starting the target, but ownership
         // has NOT transferred yet. A cancellation test drops the future here to prove the guard
-        // tears down the live target tree. Production leaves the barrier unset (never awaits).
+        // tears down the live target tree. Compiled out of production entirely — there is no
+        // barrier field to await.
+        #[cfg(feature = "test-harness")]
         if let Some(barrier) = &self.post_go_barrier {
             barrier.notified().await;
         }

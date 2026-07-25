@@ -4,10 +4,40 @@ version = "0.1.0"
 edition = "2021"
 description = "007 generic worker runtime: own a host process group via a ProcessBoundary, stream typed observations, cancel and clean up deterministically. No provider/model/ledger knowledge."
 publish = false
+# The three helper binaries below are the TEST HARNESS; disable auto-discovery so they are never
+# built as production targets and exist only via their explicit, feature-gated `[[bin]]` entries.
+autobins = false
 
 [lib]
 name = "o7_worker"
 path = "src/lib.rs"
+
+# TEST-HARNESS binaries. They drive/probe the boundary from integration tests and build ONLY with
+# the `test-harness` feature (turned on for THIS package's own test build via the self
+# dev-dependency below). A production `cargo build` leaves the feature off, so `required-features`
+# is unmet and none of them compile into a shipped artifact.
+[[bin]]
+name = "sandboy_fake"
+path = "src/bin/sandboy_fake.rs"
+required-features = ["test-harness"]
+
+[[bin]]
+name = "spawn_probe"
+path = "src/bin/spawn_probe.rs"
+required-features = ["test-harness"]
+
+[[bin]]
+name = "fd_probe"
+path = "src/bin/fd_probe.rs"
+required-features = ["test-harness"]
+
+[features]
+# TEST-ONLY seam — never in a production dependency's feature set. Gates the controlled
+# fake-backend config knob (`BackendConfig::fake_mode`), the cancellation-test barrier
+# (`SandboyBoundary::with_post_go_barrier`), and the three harness binaries above. Enabled only for
+# this package's own tests via the self dev-dependency; resolver v2 keeps that isolated to the test
+# build, so production dependents can neither request it nor observe the surface it unlocks.
+test-harness = []
 
 [dependencies]
 tokio = { version = "1", default-features = false, features = [
@@ -51,6 +81,10 @@ nix = { version = "0.29", default-features = false, features = [
 rustix = { version = "1", default-features = false, features = ["fs", "std"] }
 
 [dev-dependencies]
+# Self dev-dependency: the standard Cargo idiom for a test-only feature. It turns on
+# `test-harness` when building THIS package's own tests/harness-bins, and only then; under
+# resolver v2 the dev-dependency feature never leaks into a production build of a dependent.
+o7-worker = { path = ".", features = ["test-harness"] }
 tempfile = "3"
 # Test children install a safe no-op SIGTERM handler (the tree forbids `unsafe`,
 # so nix's raw signal API is unusable in tests). signal-hook is MIT/Apache.
