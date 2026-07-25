@@ -7,21 +7,27 @@
 //!
 //! Replay is where the tamper-evidence becomes an assertion: it (1) validates event-chain
 //! continuity and per-event digests, (2) resolves every referenced artifact and checks its
-//! content digest, (3) folds the stream through the pure [`crate::reduce`] reducer, and
-//! (4) recomputes the verdict and — for [`replay_verify`] — compares it to the stored one.
-//! Any unexplained mismatch fails loudly. A run with no events is explicitly
-//! `LegacyNonReplayable`, never "verified".
+//! content digest, (3) folds the stream through the pure [`crate::reduce`] reducer, and (4)
+//! recomputes the verdict and — for [`replay_verify`] — compares it to the stored one. Any
+//! unexplained mismatch fails loudly.
+//!
+//! What the chain proves, precisely: it detects any modification NOT accompanied by a
+//! consistent recomputation of every downstream digest. It does NOT prove authenticity
+//! against an actor who can rewrite the WHOLE stream and recompute the chain — that is a
+//! non-goal (no remote attestation). To anchor a stream against such an actor,
+//! [`ReplayReport`] exposes `final_event_digest` and `normalized_state_digest` for an
+//! external journal or signature.
 
 use serde::{Deserialize, Serialize};
 
-use crate::event::{ArtifactRef, RunEvent};
+use crate::event::{ArtifactRef, Digest256, RunEvent, RunEventKind};
 use crate::reduce::ReduceError;
 use crate::state::Verdict;
 
-/// Resolves an [`ArtifactRef`]'s locator to its current bytes. Replay hashes the result
-/// and compares to the reference's digest, so a post-seal edit to `diff.patch` or a gate
-/// log is caught. Kept as a trait so the pure core stays I/O-free and tests can inject
-/// tampered content deterministically.
+/// Resolves an [`ArtifactRef`]'s locator to its current bytes. Replay hashes the result and
+/// compares to the reference's digest, so a post-seal edit to `diff.patch` or a gate log is
+/// caught. Kept as a trait so the pure core stays I/O-free and tests can inject tampered
+/// content deterministically.
 pub trait ArtifactResolver {
     /// Return the current bytes for `artifact`, or an error if it cannot be resolved.
     ///
@@ -39,24 +45,36 @@ pub struct ArtifactError {
     pub reason: String,
 }
 
-/// Whether a stored run can be independently replayed at all.
+/// Whether — and how — a stored run can be independently replayed. Three states, so a
+/// non-empty but broken file is never called "replayable".
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Replayability {
-    /// A canonical event stream is present and can be verified.
-    Replayable,
-    /// A pre-protocol run with no canonical events: readable as a forensic archive but
-    /// NOT independently replay-verifiable. Never presented as verified.
+    /// A pre-protocol run with no canonical events: readable as a forensic archive but NOT
+    /// independently replay-verifiable. Never presented as verified.
     LegacyNonReplayable,
+    /// The stream begins like a canonical run (a genesis `RunStarted` at sequence 0); it is
+    /// a replay CANDIDATE whose full validity [`replay`] then proves or rejects.
+    CanonicalReplayable,
+    /// Events are present but the stream does not even begin canonically (no genesis
+    /// `RunStarted` at sequence 0) — corrupt, not replayable.
+    CanonicalMalformed,
 }
 
-/// Classify a stored run by whether it carries a replayable event stream. An empty stream
-/// (or one lacking `RunStarted`) is legacy.
+/// Classify a stored run cheaply, without a full replay: empty → legacy; a genesis
+/// `RunStarted` at sequence 0 → replay candidate; anything else non-empty → malformed.
 #[must_use]
 pub fn classify(events: &[RunEvent]) -> Replayability {
-    match events.first() {
-        Some(_) => Replayability::Replayable,
-        None => Replayability::LegacyNonReplayable,
+    let Some(first) = events.first() else {
+        return Replayability::LegacyNonReplayable;
+    };
+    let starts_canonically = matches!(first.kind, RunEventKind::RunStarted { .. })
+        && first.sequence == 0
+        && first.previous_event_digest == Digest256::genesis();
+    if starts_canonically {
+        Replayability::CanonicalReplayable
+    } else {
+        Replayability::CanonicalMalformed
     }
 }
 
@@ -69,6 +87,11 @@ pub struct ReplayReport {
     pub events_verified: u64,
     /// How many referenced artifacts had their content digest verified.
     pub artifacts_verified: u64,
+    /// The `event_digest` of the last (sealed) event — an external anchor point.
+    pub final_event_digest: Digest256,
+    /// A digest over the byte-stable normalized reduced state — anchorable in an external
+    /// journal/signature to detect a fully-recomputed rewrite the chain alone cannot.
+    pub normalized_state_digest: Digest256,
 }
 
 /// Everything that can make a replay fail loudly.
@@ -128,9 +151,9 @@ pub fn replay(
     events: &[RunEvent],
     artifacts: &dyn ArtifactResolver,
 ) -> Result<ReplayReport, ReplayError> {
-    // CONTRACT-ONLY: see the module doc. Verification is specified by the acceptance
-    // tests in this commit and implemented next; until then replay is unavailable so a
-    // tampered or legacy run is never reported as verified.
+    // CONTRACT-ONLY: see the module doc. Verification is specified by the acceptance tests
+    // in this commit and implemented next; until then replay is unavailable so a tampered or
+    // legacy run is never reported as verified.
     let _ = (events, artifacts);
     Err(ReplayError::Unimplemented)
 }

@@ -1,31 +1,45 @@
 //! The canonical, versioned run-event contract.
 //!
 //! A run's truth is an append-only sequence of [`RunEvent`]s. Each event is chained to
-//! its predecessor by digest, so post-run modification, truncation, reordering, and
-//! substitution are all detectable by recomputation alone (see [`crate::replay`]). The
-//! event payloads are the ONLY canonical source of the verdict — the reducer never reads
-//! unstructured agent stdout.
+//! its predecessor by digest. The chain detects any modification that was NOT accompanied
+//! by a consistent recomputation of every downstream digest — deletion, truncation,
+//! reordering, substitution, and in-place edits. It is NOT authenticity: an adversary who
+//! can rewrite the WHOLE stream and recompute the chain is out of scope (see the
+//! `#[non_goal]` on remote attestation in issue #43). To anchor a stream against such an
+//! adversary, [`crate::replay::ReplayReport`] exposes the final event digest and the
+//! normalized-state digest for an external journal/signature.
 //!
 //! Digests are computed by explicit field FRAMING (length-prefixed), not by hashing a
-//! serialized JSON blob, so they are byte-stable regardless of map ordering or
-//! serializer whitespace — a prerequisite for byte-stable replay.
+//! serialized JSON blob, so they are byte-stable regardless of map ordering or serializer
+//! whitespace — a prerequisite for byte-stable replay. Values read back from storage are
+//! UNTRUSTED: [`Digest256`] and the [`crate::ids`] newtypes validate their form on
+//! deserialization so a malformed stored value cannot masquerade as a valid one.
+
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
 use crate::ids::{GateId, RunEventId, RunId};
 
-/// The schema version this build writes. A reader that encounters a newer version must
-/// refuse to replay it as if it understood it (forward-incompatible changes bump this).
+/// The schema version this build writes. A reader that encounters a different version must
+/// refuse to replay it as if it understood it (see [`crate::reduce::ReduceError`]).
 pub const RUN_EVENT_SCHEMA_VERSION: u32 = 1;
 
-/// A lowercase-hex SHA-256 digest. Used both for event-chain links and for referenced
-/// artifact content.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+/// A validated lowercase-hex SHA-256 digest (exactly 64 hex chars). Used both for
+/// event-chain links and for referenced artifact content.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 pub struct Digest256(String);
 
+/// A string that is not a canonical 64-char lowercase-hex SHA-256 digest.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("not a canonical sha-256 digest (need 64 lowercase hex chars): {value:?}")]
+pub struct DigestFormatError {
+    pub value: String,
+}
+
 impl Digest256 {
-    /// Hash raw bytes (artifact content, or any opaque blob).
+    /// Hash raw bytes (artifact content, or any opaque blob). Always canonical.
     #[must_use]
     pub fn of_bytes(bytes: &[u8]) -> Self {
         let mut hasher = Sha256::new();
@@ -34,16 +48,25 @@ impl Digest256 {
     }
 
     /// The genesis link: the `previous_event_digest` of the FIRST event in a run. A fixed
-    /// all-zero digest, so a stream that does not begin at genesis is detectable.
+    /// all-zero (canonical) digest, so a stream that does not begin at genesis is
+    /// detectable.
     #[must_use]
     pub fn genesis() -> Self {
         Self("0".repeat(64))
     }
 
-    /// Wrap an already-computed hex digest (e.g. read back from storage).
-    #[must_use]
-    pub fn from_hex(hex: impl Into<String>) -> Self {
-        Self(hex.into())
+    /// Parse and validate a hex digest string (untrusted input path).
+    ///
+    /// # Errors
+    /// [`DigestFormatError`] if `s` is not exactly 64 lowercase hex characters.
+    pub fn parse(s: &str) -> Result<Self, DigestFormatError> {
+        if is_canonical_hex(s) {
+            Ok(Self(s.to_owned()))
+        } else {
+            Err(DigestFormatError {
+                value: s.to_owned(),
+            })
+        }
     }
 
     #[must_use]
@@ -52,9 +75,33 @@ impl Digest256 {
     }
 }
 
+impl fmt::Display for Digest256 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for Digest256 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(&raw).map_err(serde::de::Error::custom)
+    }
+}
+
+fn is_canonical_hex(s: &str) -> bool {
+    s.len() == 64
+        && s.bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 /// The kind of artifact an event references. Artifacts are referenced by digest, never
-/// duplicated into the event stream, so the forensic files (`diff.patch`, `gate/*.log`,
-/// sandbox reports, task spec) stay the single copy and replay validates them in place.
+/// duplicated into the event stream, so the forensic files (`task.json`, `diff.patch`,
+/// `gate/*.log`, sandbox reports) stay the single copy and replay validates them in place.
+/// Each slot in [`RunEventKind`] requires a SPECIFIC kind — a mismatch is a structural
+/// error, not a silent accept.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactKind {
@@ -68,6 +115,8 @@ pub enum ArtifactKind {
     SandboxReport,
     /// The materialized worktree identity.
     Worktree,
+    /// A policy definition, bound by digest so a run proves WHICH policy it checked.
+    Policy,
 }
 
 /// A reference to an out-of-band artifact: WHERE it is plus the digest its content MUST
@@ -75,8 +124,8 @@ pub enum ArtifactKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactRef {
     pub kind: ArtifactKind,
-    /// An opaque, storage-relative locator (e.g. `diff.patch`, `gate/build.log`). The
-    /// pure core never interprets it; a resolver maps it to bytes.
+    /// An opaque, storage-relative locator (e.g. `diff.patch`, `gate/build.log`). The pure
+    /// core never interprets it; a resolver maps it to bytes.
     pub locator: String,
     /// The digest the resolved content must equal.
     pub digest: Digest256,
@@ -84,6 +133,8 @@ pub struct ArtifactRef {
 
 /// The outcome a gate reported. Distinct from the run [`crate::state::Verdict`]: a single
 /// gate can `Warn` or be `NotApplicable`, but the run-level verdict is one of four states.
+/// A gate NEVER declares its own applicability here — that is fixed pre-run in the
+/// [`RunContract`]; this is only the OBSERVED result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GateOutcome {
@@ -93,83 +144,185 @@ pub enum GateOutcome {
     Fail,
     /// The gate ran, passed, but surfaced a non-blocking warning.
     Warn,
-    /// The gate was refused by policy/environment (e.g. confinement missing).
+    /// The gate was refused by policy/environment at run time.
     Blocked,
-    /// The gate does not apply in this environment (e.g. a Windows check on Linux).
+    /// The gate reported that it does not apply in this environment.
     NotApplicable,
-    /// The gate could not produce a trustworthy result (could not start, crashed). This
-    /// is a harness error, distinct from a domain `Fail`.
+    /// The gate could not produce a trustworthy result (could not start, crashed). A
+    /// harness error, distinct from a domain `Fail`.
     Error,
 }
 
-/// How an agent process ended.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The outcome of a policy pre-check. `Denied` (a normal policy denial) is deliberately
+/// distinct from `Error` (a broken policy engine) — collapsing them into a boolean would
+/// hide a fault as a denial.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AgentExit {
-    /// Exited normally with this status code.
-    Exited { code: i32 },
-    /// Terminated by this signal.
-    Signalled { signal: i32 },
-    /// Never started (a harness error → run-level `Error`).
-    FailedToStart { reason: String },
+pub enum PolicyOutcome {
+    Allowed,
+    Denied,
+    Error,
 }
 
-/// The obligations declared for a run BEFORE it executes. This is what lets an
-/// environment-specific gate be legitimately skipped (declared optional up front) while a
-/// required gate that simply did not run is `BLOCKED` — the distinction cannot be invented
-/// after the fact.
+/// Which execution a sandbox obligation/evidence is about. Confinement evidence is bound to
+/// a SUBJECT so one blanket "confined: true" cannot satisfy every requirement.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "subject", rename_all = "snake_case")]
+pub enum ExecutionSubject {
+    /// The agent process.
+    Agent,
+    /// A specific gate.
+    Gate { gate: GateId },
+    /// The trusted verifier.
+    Verifier,
+}
+
+/// The outcome of validating a sandbox report against its policy. `Violated` (confinement
+/// breached) is distinct from `Error` (the report could not be validated).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxEvidenceOutcome {
+    /// The report satisfies the required policy.
+    Satisfied,
+    /// The report shows the policy was violated.
+    Violated,
+    /// The report could not be validated (a harness error).
+    Error,
+}
+
+/// A required sandbox obligation declared BEFORE execution: some subject must run under a
+/// specific policy (bound by digest) and produce satisfying evidence for the run to `Pass`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SandboxRequirement {
+    pub subject: ExecutionSubject,
+    pub policy_digest: Digest256,
+}
+
+/// Whether a gate is required or optional for the run's verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GateRequirement {
+    /// Must be discharged (executed and passed) or the run is not `Pass`.
+    Required,
+    /// Informational; never blocks the verdict.
+    Optional,
+}
+
+/// Whether a gate applies in THIS run's environment. A `Waived` gate was declared skippable
+/// for this environment BEFORE execution — the only way a required gate may be legitimately
+/// skipped. This is fixed at `RunStarted`; nothing observed at run time can grant it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "applicability", rename_all = "snake_case")]
+pub enum GateApplicability {
+    /// The gate applies and must be run.
+    Applicable,
+    /// The gate is waived for this environment, with an auditable reason.
+    Waived { environment: String, reason: String },
+}
+
+/// One pre-declared gate obligation. A gate appears in EXACTLY one obligation, so the
+/// contradictory "required, except when optional" overlap is unrepresentable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GateObligation {
+    pub gate: GateId,
+    pub requirement: GateRequirement,
+    pub applicability: GateApplicability,
+}
+
+/// The obligations declared for a run BEFORE it executes: which gates must pass, which
+/// confinement must be evidenced, and the environment. Applicability and requirement are
+/// fixed here — they cannot be invented after the fact from observed events.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunContract {
-    /// The gates that MUST execute and pass for the run to `PASS`.
-    pub required_gates: Vec<GateId>,
-    /// Required gates explicitly declared optional FOR THIS ENVIRONMENT before execution.
-    /// A gate here that is skipped / `NotApplicable` does not block; one absent here does.
-    pub optional_in_env: Vec<GateId>,
-    /// Whether a valid sandbox-evidence artifact is required for this run to `PASS`.
-    pub requires_sandbox_evidence: bool,
+    /// Every gate obligation, keyed by a unique gate id (duplicates are a structural
+    /// error).
+    pub gate_obligations: Vec<GateObligation>,
+    /// Sandbox obligations that must each be satisfied by matching evidence.
+    pub sandbox_requirements: Vec<SandboxRequirement>,
     /// The runner environment tag (e.g. `linux`). Opaque to the reducer except for
-    /// equality against a gate's declared support.
+    /// matching a gate waiver's declared environment.
     pub runner_environment: String,
 }
 
-/// One canonical run event's payload. The names are reviewable; the semantic distinctions
-/// are load-bearing and must survive renaming.
+/// How the agent execution ended. This mirrors the frozen o7-worker `WorkerResult`
+/// categories exactly — collapsing them would erase load-bearing distinctions. In
+/// particular a `CleanupFailure` (owned process set not proven gone) MUST force the run to
+/// `Error` even when the leader exited 0.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum AgentOutcome {
+    /// The leader exited with this code.
+    ExitedNormally { code: i32 },
+    /// The leader was terminated by this signal.
+    ExitedBySignal { signal: i32 },
+    /// Cancelled; the whole owned group drained within the grace period.
+    CancelledGracefully,
+    /// Cancelled; at least one member required a force-kill.
+    CancelledForcefully,
+    /// The process never started (bad spec/policy, spawn error, boundary unmet).
+    FailedToStart { reason: String },
+    /// A boundary mechanism failed during the run.
+    BoundaryFailure { reason: String },
+    /// The authoritative observation sink failed; the worker was stopped.
+    ObservationFailure { reason: String },
+    /// A stdout/stderr read failed; output faithfulness was lost.
+    OutputFailure { reason: String },
+    /// The owned group could not be proven gone; a failure even if the leader exited
+    /// cleanly.
+    CleanupFailure { reason: String },
+}
+
+/// One canonical run event's payload.
+///
+/// EVENT CLASSIFICATION (also enforced by `tests/reducer_transitions.rs`):
+/// - **Verdict-bearing:** `RunStarted` (obligations), `AgentExited` (a fault/cleanup/
+///   cancellation forces `Error`), `PolicyChecked` (`Denied` → `Blocked`, `Error` →
+///   `Error`), `GateFinished` (its outcome), `SandboxEvidenceCaptured` (satisfies a
+///   requirement or not), `RunSealed` (finalizes).
+/// - **Lifecycle/structural:** `AgentStarted`, `GateStarted`, `RunSealed`.
+/// - **Evidence-only (verdict-neutral, but its artifact IS digest-verified in replay):**
+///   `WorktreeCreated`, `PatchCaptured`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RunEventKind {
-    /// The run began; carries the pre-execution obligation contract. MUST be the first
-    /// event of a run.
-    RunStarted { contract: RunContract },
-    /// The isolated worktree was materialized.
+    /// The run began; carries the pre-execution obligation contract and the task it runs
+    /// for (bound by digest). MUST be the first event.
+    RunStarted {
+        contract: RunContract,
+        task: ArtifactRef,
+    },
+    /// The isolated worktree was materialized (evidence-only for the verdict).
     WorktreeCreated { worktree: ArtifactRef },
     /// The agent process was spawned.
     AgentStarted,
-    /// The agent process ended.
-    AgentExited { exit: AgentExit },
-    /// A patch was captured from the worktree.
+    /// The agent execution ended, with its terminal outcome.
+    AgentExited { outcome: AgentOutcome },
+    /// A patch was captured from the worktree (evidence-only for the verdict).
     PatchCaptured { patch: ArtifactRef },
-    /// A policy pre-check ran (e.g. path/network allowlist) with its allow/deny result.
-    PolicyChecked { policy: String, allowed: bool },
+    /// A policy pre-check ran, bound to the policy it evaluated (by digest), with its
+    /// outcome.
+    PolicyChecked {
+        policy: ArtifactRef,
+        outcome: PolicyOutcome,
+    },
     /// A gate began executing.
     GateStarted { gate: GateId },
-    /// A gate finished, with its outcome, whether it is supported in this environment, and
-    /// its captured log (if any).
+    /// A gate finished, with its observed outcome and captured log (if any). Applicability
+    /// is NOT here — it is fixed in the contract.
     GateFinished {
         gate: GateId,
         outcome: GateOutcome,
-        /// Whether this gate is applicable/supported in the run's environment. A required
-        /// gate unsupported here reduces to `BLOCKED` unless declared optional-in-env.
-        supported_in_env: bool,
         log: Option<ArtifactRef>,
     },
-    /// A sandbox produced machine-readable confinement evidence, and whether it satisfies
-    /// the run's policy.
+    /// Confinement evidence for a specific subject/policy, and whether it satisfies the
+    /// policy.
     SandboxEvidenceCaptured {
+        subject: ExecutionSubject,
+        policy_digest: Digest256,
         report: ArtifactRef,
-        satisfies_policy: bool,
+        outcome: SandboxEvidenceOutcome,
     },
-    /// The run was sealed. MUST be the LAST event; the verdict is fixed here and no event
-    /// may follow.
+    /// The run was sealed. MUST be the LAST event; the verdict is fixed here.
     RunSealed,
 }
 
@@ -229,8 +382,8 @@ pub struct RunEvent {
 
 impl RunEvent {
     /// Compute the canonical digest of this event from its fields (excluding the stored
-    /// `event_digest`). Deterministic and total — pure field framing, no serialization,
-    /// no panics.
+    /// `event_digest`). Deterministic and total — pure field framing, no serialization, no
+    /// panics.
     #[must_use]
     pub fn compute_digest(&self) -> Digest256 {
         let mut h = Sha256::new();
@@ -257,54 +410,79 @@ impl RunEvent {
 /// Fold a [`RunEventKind`]'s fields into `h` with explicit framing.
 fn fold_kind(h: &mut Sha256, kind: &RunEventKind) {
     match kind {
-        RunEventKind::RunStarted { contract } => fold_contract(h, contract),
+        RunEventKind::RunStarted { contract, task } => {
+            fold_contract(h, contract);
+            fold_artifact(h, task);
+        }
         RunEventKind::WorktreeCreated { worktree } => fold_artifact(h, worktree),
         RunEventKind::AgentStarted | RunEventKind::RunSealed => {}
-        RunEventKind::AgentExited { exit } => fold_exit(h, exit),
+        RunEventKind::AgentExited { outcome } => fold_agent_outcome(h, outcome),
         RunEventKind::PatchCaptured { patch } => fold_artifact(h, patch),
-        RunEventKind::PolicyChecked { policy, allowed } => {
-            frame(h, policy.as_bytes());
-            h.update([u8::from(*allowed)]);
+        RunEventKind::PolicyChecked { policy, outcome } => {
+            fold_artifact(h, policy);
+            h.update([policy_outcome_tag(*outcome)]);
         }
         RunEventKind::GateStarted { gate } => frame(h, gate.as_str().as_bytes()),
-        RunEventKind::GateFinished {
-            gate,
-            outcome,
-            supported_in_env,
-            log,
-        } => {
+        RunEventKind::GateFinished { gate, outcome, log } => {
             frame(h, gate.as_str().as_bytes());
             h.update([gate_outcome_tag(*outcome)]);
-            h.update([u8::from(*supported_in_env)]);
-            match log {
-                Some(a) => {
-                    h.update([1u8]);
-                    fold_artifact(h, a);
-                }
-                None => h.update([0u8]),
-            }
+            fold_optional_artifact(h, log.as_ref());
         }
         RunEventKind::SandboxEvidenceCaptured {
+            subject,
+            policy_digest,
             report,
-            satisfies_policy,
+            outcome,
         } => {
+            fold_subject(h, subject);
+            frame(h, policy_digest.as_str().as_bytes());
             fold_artifact(h, report);
-            h.update([u8::from(*satisfies_policy)]);
+            h.update([sandbox_outcome_tag(*outcome)]);
         }
     }
 }
 
 fn fold_contract(h: &mut Sha256, contract: &RunContract) {
-    frame(h, &(contract.required_gates.len() as u64).to_le_bytes());
-    for g in &contract.required_gates {
-        frame(h, g.as_str().as_bytes());
+    frame(h, &(contract.gate_obligations.len() as u64).to_le_bytes());
+    for o in &contract.gate_obligations {
+        frame(h, o.gate.as_str().as_bytes());
+        h.update([gate_requirement_tag(o.requirement)]);
+        fold_applicability(h, &o.applicability);
     }
-    frame(h, &(contract.optional_in_env.len() as u64).to_le_bytes());
-    for g in &contract.optional_in_env {
-        frame(h, g.as_str().as_bytes());
+    frame(
+        h,
+        &(contract.sandbox_requirements.len() as u64).to_le_bytes(),
+    );
+    for r in &contract.sandbox_requirements {
+        fold_subject(h, &r.subject);
+        frame(h, r.policy_digest.as_str().as_bytes());
     }
-    h.update([u8::from(contract.requires_sandbox_evidence)]);
     frame(h, contract.runner_environment.as_bytes());
+}
+
+fn fold_applicability(h: &mut Sha256, a: &GateApplicability) {
+    match a {
+        GateApplicability::Applicable => h.update([1u8]),
+        GateApplicability::Waived {
+            environment,
+            reason,
+        } => {
+            h.update([2u8]);
+            frame(h, environment.as_bytes());
+            frame(h, reason.as_bytes());
+        }
+    }
+}
+
+fn fold_subject(h: &mut Sha256, s: &ExecutionSubject) {
+    match s {
+        ExecutionSubject::Agent => h.update([1u8]),
+        ExecutionSubject::Gate { gate } => {
+            h.update([2u8]);
+            frame(h, gate.as_str().as_bytes());
+        }
+        ExecutionSubject::Verifier => h.update([3u8]),
+    }
 }
 
 fn fold_artifact(h: &mut Sha256, a: &ArtifactRef) {
@@ -313,18 +491,46 @@ fn fold_artifact(h: &mut Sha256, a: &ArtifactRef) {
     frame(h, a.digest.as_str().as_bytes());
 }
 
-fn fold_exit(h: &mut Sha256, exit: &AgentExit) {
-    match exit {
-        AgentExit::Exited { code } => {
+fn fold_optional_artifact(h: &mut Sha256, a: Option<&ArtifactRef>) {
+    match a {
+        Some(a) => {
+            h.update([1u8]);
+            fold_artifact(h, a);
+        }
+        None => h.update([0u8]),
+    }
+}
+
+fn fold_agent_outcome(h: &mut Sha256, outcome: &AgentOutcome) {
+    match outcome {
+        AgentOutcome::ExitedNormally { code } => {
             h.update([1u8]);
             frame(h, &code.to_le_bytes());
         }
-        AgentExit::Signalled { signal } => {
+        AgentOutcome::ExitedBySignal { signal } => {
             h.update([2u8]);
             frame(h, &signal.to_le_bytes());
         }
-        AgentExit::FailedToStart { reason } => {
-            h.update([3u8]);
+        AgentOutcome::CancelledGracefully => h.update([3u8]),
+        AgentOutcome::CancelledForcefully => h.update([4u8]),
+        AgentOutcome::FailedToStart { reason } => {
+            h.update([5u8]);
+            frame(h, reason.as_bytes());
+        }
+        AgentOutcome::BoundaryFailure { reason } => {
+            h.update([6u8]);
+            frame(h, reason.as_bytes());
+        }
+        AgentOutcome::ObservationFailure { reason } => {
+            h.update([7u8]);
+            frame(h, reason.as_bytes());
+        }
+        AgentOutcome::OutputFailure { reason } => {
+            h.update([8u8]);
+            frame(h, reason.as_bytes());
+        }
+        AgentOutcome::CleanupFailure { reason } => {
+            h.update([9u8]);
             frame(h, reason.as_bytes());
         }
     }
@@ -337,6 +543,7 @@ fn artifact_kind_tag(kind: ArtifactKind) -> u8 {
         ArtifactKind::GateLog => 3,
         ArtifactKind::SandboxReport => 4,
         ArtifactKind::Worktree => 5,
+        ArtifactKind::Policy => 6,
     }
 }
 
@@ -348,6 +555,29 @@ fn gate_outcome_tag(outcome: GateOutcome) -> u8 {
         GateOutcome::Blocked => 4,
         GateOutcome::NotApplicable => 5,
         GateOutcome::Error => 6,
+    }
+}
+
+fn policy_outcome_tag(outcome: PolicyOutcome) -> u8 {
+    match outcome {
+        PolicyOutcome::Allowed => 1,
+        PolicyOutcome::Denied => 2,
+        PolicyOutcome::Error => 3,
+    }
+}
+
+fn sandbox_outcome_tag(outcome: SandboxEvidenceOutcome) -> u8 {
+    match outcome {
+        SandboxEvidenceOutcome::Satisfied => 1,
+        SandboxEvidenceOutcome::Violated => 2,
+        SandboxEvidenceOutcome::Error => 3,
+    }
+}
+
+fn gate_requirement_tag(requirement: GateRequirement) -> u8 {
+    match requirement {
+        GateRequirement::Required => 1,
+        GateRequirement::Optional => 2,
     }
 }
 

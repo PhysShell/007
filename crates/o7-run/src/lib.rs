@@ -24,9 +24,13 @@
 //!    skipped yet the run still passed.
 //! 2. **Run truth is independently reproducible.** Events are chained by digest and
 //!    reference their artifacts by digest, so replay re-derives the verdict byte-for-byte
-//!    and detects post-run modification, truncation, reordering, and substitution — or
-//!    fails loudly. A pre-protocol run stays readable but is explicitly
-//!    `LegacyNonReplayable`, never silently "verified".
+//!    and detects any post-run modification NOT accompanied by a consistent recomputation
+//!    of every downstream digest — truncation, reordering, substitution, in-place edits —
+//!    or fails loudly. This is tamper-EVIDENCE, not authenticity: an actor who can rewrite
+//!    the whole stream and recompute the chain is out of scope (no remote attestation). The
+//!    replay report exposes the final event digest and normalized-state digest so a stream
+//!    can be anchored externally against that. A pre-protocol run stays readable but is
+//!    explicitly `LegacyNonReplayable`, never silently "verified".
 //!
 //! The core is PURE and dependency-light on purpose (serde + a hash): the semantics can be
 //! recomputed anywhere, by anyone, without the ledger, a runtime, or a database.
@@ -48,13 +52,17 @@ pub mod replay;
 pub mod state;
 
 pub use event::{
-    AgentExit, ArtifactKind, ArtifactRef, Digest256, GateOutcome, RunContract, RunEvent,
-    RunEventKind, RUN_EVENT_SCHEMA_VERSION,
+    AgentOutcome, ArtifactKind, ArtifactRef, Digest256, DigestFormatError, ExecutionSubject,
+    GateApplicability, GateObligation, GateOutcome, GateRequirement, PolicyOutcome, RunContract,
+    RunEvent, RunEventKind, SandboxEvidenceOutcome, SandboxRequirement, RUN_EVENT_SCHEMA_VERSION,
 };
-pub use ids::{GateId, RunEventId, RunId};
+pub use ids::{GateId, IdError, RunEventId, RunId};
 pub use reduce::{reduce, reduce_all, ReduceError};
 pub use replay::{
     classify, replay, replay_verify, ArtifactError, ArtifactResolver, ReplayError, ReplayReport,
     Replayability,
 };
-pub use state::{GateProgress, RunPhase, RunState, Verdict, RUN_STATE_SCHEMA_VERSION};
+pub use state::{
+    AgentLifecycle, GateProgress, PolicyResult, RunPhase, RunState, Verdict,
+    RUN_STATE_SCHEMA_VERSION,
+};
