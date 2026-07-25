@@ -63,7 +63,7 @@ fn boundary(allow_exec: Vec<PathBuf>, mode: &str) -> SandboyBoundary {
 /// backend's control plane, not here).
 fn touch_target(marker: &std::path::Path) -> BoundarySpawnSpec {
     BoundarySpawnSpec {
-        executable: PathBuf::from("/bin/sh"),
+        executable: PathBuf::from("/bin/dash"),
         arguments: vec![
             OsString::from("-c"),
             OsString::from(format!("touch {}; exit 0", marker.display())),
@@ -140,7 +140,7 @@ async fn a_valid_report_plus_go_runs_the_target_under_a_distinct_monitor() {
     let target_pid_file = dir.path().join("target.pid");
     let b = boundary(vec![PathBuf::from("/bin")], "ok");
     let target = BoundarySpawnSpec {
-        executable: PathBuf::from("/bin/sh"),
+        executable: PathBuf::from("/bin/dash"),
         arguments: vec![
             OsString::from("-c"),
             OsString::from(format!(
@@ -189,7 +189,7 @@ async fn the_confined_target_has_a_clean_fd_table() {
     let leaked = dir.path().join("leaked-fd");
     let b = boundary(vec![PathBuf::from("/bin")], "ok");
     let target = BoundarySpawnSpec {
-        executable: PathBuf::from("/bin/sh"),
+        executable: PathBuf::from("/bin/dash"),
         arguments: vec![
             OsString::from("-c"),
             OsString::from(format!(

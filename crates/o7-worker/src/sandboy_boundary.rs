@@ -29,10 +29,14 @@
 //! downgraded report, a NACK, EOF, or a cancel makes the backend kill its cgroup and reap — the
 //! target never runs on an unverified report.
 //!
-//! LIVE + GREEN here: backend acquisition (fail-closed on a digest mismatch), policy
-//! validation, nonce minting (fail-closed on RNG failure), the confined-backend argv with plane
-//! separation, the exec-permission gate, and the pure fail-closed [`SandboyBoundary::verify_report`].
-//! RED: the confined live launch itself.
+//! LIVE + enforced here: backend + TARGET acquisition (hardened `O_NOFOLLOW`/regular-file open
+//! for ordinary paths, a followed-and-seal-checked path for the frozen `/proc/<pid>/fd/<n>`
+//! executable, fail-closed on a digest mismatch), policy validation, nonce minting (fail-closed
+//! on RNG failure), the confined-backend argv with plane separation, the exec-permission gate,
+//! the two-phase report handshake with an end-of-message (EOF) proof so a trailing byte fails
+//! closed, monitor OWNERSHIP of the target's group (a monitor that exits leaving a live owned
+//! target fails closed even on a clean code), and cleanup that must be PROVEN (an unproven reap
+//! dominates the triggering error).
 
 use std::collections::BTreeMap;
 use std::os::unix::io::RawFd;
@@ -496,6 +500,22 @@ struct SandboyMonitorProcess {
     _target: SealedObject,
 }
 
+impl SandboyMonitorProcess {
+    /// Poll the owned membership until it is empty or the bound elapses.
+    async fn drained_within(&self, bound: std::time::Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + bound;
+        loop {
+            if matches!(self.inner.remaining_members().await, Ok(m) if m.is_empty()) {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return matches!(self.inner.remaining_members().await, Ok(m) if m.is_empty());
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    }
+}
+
 #[async_trait]
 impl BoundaryProcess for SandboyMonitorProcess {
     fn identity(&self) -> ProcessIdentity {
@@ -514,7 +534,26 @@ impl BoundaryProcess for SandboyMonitorProcess {
         self.inner.force_stop().await
     }
     async fn wait(&mut self) -> Result<crate::boundary::BoundaryExit, BoundaryError> {
-        self.inner.wait().await
+        // Wait the monitor (the owned group leader). In a clean run the monitor OUTLIVES the
+        // target and reaps it, so the owned group is EMPTY once the monitor exits. If any owned
+        // member survives the monitor, the run is broken — a monitor that died leaving a live,
+        // owned target is not a clean exit no matter what code it returned. Kill the owned set,
+        // prove it drains, and FAIL CLOSED; an undrained set is a cleanup failure that dominates.
+        let exit = self.inner.wait().await?;
+        let members = self.inner.remaining_members().await?;
+        if !members.is_empty() {
+            self.inner.force_stop().await?;
+            if !self.drained_within(std::time::Duration::from_secs(3)).await {
+                return Err(BoundaryError::Signal(
+                    "monitor exited but owned members survived teardown".to_owned(),
+                ));
+            }
+            return Err(BoundaryError::Signal(format!(
+                "monitor exited ({exit:?}) leaving {} owned member(s) alive",
+                members.len()
+            )));
+        }
+        Ok(exit)
     }
     async fn remaining_members(&self) -> Result<Vec<ProcessIdentity>, BoundaryError> {
         self.inner.remaining_members().await
@@ -522,15 +561,23 @@ impl BoundaryProcess for SandboyMonitorProcess {
 }
 
 /// Bounded-kill and reap a spawned backend group so no error path leaks a process. Kills the
-/// whole group (`killpg`), then reaps the leader under a bounded timeout.
-async fn kill_and_reap(child: &mut tokio::process::Child, pgid: i32) {
+/// whole group (`killpg`), then reaps the leader under a bounded timeout. Returns `Err` if the
+/// reap is NOT PROVEN (wait failed or timed out) — an unproven cleanup must dominate whatever
+/// error triggered it, never be silently ignored.
+async fn kill_and_reap(child: &mut tokio::process::Child, pgid: i32) -> Result<(), BoundaryError> {
     use nix::sys::signal::{killpg, Signal};
     use nix::unistd::Pid;
     if pgid > 0 {
         let _ = killpg(Pid::from_raw(pgid), Signal::SIGKILL);
     }
     let _ = child.start_kill();
-    let _ = tokio::time::timeout(std::time::Duration::from_millis(500), child.wait()).await;
+    match tokio::time::timeout(std::time::Duration::from_secs(2), child.wait()).await {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(e)) => Err(BoundaryError::Wait(e)),
+        Err(_) => Err(BoundaryError::Signal(
+            "backend cleanup did not complete: reap timed out".to_owned(),
+        )),
+    }
 }
 
 #[async_trait]
@@ -613,7 +660,8 @@ impl ProcessBoundary for SandboyBoundary {
         let pid = match signalable_pid(child.id()) {
             Ok(p) => p,
             Err(e) => {
-                kill_and_reap(&mut child, -1).await;
+                // Cleanup failure DOMINATES the original error.
+                kill_and_reap(&mut child, -1).await?;
                 return Err(e);
             }
         };
@@ -623,15 +671,17 @@ impl ProcessBoundary for SandboyBoundary {
             start_time_ticks: 0,
         });
 
-        // Write the bounded request, then read exactly one bounded report frame. Offloaded so a
-        // blocking pipe op does not stall the runtime.
+        // Write the bounded request, then read exactly one bounded report frame AND prove it is
+        // the ENTIRE message: after the declared body, one more read must be EOF. The backend
+        // closes its report writer after the single frame (BEFORE it blocks on GO), so this is a
+        // deterministic end-of-message — not a racy nonblocking peek. A trailing byte is a
+        // protocol violation and fails closed. Offloaded so the blocking pipe ops do not stall the
+        // runtime, and wrapped in a wall-clock bound so a stalled backend cannot hang the launch.
         let mut req_file = std::fs::File::from(request_w);
         let mut rep_file = std::fs::File::from(report_r);
-        let io = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<u8>> {
+        let read_report = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<u8>> {
             req_file.write_all(&request_bytes)?;
             drop(req_file); // close so the backend's request read completes
-                            // Read EXACTLY one length-prefixed frame — never to EOF (the backend keeps its report
-                            // write end open while it blocks on GO, so EOF would deadlock).
             let mut len_buf = [0u8; 4];
             rep_file.read_exact(&mut len_buf)?;
             let len = u32::from_be_bytes(len_buf) as usize;
@@ -642,18 +692,31 @@ impl ProcessBoundary for SandboyBoundary {
             }
             let mut body = vec![0u8; len];
             rep_file.read_exact(&mut body)?;
+            // Confirm end-of-message: the report channel must be at EOF now. A blocking read (the
+            // writer is still open until the backend closes it after the frame) returns 0 on a
+            // clean close, or >0 if the backend appended a trailing byte.
+            let mut extra = [0u8; 1];
+            match rep_file.read(&mut extra)? {
+                0 => {}
+                _ => {
+                    return Err(std::io::Error::other(
+                        "trailing bytes after the report frame",
+                    ))
+                }
+            }
             let mut frame = len_buf.to_vec();
             frame.extend_from_slice(&body);
             Ok(frame)
-        })
-        .await;
+        });
+        let io = tokio::time::timeout(std::time::Duration::from_secs(10), read_report).await;
         let report_bytes = match io {
-            Ok(Ok(bytes)) => bytes,
+            Ok(Ok(Ok(bytes))) => bytes,
             _ => {
-                // The backend never delivered a usable report (e.g. it exited first). Fail closed.
-                kill_and_reap(&mut child, pid).await;
+                // The backend never delivered a well-formed single frame (it exited first, stalled,
+                // or appended trailing bytes). Fail closed; cleanup failure dominates.
+                kill_and_reap(&mut child, pid).await?;
                 return Err(BoundaryError::Evidence(
-                    "backend did not deliver a report frame".to_owned(),
+                    "backend did not deliver a well-formed report frame".to_owned(),
                 ));
             }
         };
@@ -664,7 +727,7 @@ impl ProcessBoundary for SandboyBoundary {
             Ok(ev) => ev,
             Err(e) => {
                 drop(control_w);
-                kill_and_reap(&mut child, pid).await;
+                kill_and_reap(&mut child, pid).await?;
                 return Err(BoundaryError::Evidence(e.to_string()));
             }
         };
@@ -672,7 +735,7 @@ impl ProcessBoundary for SandboyBoundary {
         // Authorized: send GO, then hand back the live monitor as the owned group leader.
         let mut ctl = std::fs::File::from(control_w);
         if ctl.write_all(b"G").is_err() {
-            kill_and_reap(&mut child, pid).await;
+            kill_and_reap(&mut child, pid).await?;
             return Err(BoundaryError::Evidence(
                 "failed to authorize the target (GO)".to_owned(),
             ));

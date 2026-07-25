@@ -72,7 +72,9 @@ fn boundary(allow_exec: Vec<PathBuf>, mode: &str) -> SandboyBoundary {
 
 fn sh_target(script: String) -> BoundarySpawnSpec {
     BoundarySpawnSpec {
-        executable: PathBuf::from("/bin/sh"),
+        // A REGULAR-file shell (dash), not the /bin/sh symlink — hardened acquisition rejects a
+        // symlink final component (O_NOFOLLOW). Still under /bin for the lexical exec gate.
+        executable: PathBuf::from("/bin/dash"),
         arguments: vec![OsString::from("-c"), OsString::from(script)],
         working_directory: std::env::temp_dir(),
         environment: BTreeMap::new(),

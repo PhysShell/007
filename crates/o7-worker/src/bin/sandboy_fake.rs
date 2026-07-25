@@ -1,11 +1,13 @@
 //! A CONTROLLED fake `sandboy` backend for the launch acceptance matrix. It speaks the real
 //! protocol AND respects the chosen MONITOR topology: reconstruct the policy from the flags,
-//! emit ONE bound report frame on `--report-fd`, wait for the parent's GO byte on
-//! `--control-fd`, then — on GO — CLOSE the inherited control-plane descriptors and start the
-//! target as a CHILD in its own process group, remaining alive as the monitor that owns the
-//! group and relays the target's exit. It never `exec`s into the target (which would make it
-//! disappear, the rejected exec-in-place architecture). It misbehaves on demand via its own
-//! (trusted, control-plane) environment variable `O7_FAKE_MODE` — never the target's env.
+//! emit ONE bound report frame on `--report-fd` and CLOSE the report writer (so the parent can
+//! prove the frame is the whole message by reading EOF), wait for the parent's GO byte on
+//! `--control-fd`, then — on GO — SCRUB every inherited descriptor except stdio and start the
+//! target as a CHILD that INHERITS the monitor's process group, remaining alive as the monitor
+//! that owns the group and relays the target's exit. It never `exec`s into the target (which
+//! would make it disappear, the rejected exec-in-place architecture). It misbehaves on demand
+//! via its own (trusted, control-plane) environment variable `O7_FAKE_MODE` — never the target's
+//! env.
 //!
 //! Test infrastructure: built by the o7-worker package so integration tests can locate it via
 //! `CARGO_BIN_EXE_sandboy_fake`, and exercised once the live launch lands GREEN. `unsafe`
@@ -20,7 +22,6 @@
 
 use std::ffi::OsString;
 use std::io::{Read as _, Write as _};
-use std::os::unix::process::CommandExt as _;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
@@ -223,6 +224,11 @@ fn run() -> i32 {
         }
         Err(_) => return 66,
     }
+    // CLOSE the report writer now — after exactly one frame, BEFORE waiting for GO — so the
+    // parent can prove the frame is the ENTIRE message by reading EOF. Both this /proc write
+    // handle (dropped above) and the inherited report descriptor must close; report and control
+    // are separate pipes, so the target-hold barrier (GO) still works.
+    let _ = nix::unistd::close(args.report_fd);
 
     // Wait for the parent's GO ('G') before starting the target. Anything else / EOF is a NACK.
     let control_path = format!("/proc/self/fd/{}", args.control_fd);
@@ -232,12 +238,28 @@ fn run() -> i32 {
         _ => return 67, // NACK / EOF — fail closed, target never runs.
     }
 
-    // Close the inherited control-plane descriptors so the TARGET cannot see the report/control/
-    // request channels (a security contract, not a detail). Errors are ignored: a closed fd is
-    // fine.
-    let _ = nix::unistd::close(args.report_fd);
-    let _ = nix::unistd::close(args.control_fd);
-    let _ = nix::unistd::close(args.request_fd);
+    // SCRUB the whole inherited descriptor set except stdio (0/1/2): enumerate /proc/self/fd and
+    // close every other fd, so neither a control-plane channel NOR any other inherited descriptor
+    // leaks into the target. A range or a fixed three-fd close is not enough — an arbitrary high
+    // fd would survive. We are single-threaded here, so enumerate-then-close is race-free (collect
+    // all numbers first, then close, so we never mutate the directory we are iterating).
+    let mut inherited = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("/proc/self/fd") {
+        for entry in entries.flatten() {
+            if let Some(fd) = entry
+                .file_name()
+                .to_str()
+                .and_then(|n| n.parse::<i32>().ok())
+            {
+                if fd > 2 {
+                    inherited.push(fd);
+                }
+            }
+        }
+    }
+    for fd in inherited {
+        let _ = nix::unistd::close(fd);
+    }
 
     // `hold_before_target`: prove the LIVE hash→exec property. The parent has already sealed the
     // target and bound the launch; here we announce (`ready`) that the sealed target/request are
@@ -259,10 +281,12 @@ fn run() -> i32 {
         }
     }
 
-    // MONITOR topology: start the target as a CHILD in its own process group and stay alive as
-    // the monitor. The target's argv/cwd/env come from the out-of-band REQUEST (allowlisted),
-    // never from the backend's own argv/env. `env_clear()` first, then set exactly the
-    // request's allowlisted env.
+    // MONITOR topology: start the target as a CHILD that INHERITS the monitor's process group, so
+    // the monitor OWNS the target (and its descendants) for membership and teardown. It must NOT
+    // create its own group (`process_group(0)`) — that would orphan the target from the owned set,
+    // so `remaining_members`/`force_stop` would miss it. The target's argv/cwd/env come from the
+    // out-of-band REQUEST (allowlisted), never from the backend's own argv/env. `env_clear()`
+    // first, then set exactly the request's allowlisted env.
     use std::os::unix::ffi::OsStrExt as _;
     let mut cmd = Command::new(&args.target);
     cmd.args(
@@ -272,8 +296,7 @@ fn run() -> i32 {
             .map(|a| OsString::from(std::ffi::OsStr::from_bytes(a))),
     )
     .current_dir(PathBuf::from(std::ffi::OsStr::from_bytes(&request.cwd)))
-    .env_clear()
-    .process_group(0);
+    .env_clear();
     for entry in &request.env {
         cmd.env(
             std::ffi::OsStr::from_bytes(&entry.name),

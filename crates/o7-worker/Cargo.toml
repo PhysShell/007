@@ -44,6 +44,11 @@ nix = { version = "0.29", default-features = false, features = [
     "fs",
     "mman",
 ] }
+# Hardened target ACQUISITION: open the source with O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC and
+# prove it a regular object before staging (a symlink final component fails closed, a FIFO/
+# device never blocks) — the same safe-wrapper discipline the verifier uses. rustix is already
+# a workspace dependency (o7-verifier, o7-worktree) and allowed in deny.toml.
+rustix = { version = "1", default-features = false, features = ["fs", "std"] }
 
 [dev-dependencies]
 tempfile = "3"

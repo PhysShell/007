@@ -54,48 +54,158 @@ pub struct SealedObject {
     digest: Digest256,
 }
 
+/// Whether `path` is a `/proc/<pid|self|thread-self>/fd/<n>` descriptor path — the frozen PR-3
+/// execution contract. Such a path is a procfs MAGIC SYMLINK to a held object, so it must be
+/// acquired by FOLLOWING it (never `O_NOFOLLOW`) into the exact object it points at, in this PID
+/// namespace. Every other path is an ordinary filesystem path, hardened with `O_NOFOLLOW`.
+fn is_proc_fd_path(path: &Path) -> bool {
+    use std::path::Component;
+    fn normal<'a>(c: &Component<'a>) -> Option<&'a str> {
+        match c {
+            Component::Normal(s) => s.to_str(),
+            _ => None,
+        }
+    }
+    fn all_digits(s: &str) -> bool {
+        !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+    }
+    let comps: Vec<Component<'_>> = path.components().collect();
+    match comps.as_slice() {
+        [Component::RootDir, proc, pid, fd, n] => {
+            normal(proc) == Some("proc")
+                && normal(fd) == Some("fd")
+                && matches!(normal(pid), Some(s) if s == "self" || s == "thread-self" || all_digits(s))
+                && matches!(normal(n), Some(s) if all_digits(s))
+        }
+        _ => false,
+    }
+}
+
+/// Read all of `file`'s bytes under [`MAX_OBJECT_BYTES`], returning [`SealError::TooLarge`] if it
+/// exceeds the cap (read `cap + 1` so an object that grew past the cap is caught, not truncated).
+fn read_capped(mut file: File) -> Result<Vec<u8>, SealError> {
+    let mut bytes = Vec::new();
+    std::io::Read::take(&mut file, MAX_OBJECT_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| SealError::Open(e.to_string()))?;
+    if bytes.len() > MAX_OBJECT_BYTES {
+        return Err(SealError::TooLarge);
+    }
+    Ok(bytes)
+}
+
+/// Acquire the bytes of an ORDINARY filesystem `source`, hardened exactly as the verifier does:
+/// open `O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC` (a symlink final component fails closed; a FIFO/
+/// device never blocks), prove the OPEN descriptor is a REGULAR file (rejecting FIFO/device/
+/// socket/directory/pseudo-file), and read the bytes from that same descriptor under a size cap
+/// with a drift check — so the bytes staged are the bytes proven.
+fn acquire_ordinary(source: &Path) -> Result<Vec<u8>, SealError> {
+    use rustix::fs::{self as rfs, Mode, OFlags};
+    let fd = rfs::open(
+        source,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|e| {
+        if e == rustix::io::Errno::LOOP {
+            SealError::Open("the path is a symlink (O_NOFOLLOW)".to_owned())
+        } else {
+            SealError::Open(format!("open failed: {e}"))
+        }
+    })?;
+    let st = rfs::fstat(&fd).map_err(|e| SealError::Open(format!("fstat failed: {e}")))?;
+    if (st.st_mode & 0o170_000) != 0o100_000 {
+        return Err(SealError::Open(
+            "not a regular file (fifo, device, socket, or directory)".to_owned(),
+        ));
+    }
+    let size =
+        u64::try_from(st.st_size).map_err(|_| SealError::Open("negative size".to_owned()))?;
+    if size == 0 {
+        return Err(SealError::Open(
+            "empty or pseudo-file (reported size 0)".to_owned(),
+        ));
+    }
+    if size > MAX_OBJECT_BYTES as u64 {
+        return Err(SealError::TooLarge);
+    }
+    // Read under a cap of size+1 and require an EXACT match, catching a file that grew between
+    // stat and read (or a pseudo-file whose content exceeds its reported size).
+    let mut bytes = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+    let read = std::io::Read::take(File::from(fd), size + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| SealError::Open(format!("read failed: {e}")))? as u64;
+    if read != size {
+        return Err(SealError::Open(format!(
+            "size drift: stat reported {size} bytes but the file yielded {read}"
+        )));
+    }
+    Ok(bytes)
+}
+
+/// Acquire the bytes of a `/proc/<pid>/fd/<n>` descriptor `source` — the frozen PR-3 execution
+/// path. FOLLOW the procfs magic symlink (NOT `O_NOFOLLOW`: the path itself is a magic symlink,
+/// and a universal no-follow would break the one executable contract PR-3 requires) into the
+/// exact held object, require it to be a REGULAR object, and require it to be a FULLY SEALED
+/// memfd (so a mutable file merely exposed through `/proc/<pid>/fd` cannot pose as an immutable
+/// object), then read its exact bytes.
+fn acquire_proc_fd(source: &Path) -> Result<Vec<u8>, SealError> {
+    use rustix::fs::{self as rfs, Mode, OFlags};
+    let fd = rfs::open(source, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty())
+        .map_err(|e| SealError::Open(format!("proc-fd open failed: {e}")))?;
+    let st = rfs::fstat(&fd).map_err(|e| SealError::Open(format!("fstat failed: {e}")))?;
+    if (st.st_mode & 0o170_000) != 0o100_000 {
+        return Err(SealError::Open(
+            "proc-fd target is not a regular object".to_owned(),
+        ));
+    }
+    // Require the full seal set: only an immutable sealed memfd may be acquired via /proc/fd.
+    let got = fcntl(fd.as_raw_fd(), FcntlArg::F_GET_SEALS)
+        .map_err(|_| SealError::NotSealed)
+        .and_then(|g| {
+            if g & required_seals().bits() == required_seals().bits() {
+                Ok(())
+            } else {
+                Err(SealError::NotSealed)
+            }
+        });
+    got?;
+    read_capped(File::from(fd))
+}
+
 impl SealedObject {
-    /// Open `source`, read its bytes THROUGH the held fd (bounded), stage them into a sealed
-    /// memfd, verify the seals, read them back, and require the digest to match `expected`.
+    /// Acquire `source` (hardened) and stage it into a sealed memfd, requiring the sealed bytes'
+    /// digest to match `expected`. An ordinary path is opened `O_NOFOLLOW`; a `/proc/<pid>/fd/<n>`
+    /// path follows the magic symlink into the exact held sealed object.
     ///
     /// # Errors
     /// [`SealError`] on open/read failure, oversize, a sealing failure, or a digest mismatch.
     pub fn stage_from_path(source: &Path, expected: &Digest256) -> Result<Self, SealError> {
-        let src = File::open(source).map_err(|e| SealError::Open(e.to_string()))?;
-        // Read back THROUGH the held fd, not the path — the bytes we stage are the ones we hold.
-        let held = format!("/proc/self/fd/{}", src.as_raw_fd());
-        let mut f = File::open(&held).map_err(|e| SealError::Open(e.to_string()))?;
-        let mut bytes = Vec::new();
-        let mut limited = std::io::Read::take(&mut f, MAX_OBJECT_BYTES as u64 + 1);
-        limited
-            .read_to_end(&mut bytes)
-            .map_err(|e| SealError::Open(e.to_string()))?;
-        if bytes.len() > MAX_OBJECT_BYTES {
-            return Err(SealError::TooLarge);
-        }
+        let bytes = Self::acquire(source)?;
         Self::stage_from_bytes(&bytes, expected)
     }
 
-    /// Acquire `source` into a sealed memfd WITHOUT a pre-known digest — the digest is COMPUTED
-    /// from the sealed bytes. Used for the target: the parent seals the exact object it will
-    /// hand the backend, then binds the launch to `digest()`, closing the hash→exec TOCTOU.
+    /// Acquire `source` (hardened) into a sealed memfd WITHOUT a pre-known digest — the digest is
+    /// COMPUTED from the sealed bytes. Used for the target: the parent seals the exact object it
+    /// will hand the backend, then binds the launch to `digest()`, closing the hash→exec TOCTOU.
     ///
     /// # Errors
     /// [`SealError`] on open/read failure, oversize, or a sealing failure.
     pub fn stage(source: &Path) -> Result<Self, SealError> {
-        let src = File::open(source).map_err(|e| SealError::Open(e.to_string()))?;
-        let held = format!("/proc/self/fd/{}", src.as_raw_fd());
-        let mut f = File::open(&held).map_err(|e| SealError::Open(e.to_string()))?;
-        let mut bytes = Vec::new();
-        let mut limited = std::io::Read::take(&mut f, MAX_OBJECT_BYTES as u64 + 1);
-        limited
-            .read_to_end(&mut bytes)
-            .map_err(|e| SealError::Open(e.to_string()))?;
-        if bytes.len() > MAX_OBJECT_BYTES {
-            return Err(SealError::TooLarge);
-        }
+        let bytes = Self::acquire(source)?;
         let digest = Digest256::of_bytes(&bytes);
         Self::stage_from_bytes(&bytes, &digest)
+    }
+
+    /// Hardened acquisition of `source`'s bytes: the `/proc/<pid>/fd/<n>` execution contract
+    /// follows the magic symlink into the exact sealed object; every other path is an ordinary
+    /// filesystem path opened `O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC` and proven a regular file.
+    fn acquire(source: &Path) -> Result<Vec<u8>, SealError> {
+        if is_proc_fd_path(source) {
+            acquire_proc_fd(source)
+        } else {
+            acquire_ordinary(source)
+        }
     }
 
     /// Stage `bytes` directly into a sealed memfd (used when the caller already holds the exact
