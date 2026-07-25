@@ -77,6 +77,18 @@ pub enum GateProgress {
 }
 
 /// The agent lifecycle as folded from the stream.
+///
+/// CROSS-OBLIGATION SEALING for a `Required` agent left `NotObserved` at seal: the verdict
+/// depends on WHY it did not start, so a policy that legitimately blocked it is not punished
+/// as a harness Error:
+/// - any required policy PROTECTING the agent reported `Error` → `Error`;
+/// - else any required policy protecting the agent is `Denied` or absent → `Blocked`
+///   (the agent correctly did not start; the block explains the non-start);
+/// - else (every protecting required policy `Allowed`, or none protects it) → `Error`
+///   (nothing blocked it, yet the obligated agent never ran).
+///
+/// The structural rule is unchanged: an `AgentStarted` before every protecting policy is
+/// `Allowed` is [`crate::reduce::ReduceError::ProtectedStartBeforePolicyAllowed`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "agent", rename_all = "snake_case")]
 pub enum AgentLifecycle {

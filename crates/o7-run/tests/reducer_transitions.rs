@@ -1289,3 +1289,88 @@ fn an_optional_gate_never_blocks_for_any_outcome() {
         );
     }
 }
+
+// ============================ cross-obligation: policy-blocked agent non-start =======
+
+/// A contract with a required agent and a required policy that PROTECTS the agent.
+fn agent_protected_by_policy() -> RunContract {
+    RunContract {
+        gate_obligations: vec![req("build")],
+        policy_obligations: vec![PolicyObligation {
+            policy: policy_artifact(),
+            requirement: PolicyRequirement::Required,
+            protects: vec![PolicyProtectedSubject::Agent],
+        }],
+        sandbox_requirements: Vec::new(),
+        agent: AgentObligation::Required,
+        runner_environment: "linux".to_owned(),
+    }
+}
+
+#[test]
+fn required_policy_denial_protecting_agent_blocks_instead_of_errors() {
+    // The agent correctly did NOT start because its protecting policy denied it. A legitimate
+    // policy denial must not be promoted to a harness Error just because the forbidden
+    // execution did not occur.
+    let events = chained(vec![
+        run_started(agent_protected_by_policy()),
+        RunEventKind::PolicyChecked {
+            policy: policy_artifact(),
+            outcome: PolicyOutcome::Denied,
+        },
+        RunEventKind::RunSealed,
+    ]);
+    assert_eq!(
+        verdict_of(&events),
+        Verdict::Blocked,
+        "a policy-denied, correctly-unstarted agent is Blocked, not Error"
+    );
+}
+
+#[test]
+fn required_policy_absence_protecting_agent_blocks_instead_of_errors() {
+    // The protecting policy was never checked, so the agent could not start. Blocked (the
+    // unmet policy obligation), not Error for the resulting non-start.
+    let events = chained(vec![
+        run_started(agent_protected_by_policy()),
+        RunEventKind::RunSealed,
+    ]);
+    assert_eq!(
+        verdict_of(&events),
+        Verdict::Blocked,
+        "an absent protecting policy that prevents the agent start is Blocked, not Error"
+    );
+}
+
+#[test]
+fn allowed_protecting_policy_followed_by_missing_agent_is_error() {
+    // Nothing blocked the agent — its protecting policy was Allowed — yet the obligated agent
+    // never ran. That is a genuine harness Error.
+    let events = chained(vec![
+        run_started(agent_protected_by_policy()),
+        RunEventKind::PolicyChecked {
+            policy: policy_artifact(),
+            outcome: PolicyOutcome::Allowed,
+        },
+        RunEventKind::RunSealed,
+    ]);
+    assert_eq!(
+        verdict_of(&events),
+        Verdict::Error,
+        "an allowed agent that still never ran is a harness Error"
+    );
+}
+
+#[test]
+fn errored_protecting_policy_with_missing_agent_is_error() {
+    // Derivable from the policy table (Error → Error), pinned explicitly for the matrix.
+    let events = chained(vec![
+        run_started(agent_protected_by_policy()),
+        RunEventKind::PolicyChecked {
+            policy: policy_artifact(),
+            outcome: PolicyOutcome::Error,
+        },
+        RunEventKind::RunSealed,
+    ]);
+    assert_eq!(verdict_of(&events), Verdict::Error);
+}
