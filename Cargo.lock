@@ -852,6 +852,8 @@ dependencies = [
  "async-trait",
  "bytes",
  "nix",
+ "serde",
+ "serde_json",
  "signal-hook",
  "tempfile",
  "thiserror",
