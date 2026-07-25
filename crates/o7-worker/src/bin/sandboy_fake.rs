@@ -110,8 +110,23 @@ fn run() -> i32 {
         return 64;
     };
     // The mode comes from the backend's OWN (trusted, control-plane) environment — never the
-    // target's.
-    let mode = std::env::var("O7_FAKE_MODE").unwrap_or_default();
+    // target's. It is `base;k=v;k=v`: the base behavior plus test-only parameters (a pid file to
+    // record this backend's pid, etc.). Encoding params in the fake-mode string keeps the
+    // production BackendConfig surface unchanged.
+    let raw_mode = std::env::var("O7_FAKE_MODE").unwrap_or_default();
+    let mut parts = raw_mode.split(';');
+    let mode = parts.next().unwrap_or("").to_owned();
+    let mut pid_file = None;
+    for kv in parts {
+        if let Some(path) = kv.strip_prefix("pid=") {
+            pid_file = Some(path.to_owned());
+        }
+    }
+    // Record this backend's pid EARLY so a test can observe reap/teardown even when spawn is
+    // cancelled and never returns the process.
+    if let Some(path) = &pid_file {
+        let _ = std::fs::write(path, std::process::id().to_string());
+    }
 
     if mode == "exit_before_report" {
         return 70; // die before delivering anything
@@ -176,10 +191,28 @@ fn run() -> i32 {
             Err(_) => return 65,
         }
     };
+    // `stall_mid_report`: write a length prefix + only a PARTIAL body, then stall forever, so the
+    // parent's bounded frame read blocks mid-frame and a cancel must reap this backend.
+    if mode == "stall_mid_report" {
+        if let Ok(mut w) = std::fs::OpenOptions::new().write(true).open(&report_path) {
+            let _ = w.write_all(&100u32.to_be_bytes()); // claim 100 bytes
+            let _ = w.write_all(b"partial"); // deliver only 7
+            let _ = w.flush();
+        }
+        loop {
+            std::thread::sleep(Duration::from_secs(3600));
+        }
+    }
+
     match std::fs::OpenOptions::new().write(true).open(&report_path) {
         Ok(mut w) => {
             if w.write_all(&frame).is_err() {
                 return 66;
+            }
+            // `trailing`: emit a SECOND, unexpected byte after the single frame. A correct parent
+            // must reject the trailing byte and never authorize the target.
+            if mode == "trailing" {
+                let _ = w.write_all(b"X");
             }
         }
         Err(_) => return 66,
@@ -228,6 +261,12 @@ fn run() -> i32 {
             return 68;
         }
     };
+    // `monitor_exit_early`: abandon the target — exit immediately WITHOUT waiting it, leaving it
+    // running unowned. A correct boundary must treat a monitor that died with a live target as a
+    // failure, not a clean exit.
+    if mode == "monitor_exit_early" {
+        return 0;
+    }
     // Remain as the monitor until the target exits, then relay its outcome. (A real backend
     // would also enforce the wall-clock timeout and tear the cgroup down here.)
     match child.wait() {
