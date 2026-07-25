@@ -1,0 +1,87 @@
+# AGENTS.md — 007 (`o7`)
+
+Standing instructions for agents working in this repo: Codex code review on
+pull requests, `claude`/`codex` runs driven by `o7` itself, and any other
+harness that reads `AGENTS.md`.
+
+`o7` is a Rust harness that drives external coding agents over target repos and
+reduces each run to a verdict. The binding invariants live in `README.md`,
+`docs/public-governance.md`, `docs/security-layers.md`, and
+`docs/verification.md`; this file is the review-facing summary of them, not a
+replacement.
+
+**This repository is public.** The orchestration code is not a secret. The
+absence of credentials in it is the claim the whole repo rests on.
+
+## Code Review Rules
+
+### Already enforced mechanically — do not spend review on these
+
+CI fails the pull request on every item below, so a review comment about one is
+redundant noise:
+
+- `cargo fmt --all --check`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo check --workspace --all-targets`
+- supply chain: advisories, bans, licenses, sources (`cargo-deny`)
+- the test suites of every workspace member, including the root `o7` package's
+  `proptest!` invariants
+
+**Every workspace member is tested automatically unless explicitly excluded.
+Any new `--exclude` entry must name the dedicated workflow that owns that
+package.** Today the only exclusions are `o7-worktree` and `o7-verifier`, owned
+by `pr3-worktree-verifier-gate.yml`. An exclusion added for any other reason —
+a slow suite, a flaky test — silently drops that crate out of CI, and is a P0
+review finding.
+
+The lint set in `Cargo.toml` — `unsafe_code = "forbid"`, `unwrap_used`,
+`expect_used`, `panic`, `dbg_macro`, `todo`, `unimplemented`,
+`indexing_slicing` — is compiler-enforced for the same reason. Raise these only
+when a change *adds an `#[allow(...)]`*; see rule 4.
+
+### What to actually review (P0/P1 only)
+
+1. **Credential leakage — P0, the repo's central claim.** No credential,
+   OAuth/session-storage artifact, token, or environment dump may enter the
+   tree. That includes the indirect paths a secret scanner cannot see: logging
+   or `Debug`-printing an env var, serialising a config struct that holds one,
+   or writing agent stdout into a run record without considering what the agent
+   may have echoed. Auth is external (`claude login` / `codex login`) and this
+   project never reads or stores it.
+
+2. **Verdict semantics.** `PASS` / `FAIL` / `ERROR` are three distinct states:
+   `FAIL` means the gate ran and the target failed it; `ERROR` means the
+   harness could not obtain a trustworthy answer. Collapsing `ERROR` into
+   either neighbour turns a broken harness into a green run. The process exit
+   code is `0` on `PASS` and non-zero otherwise — callers and CI gate on that.
+
+3. **Run-record integrity.** `runs/<target>/<run-id>/` is the canonical
+   artifact. Review changes to its layout or contents for backward
+   compatibility, and for whether a partially-failed run can leave behind a
+   record that reads as complete.
+
+4. **A new `#[allow(...)]` on a restriction lint.** The tree has exactly two
+   justified sites (`reps[i]`, each carrying the in-bounds invariant in a
+   comment). Any new one must state the invariant that makes it sound;
+   "clippy was noisy" is not that invariant.
+
+5. **Untrusted-input parsers.** `o7::judge::extract_json_array`,
+   `o7::judge::parse_findings_json`, and `o7::gate::GateManifest::parse`
+   consume model output and third-party manifests. They are fuzzed, and the
+   slicing ones are Kani-proved panic-free. A change to their
+   slicing/indexing logic is P0 and should extend the corresponding harness in
+   the same pull request.
+
+6. **The lint ratchet.** `docs/verification.md` defers `pedantic`/`nursery` and
+   friends on purpose — "a false positive is worse than a miss." Do not propose
+   enabling them wholesale; per-slice adoption against a baseline is the agreed
+   path.
+
+### Review style
+
+- Flag **P0 and P1 only.** Style, naming, and taste belong to the formatter and
+  clippy, which already own that layer and run before you.
+- Prefer a concrete failure scenario — inputs, then wrong behaviour — over a
+  general concern. If you cannot state one, it is probably not P1.
+- `o7` is subprocess-bound (`docs/performance.md`). Micro-optimising code that
+  is not on a subprocess boundary is not a finding.
