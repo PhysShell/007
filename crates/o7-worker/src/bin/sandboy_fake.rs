@@ -117,9 +117,15 @@ fn run() -> i32 {
     let mut parts = raw_mode.split(';');
     let mode = parts.next().unwrap_or("").to_owned();
     let mut pid_file = None;
+    let mut ready_file = None;
+    let mut release_file = None;
     for kv in parts {
         if let Some(path) = kv.strip_prefix("pid=") {
             pid_file = Some(path.to_owned());
+        } else if let Some(path) = kv.strip_prefix("ready=") {
+            ready_file = Some(path.to_owned());
+        } else if let Some(path) = kv.strip_prefix("release=") {
+            release_file = Some(path.to_owned());
         }
     }
     // Record this backend's pid EARLY so a test can observe reap/teardown even when spawn is
@@ -232,6 +238,26 @@ fn run() -> i32 {
     let _ = nix::unistd::close(args.report_fd);
     let _ = nix::unistd::close(args.control_fd);
     let _ = nix::unistd::close(args.request_fd);
+
+    // `hold_before_target`: prove the LIVE hash→exec property. The parent has already sealed the
+    // target and bound the launch; here we announce (`ready`) that the sealed target/request are
+    // in hand but the target has NOT started, then WAIT (bounded) for the parent to `release`.
+    // The parent uses that window to rewrite the SOURCE path — which must NOT change what runs,
+    // because the executed object is the sealed memfd, not a re-read of the path.
+    if mode == "hold_before_target" {
+        if let Some(path) = &ready_file {
+            let _ = std::fs::write(path, b"ready");
+        }
+        if let Some(path) = &release_file {
+            // Bounded: ~10s at 20ms polls, then proceed regardless so a test can never wedge us.
+            for _ in 0..500 {
+                if std::path::Path::new(path).exists() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+    }
 
     // MONITOR topology: start the target as a CHILD in its own process group and stay alive as
     // the monitor. The target's argv/cwd/env come from the out-of-band REQUEST (allowlisted),
