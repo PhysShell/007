@@ -180,11 +180,11 @@ async fn a_valid_report_plus_go_runs_the_target_under_a_distinct_monitor() {
 
 #[tokio::test]
 async fn the_confined_target_has_a_clean_fd_table() {
-    // fd non-inheritance is a SECURITY contract. Rather than probe fixed fictional numbers
-    // (which leak if the OS assigns the report/control/request descriptors elsewhere), the
-    // target asserts its ENTIRE inherited fd table is clean: only stdio (0,1,2). The launch
-    // must normalise/close every control-plane descriptor (report, control, request, and any
-    // backend-internal fd) so nothing beyond stdio survives into the confined target.
+    // fd non-inheritance is a SECURITY contract: NO control-plane descriptor (report, control,
+    // request, or any backend-internal fd) may survive into the confined target. The target
+    // probes fd numbers 3..=12 with SHELL BUILTINS only (no `$(...)`/glob/redirect — those open
+    // their own fds and would self-count); a clean target has only stdio open, so every probe
+    // must miss. A leak at ANY assigned number is caught.
     let dir = tempfile::tempdir().unwrap();
     let leaked = dir.path().join("leaked-fd");
     let b = boundary(vec![PathBuf::from("/bin")], "ok");
@@ -192,10 +192,9 @@ async fn the_confined_target_has_a_clean_fd_table() {
         executable: PathBuf::from("/bin/sh"),
         arguments: vec![
             OsString::from("-c"),
-            // Count this shell's own fds; anything beyond 0,1,2 is an inherited leak. `ls` reads
-            // /proc/<shell pid>/fd (the `$$` shell), not its own.
             OsString::from(format!(
-                "n=$(ls /proc/$$/fd | wc -l); if [ \"$n\" -gt 3 ]; then touch {}; fi; exit 0",
+                "leak=; for fd in 3 4 5 6 7 8 9 10 11 12; do if [ -e /proc/self/fd/$fd ]; \
+                 then leak=1; fi; done; if [ -n \"$leak\" ]; then touch {}; fi; exit 0",
                 leaked.display()
             )),
         ],

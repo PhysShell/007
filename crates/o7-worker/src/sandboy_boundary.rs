@@ -48,9 +48,28 @@ use o7_sandbox_protocol::policy::{NetworkPolicy, SandboxPolicy, SandboxPolicyErr
 
 use crate::boundary::{
     BoundaryAttestation, BoundaryError, BoundaryEvidence, BoundaryKind, BoundaryLaunch,
-    BoundarySpawnSpec, EnforcementLevel, ProcessBoundary,
+    BoundaryProcess, BoundarySpawnSpec, EnforcementLevel, ProcessBoundary,
 };
+use crate::host_boundary::{signalable_pid, HostBoundaryProcess};
+use crate::process_identity::ProcessIdentity;
 use crate::sealed::SealedObject;
+
+/// Create a pipe whose ends are non-CLOEXEC (so the backend end survives `exec`); the caller
+/// marks its own end CLOEXEC via [`set_cloexec`].
+fn make_pipe() -> Result<(std::os::fd::OwnedFd, std::os::fd::OwnedFd), BoundaryError> {
+    nix::unistd::pipe().map_err(|e| BoundaryError::Spawn(io::Error::other(format!("pipe: {e}"))))
+}
+
+/// Mark a descriptor CLOEXEC so it does NOT leak into the spawned backend.
+fn set_cloexec(fd: &std::os::fd::OwnedFd) -> Result<(), BoundaryError> {
+    use std::os::fd::AsRawFd as _;
+    nix::fcntl::fcntl(
+        fd.as_raw_fd(),
+        nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::FD_CLOEXEC),
+    )
+    .map(|_| ())
+    .map_err(|e| BoundaryError::Spawn(io::Error::other(format!("cloexec: {e}"))))
+}
 
 /// A backend bound to a specific SEALED, immutable OBJECT — not a re-resolvable path, and not
 /// merely a held-but-mutable inode. Acquisition stages the backend bytes into a sealed `memfd`
@@ -444,13 +463,91 @@ impl SandboyBoundary {
             report: frame_bytes.to_vec(),
         })
     }
+
+    /// Build the confinement-flag portion of the backend argv (network/worktree/timeout/allow-*).
+    fn policy_flags(&self) -> Vec<OsString> {
+        let mut args: Vec<OsString> = Vec::new();
+        match self.policy.network {
+            NetworkPolicy::DenyAll => args.push(OsString::from("--deny-net")),
+        }
+        args.push(OsString::from("--worktree"));
+        args.push(self.policy.worktree.clone().into_os_string());
+        args.push(OsString::from("--timeout-ms"));
+        args.push(OsString::from(self.policy.timeout.as_millis().to_string()));
+        for path in &self.policy.allow_exec {
+            args.push(OsString::from("--allow-exec"));
+            args.push(path.clone().into_os_string());
+        }
+        for name in &self.policy.env_allowlist {
+            args.push(OsString::from("--allow-env"));
+            args.push(name.clone());
+        }
+        args
+    }
+}
+
+/// The live Sandboy monitor as a [`BoundaryProcess`]. It delegates lifecycle to the group-leader
+/// wrapper, but ALSO retains the sealed backend + target objects for the process's lifetime — the
+/// backend execs the sealed target via `/proc/<owner_pid>/fd/<n>`, so those descriptors must stay
+/// open until the run ends, not be dropped when `spawn` returns.
+struct SandboyMonitorProcess {
+    inner: HostBoundaryProcess,
+    _backend: BackendImage,
+    _target: SealedObject,
+}
+
+#[async_trait]
+impl BoundaryProcess for SandboyMonitorProcess {
+    fn identity(&self) -> ProcessIdentity {
+        self.inner.identity()
+    }
+    fn take_stdout(&mut self) -> Option<crate::boundary::BoundaryStream> {
+        self.inner.take_stdout()
+    }
+    fn take_stderr(&mut self) -> Option<crate::boundary::BoundaryStream> {
+        self.inner.take_stderr()
+    }
+    async fn request_graceful_stop(&mut self) -> Result<(), BoundaryError> {
+        self.inner.request_graceful_stop().await
+    }
+    async fn force_stop(&mut self) -> Result<(), BoundaryError> {
+        self.inner.force_stop().await
+    }
+    async fn wait(&mut self) -> Result<crate::boundary::BoundaryExit, BoundaryError> {
+        self.inner.wait().await
+    }
+    async fn remaining_members(&self) -> Result<Vec<ProcessIdentity>, BoundaryError> {
+        self.inner.remaining_members().await
+    }
+}
+
+/// Bounded-kill and reap a spawned backend group so no error path leaks a process. Kills the
+/// whole group (`killpg`), then reaps the leader under a bounded timeout.
+async fn kill_and_reap(child: &mut tokio::process::Child, pgid: i32) {
+    use nix::sys::signal::{killpg, Signal};
+    use nix::unistd::Pid;
+    if pgid > 0 {
+        let _ = killpg(Pid::from_raw(pgid), Signal::SIGKILL);
+    }
+    let _ = child.start_kill();
+    let _ = tokio::time::timeout(std::time::Duration::from_millis(500), child.wait()).await;
 }
 
 #[async_trait]
 impl ProcessBoundary for SandboyBoundary {
     async fn spawn(&self, spec: BoundarySpawnSpec) -> Result<BoundaryLaunch, BoundaryError> {
+        use std::io::{Read as _, Write as _};
+        use std::os::fd::AsRawFd as _;
+
         if !cfg!(target_os = "linux") {
             return Err(BoundaryError::UnsupportedPlatform);
+        }
+        // Fail closed BEFORE anything if the ORIGINAL target path is not permitted by the policy.
+        if !self.policy.permits_exec(&spec.executable) {
+            return Err(BoundaryError::Spawn(io::Error::other(format!(
+                "sandbox policy does not permit executing {}; refusing to launch",
+                spec.executable.display()
+            ))));
         }
         // Mint the launch nonce from the OS CSPRNG BEFORE any backend spawn; an RNG failure
         // fails closed here — never a timestamp/counter fallback.
@@ -458,17 +555,138 @@ impl ProcessBoundary for SandboyBoundary {
             .nonce_source
             .mint()
             .map_err(|e| BoundaryError::Spawn(io::Error::other(e.to_string())))?;
-        // Fail closed BEFORE any launch if the target cannot execute under the policy. (Fixed
-        // placeholder fds reuse the argv builder's permission gate; the live launch assigns the
-        // real report/control descriptors.)
-        let _backend_spec = self.backend_spawn_spec(&spec, -1, -1, -1, &nonce)?;
-        // RED: the confined live launch (verify the held backend object, open the report +
-        // control pipes, spawn the monitor backend, read + verify the report, send GO, and wrap
-        // it as a live BoundaryProcess with Reported evidence) is not implemented yet. Fail
-        // closed rather than pretend to confine.
-        Err(BoundaryError::Spawn(io::Error::other(
-            "sandboy backend launch not yet implemented",
-        )))
+        // Acquire the TARGET into a sealed memfd: the parent seals exactly the object it will
+        // hand the backend and binds the launch to its digest, closing the hash→exec TOCTOU.
+        let target = SealedObject::stage(&spec.executable)
+            .map_err(|e| BoundaryError::Spawn(io::Error::other(format!("target: {e}"))))?;
+        let request = self
+            .launch_request(&spec, target.digest().clone(), &nonce)
+            .map_err(|e| BoundaryError::Evidence(e.to_string()))?;
+        let request_bytes = o7_sandbox_protocol::request::encode(&request)
+            .map_err(|e| BoundaryError::Evidence(e.to_string()))?;
+        let launch_spec_digest = request.spec_digest();
+
+        // Three channels. The BACKEND end of each stays inheritable (non-CLOEXEC); the PARENT
+        // end is marked CLOEXEC so it never leaks into the backend.
+        //   report : backend WRITES, parent READS
+        //   request: parent WRITES, backend READS
+        //   control: parent WRITES GO, backend READS
+        let (report_r, report_w) = make_pipe()?;
+        let (request_r, request_w) = make_pipe()?;
+        let (control_r, control_w) = make_pipe()?;
+        for parent_end in [&report_r, &request_w, &control_w] {
+            set_cloexec(parent_end)?;
+        }
+
+        let mut arguments: Vec<OsString> = vec![
+            OsString::from("run"),
+            OsString::from("--report-fd"),
+            OsString::from(report_w.as_raw_fd().to_string()),
+            OsString::from("--control-fd"),
+            OsString::from(control_r.as_raw_fd().to_string()),
+            OsString::from("--request-fd"),
+            OsString::from(request_r.as_raw_fd().to_string()),
+            OsString::from("--launch-nonce"),
+            OsString::from(nonce.as_str()),
+        ];
+        arguments.extend(self.policy_flags());
+        arguments.push(OsString::from("--"));
+        // The backend execs the SEALED target object, not the caller's mutable path.
+        arguments.push(target.descriptor_path().into_os_string());
+
+        let mut cmd = tokio::process::Command::new(self.backend.descriptor_path());
+        cmd.args(&arguments)
+            .current_dir("/")
+            .env_clear()
+            .envs(self.backend_environment())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .process_group(0)
+            .kill_on_drop(true);
+        let mut child = cmd.spawn().map_err(BoundaryError::Spawn)?;
+        // The backend now holds its inherited ends; the parent drops its copies of them.
+        drop(report_w);
+        drop(request_r);
+        drop(control_r);
+
+        let pid = match signalable_pid(child.id()) {
+            Ok(p) => p,
+            Err(e) => {
+                kill_and_reap(&mut child, -1).await;
+                return Err(e);
+            }
+        };
+        let identity = ProcessIdentity::read(pid).unwrap_or(ProcessIdentity {
+            pid,
+            process_group: pid,
+            start_time_ticks: 0,
+        });
+
+        // Write the bounded request, then read exactly one bounded report frame. Offloaded so a
+        // blocking pipe op does not stall the runtime.
+        let mut req_file = std::fs::File::from(request_w);
+        let mut rep_file = std::fs::File::from(report_r);
+        let io = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<u8>> {
+            req_file.write_all(&request_bytes)?;
+            drop(req_file); // close so the backend's request read completes
+                            // Read EXACTLY one length-prefixed frame — never to EOF (the backend keeps its report
+                            // write end open while it blocks on GO, so EOF would deadlock).
+            let mut len_buf = [0u8; 4];
+            rep_file.read_exact(&mut len_buf)?;
+            let len = u32::from_be_bytes(len_buf) as usize;
+            if len > o7_sandbox_protocol::frame::MAX_REPORT_BYTES {
+                return Err(std::io::Error::other(
+                    "report frame body exceeds the maximum",
+                ));
+            }
+            let mut body = vec![0u8; len];
+            rep_file.read_exact(&mut body)?;
+            let mut frame = len_buf.to_vec();
+            frame.extend_from_slice(&body);
+            Ok(frame)
+        })
+        .await;
+        let report_bytes = match io {
+            Ok(Ok(bytes)) => bytes,
+            _ => {
+                // The backend never delivered a usable report (e.g. it exited first). Fail closed.
+                kill_and_reap(&mut child, pid).await;
+                return Err(BoundaryError::Evidence(
+                    "backend did not deliver a report frame".to_owned(),
+                ));
+            }
+        };
+
+        // Verify every binding. On failure: withhold GO (drop control_w → the backend reads EOF
+        // and never starts the target) and reap the backend. Fail closed.
+        let evidence = match self.verify_report(&report_bytes, &nonce, &launch_spec_digest) {
+            Ok(ev) => ev,
+            Err(e) => {
+                drop(control_w);
+                kill_and_reap(&mut child, pid).await;
+                return Err(BoundaryError::Evidence(e.to_string()));
+            }
+        };
+
+        // Authorized: send GO, then hand back the live monitor as the owned group leader.
+        let mut ctl = std::fs::File::from(control_w);
+        if ctl.write_all(b"G").is_err() {
+            kill_and_reap(&mut child, pid).await;
+            return Err(BoundaryError::Evidence(
+                "failed to authorize the target (GO)".to_owned(),
+            ));
+        }
+        drop(ctl);
+
+        Ok(BoundaryLaunch {
+            process: Box::new(SandboyMonitorProcess {
+                inner: HostBoundaryProcess::new(child, identity, pid),
+                _backend: self.backend.clone(),
+                _target: target,
+            }),
+            evidence,
+        })
     }
 
     fn attestation(&self) -> BoundaryAttestation {

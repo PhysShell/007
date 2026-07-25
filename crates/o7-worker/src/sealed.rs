@@ -76,6 +76,28 @@ impl SealedObject {
         Self::stage_from_bytes(&bytes, expected)
     }
 
+    /// Acquire `source` into a sealed memfd WITHOUT a pre-known digest — the digest is COMPUTED
+    /// from the sealed bytes. Used for the target: the parent seals the exact object it will
+    /// hand the backend, then binds the launch to `digest()`, closing the hash→exec TOCTOU.
+    ///
+    /// # Errors
+    /// [`SealError`] on open/read failure, oversize, or a sealing failure.
+    pub fn stage(source: &Path) -> Result<Self, SealError> {
+        let src = File::open(source).map_err(|e| SealError::Open(e.to_string()))?;
+        let held = format!("/proc/self/fd/{}", src.as_raw_fd());
+        let mut f = File::open(&held).map_err(|e| SealError::Open(e.to_string()))?;
+        let mut bytes = Vec::new();
+        let mut limited = std::io::Read::take(&mut f, MAX_OBJECT_BYTES as u64 + 1);
+        limited
+            .read_to_end(&mut bytes)
+            .map_err(|e| SealError::Open(e.to_string()))?;
+        if bytes.len() > MAX_OBJECT_BYTES {
+            return Err(SealError::TooLarge);
+        }
+        let digest = Digest256::of_bytes(&bytes);
+        Self::stage_from_bytes(&bytes, &digest)
+    }
+
     /// Stage `bytes` directly into a sealed memfd (used when the caller already holds the exact
     /// bytes, e.g. an already-sealed PR-3 target read back once).
     ///
@@ -83,8 +105,14 @@ impl SealedObject {
     /// [`SealError`] on a sealing failure or a digest mismatch.
     pub fn stage_from_bytes(bytes: &[u8], expected: &Digest256) -> Result<Self, SealError> {
         let name = CString::new("o7-sealed").map_err(|e| SealError::Seal(e.to_string()))?;
-        let owned = memfd_create(&name, MemFdCreateFlag::MFD_ALLOW_SEALING)
-            .map_err(|e| SealError::Seal(e.to_string()))?;
+        // CLOEXEC so the sealed object does NOT leak into spawned children (the backend/target
+        // reach it via `/proc/<owner_pid>/fd/<n>`, which resolves the OWNER's table regardless);
+        // ALLOW_SEALING so we can seal it immutable.
+        let owned = memfd_create(
+            &name,
+            MemFdCreateFlag::MFD_CLOEXEC | MemFdCreateFlag::MFD_ALLOW_SEALING,
+        )
+        .map_err(|e| SealError::Seal(e.to_string()))?;
         let mut mf = File::from(owned);
         mf.write_all(bytes)
             .map_err(|e| SealError::Seal(e.to_string()))?;

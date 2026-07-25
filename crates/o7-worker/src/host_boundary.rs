@@ -93,13 +93,27 @@ impl ProcessBoundary for UnconfinedHostBoundary {
     }
 }
 
-struct HostBoundaryProcess {
+/// A boundary process backed by a POSIX process GROUP led by a tokio [`Child`]. Reused by the
+/// Sandboy boundary to wrap the monitor backend (also a group leader), so its lifecycle
+/// (graceful/force stop, wait, membership) acts on the whole owned group via `killpg` and
+/// `/proc` enumeration — identical to the host boundary.
+pub(crate) struct HostBoundaryProcess {
     child: Child,
     identity: ProcessIdentity,
     pgid: i32,
 }
 
 impl HostBoundaryProcess {
+    /// Wrap an already-spawned group leader `child` (spawned with `process_group(0)`, so
+    /// `pgid == child pid`) with its `identity` and `pgid`.
+    pub(crate) fn new(child: Child, identity: ProcessIdentity, pgid: i32) -> Self {
+        Self {
+            child,
+            identity,
+            pgid,
+        }
+    }
+
     /// Signal the whole group; a missing group (`ESRCH`) means it is already gone,
     /// which is success for our purposes.
     fn signal_group(&self, signal: Signal) -> Result<(), BoundaryError> {
@@ -163,7 +177,7 @@ impl BoundaryProcess for HostBoundaryProcess {
 /// negative / out-of-`i32`-range id is refused, because `killpg` on process group 0
 /// targets the CALLER's own group and a bogus id targets the wrong processes — so we
 /// must never build a boundary around an id we cannot signal in isolation.
-fn signalable_pid(raw: Option<u32>) -> Result<i32, BoundaryError> {
+pub(crate) fn signalable_pid(raw: Option<u32>) -> Result<i32, BoundaryError> {
     match raw.and_then(|id| i32::try_from(id).ok()) {
         Some(pid) if pid > 0 => Ok(pid),
         _ => Err(BoundaryError::Spawn(io::Error::other(

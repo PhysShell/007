@@ -193,10 +193,12 @@ fn run() -> i32 {
         _ => return 67, // NACK / EOF — fail closed, target never runs.
     }
 
-    // Close the inherited control-plane descriptors so the TARGET cannot see the report/control
-    // channels (a security contract, not a detail). Errors are ignored: a closed fd is fine.
+    // Close the inherited control-plane descriptors so the TARGET cannot see the report/control/
+    // request channels (a security contract, not a detail). Errors are ignored: a closed fd is
+    // fine.
     let _ = nix::unistd::close(args.report_fd);
     let _ = nix::unistd::close(args.control_fd);
+    let _ = nix::unistd::close(args.request_fd);
 
     // MONITOR topology: start the target as a CHILD in its own process group and stay alive as
     // the monitor. The target's argv/cwd/env come from the out-of-band REQUEST (allowlisted),
