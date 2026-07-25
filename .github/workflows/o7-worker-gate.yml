@@ -54,6 +54,12 @@ jobs:
       - name: Workspace check
         run: cargo check --workspace --all-targets --locked
 
+      # Explicit DEFAULT production build. `cargo check --all-targets` above compiles the test/dev
+      # graph too; this fixes the claimed harness-free production graph with a real default build
+      # (no test targets → no dev-dependency features activated anywhere).
+      - name: Default production build
+        run: cargo build --workspace --locked
+
       - name: o7-run tests
         run: cargo test -p o7-run --locked --no-fail-fast
 

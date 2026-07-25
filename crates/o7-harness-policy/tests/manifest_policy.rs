@@ -1,13 +1,24 @@
 //! Fail-closed repository gate for o7-worker's `test-harness` feature.
 //!
-//! STRUCTURAL analysis (a real TOML parse, never a substring grep): every `Cargo.toml` in the
-//! workspace tree is parsed, and every edge that ENABLES `test-harness` is located — in any
-//! dependency table (`dependencies`, `dev-dependencies`, `build-dependencies`, every
-//! `target.*.*dependencies`, and `workspace.dependencies`) or forwarded through any `[features]`
-//! array. Exactly one enablement is permitted: o7-worker's own `[dev-dependencies]` self-edge.
-//! Any other enablement — a production dependency edge, a build edge, a `foo/test-harness`
-//! forward, or a workspace-dependency default — fails the gate. A second test pins the production
-//! feature graph: with dev edges excluded, o7-worker resolves without `test-harness`.
+//! STRUCTURAL analysis (a real TOML parse, never a substring grep) of every `Cargo.toml` in the
+//! workspace tree. It resolves EFFECTIVE package identity (honouring Cargo `package = "..."`
+//! renames), so an aliased edge cannot hide, and it detects the feature being turned on through
+//! ANY route:
+//! - a dependency edge (any of `dependencies` / `dev-dependencies` / `build-dependencies`, every
+//!   `target.*.*dependencies`, `workspace.dependencies`) whose effective package is o7-worker and
+//!   whose `features` list includes `test-harness`;
+//! - a `[features]` forward to an o7-worker alias — `alias/test-harness` or the weak
+//!   `alias?/test-harness` — under the alias's effective identity, not a literal name;
+//! - a local self-activation `feature = ["test-harness"]` inside o7-worker's own manifest.
+//!
+//! Exactly ONE enablement is sanctioned, checked by full identity — o7-worker's own
+//! `[dev-dependencies]` self-edge with dependency key `o7-worker`, effective package `o7-worker`,
+//! and `path = "."`. Any other enablement (a production/build edge, a renamed alias, a forward, a
+//! duplicate self-alias, a wrong path) fails the gate, and the total number of sanctioned
+//! enablements must be exactly one. A second gate pins the harness BINARY lock (autobins off, all
+//! three bins `required-features`-gated, no un-classified `src/bin`). Traversal and parsing are
+//! fail-closed: any unreadable directory/entry, unreadable/malformed manifest, or path error is a
+//! hard failure, never a silent "all clean".
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -15,66 +26,105 @@
     clippy::indexing_slicing
 )]
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 const FEATURE: &str = "test-harness";
-const CRATE: &str = "o7-worker";
-/// The ONE sanctioned enablement site (repo-relative manifest, dependency table).
+const PKG: &str = "o7-worker";
 const ALLOWED_MANIFEST: &str = "crates/o7-worker/Cargo.toml";
 const ALLOWED_TABLE: &str = "dev-dependencies";
+const HARNESS_BINS: [&str; 3] = ["sandboy_fake", "spawn_probe", "fd_probe"];
 
-/// Walk up from this crate's manifest to the directory whose `Cargo.toml` declares `[workspace]`.
-fn workspace_root() -> PathBuf {
+// ---------------------------------------------------------------------------
+// Fail-closed filesystem traversal.
+// ---------------------------------------------------------------------------
+
+/// Walk UP to the directory whose `Cargo.toml` declares `[workspace]`. An EXISTING but
+/// unreadable/malformed manifest on the way up is a hard error, never silently skipped.
+fn workspace_root() -> Result<PathBuf, String> {
     let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     loop {
         let manifest = dir.join("Cargo.toml");
-        if let Ok(text) = std::fs::read_to_string(&manifest) {
-            if let Ok(table) = text.parse::<toml::Table>() {
+        match std::fs::read_to_string(&manifest) {
+            Ok(text) => {
+                let table: toml::Table = text
+                    .parse()
+                    .map_err(|e| format!("malformed {}: {e}", manifest.display()))?;
                 if table.contains_key("workspace") {
-                    return dir;
+                    return Ok(dir);
                 }
             }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("unreadable {}: {e}", manifest.display())),
         }
-        assert!(
-            dir.pop(),
-            "no [workspace] Cargo.toml found above CARGO_MANIFEST_DIR"
-        );
+        if !dir.pop() {
+            return Err("no [workspace] Cargo.toml found above CARGO_MANIFEST_DIR".to_owned());
+        }
     }
 }
 
-/// Every `Cargo.toml` under `root`, skipping `target/` and `.git/`.
-fn all_manifests(root: &Path) -> Vec<PathBuf> {
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
+/// Every `Cargo.toml` under `root` (skipping only `target/` and `.git/`), fail-closed: a directory
+/// that cannot be enumerated, or an entry/metadata error, aborts the scan rather than under-report.
+fn all_manifests(root: &Path) -> Result<Vec<PathBuf>, String> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+        let entries = std::fs::read_dir(dir)
+            .map_err(|e| format!("cannot enumerate {}: {e}", dir.display()))?;
+        for entry in entries {
+            let entry = entry.map_err(|e| format!("dir entry error in {}: {e}", dir.display()))?;
             let path = entry.path();
-            let name = entry.file_name();
-            if path.is_dir() {
+            let file_type = entry
+                .file_type()
+                .map_err(|e| format!("file-type error on {}: {e}", path.display()))?;
+            if file_type.is_dir() {
+                let name = entry.file_name();
                 if name != "target" && name != ".git" {
-                    walk(&path, out);
+                    walk(&path, out)?;
                 }
-            } else if name == "Cargo.toml" {
+            } else if file_type.is_file() && entry.file_name() == "Cargo.toml" {
                 out.push(path);
             }
         }
+        Ok(())
     }
     let mut out = Vec::new();
-    walk(root, &mut out);
-    out
+    walk(root, &mut out)?;
+    out.sort();
+    Ok(out)
 }
 
-/// Does a dependency `item` (`o7-worker = <item>`) enable `test-harness`?
-fn dep_enables_feature(item: &toml::Value) -> bool {
+// ---------------------------------------------------------------------------
+// Structural manifest analysis (pure — the adversarial fixtures call it directly).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+struct Enablement {
+    detail: String,
+    sanctioned: bool,
+}
+
+/// Effective package of a dependency entry: the `package = "..."` rename if present, else the key.
+fn effective_package<'a>(key: &'a str, item: &'a toml::Value) -> &'a str {
+    item.as_table()
+        .and_then(|t| t.get("package"))
+        .and_then(toml::Value::as_str)
+        .unwrap_or(key)
+}
+
+fn dep_has_feature(item: &toml::Value, feature: &str) -> bool {
     item.as_table()
         .and_then(|t| t.get("features"))
-        .and_then(|f| f.as_array())
-        .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(FEATURE)))
+        .and_then(toml::Value::as_array)
+        .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(feature)))
 }
 
-/// Collect `(table_label, table)` for every dependency table in a manifest, including
-/// `target.<cfg>.{dependencies,dev-dependencies,build-dependencies}` and `workspace.dependencies`.
+fn dep_path(item: &toml::Value) -> Option<&str> {
+    item.as_table()
+        .and_then(|t| t.get("path"))
+        .and_then(toml::Value::as_str)
+}
+
+/// `(label, table)` for every dependency table, including `target.<cfg>.{,dev-,build-}dependencies`
+/// and `workspace.dependencies`.
 fn dependency_tables(root: &toml::Table) -> Vec<(String, &toml::Table)> {
     let mut out = Vec::new();
     for kind in ["dependencies", "dev-dependencies", "build-dependencies"] {
@@ -102,87 +152,216 @@ fn dependency_tables(root: &toml::Table) -> Vec<(String, &toml::Table)> {
     out
 }
 
-/// Every enablement of `test-harness` in one manifest, as `(table_label, human_detail)`.
-fn enablements(manifest: &Path, root: &Path) -> Vec<(String, String)> {
-    let rel = manifest
-        .strip_prefix(root)
-        .unwrap()
-        .to_string_lossy()
-        .replace('\\', "/");
-    let text = std::fs::read_to_string(manifest).unwrap();
-    let table: toml::Table = text.parse().unwrap_or_else(|e| panic!("parse {rel}: {e}"));
-    let mut sites = Vec::new();
-
-    // Dependency edges that turn the feature on for the o7-worker dependency.
-    for (label, dep_table) in dependency_tables(&table) {
-        if let Some(item) = dep_table.get(CRATE) {
-            if dep_enables_feature(item) {
-                sites.push((
-                    label.clone(),
-                    format!("{rel} :: [{label}] {CRATE} features = [\"{FEATURE}\"]"),
-                ));
+/// Every dependency KEY in the manifest whose EFFECTIVE package is o7-worker (across all tables).
+fn o7_worker_aliases(root: &toml::Table) -> BTreeSet<String> {
+    let mut set = BTreeSet::new();
+    for (_label, table) in dependency_tables(root) {
+        for (key, item) in table {
+            if effective_package(key, item) == PKG {
+                set.insert(key.clone());
             }
         }
     }
+    set
+}
 
-    // Feature forwarding: any [features] array entry `o7-worker/test-harness`. (`dep:o7-worker`
-    // merely declares an optional dependency and is not a forward, so it is not flagged.)
-    let forward = format!("{CRATE}/{FEATURE}");
-    if let Some(features) = table.get("features").and_then(toml::Value::as_table) {
+/// All the ways one manifest turns `test-harness` on, each tagged sanctioned/forbidden.
+fn analyze(rel: &str, text: &str) -> Result<Vec<Enablement>, String> {
+    let root: toml::Table = text.parse().map_err(|e| format!("parse {rel}: {e}"))?;
+    let aliases = o7_worker_aliases(&root);
+    let mut out = Vec::new();
+
+    // Dependency edges (effective package o7-worker) enabling the feature.
+    for (label, table) in dependency_tables(&root) {
+        for (key, item) in table {
+            if effective_package(key, item) != PKG || !dep_has_feature(item, FEATURE) {
+                continue;
+            }
+            let path = dep_path(item);
+            let sanctioned = rel == ALLOWED_MANIFEST
+                && label == ALLOWED_TABLE
+                && key == PKG
+                && path == Some(".");
+            out.push(Enablement {
+                detail: format!(
+                    "{rel} :: [{label}] `{key}` (package={PKG}, path={path:?}) features += \"{FEATURE}\""
+                ),
+                sanctioned,
+            });
+        }
+    }
+
+    // Feature forwarding: `alias/test-harness`, weak `alias?/test-harness`, or (in o7-worker's own
+    // manifest) a bare `test-harness` self-activation.
+    if let Some(features) = root.get("features").and_then(toml::Value::as_table) {
         for (fname, arr) in features {
-            if let Some(list) = arr.as_array() {
-                if list.iter().any(|v| v.as_str() == Some(forward.as_str())) {
-                    sites.push((
-                        "features".to_owned(),
-                        format!("{rel} :: feature \"{fname}\" forwards \"{forward}\""),
-                    ));
+            let Some(list) = arr.as_array() else { continue };
+            for entry in list {
+                let Some(s) = entry.as_str() else { continue };
+                match s.split_once('/') {
+                    Some((left, right)) => {
+                        let alias = left.strip_suffix('?').unwrap_or(left);
+                        if right == FEATURE && aliases.contains(alias) {
+                            out.push(Enablement {
+                                detail: format!(
+                                    "{rel} :: feature \"{fname}\" forwards \"{s}\" (o7-worker alias `{alias}`)"
+                                ),
+                                sanctioned: false,
+                            });
+                        }
+                    }
+                    None => {
+                        if s == FEATURE && rel == ALLOWED_MANIFEST {
+                            out.push(Enablement {
+                                detail: format!(
+                                    "{rel} :: feature \"{fname}\" self-activates \"{FEATURE}\""
+                                ),
+                                sanctioned: false,
+                            });
+                        }
+                    }
                 }
             }
         }
     }
-    sites
+    Ok(out)
 }
 
-#[test]
-fn test_harness_is_enabled_only_from_the_sanctioned_self_dev_edge() {
-    let root = workspace_root();
-    let mut violations = Vec::new();
-    let mut allowed_seen = false;
+fn rel_of(manifest: &Path, root: &Path) -> Result<String, String> {
+    manifest
+        .strip_prefix(root)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .map_err(|e| format!("relative path of {}: {e}", manifest.display()))
+}
 
-    for manifest in all_manifests(&root) {
-        let rel = manifest
-            .strip_prefix(&root)
-            .unwrap()
-            .to_string_lossy()
-            .replace('\\', "/");
-        for (label, detail) in enablements(&manifest, &root) {
-            let is_sanctioned = rel == ALLOWED_MANIFEST && label == ALLOWED_TABLE;
-            if is_sanctioned {
-                allowed_seen = true;
+// ---------------------------------------------------------------------------
+// Binary-lock policy (pure — fixtures call it directly).
+// ---------------------------------------------------------------------------
+
+/// `bin_files` are the `*.rs` stems present in `crates/o7-worker/src/bin`.
+fn binary_policy(text: &str, bin_files: &BTreeSet<String>) -> Result<(), String> {
+    let root: toml::Table = text.parse().map_err(|e| format!("parse manifest: {e}"))?;
+
+    let autobins = root
+        .get("package")
+        .and_then(toml::Value::as_table)
+        .and_then(|p| p.get("autobins"))
+        .and_then(toml::Value::as_bool);
+    if autobins != Some(false) {
+        return Err(format!(
+            "package.autobins must be `false` (found {autobins:?}); auto-discovery could add an \
+             un-gated harness binary"
+        ));
+    }
+
+    let mut declared: BTreeMap<String, bool> = BTreeMap::new();
+    let bins = root
+        .get("bin")
+        .and_then(toml::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for bin in &bins {
+        let name = bin
+            .get("name")
+            .and_then(toml::Value::as_str)
+            .ok_or("a [[bin]] entry has no name")?;
+        let gated = bin
+            .get("required-features")
+            .and_then(toml::Value::as_array)
+            .is_some_and(|arr| arr.iter().any(|v| v.as_str() == Some(FEATURE)));
+        declared.insert(name.to_owned(), gated);
+    }
+
+    for (name, gated) in &declared {
+        if !gated {
+            return Err(format!(
+                "bin `{name}` is not gated by required-features = [\"{FEATURE}\"]"
+            ));
+        }
+    }
+    let declared_names: BTreeSet<&str> = declared.keys().map(String::as_str).collect();
+    let expected: BTreeSet<&str> = HARNESS_BINS.into_iter().collect();
+    if declared_names != expected {
+        return Err(format!(
+            "declared bins {declared_names:?} != the sanctioned harness bins {expected:?}"
+        ));
+    }
+    // Every source under src/bin must be one of the classified harness bins (fail-closed even with
+    // autobins off: an un-classified source must never sit there waiting for autobins to flip).
+    for stem in bin_files {
+        if !declared.contains_key(stem) {
+            return Err(format!(
+                "src/bin/{stem}.rs is not a classified harness binary"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn bin_stems(bin_dir: &Path) -> Result<BTreeSet<String>, String> {
+    let mut stems = BTreeSet::new();
+    let entries = match std::fs::read_dir(bin_dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(stems),
+        Err(e) => return Err(format!("cannot enumerate {}: {e}", bin_dir.display())),
+    };
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("bin dir entry error: {e}"))?;
+        let path = entry.path();
+        if path.extension().and_then(|x| x.to_str()) == Some("rs") {
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .ok_or("non-UTF-8 bin stem")?;
+            stems.insert(stem.to_owned());
+        }
+    }
+    Ok(stems)
+}
+
+// ---------------------------------------------------------------------------
+// The real gate over the actual workspace.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_harness_enablement_is_exactly_the_sanctioned_self_edge() {
+    let root = workspace_root().expect("workspace root");
+    let manifests = all_manifests(&root).expect("fail-closed manifest walk");
+
+    let mut sanctioned = Vec::new();
+    let mut violations = Vec::new();
+    for manifest in &manifests {
+        let rel = rel_of(manifest, &root).expect("relative path");
+        let text = std::fs::read_to_string(manifest).unwrap_or_else(|e| panic!("read {rel}: {e}"));
+        for enablement in analyze(&rel, &text).unwrap_or_else(|e| panic!("{e}")) {
+            if enablement.sanctioned {
+                sanctioned.push(enablement.detail);
             } else {
-                violations.push(detail);
+                violations.push(enablement.detail);
             }
         }
     }
 
     assert!(
         violations.is_empty(),
-        "REPOSITORY POLICY VIOLATION — `{FEATURE}` may be enabled only from the o7-worker \
-         self dev-dependency ({ALLOWED_MANIFEST} [{ALLOWED_TABLE}]); forbidden enablement(s):\n{}",
+        "REPOSITORY POLICY VIOLATION — `{FEATURE}` may be enabled only from the o7-worker self \
+         dev-dependency ({ALLOWED_MANIFEST} [{ALLOWED_TABLE}]); forbidden enablement(s):\n{}",
         violations.join("\n")
     );
-    assert!(
-        allowed_seen,
-        "the sanctioned self dev-dependency edge ({ALLOWED_MANIFEST} [{ALLOWED_TABLE}] {CRATE} \
-         features = [\"{FEATURE}\"]) is missing — the harness lock mechanism was removed or renamed"
+    assert_eq!(
+        sanctioned.len(),
+        1,
+        "there must be EXACTLY one sanctioned `{FEATURE}` enablement; found {}: {sanctioned:?}",
+        sanctioned.len()
     );
 }
 
 #[test]
 fn production_feature_graph_excludes_the_test_harness_feature() {
     // Production edges only (`no-dev`): the o7-worker node must resolve WITHOUT `test-harness`,
-    // proving the feature is reachable solely through the dev self-edge and never in a production
-    // build. This is cargo's own structural feature resolution, not a manifest heuristic.
+    // proving the feature is reachable solely through the dev self-edge. Cargo's own structural
+    // feature resolution, complementing the manifest analysis above.
+    let root = workspace_root().expect("workspace root");
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
     let output = std::process::Command::new(cargo)
         .args([
@@ -194,7 +373,7 @@ fn production_feature_graph_excludes_the_test_harness_feature() {
             "--prefix",
             "none",
         ])
-        .current_dir(workspace_root())
+        .current_dir(&root)
         .output()
         .expect("cargo tree runs");
     assert!(
@@ -206,8 +385,219 @@ fn production_feature_graph_excludes_the_test_harness_feature() {
     for line in text.lines() {
         let line = line.trim();
         assert!(
-            !(line.contains(CRATE) && line.contains(FEATURE)),
-            "production feature graph activates `{FEATURE}` on `{CRATE}`: {line:?}"
+            !(line.contains(PKG) && line.contains(FEATURE)),
+            "production feature graph activates `{FEATURE}` on `{PKG}`: {line:?}"
         );
     }
+}
+
+#[test]
+fn harness_binaries_are_locked_out_of_production() {
+    let root = workspace_root().expect("workspace root");
+    let manifest = root.join(ALLOWED_MANIFEST);
+    let text = std::fs::read_to_string(&manifest).expect("read o7-worker manifest");
+    let stems = bin_stems(&root.join("crates/o7-worker/src/bin")).expect("enumerate src/bin");
+    binary_policy(&text, &stems).expect("harness binary lock");
+}
+
+// ---------------------------------------------------------------------------
+// Adversarial fixtures — every known bypass must be caught.
+// ---------------------------------------------------------------------------
+
+/// The fixture, analysed as if it were a PRODUCTION manifest, yields ≥1 enablement and none is
+/// sanctioned — i.e. the real gate would reject it.
+fn assert_all_forbidden(rel: &str, text: &str) {
+    let found = analyze(rel, text).expect("fixture parses");
+    assert!(
+        !found.is_empty(),
+        "gate MISSED an enablement in fixture:\n{text}"
+    );
+    assert!(
+        found.iter().all(|e| !e.sanctioned),
+        "gate wrongly sanctioned an enablement in fixture:\n{found:#?}"
+    );
+}
+
+const PROD: &str = "crates/o7-verifier/Cargo.toml";
+
+#[test]
+fn adversarial_renamed_production_dependency() {
+    assert_all_forbidden(
+        PROD,
+        r#"
+[dependencies.worker-internal]
+package = "o7-worker"
+path = "../o7-worker"
+features = ["test-harness"]
+"#,
+    );
+}
+
+#[test]
+fn adversarial_renamed_target_specific_dependency() {
+    assert_all_forbidden(
+        PROD,
+        r#"
+[target.'cfg(windows)'.dependencies.worker-internal]
+package = "o7-worker"
+path = "../o7-worker"
+features = ["test-harness"]
+"#,
+    );
+}
+
+#[test]
+fn adversarial_alias_feature_forwarding() {
+    assert_all_forbidden(
+        PROD,
+        r#"
+[dependencies.worker-internal]
+package = "o7-worker"
+path = "../o7-worker"
+optional = true
+
+[features]
+production = ["worker-internal/test-harness"]
+"#,
+    );
+}
+
+#[test]
+fn adversarial_weak_alias_feature_forwarding() {
+    assert_all_forbidden(
+        PROD,
+        r#"
+[dependencies.worker-internal]
+package = "o7-worker"
+path = "../o7-worker"
+optional = true
+
+[features]
+weak-production = ["worker-internal?/test-harness"]
+"#,
+    );
+}
+
+#[test]
+fn adversarial_local_self_activation_in_o7_worker_manifest() {
+    // A feature in o7-worker's OWN manifest that pulls in `test-harness` by default.
+    assert_all_forbidden(
+        ALLOWED_MANIFEST,
+        r#"
+[features]
+test-harness = []
+default = ["test-harness"]
+"#,
+    );
+}
+
+#[test]
+fn adversarial_duplicate_self_dev_alias() {
+    // The sanctioned edge plus a SECOND aliased copy of o7-worker in the same table.
+    let found = analyze(
+        ALLOWED_MANIFEST,
+        r#"
+[dev-dependencies]
+o7-worker = { path = ".", features = ["test-harness"] }
+worker-second-copy = { package = "o7-worker", path = ".", features = ["test-harness"] }
+"#,
+    )
+    .expect("parses");
+    let sanctioned = found.iter().filter(|e| e.sanctioned).count();
+    let forbidden = found.iter().filter(|e| !e.sanctioned).count();
+    assert_eq!(
+        sanctioned, 1,
+        "exactly the real self-edge is sanctioned: {found:#?}"
+    );
+    assert_eq!(
+        forbidden, 1,
+        "the duplicate alias must be flagged: {found:#?}"
+    );
+}
+
+#[test]
+fn adversarial_self_edge_with_wrong_path_is_not_sanctioned() {
+    // Same key/table/manifest, but `path` is not "." — must NOT be treated as the sanctioned edge.
+    assert_all_forbidden(
+        ALLOWED_MANIFEST,
+        r#"
+[dev-dependencies]
+o7-worker = { path = "../o7-worker", features = ["test-harness"] }
+"#,
+    );
+}
+
+#[test]
+fn adversarial_production_dependency_edge_is_not_sanctioned() {
+    assert_all_forbidden(
+        PROD,
+        r#"
+[dependencies]
+o7-worker = { path = "../o7-worker", features = ["test-harness"] }
+"#,
+    );
+}
+
+#[test]
+fn fail_closed_on_malformed_manifest() {
+    assert!(analyze(PROD, "this is not [ valid toml").is_err());
+}
+
+#[test]
+fn fail_closed_on_unreadable_directory() {
+    let missing = Path::new("/definitely/not/a/real/dir/xyzzy");
+    assert!(all_manifests(missing).is_err());
+}
+
+// ---- binary-lock fixtures ----
+
+fn three_gated_bins() -> String {
+    r#"
+[package]
+name = "o7-worker"
+autobins = false
+
+[[bin]]
+name = "sandboy_fake"
+required-features = ["test-harness"]
+
+[[bin]]
+name = "spawn_probe"
+required-features = ["test-harness"]
+
+[[bin]]
+name = "fd_probe"
+required-features = ["test-harness"]
+"#
+    .to_owned()
+}
+
+#[test]
+fn binary_lock_accepts_the_real_shape() {
+    let stems: BTreeSet<String> = HARNESS_BINS.iter().map(|s| (*s).to_owned()).collect();
+    binary_policy(&three_gated_bins(), &stems).expect("real shape passes");
+}
+
+#[test]
+fn binary_lock_rejects_autobins_true() {
+    let text = three_gated_bins().replace("autobins = false", "autobins = true");
+    let stems: BTreeSet<String> = HARNESS_BINS.iter().map(|s| (*s).to_owned()).collect();
+    assert!(binary_policy(&text, &stems).is_err());
+}
+
+#[test]
+fn binary_lock_rejects_an_ungated_bin() {
+    let text = three_gated_bins().replace(
+        "[[bin]]\nname = \"fd_probe\"\nrequired-features = [\"test-harness\"]",
+        "[[bin]]\nname = \"fd_probe\"",
+    );
+    let stems: BTreeSet<String> = HARNESS_BINS.iter().map(|s| (*s).to_owned()).collect();
+    assert!(binary_policy(&text, &stems).is_err());
+}
+
+#[test]
+fn binary_lock_rejects_an_unclassified_source() {
+    let mut stems: BTreeSet<String> = HARNESS_BINS.iter().map(|s| (*s).to_owned()).collect();
+    stems.insert("rogue".to_owned());
+    assert!(binary_policy(&three_gated_bins(), &stems).is_err());
 }
