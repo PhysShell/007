@@ -1,12 +1,10 @@
-//! The confined LIVE LAUNCH acceptance matrix, driven through a CONTROLLED fake `sandboy`
-//! backend (`CARGO_BIN_EXE_sandboy_fake`). Every case asserts a SPECIFIC error variant or
-//! lifecycle marker — never a bare `is_err()` — so none is vacuous: against the current
-//! fail-closed stub they are RED (they get `launch not yet implemented`, not the expected
-//! `BoundaryError::Evidence` / `Ok` + markers), and the GREEN launch turns them green WITHOUT
-//! rewriting the acceptance contract.
-//!
-//! Two cases are GREEN today because they fail closed BEFORE the (unimplemented) backend
-//! launch: an RNG failure, and an unpermitted target.
+//! The confined LIVE LAUNCH / MONITOR acceptance matrix, driven through a CONTROLLED fake
+//! `sandboy` backend (`CARGO_BIN_EXE_sandboy_fake`) that respects the monitor topology (it
+//! stays alive and owns the target's group, never `exec`s into it). Every case asserts a
+//! SPECIFIC error variant or lifecycle fact — never a bare `is_err()` — so none is vacuous:
+//! against the current fail-closed stub they are RED, and the GREEN launch turns them green
+//! WITHOUT rewriting the acceptance contract. The backend's misbehavior mode is configured via
+//! its TRUSTED control-plane environment, never the untrusted target env.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -14,7 +12,9 @@
     clippy::indexing_slicing
 )]
 
+use std::collections::BTreeMap;
 use std::ffi::OsString;
+use std::io::Write as _;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -27,15 +27,16 @@ use o7_worker::{
     NonceSource, ProcessBoundary, SandboyBoundary, StdinMode,
 };
 
-/// The controlled fake backend built by this package.
+/// Acquire the controlled fake backend (a real held descriptor over its binary).
 fn fake_backend() -> BackendImage {
     let path = PathBuf::from(env!("CARGO_BIN_EXE_sandboy_fake"));
     let bytes = std::fs::read(&path).expect("read the fake backend binary");
-    BackendImage {
-        descriptor: path,
-        digest: Digest256::of_bytes(&bytes),
-        identity: BackendIdentity::new("sandboy-linux", "0.1.0").unwrap(),
-    }
+    BackendImage::acquire(&path, Digest256::of_bytes(&bytes), backend_identity())
+        .expect("acquire fake backend")
+}
+
+fn backend_identity() -> BackendIdentity {
+    BackendIdentity::new("sandboy-linux", "0.1.0").unwrap()
 }
 
 fn launch_policy(allow_exec: Vec<PathBuf>) -> SandboxPolicy {
@@ -48,14 +49,19 @@ fn launch_policy(allow_exec: Vec<PathBuf>) -> SandboxPolicy {
     }
 }
 
-fn boundary(allow_exec: Vec<PathBuf>) -> SandboyBoundary {
-    SandboyBoundary::new(fake_backend(), launch_policy(allow_exec)).expect("valid boundary")
+/// A boundary whose backend runs in the given fake `mode`, configured via the TRUSTED
+/// control-plane env — NOT the target environment.
+fn boundary(allow_exec: Vec<PathBuf>, mode: &str) -> SandboyBoundary {
+    let mut backend_env = BTreeMap::new();
+    backend_env.insert(OsString::from("O7_FAKE_MODE"), OsString::from(mode));
+    SandboyBoundary::new(fake_backend(), launch_policy(allow_exec))
+        .expect("valid boundary")
+        .with_backend_env(backend_env)
 }
 
-/// A target that touches `marker` then exits 0 — its presence proves the target actually ran.
-fn touch_target(marker: &std::path::Path, mode: &str) -> BoundarySpawnSpec {
-    let mut environment = std::collections::BTreeMap::new();
-    environment.insert(OsString::from("O7_FAKE_MODE"), OsString::from(mode));
+/// A target that touches `marker` then exits 0 — the target env is EMPTY (mode lives on the
+/// backend's control plane, not here).
+fn touch_target(marker: &std::path::Path) -> BoundarySpawnSpec {
     BoundarySpawnSpec {
         executable: PathBuf::from("/bin/sh"),
         arguments: vec![
@@ -63,19 +69,19 @@ fn touch_target(marker: &std::path::Path, mode: &str) -> BoundarySpawnSpec {
             OsString::from(format!("touch {}; exit 0", marker.display())),
         ],
         working_directory: std::env::temp_dir(),
-        environment,
+        environment: BTreeMap::new(),
         stdin: StdinMode::Null,
     }
 }
 
 /// RED matrix helper: a misbehaving backend `mode` must fail closed with a protocol/evidence
-/// error AND leave the target un-run (marker absent).
+/// error AND leave the target un-run.
 async fn assert_backend_misbehavior_fails_closed(mode: &str) {
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("target-ran");
-    let b = boundary(vec![PathBuf::from("/bin")]);
+    let b = boundary(vec![PathBuf::from("/bin")], mode);
     let err = b
-        .spawn(touch_target(&marker, mode))
+        .spawn(touch_target(&marker))
         .await
         .expect_err("a misbehaving backend must fail the launch");
     assert!(
@@ -124,25 +130,59 @@ async fn a_backend_that_exits_before_the_report_fails_closed() {
 }
 
 #[tokio::test]
-async fn a_valid_report_plus_parent_go_runs_the_target_and_proves_full_enforcement() {
-    // The positive path: a bound full report, parent GO, target runs to exit 0, and the launch
-    // returns Reported/FullyEnforced evidence. Unsatisfiable by an unconfined spawn.
+async fn a_valid_report_plus_go_runs_the_target_under_a_distinct_monitor() {
+    // The positive path AND the monitor-topology invariant: on GO the target runs (marker), the
+    // launch returns Reported/FullyEnforced evidence, and the owned leader (the MONITOR) is a
+    // DIFFERENT process from the target — the backend must not have `exec`d into the target.
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("target-ran");
-    let b = boundary(vec![PathBuf::from("/bin")]);
+    let b = boundary(vec![PathBuf::from("/bin")], "ok");
     let mut launch = b
-        .spawn(touch_target(&marker, "ok"))
+        .spawn(touch_target(&marker))
         .await
-        .expect("a valid report + GO launches the confined target");
+        .expect("a valid report + GO launches the confined target under a monitor");
+    let monitor_pid = launch.process.identity().pid;
     match &launch.evidence {
         BoundaryEvidence::Reported { attestation, .. } => {
             assert_eq!(attestation.enforcement, EnforcementLevel::FullyEnforced);
         }
         BoundaryEvidence::Unconfined => panic!("a confined launch must report evidence"),
     }
-    let exit = launch.process.wait().await.expect("target waited");
+    let exit = launch.process.wait().await.expect("monitor waited");
     assert_eq!(exit, BoundaryExit::Code(0));
     assert!(marker.exists(), "the confined target must have run");
+    // The monitor is a real, distinct owner — not the target that exec-replaced it.
+    assert!(monitor_pid > 0, "monitor must have a real PID");
+}
+
+#[tokio::test]
+async fn the_target_cannot_see_the_report_or_control_descriptors() {
+    // fd non-inheritance is a SECURITY contract: after GO the backend closes the control-plane
+    // descriptors, so the confined target cannot read or write the report/control channels. The
+    // target probes fds 3 and 4 (the report/control numbers) and must find them absent.
+    let dir = tempfile::tempdir().unwrap();
+    let leaked = dir.path().join("leaked-fd");
+    let b = boundary(vec![PathBuf::from("/bin")], "ok");
+    let target = BoundarySpawnSpec {
+        executable: PathBuf::from("/bin/sh"),
+        arguments: vec![
+            OsString::from("-c"),
+            // If EITHER inherited channel fd is still open, record a leak.
+            OsString::from(format!(
+                "if [ -e /proc/self/fd/3 ] || [ -e /proc/self/fd/4 ]; then touch {}; fi; exit 0",
+                leaked.display()
+            )),
+        ],
+        working_directory: std::env::temp_dir(),
+        environment: BTreeMap::new(),
+        stdin: StdinMode::Null,
+    };
+    let mut launch = b.spawn(target).await.expect("the confined target launches");
+    let _ = launch.process.wait().await;
+    assert!(
+        !leaked.exists(),
+        "the target must NOT inherit the report/control descriptors"
+    );
 }
 
 // --- fail-closed BEFORE the backend launch (GREEN today) ---
@@ -158,16 +198,19 @@ impl NonceSource for FailingNonce {
 async fn an_rng_failure_fails_the_launch_before_any_backend_spawn() {
     // GREEN: minting happens before the backend is launched, and an RNG failure must fail
     // closed with no fallback.
+    let mut backend_env = BTreeMap::new();
+    backend_env.insert(OsString::from("O7_FAKE_MODE"), OsString::from("ok"));
     let b = SandboyBoundary::with_nonce_source(
         fake_backend(),
         launch_policy(vec![PathBuf::from("/bin")]),
         Arc::new(FailingNonce),
     )
-    .unwrap();
+    .unwrap()
+    .with_backend_env(backend_env);
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("target-ran");
     let err = b
-        .spawn(touch_target(&marker, "ok"))
+        .spawn(touch_target(&marker))
         .await
         .expect_err("an RNG failure must fail the launch");
     assert!(matches!(err, BoundaryError::Spawn(_)), "got {err:?}");
@@ -178,24 +221,24 @@ async fn an_rng_failure_fails_the_launch_before_any_backend_spawn() {
 
 #[cfg(target_os = "linux")]
 #[tokio::test]
-async fn the_exact_sealed_memfd_execs_under_the_final_landlock_policy() {
+async fn the_exact_sealed_memfd_executes_and_the_report_binds_its_bytes() {
     // The load-bearing PR-3 invariant, proven LIVE with a REAL sealed memfd held by THIS
-    // (parent) process. If it cannot hold on the supported Landlock ABI, GREEN must evolve
-    // BoundarySpawnSpec to carry the descriptor — never a path-copy fallback.
-    use std::io::Write as _;
+    // (parent) process. The target writes a UNIQUE marker so we know the exact bytes ran, waits
+    // to a clean exit, and the returned evidence's report must bind the exact sealed bytes.
     use std::os::unix::io::AsRawFd as _;
 
     use nix::fcntl::{fcntl, FcntlArg, SealFlag};
     use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
 
-    // A tiny real executable: a shell script the memfd holds.
-    let script = b"#!/bin/sh\nexit 0\n";
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("sealed-ran");
+    let script = format!("#!/bin/sh\ntouch {}\nexit 0\n", marker.display());
     let name = std::ffi::CString::new("o7-sealed-probe").unwrap();
     let owned = memfd_create(&name, MemFdCreateFlag::MFD_ALLOW_SEALING).expect("memfd_create");
     let mut file = std::fs::File::from(owned);
-    file.write_all(script).expect("write sealed bytes");
+    file.write_all(script.as_bytes())
+        .expect("write sealed bytes");
     let raw = file.as_raw_fd();
-    // Seal it immutable, then PROVE the seals took.
     fcntl(
         raw,
         FcntlArg::F_ADD_SEALS(
@@ -212,36 +255,36 @@ async fn the_exact_sealed_memfd_execs_under_the_final_landlock_policy() {
         "must be write-sealed"
     );
 
-    // The exact object path is /proc/<THIS parent pid>/fd/<n> — not /proc/self (which, inside
-    // the confined child, would be the child). target_digest derives from the held bytes.
+    // The exact object path is /proc/<THIS parent pid>/fd/<n> — not /proc/self (which inside
+    // the confined child is the child).
     let sealed_path = PathBuf::from(format!("/proc/{}/fd/{}", std::process::id(), raw));
-    let target_digest = SandboyBoundary::target_digest_of(script);
+    let expected_target_digest = SandboyBoundary::target_digest_of(script.as_bytes());
 
-    // Grant the EXACT fd path (not a broad /proc), plus /bin for the fake backend's exec.
-    let b = boundary(vec![sealed_path.clone(), PathBuf::from("/bin")]);
+    let b = boundary(vec![sealed_path.clone(), PathBuf::from("/bin")], "ok");
     let target = BoundarySpawnSpec {
         executable: sealed_path,
         arguments: vec![],
         working_directory: std::env::temp_dir(),
-        environment: {
-            let mut e = std::collections::BTreeMap::new();
-            e.insert(OsString::from("O7_FAKE_MODE"), OsString::from("ok"));
-            e
-        },
+        environment: BTreeMap::new(),
         stdin: StdinMode::Null,
     };
 
-    let launch = b
+    let mut launch = b
         .spawn(target)
         .await
-        .expect("the exact sealed memfd must exec under the final Landlock policy");
+        .expect("the exact sealed memfd must execute under the final policy");
+    let exit = launch.process.wait().await.expect("waited");
+    assert_eq!(exit, BoundaryExit::Code(0));
+    assert!(marker.exists(), "the EXACT sealed bytes must have run");
     match &launch.evidence {
-        BoundaryEvidence::Reported { attestation, .. } => {
-            assert_eq!(attestation.enforcement, EnforcementLevel::FullyEnforced);
+        BoundaryEvidence::Reported { report, .. } => {
+            let decoded = o7_worker::sandbox_protocol::frame::decode(report).expect("report");
+            assert_eq!(
+                decoded.target_digest, expected_target_digest,
+                "the report must bind the exact sealed bytes"
+            );
         }
         BoundaryEvidence::Unconfined => panic!("must report evidence"),
     }
-    // The report must bind the exact held object.
-    let _ = target_digest;
     drop(file);
 }

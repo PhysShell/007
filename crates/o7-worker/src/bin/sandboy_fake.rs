@@ -1,12 +1,15 @@
 //! A CONTROLLED fake `sandboy` backend for the launch acceptance matrix. It speaks the real
-//! protocol — reconstruct the policy from the flags, emit ONE bound report frame on
-//! `--report-fd`, wait for the parent's GO byte on `--control-fd`, then `exec` the target — and
-//! misbehaves on demand (env `O7_FAKE_MODE`) so the tests can pin every fail-closed path.
+//! protocol AND respects the chosen MONITOR topology: reconstruct the policy from the flags,
+//! emit ONE bound report frame on `--report-fd`, wait for the parent's GO byte on
+//! `--control-fd`, then — on GO — CLOSE the inherited control-plane descriptors and start the
+//! target as a CHILD in its own process group, remaining alive as the monitor that owns the
+//! group and relays the target's exit. It never `exec`s into the target (which would make it
+//! disappear, the rejected exec-in-place architecture). It misbehaves on demand via its own
+//! (trusted, control-plane) environment variable `O7_FAKE_MODE` — never the target's env.
 //!
-//! It is test infrastructure: it is built by the o7-worker package so integration tests can
-//! locate it via `CARGO_BIN_EXE_sandboy_fake`, and it is exercised only once the live launch
-//! lands GREEN. `unsafe` is still forbidden (fd access goes through `/proc/self/fd/<n>` paths;
-//! `exec` uses the safe `CommandExt::exec`).
+//! Test infrastructure: built by the o7-worker package so integration tests can locate it via
+//! `CARGO_BIN_EXE_sandboy_fake`, and exercised once the live launch lands GREEN. `unsafe`
+//! stays forbidden (fd access via `/proc/self/fd/<n>`; fd close via nix; no `exec`).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -28,7 +31,8 @@ use o7_sandbox_protocol::policy::{Enforcement, NetworkPolicy, SandboxPolicy};
 use o7_sandbox_protocol::report::SandboxReport;
 use o7_sandbox_protocol::SCHEMA_VERSION;
 
-/// A minimal parse of the argv this backend understands.
+/// A minimal parse of the argv this backend understands. Sensitive target values (env) do NOT
+/// ride the argv (visible via `/proc`); only the non-sensitive target path/args/cwd do.
 struct Args {
     report_fd: i32,
     control_fd: i32,
@@ -37,13 +41,13 @@ struct Args {
     timeout_ms: u128,
     allow_exec: Vec<PathBuf>,
     allow_env: Vec<OsString>,
+    target_cwd: PathBuf,
     target: PathBuf,
     target_args: Vec<OsString>,
 }
 
 fn parse_args() -> Option<Args> {
     let mut it = std::env::args_os().skip(1); // skip program name
-                                              // First positional must be `run`.
     if it.next()?.to_str()? != "run" {
         return None;
     }
@@ -54,6 +58,7 @@ fn parse_args() -> Option<Args> {
     let mut timeout_ms = None;
     let mut allow_exec = Vec::new();
     let mut allow_env = Vec::new();
+    let mut target_cwd = PathBuf::from("/");
     loop {
         let flag = it.next()?;
         let flag = flag.to_str()?;
@@ -66,6 +71,7 @@ fn parse_args() -> Option<Args> {
             "--timeout-ms" => timeout_ms = Some(it.next()?.to_str()?.parse().ok()?),
             "--allow-exec" => allow_exec.push(PathBuf::from(it.next()?)),
             "--allow-env" => allow_env.push(it.next()?),
+            "--target-cwd" => target_cwd = PathBuf::from(it.next()?),
             "--" => break,
             _ => return None,
         }
@@ -80,6 +86,7 @@ fn parse_args() -> Option<Args> {
         timeout_ms: timeout_ms?,
         allow_exec,
         allow_env,
+        target_cwd,
         target,
         target_args,
     })
@@ -104,14 +111,14 @@ fn run() -> i32 {
         eprintln!("sandboy_fake: could not parse argv");
         return 64;
     };
+    // The mode comes from the backend's OWN (trusted, control-plane) environment — never the
+    // target's.
     let mode = std::env::var("O7_FAKE_MODE").unwrap_or_default();
 
-    // The "exit before report" misbehavior: die before delivering anything.
     if mode == "exit_before_report" {
-        return 70;
+        return 70; // die before delivering anything
     }
 
-    // Compute the honest bindings, then perturb per mode.
     let policy = reconstructed_policy(&args);
     let mut policy_digest = policy.digest();
     let target_bytes = std::fs::read(&args.target).unwrap_or_default();
@@ -166,8 +173,7 @@ fn run() -> i32 {
         Err(_) => return 66,
     }
 
-    // Wait for the parent's GO (a single 'G' byte) before exec'ing the target. Anything else,
-    // or EOF, is a NACK — the target must NOT run.
+    // Wait for the parent's GO ('G') before starting the target. Anything else / EOF is a NACK.
     let control_path = format!("/proc/self/fd/{}", args.control_fd);
     let mut go = [0u8; 1];
     match std::fs::File::open(&control_path).and_then(|mut f| f.read_exact(&mut go)) {
@@ -175,9 +181,31 @@ fn run() -> i32 {
         _ => return 67, // NACK / EOF — fail closed, target never runs.
     }
 
-    // GO: exec the target IN PLACE (the report descriptor is NOT passed on — a real backend
-    // marks it CLOEXEC before this point so the target cannot write to the channel).
-    let err = Command::new(&args.target).args(&args.target_args).exec();
-    eprintln!("sandboy_fake: exec failed: {err}");
-    69
+    // Close the inherited control-plane descriptors so the TARGET cannot see the report/control
+    // channels (a security contract, not a detail). Errors are ignored: a closed fd is fine.
+    let _ = nix::unistd::close(args.report_fd);
+    let _ = nix::unistd::close(args.control_fd);
+
+    // MONITOR topology: start the target as a CHILD in its own process group and stay alive as
+    // the monitor. `env_clear()` means the target does NOT inherit the backend's trusted
+    // control-plane environment (in a real backend the target's allowlisted env would arrive
+    // out-of-band; the acceptance targets need none).
+    let mut cmd = Command::new(&args.target);
+    cmd.args(&args.target_args)
+        .current_dir(&args.target_cwd)
+        .env_clear()
+        .process_group(0);
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            eprintln!("sandboy_fake: could not start target: {e}");
+            return 68;
+        }
+    };
+    // Remain as the monitor until the target exits, then relay its outcome. (A real backend
+    // would also enforce the wall-clock timeout and tear the cgroup down here.)
+    match child.wait() {
+        Ok(status) => status.code().unwrap_or(1),
+        Err(_) => 1,
+    }
 }

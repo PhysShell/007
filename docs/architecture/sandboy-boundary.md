@@ -111,13 +111,27 @@ There is no constructor that pairs `FullyEnforced` with an absent report.
 Gate-round-2 hardening, so a report can neither be forged by an unexpected backend nor
 authorize a target before the parent has verified it:
 
-- **Backend identity + object.** `SandboyBoundary` holds a `BackendImage { descriptor,
-  digest, identity }`: a HELD immutable descriptor (execed directly, so a post-construction
-  path swap cannot substitute a binary), its `digest` (re-checked against the held bytes
-  before launch — `verify_backend_object`), and the expected `BackendIdentity` the report
-  must echo (`verify_report` → `BackendMismatch`). A bare absolute path is an address, not an
-  identity; producing the sealed/held object is the caller's acquisition step (PR 3's
-  mechanism).
+- **Backend identity + object (OWNED).** `BackendImage` has PRIVATE fields and is built only
+  via `acquire(path, expected_digest, identity)`, which opens the object, reads its bytes back
+  THROUGH the held fd (`/proc/self/fd/<n>`, binding the digest to the object, not the path),
+  fails closed on a mismatch, and RETAINS the descriptor (`Arc<File>`) for the boundary's
+  lifetime. The launch execs `descriptor_path()` (`/proc/<owner_pid>/fd/<n>`), so a swap of the
+  source path after construction cannot change what runs; the report must echo the expected
+  `BackendIdentity` (`verify_report` → `BackendMismatch`). A bare `PathBuf` is an address, not
+  an owned object — the type no longer accepts one.
+
+- **Monitor topology in the fake too.** The controlled fake backend does NOT `exec` into the
+  target (which would make it disappear — the rejected architecture). On GO it CLOSES the
+  control-plane descriptors and starts the target as a CHILD in its own process group, then
+  stays alive as the monitor and relays the exit. So a trivial "spawn a host child and trust
+  its JSON" GREEN cannot satisfy the matrix: the owned leader must be a distinct monitor.
+
+- **Plane separation.** The backend is a TRUSTED launcher: `backend_spawn_spec` runs it from a
+  fixed trusted cwd (`/`) with a trusted control-plane environment, NEVER the untrusted
+  target's cwd/env (LD_PRELOAD, LD_LIBRARY_PATH, attacker cwd, …). The target's cwd rides the
+  non-sensitive argv (`--target-cwd`); its environment does not appear on the /proc-visible
+  argv or in the backend's env — it travels out-of-band to the confined target. A backend
+  misbehavior mode is configured via the trusted control-plane env, not the target env.
 - **Exact target binding.** The launch derives `target_digest` from the exact held bytes it
   hands the backend; the report must echo it. The sealed-memfd probe builds a REAL sealed
   memfd (`memfd_create` + `F_ADD_SEALS` + `F_GET_SEALS`) held by the parent and addressed as

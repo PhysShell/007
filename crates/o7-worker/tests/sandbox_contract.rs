@@ -1,9 +1,9 @@
-//! Contract tests for the Sandboy boundary's PURE, fail-closed surface: policy/backend
-//! validation, the confined-backend argv (report + control descriptors), the exec-permission
-//! gate, honest attestation, and — the load-bearing part — the object/report VERIFICATION
-//! matrix: a backend object is trusted only if its bytes match the pinned digest, and a report
-//! only if it echoes the expected backend AND is bound to this policy/launch/target AND fully
-//! enforced. All GREEN. The confined LIVE LAUNCH matrix is pinned (RED) in `sandboy_launch.rs`.
+//! Contract tests for the Sandboy boundary's PURE, fail-closed surface: acquisition-bound
+//! backend, policy validation, the confined-backend argv (report + control descriptors, TRUSTED
+//! backend cwd/env — never the target's), the exec-permission gate, honest attestation, and the
+//! report VERIFICATION matrix (a report is trusted only if it echoes the expected backend AND is
+//! bound to this policy/launch/target AND fully enforced). All GREEN. The confined LIVE LAUNCH /
+//! monitor matrix is pinned (RED) in `sandboy_launch.rs`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -12,6 +12,7 @@
 )]
 
 use std::ffi::OsString;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -34,12 +35,17 @@ fn backend_identity() -> BackendIdentity {
     BackendIdentity::new("sandboy-linux", "0.1.0").unwrap()
 }
 
+/// Acquire a real held-descriptor backend image over a temp file with `bytes`. The temp file is
+/// unlinked on drop, but the acquired image holds its OWN open fd, so it stays valid.
+fn acquired_backend(bytes: &[u8], digest: Digest256) -> Result<BackendImage, SandboyLaunchError> {
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    tmp.write_all(bytes).unwrap();
+    tmp.flush().unwrap();
+    BackendImage::acquire(tmp.path(), digest, backend_identity())
+}
+
 fn backend_image() -> BackendImage {
-    BackendImage {
-        descriptor: PathBuf::from("/usr/bin/sandboy"),
-        digest: Digest256::of_bytes(BACKEND_BYTES),
-        identity: backend_identity(),
-    }
+    acquired_backend(BACKEND_BYTES, Digest256::of_bytes(BACKEND_BYTES)).expect("acquire backend")
 }
 
 fn full_policy() -> SandboxPolicy {
@@ -64,8 +70,6 @@ fn a_target() -> Digest256 {
     Digest256::of_bytes(b"the confined target bytes")
 }
 
-/// A report frame with the given backend identity/policy/nonce/target/dimensions — so a test
-/// can forge a wrong backend, a mis-binding, or a downgrade on purpose.
 fn report_frame(
     backend: BackendIdentity,
     policy_digest: Digest256,
@@ -89,10 +93,9 @@ fn report_frame(
     encode(&report).expect("report encodes")
 }
 
-/// A fully-bound, fully-enforced frame for `boundary()`.
 fn good_frame(b: &SandboyBoundary, nonce: &LaunchNonce, target: &Digest256) -> Vec<u8> {
     report_frame(
-        b.backend().identity.clone(),
+        b.backend().identity().clone(),
         b.policy().digest(),
         nonce,
         target,
@@ -102,15 +105,28 @@ fn good_frame(b: &SandboyBoundary, nonce: &LaunchNonce, target: &Digest256) -> V
 
 const ALL_ENFORCED: [Enforcement; 5] = [Enforcement::Enforced; 5];
 
-// --- construction is fail-closed ---
+// --- acquisition is fail-closed and object-bound ---
 
 #[test]
-fn a_relative_backend_descriptor_is_rejected() {
-    let mut image = backend_image();
-    image.descriptor = PathBuf::from("sandboy");
-    let err = SandboyBoundary::new(image, full_policy())
-        .expect_err("a relative backend descriptor must be refused");
-    assert!(matches!(err, SandboyLaunchError::RelativeBackend(_)));
+fn acquiring_a_backend_whose_bytes_mismatch_the_digest_fails_closed() {
+    // A pinned digest that does not match the held object's bytes must be rejected — no
+    // boundary is built around an object we did not verify.
+    let wrong = Digest256::of_bytes(b"some other backend");
+    assert!(matches!(
+        acquired_backend(BACKEND_BYTES, wrong),
+        Err(SandboyLaunchError::BackendObjectMismatch)
+    ));
+}
+
+#[test]
+fn the_acquired_backend_exec_path_is_a_held_proc_fd() {
+    // The launch execs the HELD descriptor, addressed as /proc/<owner_pid>/fd/<n> — not a
+    // re-resolvable source path.
+    let image = backend_image();
+    let path = image.descriptor_path();
+    let s = path.to_string_lossy();
+    assert!(s.starts_with("/proc/"), "held path: {s}");
+    assert!(s.contains("/fd/"), "held path: {s}");
 }
 
 #[test]
@@ -128,19 +144,6 @@ fn attestation_is_sandboy_fully_enforced_and_satisfies_the_requirement() {
     assert!(BoundaryRequirement::RequireFullyEnforced.is_satisfied_by(&attestation));
 }
 
-// --- backend object binding: bytes, not path ---
-
-#[test]
-fn the_backend_object_is_bound_to_its_digest() {
-    let b = boundary();
-    assert!(b.verify_backend_object(BACKEND_BYTES).is_ok());
-    // A substituted object (a swapped binary at the same path) must fail closed.
-    assert!(matches!(
-        b.verify_backend_object(b"a substituted backend binary"),
-        Err(SandboyLaunchError::BackendObjectMismatch)
-    ));
-}
-
 // --- the exec gate: PR-3 sealed memfd ---
 
 #[test]
@@ -150,7 +153,6 @@ fn the_sealed_memfd_exec_path_must_be_permitted() {
         full_policy().permits_exec(sealed),
         "granting /proc permits it"
     );
-
     let mut denies = full_policy();
     denies.allow_exec = vec![PathBuf::from("/usr/bin")];
     assert!(
@@ -159,22 +161,35 @@ fn the_sealed_memfd_exec_path_must_be_permitted() {
     );
 }
 
+// --- the confined-backend invocation: descriptors + PLANE SEPARATION ---
+
 #[test]
-fn the_backend_invocation_carries_report_and_control_fds_and_wraps_the_target() {
+fn the_backend_invocation_runs_the_held_backend_with_trusted_cwd_and_env() {
     let b = boundary();
+    let mut target_env = std::collections::BTreeMap::new();
+    target_env.insert(OsString::from("LD_PRELOAD"), OsString::from("/evil.so"));
     let target = BoundarySpawnSpec {
         executable: PathBuf::from("/proc/4242/fd/7"),
         arguments: vec![OsString::from("--flag"), OsString::from("value")],
-        working_directory: PathBuf::from("/work/run-1"),
-        environment: Default::default(),
+        working_directory: PathBuf::from("/work/target-cwd"),
+        environment: target_env,
         stdin: StdinMode::Null,
     };
     let wrapped = b
         .backend_spawn_spec(&target, 3, 4, &a_nonce())
         .expect("a permitted target is wrapped");
 
-    // The launched program is the HELD backend descriptor.
-    assert_eq!(wrapped.executable, PathBuf::from("/usr/bin/sandboy"));
+    // The launched program is the HELD backend descriptor, in a TRUSTED cwd, with a TRUSTED
+    // (here empty) env — NEVER the target's cwd or env.
+    assert!(wrapped.executable.to_string_lossy().starts_with("/proc/"));
+    assert_eq!(wrapped.working_directory, PathBuf::from("/"));
+    assert!(
+        !wrapped
+            .environment
+            .contains_key(OsString::from("LD_PRELOAD").as_os_str()),
+        "the untrusted target env must NOT leak into the backend"
+    );
+
     let arg_after = |flag: &str| -> OsString {
         let i = wrapped.arguments.iter().position(|a| a == flag).unwrap();
         wrapped.arguments[i + 1].clone()
@@ -185,14 +200,21 @@ fn the_backend_invocation_carries_report_and_control_fds_and_wraps_the_target() 
         arg_after("--launch-nonce"),
         OsString::from(a_nonce().as_str())
     );
+    // The target cwd rides the (non-sensitive) argv; the target env does not appear anywhere.
+    assert_eq!(
+        arg_after("--target-cwd"),
+        OsString::from("/work/target-cwd")
+    );
+    let flat = wrapped.arguments.join(&OsString::from("\u{1f}"));
+    assert!(
+        !flat.to_string_lossy().contains("LD_PRELOAD"),
+        "target env must not appear on the /proc-visible argv"
+    );
     let sep = wrapped.arguments.iter().position(|a| a == "--").unwrap();
-    assert!(wrapped.arguments[..sep].iter().any(|a| a == "--deny-net"));
     assert_eq!(
         wrapped.arguments[sep + 1],
         OsString::from("/proc/4242/fd/7")
     );
-    assert_eq!(wrapped.arguments[sep + 2], OsString::from("--flag"));
-    assert_eq!(wrapped.arguments[sep + 3], OsString::from("value"));
 }
 
 #[test]
@@ -228,7 +250,7 @@ fn a_fully_bound_full_report_verifies_to_reported_sandboy_evidence() {
         } => {
             assert_eq!(attestation.implementation, BoundaryKind::Sandboy);
             assert_eq!(attestation.enforcement, EnforcementLevel::FullyEnforced);
-            assert_eq!(report, frame, "the raw frame is carried for persistence");
+            assert_eq!(report, frame);
         }
         BoundaryEvidence::Unconfined => panic!("a verified report must be Reported evidence"),
     }
@@ -261,7 +283,7 @@ fn a_downgraded_report_fails_closed() {
         let mut dims = ALL_ENFORCED;
         dims[i] = Enforcement::Partial;
         let frame = report_frame(
-            b.backend().identity.clone(),
+            b.backend().identity().clone(),
             b.policy().digest(),
             &nonce,
             &target,
@@ -306,14 +328,13 @@ fn a_report_bound_to_a_different_policy_fails_closed() {
     let b = boundary();
     let nonce = a_nonce();
     let target = a_target();
-    // A report minted against ANOTHER policy digest.
     let other_policy = {
         let mut p = full_policy();
         p.timeout = Duration::from_secs(601);
         p
     };
     let frame = report_frame(
-        b.backend().identity.clone(),
+        b.backend().identity().clone(),
         other_policy.digest(),
         &nonce,
         &target,

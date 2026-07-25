@@ -3,32 +3,39 @@
 //!
 //! The confinement runs in an EXTERNAL `sandboy` backend binary (every 007 crate forbids
 //! `unsafe`; see `docs/architecture/sandboy-boundary.md`). This boundary launches the backend
-//! through the spawn seam. The backend, in a MONITOR topology, installs the confinement, forks
-//! a confined child that `exec`s the real target IN PLACE (same PID namespace, so PR 3's
-//! sealed-memfd exec via `/proc/<verifier_pid>/fd/<n>` still resolves), and remains as the
-//! cgroup-owning monitor enforcing the deadline + process-tree kill.
+//! through the spawn seam. In a MONITOR topology the backend installs the confinement, starts
+//! the target as a CHILD (same PID namespace, so PR 3's sealed-memfd exec via
+//! `/proc/<verifier_pid>/fd/<n>` still resolves), and REMAINS ALIVE as the cgroup-owning
+//! monitor enforcing the deadline + process-tree kill — it never `exec`s into the target.
 //!
 //! Trust is bound to OBJECTS, not paths:
-//! - the BACKEND is a [`BackendImage`] — a HELD immutable descriptor + its digest + the
-//!   expected [`BackendIdentity`]. The launch execs the held descriptor (not a re-resolved
-//!   path, so a post-construction swap cannot substitute a different binary), and the report
-//!   must echo the expected identity;
+//! - the BACKEND is a [`BackendImage`] that OWNS a held read-only descriptor + its digest + the
+//!   expected [`BackendIdentity`]. The launch execs the held descriptor via
+//!   [`BackendImage::descriptor_path`] (not a re-resolved path, so a post-construction swap
+//!   cannot substitute a different binary), and the report must echo the expected identity;
 //! - the TARGET's digest is derived from the exact held bytes the backend confined, and the
 //!   report must echo it.
 //!
-//! Authorization is a BARRIER, not an afterthought: the two-phase handshake (`--report-fd` for
-//! the report, `--control-fd` for the parent GO) means the backend holds the confined target
-//! BEFORE `exec` until the parent has verified the report and sent GO. A malformed / mis-bound
-//! / downgraded report, a NACK, EOF, or a cancel makes the backend kill its cgroup and reap —
-//! the target never runs on an unverified report.
+//! Planes are SEPARATE: the backend is a TRUSTED launcher and runs from a fixed trusted cwd
+//! (`/`) with a trusted control-plane environment — never the untrusted target's cwd/env
+//! (LD_PRELOAD, …). The target's own cwd rides the (non-sensitive) argv; its environment
+//! travels out-of-band to the confined target, never through the backend's process env.
 //!
-//! LIVE + GREEN here: policy/backend validation, nonce minting (fail-closed on RNG failure),
-//! the confined-backend argv, the exec-permission gate, and the pure fail-closed verifiers
-//! ([`SandboyBoundary::verify_backend_object`], [`SandboyBoundary::verify_report`]). RED: the
-//! confined live launch itself.
+//! Authorization is a BARRIER: the two-phase handshake (`--report-fd` for the report,
+//! `--control-fd` for the parent GO) means the backend holds the confined target BEFORE it
+//! starts until the parent has verified the report and sent GO. A malformed / mis-bound /
+//! downgraded report, a NACK, EOF, or a cancel makes the backend kill its cgroup and reap — the
+//! target never runs on an unverified report.
+//!
+//! LIVE + GREEN here: backend acquisition (fail-closed on a digest mismatch), policy
+//! validation, nonce minting (fail-closed on RNG failure), the confined-backend argv with plane
+//! separation, the exec-permission gate, and the pure fail-closed [`SandboyBoundary::verify_report`].
+//! RED: the confined live launch itself.
 
-use std::os::unix::io::RawFd;
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::fs::File;
+use std::os::unix::io::{AsRawFd as _, RawFd};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{ffi::OsString, io};
 
@@ -43,17 +50,72 @@ use crate::boundary::{
     BoundarySpawnSpec, EnforcementLevel, ProcessBoundary,
 };
 
-/// A backend bound to a specific immutable OBJECT, not just a path. `descriptor` is a HELD,
-/// read-only descriptor (e.g. `/proc/<verifier_pid>/fd/<n>` of a sealed staging object) that
-/// the boundary execs directly, so a substitution of the on-disk path after construction
-/// cannot change what runs; `digest` is the digest of that object's bytes (re-checked before
-/// launch); `identity` is the backend the report must echo. Producing the sealed/held object
-/// is the caller's acquisition step (PR 3's mechanism) — this type only carries the proof.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A backend bound to a specific immutable OBJECT, not a re-resolvable path. It OWNS an open,
+/// read-only descriptor to the backend binary for the lifetime of the boundary: the digest is
+/// re-read back THROUGH that held descriptor (`/proc/self/fd/<n>`) and compared at construction,
+/// and the launch execs the held object via [`BackendImage::descriptor_path`]
+/// (`/proc/<owner_pid>/fd/<n>`) — so a substitution of the source path after construction cannot
+/// change what runs. The fields are private; the only way to build one is
+/// [`BackendImage::acquire`], which fails closed on a digest mismatch.
+#[derive(Debug, Clone)]
 pub struct BackendImage {
-    pub descriptor: PathBuf,
-    pub digest: Digest256,
-    pub identity: BackendIdentity,
+    /// The HELD descriptor. Retained (via `Arc`) for the whole boundary lifetime; dropping the
+    /// original acquirer does not invalidate it.
+    descriptor: Arc<File>,
+    digest: Digest256,
+    identity: BackendIdentity,
+}
+
+impl BackendImage {
+    /// Acquire the backend object: open it, read its bytes back THROUGH the held descriptor,
+    /// verify they hash to `expected_digest`, and RETAIN the descriptor. After this returns,
+    /// the object is pinned to the held fd — a swap of `path` on disk cannot change it.
+    ///
+    /// # Errors
+    /// [`SandboyLaunchError::BackendOpen`] if the object cannot be opened/read;
+    /// [`SandboyLaunchError::BackendObjectMismatch`] if the held bytes do not match the digest.
+    pub fn acquire(
+        path: &Path,
+        expected_digest: Digest256,
+        identity: BackendIdentity,
+    ) -> Result<Self, SandboyLaunchError> {
+        let file = File::open(path).map_err(|e| SandboyLaunchError::BackendOpen(e.to_string()))?;
+        // Read back THROUGH the held fd, not the path — binds the digest to the object we hold.
+        let held_path = format!("/proc/self/fd/{}", file.as_raw_fd());
+        let bytes = std::fs::read(&held_path)
+            .map_err(|e| SandboyLaunchError::BackendOpen(e.to_string()))?;
+        if Digest256::of_bytes(&bytes) != expected_digest {
+            return Err(SandboyLaunchError::BackendObjectMismatch);
+        }
+        Ok(Self {
+            descriptor: Arc::new(file),
+            digest: expected_digest,
+            identity,
+        })
+    }
+
+    /// The exec path of the HELD object: `/proc/<owner_pid>/fd/<n>`, valid while the boundary
+    /// (and thus this held descriptor) lives.
+    #[must_use]
+    pub fn descriptor_path(&self) -> PathBuf {
+        PathBuf::from(format!(
+            "/proc/{}/fd/{}",
+            std::process::id(),
+            self.descriptor.as_raw_fd()
+        ))
+    }
+
+    /// The expected backend identity a report must echo.
+    #[must_use]
+    pub fn identity(&self) -> &BackendIdentity {
+        &self.identity
+    }
+
+    /// The digest of the held backend object.
+    #[must_use]
+    pub fn digest(&self) -> &Digest256 {
+        &self.digest
+    }
 }
 
 /// Mints a 128-bit launch nonce. Abstracted so tests can inject a deterministic source and a
@@ -93,6 +155,10 @@ pub struct SandboyBoundary {
     backend: BackendImage,
     policy: SandboxPolicy,
     nonce_source: Arc<dyn NonceSource>,
+    /// The TRUSTED control-plane environment handed to the backend (never the target's). Empty
+    /// in production; tests set backend configuration (e.g. a fake mode) here — NOT via the
+    /// untrusted target environment.
+    backend_env: BTreeMap<OsString, OsString>,
 }
 
 impl std::fmt::Debug for SandboyBoundary {
@@ -111,9 +177,9 @@ pub enum SandboyLaunchError {
     /// The confinement policy is not capable of full confinement.
     #[error("sandbox policy is not fully confining: {0}")]
     Policy(#[from] SandboxPolicyError),
-    /// The backend descriptor is not an absolute (held) path.
-    #[error("sandboy backend descriptor must be an absolute held path: {0}")]
-    RelativeBackend(PathBuf),
+    /// The backend object could not be opened/read for acquisition.
+    #[error("sandboy backend object could not be acquired: {0}")]
+    BackendOpen(String),
     /// The held backend object's bytes do not match its pinned digest (substitution / TOCTOU).
     #[error("backend object digest does not match the trusted image")]
     BackendObjectMismatch,
@@ -138,11 +204,10 @@ pub enum SandboyLaunchError {
 }
 
 impl SandboyBoundary {
-    /// Build a Sandboy boundary from an acquisition-bound backend and a confinement policy,
+    /// Build a Sandboy boundary from an acquired (held) backend and a confinement policy,
     /// using the OS CSPRNG for launch nonces.
     ///
     /// # Errors
-    /// [`SandboyLaunchError::RelativeBackend`] if the backend descriptor is not absolute;
     /// [`SandboyLaunchError::Policy`] if the policy cannot fully confine.
     pub fn new(backend: BackendImage, policy: SandboxPolicy) -> Result<Self, SandboyLaunchError> {
         Self::with_nonce_source(backend, policy, Arc::new(OsNonceSource))
@@ -158,15 +223,22 @@ impl SandboyBoundary {
         policy: SandboxPolicy,
         nonce_source: Arc<dyn NonceSource>,
     ) -> Result<Self, SandboyLaunchError> {
-        if !backend.descriptor.is_absolute() {
-            return Err(SandboyLaunchError::RelativeBackend(backend.descriptor));
-        }
         policy.validate()?;
         Ok(Self {
             backend,
             policy,
             nonce_source,
+            backend_env: BTreeMap::new(),
         })
+    }
+
+    /// Set the TRUSTED control-plane environment for the backend (default empty). This is the
+    /// backend's OWN environment, distinct from the untrusted target's — used for backend
+    /// configuration, never for passing target-controlled variables.
+    #[must_use]
+    pub fn with_backend_env(mut self, env: BTreeMap<OsString, OsString>) -> Self {
+        self.backend_env = env;
+        self
     }
 
     /// The policy this boundary installs.
@@ -187,18 +259,6 @@ impl SandboyBoundary {
     #[must_use]
     pub fn target_digest_of(bytes: &[u8]) -> Digest256 {
         Digest256::of_bytes(bytes)
-    }
-
-    /// Verify the held backend object's bytes against the trusted image digest, or fail closed.
-    ///
-    /// # Errors
-    /// [`SandboyLaunchError::BackendObjectMismatch`] on any mismatch.
-    pub fn verify_backend_object(&self, bytes: &[u8]) -> Result<(), SandboyLaunchError> {
-        if Digest256::of_bytes(bytes) == self.backend.digest {
-            Ok(())
-        } else {
-            Err(SandboyLaunchError::BackendObjectMismatch)
-        }
     }
 
     /// Construct the confined backend invocation for a target `spec`, or fail closed. The
@@ -251,16 +311,26 @@ impl SandboyBoundary {
             arguments.push(OsString::from("--allow-env"));
             arguments.push(name.clone());
         }
+        // The target's cwd is not secret (unlike its env), so it may ride the argv; the
+        // target's ENVIRONMENT does not — it travels out-of-band to the confined target.
+        arguments.push(OsString::from("--target-cwd"));
+        arguments.push(spec.working_directory.clone().into_os_string());
         arguments.push(OsString::from("--"));
         arguments.push(spec.executable.clone().into_os_string());
         arguments.extend(spec.arguments.iter().cloned());
 
         Ok(BoundarySpawnSpec {
-            // Exec the HELD backend object, not a re-resolved path.
-            executable: self.backend.descriptor.clone(),
+            // Exec the HELD backend object via its owned descriptor path, not a re-resolved
+            // path — a swap of the source path after acquisition cannot change what runs.
+            executable: self.backend.descriptor_path(),
             arguments,
-            working_directory: spec.working_directory.clone(),
-            environment: spec.environment.clone(),
+            // PLANE SEPARATION: the backend is a TRUSTED launcher and must NOT inherit the
+            // untrusted target's environment or cwd (LD_PRELOAD, LD_LIBRARY_PATH, attacker cwd,
+            // …). It runs from a fixed trusted directory with a trusted control-plane
+            // environment. The target's own cwd/env travel to the backend out-of-band (a launch
+            // request), never through the backend's process environment or a /proc-visible argv.
+            working_directory: PathBuf::from("/"),
+            environment: self.backend_env.clone(),
             stdin: spec.stdin,
         })
     }
@@ -280,7 +350,7 @@ impl SandboyBoundary {
         target_digest: &Digest256,
     ) -> Result<BoundaryEvidence, SandboyLaunchError> {
         let report = frame::decode(frame_bytes)?;
-        if report.backend != self.backend.identity {
+        if report.backend != *self.backend.identity() {
             return Err(SandboyLaunchError::BackendMismatch);
         }
         if report.policy_digest != self.policy.digest() {
