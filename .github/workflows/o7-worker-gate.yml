@@ -60,6 +60,45 @@ jobs:
       - name: o7-worker tests
         run: cargo test -p o7-worker --locked --no-fail-fast
 
+      # Repository policy: the o7-worker `test-harness` feature may be enabled from exactly one
+      # dependency edge (o7-worker's own dev-dependency self-edge). The gate structurally parses
+      # every workspace manifest, pins the production feature graph, and compile-probes the default
+      # o7-worker API for the absence of the test-only surface.
+      - name: Harness feature policy (gate + production graph + compile probe)
+        run: cargo test -p o7-harness-policy --locked --no-fail-fast
+
+      # Explicit production-graph pin (belt-and-suspenders alongside the test above): with dev edges
+      # excluded, the resolved feature graph must not activate `test-harness` anywhere.
+      - name: Production feature graph is harness-free
+        shell: bash
+        run: |
+          set -euo pipefail
+          if cargo tree --workspace --locked --edges no-dev,features | grep -n 'test-harness'; then
+            echo "::error::test-harness is active in the production feature graph" >&2
+            exit 1
+          fi
+          echo "production feature graph is harness-free"
+
+      # Production-API compile probe. A plain `cargo build` activates no dev-dependency features, so
+      # o7-harness-policy links the PRODUCTION o7-worker. The default build (harness-free consumer)
+      # must compile; the same references behind `probe-leak` must FAIL — proving the default API
+      # has no `fake_mode` / `with_post_go_barrier`. (Build-based, not a doctest: a workspace test
+      # build unifies test-harness into o7-worker and would mask the very absence being proved.)
+      - name: Production API is harness-free (compile probe)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p o7-harness-policy --locked
+          if cargo build -p o7-harness-policy --locked --features probe-leak 2>probe.err; then
+            cat probe.err >&2
+            echo "::error::the test-only surface is reachable from a production consumer" >&2
+            exit 1
+          fi
+          grep -q 'fake_mode' probe.err
+          grep -q 'with_post_go_barrier' probe.err
+          rm -f probe.err
+          echo "compile probe: production API is harness-free"
+
   dependency-policy:
     name: dependency policy
     runs-on: ubuntu-24.04

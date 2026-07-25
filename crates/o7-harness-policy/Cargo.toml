@@ -1,0 +1,36 @@
+[package]
+name = "o7-harness-policy"
+version = "0.1.0"
+edition = "2021"
+description = "Repository policy gate for o7-worker's internal `test-harness` Cargo feature: it may be enabled from exactly one dependency edge (o7-worker's own dev-dependency self-edge) and nowhere else. Also a production-API compile probe proving the default o7-worker API shape excludes the test-only surface."
+publish = false
+
+[lib]
+name = "o7_harness_policy"
+path = "src/lib.rs"
+
+[features]
+# NON-DEFAULT. Compiles the `probe_leak` module, which references o7-worker's test-only surface.
+# `cargo build --features probe-leak` MUST fail (the production o7-worker lacks that surface); CI
+# asserts the failure. Off by default, so `cargo build/test --workspace` never compiles it.
+probe-leak = []
+
+[dependencies]
+# Depended on WITHOUT `test-harness`, so this crate's compiled view of o7-worker is the PRODUCTION
+# API. The compile-probe doctests in the lib assert the test-only surface is absent from that view.
+o7-worker = { path = "../o7-worker" }
+
+[dev-dependencies]
+# STRUCTURAL (not substring) parsing of every workspace manifest for the feature-policy gate — a
+# security policy implemented by grep is not a policy.
+toml = "0.8"
+
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"

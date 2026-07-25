@@ -32,11 +32,21 @@ path = "src/bin/fd_probe.rs"
 required-features = ["test-harness"]
 
 [features]
-# TEST-ONLY seam — never in a production dependency's feature set. Gates the controlled
-# fake-backend config knob (`BackendConfig::fake_mode`), the cancellation-test barrier
-# (`SandboyBoundary::with_post_go_barrier`), and the three harness binaries above. Enabled only for
-# this package's own tests via the self dev-dependency; resolver v2 keeps that isolated to the test
-# build, so production dependents can neither request it nor observe the surface it unlocks.
+# `test-harness` is an INTERNAL, NON-DEFAULT Cargo feature. It gates the controlled fake-backend
+# config knob (`BackendConfig::fake_mode`), the cancellation-test barrier
+# (`SandboyBoundary::with_post_go_barrier`), and the three harness binaries above.
+#
+# Cargo features are NOT private: any manifest may technically write
+# `o7-worker = { features = ["test-harness"] }`, forward it through `foo = ["o7-worker/test-harness"]`,
+# or pass `--features test-harness` on the command line. Resolver v2 only stops the self
+# dev-dependency below from UNIFYING this feature into a normal production build — it does not make
+# the feature unrequestable. The default build being harness-free is therefore a convenience, not
+# the guarantee.
+#
+# The guarantee is REPOSITORY POLICY, enforced fail-closed by the `o7-harness-policy` crate: this
+# feature may be enabled from exactly ONE dependency edge — o7-worker's own `[dev-dependencies]`
+# self-edge below — and from nowhere else. A production dependency edge that enables it fails the
+# policy gate in CI.
 test-harness = []
 
 [dependencies]
