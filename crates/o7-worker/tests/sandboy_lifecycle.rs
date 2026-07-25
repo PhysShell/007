@@ -245,10 +245,18 @@ async fn no_control_descriptor_leaks_to_a_concurrent_sibling() {
             .output()
             .await
             .expect("probe runs");
+        // The probe MUST succeed and print a valid non-negative count: an enumeration/parse failure
+        // must never masquerade as "no leaks".
+        assert!(
+            out.status.success(),
+            "fd_probe failed to enumerate its descriptors: {:?}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         let n: i32 = String::from_utf8_lossy(&out.stdout)
             .trim()
             .parse()
-            .unwrap_or(-1);
+            .expect("fd_probe prints a count");
+        assert!(n >= 0, "fd_probe count must be non-negative, got {n}");
         worst = worst.max(n);
         if launches.is_finished() {
             break;
@@ -260,6 +268,25 @@ async fn no_control_descriptor_leaks_to_a_concurrent_sibling() {
         "a concurrently-spawned sibling inherited {worst} descriptor(s) above stdio — the control \
          transport must be CLOEXEC with no inheritable window"
     );
+}
+
+// --- the freshly created control socket pair is CLOEXEC on both ends (deterministic) ---
+
+#[test]
+fn a_fresh_control_socket_pair_is_cloexec_on_both_ends() {
+    use std::os::fd::AsRawFd as _;
+    // The transport's race-freedom rests on both ends being CLOEXEC FROM CREATION. Prove that
+    // structural property deterministically (the concurrent race above is the stress complement).
+    let (a, b) = std::os::unix::net::UnixStream::pair().expect("socketpair");
+    for end in [a.as_raw_fd(), b.as_raw_fd()] {
+        let flags = nix::fcntl::fcntl(end, nix::fcntl::FcntlArg::F_GETFD).expect("F_GETFD");
+        let cloexec =
+            nix::fcntl::FdFlag::from_bits_truncate(flags).contains(nix::fcntl::FdFlag::FD_CLOEXEC);
+        assert!(
+            cloexec,
+            "a freshly created control socket end must be CLOEXEC from creation"
+        );
+    }
 }
 
 // --- a broken backend that forks before a bad report is fully reaped (group drain) ---
@@ -481,6 +508,113 @@ async fn cancelling_a_launch_mid_report_reaps_the_backend() {
     assert!(
         wait_pid_gone(backend_pid, Duration::from_secs(3)).await,
         "a cancelled launch must reap the backend (pid {backend_pid} still present)"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_a_launch_after_a_fork_reaps_the_whole_group() {
+    // A broken backend forks a live descendant, then stalls mid-report. Dropping the spawn future
+    // (cancellation) must reap the whole owned GROUP — the monitor leader AND the pre-report
+    // descendant — not merely the leader (kill_on_drop only signals the leader PID).
+    let dir = tempfile::tempdir().unwrap();
+    let bpid = dir.path().join("backend.pid");
+    let dpid = dir.path().join("desc.pid");
+    let b = boundary(
+        vec![PathBuf::from("/bin")],
+        &format!(
+            "fork_then_stall_mid_report;pid={};desc={}",
+            bpid.display(),
+            dpid.display()
+        ),
+    );
+    {
+        let fut = b.spawn(sh_target("exit 0".to_owned()));
+        tokio::pin!(fut);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+        loop {
+            tokio::select! {
+                _ = &mut fut => break,
+                _ = tokio::time::sleep(Duration::from_millis(25)) => {}
+            }
+            if (bpid.exists() && dpid.exists()) || tokio::time::Instant::now() > deadline {
+                break;
+            }
+        }
+    } // fut dropped -> cancellation with a live descendant
+    let leader = read_pid_bounded(&bpid, Duration::from_secs(3))
+        .await
+        .expect("leader pid");
+    let descendant = read_pid_bounded(&dpid, Duration::from_secs(3))
+        .await
+        .expect("descendant pid");
+    assert!(
+        wait_pid_gone(leader, Duration::from_secs(3)).await,
+        "a cancelled launch must reap the monitor leader"
+    );
+    assert!(
+        wait_pid_gone(descendant, Duration::from_secs(3)).await,
+        "a cancelled launch must reap the pre-report descendant too (group, not just leader)"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_a_launch_after_go_reaps_the_live_target_tree() {
+    // The frozen cancel-safety contract's hardest window: GO is delivered and the backend has
+    // started the target (which forks a live descendant), but the spawn future is cancelled BEFORE
+    // BoundaryLaunch is returned. The drop-path guard must reap the monitor + target + descendant.
+    // A test-only post-GO barrier holds the future at exactly that instant so the cancel is
+    // deterministic.
+    let dir = tempfile::tempdir().unwrap();
+    let bpid = dir.path().join("backend.pid");
+    let tpid = dir.path().join("target.pid");
+    let cpid = dir.path().join("child.pid");
+    let barrier = std::sync::Arc::new(tokio::sync::Notify::new());
+    let b = boundary(
+        vec![PathBuf::from("/bin")],
+        &format!("ok;pid={}", bpid.display()),
+    )
+    .with_post_go_barrier(barrier.clone());
+    let script = format!(
+        "echo $$ > {}; sleep 30 & echo $! > {}; sleep 30",
+        tpid.display(),
+        cpid.display()
+    );
+    {
+        let fut = b.spawn(sh_target(script));
+        tokio::pin!(fut);
+        // Drive the future to the post-GO barrier (it blocks there) and wait until the target tree
+        // is live, then drop it.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(8);
+        loop {
+            tokio::select! {
+                _ = &mut fut => break, // guards against an unexpected non-blocking completion
+                _ = tokio::time::sleep(Duration::from_millis(25)) => {}
+            }
+            if (tpid.exists() && cpid.exists()) || tokio::time::Instant::now() > deadline {
+                break;
+            }
+        }
+    } // fut dropped AT the barrier -> cancellation with a live target tree
+    let leader = read_pid_bounded(&bpid, Duration::from_secs(3))
+        .await
+        .expect("monitor pid");
+    let target = read_pid_bounded(&tpid, Duration::from_secs(3))
+        .await
+        .expect("target pid");
+    let descendant = read_pid_bounded(&cpid, Duration::from_secs(3))
+        .await
+        .expect("descendant pid");
+    assert!(
+        wait_pid_gone(leader, Duration::from_secs(3)).await,
+        "cancel after GO must reap the monitor"
+    );
+    assert!(
+        wait_pid_gone(target, Duration::from_secs(3)).await,
+        "cancel after GO must reap the live target"
+    );
+    assert!(
+        wait_pid_gone(descendant, Duration::from_secs(3)).await,
+        "cancel after GO must reap the target's descendant"
     );
 }
 

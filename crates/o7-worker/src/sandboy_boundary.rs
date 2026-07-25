@@ -41,8 +41,10 @@
 //! on RNG failure), the confined-backend argv with plane separation, the exec-permission gate,
 //! the two-phase report handshake with an end-of-message (EOF) proof so a trailing byte fails
 //! closed, monitor OWNERSHIP of the target's group (a monitor that exits leaving a live owned
-//! target fails closed even on a clean code), and cleanup that must be PROVEN (an unproven reap
-//! dominates the triggering error).
+//! target fails closed even on a clean code), cleanup that must be PROVEN (an unproven reap
+//! dominates the triggering error), and CANCEL-SAFETY: from the moment a monitor PID exists until
+//! ownership transfers to the returned launch, dropping the `spawn` future `killpg`s the whole
+//! group (leader + target + any descendant), never leaking a partially-created process set.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -162,6 +164,10 @@ pub struct SandboyBoundary {
     nonce_source: Arc<dyn NonceSource>,
     /// TYPED control-plane config for the backend (never the untrusted target's environment).
     backend_config: BackendConfig,
+    /// TEST-ONLY: a barrier awaited AFTER GO is sent but BEFORE `BoundaryLaunch` is returned, so a
+    /// test can cancel the `spawn` future at the exact instant the target tree is live but ownership
+    /// has not yet transferred — proving the drop-path group cleanup. Production leaves it `None`.
+    post_go_barrier: Option<Arc<tokio::sync::Notify>>,
 }
 
 impl std::fmt::Debug for SandboyBoundary {
@@ -247,6 +253,7 @@ impl SandboyBoundary {
             policy,
             nonce_source,
             backend_config: BackendConfig::default(),
+            post_go_barrier: None,
         })
     }
 
@@ -254,6 +261,16 @@ impl SandboyBoundary {
     #[must_use]
     pub fn with_backend_config(mut self, config: BackendConfig) -> Self {
         self.backend_config = config;
+        self
+    }
+
+    /// TEST-ONLY: install a barrier the `spawn` future awaits after GO but before it returns the
+    /// `BoundaryLaunch`, so a cancellation test can drop the future while the target tree is live.
+    /// Never set in production (there is no way to notify it into a real launch path).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_post_go_barrier(mut self, barrier: Arc<tokio::sync::Notify>) -> Self {
+        self.post_go_barrier = Some(barrier);
         self
     }
 
@@ -521,6 +538,39 @@ impl BoundaryProcess for SandboyMonitorProcess {
     }
 }
 
+/// An ARMED cleanup owner for the spawned backend GROUP, live from the moment a valid monitor PID
+/// exists until ownership is handed to the returned [`BoundaryLaunch`]. If the `spawn` future is
+/// DROPPED in that window (supervisor cancellation), `Drop` synchronously `killpg`s the whole
+/// group — leader, confined target, and any descendant the backend forked — so a cancelled launch
+/// never leaks a process set. `tokio::process::Child::kill_on_drop` only signals the leader PID and
+/// never `killpg`s, so it is NOT sufficient on its own. The leader is reaped through the retained
+/// `Child` (kill-on-drop → the runtime's orphan reaper); killed descendants are reaped by init.
+struct SpawnGroupGuard {
+    pgid: i32,
+    armed: bool,
+}
+
+impl SpawnGroupGuard {
+    fn new(pgid: i32) -> Self {
+        Self { pgid, armed: true }
+    }
+    /// Ownership has transferred to the returned launch — stop guarding.
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for SpawnGroupGuard {
+    fn drop(&mut self) {
+        if self.armed && self.pgid > 0 {
+            use nix::sys::signal::{killpg, Signal};
+            use nix::unistd::Pid;
+            // Synchronous, best-effort: kill the ENTIRE owned group, not just the leader.
+            let _ = killpg(Pid::from_raw(self.pgid), Signal::SIGKILL);
+        }
+    }
+}
+
 /// Bounded-kill and reap a spawned backend GROUP so no error path leaks a process. Kills the
 /// whole group (`killpg`), reaps the leader under a bounded timeout, AND proves the whole owned
 /// group drained — not merely that the leader was reaped, because a broken backend may have forked
@@ -658,6 +708,11 @@ impl ProcessBoundary for SandboyBoundary {
                 )));
             }
         };
+        // ARM group cleanup: from here until ownership transfers to the returned launch, a dropped
+        // (cancelled) spawn future must `killpg` the whole group, not merely the leader. Explicit
+        // error paths below still call `kill_and_reap` (drain-proving); the guard's `Drop` then
+        // fires redundantly on their `return` (a no-op `killpg` on an already-dead group).
+        let mut guard = SpawnGroupGuard::new(pid);
 
         // Send the request, read exactly one report frame, AND prove end-of-message: after the
         // declared body one more read must be EOF (the backend half-closes its write side after the
@@ -728,14 +783,25 @@ impl ProcessBoundary for SandboyBoundary {
             ));
         }
 
-        Ok(BoundaryLaunch {
+        // TEST-ONLY barrier: GO is delivered and the backend is starting the target, but ownership
+        // has NOT transferred yet. A cancellation test drops the future here to prove the guard
+        // tears down the live target tree. Production leaves the barrier unset (never awaits).
+        if let Some(barrier) = &self.post_go_barrier {
+            barrier.notified().await;
+        }
+
+        // Ownership transfers into the returned launch (it now owns the Child + sealed objects);
+        // DISARM the guard so it does not kill the group we are handing back.
+        let launch = BoundaryLaunch {
             process: Box::new(SandboyMonitorProcess {
                 inner: HostBoundaryProcess::new(child, identity, pid),
                 _backend: self.backend.clone(),
                 _target: target,
             }),
             evidence,
-        })
+        };
+        guard.disarm();
+        Ok(launch)
     }
 
     fn attestation(&self) -> BoundaryAttestation {

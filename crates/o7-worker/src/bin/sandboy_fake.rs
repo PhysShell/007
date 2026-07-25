@@ -196,13 +196,15 @@ fn run() -> i32 {
         _ => {}
     }
 
-    // `fork_before_bad_report`: a BROKEN backend that forks a live descendant (inheriting the
-    // leader's owned group) BEFORE it delivers a bad report. The parent must reap the whole GROUP,
-    // not just the leader. The BACKEND records the descendant's pid synchronously (from the spawn
-    // handle) so the test observes it without racing the cleanup; the report is then malformed.
-    if mode == "fork_before_bad_report" {
+    // `fork_before_bad_report` / `fork_then_stall_mid_report`: a BROKEN backend that forks a live
+    // descendant (inheriting the leader's owned group) BEFORE it misbehaves — either delivering a
+    // malformed report or stalling mid-frame. The parent must reap the whole GROUP, not just the
+    // leader (on an explicit error OR on a cancelled/dropped spawn future). The BACKEND records the
+    // descendant's pid synchronously (from the spawn handle) so the test observes it without racing
+    // the cleanup.
+    if mode == "fork_before_bad_report" || mode == "fork_then_stall_mid_report" {
         let mut d = Command::new("/bin/sleep");
-        d.arg("5");
+        d.arg("30");
         if let Ok(child) = d.spawn() {
             if let Some(path) = &desc_file {
                 let _ = std::fs::write(path, child.id().to_string());
@@ -237,9 +239,10 @@ fn run() -> i32 {
             Err(_) => return 65,
         }
     };
-    // `stall_mid_report`: write a length prefix + only a PARTIAL body, then stall forever (writer
-    // NOT half-closed), so the parent's bounded frame read blocks mid-frame and a cancel must reap.
-    if mode == "stall_mid_report" {
+    // `stall_mid_report` / `fork_then_stall_mid_report`: write a length prefix + only a PARTIAL
+    // body, then stall forever (writer NOT half-closed), so the parent's bounded frame read blocks
+    // mid-frame and a cancel must reap the whole group.
+    if mode == "stall_mid_report" || mode == "fork_then_stall_mid_report" {
         let _ = sock.write_all(&100u32.to_be_bytes()); // claim 100 bytes
         let _ = sock.write_all(b"partial"); // deliver only 7
         let _ = sock.flush();
