@@ -26,7 +26,7 @@
 //!
 //! Structural violations of the stream itself (duplicate/out-of-order/impossible/post-seal/
 //! wrong-run-id/duplicate-event-id/schema/…) are NOT verdicts — they make reduction fail
-//! loudly (see [`crate::reduce`]).
+//! loudly (see [`crate::reduce`](mod@crate::reduce)).
 
 use std::collections::{BTreeMap, BTreeSet};
 

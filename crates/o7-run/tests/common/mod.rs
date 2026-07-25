@@ -21,7 +21,7 @@ use o7_run::ids::{GateId, RunEventId, RunId};
 use o7_run::replay::{ArtifactError, ArtifactResolver};
 use o7_run::{AgentOutcome, RunEvent, RunEventKind};
 
-// ---- id helpers (validated constructors; `from_raw` no longer exists) ----
+// ---- id helpers (validated constructors) ----
 
 pub fn run_id() -> RunId {
     RunId::new("run-fixture-1").expect("valid run id")

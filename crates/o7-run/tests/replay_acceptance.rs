@@ -1,10 +1,8 @@
-//! RED replay-acceptance tests: independent verdict re-derivation plus tamper detection.
+//! Replay-acceptance specification: independent verdict re-derivation plus tamper detection.
 //!
-//! These assert the TARGET behavior of `replay`/`replay_verify`. This contract-only commit
-//! ships replay as `ReplayError::Unimplemented`, so they FAIL by construction — a legacy or
-//! tampered run must NEVER be reported as verified, and an unimplemented replay must never be
-//! mistaken for a passing one. A following commit implements verification and turns them
-//! green.
+//! These pin the behavior of `replay`/`replay_verify`. The load-bearing invariant: a legacy
+//! run (no canonical events) or a tampered run (a broken chain, an in-place edit, or an
+//! altered artifact) must NEVER be reported as verified — replay fails loudly instead.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

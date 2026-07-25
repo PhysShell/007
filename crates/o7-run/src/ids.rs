@@ -4,10 +4,10 @@
 //! meaning out of) but carry NO generation dependency: ids are minted by the effectful
 //! integration layer and flow INTO the pure reducer, never out of it.
 //!
-//! Values deserialized from storage are UNTRUSTED: an empty id is rejected on
-//! deserialization (and by [`IdError`]-returning constructors), so a blank identifier
-//! cannot slip in as a valid one. `from_raw` is the trusted, in-process constructor used
-//! by upstream minting and tests.
+//! Values deserialized from storage are UNTRUSTED: every id — including on the
+//! deserialization path — goes through the validating [`RunId::new`]-style constructor,
+//! which rejects an empty id ([`IdError`]), so a blank identifier cannot slip in as a valid
+//! one. There is no unchecked constructor.
 
 use std::fmt;
 

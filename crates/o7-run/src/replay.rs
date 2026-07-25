@@ -2,7 +2,7 @@
 //!
 //! Replay is where the tamper-evidence becomes an assertion: it (1) classifies the record
 //! (legacy / canonical / malformed), (2) validates per-event digests and chain-link
-//! continuity, (3) folds the stream through the pure [`crate::reduce`] reducer (structural
+//! continuity, (3) folds the stream through the pure [`crate::reduce`](mod@crate::reduce) reducer (structural
 //! validation + verdict), (4) requires a sealed run, (5) resolves every referenced artifact
 //! and checks its content digest, and (6) returns the recomputed verdict plus the anchor
 //! digests. [`replay_verify`] additionally compares the recomputed verdict to a stored one.
@@ -14,6 +14,8 @@
 //! non-goal (no remote attestation). To anchor a stream against such an actor,
 //! [`ReplayReport`] exposes `final_event_digest` and `normalized_state_digest` for an
 //! external journal or signature.
+
+use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
@@ -183,17 +185,25 @@ pub fn replay(
         None => return Err(ReplayError::NotSealed),
     };
 
-    // 5. Resolve every referenced artifact and verify its content digest in place.
-    let mut artifacts_verified: u64 = 0;
+    // 5. Resolve every referenced artifact and verify its content digest in place. Distinct
+    //    (locator, digest) pairs are resolved once — a policy declared in the contract and
+    //    later re-referenced by a PolicyChecked is not double-resolved or double-counted.
+    let mut seen: BTreeSet<(&str, &str)> = BTreeSet::new();
+    let mut unique: Vec<&ArtifactRef> = Vec::new();
     for event in events {
         for artifact in referenced_artifacts(&event.kind) {
-            let bytes = artifacts.resolve(artifact)?;
-            if Digest256::of_bytes(&bytes) != artifact.digest {
-                return Err(ReplayError::ArtifactDigestMismatch {
-                    locator: artifact.locator.clone(),
-                });
+            if seen.insert((artifact.locator.as_str(), artifact.digest.as_str())) {
+                unique.push(artifact);
             }
-            artifacts_verified += 1;
+        }
+    }
+    let artifacts_verified = unique.len() as u64;
+    for artifact in unique {
+        let bytes = artifacts.resolve(artifact)?;
+        if Digest256::of_bytes(&bytes) != artifact.digest {
+            return Err(ReplayError::ArtifactDigestMismatch {
+                locator: artifact.locator.clone(),
+            });
         }
     }
 

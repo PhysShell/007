@@ -1,7 +1,7 @@
-//! GREEN contract tests: the parts that ARE implemented in this contract-only commit — the
-//! versioned types, the tamper-evident digest chain, form-validation of untrusted inputs,
-//! three-valued replay classification, and serde stability. The reducer/replay SEMANTICS
-//! are exercised (RED) in the sibling test files.
+//! Contract tests for the type/protocol layer: the versioned types, the tamper-evident
+//! digest chain, form-validation of untrusted inputs, three-valued replay classification,
+//! and serde stability. The reducer/replay SEMANTICS are exercised in the sibling test
+//! files.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

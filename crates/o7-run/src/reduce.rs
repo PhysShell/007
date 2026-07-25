@@ -9,7 +9,7 @@
 //!
 //! Artifact-CONTENT validation is not the reducer's job — it folds only the event payloads
 //! and checks each artifact's declared KIND and locator; resolving and hashing artifact
-//! bytes belongs to [`crate::replay`]. Its behavior is specified exhaustively by
+//! bytes belongs to [`crate::replay`](mod@crate::replay). Its behavior is specified exhaustively by
 //! `tests/reducer_transitions.rs`.
 
 use std::collections::BTreeSet;
@@ -130,6 +130,12 @@ pub enum ReduceError {
         waiver_environment: String,
         runner_environment: String,
     },
+
+    /// A gate waiver carried a blank reason. A waiver is the ONLY way a required gate may be
+    /// skipped, and it must be auditable — an empty reason would be an unexplained
+    /// false-green.
+    #[error("gate {gate} is waived with a blank reason")]
+    EmptyWaiverReason { gate: GateId },
 
     /// A sandbox requirement names the `Agent` subject, but the contract declares no agent.
     #[error(
@@ -326,21 +332,47 @@ pub fn reduce_all(events: &[RunEvent]) -> Result<RunState, ReduceError> {
     Ok(state)
 }
 
-/// Apply one event's payload (the envelope is already validated).
+/// Apply one event's payload (the envelope is already validated). `RunStarted` binds the
+/// contract; every other event borrows it — moved out for the duration and restored — so the
+/// reduce hot path never re-clones the contract.
 fn apply_kind(state: &mut RunState, event: &RunEvent, seq: u64) -> Result<(), ReduceError> {
-    match &event.kind {
-        RunEventKind::RunStarted { contract, task } => {
-            if state.phase != RunPhase::NotStarted {
-                return Err(ReduceError::DuplicateStart { sequence: seq });
-            }
-            validate_contract(contract, seq)?;
-            validate_artifact(task, ArtifactKind::Task, seq)?;
-            state.run_id = Some(event.run_id.clone());
-            state.contract = Some(contract.clone());
-            state.task = Some(task.clone());
-            state.phase = RunPhase::Running;
-            Ok(())
+    if let RunEventKind::RunStarted { contract, task } = &event.kind {
+        if state.phase != RunPhase::NotStarted {
+            return Err(ReduceError::DuplicateStart { sequence: seq });
         }
+        validate_contract(contract, seq)?;
+        validate_artifact(task, ArtifactKind::Task, seq)?;
+        state.run_id = Some(event.run_id.clone());
+        state.contract = Some(contract.clone());
+        state.task = Some(task.clone());
+        state.phase = RunPhase::Running;
+        return Ok(());
+    }
+
+    let contract = match state.contract.take() {
+        Some(contract) => contract,
+        None => {
+            return Err(ReduceError::MissingRunStarted {
+                found: event.kind.name(),
+                sequence: seq,
+            })
+        }
+    };
+    let result = apply_with_contract(state, &contract, event, seq);
+    state.contract = Some(contract);
+    result
+}
+
+/// Apply a non-`RunStarted` event against the already-bound `contract` (borrowed, not cloned).
+fn apply_with_contract(
+    state: &mut RunState,
+    contract: &RunContract,
+    event: &RunEvent,
+    seq: u64,
+) -> Result<(), ReduceError> {
+    match &event.kind {
+        // Handled in `apply_kind`; a second RunStarted is a duplicate.
+        RunEventKind::RunStarted { .. } => Err(ReduceError::DuplicateStart { sequence: seq }),
         RunEventKind::WorktreeCreated { worktree } => {
             validate_artifact(worktree, ArtifactKind::Worktree, seq)?;
             if state.worktree.is_some() {
@@ -358,19 +390,17 @@ fn apply_kind(state: &mut RunState, event: &RunEvent, seq: u64) -> Result<(), Re
             Ok(())
         }
         RunEventKind::AgentStarted => {
-            let contract = require_contract(state, seq)?;
             if matches!(contract.agent, AgentObligation::NotUsed { .. }) {
                 return Err(ReduceError::DisallowedAgentEvent { sequence: seq });
             }
             if !matches!(state.agent, AgentLifecycle::NotObserved) {
                 return Err(ReduceError::DuplicateAgentStart { sequence: seq });
             }
-            check_protected_start(state, &contract, &PolicyProtectedSubject::Agent, seq)?;
+            check_protected_start(state, contract, &PolicyProtectedSubject::Agent, seq)?;
             state.agent = AgentLifecycle::Started;
             Ok(())
         }
         RunEventKind::AgentExited { outcome } => {
-            let contract = require_contract(state, seq)?;
             if matches!(contract.agent, AgentObligation::NotUsed { .. }) {
                 return Err(ReduceError::DisallowedAgentEvent { sequence: seq });
             }
@@ -392,7 +422,6 @@ fn apply_kind(state: &mut RunState, event: &RunEvent, seq: u64) -> Result<(), Re
             Ok(())
         }
         RunEventKind::PolicyChecked { policy, outcome } => {
-            let contract = require_contract(state, seq)?;
             validate_artifact(policy, ArtifactKind::Policy, seq)?;
             if !contract
                 .policy_obligations
@@ -421,8 +450,7 @@ fn apply_kind(state: &mut RunState, event: &RunEvent, seq: u64) -> Result<(), Re
             Ok(())
         }
         RunEventKind::GateStarted { gate } => {
-            let contract = require_contract(state, seq)?;
-            if gate_obligation(&contract, gate).is_none() {
+            if gate_obligation(contract, gate).is_none() {
                 return Err(ReduceError::UnknownGate {
                     sequence: seq,
                     gate: gate.clone(),
@@ -436,7 +464,7 @@ fn apply_kind(state: &mut RunState, event: &RunEvent, seq: u64) -> Result<(), Re
             }
             check_protected_start(
                 state,
-                &contract,
+                contract,
                 &PolicyProtectedSubject::Gate { gate: gate.clone() },
                 seq,
             )?;
@@ -444,8 +472,7 @@ fn apply_kind(state: &mut RunState, event: &RunEvent, seq: u64) -> Result<(), Re
             Ok(())
         }
         RunEventKind::GateFinished { gate, outcome, log } => {
-            let contract = require_contract(state, seq)?;
-            if gate_obligation(&contract, gate).is_none() {
+            if gate_obligation(contract, gate).is_none() {
                 return Err(ReduceError::UnknownGate {
                     sequence: seq,
                     gate: gate.clone(),
@@ -480,7 +507,6 @@ fn apply_kind(state: &mut RunState, event: &RunEvent, seq: u64) -> Result<(), Re
             report,
             outcome,
         } => {
-            let contract = require_contract(state, seq)?;
             validate_artifact(report, ArtifactKind::SandboxReport, seq)?;
             let matches_requirement = contract
                 .sandbox_requirements
@@ -508,23 +534,11 @@ fn apply_kind(state: &mut RunState, event: &RunEvent, seq: u64) -> Result<(), Re
             Ok(())
         }
         RunEventKind::RunSealed => {
-            let contract = require_contract(state, seq)?;
-            state.verdict = Some(compute_verdict(state, &contract));
+            state.verdict = Some(compute_verdict(state, contract));
             state.phase = RunPhase::Sealed;
             Ok(())
         }
     }
-}
-
-/// The contract, guaranteed present after `RunStarted` (the first-event rule ensures it).
-fn require_contract(state: &RunState, seq: u64) -> Result<RunContract, ReduceError> {
-    state
-        .contract
-        .clone()
-        .ok_or(ReduceError::MissingRunStarted {
-            found: "?",
-            sequence: seq,
-        })
 }
 
 fn gate_obligation<'a>(contract: &'a RunContract, gate: &GateId) -> Option<&'a GateObligation> {
@@ -569,12 +583,21 @@ fn validate_contract(contract: &RunContract, seq: u64) -> Result<(), ReduceError
                 gate: o.gate.clone(),
             });
         }
-        if let GateApplicability::Waived { environment, .. } = &o.applicability {
+        if let GateApplicability::Waived {
+            environment,
+            reason,
+        } = &o.applicability
+        {
             if environment != &contract.runner_environment {
                 return Err(ReduceError::WaiverEnvironmentMismatch {
                     gate: o.gate.clone(),
                     waiver_environment: environment.clone(),
                     runner_environment: contract.runner_environment.clone(),
+                });
+            }
+            if reason.trim().is_empty() {
+                return Err(ReduceError::EmptyWaiverReason {
+                    gate: o.gate.clone(),
                 });
             }
         }

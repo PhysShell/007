@@ -35,15 +35,16 @@
 //! The core is PURE and dependency-light on purpose (serde + a hash): the semantics can be
 //! recomputed anywhere, by anyone, without the ledger, a runtime, or a database.
 //!
-//! ## Status: contract-only (RED)
+//! ## Status
 //!
-//! This first commit fixes the versioned contracts ([`event`], [`state`]) and the
-//! reducer/replay SURFACES, with the required behavior specified exhaustively by the
-//! `tests/` transition table and replay-acceptance fixtures. The transition and
-//! verification LOGIC is intentionally not implemented here — [`reduce::reduce`] and
-//! [`replay::replay`] return an explicit `Unimplemented` error rather than a plausible
-//! wrong answer, so the acceptance tests are RED by construction and a later commit turns
-//! them GREEN. Nothing here can be mistaken for a working verdict.
+//! The versioned contracts ([`event`], [`state`]), the pure reducer ([`reduce::reduce`] /
+//! [`reduce::reduce_all`]), and independent replay ([`replay::replay`] /
+//! [`replay::replay_verify`]) are all implemented, with behavior specified exhaustively by
+//! the `tests/` transition table and replay-acceptance fixtures (all green). The contract
+//! was frozen through a RED→GREEN sequence before these were implemented, so the code holds
+//! the contract rather than the reverse. Not yet wired here (later PRs): the
+//! `WorkerObservation → RunEvent` adapter, the `o7-ledger` append path, and the `o7 replay`
+//! CLI.
 
 pub mod event;
 pub mod ids;

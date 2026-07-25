@@ -1,9 +1,9 @@
-//! RED transition-table tests for the pure reducer.
+//! Transition-table specification for the pure reducer.
 //!
-//! Every test asserts the TARGET semantics of `reduce`/`reduce_all`. Because this commit
-//! ships the reducer as contract-only (`ReduceError::Unimplemented`), these tests FAIL by
-//! construction — they are the executable specification a following commit turns green. They
-//! must NEVER be satisfied by an unimplemented reducer returning a plausible answer.
+//! Each test pins a cell of `reduce`/`reduce_all`'s behavior — the verdict tables and the
+//! fail-loud structural violations — so together they are the executable specification of
+//! the reducer. The load-bearing invariant: a required-but-undischarged obligation can never
+//! reduce to `Pass`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -1079,6 +1079,23 @@ fn a_waiver_for_a_different_environment_fails_loudly() {
     assert!(matches!(
         structural_err(&events),
         ReduceError::WaiverEnvironmentMismatch { .. }
+    ));
+}
+
+#[test]
+fn a_waiver_with_a_blank_reason_fails_loudly() {
+    // A waiver is the only way a required gate may be skipped; a blank reason would be an
+    // unexplained false-green, so it must be rejected at RunStarted.
+    let events = chained(vec![
+        run_started(contract(vec![
+            req("build"),
+            waived("win-only", "linux", "   "),
+        ])),
+        RunEventKind::RunSealed,
+    ]);
+    assert!(matches!(
+        structural_err(&events),
+        ReduceError::EmptyWaiverReason { .. }
     ));
 }
 
