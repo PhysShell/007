@@ -498,7 +498,16 @@ fn a_duplicate_sequence_fails_loudly() {
         &Digest256::genesis(),
         run_started(contract(vec![req("build")])),
     );
-    let e1 = make_event(&run, 1, &e0.event_digest, RunEventKind::AgentStarted);
+    // A valid evidence event at sequence 1, then a SECOND event re-using sequence 1 — the
+    // only defect is the repeated sequence.
+    let e1 = make_event(
+        &run,
+        1,
+        &e0.event_digest,
+        RunEventKind::WorktreeCreated {
+            worktree: artifact(ArtifactKind::Worktree, "worktree", b"wt"),
+        },
+    );
     let e1_dup = make_event(&run, 1, &e1.event_digest, RunEventKind::RunSealed);
     assert!(matches!(
         structural_err(&[e0, e1, e1_dup]),

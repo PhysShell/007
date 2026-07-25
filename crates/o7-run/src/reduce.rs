@@ -1,19 +1,30 @@
 //! The pure run-state reducer: `reduce(state, event) -> Result<state, ReduceError>`.
 //!
-//! CONTRACT-ONLY (RED). This commit fixes the reducer's SIGNATURE and its required behavior
-//! (encoded exhaustively in `tests/reducer_transitions.rs`) but does NOT yet implement the
-//! transition logic. Until the following commit implements it, [`reduce`] returns
-//! [`ReduceError::Unimplemented`] so that no caller can ever mistake an unimplemented
-//! reducer for a real verdict — the tests are RED by construction, never silently green.
+//! The reducer is PURE: same input state + event ⇒ same output, no I/O, no clock, no panics.
+//! It validates the event ENVELOPE (schema, self-consistent digest, dense sequence, chain
+//! link, run id, unique event id), fully validates the pre-execution CONTRACT at
+//! `RunStarted`, folds lifecycle/evidence events left to right, and at `RunSealed` collapses
+//! the accumulated obligations to a [`crate::state::Verdict`] under `Error > Fail > Blocked >
+//! Pass`. Any structural violation of the stream fails loudly; a domain outcome never does.
 //!
-//! The reducer is PURE: same input state + event ⇒ same output, no I/O, no clock, no
-//! panics. Artifact-CONTENT validation is not the reducer's job (it folds only the event
-//! payloads and checks each artifact's declared KIND); resolving and hashing artifact bytes
-//! belongs to [`crate::replay`].
+//! Artifact-CONTENT validation is not the reducer's job — it folds only the event payloads
+//! and checks each artifact's declared KIND and locator; resolving and hashing artifact
+//! bytes belongs to [`crate::replay`]. Its behavior is specified exhaustively by
+//! `tests/reducer_transitions.rs`.
 
-use crate::event::{ArtifactKind, Digest256, ExecutionSubject, PolicyProtectedSubject, RunEvent};
+use std::collections::BTreeSet;
+
+use crate::event::{
+    AgentObligation, AgentOutcome, ArtifactKind, ArtifactRef, Digest256, ExecutionSubject,
+    GateApplicability, GateObligation, GateOutcome, GateRequirement, PolicyObligation,
+    PolicyOutcome, PolicyProtectedSubject, PolicyRequirement, RunContract, RunEvent, RunEventKind,
+    SandboxEvidenceOutcome, RUN_EVENT_SCHEMA_VERSION,
+};
 use crate::ids::{GateId, RunEventId, RunId};
-use crate::state::RunState;
+use crate::state::{
+    AgentLifecycle, GateProgress, PolicyResult, RunPhase, RunState, SandboxEvidenceEntry,
+    SandboxEvidenceKey, Verdict,
+};
 
 /// A structural violation of the event STREAM (as opposed to a domain verdict). These make
 /// reduction fail loudly — they are never folded into a `Verdict`.
@@ -217,23 +228,90 @@ pub enum ReduceError {
     /// Any event after `RunSealed`.
     #[error("event after seal at sequence {sequence}")]
     EventAfterSeal { sequence: u64 },
-
-    /// The transition logic is not implemented in this (contract-only) commit.
-    #[error("reducer transition logic is not implemented in this contract-only build")]
-    Unimplemented,
 }
 
 /// Fold one event into the run state.
+///
+/// Processing order: (1) reject post-seal events; (2) validate the envelope — schema,
+/// self-consistent digest, dense sequence, chain link, run id, unique event id; (3) require
+/// the first event to be `RunStarted`; (4) apply the event, validating the contract at
+/// `RunStarted` and folding lifecycle/evidence otherwise; (5) at `RunSealed`, compute the
+/// verdict and freeze the run.
 ///
 /// # Errors
 /// [`ReduceError`] for any structural violation of the stream. A domain outcome (pass /
 /// fail / blocked / error) is NEVER an error here — it is recorded in the returned state and
 /// finalized into [`crate::state::Verdict`] at `RunSealed`.
-pub fn reduce(state: RunState, event: &RunEvent) -> Result<RunState, ReduceError> {
-    // CONTRACT-ONLY: see the module doc. The behavior is specified by the tests in this
-    // commit and implemented next; until then reduction is explicitly unavailable.
-    let _ = (&state, event);
-    Err(ReduceError::Unimplemented)
+pub fn reduce(mut state: RunState, event: &RunEvent) -> Result<RunState, ReduceError> {
+    let seq = event.sequence;
+
+    // 1. Nothing may follow a seal.
+    if state.phase == RunPhase::Sealed {
+        return Err(ReduceError::EventAfterSeal { sequence: seq });
+    }
+
+    // 2. Envelope validation.
+    if event.schema_version != RUN_EVENT_SCHEMA_VERSION {
+        return Err(ReduceError::UnsupportedSchema {
+            sequence: seq,
+            found: event.schema_version,
+            supported: RUN_EVENT_SCHEMA_VERSION,
+        });
+    }
+    if !event.digest_is_consistent() {
+        return Err(ReduceError::InconsistentDigest { sequence: seq });
+    }
+    match state.last_sequence {
+        None if seq != 0 => {
+            return Err(ReduceError::OutOfOrder {
+                expected: 0,
+                found: seq,
+            })
+        }
+        Some(last) if seq == last => return Err(ReduceError::DuplicateSequence { sequence: seq }),
+        Some(last) if seq != last + 1 => {
+            return Err(ReduceError::OutOfOrder {
+                expected: last + 1,
+                found: seq,
+            })
+        }
+        _ => {}
+    }
+    if event.previous_event_digest != state.last_event_digest {
+        return Err(ReduceError::BrokenChain { sequence: seq });
+    }
+    if let Some(expected) = &state.run_id {
+        if &event.run_id != expected {
+            return Err(ReduceError::RunIdMismatch {
+                sequence: seq,
+                expected: expected.clone(),
+                found: event.run_id.clone(),
+            });
+        }
+    }
+    if state.seen_event_ids.contains(&event.event_id) {
+        return Err(ReduceError::DuplicateEventId {
+            sequence: seq,
+            event_id: event.event_id.clone(),
+        });
+    }
+
+    // 3. The first event must be `RunStarted`.
+    if state.phase == RunPhase::NotStarted && !matches!(event.kind, RunEventKind::RunStarted { .. })
+    {
+        return Err(ReduceError::MissingRunStarted {
+            found: event.kind.name(),
+            sequence: seq,
+        });
+    }
+
+    // 4/5. Apply the event.
+    apply_kind(&mut state, event, seq)?;
+
+    state.seen_event_ids.insert(event.event_id.clone());
+    state.last_sequence = Some(seq);
+    state.last_event_digest = event.event_digest.clone();
+    Ok(state)
 }
 
 /// Fold an entire stream from the initial state, returning the terminal state.
@@ -246,4 +324,490 @@ pub fn reduce_all(events: &[RunEvent]) -> Result<RunState, ReduceError> {
         state = reduce(state, event)?;
     }
     Ok(state)
+}
+
+/// Apply one event's payload (the envelope is already validated).
+fn apply_kind(state: &mut RunState, event: &RunEvent, seq: u64) -> Result<(), ReduceError> {
+    match &event.kind {
+        RunEventKind::RunStarted { contract, task } => {
+            if state.phase != RunPhase::NotStarted {
+                return Err(ReduceError::DuplicateStart { sequence: seq });
+            }
+            validate_contract(contract, seq)?;
+            validate_artifact(task, ArtifactKind::Task, seq)?;
+            state.run_id = Some(event.run_id.clone());
+            state.contract = Some(contract.clone());
+            state.task = Some(task.clone());
+            state.phase = RunPhase::Running;
+            Ok(())
+        }
+        RunEventKind::WorktreeCreated { worktree } => {
+            validate_artifact(worktree, ArtifactKind::Worktree, seq)?;
+            if state.worktree.is_some() {
+                return Err(ReduceError::DuplicateWorktree { sequence: seq });
+            }
+            state.worktree = Some(worktree.clone());
+            Ok(())
+        }
+        RunEventKind::PatchCaptured { patch } => {
+            validate_artifact(patch, ArtifactKind::Diff, seq)?;
+            if state.patch.is_some() {
+                return Err(ReduceError::DuplicatePatch { sequence: seq });
+            }
+            state.patch = Some(patch.clone());
+            Ok(())
+        }
+        RunEventKind::AgentStarted => {
+            let contract = require_contract(state, seq)?;
+            if matches!(contract.agent, AgentObligation::NotUsed { .. }) {
+                return Err(ReduceError::DisallowedAgentEvent { sequence: seq });
+            }
+            if !matches!(state.agent, AgentLifecycle::NotObserved) {
+                return Err(ReduceError::DuplicateAgentStart { sequence: seq });
+            }
+            check_protected_start(state, &contract, &PolicyProtectedSubject::Agent, seq)?;
+            state.agent = AgentLifecycle::Started;
+            Ok(())
+        }
+        RunEventKind::AgentExited { outcome } => {
+            let contract = require_contract(state, seq)?;
+            if matches!(contract.agent, AgentObligation::NotUsed { .. }) {
+                return Err(ReduceError::DisallowedAgentEvent { sequence: seq });
+            }
+            match &state.agent {
+                AgentLifecycle::NotObserved => {
+                    // Only `FailedToStart` legitimately needs no prior `AgentStarted`.
+                    if !matches!(outcome, AgentOutcome::FailedToStart { .. }) {
+                        return Err(ReduceError::AgentExitBeforeStart { sequence: seq });
+                    }
+                }
+                AgentLifecycle::Started => {}
+                AgentLifecycle::Exited { .. } => {
+                    return Err(ReduceError::DuplicateAgentExit { sequence: seq })
+                }
+            }
+            state.agent = AgentLifecycle::Exited {
+                outcome: outcome.clone(),
+            };
+            Ok(())
+        }
+        RunEventKind::PolicyChecked { policy, outcome } => {
+            let contract = require_contract(state, seq)?;
+            validate_artifact(policy, ArtifactKind::Policy, seq)?;
+            if !contract
+                .policy_obligations
+                .iter()
+                .any(|o| o.policy.digest == policy.digest)
+            {
+                return Err(ReduceError::UnknownPolicy {
+                    sequence: seq,
+                    policy_digest: policy.digest.clone(),
+                });
+            }
+            if state
+                .policy_results
+                .iter()
+                .any(|r| r.policy.digest == policy.digest)
+            {
+                return Err(ReduceError::DuplicatePolicyCheck {
+                    sequence: seq,
+                    policy_digest: policy.digest.clone(),
+                });
+            }
+            state.policy_results.push(PolicyResult {
+                policy: policy.clone(),
+                outcome: *outcome,
+            });
+            Ok(())
+        }
+        RunEventKind::GateStarted { gate } => {
+            let contract = require_contract(state, seq)?;
+            if gate_obligation(&contract, gate).is_none() {
+                return Err(ReduceError::UnknownGate {
+                    sequence: seq,
+                    gate: gate.clone(),
+                });
+            }
+            if state.gates.contains_key(gate) {
+                return Err(ReduceError::DuplicateGateStarted {
+                    sequence: seq,
+                    gate: gate.clone(),
+                });
+            }
+            check_protected_start(
+                state,
+                &contract,
+                &PolicyProtectedSubject::Gate { gate: gate.clone() },
+                seq,
+            )?;
+            state.gates.insert(gate.clone(), GateProgress::Started);
+            Ok(())
+        }
+        RunEventKind::GateFinished { gate, outcome, log } => {
+            let contract = require_contract(state, seq)?;
+            if gate_obligation(&contract, gate).is_none() {
+                return Err(ReduceError::UnknownGate {
+                    sequence: seq,
+                    gate: gate.clone(),
+                });
+            }
+            if let Some(log) = log {
+                validate_artifact(log, ArtifactKind::GateLog, seq)?;
+            }
+            match state.gates.get(gate) {
+                None => {
+                    return Err(ReduceError::GateFinishedWithoutStart {
+                        sequence: seq,
+                        gate: gate.clone(),
+                    })
+                }
+                Some(GateProgress::Finished { .. }) => {
+                    return Err(ReduceError::DuplicateGateFinished {
+                        sequence: seq,
+                        gate: gate.clone(),
+                    })
+                }
+                Some(GateProgress::Started) => {}
+            }
+            state
+                .gates
+                .insert(gate.clone(), GateProgress::Finished { outcome: *outcome });
+            Ok(())
+        }
+        RunEventKind::SandboxEvidenceCaptured {
+            subject,
+            policy_digest,
+            report,
+            outcome,
+        } => {
+            let contract = require_contract(state, seq)?;
+            validate_artifact(report, ArtifactKind::SandboxReport, seq)?;
+            let matches_requirement = contract
+                .sandbox_requirements
+                .iter()
+                .any(|r| &r.subject == subject && &r.policy_digest == policy_digest);
+            if !matches_requirement {
+                return Err(ReduceError::UnrequiredSandboxEvidence { sequence: seq });
+            }
+            let key = SandboxEvidenceKey {
+                subject: subject.clone(),
+                policy_digest: policy_digest.clone(),
+            };
+            if state.sandbox_evidence.iter().any(|e| e.key == key) {
+                return Err(ReduceError::DuplicateSandboxEvidence { sequence: seq });
+            }
+            let entry = SandboxEvidenceEntry {
+                key,
+                outcome: *outcome,
+            };
+            let pos = state
+                .sandbox_evidence
+                .binary_search_by(|e| e.key.cmp(&entry.key))
+                .unwrap_or_else(|p| p);
+            state.sandbox_evidence.insert(pos, entry);
+            Ok(())
+        }
+        RunEventKind::RunSealed => {
+            let contract = require_contract(state, seq)?;
+            state.verdict = Some(compute_verdict(state, &contract));
+            state.phase = RunPhase::Sealed;
+            Ok(())
+        }
+    }
+}
+
+/// The contract, guaranteed present after `RunStarted` (the first-event rule ensures it).
+fn require_contract(state: &RunState, seq: u64) -> Result<RunContract, ReduceError> {
+    state
+        .contract
+        .clone()
+        .ok_or(ReduceError::MissingRunStarted {
+            found: "?",
+            sequence: seq,
+        })
+}
+
+fn gate_obligation<'a>(contract: &'a RunContract, gate: &GateId) -> Option<&'a GateObligation> {
+    contract.gate_obligations.iter().find(|o| &o.gate == gate)
+}
+
+/// A gate that is required AND applicable (not waived) — the only kind that can be a sandbox
+/// subject or that blocks the verdict when unrun.
+fn is_required_applicable(obligation: &GateObligation) -> bool {
+    matches!(obligation.requirement, GateRequirement::Required)
+        && matches!(obligation.applicability, GateApplicability::Applicable)
+}
+
+/// Validate an artifact reference's locator and kind.
+fn validate_artifact(
+    artifact: &ArtifactRef,
+    expected: ArtifactKind,
+    seq: u64,
+) -> Result<(), ReduceError> {
+    if artifact.locator.is_empty() {
+        return Err(ReduceError::EmptyArtifactLocator { sequence: seq });
+    }
+    if artifact.kind != expected {
+        return Err(ReduceError::WrongArtifactKind {
+            sequence: seq,
+            expected,
+            found: artifact.kind,
+        });
+    }
+    Ok(())
+}
+
+/// Fully validate the pre-execution contract at `RunStarted`.
+fn validate_contract(contract: &RunContract, seq: u64) -> Result<(), ReduceError> {
+    let agent_declared = matches!(contract.agent, AgentObligation::Required);
+
+    // Gates: unique ids, and any waiver must match the run environment.
+    let mut seen_gates: BTreeSet<&GateId> = BTreeSet::new();
+    for o in &contract.gate_obligations {
+        if !seen_gates.insert(&o.gate) {
+            return Err(ReduceError::DuplicateGateInContract {
+                gate: o.gate.clone(),
+            });
+        }
+        if let GateApplicability::Waived { environment, .. } = &o.applicability {
+            if environment != &contract.runner_environment {
+                return Err(ReduceError::WaiverEnvironmentMismatch {
+                    gate: o.gate.clone(),
+                    waiver_environment: environment.clone(),
+                    runner_environment: contract.runner_environment.clone(),
+                });
+            }
+        }
+    }
+
+    // Policy obligations: valid policy artifact, unique digest, protects well-formed.
+    let mut seen_policies: BTreeSet<&Digest256> = BTreeSet::new();
+    for p in &contract.policy_obligations {
+        validate_artifact(&p.policy, ArtifactKind::Policy, seq)?;
+        if !seen_policies.insert(&p.policy.digest) {
+            return Err(ReduceError::DuplicatePolicyInContract {
+                policy_digest: p.policy.digest.clone(),
+            });
+        }
+        if !p.protects.is_empty() && !matches!(p.requirement, PolicyRequirement::Required) {
+            return Err(ReduceError::OptionalPolicyWithProtects {
+                policy_digest: p.policy.digest.clone(),
+            });
+        }
+        let mut seen_protected: Vec<&PolicyProtectedSubject> = Vec::new();
+        for s in &p.protects {
+            if seen_protected.contains(&s) {
+                return Err(ReduceError::DuplicateProtectedSubject { subject: s.clone() });
+            }
+            seen_protected.push(s);
+            match s {
+                PolicyProtectedSubject::Agent => {
+                    if !agent_declared {
+                        return Err(ReduceError::PolicyProtectsAgentWithoutAgent);
+                    }
+                }
+                PolicyProtectedSubject::Gate { gate } => {
+                    if gate_obligation(contract, gate).is_none() {
+                        return Err(ReduceError::PolicyProtectsUnknownGate { gate: gate.clone() });
+                    }
+                }
+            }
+        }
+    }
+
+    // Sandbox requirements: unique, and each subject must be eligible.
+    let mut seen_sandbox: Vec<(&ExecutionSubject, &Digest256)> = Vec::new();
+    for r in &contract.sandbox_requirements {
+        let key = (&r.subject, &r.policy_digest);
+        if seen_sandbox.contains(&key) {
+            return Err(ReduceError::DuplicateSandboxRequirement {
+                subject: r.subject.clone(),
+                policy_digest: r.policy_digest.clone(),
+            });
+        }
+        seen_sandbox.push(key);
+        match &r.subject {
+            ExecutionSubject::Agent => {
+                if !agent_declared {
+                    return Err(ReduceError::SandboxAgentSubjectWithoutAgent);
+                }
+            }
+            ExecutionSubject::Gate { gate } => match gate_obligation(contract, gate) {
+                None => return Err(ReduceError::SandboxSubjectUnknownGate { gate: gate.clone() }),
+                Some(o) if !is_required_applicable(o) => {
+                    return Err(ReduceError::SandboxSubjectGateIneligible { gate: gate.clone() })
+                }
+                Some(_) => {}
+            },
+            ExecutionSubject::Verifier => {}
+        }
+    }
+
+    Ok(())
+}
+
+/// A subject protected by a required policy may not start before that policy is `Allowed`.
+fn check_protected_start(
+    state: &RunState,
+    contract: &RunContract,
+    subject: &PolicyProtectedSubject,
+    seq: u64,
+) -> Result<(), ReduceError> {
+    for p in &contract.policy_obligations {
+        if !matches!(p.requirement, PolicyRequirement::Required) {
+            continue;
+        }
+        if !p.protects.iter().any(|s| s == subject) {
+            continue;
+        }
+        let allowed = state.policy_results.iter().any(|r| {
+            r.policy.digest == p.policy.digest && matches!(r.outcome, PolicyOutcome::Allowed)
+        });
+        if !allowed {
+            return Err(ReduceError::ProtectedStartBeforePolicyAllowed {
+                sequence: seq,
+                subject: protected_to_execution(subject),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn protected_to_execution(subject: &PolicyProtectedSubject) -> ExecutionSubject {
+    match subject {
+        PolicyProtectedSubject::Agent => ExecutionSubject::Agent,
+        PolicyProtectedSubject::Gate { gate } => ExecutionSubject::Gate { gate: gate.clone() },
+    }
+}
+
+/// Compute the final verdict at `RunSealed` from the folded state and the contract, applying
+/// `Error > Fail > Blocked > Pass`. The state retains the failed AND blocked obligations;
+/// this only collapses them to the winning label.
+fn compute_verdict(state: &RunState, contract: &RunContract) -> Verdict {
+    let mut error = false;
+    let mut fail = false;
+    let mut blocked = false;
+
+    // Agent obligation.
+    if matches!(contract.agent, AgentObligation::Required) {
+        match &state.agent {
+            AgentLifecycle::Exited { outcome } => {
+                if !matches!(outcome, AgentOutcome::ExitedNormally { code: 0 }) {
+                    error = true;
+                }
+            }
+            AgentLifecycle::Started => error = true, // never reached a terminal outcome
+            AgentLifecycle::NotObserved => match agent_nonstart_disposition(state, contract) {
+                NonStart::Error => error = true,
+                NonStart::Blocked => blocked = true,
+            },
+        }
+    }
+
+    // Gates: only required+applicable gates can move the verdict.
+    for o in &contract.gate_obligations {
+        if !is_required_applicable(o) {
+            continue;
+        }
+        match state.gates.get(&o.gate) {
+            None => blocked = true,
+            Some(GateProgress::Started) => error = true,
+            Some(GateProgress::Finished { outcome }) => match outcome {
+                GateOutcome::Pass | GateOutcome::Warn => {}
+                GateOutcome::Fail => fail = true,
+                GateOutcome::Error => error = true,
+                GateOutcome::Blocked | GateOutcome::NotApplicable => blocked = true,
+            },
+        }
+    }
+
+    // Policies: only required policies move the verdict.
+    for p in &contract.policy_obligations {
+        if !matches!(p.requirement, PolicyRequirement::Required) {
+            continue;
+        }
+        match state
+            .policy_results
+            .iter()
+            .find(|r| r.policy.digest == p.policy.digest)
+        {
+            None => blocked = true,
+            Some(r) => match r.outcome {
+                PolicyOutcome::Allowed => {}
+                PolicyOutcome::Denied => blocked = true,
+                PolicyOutcome::Error => error = true,
+            },
+        }
+    }
+
+    // Sandbox requirements (all are mandatory obligations).
+    for req in &contract.sandbox_requirements {
+        match state
+            .sandbox_evidence
+            .iter()
+            .find(|e| e.key.subject == req.subject && e.key.policy_digest == req.policy_digest)
+        {
+            None => blocked = true,
+            Some(e) => match e.outcome {
+                SandboxEvidenceOutcome::Satisfied => {}
+                SandboxEvidenceOutcome::Violated => blocked = true,
+                SandboxEvidenceOutcome::Error => error = true,
+            },
+        }
+    }
+
+    if error {
+        Verdict::Error
+    } else if fail {
+        Verdict::Fail
+    } else if blocked {
+        Verdict::Blocked
+    } else {
+        Verdict::Pass
+    }
+}
+
+/// Disposition of a required agent that never started, per the cross-obligation rule.
+enum NonStart {
+    Error,
+    Blocked,
+}
+
+fn agent_nonstart_disposition(state: &RunState, contract: &RunContract) -> NonStart {
+    let protectors: Vec<&PolicyObligation> = contract
+        .policy_obligations
+        .iter()
+        .filter(|o| matches!(o.requirement, PolicyRequirement::Required))
+        .filter(|o| {
+            o.protects
+                .iter()
+                .any(|s| matches!(s, PolicyProtectedSubject::Agent))
+        })
+        .collect();
+    if protectors.is_empty() {
+        // Nothing blocked it, yet the obligated agent never ran.
+        return NonStart::Error;
+    }
+    let mut any_error = false;
+    let mut any_denied_or_absent = false;
+    for o in &protectors {
+        match state
+            .policy_results
+            .iter()
+            .find(|r| r.policy.digest == o.policy.digest)
+            .map(|r| r.outcome)
+        {
+            Some(PolicyOutcome::Error) => any_error = true,
+            Some(PolicyOutcome::Denied) | None => any_denied_or_absent = true,
+            Some(PolicyOutcome::Allowed) => {}
+        }
+    }
+    if any_error {
+        NonStart::Error
+    } else if any_denied_or_absent {
+        NonStart::Blocked
+    } else {
+        // Every protecting policy was Allowed, so nothing blocked it → Error.
+        NonStart::Error
+    }
 }
