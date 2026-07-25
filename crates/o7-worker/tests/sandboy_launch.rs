@@ -131,14 +131,30 @@ async fn a_backend_that_exits_before_the_report_fails_closed() {
 
 #[tokio::test]
 async fn a_valid_report_plus_go_runs_the_target_under_a_distinct_monitor() {
-    // The positive path AND the monitor-topology invariant: on GO the target runs (marker), the
-    // launch returns Reported/FullyEnforced evidence, and the owned leader (the MONITOR) is a
-    // DIFFERENT process from the target — the backend must not have `exec`d into the target.
+    // The positive path AND the monitor-topology invariant, PROVEN: the target records its OWN
+    // pid, and it must differ from the owned leader (the monitor). A backend that `exec`d into
+    // the target would make the two pids equal. The target also stays alive briefly so the
+    // monitor and child provably co-exist (not posthumous pid numerology).
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("target-ran");
+    let target_pid_file = dir.path().join("target.pid");
     let b = boundary(vec![PathBuf::from("/bin")], "ok");
+    let target = BoundarySpawnSpec {
+        executable: PathBuf::from("/bin/sh"),
+        arguments: vec![
+            OsString::from("-c"),
+            OsString::from(format!(
+                "echo $$ > {}; touch {}; sleep 0.3; exit 0",
+                target_pid_file.display(),
+                marker.display()
+            )),
+        ],
+        working_directory: std::env::temp_dir(),
+        environment: BTreeMap::new(),
+        stdin: StdinMode::Null,
+    };
     let mut launch = b
-        .spawn(touch_target(&marker))
+        .spawn(target)
         .await
         .expect("a valid report + GO launches the confined target under a monitor");
     let monitor_pid = launch.process.identity().pid;
@@ -151,15 +167,24 @@ async fn a_valid_report_plus_go_runs_the_target_under_a_distinct_monitor() {
     let exit = launch.process.wait().await.expect("monitor waited");
     assert_eq!(exit, BoundaryExit::Code(0));
     assert!(marker.exists(), "the confined target must have run");
-    // The monitor is a real, distinct owner — not the target that exec-replaced it.
-    assert!(monitor_pid > 0, "monitor must have a real PID");
+    let target_pid: i32 = std::fs::read_to_string(&target_pid_file)
+        .expect("target recorded its pid")
+        .trim()
+        .parse()
+        .expect("pid parses");
+    assert_ne!(
+        target_pid, monitor_pid,
+        "the monitor must be a DISTINCT process from the target (no exec-in-place)"
+    );
 }
 
 #[tokio::test]
-async fn the_target_cannot_see_the_report_or_control_descriptors() {
-    // fd non-inheritance is a SECURITY contract: after GO the backend closes the control-plane
-    // descriptors, so the confined target cannot read or write the report/control channels. The
-    // target probes fds 3 and 4 (the report/control numbers) and must find them absent.
+async fn the_confined_target_has_a_clean_fd_table() {
+    // fd non-inheritance is a SECURITY contract. Rather than probe fixed fictional numbers
+    // (which leak if the OS assigns the report/control/request descriptors elsewhere), the
+    // target asserts its ENTIRE inherited fd table is clean: only stdio (0,1,2). The launch
+    // must normalise/close every control-plane descriptor (report, control, request, and any
+    // backend-internal fd) so nothing beyond stdio survives into the confined target.
     let dir = tempfile::tempdir().unwrap();
     let leaked = dir.path().join("leaked-fd");
     let b = boundary(vec![PathBuf::from("/bin")], "ok");
@@ -167,9 +192,10 @@ async fn the_target_cannot_see_the_report_or_control_descriptors() {
         executable: PathBuf::from("/bin/sh"),
         arguments: vec![
             OsString::from("-c"),
-            // If EITHER inherited channel fd is still open, record a leak.
+            // Count this shell's own fds; anything beyond 0,1,2 is an inherited leak. `ls` reads
+            // /proc/<shell pid>/fd (the `$$` shell), not its own.
             OsString::from(format!(
-                "if [ -e /proc/self/fd/3 ] || [ -e /proc/self/fd/4 ]; then touch {}; fi; exit 0",
+                "n=$(ls /proc/$$/fd | wc -l); if [ \"$n\" -gt 3 ]; then touch {}; fi; exit 0",
                 leaked.display()
             )),
         ],
@@ -181,7 +207,7 @@ async fn the_target_cannot_see_the_report_or_control_descriptors() {
     let _ = launch.process.wait().await;
     assert!(
         !leaked.exists(),
-        "the target must NOT inherit the report/control descriptors"
+        "the confined target must inherit ONLY stdio — no control-plane descriptors"
     );
 }
 

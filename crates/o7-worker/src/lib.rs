@@ -24,6 +24,7 @@ pub mod observation;
 pub mod output;
 pub mod process_identity;
 pub mod sandboy_boundary;
+pub mod sealed;
 pub mod spec;
 pub mod state;
 pub mod supervisor;

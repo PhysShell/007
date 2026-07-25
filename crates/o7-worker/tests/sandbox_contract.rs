@@ -130,6 +130,31 @@ fn the_acquired_backend_exec_path_is_a_held_proc_fd() {
 }
 
 #[test]
+fn a_sealed_backend_survives_an_in_place_source_rewrite() {
+    // The load-bearing "held != immutable" fix: acquisition stages the bytes into a SEALED
+    // memfd, so a same-UID in-place rewrite of the SOURCE inode after acquire() cannot change
+    // what the held descriptor exposes — the sealed bytes are still the original.
+    let mut tmp = tempfile::NamedTempFile::new().unwrap();
+    tmp.write_all(BACKEND_BYTES).unwrap();
+    tmp.flush().unwrap();
+    let image = BackendImage::acquire(
+        tmp.path(),
+        Digest256::of_bytes(BACKEND_BYTES),
+        backend_identity(),
+    )
+    .expect("acquire seals the object");
+
+    // Rewrite the SAME inode in place with attacker bytes.
+    std::fs::write(tmp.path(), b"attacker-substituted backend bytes here!").unwrap();
+
+    // The held (sealed) descriptor still exposes the ORIGINAL bytes, and the pinned digest is
+    // unchanged.
+    let held = std::fs::read(image.descriptor_path()).expect("read the sealed descriptor");
+    assert_eq!(held, BACKEND_BYTES, "the sealed object must be immutable");
+    assert_eq!(*image.digest(), Digest256::of_bytes(BACKEND_BYTES));
+}
+
+#[test]
 fn an_invalid_policy_is_rejected() {
     let mut policy = full_policy();
     policy.timeout = Duration::ZERO;

@@ -111,14 +111,16 @@ There is no constructor that pairs `FullyEnforced` with an absent report.
 Gate-round-2 hardening, so a report can neither be forged by an unexpected backend nor
 authorize a target before the parent has verified it:
 
-- **Backend identity + object (OWNED).** `BackendImage` has PRIVATE fields and is built only
-  via `acquire(path, expected_digest, identity)`, which opens the object, reads its bytes back
-  THROUGH the held fd (`/proc/self/fd/<n>`, binding the digest to the object, not the path),
-  fails closed on a mismatch, and RETAINS the descriptor (`Arc<File>`) for the boundary's
-  lifetime. The launch execs `descriptor_path()` (`/proc/<owner_pid>/fd/<n>`), so a swap of the
-  source path after construction cannot change what runs; the report must echo the expected
+- **Backend identity + object (SEALED, not just held).** `BackendImage` has PRIVATE fields and
+  is built only via `acquire(path, expected_digest, identity)`, which stages the bytes into an
+  anonymous `memfd`, applies `WRITE|GROW|SHRINK|SEAL`, verifies the seals, reads the SEALED
+  bytes back to bind the digest, and retains the sealed descriptor (`SealedObject`, in
+  `sealed.rs`). A held-but-mutable fd would still expose an in-place inode rewrite; a sealed
+  memfd cannot — proven GREEN by a test that rewrites the source inode after `acquire` and
+  confirms the held descriptor still exposes the original bytes. The launch execs
+  `descriptor_path()` (`/proc/<owner_pid>/fd/<n>`); the report must echo the expected
   `BackendIdentity` (`verify_report` → `BackendMismatch`). A bare `PathBuf` is an address, not
-  an owned object — the type no longer accepts one.
+  an owned immutable object — the type no longer accepts one.
 
 - **Monitor topology in the fake too.** The controlled fake backend does NOT `exec` into the
   target (which would make it disappear — the rejected architecture). On GO it CLOSES the

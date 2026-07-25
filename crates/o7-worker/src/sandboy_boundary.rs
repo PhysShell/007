@@ -33,8 +33,7 @@
 //! RED: the confined live launch itself.
 
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::os::unix::io::{AsRawFd as _, RawFd};
+use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{ffi::OsString, io};
@@ -49,60 +48,40 @@ use crate::boundary::{
     BoundaryAttestation, BoundaryError, BoundaryEvidence, BoundaryKind, BoundaryLaunch,
     BoundarySpawnSpec, EnforcementLevel, ProcessBoundary,
 };
+use crate::sealed::SealedObject;
 
-/// A backend bound to a specific immutable OBJECT, not a re-resolvable path. It OWNS an open,
-/// read-only descriptor to the backend binary for the lifetime of the boundary: the digest is
-/// re-read back THROUGH that held descriptor (`/proc/self/fd/<n>`) and compared at construction,
-/// and the launch execs the held object via [`BackendImage::descriptor_path`]
-/// (`/proc/<owner_pid>/fd/<n>`) — so a substitution of the source path after construction cannot
-/// change what runs. The fields are private; the only way to build one is
-/// [`BackendImage::acquire`], which fails closed on a digest mismatch.
+/// A backend bound to a specific SEALED, immutable OBJECT — not a re-resolvable path, and not
+/// merely a held-but-mutable inode. Acquisition stages the backend bytes into a sealed `memfd`
+/// (WRITE|GROW|SHRINK|SEAL), so a same-UID process cannot rewrite the object in place after
+/// construction; the launch execs the sealed object via [`BackendImage::descriptor_path`]
+/// (`/proc/<owner_pid>/fd/<n>`). Fields are private; the only constructor is
+/// [`BackendImage::acquire`], which fails closed on a digest mismatch or a sealing failure.
 #[derive(Debug, Clone)]
 pub struct BackendImage {
-    /// The HELD descriptor. Retained (via `Arc`) for the whole boundary lifetime; dropping the
-    /// original acquirer does not invalidate it.
-    descriptor: Arc<File>,
-    digest: Digest256,
+    object: SealedObject,
     identity: BackendIdentity,
 }
 
 impl BackendImage {
-    /// Acquire the backend object: open it, read its bytes back THROUGH the held descriptor,
-    /// verify they hash to `expected_digest`, and RETAIN the descriptor. After this returns,
-    /// the object is pinned to the held fd — a swap of `path` on disk cannot change it.
+    /// Acquire the backend object into a SEALED, held memfd and bind its digest. After this
+    /// returns the object is immutable — a swap OR in-place rewrite of `path` cannot change it.
     ///
     /// # Errors
-    /// [`SandboyLaunchError::BackendOpen`] if the object cannot be opened/read;
-    /// [`SandboyLaunchError::BackendObjectMismatch`] if the held bytes do not match the digest.
+    /// [`SandboyLaunchError::BackendOpen`] if the object cannot be opened/read/sealed;
+    /// [`SandboyLaunchError::BackendObjectMismatch`] if the sealed bytes do not match the digest.
     pub fn acquire(
         path: &Path,
         expected_digest: Digest256,
         identity: BackendIdentity,
     ) -> Result<Self, SandboyLaunchError> {
-        let file = File::open(path).map_err(|e| SandboyLaunchError::BackendOpen(e.to_string()))?;
-        // Read back THROUGH the held fd, not the path — binds the digest to the object we hold.
-        let held_path = format!("/proc/self/fd/{}", file.as_raw_fd());
-        let bytes = std::fs::read(&held_path)
-            .map_err(|e| SandboyLaunchError::BackendOpen(e.to_string()))?;
-        if Digest256::of_bytes(&bytes) != expected_digest {
-            return Err(SandboyLaunchError::BackendObjectMismatch);
-        }
-        Ok(Self {
-            descriptor: Arc::new(file),
-            digest: expected_digest,
-            identity,
-        })
+        let object = SealedObject::stage_from_path(path, &expected_digest)?;
+        Ok(Self { object, identity })
     }
 
-    /// The exec path of the HELD object: `/proc/<owner_pid>/fd/<n>`, valid while the boundary
-    /// (and thus this held descriptor) lives.
+    /// The exec path of the sealed backend object: `/proc/<owner_pid>/fd/<n>`.
     #[must_use]
     pub fn descriptor_path(&self) -> PathBuf {
-        PathBuf::from(format!(
-            "/proc/{}/fd/{}",
-            std::process::id(),
-            self.descriptor.as_raw_fd()
-        ))
+        self.object.descriptor_path()
     }
 
     /// The expected backend identity a report must echo.
@@ -111,10 +90,10 @@ impl BackendImage {
         &self.identity
     }
 
-    /// The digest of the held backend object.
+    /// The digest of the sealed backend object.
     #[must_use]
     pub fn digest(&self) -> &Digest256 {
-        &self.digest
+        self.object.digest()
     }
 }
 
@@ -177,10 +156,10 @@ pub enum SandboyLaunchError {
     /// The confinement policy is not capable of full confinement.
     #[error("sandbox policy is not fully confining: {0}")]
     Policy(#[from] SandboxPolicyError),
-    /// The backend object could not be opened/read for acquisition.
+    /// The backend object could not be opened/read/sealed for acquisition.
     #[error("sandboy backend object could not be acquired: {0}")]
     BackendOpen(String),
-    /// The held backend object's bytes do not match its pinned digest (substitution / TOCTOU).
+    /// The sealed backend object's bytes do not match its pinned digest (substitution / TOCTOU).
     #[error("backend object digest does not match the trusted image")]
     BackendObjectMismatch,
     /// The report names a different backend than the expected identity.
@@ -201,6 +180,15 @@ pub enum SandboyLaunchError {
     /// The backend did not establish full enforcement on every dimension.
     #[error("backend did not establish full enforcement (a dimension was downgraded)")]
     NotFullyEnforced,
+}
+
+impl From<crate::sealed::SealError> for SandboyLaunchError {
+    fn from(e: crate::sealed::SealError) -> Self {
+        match e {
+            crate::sealed::SealError::DigestMismatch => SandboyLaunchError::BackendObjectMismatch,
+            other => SandboyLaunchError::BackendOpen(other.to_string()),
+        }
+    }
 }
 
 impl SandboyBoundary {
