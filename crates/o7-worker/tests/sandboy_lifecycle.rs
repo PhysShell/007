@@ -1,30 +1,29 @@
-//! A2 (reworked): LIVE lifecycle invariants for the Sandboy monitor, pinned against the now-live
-//! engine (A1) with NO false-green paths. The backend really exists, the target really runs, and
-//! a misbehaving fake can stall or misbehave in a specific phase. Several are RED against the
-//! current happy-path-only implementation (A3 will enforce them); each RED asserts the FULL
-//! contract, not a partial symptom, so A3 cannot make it green cheaply:
+//! LIVE lifecycle invariants for the Sandboy monitor, ENFORCED (all GREEN) against the live engine
+//! with no false-green paths. The backend really exists, the target really runs, and a misbehaving
+//! fake can stall or misbehave in a specific phase — each test asserts the FULL contract, not a
+//! partial symptom:
 //!
-//! - `every_report_failure_reaps_the_backend_and_never_runs_the_target` — for EVERY report
-//!   failure (malformed / truncated-exit / each binding mismatch / downgrade / TRAILING byte):
-//!   a specific fail-closed error, the target never runs, and the backend's exact pid is reaped
-//!   within a bound. RED for `trailing` (A1 authorizes the target and the backend lives on).
-//! - `the_monitor_owns_the_target_tree_for_membership_and_teardown` — the target forks a live
-//!   descendant; the boundary identity is the monitor leader, the LIVE owned set lists the whole
-//!   tree (monitor + target + descendant), and `force_stop` reaps all of it, leaving an empty
-//!   membership. RED: the fake starts the target in its own group, so the monitor owns none of it.
-//! - `a_monitor_that_exits_while_the_target_lives_is_not_a_clean_run` — losing the monitor while
-//!   an owned target is alive must make `wait()` return `Err`, tear the target down, and leave an
-//!   empty membership. RED: A1 reports a clean `Code(0)`.
-//! - `a_high_inherited_descriptor_does_not_leak_into_the_target` — an inherited non-cloexec fd at
-//!   a dynamically chosen high number must be scrubbed. RED: only the control-plane fds are.
-//! - `a_blocking_fifo_target_fails_closed_within_a_bound` — a target whose acquisition BLOCKS must
-//!   fail closed within a bound (probed in a helper subprocess so it cannot wedge this runtime).
-//!   RED: A1's blocking open never returns.
-//! - `a_symlinked_target_final_component_fails_closed` — a symlinked target must be refused
-//!   (O_NOFOLLOW + regular-file check, as the verifier already does). RED: A1 follows it.
-//!
-//! Expected GREEN (A1 already does the right thing): cancelling a launch mid-report reaps the
-//! backend, and a live launch executes the SEALED target even after its source path is swapped.
+//! - `every_report_failure_reaps_the_backend_and_never_runs_the_target` — for EVERY report failure
+//!   (malformed / truncated-exit / each binding mismatch / downgrade / TRAILING byte): a specific
+//!   fail-closed error, the target never runs, and the backend's exact pid is reaped within a bound.
+//! - `a_backend_that_forks_before_a_bad_report_is_fully_reaped` — cleanup drains the whole owned
+//!   GROUP (leader + a pre-report descendant), not merely the leader.
+//! - `no_control_descriptor_leaks_to_a_concurrent_sibling` — the CLOEXEC-from-creation control
+//!   socket never leaks into a process spawned concurrently with a launch (no inheritable window).
+//! - `the_monitor_owns_the_target_tree_for_membership_and_teardown` — the boundary identity is the
+//!   monitor leader, the LIVE owned set lists the whole tree (monitor + target + descendant), and
+//!   `force_stop` reaps all of it, leaving an empty membership.
+//! - `a_monitor_that_exits_while_the_target_lives_is_not_a_clean_run` — losing the monitor while an
+//!   owned target is alive makes `wait()` return `Err`, tears the target down, empties membership.
+//! - `a_high_inherited_descriptor_does_not_leak_into_the_target` — an inherited non-cloexec fd at a
+//!   dynamically chosen high number is scrubbed.
+//! - `a_blocking_fifo_target_fails_closed_within_a_bound` — a target whose acquisition would block
+//!   fails closed within a bound (probed in a helper subprocess so it cannot wedge this runtime).
+//! - `a_symlinked_target_final_component_fails_closed` — a symlinked target is refused (O_NOFOLLOW
+//!   + regular-file check), while the frozen `/proc/<pid>/fd/<n>` sealed target stays runnable.
+//! - `cancelling_a_launch_mid_report_reaps_the_backend`, and
+//!   `a_live_launch_executes_the_sealed_target_not_a_swapped_source` (hash→exec through the live
+//!   engine).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -213,6 +212,96 @@ async fn every_report_failure_reaps_the_backend_and_never_runs_the_target() {
         cases.len(),
         failures.join("\n")
     );
+}
+
+// --- the control transport never leaks into a concurrently-spawned sibling ---
+
+#[tokio::test(flavor = "multi_thread")]
+async fn no_control_descriptor_leaks_to_a_concurrent_sibling() {
+    // The control transport is a socket that is CLOEXEC FROM CREATION and mapped onto the backend's
+    // stdin by the child's own dup — so there is no window in which it is inheritable by an
+    // unrelated process. Prove it: race a stream of launches against a stream of sibling spawns; a
+    // sibling forked at ANY instant (including between transport creation and backend exec) must
+    // inherit ZERO descriptors above stdio. A regression to a non-CLOEXEC transport would let a
+    // sibling occasionally inherit a control descriptor and report a positive count.
+    let probe = env!("CARGO_BIN_EXE_fd_probe");
+    let launches = tokio::spawn(async {
+        for _ in 0..30 {
+            let dir = tempfile::tempdir().unwrap();
+            let marker = dir.path().join("m");
+            let b = boundary(vec![PathBuf::from("/bin")], "ok");
+            if let Ok(mut launch) = b
+                .spawn(sh_target(format!("touch {}; exit 0", marker.display())))
+                .await
+            {
+                let _ = launch.process.wait().await;
+            }
+        }
+    });
+
+    let mut worst = 0i32;
+    for _ in 0..120 {
+        let out = tokio::process::Command::new(probe)
+            .output()
+            .await
+            .expect("probe runs");
+        let n: i32 = String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .parse()
+            .unwrap_or(-1);
+        worst = worst.max(n);
+        if launches.is_finished() {
+            break;
+        }
+    }
+    let _ = launches.await;
+    assert_eq!(
+        worst, 0,
+        "a concurrently-spawned sibling inherited {worst} descriptor(s) above stdio — the control \
+         transport must be CLOEXEC with no inheritable window"
+    );
+}
+
+// --- a broken backend that forks before a bad report is fully reaped (group drain) ---
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_backend_that_forks_before_a_bad_report_is_fully_reaped() {
+    // Cleanup must prove the whole owned GROUP drained, not merely that the leader was reaped. A
+    // broken backend forks a live descendant (in its own owned group) BEFORE delivering a malformed
+    // report; the fail-closed path must kill the leader AND the descendant and leave an empty group.
+    let dir = tempfile::tempdir().unwrap();
+    let bpid = dir.path().join("backend.pid");
+    let dpid = dir.path().join("desc.pid");
+    let marker = dir.path().join("target-ran");
+    let b = boundary(
+        vec![PathBuf::from("/bin")],
+        &format!(
+            "fork_before_bad_report;pid={};desc={}",
+            bpid.display(),
+            dpid.display()
+        ),
+    );
+    let err = b
+        .spawn(sh_target(format!("touch {}; exit 0", marker.display())))
+        .await
+        .expect_err("a malformed report must fail closed");
+    assert!(matches!(err, BoundaryError::Evidence(_)), "got {err:?}");
+
+    let leader = read_pid_bounded(&bpid, Duration::from_secs(3))
+        .await
+        .expect("backend leader pid");
+    let descendant = read_pid_bounded(&dpid, Duration::from_secs(3))
+        .await
+        .expect("backend descendant pid");
+    assert!(
+        wait_pid_gone(leader, Duration::from_secs(3)).await,
+        "the backend leader must be reaped"
+    );
+    assert!(
+        wait_pid_gone(descendant, Duration::from_secs(3)).await,
+        "the pre-report descendant must be reaped too (group drain, not just leader)"
+    );
+    assert!(!marker.exists(), "the target must never run");
 }
 
 // --- the monitor OWNS the whole target tree, for membership AND teardown ---

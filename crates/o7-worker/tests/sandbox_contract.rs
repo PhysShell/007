@@ -205,7 +205,7 @@ fn the_backend_invocation_runs_the_held_backend_with_trusted_cwd_and_env() {
         stdin: StdinMode::Null,
     };
     let wrapped = b
-        .backend_spawn_spec(&target, 3, 4, 5, &a_nonce())
+        .backend_spawn_spec(&target, &a_nonce())
         .expect("a permitted target is wrapped");
 
     // The launched program is the HELD backend descriptor, in a TRUSTED cwd, with a TRUSTED
@@ -223,9 +223,15 @@ fn the_backend_invocation_runs_the_held_backend_with_trusted_cwd_and_env() {
         let i = wrapped.arguments.iter().position(|a| a == flag).unwrap();
         wrapped.arguments[i + 1].clone()
     };
-    assert_eq!(arg_after("--report-fd"), OsString::from("3"));
-    assert_eq!(arg_after("--control-fd"), OsString::from("4"));
-    assert_eq!(arg_after("--request-fd"), OsString::from("5"));
+    // The control transport is a single socket on the backend's STDIN, so NO control descriptor is
+    // passed by number on the /proc-visible argv — only the per-launch nonce and policy flags.
+    assert!(
+        !wrapped
+            .arguments
+            .iter()
+            .any(|a| a == "--report-fd" || a == "--control-fd" || a == "--request-fd"),
+        "no control descriptor may appear on the /proc-visible argv"
+    );
     assert_eq!(
         arg_after("--launch-nonce"),
         OsString::from(a_nonce().as_str())
@@ -270,7 +276,7 @@ fn wrapping_an_unpermitted_target_fails_closed() {
         environment: Default::default(),
         stdin: StdinMode::Null,
     };
-    assert!(b.backend_spawn_spec(&target, 3, 4, 5, &a_nonce()).is_err());
+    assert!(b.backend_spawn_spec(&target, &a_nonce()).is_err());
 }
 
 // --- the out-of-band launch request: env allowlist ---

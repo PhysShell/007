@@ -20,14 +20,20 @@
 //! Planes are SEPARATE: the backend is a TRUSTED launcher and runs from a fixed trusted cwd
 //! (`/`) with a trusted control-plane environment — never the untrusted target's cwd/env
 //! (LD_PRELOAD, …). The target's argv, cwd, and (allowlisted) environment travel out-of-band in
-//! the [`o7_sandbox_protocol::LaunchRequest`] on `--request-fd`, never on the backend's
+//! the [`o7_sandbox_protocol::LaunchRequest`] over the control socket, never on the backend's
 //! /proc-visible argv or its process environment.
 //!
-//! Authorization is a BARRIER: the two-phase handshake (`--report-fd` for the report,
-//! `--control-fd` for the parent GO) means the backend holds the confined target BEFORE it
-//! starts until the parent has verified the report and sent GO. A malformed / mis-bound /
-//! downgraded report, a NACK, EOF, or a cancel makes the backend kill its cgroup and reap — the
-//! target never runs on an unverified report.
+//! The control transport is a SINGLE bidirectional socket, CLOEXEC from creation, mapped onto the
+//! backend's STDIN by `Command` (an atomic dup in the forked child) — so there is no inheritable
+//! descriptor window a concurrent sibling spawn could race, and no control descriptor is passed by
+//! number on the /proc-visible argv.
+//!
+//! Authorization is a BARRIER: over that socket the parent sends the request, the backend replies
+//! with exactly one report frame then half-closes (so the parent proves end-of-message), and the
+//! backend holds the confined target until the parent verifies the report and sends the GO byte.
+//! A malformed / mis-bound / downgraded report, a NACK (the parent dropping its end → EOF), or a
+//! cancel makes the backend kill its cgroup and reap — the target never runs on an unverified
+//! report.
 //!
 //! LIVE + enforced here: backend + TARGET acquisition (hardened `O_NOFOLLOW`/regular-file open
 //! for ordinary paths, a followed-and-seal-checked path for the frozen `/proc/<pid>/fd/<n>`
@@ -39,7 +45,6 @@
 //! dominates the triggering error).
 
 use std::collections::BTreeMap;
-use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{ffi::OsString, io};
@@ -57,23 +62,6 @@ use crate::boundary::{
 use crate::host_boundary::{signalable_pid, HostBoundaryProcess};
 use crate::process_identity::ProcessIdentity;
 use crate::sealed::SealedObject;
-
-/// Create a pipe whose ends are non-CLOEXEC (so the backend end survives `exec`); the caller
-/// marks its own end CLOEXEC via [`set_cloexec`].
-fn make_pipe() -> Result<(std::os::fd::OwnedFd, std::os::fd::OwnedFd), BoundaryError> {
-    nix::unistd::pipe().map_err(|e| BoundaryError::Spawn(io::Error::other(format!("pipe: {e}"))))
-}
-
-/// Mark a descriptor CLOEXEC so it does NOT leak into the spawned backend.
-fn set_cloexec(fd: &std::os::fd::OwnedFd) -> Result<(), BoundaryError> {
-    use std::os::fd::AsRawFd as _;
-    nix::fcntl::fcntl(
-        fd.as_raw_fd(),
-        nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::FD_CLOEXEC),
-    )
-    .map(|_| ())
-    .map_err(|e| BoundaryError::Spawn(io::Error::other(format!("cloexec: {e}"))))
-}
 
 /// A backend bound to a specific SEALED, immutable OBJECT — not a re-resolvable path, and not
 /// merely a held-but-mutable inode. Acquisition stages the backend bytes into a sealed `memfd`
@@ -300,17 +288,17 @@ impl SandboyBoundary {
     }
 
     /// Construct the confined backend invocation for a target `spec`, or fail closed. The
-    /// launched executable is the HELD backend descriptor; the report and control descriptors
-    /// and the launch nonce precede the target after `--`.
+    /// launched executable is the HELD backend descriptor; the launch nonce and the policy flags
+    /// precede the target after `--`. The control transport is a SINGLE bidirectional socket on
+    /// the backend's STDIN (see [`SandboyBoundary::spawn`]) — created CLOEXEC and mapped race-free
+    /// by the child's stdin dup, so NO control descriptor is passed by number on this
+    /// `/proc`-visible argv and no inheritable descriptor window exists.
     ///
     /// # Errors
     /// [`BoundaryError::Spawn`] if the target executable is not permitted by the policy.
     pub fn backend_spawn_spec(
         &self,
         spec: &BoundarySpawnSpec,
-        report_fd: RawFd,
-        control_fd: RawFd,
-        request_fd: RawFd,
         launch_nonce: &LaunchNonce,
     ) -> Result<BoundarySpawnSpec, BoundaryError> {
         if !self.policy.permits_exec(&spec.executable) {
@@ -322,41 +310,14 @@ impl SandboyBoundary {
 
         let mut arguments: Vec<OsString> = vec![
             OsString::from("run"),
-            // The dedicated report descriptor (one versioned length-bounded frame).
-            OsString::from("--report-fd"),
-            OsString::from(report_fd.to_string()),
-            // The control descriptor: the backend holds the target until it reads the parent's
-            // GO here; a NACK/EOF makes it kill the cgroup and reap.
-            OsString::from("--control-fd"),
-            OsString::from(control_fd.to_string()),
-            // The request descriptor: the backend reads the exact execution (target argv/cwd/
-            // allowlisted-env/stdin) from here — never from the backend's own argv/env.
-            OsString::from("--request-fd"),
-            OsString::from(request_fd.to_string()),
             // The per-launch nonce the backend must echo, binding the report to THIS spawn.
             OsString::from("--launch-nonce"),
             OsString::from(launch_nonce.as_str()),
         ];
-        match self.policy.network {
-            NetworkPolicy::DenyAll => arguments.push(OsString::from("--deny-net")),
-        }
-        arguments.push(OsString::from("--worktree"));
-        arguments.push(self.policy.worktree.clone().into_os_string());
-        // Enforced `timeout >= 1ms` by policy validation, so this is never `0`.
-        let timeout_ms = self.policy.timeout.as_millis();
-        arguments.push(OsString::from("--timeout-ms"));
-        arguments.push(OsString::from(timeout_ms.to_string()));
-        for path in &self.policy.allow_exec {
-            arguments.push(OsString::from("--allow-exec"));
-            arguments.push(path.clone().into_os_string());
-        }
-        for name in &self.policy.env_allowlist {
-            arguments.push(OsString::from("--allow-env"));
-            arguments.push(name.clone());
-        }
+        arguments.extend(self.policy_flags());
         // Only the target EXECUTABLE path (a /proc/<pid>/fd descriptor — not sensitive) follows
         // the separator so the backend knows what object to run. The target's argv, cwd, and
-        // environment travel out-of-band in the LaunchRequest on --request-fd, never on this
+        // environment travel out-of-band in the LaunchRequest on the control socket, never on this
         // /proc-visible argv.
         arguments.push(OsString::from("--"));
         arguments.push(spec.executable.clone().into_os_string());
@@ -560,10 +521,11 @@ impl BoundaryProcess for SandboyMonitorProcess {
     }
 }
 
-/// Bounded-kill and reap a spawned backend group so no error path leaks a process. Kills the
-/// whole group (`killpg`), then reaps the leader under a bounded timeout. Returns `Err` if the
-/// reap is NOT PROVEN (wait failed or timed out) — an unproven cleanup must dominate whatever
-/// error triggered it, never be silently ignored.
+/// Bounded-kill and reap a spawned backend GROUP so no error path leaks a process. Kills the
+/// whole group (`killpg`), reaps the leader under a bounded timeout, AND proves the whole owned
+/// group drained — not merely that the leader was reaped, because a broken backend may have forked
+/// a descendant before misbehaving. Returns `Err` if the reap or the drain is NOT PROVEN — an
+/// unproven cleanup must DOMINATE whatever error triggered it, never be silently ignored.
 async fn kill_and_reap(child: &mut tokio::process::Child, pgid: i32) -> Result<(), BoundaryError> {
     use nix::sys::signal::{killpg, Signal};
     use nix::unistd::Pid;
@@ -572,19 +534,41 @@ async fn kill_and_reap(child: &mut tokio::process::Child, pgid: i32) -> Result<(
     }
     let _ = child.start_kill();
     match tokio::time::timeout(std::time::Duration::from_secs(2), child.wait()).await {
-        Ok(Ok(_)) => Ok(()),
-        Ok(Err(e)) => Err(BoundaryError::Wait(e)),
-        Err(_) => Err(BoundaryError::Signal(
-            "backend cleanup did not complete: reap timed out".to_owned(),
-        )),
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => return Err(BoundaryError::Wait(e)),
+        Err(_) => {
+            return Err(BoundaryError::Signal(
+                "backend cleanup did not complete: leader reap timed out".to_owned(),
+            ))
+        }
     }
+    // Prove the whole GROUP drained. The leader is reaped; any surviving descendant is orphaned to
+    // init (which reaps it once our SIGKILL lands), so re-signal and poll membership to empty.
+    if pgid > 0 {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            match ProcessIdentity::enumerate_group(pgid) {
+                Ok(members) if members.is_empty() => return Ok(()),
+                Ok(_) => {}
+                Err(e) => return Err(BoundaryError::Membership(e.to_string())),
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(BoundaryError::Signal(
+                    "backend cleanup did not complete: owned group did not drain".to_owned(),
+                ));
+            }
+            let _ = killpg(Pid::from_raw(pgid), Signal::SIGKILL);
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    }
+    Ok(())
 }
 
 #[async_trait]
 impl ProcessBoundary for SandboyBoundary {
     async fn spawn(&self, spec: BoundarySpawnSpec) -> Result<BoundaryLaunch, BoundaryError> {
         use std::io::{Read as _, Write as _};
-        use std::os::fd::AsRawFd as _;
+        use std::os::unix::net::UnixStream;
 
         if !cfg!(target_os = "linux") {
             return Err(BoundaryError::UnsupportedPlatform);
@@ -602,9 +586,15 @@ impl ProcessBoundary for SandboyBoundary {
             .nonce_source
             .mint()
             .map_err(|e| BoundaryError::Spawn(io::Error::other(e.to_string())))?;
-        // Acquire the TARGET into a sealed memfd: the parent seals exactly the object it will
-        // hand the backend and binds the launch to its digest, closing the hash→exec TOCTOU.
-        let target = SealedObject::stage(&spec.executable)
+        // Acquire the TARGET into a sealed memfd OFF the runtime thread: the hardened open plus a
+        // bounded read of up to 256 MiB must not block the async executor, and a cancelled launch
+        // must not wait on filesystem I/O. No process exists yet, so a cancel here needs no reap.
+        let exe = spec.executable.clone();
+        let target = tokio::task::spawn_blocking(move || SealedObject::stage(&exe))
+            .await
+            .map_err(|e| {
+                BoundaryError::Spawn(io::Error::other(format!("target acquisition task: {e}")))
+            })?
             .map_err(|e| BoundaryError::Spawn(io::Error::other(format!("target: {e}"))))?;
         let request = self
             .launch_request(&spec, target.digest().clone(), &nonce)
@@ -613,26 +603,8 @@ impl ProcessBoundary for SandboyBoundary {
             .map_err(|e| BoundaryError::Evidence(e.to_string()))?;
         let launch_spec_digest = request.spec_digest();
 
-        // Three channels. The BACKEND end of each stays inheritable (non-CLOEXEC); the PARENT
-        // end is marked CLOEXEC so it never leaks into the backend.
-        //   report : backend WRITES, parent READS
-        //   request: parent WRITES, backend READS
-        //   control: parent WRITES GO, backend READS
-        let (report_r, report_w) = make_pipe()?;
-        let (request_r, request_w) = make_pipe()?;
-        let (control_r, control_w) = make_pipe()?;
-        for parent_end in [&report_r, &request_w, &control_w] {
-            set_cloexec(parent_end)?;
-        }
-
         let mut arguments: Vec<OsString> = vec![
             OsString::from("run"),
-            OsString::from("--report-fd"),
-            OsString::from(report_w.as_raw_fd().to_string()),
-            OsString::from("--control-fd"),
-            OsString::from(control_r.as_raw_fd().to_string()),
-            OsString::from("--request-fd"),
-            OsString::from(request_r.as_raw_fd().to_string()),
             OsString::from("--launch-nonce"),
             OsString::from(nonce.as_str()),
         ];
@@ -641,21 +613,30 @@ impl ProcessBoundary for SandboyBoundary {
         // The backend execs the SEALED target object, not the caller's mutable path.
         arguments.push(target.descriptor_path().into_os_string());
 
+        // A SINGLE bidirectional control socket, CLOEXEC FROM CREATION (std sets close-on-exec on
+        // both ends of the pair), so no unrelated concurrent spawn can inherit a control descriptor
+        // and there is NO fcntl clear-CLOEXEC window. The backend end is mapped RACE-FREE onto the
+        // child's STDIN by `Command` (an atomic dup in the forked child), so the transport rides
+        // fd 0 alone — never a numbered descriptor on the /proc-visible argv. Over it:
+        //   parent → one request frame; backend → one report frame then half-close (parent proves
+        //   EOF); parent → GO byte. A NACK is the parent dropping its end (the backend reads EOF).
+        let (parent_sock, child_sock) = UnixStream::pair().map_err(BoundaryError::Spawn)?;
+
         let mut cmd = tokio::process::Command::new(self.backend.descriptor_path());
         cmd.args(&arguments)
             .current_dir("/")
             .env_clear()
             .envs(self.backend_environment())
-            .stdin(std::process::Stdio::null())
+            .stdin(std::process::Stdio::from(std::os::fd::OwnedFd::from(
+                child_sock,
+            )))
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .process_group(0)
             .kill_on_drop(true);
         let mut child = cmd.spawn().map_err(BoundaryError::Spawn)?;
-        // The backend now holds its inherited ends; the parent drops its copies of them.
-        drop(report_w);
-        drop(request_r);
-        drop(control_r);
+        // `child_sock` was consumed by the Command (mapped to the child's stdin and then closed in
+        // the parent); the parent holds only `parent_sock`.
 
         let pid = match signalable_pid(child.id()) {
             Ok(p) => p,
@@ -665,52 +646,53 @@ impl ProcessBoundary for SandboyBoundary {
                 return Err(e);
             }
         };
-        let identity = ProcessIdentity::read(pid).unwrap_or(ProcessIdentity {
-            pid,
-            process_group: pid,
-            start_time_ticks: 0,
-        });
+        // A FullyEnforced boundary MUST bind a LIVE process identity (the start time closes the
+        // PID-reuse gap). If it cannot be read, fail closed with cleanup — never a synthetic
+        // `start_time_ticks = 0` that would weaken exactly the layer that must be strictest.
+        let identity = match ProcessIdentity::read(pid) {
+            Some(id) => id,
+            None => {
+                kill_and_reap(&mut child, pid).await?;
+                return Err(BoundaryError::Spawn(io::Error::other(
+                    "could not read the live process identity of the confined monitor",
+                )));
+            }
+        };
 
-        // Write the bounded request, then read exactly one bounded report frame AND prove it is
-        // the ENTIRE message: after the declared body, one more read must be EOF. The backend
-        // closes its report writer after the single frame (BEFORE it blocks on GO), so this is a
-        // deterministic end-of-message — not a racy nonblocking peek. A trailing byte is a
-        // protocol violation and fails closed. Offloaded so the blocking pipe ops do not stall the
-        // runtime, and wrapped in a wall-clock bound so a stalled backend cannot hang the launch.
-        let mut req_file = std::fs::File::from(request_w);
-        let mut rep_file = std::fs::File::from(report_r);
-        let read_report = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<u8>> {
-            req_file.write_all(&request_bytes)?;
-            drop(req_file); // close so the backend's request read completes
-            let mut len_buf = [0u8; 4];
-            rep_file.read_exact(&mut len_buf)?;
-            let len = u32::from_be_bytes(len_buf) as usize;
-            if len > o7_sandbox_protocol::frame::MAX_REPORT_BYTES {
-                return Err(std::io::Error::other(
-                    "report frame body exceeds the maximum",
-                ));
-            }
-            let mut body = vec![0u8; len];
-            rep_file.read_exact(&mut body)?;
-            // Confirm end-of-message: the report channel must be at EOF now. A blocking read (the
-            // writer is still open until the backend closes it after the frame) returns 0 on a
-            // clean close, or >0 if the backend appended a trailing byte.
-            let mut extra = [0u8; 1];
-            match rep_file.read(&mut extra)? {
-                0 => {}
-                _ => {
+        // Send the request, read exactly one report frame, AND prove end-of-message: after the
+        // declared body one more read must be EOF (the backend half-closes its write side after the
+        // single frame), so a trailing byte fails closed. All on the one socket, offloaded so the
+        // blocking ops do not stall the runtime, and wall-clock bounded so a stall cannot hang.
+        let read_report =
+            tokio::task::spawn_blocking(move || -> std::io::Result<(UnixStream, Vec<u8>)> {
+                let mut sock = parent_sock;
+                sock.write_all(&request_bytes)?;
+                let mut len_buf = [0u8; 4];
+                sock.read_exact(&mut len_buf)?;
+                let len = u32::from_be_bytes(len_buf) as usize;
+                if len > o7_sandbox_protocol::frame::MAX_REPORT_BYTES {
                     return Err(std::io::Error::other(
-                        "trailing bytes after the report frame",
-                    ))
+                        "report frame body exceeds the maximum",
+                    ));
                 }
-            }
-            let mut frame = len_buf.to_vec();
-            frame.extend_from_slice(&body);
-            Ok(frame)
-        });
+                let mut body = vec![0u8; len];
+                sock.read_exact(&mut body)?;
+                let mut extra = [0u8; 1];
+                match sock.read(&mut extra)? {
+                    0 => {}
+                    _ => {
+                        return Err(std::io::Error::other(
+                            "trailing bytes after the report frame",
+                        ))
+                    }
+                }
+                let mut frame = len_buf.to_vec();
+                frame.extend_from_slice(&body);
+                Ok((sock, frame))
+            });
         let io = tokio::time::timeout(std::time::Duration::from_secs(10), read_report).await;
-        let report_bytes = match io {
-            Ok(Ok(Ok(bytes))) => bytes,
+        let (sock, report_bytes) = match io {
+            Ok(Ok(Ok(pair))) => pair,
             _ => {
                 // The backend never delivered a well-formed single frame (it exited first, stalled,
                 // or appended trailing bytes). Fail closed; cleanup failure dominates.
@@ -721,26 +703,30 @@ impl ProcessBoundary for SandboyBoundary {
             }
         };
 
-        // Verify every binding. On failure: withhold GO (drop control_w → the backend reads EOF
-        // and never starts the target) and reap the backend. Fail closed.
+        // Verify every binding. On failure: withhold GO (drop the socket → the backend's GO read
+        // sees EOF and never starts the target) and reap the backend group. Fail closed.
         let evidence = match self.verify_report(&report_bytes, &nonce, &launch_spec_digest) {
             Ok(ev) => ev,
             Err(e) => {
-                drop(control_w);
+                drop(sock);
                 kill_and_reap(&mut child, pid).await?;
                 return Err(BoundaryError::Evidence(e.to_string()));
             }
         };
 
-        // Authorized: send GO, then hand back the live monitor as the owned group leader.
-        let mut ctl = std::fs::File::from(control_w);
-        if ctl.write_all(b"G").is_err() {
+        // Authorized: send GO over the reverse direction of the socket, then hand back the live
+        // monitor as the owned group leader.
+        let go = tokio::task::spawn_blocking(move || {
+            let mut sock = sock;
+            sock.write_all(b"G")
+        })
+        .await;
+        if !matches!(go, Ok(Ok(()))) {
             kill_and_reap(&mut child, pid).await?;
             return Err(BoundaryError::Evidence(
                 "failed to authorize the target (GO)".to_owned(),
             ));
         }
-        drop(ctl);
 
         Ok(BoundaryLaunch {
             process: Box::new(SandboyMonitorProcess {

@@ -1,17 +1,17 @@
 //! A CONTROLLED fake `sandboy` backend for the launch acceptance matrix. It speaks the real
-//! protocol AND respects the chosen MONITOR topology: reconstruct the policy from the flags,
-//! emit ONE bound report frame on `--report-fd` and CLOSE the report writer (so the parent can
-//! prove the frame is the whole message by reading EOF), wait for the parent's GO byte on
-//! `--control-fd`, then — on GO — SCRUB every inherited descriptor except stdio and start the
-//! target as a CHILD that INHERITS the monitor's process group, remaining alive as the monitor
-//! that owns the group and relays the target's exit. It never `exec`s into the target (which
-//! would make it disappear, the rejected exec-in-place architecture). It misbehaves on demand
-//! via its own (trusted, control-plane) environment variable `O7_FAKE_MODE` — never the target's
-//! env.
+//! protocol AND respects the chosen MONITOR topology over a SINGLE bidirectional control socket on
+//! its STDIN (fd 0): read the launch request frame, emit ONE bound report frame then HALF-CLOSE
+//! the write side (so the parent can prove the frame is the whole message by reading EOF), read
+//! the parent's GO byte, then — on GO — CLOSE the control socket, SCRUB every inherited descriptor
+//! except stdout/stderr, and start the target as a CHILD that INHERITS the monitor's process
+//! group (its stdin forced to null), remaining alive as the monitor that owns the group and relays
+//! the target's exit. It never `exec`s into the target (the rejected exec-in-place architecture).
+//! It misbehaves on demand via its own (trusted, control-plane) environment variable
+//! `O7_FAKE_MODE` — never the target's env.
 //!
 //! Test infrastructure: built by the o7-worker package so integration tests can locate it via
-//! `CARGO_BIN_EXE_sandboy_fake`, and exercised once the live launch lands GREEN. `unsafe`
-//! stays forbidden (fd access via `/proc/self/fd/<n>`; fd close via nix; no `exec`).
+//! `CARGO_BIN_EXE_sandboy_fake`. `unsafe` stays forbidden (the control socket comes from a SAFE
+//! clone of stdin's descriptor; fd close via nix; no `exec`).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -22,8 +22,11 @@
 
 use std::ffi::OsString;
 use std::io::{Read as _, Write as _};
+use std::net::Shutdown;
+use std::os::fd::AsFd as _;
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use o7_sandbox_protocol::frame::encode;
@@ -32,12 +35,10 @@ use o7_sandbox_protocol::policy::{Enforcement, NetworkPolicy, SandboxPolicy};
 use o7_sandbox_protocol::report::SandboxReport;
 use o7_sandbox_protocol::SCHEMA_VERSION;
 
-/// A minimal parse of the argv this backend understands. Sensitive target values (env) do NOT
-/// ride the argv (visible via `/proc`); only the non-sensitive target path/args/cwd do.
+/// A minimal parse of the argv this backend understands. The control transport is NOT on the argv:
+/// it is the single socket on stdin. Sensitive target values (env) do NOT ride the argv (visible
+/// via `/proc`); only the non-sensitive target path/args/cwd do.
 struct Args {
-    report_fd: i32,
-    control_fd: i32,
-    request_fd: i32,
     nonce: String,
     worktree: PathBuf,
     timeout_ms: u128,
@@ -51,9 +52,6 @@ fn parse_args() -> Option<Args> {
     if it.next()?.to_str()? != "run" {
         return None;
     }
-    let mut report_fd = None;
-    let mut control_fd = None;
-    let mut request_fd = None;
     let mut nonce = None;
     let mut worktree = None;
     let mut timeout_ms = None;
@@ -63,9 +61,6 @@ fn parse_args() -> Option<Args> {
         let flag = it.next()?;
         let flag = flag.to_str()?;
         match flag {
-            "--report-fd" => report_fd = Some(it.next()?.to_str()?.parse().ok()?),
-            "--control-fd" => control_fd = Some(it.next()?.to_str()?.parse().ok()?),
-            "--request-fd" => request_fd = Some(it.next()?.to_str()?.parse().ok()?),
             "--launch-nonce" => nonce = Some(it.next()?.to_str()?.to_owned()),
             "--deny-net" => {}
             "--worktree" => worktree = Some(PathBuf::from(it.next()?)),
@@ -79,9 +74,6 @@ fn parse_args() -> Option<Args> {
     // Only the target EXECUTABLE follows the separator; argv/cwd/env come from the request.
     let target = PathBuf::from(it.next()?);
     Some(Args {
-        report_fd: report_fd?,
-        control_fd: control_fd?,
-        request_fd: request_fd?,
         nonce: nonce?,
         worktree: worktree?,
         timeout_ms: timeout_ms?,
@@ -89,6 +81,28 @@ fn parse_args() -> Option<Args> {
         allow_env,
         target,
     })
+}
+
+/// The control socket: a SAFE owned clone of stdin's descriptor (fd 0), which the parent mapped to
+/// a `UnixStream` end. No `unsafe` `from_raw_fd` — `try_clone_to_owned` dups it for us.
+fn control_socket() -> Option<UnixStream> {
+    let owned = std::io::stdin().as_fd().try_clone_to_owned().ok()?;
+    Some(UnixStream::from(owned))
+}
+
+/// Read exactly one length-prefixed frame (4-byte BE length + body) from `sock`, bounded by `max`.
+fn read_frame(sock: &mut UnixStream, max: usize) -> Option<Vec<u8>> {
+    let mut len_buf = [0u8; 4];
+    sock.read_exact(&mut len_buf).ok()?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+    if len > max {
+        return None;
+    }
+    let mut body = vec![0u8; len];
+    sock.read_exact(&mut body).ok()?;
+    let mut frame = len_buf.to_vec();
+    frame.extend_from_slice(&body);
+    Some(frame)
 }
 
 fn reconstructed_policy(args: &Args) -> SandboxPolicy {
@@ -120,6 +134,7 @@ fn run() -> i32 {
     let mut pid_file = None;
     let mut ready_file = None;
     let mut release_file = None;
+    let mut desc_file = None;
     for kv in parts {
         if let Some(path) = kv.strip_prefix("pid=") {
             pid_file = Some(path.to_owned());
@@ -127,6 +142,8 @@ fn run() -> i32 {
             ready_file = Some(path.to_owned());
         } else if let Some(path) = kv.strip_prefix("release=") {
             release_file = Some(path.to_owned());
+        } else if let Some(path) = kv.strip_prefix("desc=") {
+            desc_file = Some(path.to_owned());
         }
     }
     // Record this backend's pid EARLY so a test can observe reap/teardown even when spawn is
@@ -139,10 +156,17 @@ fn run() -> i32 {
         return 70; // die before delivering anything
     }
 
-    // Read the out-of-band launch request (target argv/cwd/env/stdin + target_digest).
-    let request_path = format!("/proc/self/fd/{}", args.request_fd);
-    let request_bytes = std::fs::read(&request_path).unwrap_or_default();
-    let request = match o7_sandbox_protocol::request::decode(&request_bytes) {
+    // The control transport is a SINGLE bidirectional socket on stdin (fd 0).
+    let Some(mut sock) = control_socket() else {
+        return 62;
+    };
+    // Read the out-of-band launch request frame (target argv/cwd/env/stdin + target_digest).
+    let Some(request_frame) =
+        read_frame(&mut sock, o7_sandbox_protocol::request::MAX_REQUEST_BYTES)
+    else {
+        return 63;
+    };
+    let request = match o7_sandbox_protocol::request::decode(&request_frame) {
         Ok(r) => r,
         Err(_) => return 63,
     };
@@ -172,9 +196,24 @@ fn run() -> i32 {
         _ => {}
     }
 
-    // Emit the report frame on the report descriptor (or malformed bytes on demand).
-    let report_path = format!("/proc/self/fd/{}", args.report_fd);
-    let frame: Vec<u8> = if mode == "malformed" {
+    // `fork_before_bad_report`: a BROKEN backend that forks a live descendant (inheriting the
+    // leader's owned group) BEFORE it delivers a bad report. The parent must reap the whole GROUP,
+    // not just the leader. The BACKEND records the descendant's pid synchronously (from the spawn
+    // handle) so the test observes it without racing the cleanup; the report is then malformed.
+    if mode == "fork_before_bad_report" {
+        let mut d = Command::new("/bin/sleep");
+        d.arg("5");
+        if let Ok(child) = d.spawn() {
+            if let Some(path) = &desc_file {
+                let _ = std::fs::write(path, child.id().to_string());
+            }
+            // Do not wait/kill it here — it is owned by the group and must be reaped by the
+            // PARENT's group teardown. (std `Child` drop neither waits nor kills.)
+        }
+    }
+
+    // Build the report frame (or malformed bytes on demand).
+    let frame: Vec<u8> = if mode == "malformed" || mode == "fork_before_bad_report" {
         b"this is not a valid length-prefixed frame".to_vec()
     } else {
         let Ok(nonce) = LaunchNonce::parse(&nonce) else {
@@ -198,51 +237,48 @@ fn run() -> i32 {
             Err(_) => return 65,
         }
     };
-    // `stall_mid_report`: write a length prefix + only a PARTIAL body, then stall forever, so the
-    // parent's bounded frame read blocks mid-frame and a cancel must reap this backend.
+    // `stall_mid_report`: write a length prefix + only a PARTIAL body, then stall forever (writer
+    // NOT half-closed), so the parent's bounded frame read blocks mid-frame and a cancel must reap.
     if mode == "stall_mid_report" {
-        if let Ok(mut w) = std::fs::OpenOptions::new().write(true).open(&report_path) {
-            let _ = w.write_all(&100u32.to_be_bytes()); // claim 100 bytes
-            let _ = w.write_all(b"partial"); // deliver only 7
-            let _ = w.flush();
-        }
+        let _ = sock.write_all(&100u32.to_be_bytes()); // claim 100 bytes
+        let _ = sock.write_all(b"partial"); // deliver only 7
+        let _ = sock.flush();
         loop {
             std::thread::sleep(Duration::from_secs(3600));
         }
     }
 
-    match std::fs::OpenOptions::new().write(true).open(&report_path) {
-        Ok(mut w) => {
-            if w.write_all(&frame).is_err() {
-                return 66;
-            }
-            // `trailing`: emit a SECOND, unexpected byte after the single frame. A correct parent
-            // must reject the trailing byte and never authorize the target.
-            if mode == "trailing" {
-                let _ = w.write_all(b"X");
-            }
-        }
-        Err(_) => return 66,
+    if sock.write_all(&frame).is_err() {
+        return 66;
     }
-    // CLOSE the report writer now — after exactly one frame, BEFORE waiting for GO — so the
-    // parent can prove the frame is the ENTIRE message by reading EOF. Both this /proc write
-    // handle (dropped above) and the inherited report descriptor must close; report and control
-    // are separate pipes, so the target-hold barrier (GO) still works.
-    let _ = nix::unistd::close(args.report_fd);
+    // `trailing`: emit a SECOND, unexpected byte after the single frame. A correct parent must
+    // reject the trailing byte and never authorize the target.
+    if mode == "trailing" {
+        let _ = sock.write_all(b"X");
+    }
+    // HALF-CLOSE the write side after exactly one frame, BEFORE reading GO — so the parent can
+    // prove the frame is the ENTIRE message by reading EOF. The read side stays open for GO.
+    if sock.shutdown(Shutdown::Write).is_err() {
+        return 66;
+    }
 
-    // Wait for the parent's GO ('G') before starting the target. Anything else / EOF is a NACK.
-    let control_path = format!("/proc/self/fd/{}", args.control_fd);
+    // Read the parent's GO ('G') from the socket before starting the target. EOF / anything else
+    // is a NACK — fail closed, target never runs.
     let mut go = [0u8; 1];
-    match std::fs::File::open(&control_path).and_then(|mut f| f.read_exact(&mut go)) {
+    match sock.read_exact(&mut go) {
         Ok(()) if go[0] == b'G' => {}
-        _ => return 67, // NACK / EOF — fail closed, target never runs.
+        _ => return 67,
     }
+    // Close the control socket entirely before the target starts (the dup handle here plus fd 0).
+    drop(sock);
+    let _ = nix::unistd::close(0);
 
-    // SCRUB the whole inherited descriptor set except stdio (0/1/2): enumerate /proc/self/fd and
-    // close every other fd, so neither a control-plane channel NOR any other inherited descriptor
-    // leaks into the target. A range or a fixed three-fd close is not enough — an arbitrary high
-    // fd would survive. We are single-threaded here, so enumerate-then-close is race-free (collect
-    // all numbers first, then close, so we never mutate the directory we are iterating).
+    // SCRUB the whole inherited descriptor set except stdout/stderr (1/2): enumerate /proc/self/fd
+    // and close every other fd, so neither the control channel NOR any other inherited descriptor
+    // leaks into the target. A range or a fixed close set is not enough — an arbitrary high fd
+    // would survive. Single-threaded here, so enumerate-then-close is race-free (collect all
+    // numbers first, then close, so we never mutate the directory we are iterating). fd 0 is
+    // already closed above; the target's own stdin is set to null below.
     let mut inherited = Vec::new();
     if let Ok(entries) = std::fs::read_dir("/proc/self/fd") {
         for entry in entries.flatten() {
@@ -296,7 +332,9 @@ fn run() -> i32 {
             .map(|a| OsString::from(std::ffi::OsStr::from_bytes(a))),
     )
     .current_dir(PathBuf::from(std::ffi::OsStr::from_bytes(&request.cwd)))
-    .env_clear();
+    .env_clear()
+    // The target's stdin is NULL — never the control socket (which lived on the backend's fd 0).
+    .stdin(Stdio::null());
     for entry in &request.env {
         cmd.env(
             std::ffi::OsStr::from_bytes(&entry.name),
