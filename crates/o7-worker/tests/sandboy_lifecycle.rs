@@ -9,9 +9,9 @@
 //!   a specific fail-closed error, the target never runs, and the backend's exact pid is reaped
 //!   within a bound. RED for `trailing` (A1 authorizes the target and the backend lives on).
 //! - `the_monitor_owns_the_target_tree_for_membership_and_teardown` — the target forks a live
-//!   descendant; the owned set must include the target, and `force_stop` must reap the monitor,
-//!   the target AND the descendant, leaving an empty membership. RED: the fake starts the target
-//!   in its own group, so the monitor owns none of it.
+//!   descendant; the boundary identity is the monitor leader, the LIVE owned set lists the whole
+//!   tree (monitor + target + descendant), and `force_stop` reaps all of it, leaving an empty
+//!   membership. RED: the fake starts the target in its own group, so the monitor owns none of it.
 //! - `a_monitor_that_exits_while_the_target_lives_is_not_a_clean_run` — losing the monitor while
 //!   an owned target is alive must make `wait()` return `Err`, tear the target down, and leave an
 //!   empty membership. RED: A1 reports a clean `Code(0)`.
@@ -246,9 +246,12 @@ async fn the_monitor_owns_the_target_tree_for_membership_and_teardown() {
         .await
         .expect("descendant pid");
 
-    // Membership while the tree is alive.
+    // The boundary's identity must BE the monitor leader, and the LIVE owned set must list the
+    // whole tree — monitor + target + descendant — not just the target. Otherwise A3 could return
+    // membership for the target alone and separately hunt the descendant, passing this test on an
+    // incomplete `remaining_members`. Snapshot both before teardown.
+    let leader_pid = launch.process.identity().pid;
     let members = launch.process.remaining_members().await.expect("members");
-    let target_owned = members.iter().any(|m| m.pid == target_pid);
 
     // Tear down BEFORE asserting, so a RED membership check never leaks the tree.
     launch.process.force_stop().await.expect("force_stop");
@@ -263,10 +266,16 @@ async fn the_monitor_owns_the_target_tree_for_membership_and_teardown() {
         .await
         .expect("members after");
 
-    assert!(
-        target_owned,
-        "the monitor must OWN the target (owned set {members:?} missing pid {target_pid})"
+    assert_eq!(
+        leader_pid, monitor_pid,
+        "the boundary's identity must be the monitor leader"
     );
+    for expected in [monitor_pid, target_pid, child_pid] {
+        assert!(
+            members.iter().any(|member| member.pid == expected),
+            "owned membership is missing pid {expected}: {members:?}"
+        );
+    }
     assert!(target_gone, "force_stop must tear the target down");
     assert!(
         child_gone,
