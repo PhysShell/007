@@ -16,7 +16,8 @@ mod common;
 use common::*;
 use o7_run::event::{
     AgentObligation, AgentOutcome, ArtifactKind, ExecutionSubject, GateOutcome, PolicyOutcome,
-    PolicyRequirement, RunContract, SandboxEvidenceOutcome, SandboxRequirement,
+    PolicyProtectedSubject, PolicyRequirement, RunContract, SandboxEvidenceOutcome,
+    SandboxRequirement,
 };
 use o7_run::reduce::ReduceError;
 use o7_run::{reduce_all, Digest256, PolicyObligation, RunEvent, RunEventKind, RunId, Verdict};
@@ -326,9 +327,11 @@ fn a_policy_engine_error_is_error() {
 // ============================ verdict reduction: sandbox ============================
 
 fn sandbox_stream(evidence: Vec<RunEventKind>) -> Vec<RunEvent> {
+    // A GATE subject (build is required+applicable), so the requirement is valid even though
+    // this fixture declares no agent.
     let mut kinds = vec![run_started(contract_sandboxed(
         vec![req("build")],
-        vec![agent_sandbox_requirement()],
+        vec![gate_sandbox_requirement("build")],
     ))];
     kinds.extend(evidence);
     kinds.push(RunEventKind::GateStarted {
@@ -345,7 +348,9 @@ fn sandbox_stream(evidence: Vec<RunEventKind>) -> Vec<RunEvent> {
 
 fn evidence(outcome: SandboxEvidenceOutcome, policy_digest: Digest256) -> RunEventKind {
     RunEventKind::SandboxEvidenceCaptured {
-        subject: ExecutionSubject::Agent,
+        subject: ExecutionSubject::Gate {
+            gate: gate("build"),
+        },
         policy_digest,
         report: artifact(ArtifactKind::SandboxReport, "sandbox.json", b"{}"),
         outcome,
@@ -800,7 +805,7 @@ fn a_protected_subject_starting_before_its_policy_is_allowed_fails_loudly() {
         policy_obligations: vec![PolicyObligation {
             policy: policy_artifact(),
             requirement: PolicyRequirement::Required,
-            protects: vec![ExecutionSubject::Agent],
+            protects: vec![PolicyProtectedSubject::Agent],
         }],
         sandbox_requirements: Vec::new(),
         agent: AgentObligation::Required,
@@ -828,7 +833,10 @@ fn a_duplicate_sandbox_requirement_fails_loudly() {
     let events = chained(vec![
         run_started(contract_sandboxed(
             vec![req("build")],
-            vec![agent_sandbox_requirement(), agent_sandbox_requirement()],
+            vec![
+                gate_sandbox_requirement("build"),
+                gate_sandbox_requirement("build"),
+            ],
         )),
         RunEventKind::RunSealed,
     ]);
@@ -859,7 +867,7 @@ fn a_duplicate_sandbox_evidence_fails_loudly() {
     let events = chained(vec![
         run_started(contract_sandboxed(
             vec![req("build")],
-            vec![agent_sandbox_requirement()],
+            vec![gate_sandbox_requirement("build")],
         )),
         evidence(SandboxEvidenceOutcome::Satisfied, sandbox_policy_digest()),
         evidence(SandboxEvidenceOutcome::Satisfied, sandbox_policy_digest()),
@@ -981,10 +989,12 @@ fn every_artifact_slot_enforces_its_kind() {
     let bad_report = chained(vec![
         run_started(contract_sandboxed(
             vec![req("build")],
-            vec![agent_sandbox_requirement()],
+            vec![gate_sandbox_requirement("build")],
         )),
         RunEventKind::SandboxEvidenceCaptured {
-            subject: ExecutionSubject::Agent,
+            subject: ExecutionSubject::Gate {
+                gate: gate("build"),
+            },
             policy_digest: sandbox_policy_digest(),
             report: artifact(ArtifactKind::Task, "sandbox.json", b"x"),
             outcome: SandboxEvidenceOutcome::Satisfied,
@@ -1043,4 +1053,239 @@ fn an_event_after_seal_fails_loudly() {
         structural_err(&[e0, e1, e2]),
         ReduceError::EventAfterSeal { .. }
     ));
+}
+
+// ============================ structural: subject/obligation consistency =============
+
+#[test]
+fn a_waiver_for_a_different_environment_fails_loudly() {
+    // Waived for windows, but the run environment is linux — a self-contradictory contract.
+    let events = chained(vec![
+        run_started(contract(vec![
+            req("build"),
+            waived("win-only", "windows", "windows-only check"),
+        ])),
+        RunEventKind::RunSealed,
+    ]);
+    assert!(matches!(
+        structural_err(&events),
+        ReduceError::WaiverEnvironmentMismatch { .. }
+    ));
+}
+
+#[test]
+fn an_agent_sandbox_requirement_without_an_agent_fails_loudly() {
+    let events = chained(vec![
+        run_started(contract_sandboxed(
+            vec![req("build")],
+            vec![agent_sandbox_requirement()], // Agent subject, but contract is NotUsed
+        )),
+        RunEventKind::RunSealed,
+    ]);
+    assert!(matches!(
+        structural_err(&events),
+        ReduceError::SandboxAgentSubjectWithoutAgent
+    ));
+}
+
+#[test]
+fn a_gate_sandbox_requirement_for_a_waived_gate_fails_loudly() {
+    let events = chained(vec![
+        run_started(contract_sandboxed(
+            vec![waived("build", "linux", "waived here")],
+            vec![gate_sandbox_requirement("build")],
+        )),
+        RunEventKind::RunSealed,
+    ]);
+    assert!(matches!(
+        structural_err(&events),
+        ReduceError::SandboxSubjectGateIneligible { .. }
+    ));
+}
+
+#[test]
+fn a_gate_sandbox_requirement_for_an_optional_gate_fails_loudly() {
+    // Otherwise an optional gate becomes implicitly required via its sandbox obligation.
+    let events = chained(vec![
+        run_started(contract_sandboxed(
+            vec![opt("build")],
+            vec![gate_sandbox_requirement("build")],
+        )),
+        RunEventKind::RunSealed,
+    ]);
+    assert!(matches!(
+        structural_err(&events),
+        ReduceError::SandboxSubjectGateIneligible { .. }
+    ));
+}
+
+#[test]
+fn a_policy_protecting_an_unknown_gate_fails_loudly() {
+    let events = chained(vec![
+        run_started(contract_policy(
+            vec![req("build")],
+            vec![required_policy(
+                policy_artifact(),
+                vec![PolicyProtectedSubject::Gate { gate: gate("nope") }],
+            )],
+        )),
+        RunEventKind::RunSealed,
+    ]);
+    assert!(matches!(
+        structural_err(&events),
+        ReduceError::PolicyProtectsUnknownGate { .. }
+    ));
+}
+
+#[test]
+fn a_policy_protecting_the_agent_without_an_agent_fails_loudly() {
+    let events = chained(vec![
+        run_started(contract_policy(
+            vec![req("build")],
+            vec![required_policy(
+                policy_artifact(),
+                vec![PolicyProtectedSubject::Agent],
+            )],
+        )),
+        RunEventKind::RunSealed,
+    ]);
+    assert!(matches!(
+        structural_err(&events),
+        ReduceError::PolicyProtectsAgentWithoutAgent
+    ));
+}
+
+#[test]
+fn a_duplicate_protected_subject_fails_loudly() {
+    let contract = RunContract {
+        gate_obligations: vec![req("build")],
+        policy_obligations: vec![PolicyObligation {
+            policy: policy_artifact(),
+            requirement: PolicyRequirement::Required,
+            protects: vec![PolicyProtectedSubject::Agent, PolicyProtectedSubject::Agent],
+        }],
+        sandbox_requirements: Vec::new(),
+        agent: AgentObligation::Required,
+        runner_environment: "linux".to_owned(),
+    };
+    let events = chained(vec![run_started(contract), RunEventKind::RunSealed]);
+    assert!(matches!(
+        structural_err(&events),
+        ReduceError::DuplicateProtectedSubject { .. }
+    ));
+}
+
+#[test]
+fn an_optional_policy_that_protects_a_subject_fails_loudly() {
+    let contract = RunContract {
+        gate_obligations: vec![req("build")],
+        policy_obligations: vec![PolicyObligation {
+            policy: policy_artifact(),
+            requirement: PolicyRequirement::Optional,
+            protects: vec![PolicyProtectedSubject::Agent],
+        }],
+        sandbox_requirements: Vec::new(),
+        agent: AgentObligation::Required,
+        runner_environment: "linux".to_owned(),
+    };
+    let events = chained(vec![run_started(contract), RunEventKind::RunSealed]);
+    assert!(matches!(
+        structural_err(&events),
+        ReduceError::OptionalPolicyWithProtects { .. }
+    ));
+}
+
+// ============================ optional policy / optional gate tables ================
+
+fn optional_policy_stream(checks: Vec<RunEventKind>) -> Vec<RunEvent> {
+    let mut kinds = vec![run_started(contract_policy(
+        vec![req("build")],
+        vec![optional_policy(policy_artifact())],
+    ))];
+    kinds.extend(checks);
+    kinds.push(RunEventKind::GateStarted {
+        gate: gate("build"),
+    });
+    kinds.push(RunEventKind::GateFinished {
+        gate: gate("build"),
+        outcome: GateOutcome::Pass,
+        log: None,
+    });
+    kinds.push(RunEventKind::RunSealed);
+    chained(kinds)
+}
+
+#[test]
+fn an_optional_policy_never_blocks_for_any_outcome() {
+    // Absent.
+    assert_eq!(verdict_of(&optional_policy_stream(vec![])), Verdict::Pass);
+    // Present, for every outcome.
+    for outcome in [
+        PolicyOutcome::Allowed,
+        PolicyOutcome::Denied,
+        PolicyOutcome::Error,
+    ] {
+        let events = optional_policy_stream(vec![RunEventKind::PolicyChecked {
+            policy: policy_artifact(),
+            outcome,
+        }]);
+        assert_eq!(
+            verdict_of(&events),
+            Verdict::Pass,
+            "optional policy outcome {outcome:?} must be neutral"
+        );
+    }
+}
+
+#[test]
+fn an_optional_gate_never_blocks_for_any_outcome() {
+    // Absent (declared optional, never run).
+    let absent = chained(vec![
+        run_started(contract(vec![req("build"), opt("bench")])),
+        RunEventKind::GateStarted {
+            gate: gate("build"),
+        },
+        RunEventKind::GateFinished {
+            gate: gate("build"),
+            outcome: GateOutcome::Pass,
+            log: None,
+        },
+        RunEventKind::RunSealed,
+    ]);
+    assert_eq!(verdict_of(&absent), Verdict::Pass);
+
+    for outcome in [
+        GateOutcome::Pass,
+        GateOutcome::Fail,
+        GateOutcome::Warn,
+        GateOutcome::Blocked,
+        GateOutcome::NotApplicable,
+        GateOutcome::Error,
+    ] {
+        let events = chained(vec![
+            run_started(contract(vec![req("build"), opt("bench")])),
+            RunEventKind::GateStarted {
+                gate: gate("build"),
+            },
+            RunEventKind::GateFinished {
+                gate: gate("build"),
+                outcome: GateOutcome::Pass,
+                log: None,
+            },
+            RunEventKind::GateStarted {
+                gate: gate("bench"),
+            },
+            RunEventKind::GateFinished {
+                gate: gate("bench"),
+                outcome,
+                log: None,
+            },
+            RunEventKind::RunSealed,
+        ]);
+        assert_eq!(
+            verdict_of(&events),
+            Verdict::Pass,
+            "optional gate outcome {outcome:?} must be neutral"
+        );
+    }
 }

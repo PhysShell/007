@@ -54,8 +54,8 @@ pub mod state;
 pub use event::{
     AgentObligation, AgentOutcome, ArtifactKind, ArtifactRef, Digest256, DigestFormatError,
     ExecutionSubject, GateApplicability, GateObligation, GateOutcome, GateRequirement,
-    PolicyObligation, PolicyOutcome, PolicyRequirement, RunContract, RunEvent, RunEventKind,
-    SandboxEvidenceOutcome, SandboxRequirement, RUN_EVENT_SCHEMA_VERSION,
+    PolicyObligation, PolicyOutcome, PolicyProtectedSubject, PolicyRequirement, RunContract,
+    RunEvent, RunEventKind, SandboxEvidenceOutcome, SandboxRequirement, RUN_EVENT_SCHEMA_VERSION,
 };
 pub use ids::{GateId, IdError, RunEventId, RunId};
 pub use reduce::{reduce, reduce_all, ReduceError};

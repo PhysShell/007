@@ -14,8 +14,8 @@ use std::collections::HashMap;
 
 use o7_run::event::{
     AgentObligation, ArtifactKind, ArtifactRef, Digest256, ExecutionSubject, GateApplicability,
-    GateObligation, GateOutcome, GateRequirement, PolicyObligation, PolicyRequirement, RunContract,
-    SandboxRequirement, RUN_EVENT_SCHEMA_VERSION,
+    GateObligation, GateOutcome, GateRequirement, PolicyObligation, PolicyProtectedSubject,
+    PolicyRequirement, RunContract, SandboxRequirement, RUN_EVENT_SCHEMA_VERSION,
 };
 use o7_run::ids::{GateId, RunEventId, RunId};
 use o7_run::replay::{ArtifactError, ArtifactResolver};
@@ -117,7 +117,10 @@ pub fn policy_artifact() -> ArtifactRef {
     artifact(ArtifactKind::Policy, "policy.json", b"{\"net\":\"deny\"}")
 }
 
-pub fn required_policy(policy: ArtifactRef, protects: Vec<ExecutionSubject>) -> PolicyObligation {
+pub fn required_policy(
+    policy: ArtifactRef,
+    protects: Vec<PolicyProtectedSubject>,
+) -> PolicyObligation {
     PolicyObligation {
         policy,
         requirement: PolicyRequirement::Required,
@@ -125,10 +128,29 @@ pub fn required_policy(policy: ArtifactRef, protects: Vec<ExecutionSubject>) -> 
     }
 }
 
+pub fn optional_policy(policy: ArtifactRef) -> PolicyObligation {
+    PolicyObligation {
+        policy,
+        requirement: PolicyRequirement::Optional,
+        protects: Vec::new(),
+    }
+}
+
 pub fn sandbox_policy_digest() -> Digest256 {
     Digest256::of_bytes(b"agent-confinement-policy-v1")
 }
 
+/// A sandbox requirement for a GATE subject (valid with `AgentObligation::NotUsed`, provided
+/// the gate is required+applicable). Used by the sandbox verdict fixtures.
+pub fn gate_sandbox_requirement(name: &str) -> SandboxRequirement {
+    SandboxRequirement {
+        subject: ExecutionSubject::Gate { gate: gate(name) },
+        policy_digest: sandbox_policy_digest(),
+    }
+}
+
+/// A sandbox requirement for the AGENT subject (only valid with `AgentObligation::Required`);
+/// used by the structural test that rejects it under `NotUsed`.
 pub fn agent_sandbox_requirement() -> SandboxRequirement {
     SandboxRequirement {
         subject: ExecutionSubject::Agent,

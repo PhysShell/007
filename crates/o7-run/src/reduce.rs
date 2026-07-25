@@ -11,7 +11,7 @@
 //! payloads and checks each artifact's declared KIND); resolving and hashing artifact bytes
 //! belongs to [`crate::replay`].
 
-use crate::event::{ArtifactKind, Digest256, ExecutionSubject, RunEvent};
+use crate::event::{ArtifactKind, Digest256, ExecutionSubject, PolicyProtectedSubject, RunEvent};
 use crate::ids::{GateId, RunEventId, RunId};
 use crate::state::RunState;
 
@@ -110,6 +110,45 @@ pub enum ReduceError {
     /// An artifact reference carried an empty locator.
     #[error("empty artifact locator at sequence {sequence}")]
     EmptyArtifactLocator { sequence: u64 },
+
+    /// A gate is waived for a DIFFERENT environment than the run's — a self-contradictory
+    /// pre-run contract.
+    #[error("gate {gate} waived for {waiver_environment:?} but the run environment is {runner_environment:?}")]
+    WaiverEnvironmentMismatch {
+        gate: GateId,
+        waiver_environment: String,
+        runner_environment: String,
+    },
+
+    /// A sandbox requirement names the `Agent` subject, but the contract declares no agent.
+    #[error(
+        "sandbox requirement names the agent, but the contract declares AgentObligation::NotUsed"
+    )]
+    SandboxAgentSubjectWithoutAgent,
+
+    /// A sandbox requirement names a `Gate` subject that is not a required, applicable gate
+    /// (it is optional or waived) — which would make that gate implicitly required.
+    #[error("sandbox requirement references gate {gate}, which is not required+applicable")]
+    SandboxSubjectGateIneligible { gate: GateId },
+
+    /// A policy `protects` an unknown gate.
+    #[error("policy protects unknown gate {gate}: not a declared obligation")]
+    PolicyProtectsUnknownGate { gate: GateId },
+
+    /// A policy `protects` the agent, but the contract declares no agent.
+    #[error("policy protects the agent, but the contract declares AgentObligation::NotUsed")]
+    PolicyProtectsAgentWithoutAgent,
+
+    /// The same protected subject appears twice within one policy's `protects`.
+    #[error("duplicate protected subject in a policy obligation: {subject:?}")]
+    DuplicateProtectedSubject { subject: PolicyProtectedSubject },
+
+    /// A non-empty `protects` on an `Optional` policy — an optional pre-check cannot gate a
+    /// start.
+    #[error(
+        "optional policy {policy_digest} declares protected subjects; only a required policy may"
+    )]
+    OptionalPolicyWithProtects { policy_digest: Digest256 },
 
     /// A second `WorktreeCreated` (the singleton evidence slot cannot be overwritten).
     #[error("duplicate WorktreeCreated at sequence {sequence}")]

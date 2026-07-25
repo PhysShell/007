@@ -248,18 +248,32 @@ pub enum PolicyRequirement {
     Optional,
 }
 
+/// A subject a policy can PROTECT — restricted to subjects that have a canonical START event
+/// (`AgentStarted`, `GateStarted`). Deliberately NOT [`ExecutionSubject`], which includes
+/// `Verifier`: there is no `VerifierStarted` event, so a policy could otherwise promise a
+/// temporal ordering the reducer physically cannot enforce.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "protected", rename_all = "snake_case")]
+pub enum PolicyProtectedSubject {
+    /// The agent (its start is `AgentStarted`).
+    Agent,
+    /// A specific gate (its start is `GateStarted`).
+    Gate { gate: GateId },
+}
+
 /// A pre-declared policy obligation: which policy (bound by digest) must be checked, whether
 /// it is required, and which subjects it PROTECTS. A protected subject may not start before
 /// this policy has been checked `Allowed` — so a stream cannot faithfully record that the
-/// horse left before the barn door was inspected. Matched to a `PolicyChecked` event by the
-/// policy artifact's digest.
+/// horse left before the barn door was inspected. A non-empty `protects` is permitted ONLY
+/// on a `Required` policy (an optional pre-check cannot both be skippable and gate a start).
+/// Matched to a `PolicyChecked` event by the policy artifact's digest.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PolicyObligation {
     /// The policy definition (must be `ArtifactKind::Policy`).
     pub policy: ArtifactRef,
     pub requirement: PolicyRequirement,
     /// Subjects whose start must be preceded by an `Allowed` check of this policy.
-    pub protects: Vec<ExecutionSubject>,
+    pub protects: Vec<PolicyProtectedSubject>,
 }
 
 /// Whether a canonical run must run an agent. Declared up front so an agent cannot be made
@@ -328,13 +342,18 @@ pub enum AgentOutcome {
 /// One canonical run event's payload.
 ///
 /// EVENT CLASSIFICATION (also enforced by `tests/reducer_transitions.rs`):
-/// - **Verdict-bearing:** `RunStarted` (obligations), `AgentExited` (a fault/cleanup/
-///   cancellation forces `Error`), `PolicyChecked` (`Denied` → `Blocked`, `Error` →
-///   `Error`), `GateFinished` (its outcome), `SandboxEvidenceCaptured` (satisfies a
-///   requirement or not), `RunSealed` (finalizes).
+/// - **Verdict-bearing:** `RunStarted` (obligations), `AgentExited` (any non-`ExitedNormally
+///   {code:0}` outcome forces `Error`), `PolicyChecked`, `GateFinished`,
+///   `SandboxEvidenceCaptured`, `RunSealed` (finalizes).
 /// - **Lifecycle/structural:** `AgentStarted`, `GateStarted`, `RunSealed`.
 /// - **Evidence-only (verdict-neutral, but its artifact IS digest-verified in replay):**
 ///   `WorktreeCreated`, `PatchCaptured`.
+///
+/// A gate's or policy's verdict effect depends on its declared OBLIGATION, not the event
+/// alone. Only a `Required` obligation can move the verdict off `Pass`; an `Optional` gate or
+/// policy NEVER blocks, for ANY outcome (a required-`Denied`/`Error` policy → `Blocked`/
+/// `Error`, but the same outcome on an optional policy is neutral; likewise every outcome of
+/// an optional gate is neutral).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RunEventKind {
@@ -508,7 +527,7 @@ fn fold_contract(h: &mut Sha256, contract: &RunContract) {
         h.update([policy_requirement_tag(p.requirement)]);
         frame(h, &(p.protects.len() as u64).to_le_bytes());
         for s in &p.protects {
-            fold_subject(h, s);
+            fold_protected_subject(h, s);
         }
     }
     frame(
@@ -545,6 +564,16 @@ fn fold_subject(h: &mut Sha256, s: &ExecutionSubject) {
             frame(h, gate.as_str().as_bytes());
         }
         ExecutionSubject::Verifier => h.update([3u8]),
+    }
+}
+
+fn fold_protected_subject(h: &mut Sha256, s: &PolicyProtectedSubject) {
+    match s {
+        PolicyProtectedSubject::Agent => h.update([1u8]),
+        PolicyProtectedSubject::Gate { gate } => {
+            h.update([2u8]);
+            frame(h, gate.as_str().as_bytes());
+        }
     }
 }
 
