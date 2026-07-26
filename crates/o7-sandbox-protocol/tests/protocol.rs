@@ -317,6 +317,62 @@ fn a_launch_request_frame_round_trips() {
 }
 
 #[test]
+fn a_request_with_a_duplicate_env_name_is_refused() {
+    // The launch env is a SET keyed by name: `spec_digest` sorts it, and `SandboxPolicy::validate`
+    // rejects duplicate env names. `decode` must enforce the same set discipline on the wire — a
+    // frame smuggling two entries with the SAME name is ambiguous (which value the target keeps)
+    // and lets a multiset pose as a set. `encode` does not validate, so it is the exact vehicle for
+    // the RED reproducer.
+    let mut conflicting = a_request();
+    conflicting.env = vec![
+        o7_sandbox_protocol::EnvEntry {
+            name: b"PATH".to_vec(),
+            value: b"/usr/bin".to_vec(),
+        },
+        o7_sandbox_protocol::EnvEntry {
+            name: b"PATH".to_vec(),
+            value: b"/bin".to_vec(),
+        },
+    ];
+    let bytes = o7_sandbox_protocol::request::encode(&conflicting).expect("encodes");
+    assert!(
+        matches!(
+            o7_sandbox_protocol::request::decode(&bytes),
+            Err(o7_sandbox_protocol::RequestFrameError::DuplicateEnvName { .. })
+        ),
+        "a launch request with a duplicate env name must be refused at decode"
+    );
+
+    // The exact-duplicate case (same name AND value) is the multiset-as-set that changes the
+    // digest, and is likewise refused.
+    let mut exact = a_request();
+    exact.env = vec![
+        o7_sandbox_protocol::EnvEntry {
+            name: b"HOME".to_vec(),
+            value: b"/root".to_vec(),
+        },
+        o7_sandbox_protocol::EnvEntry {
+            name: b"HOME".to_vec(),
+            value: b"/root".to_vec(),
+        },
+    ];
+    let exact_bytes = o7_sandbox_protocol::request::encode(&exact).expect("encodes");
+    assert!(matches!(
+        o7_sandbox_protocol::request::decode(&exact_bytes),
+        Err(o7_sandbox_protocol::RequestFrameError::DuplicateEnvName { .. })
+    ));
+
+    // Positive control: the ordinary request (distinct PATH/HOME names, and an empty env)
+    // still round-trips, so the fix rejects duplicates rather than everything.
+    let ok = o7_sandbox_protocol::request::encode(&a_request()).expect("encodes");
+    o7_sandbox_protocol::request::decode(&ok).expect("distinct env names decode");
+    let mut empty = a_request();
+    empty.env = vec![];
+    let empty_bytes = o7_sandbox_protocol::request::encode(&empty).expect("encodes");
+    o7_sandbox_protocol::request::decode(&empty_bytes).expect("an empty env decodes");
+}
+
+#[test]
 fn a_truncated_or_oversized_request_is_rejected() {
     let bytes = o7_sandbox_protocol::request::encode(&a_request()).unwrap();
     assert!(o7_sandbox_protocol::request::decode(&bytes[..bytes.len() - 3]).is_err());

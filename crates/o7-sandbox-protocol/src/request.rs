@@ -8,6 +8,8 @@
 //! [`LaunchRequest::spec_digest`], so a report can bind not just "which binary" but "which exact
 //! invocation of it".
 
+use std::collections::BTreeSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{Digest256, LaunchNonce};
@@ -100,6 +102,14 @@ pub enum RequestFrameError {
     Trailing { extra: usize },
     #[error("request frame body invalid: {0}")]
     Body(String),
+    /// Two env entries share a name. The launch env is a SET keyed by name — `spec_digest`
+    /// sorts it and [`crate::SandboxPolicy::validate`] rejects duplicate env names — so a frame
+    /// carrying the same name twice is ambiguous (which value the target keeps) and would let a
+    /// multiset masquerade as a set (`[(A,1),(A,1)]` digests differently from `[(A,1)]`). It is
+    /// refused at the wire boundary so the request the backend decodes matches the set the parent
+    /// authorized.
+    #[error("request frame env has a duplicate name: {name:?}")]
+    DuplicateEnvName { name: Vec<u8> },
     #[error(
         "request frame schema version {found} != supported {}",
         crate::SCHEMA_VERSION
@@ -165,6 +175,18 @@ pub fn decode(bytes: &[u8]) -> Result<LaunchRequest, RequestFrameError> {
         return Err(RequestFrameError::UnsupportedVersion {
             found: request.schema_version,
         });
+    }
+    // The launch env is a SET keyed by name: `spec_digest` sorts it and the policy rejects
+    // duplicate env names, so decode must too. A repeated name is ambiguous (which value the
+    // target keeps) and lets a multiset pose as a set; reject it at the wire boundary rather than
+    // silently accept an env the parent never authorized as a set.
+    let mut seen_env: BTreeSet<&[u8]> = BTreeSet::new();
+    for entry in &request.env {
+        if !seen_env.insert(entry.name.as_slice()) {
+            return Err(RequestFrameError::DuplicateEnvName {
+                name: entry.name.clone(),
+            });
+        }
     }
     Ok(request)
 }
