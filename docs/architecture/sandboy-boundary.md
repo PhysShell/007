@@ -202,42 +202,53 @@ Each dimension names its concrete oracle (the acceptance tests live in
   becomes `enforced`.
 
 - **Network / seccomp.** The target cannot create an IPv4 or IPv6 socket; the denial is the exact
-  `EPERM`/`EACCES` — an `EAFNOSUPPORT` is NOT a denial. An UNCONFINED baseline first proves which
-  families this host supports, so a runner lacking IPv6 cannot masquerade as a working filter; only
-  host-supported families are held to the confined denial. No network descriptor is inherited
-  (`inherited_sockets=0`).
+  `EPERM`/`EACCES` — an `EAFNOSUPPORT` is NOT a denial. A MANDATORY unconfined baseline requires the
+  designated host to support IPv4 AND IPv6; a runner missing IPv6 is an environment gate FAILURE, not
+  a reason to drop the IPv6 leg. No network descriptor is inherited: a separate test PLANTS a real
+  non-CLOEXEC socket and confirms the confined target still reports `inherited_sockets=0`, and the
+  enumeration probe fails CLOSED (an enumeration/parse/readlink error exits non-zero with no success
+  marker, never a silent `0`).
 
 - **Environment.** The target receives exactly the allowlisted names; no backend/control
   environment reaches it. Inability to prove the exact env construction is not `env: enforced`.
   (Enforced today by plane separation — a GREEN carryover, not RED.)
 
-- **Process tree / seccomp escape.** `setsid` and `setpgid` are each denied with the exact `EPERM`
-  (a correct filter makes "the escape survives teardown" impossible, so escape-survival is NOT the
-  oracle — the denial errno is).
+- **Process tree / seccomp escape.** `setsid` and `setpgid` are each denied with the exact `EPERM`,
+  in SEPARATE probe processes each starting from the target's initial state — so `setpgid` cannot
+  pass merely because a prior `setsid` already made the process a session leader. Each has an
+  unconfined `OK` baseline. (A correct filter makes "the escape survives teardown" impossible, so
+  escape-survival is NOT the oracle — the denial errno is.)
 
 - **Process tree / cgroup v2.** Monitor, target, an ordinary child, and a DOUBLE-FORKED (reparented)
   descendant are provably in ONE owned cgroup that is a DEDICATED non-root leaf, distinct from the
   harness's own cgroup (`0::<path>` per `/proc/<pid>/cgroup`, membership in `cgroup.procs`); after
-  `force_stop`/drain the exact PID identities disappear and the cgroup DIRECTORY is removed — a
-  killpg-only backend that never creates a cgroup cannot pass. A forced setup failure, a report
-  failure, and a cancellation all leave no cgroup.
+  `force_stop`/drain the exact PID + start-time IDENTITIES disappear (not merely the PID number, so
+  PID reuse cannot read as teardown) and the cgroup DIRECTORY is removed — a killpg-only backend that
+  never creates a cgroup cannot pass. A forced setup failure, a report failure, and a cancellation
+  all leave no cgroup.
 
 - **Timeout.** A target outliving the policy deadline is killed WITH its double-forked descendant
-  inside a bounded grace; the `survived` marker never appears; the owned cgroup is removed.
+  inside ONE bounded window (`deadline + fixed grace`); the monitor is WAITED first, then the oracle
+  is read (identities gone, `survived` marker absent, cgroup directory removed) — so the test never
+  races a monitor that reaps before it removes the cgroup, and `force_stop` runs only as post-RED
+  cleanup.
 
 - **Report truthfulness + barrier.** `enforced` is emitted only after all five dimensions are
-  installed and self-checked; a forced setup failure (test-only fault injection on the backend's
-  control-plane env) runs NO target — the target-ran marker is absent and no cgroup remains; any
-  `partial`/`not_enforced` is rejected by the parent; the report stays bound to backend object,
-  policy, nonce, and launch spec; GO follows verification only.
+  installed and self-checked. A four-stage RED matrix injects a test-only fault on the backend's
+  control-plane env — `landlock`, `seccomp`, `cgroup` (each a setup failure → `spawn` fails closed,
+  no target, no owned cgroup) and `self-check` (a syntactically valid report with a downgraded
+  dimension the parent must reject) — and in every case the target-ran marker is absent; GO follows
+  verification only; the report stays bound to backend object, policy, nonce, and launch spec.
 
 **Designated confinement CI job.** A separate Linux job runs the real-kernel acceptance matrix with
 `--include-ignored` — but only after a REAL capability preflight that EXERCISES each mechanism, not
 a presence grep:
 
-- **cgroup v2** — create a child cgroup under the delegated subtree, move a disposable process in,
-  confirm `cgroup.procs` membership, kill via `cgroup.kill`, confirm the group drains, and remove
-  the directory;
+- **cgroup v2** — create a child cgroup under the delegated subtree, require a WRITABLE `cgroup.kill`
+  (no PID-kill fallback — the GREEN backend tears down via `cgroup.kill`, so a runner without it
+  fails the gate), move a disposable process in, confirm `cgroup.procs` membership, kill via
+  `cgroup.kill`, confirm the group drains, and remove the directory (a `trap` reaps the probe's own
+  scratch process/cgroup on any intermediate failure);
 - **Landlock** — query the ABI (must be `>=` the pinned minimum) and CREATE a representative ruleset;
 - **seccomp** — install a minimal BPF filter in a disposable child and confirm a chosen syscall is
   denied with the expected errno.

@@ -161,7 +161,7 @@ jobs:
       # job (never skips) if any cannot actually be used, so a red matrix afterwards is attributable
       # to the backend, not the environment. Landlock/seccomp are driven through Python `ctypes`
       # (a CI tool), keeping all confinement syscalls OUT of the forbid-unsafe Rust tree.
-      - name: Prove cgroup v2 capability (mkdir → move → kill → rmdir)
+      - name: Prove cgroup v2 capability (mkdir → move → cgroup.kill → rmdir)
         shell: bash
         run: |
           set -euo pipefail
@@ -171,30 +171,41 @@ jobs:
           own=$(grep '^0::' /proc/self/cgroup | cut -d: -f3-)
           base="/sys/fs/cgroup${own}"
           child="${base}/o7-capcheck.$$"
+          victim=""
+          # The probe must never leak its own scratch cgroup or process, even on an intermediate
+          # failure — reap the victim and remove the directory on ANY exit.
+          cleanup() { [ -n "$victim" ] && kill -9 "$victim" 2>/dev/null || true; wait "$victim" 2>/dev/null || true; rmdir "$child" 2>/dev/null || true; }
+          trap cleanup EXIT
           if ! mkdir "$child" 2>/dev/null; then
             echo "::error::cannot create a child cgroup under ${base} (no delegated subtree)"; exit 1
+          fi
+          # The GREEN backend tears the tree down via cgroup.kill, so the designated runner MUST have
+          # a writable cgroup.kill — no PID-kill fallback that would green-light a runner without it.
+          if [ ! -w "$child/cgroup.kill" ]; then
+            echo "::error::cgroup.kill is not writable (ABI < 5.14 or undelegated) — required for teardown"; exit 1
           fi
           # Move a disposable process in and prove membership.
           sleep 120 & victim=$!
           if ! echo "$victim" > "$child/cgroup.procs" 2>/dev/null; then
-            echo "::error::cannot move a process into the delegated cgroup"; kill -9 "$victim"; rmdir "$child"; exit 1
+            echo "::error::cannot move a process into the delegated cgroup"; exit 1
           fi
           if ! grep -qx "$victim" "$child/cgroup.procs"; then
-            echo "::error::cgroup.procs does not reflect the moved process"; kill -9 "$victim"; rmdir "$child" 2>/dev/null || true; exit 1
+            echo "::error::cgroup.procs does not reflect the moved process"; exit 1
           fi
-          # Kill the whole cgroup (cgroup.kill, ABI 5.14+) and prove it drains, then remove it. The
-          # disposable child is reaped (`wait`) so its task leaves cgroup.procs and the group drains.
-          if [ -e "$child/cgroup.kill" ]; then echo 1 > "$child/cgroup.kill"; else kill -9 "$victim"; fi
+          # Kill the whole cgroup via cgroup.kill and prove it drains (the child is reaped so its
+          # task leaves cgroup.procs), then remove the directory.
+          echo 1 > "$child/cgroup.kill"
           wait "$victim" 2>/dev/null || true
+          victim=""
           for _ in $(seq 1 50); do [ -s "$child/cgroup.procs" ] || break; sleep 0.1; done
           if [ -s "$child/cgroup.procs" ]; then
-            echo "::error::the cgroup did not drain after kill"; kill -9 "$victim" 2>/dev/null || true; rmdir "$child" 2>/dev/null || true; exit 1
+            echo "::error::the cgroup did not drain after cgroup.kill"; exit 1
           fi
-          kill -9 "$victim" 2>/dev/null || true
           if ! rmdir "$child" 2>/dev/null || [ -e "$child" ]; then
             echo "::error::cannot remove the delegated cgroup directory"; exit 1
           fi
-          echo "cgroup v2 capability proven: mkdir, move, membership, kill, drain, rmdir"
+          trap - EXIT
+          echo "cgroup v2 capability proven: mkdir, move, membership, cgroup.kill, drain, rmdir"
 
       - name: Prove Landlock + seccomp capability (real ruleset + real filter)
         shell: bash

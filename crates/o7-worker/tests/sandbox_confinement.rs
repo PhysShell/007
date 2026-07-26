@@ -3,27 +3,30 @@
 //! These pin what a REAL Landlock + seccomp + cgroup-v2 backend must enforce. They run against a
 //! NON-confining stand-in — `confinement_backend()` currently returns the frozen fake, which
 //! reports every dimension `enforced` but installs nothing — so a launched target ESCAPES, and each
-//! RED assertion observes the escape with a CONCRETE oracle rather than a vacuous `is_err()`:
+//! RED assertion observes the escape with a CONCRETE, INDEPENDENTLY non-vacuous oracle:
 //!
 //! - a write OUTSIDE the worktree, captured with the exact denial errno;
 //! - an `execve` of a non-allowed binary observed KERNEL-side (a secondary marker it must never
 //!   create), NOT the lexical parent gate (that is Vertical A — see `sandbox_contract.rs`);
-//! - IPv4/IPv6 socket creation denied with the EXACT `EPERM`/`EACCES`, gated by an UNCONFINED
-//!   baseline so a runner lacking IPv6 cannot masquerade as a working seccomp filter;
-//! - `setsid`/`setpgid` denied with the exact `EPERM` (a real GREEN seccomp filter makes the old
-//!   "the escape survives" assertion impossible, so it is split out here);
-//! - a monitor-owned cgroup that provably CONTAINS the tree (monitor + target + a double-forked
-//!   descendant), is a DEDICATED non-root leaf, and is REMOVED on teardown — a killpg-only backend
-//!   cannot pass this;
-//! - a deadline that kills the target AND its descendants and leaves no cgroup;
-//! - a forced setup failure that runs NO target;
-//! - a live sealed `/proc/<pid>/fd/<n>` source that EXECUTES under confinement.
+//! - IPv4 AND IPv6 socket creation denied with the EXACT `EPERM`/`EACCES`, gated by an UNCONFINED
+//!   baseline (all three families must work unconfined, else the host is not the designated env);
+//! - a fail-closed inherited-descriptor oracle with a PLANTED non-CLOEXEC socket sentinel;
+//! - `setsid` and `setpgid` each denied with the exact `EPERM`, in SEPARATE processes so neither
+//!   result depends on the other having run first;
+//! - a monitor-owned cgroup that CONTAINS the tree (monitor + target + ordinary child + a
+//!   double-forked descendant), is a DEDICATED non-root leaf, and is REMOVED on teardown;
+//! - a deadline that kills the target AND its descendant inside ONE bounded window and leaves no
+//!   cgroup, checked AFTER the monitor is waited (never racing a reap-then-remove monitor);
+//! - a four-mode setup-failure/report-truthfulness matrix that runs NO target;
+//! - a live sealed `/proc/<pid>/fd/<n>` source that EXECUTES under confinement with the exact
+//!   outside-denial errno.
 //!
-//! Every test is `#[ignore]`d: the PORTABLE workspace suite stays host-agnostic, and the DESIGNATED
-//! Linux confinement CI job runs them with `--include-ignored` after PROVING the kernel features
-//! (Landlock ABI + ruleset, delegated cgroup v2, a real seccomp filter) — a missing capability is a
-//! job FAILURE there, never a skip. GREEN makes the real backend enforce and points
-//! `confinement_backend()` at it, without rewriting a single assertion.
+//! Teardown oracles compare PID + start-time IDENTITY (not a bare PID number), so PID reuse can
+//! never read as a successful teardown. Every test is `#[ignore]`d: the PORTABLE workspace suite
+//! stays host-agnostic, and the DESIGNATED Linux confinement CI job runs them with
+//! `--include-ignored` after PROVING the kernel features — a missing capability is a job FAILURE
+//! there, never a skip. GREEN makes the real backend enforce and points `confinement_backend()` at
+//! it, without rewriting a single assertion.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -39,7 +42,9 @@ use std::time::Duration;
 use o7_worker::boundary::BoundarySpawnSpec;
 use o7_worker::sandbox_protocol::ids::{BackendIdentity, Digest256};
 use o7_worker::sandbox_protocol::policy::{NetworkPolicy, SandboxPolicy};
-use o7_worker::{BackendConfig, BackendImage, ProcessBoundary, SandboyBoundary, StdinMode};
+use o7_worker::{
+    BackendConfig, BackendImage, ProcessBoundary, ProcessIdentity, SandboyBoundary, StdinMode,
+};
 
 /// The backend UNDER TEST for the confinement matrix. RED: the frozen fake, which claims
 /// `enforced` but installs no Landlock/seccomp/cgroup. GREEN (Vertical B): swap this one line for
@@ -96,25 +101,30 @@ fn probe_dir() -> PathBuf {
     probe_bin().parent().expect("probe dir").to_path_buf()
 }
 
-/// `/bin` and `/usr/bin` — enough for a shell target to exec `dash`/`sleep`/`setsid` under a GREEN
-/// Landlock ruleset (the process-tree tests are about ownership, not the exec allowlist).
+/// `/bin` and `/usr/bin` — enough for a shell target to exec `dash`/`sleep` under a GREEN Landlock
+/// ruleset (the process-tree tests are about ownership, not the exec allowlist).
 fn shell_exec_allow() -> Vec<PathBuf> {
     vec![PathBuf::from("/bin"), PathBuf::from("/usr/bin")]
 }
 
-fn pid_alive(pid: i32) -> bool {
-    Path::new(&format!("/proc/{pid}")).exists()
+/// Whether a captured PID+start-time identity is GONE — the PID is absent, or reused by a DIFFERENT
+/// process (a different start time). A bare `/proc/<pid>` check cannot tell teardown from PID reuse.
+fn identity_gone(id: &ProcessIdentity) -> bool {
+    match ProcessIdentity::read(id.pid) {
+        None => true,
+        Some(cur) => cur.start_time_ticks != id.start_time_ticks,
+    }
 }
 
-async fn wait_pid_gone(pid: i32, bound: Duration) -> bool {
+async fn wait_identity_gone(id: &ProcessIdentity, bound: Duration) -> bool {
     let start = tokio::time::Instant::now();
     while start.elapsed() < bound {
-        if !pid_alive(pid) {
+        if identity_gone(id) {
             return true;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    !pid_alive(pid)
+    identity_gone(id)
 }
 
 async fn read_pid_bounded(path: &Path, bound: Duration) -> Option<i32> {
@@ -130,6 +140,12 @@ async fn read_pid_bounded(path: &Path, bound: Duration) -> Option<i32> {
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+}
+
+/// The captured live identity of the process that wrote its pid to `path`.
+async fn read_identity_bounded(path: &Path, bound: Duration) -> Option<ProcessIdentity> {
+    let pid = read_pid_bounded(path, bound).await?;
+    ProcessIdentity::read(pid)
 }
 
 /// The unified cgroup-v2 path a pid belongs to (`0::<path>` in `/proc/<pid>/cgroup`).
@@ -186,6 +202,24 @@ fn probe_target(
     }
 }
 
+/// Run the probe DIRECTLY (no boundary, no confinement) and return its marker — the UNCONFINED
+/// baseline the confined run is measured against.
+fn unconfined_probe(args: &[&str]) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("baseline");
+    let mut full: Vec<OsString> = args.iter().map(OsString::from).collect();
+    full.push(OsString::from(&marker));
+    let status = std::process::Command::new(probe_bin())
+        .args(&full)
+        .status()
+        .expect("run unconfined probe");
+    assert!(
+        status.success(),
+        "unconfined probe {args:?} failed: {status:?}"
+    );
+    std::fs::read_to_string(&marker).unwrap_or_default()
+}
+
 // --- Filesystem / Landlock ---
 
 #[tokio::test(flavor = "multi_thread")]
@@ -217,13 +251,10 @@ async fn writes_are_confined_to_the_worktree() {
     let _ = launch.process.wait().await;
 
     let report = std::fs::read_to_string(&marker).unwrap_or_default();
-    // The allowed write inside the worktree must succeed (positive half).
     assert!(
         wt.path().join("inside.txt").exists() && report.contains("inside=OK"),
         "an allowed write inside the worktree must succeed; report: {report:?}"
     );
-    // RED: a write OUTSIDE the worktree must be denied with EACCES(13)/EPERM(1). The stand-in
-    // lets it through, so the file exists and the probe recorded OK.
     assert!(
         !outside.exists(),
         "a write OUTSIDE the worktree must be DENIED by Landlock; the file was created"
@@ -265,7 +296,6 @@ async fn exec_of_a_non_allowed_binary_is_denied_by_the_kernel() {
         .await
         .expect("launch");
     let _ = launch.process.wait().await;
-    // Give the escaped exec chain a moment to create its marker on the RED path.
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     assert!(
@@ -284,8 +314,8 @@ async fn exec_of_a_non_allowed_binary_is_denied_by_the_kernel() {
 async fn a_sealed_proc_fd_target_executes_under_confinement() {
     // PR-3 contract composed with Vertical B: a LIVE sealed `/proc/<pid>/fd/<n>` source (a sealed
     // memfd held by THIS process) must EXECUTE under confinement with no path-copy — and while it
-    // runs, an outside-the-worktree write must be denied. RED: the stand-in runs it but does not
-    // confine, so the outside file appears.
+    // runs, an outside-the-worktree write must be denied with the EXACT errno. RED: the stand-in
+    // runs it but does not confine, so the outside file appears.
     use std::io::Write as _;
     use std::os::unix::io::AsRawFd as _;
 
@@ -338,15 +368,17 @@ async fn a_sealed_proc_fd_target_executes_under_confinement() {
     drop(file);
 
     let report = std::fs::read_to_string(&marker).unwrap_or_default();
-    // The sealed proc-fd source really ran (positive: the exact sealed bytes executed).
     assert!(
         report.contains("inside=OK"),
         "the sealed /proc/<pid>/fd source must EXECUTE under confinement; report: {report:?}"
     );
-    // RED: while it ran, an outside write must be denied.
     assert!(
         !outside.exists(),
         "the sealed target must be confined; an outside write was allowed"
+    );
+    assert!(
+        report.contains("outside=ERR:13") || report.contains("outside=ERR:1"),
+        "the outside write must report the exact EACCES/EPERM; report: {report:?}"
     );
 }
 
@@ -355,14 +387,15 @@ async fn a_sealed_proc_fd_target_executes_under_confinement() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Vertical B: real seccomp backend required; RED against the non-confining stand-in"]
 async fn network_sockets_are_denied() {
-    // UNCONFINED baseline: prove THIS host can actually create each socket family, so a runner
-    // without (say) IPv6 cannot let `udp6` pass as a "seccomp denial" when it was really
-    // EAFNOSUPPORT. Only families the host supports are held to the confined denial.
-    let baseline = unconfined_baseline_net();
-    assert!(
-        baseline.contains("udp4=OK") && baseline.contains("tcp4=OK"),
-        "unusable test host: the unconfined baseline cannot create IPv4 sockets: {baseline:?}"
-    );
+    // MANDATORY baseline: the designated environment MUST support IPv4 AND IPv6 unconfined — a
+    // runner missing IPv6 is an environment gate failure here, not a reason to drop the IPv6 leg.
+    let baseline = unconfined_probe(&["net"]);
+    for family in ["udp4", "tcp4", "udp6"] {
+        assert!(
+            baseline.contains(&format!("{family}=OK")),
+            "designated env must support {family} unconfined; baseline: {baseline:?}"
+        );
+    }
 
     let wt = tempfile::tempdir().unwrap();
     let marker = wt.path().join("net.result");
@@ -383,38 +416,65 @@ async fn network_sockets_are_denied() {
     let _ = launch.process.wait().await;
 
     let report = std::fs::read_to_string(&marker).unwrap_or_default();
-    // RED: every family the host DEMONSTRABLY supports must now be denied with the EXACT EPERM(1)/
-    // EACCES(13) — not merely "some error" (an EAFNOSUPPORT(97) is not a seccomp denial). The
-    // stand-in installs no seccomp, so each bind succeeds (`OK`).
+    // RED: every family must be denied with the EXACT EPERM(1)/EACCES(13); the stand-in installs no
+    // seccomp, so each bind succeeds (`OK`).
     for family in ["udp4", "tcp4", "udp6"] {
-        if !baseline.contains(&format!("{family}=OK")) {
-            continue; // host cannot do it unconfined — not a seccomp signal
-        }
         assert!(
             report.contains(&format!("{family}=ERR:1"))
                 || report.contains(&format!("{family}=ERR:13")),
             "{family}: socket creation must be DENIED by seccomp with EPERM/EACCES; report: {report:?}"
         );
     }
-    // Inherited descriptors: the confined target must inherit NO network sockets (fd scrub).
-    assert!(
-        report.contains("inherited_sockets=0"),
-        "the confined target must inherit no network descriptors; report: {report:?}"
-    );
 }
 
-/// Run the probe DIRECTLY (no boundary, no confinement) to learn which socket families this host
-/// supports at all — the baseline the confined run is measured against.
-fn unconfined_baseline_net() -> String {
-    let dir = tempfile::tempdir().unwrap();
-    let marker = dir.path().join("baseline.net");
-    let status = std::process::Command::new(probe_bin())
-        .arg("net")
-        .arg(&marker)
-        .status()
-        .expect("run unconfined probe");
-    assert!(status.success(), "unconfined probe failed: {status:?}");
-    std::fs::read_to_string(&marker).unwrap_or_default()
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Vertical B confinement job (portable-clean; scrub proven with a planted socket)"]
+async fn the_confined_target_inherits_no_planted_socket() {
+    use std::os::unix::io::AsRawFd as _;
+
+    use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+
+    // PLANT a real socket and CLEAR its CLOEXEC, so it WOULD be inherited across the exec into the
+    // backend unless the monitor scrubs the descriptor set. (std sockets are CLOEXEC by default.)
+    let sentinel = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind sentinel");
+    let raw = sentinel.as_raw_fd();
+    fcntl(raw, FcntlArg::F_SETFD(FdFlag::empty())).expect("clear CLOEXEC");
+    let flags = fcntl(raw, FcntlArg::F_GETFD).expect("get flags");
+    assert!(
+        flags & FdFlag::FD_CLOEXEC.bits() == 0,
+        "the sentinel must be inheritable for this test to mean anything"
+    );
+
+    let wt = tempfile::tempdir().unwrap();
+    let marker = wt.path().join("fds.result");
+    let b = boundary(
+        wt.path(),
+        vec![probe_dir()],
+        vec![],
+        Duration::from_secs(30),
+    );
+    let mut launch = b
+        .spawn(probe_target(
+            &["fds", &marker.to_string_lossy()],
+            wt.path(),
+            BTreeMap::new(),
+        ))
+        .await
+        .expect("launch");
+    let exit = launch.process.wait().await.expect("waited");
+    drop(sentinel);
+
+    // The probe fails CLOSED: a success marker exists ONLY if enumeration succeeded (exit 0).
+    assert_eq!(
+        exit,
+        o7_worker::boundary::BoundaryExit::Code(0),
+        "the fail-closed inherited-fd probe must exit 0 on a clean enumeration"
+    );
+    let report = std::fs::read_to_string(&marker).unwrap_or_default();
+    assert!(
+        report.contains("inherited_sockets=0"),
+        "the confined target must inherit NO socket descriptors, even a planted one; report: {report:?}"
+    );
 }
 
 // --- Environment (already enforced by plane separation) ---
@@ -450,17 +510,18 @@ async fn the_target_env_is_exactly_the_allowlist() {
     );
 }
 
-// --- Process tree / seccomp escape denial ---
+// --- Process tree / seccomp escape denial (independent) ---
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Vertical B: real seccomp filter required; RED against the non-confining stand-in"]
-async fn setsid_and_setpgid_are_denied_by_seccomp() {
-    // A GREEN seccomp filter forbids leaving the owned set via a new session/process group, so
-    // BOTH `setsid` and `setpgid` must return EPERM(1). (This replaces the old "the setsid escape
-    // survives teardown" assertion, which a correct filter makes impossible.) RED: the stand-in
-    // installs no filter, so the confined target — a non-leader child — succeeds at both.
+async fn setsid_is_denied_by_seccomp() {
+    // Baseline: unconfined, `setsid` succeeds — so a confined `ERR:1` is meaningful.
+    assert!(
+        unconfined_probe(&["setsid"]).contains("setsid=OK"),
+        "unconfined setsid must succeed on the test host"
+    );
     let wt = tempfile::tempdir().unwrap();
-    let marker = wt.path().join("seccomp.result");
+    let marker = wt.path().join("setsid.result");
     let b = boundary(
         wt.path(),
         vec![probe_dir()],
@@ -469,7 +530,7 @@ async fn setsid_and_setpgid_are_denied_by_seccomp() {
     );
     let mut launch = b
         .spawn(probe_target(
-            &["seccomp", &marker.to_string_lossy()],
+            &["setsid", &marker.to_string_lossy()],
             wt.path(),
             BTreeMap::new(),
         ))
@@ -482,6 +543,36 @@ async fn setsid_and_setpgid_are_denied_by_seccomp() {
         report.contains("setsid=ERR:1"),
         "setsid must be DENIED by seccomp with EPERM; report: {report:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Vertical B: real seccomp filter required; RED against the non-confining stand-in"]
+async fn setpgid_is_denied_by_seccomp() {
+    // Baseline: unconfined, a FRESH process (no prior setsid) can `setpgid(0,0)` — so a confined
+    // `ERR:1` proves the FILTER, not the ordinary "a session leader cannot change its pgid" rule.
+    assert!(
+        unconfined_probe(&["setpgid"]).contains("setpgid=OK"),
+        "unconfined setpgid must succeed on the test host"
+    );
+    let wt = tempfile::tempdir().unwrap();
+    let marker = wt.path().join("setpgid.result");
+    let b = boundary(
+        wt.path(),
+        vec![probe_dir()],
+        vec![],
+        Duration::from_secs(30),
+    );
+    let mut launch = b
+        .spawn(probe_target(
+            &["setpgid", &marker.to_string_lossy()],
+            wt.path(),
+            BTreeMap::new(),
+        ))
+        .await
+        .expect("launch");
+    let _ = launch.process.wait().await;
+
+    let report = std::fs::read_to_string(&marker).unwrap_or_default();
     assert!(
         report.contains("setpgid=ERR:1"),
         "setpgid must be DENIED by seccomp with EPERM; report: {report:?}"
@@ -495,9 +586,9 @@ async fn setsid_and_setpgid_are_denied_by_seccomp() {
 async fn the_owned_cgroup_contains_the_tree_and_is_removed_on_teardown() {
     // The target records its pid, spawns an ORDINARY child, and a DOUBLE-FORKED (reparented, no
     // setsid) descendant, all sleeping. A monitor-owned cgroup v2 must contain monitor + target +
-    // descendant in ONE dedicated non-root cgroup, and that cgroup directory must be REMOVED on
-    // teardown. A killpg-only backend cannot pass this: it never creates a dedicated cgroup, so the
-    // members share the harness's own cgroup, which does not disappear.
+    // child + descendant in ONE dedicated non-root cgroup, and that cgroup directory must be
+    // REMOVED on teardown. A killpg-only backend never creates a dedicated cgroup, so the members
+    // share the harness's own cgroup, which does not disappear.
     let wt = tempfile::tempdir().unwrap();
     let tpid = wt.path().join("target.pid");
     let cpid = wt.path().join("child.pid");
@@ -522,45 +613,42 @@ async fn the_owned_cgroup_contains_the_tree_and_is_removed_on_teardown() {
         .await
         .expect("launch");
 
-    let monitor = launch.process.identity().pid;
-    let target = read_pid_bounded(&tpid, Duration::from_secs(3))
+    let monitor = launch.process.identity();
+    let target = read_identity_bounded(&tpid, Duration::from_secs(3))
         .await
-        .expect("target pid");
-    let child = read_pid_bounded(&cpid, Duration::from_secs(3))
+        .expect("target identity");
+    let child = read_identity_bounded(&cpid, Duration::from_secs(3))
         .await
-        .expect("child pid");
-    let descendant = read_pid_bounded(&dpid, Duration::from_secs(3))
+        .expect("child identity");
+    let descendant = read_identity_bounded(&dpid, Duration::from_secs(3))
         .await
-        .expect("descendant pid");
+        .expect("descendant identity");
 
-    let target_cg = cgroup_of(target).expect("target cgroup");
+    let target_cg = cgroup_of(target.pid).expect("target cgroup");
     let harness_cg = cgroup_of(std::process::id() as i32).expect("harness cgroup");
 
-    // RED: the owned cgroup must be a DEDICATED leaf, distinct from the harness's own cgroup. A
-    // killpg-only stand-in leaves everyone in the harness cgroup.
+    // RED: the owned cgroup must be a DEDICATED leaf, distinct from the harness's own cgroup.
     let dedicated = target_cg != harness_cg;
-    // Every member shares that one cgroup, and it lists them all.
     let members = cgroup_procs(&target_cg);
-    let all_in_one = [monitor, target, child, descendant]
+    let all_in_one = [&monitor, &target, &child, &descendant]
         .iter()
-        .all(|p| cgroup_of(*p).as_deref() == Some(target_cg.as_str()));
-    let procs_complete = [monitor, target, child, descendant]
+        .all(|p| cgroup_of(p.pid).as_deref() == Some(target_cg.as_str()));
+    let procs_complete = [&monitor, &target, &child, &descendant]
         .iter()
-        .all(|p| members.contains(p));
+        .all(|p| members.contains(&p.pid));
 
     launch.process.force_stop().await.expect("force_stop");
     let _ = launch.process.wait().await;
 
-    let gone = wait_pid_gone(target, Duration::from_secs(3)).await
-        && wait_pid_gone(child, Duration::from_secs(3)).await
-        && wait_pid_gone(descendant, Duration::from_secs(3)).await;
-    // RED: after drain the owned cgroup directory must be gone. The harness cgroup never vanishes.
+    // RED: after drain the exact IDENTITIES must be gone AND the owned cgroup directory removed.
+    let identities_gone = wait_identity_gone(&target, Duration::from_secs(3)).await
+        && wait_identity_gone(&child, Duration::from_secs(3)).await
+        && wait_identity_gone(&descendant, Duration::from_secs(3)).await;
     let cgroup_removed = !cgroup_dir(&target_cg).exists();
 
-    // Never leak survivors on the RED path.
-    for pid in [child, descendant, target] {
-        if pid_alive(pid) {
-            best_effort_kill(pid);
+    for id in [&child, &descendant, &target] {
+        if !identity_gone(id) {
+            best_effort_kill(id.pid);
         }
     }
 
@@ -573,7 +661,7 @@ async fn the_owned_cgroup_contains_the_tree_and_is_removed_on_teardown() {
         "monitor+target+child+descendant must all be in the one owned cgroup {target_cg:?} \
          (members: {members:?})"
     );
-    assert!(gone, "the whole tree must be torn down");
+    assert!(identities_gone, "the whole tree identity must be torn down");
     assert!(
         cgroup_removed,
         "the owned cgroup directory {target_cg:?} must be REMOVED after drain"
@@ -589,8 +677,6 @@ async fn a_target_outliving_the_deadline_is_killed_with_its_descendants() {
     let tpid = wt.path().join("target.pid");
     let dpid = wt.path().join("desc.pid");
     let survived = wt.path().join("survived");
-    // The target spawns a double-forked descendant, then both sleep past the deadline; the target
-    // would `touch survived` if it ever completed.
     let script = format!(
         "echo $$ > {tp}; \
          ( /bin/dash -c 'echo $$ > {dp}; exec sleep 5' & ); \
@@ -599,49 +685,58 @@ async fn a_target_outliving_the_deadline_is_killed_with_its_descendants() {
         dp = dpid.display(),
         s = survived.display(),
     );
-    // 500ms deadline; the tree sleeps 5s.
-    let b = boundary(
-        wt.path(),
-        shell_exec_allow(),
-        vec![],
-        Duration::from_millis(500),
-    );
+    let deadline = Duration::from_millis(500);
+    let grace = Duration::from_millis(2500);
+    let b = boundary(wt.path(), shell_exec_allow(), vec![], deadline);
     let mut launch = b
         .spawn(dash_target(script, wt.path()))
         .await
         .expect("launch");
-    let target = read_pid_bounded(&tpid, Duration::from_secs(2))
+    let monitor = launch.process.identity();
+    let target = read_identity_bounded(&tpid, Duration::from_secs(2))
         .await
-        .expect("target pid");
-    let descendant = read_pid_bounded(&dpid, Duration::from_secs(2))
+        .expect("target identity");
+    let descendant = read_identity_bounded(&dpid, Duration::from_secs(2))
         .await
-        .expect("descendant pid");
-    let target_cg = cgroup_of(target).expect("target cgroup");
+        .expect("descendant identity");
+    let target_cg = cgroup_of(target.pid).expect("target cgroup");
 
-    // Within the deadline + a bounded grace, target AND descendant must be dead.
-    let target_killed = wait_pid_gone(target, Duration::from_millis(2500)).await;
-    let descendant_killed = wait_pid_gone(descendant, Duration::from_millis(2500)).await;
+    // ONE bounded window: within deadline + grace the MONITOR itself must finish (kill the tree,
+    // reap, remove the cgroup, exit). We wait the monitor, THEN read the teardown oracle — never
+    // racing a monitor that reaps before it removes the cgroup.
+    let _ = tokio::time::timeout(deadline + grace, launch.process.wait()).await;
+
+    let target_gone = identity_gone(&target);
+    let descendant_gone = identity_gone(&descendant);
+    let monitor_gone = identity_gone(&monitor);
+    let survived_absent = !survived.exists();
     let cgroup_removed = !cgroup_dir(&target_cg).exists();
 
-    // Clean up any lingering process on the RED path.
+    // Cleanup happens ONLY after the oracle is captured, never before it.
     let _ = launch.process.force_stop().await;
     let _ = launch.process.wait().await;
-    for pid in [target, descendant] {
-        if pid_alive(pid) {
-            best_effort_kill(pid);
+    for id in [&target, &descendant] {
+        if !identity_gone(id) {
+            best_effort_kill(id.pid);
         }
     }
 
     assert!(
-        target_killed,
-        "the target (pid {target}) past the deadline must be killed by the monitor"
+        target_gone,
+        "the target ({}) past the deadline must be killed by the monitor",
+        target.pid
     );
     assert!(
-        descendant_killed,
-        "the descendant (pid {descendant}) must be killed with the target"
+        descendant_gone,
+        "the descendant ({}) must be killed with the target",
+        descendant.pid
     );
     assert!(
-        !survived.exists(),
+        monitor_gone,
+        "the monitor must exit after the deadline teardown"
+    );
+    assert!(
+        survived_absent,
         "the target ran past the deadline (the `survived` marker was written)"
     );
     assert!(
@@ -650,15 +745,13 @@ async fn a_target_outliving_the_deadline_is_killed_with_its_descendants() {
     );
 }
 
-// --- Report truthfulness / setup failure ---
+// --- Report truthfulness / setup failure (four stages) ---
 
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B: real backend fault injection required; RED against the non-confining stand-in"]
-async fn a_forced_setup_failure_runs_no_target() {
-    // The future backend honours a TEST-ONLY fault-injection param on its control-plane
-    // `O7_FAKE_MODE` (`ok;fault=landlock`): it fails the Landlock install, reports NOT enforced (or
-    // dies before GO), so the parent fails closed and the target NEVER runs. RED: the stand-in does
-    // not recognise the fault, reports `enforced`, GOes, and runs the target — the marker appears.
+/// A forced setup failure at `fault` must run NO target: the future backend fails that stage,
+/// reports NOT enforced (or dies before GO), so the parent fails closed and the target-ran marker
+/// is absent. RED: the stand-in does not recognise the fault, reports `enforced`, GOes, and runs
+/// the target unconfined — so `spawn` succeeds AND the marker appears.
+async fn assert_setup_failure_runs_no_target(fault: &str) {
     let wt = tempfile::tempdir().unwrap();
     let marker = wt.path().join("fs.result");
     let outside_dir = tempfile::tempdir().unwrap();
@@ -668,7 +761,7 @@ async fn a_forced_setup_failure_runs_no_target() {
         vec![probe_dir()],
         vec![],
         Duration::from_secs(30),
-        "ok;fault=landlock",
+        &format!("ok;fault={fault}"),
     );
     let spawn = b
         .spawn(probe_target(
@@ -682,7 +775,7 @@ async fn a_forced_setup_failure_runs_no_target() {
             BTreeMap::new(),
         ))
         .await;
-    // GREEN fails the launch closed; the stand-in succeeds. Either way, drain if a process exists.
+    let failed_closed = spawn.is_err();
     if let Ok(mut launch) = spawn {
         let _ = launch.process.wait().await;
     }
@@ -690,7 +783,40 @@ async fn a_forced_setup_failure_runs_no_target() {
 
     assert!(
         !marker.exists(),
-        "a forced setup failure must run NO target; the target-ran marker exists (the stand-in \
-         ignored the injected fault and ran the target unconfined)"
+        "fault={fault}: a forced setup failure must run NO target; the target-ran marker exists \
+         (the stand-in ignored the injected fault and ran the target unconfined)"
     );
+    assert!(
+        failed_closed,
+        "fault={fault}: spawn must fail closed on a setup failure; the stand-in returned a \
+         successful launch"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Vertical B: real backend fault injection required; RED against the non-confining stand-in"]
+async fn a_landlock_setup_failure_runs_no_target() {
+    assert_setup_failure_runs_no_target("landlock").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Vertical B: real backend fault injection required; RED against the non-confining stand-in"]
+async fn a_seccomp_setup_failure_runs_no_target() {
+    assert_setup_failure_runs_no_target("seccomp").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Vertical B: real backend fault injection required; RED against the non-confining stand-in"]
+async fn a_cgroup_setup_failure_runs_no_target() {
+    assert_setup_failure_runs_no_target("cgroup").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Vertical B: real backend self-check downgrade required; RED against the non-confining stand-in"]
+async fn a_self_check_downgrade_runs_no_target() {
+    // Distinct from the other three: the backend installs, then a POST-INSTALL self-check finds a
+    // dimension not fully enforced and emits a syntactically valid report with that dimension
+    // `partial`/`not_enforced`. The parent must reject it and send no GO. RED: the stand-in reports
+    // every dimension `enforced` (it never self-checks), so the target runs.
+    assert_setup_failure_runs_no_target("self-check").await;
 }
