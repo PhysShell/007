@@ -54,17 +54,21 @@ jobs:
       - name: Workspace check
         run: cargo check --workspace --all-targets --locked
 
-      - name: o7-run tests
-        run: cargo test -p o7-run --locked --no-fail-fast
-
-      # The root package carries the MVP verdict/gate semantics and the
-      # events stitch (src/events.rs) — the false-green fix and the canonical
-      # reducer authority are gated here, not only in the crates.
-      - name: o7 root tests
-        run: cargo test -p o7 --locked --no-fail-fast
-
-      - name: o7-worker tests
-        run: cargo test -p o7-worker --locked --no-fail-fast
+      # Every workspace member is tested here unless explicitly excluded. The root
+      # `o7` package is a member by virtue of the root manifest carrying both
+      # [workspace] and [package], so it is covered without being listed in
+      # `members`. o7-worktree and o7-verifier are excluded because the
+      # `pr3 worktree+verifier tests` workflow owns them; excluding rather than
+      # enumerating keeps a newly added crate tested by default instead of silently
+      # uncovered until someone remembers to name it.
+      - name: Workspace tests except worktree and verifier
+        run: >-
+          cargo test
+          --workspace
+          --exclude o7-worktree
+          --exclude o7-verifier
+          --locked
+          --no-fail-fast
 
   dependency-policy:
     name: dependency policy
