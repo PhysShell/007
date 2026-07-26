@@ -228,9 +228,19 @@ fn unconfined_probe(args: &[&str]) -> String {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Vertical B: real Landlock backend required; RED against the non-confining stand-in"]
 async fn writes_are_confined_to_the_worktree() {
+    const OVERWRITE_ORIGINAL: &[u8] = b"ORIGINAL-CONTENT";
+    const TRUNCATE_ORIGINAL: &[u8] = b"MUST-STAY-SIZED";
+
     let wt = tempfile::tempdir().unwrap();
     let outside_dir = tempfile::tempdir().unwrap();
-    let outside = outside_dir.path().join("escaped.txt");
+    let create = outside_dir.path().join("created.txt");
+    let overwrite = outside_dir.path().join("existing-overwrite.txt");
+    let truncate = outside_dir.path().join("existing-truncate.txt");
+    // The overwrite/truncate targets already EXIST — Landlock governs modifying them (WRITE_FILE)
+    // and emptying them (TRUNCATE, ABI 3) with rights DISTINCT from creating a new file (MAKE_REG),
+    // so a partial ruleset could deny creation while still leaking modification/truncation.
+    std::fs::write(&overwrite, OVERWRITE_ORIGINAL).unwrap();
+    std::fs::write(&truncate, TRUNCATE_ORIGINAL).unwrap();
     let marker = wt.path().join("fs.result");
     let b = boundary(
         wt.path(),
@@ -243,8 +253,9 @@ async fn writes_are_confined_to_the_worktree() {
             &[
                 "fs",
                 &wt.path().to_string_lossy(),
-                &outside.to_string_lossy(),
-                &marker.to_string_lossy(),
+                &create.to_string_lossy(),
+                &overwrite.to_string_lossy(),
+                &truncate.to_string_lossy(),
             ],
             wt.path(),
             BTreeMap::new(),
@@ -258,13 +269,31 @@ async fn writes_are_confined_to_the_worktree() {
         wt.path().join("inside.txt").exists() && report.contains("inside=OK"),
         "an allowed write inside the worktree must succeed; report: {report:?}"
     );
+    // RED: creating a new outside file must be denied with the exact errno, and it must not exist.
     assert!(
-        !outside.exists(),
-        "a write OUTSIDE the worktree must be DENIED by Landlock; the file was created"
+        !create.exists() && (report.contains("create=ERR:13") || report.contains("create=ERR:1")),
+        "creating a file OUTSIDE the worktree must be DENIED (EACCES/EPERM); report: {report:?}"
     );
+    // RED: overwriting a PRE-EXISTING outside file must be denied AND leave its bytes untouched — a
+    // wrong errno cannot mask actual corruption.
     assert!(
-        report.contains("outside=ERR:13") || report.contains("outside=ERR:1"),
-        "the outside write must report EACCES/EPERM; report: {report:?}"
+        report.contains("overwrite=ERR:13") || report.contains("overwrite=ERR:1"),
+        "a non-truncating write to an existing outside file must be DENIED; report: {report:?}"
+    );
+    assert_eq!(
+        std::fs::read(&overwrite).unwrap_or_default(),
+        OVERWRITE_ORIGINAL,
+        "the existing outside file was modified despite the deny"
+    );
+    // RED: truncating a PRE-EXISTING outside file must be denied AND leave its size unchanged.
+    assert!(
+        report.contains("truncate=ERR:13") || report.contains("truncate=ERR:1"),
+        "truncating an existing outside file must be DENIED (ABI-3 TRUNCATE); report: {report:?}"
+    );
+    assert_eq!(
+        std::fs::metadata(&truncate).map(|m| m.len()).unwrap_or(0),
+        TRUNCATE_ORIGINAL.len() as u64,
+        "the existing outside file was truncated despite the deny"
     );
 }
 
@@ -327,7 +356,11 @@ async fn a_sealed_proc_fd_target_executes_under_confinement() {
 
     let wt = tempfile::tempdir().unwrap();
     let outside_dir = tempfile::tempdir().unwrap();
-    let outside = outside_dir.path().join("escaped.txt");
+    let create = outside_dir.path().join("created.txt");
+    let overwrite = outside_dir.path().join("existing-overwrite.txt");
+    let truncate = outside_dir.path().join("existing-truncate.txt");
+    std::fs::write(&overwrite, b"ORIGINAL").unwrap();
+    std::fs::write(&truncate, b"SIZED").unwrap();
     let marker = wt.path().join("fs.result");
 
     let probe_bytes = std::fs::read(probe_bin()).expect("read probe");
@@ -359,8 +392,9 @@ async fn a_sealed_proc_fd_target_executes_under_confinement() {
         arguments: vec![
             OsString::from("fs"),
             OsString::from(wt.path()),
-            OsString::from(&outside),
-            OsString::from(&marker),
+            OsString::from(&create),
+            OsString::from(&overwrite),
+            OsString::from(&truncate),
         ],
         working_directory: wt.path().to_path_buf(),
         environment: BTreeMap::new(),
@@ -376,11 +410,11 @@ async fn a_sealed_proc_fd_target_executes_under_confinement() {
         "the sealed /proc/<pid>/fd source must EXECUTE under confinement; report: {report:?}"
     );
     assert!(
-        !outside.exists(),
+        !create.exists(),
         "the sealed target must be confined; an outside write was allowed"
     );
     assert!(
-        report.contains("outside=ERR:13") || report.contains("outside=ERR:1"),
+        report.contains("create=ERR:13") || report.contains("create=ERR:1"),
         "the outside write must report the exact EACCES/EPERM; report: {report:?}"
     );
 }

@@ -191,9 +191,14 @@ a specific effect, never a vacuous failure.
 Each dimension names its concrete oracle (the acceptance tests live in
 `crates/o7-worker/tests/sandbox_confinement.rs`):
 
-- **Filesystem / Landlock.** A write inside the single writable worktree succeeds; a write OUTSIDE
-  it gets a concrete kernel denial captured as the EXACT errno (`EACCES`/`EPERM`), not "the command
-  failed". Execute is restricted KERNEL-side: the confined target's own `execve` of a binary outside
+- **Filesystem / Landlock.** A write inside the single writable worktree succeeds; OUTSIDE it, THREE
+  distinct operations each get a concrete kernel denial captured as the EXACT errno
+  (`EACCES`/`EPERM`), not "the command failed" — creating a new file (`MAKE_REG`), a NON-truncating
+  write to a pre-existing file (`WRITE_FILE`), and truncating a pre-existing file (`TRUNCATE`, ABI 3)
+  — because Landlock governs them with separate rights and a partial ruleset could deny one while
+  leaking another. The pre-existing files' bytes and size are additionally asserted UNCHANGED, so a
+  wrong errno cannot mask actual corruption. Execute is restricted KERNEL-side: the confined
+  target's own `execve` of a binary outside
   `allow_exec` is denied (exact errno), proven by a secondary marker that must never be created — the
   *lexical* parent-gate refusal is a distinct, already-frozen Vertical A test
   (`sandbox_contract::wrapping_an_unpermitted_target_fails_closed`), not part of this matrix. A live
@@ -255,7 +260,8 @@ a presence grep:
   fails the gate), move a disposable process in, confirm `cgroup.procs` membership, kill via
   `cgroup.kill`, confirm the group drains, and remove the directory (a `trap` reaps the probe's own
   scratch process/cgroup on any intermediate failure);
-- **Landlock** — query the ABI (must be `>=` the pinned minimum) and CREATE a representative ruleset;
+- **Landlock** — query the ABI (must be `>= 3`, the minimum that governs file `TRUNCATE`) and CREATE
+  a representative ruleset that includes the `TRUNCATE` access right (bit 14);
 - **seccomp** — install a minimal BPF filter in a disposable child and confirm a chosen syscall is
   denied with the expected errno.
 

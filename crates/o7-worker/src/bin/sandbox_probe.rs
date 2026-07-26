@@ -18,7 +18,7 @@
 )]
 
 use std::ffi::CString;
-use std::io;
+use std::io::{self, Write as _};
 
 fn main() {
     std::process::exit(run());
@@ -27,7 +27,7 @@ fn main() {
 fn run() -> i32 {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
-        Some("fs") if args.len() >= 4 => fs_probe(&args[1], &args[2], &args[3]),
+        Some("fs") if args.len() >= 5 => fs_probe(&args[1], &args[2], &args[3], &args[4]),
         Some("net") if args.len() >= 2 => net_probe(&args[1]),
         Some("env") if args.len() >= 2 => env_probe(&args[1]),
         Some("setsid") if args.len() >= 2 => setsid_probe(&args[1]),
@@ -43,7 +43,7 @@ fn run() -> i32 {
         Some("exec") if args.len() >= 4 => exec_probe(&args[1], &args[2], &args[3]),
         _ => {
             eprintln!(
-                "usage: sandbox_probe <fs WT OUTSIDE MARKER | net MARKER | env MARKER | \
+                "usage: sandbox_probe <fs WT CREATE OVERWRITE TRUNCATE | net MARKER | env MARKER | \
                  setsid MARKER | setpgid MARKER | fds MARKER | ran MARKER | \
                  exec TARGET SECONDARY PRIMARY>"
             );
@@ -68,18 +68,42 @@ fn nix_outcome<T>(result: nix::Result<T>) -> String {
     }
 }
 
-/// Filesystem / Landlock: a write INSIDE the writable worktree should succeed; a write OUTSIDE it
-/// should be denied (`EACCES`/`EPERM`). Records both outcomes.
-fn fs_probe(worktree: &str, outside: &str, marker: &str) -> i32 {
+/// Filesystem / Landlock: a write INSIDE the writable worktree should succeed; every write OUTSIDE
+/// it should be denied (`EACCES`/`EPERM`). Records THREE distinct outside operations, because
+/// Landlock governs them with SEPARATE access rights and a partial ruleset could pass one while
+/// leaking another:
+/// - `create`: making a new regular file (`MAKE_REG`);
+/// - `overwrite`: a NON-truncating write to a PRE-EXISTING file (`WRITE_FILE`);
+/// - `truncate`: opening a PRE-EXISTING file `O_TRUNC` (`TRUNCATE`, ABI 3).
+///
+/// The test additionally checks the pre-existing files' bytes/size are UNCHANGED, so a wrong errno
+/// cannot mask actual corruption.
+fn fs_probe(worktree: &str, create: &str, overwrite: &str, truncate: &str) -> i32 {
+    let marker = std::path::Path::new(worktree).join("fs.result");
     let inside = std::path::Path::new(worktree).join("inside.txt");
     let inside_res = std::fs::write(&inside, b"inside");
-    let outside_res = std::fs::write(outside, b"outside");
+    // MAKE_REG: create a brand-new file outside the worktree.
+    let create_res = std::fs::write(create, b"created");
+    // WRITE_FILE: open an EXISTING outside file for writing (no truncation) and overwrite bytes.
+    let overwrite_res = std::fs::OpenOptions::new()
+        .write(true)
+        .open(overwrite)
+        .and_then(|mut f| f.write_all(b"HACKED"));
+    // TRUNCATE: open an EXISTING outside file with O_TRUNC (empties it) — an ABI-3 right distinct
+    // from WRITE_FILE.
+    let truncate_res = std::fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(truncate)
+        .map(|_| ());
     let report = format!(
-        "inside={}\noutside={}\n",
+        "inside={}\ncreate={}\noverwrite={}\ntruncate={}\n",
         outcome(&inside_res),
-        outcome(&outside_res)
+        outcome(&create_res),
+        outcome(&overwrite_res),
+        outcome(&truncate_res),
     );
-    let _ = std::fs::write(marker, report);
+    let _ = std::fs::write(&marker, report);
     0
 }
 

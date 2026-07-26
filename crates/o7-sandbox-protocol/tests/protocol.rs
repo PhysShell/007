@@ -14,7 +14,9 @@ use std::time::Duration;
 
 use o7_sandbox_protocol::frame::{decode, encode, FrameError, MAX_REPORT_BYTES};
 use o7_sandbox_protocol::ids::{BackendIdentity, Digest256, LaunchNonce};
-use o7_sandbox_protocol::policy::{Enforcement, NetworkPolicy, SandboxPolicy, SandboxPolicyError};
+use o7_sandbox_protocol::policy::{
+    Enforcement, NetworkPolicy, SandboxPolicy, SandboxPolicyError, MAX_TIMEOUT,
+};
 use o7_sandbox_protocol::report::{ReportError, SandboxReport};
 use o7_sandbox_protocol::SCHEMA_VERSION;
 
@@ -191,6 +193,49 @@ fn an_oversized_timeout_is_rejected() {
         p.validate(),
         Err(SandboxPolicyError::TimeoutTooLarge(_))
     ));
+}
+
+#[test]
+fn a_fractional_millisecond_timeout_is_rejected() {
+    // In range, but not a whole millisecond: the digest binds the extra nanosecond while the argv
+    // serializes only `--timeout-ms`, so it would fail every launch with `PolicyDigestMismatch`.
+    let mut p = policy();
+    p.timeout = Duration::from_millis(1) + Duration::from_nanos(1);
+    assert!(matches!(
+        p.validate(),
+        Err(SandboxPolicyError::TimeoutNotWholeMilliseconds(_))
+    ));
+}
+
+#[test]
+fn whole_millisecond_boundary_timeouts_are_accepted() {
+    // Both the minimum (1 ms) and the maximum (a whole-millisecond ceiling) validate.
+    let mut p = policy();
+    p.timeout = Duration::from_millis(1);
+    assert!(p.validate().is_ok());
+    p.timeout = MAX_TIMEOUT;
+    assert!(p.validate().is_ok());
+}
+
+#[test]
+fn an_accepted_timeout_round_trips_through_the_millisecond_wire() {
+    // Every timeout that validates must reconstruct EXACTLY from `--timeout-ms` (`as_millis` →
+    // `from_millis`) — same `Duration`, therefore same policy digest. This is the invariant the
+    // whole-millisecond rule protects.
+    for ms in [1_u64, 500, 1_000, 90_000, 24 * 60 * 60 * 1_000] {
+        let mut p = policy();
+        p.timeout = Duration::from_millis(ms);
+        p.validate().expect("whole-millisecond timeout validates");
+        let reconstructed = Duration::from_millis(p.timeout.as_millis() as u64);
+        assert_eq!(reconstructed, p.timeout, "the ms wire must lose nothing");
+        let mut q = p.clone();
+        q.timeout = reconstructed;
+        assert_eq!(
+            p.digest(),
+            q.digest(),
+            "a reconstructed policy must digest identically"
+        );
+    }
 }
 
 #[test]

@@ -100,6 +100,13 @@ pub enum SandboxPolicyError {
     TimeoutTooSmall(Duration),
     #[error("timeout {0:?} exceeds the {MAX_TIMEOUT:?} maximum")]
     TimeoutTooLarge(Duration),
+    /// The timeout carries sub-millisecond precision. The digest binds the full-nanosecond
+    /// `Duration`, but the backend argv serializes only `--timeout-ms` (whole milliseconds); a
+    /// fractional-millisecond timeout would therefore digest to one value and reconstruct to
+    /// another, failing every launch with `PolicyDigestMismatch`. The wire contract is
+    /// milliseconds, so unsupported precision is rejected at the input rather than silently lost.
+    #[error("timeout {0:?} is not a whole number of milliseconds (the wire contract is ms)")]
+    TimeoutNotWholeMilliseconds(Duration),
 }
 
 impl SandboxPolicy {
@@ -138,6 +145,16 @@ impl SandboxPolicy {
         }
         if self.timeout > MAX_TIMEOUT {
             return Err(SandboxPolicyError::TimeoutTooLarge(self.timeout));
+        }
+        // The digest binds full-nanosecond precision but the argv serializes whole milliseconds
+        // (`timeout.as_millis()`). Reject any sub-millisecond remainder so the policy the parent
+        // digests is exactly the policy a backend reconstructs from `--timeout-ms` — no silent
+        // truncation that would surface later as a `PolicyDigestMismatch`. (A whole-seconds part is
+        // inherently whole-milliseconds, so only the sub-second remainder needs checking.)
+        if !self.timeout.subsec_nanos().is_multiple_of(1_000_000) {
+            return Err(SandboxPolicyError::TimeoutNotWholeMilliseconds(
+                self.timeout,
+            ));
         }
         Ok(())
     }
