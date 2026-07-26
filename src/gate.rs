@@ -33,6 +33,13 @@ pub struct GateStep {
     /// `None`/other → run via bash in the worktree (the MVP path).
     #[serde(default)]
     pub env: Option<String>,
+    /// Pre-declared, auditable reason this step may be legitimately skipped on
+    /// a host that cannot run it (the `o7-run` `GateApplicability::Waived`
+    /// doctrine: a waiver is the ONLY way a required gate may be skipped).
+    /// Absent → an env-skipped REQUIRED step scores the run `BLOCKED`, never
+    /// `PASS` (fail closed). Additive: older manifests parse unchanged.
+    #[serde(default)]
+    pub waive_reason: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -60,18 +67,35 @@ impl GateManifest {
 
         for step in &self.gate {
             // MVP exercises the unix/bash path only. `env == "windows"` (OwnAudit's
-            // FlaUI/ClrMD/Roslyn gates on the host) is Phase 2 — skip loudly for now.
+            // FlaUI/ClrMD/Roslyn gates on the host) is Phase 2 — the step cannot run
+            // here. The step's OWN `required` flag is preserved (the old code demoted
+            // it to `false`, which let `reduce` score a manifest of skipped required
+            // gates as PASS — a false green): with a pre-declared waiver the skip is
+            // legitimate (`NotApplicable` + the auditable reason); without one, a
+            // required step scores `Blocked` — existence of a step is not execution.
             if step.env.as_deref() == Some("windows") {
-                eprintln!(
-                    "[o7] gate '{}' tagged env=windows — skipped (Phase 2)",
-                    step.name
-                );
+                let (verdict, waived) = match &step.waive_reason {
+                    Some(reason) if !reason.trim().is_empty() => {
+                        eprintln!("[o7] gate '{}' env=windows — waived: {}", step.name, reason);
+                        (Verdict::NotApplicable, Some(reason.clone()))
+                    }
+                    _ => {
+                        eprintln!(
+                            "[o7] gate '{}' env=windows — cannot run here and carries \
+                             no waiver: BLOCKED (declare `waive_reason` to skip \
+                             legitimately)",
+                            step.name
+                        );
+                        (Verdict::Blocked, None)
+                    }
+                };
                 out.push(StepVerdict {
                     name: step.name.clone(),
-                    required: false,
-                    verdict: Verdict::NotApplicable,
+                    required: step.required,
+                    verdict,
                     exit_code: None,
                     log: String::new(),
+                    waived,
                 });
                 continue;
             }
@@ -107,6 +131,7 @@ impl GateManifest {
                 verdict,
                 exit_code,
                 log: format!("gate/{log_name}"),
+                waived: None,
             });
         }
 
@@ -124,4 +149,153 @@ fn sanitize(s: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic, clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+    use crate::verdict::Verdict;
+
+    #[test]
+    fn manifest_parses_waive_reason_and_defaults() {
+        let m = GateManifest::parse(
+            r#"
+            [[gate]]
+            name = "build"
+            cmd = "true"
+
+            [[gate]]
+            name = "flaui"
+            cmd = "run.ps1"
+            env = "windows"
+            waive_reason = "FlaUI needs the Windows stand (OwnAudit Phase 2)"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(m.gate.len(), 2);
+        assert!(m.gate[0].required, "required defaults to true");
+        assert!(m.gate[0].waive_reason.is_none());
+        assert_eq!(m.gate[1].env.as_deref(), Some("windows"));
+        assert!(m.gate[1].waive_reason.is_some());
+    }
+
+    fn run_manifest(toml: &str) -> Vec<StepVerdict> {
+        let m = GateManifest::parse(toml).unwrap();
+        let dir = std::env::temp_dir().join(format!(
+            "o7-gate-test-{}-{}",
+            std::process::id(),
+            std::thread::current()
+                .name()
+                .unwrap_or("t")
+                .replace(':', "-")
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let steps = m.run(&dir, &dir.join("gate")).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        steps
+    }
+
+    /// THE false-green regression (007 audit): a manifest whose only required
+    /// step is `env = "windows"` used to demote the step to `required: false`
+    /// with `NotApplicable`, and reduce to PASS with zero checks executed.
+    /// Now the step keeps its declared `required`, scores `Blocked` without a
+    /// waiver, and the run reduces to `Blocked`.
+    #[test]
+    fn unwaived_windows_required_step_blocks_the_run() {
+        let steps = run_manifest(
+            r#"
+            [[gate]]
+            name = "clrmd-heap"
+            cmd = "run.ps1"
+            env = "windows"
+            "#,
+        );
+        assert_eq!(steps.len(), 1);
+        assert!(steps[0].required, "declared required must be preserved");
+        assert_eq!(steps[0].verdict, Verdict::Blocked);
+        assert!(steps[0].waived.is_none());
+        assert_eq!(Verdict::reduce(&steps), Verdict::Blocked);
+    }
+
+    /// With a pre-declared waiver the same skip is legitimate: NotApplicable,
+    /// the reason is carried in the record, and the run can PASS.
+    #[test]
+    fn waived_windows_required_step_passes_the_run() {
+        let steps = run_manifest(
+            r#"
+            [[gate]]
+            name = "unit"
+            cmd = "true"
+
+            [[gate]]
+            name = "clrmd-heap"
+            cmd = "run.ps1"
+            env = "windows"
+            waive_reason = "windows stand only; tracked for Phase 2"
+            "#,
+        );
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].verdict, Verdict::Pass);
+        assert_eq!(steps[1].verdict, Verdict::NotApplicable);
+        assert!(steps[1].required);
+        assert_eq!(
+            steps[1].waived.as_deref(),
+            Some("windows stand only; tracked for Phase 2")
+        );
+        assert_eq!(Verdict::reduce(&steps), Verdict::Pass);
+    }
+
+    /// A blank waiver is not a waiver (the o7-run `EmptyWaiverReason` rule).
+    #[test]
+    fn blank_waive_reason_is_not_a_waiver() {
+        let steps = run_manifest(
+            r#"
+            [[gate]]
+            name = "clrmd-heap"
+            cmd = "run.ps1"
+            env = "windows"
+            waive_reason = "  "
+            "#,
+        );
+        assert_eq!(steps[0].verdict, Verdict::Blocked);
+        assert!(steps[0].waived.is_none());
+        assert_eq!(Verdict::reduce(&steps), Verdict::Blocked);
+    }
+
+    /// An OPTIONAL windows step without a waiver stays advisory: it is
+    /// recorded `Blocked` (it could not run) but never blocks the run.
+    #[test]
+    fn optional_windows_step_never_blocks() {
+        let steps = run_manifest(
+            r#"
+            [[gate]]
+            name = "extra-profiling"
+            cmd = "run.ps1"
+            env = "windows"
+            required = false
+            "#,
+        );
+        assert!(!steps[0].required);
+        assert_eq!(Verdict::reduce(&steps), Verdict::Pass);
+    }
+
+    /// The executed path still works end-to-end: pass + fail + verdicts.
+    #[test]
+    fn executed_steps_score_pass_and_fail() {
+        let steps = run_manifest(
+            r#"
+            [[gate]]
+            name = "ok"
+            cmd = "true"
+
+            [[gate]]
+            name = "boom"
+            cmd = "false"
+            "#,
+        );
+        assert_eq!(steps[0].verdict, Verdict::Pass);
+        assert_eq!(steps[1].verdict, Verdict::Fail);
+        assert_eq!(Verdict::reduce(&steps), Verdict::Fail);
+    }
 }
