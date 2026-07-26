@@ -90,10 +90,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if cargo tree --workspace --locked --edges no-dev,features | grep -n 'test-harness'; then
+          # Materialize the resolved feature graph FIRST, with its OWN exit status checked. A bare
+          # `if cargo tree ... | grep ...; then` swallows a cargo-tree failure: inside the `if`
+          # condition `set -e` is suspended and `pipefail` only sets the pipeline's status, which the
+          # `if` discards — so a lock drift or resolver error would make `grep` see empty input, skip
+          # the branch, and pass as "harness-free". Here `cargo tree` runs as a plain command under
+          # `set -e`, so a non-zero exit aborts the step (the gate fails) regardless of any match.
+          cargo tree --workspace --locked --edges no-dev,features >feature-graph.txt
+          # Only a SUCCESSFULLY produced graph reaches the search. A match fails the gate; grep's
+          # no-match exit (1) is consumed by the `if` condition (exempt from `set -e`) and falls
+          # through to the pass path.
+          if grep -n 'test-harness' feature-graph.txt; then
             echo "::error::test-harness is active in the production feature graph" >&2
             exit 1
           fi
+          rm -f feature-graph.txt
           echo "production feature graph is harness-free"
 
       # Production-API compile probe. A plain `cargo build` activates no dev-dependency features, so
