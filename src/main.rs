@@ -1,7 +1,7 @@
 //! 007 (`o7`) — private harness. MVP = one isolated, gated agent run.
 //!
-//! loop: worktree at <base> -> agent full-auto -> gate manifest -> verdict
-//!       -> harvest run record into the private store.
+//! loop: worktree at <base> -> agent full-auto -> gate manifest -> canonical
+//!       events -> reducer verdict -> harvest run record into the private store.
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
@@ -9,12 +9,14 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use o7::agent::{self, Engine};
+use o7::events;
 use o7::gate::GateManifest;
 use o7::invoke;
 use o7::judge;
 use o7::record::{RunMeta, RunRecord};
 use o7::verdict::Verdict;
 use o7::worktree;
+use o7_run::event::ArtifactKind;
 
 #[derive(Parser)]
 #[command(name = "o7", version, about = "007 — one isolated, gated agent run")]
@@ -31,6 +33,14 @@ enum Cmd {
     Judge(judge::JudgeArgs),
     /// Invoke: one narrow, read-only, schema-bound single-shot agent call.
     Invoke(invoke::InvokeArgs),
+    /// Replay: independently re-verify a stored run record (chain, artifacts, verdict).
+    Replay(ReplayArgs),
+}
+
+#[derive(Args)]
+struct ReplayArgs {
+    /// Run record directory (`runs/<target>/<run-id>`).
+    run_dir: PathBuf,
 }
 
 #[derive(Args)]
@@ -76,7 +86,26 @@ fn main() -> Result<()> {
         Cmd::Run(a) => run(a),
         Cmd::Judge(a) => judge::run(&a),
         Cmd::Invoke(a) => invoke::run(&a),
+        Cmd::Replay(a) => replay(&a),
     }
+}
+
+/// Independently re-verify a stored run record and report the anchors.
+fn replay(a: &ReplayArgs) -> Result<()> {
+    let report = events::replay_record(&a.run_dir)?;
+    println!(
+        "[o7] replay VERIFIED: verdict {:?}, {} events, {} artifacts",
+        report.verdict, report.events_verified, report.artifacts_verified
+    );
+    println!(
+        "[o7]   final event digest:      {}",
+        report.final_event_digest.as_str()
+    );
+    println!(
+        "[o7]   normalized state digest:  {}",
+        report.normalized_state_digest.as_str()
+    );
+    Ok(())
 }
 
 fn run(a: RunArgs) -> Result<()> {
@@ -155,10 +184,35 @@ fn execute(
     let rec = RunRecord::create(&a.runs_dir, target, run_id)?;
     rec.write_task(task)?;
     rec.write_agent_stdout(&ar.stdout)?;
-    rec.write_diff(&worktree::diff_vs_base(wt, &a.base).unwrap_or_default())?;
+    let diff = worktree::diff_vs_base(wt, &a.base).unwrap_or_default();
+    rec.write_diff(&diff)?;
 
     let steps = manifest.run(wt, &rec.gate_dir())?;
-    let verdict = Verdict::reduce(&steps);
+
+    // The canonical event stream is the verdict authority: obligations are
+    // declared up front (contract), what happened is digest-chained
+    // (events.jsonl), and the pure o7-run reducer scores it — so an
+    // undischarged required gate is BLOCKED and a non-clean agent exit is
+    // ERROR, per the frozen transition table, not per this binary's opinion.
+    let contract = events::build_contract(manifest)?;
+    let task_ref = events::artifact(ArtifactKind::Task, "task.md", task.as_bytes());
+    let diff_ref = events::artifact(ArtifactKind::Diff, "diff.patch", diff.as_bytes());
+    let stream = events::build_events(
+        run_id, contract, &task_ref, &diff_ref, &ar, &steps, &rec.dir,
+    )?;
+    rec.write_text(events::EVENTS_FILE, &events::to_jsonl(&stream)?)?;
+    let verdict = events::canonical_verdict(&stream)?;
+
+    // The legacy per-step reduction stays as a cross-check surface: a
+    // difference is expected exactly where the reducer is stricter (e.g. a
+    // failed agent with green gates), and is surfaced, never hidden.
+    let legacy = Verdict::reduce(&steps);
+    if legacy != verdict {
+        eprintln!(
+            "[o7] note: canonical verdict {verdict:?} differs from legacy step reduction \
+             {legacy:?} — the canonical reducer is the authority"
+        );
+    }
 
     let meta = RunMeta {
         schema: 1,

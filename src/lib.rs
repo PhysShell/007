@@ -5,6 +5,7 @@
 //! functions and parsers. The binary is a thin CLI over these.
 
 pub mod agent;
+pub mod events;
 pub mod gate;
 pub mod invoke;
 pub mod judge;
