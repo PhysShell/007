@@ -1,9 +1,11 @@
 //! Fail-closed repository gate for o7-worker's `test-harness` feature.
 //!
 //! STRUCTURAL analysis (a real TOML parse, never a substring grep) of every `Cargo.toml` in the
-//! workspace tree. It resolves EFFECTIVE package identity (honouring Cargo `package = "..."`
-//! renames), so an aliased edge cannot hide, and it detects the feature being turned on through
-//! ANY route:
+//! workspace tree. It is REPOSITORY-GLOBAL: it first reads the workspace root's
+//! `[workspace.dependencies]` into a key→package map, so it resolves EFFECTIVE package identity
+//! whether the rename is local (`package = "..."`) OR inherited by a member via `workspace = true`
+//! (whose identity lives only in the root). An aliased edge — direct or inherited — cannot hide,
+//! and the feature is detected being turned on through ANY route:
 //! - a dependency edge (any of `dependencies` / `dev-dependencies` / `build-dependencies`, every
 //!   `target.*.*dependencies`, `workspace.dependencies`) whose effective package is o7-worker and
 //!   whose `features` list includes `test-harness`;
@@ -102,12 +104,64 @@ struct Enablement {
     sanctioned: bool,
 }
 
-/// Effective package of a dependency entry: the `package = "..."` rename if present, else the key.
-fn effective_package<'a>(key: &'a str, item: &'a toml::Value) -> &'a str {
+/// The `[workspace.dependencies]` map (dependency key → effective package) parsed from the
+/// workspace ROOT manifest. A member's `workspace = true` edge carries no `package` of its own, so
+/// its identity lives here — the analysis must be repository-global, not per-manifest.
+fn workspace_dependency_map(root_text: &str) -> Result<BTreeMap<String, String>, String> {
+    let root: toml::Table = root_text
+        .parse()
+        .map_err(|e| format!("parse workspace root: {e}"))?;
+    let mut map = BTreeMap::new();
+    if let Some(deps) = root
+        .get("workspace")
+        .and_then(toml::Value::as_table)
+        .and_then(|ws| ws.get("dependencies"))
+        .and_then(toml::Value::as_table)
+    {
+        for (key, item) in deps {
+            let pkg = item
+                .as_table()
+                .and_then(|t| t.get("package"))
+                .and_then(toml::Value::as_str)
+                .unwrap_or(key);
+            map.insert(key.clone(), pkg.to_owned());
+        }
+    }
+    Ok(map)
+}
+
+/// Whether a dependency item inherits from the workspace (`workspace = true`).
+fn is_workspace_inherited(item: &toml::Value) -> bool {
     item.as_table()
+        .and_then(|t| t.get("workspace"))
+        .and_then(toml::Value::as_bool)
+        == Some(true)
+}
+
+/// Effective package of a dependency `key = item`, resolving a local `package = "..."` rename AND
+/// an inherited `workspace = true` alias (whose identity is in the workspace root map). Fail-closed
+/// if `workspace = true` names a key absent from that map (a Cargo-invalid state we must not pass).
+fn effective_package(
+    key: &str,
+    item: &toml::Value,
+    ws: &BTreeMap<String, String>,
+) -> Result<String, String> {
+    if let Some(pkg) = item
+        .as_table()
         .and_then(|t| t.get("package"))
         .and_then(toml::Value::as_str)
-        .unwrap_or(key)
+    {
+        return Ok(pkg.to_owned());
+    }
+    if is_workspace_inherited(item) {
+        return ws.get(key).cloned().ok_or_else(|| {
+            format!(
+                "dependency `{key}` inherits `workspace = true` but no \
+                 [workspace.dependencies] `{key}` exists"
+            )
+        });
+    }
+    Ok(key.to_owned())
 }
 
 fn dep_has_feature(item: &toml::Value, feature: &str) -> bool {
@@ -152,29 +206,38 @@ fn dependency_tables(root: &toml::Table) -> Vec<(String, &toml::Table)> {
     out
 }
 
-/// Every dependency KEY in the manifest whose EFFECTIVE package is o7-worker (across all tables).
-fn o7_worker_aliases(root: &toml::Table) -> BTreeSet<String> {
+/// Every dependency KEY in the manifest whose EFFECTIVE package is o7-worker (across all tables),
+/// resolving inherited `workspace = true` aliases via `ws`.
+fn o7_worker_aliases(
+    root: &toml::Table,
+    ws: &BTreeMap<String, String>,
+) -> Result<BTreeSet<String>, String> {
     let mut set = BTreeSet::new();
     for (_label, table) in dependency_tables(root) {
         for (key, item) in table {
-            if effective_package(key, item) == PKG {
+            if effective_package(key, item, ws)? == PKG {
                 set.insert(key.clone());
             }
         }
     }
-    set
+    Ok(set)
 }
 
-/// All the ways one manifest turns `test-harness` on, each tagged sanctioned/forbidden.
-fn analyze(rel: &str, text: &str) -> Result<Vec<Enablement>, String> {
+/// All the ways one manifest turns `test-harness` on, each tagged sanctioned/forbidden. `ws` is the
+/// workspace-root dependency map, so inherited (`workspace = true`) o7-worker aliases are resolved.
+fn analyze(
+    rel: &str,
+    text: &str,
+    ws: &BTreeMap<String, String>,
+) -> Result<Vec<Enablement>, String> {
     let root: toml::Table = text.parse().map_err(|e| format!("parse {rel}: {e}"))?;
-    let aliases = o7_worker_aliases(&root);
+    let aliases = o7_worker_aliases(&root, ws)?;
     let mut out = Vec::new();
 
     // Dependency edges (effective package o7-worker) enabling the feature.
     for (label, table) in dependency_tables(&root) {
         for (key, item) in table {
-            if effective_package(key, item) != PKG || !dep_has_feature(item, FEATURE) {
+            if effective_package(key, item, ws)? != PKG || !dep_has_feature(item, FEATURE) {
                 continue;
             }
             let path = dep_path(item);
@@ -327,13 +390,17 @@ fn bin_stems(bin_dir: &Path) -> Result<BTreeSet<String>, String> {
 fn test_harness_enablement_is_exactly_the_sanctioned_self_edge() {
     let root = workspace_root().expect("workspace root");
     let manifests = all_manifests(&root).expect("fail-closed manifest walk");
+    // Repository-global: resolve inherited (`workspace = true`) aliases against the root map.
+    let root_text =
+        std::fs::read_to_string(root.join("Cargo.toml")).expect("read workspace root manifest");
+    let ws = workspace_dependency_map(&root_text).expect("workspace dependency map");
 
     let mut sanctioned = Vec::new();
     let mut violations = Vec::new();
     for manifest in &manifests {
         let rel = rel_of(manifest, &root).expect("relative path");
         let text = std::fs::read_to_string(manifest).unwrap_or_else(|e| panic!("read {rel}: {e}"));
-        for enablement in analyze(&rel, &text).unwrap_or_else(|e| panic!("{e}")) {
+        for enablement in analyze(&rel, &text, &ws).unwrap_or_else(|e| panic!("{e}")) {
             if enablement.sanctioned {
                 sanctioned.push(enablement.detail);
             } else {
@@ -404,10 +471,16 @@ fn harness_binaries_are_locked_out_of_production() {
 // Adversarial fixtures — every known bypass must be caught.
 // ---------------------------------------------------------------------------
 
-/// The fixture, analysed as if it were a PRODUCTION manifest, yields ≥1 enablement and none is
-/// sanctioned — i.e. the real gate would reject it.
+/// The fixture, analysed as if it were a PRODUCTION manifest (no workspace inheritance), yields ≥1
+/// enablement and none is sanctioned — i.e. the real gate would reject it.
 fn assert_all_forbidden(rel: &str, text: &str) {
-    let found = analyze(rel, text).expect("fixture parses");
+    assert_forbidden_with(&BTreeMap::new(), rel, text);
+}
+
+/// As [`assert_all_forbidden`], but with an explicit workspace-dependency map so a member manifest
+/// that INHERITS a renamed o7-worker alias (`workspace = true`) is analysed as Cargo resolves it.
+fn assert_forbidden_with(ws: &BTreeMap<String, String>, rel: &str, text: &str) {
+    let found = analyze(rel, text, ws).expect("fixture parses");
     assert!(
         !found.is_empty(),
         "gate MISSED an enablement in fixture:\n{text}"
@@ -419,6 +492,16 @@ fn assert_all_forbidden(rel: &str, text: &str) {
 }
 
 const PROD: &str = "crates/o7-verifier/Cargo.toml";
+
+/// A workspace root that renames o7-worker as `worker-internal` in `[workspace.dependencies]`.
+const ROOT_RENAME: &str = r#"
+[workspace]
+members = ["crates/o7-worker", "crates/o7-verifier"]
+
+[workspace.dependencies.worker-internal]
+package = "o7-worker"
+path = "crates/o7-worker"
+"#;
 
 #[test]
 fn adversarial_renamed_production_dependency() {
@@ -491,6 +574,85 @@ default = ["test-harness"]
     );
 }
 
+// ---- inherited workspace-alias fixtures (whole-tree: root map + member text) ----
+
+#[test]
+fn adversarial_inherited_workspace_alias_production_edge() {
+    let ws = workspace_dependency_map(ROOT_RENAME).expect("root parses");
+    assert_forbidden_with(
+        &ws,
+        PROD,
+        r#"
+[dependencies]
+worker-internal = { workspace = true, features = ["test-harness"] }
+"#,
+    );
+}
+
+#[test]
+fn adversarial_inherited_workspace_alias_target_specific_edge() {
+    let ws = workspace_dependency_map(ROOT_RENAME).expect("root parses");
+    assert_forbidden_with(
+        &ws,
+        PROD,
+        r#"
+[target.'cfg(windows)'.dependencies]
+worker-internal = { workspace = true, features = ["test-harness"] }
+"#,
+    );
+}
+
+#[test]
+fn adversarial_inherited_workspace_alias_forward() {
+    let ws = workspace_dependency_map(ROOT_RENAME).expect("root parses");
+    assert_forbidden_with(
+        &ws,
+        PROD,
+        r#"
+[dependencies]
+worker-internal = { workspace = true, optional = true }
+
+[features]
+prod = ["worker-internal/test-harness"]
+"#,
+    );
+}
+
+#[test]
+fn adversarial_inherited_workspace_alias_weak_forward() {
+    let ws = workspace_dependency_map(ROOT_RENAME).expect("root parses");
+    assert_forbidden_with(
+        &ws,
+        PROD,
+        r#"
+[dependencies]
+worker-internal = { workspace = true, optional = true }
+
+[features]
+weak-prod = ["worker-internal?/test-harness"]
+"#,
+    );
+}
+
+#[test]
+fn fail_closed_on_unknown_inherited_workspace_key() {
+    // `workspace = true` referencing a key absent from [workspace.dependencies] is Cargo-invalid;
+    // the gate must error, not silently treat it as a non-o7-worker dependency.
+    let empty = BTreeMap::new();
+    let result = analyze(
+        PROD,
+        r#"
+[dependencies]
+mystery = { workspace = true, features = ["test-harness"] }
+"#,
+        &empty,
+    );
+    assert!(
+        result.is_err(),
+        "unknown inherited key must fail closed: {result:?}"
+    );
+}
+
 #[test]
 fn adversarial_duplicate_self_dev_alias() {
     // The sanctioned edge plus a SECOND aliased copy of o7-worker in the same table.
@@ -501,6 +663,7 @@ fn adversarial_duplicate_self_dev_alias() {
 o7-worker = { path = ".", features = ["test-harness"] }
 worker-second-copy = { package = "o7-worker", path = ".", features = ["test-harness"] }
 "#,
+        &BTreeMap::new(),
     )
     .expect("parses");
     let sanctioned = found.iter().filter(|e| e.sanctioned).count();
@@ -540,7 +703,7 @@ o7-worker = { path = "../o7-worker", features = ["test-harness"] }
 
 #[test]
 fn fail_closed_on_malformed_manifest() {
-    assert!(analyze(PROD, "this is not [ valid toml").is_err());
+    assert!(analyze(PROD, "this is not [ valid toml", &BTreeMap::new()).is_err());
 }
 
 #[test]
