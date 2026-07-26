@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::boundary::{BoundaryAttestation, BoundaryExit};
+use crate::boundary::{BoundaryAttestation, BoundaryEvidence, BoundaryExit};
 use crate::output::OutputChunk;
 use crate::process_identity::ProcessIdentity;
 use crate::spec::WorkerId;
@@ -22,10 +22,14 @@ use crate::spec::WorkerId;
 /// A single observation of the worker lifecycle.
 #[derive(Debug, Clone)]
 pub enum WorkerObservation {
-    /// The boundary's attestation, emitted before anything is spawned.
+    /// The boundary's attestation (configured intent), emitted before anything is spawned.
     BoundaryAttested(BoundaryAttestation),
     /// About to ask the boundary to spawn.
     SpawnRequested,
+    /// The run-time evidence the launch established, emitted after a successful spawn and
+    /// BEFORE `Spawned`. A downstream adapter persists `evidence.report` as a
+    /// content-addressed artifact.
+    LaunchEvidence(BoundaryEvidence),
     /// The leader process was spawned.
     Spawned(ProcessIdentity),
     /// A chunk of stdout/stderr.

@@ -95,6 +95,93 @@ pub struct BoundarySpawnSpec {
     pub stdin: StdinMode,
 }
 
+/// The run-time proof a boundary establishes AT launch — distinct from the pre-spawn
+/// [`BoundaryAttestation`], which is only a configured claim.
+///
+/// A two-variant enum, not a struct with an `Option<report>`, so there is no way to express
+/// the contradiction "fully enforced but with no report": a launch either established NO
+/// confinement ([`BoundaryEvidence::Unconfined`], the host) or it established confinement and
+/// MUST carry the raw report frame that proves it ([`BoundaryEvidence::Reported`]). There is
+/// deliberately no constructor that pairs `FullyEnforced` with an absent report.
+///
+/// The supervisor publishes this before [`crate::WorkerObservation::Spawned`] and gates it
+/// against the requirement via [`BoundaryEvidence::satisfies`]: `RequireFullyEnforced`
+/// accepts ONLY a `Reported` evidence that is fully enforced AND whose implementation matches
+/// the boundary's configured one — so missing evidence, a downgrade, or an implementation
+/// swap all fail closed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoundaryEvidence {
+    /// No confinement was established (e.g. the host boundary). Never satisfies
+    /// `RequireFullyEnforced`. It carries no attestation because the boundary's configured
+    /// claim is already published as [`crate::WorkerObservation::BoundaryAttested`].
+    Unconfined,
+    /// Confinement was established, proven by the backend's raw report frame. The `report`
+    /// bytes are opaque here — a downstream adapter stores them as a content-addressed
+    /// artifact (o7-run's `SandboxEvidenceCaptured`) and re-derives their meaning.
+    Reported {
+        /// The attestation the report PROVES (re-derived from the verified report, not merely
+        /// claimed).
+        attestation: BoundaryAttestation,
+        /// The verified raw report frame.
+        report: Vec<u8>,
+    },
+}
+
+impl BoundaryEvidence {
+    /// The attestation this evidence actually establishes, or `None` for `Unconfined`.
+    #[must_use]
+    pub fn established(&self) -> Option<BoundaryAttestation> {
+        match self {
+            Self::Unconfined => None,
+            Self::Reported { attestation, .. } => Some(*attestation),
+        }
+    }
+
+    /// Whether this run-time evidence satisfies `requirement`, given the boundary's
+    /// pre-spawn `configured` attestation.
+    ///
+    /// - `AllowUnconfined`: any evidence is acceptable.
+    /// - `RequireFullyEnforced`: the evidence MUST be [`BoundaryEvidence::Reported`], fully
+    ///   enforced, AND its implementation must match the configured one. `Unconfined`
+    ///   (missing report), a downgrade, or an implementation swap all fail.
+    #[must_use]
+    pub fn satisfies(
+        &self,
+        requirement: BoundaryRequirement,
+        configured: &BoundaryAttestation,
+    ) -> bool {
+        match requirement {
+            BoundaryRequirement::AllowUnconfined => true,
+            BoundaryRequirement::RequireFullyEnforced => match self {
+                Self::Unconfined => false,
+                Self::Reported { attestation, .. } => {
+                    attestation.enforcement == EnforcementLevel::FullyEnforced
+                        && attestation.implementation == configured.implementation
+                }
+            },
+        }
+    }
+}
+
+/// A successful launch: the owned process set PLUS the run-time [`BoundaryEvidence`] the
+/// launch established. Returned by [`ProcessBoundary::spawn`] so evidence is available to
+/// the supervisor and downstream BEFORE the process is trusted — a frozen interface that
+/// could only return a `BoundaryProcess` could never carry the required proof.
+pub struct BoundaryLaunch {
+    pub process: Box<dyn BoundaryProcess>,
+    pub evidence: BoundaryEvidence,
+}
+
+impl std::fmt::Debug for BoundaryLaunch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The process is an opaque trait object; the evidence is the interesting part.
+        f.debug_struct("BoundaryLaunch")
+            .field("evidence", &self.evidence)
+            .field("process", &"<dyn BoundaryProcess>")
+            .finish()
+    }
+}
+
 /// Errors from a boundary mechanism.
 #[derive(Debug, thiserror::Error)]
 pub enum BoundaryError {
@@ -106,6 +193,12 @@ pub enum BoundaryError {
     Wait(#[source] std::io::Error),
     #[error("membership query failed: {0}")]
     Membership(String),
+    /// A report/protocol failure at launch: a malformed frame, a mis-bound or downgraded
+    /// report, a mismatched backend identity, or a backend that never delivered a report.
+    /// Kept distinct from [`BoundaryError::Spawn`] so report failures do not dissolve into a
+    /// generic I/O error.
+    #[error("launch evidence/protocol failure: {0}")]
+    Evidence(String),
     #[error("boundary is only supported on Linux")]
     UnsupportedPlatform,
 }
@@ -113,18 +206,18 @@ pub enum BoundaryError {
 /// Spawns processes inside a boundary it owns.
 #[async_trait]
 pub trait ProcessBoundary: Send + Sync {
-    /// Launch the process. On success the returned [`BoundaryProcess`] owns the
-    /// entire process set.
+    /// Launch the process. On success the returned [`BoundaryLaunch`] owns the entire
+    /// process set AND carries the run-time [`BoundaryEvidence`] the launch established. A
+    /// confining boundary MUST NOT return a live process it could not confine: if it cannot
+    /// establish (and prove) the intended enforcement it fails closed here.
     ///
     /// CANCEL-SAFETY CONTRACT: the returned future MUST be cancel-safe. If it is
     /// dropped before completing, the boundary must not leak a process — any
-    /// partially-created process must be terminated/cleaned up as the future
-    /// drops (so a cancel racing with a spawn can never leave an ownerless
-    /// process). The supervisor relies on this to cancel during `Starting`.
-    async fn spawn(
-        &self,
-        spec: BoundarySpawnSpec,
-    ) -> Result<Box<dyn BoundaryProcess>, BoundaryError>;
+    /// partially-created process (including a backend spawned to read a report from) must be
+    /// terminated/cleaned up as the future drops (so a cancel racing with a spawn can never
+    /// leave an ownerless process). The supervisor relies on this to cancel during
+    /// `Starting`.
+    async fn spawn(&self, spec: BoundarySpawnSpec) -> Result<BoundaryLaunch, BoundaryError>;
 
     /// The boundary's honest attestation.
     fn attestation(&self) -> BoundaryAttestation;

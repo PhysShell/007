@@ -9,6 +9,8 @@ members = [
     "crates/o7-worktree",
     "crates/o7-verifier",
     "crates/o7-run",
+    "crates/o7-sandbox-protocol",
+    "crates/o7-harness-policy",
 ]
 exclude = ["fuzz"]
 resolver = "2"

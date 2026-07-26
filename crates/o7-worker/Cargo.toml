@@ -4,10 +4,55 @@ version = "0.1.0"
 edition = "2021"
 description = "007 generic worker runtime: own a host process group via a ProcessBoundary, stream typed observations, cancel and clean up deterministically. No provider/model/ledger knowledge."
 publish = false
+# The three helper binaries below are the TEST HARNESS; disable auto-discovery so they are never
+# built as production targets and exist only via their explicit, feature-gated `[[bin]]` entries.
+autobins = false
 
 [lib]
 name = "o7_worker"
 path = "src/lib.rs"
+
+# TEST-HARNESS binaries. They drive/probe the boundary from integration tests and build ONLY with
+# the `test-harness` feature (turned on for THIS package's own test build via the self
+# dev-dependency below). A production `cargo build` leaves the feature off, so `required-features`
+# is unmet and none of them compile into a shipped artifact.
+[[bin]]
+name = "sandboy_fake"
+path = "src/bin/sandboy_fake.rs"
+required-features = ["test-harness"]
+
+[[bin]]
+name = "spawn_probe"
+path = "src/bin/spawn_probe.rs"
+required-features = ["test-harness"]
+
+[[bin]]
+name = "fd_probe"
+path = "src/bin/fd_probe.rs"
+required-features = ["test-harness"]
+
+[[bin]]
+name = "sandbox_probe"
+path = "src/bin/sandbox_probe.rs"
+required-features = ["test-harness"]
+
+[features]
+# `test-harness` is an INTERNAL, NON-DEFAULT Cargo feature. It gates the controlled fake-backend
+# config knob (`BackendConfig::fake_mode`), the cancellation-test barrier
+# (`SandboyBoundary::with_post_go_barrier`), and the three harness binaries above.
+#
+# Cargo features are NOT private: any manifest may technically write
+# `o7-worker = { features = ["test-harness"] }`, forward it through `foo = ["o7-worker/test-harness"]`,
+# or pass `--features test-harness` on the command line. Resolver v2 only stops the self
+# dev-dependency below from UNIFYING this feature into a normal production build — it does not make
+# the feature unrequestable. The default build being harness-free is therefore a convenience, not
+# the guarantee.
+#
+# The guarantee is REPOSITORY POLICY, enforced fail-closed by the `o7-harness-policy` crate: this
+# feature may be enabled from exactly ONE dependency edge — o7-worker's own `[dev-dependencies]`
+# self-edge below — and from nowhere else. A production dependency edge that enables it fails the
+# policy gate in CI.
+test-harness = []
 
 [dependencies]
 tokio = { version = "1", default-features = false, features = [
@@ -21,20 +66,52 @@ tokio = { version = "1", default-features = false, features = [
 ] }
 bytes = "1"
 thiserror = "1"
+# Sandboy: the pure wire protocol (policy digest, versioned length-bounded report frame,
+# identity binding) shared verbatim with the external backend. All report parsing lives
+# there, so o7-worker needs no serde of its own.
+o7-sandbox-protocol = { path = "../o7-sandbox-protocol" }
 # Makes the ProcessBoundary/BoundaryProcess traits object-safe with async methods
 # (spawn returns Box<dyn BoundaryProcess>). MIT-licensed.
 async-trait = "0.1"
+# Sandboy launch nonce: 128 bits straight from the OS CSPRNG, no timestamp/counter
+# fallback. Safe API over getrandom(2)/getentropy; MIT/Apache (allowed in deny.toml).
+getrandom = "0.2"
 # Unix-only: process-GROUP signalling (killpg) and pid types. Unix-only by
 # construction — 007 runs on Linux/WSL. nix wraps the raw syscalls in a safe API
 # (the tree forbids `unsafe`). nix is MIT (allowed in deny.toml).
+# `fs`/`mman`: Sandboy acquisition stages backend/target bytes into an anonymous memfd and
+# seals it (memfd_create + F_ADD_SEALS + F_GET_SEALS) via nix's SAFE API (the tree forbids
+# `unsafe`), so a held object is genuinely immutable, not merely a held mutable inode.
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", default-features = false, features = ["signal", "process"] }
+nix = { version = "0.29", default-features = false, features = [
+    "signal",
+    "process",
+    "fs",
+    "mman",
+] }
+# Hardened target ACQUISITION: open the source with O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC and
+# prove it a regular object before staging (a symlink final component fails closed, a FIFO/
+# device never blocks) — the same safe-wrapper discipline the verifier uses. rustix is already
+# a workspace dependency (o7-verifier, o7-worktree) and allowed in deny.toml.
+rustix = { version = "1", default-features = false, features = ["fs", "std"] }
 
 [dev-dependencies]
+# Self dev-dependency: the standard Cargo idiom for a test-only feature. It turns on
+# `test-harness` when building THIS package's own tests/harness-bins, and only then; under
+# resolver v2 the dev-dependency feature never leaks into a production build of a dependent.
+o7-worker = { path = ".", features = ["test-harness"] }
 tempfile = "3"
 # Test children install a safe no-op SIGTERM handler (the tree forbids `unsafe`,
 # so nix's raw signal API is unusable in tests). signal-hook is MIT/Apache.
 signal-hook = "0.3"
+# The sealed-memfd acceptance probe creates a REAL sealed memfd (memfd_create +
+# F_ADD_SEALS + F_GET_SEALS) via nix's safe API — the `fs` feature adds those.
+nix = { version = "0.29", default-features = false, features = [
+    "signal",
+    "process",
+    "fs",
+    "mman",
+] }
 
 # Mirror the workspace discipline: no unsafe, no panics-by-default.
 [lints.rust]

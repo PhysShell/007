@@ -1,0 +1,37 @@
+[package]
+name = "o7-sandbox-protocol"
+version = "0.1.0"
+edition = "2021"
+description = "007 sandbox wire protocol: versioned, length-bounded, identity-bound enforcement reports and confinement policies shared by o7-worker and any external sandboy backend. Pure: no I/O, no unsafe, no process launching."
+publish = false
+
+[lib]
+name = "o7_sandbox_protocol"
+path = "src/lib.rs"
+
+[dependencies]
+# The report/policy travel between the o7-worker parent and an EXTERNAL backend as bytes,
+# so both sides recompute truth with only serde + a hash — no shared runtime.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "1"
+
+[dev-dependencies]
+# Known-answer fixtures parse their own re-serialization.
+serde_json = "1"
+
+# Mirror the workspace discipline: no unsafe, no panics-by-default.
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"

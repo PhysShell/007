@@ -1,0 +1,188 @@
+name: sandbox confinement (Vertical B)
+
+# The REAL kernel confinement acceptance matrix for Vertical B (crates/o7-worker/tests/
+# sandbox_confinement.rs, run with --include-ignored). It requires a DESIGNATED runner that actually
+# provides delegated cgroup v2 (with a writable cgroup.kill), Landlock ABI >= 3 (TRUNCATE), seccomp,
+# and IPv6 — capabilities the default GitHub-HOSTED runners do NOT provide. So this job runs ONLY on
+# a self-hosted runner carrying the `confinement` label and is NEVER scheduled on hosted runners.
+#
+# Until such a runner is provisioned this workflow is workflow_dispatch-ONLY and NON-required (it
+# does not gate PRs and cannot go red on the default runners). Once the capable runner exists:
+#   1. add a `pull_request: branches: [main]` trigger below, and
+#   2. mark "sandbox confinement (Vertical B)" a REQUIRED status check on `main`.
+#
+# Every capability preflight is FAIL-CLOSED: a missing delegated cgroup v2, a non-writable
+# cgroup.kill, an insufficient Landlock ABI/access right, an unavailable seccomp filter, or missing
+# IPv6 is an EXPLICIT job FAILURE here — never a skip and never a green "unsupported". Landlock/
+# seccomp are exercised through Python `ctypes` (a CI tool), keeping every confinement syscall OUT of
+# the forbid-unsafe Rust tree.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sandbox-confinement:
+    name: sandbox confinement (Vertical B)
+    # DESIGNATED runner only. Never `ubuntu-latest`/hosted: those cannot delegate cgroup v2, so the
+    # preflight below would (correctly) fail-close on every hosted run.
+    runs-on: [self-hosted, linux, x64, confinement]
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact tested revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          # On a PR (once the trigger is enabled), test the PR HEAD; on manual dispatch, the ref.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # Real CAPABILITY preflight — not a presence grep. It EXERCISES each mechanism and FAILS the
+      # job (never skips) if any cannot actually be used, so a red matrix afterwards is attributable
+      # to the backend, not the environment.
+      - name: Prove cgroup v2 capability (mkdir → move → cgroup.kill → rmdir)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -e /sys/fs/cgroup/cgroup.controllers ]; then
+            echo "::error::cgroup v2 is not mounted (/sys/fs/cgroup/cgroup.controllers)"; exit 1
+          fi
+          own=$(grep '^0::' /proc/self/cgroup | cut -d: -f3-)
+          base="/sys/fs/cgroup${own}"
+          child="${base}/o7-capcheck.$$"
+          victim=""
+          # The probe must never leak its own scratch cgroup or process, even on an intermediate
+          # failure — reap the victim and remove the directory on ANY exit.
+          cleanup() { [ -n "$victim" ] && kill -9 "$victim" 2>/dev/null || true; wait "$victim" 2>/dev/null || true; rmdir "$child" 2>/dev/null || true; }
+          trap cleanup EXIT
+          if ! mkdir "$child" 2>/dev/null; then
+            echo "::error::cannot create a child cgroup under ${base} (no delegated subtree)"; exit 1
+          fi
+          # The GREEN backend tears the tree down via cgroup.kill, so the designated runner MUST have
+          # a writable cgroup.kill — no PID-kill fallback that would green-light a runner without it.
+          if [ ! -w "$child/cgroup.kill" ]; then
+            echo "::error::cgroup.kill is not writable (ABI < 5.14 or undelegated) — required for teardown"; exit 1
+          fi
+          # Move a disposable process in and prove membership.
+          sleep 120 & victim=$!
+          if ! echo "$victim" > "$child/cgroup.procs" 2>/dev/null; then
+            echo "::error::cannot move a process into the delegated cgroup"; exit 1
+          fi
+          if ! grep -qx "$victim" "$child/cgroup.procs"; then
+            echo "::error::cgroup.procs does not reflect the moved process"; exit 1
+          fi
+          # Kill the whole cgroup via cgroup.kill and prove it drains (the child is reaped so its
+          # task leaves cgroup.procs), then remove the directory.
+          echo 1 > "$child/cgroup.kill"
+          wait "$victim" 2>/dev/null || true
+          victim=""
+          for _ in $(seq 1 50); do [ -s "$child/cgroup.procs" ] || break; sleep 0.1; done
+          if [ -s "$child/cgroup.procs" ]; then
+            echo "::error::the cgroup did not drain after cgroup.kill"; exit 1
+          fi
+          if ! rmdir "$child" 2>/dev/null || [ -e "$child" ]; then
+            echo "::error::cannot remove the delegated cgroup directory"; exit 1
+          fi
+          trap - EXIT
+          echo "cgroup v2 capability proven: mkdir, move, membership, cgroup.kill, drain, rmdir"
+
+      - name: Prove Landlock + seccomp capability (real ruleset + real filter)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ctypes, os, struct, sys
+          libc = ctypes.CDLL(None, use_errno=True)
+
+          # --- Landlock: require ABI >= 3 (TRUNCATE), then CREATE a representative ruleset fd. ---
+          # ABI 3 is the minimum that governs file TRUNCATE (LANDLOCK_ACCESS_FS_TRUNCATE, bit 14),
+          # which the confinement matrix asserts is denied outside the worktree; a runner whose
+          # kernel cannot handle that right could never make the matrix GREEN.
+          NR_landlock_create_ruleset = 444
+          LANDLOCK_CREATE_RULESET_VERSION = 1 << 0
+          MIN_ABI = 3
+          abi = libc.syscall(NR_landlock_create_ruleset, None, 0, LANDLOCK_CREATE_RULESET_VERSION)
+          if abi < MIN_ABI:
+              print(f"::error::Landlock ABI {abi} < required {MIN_ABI} (no TRUNCATE right); errno {ctypes.get_errno()}")
+              sys.exit(1)
+          class ruleset_attr(ctypes.Structure):
+              _fields_ = [("handled_access_fs", ctypes.c_uint64)]
+          # Filesystem access rights bits 0..14 — a representative ruleset that INCLUDES the ABI-3
+          # TRUNCATE right (bit 14), so ruleset creation proves the kernel accepts it.
+          attr = ruleset_attr(0x7fff)
+          rs = libc.syscall(NR_landlock_create_ruleset, ctypes.byref(attr), 8, 0)
+          if rs < 0:
+              print(f"::error::cannot create a Landlock ruleset with the TRUNCATE right (errno {ctypes.get_errno()})")
+              sys.exit(1)
+          os.close(rs)
+          print(f"Landlock capability proven: ABI {abi} (>= {MIN_ABI}), TRUNCATE-inclusive ruleset created")
+
+          # --- seccomp: install a minimal BPF filter in a disposable child and observe a chosen
+          # syscall denied with the expected errno. ---
+          def child():
+              PR_SET_NO_NEW_PRIVS = 38
+              if libc.prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0:
+                  os._exit(2)
+              BPF_LD, BPF_W, BPF_ABS = 0x00, 0x00, 0x20
+              BPF_JMP, BPF_JEQ, BPF_K = 0x05, 0x10, 0x00
+              BPF_RET = 0x06
+              SECCOMP_RET_ALLOW = 0x7fff0000
+              SECCOMP_RET_ERRNO = 0x00050000
+              NR_getpriority = 140  # x86_64; the chosen syscall to deny
+              EPERM = 1
+              def stmt(code, k): return struct.pack("HBBI", code, 0, 0, k)
+              def jump(code, k, jt, jf): return struct.pack("HBBI", code, jt, jf, k)
+              prog = b"".join([
+                  stmt(BPF_LD | BPF_W | BPF_ABS, 0),                 # A = seccomp_data.nr
+                  jump(BPF_JMP | BPF_JEQ | BPF_K, NR_getpriority, 0, 1),
+                  stmt(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EPERM & 0xffff)),
+                  stmt(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+              ])
+              buf = (ctypes.c_char * len(prog)).from_buffer_copy(prog)
+              class sock_fprog(ctypes.Structure):
+                  _fields_ = [("len", ctypes.c_ushort), ("filter", ctypes.c_void_p)]
+              fp = sock_fprog(len(prog) // 8, ctypes.cast(buf, ctypes.c_void_p))
+              NR_seccomp = 317
+              SECCOMP_SET_MODE_FILTER = 1
+              if libc.syscall(NR_seccomp, SECCOMP_SET_MODE_FILTER, 0, ctypes.byref(fp)) != 0:
+                  os._exit(3)
+              ctypes.set_errno(0)
+              libc.getpriority(0, 0)
+              os._exit(10 if ctypes.get_errno() == EPERM else 11)
+          pid = os.fork()
+          if pid == 0:
+              child()
+          _, status = os.waitpid(pid, 0)
+          code = os.waitstatus_to_exitcode(status)
+          if code != 10:
+              print(f"::error::seccomp filter did not deny the chosen syscall with EPERM (child exit {code})")
+              sys.exit(1)
+          print("seccomp capability proven: filter installed, chosen syscall denied with EPERM")
+          PY
+
+      # IPv6 is a prerequisite of the network denial oracle: the matrix requires the host to create
+      # IPv4 AND IPv6 sockets UNCONFINED (so a confined EPERM is a real seccomp denial, not an
+      # EAFNOSUPPORT). A runner without IPv6 loopback fails the job here, never skips it.
+      - name: Require IPv6 loopback (fail, never skip)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import socket, sys
+          try:
+              for kind in (socket.SOCK_DGRAM, socket.SOCK_STREAM):
+                  s = socket.socket(socket.AF_INET6, kind)
+                  s.bind(("::1", 0))
+                  s.close()
+          except OSError as e:
+              print(f"::error::IPv6 loopback unavailable ({e}) — required for the network denial oracle")
+              sys.exit(1)
+          print("IPv6 capability proven: udp6 + tcp6 loopback bind")
+          PY
+
+      - name: Confinement acceptance matrix
+        run: cargo test -p o7-worker --locked --test sandbox_confinement -- --include-ignored

@@ -14,8 +14,9 @@ use nix::unistd::Pid;
 use tokio::process::{Child, Command};
 
 use crate::boundary::{
-    BoundaryAttestation, BoundaryError, BoundaryExit, BoundaryKind, BoundaryProcess,
-    BoundarySpawnSpec, BoundaryStream, EnforcementLevel, ProcessBoundary,
+    BoundaryAttestation, BoundaryError, BoundaryEvidence, BoundaryExit, BoundaryKind,
+    BoundaryLaunch, BoundaryProcess, BoundarySpawnSpec, BoundaryStream, EnforcementLevel,
+    ProcessBoundary,
 };
 use crate::process_identity::ProcessIdentity;
 use crate::spec::StdinMode;
@@ -27,10 +28,7 @@ pub struct UnconfinedHostBoundary;
 
 #[async_trait]
 impl ProcessBoundary for UnconfinedHostBoundary {
-    async fn spawn(
-        &self,
-        spec: BoundarySpawnSpec,
-    ) -> Result<Box<dyn BoundaryProcess>, BoundaryError> {
+    async fn spawn(&self, spec: BoundarySpawnSpec) -> Result<BoundaryLaunch, BoundaryError> {
         // Membership/cleanup attestation relies on Linux `/proc`. Refuse anything
         // else rather than pretend to enforce a boundary we cannot verify.
         if !cfg!(target_os = "linux") {
@@ -75,11 +73,16 @@ impl ProcessBoundary for UnconfinedHostBoundary {
             )));
         }
 
-        Ok(Box::new(HostBoundaryProcess {
-            child,
-            identity,
-            pgid,
-        }))
+        Ok(BoundaryLaunch {
+            process: Box::new(HostBoundaryProcess {
+                child,
+                identity,
+                pgid,
+            }),
+            // The host boundary establishes NO confinement — honest `Unconfined` evidence.
+            // Usable only under `AllowUnconfined`; it can never satisfy RequireFullyEnforced.
+            evidence: BoundaryEvidence::Unconfined,
+        })
     }
 
     fn attestation(&self) -> BoundaryAttestation {
@@ -90,13 +93,27 @@ impl ProcessBoundary for UnconfinedHostBoundary {
     }
 }
 
-struct HostBoundaryProcess {
+/// A boundary process backed by a POSIX process GROUP led by a tokio [`Child`]. Reused by the
+/// Sandboy boundary to wrap the monitor backend (also a group leader), so its lifecycle
+/// (graceful/force stop, wait, membership) acts on the whole owned group via `killpg` and
+/// `/proc` enumeration — identical to the host boundary.
+pub(crate) struct HostBoundaryProcess {
     child: Child,
     identity: ProcessIdentity,
     pgid: i32,
 }
 
 impl HostBoundaryProcess {
+    /// Wrap an already-spawned group leader `child` (spawned with `process_group(0)`, so
+    /// `pgid == child pid`) with its `identity` and `pgid`.
+    pub(crate) fn new(child: Child, identity: ProcessIdentity, pgid: i32) -> Self {
+        Self {
+            child,
+            identity,
+            pgid,
+        }
+    }
+
     /// Signal the whole group; a missing group (`ESRCH`) means it is already gone,
     /// which is success for our purposes.
     fn signal_group(&self, signal: Signal) -> Result<(), BoundaryError> {
@@ -160,7 +177,7 @@ impl BoundaryProcess for HostBoundaryProcess {
 /// negative / out-of-`i32`-range id is refused, because `killpg` on process group 0
 /// targets the CALLER's own group and a bogus id targets the wrong processes — so we
 /// must never build a boundary around an id we cannot signal in isolation.
-fn signalable_pid(raw: Option<u32>) -> Result<i32, BoundaryError> {
+pub(crate) fn signalable_pid(raw: Option<u32>) -> Result<i32, BoundaryError> {
     match raw.and_then(|id| i32::try_from(id).ok()) {
         Some(pid) if pid > 0 => Ok(pid),
         _ => Err(BoundaryError::Spawn(io::Error::other(

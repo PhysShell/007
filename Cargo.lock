@@ -401,6 +401,17 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
+version = "0.2.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff2abc00be7fca6ebc474524697ae276ad847ad0a6b3faa4bcb027e9a4614ad0"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "wasi",
+]
+
+[[package]]
+name = "getrandom"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
@@ -806,6 +817,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "o7-harness-policy"
+version = "0.1.0"
+dependencies = [
+ "o7-worker",
+ "toml",
+]
+
+[[package]]
 name = "o7-ledger"
 version = "0.1.0"
 dependencies = [
@@ -821,6 +840,16 @@ dependencies = [
 
 [[package]]
 name = "o7-run"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
+name = "o7-sandbox-protocol"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -852,7 +881,11 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "getrandom 0.2.17",
  "nix",
+ "o7-sandbox-protocol",
+ "o7-worker",
+ "rustix",
  "signal-hook",
  "tempfile",
  "thiserror",

@@ -435,6 +435,7 @@ pub fn observation_kind(observation: &WorkerObservation) -> &'static str {
     match observation {
         WorkerObservation::BoundaryAttested(_) => "boundary_attested",
         WorkerObservation::SpawnRequested => "spawn_requested",
+        WorkerObservation::LaunchEvidence(_) => "launch_evidence",
         WorkerObservation::Spawned(_) => "spawned",
         WorkerObservation::OutputChunk(_) => "output",
         WorkerObservation::Heartbeat { .. } => "heartbeat",

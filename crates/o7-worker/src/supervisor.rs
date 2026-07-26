@@ -351,9 +351,12 @@ async fn run_inner(
     // Dropping the spawn future is cancel-safe per the ProcessBoundary contract.
     let spawn_fut = boundary.spawn(spawn_spec);
     tokio::pin!(spawn_fut);
-    let mut process = tokio::select! {
+    let crate::boundary::BoundaryLaunch {
+        mut process,
+        evidence,
+    } = tokio::select! {
         spawned = &mut spawn_fut => match spawned {
-            Ok(process) => process,
+            Ok(launch) => launch,
             Err(err) => return fail_to_start(&mut state, err.to_string()),
         },
         _ = wait_cancel(&mut request_rx) => {
@@ -369,6 +372,38 @@ async fn run_inner(
     // From here a live process is owned: every early exit must go through VERIFIED
     // cleanup (force-kill, reap, prove the group gone), never a best-effort kill.
     let identity = process.identity();
+
+    // Defense in depth: the run-time evidence must ALSO satisfy the requirement. A confining
+    // boundary is expected to fail closed inside spawn, but if it returned a live process
+    // whose established evidence does not meet RequireFullyEnforced, tear it down and fail —
+    // never trust a process that only CLAIMED confinement it did not prove. Under
+    // RequireFullyEnforced this requires a REPORTED evidence, fully enforced, whose
+    // implementation matches the configured one — so a missing report, a downgrade, or an
+    // implementation swap all fail closed here.
+    if !evidence.satisfies(spec.boundary_requirement, &attestation) {
+        let message = format!(
+            "launch evidence does not satisfy the boundary requirement: required {:?}, configured {:?}, launch established {:?}",
+            spec.boundary_requirement, attestation.implementation, evidence.established()
+        );
+        return match abandon_and_verify(process.as_mut(), &mut pubr).await {
+            Err(cleanup) => WorkerResult::CleanupFailure(format!("{message}; {cleanup}")),
+            Ok(()) => fail_to_start(&mut state, message),
+        };
+    }
+
+    // Publish the established evidence BEFORE Spawned, so downstream sees the proof (and its
+    // report bytes) before the process is announced as running. A lost sink here already owns
+    // a live process — prove cleanup, preserving the primary sink fault.
+    if !pubr.emit(WorkerObservation::LaunchEvidence(evidence)).await {
+        let sink_fault = pubr.error();
+        return match abandon_and_verify(process.as_mut(), &mut pubr).await {
+            Err(message) => {
+                WorkerResult::CleanupFailure(format!("primary sink fault: {sink_fault}; {message}"))
+            }
+            Ok(()) => WorkerResult::ObservationFailure(sink_fault),
+        };
+    }
+
     if let Err(e) = advance(&mut state, WorkerState::Running) {
         let _ = abandon_and_verify(process.as_mut(), &mut pubr).await;
         return WorkerResult::CleanupFailure(e);

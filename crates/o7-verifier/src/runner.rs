@@ -730,7 +730,7 @@ mod tests {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         use o7_worker::{
-            BoundaryAttestation, BoundaryError, BoundaryKind, BoundaryProcess, BoundarySpawnSpec,
+            BoundaryAttestation, BoundaryError, BoundaryKind, BoundaryLaunch, BoundarySpawnSpec,
             EnforcementLevel,
         };
 
@@ -746,7 +746,7 @@ mod tests {
             async fn spawn(
                 &self,
                 _spec: BoundarySpawnSpec,
-            ) -> Result<Box<dyn BoundaryProcess>, BoundaryError> {
+            ) -> Result<BoundaryLaunch, BoundaryError> {
                 self.spawned.store(true, Ordering::SeqCst);
                 Err(BoundaryError::Spawn(std::io::Error::other(
                     "spawn must not be reached: a mutated executable was about to run",
