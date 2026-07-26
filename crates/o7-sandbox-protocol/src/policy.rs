@@ -11,65 +11,73 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::Digest256;
 
-/// A confinement dimension a backend reports on independently. There is no single boolean
-/// "secure": a real boundary enforces some dimensions and not others and must say which.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SandboxDimension {
-    Filesystem,
-    Network,
-    Env,
-    ProcessTree,
-    Timeout,
+/// The SINGLE source of truth for the confinement dimensions. One `Variant => field` list generates
+/// the [`SandboxDimension`] enum, its [`SandboxDimension::ALL`], and — the point — the three
+/// [`crate::report::SandboxReport`] accessors `dimension`, `is_fully_enforced`, and
+/// `is_none_enforced`. A new dimension is added by adding ONE line here: it becomes an enum variant,
+/// an `ALL` entry, a `dimension()` arm, AND is threaded into BOTH trust predicates. If the matching
+/// `SandboxReport` field does not exist, the generated `self.<field>` access fails to compile — so a
+/// dimension can never be added without every trust decision actually consulting it. This is a real
+/// authority link, not two hand-maintained lists watching each other. It deliberately does NOT
+/// generate `SandboxReport` itself, so the struct keeps its public fields and serde wire layout.
+macro_rules! sandbox_dimensions {
+    // Count the variants at compile time so `ALL` is a fixed-size array sized from the list itself.
+    (@count) => { 0usize };
+    (@count $head:ident $($tail:ident)*) => { 1usize + sandbox_dimensions!(@count $($tail)*) };
+
+    ($($variant:ident => $field:ident),+ $(,)?) => {
+        /// A confinement dimension a backend reports on independently. There is no single boolean
+        /// "secure": a real boundary enforces some dimensions and not others and must say which.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, ::serde::Serialize, ::serde::Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum SandboxDimension {
+            $($variant,)+
+        }
+
+        impl SandboxDimension {
+            /// Every dimension, for iteration. Generated from the same list as the trust predicates,
+            /// so it is always the complete variant set in declaration order — never a hand-kept copy
+            /// that could drift.
+            pub const ALL: [SandboxDimension; sandbox_dimensions!(@count $($variant)+)] =
+                [$(SandboxDimension::$variant),+];
+        }
+
+        impl $crate::report::SandboxReport {
+            /// The enforcement for one dimension.
+            #[must_use]
+            pub fn dimension(&self, dimension: SandboxDimension) -> $crate::policy::Enforcement {
+                match dimension {
+                    $(SandboxDimension::$variant => self.$field,)+
+                }
+            }
+
+            /// True only when EVERY dimension is `Enforced`. A single downgrade makes this false, so
+            /// a partial report can never present as full confinement. Generated from the dimension
+            /// list, so a newly added dimension is folded into the check automatically — it cannot be
+            /// merely *mentioned* and then left out (the failure mode an exhaustive destructure
+            /// alone does not catch).
+            #[must_use]
+            pub fn is_fully_enforced(&self) -> bool {
+                true $(&& self.$field == $crate::policy::Enforcement::Enforced)+
+            }
+
+            /// True when NO dimension is enforced at all. Also generated from the dimension list, so
+            /// a new dimension is consulted here too.
+            #[must_use]
+            pub fn is_none_enforced(&self) -> bool {
+                true $(&& self.$field == $crate::policy::Enforcement::NotEnforced)+
+            }
+        }
+    };
 }
 
-impl SandboxDimension {
-    /// Every dimension, for iteration. Kept WELL-FORMED by the compile-time anchor below: its fixed
-    /// `[_; N]` length rejects a short list and the `dimension_index` anchor rejects a
-    /// reordered/duplicated one. NOTE: this does not by itself guarantee `ALL` lists a newly added
-    /// variant — stable Rust cannot count enum variants without a derive — so `ALL` is NOT on the
-    /// trust-critical path. The completeness of the full-enforcement decision is guaranteed
-    /// structurally instead, by the exhaustive struct destructure in
-    /// [`crate::report::SandboxReport::is_fully_enforced`] (a new `Enforcement` field fails to
-    /// compile until it is folded into the check).
-    pub const ALL: [SandboxDimension; 5] = [
-        SandboxDimension::Filesystem,
-        SandboxDimension::Network,
-        SandboxDimension::Env,
-        SandboxDimension::ProcessTree,
-        SandboxDimension::Timeout,
-    ];
+sandbox_dimensions! {
+    Filesystem => filesystem,
+    Network => network,
+    Env => env,
+    ProcessTree => process_tree,
+    Timeout => timeout,
 }
-
-/// The canonical index of each dimension in [`SandboxDimension::ALL`]. This match is EXHAUSTIVE, so
-/// adding a `SandboxDimension` variant fails to compile HERE — next to `ALL` — forcing the new
-/// dimension into `ALL` (which drives [`crate::report::SandboxReport::is_fully_enforced`]). Used only
-/// by the compile-time anchor below.
-const fn dimension_index(d: SandboxDimension) -> usize {
-    match d {
-        SandboxDimension::Filesystem => 0,
-        SandboxDimension::Network => 1,
-        SandboxDimension::Env => 2,
-        SandboxDimension::ProcessTree => 3,
-        SandboxDimension::Timeout => 4,
-    }
-}
-
-// Compile-time anchor: `ALL` is the variant set in canonical order, with no reorder or duplicate —
-// entry `i` is exactly the variant whose `dimension_index` is `i`. (A short `ALL` is already rejected
-// by its fixed `[_; N]` length; a newly added variant is rejected by the exhaustive match above.)
-// INVARIANT: the `i < ALL.len()` guard bounds every `ALL[i]` access, so the indexing cannot panic.
-#[allow(clippy::indexing_slicing)]
-const _: () = {
-    let mut i = 0;
-    while i < SandboxDimension::ALL.len() {
-        assert!(
-            dimension_index(SandboxDimension::ALL[i]) == i,
-            "SandboxDimension::ALL must list each dimension once, in canonical order"
-        );
-        i += 1;
-    }
-};
 
 /// How thoroughly one dimension was enforced. Three-valued on purpose: `Partial` is an
 /// honest admission and must never be silently promoted to `Enforced`.

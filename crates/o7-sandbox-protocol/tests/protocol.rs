@@ -92,48 +92,20 @@ fn an_oversized_declared_length_is_rejected_without_buffering() {
     assert!(matches!(decode(&bytes), Err(FrameError::TooLarge { .. })));
 }
 
-// --- SandboxDimension::ALL completeness anchor ---
+// --- every dimension is genuinely consulted by the trust predicates ---
 
 #[test]
-fn all_lists_every_dimension_and_full_enforcement_consults_each() {
+fn every_dimension_is_consulted_by_full_and_none_enforcement() {
     use o7_sandbox_protocol::policy::SandboxDimension;
 
-    // `is_fully_enforced`/`is_none_enforced` iterate `SandboxDimension::ALL`, so a dimension missing
-    // from ALL would be silently unchecked. Enumerate the variants INDEPENDENTLY of ALL (so a dropped
-    // ALL entry is caught, not hidden by iterating ALL itself), forcing exhaustiveness with a match
-    // the compiler must cover — adding a variant fails to build until it is listed both here and in
-    // ALL.
-    let every = [
-        SandboxDimension::Filesystem,
-        SandboxDimension::Network,
-        SandboxDimension::Env,
-        SandboxDimension::ProcessTree,
-        SandboxDimension::Timeout,
-    ];
-    for d in every {
-        // Exhaustive over the type: a new variant makes this fail to compile.
-        match d {
-            SandboxDimension::Filesystem
-            | SandboxDimension::Network
-            | SandboxDimension::Env
-            | SandboxDimension::ProcessTree
-            | SandboxDimension::Timeout => {}
-        }
-        assert_eq!(
-            SandboxDimension::ALL.iter().filter(|&&x| x == d).count(),
-            1,
-            "{d:?} must appear in SandboxDimension::ALL exactly once"
-        );
-    }
-    assert_eq!(
-        every.len(),
-        SandboxDimension::ALL.len(),
-        "SandboxDimension::ALL has a different number of entries than there are dimensions"
-    );
-
-    // Every ALL entry is genuinely consulted: an all-enforced report is fully enforced, and
-    // downgrading ANY single dimension defeats it (which holds only if ALL lists that dimension).
+    // `SandboxDimension`, `ALL`, `dimension()`, `is_fully_enforced`, and `is_none_enforced` are all
+    // generated from the single `sandbox_dimensions!` list, so a new dimension is threaded into the
+    // trust predicates automatically — it cannot be merely mentioned and left out. Prove that
+    // BEHAVIOURALLY here: an all-enforced report is fully enforced, and downgrading ANY single
+    // dimension defeats it. The setter `match` is exhaustive over the type, so a newly added
+    // dimension fails to compile until this behavioural check exercises it too.
     assert!(full_report().is_fully_enforced());
+    assert!(!full_report().is_none_enforced());
     for d in SandboxDimension::ALL {
         let mut r = full_report();
         match d {
@@ -145,8 +117,10 @@ fn all_lists_every_dimension_and_full_enforcement_consults_each() {
         }
         assert!(
             !r.is_fully_enforced(),
-            "downgrading {d:?} must defeat full enforcement — is it missing from ALL?"
+            "downgrading {d:?} must defeat full enforcement"
         );
+        // And `dimension()` reports exactly the field the list maps it to.
+        assert_eq!(r.dimension(d), Enforcement::NotEnforced);
     }
 }
 
