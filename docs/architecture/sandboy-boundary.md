@@ -251,22 +251,32 @@ Each dimension names its concrete oracle (the acceptance tests live in
   not a crash). GO follows verification only; the report stays bound to backend object, policy,
   nonce, and launch spec.
 
-**Designated confinement CI job.** A separate Linux job runs the real-kernel acceptance matrix with
-`--include-ignored` — but only after a REAL capability preflight that EXERCISES each mechanism, not
-a presence grep:
+**Designated confinement CI workflow.** The real-kernel acceptance matrix runs in a SEPARATE
+workflow (`.github/workflows/sandbox-confinement.yml`), NOT in the portable `o7-worker gate`. It
+targets a self-hosted runner labelled `[self-hosted, linux, x64, confinement]` and NEVER runs on
+GitHub-hosted runners (which cannot delegate cgroup v2). Because no such runner is provisioned yet,
+the workflow is `workflow_dispatch`-ONLY and NON-required — it cannot gate PRs or go red on hosted
+runners. When the capable runner exists, add the `pull_request` trigger and mark the check REQUIRED
+on `main`. It never uses `continue-on-error`.
+
+It runs the matrix with `--include-ignored`, but only after a REAL capability preflight that
+EXERCISES each mechanism, not a presence grep:
 
 - **cgroup v2** — create a child cgroup under the delegated subtree, require a WRITABLE `cgroup.kill`
   (no PID-kill fallback — the GREEN backend tears down via `cgroup.kill`, so a runner without it
-  fails the gate), move a disposable process in, confirm `cgroup.procs` membership, kill via
+  fails the job), move a disposable process in, confirm `cgroup.procs` membership, kill via
   `cgroup.kill`, confirm the group drains, and remove the directory (a `trap` reaps the probe's own
   scratch process/cgroup on any intermediate failure);
 - **Landlock** — query the ABI (must be `>= 3`, the minimum that governs file `TRUNCATE`) and CREATE
   a representative ruleset that includes the `TRUNCATE` access right (bit 14);
 - **seccomp** — install a minimal BPF filter in a disposable child and confirm a chosen syscall is
-  denied with the expected errno.
+  denied with the expected errno;
+- **IPv6** — bind a udp6 and a tcp6 loopback socket, so the network denial oracle's mandatory
+  IPv4+IPv6 baseline can distinguish a real seccomp `EPERM` from an `EAFNOSUPPORT`.
 
-A missing or unusable capability is an EXPLICIT gate FAILURE — never a skip and never a green
-"unsupported". Landlock/seccomp are driven through Python `ctypes` (a CI tool), so no confinement
-syscall enters the forbid-unsafe Rust tree. The portable workspace tests stay host-agnostic; the
-mandatory kernel job has a pre-provisioned environment. RED until the real backend lands; GREEN turns
-the matrix green by making the backend actually enforce.
+A missing or unusable capability — delegated cgroup v2, a writable `cgroup.kill`, the required
+Landlock ABI/access bits, seccomp, IPv6, or any other prerequisite — is an EXPLICIT job FAILURE,
+never a skip and never a green "unsupported". Landlock/seccomp are driven through Python `ctypes`
+(a CI tool), so no confinement syscall enters the forbid-unsafe Rust tree. The portable workspace
+tests stay host-agnostic. RED until the real backend lands; GREEN turns the matrix green by making
+the backend actually enforce.
