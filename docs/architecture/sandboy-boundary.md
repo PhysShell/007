@@ -162,9 +162,10 @@ barrier (`SandboyBoundary::with_post_go_barrier`), and the harness binaries are 
 NON-DEFAULT `test-harness` Cargo feature. Cargo features are not private, so the guarantee is
 REPOSITORY POLICY, enforced fail-closed by `o7-harness-policy`: the feature may be enabled from
 exactly one dependency edge — o7-worker's own dev-dependency self-edge (resolved even through a
-`package = "..."` rename or an inherited `workspace = true` alias) — and nowhere else; the three
-harness bins are `required-features`-gated with `autobins = false`; and a compile probe proves the
-default o7-worker API has no `fake_mode` / `with_post_go_barrier`.
+`package = "..."` rename or an inherited `workspace = true` alias) — and nowhere else; every
+harness bin (`sandboy_fake`, `spawn_probe`, `fd_probe`, `sandbox_probe`) is `required-features`-gated
+with `autobins = false`; and a compile probe proves the default o7-worker API has no `fake_mode` /
+`with_post_go_barrier`.
 
 ## Vertical A — landed and FROZEN
 
@@ -187,36 +188,62 @@ assertion observes the escape with a CONCRETE oracle rather than an `is_err()`. 
 green by making the real backend actually enforce — the tests are not rewritten. Every RED asserts
 a specific effect, never a vacuous failure.
 
-- **Filesystem / Landlock.** A write inside the single writable worktree succeeds; a write and a
-  file-create OUTSIDE the worktree get a concrete kernel denial (`EACCES`/`EPERM`), captured as the
-  exact errno, not "the command failed". The allowed executable runs; an executable outside
-  `allow_exec` does not. The sealed `/proc/<pid>/fd/<n>` target actually EXECUTES under Landlock
-  with no path-copy fallback. An unavailable Landlock ABI, or an inability to install the full
-  ruleset, never becomes `enforced`.
+Each dimension names its concrete oracle (the acceptance tests live in
+`crates/o7-worker/tests/sandbox_confinement.rs`):
 
-- **Network / seccomp.** The target cannot create or use an IPv4 or IPv6 socket; the denial is the
-  expected `EPERM`/equivalent, captured exactly. No network descriptor is inherited. A filter-
-  install failure means NO GO and the target-ran marker is absent.
+- **Filesystem / Landlock.** A write inside the single writable worktree succeeds; a write OUTSIDE
+  it gets a concrete kernel denial captured as the EXACT errno (`EACCES`/`EPERM`), not "the command
+  failed". Execute is restricted KERNEL-side: the confined target's own `execve` of a binary outside
+  `allow_exec` is denied (exact errno), proven by a secondary marker that must never be created — the
+  *lexical* parent-gate refusal is a distinct, already-frozen Vertical A test
+  (`sandbox_contract::wrapping_an_unpermitted_target_fails_closed`), not part of this matrix. A live
+  sealed `/proc/<pid>/fd/<n>` source actually EXECUTES under Landlock with no path-copy fallback and
+  is still confined. An unavailable Landlock ABI, or an inability to install the full ruleset, never
+  becomes `enforced`.
+
+- **Network / seccomp.** The target cannot create an IPv4 or IPv6 socket; the denial is the exact
+  `EPERM`/`EACCES` — an `EAFNOSUPPORT` is NOT a denial. An UNCONFINED baseline first proves which
+  families this host supports, so a runner lacking IPv6 cannot masquerade as a working filter; only
+  host-supported families are held to the confined denial. No network descriptor is inherited
+  (`inherited_sockets=0`).
 
 - **Environment.** The target receives exactly the allowlisted names; no backend/control
   environment reaches it. Inability to prove the exact env construction is not `env: enforced`.
+  (Enforced today by plane separation — a GREEN carryover, not RED.)
 
-- **Process tree / cgroup v2.** A cgroup is created before GO; monitor, target, and a forked
-  descendant are provably in one owned cgroup (`cgroup.procs`); a double-fork does not leave
-  ownership; `setsid`/`setpgid` are denied; `force_stop`, a report failure, and a cancellation all
-  remove the whole cgroup; the cgroup directory is gone after drain; the exact PID/start-time
-  identities disappear (not merely "a signal was sent").
+- **Process tree / seccomp escape.** `setsid` and `setpgid` are each denied with the exact `EPERM`
+  (a correct filter makes "the escape survives teardown" impossible, so escape-survival is NOT the
+  oracle — the denial errno is).
 
-- **Timeout.** A target outliving the policy deadline is killed with its descendants inside a
-  bounded grace; nothing survives; no cgroup remains.
+- **Process tree / cgroup v2.** Monitor, target, an ordinary child, and a DOUBLE-FORKED (reparented)
+  descendant are provably in ONE owned cgroup that is a DEDICATED non-root leaf, distinct from the
+  harness's own cgroup (`0::<path>` per `/proc/<pid>/cgroup`, membership in `cgroup.procs`); after
+  `force_stop`/drain the exact PID identities disappear and the cgroup DIRECTORY is removed — a
+  killpg-only backend that never creates a cgroup cannot pass. A forced setup failure, a report
+  failure, and a cancellation all leave no cgroup.
+
+- **Timeout.** A target outliving the policy deadline is killed WITH its double-forked descendant
+  inside a bounded grace; the `survived` marker never appears; the owned cgroup is removed.
 
 - **Report truthfulness + barrier.** `enforced` is emitted only after all five dimensions are
-  installed and self-checked; any `partial`/`not_enforced` is rejected by the parent; a setup
-  failure runs no target; the report stays bound to backend object, policy, nonce, and launch
-  spec; GO follows verification only; an error/cancel before `BoundaryLaunch` returns leaves no
-  kernel-owned resources.
+  installed and self-checked; a forced setup failure (test-only fault injection on the backend's
+  control-plane env) runs NO target — the target-ran marker is absent and no cgroup remains; any
+  `partial`/`not_enforced` is rejected by the parent; the report stays bound to backend object,
+  policy, nonce, and launch spec; GO follows verification only.
 
-**Designated confinement CI job.** A separate Linux job runs the real-kernel acceptance matrix.
-There, a missing Landlock ABI, missing seccomp, or an unwritable/undelegated cgroup v2 is an
-EXPLICIT gate FAILURE — never a skip and never a green "unsupported". The portable workspace tests
-may stay host-agnostic; the mandatory kernel job has a pre-defined environment.
+**Designated confinement CI job.** A separate Linux job runs the real-kernel acceptance matrix with
+`--include-ignored` — but only after a REAL capability preflight that EXERCISES each mechanism, not
+a presence grep:
+
+- **cgroup v2** — create a child cgroup under the delegated subtree, move a disposable process in,
+  confirm `cgroup.procs` membership, kill via `cgroup.kill`, confirm the group drains, and remove
+  the directory;
+- **Landlock** — query the ABI (must be `>=` the pinned minimum) and CREATE a representative ruleset;
+- **seccomp** — install a minimal BPF filter in a disposable child and confirm a chosen syscall is
+  denied with the expected errno.
+
+A missing or unusable capability is an EXPLICIT gate FAILURE — never a skip and never a green
+"unsupported". Landlock/seccomp are driven through Python `ctypes` (a CI tool), so no confinement
+syscall enters the forbid-unsafe Rust tree. The portable workspace tests stay host-agnostic; the
+mandatory kernel job has a pre-provisioned environment. RED until the real backend lands; GREEN turns
+the matrix green by making the backend actually enforce.
