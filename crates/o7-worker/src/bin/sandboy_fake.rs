@@ -135,6 +135,7 @@ fn run() -> i32 {
     let mut ready_file = None;
     let mut release_file = None;
     let mut desc_file = None;
+    let mut target_arg_file = None;
     for kv in parts {
         if let Some(path) = kv.strip_prefix("pid=") {
             pid_file = Some(path.to_owned());
@@ -144,12 +145,20 @@ fn run() -> i32 {
             release_file = Some(path.to_owned());
         } else if let Some(path) = kv.strip_prefix("desc=") {
             desc_file = Some(path.to_owned());
+        } else if let Some(path) = kv.strip_prefix("target_arg=") {
+            target_arg_file = Some(path.to_owned());
         }
     }
     // Record this backend's pid EARLY so a test can observe reap/teardown even when spawn is
     // cancelled and never returns the process.
     if let Some(path) = &pid_file {
         let _ = std::fs::write(path, std::process::id().to_string());
+    }
+    // Record the EXACT executable argument this backend received after `--` (the /proc-visible exec
+    // target), so a live test can prove the parent's argv names the SEALED descriptor, not the
+    // caller's source path — the same argv the contract test inspects on `backend_spawn_spec`.
+    if let Some(path) = &target_arg_file {
+        let _ = std::fs::write(path, args.target.to_string_lossy().as_bytes());
     }
 
     if mode == "exit_before_report" {

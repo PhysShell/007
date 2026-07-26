@@ -721,6 +721,44 @@ async fn a_symlinked_target_final_component_fails_closed() {
     }
 }
 
+// --- the live backend argv names the SEALED descriptor (the same construction the contract inspects) ---
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_backend_receives_the_sealed_descriptor_as_its_exec_argv() {
+    // The GREEN half of the argv-construction contract: the REAL launch passes the SEALED target
+    // descriptor (`/proc/<pid>/fd/<n>`) as the backend's exec argument, NOT the caller's source path
+    // (`/bin/dash`). Together with the contract test that pins `backend_spawn_spec` naming the seal,
+    // and the production fact that `spawn` builds its argv through that same `backend_spawn_spec`,
+    // this proves both surfaces consume ONE construction — not two implementations coincidentally
+    // equal. The fake records the exact argument it received after `--`.
+    let dir = tempfile::tempdir().unwrap();
+    let arg_file = dir.path().join("target-arg");
+    let b = boundary(
+        vec![PathBuf::from("/bin")],
+        &format!("ok;target_arg={}", arg_file.display()),
+    );
+    let mut launch = b
+        .spawn(sh_target("exit 0".to_owned()))
+        .await
+        .expect("launch");
+    let _ = launch.process.wait().await;
+
+    assert!(
+        wait_file(&arg_file, Duration::from_secs(3)).await,
+        "the backend never recorded the exec argument it received"
+    );
+    let recorded = std::fs::read_to_string(&arg_file).expect("read recorded exec arg");
+    let recorded = recorded.trim();
+    assert!(
+        recorded.starts_with("/proc/") && recorded.contains("/fd/"),
+        "the backend's exec argument must be the SEALED /proc/<pid>/fd/<n> descriptor, got {recorded:?}"
+    );
+    assert_ne!(
+        recorded, "/bin/dash",
+        "the caller's SOURCE path must never be the backend's exec argument"
+    );
+}
+
 // --- a live launch executes the SEALED target, not a swapped source (expected GREEN) ---
 
 #[tokio::test(flavor = "multi_thread")]

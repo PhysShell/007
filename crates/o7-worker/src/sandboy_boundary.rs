@@ -320,18 +320,46 @@ impl SandboyBoundary {
         Digest256::of_bytes(bytes)
     }
 
-    /// Construct the confined backend invocation for a target `spec`, or fail closed. The
-    /// launched executable is the HELD backend descriptor; the launch nonce and the policy flags
-    /// precede the target after `--`. The control transport is a SINGLE bidirectional socket on
-    /// the backend's STDIN (see [`SandboyBoundary::spawn`]) — created CLOEXEC and mapped race-free
-    /// by the child's stdin dup, so NO control descriptor is passed by number on this
-    /// `/proc`-visible argv and no inheritable descriptor window exists.
+    /// The SINGLE canonical construction of the confined backend's argv: `run --launch-nonce
+    /// <nonce>`, then the policy flags, then `--` and EXACTLY the SEALED target descriptor. Both the
+    /// contract surface ([`SandboyBoundary::backend_spawn_spec`]) and the live launch
+    /// ([`SandboyBoundary::spawn`]) build the argv HERE, so the `/proc`-visible invocation the tests
+    /// inspect is byte-for-byte the one the backend actually receives — never two constructions that
+    /// merely happen to agree. Only the non-sensitive sealed target path follows the separator; the
+    /// target's argv, cwd, and environment travel out-of-band in the [`o7_sandbox_protocol::LaunchRequest`]
+    /// on the control socket, never on this `/proc`-visible argv.
+    fn backend_argv(&self, launch_nonce: &LaunchNonce, sealed_target: &Path) -> Vec<OsString> {
+        let mut arguments: Vec<OsString> = vec![
+            OsString::from("run"),
+            // The per-launch nonce the backend must echo, binding the report to THIS spawn.
+            OsString::from("--launch-nonce"),
+            OsString::from(launch_nonce.as_str()),
+        ];
+        arguments.extend(self.policy_flags());
+        arguments.push(OsString::from("--"));
+        // The SEALED target descriptor (`/proc/<owner_pid>/fd/<n>`) — the exact object that will
+        // run, not the caller's mutable source path. A source swap after acquisition cannot change
+        // what the backend execs.
+        arguments.push(sealed_target.as_os_str().to_os_string());
+        arguments
+    }
+
+    /// Construct the confined backend invocation that execs the SEALED target descriptor
+    /// `sealed_target`, or fail closed. The launched executable is the HELD backend descriptor; the
+    /// argv is built by the single canonical [`SandboyBoundary::backend_argv`] — the very argv the
+    /// live launch passes. The exec-permission gate is on `spec.executable` (the SOURCE path the
+    /// caller asked to run, which the policy authorizes), never on the sealed descriptor. The
+    /// control transport is a SINGLE bidirectional socket on the backend's STDIN (see
+    /// [`SandboyBoundary::spawn`]) — created CLOEXEC and mapped race-free by the child's stdin dup,
+    /// so NO control descriptor is passed by number on this `/proc`-visible argv and no inheritable
+    /// descriptor window exists.
     ///
     /// # Errors
     /// [`BoundaryError::Spawn`] if the target executable is not permitted by the policy.
     pub fn backend_spawn_spec(
         &self,
         spec: &BoundarySpawnSpec,
+        sealed_target: &Path,
         launch_nonce: &LaunchNonce,
     ) -> Result<BoundarySpawnSpec, BoundaryError> {
         if !self.policy.permits_exec(&spec.executable) {
@@ -341,25 +369,11 @@ impl SandboyBoundary {
             ))));
         }
 
-        let mut arguments: Vec<OsString> = vec![
-            OsString::from("run"),
-            // The per-launch nonce the backend must echo, binding the report to THIS spawn.
-            OsString::from("--launch-nonce"),
-            OsString::from(launch_nonce.as_str()),
-        ];
-        arguments.extend(self.policy_flags());
-        // Only the target EXECUTABLE path (a /proc/<pid>/fd descriptor — not sensitive) follows
-        // the separator so the backend knows what object to run. The target's argv, cwd, and
-        // environment travel out-of-band in the LaunchRequest on the control socket, never on this
-        // /proc-visible argv.
-        arguments.push(OsString::from("--"));
-        arguments.push(spec.executable.clone().into_os_string());
-
         Ok(BoundarySpawnSpec {
             // Exec the HELD backend object via its owned descriptor path, not a re-resolved
             // path — a swap of the source path after acquisition cannot change what runs.
             executable: self.backend.descriptor_path(),
-            arguments,
+            arguments: self.backend_argv(launch_nonce, sealed_target),
             // PLANE SEPARATION: the backend is a TRUSTED launcher and must NOT inherit the
             // untrusted target's environment or cwd (LD_PRELOAD, LD_LIBRARY_PATH, attacker cwd,
             // …). It runs from a fixed trusted directory with a trusted control-plane
@@ -669,15 +683,13 @@ impl ProcessBoundary for SandboyBoundary {
             .map_err(|e| BoundaryError::Evidence(e.to_string()))?;
         let launch_spec_digest = request.spec_digest();
 
-        let mut arguments: Vec<OsString> = vec![
-            OsString::from("run"),
-            OsString::from("--launch-nonce"),
-            OsString::from(nonce.as_str()),
-        ];
-        arguments.extend(self.policy_flags());
-        arguments.push(OsString::from("--"));
-        // The backend execs the SEALED target object, not the caller's mutable path.
-        arguments.push(target.descriptor_path().into_os_string());
+        // Build the confined backend invocation through the SINGLE canonical construction path —
+        // the exact `BoundarySpawnSpec` (executable, argv, trusted cwd/env) the contract tests
+        // inspect on `backend_spawn_spec` — naming the SEALED target descriptor after `--`. This is
+        // the only place the backend argv is built, so the live launch and the inspected contract
+        // cannot drift. `permits_exec` was already checked above (fail-closed before staging); the
+        // redundant check inside is on the same source path and cannot fail here.
+        let backend_spec = self.backend_spawn_spec(&spec, &target.descriptor_path(), &nonce)?;
 
         // A SINGLE bidirectional control socket, CLOEXEC FROM CREATION (std sets close-on-exec on
         // both ends of the pair), so no unrelated concurrent spawn can inherit a control descriptor
@@ -688,11 +700,11 @@ impl ProcessBoundary for SandboyBoundary {
         //   EOF); parent → GO byte. A NACK is the parent dropping its end (the backend reads EOF).
         let (parent_sock, child_sock) = UnixStream::pair().map_err(BoundaryError::Spawn)?;
 
-        let mut cmd = tokio::process::Command::new(self.backend.descriptor_path());
-        cmd.args(&arguments)
-            .current_dir("/")
+        let mut cmd = tokio::process::Command::new(&backend_spec.executable);
+        cmd.args(&backend_spec.arguments)
+            .current_dir(&backend_spec.working_directory)
             .env_clear()
-            .envs(self.backend_environment())
+            .envs(&backend_spec.environment)
             .stdin(std::process::Stdio::from(std::os::fd::OwnedFd::from(
                 child_sock,
             )))

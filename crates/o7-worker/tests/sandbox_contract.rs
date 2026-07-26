@@ -198,14 +198,17 @@ fn the_backend_invocation_runs_the_held_backend_with_trusted_cwd_and_env() {
     let mut target_env = std::collections::BTreeMap::new();
     target_env.insert(OsString::from("LD_PRELOAD"), OsString::from("/evil.so"));
     let target = BoundarySpawnSpec {
-        executable: PathBuf::from("/proc/4242/fd/7"),
+        // The caller's SOURCE path (permitted by the policy), DISTINCT from the sealed descriptor.
+        executable: PathBuf::from("/usr/bin/dash"),
         arguments: vec![OsString::from("--flag"), OsString::from("value")],
         working_directory: PathBuf::from("/work/target-cwd"),
         environment: target_env,
         stdin: StdinMode::Null,
     };
+    // The backend must exec the SEALED descriptor (what the live launch passes), not the source.
+    let sealed = PathBuf::from("/proc/4242/fd/7");
     let wrapped = b
-        .backend_spawn_spec(&target, &a_nonce())
+        .backend_spawn_spec(&target, &sealed, &a_nonce())
         .expect("a permitted target is wrapped");
 
     // The launched program is the HELD backend descriptor, in a TRUSTED cwd, with a TRUSTED
@@ -265,18 +268,59 @@ fn the_backend_invocation_runs_the_held_backend_with_trusted_cwd_and_env() {
 }
 
 #[test]
+fn the_backend_argv_names_the_sealed_descriptor_not_the_source() {
+    // The single most consequential A-lane defect: the contract helper must build the SAME argv the
+    // live launch passes. The live launch execs the SEALED descriptor (`target.descriptor_path()`,
+    // a `/proc/<pid>/fd/<n>`), so the helper must name that sealed path after `--`, NOT the caller's
+    // mutable SOURCE path. Prior to the fix, the helper echoed `spec.executable` (the source),
+    // disagreeing with the launch — a fiction the old test hid by making the source itself look like
+    // a `/proc` path. Here the source and the seal are DISTINCT, so an echo of the source is caught.
+    let b = boundary();
+    let source = PathBuf::from("/usr/bin/dash"); // a real SOURCE path, permitted by full_policy
+    let sealed = PathBuf::from("/proc/4242/fd/7"); // stands in for target.descriptor_path()
+    let spec = BoundarySpawnSpec {
+        executable: source.clone(),
+        arguments: vec![OsString::from("-c"), OsString::from("exit 0")],
+        working_directory: PathBuf::from("/work/target-cwd"),
+        environment: Default::default(),
+        stdin: StdinMode::Null,
+    };
+    let wrapped = b
+        .backend_spawn_spec(&spec, &sealed, &a_nonce())
+        .expect("a permitted target is wrapped");
+    let sep = wrapped.arguments.iter().position(|a| a == "--").unwrap();
+    assert_eq!(
+        wrapped.arguments[sep + 1],
+        OsString::from("/proc/4242/fd/7"),
+        "the backend argv must name the SEALED descriptor the live launch execs"
+    );
+    assert_ne!(
+        wrapped.arguments[sep + 1],
+        OsString::from(source.as_os_str()),
+        "the caller's mutable SOURCE path must never be the backend's exec target"
+    );
+    assert_eq!(
+        wrapped.arguments.len(),
+        sep + 2,
+        "only the sealed target follows --"
+    );
+}
+
+#[test]
 fn wrapping_an_unpermitted_target_fails_closed() {
     let mut policy = full_policy();
     policy.allow_exec = vec![PathBuf::from("/usr/bin")];
     let b = SandboyBoundary::new(backend_image(), policy).unwrap();
     let target = BoundarySpawnSpec {
-        executable: PathBuf::from("/proc/4242/fd/7"),
+        // A SOURCE path the narrowed policy does not permit; the gate is on this path, not the seal.
+        executable: PathBuf::from("/bin/dash"),
         arguments: vec![],
         working_directory: PathBuf::from("/work/run-1"),
         environment: Default::default(),
         stdin: StdinMode::Null,
     };
-    assert!(b.backend_spawn_spec(&target, &a_nonce()).is_err());
+    let sealed = PathBuf::from("/proc/4242/fd/7");
+    assert!(b.backend_spawn_spec(&target, &sealed, &a_nonce()).is_err());
 }
 
 // --- the out-of-band launch request: env allowlist ---
