@@ -196,6 +196,29 @@ fn an_oversized_timeout_is_rejected() {
 }
 
 #[test]
+fn a_parent_dir_traversal_target_is_refused() {
+    // The lexical exec gate is component-wise but NOT normalizing: `/usr/bin/../../etc/evil`
+    // starts_with `/usr/bin` yet resolves OUTSIDE it. A `..` (or a leading `.`) component means the
+    // lexical check no longer implies containment, so such a target must be refused.
+    let mut p = policy();
+    p.allow_exec = vec![PathBuf::from("/usr/bin")];
+    assert!(
+        !p.permits_exec(&PathBuf::from("/usr/bin/../../etc/evil")),
+        "a `..`-traversal target escaping the allowance must be refused"
+    );
+    assert!(
+        !p.permits_exec(&PathBuf::from("/usr/bin/../bin/evil")),
+        "a `..` component under the allowance is not a normalized containment proof"
+    );
+    // A normalized path genuinely under the allowance still passes, and the frozen sealed-memfd
+    // exec path (`/proc/<pid>/fd/<n>`, no dot components) is unaffected.
+    assert!(p.permits_exec(&PathBuf::from("/usr/bin/dash")));
+    let mut proc_fd = policy();
+    proc_fd.allow_exec = vec![PathBuf::from("/proc/4242/fd/7")];
+    assert!(proc_fd.permits_exec(&PathBuf::from("/proc/4242/fd/7")));
+}
+
+#[test]
 fn a_fractional_millisecond_timeout_is_rejected() {
     // In range, but not a whole millisecond: the digest binds the extra nanosecond while the argv
     // serializes only `--timeout-ms`, so it would fail every launch with `PolicyDigestMismatch`.

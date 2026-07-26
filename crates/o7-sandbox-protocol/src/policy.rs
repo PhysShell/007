@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -168,6 +168,17 @@ impl SandboxPolicy {
     /// is proven only by the live sealed-memfd acceptance probe.
     #[must_use]
     pub fn permits_exec(&self, target: &Path) -> bool {
+        // `Path::starts_with` is component-wise but NOT normalizing: a non-normalized target could
+        // lexically sit under an allowance yet resolve outside it (`/usr/bin/../../etc/evil`
+        // starts_with `/usr/bin`). Reject any `..`/`.` component so the lexical check below actually
+        // implies containment. The frozen sealed-memfd exec path (`/proc/<pid>/fd/<n>`) has no dot
+        // components, so it is unaffected.
+        if target
+            .components()
+            .any(|c| matches!(c, Component::ParentDir | Component::CurDir))
+        {
+            return false;
+        }
         self.allow_exec
             .iter()
             .any(|allowed| target == allowed || target.starts_with(allowed))
