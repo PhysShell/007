@@ -216,14 +216,38 @@ async fn every_report_failure_reaps_the_backend_and_never_runs_the_target() {
 
 // --- the control transport never leaks into a concurrently-spawned sibling ---
 
+/// The SOCKET descriptors (`socket:[inode]`) this process currently holds. During a launch the
+/// control transport is the only AF_UNIX socket in play (tokio's I/O driver uses epoll+eventfd,
+/// `anon_inode:[…]`, not sockets), so this set IS the set of control-socket inodes the sibling must
+/// never inherit — identified by object, not by a bare fd count that a non-CLOEXEC pipe would trip.
+fn parent_socket_targets() -> std::collections::BTreeSet<String> {
+    let mut set = std::collections::BTreeSet::new();
+    if let Ok(entries) = std::fs::read_dir("/proc/self/fd") {
+        for entry in entries.flatten() {
+            if let Ok(target) = std::fs::read_link(entry.path()) {
+                let target = target.to_string_lossy().into_owned();
+                if target.starts_with("socket:") {
+                    set.insert(target);
+                }
+            }
+        }
+    }
+    set
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn no_control_descriptor_leaks_to_a_concurrent_sibling() {
-    // The control transport is a socket that is CLOEXEC FROM CREATION and mapped onto the backend's
-    // stdin by the child's own dup — so there is no window in which it is inheritable by an
-    // unrelated process. Prove it: race a stream of launches against a stream of sibling spawns; a
-    // sibling forked at ANY instant (including between transport creation and backend exec) must
-    // inherit ZERO descriptors above stdio. A regression to a non-CLOEXEC transport would let a
-    // sibling occasionally inherit a control descriptor and report a positive count.
+    // The control transport is a SOCKET that is CLOEXEC FROM CREATION (`UnixStream::pair`) and mapped
+    // onto the backend's stdin by the child's own dup — so there is no window in which it is
+    // inheritable by an unrelated process. Prove it CONTROL-TRANSPORT-SPECIFICALLY: race a stream of
+    // launches against a stream of sibling spawns and assert no sibling inherits ANY socket the
+    // parent holds (the control socket is the only one in play). This does NOT count unrelated
+    // inherited plumbing — e.g. the non-CLOEXEC Cargo jobserver `pipe:[…]` present on CI runners —
+    // which a bare "zero fd above stdio" oracle wrongly flagged. A regression to a non-CLOEXEC
+    // transport would let a sibling inherit a `socket:[inode]` the parent also holds.
+    //
+    // A separate deterministic test (`a_fresh_control_socket_pair_is_cloexec_on_both_ends`) pins the
+    // CLOEXEC-from-creation property directly; this one pins the live no-inheritable-window race.
     let probe = env!("CARGO_BIN_EXE_fd_probe");
     let launches = tokio::spawn(async {
         for _ in 0..30 {
@@ -239,34 +263,45 @@ async fn no_control_descriptor_leaks_to_a_concurrent_sibling() {
         }
     });
 
-    let mut worst = 0i32;
+    let mut leaks: Vec<String> = Vec::new();
     for _ in 0..120 {
+        // Snapshot the control-socket inodes the parent holds RIGHT NOW (a launch may be mid-
+        // handshake), then fork the sibling and read the sockets it inherited.
+        let parent_sockets = parent_socket_targets();
         let out = tokio::process::Command::new(probe)
             .output()
             .await
             .expect("probe runs");
-        // The probe MUST succeed and print a valid non-negative count: an enumeration/parse failure
-        // must never masquerade as "no leaks".
+        // The probe MUST succeed: an enumeration/parse/readlink failure must never masquerade as
+        // "no leak".
         assert!(
             out.status.success(),
             "fd_probe failed to enumerate its descriptors: {:?}",
             String::from_utf8_lossy(&out.stderr)
         );
-        let n: i32 = String::from_utf8_lossy(&out.stdout)
-            .trim()
-            .parse()
-            .expect("fd_probe prints a count");
-        assert!(n >= 0, "fd_probe count must be non-negative, got {n}");
-        worst = worst.max(n);
+        let inherited_sockets: std::collections::BTreeSet<String> =
+            String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter(|l| l.starts_with("socket:"))
+                .map(str::to_owned)
+                .collect();
+        // Any socket the sibling inherited is a leak — the parent's only socket during a launch is
+        // the control transport; `parent-held` records whether it matched a live parent socket.
+        for s in inherited_sockets {
+            let record = format!("{s} (parent-held={})", parent_sockets.contains(&s));
+            if !leaks.contains(&record) {
+                leaks.push(record);
+            }
+        }
         if launches.is_finished() {
             break;
         }
     }
     let _ = launches.await;
-    assert_eq!(
-        worst, 0,
-        "a concurrently-spawned sibling inherited {worst} descriptor(s) above stdio — the control \
-         transport must be CLOEXEC with no inheritable window"
+    assert!(
+        leaks.is_empty(),
+        "a concurrently-spawned sibling inherited the parent's control socket(s) — the control \
+         transport must be CLOEXEC with no inheritable window; leaked: {leaks:?}"
     );
 }
 
