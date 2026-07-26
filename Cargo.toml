@@ -30,6 +30,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 anyhow = "1"
+# The canonical run-event protocol + pure reducer + independent replay:
+# `o7 run` emits the event stream and takes its verdict from `reduce_all`;
+# `o7 replay` re-verifies stored records (src/events.rs — the MVP stitch).
+o7-run = { path = "crates/o7-run", version = "0.1.0" }
 sha1 = "0.10"
 sha2 = "0.10"
 # `invoke.rs` only: independently re-validates a backend's structured output

@@ -796,6 +796,7 @@ dependencies = [
  "clap",
  "jsonschema",
  "nix",
+ "o7-run",
  "proptest",
  "serde",
  "serde_json",
