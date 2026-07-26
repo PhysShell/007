@@ -216,55 +216,15 @@ async fn every_report_failure_reaps_the_backend_and_never_runs_the_target() {
 
 // --- the control transport never leaks into a concurrently-spawned sibling ---
 
-/// TEMPORARY DIAGNOSTIC — DO NOT MERGE. Run `fd_probe` once and return (leak_count, diagnostic
-/// lines). Line 1 of the probe's stdout is the leak count; the rest are per-fd records.
-async fn probe_fds(probe: &str) -> (i32, Vec<String>) {
-    let out = tokio::process::Command::new(probe)
-        .output()
-        .await
-        .expect("probe runs");
-    assert!(
-        out.status.success(),
-        "fd_probe failed to enumerate its descriptors: {:?}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let mut lines = stdout.lines();
-    let n: i32 = lines
-        .next()
-        .unwrap_or("")
-        .trim()
-        .parse()
-        .expect("fd_probe prints a count");
-    let diags: Vec<String> = lines.map(str::to_owned).collect();
-    (n, diags)
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn no_control_descriptor_leaks_to_a_concurrent_sibling() {
-    // TEMPORARY DIAGNOSTIC BUILD — DO NOT MERGE. This run instruments the concurrent-sibling leak
-    // so a single hosted CI run reveals EXACTLY which descriptors the sibling inherits (fd number,
-    // /proc/self/fd readlink target = object type, and fdinfo flags = CLOEXEC visibility). Two
-    // phases: a BASELINE with sibling spawns but NO concurrent Sandboy launches, and the STRESSED
-    // race. Both dumps are printed; the assertion at the end carries the stressed diagnostics.
+    // The control transport is a socket that is CLOEXEC FROM CREATION and mapped onto the backend's
+    // stdin by the child's own dup — so there is no window in which it is inheritable by an
+    // unrelated process. Prove it: race a stream of launches against a stream of sibling spawns; a
+    // sibling forked at ANY instant (including between transport creation and backend exec) must
+    // inherit ZERO descriptors above stdio. A regression to a non-CLOEXEC transport would let a
+    // sibling occasionally inherit a control descriptor and report a positive count.
     let probe = env!("CARGO_BIN_EXE_fd_probe");
-
-    // --- Phase 1: BASELINE (no concurrent launches) ---
-    let mut base_worst = 0i32;
-    let mut base_diags: Vec<String> = Vec::new();
-    for _ in 0..60 {
-        let (n, diags) = probe_fds(probe).await;
-        if n > base_worst {
-            base_worst = n;
-            base_diags = diags;
-        }
-    }
-    eprintln!("=== BASELINE (no launches) worst_leak={base_worst} ===");
-    for d in &base_diags {
-        eprintln!("BASELINE {d}");
-    }
-
-    // --- Phase 2: STRESSED (concurrent launches racing the sibling spawns) ---
     let launches = tokio::spawn(async {
         for _ in 0..30 {
             let dir = tempfile::tempdir().unwrap();
@@ -280,29 +240,33 @@ async fn no_control_descriptor_leaks_to_a_concurrent_sibling() {
     });
 
     let mut worst = 0i32;
-    let mut worst_diags: Vec<String> = Vec::new();
     for _ in 0..120 {
-        let (n, diags) = probe_fds(probe).await;
+        let out = tokio::process::Command::new(probe)
+            .output()
+            .await
+            .expect("probe runs");
+        // The probe MUST succeed and print a valid non-negative count: an enumeration/parse failure
+        // must never masquerade as "no leaks".
+        assert!(
+            out.status.success(),
+            "fd_probe failed to enumerate its descriptors: {:?}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let n: i32 = String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .parse()
+            .expect("fd_probe prints a count");
         assert!(n >= 0, "fd_probe count must be non-negative, got {n}");
-        if n > worst {
-            worst = n;
-            worst_diags = diags;
-        }
+        worst = worst.max(n);
         if launches.is_finished() {
             break;
         }
     }
     let _ = launches.await;
-    eprintln!("=== STRESSED (concurrent launches) worst_leak={worst} ===");
-    for d in &worst_diags {
-        eprintln!("STRESSED {d}");
-    }
-
     assert_eq!(
-        worst,
-        0,
-        "a concurrently-spawned sibling inherited {worst} descriptor(s) above stdio; records:\n{}",
-        worst_diags.join("\n")
+        worst, 0,
+        "a concurrently-spawned sibling inherited {worst} descriptor(s) above stdio — the control \
+         transport must be CLOEXEC with no inheritable window"
     );
 }
 
