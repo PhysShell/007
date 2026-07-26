@@ -227,18 +227,24 @@ Each dimension names its concrete oracle (the acceptance tests live in
   never creates a cgroup cannot pass. A forced setup failure, a report failure, and a cancellation
   all leave no cgroup.
 
-- **Timeout.** A target outliving the policy deadline is killed WITH its double-forked descendant
-  inside ONE bounded window (`deadline + fixed grace`); the monitor is WAITED first, then the oracle
-  is read (identities gone, `survived` marker absent, cgroup directory removed) — so the test never
-  races a monitor that reaps before it removes the cgroup, and `force_stop` runs only as post-RED
-  cleanup.
+- **Timeout.** A target outliving the policy deadline is killed WITH its double-forked descendant.
+  The whole teardown — kill, reap, cgroup removal, monitor exit — must COMPLETE inside ONE ABSOLUTE
+  window (`timeout_at` from the moment of spawn, `deadline + fixed grace`); the completion RESULT is
+  asserted, so a monitor that finishes one millisecond late FAILS rather than passing. Member
+  identities are captured in PARALLEL so acquisition cannot itself consume the window; the teardown
+  oracle (identities gone, `survived` marker absent, cgroup directory removed) is read before any
+  `force_stop`, which runs only as post-RED cleanup.
 
 - **Report truthfulness + barrier.** `enforced` is emitted only after all five dimensions are
   installed and self-checked. A four-stage RED matrix injects a test-only fault on the backend's
-  control-plane env — `landlock`, `seccomp`, `cgroup` (each a setup failure → `spawn` fails closed,
-  no target, no owned cgroup) and `self-check` (a syntactically valid report with a downgraded
-  dimension the parent must reject) — and in every case the target-ran marker is absent; GO follows
-  verification only; the report stays bound to backend object, policy, nonce, and launch spec.
+  control-plane env and requires each stage to prove a DISTINCT failure path via a stage-specific
+  control-plane WITNESS (so a backend that returns one generic error for every fault passes none):
+  `landlock`, `seccomp`, `cgroup` each a setup failure → `spawn` fails closed, no target runs (an
+  immediate first-action `ran` marker, never a marker written only after later steps), the backend
+  witnesses reaching that install stage; and `self-check` → a syntactically valid report with a
+  downgraded dimension that the parent rejects as a report-VERIFICATION failure (`NotFullyEnforced`,
+  not a crash). GO follows verification only; the report stays bound to backend object, policy,
+  nonce, and launch spec.
 
 **Designated confinement CI job.** A separate Linux job runs the real-kernel acceptance matrix with
 `--include-ignored` — but only after a REAL capability preflight that EXERCISES each mechanism, not

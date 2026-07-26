@@ -33,6 +33,9 @@ fn run() -> i32 {
         Some("setsid") if args.len() >= 2 => setsid_probe(&args[1]),
         Some("setpgid") if args.len() >= 2 => setpgid_probe(&args[1]),
         Some("fds") if args.len() >= 2 => fds_probe(&args[1]),
+        // `ran MARKER`: write MARKER as the VERY FIRST action, so "the target started" is proven
+        // even if it is killed immediately after — never conflated with "reached a later step".
+        Some("ran") if args.len() >= 2 => ran_probe(&args[1]),
         // `exec TARGET SECONDARY PRIMARY`: attempt to execve an executable that is NOT under
         // `allow_exec`. On denial the call returns and we record the errno to PRIMARY; on escape the
         // exec succeeds, replaces us, and the executed command creates SECONDARY (which must never
@@ -41,7 +44,8 @@ fn run() -> i32 {
         _ => {
             eprintln!(
                 "usage: sandbox_probe <fs WT OUTSIDE MARKER | net MARKER | env MARKER | \
-                 setsid MARKER | setpgid MARKER | fds MARKER | exec TARGET SECONDARY PRIMARY>"
+                 setsid MARKER | setpgid MARKER | fds MARKER | ran MARKER | \
+                 exec TARGET SECONDARY PRIMARY>"
             );
             64
         }
@@ -132,6 +136,19 @@ fn fds_probe(marker: &str) -> i32 {
         },
         Err(e) => {
             eprintln!("sandbox_probe fds: enumeration failed: {e}");
+            2
+        }
+    }
+}
+
+/// Liveness witness: write MARKER as the first thing this process does. Used by the setup-failure
+/// matrix where the ONLY question is "did the target run at all"; must not be conflated with a
+/// probe that writes its marker only after several successful steps.
+fn ran_probe(marker: &str) -> i32 {
+    match std::fs::write(marker, b"ran") {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("sandbox_probe ran: cannot write marker: {e}");
             2
         }
     }

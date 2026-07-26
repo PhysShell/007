@@ -15,9 +15,12 @@
 //!   result depends on the other having run first;
 //! - a monitor-owned cgroup that CONTAINS the tree (monitor + target + ordinary child + a
 //!   double-forked descendant), is a DEDICATED non-root leaf, and is REMOVED on teardown;
-//! - a deadline that kills the target AND its descendant inside ONE bounded window and leaves no
-//!   cgroup, checked AFTER the monitor is waited (never racing a reap-then-remove monitor);
-//! - a four-mode setup-failure/report-truthfulness matrix that runs NO target;
+//! - a deadline whose teardown must COMPLETE inside one ABSOLUTE window (`timeout_at` from spawn,
+//!   result asserted — a late monitor fails), with identities captured in parallel so acquisition
+//!   never eats the window;
+//! - a four-stage setup-failure/report-truthfulness matrix where each stage proves a DISTINCT
+//!   failure path via a stage-specific control-plane witness (and self-check proves a valid
+//!   downgraded report was REJECTED, not a crash);
 //! - a live sealed `/proc/<pid>/fd/<n>` source that EXECUTES under confinement with the exact
 //!   outside-denial errno.
 //!
@@ -462,6 +465,12 @@ async fn the_confined_target_inherits_no_planted_socket() {
         .await
         .expect("launch");
     let exit = launch.process.wait().await.expect("waited");
+    // The sentinel must still be OPEN in the harness, so `inherited_sockets=0` proves the monitor's
+    // scrub — not a parent-side close that would make ANY backend look clean.
+    assert!(
+        sentinel.local_addr().is_ok(),
+        "the planted sentinel must still be open in the harness for this test to mean anything"
+    );
     drop(sentinel);
 
     // The probe fails CLOSED: a success marker exists ONLY if enumeration succeeded (exit 0).
@@ -679,33 +688,45 @@ async fn a_target_outliving_the_deadline_is_killed_with_its_descendants() {
     let survived = wt.path().join("survived");
     let script = format!(
         "echo $$ > {tp}; \
-         ( /bin/dash -c 'echo $$ > {dp}; exec sleep 5' & ); \
-         sleep 5; touch {s}",
+         ( /bin/dash -c 'echo $$ > {dp}; exec sleep 10' & ); \
+         sleep 10; touch {s}",
         tp = tpid.display(),
         dp = dpid.display(),
         s = survived.display(),
     );
-    let deadline = Duration::from_millis(500);
-    let grace = Duration::from_millis(2500);
+    // The deadline is generous enough that a correct GREEN monitor does NOT tear the tree down
+    // before this test can capture the members' start times; the grace bounds the teardown itself.
+    let deadline = Duration::from_secs(2);
+    let grace = Duration::from_secs(3);
     let b = boundary(wt.path(), shell_exec_allow(), vec![], deadline);
+
+    // The ABSOLUTE window starts at spawn. Everything — the handshake, identity capture, AND the
+    // monitor's own kill+reap+cgroup-removal+exit — must complete inside `deadline + grace`.
+    let bound_started = tokio::time::Instant::now();
     let mut launch = b
         .spawn(dash_target(script, wt.path()))
         .await
         .expect("launch");
     let monitor = launch.process.identity();
-    let target = read_identity_bounded(&tpid, Duration::from_secs(2))
-        .await
-        .expect("target identity");
-    let descendant = read_identity_bounded(&dpid, Duration::from_secs(2))
-        .await
-        .expect("descendant identity");
+    // Capture the two live identities IN PARALLEL (not two sequential 2s reads), so identity
+    // acquisition cannot itself consume the window.
+    let (target, descendant) = tokio::join!(
+        read_identity_bounded(&tpid, Duration::from_secs(2)),
+        read_identity_bounded(&dpid, Duration::from_secs(2)),
+    );
+    let target = target.expect("target identity");
+    let descendant = descendant.expect("descendant identity");
     let target_cg = cgroup_of(target.pid).expect("target cgroup");
 
-    // ONE bounded window: within deadline + grace the MONITOR itself must finish (kill the tree,
-    // reap, remove the cgroup, exit). We wait the monitor, THEN read the teardown oracle — never
-    // racing a monitor that reaps before it removes the cgroup.
-    let _ = tokio::time::timeout(deadline + grace, launch.process.wait()).await;
+    // The MONITOR must itself FINISH (kill the tree, reap, remove the cgroup, exit) within the
+    // absolute bound. We assert the completion RESULT, never discard it — a monitor that exits one
+    // millisecond late is a FAILURE, not a pass.
+    let completed_in_bound = matches!(
+        tokio::time::timeout_at(bound_started + deadline + grace, launch.process.wait()).await,
+        Ok(Ok(_))
+    );
 
+    // Capture the teardown oracle BEFORE any cleanup, so `force_stop` never masks a monitor failure.
     let target_gone = identity_gone(&target);
     let descendant_gone = identity_gone(&descendant);
     let monitor_gone = identity_gone(&monitor);
@@ -721,6 +742,11 @@ async fn a_target_outliving_the_deadline_is_killed_with_its_descendants() {
         }
     }
 
+    assert!(
+        completed_in_bound,
+        "the monitor must complete the deadline teardown INSIDE deadline + grace (it did not finish \
+         within the absolute window)"
+    );
     assert!(
         target_gone,
         "the target ({}) past the deadline must be killed by the monitor",
@@ -747,76 +773,123 @@ async fn a_target_outliving_the_deadline_is_killed_with_its_descendants() {
 
 // --- Report truthfulness / setup failure (four stages) ---
 
-/// A forced setup failure at `fault` must run NO target: the future backend fails that stage,
-/// reports NOT enforced (or dies before GO), so the parent fails closed and the target-ran marker
-/// is absent. RED: the stand-in does not recognise the fault, reports `enforced`, GOes, and runs
-/// the target unconfined — so `spawn` succeeds AND the marker appears.
-async fn assert_setup_failure_runs_no_target(fault: &str) {
+/// What a forced-fault launch produced. The GREEN backend honours a TEST-ONLY control-plane fault
+/// on `O7_FAKE_MODE` (`ok;fault=<stage>;witness=<path>`): it fails at exactly `<stage>` and writes a
+/// STAGE-SPECIFIC token to `<path>` from that stage's own code path, so each leg proves a DIFFERENT
+/// failure path — a backend that returns one generic error for every fault passes none of them.
+struct FaultObservation {
+    /// `spawn` returned an error (fail-closed) rather than a live launch.
+    failed_closed: bool,
+    /// The `spawn` error text (present iff `failed_closed`).
+    error: Option<String>,
+    /// The immediate `ran` marker exists — the target STARTED.
+    target_ran: bool,
+    /// The backend's stage witness, if any.
+    witness: Option<String>,
+}
+
+async fn observe_setup_fault(fault: &str) -> FaultObservation {
     let wt = tempfile::tempdir().unwrap();
-    let marker = wt.path().join("fs.result");
-    let outside_dir = tempfile::tempdir().unwrap();
-    let outside = outside_dir.path().join("x.txt");
+    let ran = wt.path().join("ran.marker");
+    // The GREEN backend writes the stage it reached here; the stand-in ignores the param.
+    let witness = wt.path().join("witness");
+    let mode = format!("ok;fault={fault};witness={}", witness.display());
     let b = boundary_mode(
         wt.path(),
         vec![probe_dir()],
         vec![],
         Duration::from_secs(30),
-        &format!("ok;fault={fault}"),
+        &mode,
     );
     let spawn = b
         .spawn(probe_target(
-            &[
-                "fs",
-                &wt.path().to_string_lossy(),
-                &outside.to_string_lossy(),
-                &marker.to_string_lossy(),
-            ],
+            &["ran", &ran.to_string_lossy()],
             wt.path(),
             BTreeMap::new(),
         ))
         .await;
     let failed_closed = spawn.is_err();
+    let error = spawn.as_ref().err().map(|e| e.to_string());
     if let Ok(mut launch) = spawn {
         let _ = launch.process.wait().await;
     }
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    assert!(
-        !marker.exists(),
-        "fault={fault}: a forced setup failure must run NO target; the target-ran marker exists \
-         (the stand-in ignored the injected fault and ran the target unconfined)"
-    );
-    assert!(
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    FaultObservation {
         failed_closed,
-        "fault={fault}: spawn must fail closed on a setup failure; the stand-in returned a \
-         successful launch"
+        error,
+        target_ran: ran.exists(),
+        witness: std::fs::read_to_string(&witness).ok(),
+    }
+}
+
+/// The three INSTALL-stage faults share a shape: no target runs, spawn fails closed, and the
+/// backend witnesses reaching EXACTLY `stage` (so the three legs are not one oracle in a trench
+/// coat). RED: the stand-in runs the target, returns a live launch, and writes no witness.
+fn assert_install_fault(stage: &str, obs: &FaultObservation) {
+    assert!(
+        !obs.target_ran,
+        "fault={stage}: a forced setup failure must run NO target; the immediate `ran` marker \
+         exists (the stand-in ignored the injected fault and ran the target unconfined)"
+    );
+    assert!(
+        obs.failed_closed,
+        "fault={stage}: spawn must fail closed; the stand-in returned a live launch"
+    );
+    assert!(
+        obs.witness.as_deref().is_some_and(|w| w.contains(stage)),
+        "fault={stage}: the backend must witness failing at the {stage} install stage \
+         (stage-specific, not a generic error); witness: {:?}",
+        obs.witness
     );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B: real backend fault injection required; RED against the non-confining stand-in"]
+#[ignore = "Vertical B: real backend Landlock-install fault required; RED against the non-confining stand-in"]
 async fn a_landlock_setup_failure_runs_no_target() {
-    assert_setup_failure_runs_no_target("landlock").await;
+    let obs = observe_setup_fault("landlock").await;
+    assert_install_fault("landlock", &obs);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B: real backend fault injection required; RED against the non-confining stand-in"]
+#[ignore = "Vertical B: real backend seccomp-install fault required; RED against the non-confining stand-in"]
 async fn a_seccomp_setup_failure_runs_no_target() {
-    assert_setup_failure_runs_no_target("seccomp").await;
+    let obs = observe_setup_fault("seccomp").await;
+    assert_install_fault("seccomp", &obs);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B: real backend fault injection required; RED against the non-confining stand-in"]
+#[ignore = "Vertical B: real backend cgroup-setup fault required; RED against the non-confining stand-in"]
 async fn a_cgroup_setup_failure_runs_no_target() {
-    assert_setup_failure_runs_no_target("cgroup").await;
+    let obs = observe_setup_fault("cgroup").await;
+    assert_install_fault("cgroup", &obs);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Vertical B: real backend self-check downgrade required; RED against the non-confining stand-in"]
 async fn a_self_check_downgrade_runs_no_target() {
-    // Distinct from the other three: the backend installs, then a POST-INSTALL self-check finds a
-    // dimension not fully enforced and emits a syntactically valid report with that dimension
-    // `partial`/`not_enforced`. The parent must reject it and send no GO. RED: the stand-in reports
-    // every dimension `enforced` (it never self-checks), so the target runs.
-    assert_setup_failure_runs_no_target("self-check").await;
+    // DISTINCT from the three install faults: the backend installs, then a POST-INSTALL self-check
+    // finds a dimension not fully enforced and emits a SYNTACTICALLY VALID report with that
+    // dimension downgraded. The parent must reject that report ON ITS MERITS — the failure is a
+    // report-VERIFICATION rejection (`NotFullyEnforced`), NOT an early crash / generic setup error.
+    let obs = observe_setup_fault("self-check").await;
+    assert!(
+        !obs.target_ran,
+        "fault=self-check: no target may run; the immediate `ran` marker exists"
+    );
+    assert!(
+        obs.error
+            .as_deref()
+            .is_some_and(|e| e.contains("full enforcement")),
+        "fault=self-check: the parent must reject a VALID downgraded report (a NotFullyEnforced \
+         verification failure), not fail on a crash/generic error; spawn error: {:?}",
+        obs.error
+    );
+    assert!(
+        obs.witness
+            .as_deref()
+            .is_some_and(|w| w.contains("self-check")),
+        "fault=self-check: the backend must witness emitting a downgraded report after its \
+         self-check; witness: {:?}",
+        obs.witness
+    );
 }
