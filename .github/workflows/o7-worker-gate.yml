@@ -140,3 +140,41 @@ jobs:
         with:
           command: check advisories
           arguments: ""
+
+  # Vertical B — the REAL kernel confinement acceptance matrix. Runs the `#[ignore]`d
+  # sandbox_confinement tests (the portable worker-gate skips them, staying host-agnostic). The
+  # required kernel features are asserted first: a missing Landlock ABI, seccomp, or delegated
+  # cgroup v2 is an EXPLICIT job FAILURE here, never a skip or a green "unsupported". RED until the
+  # real backend lands; GREEN turns the matrix green by making the backend actually enforce.
+  sandbox-confinement:
+    name: sandbox confinement (Vertical B)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact tested revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Require kernel confinement features (fail, never skip)
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          if ! grep -qw landlock /sys/kernel/security/lsm 2>/dev/null; then
+            echo "::error::Landlock LSM is not active (/sys/kernel/security/lsm)"; fail=1
+          fi
+          if [ ! -e /sys/fs/cgroup/cgroup.controllers ]; then
+            echo "::error::cgroup v2 is not mounted (/sys/fs/cgroup/cgroup.controllers)"; fail=1
+          fi
+          if ! grep -q '^Seccomp:' /proc/self/status 2>/dev/null; then
+            echo "::error::seccomp is unavailable (/proc/self/status)"; fail=1
+          fi
+          if [ "$fail" -ne 0 ]; then
+            echo "::error::mandatory kernel confinement features absent — this job fails closed"; exit 1
+          fi
+          echo "kernel confinement features present: landlock, cgroup v2, seccomp"
+
+      - name: Confinement acceptance matrix
+        run: cargo test -p o7-worker --locked --test sandbox_confinement -- --include-ignored

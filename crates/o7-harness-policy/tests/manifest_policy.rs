@@ -17,8 +17,8 @@
 //! `[dev-dependencies]` self-edge with dependency key `o7-worker`, effective package `o7-worker`,
 //! and `path = "."`. Any other enablement (a production/build edge, a renamed alias, a forward, a
 //! duplicate self-alias, a wrong path) fails the gate, and the total number of sanctioned
-//! enablements must be exactly one. A second gate pins the harness BINARY lock (autobins off, all
-//! three bins `required-features`-gated, no un-classified `src/bin`). Traversal and parsing are
+//! enablements must be exactly one. A second gate pins the harness BINARY lock (autobins off,
+//! every harness bin `required-features`-gated, no un-classified `src/bin`). Traversal and parsing are
 //! fail-closed: any unreadable directory/entry, unreadable/malformed manifest, or path error is a
 //! hard failure, never a silent "all clean".
 #![allow(
@@ -35,7 +35,7 @@ const FEATURE: &str = "test-harness";
 const PKG: &str = "o7-worker";
 const ALLOWED_MANIFEST: &str = "crates/o7-worker/Cargo.toml";
 const ALLOWED_TABLE: &str = "dev-dependencies";
-const HARNESS_BINS: [&str; 3] = ["sandboy_fake", "spawn_probe", "fd_probe"];
+const HARNESS_BINS: [&str; 4] = ["sandboy_fake", "spawn_probe", "fd_probe", "sandbox_probe"];
 
 // ---------------------------------------------------------------------------
 // Fail-closed filesystem traversal.
@@ -714,45 +714,34 @@ fn fail_closed_on_unreadable_directory() {
 
 // ---- binary-lock fixtures ----
 
-fn three_gated_bins() -> String {
-    r#"
-[package]
-name = "o7-worker"
-autobins = false
-
-[[bin]]
-name = "sandboy_fake"
-required-features = ["test-harness"]
-
-[[bin]]
-name = "spawn_probe"
-required-features = ["test-harness"]
-
-[[bin]]
-name = "fd_probe"
-required-features = ["test-harness"]
-"#
-    .to_owned()
+fn all_gated_bins() -> String {
+    let mut manifest = String::from("\n[package]\nname = \"o7-worker\"\nautobins = false\n");
+    for name in HARNESS_BINS {
+        manifest.push_str(&format!(
+            "\n[[bin]]\nname = \"{name}\"\nrequired-features = [\"test-harness\"]\n"
+        ));
+    }
+    manifest
 }
 
 #[test]
 fn binary_lock_accepts_the_real_shape() {
     let stems: BTreeSet<String> = HARNESS_BINS.iter().map(|s| (*s).to_owned()).collect();
-    binary_policy(&three_gated_bins(), &stems).expect("real shape passes");
+    binary_policy(&all_gated_bins(), &stems).expect("real shape passes");
 }
 
 #[test]
 fn binary_lock_rejects_autobins_true() {
-    let text = three_gated_bins().replace("autobins = false", "autobins = true");
+    let text = all_gated_bins().replace("autobins = false", "autobins = true");
     let stems: BTreeSet<String> = HARNESS_BINS.iter().map(|s| (*s).to_owned()).collect();
     assert!(binary_policy(&text, &stems).is_err());
 }
 
 #[test]
 fn binary_lock_rejects_an_ungated_bin() {
-    let text = three_gated_bins().replace(
-        "[[bin]]\nname = \"fd_probe\"\nrequired-features = [\"test-harness\"]",
-        "[[bin]]\nname = \"fd_probe\"",
+    let text = all_gated_bins().replace(
+        "[[bin]]\nname = \"fd_probe\"\nrequired-features = [\"test-harness\"]\n",
+        "[[bin]]\nname = \"fd_probe\"\n",
     );
     let stems: BTreeSet<String> = HARNESS_BINS.iter().map(|s| (*s).to_owned()).collect();
     assert!(binary_policy(&text, &stems).is_err());
@@ -762,5 +751,5 @@ fn binary_lock_rejects_an_ungated_bin() {
 fn binary_lock_rejects_an_unclassified_source() {
     let mut stems: BTreeSet<String> = HARNESS_BINS.iter().map(|s| (*s).to_owned()).collect();
     stems.insert("rogue".to_owned());
-    assert!(binary_policy(&three_gated_bins(), &stems).is_err());
+    assert!(binary_policy(&all_gated_bins(), &stems).is_err());
 }

@@ -31,6 +31,11 @@ name = "fd_probe"
 path = "src/bin/fd_probe.rs"
 required-features = ["test-harness"]
 
+[[bin]]
+name = "sandbox_probe"
+path = "src/bin/sandbox_probe.rs"
+required-features = ["test-harness"]
+
 [features]
 # `test-harness` is an INTERNAL, NON-DEFAULT Cargo feature. It gates the controlled fake-backend
 # config knob (`BackendConfig::fake_mode`), the cancellation-test barrier
