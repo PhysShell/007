@@ -24,7 +24,11 @@ pub enum SandboxDimension {
 }
 
 impl SandboxDimension {
-    /// Every dimension a fully-enforced report must account for.
+    /// Every dimension a fully-enforced report must account for. Kept exhaustive by the compile-time
+    /// anchor below: `is_fully_enforced`/`is_none_enforced` iterate this array, so a dimension
+    /// missing from it would be silently unchecked. Its fixed `[_; N]` length rejects a short list,
+    /// the `dimension_index` anchor rejects a reordered/duplicated one, and adding a variant fails to
+    /// compile until it is listed here.
     pub const ALL: [SandboxDimension; 5] = [
         SandboxDimension::Filesystem,
         SandboxDimension::Network,
@@ -33,6 +37,36 @@ impl SandboxDimension {
         SandboxDimension::Timeout,
     ];
 }
+
+/// The canonical index of each dimension in [`SandboxDimension::ALL`]. This match is EXHAUSTIVE, so
+/// adding a `SandboxDimension` variant fails to compile HERE — next to `ALL` — forcing the new
+/// dimension into `ALL` (which drives [`crate::report::SandboxReport::is_fully_enforced`]). Used only
+/// by the compile-time anchor below.
+const fn dimension_index(d: SandboxDimension) -> usize {
+    match d {
+        SandboxDimension::Filesystem => 0,
+        SandboxDimension::Network => 1,
+        SandboxDimension::Env => 2,
+        SandboxDimension::ProcessTree => 3,
+        SandboxDimension::Timeout => 4,
+    }
+}
+
+// Compile-time anchor: `ALL` is the variant set in canonical order, with no reorder or duplicate —
+// entry `i` is exactly the variant whose `dimension_index` is `i`. (A short `ALL` is already rejected
+// by its fixed `[_; N]` length; a newly added variant is rejected by the exhaustive match above.)
+// INVARIANT: the `i < ALL.len()` guard bounds every `ALL[i]` access, so the indexing cannot panic.
+#[allow(clippy::indexing_slicing)]
+const _: () = {
+    let mut i = 0;
+    while i < SandboxDimension::ALL.len() {
+        assert!(
+            dimension_index(SandboxDimension::ALL[i]) == i,
+            "SandboxDimension::ALL must list each dimension once, in canonical order"
+        );
+        i += 1;
+    }
+};
 
 /// How thoroughly one dimension was enforced. Three-valued on purpose: `Partial` is an
 /// honest admission and must never be silently promoted to `Enforced`.
