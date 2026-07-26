@@ -44,6 +44,17 @@ fn full_report() -> SandboxReport {
     }
 }
 
+fn none_report() -> SandboxReport {
+    SandboxReport {
+        filesystem: Enforcement::NotEnforced,
+        network: Enforcement::NotEnforced,
+        env: Enforcement::NotEnforced,
+        process_tree: Enforcement::NotEnforced,
+        timeout: Enforcement::NotEnforced,
+        ..full_report()
+    }
+}
+
 fn policy() -> SandboxPolicy {
     SandboxPolicy {
         worktree: PathBuf::from("/work/run-1"),
@@ -90,6 +101,60 @@ fn an_oversized_declared_length_is_rejected_without_buffering() {
     let mut bytes = ((MAX_REPORT_BYTES + 1) as u32).to_be_bytes().to_vec();
     bytes.extend_from_slice(b"{}");
     assert!(matches!(decode(&bytes), Err(FrameError::TooLarge { .. })));
+}
+
+// --- every dimension is genuinely consulted by the trust predicates ---
+
+#[test]
+fn every_dimension_is_consulted_by_full_and_none_enforcement() {
+    use o7_sandbox_protocol::policy::SandboxDimension;
+
+    // `SandboxDimension`, `ALL`, `dimension()`, `is_fully_enforced`, and `is_none_enforced` are all
+    // generated from the single `sandbox_dimensions!` list, so a new dimension is threaded into the
+    // trust predicates automatically — it cannot be merely mentioned and left out. Prove that
+    // BEHAVIOURALLY here: an all-enforced report is fully enforced, and downgrading ANY single
+    // dimension defeats it. The setter `match` is exhaustive over the type, so a newly added
+    // dimension fails to compile until this behavioural check exercises it too.
+    assert!(full_report().is_fully_enforced());
+    assert!(!full_report().is_none_enforced());
+    for d in SandboxDimension::ALL {
+        let mut r = full_report();
+        match d {
+            SandboxDimension::Filesystem => r.filesystem = Enforcement::NotEnforced,
+            SandboxDimension::Network => r.network = Enforcement::NotEnforced,
+            SandboxDimension::Env => r.env = Enforcement::NotEnforced,
+            SandboxDimension::ProcessTree => r.process_tree = Enforcement::NotEnforced,
+            SandboxDimension::Timeout => r.timeout = Enforcement::NotEnforced,
+        }
+        assert!(
+            !r.is_fully_enforced(),
+            "downgrading {d:?} must defeat full enforcement"
+        );
+        // And `dimension()` reports exactly the field the list maps it to.
+        assert_eq!(r.dimension(d), Enforcement::NotEnforced);
+    }
+
+    // Symmetric half for `is_none_enforced`: an all-NotEnforced report is none-enforced, and
+    // upgrading ANY single dimension to `Enforced` defeats it — so each dimension is genuinely
+    // consulted by this predicate too, not just by `is_fully_enforced`.
+    let none = none_report();
+    assert!(none.is_none_enforced());
+    assert!(!none.is_fully_enforced());
+    for d in SandboxDimension::ALL {
+        let mut r = none_report();
+        match d {
+            SandboxDimension::Filesystem => r.filesystem = Enforcement::Enforced,
+            SandboxDimension::Network => r.network = Enforcement::Enforced,
+            SandboxDimension::Env => r.env = Enforcement::Enforced,
+            SandboxDimension::ProcessTree => r.process_tree = Enforcement::Enforced,
+            SandboxDimension::Timeout => r.timeout = Enforcement::Enforced,
+        }
+        assert!(
+            !r.is_none_enforced(),
+            "enforcing {d:?} must defeat none-enforcement"
+        );
+        assert_eq!(r.dimension(d), Enforcement::Enforced);
+    }
 }
 
 // --- report honesty ---

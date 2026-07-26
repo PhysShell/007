@@ -11,27 +11,108 @@ use serde::{Deserialize, Serialize};
 
 use crate::ids::Digest256;
 
-/// A confinement dimension a backend reports on independently. There is no single boolean
-/// "secure": a real boundary enforces some dimensions and not others and must say which.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SandboxDimension {
-    Filesystem,
-    Network,
-    Env,
-    ProcessTree,
-    Timeout,
+/// The SINGLE source of truth for the confinement dimensions. One `Variant => field` list generates
+/// the [`SandboxDimension`] enum, its [`SandboxDimension::ALL`], and — the point — the three
+/// [`crate::report::SandboxReport`] accessors `dimension`, `is_fully_enforced`, and
+/// `is_none_enforced`. A new dimension is one line here; it becomes an enum variant, an `ALL` entry,
+/// a `dimension()` arm, AND a term in BOTH trust predicates.
+///
+/// The authority link is BIDIRECTIONAL and enforced by the compiler (see the predicates below):
+/// - a dimension line whose field is absent from `SandboxReport` fails to build (the generated
+///   `self.<field>` access is a `no field` error) — so a dimension cannot be declared without a
+///   real field for every trust decision to consult;
+/// - a `SandboxReport` `Enforcement` field with no dimension line fails to build (the predicates'
+///   exhaustive destructure has no `..`, so an untied field is not covered) — so a field cannot
+///   exist in the model yet be absent from the trust decision.
+///
+/// It deliberately does NOT generate `SandboxReport` itself, so the struct keeps its public fields
+/// and serde wire layout; the coupling is only the non-dimension metadata field names, named
+/// explicitly in the destructure.
+macro_rules! sandbox_dimensions {
+    // Count the variants at compile time so `ALL` is a fixed-size array sized from the list itself.
+    (@count) => { 0usize };
+    (@count $head:ident $($tail:ident)*) => { 1usize + sandbox_dimensions!(@count $($tail)*) };
+
+    ($($variant:ident => $field:ident),+ $(,)?) => {
+        /// A confinement dimension a backend reports on independently. There is no single boolean
+        /// "secure": a real boundary enforces some dimensions and not others and must say which.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, ::serde::Serialize, ::serde::Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum SandboxDimension {
+            $($variant,)+
+        }
+
+        impl SandboxDimension {
+            /// Every dimension, for iteration. Generated from the same list as the trust predicates,
+            /// so it is always the complete variant set in declaration order — never a hand-kept copy
+            /// that could drift.
+            pub const ALL: [SandboxDimension; sandbox_dimensions!(@count $($variant)+)] =
+                [$(SandboxDimension::$variant),+];
+        }
+
+        impl $crate::report::SandboxReport {
+            /// The enforcement for one dimension.
+            #[must_use]
+            pub fn dimension(&self, dimension: SandboxDimension) -> $crate::policy::Enforcement {
+                match dimension {
+                    $(SandboxDimension::$variant => self.$field,)+
+                }
+            }
+
+            /// True only when EVERY dimension is `Enforced`. A single downgrade makes this false, so
+            /// a partial report can never present as full confinement.
+            ///
+            /// The report is destructured EXHAUSTIVELY with its dimension-field part generated from
+            /// the SAME list as the boolean below. This is the REVERSE authority link: a
+            /// `SandboxReport` `Enforcement` field with no dimension line is not covered by the
+            /// pattern and fails to build, so a field cannot be enforcement-relevant yet escape the
+            /// trust decision. (Two lines mapping to one field also fail to build — `field bound
+            /// multiple times`.) Non-dimension metadata fields are named explicitly.
+            #[must_use]
+            pub fn is_fully_enforced(&self) -> bool {
+                // DO NOT add `..` to this pattern. Its exhaustiveness IS the reverse authority link;
+                // `..` would let an untied `Enforcement` field silently escape the trust check. (The
+                // macro-generated pattern reports the omission as `pattern requires ..`, which is a
+                // hard error — leave it that way.)
+                let $crate::report::SandboxReport {
+                    $($field,)+
+                    schema_version: _,
+                    backend: _,
+                    backend_digest: _,
+                    policy_digest: _,
+                    launch_nonce: _,
+                    launch_spec_digest: _,
+                } = self;
+                true $(&& *$field == $crate::policy::Enforcement::Enforced)+
+            }
+
+            /// True when NO dimension is enforced at all. Same bidirectional exhaustive destructure
+            /// as [`Self::is_fully_enforced`], so a new dimension is consulted here too and no report
+            /// `Enforcement` field can escape the check.
+            #[must_use]
+            pub fn is_none_enforced(&self) -> bool {
+                // DO NOT add `..` here either — same reverse authority link as `is_fully_enforced`.
+                let $crate::report::SandboxReport {
+                    $($field,)+
+                    schema_version: _,
+                    backend: _,
+                    backend_digest: _,
+                    policy_digest: _,
+                    launch_nonce: _,
+                    launch_spec_digest: _,
+                } = self;
+                true $(&& *$field == $crate::policy::Enforcement::NotEnforced)+
+            }
+        }
+    };
 }
 
-impl SandboxDimension {
-    /// Every dimension a fully-enforced report must account for.
-    pub const ALL: [SandboxDimension; 5] = [
-        SandboxDimension::Filesystem,
-        SandboxDimension::Network,
-        SandboxDimension::Env,
-        SandboxDimension::ProcessTree,
-        SandboxDimension::Timeout,
-    ];
+sandbox_dimensions! {
+    Filesystem => filesystem,
+    Network => network,
+    Env => env,
+    ProcessTree => process_tree,
+    Timeout => timeout,
 }
 
 /// How thoroughly one dimension was enforced. Three-valued on purpose: `Partial` is an

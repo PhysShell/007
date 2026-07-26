@@ -10,7 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{BackendIdentity, Digest256, LaunchNonce};
-use crate::policy::{Enforcement, SandboxDimension};
+use crate::policy::Enforcement;
 use crate::SCHEMA_VERSION;
 
 /// A backend's report of what it ACTUALLY enforced, for one launch.
@@ -70,32 +70,8 @@ impl SandboxReport {
         Ok(report)
     }
 
-    /// The enforcement for one dimension.
-    #[must_use]
-    pub fn dimension(&self, dimension: SandboxDimension) -> Enforcement {
-        match dimension {
-            SandboxDimension::Filesystem => self.filesystem,
-            SandboxDimension::Network => self.network,
-            SandboxDimension::Env => self.env,
-            SandboxDimension::ProcessTree => self.process_tree,
-            SandboxDimension::Timeout => self.timeout,
-        }
-    }
-
-    /// True only when EVERY dimension is `Enforced`. A single downgrade makes this false, so
-    /// a partial report can never present as full confinement.
-    #[must_use]
-    pub fn is_fully_enforced(&self) -> bool {
-        SandboxDimension::ALL
-            .iter()
-            .all(|&d| self.dimension(d) == Enforcement::Enforced)
-    }
-
-    /// True when NO dimension is enforced at all.
-    #[must_use]
-    pub fn is_none_enforced(&self) -> bool {
-        SandboxDimension::ALL
-            .iter()
-            .all(|&d| self.dimension(d) == Enforcement::NotEnforced)
-    }
+    // `dimension`, `is_fully_enforced`, and `is_none_enforced` are generated — together with the
+    // `SandboxDimension` enum and `SandboxDimension::ALL` — from the single `sandbox_dimensions!`
+    // list in `policy.rs`, so a new dimension is threaded through every trust predicate by adding
+    // one line there (and fails to compile until the matching field below exists).
 }
