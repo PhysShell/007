@@ -84,18 +84,58 @@ impl SandboxReport {
 
     /// True only when EVERY dimension is `Enforced`. A single downgrade makes this false, so
     /// a partial report can never present as full confinement.
+    ///
+    /// The report is destructured EXHAUSTIVELY (no `..`): a new enforcement dimension is a new
+    /// field, so this fails to compile until that dimension is named AND folded into the check —
+    /// it cannot be silently omitted (a fresh `Enforcement` field left out would otherwise let a
+    /// report that does not enforce it read as fully enforced). This structural check, not
+    /// [`SandboxDimension::ALL`], is what guarantees completeness of the trust decision; `ALL` and
+    /// its ordering anchor remain for iteration.
     #[must_use]
     pub fn is_fully_enforced(&self) -> bool {
-        SandboxDimension::ALL
-            .iter()
-            .all(|&d| self.dimension(d) == Enforcement::Enforced)
+        let SandboxReport {
+            filesystem,
+            network,
+            env,
+            process_tree,
+            timeout,
+            // Non-dimension metadata — deliberately not part of the enforcement decision.
+            schema_version: _,
+            backend: _,
+            backend_digest: _,
+            policy_digest: _,
+            launch_nonce: _,
+            launch_spec_digest: _,
+        } = self;
+        *filesystem == Enforcement::Enforced
+            && *network == Enforcement::Enforced
+            && *env == Enforcement::Enforced
+            && *process_tree == Enforcement::Enforced
+            && *timeout == Enforcement::Enforced
     }
 
-    /// True when NO dimension is enforced at all.
+    /// True when NO dimension is enforced at all. Uses the same exhaustive destructure as
+    /// [`SandboxReport::is_fully_enforced`], so a new dimension cannot be silently dropped here
+    /// either.
     #[must_use]
     pub fn is_none_enforced(&self) -> bool {
-        SandboxDimension::ALL
-            .iter()
-            .all(|&d| self.dimension(d) == Enforcement::NotEnforced)
+        let SandboxReport {
+            filesystem,
+            network,
+            env,
+            process_tree,
+            timeout,
+            schema_version: _,
+            backend: _,
+            backend_digest: _,
+            policy_digest: _,
+            launch_nonce: _,
+            launch_spec_digest: _,
+        } = self;
+        *filesystem == Enforcement::NotEnforced
+            && *network == Enforcement::NotEnforced
+            && *env == Enforcement::NotEnforced
+            && *process_tree == Enforcement::NotEnforced
+            && *timeout == Enforcement::NotEnforced
     }
 }

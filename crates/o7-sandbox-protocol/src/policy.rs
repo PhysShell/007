@@ -24,11 +24,14 @@ pub enum SandboxDimension {
 }
 
 impl SandboxDimension {
-    /// Every dimension a fully-enforced report must account for. Kept exhaustive by the compile-time
-    /// anchor below: `is_fully_enforced`/`is_none_enforced` iterate this array, so a dimension
-    /// missing from it would be silently unchecked. Its fixed `[_; N]` length rejects a short list,
-    /// the `dimension_index` anchor rejects a reordered/duplicated one, and adding a variant fails to
-    /// compile until it is listed here.
+    /// Every dimension, for iteration. Kept WELL-FORMED by the compile-time anchor below: its fixed
+    /// `[_; N]` length rejects a short list and the `dimension_index` anchor rejects a
+    /// reordered/duplicated one. NOTE: this does not by itself guarantee `ALL` lists a newly added
+    /// variant — stable Rust cannot count enum variants without a derive — so `ALL` is NOT on the
+    /// trust-critical path. The completeness of the full-enforcement decision is guaranteed
+    /// structurally instead, by the exhaustive struct destructure in
+    /// [`crate::report::SandboxReport::is_fully_enforced`] (a new `Enforcement` field fails to
+    /// compile until it is folded into the check).
     pub const ALL: [SandboxDimension; 5] = [
         SandboxDimension::Filesystem,
         SandboxDimension::Network,
