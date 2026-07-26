@@ -76,13 +76,25 @@ jobs:
             echo "::error::cgroup.procs does not reflect the moved process"; exit 1
           fi
           # Kill the whole cgroup via cgroup.kill and prove it drains (the child is reaped so its
-          # task leaves cgroup.procs), then remove the directory.
+          # task leaves cgroup.procs), then remove the directory. `cgroup.procs` is a virtual
+          # cgroupfs file whose `st_size` is 0 even while it lists live PIDs, so a `test -s` would be
+          # vacuously "drained" (a false pass). Read the actual CONTENTS instead, poll to a finite
+          # deadline, treat a read failure as an ERROR (never a silent drain), and on timeout fail
+          # closed reporting the survivors.
           echo 1 > "$child/cgroup.kill"
           wait "$victim" 2>/dev/null || true
           victim=""
-          for _ in $(seq 1 50); do [ -s "$child/cgroup.procs" ] || break; sleep 0.1; done
-          if [ -s "$child/cgroup.procs" ]; then
-            echo "::error::the cgroup did not drain after cgroup.kill"; exit 1
+          drained=""
+          for _ in $(seq 1 50); do
+            procs="$(cat "$child/cgroup.procs")" || {
+              echo "::error::cannot read $child/cgroup.procs while proving cgroup.kill drain"; exit 1
+            }
+            if [ -z "${procs//[[:space:]]/}" ]; then drained=1; break; fi
+            sleep 0.1
+          done
+          if [ -z "$drained" ]; then
+            remaining="$(tr '\n' ' ' < "$child/cgroup.procs" 2>/dev/null || echo '<unreadable>')"
+            echo "::error::the cgroup did not drain after cgroup.kill; remaining PIDs: ${remaining}"; exit 1
           fi
           if ! rmdir "$child" 2>/dev/null || [ -e "$child" ]; then
             echo "::error::cannot remove the delegated cgroup directory"; exit 1
