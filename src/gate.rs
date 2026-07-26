@@ -59,9 +59,49 @@ impl GateManifest {
         toml::from_str(text).context("parsing gate manifest TOML")
     }
 
+    /// Validate the manifest BEFORE anything runs (Codex P2s on #67): a blank
+    /// or duplicate step name would let one step's outcome be attributed to
+    /// another (canonical gate ids must be unique), and two distinct names
+    /// that sanitize to the same log filename (`a.b` vs `a-b`) would silently
+    /// overwrite the first step's log — replay would then "verify" the
+    /// surviving log as evidence for BOTH gates. Fail loud, before the agent
+    /// or any gate command spends anything.
+    ///
+    /// # Errors
+    /// The first blank name, duplicate name, or sanitized-log collision found.
+    pub fn validate(&self) -> Result<()> {
+        let mut names: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+        let mut logs: std::collections::BTreeMap<String, &str> = std::collections::BTreeMap::new();
+        for step in &self.gate {
+            if step.name.trim().is_empty() {
+                anyhow::bail!("gate manifest has a step with a blank name");
+            }
+            if !names.insert(step.name.as_str()) {
+                anyhow::bail!(
+                    "gate manifest has duplicate step name '{}' — canonical gate ids must be unique",
+                    step.name
+                );
+            }
+            let log = sanitize(&step.name);
+            if let Some(prev) = logs.insert(log.clone(), step.name.as_str()) {
+                anyhow::bail!(
+                    "gate steps '{prev}' and '{}' both sanitize to log '{log}.log' — \
+                     the second would overwrite the first's evidence; rename one",
+                    step.name
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Run every step in `workdir`, writing per-step logs into `gate_out`.
     /// Returns per-step verdicts (feed to `Verdict::reduce`).
+    ///
+    /// Validates the manifest first (`validate`) — the log-collision check
+    /// must hold on the execution path even for callers that skipped the
+    /// pre-run contract build.
     pub fn run(&self, workdir: &Path, gate_out: &Path) -> Result<Vec<StepVerdict>> {
+        self.validate()?;
         std::fs::create_dir_all(gate_out)?;
         let mut out = Vec::new();
 
@@ -278,6 +318,53 @@ mod tests {
         );
         assert!(!steps[0].required);
         assert_eq!(Verdict::reduce(&steps), Verdict::Pass);
+    }
+
+    /// Distinct names colliding after log-name sanitization (`a.b` vs `a-b`)
+    /// would overwrite the first step's evidence and let replay verify the
+    /// surviving log for BOTH gates — `run` refuses before executing anything
+    /// (Codex P2 on #67).
+    #[test]
+    fn sanitized_log_collision_is_rejected_before_execution() {
+        let m = GateManifest::parse(
+            r#"
+            [[gate]]
+            name = "a.b"
+            cmd = "true"
+
+            [[gate]]
+            name = "a-b"
+            cmd = "true"
+            "#,
+        )
+        .unwrap();
+        let dir = std::env::temp_dir();
+        assert!(m.run(&dir, &dir.join("o7-collision-test")).is_err());
+        // and duplicates / blank names are rejected by the same validator
+        assert!(GateManifest::parse(
+            r#"
+            [[gate]]
+            name = "x"
+            cmd = "true"
+
+            [[gate]]
+            name = "x"
+            cmd = "false"
+            "#,
+        )
+        .unwrap()
+        .validate()
+        .is_err());
+        assert!(GateManifest::parse(
+            r#"
+            [[gate]]
+            name = "  "
+            cmd = "true"
+            "#,
+        )
+        .unwrap()
+        .validate()
+        .is_err());
     }
 
     /// The executed path still works end-to-end: pass + fail + verdicts.

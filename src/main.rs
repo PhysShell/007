@@ -126,6 +126,11 @@ fn run(a: RunArgs) -> Result<()> {
         .clone()
         .unwrap_or_else(|| repo.join(".007").join("gate.toml"));
     let manifest = GateManifest::load(&gate_path)?;
+    // Validate the manifest and fix the obligation contract BEFORE the
+    // worktree, the agent, or any gate command spends anything — an invalid
+    // manifest (blank/duplicate names, log collisions) must cost nothing and
+    // must never abort a run after the fact without its canonical record.
+    let contract = events::build_contract(&manifest)?;
 
     let secs = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let run_id = format!("{secs}-{}", std::process::id());
@@ -147,6 +152,7 @@ fn run(a: RunArgs) -> Result<()> {
         engine,
         &task,
         &manifest,
+        contract,
     );
 
     if a.keep_worktree {
@@ -174,6 +180,7 @@ fn execute(
     engine: Engine,
     task: &str,
     manifest: &GateManifest,
+    contract: o7_run::event::RunContract,
 ) -> Result<Verdict> {
     println!(
         "[o7] {run_id}: {} ({}) full-auto in worktree",
@@ -189,12 +196,12 @@ fn execute(
 
     let steps = manifest.run(wt, &rec.gate_dir())?;
 
-    // The canonical event stream is the verdict authority: obligations are
-    // declared up front (contract), what happened is digest-chained
-    // (events.jsonl), and the pure o7-run reducer scores it — so an
-    // undischarged required gate is BLOCKED and a non-clean agent exit is
-    // ERROR, per the frozen transition table, not per this binary's opinion.
-    let contract = events::build_contract(manifest)?;
+    // The canonical event stream is the verdict authority: obligations were
+    // declared up front (the contract was validated before the worktree even
+    // existed), what happened is digest-chained (events.jsonl), and the pure
+    // o7-run reducer scores it — so an undischarged required gate is BLOCKED
+    // and a non-clean agent exit is ERROR, per the frozen transition table,
+    // not per this binary's opinion.
     let task_ref = events::artifact(ArtifactKind::Task, "task.md", task.as_bytes());
     let diff_ref = events::artifact(ArtifactKind::Diff, "diff.patch", diff.as_bytes());
     let stream = events::build_events(

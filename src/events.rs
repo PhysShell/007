@@ -26,7 +26,6 @@
 //! ordering key).
 
 use anyhow::{anyhow, bail, Context, Result};
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -68,18 +67,14 @@ pub const EVENTS_FILE: &str = "events.jsonl";
 ///   verdict `gate.rs` records per-step.
 ///
 /// # Errors
-/// Duplicate step names (the contract requires unique gate ids — silently
-/// deduping would attribute one step's outcome to another) or an empty name.
+/// An invalid manifest (`GateManifest::validate`: blank/duplicate step names,
+/// sanitized-log-name collisions — each would let one step's outcome or
+/// evidence be attributed to another) or an id-minting failure. Call this
+/// BEFORE the agent or any gate runs — an invalid manifest must cost nothing.
 pub fn build_contract(manifest: &GateManifest) -> Result<RunContract> {
-    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    manifest.validate()?;
     let mut gates = Vec::new();
     for step in &manifest.gate {
-        if !seen.insert(step.name.as_str()) {
-            bail!(
-                "gate manifest has duplicate step name '{}' — canonical gate ids must be unique",
-                step.name
-            );
-        }
         let gate = GateId::new(step.name.clone())
             .map_err(|e| anyhow!("gate step name invalid as a gate id: {e}"))?;
         let requirement = if step.required {
@@ -320,12 +315,34 @@ pub fn from_jsonl(text: &str) -> Result<Vec<RunEvent>> {
 
 /// Resolves artifact locators relative to a run-record directory, so replay
 /// can digest-check `task.md`, `diff.patch`, and `gate/*.log` in place.
+///
+/// A replayed record is UNTRUSTED input, so locators are confined to the
+/// record directory before any I/O (Codex P1 on #67): every path component
+/// must be a plain name — an absolute locator, a `..`, a `.`, or a prefix
+/// component is rejected, so a crafted record can neither read files outside
+/// the record (`/etc/...`) nor stall replay on a device file (`/dev/zero`).
+/// The check is lexical; a symlink planted INSIDE a record can still point
+/// out, which is out of the MVP threat model (records are produced by this
+/// harness) and recorded here so it is a decision, not an oversight.
 pub struct RecordDirResolver {
     pub base: PathBuf,
 }
 
+fn confined(locator: &str) -> bool {
+    let p = Path::new(locator);
+    !locator.is_empty()
+        && p.components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
 impl ArtifactResolver for RecordDirResolver {
     fn resolve(&self, a: &ArtifactRef) -> Result<Vec<u8>, ArtifactError> {
+        if !confined(&a.locator) {
+            return Err(ArtifactError {
+                locator: a.locator.clone(),
+                reason: "locator escapes the record directory (absolute, `..`, or empty) — refused before I/O".to_string(),
+            });
+        }
         std::fs::read(self.base.join(&a.locator)).map_err(|e| ArtifactError {
             locator: a.locator.clone(),
             reason: e.to_string(),
@@ -515,6 +532,50 @@ mod tests {
             [[gate]]
             name = "unit"
             cmd = "false"
+            "#,
+        )
+        .unwrap();
+        assert!(build_contract(&m).is_err());
+    }
+
+    /// Replay input is untrusted: locators that would escape the record
+    /// directory are refused BEFORE any I/O (Codex P1 on #67).
+    #[test]
+    fn resolver_confines_locators_to_the_record_dir() {
+        let r = RecordDirResolver {
+            base: std::env::temp_dir(),
+        };
+        let bad = ["/etc/hostname", "../secret", "a/../../x", "", "/dev/zero"];
+        for locator in bad {
+            let a = ArtifactRef {
+                kind: ArtifactKind::GateLog,
+                locator: locator.into(),
+                digest: Digest256::genesis(),
+            };
+            let err = r.resolve(&a).unwrap_err();
+            assert!(
+                err.reason.contains("refused before I/O"),
+                "locator {locator:?} must be refused by confinement, got: {}",
+                err.reason
+            );
+        }
+        assert!(confined("gate/unit.log") && confined("task.md"));
+    }
+
+    /// An invalid manifest is rejected at contract build — i.e. BEFORE the
+    /// agent or any gate runs, now that main builds the contract first
+    /// (Codex P2 on #67).
+    #[test]
+    fn sanitized_log_collision_is_rejected_at_contract_build() {
+        let m = GateManifest::parse(
+            r#"
+            [[gate]]
+            name = "a.b"
+            cmd = "true"
+
+            [[gate]]
+            name = "a-b"
+            cmd = "true"
             "#,
         )
         .unwrap();
