@@ -60,11 +60,22 @@ jobs:
       - name: Default production build
         run: cargo build --workspace --locked
 
-      - name: o7-run tests
-        run: cargo test -p o7-run --locked --no-fail-fast
-
-      - name: o7-worker tests
-        run: cargo test -p o7-worker --locked --no-fail-fast
+      # Every workspace member is tested here unless explicitly excluded. The root
+      # `o7` package is a member by virtue of the root manifest carrying both
+      # [workspace] and [package], so it is covered without being listed in
+      # `members`. o7-worktree and o7-verifier are excluded because the
+      # `pr3 worktree+verifier tests` workflow owns them; excluding rather than
+      # enumerating keeps a newly added crate tested by default instead of silently
+      # uncovered until someone remembers to name it. (This subsumes the o7-run and
+      # o7-worker test steps and also covers o7-sandbox-protocol / o7-harness-policy.)
+      - name: Workspace tests except worktree and verifier
+        run: >-
+          cargo test
+          --workspace
+          --exclude o7-worktree
+          --exclude o7-verifier
+          --locked
+          --no-fail-fast
 
       # Repository policy: the o7-worker `test-harness` feature may be enabled from exactly one
       # dependency edge (o7-worker's own dev-dependency self-edge). The gate structurally parses

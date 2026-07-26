@@ -1,10 +1,26 @@
 # 007 — resume here
 
-Where we stopped + the exact next step. Updated 2026-07-02 (leaving for the day).
+Where we stopped + the exact next step. Updated 2026-07-02 (leaving for the day);
+2026-07-26: verdict soundness + the o7-run stitch landed (see below).
 
 ## Built & working
 - **`o7 run`** — one isolated gated agent run (WSL worktree → full-auto claude →
   gate manifest → harvest). Scaffolded; not yet exercised on a real coding task.
+- **Verdict soundness (2026-07-26):** the false green is dead — a skipped
+  required gate (`env = "windows"`) scores `BLOCKED`, never `PASS`; the only
+  legitimate skip is a pre-declared `waive_reason` on the manifest step (the
+  o7-run `GateApplicability::Waived` doctrine, blank reason rejected). The
+  step's declared `required` is preserved in the record.
+- **The MVP ↔ o7-run stitch (2026-07-26, `src/events.rs`):** `o7 run` now
+  declares its obligation contract up front, records a digest-chained
+  `events.jsonl` in every run record, and takes its verdict from the
+  canonical `o7-run` reducer (so a non-clean agent exit is `ERROR` even with
+  green gates). New **`o7 replay <run-dir>`** independently re-verifies a
+  stored record: chain continuity, per-event digests, artifact content
+  digests (task/diff/gate logs), and a verdict recomputation against
+  `meta.json`. Root-package tests now run in the hosted gate.
+  Deferred to the next slice, on purpose: the `o7-ledger` append path and
+  the `o7-ledger`/`o7-run` id unification.
 - **`o7 judge`** — read-only FP-triage. **Verified working**: produced a
   contract-conforming `fp-verdicts.json` on the oracle with grounded reasoning.
 - Contract reconciled to the domain's source of truth:
