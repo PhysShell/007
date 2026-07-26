@@ -44,6 +44,17 @@ fn full_report() -> SandboxReport {
     }
 }
 
+fn none_report() -> SandboxReport {
+    SandboxReport {
+        filesystem: Enforcement::NotEnforced,
+        network: Enforcement::NotEnforced,
+        env: Enforcement::NotEnforced,
+        process_tree: Enforcement::NotEnforced,
+        timeout: Enforcement::NotEnforced,
+        ..full_report()
+    }
+}
+
 fn policy() -> SandboxPolicy {
     SandboxPolicy {
         worktree: PathBuf::from("/work/run-1"),
@@ -121,6 +132,28 @@ fn every_dimension_is_consulted_by_full_and_none_enforcement() {
         );
         // And `dimension()` reports exactly the field the list maps it to.
         assert_eq!(r.dimension(d), Enforcement::NotEnforced);
+    }
+
+    // Symmetric half for `is_none_enforced`: an all-NotEnforced report is none-enforced, and
+    // upgrading ANY single dimension to `Enforced` defeats it — so each dimension is genuinely
+    // consulted by this predicate too, not just by `is_fully_enforced`.
+    let none = none_report();
+    assert!(none.is_none_enforced());
+    assert!(!none.is_fully_enforced());
+    for d in SandboxDimension::ALL {
+        let mut r = none_report();
+        match d {
+            SandboxDimension::Filesystem => r.filesystem = Enforcement::Enforced,
+            SandboxDimension::Network => r.network = Enforcement::Enforced,
+            SandboxDimension::Env => r.env = Enforcement::Enforced,
+            SandboxDimension::ProcessTree => r.process_tree = Enforcement::Enforced,
+            SandboxDimension::Timeout => r.timeout = Enforcement::Enforced,
+        }
+        assert!(
+            !r.is_none_enforced(),
+            "enforcing {d:?} must defeat none-enforcement"
+        );
+        assert_eq!(r.dimension(d), Enforcement::Enforced);
     }
 }
 
