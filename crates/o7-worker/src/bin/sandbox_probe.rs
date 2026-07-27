@@ -68,6 +68,25 @@ fn nix_outcome<T>(result: nix::Result<T>) -> String {
     }
 }
 
+/// Write a probe's result marker, or exit ERROR (2). A marker that could NOT be written is an
+/// infrastructure ERROR, never an implicit "the escape was denied": an acceptance test reading a
+/// missing/partial marker must not mistake a failed write (worktree not writable, `ENOSPC`, or the
+/// very confinement rules under test) for a confinement success. Mirrors the `fds`/`ran` discipline.
+/// Returns the process exit code to propagate (0 on success, 2 on write failure).
+fn write_marker(subcmd: &str, path: impl AsRef<std::path::Path>, body: impl AsRef<[u8]>) -> i32 {
+    let path = path.as_ref();
+    match std::fs::write(path, body) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!(
+                "sandbox_probe {subcmd}: cannot write marker {}: {e}",
+                path.display()
+            );
+            2
+        }
+    }
+}
+
 /// Filesystem / Landlock: a write INSIDE the writable worktree should succeed; every write OUTSIDE
 /// it should be denied (`EACCES`/`EPERM`). Records THREE distinct outside operations, because
 /// Landlock governs them with SEPARATE access rights and a partial ruleset could pass one while
@@ -103,8 +122,7 @@ fn fs_probe(worktree: &str, create: &str, overwrite: &str, truncate: &str) -> i3
         outcome(&overwrite_res),
         outcome(&truncate_res),
     );
-    let _ = std::fs::write(&marker, report);
-    0
+    write_marker("fs", &marker, report)
 }
 
 /// Network / seccomp: creating an IPv4/IPv6 socket should be denied. Records each outcome with its
@@ -119,8 +137,7 @@ fn net_probe(marker: &str) -> i32 {
         outcome(&tcp4),
         outcome(&udp6),
     );
-    let _ = std::fs::write(marker, report);
-    0
+    write_marker("net", marker, report)
 }
 
 /// FAIL-CLOSED count of INHERITED socket descriptors (`/proc/self/fd/<n>` → `socket:[...]`),
@@ -182,16 +199,14 @@ fn ran_probe(marker: &str) -> i32 {
 fn env_probe(marker: &str) -> i32 {
     let mut names: Vec<String> = std::env::vars().map(|(k, _)| k).collect();
     names.sort();
-    let _ = std::fs::write(marker, names.join(","));
-    0
+    write_marker("env", marker, names.join(","))
 }
 
 /// Process tree / seccomp: a confined target must NOT leave the owned set by starting a new session
 /// (`setsid`). INDEPENDENT of `setpgid` — this process has done nothing else first.
 fn setsid_probe(marker: &str) -> i32 {
     let report = format!("setsid={}\n", nix_outcome(nix::unistd::setsid()));
-    let _ = std::fs::write(marker, report);
-    0
+    write_marker("setsid", marker, report)
 }
 
 /// Process tree / seccomp: a confined target must NOT leave the owned set by starting a new process
@@ -205,8 +220,7 @@ fn setpgid_probe(marker: &str) -> i32 {
             nix::unistd::Pid::from_raw(0),
         ))
     );
-    let _ = std::fs::write(marker, report);
-    0
+    write_marker("setpgid", marker, report)
 }
 
 /// Filesystem / Landlock EXECUTE: attempt to `execve` a `target` that is NOT under `allow_exec`.
@@ -225,9 +239,6 @@ fn exec_probe(target: &str, secondary: &str, primary: &str) -> i32 {
     // `execv` only returns on FAILURE; on success our process image is replaced.
     match nix::unistd::execv(&path, &argv) {
         Ok(_) => 0,
-        Err(e) => {
-            let _ = std::fs::write(primary, format!("exec=ERR:{}\n", e as i32));
-            0
-        }
+        Err(e) => write_marker("exec", primary, format!("exec=ERR:{}\n", e as i32)),
     }
 }
