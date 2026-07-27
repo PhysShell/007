@@ -75,15 +75,20 @@ jobs:
           if ! grep -qx "$victim" "$child/cgroup.procs"; then
             echo "::error::cgroup.procs does not reflect the moved process"; exit 1
           fi
-          # Kill the whole cgroup via cgroup.kill and prove it drains (the child is reaped so its
-          # task leaves cgroup.procs), then remove the directory. `cgroup.procs` is a virtual
-          # cgroupfs file whose `st_size` is 0 even while it lists live PIDs, so a `test -s` would be
-          # vacuously "drained" (a false pass). Read the actual CONTENTS instead, poll to a finite
-          # deadline, treat a read failure as an ERROR (never a silent drain), and on timeout fail
-          # closed reporting the survivors.
+          # Kill the whole cgroup via cgroup.kill and prove it DRAINED WITHIN A DEADLINE. `cgroup.procs`
+          # is a virtual cgroupfs file whose `st_size` is 0 even while it lists live PIDs, so a
+          # `test -s` would be vacuously "drained" (a false pass). Read the actual CONTENTS instead,
+          # poll to a finite deadline, treat a read failure as an ERROR (never a silent drain), and on
+          # timeout fail closed reporting the survivors.
+          #
+          # ORDER MATTERS: do the drain poll FIRST, and reap the direct child (`wait`) only AFTER the
+          # drain is proven. Reaping first would block on the victim's OWN natural exit (its
+          # `sleep 120`): if the `cgroup.kill` write returned success but did not immediately kill,
+          # `wait` would stall until the process ended on its own, and the later poll would then see an
+          # empty group — proving only "the process eventually exited", not "cgroup.kill drained the
+          # group within the deadline". On a timeout/read error `victim` stays set, so the EXIT trap
+          # still kills and reaps it.
           echo 1 > "$child/cgroup.kill"
-          wait "$victim" 2>/dev/null || true
-          victim=""
           drained=""
           for _ in $(seq 1 50); do
             procs="$(cat "$child/cgroup.procs")" || {
@@ -96,6 +101,10 @@ jobs:
             remaining="$(tr '\n' ' ' < "$child/cgroup.procs" 2>/dev/null || echo '<unreadable>')"
             echo "::error::the cgroup did not drain after cgroup.kill; remaining PIDs: ${remaining}"; exit 1
           fi
+          # Drain proven: `cgroup.kill` SIGKILLed the victim and it left cgroup.procs (zombies do not
+          # appear there), so this reap is immediate rather than a wait on the victim's natural exit.
+          wait "$victim" 2>/dev/null || true
+          victim=""
           if ! rmdir "$child" 2>/dev/null || [ -e "$child" ]; then
             echo "::error::cannot remove the delegated cgroup directory"; exit 1
           fi
