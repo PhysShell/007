@@ -5,7 +5,13 @@
 //! loop that also closes that number double-closes it (and closes an unrelated fresh descriptor
 //! once the number is recycled). GREEN: [`inherited_fds_to_scrub`] excludes the EXACT `dirfd` from
 //! the close-set while every ordinary inherited descriptor survives.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+// Restriction-lint allowance (AGENTS.md §4). Invariant: every `unwrap()` here is on test-harness
+// SETUP that is a precondition, not the code under test — opening `/proc/self/fd` and
+// `/proc/self/status` and wrapping them with `Dir::from`. On this Linux CI target those cannot
+// legitimately fail; if one does, it is a harness fault that MUST abort the test (a panic = a test
+// failure), never be silently handled. No `expect` is used, so only `unwrap_used` is allowed; every
+// value the test actually reasons about (`dirfd`, the scrub set, the neighbor fds) is asserted below.
+#![allow(clippy::unwrap_used)]
 
 use std::fs::File;
 use std::os::fd::AsRawFd as _;
