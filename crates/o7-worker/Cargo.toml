@@ -82,12 +82,16 @@ getrandom = "0.2"
 # `fs`/`mman`: Sandboy acquisition stages backend/target bytes into an anonymous memfd and
 # seals it (memfd_create + F_ADD_SEALS + F_GET_SEALS) via nix's SAFE API (the tree forbids
 # `unsafe`), so a held object is genuinely immutable, not merely a held mutable inode.
+# `dir`: the test-harness fd scrub (`fd_scrub`) enumerates `/proc/self/fd` through a `Dir` whose
+# `dirfd` is the EXACT descriptor the scan occupies, so it can be excluded by identity rather than
+# by a readlink-target guess (`dir = ["fs"]`, already enabled — no unsafe, no new crate).
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", default-features = false, features = [
     "signal",
     "process",
     "fs",
     "mman",
+    "dir",
 ] }
 # Hardened target ACQUISITION: open the source with O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC and
 # prove it a regular object before staging (a symlink final component fails closed, a FIFO/
@@ -105,12 +109,14 @@ tempfile = "3"
 # so nix's raw signal API is unusable in tests). signal-hook is MIT/Apache.
 signal-hook = "0.3"
 # The sealed-memfd acceptance probe creates a REAL sealed memfd (memfd_create +
-# F_ADD_SEALS + F_GET_SEALS) via nix's safe API — the `fs` feature adds those.
+# F_ADD_SEALS + F_GET_SEALS) via nix's safe API — the `fs` feature adds those. `dir` adds the
+# `/proc/self/fd` enumeration handle (`Dir`) the fd-scrub test exercises.
 nix = { version = "0.29", default-features = false, features = [
     "signal",
     "process",
     "fs",
     "mman",
+    "dir",
 ] }
 
 # Mirror the workspace discipline: no unsafe, no panics-by-default.

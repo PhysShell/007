@@ -18,6 +18,10 @@
 
 pub mod boundary;
 pub mod cancellation;
+/// Exact-`dirfd` scrubbing of `/proc/self/fd` for the test-harness fake backend. Test-harness only:
+/// production builds (which never enable `test-harness`) leave the whole module out.
+#[cfg(feature = "test-harness")]
+pub mod fd_scrub;
 pub mod heartbeat;
 pub mod host_boundary;
 pub mod observation;
