@@ -187,6 +187,15 @@ impl std::fmt::Debug for BoundaryLaunch {
 pub enum BoundaryError {
     #[error("spawn failed: {0}")]
     Spawn(#[source] std::io::Error),
+    /// The TARGET executable could not be acquired under the hardened open: a symlink final
+    /// component (`O_NOFOLLOW`), a FIFO/device/socket/directory, or another non-regular object.
+    /// This is the intended fail-closed refusal of an unacceptable target — kept distinct from
+    /// [`BoundaryError::Spawn`] so a genuine target refusal (the desired hardened behavior) cannot
+    /// be confused with an infrastructure spawn failure (backend launch, control socket, RNG). A
+    /// probe that treats "any error" as a target refusal would accept an infrastructure failure as
+    /// proof of confinement; this variant lets the consumer demand exactly the refusal it tests.
+    #[error("target acquisition failed closed: {0}")]
+    TargetAcquisition(String),
     #[error("signal delivery failed: {0}")]
     Signal(String),
     #[error("waiting for the process failed: {0}")]

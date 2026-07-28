@@ -47,6 +47,26 @@ pub enum SealError {
     DigestMismatch,
 }
 
+/// A TARGET-staging failure tagged by the PHASE it occurred in. The phase — NOT the [`SealError`]
+/// variant — is the authority for boundary classification, because the same variant means different
+/// things in different phases. [`SealError::NotSealed`], for instance, is a fail-closed TARGET
+/// refusal when the SOURCE object is unacceptable (an input `/proc/<pid>/fd/<n>` object that is not a
+/// fully sealed memfd), but an INFRASTRUCTURE failure when the worker's OWN staging memfd could not
+/// be sealed. [`SealedObject::stage`] erases which phase produced a bare `SealError`, so it wraps
+/// each phase here instead — classifying by variant cannot tell these two apart.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum TargetStageError {
+    /// The SOURCE object was rejected during hardened acquisition — a symlink final component, a
+    /// FIFO/device/socket/directory, an over-size object, or an input `/proc/fd` object that is not
+    /// a fully sealed memfd. This is the intended fail-closed TARGET refusal.
+    #[error("target source rejected: {0}")]
+    SourceRejected(#[source] SealError),
+    /// The source was acceptable, but staging it into the worker's OWN sealed memfd failed
+    /// (memfd/seal/digest). This is an INFRASTRUCTURE failure, never a target refusal.
+    #[error("target staging failed: {0}")]
+    StagingFailed(#[source] SealError),
+}
+
 /// A held, sealed (immutable) copy of an object's bytes.
 #[derive(Debug, Clone)]
 pub struct SealedObject {
@@ -189,12 +209,18 @@ impl SealedObject {
     /// COMPUTED from the sealed bytes. Used for the target: the parent seals the exact object it
     /// will hand the backend, then binds the launch to `digest()`, closing the hash→exec TOCTOU.
     ///
+    /// The failure is PHASE-TAGGED ([`TargetStageError`]) so the boundary can classify a SOURCE
+    /// rejection (a fail-closed target refusal) apart from a worker STAGING failure (infrastructure),
+    /// even when both surface the same underlying [`SealError`] variant (e.g. `NotSealed`).
+    ///
     /// # Errors
-    /// [`SealError`] on open/read failure, oversize, or a sealing failure.
-    pub fn stage(source: &Path) -> Result<Self, SealError> {
-        let bytes = Self::acquire(source)?;
+    /// [`TargetStageError::SourceRejected`] if `source` is unacceptable (hardened open, oversize, or
+    /// an input `/proc/fd` object that is not fully sealed); [`TargetStageError::StagingFailed`] if
+    /// the worker's own memfd could not be created/sealed or its digest did not bind.
+    pub(crate) fn stage(source: &Path) -> Result<Self, TargetStageError> {
+        let bytes = Self::acquire(source).map_err(TargetStageError::SourceRejected)?;
         let digest = Digest256::of_bytes(&bytes);
-        Self::stage_from_bytes(&bytes, &digest)
+        Self::stage_from_bytes(&bytes, &digest).map_err(TargetStageError::StagingFailed)
     }
 
     /// Hardened acquisition of `source`'s bytes: the `/proc/<pid>/fd/<n>` execution contract

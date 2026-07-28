@@ -661,8 +661,11 @@ async fn a_blocking_fifo_target_fails_closed_within_a_bound() {
     // A FIFO with no writer BLOCKS on open. Acquisition must fail closed within a bound instead of
     // blocking forever BEFORE the first `.await`. We drive one spawn in a helper SUBPROCESS so a
     // blocking acquisition wedges the helper, not this runtime; the parent bounds the helper and
-    // kills it. RED today: the helper never returns and we must kill it. GREEN once acquisition is
-    // non-blocking: the helper exits 3 (fail-closed).
+    // kills it. Exit 0 is the helper's PASS: the target was refused exactly as a
+    // `BoundaryError::TargetAcquisition` (AGENTS.md §2 — 0 for PASS). A launched target would be
+    // FAIL (1) and an infrastructure fault ERROR (4, see
+    // `a_non_target_boundary_error_is_not_reported_as_a_target_refusal`); only the hardened refusal
+    // earns the PASS here.
     let dir = tempfile::tempdir().unwrap();
     let fifo = dir.path().join("fifo");
     nix::unistd::mkfifo(&fifo, Mode::from_bits_truncate(0o644)).unwrap();
@@ -680,13 +683,105 @@ async fn a_blocking_fifo_target_fails_closed_within_a_bound() {
     match tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
         Ok(Ok(status)) => assert_eq!(
             status.code(),
-            Some(3),
-            "a blocking FIFO target must fail closed (probe exited {status:?})"
+            Some(0),
+            "a blocking FIFO target must fail closed as a target refusal — the helper's PASS (0); \
+             probe exited {status:?}"
         ),
         Ok(Err(e)) => panic!("probe helper wait failed: {e}"),
         Err(_) => {
             let _ = child.kill().await;
             panic!("acquisition of a blocking FIFO target did not return within the bound");
+        }
+    }
+}
+
+// --- a NON-target boundary error is not laundered into a target-acquisition refusal ---
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_non_target_boundary_error_is_not_reported_as_a_target_refusal() {
+    // The helper's PASS (0) means ONE thing: the hardened target acquisition refused an unacceptable
+    // target (a FIFO/symlink/non-regular object). Prove that meaning is real by forcing a DIFFERENT
+    // failure — a fully acquirable, permitted, regular-file target driven against a bogus "backend"
+    // (`/bin/true`) that spawns, exits 0, and never delivers a report → an infrastructure
+    // `BoundaryError::Evidence`, NOT a target refusal. The original `Err(_) => 3` reported EVERY error
+    // alike, so this false green was indistinguishable from a genuine FIFO/symlink refusal and the
+    // `a_blocking_fifo_target_...` assertion did not actually pin target acquisition. The classified
+    // helper must exit 4 (infrastructure ERROR), never 0 (the refusal PASS).
+    let dir = tempfile::tempdir().unwrap();
+    // A REGULAR file (not a symlink like /bin/sh often is) so acquisition SUCCEEDS and the only
+    // failure left is the bogus backend. Its contents are irrelevant — acquisition only proves
+    // S_ISREG; the launch dies at the report stage before any exec.
+    let target = dir.path().join("acquirable-target");
+    std::fs::write(
+        &target,
+        b"a regular, acquirable file; never actually exec'd\n",
+    )
+    .unwrap();
+
+    let helper = env!("CARGO_BIN_EXE_spawn_probe");
+    let mut child = tokio::process::Command::new(helper)
+        .arg("/bin/true") // bogus backend: spawns, exits 0, never delivers a report → Evidence error
+        .arg(dir.path()) // allow-exec dir — the target is under it, so the permit check passes
+        .arg(&target) // regular + permitted + acquirable → acquisition SUCCEEDS
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn probe helper");
+
+    // The bound comfortably exceeds the backend report-wait window (a silent backend makes the
+    // launch wait for its report before failing with Evidence); we assert the CLASSIFICATION, not
+    // latency.
+    match tokio::time::timeout(Duration::from_secs(25), child.wait()).await {
+        Ok(Ok(status)) => assert_eq!(
+            status.code(),
+            Some(4),
+            "a non-target (infrastructure) boundary error must be classified ERROR (4), not the \
+             target-acquisition refusal PASS (0); got {status:?}"
+        ),
+        Ok(Err(e)) => panic!("probe helper wait failed: {e}"),
+        Err(_) => {
+            let _ = child.kill().await;
+            panic!("spawn_probe did not return within the bound for a non-target error");
+        }
+    }
+}
+
+// --- an unexpectedly launched target is a FAIL, distinct from the refusal PASS ---
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unexpectedly_launched_target_is_a_fail_not_the_refusal_pass() {
+    // The third semantic outcome: a target that should have been refused but actually LAUNCHES is a
+    // FAIL (1) — never conflated with the refusal PASS (0) or an infrastructure ERROR (4). Drive a
+    // fully valid launch with the REAL fake backend (the helper hardcodes mode `ok`) and a
+    // Cargo-provided compiled binary as the target: guaranteed to exist and be a regular file (unlike
+    // /bin/dash, absent on some minimal systems). Exec'd with no arguments and StdinMode::Null it
+    // exits immediately (usage) without reading stdin, so `spawn` SUCCEEDS, the helper force-stops the
+    // launch and reports FAIL (1). Its parent directory is the allow-exec dir. This pins that 0 is
+    // reserved for the refusal PASS and cannot be reached by a target that ran.
+    let helper = env!("CARGO_BIN_EXE_spawn_probe");
+    let backend = env!("CARGO_BIN_EXE_sandboy_fake");
+    let target = env!("CARGO_BIN_EXE_spawn_probe");
+    let allow_dir = Path::new(target)
+        .parent()
+        .expect("the compiled target binary has a parent directory");
+    let mut child = tokio::process::Command::new(helper)
+        .arg(backend)
+        .arg(allow_dir)
+        .arg(target)
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn probe helper");
+
+    match tokio::time::timeout(Duration::from_secs(25), child.wait()).await {
+        Ok(Ok(status)) => assert_eq!(
+            status.code(),
+            Some(1),
+            "a target that unexpectedly launched must be FAIL (1), not the refusal PASS (0) nor an \
+             ERROR (4); got {status:?}"
+        ),
+        Ok(Err(e)) => panic!("probe helper wait failed: {e}"),
+        Err(_) => {
+            let _ = child.kill().await;
+            panic!("spawn_probe did not return within the bound for a launched target");
         }
     }
 }
