@@ -239,6 +239,22 @@ fn require_probe_exit_zero(exit: o7_worker::boundary::BoundaryExit) {
     );
 }
 
+/// Consume a confined probe's marker ONLY after the probe exited cleanly. This is the single seam the
+/// seven positive-marker oracles (fs, exec, sealed-fs, net, env, setsid, setpgid) and the non-ignored
+/// ordering regression both call: it gates on the exit via `require_probe_exit_zero` FIRST and only
+/// then runs `consume` (the marker read/parse). Sharing one seam is what makes the regression a real
+/// guard — the Vertical B oracles are `#[ignore]`d (compiled but not executed on the hosted gate), so
+/// a reorder to "read the marker, then check the exit" would be invisible if the regression exercised
+/// a private copy of this logic. Because both go through here, reordering these two statements makes
+/// the regression fail on every gate.
+fn consume_marker_after_probe_success<T>(
+    exit: o7_worker::boundary::BoundaryExit,
+    consume: impl FnOnce() -> T,
+) -> T {
+    require_probe_exit_zero(exit);
+    consume()
+}
+
 // --- Filesystem / Landlock ---
 
 #[tokio::test(flavor = "multi_thread")]
@@ -279,9 +295,9 @@ async fn writes_are_confined_to_the_worktree() {
         .await
         .expect("launch");
     let exit = launch.process.wait().await.expect("waited");
-    require_probe_exit_zero(exit);
-
-    let report = std::fs::read_to_string(&marker).unwrap_or_default();
+    let report = consume_marker_after_probe_success(exit, || {
+        std::fs::read_to_string(&marker).expect("a successful probe must publish its marker")
+    });
     assert!(
         wt.path().join("inside.txt").exists() && report.contains("inside=OK"),
         "an allowed write inside the worktree must succeed; report: {report:?}"
@@ -345,14 +361,15 @@ async fn exec_of_a_non_allowed_binary_is_denied_by_the_kernel() {
         .await
         .expect("launch");
     let exit = launch.process.wait().await.expect("waited");
-    require_probe_exit_zero(exit);
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     assert!(
         !secondary.exists(),
         "execve of a non-allowed binary must be DENIED by the kernel; it ran (secondary marker)"
     );
-    let report = std::fs::read_to_string(&primary).unwrap_or_default();
+    let report = consume_marker_after_probe_success(exit, || {
+        std::fs::read_to_string(&primary).expect("a successful probe must publish its marker")
+    });
     assert!(
         report.contains("exec=ERR:13") || report.contains("exec=ERR:1"),
         "the denied exec must report EACCES/EPERM; report: {report:?}"
@@ -420,10 +437,11 @@ async fn a_sealed_proc_fd_target_executes_under_confinement() {
     };
     let mut launch = b.spawn(spec).await.expect("the sealed memfd must execute");
     let exit = launch.process.wait().await.expect("waited");
-    require_probe_exit_zero(exit);
     drop(file);
 
-    let report = std::fs::read_to_string(&marker).unwrap_or_default();
+    let report = consume_marker_after_probe_success(exit, || {
+        std::fs::read_to_string(&marker).expect("a successful probe must publish its marker")
+    });
     assert!(
         report.contains("inside=OK"),
         "the sealed /proc/<pid>/fd source must EXECUTE under confinement; report: {report:?}"
@@ -470,9 +488,9 @@ async fn network_sockets_are_denied() {
         .await
         .expect("launch");
     let exit = launch.process.wait().await.expect("waited");
-    require_probe_exit_zero(exit);
-
-    let report = std::fs::read_to_string(&marker).unwrap_or_default();
+    let report = consume_marker_after_probe_success(exit, || {
+        std::fs::read_to_string(&marker).expect("a successful probe must publish its marker")
+    });
     // RED: every family must be denied with the EXACT EPERM(1)/EACCES(13); the stand-in installs no
     // seccomp, so each bind succeeds (`OK`).
     for family in ["udp4", "tcp4", "udp6"] {
@@ -564,9 +582,9 @@ async fn the_target_env_is_exactly_the_allowlist() {
         .await
         .expect("launch");
     let exit = launch.process.wait().await.expect("waited");
-    require_probe_exit_zero(exit);
-
-    let names = std::fs::read_to_string(&marker).unwrap_or_default();
+    let names = consume_marker_after_probe_success(exit, || {
+        std::fs::read_to_string(&marker).expect("a successful probe must publish its marker")
+    });
     assert_eq!(
         names.trim(),
         "PATH",
@@ -601,9 +619,9 @@ async fn setsid_is_denied_by_seccomp() {
         .await
         .expect("launch");
     let exit = launch.process.wait().await.expect("waited");
-    require_probe_exit_zero(exit);
-
-    let report = std::fs::read_to_string(&marker).unwrap_or_default();
+    let report = consume_marker_after_probe_success(exit, || {
+        std::fs::read_to_string(&marker).expect("a successful probe must publish its marker")
+    });
     assert!(
         report.contains("setsid=ERR:1"),
         "setsid must be DENIED by seccomp with EPERM; report: {report:?}"
@@ -636,9 +654,9 @@ async fn setpgid_is_denied_by_seccomp() {
         .await
         .expect("launch");
     let exit = launch.process.wait().await.expect("waited");
-    require_probe_exit_zero(exit);
-
-    let report = std::fs::read_to_string(&marker).unwrap_or_default();
+    let report = consume_marker_after_probe_success(exit, || {
+        std::fs::read_to_string(&marker).expect("a successful probe must publish its marker")
+    });
     assert!(
         report.contains("setpgid=ERR:1"),
         "setpgid must be DENIED by seccomp with EPERM; report: {report:?}"
@@ -953,21 +971,24 @@ async fn a_self_check_downgrade_runs_no_target() {
 
 // --- Consumer-side exit gate (non-vacuous regression) ---
 
-/// Locks the ORDERING the seven positive-marker oracles now enforce: the confined probe's exit code
-/// is checked BEFORE its marker is read. Every oracle previously did `let _ = wait().await;` and then
+/// Locks the ORDERING the seven positive-marker oracles enforce: the confined probe's exit code is
+/// checked BEFORE its marker is read. Every oracle previously did `let _ = wait().await;` and then
 /// asserted on the marker CONTENTS, so a probe that left a fully parseable denial marker on disk yet
 /// exited 2 (an ERROR — e.g. `sandbox_probe` failing a partial marker write over stale content, per
 /// commit `91cb703`) would have been ACCEPTED as a genuine kernel denial.
 ///
-/// The test models that exact hazard through a `gated_read` closure that mirrors the oracle sequence
-/// — gate on the exit, THEN read/parse the marker — and asserts on order, not merely on rejection: a
-/// `read_reached` flag flips only if control passes the gate to the read, so a caller that regressed
-/// to "read the stale marker first, validate the exit afterward" would flip the flag on `Code(2)` and
-/// fail here. Both halves are proven non-vacuously: on `Code(0)` the SAME gated read reaches the
-/// marker and returns content that satisfies the real setsid oracle assertion (so the marker would
-/// genuinely be accepted), while on `Code(2)` the gate panics before the read is ever reached. A
-/// plain non-ignored test — no real Landlock/seccomp backend is needed to prove the consumer
-/// ordering — so it runs on every hosted gate, not only on the confinement runner.
+/// Crucially, this guard drives the SAME `consume_marker_after_probe_success` seam the seven oracles
+/// use — not a private copy of its logic. That coupling is the whole point: the Vertical B oracles
+/// are `#[ignore]`d (compiled but never executed on the hosted gate), so a reorder to "read the
+/// marker, then validate the exit" inside the shared seam would be invisible to them. Because this
+/// non-ignored test consumes through the same seam and flips `read_reached` only when control reaches
+/// the read callback, that reorder makes THIS test fail on every gate. On `Code(2)` the seam must
+/// panic in `require_probe_exit_zero` BEFORE running the callback, so `read_reached` stays false —
+/// ordering, not mere rejection: a read-then-check seam would run the callback first, flip the flag,
+/// and fail the assertion below. On `Code(0)` the same seam runs the callback and returns the
+/// parseable marker, which satisfies the real setsid oracle assertion, proving the `Code(2)` case
+/// rejected an otherwise fully acceptable marker rather than a straw man. No real Landlock/seccomp
+/// backend is needed, so it runs on every hosted gate.
 #[test]
 fn a_parseable_marker_paired_with_a_nonzero_exit_is_rejected_before_parsing() {
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -977,40 +998,40 @@ fn a_parseable_marker_paired_with_a_nonzero_exit_is_rejected_before_parsing() {
     // A leftover, fully parseable denial marker — exactly the bytes a GREEN confined run produces.
     std::fs::write(&marker, "setsid=ERR:1\n").unwrap();
 
-    // The oracle sequence, in one place: gate on the probe exit FIRST, and only then read the
-    // marker. `read_reached` flips true iff the gate let control through to the read.
+    // Consume the planted marker through the REAL shared seam, exactly as the seven oracles do. The
+    // read callback flips `read_reached` iff the seam lets control reach it, so the assertions below
+    // observe the seam's own ordering — not a private reimplementation of it.
     let read_reached = AtomicBool::new(false);
-    let gated_read = |exit: o7_worker::boundary::BoundaryExit| -> String {
-        require_probe_exit_zero(exit);
-        read_reached.store(true, Ordering::SeqCst);
-        std::fs::read_to_string(&marker).unwrap_or_default()
+    let consume_via_seam = |exit: o7_worker::boundary::BoundaryExit| -> String {
+        consume_marker_after_probe_success(exit, || {
+            read_reached.store(true, Ordering::SeqCst);
+            std::fs::read_to_string(&marker).unwrap_or_default()
+        })
     };
 
-    // Code(2): the gate must panic BEFORE the marker is read. `catch_unwind` (no process-global
-    // panic-hook mutation — that would race with other tests sharing this process) confirms the
-    // panic; `read_reached == false` confirms the ORDERING: the stale-but-parseable marker was never
-    // consumed, so a read-then-check regression could not pass this test.
+    // Code(2): the shared seam must panic in the exit gate BEFORE the callback runs. `catch_unwind`
+    // (no process-global panic-hook mutation — that would race with other tests in this process)
+    // confirms the panic; `read_reached == false` confirms the ORDERING through the real seam.
     let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = gated_read(o7_worker::boundary::BoundaryExit::Code(2));
+        let _ = consume_via_seam(o7_worker::boundary::BoundaryExit::Code(2));
     }))
     .is_err();
     assert!(
         rejected,
-        "a non-zero probe exit must be REJECTED by the gate before the marker is parsed"
+        "a non-zero probe exit must be REJECTED by the shared seam before the marker is parsed"
     );
     assert!(
         !read_reached.load(Ordering::SeqCst),
-        "the stale marker must NOT be read when the probe exited non-zero — the exit gate must \
-         PRECEDE the marker read, not follow it"
+        "the stale marker must NOT be read when the probe exited non-zero — the shared seam's exit \
+         gate must PRECEDE the marker read, not follow it"
     );
 
-    // Non-vacuous: on a clean exit the SAME gated read reaches the marker and returns content that
-    // satisfies the real setsid oracle assertion — so the Code(2) case above rejected an otherwise
-    // fully acceptable marker, not a straw man.
-    let report = gated_read(o7_worker::boundary::BoundaryExit::Code(0));
+    // Code(0): the SAME seam runs the callback and returns content that satisfies the real setsid
+    // oracle assertion — so the Code(2) case above rejected an otherwise fully acceptable marker.
+    let report = consume_via_seam(o7_worker::boundary::BoundaryExit::Code(0));
     assert!(
         read_reached.load(Ordering::SeqCst),
-        "a clean exit must let the gated read through to the marker"
+        "a clean exit must let the shared seam run the marker-read callback"
     );
     assert!(
         report.contains("setsid=ERR:1"),
