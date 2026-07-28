@@ -953,45 +953,68 @@ async fn a_self_check_downgrade_runs_no_target() {
 
 // --- Consumer-side exit gate (non-vacuous regression) ---
 
-/// Locks the ordering the seven positive-marker oracles now enforce: the confined probe's exit code
+/// Locks the ORDERING the seven positive-marker oracles now enforce: the confined probe's exit code
 /// is checked BEFORE its marker is read. Every oracle previously did `let _ = wait().await;` and then
 /// asserted on the marker CONTENTS, so a probe that left a fully parseable denial marker on disk yet
 /// exited 2 (an ERROR — e.g. `sandbox_probe` failing a partial marker write over stale content, per
-/// commit `91cb703`) would have been ACCEPTED as a genuine kernel denial. This models that exact
-/// hazard directly — a parseable marker paired with exit 2 — and proves BOTH halves:
-///   the marker satisfies the real oracle assertion (so the OLD accept-path is genuinely exercised,
-///   not a straw man), AND `require_probe_exit_zero` rejects the non-zero exit before the marker is
-///   read. It is a plain non-ignored test: no real Landlock/seccomp backend is needed to prove the
-///   consumer ordering, so it runs on every hosted gate, not only on the confinement runner.
+/// commit `91cb703`) would have been ACCEPTED as a genuine kernel denial.
+///
+/// The test models that exact hazard through a `gated_read` closure that mirrors the oracle sequence
+/// — gate on the exit, THEN read/parse the marker — and asserts on order, not merely on rejection: a
+/// `read_reached` flag flips only if control passes the gate to the read, so a caller that regressed
+/// to "read the stale marker first, validate the exit afterward" would flip the flag on `Code(2)` and
+/// fail here. Both halves are proven non-vacuously: on `Code(0)` the SAME gated read reaches the
+/// marker and returns content that satisfies the real setsid oracle assertion (so the marker would
+/// genuinely be accepted), while on `Code(2)` the gate panics before the read is ever reached. A
+/// plain non-ignored test — no real Landlock/seccomp backend is needed to prove the consumer
+/// ordering — so it runs on every hosted gate, not only on the confinement runner.
 #[test]
 fn a_parseable_marker_paired_with_a_nonzero_exit_is_rejected_before_parsing() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("setsid.result");
     // A leftover, fully parseable denial marker — exactly the bytes a GREEN confined run produces.
     std::fs::write(&marker, "setsid=ERR:1\n").unwrap();
 
-    // Non-vacuous: this IS the assertion the setsid oracle runs on the marker, and it passes — so
-    // without the exit gate the stale-but-parseable marker would be accepted as a real denial.
-    let report = std::fs::read_to_string(&marker).unwrap_or_default();
-    assert!(
-        report.contains("setsid=ERR:1"),
-        "the planted marker must be parseable so the pre-gate accept-path is genuinely exercised"
-    );
+    // The oracle sequence, in one place: gate on the probe exit FIRST, and only then read the
+    // marker. `read_reached` flips true iff the gate let control through to the read.
+    let read_reached = AtomicBool::new(false);
+    let gated_read = |exit: o7_worker::boundary::BoundaryExit| -> String {
+        require_probe_exit_zero(exit);
+        read_reached.store(true, Ordering::SeqCst);
+        std::fs::read_to_string(&marker).unwrap_or_default()
+    };
 
-    // With the gate: a non-zero probe exit is rejected (panics) BEFORE any marker is read, so the
-    // parseable-but-stale marker above can never be consumed.
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    let rejected = std::panic::catch_unwind(|| {
-        require_probe_exit_zero(o7_worker::boundary::BoundaryExit::Code(2));
-    })
+    // Code(2): the gate must panic BEFORE the marker is read. `catch_unwind` (no process-global
+    // panic-hook mutation — that would race with other tests sharing this process) confirms the
+    // panic; `read_reached == false` confirms the ORDERING: the stale-but-parseable marker was never
+    // consumed, so a read-then-check regression could not pass this test.
+    let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = gated_read(o7_worker::boundary::BoundaryExit::Code(2));
+    }))
     .is_err();
-    std::panic::set_hook(default_hook);
     assert!(
         rejected,
-        "a parseable marker paired with exit 2 must be REJECTED by the exit gate before parsing"
+        "a non-zero probe exit must be REJECTED by the gate before the marker is parsed"
+    );
+    assert!(
+        !read_reached.load(Ordering::SeqCst),
+        "the stale marker must NOT be read when the probe exited non-zero — the exit gate must \
+         PRECEDE the marker read, not follow it"
     );
 
-    // A clean exit still passes the gate, so the gate does not reject legitimate GREEN oracles.
-    require_probe_exit_zero(o7_worker::boundary::BoundaryExit::Code(0));
+    // Non-vacuous: on a clean exit the SAME gated read reaches the marker and returns content that
+    // satisfies the real setsid oracle assertion — so the Code(2) case above rejected an otherwise
+    // fully acceptable marker, not a straw man.
+    let report = gated_read(o7_worker::boundary::BoundaryExit::Code(0));
+    assert!(
+        read_reached.load(Ordering::SeqCst),
+        "a clean exit must let the gated read through to the marker"
+    );
+    assert!(
+        report.contains("setsid=ERR:1"),
+        "the planted marker must be parseable so the pre-gate accept-path is genuinely exercised; \
+         report: {report:?}"
+    );
 }
