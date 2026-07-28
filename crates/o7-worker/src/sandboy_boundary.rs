@@ -672,10 +672,14 @@ impl ProcessBoundary for SandboyBoundary {
         let exe = spec.executable.clone();
         let target = tokio::task::spawn_blocking(move || SealedObject::stage(&exe))
             .await
+            // A join failure (the staging task panicked) is INFRASTRUCTURE, not a target refusal.
             .map_err(|e| {
                 BoundaryError::Spawn(io::Error::other(format!("target acquisition task: {e}")))
             })?
-            .map_err(|e| BoundaryError::Spawn(io::Error::other(format!("target: {e}"))))?;
+            // The staging RESULT — a symlink/FIFO/non-regular target rejected by the hardened open —
+            // is the intended fail-closed target refusal, typed distinctly so a consumer cannot
+            // mistake an infrastructure error for it.
+            .map_err(|e| BoundaryError::TargetAcquisition(e.to_string()))?;
         let request = self
             .launch_request(&spec, target.digest().clone(), &nonce)
             .map_err(|e| BoundaryError::Evidence(e.to_string()))?;
