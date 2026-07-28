@@ -63,7 +63,7 @@ use crate::boundary::{
 };
 use crate::host_boundary::{signalable_pid, HostBoundaryProcess};
 use crate::process_identity::ProcessIdentity;
-use crate::sealed::SealedObject;
+use crate::sealed::{SealError, SealedObject};
 
 /// A backend bound to a specific SEALED, immutable OBJECT — not a re-resolvable path, and not
 /// merely a held-but-mutable inode. Acquisition stages the backend bytes into a sealed `memfd`
@@ -644,6 +644,23 @@ async fn kill_and_reap(child: &mut tokio::process::Child, pgid: i32) -> Result<(
     Ok(())
 }
 
+/// Classify a failure from staging the TARGET (`SealedObject::stage`) into the boundary taxonomy.
+/// Only the hardened OPEN rejecting the target object itself — a symlink final component, a
+/// FIFO/device/socket/directory, or an over-size object — is the intended fail-closed TARGET
+/// refusal ([`BoundaryError::TargetAcquisition`]). A memfd/seal/digest failure means the target
+/// opened fine but the worker could not SEAL it (fd/memory exhaustion, or a TOCTOU digest change):
+/// INFRASTRUCTURE ([`BoundaryError::Spawn`]), never a target refusal — otherwise a consumer such as
+/// `spawn_probe` would read exit-3 "target refused" on an infrastructure fault (a false green).
+fn classify_target_seal_error(e: SealError) -> BoundaryError {
+    let detail = e.to_string();
+    match e {
+        SealError::Open(_) | SealError::TooLarge => BoundaryError::TargetAcquisition(detail),
+        SealError::Seal(_) | SealError::NotSealed | SealError::DigestMismatch => {
+            BoundaryError::Spawn(io::Error::other(format!("target staging: {detail}")))
+        }
+    }
+}
+
 #[async_trait]
 impl ProcessBoundary for SandboyBoundary {
     async fn spawn(&self, spec: BoundarySpawnSpec) -> Result<BoundaryLaunch, BoundaryError> {
@@ -676,10 +693,10 @@ impl ProcessBoundary for SandboyBoundary {
             .map_err(|e| {
                 BoundaryError::Spawn(io::Error::other(format!("target acquisition task: {e}")))
             })?
-            // The staging RESULT — a symlink/FIFO/non-regular target rejected by the hardened open —
-            // is the intended fail-closed target refusal, typed distinctly so a consumer cannot
-            // mistake an infrastructure error for it.
-            .map_err(|e| BoundaryError::TargetAcquisition(e.to_string()))?;
+            // Split the staging RESULT by cause (see `classify_target_seal_error`): only the hardened
+            // OPEN rejecting the target itself is a fail-closed TARGET refusal; a staging/sealing
+            // failure is INFRASTRUCTURE, never laundered into a target refusal.
+            .map_err(classify_target_seal_error)?;
         let request = self
             .launch_request(&spec, target.digest().clone(), &nonce)
             .map_err(|e| BoundaryError::Evidence(e.to_string()))?;
@@ -842,6 +859,44 @@ impl ProcessBoundary for SandboyBoundary {
         BoundaryAttestation {
             implementation: BoundaryKind::Sandboy,
             enforcement: EnforcementLevel::FullyEnforced,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{classify_target_seal_error, BoundaryError, SealError};
+
+    // The Codex P1 hazard: only the hardened OPEN rejecting the target is a fail-closed refusal
+    // (exit 3); a memfd/seal/digest failure is INFRASTRUCTURE (→ Spawn, exit 4). A real seal failure
+    // (fd/memory exhaustion) cannot be provoked deterministically, so pin the classification at the
+    // mapping seam instead — non-vacuously, across every SealError variant.
+    #[test]
+    fn only_the_hardened_open_refusal_is_a_target_acquisition() {
+        // The target OBJECT itself is unacceptable — the hardened open refuses it: a target refusal.
+        for e in [
+            SealError::Open("the path is a symlink (O_NOFOLLOW)".to_owned()),
+            SealError::Open("not a regular file (fifo, device, socket, or directory)".to_owned()),
+            SealError::TooLarge,
+        ] {
+            assert!(
+                matches!(
+                    classify_target_seal_error(e),
+                    BoundaryError::TargetAcquisition(_)
+                ),
+                "an unacceptable target object must classify as TargetAcquisition"
+            );
+        }
+        // The target opened fine but STAGING/SEALING it failed — infrastructure, never a refusal.
+        for e in [
+            SealError::Seal("memfd_create: too many open files".to_owned()),
+            SealError::NotSealed,
+            SealError::DigestMismatch,
+        ] {
+            assert!(
+                matches!(classify_target_seal_error(e), BoundaryError::Spawn(_)),
+                "a staging/sealing failure must classify as infrastructure (Spawn), not a refusal"
+            );
         }
     }
 }
