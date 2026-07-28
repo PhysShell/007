@@ -10,10 +10,13 @@
 //! exactly as intended — a typed [`BoundaryError::TargetAcquisition`] (the hardened
 //! `O_NOFOLLOW`/regular-file open rejecting a symlink/FIFO/non-regular/over-size target); ONLY this
 //! outcome earns the pass. `1` is FAIL: a target that should have been refused unexpectedly
-//! **LAUNCHED**. `4` is ERROR: any other [`BoundaryError`] (backend spawn, RNG, control socket,
-//! evidence/protocol, unsupported platform, or a target STAGING/sealing failure) — an infrastructure
-//! fault, never a refusal, with the category and message on stderr; a test that accepted it as a
-//! refusal would false-green. `2` is a usage ERROR. `unsafe` stays forbidden.
+//! **LAUNCHED** and was then PROVABLY stopped. `4` is ERROR: any other [`BoundaryError`] (backend
+//! spawn, RNG, control socket, evidence/protocol, unsupported platform, or a target STAGING/sealing
+//! failure) — an infrastructure fault, never a refusal — AND also the case where the target launched
+//! but its forced stop could not be PROVEN (the target may still be alive: the harness could not get
+//! a trustworthy answer, so it is an ERROR, not a FAIL). The category and message go to stderr; a
+//! test that accepted an ERROR as a refusal would false-green. `2` is a usage ERROR. `unsafe` stays
+//! forbidden.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -87,12 +90,23 @@ async fn run() -> i32 {
             eprintln!("PASS: target acquisition failed closed (expected): {msg}");
             0
         }
-        // FAIL (exit 1): the target should have been refused, but it launched; do not leak it.
-        Ok(mut launch) => {
-            let _ = launch.process.force_stop().await;
-            eprintln!("FAIL: target unexpectedly launched (should have failed closed)");
-            1
-        }
+        // FAIL (exit 1): the target should have been refused, but it launched. It must be stopped,
+        // and PROVABLY so — a force-stop that returns Err means the launched target was NOT proven
+        // stopped, which is an ERROR (the harness could not get a trustworthy answer), not a clean
+        // FAIL. AGENTS.md §2: ERROR must not be collapsed into FAIL.
+        Ok(mut launch) => match launch.process.force_stop().await {
+            Ok(()) => {
+                eprintln!("FAIL: target unexpectedly launched (should have failed closed)");
+                1
+            }
+            Err(e) => {
+                eprintln!(
+                    "ERROR: target launched and its forced stop could not be proven [{}]: {e}",
+                    category(&e)
+                );
+                4
+            }
+        },
         // ERROR (exit 4): any other error is infrastructure, NOT a target refusal — print the
         // category so a consumer can distinguish it and never mistake it for the PASS above.
         Err(other) => {

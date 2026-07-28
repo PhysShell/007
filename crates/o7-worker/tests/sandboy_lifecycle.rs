@@ -751,16 +751,22 @@ async fn a_non_target_boundary_error_is_not_reported_as_a_target_refusal() {
 async fn an_unexpectedly_launched_target_is_a_fail_not_the_refusal_pass() {
     // The third semantic outcome: a target that should have been refused but actually LAUNCHES is a
     // FAIL (1) — never conflated with the refusal PASS (0) or an infrastructure ERROR (4). Drive a
-    // fully valid launch: the REAL fake backend (the helper hardcodes mode `ok`) plus a regular-file,
-    // permitted, acquirable executable (`/bin/dash`, under the `/bin` allow dir) → `spawn` SUCCEEDS,
-    // so the helper force-stops the launch and reports FAIL (1). This pins that 0 is reserved for the
-    // refusal PASS and cannot be reached by a target that ran.
+    // fully valid launch with the REAL fake backend (the helper hardcodes mode `ok`) and a
+    // Cargo-provided compiled binary as the target: guaranteed to exist and be a regular file (unlike
+    // /bin/dash, absent on some minimal systems). Exec'd with no arguments and StdinMode::Null it
+    // exits immediately (usage) without reading stdin, so `spawn` SUCCEEDS, the helper force-stops the
+    // launch and reports FAIL (1). Its parent directory is the allow-exec dir. This pins that 0 is
+    // reserved for the refusal PASS and cannot be reached by a target that ran.
     let helper = env!("CARGO_BIN_EXE_spawn_probe");
     let backend = env!("CARGO_BIN_EXE_sandboy_fake");
+    let target = env!("CARGO_BIN_EXE_spawn_probe");
+    let allow_dir = Path::new(target)
+        .parent()
+        .expect("the compiled target binary has a parent directory");
     let mut child = tokio::process::Command::new(helper)
         .arg(backend)
-        .arg("/bin") // allow-exec dir
-        .arg("/bin/dash") // a regular-file executable (not the /bin/sh symlink); permitted + acquirable
+        .arg(allow_dir)
+        .arg(target)
         .kill_on_drop(true)
         .spawn()
         .expect("spawn probe helper");
