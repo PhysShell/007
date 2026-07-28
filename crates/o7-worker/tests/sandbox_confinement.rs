@@ -223,6 +223,22 @@ fn unconfined_probe(args: &[&str]) -> String {
     std::fs::read_to_string(&marker).unwrap_or_default()
 }
 
+/// Require the confined probe to have exited cleanly (`Code(0)`) BEFORE its marker is read/parsed. A
+/// probe that returns a non-zero code — e.g. `sandbox_probe` exiting 2 after a failed or partial
+/// marker write — signals an infrastructure ERROR, not a confinement RESULT. Reading its marker
+/// anyway could accept a stale, truncated, or leftover oracle as if the kernel had just produced it
+/// (a parseable marker plus a non-zero exit must be REJECTED, never parsed). This mirrors the
+/// fail-closed `fds` gate, where a success marker is trusted only on `Code(0)`.
+fn require_probe_exit_zero(exit: o7_worker::boundary::BoundaryExit) {
+    assert_eq!(
+        exit,
+        o7_worker::boundary::BoundaryExit::Code(0),
+        "the confined probe must exit 0 before its marker is read; a non-zero exit is an \
+         infrastructure ERROR (e.g. sandbox_probe returning 2 on a failed marker write), not a \
+         confinement result; got {exit:?}"
+    );
+}
+
 // --- Filesystem / Landlock ---
 
 #[tokio::test(flavor = "multi_thread")]
@@ -262,7 +278,8 @@ async fn writes_are_confined_to_the_worktree() {
         ))
         .await
         .expect("launch");
-    let _ = launch.process.wait().await;
+    let exit = launch.process.wait().await.expect("waited");
+    require_probe_exit_zero(exit);
 
     let report = std::fs::read_to_string(&marker).unwrap_or_default();
     assert!(
@@ -327,7 +344,8 @@ async fn exec_of_a_non_allowed_binary_is_denied_by_the_kernel() {
         ))
         .await
         .expect("launch");
-    let _ = launch.process.wait().await;
+    let exit = launch.process.wait().await.expect("waited");
+    require_probe_exit_zero(exit);
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     assert!(
@@ -401,7 +419,8 @@ async fn a_sealed_proc_fd_target_executes_under_confinement() {
         stdin: StdinMode::Null,
     };
     let mut launch = b.spawn(spec).await.expect("the sealed memfd must execute");
-    let _ = launch.process.wait().await;
+    let exit = launch.process.wait().await.expect("waited");
+    require_probe_exit_zero(exit);
     drop(file);
 
     let report = std::fs::read_to_string(&marker).unwrap_or_default();
@@ -450,7 +469,8 @@ async fn network_sockets_are_denied() {
         ))
         .await
         .expect("launch");
-    let _ = launch.process.wait().await;
+    let exit = launch.process.wait().await.expect("waited");
+    require_probe_exit_zero(exit);
 
     let report = std::fs::read_to_string(&marker).unwrap_or_default();
     // RED: every family must be denied with the EXACT EPERM(1)/EACCES(13); the stand-in installs no
@@ -543,7 +563,8 @@ async fn the_target_env_is_exactly_the_allowlist() {
         ))
         .await
         .expect("launch");
-    let _ = launch.process.wait().await;
+    let exit = launch.process.wait().await.expect("waited");
+    require_probe_exit_zero(exit);
 
     let names = std::fs::read_to_string(&marker).unwrap_or_default();
     assert_eq!(
@@ -579,7 +600,8 @@ async fn setsid_is_denied_by_seccomp() {
         ))
         .await
         .expect("launch");
-    let _ = launch.process.wait().await;
+    let exit = launch.process.wait().await.expect("waited");
+    require_probe_exit_zero(exit);
 
     let report = std::fs::read_to_string(&marker).unwrap_or_default();
     assert!(
@@ -613,7 +635,8 @@ async fn setpgid_is_denied_by_seccomp() {
         ))
         .await
         .expect("launch");
-    let _ = launch.process.wait().await;
+    let exit = launch.process.wait().await.expect("waited");
+    require_probe_exit_zero(exit);
 
     let report = std::fs::read_to_string(&marker).unwrap_or_default();
     assert!(
@@ -926,4 +949,49 @@ async fn a_self_check_downgrade_runs_no_target() {
          self-check; witness: {:?}",
         obs.witness
     );
+}
+
+// --- Consumer-side exit gate (non-vacuous regression) ---
+
+/// Locks the ordering the seven positive-marker oracles now enforce: the confined probe's exit code
+/// is checked BEFORE its marker is read. Every oracle previously did `let _ = wait().await;` and then
+/// asserted on the marker CONTENTS, so a probe that left a fully parseable denial marker on disk yet
+/// exited 2 (an ERROR — e.g. `sandbox_probe` failing a partial marker write over stale content, per
+/// commit `91cb703`) would have been ACCEPTED as a genuine kernel denial. This models that exact
+/// hazard directly — a parseable marker paired with exit 2 — and proves BOTH halves:
+///   the marker satisfies the real oracle assertion (so the OLD accept-path is genuinely exercised,
+///   not a straw man), AND `require_probe_exit_zero` rejects the non-zero exit before the marker is
+///   read. It is a plain non-ignored test: no real Landlock/seccomp backend is needed to prove the
+///   consumer ordering, so it runs on every hosted gate, not only on the confinement runner.
+#[test]
+fn a_parseable_marker_paired_with_a_nonzero_exit_is_rejected_before_parsing() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("setsid.result");
+    // A leftover, fully parseable denial marker — exactly the bytes a GREEN confined run produces.
+    std::fs::write(&marker, "setsid=ERR:1\n").unwrap();
+
+    // Non-vacuous: this IS the assertion the setsid oracle runs on the marker, and it passes — so
+    // without the exit gate the stale-but-parseable marker would be accepted as a real denial.
+    let report = std::fs::read_to_string(&marker).unwrap_or_default();
+    assert!(
+        report.contains("setsid=ERR:1"),
+        "the planted marker must be parseable so the pre-gate accept-path is genuinely exercised"
+    );
+
+    // With the gate: a non-zero probe exit is rejected (panics) BEFORE any marker is read, so the
+    // parseable-but-stale marker above can never be consumed.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let rejected = std::panic::catch_unwind(|| {
+        require_probe_exit_zero(o7_worker::boundary::BoundaryExit::Code(2));
+    })
+    .is_err();
+    std::panic::set_hook(default_hook);
+    assert!(
+        rejected,
+        "a parseable marker paired with exit 2 must be REJECTED by the exit gate before parsing"
+    );
+
+    // A clean exit still passes the gate, so the gate does not reject legitimate GREEN oracles.
+    require_probe_exit_zero(o7_worker::boundary::BoundaryExit::Code(0));
 }
