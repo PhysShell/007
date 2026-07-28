@@ -5,17 +5,15 @@
 //! helper's lifetime and kills it, turning "acquisition blocks forever" into a clean RED that a
 //! non-blocking hardened acquisition converts to a fast fail-closed exit.
 //!
-//! argv: `<backend-binary> <allow-exec-dir> <target-path>`. Exit codes classify the OUTCOME so the
-//! parent test can demand exactly the one it pins, never "some error happened". `3` is the expected
-//! **target-acquisition refusal** ([`BoundaryError::TargetAcquisition`]) — the hardened open refused
-//! a symlink/FIFO/non-regular target; ONLY this outcome earns it. `4` is an
-//! **unexpected/infrastructure ERROR** — any other [`BoundaryError`] (backend spawn, RNG, control
-//! socket, evidence/protocol, unsupported platform), with the category and message on stderr; it is
-//! NOT proof the target was refused, and a test that accepted it as such would false-green on an
-//! infrastructure failure. `1` is an unexpectedly **SUCCEEDED** spawn (the target ran) — a FAIL for a
-//! target that should have been refused; it is non-zero because AGENTS.md §2 reserves exit `0` for
-//! `PASS` alone (a launched-but-should-be-refused target is a FAIL, never a pass). `2` is usage.
-//! `unsafe` stays forbidden.
+//! argv: `<backend-binary> <allow-exec-dir> <target-path>`. Per AGENTS.md §2 the exit code is a
+//! PASS/FAIL/ERROR verdict, with `0` reserved for `PASS` alone. `0` is PASS: the target was refused
+//! exactly as intended — a typed [`BoundaryError::TargetAcquisition`] (the hardened
+//! `O_NOFOLLOW`/regular-file open rejecting a symlink/FIFO/non-regular/over-size target); ONLY this
+//! outcome earns the pass. `1` is FAIL: a target that should have been refused unexpectedly
+//! **LAUNCHED**. `4` is ERROR: any other [`BoundaryError`] (backend spawn, RNG, control socket,
+//! evidence/protocol, unsupported platform, or a target STAGING/sealing failure) — an infrastructure
+//! fault, never a refusal, with the category and message on stderr; a test that accepted it as a
+//! refusal would false-green. `2` is a usage ERROR. `unsafe` stays forbidden.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -83,20 +81,20 @@ async fn run() -> i32 {
     };
 
     match boundary.spawn(spec).await {
+        // PASS (exit 0, per AGENTS.md §2): the hardened acquisition refused the target exactly as
+        // intended — the ONLY outcome that earns the pass.
+        Err(BoundaryError::TargetAcquisition(msg)) => {
+            eprintln!("PASS: target acquisition failed closed (expected): {msg}");
+            0
+        }
+        // FAIL (exit 1): the target should have been refused, but it launched; do not leak it.
         Ok(mut launch) => {
-            // FAIL (non-zero per AGENTS.md §2 — exit 0 is PASS only): the target should have been
-            // refused, but it launched; do not leak the launch.
             let _ = launch.process.force_stop().await;
             eprintln!("FAIL: target unexpectedly launched (should have failed closed)");
             1
         }
-        // The one outcome that earns exit 3: the hardened acquisition refused the target.
-        Err(BoundaryError::TargetAcquisition(msg)) => {
-            eprintln!("target acquisition failed closed (expected): {msg}");
-            3
-        }
-        // Any other error is infrastructure, NOT a target refusal — exit 4 with the category so a
-        // consumer can distinguish it and never mistake it for the fail-closed behavior above.
+        // ERROR (exit 4): any other error is infrastructure, NOT a target refusal — print the
+        // category so a consumer can distinguish it and never mistake it for the PASS above.
         Err(other) => {
             eprintln!(
                 "ERROR: unexpected boundary error [{}]: {other}",
