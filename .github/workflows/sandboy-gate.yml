@@ -50,6 +50,12 @@ jobs:
       - name: Clippy (backend)
         run: cargo clippy -p sandboy --all-targets --locked -- -D warnings
 
+      # The VB-1 cgroup-monitor module + `__cgroup-run` harness compile ONLY under `test-harness`.
+      # Its real-cgroup acceptance tests are `#[ignore]`d and run on the self-hosted confinement
+      # runner (sandbox-confinement.yml); here we still COMPILE + lint that code so it cannot rot.
+      - name: Clippy (backend, test-harness)
+        run: cargo clippy -p sandboy --all-targets --features test-harness --locked -- -D warnings
+
       - name: Build (backend)
         run: cargo build -p sandboy --locked
 
