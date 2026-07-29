@@ -213,3 +213,9 @@ jobs:
       # compiles the `__cgroup-run` monitor entry these `#[ignore]`d tests drive.
       - name: Sandboy cgroup monitor acceptance (VB-1)
         run: cargo test -p sandboy --features test-harness --locked --test cgroup_confinement -- --include-ignored
+
+      # VB-2: the real Landlock filesystem confinement + effect-based self-check. Needs the Landlock
+      # ABI >= 3 the preflight above proved; the `test-harness` feature compiles the `__landlock-run`
+      # entry these `#[ignore]`d tests drive. A capability guard SKIPS if Landlock is unavailable.
+      - name: Sandboy Landlock filesystem acceptance (VB-2)
+        run: cargo test -p sandboy --features test-harness --locked --test landlock_confinement -- --include-ignored

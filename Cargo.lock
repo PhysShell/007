@@ -1199,6 +1199,7 @@ dependencies = [
 name = "sandboy"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "o7-sandbox-protocol",
  "tempfile",
 ]

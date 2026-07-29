@@ -10,17 +10,23 @@ name = "sandboy"
 path = "src/main.rs"
 
 [features]
-# INTERNAL, NON-DEFAULT. Gates the VB-1 cgroup-monitor module and its `__cgroup-run` harness entry
-# (src/cgroup.rs), which the `#[ignore]`d confinement tests drive on a real delegated-cgroup host. A
-# production `sandboy` build leaves this OFF, so the only subcommand it exposes is `run` (the honest
-# VB-0 bootstrap). VB-4 promotes the cgroup monitor into the production `run` path and drops the gate.
-test-harness = []
+# INTERNAL, NON-DEFAULT. Gates the VB-1 cgroup-monitor module (src/cgroup.rs) and the VB-2 Landlock
+# module (src/landlock/), plus their `__cgroup-run` / `__landlock-run` harness entries, which the
+# `#[ignore]`d confinement tests drive on a real host. A production `sandboy` build leaves this OFF,
+# so it exposes only the `run` subcommand (the honest VB-0 bootstrap), compiles NEITHER module, pulls
+# in NO `libc`, and keeps `forbid(unsafe_code)`. VB-4 promotes these into `run` and drops the gate.
+test-harness = ["dep:libc"]
 
 [dependencies]
-# The pure wire protocol shared VERBATIM with the o7-worker parent. This is the ONLY dependency
-# at VB-0: framing, digests, policy reconstruction, and the report all come from here, so the
-# backend never depends on the worker runtime. Zero new external crates → `cargo deny` untouched.
+# The pure wire protocol shared VERBATIM with the o7-worker parent: framing, digests, policy
+# reconstruction, and the report all come from here, so the backend never depends on the worker
+# runtime. This is the ONLY non-optional dependency.
 o7-sandbox-protocol = { path = "../o7-sandbox-protocol" }
+# VB-2: raw Landlock syscalls (SYS_landlock_*) + prctl live in the single audited `landlock::sys`
+# module. `libc` supplies the target-provided syscall numbers and `prctl` ONLY — no hidden
+# implementation, no ABI-probing wrapper. OPTIONAL and enabled solely by `test-harness`, so a
+# production build never compiles it. Pinned; already in the workspace tree (MIT/Apache-2.0).
+libc = { version = "0.2.186", optional = true }
 
 [dev-dependencies]
 # The bootstrap tests drive the backend BINARY directly over a UnixStream and craft/parse frames
@@ -36,11 +42,15 @@ tempfile = "3"
 # confinement syscalls (Landlock/seccomp — VB-2/VB-3) may live. It uses NONE at VB-0. The rest of
 # the workspace lint discipline is kept.
 [lints.rust]
-# `unsafe_code` is deliberately NOT forbidden here — this is the confinement boundary. VB-0 adds
-# no `unsafe`; VB-2/VB-3 will. `kani` is registered so stable builds don't warn.
+# `unsafe_code` is deliberately NOT forbidden at the manifest level — this is the confinement
+# boundary. Instead `main.rs` keeps `forbid(unsafe_code)` for PRODUCTION builds (feature off) and
+# lifts it ONLY under `test-harness`, where VB-2's Landlock syscalls live. `kani` is registered so
+# stable builds don't warn.
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
 unreachable_pub = "deny"
 rust_2018_idioms = { level = "deny", priority = -1 }
+# Every op inside an `unsafe fn` still needs its own `unsafe` block (there are none today, but pin it).
+unsafe_op_in_unsafe_fn = "deny"
 
 [lints.clippy]
 unwrap_used = "deny"
@@ -50,3 +60,7 @@ dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
 indexing_slicing = "deny"
+# Unsafe discipline for the VB-2 Landlock boundary: every `unsafe` block carries a `// SAFETY:`
+# comment and does exactly one unsafe operation, so the audited surface stays small and reviewable.
+undocumented_unsafe_blocks = "deny"
+multiple_unsafe_ops_per_block = "deny"

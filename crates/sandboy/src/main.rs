@@ -16,11 +16,13 @@
 //! descriptor; framing/decoding/digests come from `o7-sandbox-protocol`; the backend digest is a
 //! plain `std::fs` read of `/proc/self/exe`.
 
-// VB-0 uses NO `unsafe` — proven by the compiler. This crate is the designated external confinement
-// boundary (its manifest deliberately does not set the workspace-wide `unsafe_code = "forbid"`), so
-// the slice that first installs Landlock/seccomp (VB-2/VB-3) removes THIS one line to unlock
-// `unsafe` here — and nowhere in the forbid-unsafe 007 crates. Until then, the inventory is empty.
-#![forbid(unsafe_code)]
+// This crate is the designated external confinement boundary. A PRODUCTION build (feature off) still
+// installs NO kernel enforcement and contains NO `unsafe` — so it keeps `forbid(unsafe_code)`, and
+// the VB-0 empty-unsafe-inventory guarantee is byte-for-byte intact. The `test-harness` feature
+// unlocks `unsafe` for the VB-2 Landlock syscalls, which live SOLELY in `landlock::sys` (the gate
+// greps to prove containment) — and nowhere in the forbid-unsafe 007 crates. VB-4 wires the confined
+// `run` path in and lifts this entirely.
+#![cfg_attr(not(feature = "test-harness"), forbid(unsafe_code))]
 
 use std::ffi::OsString;
 use std::io::{Read as _, Write as _};
@@ -40,6 +42,11 @@ use o7_sandbox_protocol::SCHEMA_VERSION;
 // production build has neither the module nor the subcommand (see Cargo.toml). VB-4 promotes it.
 #[cfg(feature = "test-harness")]
 mod cgroup;
+
+// VB-2 Landlock filesystem confinement + its `__landlock-run` harness entry. Also `test-harness`-only
+// (the single `unsafe` surface, `landlock::sys`, is compiled ONLY here). VB-4 promotes it into `run`.
+#[cfg(feature = "test-harness")]
+mod landlock;
 
 /// Exit codes. Distinct per fail-closed reason so a test (and an operator) can tell WHICH gate
 /// refused. All are non-zero except a clean bootstrap has no success exit — the backend only ever
@@ -72,6 +79,13 @@ fn run() -> i32 {
     #[cfg(feature = "test-harness")]
     if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("__cgroup-run")) {
         return cgroup::harness_main();
+    }
+
+    // TEST-HARNESS ONLY: the VB-2 Landlock filesystem entry, exercised by the `#[ignore]`d
+    // confinement tests. Never present in a production build.
+    #[cfg(feature = "test-harness")]
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("__landlock-run")) {
+        return landlock::harness_main();
     }
 
     let Some(args) = parse_args() else {

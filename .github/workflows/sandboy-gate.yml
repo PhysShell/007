@@ -70,15 +70,24 @@ jobs:
       - name: Backend x SandboyBoundary wire-compat (VB-0)
         run: cargo test -p o7-worker --test sandboy_backend_bootstrap --locked --no-fail-fast
 
-      # VB-0 must contain NO `unsafe`. The crate root carries `#![forbid(unsafe_code)]` (removed only
-      # by the slice that first installs Landlock/seccomp), so the build above already fails on any
-      # `unsafe`; this makes the invariant explicit and greppable.
-      - name: Unsafe inventory is empty (VB-0)
+      # PRODUCTION (feature off) must still contain NO `unsafe`: `main.rs` keeps
+      # `forbid(unsafe_code)` under `cfg(not(test-harness))`, so the production build above fails on
+      # any `unsafe`. VB-2 unlocks `unsafe` ONLY under `test-harness`, and ONLY inside the single
+      # audited Landlock syscall module. This step pins both: production stays forbid-unsafe, and the
+      # entire `unsafe` surface is contained to `crates/sandboy/src/landlock/sys.rs`.
+      - name: Unsafe surface contained to landlock/sys.rs (VB-2)
         shell: bash
         run: |
           set -euo pipefail
-          if ! grep -q '#!\[forbid(unsafe_code)\]' crates/sandboy/src/main.rs; then
-            echo "::error::VB-0 backend must keep #![forbid(unsafe_code)] (empty unsafe inventory)" >&2
+          if ! grep -q 'forbid(unsafe_code)' crates/sandboy/src/main.rs; then
+            echo "::error::production sandboy must keep forbid(unsafe_code) (feature off)" >&2
             exit 1
           fi
-          echo "VB-0 backend unsafe inventory: empty (compiler-enforced)"
+          offenders=$(grep -rnE 'unsafe *(\{|fn |impl |extern |trait )' crates/sandboy/src \
+            | grep -v 'src/landlock/sys.rs' || true)
+          if [ -n "$offenders" ]; then
+            echo "::error::unsafe found OUTSIDE crates/sandboy/src/landlock/sys.rs:" >&2
+            echo "$offenders" >&2
+            exit 1
+          fi
+          echo "sandboy unsafe surface: contained to landlock/sys.rs (production stays forbid-unsafe)"
