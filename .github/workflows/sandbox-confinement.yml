@@ -213,3 +213,13 @@ jobs:
       # compiles the `__cgroup-run` monitor entry these `#[ignore]`d tests drive.
       - name: Sandboy cgroup monitor acceptance (VB-1)
         run: cargo test -p sandboy --features test-harness --locked --test cgroup_confinement -- --include-ignored
+
+      # VB-2: the real Landlock filesystem confinement + differential self-check. This runner already
+      # proved Landlock ABI >= 3 (preflight), so REQUIRE it: `O7_REQUIRE_LANDLOCK=1` turns an
+      # incapable host — or a backend that cannot reach baseline enforcement — into a TEST FAILURE,
+      # never a silent SKIP. The capability predicate is an INDEPENDENT raw-syscall probe, not the
+      # backend under test.
+      - name: Sandboy Landlock filesystem acceptance (VB-2)
+        env:
+          O7_REQUIRE_LANDLOCK: "1"
+        run: cargo test -p sandboy --features test-harness --locked --test landlock_confinement -- --include-ignored --nocapture
