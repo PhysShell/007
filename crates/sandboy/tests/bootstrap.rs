@@ -25,7 +25,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use o7_sandbox_protocol::ids::{Digest256, LaunchNonce};
-use o7_sandbox_protocol::policy::{Enforcement, NetworkPolicy, SandboxPolicy};
+use o7_sandbox_protocol::policy::{NetworkPolicy, SandboxPolicy};
 use o7_sandbox_protocol::request::{EnvEntry, LaunchRequest, StdinKind};
 use o7_sandbox_protocol::SCHEMA_VERSION;
 
@@ -178,32 +178,24 @@ fn honest_downgraded_report_then_nack_and_the_runnable_target_never_runs() {
     let frame = read_report_and_prove_eof(&mut parent);
     let report = o7_sandbox_protocol::frame::decode(&frame).expect("valid report frame");
 
-    // The report is correctly BOUND but HONESTLY downgraded.
+    // The report is correctly BOUND to this policy/launch/backend object. (The per-dimension
+    // enforcement is now VB-4-real and environment-dependent — this test drops the socket before GO,
+    // so what matters here is the binding + that a NACK never runs the target.)
     assert_eq!(report.schema_version, SCHEMA_VERSION);
     assert_eq!(report.backend.name(), "sandboy-linux");
     assert_eq!(report.backend_digest, backend_digest());
     assert_eq!(report.policy_digest, policy().digest());
     assert_eq!(report.launch_nonce, LaunchNonce::parse(NONCE_HEX).unwrap());
     assert_eq!(report.launch_spec_digest, req.spec_digest());
-    for d in [
-        report.filesystem,
-        report.network,
-        report.env,
-        report.process_tree,
-        report.timeout,
-    ] {
-        assert_eq!(d, Enforcement::NotEnforced, "VB-0 enforces nothing");
-    }
-    assert!(
-        !report.is_fully_enforced(),
-        "an honest VB-0 report is downgraded"
-    );
 
-    // NACK: drop the socket without GO. The backend reads EOF and exits; the RUNNABLE target is
-    // never executed, so its marker never appears.
+    // NACK: drop the socket without GO. The backend reads EOF, tears down, and exits; the RUNNABLE
+    // target is never released, so its marker never appears.
     drop(parent);
     assert_eq!(exit_code(backend), 67, "NACK/EOF before GO");
-    assert!(!marker.exists(), "the runnable target must not run at VB-0");
+    assert!(
+        !marker.exists(),
+        "a NACK'd launch must never run the target"
+    );
 }
 
 #[test]

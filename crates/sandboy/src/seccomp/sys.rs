@@ -58,6 +58,7 @@ pub(crate) fn probe_socket(domain: libc::c_int, via_x32: bool) -> Result<(), i32
 /// starts here, so denying it (plus `enter`/`register` and the fd scrub) is what makes network
 /// deny-all real. `Ok(())` if a ring was created (then closed); `Err(errno)` otherwise. `via_x32`
 /// issues it through the x32 namespace.
+#[cfg(feature = "test-harness")]
 pub(crate) fn probe_io_uring_setup(via_x32: bool) -> Result<(), i32> {
     let nr: libc::c_long = if via_x32 {
         #[cfg(target_arch = "x86_64")]
@@ -85,6 +86,7 @@ pub(crate) fn probe_io_uring_setup(via_x32: bool) -> Result<(), i32> {
 
 /// Attempt `setsid()`. `Ok(())` on success (a new session — a real side effect, so run in a
 /// disposable child), `Err(errno)` otherwise.
+#[cfg(feature = "test-harness")]
 pub(crate) fn probe_setsid() -> Result<(), i32> {
     // SAFETY: setsid(2) takes no arguments and returns the new session id or -1/errno.
     let ret = unsafe { libc::setsid() };
@@ -96,6 +98,7 @@ pub(crate) fn probe_setsid() -> Result<(), i32> {
 }
 
 /// Attempt `setpgid(0, 0)`. `Ok(())`/`Err(errno)`. A side effect (pgid change) — run in a child.
+#[cfg(feature = "test-harness")]
 pub(crate) fn probe_setpgid() -> Result<(), i32> {
     // SAFETY: setpgid(2) with two plain integer arguments; returns 0 or -1/errno.
     let ret = unsafe { libc::setpgid(0, 0) };
@@ -109,6 +112,7 @@ pub(crate) fn probe_setpgid() -> Result<(), i32> {
 /// Fork, run `f` in the child and `_exit` with its return code; return the child's exit code in the
 /// parent (or a negative sentinel on fork/wait failure). Used to probe side-effecting syscalls in a
 /// disposable process and to prove the seccomp filter is inherited across fork.
+#[cfg(feature = "test-harness")]
 pub(crate) fn run_in_child<F: FnOnce() -> i32>(f: F) -> i32 {
     // SAFETY: fork(2) in this single-threaded harness; the parent gets the child pid, the child 0.
     let pid = unsafe { libc::fork() };
@@ -133,6 +137,113 @@ pub(crate) fn run_in_child<F: FnOnce() -> i32>(f: F) -> i32 {
     }
 }
 
+/// Terminate the current process IMMEDIATELY (`_exit`), without running atexit handlers, destructors,
+/// or stdio flushes — the correct primitive for a forked launch child that must not run the parent's
+/// cleanup after a failure.
+pub(crate) fn exit_now(code: i32) -> ! {
+    // SAFETY: `_exit(2)` never returns and touches no user memory.
+    unsafe { libc::_exit(code) }
+}
+
+/// The result of [`fork_raw`].
+pub(crate) enum ForkResult {
+    Parent(libc::pid_t),
+    Child,
+}
+
+/// `fork(2)` returning which side we are on (or an errno). The VB-4 launch monitor forks exactly ONE
+/// child, supervises it by pid, and enforces an absolute deadline — so it cannot use the
+/// waitpid-inline [`run_in_child`] helper.
+pub(crate) fn fork_raw() -> Result<ForkResult, i32> {
+    // SAFETY: fork(2) in a single-threaded process; returns the child pid to the parent, 0 to the
+    // child, or -1/errno.
+    let pid = unsafe { libc::fork() };
+    match pid {
+        -1 => Err(last_errno()),
+        0 => Ok(ForkResult::Child),
+        n => Ok(ForkResult::Parent(n)),
+    }
+}
+
+/// Create a `pipe2(O_CLOEXEC)` and return its raw (read, write) fds. CLOEXEC so neither end leaks
+/// across an unrelated exec; the VB-4 launch code closes each end explicitly.
+pub(crate) fn make_pipe_cloexec() -> Result<(RawFd, RawFd), i32> {
+    let mut fds = [0 as libc::c_int; 2];
+    // SAFETY: pipe2 with a valid 2-element out array and O_CLOEXEC; returns 0 or -1/errno.
+    let r = unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) };
+    if r != 0 {
+        return Err(last_errno());
+    }
+    Ok((fds[0], fds[1]))
+}
+
+/// `read(2)` into `buf`; `Ok(0)` is EOF. Raw so the launch code needs no fd→File `unsafe` of its own.
+pub(crate) fn read_fd(fd: RawFd, buf: &mut [u8]) -> Result<usize, i32> {
+    // SAFETY: read into a valid buffer of `buf.len()` bytes on an open fd; returns count or -1/errno.
+    let n = unsafe { libc::read(fd, buf.as_mut_ptr().cast::<libc::c_void>(), buf.len()) };
+    if n < 0 {
+        Err(last_errno())
+    } else {
+        Ok(n as usize)
+    }
+}
+
+/// `write(2)` from `buf`.
+pub(crate) fn write_fd(fd: RawFd, buf: &[u8]) -> Result<usize, i32> {
+    // SAFETY: write from a valid buffer of `buf.len()` bytes on an open fd; returns count or -1/errno.
+    let n = unsafe { libc::write(fd, buf.as_ptr().cast::<libc::c_void>(), buf.len()) };
+    if n < 0 {
+        Err(last_errno())
+    } else {
+        Ok(n as usize)
+    }
+}
+
+/// Borrow an existing fd as a `File` WITHOUT owning it — its `Drop` never closes the fd (wrapped in
+/// `ManuallyDrop`). Used to hand the inherited sealed-target fd to Landlock's install (which fstats +
+/// reads its seals) while the launch child keeps the fd for its `execveat`.
+pub(crate) fn borrow_fd_as_file(fd: RawFd) -> std::mem::ManuallyDrop<std::fs::File> {
+    use std::os::fd::FromRawFd as _;
+    // SAFETY: `fd` is an open fd owned elsewhere; ManuallyDrop ensures this `File` never closes it.
+    std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(fd) })
+}
+
+/// `dup2(old, new)` — used by the launch child to place `/dev/null` on the target's stdin.
+pub(crate) fn dup2_fd(old: RawFd, new: RawFd) -> Result<(), i32> {
+    // SAFETY: dup2 with two integer fds; returns the new fd or -1/errno.
+    let r = unsafe { libc::dup2(old, new) };
+    if r < 0 {
+        Err(last_errno())
+    } else {
+        Ok(())
+    }
+}
+
+/// Non-blocking reap: `Some(exit_status)` if the child changed state, `None` if still running.
+pub(crate) fn try_wait(pid: libc::pid_t) -> Result<Option<i32>, i32> {
+    let mut status: libc::c_int = 0;
+    // SAFETY: waitpid with WNOHANG on our child and a valid status out-pointer; 0 = still running.
+    let r = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+    if r < 0 {
+        Err(last_errno())
+    } else if r == 0 {
+        Ok(None)
+    } else {
+        Ok(Some(exit_status(status)))
+    }
+}
+
+/// Encode a `waitpid` status as an exit-ish code: the exit status, or `128 + signal` if killed.
+fn exit_status(status: libc::c_int) -> i32 {
+    if libc::WIFEXITED(status) {
+        libc::WEXITSTATUS(status)
+    } else if libc::WIFSIGNALED(status) {
+        128 + libc::WTERMSIG(status)
+    } else {
+        -1
+    }
+}
+
 /// `prctl(PR_SET_NO_NEW_PRIVS, 1)` — required before a seccomp filter can be installed without
 /// `CAP_SYS_ADMIN`.
 pub(crate) fn set_no_new_privs() -> Result<(), i32> {
@@ -147,6 +258,7 @@ pub(crate) fn set_no_new_privs() -> Result<(), i32> {
 }
 
 /// Whether `fd` is currently open (`fcntl(fd, F_GETFD) != -1`).
+#[cfg(feature = "test-harness")]
 pub(crate) fn fd_is_open(fd: RawFd) -> bool {
     // SAFETY: F_GETFD reads the fd flags of `fd`; it takes no pointer args and returns -1/EBADF for a
     // closed fd.

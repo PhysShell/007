@@ -16,41 +16,29 @@
 //! descriptor; framing/decoding/digests come from `o7-sandbox-protocol`; the backend digest is a
 //! plain `std::fs` read of `/proc/self/exe`.
 
-// This crate is the designated external confinement boundary. A PRODUCTION build (feature off) still
-// installs NO kernel enforcement and contains NO `unsafe` — so it keeps `forbid(unsafe_code)`, and
-// the VB-0 empty-unsafe-inventory guarantee is byte-for-byte intact. The `test-harness` feature
-// unlocks `unsafe` for the VB-2 Landlock syscalls, which live SOLELY in `landlock::sys` (the gate
-// greps to prove containment) — and nowhere in the forbid-unsafe 007 crates. VB-4 wires the confined
-// `run` path in and lifts this entirely.
-#![cfg_attr(not(feature = "test-harness"), forbid(unsafe_code))]
+// This crate is the designated external confinement boundary. VB-4 makes the Landlock/seccomp/cgroup
+// confinement the PRODUCTION launch path, so `forbid(unsafe_code)` is lifted here — but the `unsafe`
+// surface stays CONTAINED to the two audited syscall modules `landlock/sys.rs` + `seccomp/sys.rs`
+// (the gate greps every other file to prove it). Every OTHER 007 crate remains forbid-unsafe.
+#![deny(unsafe_op_in_unsafe_fn)]
 
 use std::ffi::OsString;
-use std::io::{Read as _, Write as _};
-use std::net::Shutdown;
+use std::io::Read as _;
 use std::os::fd::AsFd as _;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use o7_sandbox_protocol::frame::encode;
 use o7_sandbox_protocol::ids::{BackendIdentity, Digest256, LaunchNonce};
-use o7_sandbox_protocol::policy::{Enforcement, NetworkPolicy, SandboxPolicy};
-use o7_sandbox_protocol::report::SandboxReport;
-use o7_sandbox_protocol::SCHEMA_VERSION;
+use o7_sandbox_protocol::policy::{NetworkPolicy, SandboxPolicy};
 
-// VB-1 cgroup monitor + its `__cgroup-run` harness entry. Compiled ONLY under `test-harness`; a
-// production build has neither the module nor the subcommand (see Cargo.toml). VB-4 promotes it.
-#[cfg(feature = "test-harness")]
+// The three confinement mechanisms — now PRODUCTION code composed by the VB-4 launch path (`launch`).
+// Their standalone `__*-run` harness entries (VB-1/2/3 acceptance drivers) are `test-harness`-only and
+// call the SAME production install functions. The only `unsafe` lives in `landlock/sys.rs` +
+// `seccomp/sys.rs`.
 mod cgroup;
-
-// VB-2 Landlock filesystem confinement + its `__landlock-run` harness entry. Also `test-harness`-only
-// (the single `unsafe` surface, `landlock::sys`, is compiled ONLY here). VB-4 promotes it into `run`.
-#[cfg(feature = "test-harness")]
 mod landlock;
-
-// VB-3 seccomp confinement (network/setsid/setpgid deny) + fd scrub + env allowlist, with its
-// `__seccomp-run` harness entry. `test-harness`-only; its `unsafe` probe surface is `seccomp::sys`.
-#[cfg(feature = "test-harness")]
+mod launch;
 mod seccomp;
 
 /// Exit codes. Distinct per fail-closed reason so a test (and an operator) can tell WHICH gate
@@ -63,15 +51,9 @@ mod exit {
     pub(crate) const NO_SOCKET: i32 = 62;
     /// The launch-request frame was truncated, oversized, malformed, or a bad version.
     pub(crate) const BAD_REQUEST: i32 = 63;
-    /// The report could not be self-bound (e.g. `/proc/self/exe` unreadable) or encoded.
+    /// The report could not be self-bound (e.g. `/proc/self/exe` unreadable).
     pub(crate) const REPORT_BUILD: i32 = 65;
-    /// Writing the report frame or half-closing the socket failed.
-    pub(crate) const REPORT_WRITE: i32 = 66;
-    /// The parent did NOT authorize (EOF / NACK before GO): the target never runs. Expected at VB-0.
-    pub(crate) const NACK: i32 = 67;
-    /// GO arrived but the self-check is not satisfied (no enforcement installed): the target is
-    /// STILL refused. A correct parent never reaches here at VB-0; it is a defense-in-depth refusal.
-    pub(crate) const REFUSED_UNENFORCED: i32 = 71;
+    // The report/GO/launch exit codes now live in `launch::exit` (the state machine owns them).
 }
 
 fn main() {
@@ -155,105 +137,28 @@ fn run() -> i32 {
         }
     };
 
-    // Install confinement and SELF-CHECK before anything could run. VB-0: the installer is an
-    // honest no-op — it installs nothing, so the self-check reports every dimension `not_enforced`.
-    // Later slices fill `install_confinement` and flip dimensions to `enforced` only after a real
-    // self-check. Because this happens BEFORE any target could start, a downgrade can never mean
-    // "the target already ran unconfined".
-    let outcome = install_confinement(&policy, &request);
-
-    let report = SandboxReport {
-        schema_version: SCHEMA_VERSION,
-        backend: identity,
+    // VB-4: hand off to the confined-launch state machine. It composes the cgroup leaf + Landlock +
+    // fd-scrub + env + seccomp in ONE launch child, self-checks all five dimensions, publishes the
+    // report built ONLY from the verified plan, runs the GO/release/supervise sequence, and returns
+    // the exit code. The report/GO/half-close all happen inside, so a dimension can never be flipped
+    // to `Enforced` by an independent field assignment, and the target never runs unconfined.
+    let bindings = launch::Bindings {
+        identity,
         backend_digest,
         policy_digest,
         launch_nonce: nonce,
         launch_spec_digest,
-        filesystem: outcome.filesystem,
-        network: outcome.network,
-        env: outcome.env,
-        process_tree: outcome.process_tree,
-        timeout: outcome.timeout,
+        target_digest: request.target_digest.clone(),
     };
-    let frame = match encode(&report) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            eprintln!("sandboy: could not encode the report frame: {e}");
-            return exit::REPORT_BUILD;
-        }
-    };
-
-    // Emit exactly ONE report frame, then HALF-CLOSE the write side so the parent can prove the
-    // frame is the entire message by reading EOF. The read side stays open for GO.
-    if sock.write_all(&frame).is_err() || sock.flush().is_err() {
-        eprintln!("sandboy: could not write the report frame");
-        return exit::REPORT_WRITE;
-    }
-    if sock.shutdown(Shutdown::Write).is_err() {
-        eprintln!("sandboy: could not half-close the control socket");
-        return exit::REPORT_WRITE;
-    }
-
-    // Parent authorization barrier: read the GO byte ('G'). EOF or anything else is a NACK.
-    let mut go = [0u8; 1];
-    let authorized = matches!(sock.read_exact(&mut go), Ok(())) && go[0] == b'G';
-    if !authorized {
-        // The common, correct VB-0 path: the parent verified the honest report, saw a downgraded
-        // dimension, and dropped its end (NACK / EOF). The target never runs.
-        return exit::NACK;
-    }
-
-    // GO arrived. VB-0 self-check is NEVER satisfied (no enforcement installed), so we REFUSE to
-    // launch the target rather than run it unconfined — a downgraded self-check must never become a
-    // live unconfined run. A correct parent never sends GO on a downgraded report; this is
-    // defense in depth. The on-GO monitor→target spawn is added by the slice that first achieves
-    // full enforcement (VB-4).
-    if !outcome.fully_enforced() {
-        eprintln!(
-            "sandboy: refusing to launch — confinement is not established (VB-0 installs none)"
-        );
-        return exit::REFUSED_UNENFORCED;
-    }
-    // Unreachable at VB-0 (`fully_enforced()` is always false); the real launch lands in VB-4.
-    exit::REFUSED_UNENFORCED
-}
-
-/// The self-check outcome per dimension. VB-0 produces all-`not_enforced`; later slices flip a
-/// dimension to `enforced` only after installing AND self-checking it.
-struct EnforcementOutcome {
-    filesystem: Enforcement,
-    network: Enforcement,
-    env: Enforcement,
-    process_tree: Enforcement,
-    timeout: Enforcement,
-}
-
-impl EnforcementOutcome {
-    /// Every dimension `enforced`. VB-0 is never fully enforced.
-    fn fully_enforced(&self) -> bool {
-        matches!(self.filesystem, Enforcement::Enforced)
-            && matches!(self.network, Enforcement::Enforced)
-            && matches!(self.env, Enforcement::Enforced)
-            && matches!(self.process_tree, Enforcement::Enforced)
-            && matches!(self.timeout, Enforcement::Enforced)
-    }
-}
-
-/// Install confinement and self-check it. **VB-0: an HONEST no-op.** It installs nothing and
-/// therefore self-checks every dimension as `not_enforced`. VB-1 (cgroup+timeout), VB-2 (Landlock),
-/// and VB-3 (seccomp+env) fill this in, flipping a dimension to `enforced` ONLY after a real
-/// kernel-side self-check. Its inputs are named now so the signature does not churn later.
-fn install_confinement(
-    _policy: &SandboxPolicy,
-    _request: &o7_sandbox_protocol::LaunchRequest,
-) -> EnforcementOutcome {
-    EnforcementOutcome {
-        filesystem: Enforcement::NotEnforced,
-        network: Enforcement::NotEnforced,
-        env: Enforcement::NotEnforced,
-        process_tree: Enforcement::NotEnforced,
-        timeout: Enforcement::NotEnforced,
-    }
+    let faults = launch::monitor_faults();
+    launch::run_confined_launch(
+        &mut sock,
+        &policy,
+        &request,
+        &args.target,
+        bindings,
+        &faults,
+    )
 }
 
 /// The confined-backend argv this backend understands. The control transport is NOT on the argv
@@ -265,8 +170,8 @@ struct Args {
     timeout_ms: u128,
     allow_exec: Vec<PathBuf>,
     allow_env: Vec<OsString>,
-    /// Retained for the VB-4 launch (the sealed target descriptor to exec); unused at VB-0.
-    _target: PathBuf,
+    /// The sealed target descriptor (`/proc/<worker>/fd/<n>`) the launch child execveat's.
+    target: PathBuf,
 }
 
 fn parse_args() -> Option<Args> {
@@ -299,7 +204,7 @@ fn parse_args() -> Option<Args> {
         timeout_ms: timeout_ms?,
         allow_exec,
         allow_env,
-        _target: target,
+        target,
     })
 }
 

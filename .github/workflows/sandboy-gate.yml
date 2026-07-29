@@ -70,20 +70,15 @@ jobs:
       - name: Backend x SandboyBoundary wire-compat (VB-0)
         run: cargo test -p o7-worker --test sandboy_backend_bootstrap --locked --no-fail-fast
 
-      # PRODUCTION (feature off) must still contain NO `unsafe`: `main.rs` keeps
-      # `forbid(unsafe_code)` under `cfg(not(test-harness))`, so the production build above fails on
-      # any `unsafe`. The `test-harness` feature unlocks `unsafe` ONLY inside the audited per-mechanism
-      # syscall modules: VB-2 Landlock (`landlock/sys.rs`) and VB-3 seccomp probes (`seccomp/sys.rs`).
-      # This step pins both: production stays forbid-unsafe, and the entire `unsafe` surface is
-      # contained to those `*/sys.rs` modules.
-      - name: Unsafe surface contained to the audited sys.rs modules (VB-2/VB-3)
+      # VB-4 makes the Landlock/seccomp/cgroup confinement the PRODUCTION launch path, so
+      # `forbid(unsafe_code)` is lifted — but the entire `unsafe` surface stays CONTAINED to the two
+      # audited syscall modules `landlock/sys.rs` + `seccomp/sys.rs`. This step greps EVERY other
+      # sandboy source file (including the new `launch/` state machine) and fails on any `unsafe` there,
+      # so lifting the crate-level forbid never permits `unsafe` to sprawl.
+      - name: Unsafe surface contained to the audited sys.rs modules (VB-4)
         shell: bash
         run: |
           set -euo pipefail
-          if ! grep -q 'forbid(unsafe_code)' crates/sandboy/src/main.rs; then
-            echo "::error::production sandboy must keep forbid(unsafe_code) (feature off)" >&2
-            exit 1
-          fi
           offenders=$(grep -rnE 'unsafe *(\{|fn |impl |extern |trait )' crates/sandboy/src \
             | grep -vE 'src/(landlock|seccomp)/sys\.rs' || true)
           if [ -n "$offenders" ]; then
@@ -91,4 +86,4 @@ jobs:
             echo "$offenders" >&2
             exit 1
           fi
-          echo "sandboy unsafe surface: contained to landlock/sys.rs + seccomp/sys.rs (prod forbid-unsafe)"
+          echo "sandboy unsafe surface: contained to landlock/sys.rs + seccomp/sys.rs"

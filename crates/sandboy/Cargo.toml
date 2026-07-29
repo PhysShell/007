@@ -10,28 +10,31 @@ name = "sandboy"
 path = "src/main.rs"
 
 [features]
-# INTERNAL, NON-DEFAULT. Gates the VB-1 cgroup-monitor module (src/cgroup.rs) and the VB-2 Landlock
-# module (src/landlock/), plus their `__cgroup-run` / `__landlock-run` harness entries, which the
-# `#[ignore]`d confinement tests drive on a real host. A production `sandboy` build leaves this OFF,
-# so it exposes only the `run` subcommand (the honest VB-0 bootstrap), compiles NEITHER module, pulls
-# in NO `libc`, and keeps `forbid(unsafe_code)`. VB-4 promotes these into `run` and drops the gate.
-test-harness = ["dep:libc", "dep:seccompiler"]
+# INTERNAL, NON-DEFAULT. Exposes the `__cgroup-run` / `__landlock-run` / `__seccomp-run` standalone
+# harness entries that the `#[ignore]`d per-mechanism acceptance tests (VB-1/2/3) drive on a real host.
+# Those harnesses call the SAME production install functions VB-4 composes (no copies). The confinement
+# modules are now production code, so this feature only adds the standalone drivers — never present in a
+# production build.
+test-harness = []
+# INTERNAL, NON-DEFAULT, TEST-ONLY. Compiles the deterministic `FaultPoint` seam into the REAL VB-4
+# launch state machine so the frozen confinement matrix's setup-failure oracles drive genuine stage
+# failures against the real backend. A production/default/release build NEVER compiles the seam (no
+# `O7_FAULT_POINT` recognition, no stage table), and a fault-enabled artifact carries a DISTINCT
+# backend identity so it can never be accepted as a production backend.
+fault-injection = []
 
 [dependencies]
 # The pure wire protocol shared VERBATIM with the o7-worker parent: framing, digests, policy
-# reconstruction, and the report all come from here, so the backend never depends on the worker
-# runtime. This is the ONLY non-optional dependency.
+# reconstruction, and the report all come from here, so the backend never depends on the worker runtime.
 o7-sandbox-protocol = { path = "../o7-sandbox-protocol" }
-# VB-2: raw Landlock syscalls (SYS_landlock_*) + prctl live in the single audited `landlock::sys`
-# module. `libc` supplies the target-provided syscall numbers and `prctl` ONLY — no hidden
-# implementation, no ABI-probing wrapper. OPTIONAL and enabled solely by `test-harness`, so a
-# production build never compiles it. Pinned; already in the workspace tree (MIT/Apache-2.0).
-libc = { version = "0.2.186", optional = true }
-# VB-3: the seccomp deny filter is BUILT from a typed Rust policy and compiled to BPF by `seccompiler`
-# (rust-vmm / Firecracker's, pure-Rust — no system libseccomp). Pinned EXACTLY and with default
-# features OFF (drops the optional serde/JSON path we do not use), so only its typed API + `libc` are
-# pulled in. OPTIONAL and enabled solely by `test-harness`; a production build never compiles it.
-seccompiler = { version = "=0.5.0", default-features = false, optional = true }
+# VB-4: the confinement modules are now the PRODUCTION launch path, so their kernel dependencies are
+# non-optional. `libc` supplies the target-provided Landlock/prctl/seccomp/fd syscall numbers ONLY (no
+# hidden implementation) for the single audited `landlock/sys.rs` + `seccomp/sys.rs` modules. Pinned.
+libc = "0.2.186"
+# VB-3/VB-4: the seccomp deny filter is BUILT from a typed Rust policy and compiled to BPF by
+# `seccompiler` (rust-vmm / Firecracker's, pure-Rust — no system libseccomp). Pinned EXACTLY, default
+# features OFF (drops the optional serde/JSON path), so only its typed API + `libc` are pulled in.
+seccompiler = { version = "=0.5.0", default-features = false }
 
 [dev-dependencies]
 # The bootstrap tests drive the backend BINARY directly over a UnixStream and craft/parse frames
@@ -40,9 +43,6 @@ o7-sandbox-protocol = { path = "../o7-sandbox-protocol" }
 # Scratch dirs for the would-be-target marker. Already a workspace dev-dependency (o7-worker),
 # already allowed in deny.toml.
 tempfile = "3"
-# VB-2 tests only: an INDEPENDENT raw kernel Landlock-ABI probe (so the capability guard never
-# depends on the system-under-test) and a sealed memfd for the frozen `/proc/<pid>/fd/<n>` exec case.
-libc = "0.2.186"
 
 # This crate is the DESIGNATED external `unsafe` trust boundary (see
 # docs/architecture/sandboy-backend-vb0.md, Decision 1 of sandboy-boundary.md): every OTHER 007

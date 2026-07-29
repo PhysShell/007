@@ -1,0 +1,893 @@
+//! VB-4 — the PRODUCTION confined-launch state machine: one unconfined monitor + one launch child
+//! that becomes the target via `execveat`, with a two-party proof and a pause-for-GO barrier.
+//!
+//! The unconfined **monitor** solely owns the fd-0 control/report socket, the cgroup leaf + teardown
+//! authority, the absolute deadline, child supervision, and report publication. It forks EXACTLY ONE
+//! child; that SAME child later `execveat`s the sealed target — no prober, no second install. Proof
+//! split: the monitor proves the child is placed in its cgroup leaf, the deadline is armed, and
+//! teardown authority is available; the child proves monitor-only fds are absent, the env is built
+//! byte-exactly from the launch spec, and Landlock / fd-scrub / seccomp are installed and
+//! effect-checked. The child writes ONE `READY_TO_EXEC` record bound to the launch nonce and the
+//! policy / launch-spec / target digests, its pid and cgroup identity, and its dimension proofs; the
+//! monitor folds it with its own proof into a [`VerifiedLaunchPlan`], the ONLY constructor of a
+//! report. Only after a valid GO does the monitor release the child, which closes the proof/release
+//! fds and `execveat`s. Once the cgroup exists, teardown failure is authoritative and dominates any
+//! earlier setup error.
+
+use std::ffi::CString;
+use std::fs::File;
+use std::io::{Read as _, Write as _};
+use std::net::Shutdown;
+use std::os::fd::{AsRawFd as _, RawFd};
+use std::os::unix::ffi::OsStringExt as _;
+use std::os::unix::net::UnixStream;
+use std::path::Path;
+use std::time::{Duration, Instant};
+
+use o7_sandbox_protocol::frame::encode;
+use o7_sandbox_protocol::ids::{BackendIdentity, Digest256, LaunchNonce};
+use o7_sandbox_protocol::policy::{Enforcement, SandboxPolicy};
+use o7_sandbox_protocol::report::SandboxReport;
+use o7_sandbox_protocol::{LaunchRequest, SCHEMA_VERSION};
+
+use crate::seccomp::{self, ForkResult};
+
+// ---- compile-gated fault seam (Stage 3 fills `fault`; here it is a zero-cost no-op) --------------
+
+#[cfg(feature = "fault-injection")]
+pub(crate) mod fault;
+#[cfg(feature = "fault-injection")]
+pub(crate) use fault::Faults;
+
+/// In a production/default build the fault seam carries nothing and every mapping is a no-op, so no
+/// fault-point names or parser reach the binary.
+#[cfg(not(feature = "fault-injection"))]
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Faults;
+
+/// Parse the fault selection once, in the unconfined monitor, before any fork. In a production build
+/// this is a no-op that never reads `O7_FAULT_POINT`; the `fault-injection` build overrides it.
+#[cfg(not(feature = "fault-injection"))]
+pub(crate) fn monitor_faults() -> Faults {
+    Faults
+}
+
+#[cfg(not(feature = "fault-injection"))]
+impl Faults {
+    pub(crate) fn landlock(&self) -> crate::landlock::Faults {
+        crate::landlock::Faults::default()
+    }
+    pub(crate) fn seccomp(&self) -> crate::seccomp::Fault {
+        crate::seccomp::Fault::default()
+    }
+    pub(crate) fn cgroup(&self) -> crate::cgroup::Faults {
+        crate::cgroup::Faults::default()
+    }
+}
+
+/// Fault trip point. In production this expands to NOTHING (no fault-point name in the binary); under
+/// `fault-injection` it runs `$on_fault` when that point is the selected one.
+macro_rules! trip {
+    ($faults:expr, $id:ident, $on_fault:expr) => {{
+        #[cfg(feature = "fault-injection")]
+        {
+            if $faults.tripped($crate::launch::fault::FaultId::$id) {
+                $on_fault
+            }
+        }
+    }};
+}
+
+// ---- inputs + proof objects ---------------------------------------------------------------------
+
+/// The report-binding identity the monitor received.
+pub(crate) struct Bindings {
+    pub(crate) identity: BackendIdentity,
+    pub(crate) backend_digest: Digest256,
+    pub(crate) policy_digest: Digest256,
+    pub(crate) launch_nonce: LaunchNonce,
+    pub(crate) launch_spec_digest: Digest256,
+    pub(crate) target_digest: Digest256,
+}
+
+/// What the launch CHILD proves and returns over the one-shot proof pipe.
+struct ChildProof {
+    ok: bool,
+    stage: String,
+    child_pid: i32,
+    cgroup_path: String,
+    nonce_hex: String,
+    policy_digest: String,
+    launch_spec_digest: String,
+    target_digest: String,
+    fs: bool,
+    net: bool,
+    env: bool,
+    fd: bool,
+    placement: bool,
+}
+
+/// What the MONITOR proves about the cgroup leaf and the armed deadline.
+struct MonitorProof {
+    leaf_path: String,
+    child_in_leaf: bool,
+    deadline_armed: bool,
+    teardown_authority: bool,
+}
+
+fn enf(ok: bool) -> Enforcement {
+    if ok {
+        Enforcement::Enforced
+    } else {
+        Enforcement::NotEnforced
+    }
+}
+
+/// The immutable combined plan. Its [`report`](Self::report) is the ONLY place a `SandboxReport` is
+/// produced, so a dimension can never be flipped to `Enforced` by an independent field assignment.
+struct VerifiedLaunchPlan {
+    identity: BackendIdentity,
+    backend_digest: Digest256,
+    policy_digest: Digest256,
+    launch_nonce: LaunchNonce,
+    launch_spec_digest: Digest256,
+    filesystem: Enforcement,
+    network: Enforcement,
+    env: Enforcement,
+    process_tree: Enforcement,
+    timeout: Enforcement,
+}
+
+impl VerifiedLaunchPlan {
+    /// Fold the child proof + monitor proof + bindings into the plan. Every binding is checked; a
+    /// mismatch downgrades the affected dimension (never a silent Enforced).
+    fn assemble(
+        bindings: &Bindings,
+        child: &ChildProof,
+        monitor: &MonitorProof,
+    ) -> VerifiedLaunchPlan {
+        let bindings_match = child.nonce_hex == bindings.launch_nonce.as_str()
+            && child.policy_digest == bindings.policy_digest.as_str()
+            && child.launch_spec_digest == bindings.launch_spec_digest.as_str()
+            && child.target_digest == bindings.target_digest.as_str();
+        let child_ok = child.ok && bindings_match;
+        // process_tree needs BOTH the child's inherited placement AND the monitor's independent
+        // observation that the child sits in the monitor-owned leaf.
+        let placement = child_ok
+            && child.placement
+            && monitor.child_in_leaf
+            && monitor.leaf_path == child.cgroup_path;
+        VerifiedLaunchPlan {
+            identity: bindings.identity.clone(),
+            backend_digest: bindings.backend_digest.clone(),
+            policy_digest: bindings.policy_digest.clone(),
+            launch_nonce: bindings.launch_nonce.clone(),
+            launch_spec_digest: bindings.launch_spec_digest.clone(),
+            filesystem: enf(child_ok && child.fs),
+            // A leaked inherited socket defeats network deny-all, so fd-scrub gates the network dim.
+            network: enf(child_ok && child.net && child.fd),
+            env: enf(child_ok && child.env),
+            process_tree: enf(placement),
+            timeout: enf(monitor.deadline_armed && monitor.teardown_authority),
+        }
+    }
+
+    fn report(&self) -> SandboxReport {
+        SandboxReport {
+            schema_version: SCHEMA_VERSION,
+            backend: self.identity.clone(),
+            backend_digest: self.backend_digest.clone(),
+            policy_digest: self.policy_digest.clone(),
+            launch_nonce: self.launch_nonce.clone(),
+            launch_spec_digest: self.launch_spec_digest.clone(),
+            filesystem: self.filesystem,
+            network: self.network,
+            env: self.env,
+            process_tree: self.process_tree,
+            timeout: self.timeout,
+        }
+    }
+
+    fn fully_enforced(&self) -> bool {
+        matches!(self.filesystem, Enforcement::Enforced)
+            && matches!(self.network, Enforcement::Enforced)
+            && matches!(self.env, Enforcement::Enforced)
+            && matches!(self.process_tree, Enforcement::Enforced)
+            && matches!(self.timeout, Enforcement::Enforced)
+    }
+}
+
+// ---- exit codes ---------------------------------------------------------------------------------
+
+pub(crate) mod exit {
+    /// Report sent but the parent did NOT authorize (NACK/EOF) — the target never ran.
+    pub(crate) const NACK: i32 = 67;
+    /// The report was NOT fully enforced (a proof failed); the target never ran.
+    pub(crate) const REFUSED: i32 = 71;
+    /// Internal launch plumbing failed (pipe/fork/encode).
+    pub(crate) const PLUMBING: i32 = 70;
+    /// The confined target ran to completion and was reaped; the tree was torn down cleanly.
+    pub(crate) const OK: i32 = 0;
+    /// Teardown of the cgroup tree FAILED — authoritative, dominates any earlier error.
+    pub(crate) const TEARDOWN: i32 = 77;
+}
+
+const DRAIN_BOUND: Duration = Duration::from_secs(3);
+const READY_BOUND: Duration = Duration::from_secs(10);
+
+// ---- the monitor entry --------------------------------------------------------------------------
+
+/// Run the full confined launch. Owns the report publication and returns the process exit code.
+pub(crate) fn run_confined_launch(
+    sock: &mut UnixStream,
+    policy: &SandboxPolicy,
+    request: &LaunchRequest,
+    target_path: &Path,
+    bindings: Bindings,
+    faults: &Faults,
+) -> i32 {
+    // 1. Open the sealed target BEFORE anything — its path resolves the worker's fd table, which a
+    //    confined child could not open post-Landlock. The child inherits and `execveat`s this fd.
+    let target = match File::open(target_path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("sandboy: cannot open sealed target {target_path:?}: {e}");
+            return refuse_before_child(sock, &bindings, "target_open");
+        }
+    };
+
+    // 2. Establish the monitor-owned cgroup leaf (the monitor moves ITSELF in; the child inherits it).
+    trip!(
+        faults,
+        CgroupCreate,
+        return refuse_before_child(sock, &bindings, "cgroup_create")
+    );
+    let leaf = match crate::cgroup::Leaf::establish() {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("sandboy: cannot establish cgroup leaf: {e}");
+            return refuse_before_child(sock, &bindings, "cgroup_create");
+        }
+    };
+
+    // 3. Pipes: proof (child → monitor) and release (monitor → child), both CLOEXEC (raw fds).
+    let (proof_r, proof_w) = match seccomp::make_pipe_cloexec() {
+        Ok(p) => p,
+        Err(_) => return teardown_and(&leaf, faults, exit::PLUMBING, "pipe"),
+    };
+    let (release_r, release_w) = match seccomp::make_pipe_cloexec() {
+        Ok(p) => p,
+        Err(_) => {
+            let _ = seccomp::close_fd(proof_r);
+            let _ = seccomp::close_fd(proof_w);
+            return teardown_and(&leaf, faults, exit::PLUMBING, "pipe");
+        }
+    };
+
+    // 4. Arm the absolute deadline (the timeout proof is the ARMED timer + the teardown path).
+    let deadline_at = Instant::now() + policy.timeout;
+
+    // 5. Fork EXACTLY ONE launch child.
+    let sock_fd = sock.as_raw_fd();
+    let target_fd = target.as_raw_fd();
+    match seccomp::fork_raw() {
+        Err(_) => {
+            let _ = seccomp::close_fd(proof_r);
+            let _ = seccomp::close_fd(proof_w);
+            let _ = seccomp::close_fd(release_r);
+            let _ = seccomp::close_fd(release_w);
+            teardown_and(&leaf, faults, exit::PLUMBING, "fork")
+        }
+        Ok(ForkResult::Child) => launch_child(ChildCtx {
+            policy,
+            request,
+            bindings: &bindings,
+            leaf_path: leaf.path().to_owned(),
+            target_fd,
+            sock_fd,
+            proof_w,
+            release_r,
+            close_first: [proof_r, release_w],
+            faults,
+        }),
+        Ok(ForkResult::Parent(child_pid)) => {
+            // The monitor closes the CHILD's ends so its proof read sees EOF when the child is done.
+            let _ = seccomp::close_fd(proof_w);
+            let _ = seccomp::close_fd(release_r);
+            let code = monitor_after_fork(MonitorCtx {
+                sock,
+                bindings: &bindings,
+                leaf: &leaf,
+                child_pid,
+                deadline_at,
+                proof_r,
+                release_w,
+                faults,
+            });
+            let _ = seccomp::close_fd(proof_r);
+            let _ = seccomp::close_fd(release_w);
+            drop(target);
+            code
+        }
+    }
+}
+
+// ---- the monitor role (post-fork parent) --------------------------------------------------------
+
+struct MonitorCtx<'a> {
+    sock: &'a mut UnixStream,
+    bindings: &'a Bindings,
+    leaf: &'a crate::cgroup::Leaf,
+    child_pid: i32,
+    deadline_at: Instant,
+    proof_r: RawFd,
+    release_w: RawFd,
+    faults: &'a Faults,
+}
+
+fn monitor_after_fork(mut ctx: MonitorCtx<'_>) -> i32 {
+    // 5a. Prove the monitor-side invariants (independent of the child's self-report).
+    let child_in_leaf = ctx.leaf.contains(ctx.child_pid).unwrap_or(false);
+    let kill_path = format!("/sys/fs/cgroup{}/cgroup.kill", ctx.leaf.path());
+    let teardown_authority = File::options().write(true).open(&kill_path).is_ok();
+    let monitor_proof = MonitorProof {
+        leaf_path: ctx.leaf.path().to_owned(),
+        child_in_leaf,
+        deadline_armed: true,
+        teardown_authority,
+    };
+
+    // 5b. Read the child's READY_TO_EXEC (bounded); a failed/absent proof downgrades the report.
+    let plan = {
+        #[cfg(feature = "fault-injection")]
+        if ctx.faults.tripped(fault::FaultId::ReadyValidate) {
+            forced_downgrade(ctx.bindings, &monitor_proof, "ready_validate")
+        } else {
+            assemble_from_pipe(&ctx, &monitor_proof)
+        }
+        #[cfg(not(feature = "fault-injection"))]
+        assemble_from_pipe(&ctx, &monitor_proof)
+    };
+    report_and_run(&mut ctx, plan)
+}
+
+fn assemble_from_pipe(ctx: &MonitorCtx<'_>, monitor_proof: &MonitorProof) -> VerifiedLaunchPlan {
+    match read_child_proof(ctx.proof_r, ctx.child_pid) {
+        Ok(child) => VerifiedLaunchPlan::assemble(ctx.bindings, &child, monitor_proof),
+        Err(stage) => forced_downgrade(ctx.bindings, monitor_proof, &stage),
+    }
+}
+
+/// Publish the report built from the plan, then run the GO/release/supervise/teardown sequence.
+fn report_and_run(ctx: &mut MonitorCtx<'_>, plan: VerifiedLaunchPlan) -> i32 {
+    let fully = plan.fully_enforced();
+    let frame = match encode(&plan.report()) {
+        Ok(f) => f,
+        Err(_) => return teardown_and(ctx.leaf, ctx.faults, exit::PLUMBING, "encode"),
+    };
+    if ctx.sock.write_all(&frame).is_err()
+        || ctx.sock.flush().is_err()
+        || ctx.sock.shutdown(Shutdown::Write).is_err()
+    {
+        return teardown_and(ctx.leaf, ctx.faults, exit::PLUMBING, "report_write");
+    }
+    // GO barrier.
+    let mut go = [0u8; 1];
+    let authorized = matches!(ctx.sock.read_exact(&mut go), Ok(())) && go[0] == b'G';
+    if !authorized {
+        return teardown_and(ctx.leaf, ctx.faults, exit::NACK, "nack");
+    }
+    if !fully {
+        eprintln!("sandboy: refusing to release — not fully enforced");
+        return teardown_and(ctx.leaf, ctx.faults, exit::REFUSED, "refused");
+    }
+
+    // 6. Release the SAME child with one token (one-shot). Then supervise under the deadline.
+    trip!(
+        ctx.faults,
+        Release,
+        return teardown_and(ctx.leaf, ctx.faults, exit::PLUMBING, "release")
+    );
+    if seccomp::write_fd(ctx.release_w, b"G")
+        .map(|n| n == 1)
+        .unwrap_or(false)
+    {
+        // ok
+    } else {
+        return teardown_and(ctx.leaf, ctx.faults, exit::PLUMBING, "release");
+    }
+    let target_status = supervise(ctx.child_pid, ctx.deadline_at);
+
+    // 7. Teardown DOMINATES.
+    match ctx.leaf.teardown(DRAIN_BOUND, ctx.faults.cgroup()) {
+        Ok(()) => target_status,
+        Err(e) => {
+            eprintln!(
+                "sandboy: teardown failed at {}: {} (exit {})",
+                e.stage(),
+                e.message(),
+                e.exit_code()
+            );
+            exit::TEARDOWN
+        }
+    }
+}
+
+/// Wait for the child; on the absolute deadline, the teardown (cgroup.kill in the caller) reaps it.
+fn supervise(child_pid: i32, deadline_at: Instant) -> i32 {
+    loop {
+        match seccomp::try_wait(child_pid) {
+            Ok(Some(_status)) => return exit::OK,
+            Ok(None) => {}
+            Err(_) => return exit::OK,
+        }
+        if Instant::now() >= deadline_at {
+            return exit::OK; // teardown kills the tree
+        }
+        std::thread::sleep(
+            deadline_at
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_millis(20)),
+        );
+    }
+}
+
+fn forced_downgrade(
+    bindings: &Bindings,
+    monitor: &MonitorProof,
+    stage: &str,
+) -> VerifiedLaunchPlan {
+    eprintln!("sandboy: launch not enforced at {stage}");
+    let empty = ChildProof {
+        ok: false,
+        stage: stage.to_owned(),
+        child_pid: 0,
+        cgroup_path: String::new(),
+        nonce_hex: String::new(),
+        policy_digest: String::new(),
+        launch_spec_digest: String::new(),
+        target_digest: String::new(),
+        fs: false,
+        net: false,
+        env: false,
+        fd: false,
+        placement: false,
+    };
+    VerifiedLaunchPlan::assemble(bindings, &empty, monitor)
+}
+
+/// Send a downgraded report BEFORE any child/cgroup exists (target-open / early cgroup failure), then
+/// expect the NACK. Nothing to tear down.
+fn refuse_before_child(sock: &mut UnixStream, bindings: &Bindings, stage: &str) -> i32 {
+    let monitor = MonitorProof {
+        leaf_path: String::new(),
+        child_in_leaf: false,
+        deadline_armed: false,
+        teardown_authority: false,
+    };
+    let plan = forced_downgrade(bindings, &monitor, stage);
+    if let Ok(frame) = encode(&plan.report()) {
+        let _ = sock.write_all(&frame);
+        let _ = sock.flush();
+        let _ = sock.shutdown(Shutdown::Write);
+        let mut go = [0u8; 1];
+        let _ = sock.read_exact(&mut go);
+    }
+    exit::REFUSED
+}
+
+fn teardown_and(leaf: &crate::cgroup::Leaf, faults: &Faults, on_ok: i32, why: &str) -> i32 {
+    match leaf.teardown(DRAIN_BOUND, faults.cgroup()) {
+        Ok(()) => on_ok,
+        Err(e) => {
+            eprintln!(
+                "sandboy: teardown failed at {}: {} (dominates {why})",
+                e.stage(),
+                e.message()
+            );
+            exit::TEARDOWN
+        }
+    }
+}
+
+// ---- the child role (post-fork child; never returns) --------------------------------------------
+
+struct ChildCtx<'a> {
+    policy: &'a SandboxPolicy,
+    request: &'a LaunchRequest,
+    bindings: &'a Bindings,
+    leaf_path: String,
+    target_fd: RawFd,
+    sock_fd: RawFd,
+    proof_w: RawFd,
+    release_r: RawFd,
+    close_first: [RawFd; 2],
+    faults: &'a Faults,
+}
+
+/// The launch child: close monitor-only fds → chdir → Landlock → env → fd-scrub+ledger → seccomp →
+/// self-check → prove placement → READY → block release → close proof/release → final ledger →
+/// `execveat`. On any failure it signals the stage and `_exit`s; the monitor tears the cgroup down.
+fn launch_child(ctx: ChildCtx<'_>) -> i32 {
+    // A) Close the monitor-only ends we inherited (proof-READ, release-WRITE, control socket), and put
+    //    /dev/null on stdin. The full scrub (step E) closes anything else.
+    for fd in ctx.close_first {
+        let _ = seccomp::close_fd(fd);
+    }
+    let _ = seccomp::close_fd(ctx.sock_fd);
+    if let Ok(devnull) = File::open("/dev/null") {
+        let _ = seccomp::dup2_fd(devnull.as_raw_fd(), 0);
+    }
+
+    // B) chdir to the launch-spec cwd BEFORE Landlock (afterwards the path may be unreachable).
+    let cwd = std::path::PathBuf::from(std::ffi::OsString::from_vec(ctx.request.cwd.clone()));
+    let _ = std::env::set_current_dir(&cwd);
+
+    // C) Landlock filesystem confinement + effect-check.
+    trip!(
+        ctx.faults,
+        LandlockCreate,
+        child_fail(&ctx, "landlock_create")
+    );
+    let fs_ok = install_landlock(&ctx);
+
+    // D) Build the target argv + env from the launch SPEC (never the inherited backend env).
+    let (argv, envp, env_ok) = build_argv_envp(&ctx);
+
+    // E) Fail-closed fd scrub + ledger: only stdio + target fd + proof-write + release-read may remain.
+    trip!(ctx.faults, FdVerify, child_fail(&ctx, "fd_verify"));
+    let keep = [0, 1, 2, ctx.target_fd, ctx.proof_w, ctx.release_r];
+    let fd_ok = scrub_and_verify(&keep);
+
+    // F) seccomp network/process deny + effect-check.
+    trip!(ctx.faults, SeccompApply, child_fail(&ctx, "seccomp_apply"));
+    let net_ok = install_seccomp_checked(&ctx);
+
+    // G) Prove placement in the monitor-owned leaf.
+    trip!(ctx.faults, CgroupVerify, child_fail(&ctx, "cgroup_verify"));
+    let cgroup_path = crate::cgroup::cgroup_path_of(std::process::id() as i32).unwrap_or_default();
+    let placement = cgroup_path == ctx.leaf_path;
+
+    // H) READY_TO_EXEC — one immutable record.
+    let all_ok = fs_ok && net_ok && env_ok && fd_ok && placement;
+    let proof = ChildProof {
+        ok: all_ok,
+        stage: first_failed_stage(fs_ok, net_ok, env_ok, fd_ok, placement),
+        child_pid: std::process::id() as i32,
+        cgroup_path,
+        nonce_hex: ctx.bindings.launch_nonce.as_str().to_owned(),
+        policy_digest: ctx.bindings.policy_digest.as_str().to_owned(),
+        launch_spec_digest: ctx.bindings.launch_spec_digest.as_str().to_owned(),
+        target_digest: ctx.bindings.target_digest.as_str().to_owned(),
+        fs: fs_ok,
+        net: net_ok,
+        env: env_ok,
+        fd: fd_ok,
+        placement,
+    };
+    trip!(ctx.faults, ReadyWrite, seccomp::exit_now(90));
+    if write_child_proof(ctx.proof_w, &proof).is_err() || !all_ok {
+        seccomp::exit_now(90);
+    }
+
+    // I) Block on the one-shot release token (reject extra bytes).
+    let mut token = [0u8; 1];
+    match seccomp::read_fd(ctx.release_r, &mut token) {
+        Ok(1) if token[0] == b'G' => {}
+        _ => seccomp::exit_now(91),
+    }
+    if !matches!(seccomp::read_fd(ctx.release_r, &mut [0u8; 1]), Ok(0)) {
+        seccomp::exit_now(91); // a one-shot channel: nothing may follow the single token
+    }
+
+    // J) Close proof + release fds; the final ledger must be ONLY {stdio, target fd}.
+    let _ = seccomp::close_fd(ctx.proof_w);
+    let _ = seccomp::close_fd(ctx.release_r);
+    if !verify_ledger(&[0, 1, 2, ctx.target_fd]) {
+        seccomp::exit_now(92);
+    }
+
+    // K) Become the target.
+    trip!(ctx.faults, Execveat, seccomp::exit_now(93));
+    let argv_ptrs: Vec<*const libc::c_char> = argv
+        .iter()
+        .map(|c| c.as_ptr())
+        .chain(std::iter::once(std::ptr::null()))
+        .collect();
+    let envp_ptrs: Vec<*const libc::c_char> = envp
+        .iter()
+        .map(|c| c.as_ptr())
+        .chain(std::iter::once(std::ptr::null()))
+        .collect();
+    let e = crate::landlock::execveat_replace(ctx.target_fd, &argv_ptrs, &envp_ptrs);
+    eprintln!("sandboy: execveat failed: {e}");
+    seccomp::exit_now(93)
+}
+
+#[cfg(feature = "fault-injection")]
+fn child_fail(ctx: &ChildCtx<'_>, stage: &str) -> ! {
+    let proof = ChildProof {
+        ok: false,
+        stage: stage.to_owned(),
+        child_pid: std::process::id() as i32,
+        cgroup_path: String::new(),
+        nonce_hex: ctx.bindings.launch_nonce.as_str().to_owned(),
+        policy_digest: ctx.bindings.policy_digest.as_str().to_owned(),
+        launch_spec_digest: ctx.bindings.launch_spec_digest.as_str().to_owned(),
+        target_digest: ctx.bindings.target_digest.as_str().to_owned(),
+        fs: false,
+        net: false,
+        env: false,
+        fd: false,
+        placement: false,
+    };
+    let _ = write_child_proof(ctx.proof_w, &proof);
+    seccomp::exit_now(90)
+}
+
+fn first_failed_stage(fs: bool, net: bool, env: bool, fd: bool, placement: bool) -> String {
+    if !fs {
+        "landlock_self_check"
+    } else if !fd {
+        "fd_verify"
+    } else if !net {
+        "seccomp_self_check"
+    } else if !env {
+        "env_verify"
+    } else if !placement {
+        "cgroup_verify"
+    } else {
+        "ok"
+    }
+    .to_owned()
+}
+
+// ---- child helpers ------------------------------------------------------------------------------
+
+/// Install Landlock for the worktree + allow_exec, treating the inherited sealed target fd as the
+/// detached-exception launch target. Returns whether the install was proven.
+fn install_landlock(ctx: &ChildCtx<'_>) -> bool {
+    let allow = ctx.policy.allow_exec.clone();
+    let target = seccomp::borrow_fd_as_file(ctx.target_fd);
+    match crate::landlock::install_filesystem(
+        &ctx.policy.worktree,
+        &allow,
+        std::env::temp_dir().as_path(),
+        Some(&target),
+        ctx.faults.landlock(),
+    ) {
+        Ok(()) => true,
+        Err(e) => {
+            eprintln!("sandboy: landlock not enforced: {e}");
+            false
+        }
+    }
+}
+
+fn install_seccomp_checked(ctx: &ChildCtx<'_>) -> bool {
+    match seccomp::install_seccomp(ctx.faults.seccomp()) {
+        Ok(()) => seccomp::network_is_denied(),
+        Err(e) => {
+            eprintln!("sandboy: seccomp not enforced: {e}");
+            false
+        }
+    }
+}
+
+/// Build the target's argv + envp as C strings from the launch specification, validating env names
+/// against the policy allowlist. `env_ok` is false if any name is not allowlisted.
+fn build_argv_envp(ctx: &ChildCtx<'_>) -> (Vec<CString>, Vec<CString>, bool) {
+    let argv: Vec<CString> = ctx
+        .request
+        .argv
+        .iter()
+        .filter_map(|a| CString::new(a.clone()).ok())
+        .collect();
+    let mut env_ok = true;
+    let mut envp = Vec::new();
+    for entry in &ctx.request.env {
+        let allowed = ctx
+            .policy
+            .env_allowlist
+            .iter()
+            .any(|n| n.as_encoded_bytes() == entry.name.as_slice());
+        if !allowed {
+            env_ok = false;
+            continue;
+        }
+        let mut kv = entry.name.clone();
+        kv.push(b'=');
+        kv.extend_from_slice(&entry.value);
+        match CString::new(kv) {
+            Ok(c) => envp.push(c),
+            Err(_) => env_ok = false,
+        }
+    }
+    (argv, envp, env_ok)
+}
+
+/// Close every open fd not in `keep`, then independently re-enumerate and require only keep-fds
+/// survive AND that no socket descriptor was inherited.
+fn scrub_and_verify(keep: &[RawFd]) -> bool {
+    let Ok(fds) = seccomp::list_fds() else {
+        return false;
+    };
+    for fd in fds {
+        if fd >= 0 && !keep.contains(&fd) {
+            let _ = seccomp::close_fd(fd);
+        }
+    }
+    if !verify_ledger(keep) {
+        return false;
+    }
+    match seccomp::list_fds() {
+        Ok(remaining) => !remaining.iter().any(|&fd| seccomp::fd_is_socket(fd)),
+        Err(_) => false,
+    }
+}
+
+/// The fd ledger as an executable contract: the open fd set must be a subset of `allowed`.
+fn verify_ledger(allowed: &[RawFd]) -> bool {
+    match seccomp::list_fds() {
+        Ok(fds) => fds.iter().all(|fd| allowed.contains(fd)),
+        Err(_) => false,
+    }
+}
+
+// ---- READY_TO_EXEC serialization (in-process, our code on both ends) ----------------------------
+
+const READY_MAGIC: &[u8; 4] = b"O7R1";
+const READY_MAX: usize = 64 * 1024;
+
+fn write_child_proof(pipe: RawFd, p: &ChildProof) -> Result<(), ()> {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(READY_MAGIC);
+    buf.push(u8::from(p.ok));
+    put_str(&mut buf, &p.stage);
+    buf.extend_from_slice(&p.child_pid.to_le_bytes());
+    put_str(&mut buf, &p.cgroup_path);
+    put_str(&mut buf, &p.nonce_hex);
+    put_str(&mut buf, &p.policy_digest);
+    put_str(&mut buf, &p.launch_spec_digest);
+    put_str(&mut buf, &p.target_digest);
+    buf.extend_from_slice(&[
+        u8::from(p.fs),
+        u8::from(p.net),
+        u8::from(p.env),
+        u8::from(p.fd),
+        u8::from(p.placement),
+    ]);
+    let mut framed = (buf.len() as u32).to_le_bytes().to_vec();
+    framed.extend_from_slice(&buf);
+    write_all_fd(pipe, &framed)
+}
+
+fn read_child_proof(pipe: RawFd, child_pid: i32) -> Result<ChildProof, String> {
+    let mut len = [0u8; 4];
+    read_exact_fd(pipe, &mut len).map_err(|_| "ready_eof".to_owned())?;
+    let n = u32::from_le_bytes(len) as usize;
+    if n == 0 || n > READY_MAX {
+        return Err("ready_malformed".to_owned());
+    }
+    let mut body = vec![0u8; n];
+    read_exact_fd(pipe, &mut body).map_err(|_| "ready_eof".to_owned())?;
+    let mut r = Reader { buf: &body, pos: 0 };
+    if r.take(4)? != READY_MAGIC {
+        return Err("ready_malformed".to_owned());
+    }
+    let ok = r.u8()? == 1;
+    let stage = r.string()?;
+    let pid = r.i32()?;
+    if pid != child_pid {
+        return Err("ready_pid".to_owned());
+    }
+    let cgroup_path = r.string()?;
+    let nonce_hex = r.string()?;
+    let policy_digest = r.string()?;
+    let launch_spec_digest = r.string()?;
+    let target_digest = r.string()?;
+    let fs = r.u8()? == 1;
+    let net = r.u8()? == 1;
+    let env = r.u8()? == 1;
+    let fd = r.u8()? == 1;
+    let placement = r.u8()? == 1;
+    if !ok {
+        return Err(stage);
+    }
+    Ok(ChildProof {
+        ok,
+        stage,
+        child_pid: pid,
+        cgroup_path,
+        nonce_hex,
+        policy_digest,
+        launch_spec_digest,
+        target_digest,
+        fs,
+        net,
+        env,
+        fd,
+        placement,
+    })
+}
+
+fn put_str(buf: &mut Vec<u8>, s: &str) {
+    buf.extend_from_slice(&(s.len() as u16).to_le_bytes());
+    buf.extend_from_slice(s.as_bytes());
+}
+
+/// A bounds-checked reader over the READY body (explicit lifetime — no elided-lifetime path).
+struct Reader<'a> {
+    buf: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Reader<'a> {
+    fn take(&mut self, n: usize) -> Result<&'a [u8], String> {
+        let end = self
+            .pos
+            .checked_add(n)
+            .ok_or("ready_malformed".to_owned())?;
+        let slice = self
+            .buf
+            .get(self.pos..end)
+            .ok_or("ready_malformed".to_owned())?;
+        self.pos = end;
+        Ok(slice)
+    }
+    fn u8(&mut self) -> Result<u8, String> {
+        self.take(1)?
+            .first()
+            .copied()
+            .ok_or_else(|| "ready_malformed".to_owned())
+    }
+    fn i32(&mut self) -> Result<i32, String> {
+        let b: [u8; 4] = self
+            .take(4)?
+            .try_into()
+            .map_err(|_| "ready_malformed".to_owned())?;
+        Ok(i32::from_le_bytes(b))
+    }
+    fn string(&mut self) -> Result<String, String> {
+        let l: [u8; 2] = self
+            .take(2)?
+            .try_into()
+            .map_err(|_| "ready_malformed".to_owned())?;
+        let n = u16::from_le_bytes(l) as usize;
+        let bytes = self.take(n)?.to_vec();
+        String::from_utf8(bytes).map_err(|_| "ready_malformed".to_owned())
+    }
+}
+
+fn write_all_fd(fd: RawFd, mut buf: &[u8]) -> Result<(), ()> {
+    while !buf.is_empty() {
+        match seccomp::write_fd(fd, buf) {
+            Ok(0) => return Err(()),
+            Ok(n) => buf = buf.get(n..).unwrap_or(&[]),
+            Err(e) if e == libc::EINTR => {}
+            Err(_) => return Err(()),
+        }
+    }
+    Ok(())
+}
+
+/// Read exactly `buf.len()` bytes from `fd` within `READY_BOUND`; EOF is an error.
+fn read_exact_fd(fd: RawFd, buf: &mut [u8]) -> Result<(), ()> {
+    let start = Instant::now();
+    let mut off = 0;
+    while off < buf.len() {
+        if start.elapsed() > READY_BOUND {
+            return Err(());
+        }
+        let Some(slice) = buf.get_mut(off..) else {
+            return Err(());
+        };
+        match seccomp::read_fd(fd, slice) {
+            Ok(0) => return Err(()),
+            Ok(n) => off += n,
+            Err(e) if e == libc::EINTR => {}
+            Err(_) => return Err(()),
+        }
+    }
+    Ok(())
+}

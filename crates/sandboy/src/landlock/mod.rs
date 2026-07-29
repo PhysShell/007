@@ -22,6 +22,10 @@
 
 mod sys;
 
+// The `execveat` primitive the VB-4 launch child uses to become the sealed target (its `unsafe` lives
+// in `sys`). Re-exported at `crate::landlock::execveat_replace`.
+pub(crate) use sys::execveat_replace;
+
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write as _};
 use std::os::fd::AsRawFd as _;
@@ -36,6 +40,7 @@ fn is_denied(err: &io::Error) -> bool {
     matches!(err.raw_os_error(), Some(libc::EACCES) | Some(libc::EPERM))
 }
 
+#[cfg(feature = "test-harness")]
 fn errno_of(err: &io::Error) -> i32 {
     err.raw_os_error().unwrap_or(0)
 }
@@ -81,6 +86,7 @@ pub(crate) enum InstallError {
 }
 
 impl InstallError {
+    #[cfg(feature = "test-harness")]
     pub(crate) fn stage(&self) -> &'static str {
         match self {
             InstallError::Unsupported(_) => "unsupported",
@@ -98,6 +104,7 @@ impl InstallError {
             InstallError::SelfCheckInsideDenied(_) => "self_check_inside",
         }
     }
+    #[cfg(feature = "test-harness")]
     pub(crate) fn exit_code(&self) -> i32 {
         match self {
             InstallError::CreateRuleset(_) => 80,
@@ -172,20 +179,21 @@ impl std::fmt::Display for InstallError {
 /// TEST-ONLY forced-fault knob (`O7_LL_FAULT`), letting the confinement tests force a specific
 /// install stage — including the hard-to-stage self-check verdicts — to fail without a broken kernel.
 #[derive(Debug, Clone, Copy, Default)]
-struct Faults {
-    abi_enosys: bool,
-    abi_eopnotsupp: bool,
-    abi_low: bool,
-    create: bool,
-    add_rule: bool,
-    add_rule_partial: bool,
-    omit_worktree_rule: bool,
-    no_new_privs: bool,
-    restrict_self: bool,
-    selfcheck_outside_notdenied: bool,
+pub(crate) struct Faults {
+    pub(crate) abi_enosys: bool,
+    pub(crate) abi_eopnotsupp: bool,
+    pub(crate) abi_low: bool,
+    pub(crate) create: bool,
+    pub(crate) add_rule: bool,
+    pub(crate) add_rule_partial: bool,
+    pub(crate) omit_worktree_rule: bool,
+    pub(crate) no_new_privs: bool,
+    pub(crate) restrict_self: bool,
+    pub(crate) selfcheck_outside_notdenied: bool,
 }
 
 impl Faults {
+    #[cfg(feature = "test-harness")]
     fn from_env() -> Faults {
         let mut f = Faults::default();
         match std::env::var("O7_LL_FAULT").ok().as_deref() {
@@ -323,7 +331,7 @@ fn identity_of(file: &File) -> Result<(u64, u64), InstallError> {
 /// launch target — an anonymous inode no path rule can name — is the ONE `allow_exec` object that is
 /// deliberately NOT given a path rule (it runs via `execveat`); every other unruleable object fails
 /// closed.
-fn install_filesystem(
+pub(crate) fn install_filesystem(
     worktree: &Path,
     allow_exec: &[PathBuf],
     outside_probe: &Path,
@@ -487,6 +495,7 @@ fn install_filesystem(
 
 // --- harness entry ---
 
+#[cfg(feature = "test-harness")]
 enum Op {
     Fs {
         create: PathBuf,
@@ -499,6 +508,7 @@ enum Op {
     },
 }
 
+#[cfg(feature = "test-harness")]
 struct Args {
     result: PathBuf,
     worktree: PathBuf,
@@ -507,6 +517,7 @@ struct Args {
     op: Op,
 }
 
+#[cfg(feature = "test-harness")]
 fn parse_args() -> Option<Args> {
     let mut it = std::env::args_os().skip(2); // program + "__landlock-run"
     let mut result = None;
@@ -547,6 +558,7 @@ fn parse_args() -> Option<Args> {
 }
 
 /// Open `path` under `opts`, returning the `key=OK` / `key=ERR:<errno>` token the frozen oracle reads.
+#[cfg(feature = "test-harness")]
 fn probe(key: &str, opts: &OpenOptions, path: &Path) -> String {
     match opts.open(path) {
         Ok(_) => format!("{key}=OK\n"),
@@ -558,6 +570,7 @@ fn probe(key: &str, opts: &OpenOptions, path: &Path) -> String {
 /// filesystem policy, then — ONLY if fully enforced — run the requested probe op inside the
 /// confinement. On any install failure, record `filesystem=not_enforced` + the stage and DO NOT run
 /// the op (never launch).
+#[cfg(feature = "test-harness")]
 pub(crate) fn harness_main() -> i32 {
     let Some(args) = parse_args() else {
         eprintln!("sandboy __landlock-run: bad arguments");

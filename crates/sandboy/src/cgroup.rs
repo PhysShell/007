@@ -19,6 +19,7 @@
 
 use std::io::{self, Write as _};
 use std::path::{Path, PathBuf};
+#[cfg(feature = "test-harness")]
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -50,15 +51,69 @@ fn read_members(cgroup_dir: &Path) -> io::Result<Vec<i32>> {
     Ok(raw.lines().filter_map(|l| l.trim().parse().ok()).collect())
 }
 
-/// TEST-ONLY forced-fault knob, read from the control-plane env. Lets the confinement tests force a
-/// specific teardown step to fail and prove the fail-closed path, with no external dependency.
-#[derive(Debug, Clone, Copy, Default)]
-struct Faults {
-    move_out: bool,
-    kill: bool,
-    drain: bool,
+/// A monitor-owned cgroup v2 leaf. The monitor creates a dedicated non-root leaf under its OWN
+/// delegated cgroup and moves itself in, so a later-forked child inherits the leaf by placement. The
+/// monitor alone tears it down (move self out → `cgroup.kill` → drain → rmdir); teardown failure is
+/// authoritative. This is the production handle VB-4's launch monitor uses.
+pub(crate) struct Leaf {
+    dir: PathBuf,
+    parent_dir: PathBuf,
+    parent_path: String,
+    leaf_path: String,
 }
 
+impl Leaf {
+    /// Create the leaf and move the CURRENT process (the monitor) into it.
+    pub(crate) fn establish() -> io::Result<Leaf> {
+        let self_pid = std::process::id() as i32;
+        let parent_path = cgroup_path_of(self_pid)?;
+        let parent_dir = cgroup_dir(&parent_path);
+        let leaf_path = format!("{parent_path}/o7cg-{self_pid}");
+        let dir = cgroup_dir(&leaf_path);
+        std::fs::create_dir(&dir)?;
+        move_pid_into(&dir, self_pid)?;
+        Ok(Leaf {
+            dir,
+            parent_dir,
+            parent_path,
+            leaf_path,
+        })
+    }
+    /// The unified cgroup PATH of this leaf (for placement proofs).
+    pub(crate) fn path(&self) -> &str {
+        &self.leaf_path
+    }
+    /// Whether `pid` is currently placed EXACTLY in this leaf.
+    pub(crate) fn contains(&self, pid: i32) -> io::Result<bool> {
+        Ok(cgroup_path_of(pid)? == self.leaf_path)
+    }
+    /// Move the monitor back out, PROVE placement in the parent, `cgroup.kill`, observe the drain, and
+    /// remove the leaf — fail-closed + typed (see [`teardown`]).
+    pub(crate) fn teardown(
+        &self,
+        drain_bound: Duration,
+        faults: Faults,
+    ) -> Result<(), TeardownError> {
+        teardown(
+            &self.dir,
+            &self.parent_dir,
+            &self.parent_path,
+            drain_bound,
+            faults,
+        )
+    }
+}
+
+/// Forced-fault knob for the teardown stages. In production it is built from the VB-4 `FaultPoint`
+/// (test-only, compile-gated); the VB-1 standalone harness builds it from `O7_CG_FAULT`.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Faults {
+    pub(crate) move_out: bool,
+    pub(crate) kill: bool,
+    pub(crate) drain: bool,
+}
+
+#[cfg(feature = "test-harness")]
 fn faults_from_env() -> Faults {
     match std::env::var("O7_CG_FAULT").ok().as_deref() {
         Some("move_out") => Faults {
@@ -80,7 +135,7 @@ fn faults_from_env() -> Faults {
 /// A teardown step that failed — named so the harness can surface WHICH stage refused and so a
 /// downgrade at any step never masquerades as a clean teardown.
 #[derive(Debug)]
-enum TeardownError {
+pub(crate) enum TeardownError {
     MoveOut(String),
     Placement(String),
     Kill(String),
@@ -89,7 +144,7 @@ enum TeardownError {
 }
 
 impl TeardownError {
-    fn stage(&self) -> &'static str {
+    pub(crate) fn stage(&self) -> &'static str {
         match self {
             TeardownError::MoveOut(_) => "move_out",
             TeardownError::Placement(_) => "verify_placement",
@@ -99,7 +154,7 @@ impl TeardownError {
         }
     }
     /// A distinct non-zero exit per teardown stage.
-    fn exit_code(&self) -> i32 {
+    pub(crate) fn exit_code(&self) -> i32 {
         match self {
             TeardownError::MoveOut(_) => 72,
             TeardownError::Placement(_) => 73,
@@ -108,7 +163,7 @@ impl TeardownError {
             TeardownError::Rmdir(_) => 76,
         }
     }
-    fn message(&self) -> &str {
+    pub(crate) fn message(&self) -> &str {
         match self {
             TeardownError::MoveOut(m)
             | TeardownError::Placement(m)
@@ -208,6 +263,7 @@ fn teardown(
 /// The result of one monitored run, written to the harness `--result` file as `key=value` lines so
 /// the confinement test can verify FACTS the monitor observed. `drained`/`dir_removed` are true only
 /// when actually OBSERVED; `teardown_stage` is `ok` or the stage that refused.
+#[cfg(feature = "test-harness")]
 struct RunResult {
     leaf: PathBuf,
     monitor_pid: i32,
@@ -219,7 +275,9 @@ struct RunResult {
     elapsed_ms: u128,
 }
 
+#[cfg(feature = "test-harness")]
 impl RunResult {
+    #[cfg(feature = "test-harness")]
     fn write(&self, path: &Path) -> io::Result<()> {
         let members = self
             .members
@@ -243,6 +301,7 @@ impl RunResult {
 }
 
 /// Parsed `__cgroup-run` arguments.
+#[cfg(feature = "test-harness")]
 struct HarnessArgs {
     result: PathBuf,
     deadline: Duration,
@@ -251,6 +310,7 @@ struct HarnessArgs {
     target_args: Vec<std::ffi::OsString>,
 }
 
+#[cfg(feature = "test-harness")]
 fn parse_harness_args() -> Option<HarnessArgs> {
     let mut it = std::env::args_os().skip(2); // skip program name + "__cgroup-run"
     let mut result = None;
@@ -280,6 +340,7 @@ fn parse_harness_args() -> Option<HarnessArgs> {
 /// TEST-HARNESS ENTRY (`sandboy __cgroup-run …`): create a dedicated leaf, become its owner, run the
 /// target inside it under an ABSOLUTE wall-clock deadline, tear the tree down fail-closed via
 /// `cgroup.kill`, and record what was observed. Never leaves a cgroup behind on a setup failure.
+#[cfg(feature = "test-harness")]
 pub(crate) fn harness_main() -> i32 {
     let Some(args) = parse_harness_args() else {
         eprintln!("sandboy __cgroup-run: bad arguments");
@@ -418,6 +479,7 @@ pub(crate) fn harness_main() -> i32 {
 }
 
 /// Sleep until `at` (no-op if already past), in small steps.
+#[cfg(feature = "test-harness")]
 fn sleep_until(at: Instant) {
     while Instant::now() < at {
         let remaining = at.saturating_duration_since(Instant::now());
@@ -427,6 +489,7 @@ fn sleep_until(at: Instant) {
 
 /// Teardown on a SETUP-failure path (no target running yet, or leaf-join failed) and fold the
 /// observed drain/dir-removal + stage into `result`.
+#[cfg(feature = "test-harness")]
 fn finish_teardown(
     result: &mut RunResult,
     leaf: &Path,

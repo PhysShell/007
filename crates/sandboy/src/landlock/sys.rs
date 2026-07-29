@@ -178,11 +178,38 @@ pub(crate) fn restrict_self(ruleset: &OwnedFd) -> io::Result<()> {
     }
 }
 
+/// `execveat(fd, "", argv, envp, AT_EMPTY_PATH)` — replace THIS process with the program at the
+/// already-open `fd` (a sealed memfd), using a caller-built argv/envp. Returns only on failure (the
+/// `io::Error`); on success the process is replaced. `argv`/`envp` must be NULL-terminated arrays of
+/// valid C-string pointers that outlive the call. The VB-4 launch child calls this after it has
+/// installed + self-checked the full confinement, so the target inherits it.
+pub(crate) fn execveat_replace(
+    fd: RawFd,
+    argv: &[*const libc::c_char],
+    envp: &[*const libc::c_char],
+) -> io::Error {
+    // SAFETY: `fd` is an open, owned fd; `argv`/`envp` are NULL-terminated pointer arrays that live
+    // across the call; `""` + AT_EMPTY_PATH names the fd itself. execveat replaces the process or
+    // returns -1 with errno set.
+    unsafe {
+        libc::syscall(
+            libc::SYS_execveat,
+            fd,
+            c"".as_ptr(),
+            argv.as_ptr(),
+            envp.as_ptr(),
+            libc::AT_EMPTY_PATH,
+        );
+    }
+    io::Error::last_os_error()
+}
+
 /// Spawn a child that `execveat`s the already-open `fd` with `AT_EMPTY_PATH` (i.e. `fexecve`), passing
 /// `arg` as argv[1]. Executing via an fd — opened BEFORE `restrict_self` — is how a sealed memfd (an
 /// anonymous inode with no filesystem path, so un-nameable by a path rule) runs under Landlock, while
 /// a real file's execute right is still enforced by the kernel at `execveat`. Returns the child on a
 /// successful hand-off; a Landlock/exec denial surfaces as the spawn `io::Error` (EACCES/EPERM).
+#[cfg(feature = "test-harness")]
 pub(crate) fn spawn_via_execveat(
     fd: RawFd,
     arg: &std::ffi::OsStr,

@@ -18,13 +18,28 @@
 
 mod sys;
 
+// The process/fd raw primitives the VB-4 launch state machine drives from safe code (their `unsafe`
+// lives in `sys`). Re-exported at `crate::seccomp::*` so `launch` needs no new unsafe location.
+pub(crate) use sys::{
+    borrow_fd_as_file, close_fd, dup2_fd, exit_now, fd_is_socket, fork_raw, list_fds,
+    make_pipe_cloexec, read_fd, try_wait, write_fd, ForkResult,
+};
+
 use std::collections::BTreeMap;
+// These are used only by the `test-harness`-gated standalone `__seccomp-run` driver.
+#[cfg(feature = "test-harness")]
 use std::ffi::OsString;
+#[cfg(feature = "test-harness")]
 use std::fs::File;
+#[cfg(feature = "test-harness")]
 use std::io::Write as _;
-use std::os::fd::{AsRawFd as _, RawFd};
+#[cfg(feature = "test-harness")]
+use std::os::fd::AsRawFd as _;
+use std::os::fd::RawFd;
+#[cfg(feature = "test-harness")]
 use std::path::PathBuf;
 
+#[cfg(feature = "test-harness")]
 use o7_sandbox_protocol::ids::Digest256;
 use seccompiler::{
     BpfProgram, SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition, SeccompFilter,
@@ -34,7 +49,9 @@ use seccompiler::{
 const EPERM: i32 = libc::EPERM;
 
 /// Why the seccomp policy is not a proven, fully-enforced boundary. Typed, distinct stage + exit code.
+/// Some variants/accessors are constructed only by the test-harness/fault paths; inert in pure prod.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) enum InstallError {
     /// Not x86_64 — the x32 guarantee is expressed for x86_64 only; fail the arch gate, never Allow.
     #[allow(dead_code)]
@@ -54,6 +71,7 @@ pub(crate) enum InstallError {
 }
 
 impl InstallError {
+    #[cfg(feature = "test-harness")]
     pub(crate) fn stage(&self) -> &'static str {
         match self {
             InstallError::UnsupportedArch => "unsupported_arch",
@@ -66,6 +84,7 @@ impl InstallError {
             InstallError::EffectMismatch(_) => "effect_mismatch",
         }
     }
+    #[cfg(feature = "test-harness")]
     pub(crate) fn exit_code(&self) -> i32 {
         match self {
             InstallError::UnsupportedArch => 93,
@@ -100,7 +119,8 @@ impl std::fmt::Display for InstallError {
 /// TEST-ONLY forced-fault knob (`O7_SC_FAULT`): forces one install/effect/scrub failure so every
 /// fail-closed verdict is provable.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-enum Fault {
+#[allow(dead_code)]
+pub(crate) enum Fault {
     #[default]
     None,
     NoNewPrivs,
@@ -116,6 +136,7 @@ enum Fault {
 }
 
 impl Fault {
+    #[cfg(feature = "test-harness")]
     fn from_env() -> Fault {
         match std::env::var("O7_SC_FAULT").ok().as_deref() {
             Some("no_new_privs") => Fault::NoNewPrivs,
@@ -199,6 +220,7 @@ fn build_bpf(fault: Fault) -> Result<BpfProgram, InstallError> {
     }
 }
 
+#[cfg(feature = "test-harness")]
 fn bpf_to_bytes(bpf: &BpfProgram) -> Vec<u8> {
     let mut out = Vec::with_capacity(bpf.len() * 8);
     for insn in bpf {
@@ -211,13 +233,22 @@ fn bpf_to_bytes(bpf: &BpfProgram) -> Vec<u8> {
 }
 
 /// The digest of the canonical (fault-free) compiled BPF — frozen by a test.
+#[cfg(feature = "test-harness")]
 pub(crate) fn compiled_bpf_digest() -> Result<Digest256, InstallError> {
     let bpf = build_bpf(Fault::None)?;
     Ok(Digest256::of_bytes(&bpf_to_bytes(&bpf)))
 }
 
+/// Post-install effect self-check for the network dimension: IPv4/IPv6 socket creation is denied
+/// (EXACTLY EPERM) while AF_UNIX still succeeds. Used by the VB-4 launch child's self-check.
+pub(crate) fn network_is_denied() -> bool {
+    matches!(sys::probe_socket(libc::AF_INET, false), Err(e) if e == EPERM)
+        && matches!(sys::probe_socket(libc::AF_INET6, false), Err(e) if e == EPERM)
+        && sys::probe_socket(libc::AF_UNIX, false).is_ok()
+}
+
 /// Install the filter on THIS thread (inherited across fork/exec): `no_new_privs` then `apply_filter`.
-fn install_seccomp(fault: Fault) -> Result<(), InstallError> {
+pub(crate) fn install_seccomp(fault: Fault) -> Result<(), InstallError> {
     if fault == Fault::NoNewPrivs {
         return Err(InstallError::NoNewPrivs(EPERM));
     }
@@ -231,6 +262,7 @@ fn install_seccomp(fault: Fault) -> Result<(), InstallError> {
 
 /// Close every inherited fd not in `keep`, then PROVE it by independent re-enumeration: only keep-fds
 /// may survive. Fail-closed — enumeration/parse failures and any survivor are typed errors.
+#[cfg(feature = "test-harness")]
 fn scrub_fds(keep: &[RawFd], fault: Fault) -> Result<(), InstallError> {
     if fault == Fault::FdEnumFail {
         return Err(InstallError::FdScrub(libc::EIO));
@@ -256,6 +288,7 @@ fn scrub_fds(keep: &[RawFd], fault: Fault) -> Result<(), InstallError> {
 }
 
 /// Remove every env var whose name is not in `allow`.
+#[cfg(feature = "test-harness")]
 fn scrub_env(allow: &[OsString]) {
     let names: Vec<OsString> = std::env::vars_os().map(|(k, _)| k).collect();
     for name in names {
@@ -265,6 +298,7 @@ fn scrub_env(allow: &[OsString]) {
     }
 }
 
+#[cfg(feature = "test-harness")]
 fn token(key: &str, res: Result<(), i32>) -> String {
     match res {
         Ok(()) => format!("{key}=OK\n"),
@@ -272,18 +306,21 @@ fn token(key: &str, res: Result<(), i32>) -> String {
     }
 }
 
+#[cfg(feature = "test-harness")]
 fn is_eperm(res: &Result<(), i32>) -> bool {
     matches!(res, Err(e) if *e == EPERM)
 }
 
 // --- harness entry ---
 
+#[cfg(feature = "test-harness")]
 struct Args {
     result: PathBuf,
     check_fd_closed: Option<RawFd>,
     env_allow: Vec<OsString>,
 }
 
+#[cfg(feature = "test-harness")]
 fn parse_args() -> Option<Args> {
     let mut it = std::env::args_os().skip(2);
     let mut result = None;
@@ -308,6 +345,7 @@ fn parse_args() -> Option<Args> {
 /// baseline probes (participating in the verdict) → install seccomp → differential exact-EPERM
 /// self-check (incl. io_uring, x32, fork inheritance, child-side zero-inherited-sockets, byte-exact
 /// env). `seccomp=enforced` is written ONLY if every effect matches; else `not_enforced` + the stage.
+#[cfg(feature = "test-harness")]
 pub(crate) fn harness_main() -> i32 {
     let Some(args) = parse_args() else {
         eprintln!("sandboy __seccomp-run: bad arguments");
@@ -449,6 +487,7 @@ pub(crate) fn harness_main() -> i32 {
     0
 }
 
+#[cfg(feature = "test-harness")]
 fn finish_err(mut out: File, rec: &mut String, e: &InstallError) -> i32 {
     rec.insert_str(0, &format!("seccomp=not_enforced\nstage={}\n", e.stage()));
     let _ = out.write_all(rec.as_bytes());
