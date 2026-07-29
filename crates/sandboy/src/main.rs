@@ -129,7 +129,15 @@ fn run() -> i32 {
             return exit::REPORT_BUILD;
         }
     };
-    let identity = match BackendIdentity::new("sandboy-linux", env!("CARGO_PKG_VERSION")) {
+    // The production identity. A `fault-injection` build is a DISTINCT artifact (the compiled fault
+    // seam) and MUST carry a distinct identity so it can never be bound as the production backend: the
+    // GREEN oracles bind the production digest+identity, so a fault artifact (different digest AND
+    // version) is rejected on both. The frozen setup-failure oracles bind THIS fault identity.
+    #[cfg(not(feature = "fault-injection"))]
+    const BACKEND_VERSION: &str = env!("CARGO_PKG_VERSION");
+    #[cfg(feature = "fault-injection")]
+    const BACKEND_VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "+faultinject");
+    let identity = match BackendIdentity::new("sandboy-linux", BACKEND_VERSION) {
         Ok(id) => id,
         Err(_) => {
             eprintln!("sandboy: static backend identity is invalid");

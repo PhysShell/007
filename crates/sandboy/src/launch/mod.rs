@@ -37,7 +37,7 @@ use crate::seccomp::{self, ForkResult};
 #[cfg(feature = "fault-injection")]
 pub(crate) mod fault;
 #[cfg(feature = "fault-injection")]
-pub(crate) use fault::Faults;
+pub(crate) use fault::{monitor_faults, Faults};
 
 /// In a production/default build the fault seam carries nothing and every mapping is a no-op, so no
 /// fault-point names or parser reach the binary.
@@ -226,6 +226,12 @@ pub(crate) fn run_confined_launch(
     bindings: Bindings,
     faults: &Faults,
 ) -> i32 {
+    // An unknown/malformed fault selection must abort the launch (never run the target).
+    #[cfg(feature = "fault-injection")]
+    if faults.is_invalid() {
+        return refuse_before_child(sock, &bindings, "invalid_fault");
+    }
+
     // 1. Open the sealed target BEFORE anything — its path resolves the worker's fd table, which a
     //    confined child could not open post-Landlock. The child inherits and `execveat`s this fd.
     let target = match File::open(target_path) {
@@ -523,30 +529,29 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
     let cwd = std::path::PathBuf::from(std::ffi::OsString::from_vec(ctx.request.cwd.clone()));
     let _ = std::env::set_current_dir(&cwd);
 
-    // C) Landlock filesystem confinement + effect-check.
-    trip!(
-        ctx.faults,
-        LandlockCreate,
-        child_fail(&ctx, "landlock_create")
-    );
+    // C) Landlock filesystem confinement + effect-check. A `landlock_*` fault is injected THROUGH the
+    //    real install (via `faults.landlock()`), so the genuine install fails at that exact stage.
     let fs_ok = install_landlock(&ctx);
 
     // D) Build the target argv + env from the launch SPEC (never the inherited backend env).
-    let (argv, envp, env_ok) = build_argv_envp(&ctx);
+    let (argv, envp, env_built) = build_argv_envp(&ctx);
 
     // E) Fail-closed fd scrub + ledger: only stdio + target fd + proof-write + release-read may remain.
-    trip!(ctx.faults, FdVerify, child_fail(&ctx, "fd_verify"));
     let keep = [0, 1, 2, ctx.target_fd, ctx.proof_w, ctx.release_r];
-    let fd_ok = scrub_and_verify(&keep);
+    let fd_built = scrub_and_verify(&keep);
 
-    // F) seccomp network/process deny + effect-check.
-    trip!(ctx.faults, SeccompApply, child_fail(&ctx, "seccomp_apply"));
+    // F) seccomp network/process deny + effect-check. A `seccomp_*` fault is injected THROUGH the real
+    //    install (via `faults.seccomp()`).
     let net_ok = install_seccomp_checked(&ctx);
 
     // G) Prove placement in the monitor-owned leaf.
-    trip!(ctx.faults, CgroupVerify, child_fail(&ctx, "cgroup_verify"));
     let cgroup_path = crate::cgroup::cgroup_path_of(std::process::id() as i32).unwrap_or_default();
-    let placement = cgroup_path == ctx.leaf_path;
+    let placement_built = cgroup_path == ctx.leaf_path;
+
+    // The launch-level dimension faults (fd/env/cgroup-verify) override the proven flag, so the child
+    // reports the dimension NOT enforced and the monitor's report is downgraded.
+    let (fd_ok, env_ok, placement) =
+        apply_launch_faults(ctx.faults, fd_built, env_built, placement_built);
 
     // H) READY_TO_EXEC — one immutable record.
     let all_ok = fs_ok && net_ok && env_ok && fd_ok && placement;
@@ -604,27 +609,6 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
     seccomp::exit_now(93)
 }
 
-#[cfg(feature = "fault-injection")]
-fn child_fail(ctx: &ChildCtx<'_>, stage: &str) -> ! {
-    let proof = ChildProof {
-        ok: false,
-        stage: stage.to_owned(),
-        child_pid: std::process::id() as i32,
-        cgroup_path: String::new(),
-        nonce_hex: ctx.bindings.launch_nonce.as_str().to_owned(),
-        policy_digest: ctx.bindings.policy_digest.as_str().to_owned(),
-        launch_spec_digest: ctx.bindings.launch_spec_digest.as_str().to_owned(),
-        target_digest: ctx.bindings.target_digest.as_str().to_owned(),
-        fs: false,
-        net: false,
-        env: false,
-        fd: false,
-        placement: false,
-    };
-    let _ = write_child_proof(ctx.proof_w, &proof);
-    seccomp::exit_now(90)
-}
-
 fn first_failed_stage(fs: bool, net: bool, env: bool, fd: bool, placement: bool) -> String {
     if !fs {
         "landlock_self_check"
@@ -643,6 +627,30 @@ fn first_failed_stage(fs: bool, net: bool, env: bool, fd: bool, placement: bool)
 }
 
 // ---- child helpers ------------------------------------------------------------------------------
+
+/// Apply the launch-level (fd/env/placement) dimension faults. In production this is the identity.
+#[cfg(feature = "fault-injection")]
+fn apply_launch_faults(
+    faults: &Faults,
+    fd: bool,
+    env: bool,
+    placement: bool,
+) -> (bool, bool, bool) {
+    (
+        fd && !faults.tripped(fault::FaultId::FdVerify),
+        env && !faults.tripped(fault::FaultId::EnvVerify),
+        placement && !faults.tripped(fault::FaultId::CgroupVerify),
+    )
+}
+#[cfg(not(feature = "fault-injection"))]
+fn apply_launch_faults(
+    _faults: &Faults,
+    fd: bool,
+    env: bool,
+    placement: bool,
+) -> (bool, bool, bool) {
+    (fd, env, placement)
+}
 
 /// Install Landlock for the worktree + allow_exec, treating the inherited sealed target fd as the
 /// detached-exception launch target. Returns whether the install was proven.
