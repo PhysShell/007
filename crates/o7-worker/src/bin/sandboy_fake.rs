@@ -21,6 +21,7 @@
 )]
 
 use std::ffi::OsString;
+use std::fs::File;
 use std::io::{Read as _, Write as _};
 use std::net::Shutdown;
 use std::os::fd::AsFd as _;
@@ -28,6 +29,8 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
+
+use o7_worker::fd_scrub::inherited_fds_to_scrub;
 
 use o7_sandbox_protocol::frame::encode;
 use o7_sandbox_protocol::ids::{BackendIdentity, Digest256, LaunchNonce};
@@ -286,26 +289,40 @@ fn run() -> i32 {
     let _ = nix::unistd::close(0);
 
     // SCRUB the whole inherited descriptor set except stdout/stderr (1/2): enumerate /proc/self/fd
-    // and close every other fd, so neither the control channel NOR any other inherited descriptor
-    // leaks into the target. A range or a fixed close set is not enough — an arbitrary high fd
-    // would survive. Single-threaded here, so enumerate-then-close is race-free (collect all
-    // numbers first, then close, so we never mutate the directory we are iterating). fd 0 is
-    // already closed above; the target's own stdin is set to null below.
-    let mut inherited = Vec::new();
-    if let Ok(entries) = std::fs::read_dir("/proc/self/fd") {
-        for entry in entries.flatten() {
-            if let Some(fd) = entry
-                .file_name()
-                .to_str()
-                .and_then(|n| n.parse::<i32>().ok())
-            {
-                if fd > 2 {
-                    inherited.push(fd);
-                }
+    // and close every other inherited fd, so neither the control channel NOR any other inherited
+    // descriptor leaks into the target. A range or a fixed close set is not enough — an arbitrary
+    // high fd would survive. `inherited_fds_to_scrub` excludes the enumeration handle by its EXACT
+    // `dirfd` (so it is never swept into the close-set and double-closed) and FAILS CLOSED on an
+    // enumeration/parse error — a scrub we cannot complete must abort the launch, never start the
+    // target with an un-scrubbed table. We drop the `Dir` (releasing `dirfd`) BEFORE the close loop
+    // so that handle is closed exactly once, by its own drop. Single-threaded here, so
+    // collect-then-close is race-free. fd 0 is already closed above; the target's own stdin is set
+    // to null below.
+    let scrub = {
+        let dir_file = match File::open("/proc/self/fd") {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("sandboy_fake: cannot open /proc/self/fd for scrub: {e}");
+                return 69;
+            }
+        };
+        let mut dir = match nix::dir::Dir::from(dir_file) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("sandboy_fake: cannot fdopendir /proc/self/fd: {e}");
+                return 69;
+            }
+        };
+        match inherited_fds_to_scrub(&mut dir) {
+            Ok(fds) => fds,
+            Err(e) => {
+                eprintln!("sandboy_fake: refusing to launch, fd enumeration failed: {e}");
+                return 69;
             }
         }
-    }
-    for fd in inherited {
+        // `dir` drops here (closes `dirfd`) before the close loop below runs.
+    };
+    for fd in scrub {
         let _ = nix::unistd::close(fd);
     }
 
