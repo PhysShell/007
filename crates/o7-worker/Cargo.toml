@@ -52,7 +52,13 @@ required-features = ["test-harness"]
 # feature may be enabled from exactly ONE dependency edge — o7-worker's own `[dev-dependencies]`
 # self-edge below — and from nowhere else. A production dependency edge that enables it fails the
 # policy gate in CI.
-test-harness = []
+#
+# `nix/dir` is a harness-only capability: the `fd_scrub` module (also `#[cfg(feature =
+# "test-harness")]`) enumerates `/proc/self/fd` through a `nix::dir::Dir` whose `dirfd` is the EXACT
+# descriptor the scan occupies. Forwarding it through this feature — rather than adding it to the base
+# `nix` dependency below — keeps the DEFAULT production feature graph free of `nix/dir`, since nothing
+# in a production build uses it. (`dir = ["fs"]`; `fs` is already enabled — no new crate, no unsafe.)
+test-harness = ["nix/dir"]
 
 [dependencies]
 tokio = { version = "1", default-features = false, features = [
@@ -81,17 +87,15 @@ getrandom = "0.2"
 # (the tree forbids `unsafe`). nix is MIT (allowed in deny.toml).
 # `fs`/`mman`: Sandboy acquisition stages backend/target bytes into an anonymous memfd and
 # seals it (memfd_create + F_ADD_SEALS + F_GET_SEALS) via nix's SAFE API (the tree forbids
-# `unsafe`), so a held object is genuinely immutable, not merely a held mutable inode.
-# `dir`: the test-harness fd scrub (`fd_scrub`) enumerates `/proc/self/fd` through a `Dir` whose
-# `dirfd` is the EXACT descriptor the scan occupies, so it can be excluded by identity rather than
-# by a readlink-target guess (`dir = ["fs"]`, already enabled — no unsafe, no new crate).
+# `unsafe`), so a held object is genuinely immutable, not merely a held mutable inode. (`dir` is a
+# harness-only capability forwarded through the `test-harness` feature above, NOT added here, so the
+# default production graph stays free of it.)
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", default-features = false, features = [
     "signal",
     "process",
     "fs",
     "mman",
-    "dir",
 ] }
 # Hardened target ACQUISITION: open the source with O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC and
 # prove it a regular object before staging (a symlink final component fails closed, a FIFO/
