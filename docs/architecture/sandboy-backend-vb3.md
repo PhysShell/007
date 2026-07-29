@@ -26,6 +26,13 @@ arg0 ∈ {`AF_INET`, `AF_INET6`} (two OR-ed rules; `AF_UNIX` matches neither →
 family-scoped, not a blanket socket ban), and `setsid`/`setpgid` denied unconditionally (empty rule
 vectors).
 
+**Network deny-all is REAL, not a single-door lock.** `socket(2)` is not the only way to create an
+INET socket: io_uring's `IORING_OP_SOCKET` does the equivalent. So the filter ALSO denies
+`io_uring_setup`/`io_uring_enter`/`io_uring_register` (no ring → no `IORING_OP_SOCKET`; and `enter`/
+`register` deny + the fd scrub close the inherited-ring path). An oracle proves `io_uring_setup`
+succeeds unconfined and is `EPERM` after — one green `socket(AF_INET)` would only prove one locked door
+in a building with a known service entrance.
+
 `seccompiler`'s compiled BPF already begins with an architecture gate that returns
 `SECCOMP_RET_KILL_PROCESS` on an `AUDIT_ARCH` mismatch — fail-closed, never Allow. **But** x32 on
 x86_64 reports the same `AUDIT_ARCH_X86_64` and issues syscalls as `native_nr | 0x40000000`; since
@@ -45,23 +52,38 @@ the result fd) — a planted non-CLOEXEC socket is the oracle. Env construction 
 whose name is not in the allowlist. The filter is installed on the single launch thread and inherited
 across fork/exec (proven by a forked child observing the same deny).
 
-Enforcement is never assumed. Before install, the exact operations are proven permitted unconfined
-(`socket(AF_INET/INET6/UNIX)` succeed; `setsid`/`setpgid` succeed in disposable children). After
-install: `socket(AF_INET)` and `socket(AF_INET6)` are `EPERM`, `AF_UNIX` still succeeds, `setsid` and
-`setpgid` are `EPERM` (seccomp denies before the kernel's group-leader check, so the denial is
-unambiguous), the x32 socket is denied, a forked child sees the same deny, and a child's environment
-holds only allowlisted names. Any mismatch is a typed `EffectMismatch` → `not_enforced`; every install
-stage is a typed error with a distinct exit code (93–99), and the target is never launched on failure.
+Enforcement is never assumed, and the self-check is DIFFERENTIAL and AUTHORITATIVE — the backend's own
+verdict, not just the acceptance tests. Before install, every intended-denied op is proven permitted
+unconfined (`socket(AF_INET/INET6/UNIX)` and `io_uring_setup` succeed; `setsid`/`setpgid` succeed in
+disposable children), and **those baseline results participate in the verdict**: a pre-existing denial
+is a typed `BaselineDenied`, never re-attributed to this filter. After install: `socket(AF_INET/INET6)`,
+the x32 socket, and `io_uring_setup` are **exactly `EPERM`** (not "any error" — an incidental `ENOSYS`
+would not prove a deny rule; x32/io_uring checks are conditional on the op being available at baseline);
+`AF_UNIX` still succeeds; `setsid`/`setpgid` are `EPERM` probed in **fresh children identical to the
+baseline** (seccomp denies before the group-leader check, so the denial is unambiguous); a forked child
+sees the same deny; a child inherits **zero socket descriptors**; and a child's environment is
+**byte-exactly** the allowlisted key/value map (no forbidden name, no lost allowed name, values intact).
+
+The inherited-fd scrub is FAIL-CLOSED: enumeration (`/proc/self/fd`) propagates every dir-open,
+readdir, and non-numeric-entry error; `close` returns a result; and an **independent post-scrub
+re-enumeration** proves only keep-fds survive (any survivor → `FdScrubIncomplete`). Multiple planted
+descriptors (a socket AND a regular file) are the oracle.
+
+Any mismatch is typed → `not_enforced`; the target never launches on failure. Every stage has a
+distinct exit code (93–100), and a TEST-ONLY `O7_SC_FAULT` knob forces each — `no_new_privs` (95),
+`apply` (96), fd enumeration failure (97), incomplete scrub (98), each omitted rule → `EffectMismatch`
+(99), and baseline-denied (100) — so the whole matrix is proven RED, not decorative.
 
 ## Tests & gates
 
 - `crates/sandboy/tests/seccomp_confinement.rs` — `#[ignore]`d, real seccomp-BPF required. The
   capability guard is an INDEPENDENT `prctl(PR_GET_SECCOMP)` probe (not the SUT), so a broken backend
   fails RED; `O7_REQUIRE_SECCOMP=1` makes an incapable host a FAILURE, never a skip. Covers: IPv4/IPv6
-  deny with AF_UNIX preserved; setsid/setpgid deny; the x32 anti-bypass oracle; the planted
-  non-CLOEXEC-socket scrub; the exact env allowlist + fork inheritance; the frozen compiled-BPF
-  digest; and a forced install failure failing closed. A TEST-ONLY `O7_SC_FAULT` knob forces the
-  apply stage.
+  deny with AF_UNIX preserved; the io_uring socket-creation deny; setsid/setpgid deny (exact EPERM in
+  fresh children); the x32 anti-bypass oracle (exact EPERM); the fail-closed scrub of multiple planted
+  descriptors + child-side zero-inherited-sockets; the BYTE-EXACT env allowlist (kept sentinel, dropped
+  sentinel, and empty-allowlist cases); the frozen compiled-BPF digest; and the full typed failure
+  matrix (95–100). A TEST-ONLY `O7_SC_FAULT` knob forces each stage.
 - Hosted `sandboy backend gate` COMPILES + lints the module (`--features test-harness`) and proves the
   `unsafe` surface stays contained to `landlock/sys.rs` + `seccomp/sys.rs` (production forbid-unsafe).
 - `sandbox-confinement.yml` (self-hosted, `workflow_dispatch`-only — trigger UNCHANGED) runs the VB-3

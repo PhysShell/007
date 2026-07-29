@@ -1,8 +1,8 @@
-//! The `unsafe` surface for VB-3 seccomp EFFECT-PROBES + the inherited-fd scrub. The BPF filter
-//! itself is built by `seccompiler` (typed Rust) in the safe `super` module and installed via its
-//! `apply_filter`; this module only issues the raw probe syscalls that OBSERVE the filter's effect
-//! (and closes leaked fds). Every wrapper preserves `errno` and does no policy. Syscall numbers come
-//! from `libc::SYS_*`; a non-Linux target fails to compile.
+//! The `unsafe` surface for VB-3 seccomp EFFECT-PROBES + the fail-closed inherited-fd scrub. The BPF
+//! filter itself is built by `seccompiler` (typed Rust) in the safe `super` module; this module only
+//! issues the raw probe syscalls that OBSERVE the filter's effect and enumerate/close fds. Every
+//! wrapper preserves `errno` and does no policy. Syscall numbers come from `libc::SYS_*`; a non-Linux
+//! target fails to compile.
 
 #[cfg(not(target_os = "linux"))]
 compile_error!("sandboy seccomp confinement is Linux-only");
@@ -20,9 +20,17 @@ fn last_errno() -> i32 {
     io::Error::last_os_error().raw_os_error().unwrap_or(0)
 }
 
+fn set_errno(v: i32) {
+    // SAFETY: `__errno_location` returns a valid, thread-local pointer to this thread's errno.
+    let loc = unsafe { libc::__errno_location() };
+    // SAFETY: `loc` is that valid thread-local errno pointer; write through it.
+    unsafe {
+        *loc = v;
+    }
+}
+
 /// Attempt `socket(domain, SOCK_STREAM, 0)`. `Ok(())` if a socket was created (then closed); `Err`
-/// with the errno otherwise. `via_x32` issues the call through the x32 syscall-number namespace so an
-/// oracle can prove the deny rules are not bypassable there.
+/// with the errno otherwise. `via_x32` issues the call through the x32 syscall-number namespace.
 pub(crate) fn probe_socket(domain: libc::c_int, via_x32: bool) -> Result<(), i32> {
     let nr: libc::c_long = if via_x32 {
         #[cfg(target_arch = "x86_64")]
@@ -42,14 +50,40 @@ pub(crate) fn probe_socket(domain: libc::c_int, via_x32: bool) -> Result<(), i32
     if ret < 0 {
         return Err(last_errno());
     }
-    // SAFETY: `ret` is a fresh fd we own; close it (the probe only needed the create to succeed).
-    unsafe {
-        libc::close(ret as RawFd);
-    }
+    let _ = close_fd(ret as RawFd);
     Ok(())
 }
 
-/// Attempt `setsid()`. `Ok(())` on success (a new session — a real side effect, so run this in a
+/// Attempt `io_uring_setup(1, &params)` — the io_uring path to socket creation (`IORING_OP_SOCKET`)
+/// starts here, so denying it (plus `enter`/`register` and the fd scrub) is what makes network
+/// deny-all real. `Ok(())` if a ring was created (then closed); `Err(errno)` otherwise. `via_x32`
+/// issues it through the x32 namespace.
+pub(crate) fn probe_io_uring_setup(via_x32: bool) -> Result<(), i32> {
+    let nr: libc::c_long = if via_x32 {
+        #[cfg(target_arch = "x86_64")]
+        {
+            libc::SYS_io_uring_setup | X32_SYSCALL_BIT
+        }
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            return Err(libc::ENOSYS);
+        }
+    } else {
+        libc::SYS_io_uring_setup
+    };
+    // A zeroed buffer >= sizeof(struct io_uring_params) (120 bytes): flags 0, resv 0 → a basic ring.
+    let mut params = [0u8; 256];
+    // SAFETY: io_uring_setup(entries, params*) with a valid writable buffer the kernel reads/writes
+    // in place; returns a ring fd or -1/errno.
+    let ret = unsafe { libc::syscall(nr, 1_u32, params.as_mut_ptr()) };
+    if ret < 0 {
+        return Err(last_errno());
+    }
+    let _ = close_fd(ret as RawFd);
+    Ok(())
+}
+
+/// Attempt `setsid()`. `Ok(())` on success (a new session — a real side effect, so run in a
 /// disposable child), `Err(errno)` otherwise.
 pub(crate) fn probe_setsid() -> Result<(), i32> {
     // SAFETY: setsid(2) takes no arguments and returns the new session id or -1/errno.
@@ -61,7 +95,7 @@ pub(crate) fn probe_setsid() -> Result<(), i32> {
     }
 }
 
-/// Attempt `setpgid(0, 0)` (put the caller in its own process group). `Ok(())`/`Err(errno)`.
+/// Attempt `setpgid(0, 0)`. `Ok(())`/`Err(errno)`. A side effect (pgid change) — run in a child.
 pub(crate) fn probe_setpgid() -> Result<(), i32> {
     // SAFETY: setpgid(2) with two plain integer arguments; returns 0 or -1/errno.
     let ret = unsafe { libc::setpgid(0, 0) };
@@ -73,15 +107,14 @@ pub(crate) fn probe_setpgid() -> Result<(), i32> {
 }
 
 /// Fork, run `f` in the child and `_exit` with its return code; return the child's exit code in the
-/// parent (or a negative sentinel on fork/wait failure). Used to probe side-effecting syscalls
-/// (setsid/setpgid) in a disposable process, and to prove the seccomp filter is inherited across fork.
+/// parent (or a negative sentinel on fork/wait failure). Used to probe side-effecting syscalls in a
+/// disposable process and to prove the seccomp filter is inherited across fork.
 pub(crate) fn run_in_child<F: FnOnce() -> i32>(f: F) -> i32 {
     // SAFETY: fork(2) in this single-threaded harness; the parent gets the child pid, the child 0.
     let pid = unsafe { libc::fork() };
     if pid == 0 {
         let code = f();
-        // SAFETY: _exit terminates the child immediately (no atexit/destructors, no stdio flush) —
-        // the correct primitive after a fork in a would-be async-signal context.
+        // SAFETY: _exit terminates the child immediately (no atexit/destructors, no stdio flush).
         unsafe { libc::_exit(code) };
     }
     if pid < 0 {
@@ -113,17 +146,81 @@ pub(crate) fn set_no_new_privs() -> Result<(), i32> {
     }
 }
 
-/// Whether `fd` is currently open in this process (`fcntl(fd, F_GETFD) != -1`).
+/// Whether `fd` is currently open (`fcntl(fd, F_GETFD) != -1`).
 pub(crate) fn fd_is_open(fd: RawFd) -> bool {
     // SAFETY: F_GETFD reads the fd flags of `fd`; it takes no pointer args and returns -1/EBADF for a
     // closed fd.
     unsafe { libc::fcntl(fd, libc::F_GETFD) != -1 }
 }
 
-/// Close `fd`, ignoring the result (used by the scrub to drop a leaked inherited fd).
-pub(crate) fn close_fd(fd: RawFd) {
-    // SAFETY: close(2) on an integer fd; a bad fd merely returns EBADF, which we ignore.
-    unsafe {
-        libc::close(fd);
+/// Whether `fd` refers to a socket (`fstat` → `S_ISSOCK`). Used by a child to prove it inherited no
+/// socket descriptors.
+pub(crate) fn fd_is_socket(fd: RawFd) -> bool {
+    // SAFETY: zero-initialize a `stat` to be filled by `fstat`.
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    // SAFETY: fstat on `fd` with a valid `stat` out-pointer; returns 0 or -1.
+    let r = unsafe { libc::fstat(fd, &mut st) };
+    r == 0 && (st.st_mode & libc::S_IFMT) == libc::S_IFSOCK
+}
+
+/// Close `fd`; returns `Err(errno)` on failure (the caller decides how to treat it).
+pub(crate) fn close_fd(fd: RawFd) -> Result<(), i32> {
+    // SAFETY: close(2) on an integer fd.
+    let r = unsafe { libc::close(fd) };
+    if r == 0 {
+        Ok(())
+    } else {
+        Err(last_errno())
     }
+}
+
+/// Enumerate every open fd of this process from `/proc/self/fd`, EXCLUDING the directory stream's own
+/// fd. FAIL-CLOSED: a directory-open failure, a readdir error, or a non-numeric entry (other than
+/// `.`/`..`) is an `Err(errno)`, never a silently-dropped entry.
+pub(crate) fn list_fds() -> Result<Vec<RawFd>, i32> {
+    // SAFETY: opendir on a valid, static NUL-terminated path; returns a DIR* or NULL/errno.
+    let dir = unsafe { libc::opendir(c"/proc/self/fd".as_ptr()) };
+    if dir.is_null() {
+        return Err(last_errno());
+    }
+    // SAFETY: dirfd on our open DIR*.
+    let dfd = unsafe { libc::dirfd(dir) };
+    let mut fds = Vec::new();
+    let mut result: Result<(), i32> = Ok(());
+    loop {
+        set_errno(0);
+        // SAFETY: readdir on our open DIR*; returns a valid dirent pointer or NULL (end or error).
+        let ent = unsafe { libc::readdir(dir) };
+        if ent.is_null() {
+            let e = last_errno();
+            if e != 0 {
+                result = Err(e);
+            }
+            break;
+        }
+        // SAFETY: `ent` is a valid dirent pointer until the next readdir/closedir.
+        let d_name = unsafe { (*ent).d_name };
+        // SAFETY: `d_name` is a NUL-terminated C string field within the dirent.
+        let name = unsafe { std::ffi::CStr::from_ptr(d_name.as_ptr()) };
+        let bytes = name.to_bytes();
+        if bytes == b"." || bytes == b".." {
+            continue;
+        }
+        match std::str::from_utf8(bytes)
+            .ok()
+            .and_then(|s| s.parse::<RawFd>().ok())
+        {
+            Some(n) if n != dfd => fds.push(n),
+            Some(_) => {} // the directory stream's own fd
+            None => {
+                result = Err(libc::EINVAL); // a non-numeric /proc/self/fd entry — fail closed
+                break;
+            }
+        }
+    }
+    // SAFETY: close the DIR* (also closes `dfd`).
+    unsafe {
+        libc::closedir(dir);
+    }
+    result.map(|()| fds)
 }

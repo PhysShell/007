@@ -1,6 +1,8 @@
-//! VB-3 real-seccomp acceptance: network deny (IPv4/IPv6, AF_UNIX preserved), `setsid`/`setpgid`
-//! deny, the x32-namespace anti-bypass, an inherited-fd scrub with a planted non-CLOEXEC socket, an
-//! exact env allowlist, fork inheritance, a frozen compiled-BPF digest, and fail-closed install.
+//! VB-3 real-seccomp acceptance: network **deny-all** (IPv4/IPv6 socket AND the io_uring
+//! socket-creation path, AF_UNIX preserved), `setsid`/`setpgid` deny, the x32-namespace anti-bypass
+//! (exact EPERM), a FAIL-CLOSED inherited-fd scrub with multiple planted descriptors + child-side
+//! zero-inherited-sockets, a BYTE-EXACT env allowlist, fork inheritance, a frozen compiled-BPF digest,
+//! and the full typed failure matrix (exit 95–100).
 //!
 //! Every test is `#[ignore]`d and needs a kernel with seccomp-BPF. The capability guard is an
 //! INDEPENDENT raw `prctl(PR_GET_SECCOMP)` probe — NOT the backend under test — so a broken backend
@@ -17,9 +19,9 @@ use std::os::fd::AsRawFd as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// The exact compiled-BPF digest of the VB-3 policy. FROZEN: a `seccompiler`/compiler change or a
-/// rule edit changes this, forcing a deliberate review rather than a silent policy drift.
-const FROZEN_BPF_DIGEST: &str = "9c8911957d2e3ad307a5c8b0fcc1464c1160df0973633348f9149bbaad0fc9a8";
+/// The exact compiled-BPF digest of the VB-3 policy (socket + io_uring + setsid/setpgid, native+x32).
+/// FROZEN: a `seccompiler`/compiler change or a rule edit changes this, forcing a deliberate review.
+const FROZEN_BPF_DIGEST: &str = "27e32aa7c10a13ca2741daf98985a1542cddde02d1b7094832e8ea6cbd020ad0";
 
 fn backend_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_sandboy"))
@@ -66,8 +68,40 @@ struct Run {
     check_fd_closed: Option<i32>,
     env_allow: Vec<String>,
     fault: Option<&'static str>,
-    /// An extra inherited (non-CLOEXEC) fd to keep open across the spawn.
-    keep_open_listener: Option<std::net::TcpListener>,
+    extra_env: Vec<(&'static str, &'static str)>,
+    /// Inherited (non-CLOEXEC) fds to keep open across the spawn (the scrub must close them).
+    keep_open: Vec<KeepOpen>,
+}
+
+/// RAII holders that keep a planted (non-CLOEXEC) fd open across the spawn; the payloads exist only
+/// for their `Drop` (closing the fd after the child exits), never read directly.
+#[allow(dead_code)]
+enum KeepOpen {
+    Sock(std::net::TcpListener),
+    File(std::fs::File),
+}
+
+/// Clear FD_CLOEXEC on `fd` so a spawned child inherits it.
+fn make_inheritable(fd: i32) {
+    // SAFETY: F_SETFD with flags 0 clears FD_CLOEXEC on our own fd; no pointer args.
+    let r = unsafe { libc::fcntl(fd, libc::F_SETFD, 0) };
+    assert_eq!(r, 0, "clear CLOEXEC: {}", std::io::Error::last_os_error());
+}
+
+fn planted_socket() -> (KeepOpen, i32) {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind planted socket");
+    let fd = l.as_raw_fd();
+    make_inheritable(fd);
+    (KeepOpen::Sock(l), fd)
+}
+
+fn planted_file() -> (KeepOpen, i32) {
+    let f = std::fs::File::open("/etc/hostname")
+        .or_else(|_| std::fs::File::open("/proc/self/status"))
+        .expect("open planted file");
+    let fd = f.as_raw_fd();
+    make_inheritable(fd);
+    (KeepOpen::File(f), fd)
 }
 
 fn run_seccomp(result: &Path, run: Run) -> (i32, BTreeMap<String, String>) {
@@ -82,25 +116,16 @@ fn run_seccomp(result: &Path, run: Run) -> (i32, BTreeMap<String, String>) {
     if let Some(f) = run.fault {
         cmd.env("O7_SC_FAULT", f);
     }
+    for (k, v) in &run.extra_env {
+        cmd.env(k, v);
+    }
     let status = cmd.status().expect("run sandboy __seccomp-run");
-    // keep the listener alive until after the child exits
-    drop(run.keep_open_listener);
+    drop(run.keep_open); // keep planted fds alive until after the child exits
     (status.code().unwrap_or(-1), parse_result(result))
 }
 
-/// A real AF_INET socket (a `TcpListener`) whose fd has CLOEXEC CLEARED, so a spawned child inherits
-/// it — the "planted non-CLOEXEC socket" the scrub must close.
-fn planted_inheritable_socket() -> (std::net::TcpListener, i32) {
-    let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind planted socket");
-    let fd = l.as_raw_fd();
-    // SAFETY: F_SETFD with flags 0 clears FD_CLOEXEC on our own fd; no pointer args.
-    let r = unsafe { libc::fcntl(fd, libc::F_SETFD, 0) };
-    assert_eq!(r, 0, "clear CLOEXEC: {}", std::io::Error::last_os_error());
-    (l, fd)
-}
-
 #[test]
-#[ignore = "Vertical B: real seccomp-BPF required; network deny (IPv4/IPv6), AF_UNIX preserved"]
+#[ignore = "Vertical B: real seccomp-BPF required; network deny-all (socket + io_uring), AF_UNIX preserved"]
 fn network_is_denied_for_ipv4_and_ipv6_but_af_unix_is_preserved() {
     if !require_or_skip() {
         return;
@@ -111,11 +136,10 @@ fn network_is_denied_for_ipv4_and_ipv6_but_af_unix_is_preserved() {
 
     assert_eq!(code, 0, "result: {res:?}");
     assert_eq!(field(&res, "seccomp"), "enforced");
-    // Baseline: all three families succeed unconfined.
     assert_eq!(field(&res, "inet_pre"), "OK");
     assert_eq!(field(&res, "inet6_pre"), "OK");
     assert_eq!(field(&res, "unix_pre"), "OK");
-    // Post-install: IPv4/IPv6 denied with EPERM; AF_UNIX still allowed (family-scoped).
+    // EXACT EPERM (errno 1), not merely any error.
     assert_eq!(
         field(&res, "inet_post"),
         "ERR:1",
@@ -134,15 +158,36 @@ fn network_is_denied_for_ipv4_and_ipv6_but_af_unix_is_preserved() {
 }
 
 #[test]
-#[ignore = "Vertical B: real seccomp-BPF required; setsid/setpgid denied"]
-fn setsid_and_setpgid_are_denied() {
+#[ignore = "Vertical B: real seccomp-BPF required; the io_uring socket-creation bypass is closed"]
+fn the_io_uring_socket_creation_path_is_denied() {
     if !require_or_skip() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
     let result = dir.path().join("res");
     let (_code, res) = run_seccomp(&result, Run::default());
-    // Baseline succeeds in a disposable child (exit 0 == success).
+    // io_uring_setup must succeed unconfined (the bypass surface is real) and be EXACT EPERM after.
+    assert_eq!(
+        field(&res, "iouring_pre"),
+        "OK",
+        "io_uring_setup must be available unconfined; result: {res:?}"
+    );
+    assert_eq!(
+        field(&res, "iouring_post"),
+        "ERR:1",
+        "io_uring_setup must be denied EPERM (else IORING_OP_SOCKET bypasses network deny); result: {res:?}"
+    );
+}
+
+#[test]
+#[ignore = "Vertical B: real seccomp-BPF required; setsid/setpgid denied (exact EPERM, fresh children)"]
+fn setsid_and_setpgid_are_denied_with_exact_eperm() {
+    if !require_or_skip() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let result = dir.path().join("res");
+    let (_code, res) = run_seccomp(&result, Run::default());
     assert_eq!(
         field(&res, "setsid_pre"),
         "0",
@@ -153,91 +198,111 @@ fn setsid_and_setpgid_are_denied() {
         "0",
         "setpgid must succeed unconfined; result: {res:?}"
     );
-    // Post-install: EPERM.
+    // Post-install probes run in fresh children (same state as baseline) → EXACT EPERM (errno 1).
     assert_eq!(
         field(&res, "setsid_post"),
-        "ERR:1",
-        "setsid must be denied EPERM"
+        "1",
+        "setsid must be denied EPERM in a fresh child"
     );
     assert_eq!(
         field(&res, "setpgid_post"),
-        "ERR:1",
-        "setpgid must be denied EPERM"
+        "1",
+        "setpgid must be denied EPERM in a fresh child"
     );
 }
 
 #[test]
-#[ignore = "Vertical B: real seccomp-BPF required; the x32 namespace cannot bypass the socket deny"]
-fn the_x32_syscall_namespace_cannot_bypass_the_socket_deny() {
+#[ignore = "Vertical B: real seccomp-BPF required; x32 returns EXACT EPERM, not merely any error"]
+fn the_x32_namespace_returns_exact_eperm() {
     if !require_or_skip() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
     let result = dir.path().join("res");
     let (_code, res) = run_seccomp(&result, Run::default());
-    // A socket(AF_INET) issued through the x32 syscall number must NOT create a socket. On this
-    // kernel (x32 enabled) it is denied EPERM; even without x32 it would be ENOSYS — never OK.
-    let x32 = field(&res, "x32_inet_post");
-    assert_ne!(
-        x32, "OK",
-        "x32 socket(AF_INET) created a socket — deny bypassed! result: {res:?}"
+    // On this kernel x32 is available: baseline succeeds, post is EXACTLY EPERM (a real deny rule,
+    // not an incidental ENOSYS).
+    assert_eq!(
+        field(&res, "x32_inet_pre"),
+        "OK",
+        "x32 socket must be available unconfined; result: {res:?}"
     );
-    assert!(
-        x32.starts_with("ERR:"),
-        "x32 socket(AF_INET) must be an error (EPERM), got {x32:?}"
+    assert_eq!(
+        field(&res, "x32_inet_post"),
+        "ERR:1",
+        "x32 socket(AF_INET) must be denied by an EXACT EPERM rule; result: {res:?}"
     );
 }
 
 #[test]
-#[ignore = "Vertical B: real seccomp-BPF required; inherited-fd scrub closes a planted non-CLOEXEC socket"]
-fn the_inherited_fd_scrub_closes_a_planted_non_cloexec_socket() {
+#[ignore = "Vertical B: real seccomp-BPF required; fail-closed scrub closes multiple planted fds"]
+fn the_inherited_fd_scrub_closes_multiple_planted_descriptors() {
     if !require_or_skip() {
         return;
     }
-    let (listener, fd) = planted_inheritable_socket();
+    let (sock, sock_fd) = planted_socket();
+    let (file, _file_fd) = planted_file();
     let dir = tempfile::tempdir().unwrap();
     let result = dir.path().join("res");
     let (code, res) = run_seccomp(
         &result,
         Run {
-            check_fd_closed: Some(fd),
-            keep_open_listener: Some(listener),
+            check_fd_closed: Some(sock_fd),
+            keep_open: vec![sock, file],
             ..Run::default()
         },
     );
+    // Reaching `enforced` implies the post-scrub re-enumeration found ONLY keep-fds — both the planted
+    // socket AND the planted regular file were closed.
     assert_eq!(code, 0, "result: {res:?}");
+    assert_eq!(field(&res, "seccomp"), "enforced");
     assert_eq!(
         field(&res, "fd_planted_closed"),
         "1",
-        "the planted non-CLOEXEC socket (fd {fd}) must be scrubbed before seccomp; result: {res:?}"
+        "the planted socket fd must be closed"
+    );
+    assert_eq!(
+        field(&res, "child_inherited_sockets"),
+        "0",
+        "a child must inherit ZERO socket descriptors; result: {res:?}"
     );
 }
 
 #[test]
-#[ignore = "Vertical B: real seccomp-BPF required; exact env allowlist + fork inheritance"]
-fn the_env_is_reduced_to_the_allowlist_and_the_filter_is_inherited() {
+#[ignore = "Vertical B: real seccomp-BPF required; byte-exact env allowlist"]
+fn the_env_is_reduced_to_a_byte_exact_allowlist() {
     if !require_or_skip() {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
-    let result = dir.path().join("res");
-    let (_code, res) = run_seccomp(
-        &result,
+    // Kept sentinel + dropped sentinel; allowlist keeps only O7_KEEP.
+    let (_c, res) = run_seccomp(
+        &dir.path().join("a"),
         Run {
-            env_allow: vec!["PATH".to_owned()],
+            env_allow: vec!["O7_KEEP".to_owned()],
+            extra_env: vec![("O7_KEEP", "sentinel-value"), ("O7_DROP", "must-disappear")],
             ..Run::default()
         },
     );
     assert_eq!(
-        field(&res, "env_only_allowlisted"),
+        field(&res, "env_exact"),
         "1",
-        "a child must see ONLY allowlisted env names; result: {res:?}"
+        "child env must be byte-exactly {{O7_KEEP=sentinel-value}} (O7_DROP gone, value intact); result: {res:?}"
     );
-    // The filter is inherited across fork: a forked child sees the IPv4 deny (EPERM == errno 1).
+
+    // Empty allowlist → a genuinely empty environment.
+    let (_c2, res2) = run_seccomp(
+        &dir.path().join("b"),
+        Run {
+            env_allow: vec![],
+            extra_env: vec![("O7_KEEP", "x"), ("O7_DROP", "y")],
+            ..Run::default()
+        },
+    );
     assert_eq!(
-        field(&res, "child_inet_post"),
+        field(&res2, "env_exact"),
         "1",
-        "the seccomp filter must be inherited across fork; result: {res:?}"
+        "empty allowlist must yield an empty env; result: {res2:?}"
     );
 }
 
@@ -258,24 +323,43 @@ fn the_compiled_bpf_policy_matches_the_frozen_digest() {
 }
 
 #[test]
-#[ignore = "Vertical B: real seccomp-BPF required; a failed install fails closed"]
-fn a_failed_seccomp_install_fails_closed() {
+#[ignore = "Vertical B: real seccomp-BPF required; every install/effect/scrub failure fails closed"]
+fn the_full_failure_matrix_fails_closed() {
     if !require_or_skip() {
         return;
     }
+    // (fault, expected stage, expected exit): the typed failure matrix, each proven to go RED.
+    let cases = [
+        ("no_new_privs", "no_new_privs", 95),
+        ("apply", "apply", 96),
+        ("fd_enum_fail", "fd_scrub", 97),
+        ("fd_close_fail", "fd_scrub_incomplete", 98),
+        ("omit_socket_native", "effect_mismatch", 99),
+        ("omit_socket_x32", "effect_mismatch", 99),
+        ("omit_setsid", "effect_mismatch", 99),
+        ("omit_setpgid", "effect_mismatch", 99),
+        ("omit_iouring", "effect_mismatch", 99),
+        ("baseline_denied", "baseline_denied", 100),
+    ];
     let dir = tempfile::tempdir().unwrap();
-    let result = dir.path().join("res");
-    let (code, res) = run_seccomp(
-        &result,
-        Run {
-            fault: Some("apply"),
-            ..Run::default()
-        },
-    );
-    assert_eq!(field(&res, "seccomp"), "not_enforced");
-    assert_eq!(field(&res, "stage"), "apply");
-    assert_eq!(
-        code, 96,
-        "a forced apply failure returns its distinct code; result: {res:?}"
-    );
+    for (fault, stage, exit) in cases {
+        // fd_close_fail needs a survivor to detect; plant a socket for every case (harmless).
+        let (sock, _fd) = planted_socket();
+        let result = dir.path().join(fault);
+        let (code, res) = run_seccomp(
+            &result,
+            Run {
+                fault: Some(fault),
+                keep_open: vec![sock],
+                ..Run::default()
+            },
+        );
+        assert_eq!(
+            field(&res, "seccomp"),
+            "not_enforced",
+            "[{fault}] must be not_enforced"
+        );
+        assert_eq!(field(&res, "stage"), stage, "[{fault}] wrong stage");
+        assert_eq!(code, exit, "[{fault}] wrong exit; result: {res:?}");
+    }
 }
