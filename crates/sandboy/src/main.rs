@@ -36,6 +36,11 @@ use o7_sandbox_protocol::policy::{Enforcement, NetworkPolicy, SandboxPolicy};
 use o7_sandbox_protocol::report::SandboxReport;
 use o7_sandbox_protocol::SCHEMA_VERSION;
 
+// VB-1 cgroup monitor + its `__cgroup-run` harness entry. Compiled ONLY under `test-harness`; a
+// production build has neither the module nor the subcommand (see Cargo.toml). VB-4 promotes it.
+#[cfg(feature = "test-harness")]
+mod cgroup;
+
 /// Exit codes. Distinct per fail-closed reason so a test (and an operator) can tell WHICH gate
 /// refused. All are non-zero except a clean bootstrap has no success exit — the backend only ever
 /// exits 0 by relaying a target it ran, which cannot happen at VB-0.
@@ -62,6 +67,13 @@ fn main() {
 }
 
 fn run() -> i32 {
+    // TEST-HARNESS ONLY: the VB-1 cgroup-monitor entry, exercised by the `#[ignore]`d confinement
+    // tests. Never present in a production build.
+    #[cfg(feature = "test-harness")]
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("__cgroup-run")) {
+        return cgroup::harness_main();
+    }
+
     let Some(args) = parse_args() else {
         eprintln!("sandboy: could not parse the confined-backend argv");
         return exit::BAD_ARGV;
