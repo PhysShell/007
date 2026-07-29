@@ -1,19 +1,24 @@
-//! VB-2 — real Landlock **filesystem** confinement + an effect-based self-check, SAFE on top of the
-//! single audited [`sys`] syscall module. Scope, strictly: confine writes to the worktree and
-//! read+execute to `allow_exec`; prove it; report the `filesystem` dimension honestly. **No seccomp,
-//! network, or env (VB-3); no `confinement_backend()` switch; no RED-matrix flip (VB-4).**
+//! VB-2 — real Landlock **filesystem** confinement + a DIFFERENTIAL effect-based self-check, SAFE on
+//! top of the single audited [`sys`] syscall module. Scope, strictly: confine writes to the worktree
+//! and read+execute to `allow_exec`; PROVE it against an unconfined baseline; report the `filesystem`
+//! dimension honestly. **No seccomp, network, or env (VB-3); no `confinement_backend()` switch; no
+//! RED-matrix flip (VB-4).**
 //!
 //! Enforcement is NOT "the kernel handed back a ruleset fd". It is the full ordered sequence —
 //! `create_ruleset` → `add_rule`* → `prctl(PR_SET_NO_NEW_PRIVS)` → `restrict_self` — AND a
-//! subsequent EFFECT-BASED self-check (an outside write is observed DENIED and an inside write
-//! observed ALLOWED). Anything short of that returns a typed [`InstallError`] and the caller MUST
-//! NOT launch the target. The ABI is probed first and the exact minimum (3, for `TRUNCATE`) is
-//! required; a lower/absent/disabled Landlock reports `not_enforced`, never a launch.
+//! DIFFERENTIAL self-check: the exact outside-worktree write is proven to SUCCEED *before*
+//! `restrict_self` (ruling out a DAC / other-LSM denial) and then observed DENIED (EACCES/EPERM)
+//! *after* it, while an inside-worktree write stays allowed. A baseline that cannot even succeed
+//! unconfined is a distinct `not_enforced` verdict, never a false "confined". Anything short returns
+//! a typed [`InstallError`] and the caller MUST NOT launch.
 //!
-//! Compiled ONLY under `test-harness` (like the VB-1 cgroup monitor): production `run` is the
-//! untouched VB-0 honest bootstrap, so a production build compiles NEITHER this module NOR `libc`
-//! NOR any `unsafe` (the crate keeps `forbid(unsafe_code)` when the feature is off). A TEST-ONLY
-//! `O7_LL_FAULT` knob forces one install stage to fail so every fail-closed path is provable.
+//! `allow_exec` rules are OBJECT-TYPE-CORRECT: a directory may hold `EXECUTE|READ_FILE|READ_DIR`, a
+//! regular file only the file-applicable subset (`READ_DIR` on a file is EINVAL); other object types
+//! are rejected. The ABI is probed first and the exact minimum (3, for `TRUNCATE`) required.
+//!
+//! Compiled ONLY under `test-harness` (like the VB-1 cgroup monitor): production `run` compiles
+//! NEITHER this module NOR `libc` NOR any `unsafe`. A TEST-ONLY `O7_LL_FAULT` knob forces one install
+//! stage to fail so every fail-closed path — including the self-check verdicts — is provable.
 
 mod sys;
 
@@ -22,7 +27,6 @@ use std::io::{self, Write as _};
 use std::os::fd::AsRawFd as _;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use sys::access;
 
@@ -52,18 +56,26 @@ pub(crate) enum InstallError {
         path: PathBuf,
         err: io::Error,
     },
+    /// An `allow_exec` path is neither a directory nor a regular file — no correct rule mask exists.
+    UnsupportedObjectType {
+        path: PathBuf,
+    },
     AddRule {
         path: PathBuf,
         err: io::Error,
     },
     NoNewPrivs(io::Error),
     RestrictSelf(io::Error),
-    /// After `restrict_self`, an OUTSIDE-worktree write SUCCEEDED — the ruleset is not confining.
+    /// The unconfined baseline inside-worktree write failed — cannot even establish a baseline.
+    SelfCheckBaselineInsideDenied(io::Error),
+    /// The unconfined baseline outside-worktree write failed (DAC / read-only / other LSM), so a
+    /// later denial could NOT be attributed to Landlock — report not_enforced, never "confined".
+    SelfCheckBaselineOutsideDenied(io::Error),
+    /// After `restrict_self`, the outside-worktree write SUCCEEDED — the ruleset is not confining.
     SelfCheckOutsideAllowed,
-    /// The outside-worktree write failed, but NOT with a Landlock deny (EACCES/EPERM), so the
-    /// restriction is unproven — fail closed rather than assume it holds.
+    /// After `restrict_self`, the outside write failed but NOT with a Landlock deny — unproven.
     SelfCheckOutsideNotDenied(io::Error),
-    /// After `restrict_self`, an INSIDE-worktree write was denied — the ruleset is misbuilt.
+    /// After `restrict_self`, an inside-worktree write was denied — the ruleset is misbuilt.
     SelfCheckInsideDenied(io::Error),
 }
 
@@ -74,9 +86,12 @@ impl InstallError {
             InstallError::AbiTooLow { .. } => "abi_too_low",
             InstallError::CreateRuleset(_) => "create_ruleset",
             InstallError::OpenParent { .. } => "open_parent",
+            InstallError::UnsupportedObjectType { .. } => "unsupported_object_type",
             InstallError::AddRule { .. } => "add_rule",
             InstallError::NoNewPrivs(_) => "no_new_privs",
             InstallError::RestrictSelf(_) => "restrict_self",
+            InstallError::SelfCheckBaselineInsideDenied(_) => "baseline_inside",
+            InstallError::SelfCheckBaselineOutsideDenied(_) => "baseline_outside",
             InstallError::SelfCheckOutsideAllowed => "self_check_outside",
             InstallError::SelfCheckOutsideNotDenied(_) => "self_check_outside_inconclusive",
             InstallError::SelfCheckInsideDenied(_) => "self_check_inside",
@@ -94,6 +109,9 @@ impl InstallError {
             InstallError::SelfCheckOutsideAllowed => 87,
             InstallError::SelfCheckInsideDenied(_) => 88,
             InstallError::SelfCheckOutsideNotDenied(_) => 89,
+            InstallError::SelfCheckBaselineInsideDenied(_) => 90,
+            InstallError::SelfCheckBaselineOutsideDenied(_) => 91,
+            InstallError::UnsupportedObjectType { .. } => 92,
         }
     }
 }
@@ -107,30 +125,51 @@ impl std::fmt::Display for InstallError {
             }
             InstallError::CreateRuleset(e) => write!(f, "create_ruleset: {e}"),
             InstallError::OpenParent { path, err } => write!(f, "open {path:?}: {err}"),
+            InstallError::UnsupportedObjectType { path } => {
+                write!(
+                    f,
+                    "allow_exec {path:?} is neither a directory nor a regular file"
+                )
+            }
             InstallError::AddRule { path, err } => write!(f, "add_rule {path:?}: {err}"),
             InstallError::NoNewPrivs(e) => write!(f, "prctl(NO_NEW_PRIVS): {e}"),
             InstallError::RestrictSelf(e) => write!(f, "restrict_self: {e}"),
+            InstallError::SelfCheckBaselineInsideDenied(e) => {
+                write!(
+                    f,
+                    "self-check baseline: inside-worktree write failed unconfined: {e}"
+                )
+            }
+            InstallError::SelfCheckBaselineOutsideDenied(e) => {
+                write!(
+                    f,
+                    "self-check baseline: outside write failed unconfined (DAC/other LSM): {e}"
+                )
+            }
             InstallError::SelfCheckOutsideAllowed => {
                 write!(
                     f,
-                    "self-check: an outside-worktree write SUCCEEDED (not confined)"
+                    "self-check: an outside-worktree write SUCCEEDED post-restrict (not confined)"
                 )
             }
             InstallError::SelfCheckOutsideNotDenied(e) => {
                 write!(
                     f,
-                    "self-check: outside write failed but not via a Landlock deny: {e}"
+                    "self-check: outside write failed post-restrict but not via a deny: {e}"
                 )
             }
             InstallError::SelfCheckInsideDenied(e) => {
-                write!(f, "self-check: an inside-worktree write was denied: {e}")
+                write!(
+                    f,
+                    "self-check: an inside-worktree write was denied post-restrict: {e}"
+                )
             }
         }
     }
 }
 
-/// TEST-ONLY forced-fault knob (`O7_LL_FAULT`), read from the control-plane env, letting the
-/// confinement tests force a specific install stage to fail without needing a broken kernel.
+/// TEST-ONLY forced-fault knob (`O7_LL_FAULT`), letting the confinement tests force a specific
+/// install stage — including the hard-to-stage self-check verdicts — to fail without a broken kernel.
 #[derive(Debug, Clone, Copy, Default)]
 struct Faults {
     abi_enosys: bool,
@@ -139,8 +178,10 @@ struct Faults {
     create: bool,
     add_rule: bool,
     add_rule_partial: bool,
+    omit_worktree_rule: bool,
     no_new_privs: bool,
     restrict_self: bool,
+    selfcheck_outside_notdenied: bool,
 }
 
 impl Faults {
@@ -153,17 +194,21 @@ impl Faults {
             Some("create") => f.create = true,
             Some("add_rule") => f.add_rule = true,
             Some("add_rule_partial") => f.add_rule_partial = true,
+            Some("omit_worktree_rule") => f.omit_worktree_rule = true,
             Some("no_new_privs") => f.no_new_privs = true,
             Some("restrict_self") => f.restrict_self = true,
+            Some("selfcheck_outside_notdenied") => f.selfcheck_outside_notdenied = true,
             _ => {}
         }
         f
     }
 }
 
-/// Add one `path_beneath` rule for `path`, opening it `O_PATH|O_CLOEXEC` via SAFE std (its `File`
-/// closes the fd on EVERY return path, success or error).
-fn add_rule(ruleset: &std::os::fd::OwnedFd, path: &Path, rights: u64) -> Result<(), InstallError> {
+/// Add one `path_beneath` rule for `path` with an OBJECT-TYPE-CORRECT mask. Opens the path
+/// `O_PATH|O_CLOEXEC` via SAFE std (its `File` closes the fd on every return) and `fstat`s that same
+/// fd (no TOCTOU): a directory keeps `desired`, a regular file keeps only the file-applicable subset,
+/// any other object type is rejected.
+fn add_rule(ruleset: &std::os::fd::OwnedFd, path: &Path, desired: u64) -> Result<(), InstallError> {
     let dir = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_PATH | libc::O_CLOEXEC)
@@ -172,22 +217,55 @@ fn add_rule(ruleset: &std::os::fd::OwnedFd, path: &Path, rights: u64) -> Result<
             path: path.to_path_buf(),
             err,
         })?;
-    let res = sys::add_path_beneath_rule(ruleset, rights, dir.as_raw_fd()).map_err(|err| {
+    let ft = dir
+        .metadata()
+        .map_err(|err| InstallError::OpenParent {
+            path: path.to_path_buf(),
+            err,
+        })?
+        .file_type();
+    let mask = if ft.is_dir() {
+        desired
+    } else if ft.is_file() {
+        desired & sys::FILE_APPLICABLE
+    } else {
+        return Err(InstallError::UnsupportedObjectType {
+            path: path.to_path_buf(),
+        });
+    };
+    let res = sys::add_path_beneath_rule(ruleset, mask, dir.as_raw_fd()).map_err(|err| {
         InstallError::AddRule {
             path: path.to_path_buf(),
             err,
         }
     });
-    // `dir` drops here regardless — the O_PATH fd is closed on success and on error.
+    // `dir` (the O_PATH fd) drops here regardless — closed on success and on error.
     res
 }
 
-/// Install and PROVE the Landlock filesystem policy for this thread: writes confined to `worktree`,
-/// read+execute confined to `allow_exec`. `Ok(())` means fully enforced AND self-checked; any error
-/// means the caller must NOT launch the target.
+/// Create + write + remove `path`, proving the exact write operation succeeds. Used for the
+/// unconfined baseline and the post-restrict inside check.
+fn write_probe(path: &Path) -> io::Result<()> {
+    {
+        let mut f = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(path)?;
+        f.write_all(b"o7-landlock-probe")?;
+    }
+    let _ = std::fs::remove_file(path);
+    Ok(())
+}
+
+/// Install and PROVE the Landlock filesystem policy for this thread against an unconfined baseline.
+/// `Ok(())` means fully enforced AND differentially self-checked; any error means the caller must NOT
+/// launch. `outside_probe` is a directory the self-check uses for its outside write — the default is
+/// a genuinely-outside temp dir; tests point it at pathological locations to exercise each verdict.
 fn install_filesystem(
     worktree: &Path,
     allow_exec: &[PathBuf],
+    outside_probe: &Path,
     faults: Faults,
 ) -> Result<(), InstallError> {
     // 1. Probe the ABI FIRST — an fd or a version number alone restricts nothing.
@@ -226,28 +304,36 @@ fn install_filesystem(
     let ruleset = sys::create_ruleset(sys::HANDLED_FS_ABI3).map_err(InstallError::CreateRuleset)?;
 
     // 3. Rules: the worktree is the single WRITABLE root (every FS right); each allow_exec path is
-    //    read+execute only.
+    //    read+execute, object-type-masked.
     if faults.add_rule {
         return Err(InstallError::AddRule {
             path: worktree.to_path_buf(),
             err: io::Error::from_raw_os_error(libc::EINVAL),
         });
     }
-    add_rule(&ruleset, worktree, sys::HANDLED_FS_ABI3)?;
-    let exec_rights = access::EXECUTE | access::READ_FILE | access::READ_DIR;
+    if !faults.omit_worktree_rule {
+        add_rule(&ruleset, worktree, sys::HANDLED_FS_ABI3)?;
+    }
+    let exec_desired = access::EXECUTE | access::READ_FILE | access::READ_DIR;
     for (i, path) in allow_exec.iter().enumerate() {
         if faults.add_rule_partial && i == 0 {
-            // A PARTIAL ruleset: the worktree rule was added, but an allow_exec rule fails. We abort
-            // before restrict_self, so nothing is ever enforced.
             return Err(InstallError::AddRule {
                 path: path.to_path_buf(),
                 err: io::Error::from_raw_os_error(libc::EINVAL),
             });
         }
-        add_rule(&ruleset, path, exec_rights)?;
+        add_rule(&ruleset, path, exec_desired)?;
     }
 
-    // 4. no_new_privs — restrict_self needs it (or CAP_SYS_ADMIN), else EPERM.
+    // 4. UNCONFINED BASELINE (before restrict): the exact self-check ops must succeed now, so a later
+    //    denial is attributable to Landlock and not to DAC / read-only / another LSM.
+    let tag = format!(".o7-landlock-selfcheck-{}", std::process::id());
+    let inside_file = worktree.join(&tag);
+    let outside_file = outside_probe.join(&tag);
+    write_probe(&inside_file).map_err(InstallError::SelfCheckBaselineInsideDenied)?;
+    write_probe(&outside_file).map_err(InstallError::SelfCheckBaselineOutsideDenied)?;
+
+    // 5. no_new_privs — restrict_self needs it (or CAP_SYS_ADMIN), else EPERM.
     if faults.no_new_privs {
         return Err(InstallError::NoNewPrivs(io::Error::from_raw_os_error(
             libc::EPERM,
@@ -255,7 +341,7 @@ fn install_filesystem(
     }
     sys::set_no_new_privs().map_err(InstallError::NoNewPrivs)?;
 
-    // 5. The point of no return.
+    // 6. The point of no return.
     if faults.restrict_self {
         return Err(InstallError::RestrictSelf(io::Error::from_raw_os_error(
             libc::EPERM,
@@ -263,44 +349,25 @@ fn install_filesystem(
     }
     sys::restrict_self(&ruleset).map_err(InstallError::RestrictSelf)?;
 
-    // 6. EFFECT-BASED self-check — the only thing that turns "syscalls returned 0" into "enforced".
-    self_check(worktree)
-}
-
-/// Prove the restriction is real by OBSERVING it: an inside-worktree write must succeed and an
-/// outside-worktree write must be denied. Uses a world-writable temp dir for the outside probe so a
-/// success there unambiguously means Landlock is NOT confining (not merely a unix-permission deny).
-fn self_check(worktree: &Path) -> Result<(), InstallError> {
-    let tag = format!(".o7-landlock-selfcheck-{}", std::process::id());
-
-    let inside = worktree.join(&tag);
+    // 7. DIFFERENTIAL self-check. Inside must STILL be writable; the SAME outside op that succeeded
+    //    unconfined must now be denied SPECIFICALLY by Landlock (EACCES/EPERM).
+    write_probe(&inside_file).map_err(InstallError::SelfCheckInsideDenied)?;
+    if faults.selfcheck_outside_notdenied {
+        return Err(InstallError::SelfCheckOutsideNotDenied(
+            io::Error::from_raw_os_error(libc::EROFS),
+        ));
+    }
     match OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
-        .open(&inside)
+        .open(&outside_file)
     {
         Ok(_) => {
-            let _ = std::fs::remove_file(&inside);
-        }
-        Err(e) => return Err(InstallError::SelfCheckInsideDenied(e)),
-    }
-
-    let outside = std::env::temp_dir().join(&tag);
-    match OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(&outside)
-    {
-        Ok(_) => {
-            // The write SUCCEEDED outside the worktree — confinement is not real.
-            let _ = std::fs::remove_file(&outside);
+            let _ = std::fs::remove_file(&outside_file);
             Err(InstallError::SelfCheckOutsideAllowed)
         }
-        // The proof: the outside write is denied SPECIFICALLY by Landlock (EACCES/EPERM).
         Err(ref e) if is_denied(e) => Ok(()),
-        // Failed, but not via a deny — cannot conclude the restriction holds. Fail closed.
         Err(e) => Err(InstallError::SelfCheckOutsideNotDenied(e)),
     }
 }
@@ -322,6 +389,7 @@ enum Op {
 struct Args {
     result: PathBuf,
     worktree: PathBuf,
+    outside_probe: PathBuf,
     allow_exec: Vec<PathBuf>,
     op: Op,
 }
@@ -330,12 +398,14 @@ fn parse_args() -> Option<Args> {
     let mut it = std::env::args_os().skip(2); // program + "__landlock-run"
     let mut result = None;
     let mut worktree = None;
+    let mut outside_probe = None;
     let mut allow_exec = Vec::new();
     loop {
         let flag = it.next()?;
         match flag.to_str()? {
             "--result" => result = Some(PathBuf::from(it.next()?)),
             "--worktree" => worktree = Some(PathBuf::from(it.next()?)),
+            "--outside-probe" => outside_probe = Some(PathBuf::from(it.next()?)),
             "--allow-exec" => allow_exec.push(PathBuf::from(it.next()?)),
             "--" => break,
             _ => return None,
@@ -356,6 +426,8 @@ fn parse_args() -> Option<Args> {
     Some(Args {
         result: result?,
         worktree: worktree?,
+        // Default outside probe: a genuinely-outside temp dir (not under worktree/allow roots).
+        outside_probe: outside_probe.unwrap_or_else(std::env::temp_dir),
         allow_exec,
         op,
     })
@@ -369,9 +441,10 @@ fn probe(key: &str, opts: &OpenOptions, path: &Path) -> String {
     }
 }
 
-/// TEST-HARNESS ENTRY (`sandboy __landlock-run …`): install + prove the Landlock filesystem policy,
-/// then — ONLY if fully enforced — run the requested probe op inside the confinement. On any install
-/// failure, record `filesystem=not_enforced` + the stage and DO NOT run the op (never launch).
+/// TEST-HARNESS ENTRY (`sandboy __landlock-run …`): install + differentially prove the Landlock
+/// filesystem policy, then — ONLY if fully enforced — run the requested probe op inside the
+/// confinement. On any install failure, record `filesystem=not_enforced` + the stage and DO NOT run
+/// the op (never launch).
 pub(crate) fn harness_main() -> i32 {
     let Some(args) = parse_args() else {
         eprintln!("sandboy __landlock-run: bad arguments");
@@ -392,7 +465,20 @@ pub(crate) fn harness_main() -> i32 {
     let faults = Faults::from_env();
     let mut rec = String::new();
 
-    if let Err(e) = install_filesystem(&args.worktree, &args.allow_exec, faults) {
+    // For the exec op, open the target executable BEFORE confinement (its path is resolved now); it
+    // is executed via this fd AFTER restrict_self, so the exec restriction observed is Landlock's own
+    // — a real file's execute right is enforced by the kernel, while a sealed memfd (no path) runs.
+    let exec_fd: Option<io::Result<File>> = match &args.op {
+        Op::Exec { target, .. } => Some(OpenOptions::new().read(true).open(target)),
+        Op::Fs { .. } => None,
+    };
+
+    if let Err(e) = install_filesystem(
+        &args.worktree,
+        &args.allow_exec,
+        &args.outside_probe,
+        faults,
+    ) {
         rec.push_str("filesystem=not_enforced\n");
         rec.push_str(&format!("stage={}\n", e.stage()));
         let _ = out.write_all(rec.as_bytes());
@@ -439,21 +525,25 @@ pub(crate) fn harness_main() -> i32 {
                 &truncate,
             ));
         }
-        Op::Exec { target, secondary } => {
-            // execve of a non-allowed binary must be DENIED by the kernel; if it ran, it would create
-            // `secondary`.
-            match Command::new(&target)
-                .arg(&secondary)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-            {
-                Ok(mut child) => {
-                    let _ = child.wait();
-                    rec.push_str("exec=OK\n");
+        Op::Exec { secondary, .. } => {
+            // Execute the pre-opened target fd via execveat (see `exec_fd` above): an allowed target
+            // runs (creating `secondary`); a non-allowed real file is DENIED by Landlock at execveat.
+            match exec_fd {
+                Some(Ok(exe)) => {
+                    match sys::spawn_via_execveat(exe.as_raw_fd(), secondary.as_os_str()) {
+                        Ok(mut child) => {
+                            let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+                            rec.push_str(&format!(
+                                "exec={}\n",
+                                if ok { "OK" } else { "RANBUTFAILED" }
+                            ));
+                        }
+                        Err(e) => rec.push_str(&format!("exec=ERR:{}\n", errno_of(&e))),
+                    }
                 }
-                Err(e) => rec.push_str(&format!("exec=ERR:{}\n", errno_of(&e))),
+                // Could not even open the target before confinement (independent of Landlock).
+                Some(Err(e)) => rec.push_str(&format!("exec=ERR:{}\n", errno_of(&e))),
+                None => {}
             }
         }
     }

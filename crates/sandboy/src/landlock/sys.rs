@@ -54,6 +54,12 @@ pub(crate) const HANDLED_FS_ABI3: u64 = access::EXECUTE
     | access::REFER
     | access::TRUNCATE;
 
+/// Rights that apply to a REGULAR FILE. Directory-only rights (READ_DIR, the MAKE_*/REMOVE_* set,
+/// REFER) on a file rule make `landlock_add_rule` fail with EINVAL, so a file rule's mask must be
+/// intersected with this set. (Directories may hold every handled right.)
+pub(crate) const FILE_APPLICABLE: u64 =
+    access::EXECUTE | access::WRITE_FILE | access::READ_FILE | access::TRUNCATE;
+
 /// The minimum Landlock ABI VB-2 requires: 3, for `LANDLOCK_ACCESS_FS_TRUNCATE`.
 pub(crate) const MIN_ABI: i32 = 3;
 
@@ -164,6 +170,53 @@ pub(crate) fn restrict_self(ruleset: &OwnedFd) -> io::Result<()> {
     } else {
         Ok(())
     }
+}
+
+/// Spawn a child that `execveat`s the already-open `fd` with `AT_EMPTY_PATH` (i.e. `fexecve`), passing
+/// `arg` as argv[1]. Executing via an fd — opened BEFORE `restrict_self` — is how a sealed memfd (an
+/// anonymous inode with no filesystem path, so un-nameable by a path rule) runs under Landlock, while
+/// a real file's execute right is still enforced by the kernel at `execveat`. Returns the child on a
+/// successful hand-off; a Landlock/exec denial surfaces as the spawn `io::Error` (EACCES/EPERM).
+pub(crate) fn spawn_via_execveat(
+    fd: RawFd,
+    arg: &std::ffi::OsStr,
+) -> io::Result<std::process::Child> {
+    use std::os::unix::ffi::OsStrExt as _;
+    use std::os::unix::process::CommandExt as _;
+
+    let bad = || io::Error::from(io::ErrorKind::InvalidInput);
+    let argv0 = std::ffi::CString::new("o7-sealed-exec").map_err(|_| bad())?;
+    let arg1 = std::ffi::CString::new(arg.as_bytes()).map_err(|_| bad())?;
+    let empty = std::ffi::CString::new("").map_err(|_| bad())?;
+
+    // Runs in the forked child before any exec: build argv/envp as STACK arrays of pointers into the
+    // moved-in CStrings (no heap allocation → async-signal-safe in the single-threaded child) and
+    // execveat the fd, which either replaces the process (never returning) or returns -1/errno.
+    let hook = move || -> io::Result<()> {
+        let argv = [argv0.as_ptr(), arg1.as_ptr(), core::ptr::null()];
+        let envp = [core::ptr::null::<libc::c_char>()];
+        // SAFETY: `fd` is an inherited, open fd; `empty` is a valid "" path; argv/envp are valid
+        // NULL-terminated pointer arrays that live across the call.
+        unsafe {
+            libc::syscall(
+                libc::SYS_execveat,
+                fd,
+                empty.as_ptr(),
+                argv.as_ptr(),
+                envp.as_ptr(),
+                libc::AT_EMPTY_PATH,
+            );
+        }
+        Err(io::Error::last_os_error())
+    };
+
+    // The placeholder program is NEVER exec'd: `hook` either replaces the process or errors first.
+    let mut cmd = std::process::Command::new("/nonexistent-o7-execveat-placeholder");
+    // SAFETY: registering a pre_exec hook; the hook above is async-signal-safe as documented.
+    unsafe {
+        cmd.pre_exec(hook);
+    }
+    cmd.spawn()
 }
 
 /// `prctl(PR_SET_NO_NEW_PRIVS, 1)` — a prerequisite for `restrict_self` without `CAP_SYS_ADMIN`.

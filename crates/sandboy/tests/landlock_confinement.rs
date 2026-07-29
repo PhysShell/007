@@ -1,11 +1,14 @@
-//! VB-2 real-Landlock acceptance for the filesystem confinement + effect-based self-check, mirroring
-//! the frozen Vertical B filesystem/exec oracles (`o7-worker/tests/sandbox_confinement.rs`:
-//! `writes_are_confined_to_the_worktree`, `exec_of_a_non_allowed_binary_is_denied_by_the_kernel`)
-//! and proving the fail-closed install: an unsupported / disabled / insufficient-ABI Landlock, or a
-//! failure at any install stage, reports `filesystem=not_enforced` and NEVER runs the probe op.
+//! VB-2 real-Landlock acceptance for the filesystem confinement + DIFFERENTIAL effect-based
+//! self-check, mirroring the frozen Vertical B oracles (`o7-worker/tests/sandbox_confinement.rs`:
+//! `writes_are_confined_to_the_worktree`, `exec_of_a_non_allowed_binary_is_denied_by_the_kernel`,
+//! `a_sealed_proc_fd_target_executes_under_confinement`) AND proving BOTH directions: an allowed
+//! directory / exact-file / sealed-`/proc/<pid>/fd/<n>` executable runs; a non-allowed one is denied;
+//! and every fail-closed verdict (install stages + the four self-check verdicts) reports
+//! `not_enforced` and never runs the op.
 //!
-//! Every test is `#[ignore]`d and needs a REAL kernel with Landlock ABI >= 3 (TRUNCATE). A capability
-//! guard SKIPS (does not fail) when Landlock is unavailable, so `--include-ignored` is safe anywhere.
+//! The capability guard is an INDEPENDENT raw kernel ABI probe — NOT the system-under-test — so a
+//! broken backend fails RED, never a silent SKIP. With `O7_REQUIRE_LANDLOCK` set (the designated
+//! runner), an incapable host is a TEST FAILURE, never a skip.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -14,11 +17,55 @@
 )]
 
 use std::collections::BTreeMap;
+use std::ffi::CString;
+use std::fs::File;
+use std::io::Write as _;
+use std::os::fd::{AsRawFd as _, FromRawFd as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn backend_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_sandboy"))
+}
+
+/// INDEPENDENT raw kernel Landlock ABI probe — the documented `create_ruleset(NULL,0,VERSION)`
+/// syscall, issued directly (NOT via the backend under test). Returns the ABI version or -1.
+fn kernel_landlock_abi() -> i32 {
+    // SAFETY: the documented ABI probe — NULL attr, 0 size, the VERSION flag (1). The kernel reads no
+    // user memory in this mode and returns the ABI version (>=1) or -1 with errno set.
+    let r = unsafe {
+        libc::syscall(
+            libc::SYS_landlock_create_ruleset,
+            std::ptr::null::<u8>(),
+            0_usize,
+            1_u32,
+        )
+    };
+    if r < 0 {
+        -1
+    } else {
+        r as i32
+    }
+}
+
+/// Gate a test: `true` to proceed. When `O7_REQUIRE_LANDLOCK` is set, an incapable host is a FAILURE
+/// (never a skip); otherwise an incapable host skips. The predicate is the independent probe above,
+/// so a backend regression can never turn a test into a green early return.
+fn require_or_skip() -> bool {
+    let abi = kernel_landlock_abi();
+    let capable = abi >= 3;
+    if std::env::var_os("O7_REQUIRE_LANDLOCK").is_some() {
+        assert!(
+            capable,
+            "O7_REQUIRE_LANDLOCK set but the kernel Landlock ABI is {abi} (< 3, needs TRUNCATE)"
+        );
+        return true;
+    }
+    if !capable {
+        eprintln!("SKIP: kernel Landlock ABI {abi} < 3 (independent probe)");
+        return false;
+    }
+    true
 }
 
 fn parse_result(path: &Path) -> BTreeMap<String, String> {
@@ -33,64 +80,16 @@ fn field<'a>(res: &'a BTreeMap<String, String>, key: &str) -> &'a str {
     res.get(key).map(String::as_str).unwrap_or("")
 }
 
-/// Run `sandboy __landlock-run`; `fault` sets the test-only `O7_LL_FAULT` control knob. Returns
-/// (exit_code, parsed result).
-fn run_landlock(
-    result: &Path,
-    worktree: &Path,
-    allow_exec: &[&Path],
-    fault: Option<&str>,
-    op: &[&str],
-) -> (i32, BTreeMap<String, String>) {
-    let mut cmd = Command::new(backend_bin());
-    cmd.arg("__landlock-run")
-        .arg("--result")
-        .arg(result)
-        .arg("--worktree")
-        .arg(worktree);
-    for p in allow_exec {
-        cmd.arg("--allow-exec").arg(p);
-    }
-    cmd.arg("--");
-    for a in op {
-        cmd.arg(a);
-    }
-    if let Some(f) = fault {
-        cmd.env("O7_LL_FAULT", f);
-    }
-    let status = cmd.status().expect("run sandboy __landlock-run");
-    (status.code().unwrap_or(-1), parse_result(result))
+/// Existing system directories a dynamically-linked executable needs to run under Landlock (the
+/// binary dirs + the dynamic loader / libraries).
+fn system_exec_roots() -> Vec<PathBuf> {
+    ["/usr", "/lib", "/lib64", "/bin", "/sbin"]
+        .into_iter()
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .collect()
 }
 
-/// Whether this host can install and PROVE a Landlock filesystem policy (ABI >= 3 present + enabled).
-/// Probes by actually running an fs op in a throwaway dir and requiring `filesystem=enforced`.
-fn landlock_available() -> bool {
-    let wt = match tempfile::tempdir() {
-        Ok(d) => d,
-        Err(_) => return false,
-    };
-    let outside = match tempfile::tempdir() {
-        Ok(d) => d,
-        Err(_) => return false,
-    };
-    let result = wt.path().join("probe.result");
-    let (code, res) = run_landlock(
-        &result,
-        wt.path(),
-        &[wt.path()],
-        None,
-        &[
-            "fs",
-            &outside.path().join("c").to_string_lossy(),
-            &outside.path().join("o").to_string_lossy(),
-            &outside.path().join("t").to_string_lossy(),
-        ],
-    );
-    code == 0 && field(&res, "filesystem") == "enforced"
-}
-
-/// A `touch`-like binary that creates its first argument when executed. Used as the NON-allowed exec
-/// target; if the kernel lets it run, it leaves an observable `secondary` marker.
 fn touch_bin() -> Option<PathBuf> {
     for cand in ["/usr/bin/touch", "/bin/touch"] {
         let p = PathBuf::from(cand);
@@ -101,11 +100,44 @@ fn touch_bin() -> Option<PathBuf> {
     None
 }
 
+struct RunOpts<'a> {
+    worktree: &'a Path,
+    outside_probe: Option<&'a Path>,
+    allow_exec: &'a [&'a Path],
+    fault: Option<&'a str>,
+}
+
+/// Run `sandboy __landlock-run`. Returns (exit_code, parsed result).
+fn run_landlock(result: &Path, opts: RunOpts<'_>, op: &[&str]) -> (i32, BTreeMap<String, String>) {
+    let mut cmd = Command::new(backend_bin());
+    cmd.arg("__landlock-run")
+        .arg("--result")
+        .arg(result)
+        .arg("--worktree")
+        .arg(opts.worktree);
+    if let Some(p) = opts.outside_probe {
+        cmd.arg("--outside-probe").arg(p);
+    }
+    for p in opts.allow_exec {
+        cmd.arg("--allow-exec").arg(p);
+    }
+    cmd.arg("--");
+    for a in op {
+        cmd.arg(a);
+    }
+    if let Some(f) = opts.fault {
+        cmd.env("O7_LL_FAULT", f);
+    }
+    let status = cmd.status().expect("run sandboy __landlock-run");
+    (status.code().unwrap_or(-1), parse_result(result))
+}
+
+// --- filesystem confinement (mirrors the frozen oracle) ---
+
 #[test]
 #[ignore = "Vertical B: real Landlock ABI >= 3 required; RED against the non-confining stand-in"]
 fn writes_are_confined_to_the_worktree() {
-    if !landlock_available() {
-        eprintln!("SKIP: no Landlock ABI >= 3 on this host");
+    if !require_or_skip() {
         return;
     }
     const OVERWRITE_ORIGINAL: &[u8] = b"ORIGINAL-CONTENT";
@@ -117,17 +149,18 @@ fn writes_are_confined_to_the_worktree() {
     let create = outside.path().join("created.txt");
     let overwrite = outside.path().join("existing-overwrite.txt");
     let truncate = outside.path().join("existing-truncate.txt");
-    // The overwrite/truncate targets already EXIST — Landlock governs modifying (WRITE_FILE) and
-    // emptying (TRUNCATE, ABI 3) them with rights DISTINCT from creating a new file (MAKE_REG).
     std::fs::write(&overwrite, OVERWRITE_ORIGINAL).unwrap();
     std::fs::write(&truncate, TRUNCATE_ORIGINAL).unwrap();
     let result = wt.path().join("fs.result");
 
     let (code, res) = run_landlock(
         &result,
-        wt.path(),
-        &[allow.path()],
-        None,
+        RunOpts {
+            worktree: wt.path(),
+            outside_probe: None,
+            allow_exec: &[allow.path()],
+            fault: None,
+        },
         &[
             "fs",
             &create.to_string_lossy(),
@@ -138,17 +171,14 @@ fn writes_are_confined_to_the_worktree() {
 
     assert_eq!(code, 0, "a fully-enforced fs run exits 0; result: {res:?}");
     assert_eq!(field(&res, "filesystem"), "enforced");
-    // An allowed write INSIDE the worktree must succeed.
     assert!(
         wt.path().join("inside.txt").exists() && field(&res, "inside") == "OK",
         "an allowed write inside the worktree must succeed; result: {res:?}"
     );
-    // Creating a NEW outside file must be denied (EACCES/EPERM) and must not exist.
     assert!(
         !create.exists() && matches!(field(&res, "create"), "ERR:13" | "ERR:1"),
         "creating a file OUTSIDE the worktree must be DENIED; result: {res:?}"
     );
-    // Overwriting a PRE-EXISTING outside file must be denied AND leave its bytes untouched.
     assert!(
         matches!(field(&res, "overwrite"), "ERR:13" | "ERR:1"),
         "a write to an existing outside file must be DENIED; result: {res:?}"
@@ -158,7 +188,6 @@ fn writes_are_confined_to_the_worktree() {
         OVERWRITE_ORIGINAL,
         "the existing outside file was modified despite the deny"
     );
-    // Truncating a PRE-EXISTING outside file must be denied AND leave its size unchanged.
     assert!(
         matches!(field(&res, "truncate"), "ERR:13" | "ERR:1"),
         "truncating an existing outside file must be DENIED (ABI-3 TRUNCATE); result: {res:?}"
@@ -170,15 +199,16 @@ fn writes_are_confined_to_the_worktree() {
     );
 }
 
+// --- execute restriction: BOTH directions ---
+
 #[test]
 #[ignore = "Vertical B: real Landlock execute restriction required; RED against the stand-in"]
 fn exec_of_a_non_allowed_binary_is_denied_by_the_kernel() {
-    if !landlock_available() {
-        eprintln!("SKIP: no Landlock ABI >= 3 on this host");
+    if !require_or_skip() {
         return;
     }
     let Some(touch) = touch_bin() else {
-        eprintln!("SKIP: no touch binary to use as the non-allowed exec target");
+        eprintln!("SKIP: no touch binary");
         return;
     };
     let wt = tempfile::tempdir().unwrap();
@@ -188,9 +218,12 @@ fn exec_of_a_non_allowed_binary_is_denied_by_the_kernel() {
 
     let (code, res) = run_landlock(
         &result,
-        wt.path(),
-        &[allow.path()],
-        None,
+        RunOpts {
+            worktree: wt.path(),
+            outside_probe: None,
+            allow_exec: &[allow.path()],
+            fault: None,
+        },
         &[
             "exec",
             &touch.to_string_lossy(),
@@ -213,90 +246,366 @@ fn exec_of_a_non_allowed_binary_is_denied_by_the_kernel() {
     );
 }
 
-/// Shared assertion for a fail-closed install: `filesystem=not_enforced`, the expected stage + exit
-/// code, and — the point — the probe op NEVER ran (no `inside.txt`, outside targets untouched).
-fn assert_fails_closed(fault: &str, want_stage: &str, want_code: i32) {
+#[test]
+#[ignore = "Vertical B: real Landlock required; positive directory-rule exec"]
+fn an_allowed_directory_executable_runs_and_writes_inside_the_worktree() {
+    if !require_or_skip() {
+        return;
+    }
+    let Some(touch) = touch_bin() else {
+        eprintln!("SKIP: no touch binary");
+        return;
+    };
     let wt = tempfile::tempdir().unwrap();
-    let outside = tempfile::tempdir().unwrap();
-    let allow = tempfile::tempdir().unwrap();
-    let overwrite = outside.path().join("ow.txt");
-    let truncate = outside.path().join("tr.txt");
-    std::fs::write(&overwrite, b"KEEP").unwrap();
-    std::fs::write(&truncate, b"KEEPSIZED").unwrap();
-    let result = wt.path().join("res");
+    let roots = system_exec_roots();
+    let allow: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
+    let marker = wt.path().join("ran-marker");
+    let result = wt.path().join("exec.result");
 
     let (code, res) = run_landlock(
         &result,
-        wt.path(),
-        &[allow.path()],
-        Some(fault),
+        RunOpts {
+            worktree: wt.path(),
+            outside_probe: None,
+            allow_exec: &allow,
+            fault: None,
+        },
+        &["exec", &touch.to_string_lossy(), &marker.to_string_lossy()],
+    );
+
+    assert_eq!(code, 0, "result: {res:?}");
+    assert_eq!(field(&res, "filesystem"), "enforced");
+    assert_eq!(
+        field(&res, "exec"),
+        "OK",
+        "an allowed executable must run; result: {res:?}"
+    );
+    assert!(
+        marker.exists(),
+        "the allowed executable must run and write its marker INSIDE the worktree"
+    );
+}
+
+/// A sealed memfd holding `path`'s bytes, plus the `/proc/<pid>/fd/<n>` path that names it. Mirrors
+/// the frozen `a_sealed_proc_fd_target_executes_under_confinement` setup. The returned `File` must be
+/// kept alive for the duration of the run.
+fn sealed_memfd_of(path: &Path) -> (File, PathBuf) {
+    let bytes = std::fs::read(path).expect("read binary to seal");
+    let name = CString::new("o7-sealed-landlock-probe").unwrap();
+    // SAFETY: `memfd_create` with a valid NUL-terminated name and MFD_ALLOW_SEALING returns a fresh
+    // owned fd or -1; we check the result before using it.
+    let fd = unsafe { libc::memfd_create(name.as_ptr(), libc::MFD_ALLOW_SEALING) };
+    assert!(
+        fd >= 0,
+        "memfd_create failed: {}",
+        std::io::Error::last_os_error()
+    );
+    // SAFETY: `fd` is a fresh, exclusively-owned fd from memfd_create; `File` takes sole ownership.
+    let mut file = unsafe { File::from_raw_fd(fd) };
+    file.write_all(&bytes).expect("write sealed bytes");
+    let seals = libc::F_SEAL_WRITE | libc::F_SEAL_GROW | libc::F_SEAL_SHRINK | libc::F_SEAL_SEAL;
+    // SAFETY: F_ADD_SEALS on our own memfd with a valid seal bitmask; returns 0 or -1.
+    let r = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_ADD_SEALS, seals) };
+    assert_eq!(
+        r,
+        0,
+        "F_ADD_SEALS failed: {}",
+        std::io::Error::last_os_error()
+    );
+    let proc_path = PathBuf::from(format!(
+        "/proc/{}/fd/{}",
+        std::process::id(),
+        file.as_raw_fd()
+    ));
+    (file, proc_path)
+}
+
+#[test]
+#[ignore = "Vertical B: real Landlock required; sealed /proc/<pid>/fd exec + exact file rule"]
+fn a_sealed_proc_fd_executable_runs_under_landlock() {
+    if !require_or_skip() {
+        return;
+    }
+    let Some(touch) = touch_bin() else {
+        eprintln!("SKIP: no touch binary");
+        return;
+    };
+    // A LIVE sealed memfd holding a real executable. A memfd is an ANONYMOUS inode with no
+    // filesystem-hierarchy path, so it cannot be named by a Landlock path_beneath rule (add_rule
+    // would EBADFD) — and precisely because it is not path-reachable, executing it is not restricted,
+    // while the resulting process stays confined. Kept alive here for the duration of the run.
+    let (_sealed, sealed_path) = sealed_memfd_of(&touch);
+
+    let wt = tempfile::tempdir().unwrap();
+    let mut roots = system_exec_roots();
+    // The EXACT regular-file allow rule (a real file, object-type masked to file rights) — proves a
+    // file rule installs without EINVAL alongside directory rules. `touch` is also under a system
+    // root, so this rule exists purely to exercise the exact-file path.
+    roots.push(touch.clone());
+    let allow: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
+    let marker = wt.path().join("sealed-ran");
+    let result = wt.path().join("exec.result");
+
+    // The target is named by its /proc/<pid>/fd/<n> path, exactly like the frozen oracle. The harness
+    // opens it BEFORE restrict and executes it via the fd (execveat), so the anonymous memfd — which
+    // no path rule can name — runs, while the surrounding filesystem stays confined.
+    let (code, res) = run_landlock(
+        &result,
+        RunOpts {
+            worktree: wt.path(),
+            outside_probe: None,
+            allow_exec: &allow,
+            fault: None,
+        },
         &[
-            "fs",
-            &outside.path().join("new.txt").to_string_lossy(),
-            &overwrite.to_string_lossy(),
-            &truncate.to_string_lossy(),
+            "exec",
+            &sealed_path.to_string_lossy(),
+            &marker.to_string_lossy(),
         ],
     );
 
+    assert_eq!(code, 0, "result: {res:?}");
+    assert_eq!(
+        field(&res, "filesystem"),
+        "enforced",
+        "an exact regular-file allow rule must install (object-type masked); result: {res:?}"
+    );
+    assert_eq!(
+        field(&res, "exec"),
+        "OK",
+        "the sealed memfd must EXECUTE under Landlock; result: {res:?}"
+    );
+    assert!(
+        marker.exists(),
+        "the sealed executable must run and write its marker"
+    );
+}
+
+// --- fail-closed matrix: install stages + self-check verdicts + object type ---
+
+/// Assert a fail-closed install: `filesystem=not_enforced`, the expected stage + exit code, and the
+/// probe op NEVER ran (no `inside.txt`).
+fn assert_fails_closed(opts: RunOpts<'_>, op: &[&str], want_stage: &str, want_code: i32) {
+    let wt_owned;
+    let worktree = opts.worktree;
+    let result = {
+        // Put the result outside the worktree so a would-be op never masks it.
+        wt_owned = tempfile::tempdir().unwrap();
+        wt_owned.path().join("res")
+    };
+    let (code, res) = run_landlock(&result, opts, op);
     assert_eq!(
         field(&res, "filesystem"),
         "not_enforced",
-        "[{fault}] must be not_enforced"
+        "[{want_stage}] must be not_enforced"
     );
-    assert_eq!(field(&res, "stage"), want_stage, "[{fault}] wrong stage");
-    assert_eq!(code, want_code, "[{fault}] wrong exit code");
-    // "Never launch": the op did not run.
+    assert_eq!(
+        field(&res, "stage"),
+        want_stage,
+        "[{want_stage}] wrong stage"
+    );
+    assert_eq!(
+        code, want_code,
+        "[{want_stage}] wrong exit code; result: {res:?}"
+    );
     assert!(
-        !wt.path().join("inside.txt").exists(),
-        "[{fault}] op ran despite not_enforced"
-    );
-    assert_eq!(
-        std::fs::read(&overwrite).unwrap_or_default(),
-        b"KEEP",
-        "[{fault}] outside file touched"
-    );
-    assert_eq!(
-        std::fs::metadata(&truncate).map(|m| m.len()).unwrap_or(0),
-        b"KEEPSIZED".len() as u64,
-        "[{fault}] outside file truncated"
+        !worktree.join("inside.txt").exists(),
+        "[{want_stage}] op ran despite not_enforced"
     );
 }
 
 #[test]
 #[ignore = "Vertical B: real Landlock required"]
-fn an_unsupported_or_disabled_landlock_reports_not_enforced_and_never_launches() {
-    if !landlock_available() {
-        eprintln!("SKIP: no Landlock ABI >= 3 on this host");
+fn install_stage_failures_report_not_enforced_and_never_launch() {
+    if !require_or_skip() {
         return;
     }
-    // ENOSYS (no Landlock) and EOPNOTSUPP (disabled) both map to the same fail-closed outcome.
-    assert_fails_closed("abi_enosys", "unsupported", 81);
-    assert_fails_closed("abi_eopnotsupp", "unsupported", 81);
+    let fs_op = |c: &Path, o: &Path, t: &Path| {
+        vec![
+            "fs".to_string(),
+            c.to_string_lossy().into_owned(),
+            o.to_string_lossy().into_owned(),
+            t.to_string_lossy().into_owned(),
+        ]
+    };
+    for (fault, stage, exit) in [
+        ("abi_enosys", "unsupported", 81),
+        ("abi_eopnotsupp", "unsupported", 81),
+        ("abi_low", "abi_too_low", 82),
+        ("create", "create_ruleset", 80),
+        ("add_rule", "add_rule", 84),
+        ("add_rule_partial", "add_rule", 84),
+        ("no_new_privs", "no_new_privs", 85),
+        ("restrict_self", "restrict_self", 86),
+    ] {
+        let wt = tempfile::tempdir().unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let allow = tempfile::tempdir().unwrap();
+        let op = fs_op(
+            &out.path().join("n"),
+            &out.path().join("o"),
+            &out.path().join("t"),
+        );
+        let op_ref: Vec<&str> = op.iter().map(String::as_str).collect();
+        assert_fails_closed(
+            RunOpts {
+                worktree: wt.path(),
+                outside_probe: None,
+                allow_exec: &[allow.path()],
+                fault: Some(fault),
+            },
+            &op_ref,
+            stage,
+            exit,
+        );
+    }
 }
 
 #[test]
-#[ignore = "Vertical B: real Landlock required"]
-fn an_insufficient_abi_reports_not_enforced_and_never_launches() {
-    if !landlock_available() {
-        eprintln!("SKIP: no Landlock ABI >= 3 on this host");
+#[ignore = "Vertical B: real Landlock required; the four self-check verdicts + object type"]
+fn self_check_and_object_type_verdicts_are_fail_closed() {
+    if !require_or_skip() {
         return;
     }
-    // ABI < 3 cannot enforce TRUNCATE, which the frozen oracle requires.
-    assert_fails_closed("abi_low", "abi_too_low", 82);
-}
+    let out = tempfile::tempdir().unwrap();
+    let (c, o, t) = (
+        out.path().join("n"),
+        out.path().join("o"),
+        out.path().join("t"),
+    );
+    let op = [
+        "fs",
+        &c.to_string_lossy(),
+        &o.to_string_lossy(),
+        &t.to_string_lossy(),
+    ];
 
-#[test]
-#[ignore = "Vertical B: real Landlock required"]
-fn a_failed_install_stage_reports_not_enforced_and_never_launches() {
-    if !landlock_available() {
-        eprintln!("SKIP: no Landlock ABI >= 3 on this host");
-        return;
-    }
-    // Every stage from ruleset creation through the point-of-no-return fails closed, and a PARTIAL
-    // ruleset (worktree rule added, an allow_exec rule fails) never reaches restrict_self.
-    assert_fails_closed("create", "create_ruleset", 80);
-    assert_fails_closed("add_rule", "add_rule", 84);
-    assert_fails_closed("add_rule_partial", "add_rule", 84);
-    assert_fails_closed("no_new_privs", "no_new_privs", 85);
-    assert_fails_closed("restrict_self", "restrict_self", 86);
+    // 87 — outside probe IS the worktree, so the post-restrict "outside" write is allowed.
+    let wt = tempfile::tempdir().unwrap();
+    let allow = tempfile::tempdir().unwrap();
+    assert_fails_closed(
+        RunOpts {
+            worktree: wt.path(),
+            outside_probe: Some(wt.path()),
+            allow_exec: &[allow.path()],
+            fault: None,
+        },
+        &op,
+        "self_check_outside",
+        87,
+    );
+
+    // 88 — a misbuilt ruleset (worktree rule omitted): the inside write is denied post-restrict.
+    let wt = tempfile::tempdir().unwrap();
+    assert_fails_closed(
+        RunOpts {
+            worktree: wt.path(),
+            outside_probe: None,
+            allow_exec: &[allow.path()],
+            fault: Some("omit_worktree_rule"),
+        },
+        &op,
+        "self_check_inside",
+        88,
+    );
+
+    // 89 — the outside write fails post-restrict but NOT with a Landlock deny.
+    let wt = tempfile::tempdir().unwrap();
+    assert_fails_closed(
+        RunOpts {
+            worktree: wt.path(),
+            outside_probe: None,
+            allow_exec: &[allow.path()],
+            fault: Some("selfcheck_outside_notdenied"),
+        },
+        &op,
+        "self_check_outside_inconclusive",
+        89,
+    );
+
+    // 91 — a read-only outside probe dir: the UNCONFINED baseline write already fails, so a later
+    // denial could not be attributed to Landlock. (Real condition, no fault.)
+    let wt = tempfile::tempdir().unwrap();
+    let ro = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(
+        ro.path(),
+        std::os::unix::fs::PermissionsExt::from_mode(0o555),
+    )
+    .unwrap();
+    assert_fails_closed(
+        RunOpts {
+            worktree: wt.path(),
+            outside_probe: Some(ro.path()),
+            allow_exec: &[allow.path()],
+            fault: None,
+        },
+        &op,
+        "baseline_outside",
+        91,
+    );
+    // restore perms so tempdir cleanup succeeds
+    std::fs::set_permissions(
+        ro.path(),
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+
+    // 83 — an allow_exec path that does not exist: the O_PATH open fails before any rule.
+    let wt = tempfile::tempdir().unwrap();
+    let missing = PathBuf::from("/nonexistent/o7-landlock-allow-path");
+    assert_fails_closed(
+        RunOpts {
+            worktree: wt.path(),
+            outside_probe: None,
+            allow_exec: &[&missing],
+            fault: None,
+        },
+        &op,
+        "open_parent",
+        83,
+    );
+
+    // 90 — a read-only worktree: the UNCONFINED inside baseline write already fails.
+    let wt = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(
+        wt.path(),
+        std::os::unix::fs::PermissionsExt::from_mode(0o555),
+    )
+    .unwrap();
+    assert_fails_closed(
+        RunOpts {
+            worktree: wt.path(),
+            outside_probe: None,
+            allow_exec: &[allow.path()],
+            fault: None,
+        },
+        &op,
+        "baseline_inside",
+        90,
+    );
+    std::fs::set_permissions(
+        wt.path(),
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+
+    // 92 — an allow_exec object that is neither a directory nor a regular file (a FIFO).
+    let wt = tempfile::tempdir().unwrap();
+    let fifo_dir = tempfile::tempdir().unwrap();
+    let fifo = fifo_dir.path().join("a-fifo");
+    let fifo_c = CString::new(fifo.to_string_lossy().as_bytes()).unwrap();
+    // SAFETY: mkfifo with a valid NUL-terminated path and mode 0644; returns 0 or -1.
+    let r = unsafe { libc::mkfifo(fifo_c.as_ptr(), 0o644) };
+    assert_eq!(r, 0, "mkfifo failed: {}", std::io::Error::last_os_error());
+    assert_fails_closed(
+        RunOpts {
+            worktree: wt.path(),
+            outside_probe: None,
+            allow_exec: &[&fifo],
+            fault: None,
+        },
+        &op,
+        "unsupported_object_type",
+        92,
+    );
 }

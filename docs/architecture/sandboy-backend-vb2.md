@@ -27,22 +27,39 @@ compiles NEITHER the Landlock module NOR `libc` NOR any `unsafe`, so the VB-0 em
 guarantee is byte-for-byte intact. The `test-harness` feature — the same gate as the VB-1 cgroup
 monitor — unlocks the capability. VB-4 wires it into the live `run` path and lifts the forbid.
 
-## Decision 2 — enforcement is PROVEN, never assumed; the exact minimum ABI
+## Decision 2 — enforcement is PROVEN against an unconfined baseline
 
 A ruleset fd or an ABI number restricts nothing on its own — the kernel API separates *creating* a
 ruleset, *adding* rules, and *applying* the restriction. So VB-2 considers the filesystem dimension
 `enforced` **only** after the full ordered sequence succeeds — `create_ruleset` → `add_rule`* →
-`prctl(PR_SET_NO_NEW_PRIVS)` → `restrict_self` — **and** an effect-based self-check observes that an
-outside-worktree write is DENIED (specifically EACCES/EPERM) while an inside-worktree write is
-ALLOWED. `PR_SET_NO_NEW_PRIVS` is mandatory: without it (or `CAP_SYS_ADMIN`) `restrict_self` returns
-`EPERM`.
+`prctl(PR_SET_NO_NEW_PRIVS)` → `restrict_self` — **and** a DIFFERENTIAL self-check.
 
-The runtime ABI is probed FIRST, and the exact minimum the frozen filesystem oracle needs is
-required: **ABI 3**, for `LANDLOCK_ACCESS_FS_TRUNCATE` (the oracle denies truncation of a pre-existing
-outside file as a right distinct from create/write). An absent (`ENOSYS`), disabled (`EOPNOTSUPP`),
-or insufficient (`< 3`) Landlock reports `filesystem=not_enforced` and NEVER runs the target. Every
-install stage returns a typed `InstallError` mapped to a distinct exit code (80–89) and stage label;
-each path-fd is opened via SAFE `std` with `O_PATH|O_CLOEXEC` so its `File` closes on every return.
+The self-check is differential because a bare EACCES proves nothing: Landlock composes with DAC and
+other LSMs, so a denial could come from anywhere. VB-2 therefore performs the exact outside-worktree
+write **before** `restrict_self` and requires it to SUCCEED (establishing that, unconfined, the op is
+allowed), then repeats it **after** `restrict_self` and requires EACCES/EPERM — so the post-restrict
+denial is attributable to Landlock alone. An inside-worktree write must succeed both times. A baseline
+that fails unconfined (read-only dir, DAC, another LSM) is its own `not_enforced` verdict
+(`baseline_outside` / `baseline_inside`), never a false "confined". `PR_SET_NO_NEW_PRIVS` is mandatory:
+without it (or `CAP_SYS_ADMIN`) `restrict_self` returns `EPERM`.
+
+The runtime ABI is probed FIRST, and the exact minimum the frozen oracle needs is required: **ABI 3**,
+for `LANDLOCK_ACCESS_FS_TRUNCATE`. Absent (`ENOSYS`), disabled (`EOPNOTSUPP`), or insufficient (`< 3`)
+reports `not_enforced` and NEVER runs. Every stage is a typed `InstallError` → distinct exit code
+(80–92) + label; each path-fd is opened via SAFE `std` `O_PATH|O_CLOEXEC` and RAII-closed on every path.
+
+## Decision 2b — object-type-correct rules and fd-based execution
+
+`allow_exec` rules are masked by the OPENED object's type (`fstat` of the same `O_PATH` fd, no TOCTOU):
+a **directory** may hold `EXECUTE|READ_FILE|READ_DIR`; a **regular file** only the file-applicable
+subset (`READ_DIR` on a file makes `add_rule` return EINVAL); any other type is rejected fail-closed.
+
+Execution goes through the fd, not the path: the target is opened BEFORE `restrict_self` and run with
+`execveat(fd, "", AT_EMPTY_PATH)` (fexecve) AFTER. For a real file the kernel still enforces the
+Landlock EXECUTE right at `execveat` (a non-allowed binary is denied EACCES); a sealed memfd — an
+anonymous inode with no filesystem path, so un-nameable by any `path_beneath` rule — executes because
+no path rule can name it, while the surrounding filesystem stays confined. This mirrors the frozen
+`a_sealed_proc_fd_target_executes_under_confinement` contract.
 
 ## Decision 3 — a tested CAPABILITY, gated; production `run` is unchanged
 
@@ -54,19 +71,21 @@ untouched VB-0 honest bootstrap.
 
 ## Tests & gates
 
-- `crates/sandboy/tests/landlock_confinement.rs` — `#[ignore]`d, real Landlock ABI ≥ 3 required.
-  Mirrors the frozen oracles (`writes_are_confined_to_the_worktree`,
-  `exec_of_a_non_allowed_binary_is_denied_by_the_kernel`) and adds the adversarial fail-closed matrix:
-  unsupported/disabled (ENOSYS/EOPNOTSUPP), insufficient ABI, and a failure at each install stage
-  (create_ruleset, add_rule, partial ruleset, no_new_privs, restrict_self) each report
-  `not_enforced` and never run the op. A capability guard SKIPS when Landlock is absent, so
-  `--include-ignored` is safe anywhere. A TEST-ONLY `O7_LL_FAULT` knob forces each stage to fail.
+- `crates/sandboy/tests/landlock_confinement.rs` — `#[ignore]`d, real Landlock ABI ≥ 3 required. The
+  capability guard is an INDEPENDENT raw-syscall ABI probe (NOT the system-under-test), so a broken
+  backend fails RED rather than skipping green; with `O7_REQUIRE_LANDLOCK=1` an incapable host is a
+  TEST FAILURE, never a skip. Covers: the frozen filesystem oracle; BOTH exec directions (allowed
+  directory executable, allowed exact-file rule, sealed `/proc/<pid>/fd/<n>` memfd, and a non-allowed
+  binary denied); and the full fail-closed matrix — unsupported/disabled, insufficient ABI, each
+  install stage, the four self-check verdicts (outside-allowed/outside-inconclusive/inside-denied and
+  both baselines), and an unsupported object type. A TEST-ONLY `O7_LL_FAULT` knob forces the
+  hard-to-stage stages; the baselines and the object-type case are real conditions.
 - Hosted `sandboy backend gate` COMPILES + lints the module (`--features test-harness`) and proves
   the `unsafe` surface is contained to `landlock/sys.rs` (production stays forbid-unsafe); it does
   not run the ignored tests (hosted runners can't guarantee Landlock).
-- `sandbox-confinement.yml` (self-hosted, `workflow_dispatch`-only — trigger UNCHANGED) gains one
-  step running the VB-2 Landlock acceptance with `--include-ignored` after the existing
-  Landlock+seccomp preflight.
+- `sandbox-confinement.yml` (self-hosted, `workflow_dispatch`-only — trigger UNCHANGED) runs the VB-2
+  Landlock acceptance with `--include-ignored --nocapture` and `O7_REQUIRE_LANDLOCK=1` after the
+  existing Landlock+seccomp preflight.
 
 `libc` is the one new dependency (pinned, already in the workspace tree, MIT/Apache-2.0). No seccomp,
 network, or env; no `confinement_backend()` switch; no RED-matrix flip. One layer; stop for re-gate;

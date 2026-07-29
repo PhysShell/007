@@ -35,6 +35,9 @@ o7-sandbox-protocol = { path = "../o7-sandbox-protocol" }
 # Scratch dirs for the would-be-target marker. Already a workspace dev-dependency (o7-worker),
 # already allowed in deny.toml.
 tempfile = "3"
+# VB-2 tests only: an INDEPENDENT raw kernel Landlock-ABI probe (so the capability guard never
+# depends on the system-under-test) and a sealed memfd for the frozen `/proc/<pid>/fd/<n>` exec case.
+libc = "0.2.186"
 
 # This crate is the DESIGNATED external `unsafe` trust boundary (see
 # docs/architecture/sandboy-backend-vb0.md, Decision 1 of sandboy-boundary.md): every OTHER 007
