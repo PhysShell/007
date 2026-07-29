@@ -1,0 +1,78 @@
+name: sandboy backend gate (Vertical B)
+
+# A DEDICATED, portable gate for the external `sandboy` confinement backend (crates/sandboy) — the
+# single `unsafe`-permitted trust boundary, kept OUT of the forbid-unsafe 007 crates. VB-0 is the
+# honest fail-closed bootstrap: it installs NO kernel confinement, so this gate needs NO special
+# runner and runs on a hosted runner alongside the o7-worker gate. The REAL kernel-confinement
+# acceptance matrix stays in `sandbox-confinement.yml` (self-hosted, workflow_dispatch-only).
+#
+# Action pins are full-length commit SHAs (immutable); the tag in the comment is informational.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sandboy-gate:
+    name: sandboy backend gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact tested revision
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          # On a PR, test the PR HEAD (not the synthetic merge ref); on push/manual, the pushed SHA.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Record execution identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "tested_sha=$(git rev-parse HEAD)"
+          rustup show active-toolchain
+          rustc -Vv
+          cargo --version
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy (backend)
+        run: cargo clippy -p sandboy --all-targets --locked -- -D warnings
+
+      - name: Build (backend)
+        run: cargo build -p sandboy --locked
+
+      # VB-0 backend behavior: honest downgraded report, half-close/EOF, and fail-closed on a
+      # malformed/truncated/oversized request, a NACK, or a spurious GO — the target never runs.
+      - name: Backend bootstrap tests
+        run: cargo test -p sandboy --locked --no-fail-fast
+
+      # Wire compatibility with the PRODUCTION SandboyBoundary (no fake, no test-harness knob): the
+      # real backend's honest report is rejected specifically as NotFullyEnforced, proving every
+      # binding matched. Needs the backend built above.
+      - name: Backend x SandboyBoundary wire-compat (VB-0)
+        run: cargo test -p o7-worker --test sandboy_backend_bootstrap --locked --no-fail-fast
+
+      # VB-0 must contain NO `unsafe`. The crate root carries `#![forbid(unsafe_code)]` (removed only
+      # by the slice that first installs Landlock/seccomp), so the build above already fails on any
+      # `unsafe`; this makes the invariant explicit and greppable.
+      - name: Unsafe inventory is empty (VB-0)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! grep -q '#!\[forbid(unsafe_code)\]' crates/sandboy/src/main.rs; then
+            echo "::error::VB-0 backend must keep #![forbid(unsafe_code)] (empty unsafe inventory)" >&2
+            exit 1
+          fi
+          echo "VB-0 backend unsafe inventory: empty (compiler-enforced)"
