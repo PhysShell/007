@@ -72,10 +72,11 @@ jobs:
 
       # PRODUCTION (feature off) must still contain NO `unsafe`: `main.rs` keeps
       # `forbid(unsafe_code)` under `cfg(not(test-harness))`, so the production build above fails on
-      # any `unsafe`. VB-2 unlocks `unsafe` ONLY under `test-harness`, and ONLY inside the single
-      # audited Landlock syscall module. This step pins both: production stays forbid-unsafe, and the
-      # entire `unsafe` surface is contained to `crates/sandboy/src/landlock/sys.rs`.
-      - name: Unsafe surface contained to landlock/sys.rs (VB-2)
+      # any `unsafe`. The `test-harness` feature unlocks `unsafe` ONLY inside the audited per-mechanism
+      # syscall modules: VB-2 Landlock (`landlock/sys.rs`) and VB-3 seccomp probes (`seccomp/sys.rs`).
+      # This step pins both: production stays forbid-unsafe, and the entire `unsafe` surface is
+      # contained to those `*/sys.rs` modules.
+      - name: Unsafe surface contained to the audited sys.rs modules (VB-2/VB-3)
         shell: bash
         run: |
           set -euo pipefail
@@ -84,10 +85,10 @@ jobs:
             exit 1
           fi
           offenders=$(grep -rnE 'unsafe *(\{|fn |impl |extern |trait )' crates/sandboy/src \
-            | grep -v 'src/landlock/sys.rs' || true)
+            | grep -vE 'src/(landlock|seccomp)/sys\.rs' || true)
           if [ -n "$offenders" ]; then
-            echo "::error::unsafe found OUTSIDE crates/sandboy/src/landlock/sys.rs:" >&2
+            echo "::error::unsafe found OUTSIDE crates/sandboy/src/{landlock,seccomp}/sys.rs:" >&2
             echo "$offenders" >&2
             exit 1
           fi
-          echo "sandboy unsafe surface: contained to landlock/sys.rs (production stays forbid-unsafe)"
+          echo "sandboy unsafe surface: contained to landlock/sys.rs + seccomp/sys.rs (prod forbid-unsafe)"
