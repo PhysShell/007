@@ -48,6 +48,11 @@ mod cgroup;
 #[cfg(feature = "test-harness")]
 mod landlock;
 
+// VB-3 seccomp confinement (network/setsid/setpgid deny) + fd scrub + env allowlist, with its
+// `__seccomp-run` harness entry. `test-harness`-only; its `unsafe` probe surface is `seccomp::sys`.
+#[cfg(feature = "test-harness")]
+mod seccomp;
+
 /// Exit codes. Distinct per fail-closed reason so a test (and an operator) can tell WHICH gate
 /// refused. All are non-zero except a clean bootstrap has no success exit — the backend only ever
 /// exits 0 by relaying a target it ran, which cannot happen at VB-0.
@@ -86,6 +91,12 @@ fn run() -> i32 {
     #[cfg(feature = "test-harness")]
     if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("__landlock-run")) {
         return landlock::harness_main();
+    }
+
+    // TEST-HARNESS ONLY: the VB-3 seccomp entry, exercised by the `#[ignore]`d confinement tests.
+    #[cfg(feature = "test-harness")]
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("__seccomp-run")) {
+        return seccomp::harness_main();
     }
 
     let Some(args) = parse_args() else {

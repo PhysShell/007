@@ -223,3 +223,11 @@ jobs:
         env:
           O7_REQUIRE_LANDLOCK: "1"
         run: cargo test -p sandboy --features test-harness --locked --test landlock_confinement -- --include-ignored --nocapture
+
+      # VB-3: real seccomp confinement (network/setsid/setpgid deny), inherited-fd scrub, env
+      # allowlist. The preflight above proved seccomp-BPF, so REQUIRE it: `O7_REQUIRE_SECCOMP=1` makes
+      # an incapable host a FAILURE, never a SKIP. Capability predicate is an INDEPENDENT prctl probe.
+      - name: Sandboy seccomp acceptance (VB-3)
+        env:
+          O7_REQUIRE_SECCOMP: "1"
+        run: cargo test -p sandboy --features test-harness --locked --test seccomp_confinement -- --include-ignored --nocapture
