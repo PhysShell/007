@@ -1,0 +1,12 @@
+# actionlint configuration.
+#
+# `confinement` is a CUSTOM self-hosted-runner label, not a GitHub-hosted one: the
+# `sandbox confinement (Vertical B)` job in `sandbox-confinement.yml` targets
+# `runs-on: [self-hosted, linux, x64, confinement]` — a DESIGNATED runner that actually provides
+# delegated cgroup v2, Landlock ABI >= 3, seccomp and IPv6 (capabilities hosted runners lack).
+# Without this declaration actionlint's `runner-label` check reports `label "confinement" is unknown`.
+# Declaring it here tells actionlint the label is intentional, so the check passes without weakening
+# it for any genuinely misspelled label.
+self-hosted-runner:
+  labels:
+    - confinement
