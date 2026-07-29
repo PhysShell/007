@@ -287,11 +287,11 @@ fn an_allowed_directory_executable_runs_and_writes_inside_the_worktree() {
     );
 }
 
-/// A sealed memfd holding `path`'s bytes, plus the `/proc/<pid>/fd/<n>` path that names it. Mirrors
-/// the frozen `a_sealed_proc_fd_target_executes_under_confinement` setup. The returned `File` must be
-/// kept alive for the duration of the run.
-fn sealed_memfd_of(path: &Path) -> (File, PathBuf) {
-    let bytes = std::fs::read(path).expect("read binary to seal");
+/// A memfd holding `path`'s bytes, plus the `/proc/<pid>/fd/<n>` path that names it. With
+/// `seal_full`, it is fully sealed (WRITE|GROW|SHRINK|SEAL) — the frozen sealed-launch-image shape;
+/// otherwise it is an unsealed memfd. The returned `File` must be kept alive for the run.
+fn memfd_of(path: &Path, seal_full: bool) -> (File, PathBuf) {
+    let bytes = std::fs::read(path).expect("read binary");
     let name = CString::new("o7-sealed-landlock-probe").unwrap();
     // SAFETY: `memfd_create` with a valid NUL-terminated name and MFD_ALLOW_SEALING returns a fresh
     // owned fd or -1; we check the result before using it.
@@ -303,16 +303,19 @@ fn sealed_memfd_of(path: &Path) -> (File, PathBuf) {
     );
     // SAFETY: `fd` is a fresh, exclusively-owned fd from memfd_create; `File` takes sole ownership.
     let mut file = unsafe { File::from_raw_fd(fd) };
-    file.write_all(&bytes).expect("write sealed bytes");
-    let seals = libc::F_SEAL_WRITE | libc::F_SEAL_GROW | libc::F_SEAL_SHRINK | libc::F_SEAL_SEAL;
-    // SAFETY: F_ADD_SEALS on our own memfd with a valid seal bitmask; returns 0 or -1.
-    let r = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_ADD_SEALS, seals) };
-    assert_eq!(
-        r,
-        0,
-        "F_ADD_SEALS failed: {}",
-        std::io::Error::last_os_error()
-    );
+    file.write_all(&bytes).expect("write memfd bytes");
+    if seal_full {
+        let seals =
+            libc::F_SEAL_WRITE | libc::F_SEAL_GROW | libc::F_SEAL_SHRINK | libc::F_SEAL_SEAL;
+        // SAFETY: F_ADD_SEALS on our own memfd with a valid seal bitmask; returns 0 or -1.
+        let r = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_ADD_SEALS, seals) };
+        assert_eq!(
+            r,
+            0,
+            "F_ADD_SEALS failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
     let proc_path = PathBuf::from(format!(
         "/proc/{}/fd/{}",
         std::process::id(),
@@ -322,8 +325,8 @@ fn sealed_memfd_of(path: &Path) -> (File, PathBuf) {
 }
 
 #[test]
-#[ignore = "Vertical B: real Landlock required; sealed /proc/<pid>/fd exec + exact file rule"]
-fn a_sealed_proc_fd_executable_runs_under_landlock() {
+#[ignore = "Vertical B: real Landlock required; the frozen sealed /proc/<pid>/fd target contract"]
+fn a_sealed_proc_fd_target_in_allow_exec_executes_under_landlock() {
     if !require_or_skip() {
         return;
     }
@@ -331,25 +334,18 @@ fn a_sealed_proc_fd_executable_runs_under_landlock() {
         eprintln!("SKIP: no touch binary");
         return;
     };
-    // A LIVE sealed memfd holding a real executable. A memfd is an ANONYMOUS inode with no
-    // filesystem-hierarchy path, so it cannot be named by a Landlock path_beneath rule (add_rule
-    // would EBADFD) — and precisely because it is not path-reachable, executing it is not restricted,
-    // while the resulting process stays confined. Kept alive here for the duration of the run.
-    let (_sealed, sealed_path) = sealed_memfd_of(&touch);
+    // A LIVE fully-sealed memfd holding a real executable, kept alive for the run.
+    let (_sealed, sealed_path) = memfd_of(&touch, true);
 
     let wt = tempfile::tempdir().unwrap();
+    // EXACTLY the frozen production policy shape: allow_exec CONTAINS the sealed target path itself,
+    // plus the loader/library roots; the launch target is that same sealed path.
     let mut roots = system_exec_roots();
-    // The EXACT regular-file allow rule (a real file, object-type masked to file rights) — proves a
-    // file rule installs without EINVAL alongside directory rules. `touch` is also under a system
-    // root, so this rule exists purely to exercise the exact-file path.
-    roots.push(touch.clone());
+    roots.push(sealed_path.clone());
     let allow: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
     let marker = wt.path().join("sealed-ran");
     let result = wt.path().join("exec.result");
 
-    // The target is named by its /proc/<pid>/fd/<n> path, exactly like the frozen oracle. The harness
-    // opens it BEFORE restrict and executes it via the fd (execveat), so the anonymous memfd — which
-    // no path rule can name — runs, while the surrounding filesystem stays confined.
     let (code, res) = run_landlock(
         &result,
         RunOpts {
@@ -366,19 +362,105 @@ fn a_sealed_proc_fd_executable_runs_under_landlock() {
     );
 
     assert_eq!(code, 0, "result: {res:?}");
+    // filesystem=enforced is only reported after the differential self-check observed an outside
+    // write DENIED and an inside write ALLOWED — so outside write/create/truncate remain denied for
+    // the confined sealed process, which inherits this exact ruleset.
     assert_eq!(
         field(&res, "filesystem"),
         "enforced",
-        "an exact regular-file allow rule must install (object-type masked); result: {res:?}"
+        "the sealed target IN allow_exec must install confinement (it is the detached exception); result: {res:?}"
     );
     assert_eq!(
         field(&res, "exec"),
         "OK",
-        "the sealed memfd must EXECUTE under Landlock; result: {res:?}"
+        "the sealed memfd named in allow_exec must EXECUTE under Landlock; result: {res:?}"
     );
     assert!(
         marker.exists(),
         "the sealed executable must run and write its marker"
+    );
+}
+
+/// Run the exec op and return (exit, result) — for the sealed-target negative cases.
+fn run_exec(
+    result: &Path,
+    worktree: &Path,
+    allow: &[&Path],
+    target: &Path,
+    marker: &Path,
+) -> (i32, BTreeMap<String, String>) {
+    run_landlock(
+        result,
+        RunOpts {
+            worktree,
+            outside_probe: None,
+            allow_exec: allow,
+            fault: None,
+        },
+        &["exec", &target.to_string_lossy(), &marker.to_string_lossy()],
+    )
+}
+
+#[test]
+#[ignore = "Vertical B: real Landlock required; an UNSEALED memfd allowance fails closed"]
+fn an_unsealed_memfd_allowance_fails_closed() {
+    if !require_or_skip() {
+        return;
+    }
+    let Some(touch) = touch_bin() else {
+        eprintln!("SKIP: no touch binary");
+        return;
+    };
+    // The launch target is an UNSEALED memfd — not the sanctioned exception, and unruleable.
+    let (_mem, path) = memfd_of(&touch, false);
+    let wt = tempfile::tempdir().unwrap();
+    let mut roots = system_exec_roots();
+    roots.push(path.clone());
+    let allow: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
+    let marker = wt.path().join("ran");
+    let result = wt.path().join("res");
+
+    let (_code, res) = run_exec(&result, wt.path(), &allow, &path, &marker);
+    assert_eq!(
+        field(&res, "filesystem"),
+        "not_enforced",
+        "an unsealed memfd allowance must fail closed; result: {res:?}"
+    );
+    assert!(
+        !marker.exists(),
+        "the target must not run when install failed closed"
+    );
+}
+
+#[test]
+#[ignore = "Vertical B: real Landlock required; a sealed memfd that is NOT the launch target fails closed"]
+fn a_sealed_memfd_allowance_that_is_not_the_launch_target_fails_closed() {
+    if !require_or_skip() {
+        return;
+    }
+    let Some(touch) = touch_bin() else {
+        eprintln!("SKIP: no touch binary");
+        return;
+    };
+    // A fully-sealed memfd is allow-listed, but the LAUNCH TARGET is an ordinary file — so the sealed
+    // memfd cannot claim the detached exception and must be ruled (EBADFD) → fail closed.
+    let (_mem, sealed_path) = memfd_of(&touch, true);
+    let wt = tempfile::tempdir().unwrap();
+    let mut roots = system_exec_roots();
+    roots.push(sealed_path.clone());
+    let allow: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
+    let marker = wt.path().join("ran");
+    let result = wt.path().join("res");
+
+    let (_code, res) = run_exec(&result, wt.path(), &allow, &touch, &marker);
+    assert_eq!(
+        field(&res, "filesystem"),
+        "not_enforced",
+        "a sealed memfd that is not the launch target must fail closed; result: {res:?}"
+    );
+    assert!(
+        !marker.exists(),
+        "the target must not run when install failed closed"
     );
 }
 

@@ -305,14 +305,29 @@ fn write_probe(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// The identity of an already-open object, from its fd (no pathname).
+fn identity_of(file: &File) -> Result<(u64, u64), InstallError> {
+    use std::os::unix::fs::MetadataExt as _;
+    let md = file.metadata().map_err(|err| InstallError::OpenParent {
+        path: PathBuf::from("<launch-target>"),
+        err,
+    })?;
+    Ok((md.dev(), md.ino()))
+}
+
 /// Install and PROVE the Landlock filesystem policy for this thread against an unconfined baseline.
 /// `Ok(())` means fully enforced AND differentially self-checked; any error means the caller must NOT
 /// launch. `outside_probe` is a directory the self-check uses for its outside write — the default is
 /// a genuinely-outside temp dir; tests point it at pathological locations to exercise each verdict.
+/// `launch_target` is the already-opened exec target (for the exec op): the EXACT, fully-sealed memfd
+/// launch target — an anonymous inode no path rule can name — is the ONE `allow_exec` object that is
+/// deliberately NOT given a path rule (it runs via `execveat`); every other unruleable object fails
+/// closed.
 fn install_filesystem(
     worktree: &Path,
     allow_exec: &[PathBuf],
     outside_probe: &Path,
+    launch_target: Option<&File>,
     faults: Faults,
 ) -> Result<(), InstallError> {
     // 1. Probe the ABI FIRST — an fd or a version number alone restricts nothing.
@@ -374,6 +389,23 @@ fn install_filesystem(
         exec_objs.push(open_object(path)?);
     }
 
+    // The ONE allow_exec object that may skip a path rule: the EXACT launch target, proven from its
+    // OPENED fd to be a fully-sealed memfd (an anonymous inode no path rule can name — it runs via
+    // execveat). Identified by opened-object identity, never pathname text.
+    let sealed_target_id: Option<(u64, u64)> = match launch_target {
+        Some(f) => {
+            let sealed = sys::get_seals(f.as_raw_fd())
+                .map(|s| s & sys::FULL_SEALS == sys::FULL_SEALS)
+                .unwrap_or(false);
+            if sealed {
+                Some(identity_of(f)?)
+            } else {
+                None
+            }
+        }
+        None => None,
+    };
+
     // Test-only deterministic barrier: after every object is OPEN, before any rule is ATTACHED.
     race_barrier();
 
@@ -395,6 +427,13 @@ fn install_filesystem(
         if obj.id == worktree_obj.id {
             continue; // folded into the single worktree rule above
         }
+        if Some(obj.id) == sealed_target_id {
+            // The sanctioned detached sealed launch target: do NOT call landlock_add_rule for this
+            // anonymous inode (it would EBADFD). It executes via execveat; no path rule can name it.
+            continue;
+        }
+        // Any other object — including a sealed memfd that is NOT the launch target, or an unsealed
+        // memfd — is ruled normally; an unruleable one fails closed here (add_rule → EBADFD).
         let rights = mask_for_type(obj, exec_desired)?;
         attach_rule(&ruleset, obj, rights)?;
     }
@@ -546,11 +585,14 @@ pub(crate) fn harness_main() -> i32 {
         Op::Exec { target, .. } => Some(OpenOptions::new().read(true).open(target)),
         Op::Fs { .. } => None,
     };
+    // The opened launch target (if the open succeeded) informs the sealed-memfd exception.
+    let launch_ref: Option<&File> = exec_fd.as_ref().and_then(|r| r.as_ref().ok());
 
     if let Err(e) = install_filesystem(
         &args.worktree,
         &args.allow_exec,
         &args.outside_probe,
+        launch_ref,
         faults,
     ) {
         rec.push_str("filesystem=not_enforced\n");

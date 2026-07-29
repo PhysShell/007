@@ -75,6 +75,15 @@ authority.
 a **directory** may hold `EXECUTE|READ_FILE|READ_DIR`; a **regular file** only the file-applicable
 subset (`READ_DIR` on a file makes `add_rule` return EINVAL); any other type is rejected fail-closed.
 
+The frozen production policy puts the exact sealed `/proc/<pid>/fd/<n>` launch target in `allow_exec`,
+yet a memfd is an anonymous inode `landlock_add_rule` rejects with EBADFD. So exactly ONE `allow_exec`
+object may skip its path rule: the launch target proven — from its OPENED fd (`F_GET_SEALS` must show
+`WRITE|GROW|SHRINK|SEAL`), by opened-object identity, never pathname text — to be that fully-sealed
+memfd. It needs no rule because it runs via `execveat` and no path rule can name it. **Every other**
+unruleable `allow_exec` object fails closed: an unsealed memfd, or a sealed memfd that is not the
+launch target, reaches `add_rule` → EBADFD → `not_enforced`, so the actual frozen policy installs
+confinement and a future VB-4 can flip the sealed-target oracle GREEN.
+
 Execution goes through the fd, not the path: the target is opened BEFORE `restrict_self` and run with
 `execveat(fd, "", AT_EMPTY_PATH)` (fexecve) AFTER. For a real file the kernel still enforces the
 Landlock EXECUTE right at `execveat` (a non-allowed binary is denied EACCES); a sealed memfd — an
