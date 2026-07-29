@@ -7,10 +7,12 @@
 //! than counting unrelated plumbing (e.g. the non-CLOEXEC Cargo jobserver `pipe:[…]`).
 //!
 //! Output is BUFFERED: the whole scan is collected through [`collect_targets`] and published to
-//! stdout only after it fully succeeds. It exits 0 ON SUCCESS ONLY; if it cannot
-//! enumerate/parse/readlink its own descriptor table — or cannot write/flush stdout — it exits
-//! NON-ZERO and prints nothing (no partial prefix), so a scan failure can never masquerade as a
-//! shorter "no leak" listing. A race-free CLOEXEC transport leaks no socket line.
+//! stdout only after it fully succeeds. It exits 0 ON SUCCESS ONLY. A SCAN failure
+//! (enumerate/parse/readlink) exits NON-ZERO having printed NOTHING — publishing has not begun, so
+//! there is no partial prefix and the failure can never masquerade as a shorter "no leak" listing.
+//! A stdout WRITE or FLUSH failure ALSO exits NON-ZERO, but publishing has already begun: bytes may
+//! already be on stdout, so the exit code — not an empty-stdout assumption — is what marks the run
+//! untrustworthy. A race-free CLOEXEC transport leaks no socket line.
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
 use std::fs::File;
@@ -58,8 +60,10 @@ fn run() -> i32 {
             return 2;
         }
     };
-    // Only now that the scan fully succeeded, render the whole result and publish it in ONE write.
-    // A stdout write or flush failure is itself an error (exit 2), never a silent truncation.
+    // Only now that the scan fully succeeded, render the whole result and publish it. Nothing was
+    // written before this point, so a scan failure above left stdout empty. A stdout write or flush
+    // failure here is itself an error (exit 2); `write_all` may already have emitted a prefix before
+    // failing, so the guarantee at this stage is the non-zero exit, not empty stdout.
     let mut buf = String::with_capacity(targets.iter().map(|t| t.len() + 1).sum());
     for target in &targets {
         buf.push_str(target);
