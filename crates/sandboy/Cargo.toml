@@ -1,0 +1,45 @@
+[package]
+name = "sandboy"
+version = "0.1.0"
+edition = "2021"
+description = "007 external confinement backend (Sandboy): the SEPARATE, unsafe-permitted trust boundary that installs real Linux confinement (Landlock + seccomp + a monitor-owned cgroup v2) OUTSIDE the forbid-unsafe 007 crates and reports each dimension honestly. VB-0: honest fail-closed bootstrap over the frozen protocol — no kernel enforcement yet."
+publish = false
+
+[[bin]]
+name = "sandboy"
+path = "src/main.rs"
+
+[dependencies]
+# The pure wire protocol shared VERBATIM with the o7-worker parent. This is the ONLY dependency
+# at VB-0: framing, digests, policy reconstruction, and the report all come from here, so the
+# backend never depends on the worker runtime. Zero new external crates → `cargo deny` untouched.
+o7-sandbox-protocol = { path = "../o7-sandbox-protocol" }
+
+[dev-dependencies]
+# The bootstrap tests drive the backend BINARY directly over a UnixStream and craft/parse frames
+# with the same pure protocol crate — no new external dependency.
+o7-sandbox-protocol = { path = "../o7-sandbox-protocol" }
+# Scratch dirs for the would-be-target marker. Already a workspace dev-dependency (o7-worker),
+# already allowed in deny.toml.
+tempfile = "3"
+
+# This crate is the DESIGNATED external `unsafe` trust boundary (see
+# docs/architecture/sandboy-backend-vb0.md, Decision 1 of sandboy-boundary.md): every OTHER 007
+# crate sets `unsafe_code = "forbid"` in its own manifest, and this one is the single place kernel
+# confinement syscalls (Landlock/seccomp — VB-2/VB-3) may live. It uses NONE at VB-0. The rest of
+# the workspace lint discipline is kept.
+[lints.rust]
+# `unsafe_code` is deliberately NOT forbidden here — this is the confinement boundary. VB-0 adds
+# no `unsafe`; VB-2/VB-3 will. `kani` is registered so stable builds don't warn.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+unreachable_pub = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"

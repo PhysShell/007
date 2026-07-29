@@ -11,6 +11,10 @@ members = [
     "crates/o7-run",
     "crates/o7-sandbox-protocol",
     "crates/o7-harness-policy",
+    # The EXTERNAL confinement backend — the single `unsafe`-permitted trust boundary (its own
+    # manifest does not forbid `unsafe`), kept OUT of the forbid-unsafe crates above. VB-0: honest
+    # bootstrap, no kernel enforcement (docs/architecture/sandboy-backend-vb0.md).
+    "crates/sandboy",
 ]
 exclude = ["fuzz"]
 resolver = "2"
