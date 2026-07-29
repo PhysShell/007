@@ -112,11 +112,16 @@ async fn the_real_backend_is_wire_compatible_and_rejected_as_not_fully_enforced(
         "expected an evidence rejection, got {err:?}"
     );
     // And specifically NotFullyEnforced: every binding matched (real wire compatibility); only the
-    // enforcement was honestly absent. A binding mismatch would carry a different message.
-    let msg = err.to_string();
-    assert!(
-        msg.contains("full enforcement"),
-        "expected a NotFullyEnforced rejection (bindings all matched), got: {msg}"
+    // enforcement was honestly absent. Pin the path UNAMBIGUOUSLY to the typed variant rather than
+    // hunting for two lucky words — `spawn` stringifies `SandboyLaunchError` into
+    // `BoundaryError::Evidence`, so rebuild the exact expected message from the same types. A
+    // binding mismatch (a different `SandboyLaunchError`) would not equal this string.
+    let expected =
+        BoundaryError::Evidence(SandboyLaunchError::NotFullyEnforced.to_string()).to_string();
+    assert_eq!(
+        err.to_string(),
+        expected,
+        "the rejection must be exactly the NotFullyEnforced path (every binding matched)"
     );
     // The honest bootstrap ran nothing.
     assert!(
