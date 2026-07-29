@@ -9,6 +9,13 @@ publish = false
 name = "sandboy"
 path = "src/main.rs"
 
+[features]
+# INTERNAL, NON-DEFAULT. Gates the VB-1 cgroup-monitor module and its `__cgroup-run` harness entry
+# (src/cgroup.rs), which the `#[ignore]`d confinement tests drive on a real delegated-cgroup host. A
+# production `sandboy` build leaves this OFF, so the only subcommand it exposes is `run` (the honest
+# VB-0 bootstrap). VB-4 promotes the cgroup monitor into the production `run` path and drops the gate.
+test-harness = []
+
 [dependencies]
 # The pure wire protocol shared VERBATIM with the o7-worker parent. This is the ONLY dependency
 # at VB-0: framing, digests, policy reconstruction, and the report all come from here, so the

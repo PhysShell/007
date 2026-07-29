@@ -207,3 +207,9 @@ jobs:
 
       - name: Confinement acceptance matrix
         run: cargo test -p o7-worker --locked --test sandbox_confinement -- --include-ignored
+
+      # VB-1: the real monitor-owned cgroup v2 leaf, timeout, and cgroup.kill teardown. Needs the
+      # same delegated-cgroup capability the preflight above proved; the `test-harness` feature
+      # compiles the `__cgroup-run` monitor entry these `#[ignore]`d tests drive.
+      - name: Sandboy cgroup monitor acceptance (VB-1)
+        run: cargo test -p sandboy --features test-harness --locked --test cgroup_confinement -- --include-ignored
