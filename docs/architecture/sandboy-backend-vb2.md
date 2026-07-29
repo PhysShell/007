@@ -48,7 +48,18 @@ for `LANDLOCK_ACCESS_FS_TRUNCATE`. Absent (`ENOSYS`), disabled (`EOPNOTSUPP`), o
 reports `not_enforced` and NEVER runs. Every stage is a typed `InstallError` → distinct exit code
 (80–92) + label; each path-fd is opened via SAFE `std` `O_PATH|O_CLOEXEC` and RAII-closed on every path.
 
-## Decision 2b — object-type-correct rules and fd-based execution
+## Decision 2b — the writable worktree is NOT an executable root
+
+The frozen policy splits two powers: the worktree is the single **writable** root; `allow_exec` names
+the **read+execute** roots. So the worktree rule grants `WORKTREE_RIGHTS` = every handled FS right
+**except `EXECUTE`** — otherwise, since a directory `path_beneath` rule applies to everything beneath
+it, a process could drop or copy an executable into the writable worktree and run it despite the
+worktree being absent from `allow_exec`. `EXECUTE` stays in the ruleset's HANDLED set, so it is denied
+wherever it is not granted. An `allow_exec` path that lies **inside** the worktree is a deliberate
+overlap: the code grants the explicit union (`WORKTREE_RIGHTS | exec`) for that exact path rather than
+relying on Landlock's multi-rule resolution.
+
+## Decision 2c — object-type-correct rules and fd-based execution
 
 `allow_exec` rules are masked by the OPENED object's type (`fstat` of the same `O_PATH` fd, no TOCTOU):
 a **directory** may hold `EXECUTE|READ_FILE|READ_DIR`; a **regular file** only the file-applicable

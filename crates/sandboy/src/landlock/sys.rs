@@ -60,6 +60,12 @@ pub(crate) const HANDLED_FS_ABI3: u64 = access::EXECUTE
 pub(crate) const FILE_APPLICABLE: u64 =
     access::EXECUTE | access::WRITE_FILE | access::READ_FILE | access::TRUNCATE;
 
+/// The worktree is the single WRITABLE root — read/write/create/remove/truncate — but NOT an
+/// executable root. It gets every handled FS right EXCEPT `EXECUTE`, so an executable created or
+/// copied inside the writable worktree is NOT kernel-executable unless the exact path is ALSO named
+/// by `allow_exec`. (`EXECUTE` stays in the ruleset's HANDLED set, so it is denied where not granted.)
+pub(crate) const WORKTREE_RIGHTS: u64 = HANDLED_FS_ABI3 & !access::EXECUTE;
+
 /// The minimum Landlock ABI VB-2 requires: 3, for `LANDLOCK_ACCESS_FS_TRUNCATE`.
 pub(crate) const MIN_ABI: i32 = 3;
 

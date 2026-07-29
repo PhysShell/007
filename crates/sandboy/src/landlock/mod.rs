@@ -303,8 +303,9 @@ fn install_filesystem(
     }
     let ruleset = sys::create_ruleset(sys::HANDLED_FS_ABI3).map_err(InstallError::CreateRuleset)?;
 
-    // 3. Rules: the worktree is the single WRITABLE root (every FS right); each allow_exec path is
-    //    read+execute, object-type-masked.
+    // 3. Rules: the worktree is the single WRITABLE root — every handled FS right EXCEPT EXECUTE, so
+    //    an executable dropped into the writable worktree is NOT runnable unless its exact path is
+    //    also in allow_exec. Each allow_exec path is read+execute, object-type-masked.
     if faults.add_rule {
         return Err(InstallError::AddRule {
             path: worktree.to_path_buf(),
@@ -312,8 +313,10 @@ fn install_filesystem(
         });
     }
     if !faults.omit_worktree_rule {
-        add_rule(&ruleset, worktree, sys::HANDLED_FS_ABI3)?;
+        add_rule(&ruleset, worktree, sys::WORKTREE_RIGHTS)?;
     }
+    // Canonicalized once, to detect allow_exec paths that lie inside the worktree.
+    let worktree_canon = std::fs::canonicalize(worktree).unwrap_or_else(|_| worktree.to_path_buf());
     let exec_desired = access::EXECUTE | access::READ_FILE | access::READ_DIR;
     for (i, path) in allow_exec.iter().enumerate() {
         if faults.add_rule_partial && i == 0 {
@@ -322,7 +325,18 @@ fn install_filesystem(
                 err: io::Error::from_raw_os_error(libc::EINVAL),
             });
         }
-        add_rule(&ruleset, path, exec_desired)?;
+        // DELIBERATE overlap: an allow_exec path inside the worktree is BOTH writable (worktree) and
+        // executable (allow_exec). Grant that union EXPLICITLY here rather than relying on Landlock's
+        // multi-rule resolution — object-type masking still applies in `add_rule`.
+        let within = std::fs::canonicalize(path)
+            .map(|c| c.starts_with(&worktree_canon))
+            .unwrap_or(false);
+        let desired = if within {
+            exec_desired | sys::WORKTREE_RIGHTS
+        } else {
+            exec_desired
+        };
+        add_rule(&ruleset, path, desired)?;
     }
 
     // 4. UNCONFINED BASELINE (before restrict): the exact self-check ops must succeed now, so a later

@@ -381,6 +381,95 @@ fn a_sealed_proc_fd_executable_runs_under_landlock() {
     );
 }
 
+#[test]
+#[ignore = "Vertical B: real Landlock required; the writable worktree must NOT be an executable root"]
+fn an_executable_inside_the_worktree_is_not_executable_unless_allowlisted() {
+    if !require_or_skip() {
+        return;
+    }
+    let Some(touch) = touch_bin() else {
+        eprintln!("SKIP: no touch binary");
+        return;
+    };
+    let wt = tempfile::tempdir().unwrap();
+    // A REAL runnable executable copied INTO the writable worktree (mode preserved by copy).
+    let evil = wt.path().join("evil");
+    std::fs::copy(&touch, &evil).unwrap();
+    let marker = wt.path().join("pwned");
+    // Allow the system roots (so the ONLY thing missing is an exec grant for the worktree binary).
+    let roots = system_exec_roots();
+    let allow: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
+    let result = wt.path().join("exec.result");
+
+    let (code, res) = run_landlock(
+        &result,
+        RunOpts {
+            worktree: wt.path(),
+            outside_probe: None,
+            allow_exec: &allow,
+            fault: None,
+        },
+        &["exec", &evil.to_string_lossy(), &marker.to_string_lossy()],
+    );
+
+    assert_eq!(code, 0, "result: {res:?}");
+    assert_eq!(field(&res, "filesystem"), "enforced");
+    assert!(
+        matches!(field(&res, "exec"), "ERR:13" | "ERR:1"),
+        "an executable in the WRITABLE worktree must NOT be kernel-executable when absent from \
+         allow_exec; result: {res:?}"
+    );
+    assert!(
+        !marker.exists(),
+        "the worktree executable RAN despite not being allow-listed — writable became executable"
+    );
+}
+
+#[test]
+#[ignore = "Vertical B: real Landlock required; deliberate worktree∩allow_exec overlap"]
+fn an_exact_worktree_file_added_to_allow_exec_executes() {
+    if !require_or_skip() {
+        return;
+    }
+    let Some(touch) = touch_bin() else {
+        eprintln!("SKIP: no touch binary");
+        return;
+    };
+    let wt = tempfile::tempdir().unwrap();
+    let tool = wt.path().join("tool");
+    std::fs::copy(&touch, &tool).unwrap();
+    let marker = wt.path().join("ran");
+    // The EXACT worktree file, explicitly allow-listed (the deliberate overlap): writable AND now
+    // executable. Plus system roots for the dynamic loader/libraries.
+    let mut roots = system_exec_roots();
+    roots.push(tool.clone());
+    let allow: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
+    let result = wt.path().join("exec.result");
+
+    let (code, res) = run_landlock(
+        &result,
+        RunOpts {
+            worktree: wt.path(),
+            outside_probe: None,
+            allow_exec: &allow,
+            fault: None,
+        },
+        &["exec", &tool.to_string_lossy(), &marker.to_string_lossy()],
+    );
+
+    assert_eq!(code, 0, "result: {res:?}");
+    assert_eq!(field(&res, "filesystem"), "enforced");
+    assert_eq!(
+        field(&res, "exec"),
+        "OK",
+        "an exact worktree file added to allow_exec must execute (deliberate overlap); result: {res:?}"
+    );
+    assert!(
+        marker.exists(),
+        "the allow-listed worktree file must run and write its marker"
+    );
+}
+
 // --- fail-closed matrix: install stages + self-check verdicts + object type ---
 
 /// Assert a fail-closed install: `filesystem=not_enforced`, the expected stage + exit code, and the
