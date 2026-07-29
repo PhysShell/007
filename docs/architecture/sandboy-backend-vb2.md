@@ -55,9 +55,19 @@ the **read+execute** roots. So the worktree rule grants `WORKTREE_RIGHTS` = ever
 **except `EXECUTE`** — otherwise, since a directory `path_beneath` rule applies to everything beneath
 it, a process could drop or copy an executable into the writable worktree and run it despite the
 worktree being absent from `allow_exec`. `EXECUTE` stays in the ruleset's HANDLED set, so it is denied
-wherever it is not granted. An `allow_exec` path that lies **inside** the worktree is a deliberate
-overlap: the code grants the explicit union (`WORKTREE_RIGHTS | exec`) for that exact path rather than
-relying on Landlock's multi-rule resolution.
+wherever it is not granted.
+
+Rule installation is **TOCTOU-safe**: every rule object (the worktree and each `allow_exec` entry) is
+opened **exactly once** via `O_PATH`, and rules attach to those SAME fds — no pathname is re-resolved
+between any decision and the rule attachment, so a concurrent rename/symlink swap cannot redirect a
+rule to a different object, and an open/identity failure fails closed (no lexical guessing). A
+descendant of the worktree that is also allow-listed needs **no** explicit union: the worktree
+ancestor rule grants write and the nested `allow_exec` rule grants execute/read, and Landlock's
+documented same-layer hierarchy semantics accumulate them along the path. The only combined rule is
+for the **exact same object** — an `allow_exec` entry whose opened identity (`dev`,`ino`) equals the
+worktree's — folded into a single deliberate rule rather than a duplicate. A deterministic race oracle
+(a test-only barrier between open and attach) proves a mid-setup pathname swap grants no outside
+authority.
 
 ## Decision 2c — object-type-correct rules and fd-based execution
 

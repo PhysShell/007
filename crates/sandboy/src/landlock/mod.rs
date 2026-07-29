@@ -27,6 +27,7 @@ use std::io::{self, Write as _};
 use std::os::fd::AsRawFd as _;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use sys::access;
 
@@ -204,12 +205,22 @@ impl Faults {
     }
 }
 
-/// Add one `path_beneath` rule for `path` with an OBJECT-TYPE-CORRECT mask. Opens the path
-/// `O_PATH|O_CLOEXEC` via SAFE std (its `File` closes the fd on every return) and `fstat`s that same
-/// fd (no TOCTOU): a directory keeps `desired`, a regular file keeps only the file-applicable subset,
-/// any other object type is rejected.
-fn add_rule(ruleset: &std::os::fd::OwnedFd, path: &Path, desired: u64) -> Result<(), InstallError> {
-    let dir = OpenOptions::new()
+/// A rule object opened EXACTLY ONCE via `O_PATH|O_CLOEXEC`: the fd (closed on drop), its path (for
+/// diagnostics), its type, and its stable identity (`dev`,`ino`) read from that SAME fd. Every later
+/// decision — overlap detection, type masking, rule attachment — uses THIS object, never a
+/// re-resolved pathname, so a concurrent rename/symlink swap cannot redirect a rule to another object.
+struct RuleObject {
+    path: PathBuf,
+    file: File,
+    file_type: std::fs::FileType,
+    id: (u64, u64),
+}
+
+/// Open `path` once (O_PATH) and capture its type + identity from that fd. A failure to open or prove
+/// identity fails closed (no lexical guessing).
+fn open_object(path: &Path) -> Result<RuleObject, InstallError> {
+    use std::os::unix::fs::MetadataExt as _;
+    let file = OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_PATH | libc::O_CLOEXEC)
         .open(path)
@@ -217,30 +228,66 @@ fn add_rule(ruleset: &std::os::fd::OwnedFd, path: &Path, desired: u64) -> Result
             path: path.to_path_buf(),
             err,
         })?;
-    let ft = dir
-        .metadata()
-        .map_err(|err| InstallError::OpenParent {
-            path: path.to_path_buf(),
-            err,
-        })?
-        .file_type();
-    let mask = if ft.is_dir() {
-        desired
-    } else if ft.is_file() {
-        desired & sys::FILE_APPLICABLE
+    let md = file.metadata().map_err(|err| InstallError::OpenParent {
+        path: path.to_path_buf(),
+        err,
+    })?;
+    Ok(RuleObject {
+        path: path.to_path_buf(),
+        file_type: md.file_type(),
+        id: (md.dev(), md.ino()),
+        file,
+    })
+}
+
+/// Mask `desired` to the rights valid for this object's TYPE (from the opened fd): a directory keeps
+/// them all; a regular file keeps only the file-applicable subset (`READ_DIR` etc. on a file is
+/// EINVAL); any other type is rejected fail-closed.
+fn mask_for_type(obj: &RuleObject, desired: u64) -> Result<u64, InstallError> {
+    if obj.file_type.is_dir() {
+        Ok(desired)
+    } else if obj.file_type.is_file() {
+        Ok(desired & sys::FILE_APPLICABLE)
     } else {
-        return Err(InstallError::UnsupportedObjectType {
-            path: path.to_path_buf(),
-        });
-    };
-    let res = sys::add_path_beneath_rule(ruleset, mask, dir.as_raw_fd()).map_err(|err| {
+        Err(InstallError::UnsupportedObjectType {
+            path: obj.path.clone(),
+        })
+    }
+}
+
+/// Attach one `path_beneath` rule to the ALREADY-OPEN object (its fd) — not a re-resolved path.
+fn attach_rule(
+    ruleset: &std::os::fd::OwnedFd,
+    obj: &RuleObject,
+    rights: u64,
+) -> Result<(), InstallError> {
+    sys::add_path_beneath_rule(ruleset, rights, obj.file.as_raw_fd()).map_err(|err| {
         InstallError::AddRule {
-            path: path.to_path_buf(),
+            path: obj.path.clone(),
             err,
         }
-    });
-    // `dir` (the O_PATH fd) drops here regardless — closed on success and on error.
-    res
+    })
+}
+
+/// TEST-ONLY deterministic barrier for the race oracle: with `O7_LL_RACE_READY`/`O7_LL_RACE_GO` set,
+/// signal that all rule objects are OPEN (READY) then wait (bounded) for GO before attaching any rule.
+/// This lets a test atomically swap the rule pathnames in between and prove the rules still bind to
+/// the objects opened above — never to the swapped-in ones.
+fn race_barrier() {
+    let (Ok(ready), Ok(go)) = (
+        std::env::var("O7_LL_RACE_READY"),
+        std::env::var("O7_LL_RACE_GO"),
+    ) else {
+        return;
+    };
+    let _ = std::fs::write(&ready, b"1");
+    let start = Instant::now();
+    while !Path::new(&go).exists() {
+        if start.elapsed() > Duration::from_secs(10) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 /// Create + write + remove `path`, proving the exact write operation succeeds. Used for the
@@ -303,21 +350,20 @@ fn install_filesystem(
     }
     let ruleset = sys::create_ruleset(sys::HANDLED_FS_ABI3).map_err(InstallError::CreateRuleset)?;
 
-    // 3. Rules: the worktree is the single WRITABLE root — every handled FS right EXCEPT EXECUTE, so
-    //    an executable dropped into the writable worktree is NOT runnable unless its exact path is
-    //    also in allow_exec. Each allow_exec path is read+execute, object-type-masked.
+    // 3. Rules — TOCTOU-safe. Open EVERY rule object ONCE (O_PATH) and attach rules to those SAME fds;
+    //    no pathname is ever re-resolved between the containment decision and the rule attachment. The
+    //    worktree is the single WRITABLE root (WORKTREE_RIGHTS, no EXECUTE); each allow_exec object is
+    //    read+execute, object-type-masked. A DESCENDANT of the worktree that is also allow-listed
+    //    naturally accumulates worktree-write + allow_exec-execute along the path hierarchy (documented
+    //    Landlock same-layer semantics) — no explicit union, no path classification.
     if faults.add_rule {
         return Err(InstallError::AddRule {
             path: worktree.to_path_buf(),
             err: io::Error::from_raw_os_error(libc::EINVAL),
         });
     }
-    if !faults.omit_worktree_rule {
-        add_rule(&ruleset, worktree, sys::WORKTREE_RIGHTS)?;
-    }
-    // Canonicalized once, to detect allow_exec paths that lie inside the worktree.
-    let worktree_canon = std::fs::canonicalize(worktree).unwrap_or_else(|_| worktree.to_path_buf());
-    let exec_desired = access::EXECUTE | access::READ_FILE | access::READ_DIR;
+    let worktree_obj = open_object(worktree)?;
+    let mut exec_objs = Vec::with_capacity(allow_exec.len());
     for (i, path) in allow_exec.iter().enumerate() {
         if faults.add_rule_partial && i == 0 {
             return Err(InstallError::AddRule {
@@ -325,18 +371,32 @@ fn install_filesystem(
                 err: io::Error::from_raw_os_error(libc::EINVAL),
             });
         }
-        // DELIBERATE overlap: an allow_exec path inside the worktree is BOTH writable (worktree) and
-        // executable (allow_exec). Grant that union EXPLICITLY here rather than relying on Landlock's
-        // multi-rule resolution — object-type masking still applies in `add_rule`.
-        let within = std::fs::canonicalize(path)
-            .map(|c| c.starts_with(&worktree_canon))
-            .unwrap_or(false);
-        let desired = if within {
-            exec_desired | sys::WORKTREE_RIGHTS
-        } else {
-            exec_desired
-        };
-        add_rule(&ruleset, path, desired)?;
+        exec_objs.push(open_object(path)?);
+    }
+
+    // Test-only deterministic barrier: after every object is OPEN, before any rule is ATTACHED.
+    race_barrier();
+
+    let exec_desired = access::EXECUTE | access::READ_FILE | access::READ_DIR;
+    // EXACT-object overlap: only when an allow_exec object IS the worktree object (same dev+ino) do we
+    // combine rights — into ONE deliberate rule — instead of adding a duplicate rule for that object.
+    // Identity is compared between the SAME opened objects, never between re-resolved paths.
+    let mut worktree_rights = sys::WORKTREE_RIGHTS;
+    for obj in &exec_objs {
+        if obj.id == worktree_obj.id {
+            worktree_rights |= mask_for_type(obj, exec_desired)?;
+        }
+    }
+    if !faults.omit_worktree_rule {
+        let rights = mask_for_type(&worktree_obj, worktree_rights)?;
+        attach_rule(&ruleset, &worktree_obj, rights)?;
+    }
+    for obj in &exec_objs {
+        if obj.id == worktree_obj.id {
+            continue; // folded into the single worktree rule above
+        }
+        let rights = mask_for_type(obj, exec_desired)?;
+        attach_rule(&ruleset, obj, rights)?;
     }
 
     // 4. UNCONFINED BASELINE (before restrict): the exact self-check ops must succeed now, so a later

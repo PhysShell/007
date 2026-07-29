@@ -23,6 +23,7 @@ use std::io::Write as _;
 use std::os::fd::{AsRawFd as _, FromRawFd as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 fn backend_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_sandboy"))
@@ -467,6 +468,98 @@ fn an_exact_worktree_file_added_to_allow_exec_executes() {
     assert!(
         marker.exists(),
         "the allow-listed worktree file must run and write its marker"
+    );
+}
+
+#[test]
+#[ignore = "Vertical B: real Landlock required; TOCTOU authority-widening race"]
+fn a_pathname_swap_during_rule_setup_cannot_widen_authority_outside_the_worktree() {
+    if !require_or_skip() {
+        return;
+    }
+    let wt = tempfile::tempdir().unwrap();
+    // A writable-sans-Landlock directory OUTSIDE the worktree; the swap tries to grant it authority.
+    let outside = tempfile::tempdir().unwrap();
+    // The allow_exec target is a symlink INSIDE the worktree pointing at an inside dir. The harness
+    // opens it (resolving to the inside object) then pauses at the barrier.
+    let inside_dir = wt.path().join("inside_allow");
+    std::fs::create_dir(&inside_dir).unwrap();
+    let alias = wt.path().join("alias");
+    std::os::unix::fs::symlink(&inside_dir, &alias).unwrap();
+
+    let create = outside.path().join("created");
+    let overwrite = outside.path().join("ow");
+    std::fs::write(&overwrite, b"KEEP").unwrap();
+    let truncate = outside.path().join("tr");
+    std::fs::write(&truncate, b"KEEPSIZED").unwrap();
+
+    let ready = wt.path().join("ready");
+    let go = wt.path().join("go");
+    let result = wt.path().join("res");
+
+    // Spawn the harness; it opens `alias` (-> inside_dir) then blocks at the barrier for GO.
+    let mut child = Command::new(backend_bin())
+        .arg("__landlock-run")
+        .arg("--result")
+        .arg(&result)
+        .arg("--worktree")
+        .arg(wt.path())
+        .arg("--allow-exec")
+        .arg(&alias)
+        .arg("--")
+        .arg("fs")
+        .arg(&create)
+        .arg(&overwrite)
+        .arg(&truncate)
+        .env("O7_REQUIRE_LANDLOCK", "1")
+        .env("O7_LL_RACE_READY", &ready)
+        .env("O7_LL_RACE_GO", &go)
+        .spawn()
+        .expect("spawn harness");
+
+    // Wait until every rule object is OPEN, then ATOMICALLY swap `alias` -> the OUTSIDE dir, then GO.
+    let start = Instant::now();
+    while !ready.exists() {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "harness never signalled READY"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::fs::remove_file(&alias).unwrap();
+    std::os::unix::fs::symlink(outside.path(), &alias).unwrap(); // now points OUTSIDE the worktree
+    std::fs::write(&go, b"1").unwrap();
+
+    let _ = child.wait().expect("wait harness");
+    let res = parse_result(&result);
+
+    // The rule bound to the inside object opened BEFORE the swap; the outside object got nothing.
+    assert_eq!(field(&res, "filesystem"), "enforced", "result: {res:?}");
+    assert!(
+        matches!(field(&res, "create"), "ERR:13" | "ERR:1"),
+        "outside create must be DENIED despite the swap; result: {res:?}"
+    );
+    assert!(
+        matches!(field(&res, "overwrite"), "ERR:13" | "ERR:1"),
+        "outside overwrite must be DENIED despite the swap; result: {res:?}"
+    );
+    assert!(
+        matches!(field(&res, "truncate"), "ERR:13" | "ERR:1"),
+        "outside truncate must be DENIED despite the swap; result: {res:?}"
+    );
+    assert!(
+        !create.exists(),
+        "outside file created — a swap widened authority"
+    );
+    assert_eq!(
+        std::fs::read(&overwrite).unwrap(),
+        b"KEEP",
+        "outside file modified — a swap widened authority"
+    );
+    assert_eq!(
+        std::fs::metadata(&truncate).unwrap().len(),
+        b"KEEPSIZED".len() as u64,
+        "outside file truncated — a swap widened authority"
     );
 }
 
