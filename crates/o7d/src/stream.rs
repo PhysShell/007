@@ -19,6 +19,7 @@ use futures_util::stream::{self, Stream};
 use o7_ledger::{ConversationId, Ledger as _, PersistedEvent, SqliteLedger};
 
 use crate::dto::{EventDto, EventsParams};
+use crate::error::ApiError;
 use crate::state::AppState;
 
 /// How long an idle poll waits before asking the ledger again. Bounded and
@@ -35,6 +36,7 @@ struct PollState {
     conversation_id: ConversationId,
     cursor: Option<u64>,
     buffered: VecDeque<PersistedEvent>,
+    batch: usize,
 }
 
 pub(crate) async fn conversation_events_stream(
@@ -42,7 +44,17 @@ pub(crate) async fn conversation_events_stream(
     Path(conversation_id): Path<String>,
     Query(params): Query<EventsParams>,
     headers: HeaderMap,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+    let id = ConversationId::from_raw(conversation_id);
+    // Same existence contract as the REST events endpoint: an unknown
+    // conversation is 404, not a 200 connection that heartbeats forever with
+    // nothing behind it.
+    state
+        .ledger
+        .conversation(id.clone())
+        .await?
+        .ok_or(ApiError::NotFound)?;
+
     // `Last-Event-ID` wins over `?after=` when both are present: it is the
     // browser EventSource's OWN reconnect signal, sent automatically on every
     // reconnect attempt and always describing what THIS client last actually
@@ -56,11 +68,20 @@ pub(crate) async fn conversation_events_stream(
         .and_then(|s| s.parse::<u64>().ok())
         .or(params.after);
 
+    // `?limit=` sets the per-poll batch size, clamped to STREAM_BATCH: it is
+    // a caller-tunable knob (a slow client may want smaller catch-up bursts
+    // after a long reconnect gap), never accepted-but-silently-ignored, and
+    // never large enough to turn one poll into a bulk-history read.
+    let batch = params
+        .limit
+        .map_or(STREAM_BATCH, |l| l.clamp(1, STREAM_BATCH));
+
     let initial = PollState {
         ledger: state.ledger,
-        conversation_id: ConversationId::from_raw(conversation_id),
+        conversation_id: id,
         cursor,
         buffered: VecDeque::new(),
+        batch,
     };
 
     let events = stream::unfold(initial, |mut st| async move {
@@ -82,7 +103,7 @@ pub(crate) async fn conversation_events_stream(
 
             match st
                 .ledger
-                .read_events(&st.conversation_id, st.cursor, STREAM_BATCH)
+                .read_events(&st.conversation_id, st.cursor, st.batch)
                 .await
             {
                 Ok(fresh) if fresh.is_empty() => {
@@ -107,5 +128,5 @@ pub(crate) async fn conversation_events_stream(
         }
     });
 
-    Sse::new(events).keep_alive(KeepAlive::default())
+    Ok(Sse::new(events).keep_alive(KeepAlive::default()))
 }

@@ -5,10 +5,10 @@
 // history, dedupe defensively by sequence, and expose connection state a
 // mobile UI can render honestly (never silently show stale data as fresh).
 
-import { conversationEventsStreamUrl, getConversationEvents } from "./api";
+import { checkSchema, conversationEventsStreamUrl, getConversationEvents } from "./api";
 import type { EventDto } from "./types";
 
-export type StreamStatus = "connecting" | "open" | "reconnecting" | "closed";
+export type StreamStatus = "connecting" | "open" | "reconnecting" | "closed" | "unsupported";
 
 export class ConversationEventStream {
   events: EventDto[] = $state([]);
@@ -18,6 +18,11 @@ export class ConversationEventStream {
   #seen = new Set<number>();
   #source: EventSource | null = null;
   #hasOpenedOnce = false;
+  // Set by close(). Checked after every await in #start(): navigating away
+  // while the history fetch (or, in principle, a future await added later)
+  // is still in flight must not let a since-abandoned stream go on to open a
+  // live EventSource nothing will ever close.
+  #closed = false;
 
   constructor(conversationId: string) {
     this.#conversationId = conversationId;
@@ -32,14 +37,17 @@ export class ConversationEventStream {
     let after: number | undefined;
     try {
       const page = await getConversationEvents(this.#conversationId, undefined, 500);
+      if (this.#closed) return;
       for (const e of page.items) {
         this.#push(e);
       }
       after = page.items.at(-1)?.sequence;
     } catch {
+      if (this.#closed) return;
       // History fetch failing doesn't block the live stream — it'll replay
       // from the beginning instead (o7d replays all events with no `after`).
     }
+    if (this.#closed) return;
 
     const suffix = after !== undefined ? `?after=${after}` : "";
     const source = new EventSource(conversationEventsStreamUrl(this.#conversationId) + suffix);
@@ -61,6 +69,16 @@ export class ConversationEventStream {
       } catch {
         return; // a malformed frame is dropped, not crashed on
       }
+      // REST responses already refuse a schema_version this build doesn't
+      // understand (see api.ts) — a stream frame must be held to the same
+      // standard rather than blindly rendered just because it parsed as JSON.
+      try {
+        checkSchema(parsed);
+      } catch {
+        this.status = "unsupported";
+        source.close();
+        return;
+      }
       this.#push(parsed);
     };
   }
@@ -80,6 +98,7 @@ export class ConversationEventStream {
   }
 
   close(): void {
+    this.#closed = true;
     this.#source?.close();
     this.#source = null;
     this.status = "closed";

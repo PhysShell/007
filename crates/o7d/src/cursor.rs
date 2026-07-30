@@ -30,6 +30,10 @@ pub fn decode(raw: &str) -> Result<ListCursor, String> {
 }
 
 #[cfg(test)]
+// Invariant: every `unwrap()` below is on an `encode`/`decode` round-trip this
+// same test just constructed, or an explicit rejects_* assertion where the
+// `Err` case is exactly what's being tested — never a runtime `Result` this
+// module receives from elsewhere.
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;

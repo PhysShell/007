@@ -270,8 +270,11 @@ pub struct ListCursor {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Page<T> {
     pub items: Vec<T>,
-    /// Pass as the next call's `before` to continue further back into history.
-    /// `None` means this page reached the oldest row — there is no next page.
+    /// Pass as the next call's `before` to continue further back into
+    /// history. `Some` on every non-empty page, including the final partial
+    /// one — its presence is NOT proof there are more rows. Exhaustion is
+    /// only established when a subsequent call with this cursor returns an
+    /// empty page; `None` here means only "this page itself was empty."
     pub next_before: Option<ListCursor>,
 }
 

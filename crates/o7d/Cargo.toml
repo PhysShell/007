@@ -33,18 +33,23 @@ tokio = { version = "1", default-features = false, features = [
 # depending on it here — narrowed to just the `alloc`/`std` combinators
 # actually used — adds no new crate to the tree.
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-# R0's whole surface is bounded JSON + one-way SSE (task #4) over HTTP/1 — no
-# WebSocket (the brief is explicit: "WebSocket is not needed for a one-way
-# read-only stream"), no multipart, no form bodies, no static-file serving
-# feature (the Q-Deck static shell, once built, is served by hand from an axum
-# route, not axum's `fs` helper). `default-features = false` + this explicit
-# list keeps the graph to what R0 actually exercises.
+# R0's whole surface is bounded JSON + one-way SSE over HTTP/1 — no WebSocket
+# (the brief is explicit: "WebSocket is not needed for a one-way read-only
+# stream"), no multipart, no form bodies. `default-features = false` + this
+# explicit list keeps the graph to what R0's own API layer exercises; static
+# file serving (below, via tower-http) is a separate concern layered on top.
 axum = { version = "0.7", default-features = false, features = [
     "http1",
     "json",
     "query",
     "tokio",
 ] }
+# `o7d serve --static-dir <dist>` is o7d's documented production role: same
+# origin serves both `/api/v1/*` and the built Q-Deck shell, with unmatched
+# paths (a client-side route like `/runs/abc`) falling back to `index.html`
+# so the SPA's own router — not the server — decides what that path means.
+# `fs` is the only feature needed for `ServeDir`/`ServeFile`.
+tower-http = { version = "0.6", default-features = false, features = ["fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 clap = { version = "4", features = ["derive"] }

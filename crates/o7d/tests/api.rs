@@ -2,6 +2,13 @@
 //! `axum::Router` via `tower::Service::oneshot` — real routing, extraction,
 //! and JSON serialization, not handler functions called directly — over a
 //! ledger populated only through `o7-ledger`'s own public write APIs.
+//!
+//! Invariant for the restriction-lint allowance below: every `unwrap`/
+//! `expect`/JSON-field index here is on a response this same test just
+//! constructed and asserted the status of — a controlled fixture, not
+//! runtime input. A panic means this test's own setup broke, which should
+//! fail the test loudly rather than be recovered from. Matches the precedent
+//! in `o7-ledger`'s test files (e.g. `tests/append_replay.rs`).
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -237,4 +244,103 @@ async fn unknown_run_is_404() {
     let (router, ..) = seeded_router().await;
     let (status, _) = get(&router, "/api/v1/runs/does-not-exist").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn conversation_events_404s_for_unknown_conversation() {
+    let (router, ..) = seeded_router().await;
+    let (status, body) = get(&router, "/api/v1/conversations/does-not-exist/events").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(body["code"], "NOT_FOUND");
+}
+
+// --- static shell + SPA fallback (o7d::app) -------------------------------
+
+async fn text_body(resp: axum::http::Response<Body>) -> String {
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+async fn seeded_app_with_shell() -> (Router, tempfile::TempDir) {
+    let ledger_dir = tempfile::tempdir().unwrap();
+    let ledger = SqliteLedger::open(ledger_dir.path().join("ledger.sqlite3")).unwrap();
+    std::mem::forget(ledger_dir);
+
+    let shell_dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        shell_dir.path().join("index.html"),
+        "<!doctype html><title>q-deck-shell-marker</title>",
+    )
+    .unwrap();
+    std::fs::write(
+        shell_dir.path().join("app.js"),
+        "console.log('real-asset');",
+    )
+    .unwrap();
+
+    let app = o7d::app(ledger, Some(shell_dir.path()));
+    (app, shell_dir)
+}
+
+#[tokio::test]
+async fn root_serves_the_shell() {
+    let (app, _shell_dir) = seeded_app_with_shell().await;
+    let req = Request::builder().uri("/").body(Body::empty()).unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(text_body(resp).await.contains("q-deck-shell-marker"));
+}
+
+#[tokio::test]
+async fn unmatched_client_route_falls_back_to_the_shell() {
+    let (app, _shell_dir) = seeded_app_with_shell().await;
+    // No file named this exists — a client-side route the SPA's own router
+    // (not o7d's) must be the one to resolve.
+    let req = Request::builder()
+        .uri("/runs/abc123")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(text_body(resp).await.contains("q-deck-shell-marker"));
+}
+
+#[tokio::test]
+async fn a_real_static_asset_is_served_as_itself_not_the_shell() {
+    let (app, _shell_dir) = seeded_app_with_shell().await;
+    let req = Request::builder()
+        .uri("/app.js")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(text_body(resp).await.contains("real-asset"));
+}
+
+#[tokio::test]
+async fn api_routes_still_win_over_static_serving() {
+    let (app, _shell_dir) = seeded_app_with_shell().await;
+    let req = Request::builder()
+        .uri("/api/v1/health")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = text_body(resp).await;
+    assert!(body.contains("\"status\":\"ok\""), "got: {body}");
+}
+
+#[tokio::test]
+async fn no_static_dir_means_api_only_dev_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = SqliteLedger::open(dir.path().join("ledger.sqlite3")).unwrap();
+    std::mem::forget(dir);
+    let app = o7d::app(ledger, None);
+    let req = Request::builder().uri("/").body(Body::empty()).unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::NOT_FOUND,
+        "no shell configured: / has nothing to serve it, same as before this feature existed"
+    );
 }

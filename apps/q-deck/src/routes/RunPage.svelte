@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { getRun } from "../lib/api";
   import type { RunDto } from "../lib/types";
+  import { isActiveRun } from "../lib/types";
   import { ConversationEventStream } from "../lib/eventStream.svelte";
   import { relativeAge, duration, absoluteTime } from "../lib/format";
   import Link from "../components/Link.svelte";
@@ -16,12 +18,38 @@
   let loadState: LoadState = $state("loading");
   let stream: ConversationEventStream | null = $state(null);
 
+  // The SSE stream only ever adds to the event timeline — it carries no
+  // mechanism for updating the run's OWN fields (status, finished_at). A
+  // lifecycle transition (running -> completed, say) would otherwise leave
+  // this page showing "running" forever even while a live connection is
+  // displayed, which is exactly the kind of stale-presented-as-fresh state
+  // this app's honesty rule elsewhere forbids. Poll the run itself, same
+  // interval as the dashboard, stopping once it's actually terminal — a
+  // finished run's own fields cannot change again.
+  const REFRESH_INTERVAL_MS = 5000;
+  let timer: ReturnType<typeof setInterval> | undefined;
+
   $effect(() => {
     let cancelled = false;
     loadState = "loading";
     run = null;
     stream?.close();
     stream = null;
+    clearInterval(timer);
+
+    async function refreshRun(): Promise<void> {
+      try {
+        const r = await getRun(runId);
+        if (cancelled) return;
+        run = r;
+        if (!isActiveRun(r.status)) {
+          clearInterval(timer);
+        }
+      } catch {
+        // A transient refresh failure doesn't blank an already-loaded run —
+        // the next poll tries again; only the FIRST load surfaces an error.
+      }
+    }
 
     getRun(runId)
       .then((r) => {
@@ -29,6 +57,9 @@
         run = r;
         loadState = "ready";
         stream = new ConversationEventStream(r.conversation_id);
+        if (isActiveRun(r.status)) {
+          timer = setInterval(() => void refreshRun(), REFRESH_INTERVAL_MS);
+        }
       })
       .catch(() => {
         if (!cancelled) loadState = "error";
@@ -37,8 +68,11 @@
     return () => {
       cancelled = true;
       stream?.close();
+      clearInterval(timer);
     };
   });
+
+  onDestroy(() => clearInterval(timer));
 
   // Only this run's own events — the conversation may hold other runs' too.
   let runEvents = $derived.by(() => {

@@ -8,6 +8,7 @@
     open: "Live",
     reconnecting: "Reconnecting…",
     closed: "Offline",
+    unsupported: "Update required",
   };
 </script>
 
@@ -39,7 +40,8 @@
     background: var(--warn);
     animation: pulse 1.2s ease-in-out infinite;
   }
-  .conn-closed .dot {
+  .conn-closed .dot,
+  .conn-unsupported .dot {
     background: var(--bad);
   }
   @keyframes pulse {

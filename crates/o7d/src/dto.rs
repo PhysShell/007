@@ -136,6 +136,9 @@ pub struct RunsListParams {
     pub limit: Option<usize>,
     pub before: Option<String>,
     pub conversation_id: Option<String>,
+    /// Comma-separated `RunStatus` values, e.g. `?status=queued,running`.
+    /// Absent means any status.
+    pub status: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]

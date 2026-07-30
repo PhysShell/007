@@ -23,11 +23,28 @@ export type Route =
   | { name: "conversation"; conversationId: string }
   | { name: "not-found" };
 
+/** `decodeURIComponent` throws on a malformed percent-escape (e.g. a
+ * truncated multi-byte sequence from a hand-edited or corrupted URL) — that
+ * must resolve to "not found", not crash the whole app on navigation. */
+function tryDecode(raw: string): string | null {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+}
+
 export function resolve(path: string): Route {
   if (path === "/") return { name: "dashboard" };
   const runMatch = /^\/runs\/([^/]+)\/?$/.exec(path);
-  if (runMatch) return { name: "run", runId: decodeURIComponent(runMatch[1]) };
+  if (runMatch) {
+    const runId = tryDecode(runMatch[1]);
+    return runId === null ? { name: "not-found" } : { name: "run", runId };
+  }
   const convMatch = /^\/conversations\/([^/]+)\/?$/.exec(path);
-  if (convMatch) return { name: "conversation", conversationId: decodeURIComponent(convMatch[1]) };
+  if (convMatch) {
+    const conversationId = tryDecode(convMatch[1]);
+    return conversationId === null ? { name: "not-found" } : { name: "conversation", conversationId };
+  }
   return { name: "not-found" };
 }

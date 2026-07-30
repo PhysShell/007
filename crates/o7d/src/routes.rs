@@ -26,6 +26,17 @@ const DEFAULT_LIST_LIMIT: usize = 50;
 /// load, not paged eagerly.
 const DEFAULT_EVENTS_LIMIT: usize = 200;
 
+/// Parse `?status=queued,running` into the ledger's own status enum, so an
+/// unrecognized value is a 400 (a client mistake) rather than silently
+/// matching nothing.
+fn parse_statuses(raw: &str) -> Result<Vec<o7_ledger::RunStatus>, String> {
+    raw.split(',')
+        .map(|s| {
+            o7_ledger::RunStatus::parse(s.trim()).ok_or_else(|| format!("unknown run status {s:?}"))
+        })
+        .collect()
+}
+
 pub(crate) async fn health() -> Json<HealthDto> {
     Json(HealthDto {
         schema_version: API_SCHEMA_VERSION,
@@ -71,6 +82,14 @@ pub(crate) async fn conversation_events(
     Query(params): Query<EventsParams>,
 ) -> Result<Json<EventPageDto>, ApiError> {
     let id = o7_ledger::ConversationId::from_raw(conversation_id);
+    // Same existence contract as get_conversation/get_run: an unknown parent
+    // is 404, not a 200 with an empty page — a typo'd id and a genuinely
+    // empty conversation must not look identical on the wire.
+    state
+        .ledger
+        .conversation(id.clone())
+        .await?
+        .ok_or(ApiError::NotFound)?;
     let limit = params.limit.unwrap_or(DEFAULT_EVENTS_LIMIT);
     let events = state.ledger.read_events(&id, params.after, limit).await?;
     let next_after = events.last().map(|e| e.sequence);
@@ -95,9 +114,15 @@ pub(crate) async fn list_runs(
     let conversation_id = params
         .conversation_id
         .map(o7_ledger::ConversationId::from_raw);
+    let statuses = params
+        .status
+        .as_deref()
+        .map(parse_statuses)
+        .transpose()
+        .map_err(ApiError::BadRequest)?;
     let page = state
         .ledger
-        .list_runs(conversation_id, before, limit)
+        .list_runs(conversation_id, statuses, before, limit)
         .await?;
     Ok(Json(PageDto {
         schema_version: API_SCHEMA_VERSION,

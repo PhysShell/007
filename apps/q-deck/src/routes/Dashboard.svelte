@@ -9,24 +9,45 @@
 
   type LoadState = "loading" | "ready" | "error" | "offline";
 
-  let runs: RunDto[] = $state([]);
+  // Fetched separately, not derived from one bounded page: "active" must be
+  // the real active set (a status-filtered query the database answers
+  // completely), not whatever happened to fall inside one newest-first page
+  // — an older queued/running run must not silently vanish from "Running"
+  // just because enough newer runs exist to push it past a fixed-size page.
+  let active: RunDto[] = $state([]);
+  let terminal: RunDto[] = $state([]);
   let loadState: LoadState = $state("loading");
   let lastRefreshed: number | null = $state(null);
 
   const REFRESH_INTERVAL_MS = 5000;
+  const RECENT_LIMIT = 20;
   let timer: ReturnType<typeof setInterval> | undefined;
+  // Overlapping refresh() calls can resolve out of order (a slow request
+  // started earlier finishing after a faster later one) — a generation
+  // counter lets a stale completion recognize itself and no-op instead of
+  // overwriting newer state with older data.
+  let generation = 0;
 
   async function refresh(): Promise<void> {
+    const myGeneration = ++generation;
     try {
-      const page = await listRuns({ limit: 100 });
-      runs = page.items;
+      const [activePage, recentPage] = await Promise.all([
+        listRuns({ status: ["queued", "running"], limit: 200 }),
+        listRuns({ limit: RECENT_LIMIT }),
+      ]);
+      if (myGeneration !== generation) return; // superseded by a later refresh
+      active = activePage.items;
+      terminal = recentPage.items
+        .filter((r) => !isActiveRun(r.status))
+        .sort((a, b) => b.created_at - a.created_at);
       loadState = "ready";
       lastRefreshed = Date.now();
     } catch {
+      if (myGeneration !== generation) return;
       // Keep the last-known list on screen — going blank on a transient
       // network blip would be a worse failure than showing slightly stale
       // data with an honest "offline" indicator.
-      loadState = runs.length > 0 ? "offline" : "error";
+      loadState = active.length > 0 || terminal.length > 0 ? "offline" : "error";
     }
   }
 
@@ -37,11 +58,6 @@
   });
 
   onDestroy(() => clearInterval(timer));
-
-  let active = $derived(runs.filter((r) => isActiveRun(r.status)));
-  let terminal = $derived(
-    runs.filter((r) => !isActiveRun(r.status)).sort((a, b) => b.created_at - a.created_at),
-  );
 </script>
 
 <div class="dashboard">

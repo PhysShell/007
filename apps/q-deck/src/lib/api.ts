@@ -9,6 +9,7 @@ import type {
   HealthDto,
   PageDto,
   RunDto,
+  RunStatus,
 } from "./types";
 
 export class ApiError extends Error {
@@ -33,9 +34,11 @@ export class UnsupportedSchemaError extends Error {
   }
 }
 
-const EXPECTED_SCHEMA_VERSION = 1;
+export const EXPECTED_SCHEMA_VERSION = 1;
 
-function checkSchema(body: { schema_version: number }): void {
+/** Shared by every REST response and every SSE frame — one schema check, not
+ * a REST-only one that lets a version-mismatched stream frame through. */
+export function checkSchema(body: { schema_version: number }): void {
   if (body.schema_version !== EXPECTED_SCHEMA_VERSION) {
     throw new UnsupportedSchemaError(body.schema_version, EXPECTED_SCHEMA_VERSION);
   }
@@ -87,6 +90,9 @@ export function getConversationEvents(
 
 export interface RunsListParams extends ListParams {
   conversationId?: string;
+  /** Restrict to exactly these statuses (server-side filter — see
+   * o7-ledger's list_runs), e.g. `["queued", "running"]` for "active". */
+  status?: RunStatus[];
 }
 
 export function listRuns(params: RunsListParams = {}): Promise<PageDto<RunDto>> {
@@ -94,6 +100,9 @@ export function listRuns(params: RunsListParams = {}): Promise<PageDto<RunDto>> 
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.before !== undefined) qs.set("before", params.before);
   if (params.conversationId !== undefined) qs.set("conversation_id", params.conversationId);
+  if (params.status !== undefined && params.status.length > 0) {
+    qs.set("status", params.status.join(","));
+  }
   const suffix = qs.toString() ? `?${qs}` : "";
   return getJson<PageDto<RunDto>>(`/api/v1/runs${suffix}`);
 }

@@ -766,33 +766,66 @@ impl SqliteLedger {
     }
 
     /// List runs newest-first, keyset-paginated by `(created_at, id)`, optionally
-    /// scoped to one conversation. `conversation_id = None` lists across every
-    /// conversation (the cockpit dashboard's "all runs" view); `Some(id)` scopes
-    /// to one conversation's runs (the conversation page's run list). Same
-    /// exhaustion contract as [`Self::list_conversations`].
+    /// scoped to one conversation and/or filtered to a set of statuses.
+    /// `conversation_id = None` lists across every conversation (the cockpit
+    /// dashboard's "all runs" view); `Some(id)` scopes to one conversation's
+    /// runs (the conversation page's run list). `statuses = None` matches any
+    /// status; `Some(&[...])` restricts to exactly those — the dashboard's
+    /// "active" section uses this (`[Queued, Running]`) so correctness does
+    /// not depend on an active run happening to fall within the newest page:
+    /// the filter is applied by the database, not by the caller hoping a
+    /// bounded page was enough. Same exhaustion contract as
+    /// [`Self::list_conversations`].
     ///
     /// # Errors
     /// Propagates SQLite errors.
     pub async fn list_runs(
         &self,
         conversation_id: Option<crate::ConversationId>,
+        statuses: Option<Vec<RunStatus>>,
         before: Option<ListCursor>,
         limit: usize,
     ) -> Result<Page<Run>, LedgerError> {
         let capped = limit.min(MAX_LIST_LIMIT);
         self.with_conn(move |conn| {
-            let conv_filter = conversation_id.as_ref().map(|c| c.as_str().to_owned());
-            let cursor_ts = before.as_ref().map(|c| c.created_at);
-            let cursor_tiebreak = before.as_ref().map(|c| c.tiebreak);
+            // Built dynamically because the status set has variable arity —
+            // an `IN (?,?,...)` clause can't be expressed with a fixed-arity
+            // `params![]` call. Every value is still a bound parameter, never
+            // string-interpolated, so this stays fully parameterized despite
+            // the variable shape.
+            let mut sql = String::from(
+                "SELECT rowid, run_id, conversation_id, parent_run_id, agent, role, status, \
+                 created_at, finished_at FROM run WHERE 1=1",
+            );
+            let mut bound: Vec<Box<dyn rusqlite::ToSql + Send>> = Vec::new();
+
+            if let Some(conv) = &conversation_id {
+                sql.push_str(" AND conversation_id = ?");
+                bound.push(Box::new(conv.as_str().to_owned()));
+            }
+            if let Some(statuses) = &statuses {
+                let placeholders = vec!["?"; statuses.len()].join(",");
+                sql.push_str(&format!(" AND status IN ({placeholders})"));
+                for s in statuses {
+                    bound.push(Box::new(s.as_str().to_owned()));
+                }
+            }
+            if let Some(before) = &before {
+                sql.push_str(" AND (created_at < ? OR (created_at = ? AND rowid < ?))");
+                bound.push(Box::new(before.created_at));
+                bound.push(Box::new(before.created_at));
+                bound.push(Box::new(before.tiebreak));
+            }
+            sql.push_str(" ORDER BY created_at DESC, rowid DESC LIMIT ?");
             let cap = i64::try_from(capped).unwrap_or(0);
-            let mut stmt = conn.prepare(
-                "SELECT rowid, run_id, conversation_id, parent_run_id, agent, role, status, created_at, finished_at \
-                 FROM run \
-                 WHERE (?1 IS NULL OR conversation_id = ?1) \
-                   AND (?2 IS NULL OR created_at < ?2 OR (created_at = ?2 AND rowid < ?3)) \
-                 ORDER BY created_at DESC, rowid DESC LIMIT ?4",
-            )?;
-            let rows = stmt.query_map(params![conv_filter, cursor_ts, cursor_tiebreak, cap], |row| {
+            bound.push(Box::new(cap));
+
+            let mut stmt = conn.prepare(&sql)?;
+            let param_refs: Vec<&dyn rusqlite::ToSql> = bound
+                .iter()
+                .map(|b| b.as_ref() as &dyn rusqlite::ToSql)
+                .collect();
+            let rows = stmt.query_map(param_refs.as_slice(), |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
@@ -816,8 +849,9 @@ impl SqliteLedger {
                     parent_run_id: parent.map(crate::RunId::from_raw),
                     agent,
                     role,
-                    status: RunStatus::parse(&status)
-                        .ok_or_else(|| LedgerError::Integrity(format!("bad run status {status}")))?,
+                    status: RunStatus::parse(&status).ok_or_else(|| {
+                        LedgerError::Integrity(format!("bad run status {status}"))
+                    })?,
                     created_at,
                     finished_at,
                 });

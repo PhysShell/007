@@ -1,11 +1,27 @@
 # o7d HTTP/SSE API — v1
 
-All responses are JSON with a top-level `schema_version` (currently `1`).
-Q-Deck's client (`apps/q-deck/src/lib/api.ts`) rejects any response whose
-`schema_version` it doesn't recognize rather than guessing at its shape.
+Every non-SSE endpoint responds with JSON carrying a top-level
+`schema_version` (currently `1`). Q-Deck's client
+(`apps/q-deck/src/lib/api.ts`) rejects any response whose `schema_version` it
+doesn't recognize rather than guessing at its shape. The one SSE endpoint
+(`/events/stream`, below) is `text/event-stream`, not JSON — each of its
+frames carries its own embedded JSON payload with the same `schema_version`
+field, checked the same way (`checkSchema`, shared with the REST path) before
+being accepted.
 
 Every DTO here is defined once, in `crates/o7d/src/dto.rs`, and derived from
 an `o7-ledger` domain type — never a raw pass-through of it.
+
+## Static shell (production)
+
+`o7d serve --static-dir <apps/q-deck/dist>` serves the built Q-Deck shell
+same-origin with this API: `/api/v1/*` (below) always wins; anything else is
+looked up as a file under `--static-dir`, and anything that isn't a real file
+there falls back to `index.html` — a client-side route like `/runs/abc123`
+has no file of its own, so the shell loads and Q-Deck's own router (not
+o7d's) resolves the path. Omitting `--static-dir` serves the API alone — the
+dev-mode setup, where Vite's own dev server serves the shell and proxies
+`/api` to this process instead (see `apps/q-deck/vite.config.ts`).
 
 ## Errors
 
@@ -79,8 +95,9 @@ starts at the beginning), `limit` (default 200).
 ```
 
 Ascending, gap-free (this is `o7-ledger`'s own `sequence` guarantee, not
-re-derived here). An unknown `conversation_id` yields an empty list, not an
-error — consistent with `o7-ledger::read_events`'s own contract.
+re-derived here). An unknown `conversation_id` is `404` — the parent
+resource's existence is checked before reading its events, the same contract
+`get_conversation`/`get_run` already have.
 
 ## `GET /api/v1/conversations/{conversation_id}/events/stream`
 
@@ -107,13 +124,20 @@ everything after `N` from the ledger itself, with no reliance on the server
 process having been continuously running or holding any per-client buffer.
 A storage error ends the stream (the client's `EventSource` retries the
 whole connection on its own); it is never silently swallowed as "no more
-events right now."
+events right now." An unknown `conversation_id` is `404`, checked before the
+poll loop starts — never a `200` connection that heartbeats forever with
+nothing behind it.
 
 ## `GET /api/v1/runs`
 
 Query params: `limit` (default 50), `before` (opaque cursor), `conversation_id`
 (optional — omit for the global "all runs" dashboard view, set it to scope to
-one conversation's runs, e.g. for the conversation page).
+one conversation's runs, e.g. for the conversation page), `status` (optional,
+comma-separated `RunStatus` values, e.g. `?status=queued,running` — a real
+database-level filter via `o7-ledger::SqliteLedger::list_runs`'s `statuses`
+parameter, not something the caller approximates by paging and hoping a
+bounded page happened to contain everything with that status). An
+unrecognized status value is `400`.
 
 Same `PageDto` shape as `/conversations`, with `RunDto` items:
 

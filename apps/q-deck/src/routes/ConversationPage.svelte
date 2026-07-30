@@ -23,15 +23,29 @@
     stream?.close();
     stream = new ConversationEventStream(conversationId);
 
-    listRuns({ conversationId, limit: 200 })
-      .then((page) => {
+    // Page through every run for this one conversation rather than trusting
+    // a single bounded page — a conversation's own run count isn't bounded
+    // the way "all runs ever" would be, but it can still exceed one page,
+    // and presenting a partial list as complete would be exactly the kind
+    // of silent truncation this app's honesty rule forbids elsewhere.
+    (async () => {
+      try {
+        const collected: RunDto[] = [];
+        let before: string | undefined;
+        for (;;) {
+          const page = await listRuns({ conversationId, before, limit: 200 });
+          if (cancelled) return;
+          collected.push(...page.items);
+          if (page.items.length === 0 || !page.next_before) break;
+          before = page.next_before;
+        }
         if (cancelled) return;
-        runs = [...page.items].sort((a, b) => a.created_at - b.created_at);
+        runs = collected.sort((a, b) => a.created_at - b.created_at);
         loadState = "ready";
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) loadState = "error";
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;

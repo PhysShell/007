@@ -8,6 +8,12 @@
 //! - the required reconnect transcript: a REAL socket, because "disconnect"
 //!   has to mean an actual TCP close, not just dropping an in-memory value.
 //!   Written by hand over `tokio::net::TcpStream` — no HTTP client crate.
+//!
+//! Invariant for the restriction-lint allowance below: every `unwrap`/
+//! `expect`/index operates on this test's own controlled fixtures (a
+//! just-created ledger, a frame this test just parsed and is asserting the
+//! shape of) — a panic here is this test's own setup failing loudly, not a
+//! runtime condition. Matches the precedent in `o7-ledger`'s test files.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -131,6 +137,27 @@ async fn after_query_param_resumes_from_that_cursor() {
     let frames = collect_data_frames(resp.into_body(), 2).await;
     let ids: Vec<u64> = frames.iter().map(|f| f.id.unwrap()).collect();
     assert_eq!(ids, vec![3, 4]);
+}
+
+#[tokio::test]
+async fn limit_query_param_sets_poll_batch_without_dropping_or_stalling_events() {
+    let (router, conv_id) = seeded_router_with_events(3).await;
+    // `?limit=1` forces the smallest possible per-poll batch. A batch of
+    // literally 0 (clamped up to 1 internally) would otherwise never fetch
+    // anything and the stream would heartbeat forever instead of ever
+    // reaching these 4 events — this proves the query param is both honored
+    // and safely clamped, not silently ignored.
+    let req = Request::builder()
+        .uri(format!(
+            "/api/v1/conversations/{conv_id}/events/stream?limit=0"
+        ))
+        .body(Body::empty())
+        .unwrap();
+    let resp = router.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), 200);
+    let frames = collect_data_frames(resp.into_body(), 4).await;
+    let ids: Vec<u64> = frames.iter().map(|f| f.id.unwrap()).collect();
+    assert_eq!(ids, vec![1, 2, 3, 4]);
 }
 
 #[tokio::test]

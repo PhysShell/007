@@ -1,6 +1,14 @@
 //! Acceptance: `list_conversations`/`list_runs` — newest-first ordering,
 //! keyset pagination that is lossless and duplicate-free even under
 //! same-millisecond ties, per-conversation scoping, and bounded limits.
+//!
+//! Invariant for the restriction-lint allowance below: every `unwrap`/
+//! `expect`/index in this file operates on test-fixture data this same test
+//! just constructed (a freshly created in-memory ledger, a row this test
+//! itself inserted the line before). A panic here means the test setup
+//! itself is broken, which is the correct failure mode for a test — not a
+//! runtime condition production code has to recover from. Matches the
+//! precedent in `tests/append_replay.rs` and this crate's other test files.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -29,7 +37,7 @@ async fn empty_ledger_lists_empty_page() {
     assert!(page.items.is_empty());
     assert!(page.next_before.is_none());
 
-    let runs = ledger.list_runs(None, None, 50).await.unwrap();
+    let runs = ledger.list_runs(None, None, None, 50).await.unwrap();
     assert!(runs.items.is_empty());
     assert!(runs.next_before.is_none());
 }
@@ -129,7 +137,7 @@ async fn list_runs_scopes_by_conversation_or_lists_all() {
         .await
         .unwrap();
 
-    let all = ledger.list_runs(None, None, 50).await.unwrap();
+    let all = ledger.list_runs(None, None, None, 50).await.unwrap();
     let all_ids: HashSet<_> = all.items.iter().map(|r| r.run_id.clone()).collect();
     assert_eq!(all_ids.len(), 3);
     assert!(all_ids.contains(&run_a1.run_id));
@@ -137,7 +145,7 @@ async fn list_runs_scopes_by_conversation_or_lists_all() {
     assert!(all_ids.contains(&run_b1.run_id));
 
     let only_a = ledger
-        .list_runs(Some(a.conversation_id.clone()), None, 50)
+        .list_runs(Some(a.conversation_id.clone()), None, None, 50)
         .await
         .unwrap();
     let a_ids: HashSet<_> = only_a.items.iter().map(|r| r.run_id.clone()).collect();
@@ -150,7 +158,7 @@ async fn list_runs_scopes_by_conversation_or_lists_all() {
     );
 
     let only_b = ledger
-        .list_runs(Some(b.conversation_id.clone()), None, 50)
+        .list_runs(Some(b.conversation_id.clone()), None, None, 50)
         .await
         .unwrap();
     assert_eq!(only_b.items.len(), 1);
@@ -182,7 +190,63 @@ async fn unknown_conversation_filter_is_empty_not_error() {
     let ledger = SqliteLedger::open_in_memory().unwrap();
     ledger.create_conversation(None).await.unwrap();
     let missing = o7_ledger::ConversationId::from_raw("does-not-exist".to_owned());
-    let page = ledger.list_runs(Some(missing), None, 50).await.unwrap();
+    let page = ledger
+        .list_runs(Some(missing), None, None, 50)
+        .await
+        .unwrap();
     assert!(page.items.is_empty());
     assert!(page.next_before.is_none());
+}
+
+// A statuses filter restricts to exactly those statuses, across every
+// conversation — the dashboard's "active" set depends on this being a real
+// database-level filter, not something the caller approximates by paging.
+#[tokio::test]
+async fn list_runs_status_filter_matches_only_requested_statuses() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let conv = ledger.create_conversation(None).await.unwrap();
+
+    let queued = ledger
+        .create_run(run_req(conv.conversation_id.clone(), "claude"), None)
+        .await
+        .unwrap();
+    let running = ledger
+        .create_run(run_req(conv.conversation_id.clone(), "codex"), None)
+        .await
+        .unwrap();
+    ledger.start_run(running.run_id.clone()).await.unwrap();
+    let completed = ledger
+        .create_run(run_req(conv.conversation_id.clone(), "claude"), None)
+        .await
+        .unwrap();
+    ledger.start_run(completed.run_id.clone()).await.unwrap();
+    ledger.complete_run(completed.run_id.clone()).await.unwrap();
+
+    let active = ledger
+        .list_runs(
+            None,
+            Some(vec![
+                o7_ledger::RunStatus::Queued,
+                o7_ledger::RunStatus::Running,
+            ]),
+            None,
+            50,
+        )
+        .await
+        .unwrap();
+    let active_ids: HashSet<_> = active.items.iter().map(|r| r.run_id.clone()).collect();
+    assert_eq!(active_ids.len(), 2);
+    assert!(active_ids.contains(&queued.run_id));
+    assert!(active_ids.contains(&running.run_id));
+    assert!(
+        !active_ids.contains(&completed.run_id),
+        "a completed run must not appear in a queued+running filter"
+    );
+
+    let single = ledger
+        .list_runs(None, Some(vec![o7_ledger::RunStatus::Completed]), None, 50)
+        .await
+        .unwrap();
+    assert_eq!(single.items.len(), 1);
+    assert_eq!(single.items[0].run_id, completed.run_id);
 }

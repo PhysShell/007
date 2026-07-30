@@ -23,6 +23,17 @@ function page(items: RunDto[]): PageDto<RunDto> {
   return { schema_version: 1, items, next_before: null };
 }
 
+/** Dashboard now fetches "active" and "recent" as two independent listRuns
+ * calls (a real server-side status filter, not a client-side split of one
+ * page — see Dashboard.svelte). Route each call by whether it carries a
+ * `status` filter, so a mock reflects that contract instead of returning the
+ * same page to both. */
+function mockActiveAndRecent(active: RunDto[], recent: RunDto[]) {
+  return vi.spyOn(api, "listRuns").mockImplementation(async (params = {}) =>
+    params.status ? page(active) : page(recent),
+  );
+}
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -41,8 +52,9 @@ describe("Dashboard", () => {
   });
 
   it("splits runs into Running and Recent, and shows an empty message for each when appropriate", async () => {
-    vi.spyOn(api, "listRuns").mockResolvedValue(
-      page([runDto({ run_id: "r1", status: "completed", created_at: Date.now() - 5000 })]),
+    mockActiveAndRecent(
+      [],
+      [runDto({ run_id: "r1", status: "completed", created_at: Date.now() - 5000 })],
     );
     render(Dashboard);
     await waitFor(() => expect(screen.getByText("Nothing running right now.")).toBeInTheDocument());
@@ -50,9 +62,7 @@ describe("Dashboard", () => {
   });
 
   it("lists an active run under Running with its status and age", async () => {
-    vi.spyOn(api, "listRuns").mockResolvedValue(
-      page([runDto({ run_id: "r-active", status: "running" })]),
-    );
+    mockActiveAndRecent([runDto({ run_id: "r-active", status: "running" })], []);
     render(Dashboard);
     await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
     expect(screen.queryByText("Nothing running right now.")).not.toBeInTheDocument();
@@ -61,9 +71,16 @@ describe("Dashboard", () => {
   it("shows a stale/offline banner but keeps the last-known list on a later failed refresh", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      vi.spyOn(api, "listRuns")
-        .mockResolvedValueOnce(page([runDto({ run_id: "r1" })]))
-        .mockRejectedValueOnce(new Error("blip"));
+      // Each refresh() makes 2 calls (active + recent) via Promise.all. Let
+      // the first refresh's pair succeed and every call from the second
+      // refresh onward reject, so the poll-interval tick is the one that
+      // goes offline.
+      let calls = 0;
+      vi.spyOn(api, "listRuns").mockImplementation(async (params = {}) => {
+        calls += 1;
+        if (calls > 2) throw new Error("blip");
+        return params.status ? page([runDto({ run_id: "r1" })]) : page([]);
+      });
       render(Dashboard);
       await waitFor(() => expect(screen.getByText("claude · implementer")).toBeInTheDocument());
 
@@ -80,8 +97,9 @@ describe("Dashboard", () => {
   });
 
   it("never renders a mutation control (start/stop/cancel/approve/reject) in R0", async () => {
-    vi.spyOn(api, "listRuns").mockResolvedValue(
-      page([runDto({ status: "running" }), runDto({ run_id: "r2", status: "failed" })]),
+    mockActiveAndRecent(
+      [runDto({ status: "running" })],
+      [runDto({ run_id: "r2", status: "failed" })],
     );
     render(Dashboard);
     await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
