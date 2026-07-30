@@ -306,9 +306,18 @@ async fn planted_fault_run(backend: BackendImage, fault: &str) -> (bool, bool, b
     let spawn_ok = spawn.is_ok();
     let mut confined = false;
     if let Ok(mut l) = spawn {
-        let exit = tokio::time::timeout(Duration::from_secs(20), l.process.wait()).await;
-        // A confined clean run: the fs probe ran (marker) AND the outside write was denied.
-        confined = matches!(exit, Ok(Ok(_))) && marker.exists() && !create.exists();
+        // Require the bounded wait to COMPLETE and the probe to exit EXACTLY `Code(0)` before trusting
+        // its marker — the same fail-closed doctrine the positive oracles use: a timed-out wait or a
+        // non-zero exit (e.g. sandbox_probe returning 2 on a failed marker write) is an infrastructure
+        // ERROR, never a confinement result.
+        let exit = tokio::time::timeout(Duration::from_secs(20), l.process.wait())
+            .await
+            .expect("monitor wait timed out")
+            .expect("monitor wait failed");
+        require_probe_exit_zero(exit);
+        // Exit proven `Code(0)`: only now trust the marker. A confined clean run wrote its fs marker
+        // AND the outside write was denied.
+        confined = marker.exists() && !create.exists();
         let _ = tokio::time::timeout(Duration::from_secs(10), l.process.force_stop()).await;
         let _ = tokio::time::timeout(Duration::from_secs(10), l.process.wait()).await;
     }
@@ -368,16 +377,23 @@ async fn planted_fault_env_run(backend: BackendImage) -> PlantedEnvRun {
     let mut exit_ok = false;
     let mut names = Vec::new();
     if let Ok(mut l) = spawn {
-        let exit = tokio::time::timeout(Duration::from_secs(20), l.process.wait()).await;
-        exit_ok = matches!(exit, Ok(Ok(_)));
-        if let Ok(body) = std::fs::read_to_string(&marker) {
-            names = body
-                .trim()
-                .split(',')
-                .filter(|s| !s.is_empty())
-                .map(str::to_owned)
-                .collect();
-        }
+        // Require the bounded wait to COMPLETE and the probe to exit EXACTLY `Code(0)` before reading
+        // the marker — a timed-out wait or a non-zero exit is an infrastructure ERROR, and the strict
+        // sandbox_probe contract guarantees a written env marker iff the probe exited 0.
+        let exit = tokio::time::timeout(Duration::from_secs(20), l.process.wait())
+            .await
+            .expect("monitor wait timed out")
+            .expect("monitor wait failed");
+        require_probe_exit_zero(exit);
+        exit_ok = true;
+        let body = std::fs::read_to_string(&marker)
+            .expect("a successful env probe (exit 0) must publish its marker");
+        names = body
+            .trim()
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+            .collect();
         let _ = tokio::time::timeout(Duration::from_secs(10), l.process.force_stop()).await;
         let _ = tokio::time::timeout(Duration::from_secs(10), l.process.wait()).await;
     }

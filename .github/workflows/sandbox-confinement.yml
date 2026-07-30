@@ -65,22 +65,34 @@ jobs:
             echo "requested_sha=${{ github.event.pull_request.head.sha || github.sha }}"
           } > "$M"
           cat > "$L" <<'SH'
-          # run_suite NAME CMD...: append the exact command, stream+capture output, record each
-          # `test result:` summary line and the elapsed time to $O7_MANIFEST, and fail the step on a
-          # non-zero exit. Requires `set -o pipefail` in the caller so a cargo failure is not masked by
-          # the `tee`.
+          # run_suite NAME CMD...: append the exact command, stream+capture output, record the suite's
+          # `test result:` summary line + elapsed time to $O7_MANIFEST, and fail the step (return 1) on a
+          # non-zero exit OR a MISSING summary. Requires `set -o pipefail` in the caller so a cargo
+          # failure is not masked by the `tee`. Each call runs ONE integration-test target, so EXACTLY
+          # one `test result:` line is required — a compile error, a crash, or truncated output yields
+          # zero (or an unexpected count) and is recorded as a FAILURE, never a silent PASS.
           run_suite() {
             local name="$1"; shift
             local log; log="$(mktemp)"
+            local summary; summary="$(mktemp)"
             local start="$SECONDS"
             echo "command[$name]: $*" >> "$O7_MANIFEST"
-            local st=PASS
-            if ! "$@" 2>&1 | tee "$log"; then st=FAIL; fi
+            local rc=0
+            if ! "$@" 2>&1 | tee "$log"; then rc=1; fi
             local elapsed=$(( SECONDS - start ))
-            grep -E 'test result:' "$log" | sed "s/^/  result[$name]: /" >> "$O7_MANIFEST" || true
-            echo "suite[$name]=$st elapsed=${elapsed}s" >> "$O7_MANIFEST"
-            rm -f "$log"
-            [ "$st" = PASS ]
+            grep -E 'test result:' "$log" > "$summary" || true
+            local n; n="$(wc -l < "$summary")"
+            if [ "$n" -ne 1 ]; then
+              echo "suite[$name]=FAIL reason=expected-1-test-summary-got-$n elapsed=${elapsed}s" >> "$O7_MANIFEST"
+              rm -f "$log" "$summary"; return 1
+            fi
+            sed "s/^/  result[$name]: /" "$summary" >> "$O7_MANIFEST"
+            if [ "$rc" -ne 0 ]; then
+              echo "suite[$name]=FAIL reason=nonzero-exit elapsed=${elapsed}s" >> "$O7_MANIFEST"
+              rm -f "$log" "$summary"; return 1
+            fi
+            echo "suite[$name]=PASS elapsed=${elapsed}s" >> "$O7_MANIFEST"
+            rm -f "$log" "$summary"
           }
           SH
 
@@ -278,20 +290,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          prod_feats="$(cargo tree -p sandboy --locked --depth 0 -f '{f}' | head -n1 || true)"
-          fault_feats="$(cargo tree -p sandboy --locked --features test-harness,fault-injection --depth 0 -f '{f}' | head -n1 || true)"
+          # NO `|| true`: a cargo-tree failure (or a broken pipe) MUST fail the job — an empty result can
+          # never be read as "harness-free production". Capture each query to a file so its exit status
+          # propagates under `set -e` instead of being swallowed by a pipeline.
+          prod_file="$(mktemp)"; fault_file="$(mktemp)"
+          cargo tree -p sandboy --locked --depth 0 -f '{f}' > "$prod_file"
+          cargo tree -p sandboy --locked --features test-harness,fault-injection --depth 0 -f '{f}' > "$fault_file"
+          prod_feats="$(head -n1 "$prod_file")"
+          fault_feats="$(head -n1 "$fault_file")"
           echo "production sandboy features=[$prod_feats]"
           echo "fault sandboy features=[$fault_feats]"
           echo "features[production]=[$prod_feats]" >> "$O7_MANIFEST"
           echo "features[fault]=[$fault_feats]" >> "$O7_MANIFEST"
-          case ",$prod_feats," in
-            *,test-harness,*|*,fault-injection,*)
-              echo "::error::production feature graph activates a test feature: [$prod_feats]"; exit 1;;
-          esac
-          echo ",$fault_feats," | grep -q ',test-harness,' \
-            || { echo "::error::fault feature graph is missing test-harness: [$fault_feats]"; exit 1; }
-          echo ",$fault_feats," | grep -q ',fault-injection,' \
-            || { echo "::error::fault feature graph is missing fault-injection: [$fault_feats]"; exit 1; }
+          # Require the EXACT expected shape, not just the absence of two known features — so a future
+          # third test-only feature cannot pass unnoticed. Production must be EXACTLY empty; the
+          # instrumented set must be EXACTLY {fault-injection,test-harness}, order-normalized.
+          if [ -n "$prod_feats" ]; then
+            echo "::error::production feature set must be EXACTLY empty; got [$prod_feats]"; exit 1
+          fi
+          fault_norm="$(printf '%s\n' "$fault_feats" | tr ',' '\n' | sort | paste -sd, -)"
+          if [ "$fault_norm" != "fault-injection,test-harness" ]; then
+            echo "::error::instrumented feature set must be EXACTLY {fault-injection,test-harness}; got [$fault_feats] (normalized [$fault_norm])"; exit 1
+          fi
+          rm -f "$prod_file" "$fault_file"
 
       # PHASE 8: build the PRODUCTION and FAULT artifacts from THIS SHA into SEPARATE target dirs, with
       # distinct identities (production 0.1.0, no fault seam / fault 0.1.0+faultinject, seam present).
@@ -328,11 +349,14 @@ jobs:
           [ "$(sha256sum "$O7_SANDBOY_BIN" | cut -d' ' -f1)" != "$(sha256sum "$O7_SANDBOY_FAULT_BIN" | cut -d' ' -f1)" ] \
             || { echo "::error::production and fault artifacts share a digest"; exit 1; }
           # Seam rodata fingerprints: ABSENT from production, PRESENT in the instrumented artifact.
+          # Direct binary `grep -aFq` (not `strings | grep -q`): under pipefail a `producer | grep -q`
+          # exit hinges on whether the producer gets SIGPIPE after grep's early exit, which can make the
+          # step spuriously red OR mask a producer failure. `grep -a` treats the binary as text.
           for m in O7_FAULT_POINT O7_FAULT_WITNESS +faultinject; do
-            if strings "$O7_SANDBOY_BIN" | grep -qF -- "$m"; then
+            if grep -aFq -- "$m" "$O7_SANDBOY_BIN"; then
               echo "::error::production binary contains seam fingerprint '$m'"; exit 1
             fi
-            if ! strings "$O7_SANDBOY_FAULT_BIN" | grep -qF -- "$m"; then
+            if ! grep -aFq -- "$m" "$O7_SANDBOY_FAULT_BIN"; then
               echo "::error::instrumented binary is missing seam fingerprint '$m' (non-vacuous check failed)"; exit 1
             fi
           done
