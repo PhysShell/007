@@ -2,8 +2,6 @@
 // from these — no field is invented client-side, per the R0 source-of-truth
 // rule (see docs/q-deck/architecture.md).
 
-export const API_SCHEMA_VERSION = 1;
-
 export interface HealthDto {
   schema_version: number;
   status: string;

@@ -301,7 +301,7 @@ async fn transcript_reconnect_with_last_event_id_yields_exactly_the_missed_tail(
     for (frame, expected_type) in rest.iter().zip(expected) {
         let data = frame.data.as_ref().unwrap();
         let parsed: Value = serde_json::from_str(data).expect("frame data is valid JSON");
-        assert_eq!(parsed["schema_version"], 1);
+        assert_eq!(parsed["schema_version"], o7d::dto::API_SCHEMA_VERSION);
         assert_eq!(parsed["event_type"], *expected_type);
         assert_eq!(parsed["run_id"], transcript.run.run_id.as_str());
     }

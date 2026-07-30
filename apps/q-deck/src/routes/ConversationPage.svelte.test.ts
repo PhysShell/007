@@ -32,7 +32,7 @@ class MockEventSource {
 
 function runDto(overrides: Partial<RunDto> = {}): RunDto {
   return {
-    schema_version: 1,
+    schema_version: api.EXPECTED_SCHEMA_VERSION,
     run_id: "run-1",
     conversation_id: GOLDEN_CONVERSATION_ID,
     parent_run_id: null,
@@ -46,7 +46,7 @@ function runDto(overrides: Partial<RunDto> = {}): RunDto {
 }
 
 function page(items: RunDto[], nextBefore: string | null = null): PageDto<RunDto> {
-  return { schema_version: 1, items, next_before: nextBefore };
+  return { schema_version: api.EXPECTED_SCHEMA_VERSION, items, next_before: nextBefore };
 }
 
 beforeEach(() => {

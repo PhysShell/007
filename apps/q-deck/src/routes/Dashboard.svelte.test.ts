@@ -7,7 +7,7 @@ import { goldenRun, goldenRunActive } from "../test-support/goldenTranscript";
 
 function runDto(overrides: Partial<RunDto> = {}): RunDto {
   return {
-    schema_version: 1,
+    schema_version: api.EXPECTED_SCHEMA_VERSION,
     run_id: "run-1",
     conversation_id: "conv-1",
     parent_run_id: null,
@@ -21,7 +21,7 @@ function runDto(overrides: Partial<RunDto> = {}): RunDto {
 }
 
 function page(items: RunDto[]): PageDto<RunDto> {
-  return { schema_version: 1, items, next_before: null };
+  return { schema_version: api.EXPECTED_SCHEMA_VERSION, items, next_before: null };
 }
 
 /** Dashboard now fetches "active" and "recent" as two independent listRuns
@@ -78,7 +78,7 @@ describe("Dashboard", () => {
       if (!params.status) return page([]); // the unfiltered "recent" call
       if (params.before === undefined) {
         return {
-          schema_version: 1,
+          schema_version: api.EXPECTED_SCHEMA_VERSION,
           items: [runDto({ run_id: "a1" }), runDto({ run_id: "a2" })],
           next_before: "cursor1",
         };

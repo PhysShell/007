@@ -5,6 +5,7 @@
 // three copies implement. Test-only: nothing outside `*.test.ts` files
 // imports this module, so it is not part of the built production bundle.
 
+import { EXPECTED_SCHEMA_VERSION } from "../lib/api";
 import type { EventDto, EventPageDto, RunDto, RunStatus } from "../lib/types";
 
 // "pass"/"fail"/"blocked"/"error" are sealed/terminal outcomes (RunStatus
@@ -57,7 +58,7 @@ function outcomeEventType(outcome: GoldenOutcome): string {
  * "running" shape via a resume — see `goldenRunResumed`). */
 export function goldenRunActive(overrides: Partial<RunDto> = {}): RunDto {
   return {
-    schema_version: 1,
+    schema_version: EXPECTED_SCHEMA_VERSION,
     run_id: GOLDEN_RUN_ID,
     conversation_id: GOLDEN_CONVERSATION_ID,
     parent_run_id: null,
@@ -74,7 +75,7 @@ export function goldenRunActive(overrides: Partial<RunDto> = {}): RunDto {
 export function goldenRun(outcome: GoldenOutcome, overrides: Partial<RunDto> = {}): RunDto {
   const status = outcomeStatus(outcome);
   return {
-    schema_version: 1,
+    schema_version: EXPECTED_SCHEMA_VERSION,
     run_id: GOLDEN_RUN_ID,
     conversation_id: GOLDEN_CONVERSATION_ID,
     parent_run_id: null,
@@ -114,7 +115,7 @@ export function goldenEvents(outcome: GoldenOutcome): EventDto[] {
     outcomeEventType(outcome),
   ];
   return types.map((event_type, i) => ({
-    schema_version: 1,
+    schema_version: EXPECTED_SCHEMA_VERSION,
     event_id: `r05-golden-event-${i + 1}`,
     conversation_id: GOLDEN_CONVERSATION_ID,
     // conversation.created precedes the run's own existence — every other
@@ -136,7 +137,7 @@ export function goldenEventsActive(): EventDto[] {
 
 export function goldenEventPage(events: EventDto[]): EventPageDto {
   return {
-    schema_version: 1,
+    schema_version: EXPECTED_SCHEMA_VERSION,
     items: events,
     next_after: events.at(-1)?.sequence ?? null,
   };

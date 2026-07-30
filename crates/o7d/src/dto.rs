@@ -6,10 +6,20 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The `/api/v1` contract version. Bump on any breaking response-shape change;
-/// an additive, always-safely-defaulted field does not require a bump (same
-/// policy `o7-run`/`o7-ledger` already use for their own schema versions).
-pub const API_SCHEMA_VERSION: u32 = 1;
+/// The `/api/v1` contract version. Bump on any breaking response-shape change
+/// — including a new value inside an existing string field, whenever a
+/// client's own type for that field is a closed union it uses for control
+/// flow rather than a value it just displays. `RunStatus` is exactly that
+/// case in Q-Deck: `isSealedRun` decides whether to keep polling by exact
+/// match against a fixed set of strings, so a server that starts emitting
+/// `"blocked"`/`"error"` without a version bump would have an old,
+/// not-yet-upgraded client accept the response (same version number, so
+/// `checkSchema` lets it through) and then silently poll a sealed run
+/// forever, having never recognized the new value as sealed. `event_type` is
+/// the *other* kind of field — Q-Deck never branches on its exact value, so
+/// widening it stays additive without a bump. Bumped 1 → 2 for Q-Deck R0.6
+/// (`docs/q-deck/r06-verdict-fidelity.md`) for exactly this reason.
+pub const API_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Serialize)]
 pub struct HealthDto {
@@ -37,12 +47,14 @@ impl From<o7_ledger::Conversation> for ConversationDto {
 }
 
 /// `status` is a bare pass-through of `o7_ledger::RunStatus::as_str()` — Q-Deck
-/// R0.6's new `"blocked"`/`"error"` values need no change here at all: this
-/// DTO never enumerates statuses itself, so a wider ledger vocabulary flows
-/// through automatically without recomputation and without an
-/// `API_SCHEMA_VERSION` bump (see `docs/q-deck/r06-verdict-fidelity.md` and
-/// `crates/o7d/tests/verdict_fidelity.rs`, which prove this rather than just
-/// assert it).
+/// R0.6's new `"blocked"`/`"error"` values needed no change to this struct or
+/// to `routes.rs`: a wider ledger vocabulary flows through automatically
+/// without recomputation. The wire contract as a whole still needed an
+/// `API_SCHEMA_VERSION` bump, though — not for this DTO's shape, but because
+/// Q-Deck's `RunStatus` is a closed union its client logic branches on (see
+/// `API_SCHEMA_VERSION`'s doc comment). See
+/// `docs/q-deck/r06-verdict-fidelity.md` and
+/// `crates/o7d/tests/verdict_fidelity.rs`.
 #[derive(Debug, Serialize)]
 pub struct RunDto {
     pub schema_version: u32,

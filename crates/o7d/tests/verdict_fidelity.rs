@@ -1,9 +1,14 @@
 //! Q-Deck R0.6 (`docs/q-deck/r06-verdict-fidelity.md`): proves the new sealed
 //! `blocked`/`error` run outcomes flow through o7d's REST and SSE surface
-//! exactly as they are in the ledger — no recomputation, no schema bump.
+//! exactly as they are in the ledger — no recomputation.
 //! `RunDto.status`/`EventDto.event_type` are bare-string pass-throughs of the
-//! ledger value already, so no `dto.rs`/`routes.rs` code changed for this;
-//! these tests exist to prove that claim rather than just assert it.
+//! ledger value already, so no `dto.rs`/`routes.rs` shape changed for this;
+//! these tests exist to prove that claim rather than just assert it. The
+//! wire contract as a whole still bumped `API_SCHEMA_VERSION` (see its doc
+//! comment in `dto.rs`) — that bump is what makes it safe for these new
+//! status values to exist at all: an old client talking to a new server
+//! rejects the mismatched version outright instead of silently failing to
+//! recognize `blocked`/`error` as sealed.
 //!
 //! Invariant for the restriction-lint allowance below: every `unwrap`/
 //! `expect`/JSON-field index here is on a response this same test just
@@ -90,8 +95,9 @@ async fn blocked_and_error_runs_are_listed_and_reachable_by_id() {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(one["status"], outcome, "outcome={outcome}");
         assert_eq!(
-            one["schema_version"], 1,
-            "no schema bump for a new status value"
+            one["schema_version"],
+            o7d::dto::API_SCHEMA_VERSION,
+            "blocked/error ship under the bumped wire contract, not the pre-R0.6 one"
         );
         assert!(one["finished_at"].is_number(), "blocked/error are sealed");
 
@@ -127,7 +133,10 @@ async fn blocked_and_error_events_travel_with_the_right_event_type() {
             })
             .expect("the outcome event must be present");
         assert_eq!(terminal_event["event_type"], expected_event_type);
-        assert_eq!(terminal_event["schema_version"], 1);
+        assert_eq!(
+            terminal_event["schema_version"],
+            o7d::dto::API_SCHEMA_VERSION
+        );
     }
 }
 

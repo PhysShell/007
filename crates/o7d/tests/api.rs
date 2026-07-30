@@ -93,7 +93,7 @@ async fn health_reports_ok() {
     let (status, body) = get(&router, "/api/v1/health").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["status"], "ok");
-    assert_eq!(body["schema_version"], 1);
+    assert_eq!(body["schema_version"], o7d::dto::API_SCHEMA_VERSION);
 }
 
 #[tokio::test]

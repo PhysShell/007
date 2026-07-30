@@ -107,10 +107,24 @@ resumable interruption "error").
    filtering (`parse_statuses`) calls `RunStatus::parse` generically, so
    `blocked`/`error` become valid filter values automatically and anything
    else still 400s exactly as before.
-6. **API schema version: stays at `API_SCHEMA_VERSION = 1`.** A new enum
-   value inside an existing string field is additive by the same precedent
-   already established for `event_type`'s own forward-compatibility — not a
-   breaking shape change. Proven by a dedicated round-trip test, not just
+6. **API schema version bumped: `API_SCHEMA_VERSION` 1 → 2.** Adding
+   `blocked`/`error` to `status` is *not* the same kind of change as
+   `event_type`'s own forward-compatible widening, despite both being "a new
+   string value inside an existing field": Q-Deck never branches on
+   `event_type`'s exact value, but `RunStatus` is a closed union its client
+   logic (`isSealedRun`) uses for control flow. An old, not-yet-upgraded
+   Q-Deck build talking to a new o7d would otherwise accept the response
+   (same version number, so `checkSchema` lets it through) and then silently
+   poll a blocked/errored run forever, having no way to recognize the new
+   value as sealed — a real, previously-unrecognized incompatibility, not a
+   safe additive change. The bump makes that combination fail closed instead:
+   an old client rejects the mismatched version outright
+   (`UnsupportedSchemaError`) rather than misreading it. `apps/q-deck/src/lib/api.ts`'s
+   `EXPECTED_SCHEMA_VERSION` bumped to match; `apps/q-deck/src/lib/types.ts`'s
+   own unused, drift-prone duplicate of this constant was deleted rather than
+   also bumped. Proven by dedicated tests on both sides — the new value
+   round-tripping under the bumped version, and (separately) the *old*
+   version (1) now being rejected rather than silently accepted — not just
    asserted.
 7. **Q-Deck.** `lib/types.ts`: add `"blocked" | "error"` to the `RunStatus`
    union; extend `isSealedRun` to include them (`isActiveRun` is unchanged —

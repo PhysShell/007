@@ -1,7 +1,7 @@
 # o7d HTTP/SSE API — v1
 
 Every non-SSE endpoint responds with JSON carrying a top-level
-`schema_version` (currently `1`). Q-Deck's client
+`schema_version` (currently `2`). Q-Deck's client
 (`apps/q-deck/src/lib/api.ts`) rejects any response whose `schema_version` it
 doesn't recognize rather than guessing at its shape. The one SSE endpoint
 (`/events/stream`, below) is `text/event-stream`, not JSON — each of its
@@ -28,7 +28,7 @@ dev-mode setup, where Vite's own dev server serves the shell and proxies
 Any non-2xx response body:
 
 ```json
-{ "schema_version": 1, "error": "human-readable message", "code": "STABLE_CODE" }
+{ "schema_version": 2, "error": "human-readable message", "code": "STABLE_CODE" }
 ```
 
 `code` is one of `NOT_FOUND` (404), `BAD_REQUEST` (400 — a malformed cursor
@@ -40,7 +40,7 @@ different claims and must not read the same on the wire.
 ## `GET /api/v1/health`
 
 ```json
-{ "schema_version": 1, "status": "ok" }
+{ "schema_version": 2, "status": "ok" }
 ```
 
 ## `GET /api/v1/conversations`
@@ -50,9 +50,9 @@ page's `next_before`).
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "items": [
-    { "schema_version": 1, "conversation_id": "...", "created_at": 0, "status": "open" }
+    { "schema_version": 2, "conversation_id": "...", "created_at": 0, "status": "open" }
   ],
   "next_before": "1753900000123.42"
 }
@@ -76,10 +76,10 @@ starts at the beginning), `limit` (default 200).
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "items": [
     {
-      "schema_version": 1,
+      "schema_version": 2,
       "event_id": "...",
       "conversation_id": "...",
       "run_id": "...|null",
@@ -105,7 +105,7 @@ Server-Sent Events. Each event frame:
 
 ```
 id: 7
-data: {"schema_version":1,"event_id":"...","sequence":7,...}
+data: {"schema_version":2,"event_id":"...","sequence":7,...}
 
 ```
 
@@ -143,7 +143,7 @@ Same `PageDto` shape as `/conversations`, with `RunDto` items:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "run_id": "...",
   "conversation_id": "...",
   "parent_run_id": "...|null",
@@ -159,11 +159,19 @@ Same `PageDto` shape as `/conversations`, with `RunDto` items:
 sealed — `finished_at` is set, same as `completed`/`failed`/`cancelled`.
 `interrupted` remains the one non-sealed value in this set (`finished_at` is
 `null`) — it is a resumable pause, not a verdict, and must never be conflated
-with `error`. Adding these two values was an ADDITIVE change to this field —
-`schema_version` did not bump, following the same forward-compatibility
-policy `event_type` already established (see the events endpoint above): an
-unrecognized status string is a client's own problem to degrade gracefully
-on, not a wire-shape break.
+with `error`.
+
+Unlike `event_type` (a value Q-Deck only ever displays, never branches on),
+adding `blocked`/`error` to `status` **did** require bumping
+`schema_version` (1 → 2, Q-Deck R0.6): Q-Deck's `RunStatus` type is a closed
+union its client code uses for control flow (`isSealedRun` decides whether
+to keep polling by exact match). An old, not-yet-upgraded client talking to a
+new server would otherwise accept the response (same version number) and
+then silently poll a blocked/errored run forever, having no way to recognize
+the new value as sealed. The version bump makes that combination fail
+closed instead: `checkSchema` (`apps/q-deck/src/lib/api.ts`) rejects a
+version mismatch outright, surfaced as `UnsupportedSchemaError` rather than
+a run that just never stops polling.
 
 ## `GET /api/v1/runs/{run_id}`
 

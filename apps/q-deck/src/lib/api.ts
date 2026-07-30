@@ -34,7 +34,16 @@ export class UnsupportedSchemaError extends Error {
   }
 }
 
-export const EXPECTED_SCHEMA_VERSION = 1;
+// Bumped 1 -> 2 for Q-Deck R0.6 (docs/q-deck/r06-verdict-fidelity.md): adding
+// "blocked"/"error" to RunStatus is not additive from this client's point of
+// view, because isSealedRun (./types.ts) branches on RunStatus's exact
+// values rather than just displaying them. An old build stuck at 1 must
+// reject a v2 server outright via checkSchema below, not silently poll a
+// blocked/errored run forever because it can't recognize the new value as
+// sealed. The single source of truth for what this build expects — do not
+// duplicate this number elsewhere (see the removed types.ts constant this
+// replaced).
+export const EXPECTED_SCHEMA_VERSION = 2;
 
 /** Shared by every REST response and every SSE frame — one schema check, not
  * a REST-only one that lets a version-mismatched stream frame through. */
