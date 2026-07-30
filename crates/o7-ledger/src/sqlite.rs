@@ -15,8 +15,8 @@ use crate::idempotency::{
 };
 use crate::migrations;
 use crate::models::{
-    Conversation, ConversationStatus, EventType, Idempotency, NewEvent, NewRun, PersistedEvent,
-    RecoveryState, Run, RunAttempt, RunStatus,
+    Conversation, ConversationStatus, EventType, Idempotency, ListCursor, NewEvent, NewRun, Page,
+    PersistedEvent, RecoveryState, Run, RunAttempt, RunStatus,
 };
 use crate::transitions::{validate_attempt_transition, validate_run_transition};
 use crate::{now_millis, AttemptStatus, EventId, Ledger, LedgerError};
@@ -24,6 +24,12 @@ use crate::{now_millis, AttemptStatus, EventId, Ledger, LedgerError};
 /// Hard upper bound on how many events a single [`read_events`](Ledger::read_events)
 /// call may return, so a caller can never request an unbounded scan.
 pub const MAX_READ_LIMIT: usize = 1000;
+
+/// Hard upper bound on rows per call to [`SqliteLedger::list_conversations`] or
+/// [`SqliteLedger::list_runs`]. Smaller than [`MAX_READ_LIMIT`]: these rows are
+/// for UI display (a cockpit page), not event-replay throughput — a caller
+/// wanting more pages further back into history.
+pub const MAX_LIST_LIMIT: usize = 200;
 
 /// Schema version stamped on events emitted by the ledger's own lifecycle methods.
 pub const EVENT_SCHEMA_VERSION: u32 = 1;
@@ -704,6 +710,125 @@ impl SqliteLedger {
     ) -> Result<Option<RunAttempt>, LedgerError> {
         self.with_conn(move |conn| load_attempt(conn, attempt_id.as_str()))
             .await
+    }
+
+    /// List conversations newest-first, keyset-paginated by `(created_at, id)`.
+    /// `before = None` starts at the most recent conversation. Same exhaustion
+    /// contract as [`Ledger::read_events`]: keep calling with
+    /// `before = page.next_before` until a page comes back empty — a page
+    /// exactly `limit` long is not itself proof there is nothing older.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn list_conversations(
+        &self,
+        before: Option<ListCursor>,
+        limit: usize,
+    ) -> Result<Page<Conversation>, LedgerError> {
+        let capped = limit.min(MAX_LIST_LIMIT);
+        self.with_conn(move |conn| {
+            let cursor_ts = before.as_ref().map(|c| c.created_at);
+            let cursor_tiebreak = before.as_ref().map(|c| c.tiebreak);
+            let cap = i64::try_from(capped).unwrap_or(0);
+            let mut stmt = conn.prepare(
+                "SELECT rowid, conversation_id, created_at, status FROM conversation \
+                 WHERE ?1 IS NULL OR created_at < ?1 OR (created_at = ?1 AND rowid < ?2) \
+                 ORDER BY created_at DESC, rowid DESC LIMIT ?3",
+            )?;
+            let rows = stmt.query_map(params![cursor_ts, cursor_tiebreak, cap], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })?;
+            let mut items = Vec::new();
+            let mut last_key: Option<(i64, i64)> = None;
+            for row in rows {
+                let (rowid, id, created_at, status) = row?;
+                last_key = Some((created_at, rowid));
+                items.push(Conversation {
+                    conversation_id: crate::ConversationId::from_raw(id),
+                    created_at,
+                    status: ConversationStatus::parse(&status).ok_or_else(|| {
+                        LedgerError::Integrity(format!("bad conversation status {status}"))
+                    })?,
+                });
+            }
+            let next_before = last_key.map(|(created_at, tiebreak)| ListCursor {
+                created_at,
+                tiebreak,
+            });
+            Ok(Page { items, next_before })
+        })
+        .await
+    }
+
+    /// List runs newest-first, keyset-paginated by `(created_at, id)`, optionally
+    /// scoped to one conversation. `conversation_id = None` lists across every
+    /// conversation (the cockpit dashboard's "all runs" view); `Some(id)` scopes
+    /// to one conversation's runs (the conversation page's run list). Same
+    /// exhaustion contract as [`Self::list_conversations`].
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn list_runs(
+        &self,
+        conversation_id: Option<crate::ConversationId>,
+        before: Option<ListCursor>,
+        limit: usize,
+    ) -> Result<Page<Run>, LedgerError> {
+        let capped = limit.min(MAX_LIST_LIMIT);
+        self.with_conn(move |conn| {
+            let conv_filter = conversation_id.as_ref().map(|c| c.as_str().to_owned());
+            let cursor_ts = before.as_ref().map(|c| c.created_at);
+            let cursor_tiebreak = before.as_ref().map(|c| c.tiebreak);
+            let cap = i64::try_from(capped).unwrap_or(0);
+            let mut stmt = conn.prepare(
+                "SELECT rowid, run_id, conversation_id, parent_run_id, agent, role, status, created_at, finished_at \
+                 FROM run \
+                 WHERE (?1 IS NULL OR conversation_id = ?1) \
+                   AND (?2 IS NULL OR created_at < ?2 OR (created_at = ?2 AND rowid < ?3)) \
+                 ORDER BY created_at DESC, rowid DESC LIMIT ?4",
+            )?;
+            let rows = stmt.query_map(params![conv_filter, cursor_ts, cursor_tiebreak, cap], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, i64>(7)?,
+                    row.get::<_, Option<i64>>(8)?,
+                ))
+            })?;
+            let mut items = Vec::new();
+            let mut last_key: Option<(i64, i64)> = None;
+            for row in rows {
+                let (rowid, id, conv, parent, agent, role, status, created_at, finished_at) = row?;
+                last_key = Some((created_at, rowid));
+                items.push(Run {
+                    run_id: crate::RunId::from_raw(id),
+                    conversation_id: crate::ConversationId::from_raw(conv),
+                    parent_run_id: parent.map(crate::RunId::from_raw),
+                    agent,
+                    role,
+                    status: RunStatus::parse(&status)
+                        .ok_or_else(|| LedgerError::Integrity(format!("bad run status {status}")))?,
+                    created_at,
+                    finished_at,
+                });
+            }
+            let next_before = last_key.map(|(created_at, tiebreak)| ListCursor {
+                created_at,
+                tiebreak,
+            });
+            Ok(Page { items, next_before })
+        })
+        .await
     }
 }
 
