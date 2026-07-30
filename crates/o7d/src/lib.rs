@@ -9,6 +9,7 @@ pub mod dto;
 mod error;
 mod routes;
 mod state;
+mod stream;
 
 pub use error::ApiError;
 pub use state::AppState;
@@ -32,6 +33,10 @@ pub fn router(ledger: o7_ledger::SqliteLedger) -> Router {
         .route(
             "/api/v1/conversations/:conversation_id/events",
             get(routes::conversation_events),
+        )
+        .route(
+            "/api/v1/conversations/:conversation_id/events/stream",
+            get(stream::conversation_events_stream),
         )
         .route("/api/v1/runs", get(routes::list_runs))
         .route("/api/v1/runs/:run_id", get(routes::get_run))

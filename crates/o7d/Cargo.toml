@@ -20,7 +20,19 @@ tokio = { version = "1", default-features = false, features = [
     "rt-multi-thread",
     "macros",
     "net",
+    "time",
+    # AsyncReadExt/AsyncWriteExt: only tests/sse.rs's raw-socket reconnect
+    # transcript uses these directly (production code never hand-writes HTTP);
+    # listed on the main dependency rather than as a dev-only feature bump
+    # since Cargo unifies features across one dependency graph either way.
+    "io-util",
 ] }
+# The SSE stream's poll loop is built on `stream::unfold`, not the `async-stream`
+# macro crate: `futures-util` is already compiled as part of axum's own
+# dependency graph (axum's extractors/response bodies are built on it), so
+# depending on it here — narrowed to just the `alloc`/`std` combinators
+# actually used — adds no new crate to the tree.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # R0's whole surface is bounded JSON + one-way SSE (task #4) over HTTP/1 — no
 # WebSocket (the brief is explicit: "WebSocket is not needed for a one-way
 # read-only stream"), no multipart, no form bodies, no static-file serving
