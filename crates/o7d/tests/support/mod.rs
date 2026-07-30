@@ -17,19 +17,18 @@ use o7_ledger::{
     Conversation, EventId, EventType, Ledger as _, LedgerError, NewEvent, NewRun, Run, SqliteLedger,
 };
 
-/// Which existing, already-canonical status the transcript ends in. Only
-/// `Pass`/`Fail` are sealed/terminal (see `o7-ledger`'s copy of this module
-/// for the full rationale); `Interrupted` is a resumable pause, not a third
-/// co-equal outcome of the same kind, and must never be described as
-/// terminal/sealed/"ERROR" — that name belongs to `o7-run::Verdict::Error`,
-/// a genuinely different, SEALED concept this transcript does not represent
-/// (the projection from `o7-run::Verdict` onto `o7-ledger`'s status
-/// vocabulary is an open seam, not decided here).
+/// Which existing, already-canonical status the transcript ends in.
+/// `Pass`/`Fail`/`Blocked`/`Error` (see `o7-ledger`'s copy of this module for
+/// the full rationale, incl. Q-Deck R0.6's `Blocked`/`Error` addition) are
+/// sealed/terminal; `Interrupted` is a resumable pause, not a co-equal
+/// outcome of the same kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GoldenOutcome {
     Pass,
     Fail,
     Interrupted,
+    Blocked,
+    Error,
 }
 
 /// Everything the transcript produced, for callers to assert against.
@@ -57,6 +56,8 @@ pub(crate) fn outcome_event_type(outcome: GoldenOutcome) -> &'static str {
         GoldenOutcome::Pass => "run.completed",
         GoldenOutcome::Fail => "run.failed",
         GoldenOutcome::Interrupted => "run.interrupted",
+        GoldenOutcome::Blocked => "run.blocked",
+        GoldenOutcome::Error => "run.errored",
     }
 }
 
@@ -135,6 +136,8 @@ pub(crate) async fn apply_golden_transcript(
         GoldenOutcome::Pass => ledger.complete_run(run.run_id.clone()).await?,
         GoldenOutcome::Fail => ledger.fail_run(run.run_id.clone()).await?,
         GoldenOutcome::Interrupted => ledger.interrupt_run(run.run_id.clone()).await?,
+        GoldenOutcome::Blocked => ledger.block_run(run.run_id.clone()).await?,
+        GoldenOutcome::Error => ledger.error_run(run.run_id.clone()).await?,
     };
 
     Ok(GoldenTranscript { conversation, run })

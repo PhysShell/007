@@ -13,35 +13,32 @@
 //! this transcript proves the ledger/o7d/Q-Deck downstream contract, it does
 //! not stand in for a production provider integration.
 //!
-//! ## A missing seam this transcript does NOT paper over
+//! ## The seam this transcript closed, and the one it still does NOT
 //!
 //! `crates/o7-run` has its own `Verdict` enum (`Pass`, `Fail`, `Blocked`,
 //! `Error` — see `crates/o7-run/src/state.rs`), fixed only once a run is
-//! `Sealed`. That `Error` variant is a SEALED, terminal judgment in o7-run's
-//! own model — a genuinely different concept from `o7_ledger::RunStatus`'s
-//! `Interrupted`, which is an UNSEALED, resumable pause
-//! (`resume_interrupted_run` can bring it back to `Running`). There is
-//! currently no defined projection from o7-run's four sealed `Verdict`
-//! values onto `o7-ledger`'s status vocabulary at all (o7d doesn't even
-//! depend on o7-run — see `docs/q-deck/architecture.md`) — whether a real
-//! `Verdict::Error` should someday become `RunStatus::Failed`, a new status,
-//! or something else is an open question this transcript does not answer.
-//! This transcript's third variant below demonstrates `Interrupted` on its
-//! OWN terms (an existing, resumable ledger state) — it does NOT claim to
-//! represent o7-run's `Verdict::Error`, and must never be described as a
-//! terminal/sealed/"ERROR" outcome.
+//! `Sealed`. As of Q-Deck R0.6 (`docs/q-deck/r06-verdict-fidelity.md`),
+//! `o7_ledger::RunStatus` has its own sealed `Blocked`/`Error`, matching
+//! o7-run's own vocabulary by name — closing the gap that previously made it
+//! impossible to project every sealed `Verdict` into the ledger. What R0.6
+//! does NOT do: wire a real `o7-run`/`o7-worker` producer to actually call
+//! `block_run`/`error_run` (o7d still doesn't depend on o7-run at all — see
+//! `docs/q-deck/architecture.md`). `RunStatus::Interrupted` remains a
+//! genuinely different, UNSEALED, resumable concept (`resume_interrupted_run`
+//! can bring it back to `Running`) and must never be described as
+//! terminal/sealed/"error" anywhere.
 
 use o7_ledger::{
     Conversation, EventId, EventType, Ledger as _, LedgerError, NewEvent, NewRun, Run, SqliteLedger,
 };
 
-/// Which existing, already-canonical status the transcript ends in. Only
-/// `Pass` and `Fail` are sealed/terminal outcomes (`RunStatus::Completed`,
-/// `RunStatus::Failed`). `Interrupted` is NOT a third co-equal "outcome" of
-/// the same kind — it is a resumable pause, not a verdict; see the module
-/// doc comment above for why it is kept in this enum anyway (for the
-/// convenience of one `apply_golden_transcript` entry point) despite being a
-/// different kind of thing.
+/// Which existing, already-canonical status the transcript ends in.
+/// `Pass`/`Fail`/`Blocked`/`Error` are all sealed/terminal outcomes
+/// (`RunStatus::Completed`/`Failed`/`Blocked`/`Error`). `Interrupted` is NOT
+/// a co-equal "outcome" of the same kind — it is a resumable pause, not a
+/// verdict; see the module doc comment above for why it is kept in this enum
+/// anyway (for the convenience of one `apply_golden_transcript` entry point)
+/// despite being a different kind of thing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GoldenOutcome {
     /// Sealed. Ends in `RunStatus::Completed`.
@@ -55,6 +52,11 @@ pub(crate) enum GoldenOutcome {
     /// transcript surfaces honestly rather than treating as a fourth
     /// terminal outcome.
     Interrupted,
+    /// Sealed. Ends in `RunStatus::Blocked` (R0.6).
+    Blocked,
+    /// Sealed. Ends in `RunStatus::Error` (R0.6) — NOT the same concept as
+    /// `Interrupted`.
+    Error,
 }
 
 /// Everything the transcript produced, for callers to assert against.
@@ -88,6 +90,8 @@ pub(crate) fn outcome_event_type(outcome: GoldenOutcome) -> &'static str {
         GoldenOutcome::Pass => "run.completed",
         GoldenOutcome::Fail => "run.failed",
         GoldenOutcome::Interrupted => "run.interrupted",
+        GoldenOutcome::Blocked => "run.blocked",
+        GoldenOutcome::Error => "run.errored",
     }
 }
 
@@ -166,6 +170,8 @@ pub(crate) async fn apply_golden_transcript(
         GoldenOutcome::Pass => ledger.complete_run(run.run_id.clone()).await?,
         GoldenOutcome::Fail => ledger.fail_run(run.run_id.clone()).await?,
         GoldenOutcome::Interrupted => ledger.interrupt_run(run.run_id.clone()).await?,
+        GoldenOutcome::Blocked => ledger.block_run(run.run_id.clone()).await?,
+        GoldenOutcome::Error => ledger.error_run(run.run_id.clone()).await?,
     };
 
     Ok(GoldenTranscript {

@@ -130,20 +130,24 @@ describe("Dashboard", () => {
     expect(screen.queryByText("Nothing running right now.")).not.toBeInTheDocument();
   });
 
-  it("shows the golden synthetic-run transcript's completed/failed/interrupted runs under Recent (not currently active, regardless of whether each is sealed)", async () => {
+  it("shows the golden synthetic-run transcript's completed/failed/interrupted/blocked/error runs under Recent (not currently active, regardless of whether each is sealed)", async () => {
     mockActiveAndRecent(
       [],
       [
         goldenRun("pass", { run_id: "r05-golden-run-pass" }),
         goldenRun("fail", { run_id: "r05-golden-run-fail" }),
         goldenRun("interrupted", { run_id: "r05-golden-run-interrupted" }),
+        goldenRun("blocked", { run_id: "r06-golden-run-blocked" }),
+        goldenRun("error", { run_id: "r06-golden-run-error" }),
       ],
     );
     render(Dashboard);
-    await waitFor(() => expect(screen.getAllByText("claude · implementer")).toHaveLength(3));
+    await waitFor(() => expect(screen.getAllByText("claude · implementer")).toHaveLength(5));
     expect(screen.getByText("completed")).toBeInTheDocument();
     expect(screen.getByText("failed")).toBeInTheDocument();
     expect(screen.getByText("interrupted")).toBeInTheDocument();
+    expect(screen.getByText("blocked")).toBeInTheDocument();
+    expect(screen.getByText("error")).toBeInTheDocument();
   });
 
   it("never renders a mutation control (start/stop/cancel/approve/reject) in R0", async () => {

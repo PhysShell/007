@@ -342,6 +342,41 @@ async fn transcript_interrupted_outcome_frame_is_run_interrupted_not_run_failed(
 }
 
 #[tokio::test]
+async fn every_outcomes_terminal_frame_carries_the_right_event_type_over_sse() {
+    for outcome in [
+        GoldenOutcome::Pass,
+        GoldenOutcome::Fail,
+        GoldenOutcome::Interrupted,
+        GoldenOutcome::Blocked,
+        GoldenOutcome::Error,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("ledger.sqlite3");
+        let ledger = SqliteLedger::open(&db_path).unwrap();
+        let transcript = apply_golden_transcript(&ledger, outcome).await.unwrap();
+        drop(ledger);
+
+        let (addr, _handle) = spawn_server_on(&db_path).await;
+        let path = format!(
+            "/api/v1/conversations/{}/events/stream",
+            transcript.conversation.conversation_id.as_str()
+        );
+        let mut client = connect_and_request(addr, &path, None).await;
+        let frames = read_n_data_frames(&mut client, 7).await;
+
+        let last_frame = frames.last().expect("7 frames requested");
+        let parsed: Value = serde_json::from_str(last_frame.data.as_ref().unwrap())
+            .expect("frame data is valid JSON");
+        assert_eq!(
+            parsed["event_type"],
+            outcome_event_type(outcome),
+            "outcome={outcome:?}"
+        );
+        assert_eq!(parsed["run_id"], transcript.run.run_id.as_str());
+    }
+}
+
+#[tokio::test]
 async fn transcript_resume_survives_a_real_daemon_restart_against_the_same_db() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("ledger.sqlite3");
