@@ -11,8 +11,8 @@ use std::time::Duration;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::idempotency::{
-    self, IdemOutcome, SCOPE_APPEND_USER_MESSAGE, SCOPE_CREATE_CONVERSATION, SCOPE_CREATE_RUN,
-    SCOPE_CREATE_RUN_WITH_ID,
+    self, IdemOutcome, SCOPE_APPEND_SYSTEM_NOTE, SCOPE_APPEND_USER_MESSAGE,
+    SCOPE_CREATE_CONVERSATION, SCOPE_CREATE_RUN, SCOPE_CREATE_RUN_WITH_ID,
 };
 use crate::migrations;
 use crate::models::{
@@ -693,6 +693,77 @@ impl SqliteLedger {
                     now,
                 )?;
             }
+            Ok(event)
+        })
+        .await
+    }
+
+    /// Append a `system.note` event, scoped to a run/attempt. Idempotency is
+    /// mandatory (unlike `append_user_message`'s optional one): this exists
+    /// for Q-Deck R0.7's live-ingress projector
+    /// (`docs/q-deck/r07-live-ingress.md`), where the natural and required
+    /// idempotency key is the source canonical event's own `{run_id}:
+    /// {sequence}` — a source event must project at most once, ever, and a
+    /// caller without a key for that has a bug, not an optional nicety.
+    ///
+    /// This is the vehicle for projecting `o7-run` canonical event kinds
+    /// that have no dedicated `o7-ledger` `EventType` of their own
+    /// (`AgentStarted`, `GateFinished`, etc. — deliberately not added to
+    /// `EventType` here; see `docs/q-deck/r07-live-ingress.md`'s projector
+    /// section) — `payload` carries the canonical kind, sequence, digest,
+    /// and schema version, plus kind-specific detail, so the same generic
+    /// event/payload/SSE path every other event already uses displays it,
+    /// with no new wire concept.
+    ///
+    /// # Errors
+    /// SQLite/foreign-key errors; idempotency conflict.
+    pub async fn append_system_note(
+        &self,
+        conversation_id: crate::ConversationId,
+        run_id: Option<crate::RunId>,
+        attempt_id: Option<crate::AttemptId>,
+        payload: serde_json::Value,
+        idempotency: Idempotency,
+    ) -> Result<PersistedEvent, LedgerError> {
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id.as_str(),
+            "run_id": run_id.as_ref().map(crate::RunId::as_str),
+            "attempt_id": attempt_id.as_ref().map(crate::AttemptId::as_str),
+            "payload": payload,
+        });
+        let request_digest = idempotency::digest_bytes(&serde_json::to_vec(&digest_input)?);
+        self.with_tx(move |tx| {
+            if let IdemOutcome::Replayed(reference) = idempotency::check(
+                tx,
+                SCOPE_APPEND_SYSTEM_NOTE,
+                &idempotency.key,
+                &request_digest,
+            )? {
+                return load_event(tx, &reference)?
+                    .ok_or_else(|| LedgerError::NotFound(format!("event {reference}")));
+            }
+            let now = now_millis();
+            let event = emit_event(
+                tx,
+                &NewEvent {
+                    event_id: EventId::generate(),
+                    conversation_id: conversation_id.clone(),
+                    run_id: run_id.clone(),
+                    attempt_id: attempt_id.clone(),
+                    event_type: EventType::SystemNote,
+                    schema_version: EVENT_SCHEMA_VERSION,
+                    payload: payload.clone(),
+                },
+                now,
+            )?;
+            idempotency::record(
+                tx,
+                SCOPE_APPEND_SYSTEM_NOTE,
+                &idempotency.key,
+                &request_digest,
+                event.event_id.as_str(),
+                now,
+            )?;
             Ok(event)
         })
         .await

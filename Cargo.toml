@@ -37,6 +37,14 @@ anyhow = "1"
 # `o7 run` emits the event stream and takes its verdict from `reduce_all`;
 # `o7 replay` re-verifies stored records (src/events.rs — the MVP stitch).
 o7-run = { path = "crates/o7-run", version = "0.1.0" }
+# Live-ingress projection (Q-Deck R0.7, docs/q-deck/r07-live-ingress.md):
+# a plain library dependency, same as o7-run above. o7-ledger's own API is
+# async; `tokio` here is purely an internal implementation detail of
+# src/ledger_projector.rs's synchronous facade (current-thread runtime,
+# .block_on per call) — the rest of the CLI stays exactly as synchronous
+# as it is today.
+o7-ledger = { path = "crates/o7-ledger", version = "0.1.0" }
+tokio = { version = "1", features = ["rt"] }
 sha1 = "0.10"
 sha2 = "0.10"
 # `invoke.rs` only: independently re-validates a backend's structured output
