@@ -1,9 +1,11 @@
-//! Vertical B — REAL kernel confinement acceptance matrix (RED).
+//! Vertical B — REAL kernel confinement acceptance matrix.
 //!
-//! These pin what a REAL Landlock + seccomp + cgroup-v2 backend must enforce. They run against a
-//! NON-confining stand-in — `confinement_backend()` currently returns the frozen fake, which
-//! reports every dimension `enforced` but installs nothing — so a launched target ESCAPES, and each
-//! RED assertion observes the escape with a CONCRETE, INDEPENDENTLY non-vacuous oracle:
+//! These pin what a REAL Landlock + seccomp + cgroup-v2 backend must enforce. Phase 8 FLIPPED the
+//! selectors: `confinement_backend()` now binds the real PRODUCTION artifact (`O7_SANDBOY_BIN`,
+//! identity `0.1.0`) — every ORDINARY non-fault oracle runs against it — while `fault_backend()`
+//! binds the separate FAULT artifact (`O7_SANDBOY_FAULT_BIN`, identity `0.1.0+faultinject`) for the
+//! fault legs and the two documented instrumented exceptions. Each assertion is a CONCRETE,
+//! INDEPENDENTLY non-vacuous oracle:
 //!
 //! - a write OUTSIDE the worktree, captured with the exact denial errno;
 //! - an `execve` of a non-allowed binary observed KERNEL-side (a secondary marker it must never
@@ -19,7 +21,7 @@
 //!   target-start, so backend setup is excluded, result asserted — a late monitor fails), with
 //!   identities captured in parallel so acquisition never eats the window;
 //! - a setup/lifecycle FAULT matrix (Phase 7b.3) driving one typed `O7_FAULT_POINT` into the REAL
-//!   fault-injection artifact via the committed `matrix_backend()` seam, each proving a DISTINCT stage
+//!   fault-injection artifact via `fault_backend()` (`O7_SANDBOY_FAULT_BIN`), each proving a DISTINCT stage
 //!   via a MONITOR-owned witness (`O7_FAULT_WITNESS`): pre-GO faults run no target and fail closed
 //!   as NotFullyEnforced; a self-check downgrade is rejected on its merits (not a crash); post-GO
 //!   release/execveat run no target; and kill/drain prove teardown-failure dominance;
@@ -51,53 +53,49 @@ use o7_worker::{
     BackendConfig, BackendImage, ProcessBoundary, ProcessIdentity, SandboyBoundary, StdinMode,
 };
 
-/// The backend UNDER TEST for the confinement matrix. RED: the frozen fake, which claims
-/// `enforced` but installs no Landlock/seccomp/cgroup. GREEN (Vertical B): swap this one line for
-/// the real external confinement backend and the whole matrix turns green unchanged.
+/// PHASE 8 — the ATOMIC FLIP. `confinement_backend()` now selects the real PRODUCTION sandboy artifact
+/// (built with DEFAULT features — no fault seam, no test-harness), bound to the HARD-CODED production
+/// identity `sandboy-linux / 0.1.0`. Every ORDINARY non-fault oracle (`boundary()`/`boundary_mode()`)
+/// runs against THIS. The artifact PATH comes from `O7_SANDBOY_BIN` (the designated job), but the
+/// identity is a code CONSTANT and is NEVER derived from the environment — so no env value can smuggle
+/// a fault artifact (identity `0.1.0+faultinject`) in as production: it would fail the report identity
+/// check. The old frozen fake is gone; the matrix now tests production directly.
 fn confinement_backend() -> BackendImage {
-    let path = PathBuf::from(env!("CARGO_BIN_EXE_sandboy_fake"));
-    let bytes = std::fs::read(&path).expect("read backend binary");
+    let path = PathBuf::from(
+        std::env::var_os("O7_SANDBOY_BIN")
+            .expect("O7_SANDBOY_BIN must point at the PRODUCTION sandboy artifact (identity 0.1.0)"),
+    );
+    let bytes = std::fs::read(&path).expect("read production backend binary");
     BackendImage::acquire(
         &path,
         Digest256::of_bytes(&bytes),
         BackendIdentity::new("sandboy-linux", "0.1.0").unwrap(),
     )
-    .expect("acquire backend")
+    .expect("acquire production backend")
 }
 
-/// TEST-ONLY pre-flip backend SELECTION SEAM. This is the ONLY backend every boundary in this matrix
-/// binds, so the 17 non-fault oracles are reproducible FROM THE COMMITTED TREE — no manual binary
-/// swap, no scratch file. With `O7_SANDBOY_BIN` set (the designated confinement job), it binds the
-/// PINNED fault-injection artifact as the REAL backend; with it unset, it falls back to the frozen
-/// fake (`confinement_backend()`), so the RED semantics against the stand-in are unchanged.
-///
-/// `confinement_backend()` itself is UNTOUCHED until Phase 8 (the production selector flip). This
-/// seam does NOT flip production — it only lets the amended oracles exercise the real backend through
-/// an explicit, committed env selection:
-///   `O7_SANDBOY_BIN=<fault artifact> cargo test -p o7-worker --test sandbox_confinement -- --ignored`
-fn matrix_backend() -> BackendImage {
-    match std::env::var_os("O7_SANDBOY_BIN") {
-        Some(path) => acquire_expected_fault_artifact(PathBuf::from(path)),
-        None => confinement_backend(),
-    }
-}
-
-/// Acquire the real backend at `path`, binding the HARD-EXPECTED fault-artifact identity
-/// (`sandboy-linux` / `0.1.0+faultinject`). The identity is a fixed constant — NEVER derived from the
-/// environment — so `O7_SANDBOY_BIN` can only select the designated fault artifact and can never
-/// smuggle in an arbitrary backend under a chosen identity. A production build is `0.1.0`, so a
-/// production binary can never be bound here.
-fn acquire_expected_fault_artifact(path: PathBuf) -> BackendImage {
-    let bytes = std::fs::read(&path).expect("read O7_SANDBOY_BIN backend binary");
+/// The FAULT / INSTRUMENTED artifact (built `--features test-harness,fault-injection`), bound to the
+/// HARD-CODED fault identity `sandboy-linux / 0.1.0+faultinject`. Path from `O7_SANDBOY_FAULT_BIN`; the
+/// identity is a code constant. Used ONLY by the fault-driving helpers and the two DOCUMENTED
+/// instrumented exceptions whose compile-gated entrypoint does not exist in a production build:
+///   - `boundary_with_staging_probe` — the mid-materialize staging barrier lives IN the backend;
+///   - `fixture_target` (`tree_fixture_bin`) — the `__tree-fixture` TARGET mode (the backend under
+///     these two oracles is still PRODUCTION; only the target binary is instrumented).
+fn fault_backend() -> BackendImage {
+    let path = PathBuf::from(std::env::var_os("O7_SANDBOY_FAULT_BIN").expect(
+        "O7_SANDBOY_FAULT_BIN must point at the fault-injection artifact (identity 0.1.0+faultinject)",
+    ));
+    let bytes = std::fs::read(&path).expect("read fault backend binary");
     BackendImage::acquire(
         &path,
         Digest256::of_bytes(&bytes),
         BackendIdentity::new("sandboy-linux", "0.1.0+faultinject").unwrap(),
     )
-    .expect("acquire fault-injection backend")
+    .expect("acquire fault backend")
 }
 
-/// A boundary over the stand-in with an explicit fake-backend `mode` (control-plane only).
+/// A boundary over the PRODUCTION backend with an explicit control-plane `mode` (the fake-mode field is
+/// inert against a real backend; retained so `boundary_mode` stays one constructor).
 fn boundary_mode(
     worktree: &Path,
     allow_exec: Vec<PathBuf>,
@@ -106,7 +104,7 @@ fn boundary_mode(
     mode: &str,
 ) -> SandboyBoundary {
     SandboyBoundary::new(
-        matrix_backend(),
+        confinement_backend(),
         SandboxPolicy {
             worktree: worktree.to_path_buf(),
             allow_exec,
@@ -141,7 +139,7 @@ fn boundary_with_staging_probe(
     witness: &Path,
 ) -> SandboyBoundary {
     SandboyBoundary::new(
-        matrix_backend(),
+        fault_backend(),
         SandboxPolicy {
             worktree: worktree.to_path_buf(),
             allow_exec,
@@ -157,6 +155,199 @@ fn boundary_with_staging_probe(
         fault_point: None,
         fault_witness: None,
     })
+}
+
+// --- Phase 8: production/fault artifact separation + production fault-seam absence ---
+
+/// The PRODUCTION sandboy artifact path (default features; identity 0.1.0).
+fn production_bin() -> PathBuf {
+    PathBuf::from(
+        std::env::var_os("O7_SANDBOY_BIN")
+            .expect("O7_SANDBOY_BIN must point at the PRODUCTION sandboy artifact"),
+    )
+}
+
+/// The FAULT sandboy artifact path (test-harness,fault-injection; identity 0.1.0+faultinject).
+fn fault_bin() -> PathBuf {
+    PathBuf::from(
+        std::env::var_os("O7_SANDBOY_FAULT_BIN")
+            .expect("O7_SANDBOY_FAULT_BIN must point at the fault-injection sandboy artifact"),
+    )
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+/// Launch a `fs` probe through a boundary whose backend is `path` bound to `claimed_identity`, and
+/// return the spawn error string (empty if it wrongly SUCCEEDED). Used to prove a cross-identity
+/// acceptance is REJECTED: a backend's self-reported identity must match the bound expectation.
+async fn spawn_error_under_identity(path: &Path, claimed_identity: &str) -> String {
+    let bytes = std::fs::read(path).expect("read backend binary");
+    let backend = BackendImage::acquire(
+        path,
+        Digest256::of_bytes(&bytes),
+        BackendIdentity::new("sandboy-linux", claimed_identity).unwrap(),
+    )
+    .expect("acquire backend image (identity binding is recorded, verified only at launch)");
+    let wt = tempfile::tempdir().unwrap();
+    let marker = wt.path().join("fs.result");
+    let b = SandboyBoundary::new(
+        backend,
+        SandboxPolicy {
+            worktree: wt.path().to_path_buf(),
+            allow_exec: vec![probe_dir()],
+            network: NetworkPolicy::DenyAll,
+            env_allowlist: vec![],
+            timeout: Duration::from_secs(30),
+        },
+    )
+    .expect("valid boundary");
+    let spawn = tokio::time::timeout(
+        Duration::from_secs(45),
+        b.spawn(probe_target(
+            &[
+                "fs",
+                &wt.path().to_string_lossy(),
+                &marker.to_string_lossy(),
+                &marker.to_string_lossy(),
+                &marker.to_string_lossy(),
+            ],
+            wt.path(),
+            BTreeMap::new(),
+        )),
+    )
+    .await
+    .expect("spawn resolved");
+    let err = spawn.as_ref().err().map(std::string::ToString::to_string);
+    if let Ok(mut l) = spawn {
+        let _ = tokio::time::timeout(Duration::from_secs(10), l.process.force_stop()).await;
+        let _ = tokio::time::timeout(Duration::from_secs(10), l.process.wait()).await;
+    }
+    err.unwrap_or_default()
+}
+
+/// Phase 8: the two artifacts are DISTINCT and NOT cross-acceptable. Different digests; the production
+/// binary bound to the FAULT identity (and vice versa) is REJECTED at launch because the backend's
+/// self-reported identity does not match the bound expectation. A fault artifact can therefore never
+/// be accepted as production, nor production as the fault backend.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "VB-4 Phase 8: production and fault artifacts are distinct and not cross-acceptable"]
+async fn the_production_and_fault_artifacts_are_distinct() {
+    let prod = std::fs::read(production_bin()).expect("read production artifact");
+    let fault = std::fs::read(fault_bin()).expect("read fault artifact");
+    assert_ne!(
+        Digest256::of_bytes(&prod).as_str(),
+        Digest256::of_bytes(&fault).as_str(),
+        "the production and fault artifacts must have DISTINCT digests"
+    );
+    // production binary offered under the FAULT identity → rejected (self-reports 0.1.0).
+    let e1 = spawn_error_under_identity(&production_bin(), "0.1.0+faultinject").await;
+    assert!(
+        e1.contains("identity"),
+        "the production artifact must NOT be acceptable under the fault identity; got {e1:?}"
+    );
+    // fault binary offered under the PRODUCTION identity → rejected (self-reports 0.1.0+faultinject).
+    let e2 = spawn_error_under_identity(&fault_bin(), "0.1.0").await;
+    assert!(
+        e2.contains("identity"),
+        "the fault artifact must NOT be acceptable under the production identity; got {e2:?}"
+    );
+}
+
+/// Plant a valid fault point + witness into a boundary's backend env and run a clean `fs` probe.
+/// Returns (spawn_ok, target_confined, witness_present). Used for BOTH the production-ignores case and
+/// the fault-recognizes case.
+async fn planted_fault_run(backend: BackendImage, fault: &str) -> (bool, bool, bool) {
+    let wt = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let marker = wt.path().join("fs.result");
+    let create = outside.path().join("c.txt");
+    let witness = wt.path().join("planted.witness");
+    let b = SandboyBoundary::new(
+        backend,
+        SandboxPolicy {
+            worktree: wt.path().to_path_buf(),
+            allow_exec: vec![probe_dir()],
+            network: NetworkPolicy::DenyAll,
+            env_allowlist: vec![],
+            timeout: Duration::from_secs(30),
+        },
+    )
+    .expect("valid boundary")
+    .with_backend_config(BackendConfig {
+        fake_mode: None,
+        staging_probe: None,
+        fault_point: Some(fault.to_owned()),
+        fault_witness: Some(witness.clone()),
+    });
+    let spawn = tokio::time::timeout(
+        Duration::from_secs(45),
+        b.spawn(probe_target(
+            &[
+                "fs",
+                &wt.path().to_string_lossy(),
+                &create.to_string_lossy(),
+                &create.to_string_lossy(),
+                &create.to_string_lossy(),
+            ],
+            wt.path(),
+            BTreeMap::new(),
+        )),
+    )
+    .await
+    .expect("spawn resolved");
+    let spawn_ok = spawn.is_ok();
+    let mut confined = false;
+    if let Ok(mut l) = spawn {
+        let exit = tokio::time::timeout(Duration::from_secs(20), l.process.wait()).await;
+        // A confined clean run: the fs probe ran (marker) AND the outside write was denied.
+        confined = matches!(exit, Ok(Ok(_))) && marker.exists() && !create.exists();
+        let _ = tokio::time::timeout(Duration::from_secs(10), l.process.force_stop()).await;
+        let _ = tokio::time::timeout(Duration::from_secs(10), l.process.wait()).await;
+    }
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    (spawn_ok, confined, witness.exists())
+}
+
+/// Phase 8: the PRODUCTION artifact contains NO fault seam — proven statically AND dynamically, with a
+/// non-vacuous cross-check.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "VB-4 Phase 8: the production artifact has no fault seam (static + dynamic + non-vacuous)"]
+async fn the_production_artifact_has_no_fault_seam() {
+    // STATIC: the seam's UNIQUE fingerprints are absent from the production binary. (Individual FaultId
+    // wire names alias production DIAGNOSTIC stage strings — `target_tmpfile`, `restrict_self` — so a
+    // name scan would false-positive; the env-var names + identity suffix are seam-only, and the
+    // DYNAMIC check below is the authoritative BEHAVIOURAL proof.)
+    let prod = std::fs::read(production_bin()).expect("read production artifact");
+    for marker in ["O7_FAULT_POINT", "O7_FAULT_WITNESS", "+faultinject"] {
+        assert!(
+            !contains_bytes(&prod, marker.as_bytes()),
+            "the production binary must NOT contain the seam fingerprint `{marker}`"
+        );
+    }
+
+    // DYNAMIC: plant a VALID fault point into the PRODUCTION backend's env. Production has no fault
+    // parser, so it must IGNORE it — the clean target runs FullyEnforced and NO witness is written.
+    let (prod_ok, prod_confined, prod_witness) =
+        planted_fault_run(confinement_backend(), "target_tmpfile").await;
+    assert!(
+        prod_ok && prod_confined,
+        "production must run the clean target under FULL confinement despite a planted O7_FAULT_POINT \
+         (spawn_ok={prod_ok}, confined={prod_confined})"
+    );
+    assert!(!prod_witness, "production must write NO fault witness (it has no fault seam)");
+
+    // NON-VACUOUS: the FAULT artifact RECOGNIZES the SAME planted point — it fails closed and writes
+    // the `target_tmpfile` witness. So the production absence above is a real difference, not a
+    // silently-inert env var.
+    let fault_run = run_pre_go_fault("target_tmpfile").await;
+    assert_eq!(
+        fault_run.witness.as_deref(),
+        Some("target_tmpfile"),
+        "the fault artifact must recognize the same fault point (non-vacuous); witness {:?}",
+        fault_run.witness
+    );
 }
 
 fn probe_bin() -> PathBuf {
@@ -249,8 +440,8 @@ fn best_effort_kill(pid: i32) {
 /// an unset path is a job failure, never a silent skip.
 fn tree_fixture_bin() -> PathBuf {
     PathBuf::from(
-        std::env::var_os("O7_SANDBOY_BIN")
-            .expect("O7_SANDBOY_BIN must point at the sandboy artifact (its __tree-fixture mode)"),
+        std::env::var_os("O7_SANDBOY_FAULT_BIN")
+            .expect("O7_SANDBOY_FAULT_BIN must point at the sandboy artifact (its __tree-fixture mode)"),
     )
 }
 
@@ -1404,7 +1595,7 @@ async fn a_target_outliving_the_deadline_is_killed_with_its_descendants() {
 // --- Setup + lifecycle faults driven through the REAL fault-injection artifact (Phase 7b.3) ---
 //
 // These replace the frozen `O7_FAKE_MODE` setup oracles. Each drives EXACTLY ONE typed `FaultId`
-// (`O7_FAULT_POINT`) into the real composed launch state machine via the committed `matrix_backend()`
+// (`O7_FAULT_POINT`) into the real composed launch state machine via `fault_backend()`
 // seam, and reads a MONITOR-owned stage witness (`O7_FAULT_WITNESS`, written by the unconfined
 // monitor/pre-exec child — never by the target, which never runs on a setup fault). The witness names
 // the EXACT stage reached, so a generic/malformed failure cannot satisfy a stage-specific oracle.
@@ -1424,7 +1615,7 @@ fn boundary_with_fault(
     timeout: Duration,
 ) -> SandboyBoundary {
     SandboyBoundary::new(
-        matrix_backend(),
+        fault_backend(),
         SandboxPolicy {
             worktree: worktree.to_path_buf(),
             allow_exec,

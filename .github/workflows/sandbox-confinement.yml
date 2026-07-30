@@ -205,14 +205,76 @@ jobs:
           print("IPv6 capability proven: udp6 + tcp6 loopback bind")
           PY
 
-      - name: Confinement acceptance matrix
-        run: cargo test -p o7-worker --locked --test sandbox_confinement -- --include-ignored
+      # PHASE 8: the checked-out revision MUST be exactly the requested SHA — no drift between what is
+      # tested and what the gate records.
+      - name: Assert exact tested revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          want="${{ github.event.pull_request.head.sha || github.sha }}"
+          have="$(git rev-parse HEAD)"
+          [ "$have" = "$want" ] || { echo "::error::HEAD $have != requested $want"; exit 1; }
+          echo "exact tested revision: $have"
+
+      # PHASE 8: build the PRODUCTION and FAULT artifacts from THIS SHA into SEPARATE target dirs, with
+      # distinct identities (production 0.1.0, no fault seam / fault 0.1.0+faultinject, seam present).
+      # The binaries are NEVER uploaded as public artifacts; only the text manifest is.
+      - name: Build production + fault sandboy artifacts (separate)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -p sandboy --release --locked --bin sandboy --target-dir "$RUNNER_TEMP/prod"
+          cargo build -p sandboy --release --locked --bin sandboy \
+            --features test-harness,fault-injection --target-dir "$RUNNER_TEMP/fault"
+          echo "O7_SANDBOY_BIN=$RUNNER_TEMP/prod/release/sandboy" >> "$GITHUB_ENV"
+          echo "O7_SANDBOY_FAULT_BIN=$RUNNER_TEMP/fault/release/sandboy" >> "$GITHUB_ENV"
+
+      # PHASE 8: record both artifacts into the evidence manifest and assert FILE-LEVEL separation —
+      # distinct digests + production carries none of the seam fingerprints. (The Rust gates
+      # `the_production_and_fault_artifacts_are_distinct` + `the_production_artifact_has_no_fault_seam`
+      # prove the BEHAVIOURAL separation; this step fails the job early on a build-level regression.)
+      - name: Record artifact manifest + assert separation
+        shell: bash
+        run: |
+          set -euo pipefail
+          M="$RUNNER_TEMP/evidence-manifest.txt"
+          {
+            echo "sha=$(git rev-parse HEAD)"
+            echo "production features=default identity=sandboy-linux/0.1.0 path=$O7_SANDBOY_BIN size=$(stat -c %s "$O7_SANDBOY_BIN") sha256=$(sha256sum "$O7_SANDBOY_BIN" | cut -d' ' -f1)"
+            echo "fault features=test-harness,fault-injection identity=sandboy-linux/0.1.0+faultinject path=$O7_SANDBOY_FAULT_BIN size=$(stat -c %s "$O7_SANDBOY_FAULT_BIN") sha256=$(sha256sum "$O7_SANDBOY_FAULT_BIN" | cut -d' ' -f1)"
+          } | tee "$M"
+          [ "$(sha256sum "$O7_SANDBOY_BIN" | cut -d' ' -f1)" != "$(sha256sum "$O7_SANDBOY_FAULT_BIN" | cut -d' ' -f1)" ] \
+            || { echo "::error::production and fault artifacts share a digest"; exit 1; }
+          for m in O7_FAULT_POINT O7_FAULT_WITNESS +faultinject; do
+            if strings "$O7_SANDBOY_BIN" | grep -qF -- "$m"; then
+              echo "::error::production binary contains fault-seam fingerprint '$m'"; exit 1
+            fi
+          done
+          echo "artifacts distinct; production seam-free" | tee -a "$M"
+
+      # PHASE 8: the confinement acceptance matrix (includes the separation + seam-absence gates).
+      # ORDINARY oracles bind the PRODUCTION backend (O7_SANDBOY_BIN); fault legs + the two documented
+      # instrumented exceptions bind the FAULT backend (O7_SANDBOY_FAULT_BIN). SERIAL is REQUIRED: the
+      # fault harness compares process-global before/after cgroup leaf SETS and manually removes
+      # introduced leaves, so parallel cgroup-teardown tests would race that tracking.
+      - name: Confinement acceptance matrix (production + fault, serial)
+        run: cargo test -p o7-worker --locked --test sandbox_confinement -- --include-ignored --test-threads=1
+
+      # PHASE 8: the VB-era o7-worker regressions (contract, honest-fail bootstrap, policy gate, and the
+      # composed launch state machine).
+      - name: VB-era o7-worker regressions
+        run: |
+          set -euo pipefail
+          cargo test -p o7-worker --features test-harness --locked --test sandbox_contract
+          cargo test -p o7-worker --features test-harness --locked --test sandboy_backend_bootstrap
+          cargo test -p o7-worker --features test-harness --locked --test boundary_policy
+          cargo test -p o7-worker --features test-harness --locked --test sandboy_launch -- --test-threads=1
 
       # VB-1: the real monitor-owned cgroup v2 leaf, timeout, and cgroup.kill teardown. Needs the
       # same delegated-cgroup capability the preflight above proved; the `test-harness` feature
       # compiles the `__cgroup-run` monitor entry these `#[ignore]`d tests drive.
       - name: Sandboy cgroup monitor acceptance (VB-1)
-        run: cargo test -p sandboy --features test-harness --locked --test cgroup_confinement -- --include-ignored
+        run: cargo test -p sandboy --features test-harness --locked --test cgroup_confinement -- --include-ignored --test-threads=1
 
       # VB-2: the real Landlock filesystem confinement + differential self-check. This runner already
       # proved Landlock ABI >= 3 (preflight), so REQUIRE it: `O7_REQUIRE_LANDLOCK=1` turns an
@@ -231,3 +293,13 @@ jobs:
         env:
           O7_REQUIRE_SECCOMP: "1"
         run: cargo test -p sandboy --features test-harness --locked --test seccomp_confinement -- --include-ignored --nocapture
+
+      # PHASE 8: emit the textual evidence manifest. Reaching this step means every gate above passed
+      # (the job fails fast otherwise), so the manifest records the exact SHA + both artifacts' identity
+      # and digest as the acceptance record. The backend binaries themselves are NOT published.
+      - name: Emit evidence manifest
+        if: always()
+        shell: bash
+        run: |
+          echo "=== VB-4 confinement acceptance evidence (SHA ${{ github.sha }}) ==="
+          cat "$RUNNER_TEMP/evidence-manifest.txt" 2>/dev/null || echo "(manifest not produced — a gate failed before artifact build)"

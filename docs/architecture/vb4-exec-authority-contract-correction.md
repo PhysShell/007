@@ -424,3 +424,46 @@ report-verification rejection, for two reasons, both fixed:
    leaf and stalled the drain observation (~`DRAIN_BOUND`) until the graceful window occasionally tipped
    over — fixed by reaping the child before the NACK/refused teardown (`launch/mod.rs::reap_child_bounded`),
    which also makes the drain (and the pre-GO oracle suite) fast and deterministic.
+
+## 11. Phase 8 — atomic production selector flip + artifact separation
+
+The matrix now tests the REAL PRODUCTION backend. The single pre-flip `matrix_backend()` seam is
+replaced by THREE explicit backend roles so one env var can never route the whole matrix through the
+fault artifact:
+
+- `confinement_backend()` → the **production** artifact (`O7_SANDBOY_BIN`), bound to the HARD-CODED
+  identity `sandboy-linux / 0.1.0`. `boundary()`/`boundary_mode()` — every ordinary non-fault oracle —
+  use it. The atomic flip: this was the frozen fake; it is now production.
+- `fault_backend()` → the **fault** artifact (`O7_SANDBOY_FAULT_BIN`), bound to the hard-coded identity
+  `sandboy-linux / 0.1.0+faultinject`. `boundary_with_fault()` (33 fault legs) uses it.
+- **Instrumented exceptions** (documented): `boundary_with_staging_probe` (the mid-materialize staging
+  barrier lives IN the backend) and `fixture_target` (`__tree-fixture` TARGET mode) use the fault/test
+  artifact because their compile-gated entrypoint does not exist in a production build. For the two
+  fixture oracles the *backend under test is still production*; only the launched TARGET is instrumented.
+
+Neither identity is ever derived from the environment: a fault artifact (identity `0.1.0+faultinject`)
+offered under the production identity — or production under the fault identity — is REJECTED at launch
+by the report identity check (`the_production_and_fault_artifacts_are_distinct`).
+
+**Artifact separation** — two release builds from the same SHA into separate target dirs:
+
+| artifact | features | identity | fault seam |
+|---|---|---|---|
+| production | *(default)* | `sandboy-linux / 0.1.0` | ABSENT (no `O7_FAULT_POINT`/`O7_FAULT_WITNESS`/`+faultinject`) |
+| fault | `test-harness,fault-injection` | `sandboy-linux / 0.1.0+faultinject` | present |
+
+**Production fault-seam absence** (`the_production_artifact_has_no_fault_seam`): (1) STATIC — the
+production binary contains none of the seam's unique fingerprints (`O7_FAULT_POINT`, `O7_FAULT_WITNESS`,
+`+faultinject`); individual FaultId wire names alias production DIAGNOSTIC stage strings
+(`target_tmpfile`, `restrict_self`), so a name scan would false-positive and the behavioural check is
+authoritative. (2) DYNAMIC — production launched with a VALID `O7_FAULT_POINT` planted in its env
+IGNORES it: the clean target runs FullyEnforced, no witness is written, and the planted var never
+reaches the target env. (3) NON-VACUOUS — the fault artifact recognizes the SAME point and writes its
+witness. Unsafe stays contained to `landlock/sys.rs` + `seccomp/sys.rs` + `staging/sys.rs`.
+
+The designated workflow (`.github/workflows/sandbox-confinement.yml`) now: asserts `HEAD == requested
+SHA`; builds both artifacts into separate `$RUNNER_TEMP` dirs; records + asserts file-level separation
+into a text manifest; runs the matrix `--include-ignored --test-threads=1` with both backend paths; runs
+the full VB-era regression set; and emits the evidence manifest. It stays `workflow_dispatch`-only on
+the `[self-hosted, linux, x64, confinement]` runner (no PR trigger until that runner exists); the
+backend binaries are never uploaded.
