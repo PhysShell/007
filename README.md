@@ -78,6 +78,11 @@ Workflow scripting (what to take from CoStrict-style strict workflows, what to
 defer, and the v1 scope — flat `workflow.toml`, no DAG/skills/multi-provider
 yet): `docs/workflow-scripting.md`.
 
+Agentic engineering authority map (which common agent concepts are enforced,
+partial, planned, rejected as foundations, or out of scope, plus binding
+invariants and the dependency-ordered gaps):
+`docs/architecture/agentic-engineering-invariants.md`.
+
 Which agent-research papers are worth transplanting here vs. Own.NET (and which
 are already spiked / in flight): `docs/paper-transplant-map.md`.
 
