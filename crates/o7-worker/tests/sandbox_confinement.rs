@@ -180,9 +180,11 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
 }
 
 /// Launch a `fs` probe through a boundary whose backend is `path` bound to `claimed_identity`, and
-/// return the spawn error string (empty if it wrongly SUCCEEDED). Used to prove a cross-identity
-/// acceptance is REJECTED: a backend's self-reported identity must match the bound expectation.
-async fn spawn_error_under_identity(path: &Path, claimed_identity: &str) -> String {
+/// return the TYPED classification of the spawn failure (`None` if the launch wrongly SUCCEEDED). Used
+/// to prove a cross-identity acceptance is REJECTED with exactly
+/// `BoundaryError::Evidence(SandboyLaunchError::BackendMismatch)` — a backend's self-reported identity
+/// must match the bound expectation, and the rejection is asserted by TYPED value, never by substring.
+async fn spawn_error_under_identity(path: &Path, claimed_identity: &str) -> Option<SpawnFailureKind> {
     let bytes = std::fs::read(path).expect("read backend binary");
     let backend = BackendImage::acquire(
         path,
@@ -219,12 +221,12 @@ async fn spawn_error_under_identity(path: &Path, claimed_identity: &str) -> Stri
     )
     .await
     .expect("spawn resolved");
-    let err = spawn.as_ref().err().map(std::string::ToString::to_string);
+    let kind = spawn.as_ref().err().map(classify_spawn_failure);
     if let Ok(mut l) = spawn {
         let _ = tokio::time::timeout(Duration::from_secs(10), l.process.force_stop()).await;
         let _ = tokio::time::timeout(Duration::from_secs(10), l.process.wait()).await;
     }
-    err.unwrap_or_default()
+    kind
 }
 
 /// Phase 8: the two artifacts are DISTINCT and NOT cross-acceptable. Different digests; the production
@@ -241,17 +243,21 @@ async fn the_production_and_fault_artifacts_are_distinct() {
         Digest256::of_bytes(&fault).as_str(),
         "the production and fault artifacts must have DISTINCT digests"
     );
-    // production binary offered under the FAULT identity → rejected (self-reports 0.1.0).
-    let e1 = spawn_error_under_identity(&production_bin(), "0.1.0+faultinject").await;
-    assert!(
-        e1.contains("identity"),
-        "the production artifact must NOT be acceptable under the fault identity; got {e1:?}"
+    // production binary offered under the FAULT identity → rejected with EXACTLY
+    // `BoundaryError::Evidence(SandboyLaunchError::BackendMismatch)` (self-reports 0.1.0).
+    assert_eq!(
+        spawn_error_under_identity(&production_bin(), "0.1.0+faultinject").await,
+        Some(SpawnFailureKind::BackendMismatchEvidence),
+        "the production artifact under the fault identity must be rejected with exactly \
+         BoundaryError::Evidence(SandboyLaunchError::BackendMismatch)"
     );
-    // fault binary offered under the PRODUCTION identity → rejected (self-reports 0.1.0+faultinject).
-    let e2 = spawn_error_under_identity(&fault_bin(), "0.1.0").await;
-    assert!(
-        e2.contains("identity"),
-        "the fault artifact must NOT be acceptable under the production identity; got {e2:?}"
+    // fault binary offered under the PRODUCTION identity → the same exact typed rejection
+    // (self-reports 0.1.0+faultinject).
+    assert_eq!(
+        spawn_error_under_identity(&fault_bin(), "0.1.0").await,
+        Some(SpawnFailureKind::BackendMismatchEvidence),
+        "the fault artifact under the production identity must be rejected with exactly \
+         BoundaryError::Evidence(SandboyLaunchError::BackendMismatch)"
     );
 }
 
@@ -310,25 +316,113 @@ async fn planted_fault_run(backend: BackendImage, fault: &str) -> (bool, bool, b
     (spawn_ok, confined, witness.exists())
 }
 
-/// Phase 8: the PRODUCTION artifact contains NO fault seam — proven statically AND dynamically, with a
-/// non-vacuous cross-check.
+/// The observation of a planted-fault ENV run: whether the launch fully enforced (`spawn_ok`), the
+/// probe exited cleanly (`exit_ok`), the EXACT set of env-var NAMES the confined target received
+/// (`names`), and whether a fault witness was written.
+struct PlantedEnvRun {
+    spawn_ok: bool,
+    exit_ok: bool,
+    names: Vec<String>,
+    witness: bool,
+}
+
+/// Plant BOTH control-plane variables (`O7_FAULT_POINT` + `O7_FAULT_WITNESS`) into `backend`'s env and
+/// run the `env` probe with a single allowlisted target var (`PATH`). The control-plane variables are
+/// set in the SANDBOY backend's environment, but the confined TARGET's environment is rebuilt from the
+/// policy allowlist ONLY — so the target must receive EXACTLY `{PATH}` and no `O7_*` variable. Proves
+/// the architecture claim that a planted control-plane variable never LEAKS into the target env.
+async fn planted_fault_env_run(backend: BackendImage) -> PlantedEnvRun {
+    let wt = tempfile::tempdir().unwrap();
+    let marker = wt.path().join("env.result");
+    let witness = wt.path().join("planted.witness");
+    let mut env = BTreeMap::new();
+    env.insert(OsString::from("PATH"), OsString::from("/usr/bin:/bin"));
+    let b = SandboyBoundary::new(
+        backend,
+        SandboxPolicy {
+            worktree: wt.path().to_path_buf(),
+            allow_exec: vec![probe_dir()],
+            network: NetworkPolicy::DenyAll,
+            env_allowlist: vec![OsString::from("PATH")],
+            timeout: Duration::from_secs(30),
+        },
+    )
+    .expect("valid boundary")
+    .with_backend_config(BackendConfig {
+        fake_mode: None,
+        staging_probe: None,
+        fault_point: Some("target_tmpfile".to_owned()),
+        fault_witness: Some(witness.clone()),
+    });
+    let spawn = tokio::time::timeout(
+        Duration::from_secs(45),
+        b.spawn(probe_target(
+            &["env", &marker.to_string_lossy()],
+            wt.path(),
+            env,
+        )),
+    )
+    .await
+    .expect("spawn resolved");
+    let spawn_ok = spawn.is_ok();
+    let mut exit_ok = false;
+    let mut names = Vec::new();
+    if let Ok(mut l) = spawn {
+        let exit = tokio::time::timeout(Duration::from_secs(20), l.process.wait()).await;
+        exit_ok = matches!(exit, Ok(Ok(_)));
+        if let Ok(body) = std::fs::read_to_string(&marker) {
+            names = body
+                .trim()
+                .split(',')
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+                .collect();
+        }
+        let _ = tokio::time::timeout(Duration::from_secs(10), l.process.force_stop()).await;
+        let _ = tokio::time::timeout(Duration::from_secs(10), l.process.wait()).await;
+    }
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    PlantedEnvRun { spawn_ok, exit_ok, names, witness: witness.exists() }
+}
+
+/// Phase 8: the PRODUCTION artifact contains NO fault seam AND is not test-harness-compiled — proven
+/// statically (seam + harness fingerprints), dynamically (planted fault ignored + no control-plane env
+/// leak), each with a non-vacuous cross-check against the instrumented artifact.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "VB-4 Phase 8: the production artifact has no fault seam (static + dynamic + non-vacuous)"]
 async fn the_production_artifact_has_no_fault_seam() {
-    // STATIC: the seam's UNIQUE fingerprints are absent from the production binary. (Individual FaultId
-    // wire names alias production DIAGNOSTIC stage strings — `target_tmpfile`, `restrict_self` — so a
-    // name scan would false-positive; the env-var names + identity suffix are seam-only, and the
-    // DYNAMIC check below is the authoritative BEHAVIOURAL proof.)
+    // STATIC: the seam's UNIQUE rodata fingerprints are ABSENT from production and PRESENT in the
+    // instrumented artifact (non-vacuous). These are DATA strings the program stores for runtime use —
+    // the `O7_FAULT_*` env-var names (looked up via `env::var`) and the `+faultinject` identity suffix —
+    // so the compiler keeps them as contiguous rodata; a byte scan is a sound discriminator.
+    //
+    // The `test-harness` standalone-entrypoint ARGV literals (`__cgroup-run`, `__landlock-run`,
+    // `__seccomp-run`, `__tree-fixture`) are DELIBERATELY NOT scanned here: under -O the compiler emits
+    // them as split/overlapping `movabs` COMPARISON immediates (e.g. `__tree-fixture` becomes an
+    // `__tree-f` + `-fixture` pair of 8-byte loads), never as contiguous rodata, and the release
+    // binaries are stripped — so a contiguous-byte scan for them is codegen-dependent and UNSOUND.
+    // Their production absence is instead guaranteed at COMPILE TIME (each dispatch arm is
+    // `#[cfg(feature = "test-harness")]` / `#[cfg(any(test-harness, fault-injection))]`) and proven
+    // deterministically by the workflow's Cargo feature-graph gate (production `feats=[]` vs fault
+    // `feats=[fault-injection,test-harness]`); their instrumented PRESENCE is exercised BEHAVIOURALLY by
+    // the matrix (the `__tree-fixture` fixture oracles) and the VB-1/2/3 `__*-run` harness suites.
     let prod = std::fs::read(production_bin()).expect("read production artifact");
-    for marker in ["O7_FAULT_POINT", "O7_FAULT_WITNESS", "+faultinject"] {
+    let fault = std::fs::read(fault_bin()).expect("read fault artifact");
+    const SEAM_FINGERPRINTS: [&str; 3] = ["O7_FAULT_POINT", "O7_FAULT_WITNESS", "+faultinject"];
+    for marker in SEAM_FINGERPRINTS {
         assert!(
             !contains_bytes(&prod, marker.as_bytes()),
             "the production binary must NOT contain the seam fingerprint `{marker}`"
         );
+        assert!(
+            contains_bytes(&fault, marker.as_bytes()),
+            "the instrumented artifact MUST contain the seam fingerprint `{marker}` \
+             (non-vacuous cross-check for the production absence)"
+        );
     }
 
-    // DYNAMIC: plant a VALID fault point into the PRODUCTION backend's env. Production has no fault
-    // parser, so it must IGNORE it — the clean target runs FullyEnforced and NO witness is written.
+    // DYNAMIC (fault ignored): plant a VALID fault point into the PRODUCTION backend's env. Production
+    // has no fault parser, so it must IGNORE it — the clean target runs FullyEnforced and NO witness.
     let (prod_ok, prod_confined, prod_witness) =
         planted_fault_run(confinement_backend(), "target_tmpfile").await;
     assert!(
@@ -338,9 +432,38 @@ async fn the_production_artifact_has_no_fault_seam() {
     );
     assert!(!prod_witness, "production must write NO fault witness (it has no fault seam)");
 
-    // NON-VACUOUS: the FAULT artifact RECOGNIZES the SAME planted point — it fails closed and writes
-    // the `target_tmpfile` witness. So the production absence above is a real difference, not a
-    // silently-inert env var.
+    // DYNAMIC (env non-leakage): the planted control-plane variables live in the PRODUCTION backend's
+    // env, but must never be rebuilt into the confined TARGET's environment. The target must receive
+    // EXACTLY the allowlist `{PATH}` — no `O7_FAULT_POINT`, no `O7_FAULT_WITNESS`, no other `O7_*`.
+    let er = planted_fault_env_run(confinement_backend()).await;
+    assert!(er.spawn_ok, "production must spawn FullyEnforced despite planted control-plane vars");
+    assert!(er.exit_ok, "the env-probe target must exit cleanly under production confinement");
+    assert_eq!(
+        er.names,
+        vec!["PATH".to_string()],
+        "the confined target env must be EXACTLY the allowlist; got {:?}",
+        er.names
+    );
+    assert!(
+        !er.names.iter().any(|n| n == "O7_FAULT_POINT"),
+        "O7_FAULT_POINT must NOT reach the confined target; got {:?}",
+        er.names
+    );
+    assert!(
+        !er.names.iter().any(|n| n == "O7_FAULT_WITNESS"),
+        "O7_FAULT_WITNESS must NOT reach the confined target; got {:?}",
+        er.names
+    );
+    assert!(
+        !er.names.iter().any(|n| n.starts_with("O7_")),
+        "no O7_* control-plane variable may leak into the confined target env; got {:?}",
+        er.names
+    );
+    assert!(!er.witness, "production must write NO fault witness under the env probe either");
+
+    // NON-VACUOUS (fault side): the FAULT artifact RECOGNIZES the SAME planted point — it fails closed
+    // and writes the `target_tmpfile` witness. So the production absence above is a real difference, not
+    // a silently-inert env var.
     let fault_run = run_pre_go_fault("target_tmpfile").await;
     assert_eq!(
         fault_run.witness.as_deref(),
@@ -1659,10 +1782,13 @@ fn owned_cgroup_leaf_names() -> BTreeSet<String> {
 
 /// The TYPED classification of a spawn failure, derived by MATCHING the actual `BoundaryError` — never
 /// by substring-searching its message. `NotFullyEnforcedEvidence` requires the inner evidence string
-/// to EQUAL `SandboyLaunchError::NotFullyEnforced.to_string()` exactly.
+/// to EQUAL `SandboyLaunchError::NotFullyEnforced.to_string()` exactly; `BackendMismatchEvidence`
+/// requires it to EQUAL `SandboyLaunchError::BackendMismatch.to_string()` exactly (artifact-separation
+/// rejection — too load-bearing for a substring after Phase 7b.3 established typed discipline).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SpawnFailureKind {
     NotFullyEnforcedEvidence,
+    BackendMismatchEvidence,
     OtherEvidence,
     Signal,
     Spawn,
@@ -1672,8 +1798,10 @@ enum SpawnFailureKind {
 fn classify_spawn_failure(err: &o7_worker::boundary::BoundaryError) -> SpawnFailureKind {
     use o7_worker::boundary::BoundaryError as Be;
     let nfe = o7_worker::SandboyLaunchError::NotFullyEnforced.to_string();
+    let bmm = o7_worker::SandboyLaunchError::BackendMismatch.to_string();
     match err {
         Be::Evidence(s) if *s == nfe => SpawnFailureKind::NotFullyEnforcedEvidence,
+        Be::Evidence(s) if *s == bmm => SpawnFailureKind::BackendMismatchEvidence,
         Be::Evidence(_) => SpawnFailureKind::OtherEvidence,
         Be::Signal(_) => SpawnFailureKind::Signal,
         Be::Spawn(_) => SpawnFailureKind::Spawn,

@@ -467,3 +467,51 @@ into a text manifest; runs the matrix `--include-ignored --test-threads=1` with 
 the full VB-era regression set; and emits the evidence manifest. It stays `workflow_dispatch`-only on
 the `[self-hosted, linux, x64, confinement]` runner (no PR trigger until that runner exists); the
 backend binaries are never uploaded.
+
+### 11.1 Acceptance-plumbing hardening (corrective commit on top of the flip)
+
+The atomic flip and selector topology were accepted; four acceptance-gate gaps were then closed without
+touching the sandbox mechanism, the frozen 7b.2/7b.3 assertions, the backend identities, or the selector
+roles:
+
+1. **Production is proven test-harness-free, not only fault-seam-free.** The `test-harness` feature
+   compiles standalone harness entrypoints (`__cgroup-run`, `__landlock-run`, `__seccomp-run` under
+   `test-harness`; `__tree-fixture` under `any(test-harness, fault-injection)`) that are
+   production-inappropriate. The authoritative, deterministic proof is a **Cargo feature-graph gate** —
+   `cargo tree -p sandboy --depth 0 -f '{f}'` — asserting the production graph resolves to `[]` (neither
+   feature) while the fault graph resolves to `[fault-injection,test-harness]` via the identical command
+   (self-non-vacuous). Because every entrypoint dispatch arm is `#[cfg(feature = ...)]`-gated, an empty
+   production feature set is a **compile-time** guarantee that none of them (nor the fault seam) are
+   compiled — stronger than any binary scan.
+
+   A binary `strings` scan is retained only for the seam's reliable **rodata** fingerprints
+   (`O7_FAULT_POINT`, `O7_FAULT_WITNESS`, `+faultinject` — data strings the program stores for runtime
+   use), asserted ABSENT in production and PRESENT in the instrumented artifact (non-vacuous), in both
+   the workflow and `the_production_artifact_has_no_fault_seam`. The harness ARGV entrypoint *literals*
+   are deliberately NOT byte-scanned: under `-O` the compiler emits them as split/overlapping `movabs`
+   comparison immediates (`__tree-fixture` → an `__tree-f` + `-fixture` pair; verified by disassembly),
+   never as contiguous rodata, and the release binaries are stripped — so a contiguous-byte scan for them
+   is codegen-dependent and unsound. Their instrumented PRESENCE is instead exercised behaviourally by
+   the matrix (`__tree-fixture` fixture oracles) and the VB-1/2/3 `__*-run` harness suites.
+
+2. **The env-non-leakage claim is now proved behaviourally.** `planted_fault_env_run` plants BOTH
+   control-plane variables (`O7_FAULT_POINT` + `O7_FAULT_WITNESS`) into the production backend's env and
+   runs the `env` probe with a single allowlisted target var (`PATH`). The confined target must report
+   its env as EXACTLY `{PATH}` — no `O7_FAULT_POINT`, no `O7_FAULT_WITNESS`, no other `O7_*` — while the
+   launch is FullyEnforced and no witness is written. This proves the control plane never leaks into the
+   target env, rather than only observing filesystem confinement.
+
+3. **Cross-identity rejection is typed, not substring.** `SpawnFailureKind` gains a
+   `BackendMismatchEvidence` variant (inner evidence string EQUAL to
+   `SandboyLaunchError::BackendMismatch.to_string()`); `the_production_and_fault_artifacts_are_distinct`
+   asserts BOTH directions reject with EXACTLY
+   `BoundaryError::Evidence(SandboyLaunchError::BackendMismatch)` — the same typed discipline 7b.3
+   established everywhere else, since artifact separation is too load-bearing for a substring.
+
+4. **The evidence manifest is the complete acceptance record.** It accumulates, in order: the exact SHA,
+   the real active feature sets of both artifacts, their identities/sizes/digests, every
+   capability-preflight outcome, each suite's exact command + `test result:` summary/count + elapsed time
+   (via a shared `run_suite` helper), and a final `status=` line. `status=PASS` is written ONLY by an
+   `if: success()` step; a failed run records `status=FAIL` (`if: failure()`). The `Emit evidence
+   manifest` step no longer claims all gates passed — it merely prints the record whose verdict a
+   dedicated success/failure step already wrote — so a red run can never resemble an acceptance.

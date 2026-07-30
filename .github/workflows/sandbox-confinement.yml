@@ -16,6 +16,12 @@ name: sandbox confinement (Vertical B)
 # IPv6 is an EXPLICIT job FAILURE here — never a skip and never a green "unsupported". Landlock/
 # seccomp are exercised through Python `ctypes` (a CI tool), keeping every confinement syscall OUT of
 # the forbid-unsafe Rust tree.
+#
+# The job accumulates a single textual ACCEPTANCE RECORD at $O7_MANIFEST: the exact SHA, the real
+# active feature sets of both artifacts, their identities/sizes/digests, every capability-preflight
+# outcome, every exact command, each suite's `test result:` summary and elapsed time, and a final
+# status line. `status=PASS` is written ONLY by an `if: success()` step; a failed run writes
+# `status=FAIL` for diagnostics. The record can therefore never resemble an acceptance on a red run.
 on:
   workflow_dispatch:
 
@@ -40,6 +46,43 @@ jobs:
           persist-credentials: false
           # On a PR (once the trigger is enabled), test the PR HEAD; on manual dispatch, the ref.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      # PHASE 8: create the single accumulating ACCEPTANCE RECORD and a shared `run_suite` helper. Every
+      # later step appends to $O7_MANIFEST; test steps `source $O7_MANIFEST_LIB` so each suite records
+      # its exact command, its `test result:` summary/count, and its elapsed time. The final PASS/FAIL
+      # is written by dedicated success()/failure() steps — never here.
+      - name: Initialize evidence manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          M="$RUNNER_TEMP/evidence-manifest.txt"
+          L="$RUNNER_TEMP/manifest-lib.sh"
+          echo "O7_MANIFEST=$M" >> "$GITHUB_ENV"
+          echo "O7_MANIFEST_LIB=$L" >> "$GITHUB_ENV"
+          {
+            echo "=== VB-4 confinement acceptance evidence ==="
+            echo "workflow=${{ github.workflow }} run_id=${{ github.run_id }} attempt=${{ github.run_attempt }}"
+            echo "requested_sha=${{ github.event.pull_request.head.sha || github.sha }}"
+          } > "$M"
+          cat > "$L" <<'SH'
+          # run_suite NAME CMD...: append the exact command, stream+capture output, record each
+          # `test result:` summary line and the elapsed time to $O7_MANIFEST, and fail the step on a
+          # non-zero exit. Requires `set -o pipefail` in the caller so a cargo failure is not masked by
+          # the `tee`.
+          run_suite() {
+            local name="$1"; shift
+            local log; log="$(mktemp)"
+            local start="$SECONDS"
+            echo "command[$name]: $*" >> "$O7_MANIFEST"
+            local st=PASS
+            if ! "$@" 2>&1 | tee "$log"; then st=FAIL; fi
+            local elapsed=$(( SECONDS - start ))
+            grep -E 'test result:' "$log" | sed "s/^/  result[$name]: /" >> "$O7_MANIFEST" || true
+            echo "suite[$name]=$st elapsed=${elapsed}s" >> "$O7_MANIFEST"
+            rm -f "$log"
+            [ "$st" = PASS ]
+          }
+          SH
 
       # Real CAPABILITY preflight — not a presence grep. It EXERCISES each mechanism and FAILS the
       # job (never skips) if any cannot actually be used, so a red matrix afterwards is attributable
@@ -110,6 +153,7 @@ jobs:
           fi
           trap - EXIT
           echo "cgroup v2 capability proven: mkdir, move, membership, cgroup.kill, drain, rmdir"
+          echo "preflight[cgroup_v2]=PASS: mkdir+move+membership+cgroup.kill+drain+rmdir" >> "$O7_MANIFEST"
 
       - name: Prove Landlock + seccomp capability (real ruleset + real filter)
         shell: bash
@@ -184,6 +228,8 @@ jobs:
               sys.exit(1)
           print("seccomp capability proven: filter installed, chosen syscall denied with EPERM")
           PY
+          echo "preflight[landlock]=PASS: ABI>=3 TRUNCATE-inclusive ruleset created" >> "$O7_MANIFEST"
+          echo "preflight[seccomp]=PASS: BPF filter installed, chosen syscall denied EPERM" >> "$O7_MANIFEST"
 
       # IPv6 is a prerequisite of the network denial oracle: the matrix requires the host to create
       # IPv4 AND IPv6 sockets UNCONFINED (so a confined EPERM is a real seccomp denial, not an
@@ -204,6 +250,7 @@ jobs:
               sys.exit(1)
           print("IPv6 capability proven: udp6 + tcp6 loopback bind")
           PY
+          echo "preflight[ipv6]=PASS: udp6 + tcp6 loopback bind" >> "$O7_MANIFEST"
 
       # PHASE 8: the checked-out revision MUST be exactly the requested SHA — no drift between what is
       # tested and what the gate records.
@@ -215,6 +262,36 @@ jobs:
           have="$(git rev-parse HEAD)"
           [ "$have" = "$want" ] || { echo "::error::HEAD $have != requested $want"; exit 1; }
           echo "exact tested revision: $have"
+          echo "tested_sha=$have" >> "$O7_MANIFEST"
+
+      # PHASE 8: prove the PRODUCTION feature graph excludes BOTH test features and the FAULT graph
+      # includes them. `cargo tree --depth 0 -f '{f}'` prints the exactly-resolved feature set of the
+      # sandboy crate for that build configuration — the authoritative, deterministic proof that
+      # production is neither `test-harness` nor `fault-injection` compiled. This is the SOUND gate for
+      # harness-entrypoint absence: `__cgroup-run`/`__landlock-run`/`__seccomp-run` are
+      # `#[cfg(feature = "test-harness")]` and `__tree-fixture` is `#[cfg(any(test-harness,
+      # fault-injection))]`, so an empty production feature set is a COMPILE-TIME guarantee none of them
+      # (nor the fault seam) exist — stronger than, and not subject to the codegen fragility of, a
+      # binary string scan. The check is self-non-vacuous: the identical command reports
+      # `[fault-injection,test-harness]` for the instrumented configuration.
+      - name: Assert production feature graph excludes test features
+        shell: bash
+        run: |
+          set -euo pipefail
+          prod_feats="$(cargo tree -p sandboy --locked --depth 0 -f '{f}' | head -n1 || true)"
+          fault_feats="$(cargo tree -p sandboy --locked --features test-harness,fault-injection --depth 0 -f '{f}' | head -n1 || true)"
+          echo "production sandboy features=[$prod_feats]"
+          echo "fault sandboy features=[$fault_feats]"
+          echo "features[production]=[$prod_feats]" >> "$O7_MANIFEST"
+          echo "features[fault]=[$fault_feats]" >> "$O7_MANIFEST"
+          case ",$prod_feats," in
+            *,test-harness,*|*,fault-injection,*)
+              echo "::error::production feature graph activates a test feature: [$prod_feats]"; exit 1;;
+          esac
+          echo ",$fault_feats," | grep -q ',test-harness,' \
+            || { echo "::error::fault feature graph is missing test-harness: [$fault_feats]"; exit 1; }
+          echo ",$fault_feats," | grep -q ',fault-injection,' \
+            || { echo "::error::fault feature graph is missing fault-injection: [$fault_feats]"; exit 1; }
 
       # PHASE 8: build the PRODUCTION and FAULT artifacts from THIS SHA into SEPARATE target dirs, with
       # distinct identities (production 0.1.0, no fault seam / fault 0.1.0+faultinject, seam present).
@@ -229,28 +306,37 @@ jobs:
           echo "O7_SANDBOY_BIN=$RUNNER_TEMP/prod/release/sandboy" >> "$GITHUB_ENV"
           echo "O7_SANDBOY_FAULT_BIN=$RUNNER_TEMP/fault/release/sandboy" >> "$GITHUB_ENV"
 
-      # PHASE 8: record both artifacts into the evidence manifest and assert FILE-LEVEL separation —
-      # distinct digests + production carries none of the seam fingerprints. (The Rust gates
-      # `the_production_and_fault_artifacts_are_distinct` + `the_production_artifact_has_no_fault_seam`
-      # prove the BEHAVIOURAL separation; this step fails the job early on a build-level regression.)
+      # PHASE 8: record both artifacts into the acceptance record and assert FILE-LEVEL separation —
+      # distinct digests; the production binary carries NONE of the seam's rodata fingerprints, and (non-
+      # vacuous) the instrumented artifact carries ALL of them. The scanned fingerprints are DATA strings
+      # the program stores for runtime use — the `O7_FAULT_*` env-var names + the `+faultinject` identity
+      # suffix — so the compiler keeps them contiguous and the scan is sound. The test-harness ARGV
+      # entrypoint literals (`__cgroup-run`/`__tree-fixture`/...) are intentionally NOT scanned: under -O
+      # they are emitted as split `movabs` comparison immediates (never contiguous rodata) and the binary
+      # is stripped, so a byte scan for them is codegen-dependent. Their production absence is proven
+      # deterministically by the feature-graph gate above (each is `#[cfg(feature = ...)]`-gated). (The
+      # Rust gates `the_production_and_fault_artifacts_are_distinct` + `the_production_artifact_has_no_
+      # fault_seam` prove the BEHAVIOURAL separation; this step fails the job early on a build regression.)
       - name: Record artifact manifest + assert separation
         shell: bash
         run: |
           set -euo pipefail
-          M="$RUNNER_TEMP/evidence-manifest.txt"
           {
-            echo "sha=$(git rev-parse HEAD)"
             echo "production features=default identity=sandboy-linux/0.1.0 path=$O7_SANDBOY_BIN size=$(stat -c %s "$O7_SANDBOY_BIN") sha256=$(sha256sum "$O7_SANDBOY_BIN" | cut -d' ' -f1)"
             echo "fault features=test-harness,fault-injection identity=sandboy-linux/0.1.0+faultinject path=$O7_SANDBOY_FAULT_BIN size=$(stat -c %s "$O7_SANDBOY_FAULT_BIN") sha256=$(sha256sum "$O7_SANDBOY_FAULT_BIN" | cut -d' ' -f1)"
-          } | tee "$M"
+          } | tee -a "$O7_MANIFEST"
           [ "$(sha256sum "$O7_SANDBOY_BIN" | cut -d' ' -f1)" != "$(sha256sum "$O7_SANDBOY_FAULT_BIN" | cut -d' ' -f1)" ] \
             || { echo "::error::production and fault artifacts share a digest"; exit 1; }
+          # Seam rodata fingerprints: ABSENT from production, PRESENT in the instrumented artifact.
           for m in O7_FAULT_POINT O7_FAULT_WITNESS +faultinject; do
             if strings "$O7_SANDBOY_BIN" | grep -qF -- "$m"; then
-              echo "::error::production binary contains fault-seam fingerprint '$m'"; exit 1
+              echo "::error::production binary contains seam fingerprint '$m'"; exit 1
+            fi
+            if ! strings "$O7_SANDBOY_FAULT_BIN" | grep -qF -- "$m"; then
+              echo "::error::instrumented binary is missing seam fingerprint '$m' (non-vacuous check failed)"; exit 1
             fi
           done
-          echo "artifacts distinct; production seam-free" | tee -a "$M"
+          echo "separation=OK (distinct digests; production seam-free; instrumented carries all seam fingerprints)" | tee -a "$O7_MANIFEST"
 
       # PHASE 8: the confinement acceptance matrix (includes the separation + seam-absence gates).
       # ORDINARY oracles bind the PRODUCTION backend (O7_SANDBOY_BIN); fault legs + the two documented
@@ -258,23 +344,33 @@ jobs:
       # fault harness compares process-global before/after cgroup leaf SETS and manually removes
       # introduced leaves, so parallel cgroup-teardown tests would race that tracking.
       - name: Confinement acceptance matrix (production + fault, serial)
-        run: cargo test -p o7-worker --locked --test sandbox_confinement -- --include-ignored --test-threads=1
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$O7_MANIFEST_LIB"
+          run_suite matrix cargo test -p o7-worker --locked --test sandbox_confinement -- --include-ignored --test-threads=1
 
       # PHASE 8: the VB-era o7-worker regressions (contract, honest-fail bootstrap, policy gate, and the
       # composed launch state machine).
       - name: VB-era o7-worker regressions
+        shell: bash
         run: |
           set -euo pipefail
-          cargo test -p o7-worker --features test-harness --locked --test sandbox_contract
-          cargo test -p o7-worker --features test-harness --locked --test sandboy_backend_bootstrap
-          cargo test -p o7-worker --features test-harness --locked --test boundary_policy
-          cargo test -p o7-worker --features test-harness --locked --test sandboy_launch -- --test-threads=1
+          source "$O7_MANIFEST_LIB"
+          run_suite sandbox_contract cargo test -p o7-worker --features test-harness --locked --test sandbox_contract
+          run_suite sandboy_backend_bootstrap cargo test -p o7-worker --features test-harness --locked --test sandboy_backend_bootstrap
+          run_suite boundary_policy cargo test -p o7-worker --features test-harness --locked --test boundary_policy
+          run_suite sandboy_launch cargo test -p o7-worker --features test-harness --locked --test sandboy_launch -- --test-threads=1
 
       # VB-1: the real monitor-owned cgroup v2 leaf, timeout, and cgroup.kill teardown. Needs the
       # same delegated-cgroup capability the preflight above proved; the `test-harness` feature
       # compiles the `__cgroup-run` monitor entry these `#[ignore]`d tests drive.
       - name: Sandboy cgroup monitor acceptance (VB-1)
-        run: cargo test -p sandboy --features test-harness --locked --test cgroup_confinement -- --include-ignored --test-threads=1
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$O7_MANIFEST_LIB"
+          run_suite cgroup_confinement cargo test -p sandboy --features test-harness --locked --test cgroup_confinement -- --include-ignored --test-threads=1
 
       # VB-2: the real Landlock filesystem confinement + differential self-check. This runner already
       # proved Landlock ABI >= 3 (preflight), so REQUIRE it: `O7_REQUIRE_LANDLOCK=1` turns an
@@ -282,24 +378,43 @@ jobs:
       # never a silent SKIP. The capability predicate is an INDEPENDENT raw-syscall probe, not the
       # backend under test.
       - name: Sandboy Landlock filesystem acceptance (VB-2)
+        shell: bash
         env:
           O7_REQUIRE_LANDLOCK: "1"
-        run: cargo test -p sandboy --features test-harness --locked --test landlock_confinement -- --include-ignored --nocapture
+        run: |
+          set -euo pipefail
+          source "$O7_MANIFEST_LIB"
+          run_suite landlock_confinement cargo test -p sandboy --features test-harness --locked --test landlock_confinement -- --include-ignored --nocapture
 
       # VB-3: real seccomp confinement (network/setsid/setpgid deny), inherited-fd scrub, env
       # allowlist. The preflight above proved seccomp-BPF, so REQUIRE it: `O7_REQUIRE_SECCOMP=1` makes
       # an incapable host a FAILURE, never a SKIP. Capability predicate is an INDEPENDENT prctl probe.
       - name: Sandboy seccomp acceptance (VB-3)
+        shell: bash
         env:
           O7_REQUIRE_SECCOMP: "1"
-        run: cargo test -p sandboy --features test-harness --locked --test seccomp_confinement -- --include-ignored --nocapture
+        run: |
+          set -euo pipefail
+          source "$O7_MANIFEST_LIB"
+          run_suite seccomp_confinement cargo test -p sandboy --features test-harness --locked --test seccomp_confinement -- --include-ignored --nocapture
 
-      # PHASE 8: emit the textual evidence manifest. Reaching this step means every gate above passed
-      # (the job fails fast otherwise), so the manifest records the exact SHA + both artifacts' identity
-      # and digest as the acceptance record. The backend binaries themselves are NOT published.
+      # PHASE 8: the final acceptance verdict. `status=PASS` is written ONLY when EVERY step above
+      # succeeded (if: success()). A failed run instead records `status=FAIL` (if: failure()) for
+      # diagnostics — so the acceptance record can never show PASS on a red job.
+      - name: Record job PASS
+        if: success()
+        shell: bash
+        run: echo "status=PASS" >> "$O7_MANIFEST"
+
+      - name: Record job FAIL
+        if: failure()
+        shell: bash
+        run: echo "status=FAIL" >> "${O7_MANIFEST:-$RUNNER_TEMP/evidence-manifest.txt}" || true
+
+      # Emit the accumulated acceptance record (always), WITHOUT asserting any verdict of its own — the
+      # status line was written by the success()/failure() step above. The backend binaries are NOT
+      # published; only this text record is.
       - name: Emit evidence manifest
         if: always()
         shell: bash
-        run: |
-          echo "=== VB-4 confinement acceptance evidence (SHA ${{ github.sha }}) ==="
-          cat "$RUNNER_TEMP/evidence-manifest.txt" 2>/dev/null || echo "(manifest not produced — a gate failed before artifact build)"
+        run: cat "${O7_MANIFEST:-$RUNNER_TEMP/evidence-manifest.txt}" 2>/dev/null || echo "(no manifest — the job failed before it was initialized)"
