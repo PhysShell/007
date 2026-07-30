@@ -14,6 +14,10 @@
   // completely), not whatever happened to fall inside one newest-first page
   // — an older queued/running run must not silently vanish from "Running"
   // just because enough newer runs exist to push it past a fixed-size page.
+  // The status filter alone only bounds what KIND of run comes back, not HOW
+  // MANY — with 201+ genuinely active runs, a single page still truncates,
+  // so fetchAllActive below pages through every page, same as
+  // ConversationPage's full-history walk.
   let active: RunDto[] = $state([]);
   let terminal: RunDto[] = $state([]);
   let loadState: LoadState = $state("loading");
@@ -28,15 +32,27 @@
   // overwriting newer state with older data.
   let generation = 0;
 
+  async function fetchAllActive(): Promise<RunDto[]> {
+    const collected: RunDto[] = [];
+    let before: string | undefined;
+    for (;;) {
+      const pg = await listRuns({ status: ["queued", "running"], limit: 200, before });
+      collected.push(...pg.items);
+      if (pg.items.length === 0 || !pg.next_before) break;
+      before = pg.next_before;
+    }
+    return collected;
+  }
+
   async function refresh(): Promise<void> {
     const myGeneration = ++generation;
     try {
-      const [activePage, recentPage] = await Promise.all([
-        listRuns({ status: ["queued", "running"], limit: 200 }),
+      const [activeItems, recentPage] = await Promise.all([
+        fetchAllActive(),
         listRuns({ limit: RECENT_LIMIT }),
       ]);
       if (myGeneration !== generation) return; // superseded by a later refresh
-      active = activePage.items;
+      active = activeItems;
       terminal = recentPage.items
         .filter((r) => !isActiveRun(r.status))
         .sort((a, b) => b.created_at - a.created_at);

@@ -331,6 +331,26 @@ async fn api_routes_still_win_over_static_serving() {
 }
 
 #[tokio::test]
+async fn unknown_api_path_is_404_json_not_the_shell() {
+    // A typo'd/unimplemented `/api/v1/*` path must never fall through to the
+    // static-file fallback and come back as a 200 with the SPA shell — that
+    // would make a broken API call indistinguishable from a slow one to any
+    // client that doesn't inspect the body.
+    let (app, _shell_dir) = seeded_app_with_shell().await;
+    let req = Request::builder()
+        .uri("/api/v1/does-not-exist")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    let body = text_body(resp).await;
+    assert!(
+        body.contains("\"code\":\"NOT_FOUND\""),
+        "expected the API's JSON 404, got: {body}"
+    );
+}
+
+#[tokio::test]
 async fn no_static_dir_means_api_only_dev_mode() {
     let dir = tempfile::tempdir().unwrap();
     let ledger = SqliteLedger::open(dir.path().join("ledger.sqlite3")).unwrap();

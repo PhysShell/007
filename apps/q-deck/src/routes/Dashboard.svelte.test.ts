@@ -68,6 +68,27 @@ describe("Dashboard", () => {
     expect(screen.queryByText("Nothing running right now.")).not.toBeInTheDocument();
   });
 
+  it("pages through every active run instead of truncating at one page", async () => {
+    // The status filter alone only bounds WHICH runs come back, not HOW MANY
+    // — 201+ genuinely active runs still spans more than one page. Mock two
+    // pages or `active` would silently truncate to whatever the first page
+    // held, exactly the bug this test guards against.
+    vi.spyOn(api, "listRuns").mockImplementation(async (params = {}) => {
+      if (!params.status) return page([]); // the unfiltered "recent" call
+      if (params.before === undefined) {
+        return {
+          schema_version: 1,
+          items: [runDto({ run_id: "a1" }), runDto({ run_id: "a2" })],
+          next_before: "cursor1",
+        };
+      }
+      expect(params.before).toBe("cursor1");
+      return page([runDto({ run_id: "a3" })]);
+    });
+    const { container } = render(Dashboard);
+    await waitFor(() => expect(container.querySelectorAll(".run-card")).toHaveLength(3));
+  });
+
   it("shows a stale/offline banner but keeps the last-known list on a later failed refresh", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {

@@ -139,3 +139,10 @@ pub(crate) async fn get_run(
     let run = state.ledger.run(id).await?.ok_or(ApiError::NotFound)?;
     Ok(Json(run.into()))
 }
+
+/// Matches any `/api/v1/*` path none of the literal routes above claimed —
+/// see the `/api/v1/*rest` route's doc comment in `lib.rs` for why this must
+/// exist at all.
+pub(crate) async fn unknown_api_route() -> ApiError {
+    ApiError::NotFound
+}
