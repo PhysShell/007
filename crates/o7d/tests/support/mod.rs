@@ -17,15 +17,19 @@ use o7_ledger::{
     Conversation, EventId, EventType, Ledger as _, LedgerError, NewEvent, NewRun, Run, SqliteLedger,
 };
 
-/// Which existing, already-canonical terminal state the transcript ends in.
-/// See `o7-ledger`'s copy of this type for the full rationale: nothing new
-/// is invented, ERROR (`Interrupted`) is never collapsed into FAIL
-/// (`Failed`).
+/// Which existing, already-canonical status the transcript ends in. Only
+/// `Pass`/`Fail` are sealed/terminal (see `o7-ledger`'s copy of this module
+/// for the full rationale); `Interrupted` is a resumable pause, not a third
+/// co-equal outcome of the same kind, and must never be described as
+/// terminal/sealed/"ERROR" — that name belongs to `o7-run::Verdict::Error`,
+/// a genuinely different, SEALED concept this transcript does not represent
+/// (the projection from `o7-run::Verdict` onto `o7-ledger`'s status
+/// vocabulary is an open seam, not decided here).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GoldenOutcome {
     Pass,
     Fail,
-    Error,
+    Interrupted,
 }
 
 /// Everything the transcript produced, for callers to assert against.
@@ -35,8 +39,8 @@ pub(crate) struct GoldenTranscript {
 }
 
 /// The `event_type` strings this transcript produces, in the exact order
-/// they are emitted (the 7th/terminal entry varies — see
-/// `terminal_event_type`).
+/// they are emitted (the 7th entry varies — see `outcome_event_type`; it is
+/// not necessarily "terminal").
 pub(crate) const EXPECTED_EVENT_TYPES: [&str; 7] = [
     "conversation.created",
     "run.created",
@@ -48,11 +52,11 @@ pub(crate) const EXPECTED_EVENT_TYPES: [&str; 7] = [
 ];
 
 #[must_use]
-pub(crate) fn terminal_event_type(outcome: GoldenOutcome) -> &'static str {
+pub(crate) fn outcome_event_type(outcome: GoldenOutcome) -> &'static str {
     match outcome {
         GoldenOutcome::Pass => "run.completed",
         GoldenOutcome::Fail => "run.failed",
-        GoldenOutcome::Error => "run.interrupted",
+        GoldenOutcome::Interrupted => "run.interrupted",
     }
 }
 
@@ -130,7 +134,7 @@ pub(crate) async fn apply_golden_transcript(
     let run = match outcome {
         GoldenOutcome::Pass => ledger.complete_run(run.run_id.clone()).await?,
         GoldenOutcome::Fail => ledger.fail_run(run.run_id.clone()).await?,
-        GoldenOutcome::Error => ledger.interrupt_run(run.run_id.clone()).await?,
+        GoldenOutcome::Interrupted => ledger.interrupt_run(run.run_id.clone()).await?,
     };
 
     Ok(GoldenTranscript { conversation, run })

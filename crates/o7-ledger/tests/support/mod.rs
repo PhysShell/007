@@ -12,30 +12,49 @@
 //! written by this fixture can ever be mistaken for real provider output —
 //! this transcript proves the ledger/o7d/Q-Deck downstream contract, it does
 //! not stand in for a production provider integration.
+//!
+//! ## A missing seam this transcript does NOT paper over
+//!
+//! `crates/o7-run` has its own `Verdict` enum (`Pass`, `Fail`, `Blocked`,
+//! `Error` — see `crates/o7-run/src/state.rs`), fixed only once a run is
+//! `Sealed`. That `Error` variant is a SEALED, terminal judgment in o7-run's
+//! own model — a genuinely different concept from `o7_ledger::RunStatus`'s
+//! `Interrupted`, which is an UNSEALED, resumable pause
+//! (`resume_interrupted_run` can bring it back to `Running`). There is
+//! currently no defined projection from o7-run's four sealed `Verdict`
+//! values onto `o7-ledger`'s status vocabulary at all (o7d doesn't even
+//! depend on o7-run — see `docs/q-deck/architecture.md`) — whether a real
+//! `Verdict::Error` should someday become `RunStatus::Failed`, a new status,
+//! or something else is an open question this transcript does not answer.
+//! This transcript's third variant below demonstrates `Interrupted` on its
+//! OWN terms (an existing, resumable ledger state) — it does NOT claim to
+//! represent o7-run's `Verdict::Error`, and must never be described as a
+//! terminal/sealed/"ERROR" outcome.
 
 use o7_ledger::{
     Conversation, EventId, EventType, Ledger as _, LedgerError, NewEvent, NewRun, Run, SqliteLedger,
 };
 
-/// Which existing, already-canonical terminal state the transcript ends in.
-/// Not a new status: R0.5 borrows `o7_ledger::RunStatus`'s own existing
-/// distinction between an assessed failure (`failed`) and an involuntary
-/// abort (`interrupted`) to stand in for a "FAIL" vs "ERROR" outcome, exactly
-/// because the two are already canonically different in production code —
-/// nothing new is invented, and ERROR is never collapsed into FAIL.
+/// Which existing, already-canonical status the transcript ends in. Only
+/// `Pass` and `Fail` are sealed/terminal outcomes (`RunStatus::Completed`,
+/// `RunStatus::Failed`). `Interrupted` is NOT a third co-equal "outcome" of
+/// the same kind — it is a resumable pause, not a verdict; see the module
+/// doc comment above for why it is kept in this enum anyway (for the
+/// convenience of one `apply_golden_transcript` entry point) despite being a
+/// different kind of thing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GoldenOutcome {
-    /// Ends in `RunStatus::Completed`.
+    /// Sealed. Ends in `RunStatus::Completed`.
     Pass,
-    /// Ends in `RunStatus::Failed`.
+    /// Sealed. Ends in `RunStatus::Failed`.
     Fail,
-    /// Ends in `RunStatus::Interrupted`. NOTE: `RunStatus::is_terminal()`
-    /// deliberately does NOT include `Interrupted` (an interrupted run is
-    /// resumable via `resume_interrupted_run` — it is not a closed state the
-    /// way completed/failed/cancelled are), so `run.finished_at` stays
-    /// `None` for this outcome. That is real, existing ledger behavior this
-    /// transcript surfaces honestly rather than papering over.
-    Error,
+    /// NOT sealed. Ends in `RunStatus::Interrupted`, which
+    /// `RunStatus::is_terminal()` deliberately excludes — an interrupted run
+    /// is resumable via `resume_interrupted_run` back to `Running`, so
+    /// `run.finished_at` stays `None`. Real, existing ledger behavior this
+    /// transcript surfaces honestly rather than treating as a fourth
+    /// terminal outcome.
+    Interrupted,
 }
 
 /// Everything the transcript produced, for callers to assert against.
@@ -55,19 +74,20 @@ pub(crate) const EXPECTED_EVENT_TYPES: [&str; 7] = [
     "user.message",
     "user.message",
     "system.note",
-    // The 7th (terminal) event's type depends on `GoldenOutcome` — see
-    // `terminal_event_type`.
+    // The 7th event's type depends on `GoldenOutcome` — see
+    // `outcome_event_type`. Not necessarily "terminal": for `Interrupted` it
+    // is a resumable pause, not a sealed outcome.
     "run.completed",
 ];
 
-/// The terminal event type for a given outcome — the one entry in
+/// The 7th event's type for a given outcome — the one entry in
 /// `EXPECTED_EVENT_TYPES` that varies.
 #[must_use]
-pub(crate) fn terminal_event_type(outcome: GoldenOutcome) -> &'static str {
+pub(crate) fn outcome_event_type(outcome: GoldenOutcome) -> &'static str {
     match outcome {
         GoldenOutcome::Pass => "run.completed",
         GoldenOutcome::Fail => "run.failed",
-        GoldenOutcome::Error => "run.interrupted",
+        GoldenOutcome::Interrupted => "run.interrupted",
     }
 }
 
@@ -145,7 +165,7 @@ pub(crate) async fn apply_golden_transcript(
     let run = match outcome {
         GoldenOutcome::Pass => ledger.complete_run(run.run_id.clone()).await?,
         GoldenOutcome::Fail => ledger.fail_run(run.run_id.clone()).await?,
-        GoldenOutcome::Error => ledger.interrupt_run(run.run_id.clone()).await?,
+        GoldenOutcome::Interrupted => ledger.interrupt_run(run.run_id.clone()).await?,
     };
 
     Ok(GoldenTranscript {

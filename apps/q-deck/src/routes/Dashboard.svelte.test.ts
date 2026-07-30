@@ -130,13 +130,13 @@ describe("Dashboard", () => {
     expect(screen.queryByText("Nothing running right now.")).not.toBeInTheDocument();
   });
 
-  it("shows the golden synthetic-run transcript's terminal outcomes under Recent, once active", async () => {
+  it("shows the golden synthetic-run transcript's completed/failed/interrupted runs under Recent (not currently active, regardless of whether each is sealed)", async () => {
     mockActiveAndRecent(
       [],
       [
         goldenRun("pass", { run_id: "r05-golden-run-pass" }),
         goldenRun("fail", { run_id: "r05-golden-run-fail" }),
-        goldenRun("error", { run_id: "r05-golden-run-error" }),
+        goldenRun("interrupted", { run_id: "r05-golden-run-interrupted" }),
       ],
     );
     render(Dashboard);

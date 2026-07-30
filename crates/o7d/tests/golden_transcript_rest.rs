@@ -27,7 +27,7 @@ use http_body_util::BodyExt;
 use o7_ledger::SqliteLedger;
 use serde_json::Value;
 use support::{
-    apply_golden_transcript, terminal_event_type, GoldenOutcome, GoldenTranscript,
+    apply_golden_transcript, outcome_event_type, GoldenOutcome, GoldenTranscript,
     EXPECTED_EVENT_TYPES,
 };
 use tower::ServiceExt;
@@ -35,7 +35,7 @@ use tower::ServiceExt;
 fn expected_types(outcome: GoldenOutcome) -> Vec<&'static str> {
     let mut types = EXPECTED_EVENT_TYPES.to_vec();
     let last = types.len() - 1;
-    types[last] = terminal_event_type(outcome);
+    types[last] = outcome_event_type(outcome);
     types
 }
 
@@ -105,11 +105,11 @@ async fn transcript_run_is_reachable_by_id_with_terminal_status_and_timestamps()
 }
 
 #[tokio::test]
-async fn transcript_error_outcome_run_has_no_finished_at_over_the_wire() {
+async fn transcript_interrupted_run_has_no_finished_at_over_the_wire() {
     // Same honesty check as the ledger-side proof, at the REST boundary:
-    // ERROR (interrupted) is resumable, not closed, so `finished_at` must
-    // travel as `null`, not be backfilled into looking like a closed run.
-    let (router, transcript) = seeded_router_with_transcript(GoldenOutcome::Error).await;
+    // interrupted is resumable, not sealed, so `finished_at` must travel as
+    // `null`, not be backfilled into looking like a closed run.
+    let (router, transcript) = seeded_router_with_transcript(GoldenOutcome::Interrupted).await;
     let (status, run) = get(
         &router,
         &format!("/api/v1/runs/{}", transcript.run.run_id.as_str()),
@@ -117,6 +117,35 @@ async fn transcript_error_outcome_run_has_no_finished_at_over_the_wire() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(run["status"], "interrupted");
+    assert!(run["finished_at"].is_null());
+}
+
+#[tokio::test]
+async fn transcript_interrupted_run_resumes_to_running_over_the_wire() {
+    // The regression this transcript must prove at the REST boundary: an
+    // interrupted run is not a dead end. After `resume_interrupted_run`
+    // (the only production path that can revive one), GET /api/v1/runs/{id}
+    // must reflect `running`, not still `interrupted` and not some
+    // backfilled "resumed" pseudo-status invented for this purpose.
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = SqliteLedger::open(dir.path().join("ledger.sqlite3")).unwrap();
+    std::mem::forget(dir);
+    let transcript = apply_golden_transcript(&ledger, GoldenOutcome::Interrupted)
+        .await
+        .unwrap();
+    ledger
+        .resume_interrupted_run(transcript.run.run_id.clone())
+        .await
+        .unwrap();
+    let router = o7d::router(ledger);
+
+    let (status, run) = get(
+        &router,
+        &format!("/api/v1/runs/{}", transcript.run.run_id.as_str()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(run["status"], "running");
     assert!(run["finished_at"].is_null());
 }
 

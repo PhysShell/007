@@ -2,7 +2,7 @@
   import { onDestroy } from "svelte";
   import { getRun } from "../lib/api";
   import type { RunDto } from "../lib/types";
-  import { isActiveRun } from "../lib/types";
+  import { isSealedRun } from "../lib/types";
   import { ConversationEventStream } from "../lib/eventStream.svelte";
   import { relativeAge, duration, absoluteTime } from "../lib/format";
   import Link from "../components/Link.svelte";
@@ -24,8 +24,11 @@
   // this page showing "running" forever even while a live connection is
   // displayed, which is exactly the kind of stale-presented-as-fresh state
   // this app's honesty rule elsewhere forbids. Poll the run itself, same
-  // interval as the dashboard, stopping once it's actually terminal — a
-  // finished run's own fields cannot change again.
+  // interval as the dashboard, stopping only once it's SEALED
+  // (completed/failed/cancelled) — never on `interrupted`, which is a
+  // resumable pause in `o7-ledger` (`resume_interrupted_run`), not a fixed
+  // verdict; stopping on it would mean this page never notices a
+  // subsequent resume back to `running`.
   const REFRESH_INTERVAL_MS = 5000;
   let timer: ReturnType<typeof setInterval> | undefined;
 
@@ -51,7 +54,7 @@
         const r = await getRun(runId);
         if (cancelled) return;
         run = r;
-        if (!isActiveRun(r.status)) {
+        if (isSealedRun(r.status)) {
           clearInterval(timer);
         }
       } catch {
@@ -66,7 +69,7 @@
         run = r;
         loadState = "ready";
         stream = new ConversationEventStream(r.conversation_id);
-        if (isActiveRun(r.status)) {
+        if (!isSealedRun(r.status)) {
           timer = setInterval(() => void refreshRun(), REFRESH_INTERVAL_MS);
         }
       })

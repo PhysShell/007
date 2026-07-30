@@ -17,6 +17,7 @@ import {
   goldenEventsActive,
   goldenRun,
   goldenRunActive,
+  goldenRunResumed,
 } from "../test-support/goldenTranscript";
 
 class MockEventSource {
@@ -65,14 +66,37 @@ describe("RunPage", () => {
     expect(screen.getByText(/duration/)).toBeInTheDocument();
   });
 
-  it("shows ERROR (interrupted) without a duration row — finished_at is honestly absent, not backfilled", async () => {
-    const errored = goldenRun("error");
-    vi.spyOn(api, "getRun").mockResolvedValue(errored);
-    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents("error")));
+  it("shows interrupted without a duration row — finished_at is honestly absent, not backfilled", async () => {
+    // interrupted is a resumable pause, not a sealed/terminal outcome — see
+    // goldenRun's own doc comment and docs/q-deck/r05-live-readiness.md.
+    const interrupted = goldenRun("interrupted");
+    vi.spyOn(api, "getRun").mockResolvedValue(interrupted);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(
+      goldenEventPage(goldenEvents("interrupted")),
+    );
 
-    render(RunPage, { props: { runId: errored.run_id } });
+    render(RunPage, { props: { runId: interrupted.run_id } });
     await waitFor(() => expect(screen.getByText("interrupted")).toBeInTheDocument());
     expect(screen.queryByText(/duration/)).not.toBeInTheDocument();
+  });
+
+  it("keeps polling through an interrupted run and picks up a subsequent resume back to running", async () => {
+    // The regression this transcript must prove: RunPage must NOT stop
+    // polling on `interrupted` (it is resumable, not sealed) — before the
+    // fix, isActiveRun-based polling treated `interrupted` the same as a
+    // sealed outcome and this page would never notice a later resume.
+    const interrupted = goldenRun("interrupted");
+    const resumed = goldenRunResumed();
+    vi.spyOn(api, "getRun").mockResolvedValueOnce(interrupted).mockResolvedValueOnce(resumed);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(
+      goldenEventPage(goldenEvents("interrupted")),
+    );
+
+    render(RunPage, { props: { runId: interrupted.run_id } });
+    await waitFor(() => expect(screen.getByText("interrupted")).toBeInTheDocument());
+
+    await vi.advanceTimersByTimeAsync(5100);
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
   });
 
   it("renders this run's own timeline events in sequence order, from REST history alone (the reload path)", async () => {

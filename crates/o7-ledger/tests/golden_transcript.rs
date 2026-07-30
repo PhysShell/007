@@ -22,13 +22,13 @@
 
 mod support;
 
-use o7_ledger::{Ledger as _, SqliteLedger};
-use support::{apply_golden_transcript, terminal_event_type, GoldenOutcome, EXPECTED_EVENT_TYPES};
+use o7_ledger::{Ledger as _, RunStatus, SqliteLedger};
+use support::{apply_golden_transcript, outcome_event_type, GoldenOutcome, EXPECTED_EVENT_TYPES};
 
 fn expected_types(outcome: GoldenOutcome) -> Vec<&'static str> {
     let mut types = EXPECTED_EVENT_TYPES.to_vec();
     let last = types.len() - 1;
-    types[last] = terminal_event_type(outcome);
+    types[last] = outcome_event_type(outcome);
     types
 }
 
@@ -123,9 +123,9 @@ async fn golden_transcript_run_metadata_matches_transcript_fail() {
 }
 
 #[tokio::test]
-async fn golden_transcript_run_metadata_matches_transcript_error() {
+async fn golden_transcript_run_metadata_matches_transcript_interrupted() {
     let ledger = SqliteLedger::open_in_memory().unwrap();
-    let transcript = apply_golden_transcript(&ledger, GoldenOutcome::Error)
+    let transcript = apply_golden_transcript(&ledger, GoldenOutcome::Interrupted)
         .await
         .unwrap();
 
@@ -138,11 +138,41 @@ async fn golden_transcript_run_metadata_matches_transcript_error() {
     // Real, existing ledger behavior, not a bug this fixture works around:
     // `RunStatus::is_terminal()` deliberately excludes `Interrupted` (it is
     // resumable via `resume_interrupted_run`), so `finished_at` stays unset
-    // even though the run is no longer active. ERROR is not silently
-    // reshaped into a closed/FAIL-shaped terminal state here.
+    // even though the run is no longer active. This is NOT a terminal/sealed
+    // outcome and must never be reshaped into looking like one.
     assert!(
         run.finished_at.is_none(),
-        "ERROR (interrupted) is resumable, not a closed terminal state — finished_at stays unset"
+        "interrupted is resumable, not a sealed terminal state — finished_at stays unset"
+    );
+}
+
+#[tokio::test]
+async fn golden_transcript_interrupted_run_can_resume_to_running() {
+    // The regression this transcript must prove: an interrupted run is not
+    // a dead end. `resume_interrupted_run` is the ONLY production path that
+    // can move a run `interrupted -> running` (the general `start_run` path
+    // deliberately cannot revive one — see `start_run_cannot_revive_interrupted_run`
+    // in tests/attempt_lifecycle.rs); this test proves it on THIS transcript's
+    // own run, not just in the abstract.
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let transcript = apply_golden_transcript(&ledger, GoldenOutcome::Interrupted)
+        .await
+        .unwrap();
+
+    ledger
+        .resume_interrupted_run(transcript.run.run_id.clone())
+        .await
+        .unwrap();
+
+    let resumed = ledger
+        .run(transcript.run.run_id.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(resumed.status, RunStatus::Running);
+    assert!(
+        resumed.finished_at.is_none(),
+        "a resumed run is active again, not finished"
     );
 }
 

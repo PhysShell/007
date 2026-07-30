@@ -7,7 +7,7 @@
 //! code — this example is not part of the library's public API surface, and
 //! the transcript itself is not a real downstream seam, just a fixture).
 //!
-//! Usage: `cargo run --example seed_r05_fixture -- <db-path> [pass|fail|error]`
+//! Usage: `cargo run --example seed_r05_fixture -- <db-path> [pass|fail|interrupted]`
 //! (defaults to `pass` if the outcome argument is omitted.)
 
 use o7_ledger::{EventId, EventType, Ledger as _, NewEvent, NewRun, SqliteLedger};
@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
     let db_path = args
         .next()
-        .ok_or("usage: seed_r05_fixture <db-path> [pass|fail|error]")?;
+        .ok_or("usage: seed_r05_fixture <db-path> [pass|fail|interrupted]")?;
     let outcome = args.next().unwrap_or_else(|| "pass".to_owned());
 
     let ledger = SqliteLedger::open(&db_path)?;
@@ -83,8 +83,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let run = match outcome.as_str() {
         "pass" => ledger.complete_run(run.run_id.clone()).await?,
         "fail" => ledger.fail_run(run.run_id.clone()).await?,
-        "error" => ledger.interrupt_run(run.run_id.clone()).await?,
-        other => return Err(format!("unknown outcome {other:?}, expected pass|fail|error").into()),
+        "interrupted" => ledger.interrupt_run(run.run_id.clone()).await?,
+        other => {
+            return Err(format!("unknown outcome {other:?}, expected pass|fail|interrupted").into())
+        }
     };
 
     println!("conversation_id={}", conversation.conversation_id.as_str());

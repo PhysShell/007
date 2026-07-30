@@ -7,38 +7,48 @@
 
 import type { EventDto, EventPageDto, RunDto, RunStatus } from "../lib/types";
 
-export type GoldenOutcome = "pass" | "fail" | "error";
+// Only "pass"/"fail" are sealed/terminal outcomes (RunStatus completed/
+// failed). "interrupted" is NOT a third co-equal outcome of the same kind —
+// it is a resumable pause (o7-ledger's resume_interrupted_run can bring it
+// back to "running"), kept in this union only for apply_golden_transcript's
+// convenience. Never call it "terminal" or "ERROR": that name belongs to
+// o7-run::Verdict::Error, a genuinely different SEALED concept this fixture
+// does not represent — the projection from o7-run::Verdict onto
+// o7-ledger's status vocabulary is an open seam, not decided here (see
+// docs/q-deck/r05-live-readiness.md).
+export type GoldenOutcome = "pass" | "fail" | "interrupted";
 
 export const GOLDEN_CONVERSATION_ID = "r05-golden-conversation";
 export const GOLDEN_RUN_ID = "r05-golden-run";
 const BASE_CREATED_AT = 1_700_000_000_000;
 
-function terminalStatus(outcome: GoldenOutcome): RunStatus {
+function outcomeStatus(outcome: GoldenOutcome): RunStatus {
   switch (outcome) {
     case "pass":
       return "completed";
     case "fail":
       return "failed";
-    case "error":
+    case "interrupted":
       return "interrupted";
   }
 }
 
-function terminalEventType(outcome: GoldenOutcome): string {
+function outcomeEventType(outcome: GoldenOutcome): string {
   switch (outcome) {
     case "pass":
       return "run.completed";
     case "fail":
       return "run.failed";
-    case "error":
+    case "interrupted":
       return "run.interrupted";
   }
 }
 
-/** The run mid-transcript, before any terminal transition — `run.started`
- * has happened, nothing terminal has. This is what a real client sees while
- * a run is still active, polled repeatedly until it becomes one of the three
- * terminal outcomes below. */
+/** The run mid-transcript, before any outcome transition — `run.started`
+ * has happened, nothing else has. This is what a real client sees while a
+ * run is still active, polled repeatedly until it reaches one of the
+ * outcomes below (or, from "interrupted", potentially back to this same
+ * "running" shape via a resume — see `goldenRunResumed`). */
 export function goldenRunActive(overrides: Partial<RunDto> = {}): RunDto {
   return {
     schema_version: 1,
@@ -54,9 +64,9 @@ export function goldenRunActive(overrides: Partial<RunDto> = {}): RunDto {
   };
 }
 
-/** The run after its terminal transition. */
+/** The run after its outcome transition. */
 export function goldenRun(outcome: GoldenOutcome, overrides: Partial<RunDto> = {}): RunDto {
-  const status = terminalStatus(outcome);
+  const status = outcomeStatus(outcome);
   return {
     schema_version: 1,
     run_id: GOLDEN_RUN_ID,
@@ -66,13 +76,20 @@ export function goldenRun(outcome: GoldenOutcome, overrides: Partial<RunDto> = {
     role: "implementer",
     status,
     created_at: BASE_CREATED_AT,
-    // ERROR (interrupted) is resumable, not a closed terminal state — stays
-    // unset, exactly mirroring the real ledger (see the Rust golden
+    // interrupted is resumable, not a sealed/closed state — finished_at
+    // stays unset, exactly mirroring the real ledger (see the Rust golden
     // transcript tests for the full rationale). Never backfilled to look
-    // like a closed run just because this is the "terminal" fixture.
+    // like a closed run just because this is the "outcome" fixture.
     finished_at: status === "interrupted" ? null : BASE_CREATED_AT + 5_000,
     ...overrides,
   };
+}
+
+/** The regression this transcript must prove: an interrupted run is not a
+ * dead end. What a client sees after `o7-ledger`'s `resume_interrupted_run`
+ * — back to `running`, `finished_at` unset, same run identity. */
+export function goldenRunResumed(overrides: Partial<RunDto> = {}): RunDto {
+  return goldenRunActive(overrides);
 }
 
 /** All 7 events of the full transcript, in order — mirrors exactly what
@@ -87,7 +104,7 @@ export function goldenEvents(outcome: GoldenOutcome): EventDto[] {
     "user.message",
     "user.message",
     "system.note",
-    terminalEventType(outcome),
+    outcomeEventType(outcome),
   ];
   return types.map((event_type, i) => ({
     schema_version: 1,

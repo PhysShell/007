@@ -26,13 +26,13 @@ use std::time::Duration;
 
 use o7_ledger::SqliteLedger;
 use serde_json::Value;
-use support::{apply_golden_transcript, terminal_event_type, GoldenOutcome, EXPECTED_EVENT_TYPES};
+use support::{apply_golden_transcript, outcome_event_type, GoldenOutcome, EXPECTED_EVENT_TYPES};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 fn expected_types(outcome: GoldenOutcome) -> Vec<&'static str> {
     let mut types = EXPECTED_EVENT_TYPES.to_vec();
     let last = types.len() - 1;
-    types[last] = terminal_event_type(outcome);
+    types[last] = outcome_event_type(outcome);
     types
 }
 
@@ -215,14 +215,14 @@ async fn transcript_reconnect_with_last_event_id_yields_exactly_the_missed_tail(
 }
 
 #[tokio::test]
-async fn transcript_error_outcome_terminal_frame_is_run_interrupted_not_run_failed() {
-    // ERROR must travel over SSE as `run.interrupted`, never collapsed into
-    // `run.failed` — the same honesty check as the ledger/REST proofs, at
-    // the SSE wire boundary.
+async fn transcript_interrupted_outcome_frame_is_run_interrupted_not_run_failed() {
+    // The interrupted outcome must travel over SSE as `run.interrupted`, never
+    // collapsed into `run.failed` — the same honesty check as the ledger/REST
+    // proofs, at the SSE wire boundary.
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("ledger.sqlite3");
     let ledger = SqliteLedger::open(&db_path).unwrap();
-    let transcript = apply_golden_transcript(&ledger, GoldenOutcome::Error)
+    let transcript = apply_golden_transcript(&ledger, GoldenOutcome::Interrupted)
         .await
         .unwrap();
     drop(ledger);
@@ -235,12 +235,12 @@ async fn transcript_error_outcome_terminal_frame_is_run_interrupted_not_run_fail
     let mut client = connect_and_request(addr, &path, None).await;
     let frames = read_n_data_frames(&mut client, 7).await;
 
-    let terminal = frames.last().expect("7 frames requested");
+    let last_frame = frames.last().expect("7 frames requested");
     let parsed: Value =
-        serde_json::from_str(terminal.data.as_ref().unwrap()).expect("frame data is valid JSON");
+        serde_json::from_str(last_frame.data.as_ref().unwrap()).expect("frame data is valid JSON");
     assert_eq!(
         parsed["event_type"],
-        terminal_event_type(GoldenOutcome::Error)
+        outcome_event_type(GoldenOutcome::Interrupted)
     );
     assert_eq!(parsed["event_type"], "run.interrupted");
     assert_eq!(parsed["run_id"], transcript.run.run_id.as_str());
