@@ -68,7 +68,19 @@ export interface ErrorDto {
   code: string;
 }
 
-/** A run is still doing something; anything else is a terminal outcome. */
+/** A run is currently doing something (queued to start, or running). Does
+ * NOT mean "anything else is terminal" — `interrupted` is neither active nor
+ * sealed, see `isSealedRun`. */
 export function isActiveRun(status: RunStatus): boolean {
   return status === "queued" || status === "running";
+}
+
+/** A run whose verdict is fixed and will never change again. `interrupted`
+ * is deliberately NOT included: in `o7-ledger`, an interrupted run is
+ * resumable (`resume_interrupted_run`) back to `running` — it is a pause,
+ * not a sealed outcome. A client must keep watching an interrupted run (e.g.
+ * keep polling it) in case it resumes; only completed/failed/cancelled are
+ * safe to stop watching. */
+export function isSealedRun(status: RunStatus): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
 }

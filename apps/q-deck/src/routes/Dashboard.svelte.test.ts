@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/svelte";
 import Dashboard from "./Dashboard.svelte";
 import * as api from "../lib/api";
 import type { PageDto, RunDto } from "../lib/types";
+import { goldenRun, goldenRunActive } from "../test-support/goldenTranscript";
 
 function runDto(overrides: Partial<RunDto> = {}): RunDto {
   return {
@@ -115,6 +116,34 @@ describe("Dashboard", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("shows the golden synthetic-run transcript's active run under Running, tied to the canonical R0.5 contract", async () => {
+    // Q-Deck R0.5 live-readiness proof: the same DTO shape
+    // `crates/o7-ledger`'s and `crates/o7d`'s golden-transcript tests
+    // produce via the real production write API and REST/SSE surface, not
+    // ad hoc test data — see docs/q-deck/r05-live-readiness.md.
+    mockActiveAndRecent([goldenRunActive()], []);
+    render(Dashboard);
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    expect(screen.getByText("claude · implementer")).toBeInTheDocument();
+    expect(screen.queryByText("Nothing running right now.")).not.toBeInTheDocument();
+  });
+
+  it("shows the golden synthetic-run transcript's completed/failed/interrupted runs under Recent (not currently active, regardless of whether each is sealed)", async () => {
+    mockActiveAndRecent(
+      [],
+      [
+        goldenRun("pass", { run_id: "r05-golden-run-pass" }),
+        goldenRun("fail", { run_id: "r05-golden-run-fail" }),
+        goldenRun("interrupted", { run_id: "r05-golden-run-interrupted" }),
+      ],
+    );
+    render(Dashboard);
+    await waitFor(() => expect(screen.getAllByText("claude · implementer")).toHaveLength(3));
+    expect(screen.getByText("completed")).toBeInTheDocument();
+    expect(screen.getByText("failed")).toBeInTheDocument();
+    expect(screen.getByText("interrupted")).toBeInTheDocument();
   });
 
   it("never renders a mutation control (start/stop/cancel/approve/reject) in R0", async () => {
