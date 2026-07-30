@@ -25,7 +25,9 @@ pub use models::{
     AttemptStatus, Conversation, ConversationStatus, EventType, Idempotency, IdempotencyRecord,
     ListCursor, NewEvent, NewRun, Page, PersistedEvent, RecoveryState, Run, RunAttempt, RunStatus,
 };
-pub use sqlite::{PragmaReport, SqliteLedger, EVENT_SCHEMA_VERSION, MAX_LIST_LIMIT, MAX_READ_LIMIT};
+pub use sqlite::{
+    PragmaReport, SqliteLedger, EVENT_SCHEMA_VERSION, MAX_LIST_LIMIT, MAX_READ_LIMIT,
+};
 
 /// The core append-only ledger contract: append an event, or replay a
 /// conversation's events by cursor. `append_event` returns only after a

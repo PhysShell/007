@@ -2,7 +2,12 @@
 //! `axum::Router` via `tower::Service::oneshot` — real routing, extraction,
 //! and JSON serialization, not handler functions called directly — over a
 //! ledger populated only through `o7-ledger`'s own public write APIs.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::indexing_slicing
+)]
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -50,7 +55,11 @@ async fn get(router: &Router, uri: &str) -> (StatusCode, Value) {
         .uri(uri)
         .body(Body::empty())
         .expect("valid request");
-    let resp = router.clone().oneshot(req).await.expect("router does not fail");
+    let resp = router
+        .clone()
+        .oneshot(req)
+        .await
+        .expect("router does not fail");
     let status = resp.status();
     let bytes = resp
         .into_body()
@@ -62,7 +71,10 @@ async fn get(router: &Router, uri: &str) -> (StatusCode, Value) {
         Value::Null
     } else {
         serde_json::from_slice(&bytes).unwrap_or_else(|e| {
-            panic!("response body is not valid JSON: {e}: {:?}", String::from_utf8_lossy(&bytes))
+            panic!(
+                "response body is not valid JSON: {e}: {:?}",
+                String::from_utf8_lossy(&bytes)
+            )
         })
     };
     (status, body)
@@ -170,7 +182,10 @@ async fn list_runs_global_and_scoped_by_conversation() {
 
     let (status, scoped) = get(
         &router,
-        &format!("/api/v1/runs?conversation_id={}", conv.conversation_id.as_str()),
+        &format!(
+            "/api/v1/runs?conversation_id={}",
+            conv.conversation_id.as_str()
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -207,7 +222,10 @@ async fn unrelated_conversation_never_leaks_into_scoped_run_listing() {
 
     let (status, empty) = get(
         &router,
-        &format!("/api/v1/runs?conversation_id={}", other.conversation_id.as_str()),
+        &format!(
+            "/api/v1/runs?conversation_id={}",
+            other.conversation_id.as_str()
+        ),
     )
     .await;
     assert_eq!(status, StatusCode::OK);

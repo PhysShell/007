@@ -20,7 +20,6 @@ use axum::Router;
 /// Build the R0 router. Bind it with `axum::serve` (see `main.rs`) or drive
 /// it in-process for tests via `tower::ServiceExt::oneshot` / a real listener
 /// on `127.0.0.1:0`.
-#[must_use]
 pub fn router(ledger: o7_ledger::SqliteLedger) -> Router {
     let state = AppState { ledger };
     Router::new()

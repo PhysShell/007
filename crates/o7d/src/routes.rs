@@ -57,7 +57,11 @@ pub(crate) async fn get_conversation(
     Path(conversation_id): Path<String>,
 ) -> Result<Json<ConversationDto>, ApiError> {
     let id = o7_ledger::ConversationId::from_raw(conversation_id);
-    let conversation = state.ledger.conversation(id).await?.ok_or(ApiError::NotFound)?;
+    let conversation = state
+        .ledger
+        .conversation(id)
+        .await?
+        .ok_or(ApiError::NotFound)?;
     Ok(Json(conversation.into()))
 }
 
@@ -88,8 +92,13 @@ pub(crate) async fn list_runs(
         .transpose()
         .map_err(ApiError::BadRequest)?;
     let limit = params.limit.unwrap_or(DEFAULT_LIST_LIMIT);
-    let conversation_id = params.conversation_id.map(o7_ledger::ConversationId::from_raw);
-    let page = state.ledger.list_runs(conversation_id, before, limit).await?;
+    let conversation_id = params
+        .conversation_id
+        .map(o7_ledger::ConversationId::from_raw);
+    let page = state
+        .ledger
+        .list_runs(conversation_id, before, limit)
+        .await?;
     Ok(Json(PageDto {
         schema_version: API_SCHEMA_VERSION,
         items: page.items.into_iter().map(RunDto::from).collect(),

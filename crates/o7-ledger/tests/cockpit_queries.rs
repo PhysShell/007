@@ -49,10 +49,17 @@ async fn conversations_are_newest_first() {
         );
     }
     let page = ledger.list_conversations(None, 50).await.unwrap();
-    let listed: Vec<_> = page.items.iter().map(|c| c.conversation_id.clone()).collect();
+    let listed: Vec<_> = page
+        .items
+        .iter()
+        .map(|c| c.conversation_id.clone())
+        .collect();
     let mut expected = ids.clone();
     expected.reverse();
-    assert_eq!(listed, expected, "must be newest-first, i.e. reverse creation order");
+    assert_eq!(
+        listed, expected,
+        "must be newest-first, i.e. reverse creation order"
+    );
 }
 
 // Pagination over many rows created in a tight loop — real same-millisecond
@@ -76,7 +83,7 @@ async fn conversation_pagination_is_lossless_and_dedup_under_ties() {
     let mut collected = Vec::new();
     let mut cursor: Option<ListCursor> = None;
     loop {
-        let page = ledger.list_conversations(cursor.clone(), 10).await.unwrap();
+        let page = ledger.list_conversations(cursor, 10).await.unwrap();
         if page.items.is_empty() {
             break;
         }
@@ -86,12 +93,19 @@ async fn conversation_pagination_is_lossless_and_dedup_under_ties() {
         cursor = page.next_before;
     }
 
-    assert_eq!(collected.len(), total, "no row lost or duplicated across pages");
+    assert_eq!(
+        collected.len(),
+        total,
+        "no row lost or duplicated across pages"
+    );
     let unique: HashSet<_> = collected.iter().collect();
     assert_eq!(unique.len(), total, "no duplicate across page boundaries");
     let mut expected = created.clone();
     expected.reverse();
-    assert_eq!(collected, expected, "full paginated walk is exactly reverse creation order");
+    assert_eq!(
+        collected, expected,
+        "full paginated walk is exactly reverse creation order"
+    );
 }
 
 // list_runs with no conversation filter spans every conversation; with a
@@ -154,7 +168,11 @@ async fn list_limit_is_clamped_not_unbounded() {
         .list_conversations(None, o7_ledger::MAX_LIST_LIMIT + 10_000)
         .await
         .unwrap();
-    assert_eq!(page.items.len(), 5, "clamped request still returns only what exists");
+    assert_eq!(
+        page.items.len(),
+        5,
+        "clamped request still returns only what exists"
+    );
 }
 
 // An unknown conversation_id filter is an empty result, not an error — the
