@@ -62,6 +62,57 @@ fn main() {
     std::process::exit(run());
 }
 
+/// The hermetic process-tree fixture (see the dispatch in `run`). argv after `__tree-fixture`:
+/// `<target_pid_file> <child_pid_file> <descendant_pid_file> [survived_marker]`. Each process writes
+/// its own pid to its marker; the leader writes `survived_marker` ONLY if it is never killed (proving
+/// a deadline miss). Uses the audited `seccomp::fork_raw` — no `unsafe` outside the sys modules.
+#[cfg(any(feature = "test-harness", feature = "fault-injection"))]
+fn tree_fixture() -> i32 {
+    use std::time::Duration;
+    let args: Vec<OsString> = std::env::args_os().skip(2).collect();
+    let arg = |i: usize| args.get(i).cloned();
+    let target_pf = arg(0);
+    let child_pf = arg(1);
+    let desc_pf = arg(2);
+    let survived = arg(3);
+    let write_pid = |p: &Option<OsString>| {
+        if let Some(p) = p {
+            let _ = std::fs::write(p, format!("{}", std::process::id()));
+        }
+    };
+    let sleep_long = || std::thread::sleep(Duration::from_secs(3600));
+
+    // Ordinary child: writes its identity, then sleeps past the deadline.
+    if let Ok(seccomp::ForkResult::Child) = seccomp::fork_raw() {
+        write_pid(&child_pf);
+        sleep_long();
+        seccomp::exit_now(0);
+    }
+
+    // Double-forked descendant: fork → the grandchild writes its identity + sleeps; the intermediate
+    // exits immediately, so the grandchild is REPARENTED (a genuine deep descendant, not a direct
+    // child) — proving the owned cgroup captures the whole tree and teardown kills it.
+    if let Ok(seccomp::ForkResult::Child) = seccomp::fork_raw() {
+        match seccomp::fork_raw() {
+            Ok(seccomp::ForkResult::Child) => {
+                write_pid(&desc_pf);
+                sleep_long();
+                seccomp::exit_now(0);
+            }
+            _ => seccomp::exit_now(0),
+        }
+    }
+
+    // The leader (the launch target itself): identity, then sleep past the deadline. The survived
+    // marker is written only if it is NOT killed — a correct monitor kills it before this returns.
+    write_pid(&target_pf);
+    sleep_long();
+    if let Some(s) = survived {
+        let _ = std::fs::write(s, b"survived");
+    }
+    0
+}
+
 fn run() -> i32 {
     // TEST-HARNESS ONLY: the VB-1 cgroup-monitor entry, exercised by the `#[ignore]`d confinement
     // tests. Never present in a production build.
@@ -81,6 +132,16 @@ fn run() -> i32 {
     #[cfg(feature = "test-harness")]
     if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("__seccomp-run")) {
         return seccomp::harness_main();
+    }
+
+    // TEST/FAULT ONLY: the HERMETIC process-tree fixture — a self-contained target for the VB-4
+    // cgroup-tree + deadline oracles, replacing the host `/bin/dash` dependency. Compiled only under
+    // `test-harness` or `fault-injection` (the matrix launches it via the fault artifact), never in a
+    // production build. It forks an ordinary child and a double-forked (reparented) descendant, writes
+    // each identity to a marker, and sleeps past the deadline so a correct monitor must kill the tree.
+    #[cfg(any(feature = "test-harness", feature = "fault-injection"))]
+    if std::env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("__tree-fixture")) {
+        return tree_fixture();
     }
 
     let Some(args) = parse_args() else {

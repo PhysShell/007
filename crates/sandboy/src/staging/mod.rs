@@ -33,11 +33,13 @@ const STAGING_MOUNTPOINT: &[u8] = b"/dev/shm\0";
 const COPY_CHUNK: usize = 64 * 1024;
 
 /// The materialized execution object: an `O_RDONLY` fd to `execveat`, an `O_PATH` fd for the exact
-/// Landlock rule (closed by the caller before exec), and the verified digest.
+/// Landlock rule (closed by the caller before exec), the verified digest, and the inode IDENTITY
+/// `(dev, ino)` — bound into `READY_TO_EXEC` so the proof names the EXACT object that runs.
 pub(crate) struct ExecObject {
     pub(crate) exec_fd: RawFd,
     pub(crate) rule_fd: RawFd,
     pub(crate) digest: Digest256,
+    pub(crate) inode_id: (u64, u64),
 }
 
 /// The stage a staging failure occurred at — each maps to a distinct fault point and a distinct
@@ -207,11 +209,28 @@ pub(crate) fn materialize(
         return Err(StageError::new(Stage::ProcIsolation, e));
     }
 
+    // The exact inode identity of the execution object (via its own read-only fd, still reachable —
+    // self-access survives non-dumpable). Bound into the proof so the launch names the exact object.
+    let inode_id = inode_identity(exec_fd).inspect_err(|_| {
+        let _ = crate::seccomp::close_fd(exec_fd);
+        let _ = crate::seccomp::close_fd(rule_fd);
+    })?;
+
     Ok(ExecObject {
         exec_fd,
         rule_fd,
         digest,
+        inode_id,
     })
+}
+
+/// The `(dev, ino)` identity of the inode behind `fd`, read via its own `/proc/self/fd` entry
+/// (self-access, pre-Landlock). Fails closed at the identity stage on any error.
+fn inode_identity(fd: RawFd) -> Result<(u64, u64), StageError> {
+    use std::os::unix::fs::MetadataExt as _;
+    let md = std::fs::metadata(format!("/proc/self/fd/{fd}"))
+        .map_err(|e| StageError::new(Stage::Reopen, e.raw_os_error().unwrap_or(libc::EIO)))?;
+    Ok((md.dev(), md.ino()))
 }
 
 fn close_and(fd: RawFd, e: StageError) -> StageError {

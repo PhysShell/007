@@ -18,6 +18,8 @@
 
 use std::path::PathBuf;
 
+use o7_sandbox_protocol::ids::Digest256;
+
 /// A versioned platform runtime profile. Content lives in the trusted backend binary (so the backend
 /// digest covers it); the launch binds the RESOLVED policy identities into `READY_TO_EXEC`.
 pub(crate) struct RuntimeProfile {
@@ -149,6 +151,36 @@ enum RuntimeFault {
 }
 
 impl RuntimePolicy {
+    /// A digest binding the FULLY-RESOLVED runtime read policy: the profile version plus every
+    /// runtime object's path AND opened-object identity `(dev, ino)`. Bound into `READY_TO_EXEC` so
+    /// the proof commits to the EXACT interpreter/library-root/support-file objects that were granted
+    /// — not merely the profile name. A missing object (statted just before confinement) fails the
+    /// digest computation, which downgrades the launch.
+    pub(crate) fn binding_digest(&self) -> Option<Digest256> {
+        use std::os::unix::fs::MetadataExt as _;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"o7-runtime-binding-v1\n");
+        buf.extend_from_slice(self.profile_version.as_bytes());
+        buf.push(b'\n');
+        let mut entry = |tag: &str, p: &std::path::Path| -> Option<()> {
+            let md = std::fs::metadata(p).ok()?;
+            buf.extend_from_slice(tag.as_bytes());
+            buf.extend_from_slice(p.as_os_str().as_encoded_bytes());
+            buf.extend_from_slice(format!(":{}:{}\n", md.dev(), md.ino()).as_bytes());
+            Some(())
+        };
+        if let Some(interp) = &self.interpreter {
+            entry("interp=", interp)?;
+        }
+        for r in &self.read_roots {
+            entry("root=", r)?;
+        }
+        for f in &self.read_files {
+            entry("file=", f)?;
+        }
+        Some(Digest256::of_bytes(&buf))
+    }
+
     /// An empty runtime policy (no interpreter, no read roots) — for a static target or a
     /// filesystem-only op that execs nothing.
     #[cfg(feature = "test-harness")]

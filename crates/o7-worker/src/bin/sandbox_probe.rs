@@ -143,16 +143,21 @@ fn net_probe(marker: &str) -> i32 {
 /// FAIL-CLOSED count of INHERITED socket descriptors (`/proc/self/fd/<n>` → `socket:[...]`),
 /// excluding std streams. Any enumeration/parse/readlink error is a hard error, never a silent `0`
 /// — an error can never masquerade as "no inherited sockets".
-/// Count inherited SOCKET descriptors WITHOUT procfs: `fstat` each fd over a bounded range. A closed
-/// fd returns `EBADF` (skipped); an open one is a socket iff `S_ISSOCK`. This keeps the target-side
-/// fd oracle independent of any `/proc` authority — the confined target needs no procfs grant, only
-/// the ordinary runtime policy. The bound is generous: the launch child's final `close_range` leaves
-/// the target only {stdio, exec fd (CLOEXEC → closed on exec)}, so nothing survives above it anyway.
+/// Count inherited SOCKET descriptors WITHOUT procfs, over a range PROVABLY covering every fd this
+/// process can hold: `fstat` each fd in `[3, RLIMIT_NOFILE.soft)`. A process cannot hold an fd >= its
+/// soft `RLIMIT_NOFILE`, so this scan is COMPLETE — not an arbitrary constant that could miss a
+/// high-numbered leak. A closed slot returns `EBADF` (skipped); an open one is a socket iff
+/// `S_ISSOCK`. Keeps the target-side fd oracle independent of any `/proc` authority: the confined
+/// target needs no procfs grant.
 fn count_inherited_sockets() -> io::Result<usize> {
+    use nix::sys::resource::{getrlimit, Resource};
     use nix::sys::stat::{fstat, SFlag};
-    const FD_SCAN_MAX: i32 = 4096;
+    let (soft, _hard) =
+        getrlimit(Resource::RLIMIT_NOFILE).map_err(|e| io::Error::from_raw_os_error(e as i32))?;
+    // Cap the loop counter safely; the soft limit is the true upper bound on any open fd.
+    let upper: i32 = soft.min(i32::MAX as u64) as i32;
     let mut n = 0;
-    for fd in 3..FD_SCAN_MAX {
+    for fd in 3..upper {
         match fstat(fd) {
             Ok(st) => {
                 if SFlag::from_bits_truncate(st.st_mode) & SFlag::S_IFMT == SFlag::S_IFSOCK {

@@ -109,8 +109,14 @@ struct ChildProof {
     /// Digest of the PRIVATE EXECUTION INODE the child actually `execveat`s — proven equal to the
     /// sealed source and bound here so the monitor confirms it matches the launch-spec target digest.
     exec_digest: String,
+    /// The execution inode's IDENTITY `dev:ino` — names the exact object that ran.
+    exec_inode: String,
     /// The versioned runtime profile the child resolved + applied (audit binding).
     runtime_profile: String,
+    /// A digest over the FULLY-RESOLVED runtime read policy (interpreter + library-root +
+    /// support-file paths AND opened-object identities) — commits the proof to the exact objects
+    /// granted, not merely the profile name.
+    runtime_binding: String,
     fs: bool,
     net: bool,
     env: bool,
@@ -177,7 +183,13 @@ impl VerifiedLaunchPlan {
             policy_digest: bindings.policy_digest.clone(),
             launch_nonce: bindings.launch_nonce.clone(),
             launch_spec_digest: bindings.launch_spec_digest.clone(),
-            filesystem: enf(child_ok && child.fs),
+            // Filesystem is Enforced only when the child ALSO bound the execution-inode identity and
+            // the resolved runtime-policy digest — so the report commits to the exact object that ran
+            // and the exact runtime objects granted, not merely to "some confined process".
+            filesystem: enf(child_ok
+                && child.fs
+                && !child.exec_inode.is_empty()
+                && !child.runtime_binding.is_empty()),
             // A leaked inherited socket defeats network deny-all, so fd-scrub gates the network dim.
             network: enf(child_ok && child.net && child.fd),
             env: enf(child_ok && child.env),
@@ -476,7 +488,9 @@ fn forced_downgrade(
         launch_spec_digest: String::new(),
         target_digest: String::new(),
         exec_digest: String::new(),
+        exec_inode: String::new(),
         runtime_profile: String::new(),
+        runtime_binding: String::new(),
         fs: false,
         net: false,
         env: false,
@@ -624,14 +638,24 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
     // I) seccomp network/process deny + effect-check.
     let net_ok = install_seccomp_checked(&ctx);
 
-    // Identity bindings the child proves: the execution inode's digest and the runtime profile.
+    // Identity bindings the child proves: the execution inode's digest + identity, and the resolved
+    // runtime read policy (profile version + a digest over every granted object's identity).
     let exec_digest = exec_obj
         .as_ref()
         .map(|o| o.digest.as_str().to_owned())
         .unwrap_or_default();
+    let exec_inode = exec_obj
+        .as_ref()
+        .map(|o| format!("{}:{}", o.inode_id.0, o.inode_id.1))
+        .unwrap_or_default();
     let runtime_profile = runtime
         .as_ref()
         .map(|r| r.profile_version.to_owned())
+        .unwrap_or_default();
+    let runtime_binding = runtime
+        .as_ref()
+        .and_then(|r| r.binding_digest())
+        .map(|d| d.as_str().to_owned())
         .unwrap_or_default();
 
     let (fd_ok, env_ok, placement) =
@@ -649,7 +673,9 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
         launch_spec_digest: ctx.bindings.launch_spec_digest.as_str().to_owned(),
         target_digest: ctx.bindings.target_digest.as_str().to_owned(),
         exec_digest,
+        exec_inode,
         runtime_profile,
+        runtime_binding,
         fs: fs_ok,
         net: net_ok,
         env: env_ok,
@@ -888,7 +914,9 @@ fn write_child_proof(pipe: RawFd, p: &ChildProof) -> Result<(), ()> {
     put_str(&mut buf, &p.launch_spec_digest);
     put_str(&mut buf, &p.target_digest);
     put_str(&mut buf, &p.exec_digest);
+    put_str(&mut buf, &p.exec_inode);
     put_str(&mut buf, &p.runtime_profile);
+    put_str(&mut buf, &p.runtime_binding);
     buf.extend_from_slice(&[
         u8::from(p.fs),
         u8::from(p.net),
@@ -926,7 +954,9 @@ fn read_child_proof(pipe: RawFd, child_pid: i32) -> Result<ChildProof, String> {
     let launch_spec_digest = r.string()?;
     let target_digest = r.string()?;
     let exec_digest = r.string()?;
+    let exec_inode = r.string()?;
     let runtime_profile = r.string()?;
+    let runtime_binding = r.string()?;
     let fs = r.u8()? == 1;
     let net = r.u8()? == 1;
     let env = r.u8()? == 1;
@@ -945,7 +975,9 @@ fn read_child_proof(pipe: RawFd, child_pid: i32) -> Result<ChildProof, String> {
         launch_spec_digest,
         target_digest,
         exec_digest,
+        exec_inode,
         runtime_profile,
+        runtime_binding,
         fs,
         net,
         env,
