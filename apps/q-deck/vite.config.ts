@@ -1,9 +1,26 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { VitePWA } from "vite-plugin-pwa";
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Without this, Vite/Vitest resolves Svelte's package `exports` via the
+  // default (non-browser) condition even under `environment: "jsdom"` —
+  // Vitest doesn't run in a real browser, so Vite has no other signal to
+  // prefer the client build, and picks Svelte's server-rendering build
+  // instead (whose `mount()` doesn't exist — SSR renders to a string, it
+  // doesn't mount to a DOM). `process.env.VITEST` is only set during a
+  // Vitest run, so `vite build`/`vite dev` are unaffected.
+  resolve: process.env.VITEST ? { conditions: ["browser"] } : undefined,
+  test: {
+    environment: "jsdom",
+    setupFiles: ["./src/setupTests.ts"],
+    // Rules out an in-source `.svelte.ts` test accidentally shipping to prod
+    // via the app's own dependency graph — Vitest sees `*.svelte.test.ts`/
+    // `*.test.ts` only, never bundled by the `build` script above.
+    include: ["src/**/*.test.ts"],
+  },
   plugins: [
     svelte(),
     VitePWA({
