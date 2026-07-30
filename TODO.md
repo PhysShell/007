@@ -28,6 +28,16 @@ Where we stopped + the exact next step. Updated 2026-07-02 (leaving for the day)
   couldn't have projected every sealed verdict without collapsing
   meaning). Vocabulary alignment only — the actual append-path wiring and
   id unification above remain the next slice, not R1 mutations.
+  **Q-Deck R0.7 (`docs/q-deck/r07-live-ingress.md`)** did that next
+  slice: `o7 run --ledger <path>` now projects its canonical events into
+  `o7-ledger` live, per event, as the run executes (new
+  `LiveLedgerProjector`); the id unification above is done too
+  (`create_run_with_id`, sharing the canonical `RunId` verbatim). No
+  ledger without the flag remains byte/semantics-unchanged. Real
+  process-level acceptance (`tests/live_ingress_e2e.rs`): actual `o7 run`
+  + `o7d` processes, REST/SSE visible before completion, daemon restart,
+  replay agreement, idempotent recovery retry, and a real SIGKILL
+  interruption proving `Interrupted`, never `Error`.
 - **`o7 judge`** — read-only FP-triage. **Verified working**: produced a
   contract-conforming `fp-verdicts.json` on the oracle with grounded reasoning.
 - Contract reconciled to the domain's source of truth:

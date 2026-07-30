@@ -228,3 +228,13 @@ every canonical verdict without collapsing meaning — is now closed. R0.6
 does not wire the producer either; it only makes the ledger/API/Q-Deck
 vocabulary capable of representing what a real producer would eventually
 need to say.
+
+**Update (R0.7, `docs/q-deck/r07-live-ingress.md`)**: this gap is now
+closed. `o7 run --ledger <path>` is that real producer — its canonical
+`RunEvent` stream is translated into `o7-ledger`'s `EventType` vocabulary
+live, per event, by a new `LiveLedgerProjector`, and a real process's
+lifecycle is wired into `start_run`/`create_attempt`/`complete_run`/etc.
+exactly as anticipated above. No changes were needed to `o7-run` itself
+beyond restructuring *when* its canonical events are minted (incrementally
+instead of in one post-hoc batch) — the reducer/verdict semantics this
+section worried about needing to change were untouched.
