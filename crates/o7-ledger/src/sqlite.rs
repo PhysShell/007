@@ -12,6 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 
 use crate::idempotency::{
     self, IdemOutcome, SCOPE_APPEND_USER_MESSAGE, SCOPE_CREATE_CONVERSATION, SCOPE_CREATE_RUN,
+    SCOPE_CREATE_RUN_WITH_ID,
 };
 use crate::migrations;
 use crate::models::{
@@ -231,7 +232,9 @@ impl SqliteLedger {
     }
 
     /// Create a run in `queued` state (and emit `run.created`). Optionally
-    /// idempotent under scope `create-run`.
+    /// idempotent under scope `create-run`. The ledger mints its own `RunId`
+    /// — for a run that must share an id with an external canonical stream,
+    /// see [`Self::create_run_with_id`].
     ///
     /// # Errors
     /// SQLite/foreign-key errors (e.g. unknown conversation); idempotency conflict.
@@ -240,11 +243,73 @@ impl SqliteLedger {
         request: NewRun,
         idempotency: Option<Idempotency>,
     ) -> Result<Run, LedgerError> {
+        // Unchanged from before create_run_with_id existed: the digest is
+        // computed over `request` alone, exactly as any already-persisted
+        // idempotency record for this scope was — a ledger file upgraded
+        // in place must keep replaying old create-run retries correctly.
         let request_digest = idempotency::digest_bytes(&serde_json::to_vec(&request)?);
+        self.create_run_inner(request, None, SCOPE_CREATE_RUN, idempotency, request_digest)
+            .await
+    }
+
+    /// Like [`Self::create_run`], but the run uses exactly `run_id` instead
+    /// of a ledger-generated one — for live-ingress projection (Q-Deck R0.7,
+    /// `docs/q-deck/r07-live-ingress.md`), where one physical run must carry
+    /// the same `RunId` in `o7-run`'s canonical stream and in the ledger.
+    ///
+    /// `idempotency` is mandatory here (unlike `create_run`'s optional one):
+    /// the natural, and required, idempotency key for this call is `run_id`
+    /// itself — a caller that retries after a crash between this insert and
+    /// its own bookkeeping must replay under the exact same key so a second
+    /// call for the same `run_id` returns the existing row (via the ordinary
+    /// idempotent-replay path) rather than hitting a raw `UNIQUE` constraint
+    /// error on the primary key.
+    ///
+    /// # Errors
+    /// SQLite/foreign-key errors (e.g. unknown conversation); idempotency
+    /// conflict (the same `idempotency.key` reused with a different request,
+    /// including a different `run_id` — this is what protects against a
+    /// caller ever using this call to secretly reassign an existing ledger
+    /// run to a different `RunId`).
+    pub async fn create_run_with_id(
+        &self,
+        request: NewRun,
+        run_id: crate::RunId,
+        idempotency: Idempotency,
+    ) -> Result<Run, LedgerError> {
+        // A new scope with no pre-existing persisted records, so this digest
+        // scheme (including run_id, unlike create_run's) is free to differ
+        // from create_run's without any upgrade-compatibility concern.
+        let digest_input = serde_json::json!({
+            "conversation_id": request.conversation_id.as_str(),
+            "parent_run_id": request.parent_run_id.as_ref().map(crate::RunId::as_str),
+            "agent": request.agent,
+            "role": request.role,
+            "run_id": run_id.as_str(),
+        });
+        let request_digest = idempotency::digest_bytes(&serde_json::to_vec(&digest_input)?);
+        self.create_run_inner(
+            request,
+            Some(run_id),
+            SCOPE_CREATE_RUN_WITH_ID,
+            Some(idempotency),
+            request_digest,
+        )
+        .await
+    }
+
+    async fn create_run_inner(
+        &self,
+        request: NewRun,
+        run_id: Option<crate::RunId>,
+        scope: &'static str,
+        idempotency: Option<Idempotency>,
+        request_digest: String,
+    ) -> Result<Run, LedgerError> {
         self.with_tx(move |tx| {
             if let Some(idem) = &idempotency {
                 if let IdemOutcome::Replayed(reference) =
-                    idempotency::check(tx, SCOPE_CREATE_RUN, &idem.key, &request_digest)?
+                    idempotency::check(tx, scope, &idem.key, &request_digest)?
                 {
                     return load_run(tx, &reference)?
                         .ok_or_else(|| LedgerError::NotFound(format!("run {reference}")));
@@ -252,7 +317,7 @@ impl SqliteLedger {
             }
             let now = now_millis();
             let run = Run {
-                run_id: crate::RunId::generate(),
+                run_id: run_id.clone().unwrap_or_else(crate::RunId::generate),
                 conversation_id: request.conversation_id.clone(),
                 parent_run_id: request.parent_run_id.clone(),
                 agent: request.agent.clone(),
@@ -290,7 +355,7 @@ impl SqliteLedger {
             if let Some(idem) = &idempotency {
                 idempotency::record(
                     tx,
-                    SCOPE_CREATE_RUN,
+                    scope,
                     &idem.key,
                     &request_digest,
                     run.run_id.as_str(),

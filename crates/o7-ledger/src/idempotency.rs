@@ -13,6 +13,11 @@ use crate::LedgerError;
 pub const SCOPE_CREATE_CONVERSATION: &str = "create-conversation";
 pub const SCOPE_CREATE_RUN: &str = "create-run";
 pub const SCOPE_APPEND_USER_MESSAGE: &str = "append-user-message";
+/// `SqliteLedger::create_run_with_id` (Q-Deck R0.7, live ingress) — distinct
+/// from `SCOPE_CREATE_RUN` because the idempotency key here is mandatory and
+/// caller-chosen (the shared `RunId` itself), not an arbitrary caller key
+/// under a ledger-generated id.
+pub const SCOPE_CREATE_RUN_WITH_ID: &str = "create-run-with-id";
 
 /// Lowercase hex SHA-256 of the canonical request bytes.
 #[must_use]
