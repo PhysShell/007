@@ -143,23 +143,24 @@ fn net_probe(marker: &str) -> i32 {
 /// FAIL-CLOSED count of INHERITED socket descriptors (`/proc/self/fd/<n>` → `socket:[...]`),
 /// excluding std streams. Any enumeration/parse/readlink error is a hard error, never a silent `0`
 /// — an error can never masquerade as "no inherited sockets".
+/// Count inherited SOCKET descriptors WITHOUT procfs: `fstat` each fd over a bounded range. A closed
+/// fd returns `EBADF` (skipped); an open one is a socket iff `S_ISSOCK`. This keeps the target-side
+/// fd oracle independent of any `/proc` authority — the confined target needs no procfs grant, only
+/// the ordinary runtime policy. The bound is generous: the launch child's final `close_range` leaves
+/// the target only {stdio, exec fd (CLOEXEC → closed on exec)}, so nothing survives above it anyway.
 fn count_inherited_sockets() -> io::Result<usize> {
+    use nix::sys::stat::{fstat, SFlag};
+    const FD_SCAN_MAX: i32 = 4096;
     let mut n = 0;
-    for entry in std::fs::read_dir("/proc/self/fd")? {
-        let entry = entry?;
-        let name = entry.file_name();
-        let fd = name
-            .to_str()
-            .and_then(|s| s.parse::<i32>().ok())
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "non-numeric fd entry"))?;
-        if fd <= 2 {
-            continue;
-        }
-        // The readdir handle itself resolves to the directory (not `socket:`), so it is naturally
-        // excluded from the socket count; any readlink error IS fatal.
-        let target = std::fs::read_link(entry.path())?;
-        if target.to_string_lossy().starts_with("socket:") {
-            n += 1;
+    for fd in 3..FD_SCAN_MAX {
+        match fstat(fd) {
+            Ok(st) => {
+                if SFlag::from_bits_truncate(st.st_mode) & SFlag::S_IFMT == SFlag::S_IFSOCK {
+                    n += 1;
+                }
+            }
+            Err(nix::errno::Errno::EBADF) => {} // a closed slot
+            Err(e) => return Err(io::Error::from_raw_os_error(e as i32)),
         }
     }
     Ok(n)

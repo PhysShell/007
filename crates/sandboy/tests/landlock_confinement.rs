@@ -203,51 +203,6 @@ fn writes_are_confined_to_the_worktree() {
 // --- execute restriction: BOTH directions ---
 
 #[test]
-#[ignore = "Vertical B: real Landlock execute restriction required; RED against the stand-in"]
-fn exec_of_a_non_allowed_binary_is_denied_by_the_kernel() {
-    if !require_or_skip() {
-        return;
-    }
-    let Some(touch) = touch_bin() else {
-        eprintln!("SKIP: no touch binary");
-        return;
-    };
-    let wt = tempfile::tempdir().unwrap();
-    let allow = tempfile::tempdir().unwrap(); // deliberately does NOT contain `touch`
-    let secondary = wt.path().join("escaped-exec");
-    let result = wt.path().join("exec.result");
-
-    let (code, res) = run_landlock(
-        &result,
-        RunOpts {
-            worktree: wt.path(),
-            outside_probe: None,
-            allow_exec: &[allow.path()],
-            fault: None,
-        },
-        &[
-            "exec",
-            &touch.to_string_lossy(),
-            &secondary.to_string_lossy(),
-        ],
-    );
-
-    assert_eq!(
-        code, 0,
-        "the confined harness itself exits 0; result: {res:?}"
-    );
-    assert_eq!(field(&res, "filesystem"), "enforced");
-    assert!(
-        !secondary.exists(),
-        "execve of a non-allowed binary must be DENIED; it ran (secondary marker present)"
-    );
-    assert!(
-        matches!(field(&res, "exec"), "ERR:13" | "ERR:1"),
-        "the denied exec must report EACCES/EPERM; result: {res:?}"
-    );
-}
-
-#[test]
 #[ignore = "Vertical B: real Landlock required; positive directory-rule exec"]
 fn an_allowed_directory_executable_runs_and_writes_inside_the_worktree() {
     if !require_or_skip() {
@@ -324,9 +279,27 @@ fn memfd_of(path: &Path, seal_full: bool) -> (File, PathBuf) {
     (file, proc_path)
 }
 
+// VB-4 authority-model correction: the following two VB-2 harness tests exec'd the TARGET directly
+// and asserted it was denied unless present in `allow_exec` — the old semantics where the launch
+// target was itself an `allow_exec` member. Under the corrected model the launch target is always the
+// sanctioned execution-object capability (a ruleable private inode), and `allow_exec` governs the
+// running target's SUBPROCESS execs. Those subprocess-denial properties (a non-allowlisted binary and
+// a writable-worktree binary must be denied when exec'd BY the target) now live in the o7-worker
+// confinement matrix, which runs a real target that attempts the sub-exec. Removed here:
+//   - exec_of_a_non_allowed_binary_is_denied_by_the_kernel
+//   - an_executable_inside_the_worktree_is_not_executable_unless_allowlisted
+
+// VB-4 authority-model correction (see docs/architecture/vb4-exec-authority-contract-correction.md):
+// a pathless anonymous `memfd` can NOT be a Landlock execution-rule object
+// (`landlock_add_rule` → EBADFD), so it is never offered to `install_filesystem` directly. In
+// production the sealed source memfd is materialized into a private, ruleable execution INODE (the
+// `staging` module) which IS the exec object. This harness therefore asserts the kernel truth: a
+// sealed memfd handed straight to `install_filesystem` as the execution object FAILS CLOSED at the
+// rule stage. (The positive "the sealed source's bytes execute under confinement" property now lives
+// in the o7-worker matrix via the staged private-inode path.)
 #[test]
-#[ignore = "Vertical B: real Landlock required; the frozen sealed /proc/<pid>/fd target contract"]
-fn a_sealed_proc_fd_target_in_allow_exec_executes_under_landlock() {
+#[ignore = "Vertical B / VB-4: a sealed memfd offered directly as a Landlock exec object fails closed"]
+fn a_sealed_memfd_offered_as_execution_object_fails_closed() {
     if !require_or_skip() {
         return;
     }
@@ -334,19 +307,16 @@ fn a_sealed_proc_fd_target_in_allow_exec_executes_under_landlock() {
         eprintln!("SKIP: no touch binary");
         return;
     };
-    // A LIVE fully-sealed memfd holding a real executable, kept alive for the run.
     let (_sealed, sealed_path) = memfd_of(&touch, true);
 
     let wt = tempfile::tempdir().unwrap();
-    // EXACTLY the frozen production policy shape: allow_exec CONTAINS the sealed target path itself,
-    // plus the loader/library roots; the launch target is that same sealed path.
     let mut roots = system_exec_roots();
     roots.push(sealed_path.clone());
     let allow: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
     let marker = wt.path().join("sealed-ran");
     let result = wt.path().join("exec.result");
 
-    let (code, res) = run_landlock(
+    let (_code, res) = run_landlock(
         &result,
         RunOpts {
             worktree: wt.path(),
@@ -361,23 +331,19 @@ fn a_sealed_proc_fd_target_in_allow_exec_executes_under_landlock() {
         ],
     );
 
-    assert_eq!(code, 0, "result: {res:?}");
-    // filesystem=enforced is only reported after the differential self-check observed an outside
-    // write DENIED and an inside write ALLOWED — so outside write/create/truncate remain denied for
-    // the confined sealed process, which inherits this exact ruleset.
     assert_eq!(
         field(&res, "filesystem"),
-        "enforced",
-        "the sealed target IN allow_exec must install confinement (it is the detached exception); result: {res:?}"
+        "not_enforced",
+        "a sealed memfd offered as the Landlock exec object must fail closed (EBADFD); result: {res:?}"
     );
     assert_eq!(
-        field(&res, "exec"),
-        "OK",
-        "the sealed memfd named in allow_exec must EXECUTE under Landlock; result: {res:?}"
+        field(&res, "stage"),
+        "add_rule",
+        "the failure must be at the rule-attach stage (anonymous inode is unruleable); result: {res:?}"
     );
     assert!(
-        marker.exists(),
-        "the sealed executable must run and write its marker"
+        !marker.exists(),
+        "no target may run once install fails closed"
     );
 }
 
@@ -461,50 +427,6 @@ fn a_sealed_memfd_allowance_that_is_not_the_launch_target_fails_closed() {
     assert!(
         !marker.exists(),
         "the target must not run when install failed closed"
-    );
-}
-
-#[test]
-#[ignore = "Vertical B: real Landlock required; the writable worktree must NOT be an executable root"]
-fn an_executable_inside_the_worktree_is_not_executable_unless_allowlisted() {
-    if !require_or_skip() {
-        return;
-    }
-    let Some(touch) = touch_bin() else {
-        eprintln!("SKIP: no touch binary");
-        return;
-    };
-    let wt = tempfile::tempdir().unwrap();
-    // A REAL runnable executable copied INTO the writable worktree (mode preserved by copy).
-    let evil = wt.path().join("evil");
-    std::fs::copy(&touch, &evil).unwrap();
-    let marker = wt.path().join("pwned");
-    // Allow the system roots (so the ONLY thing missing is an exec grant for the worktree binary).
-    let roots = system_exec_roots();
-    let allow: Vec<&Path> = roots.iter().map(PathBuf::as_path).collect();
-    let result = wt.path().join("exec.result");
-
-    let (code, res) = run_landlock(
-        &result,
-        RunOpts {
-            worktree: wt.path(),
-            outside_probe: None,
-            allow_exec: &allow,
-            fault: None,
-        },
-        &["exec", &evil.to_string_lossy(), &marker.to_string_lossy()],
-    );
-
-    assert_eq!(code, 0, "result: {res:?}");
-    assert_eq!(field(&res, "filesystem"), "enforced");
-    assert!(
-        matches!(field(&res, "exec"), "ERR:13" | "ERR:1"),
-        "an executable in the WRITABLE worktree must NOT be kernel-executable when absent from \
-         allow_exec; result: {res:?}"
-    );
-    assert!(
-        !marker.exists(),
-        "the worktree executable RAN despite not being allow-listed — writable became executable"
     );
 }
 

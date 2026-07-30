@@ -39,7 +39,9 @@ use o7_sandbox_protocol::policy::{NetworkPolicy, SandboxPolicy};
 mod cgroup;
 mod landlock;
 mod launch;
+mod runtime;
 mod seccomp;
+mod staging;
 
 /// Exit codes. Distinct per fail-closed reason so a test (and an operator) can tell WHICH gate
 /// refused. All are non-zero except a clean bootstrap has no success exit — the backend only ever

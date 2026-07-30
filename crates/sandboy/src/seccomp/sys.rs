@@ -20,6 +20,7 @@ fn last_errno() -> i32 {
     io::Error::last_os_error().raw_os_error().unwrap_or(0)
 }
 
+#[cfg(feature = "test-harness")]
 fn set_errno(v: i32) {
     // SAFETY: `__errno_location` returns a valid, thread-local pointer to this thread's errno.
     let loc = unsafe { libc::__errno_location() };
@@ -199,15 +200,6 @@ pub(crate) fn write_fd(fd: RawFd, buf: &[u8]) -> Result<usize, i32> {
     }
 }
 
-/// Borrow an existing fd as a `File` WITHOUT owning it — its `Drop` never closes the fd (wrapped in
-/// `ManuallyDrop`). Used to hand the inherited sealed-target fd to Landlock's install (which fstats +
-/// reads its seals) while the launch child keeps the fd for its `execveat`.
-pub(crate) fn borrow_fd_as_file(fd: RawFd) -> std::mem::ManuallyDrop<std::fs::File> {
-    use std::os::fd::FromRawFd as _;
-    // SAFETY: `fd` is an open fd owned elsewhere; ManuallyDrop ensures this `File` never closes it.
-    std::mem::ManuallyDrop::new(unsafe { std::fs::File::from_raw_fd(fd) })
-}
-
 /// `dup2(old, new)` — used by the launch child to place `/dev/null` on the target's stdin.
 pub(crate) fn dup2_fd(old: RawFd, new: RawFd) -> Result<(), i32> {
     // SAFETY: dup2 with two integer fds; returns the new fd or -1/errno.
@@ -257,12 +249,28 @@ pub(crate) fn set_no_new_privs() -> Result<(), i32> {
     }
 }
 
-/// Whether `fd` is currently open (`fcntl(fd, F_GETFD) != -1`).
-#[cfg(feature = "test-harness")]
+/// Whether `fd` is currently open (`fcntl(fd, F_GETFD) != -1`). Filesystem-free — unlike
+/// `/proc/self/fd` enumeration, it keeps working AFTER Landlock has restricted path access, so the
+/// child's fd ledger can be verified between confinement install and `execveat`.
 pub(crate) fn fd_is_open(fd: RawFd) -> bool {
     // SAFETY: F_GETFD reads the fd flags of `fd`; it takes no pointer args and returns -1/EBADF for a
     // closed fd.
     unsafe { libc::fcntl(fd, libc::F_GETFD) != -1 }
+}
+
+/// Close EVERY open descriptor numbered `first` or higher in a single `close_range(2)` syscall
+/// (Linux 5.9+). Filesystem-free, so it survives Landlock; it lets the child collapse the entire
+/// high fd space with one call, leaving only a small bounded range to enumerate for the ledger.
+pub(crate) fn close_range_from(first: RawFd) -> Result<(), i32> {
+    let lo = first.max(0) as libc::c_uint;
+    // SAFETY: close_range(2) takes two unsigned fd bounds and a flags int, no pointers; returns 0 or
+    // -1/errno. `~0u32` is the documented "up to the highest possible fd" sentinel.
+    let r = unsafe { libc::syscall(libc::SYS_close_range, lo, libc::c_uint::MAX, 0) };
+    if r == 0 {
+        Ok(())
+    } else {
+        Err(last_errno())
+    }
 }
 
 /// Whether `fd` refers to a socket (`fstat` → `S_ISSOCK`). Used by a child to prove it inherited no
@@ -289,6 +297,7 @@ pub(crate) fn close_fd(fd: RawFd) -> Result<(), i32> {
 /// Enumerate every open fd of this process from `/proc/self/fd`, EXCLUDING the directory stream's own
 /// fd. FAIL-CLOSED: a directory-open failure, a readdir error, or a non-numeric entry (other than
 /// `.`/`..`) is an `Err(errno)`, never a silently-dropped entry.
+#[cfg(feature = "test-harness")]
 pub(crate) fn list_fds() -> Result<Vec<RawFd>, i32> {
     // SAFETY: opendir on a valid, static NUL-terminated path; returns a DIR* or NULL/errno.
     let dir = unsafe { libc::opendir(c"/proc/self/fd".as_ptr()) };

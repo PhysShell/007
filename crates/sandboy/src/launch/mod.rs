@@ -19,7 +19,7 @@ use std::fs::File;
 use std::io::{Read as _, Write as _};
 use std::net::Shutdown;
 use std::os::fd::{AsRawFd as _, RawFd};
-use std::os::unix::ffi::OsStringExt as _;
+use std::os::unix::ffi::{OsStrExt as _, OsStringExt as _};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -63,6 +63,12 @@ impl Faults {
     pub(crate) fn cgroup(&self) -> crate::cgroup::Faults {
         crate::cgroup::Faults::default()
     }
+    pub(crate) fn staging(&self) -> crate::staging::Faults {
+        crate::staging::Faults::default()
+    }
+    pub(crate) fn runtime(&self) -> crate::runtime::Faults {
+        crate::runtime::Faults::default()
+    }
 }
 
 /// Fault trip point. In production this expands to NOTHING (no fault-point name in the binary); under
@@ -100,6 +106,11 @@ struct ChildProof {
     policy_digest: String,
     launch_spec_digest: String,
     target_digest: String,
+    /// Digest of the PRIVATE EXECUTION INODE the child actually `execveat`s — proven equal to the
+    /// sealed source and bound here so the monitor confirms it matches the launch-spec target digest.
+    exec_digest: String,
+    /// The versioned runtime profile the child resolved + applied (audit binding).
+    runtime_profile: String,
     fs: bool,
     net: bool,
     env: bool,
@@ -149,7 +160,10 @@ impl VerifiedLaunchPlan {
         let bindings_match = child.nonce_hex == bindings.launch_nonce.as_str()
             && child.policy_digest == bindings.policy_digest.as_str()
             && child.launch_spec_digest == bindings.launch_spec_digest.as_str()
-            && child.target_digest == bindings.target_digest.as_str();
+            && child.target_digest == bindings.target_digest.as_str()
+            // The PRIVATE EXECUTION INODE the child ran must carry the exact launch-spec target
+            // digest — the object-capability is bound to the approved bytes, not merely "some memfd".
+            && child.exec_digest == bindings.target_digest.as_str();
         let child_ok = child.ok && bindings_match;
         // process_tree needs BOTH the child's inherited placement AND the monitor's independent
         // observation that the child sits in the monitor-owned leaf.
@@ -290,6 +304,7 @@ pub(crate) fn run_confined_launch(
             bindings: &bindings,
             leaf_path: leaf.path().to_owned(),
             target_fd,
+            target_path,
             sock_fd,
             proof_w,
             release_r,
@@ -402,10 +417,17 @@ fn report_and_run(ctx: &mut MonitorCtx<'_>, plan: VerifiedLaunchPlan) -> i32 {
     } else {
         return teardown_and(ctx.leaf, ctx.faults, exit::PLUMBING, "release");
     }
+    // Close the monitor's release-WRITE end NOW: the child, after taking the single token, reads once
+    // more and requires EOF (a one-shot channel — nothing may follow). That EOF only arrives once the
+    // last writer closes, so without this the child blocks forever and the target never `execveat`s.
+    let _ = seccomp::close_fd(ctx.release_w);
+    let _t_sup = Instant::now();
     let target_status = supervise(ctx.child_pid, ctx.deadline_at);
 
     // 7. Teardown DOMINATES.
-    match ctx.leaf.teardown(DRAIN_BOUND, ctx.faults.cgroup()) {
+    let _t_td = Instant::now();
+    let _r = ctx.leaf.teardown(DRAIN_BOUND, ctx.faults.cgroup());
+    match _r {
         Ok(()) => target_status,
         Err(e) => {
             eprintln!(
@@ -453,6 +475,8 @@ fn forced_downgrade(
         policy_digest: String::new(),
         launch_spec_digest: String::new(),
         target_digest: String::new(),
+        exec_digest: String::new(),
+        runtime_profile: String::new(),
         fs: false,
         net: false,
         env: false,
@@ -504,6 +528,7 @@ struct ChildCtx<'a> {
     bindings: &'a Bindings,
     leaf_path: String,
     target_fd: RawFd,
+    target_path: &'a Path,
     sock_fd: RawFd,
     proof_w: RawFd,
     release_r: RawFd,
@@ -516,7 +541,7 @@ struct ChildCtx<'a> {
 /// `execveat`. On any failure it signals the stage and `_exit`s; the monitor tears the cgroup down.
 fn launch_child(ctx: ChildCtx<'_>) -> i32 {
     // A) Close the monitor-only ends we inherited (proof-READ, release-WRITE, control socket), and put
-    //    /dev/null on stdin. The full scrub (step E) closes anything else.
+    //    /dev/null on stdin. The full scrub (step G) closes anything else.
     for fd in ctx.close_first {
         let _ = seccomp::close_fd(fd);
     }
@@ -525,35 +550,94 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
         let _ = seccomp::dup2_fd(devnull.as_raw_fd(), 0);
     }
 
-    // B) chdir to the launch-spec cwd BEFORE Landlock (afterwards the path may be unreachable).
+    // B) chdir to the launch-spec cwd BEFORE confinement (afterwards the path may be unreachable).
     let cwd = std::path::PathBuf::from(std::ffi::OsString::from_vec(ctx.request.cwd.clone()));
     let _ = std::env::set_current_dir(&cwd);
 
-    // C) Landlock filesystem confinement + effect-check. A `landlock_*` fault is injected THROUGH the
-    //    real install (via `faults.landlock()`), so the genuine install fails at that exact stage.
-    let fs_ok = install_landlock(&ctx);
-
-    // D) Build the target argv + env from the launch SPEC (never the inherited backend env).
-    let (argv, envp, env_built) = build_argv_envp(&ctx);
-
-    // E) Fail-closed fd scrub + ledger: only stdio + target fd + proof-write + release-read may remain.
-    let keep = [0, 1, 2, ctx.target_fd, ctx.proof_w, ctx.release_r];
-    let fd_built = scrub_and_verify(&keep);
-
-    // F) seccomp network/process deny + effect-check. A `seccomp_*` fault is injected THROUGH the real
-    //    install (via `faults.seccomp()`).
-    let net_ok = install_seccomp_checked(&ctx);
-
-    // G) Prove placement in the monitor-owned leaf.
+    // B') Read our OWN cgroup placement NOW — inherited from the monitor's leaf; `/proc/self/cgroup`
+    //     becomes unreadable once Landlock restricts paths.
     let cgroup_path = crate::cgroup::cgroup_path_of(std::process::id() as i32).unwrap_or_default();
     let placement_built = cgroup_path == ctx.leaf_path;
 
-    // The launch-level dimension faults (fd/env/cgroup-verify) override the proven flag, so the child
-    // reports the dimension NOT enforced and the monitor's report is downgraded.
+    // C) Read the sealed source bytes ONCE (pre-confinement): used both to materialize the private
+    //    execution object and to parse the target ELF for the runtime read policy.
+    let source = std::fs::read(format!("/proc/self/fd/{}", ctx.target_fd)).unwrap_or_default();
+
+    // D) Materialize the PRIVATE, RULEABLE EXECUTION OBJECT (userns → private tmpfs → O_TMPFILE →
+    //    exact copy → digest recheck → close writers → non-dumpable). Its bytes are proven EQUAL to
+    //    the sealed source AND to hash to the launch-spec target digest. Landlock cannot authorize a
+    //    pathless `memfd` narrowly, so we run an object of the kind it CAN control.
+    let exec_obj = match crate::staging::materialize(
+        &source,
+        &ctx.bindings.target_digest,
+        &ctx.faults.staging(),
+    ) {
+        Ok(o) => Some(o),
+        Err(e) => {
+            eprintln!("sandboy: private execution object failed: {e}");
+            None
+        }
+    };
+    // The sealed source memfd is no longer needed — its bytes now live in the execution inode.
+    let _ = seccomp::close_fd(ctx.target_fd);
+
+    // E) Resolve the RUNTIME read policy (interpreter + library roots) from the target ELF against the
+    //    versioned platform profile — a separate authority class from `allow_exec`.
+    let runtime = match crate::runtime::resolve(
+        &source,
+        &crate::runtime::PROFILE_V1,
+        &ctx.faults.runtime(),
+    ) {
+        Ok(r) => Some(r),
+        Err(e) => {
+            eprintln!("sandboy: runtime policy unresolved: {e}");
+            None
+        }
+    };
+    drop(source);
+
+    // F) Build the target argv + env from the launch SPEC, sanitizing dynamic-linker controls.
+    let (argv, envp, env_built) = build_argv_envp(&ctx, runtime.as_ref());
+
+    // G) Fail-closed fd scrub + ledger BEFORE confinement: only stdio + exec fd + rule fd +
+    //    proof-write + release-read may remain.
+    let (exec_fd, rule_fd) = match &exec_obj {
+        Some(o) => (o.exec_fd, o.rule_fd),
+        None => (-1, -1),
+    };
+    let fd_built = if exec_obj.is_some() {
+        scrub_and_verify(&[0, 1, 2, exec_fd, rule_fd, ctx.proof_w, ctx.release_r])
+    } else {
+        false
+    };
+
+    // H) Landlock: rule the private execution inode + `allow_exec` + the runtime read policy, then
+    //    restrict. Close the `O_PATH` rule fd afterwards — it must not reach the target.
+    let fs_ok = match (&exec_obj, &runtime) {
+        (Some(o), Some(rt)) => install_landlock(&ctx, o.rule_fd, rt),
+        _ => false,
+    };
+    if rule_fd >= 0 {
+        let _ = seccomp::close_fd(rule_fd);
+    }
+
+    // I) seccomp network/process deny + effect-check.
+    let net_ok = install_seccomp_checked(&ctx);
+
+    // Identity bindings the child proves: the execution inode's digest and the runtime profile.
+    let exec_digest = exec_obj
+        .as_ref()
+        .map(|o| o.digest.as_str().to_owned())
+        .unwrap_or_default();
+    let runtime_profile = runtime
+        .as_ref()
+        .map(|r| r.profile_version.to_owned())
+        .unwrap_or_default();
+
     let (fd_ok, env_ok, placement) =
         apply_launch_faults(ctx.faults, fd_built, env_built, placement_built);
 
-    // H) READY_TO_EXEC — one immutable record.
+    // J) READY_TO_EXEC — one immutable record.
     let all_ok = fs_ok && net_ok && env_ok && fd_ok && placement;
     let proof = ChildProof {
         ok: all_ok,
@@ -564,6 +648,8 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
         policy_digest: ctx.bindings.policy_digest.as_str().to_owned(),
         launch_spec_digest: ctx.bindings.launch_spec_digest.as_str().to_owned(),
         target_digest: ctx.bindings.target_digest.as_str().to_owned(),
+        exec_digest,
+        runtime_profile,
         fs: fs_ok,
         net: net_ok,
         env: env_ok,
@@ -575,7 +661,7 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
         seccomp::exit_now(90);
     }
 
-    // I) Block on the one-shot release token (reject extra bytes).
+    // K) Block on the one-shot release token (reject extra bytes).
     let mut token = [0u8; 1];
     match seccomp::read_fd(ctx.release_r, &mut token) {
         Ok(1) if token[0] == b'G' => {}
@@ -585,14 +671,15 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
         seccomp::exit_now(91); // a one-shot channel: nothing may follow the single token
     }
 
-    // J) Close proof + release fds; the final ledger must be ONLY {stdio, target fd}.
+    // L) Close proof + release fds, then re-scrub: the final fd set the target inherits must be
+    //    EXACTLY {stdio, private execution fd}.
     let _ = seccomp::close_fd(ctx.proof_w);
     let _ = seccomp::close_fd(ctx.release_r);
-    if !verify_ledger(&[0, 1, 2, ctx.target_fd]) {
+    if !scrub_and_verify(&[0, 1, 2, exec_fd]) {
         seccomp::exit_now(92);
     }
 
-    // K) Become the target.
+    // M) Become the target: `execveat` the read-only private execution inode.
     trip!(ctx.faults, Execveat, seccomp::exit_now(93));
     let argv_ptrs: Vec<*const libc::c_char> = argv
         .iter()
@@ -604,7 +691,7 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
         .map(|c| c.as_ptr())
         .chain(std::iter::once(std::ptr::null()))
         .collect();
-    let e = crate::landlock::execveat_replace(ctx.target_fd, &argv_ptrs, &envp_ptrs);
+    let e = crate::landlock::execveat_replace(exec_fd, &argv_ptrs, &envp_ptrs);
     eprintln!("sandboy: execveat failed: {e}");
     seccomp::exit_now(93)
 }
@@ -652,16 +739,20 @@ fn apply_launch_faults(
     (fd, env, placement)
 }
 
-/// Install Landlock for the worktree + allow_exec, treating the inherited sealed target fd as the
-/// detached-exception launch target. Returns whether the install was proven.
-fn install_landlock(ctx: &ChildCtx<'_>) -> bool {
-    let allow = ctx.policy.allow_exec.clone();
-    let target = seccomp::borrow_fd_as_file(ctx.target_fd);
+/// Install Landlock for the worktree + `allow_exec` + the private execution object (`rule_fd`, its
+/// `O_PATH`) + the runtime read policy, then restrict + differentially self-check. Returns whether the
+/// install was proven.
+fn install_landlock(
+    ctx: &ChildCtx<'_>,
+    rule_fd: RawFd,
+    runtime: &crate::runtime::RuntimePolicy,
+) -> bool {
     match crate::landlock::install_filesystem(
         &ctx.policy.worktree,
-        &allow,
+        &ctx.policy.allow_exec,
         std::env::temp_dir().as_path(),
-        Some(&target),
+        Some(rule_fd),
+        runtime,
         ctx.faults.landlock(),
     ) {
         Ok(()) => true,
@@ -673,6 +764,9 @@ fn install_landlock(ctx: &ChildCtx<'_>) -> bool {
 }
 
 fn install_seccomp_checked(ctx: &ChildCtx<'_>) -> bool {
+    // NO blanket `execve` deny: exec confinement is Landlock's job (the narrow path allowlist +
+    // the exact execution-object rule), so legitimate `allow_exec` subprocesses (`/bin/dash`,
+    // `/bin/sleep`) still run while a non-allowed path exec is kernel-denied.
     match seccomp::install_seccomp(ctx.faults.seccomp()) {
         Ok(()) => seccomp::network_is_denied(),
         Err(e) => {
@@ -683,17 +777,41 @@ fn install_seccomp_checked(ctx: &ChildCtx<'_>) -> bool {
 }
 
 /// Build the target's argv + envp as C strings from the launch specification, validating env names
-/// against the policy allowlist. `env_ok` is false if any name is not allowlisted.
-fn build_argv_envp(ctx: &ChildCtx<'_>) -> (Vec<CString>, Vec<CString>, bool) {
-    let argv: Vec<CString> = ctx
-        .request
-        .argv
-        .iter()
-        .filter_map(|a| CString::new(a.clone()).ok())
+/// against the policy allowlist AND stripping dynamic-linker control variables the runtime profile
+/// forbids (`LD_PRELOAD`, `LD_LIBRARY_PATH`, …) so they can never reach the target. `env_ok` is false
+/// if any spec name is not allowlisted.
+fn build_argv_envp(
+    ctx: &ChildCtx<'_>,
+    runtime: Option<&crate::runtime::RuntimePolicy>,
+) -> (Vec<CString>, Vec<CString>, bool) {
+    // `request.argv` carries the target's arguments as argv[1..]; the conventional program-name
+    // argv[0] is synthesized here from the sealed target descriptor path (matching the reference
+    // launcher, which sets argv[0] via `Command::new(target)`), then the request args follow.
+    let argv0 = CString::new(ctx.target_path.as_os_str().as_bytes()).ok();
+    let argv: Vec<CString> = argv0
+        .into_iter()
+        .chain(
+            ctx.request
+                .argv
+                .iter()
+                .filter_map(|a| CString::new(a.clone()).ok()),
+        )
         .collect();
+    let empty = Vec::new();
+    let forbidden: &[Vec<u8>] = runtime
+        .map(|r| r.forbidden_env.as_slice())
+        .unwrap_or(&empty);
     let mut env_ok = true;
     let mut envp = Vec::new();
     for entry in &ctx.request.env {
+        // Strip any dynamic-linker control variable the profile forbids — it never reaches the
+        // target, whatever the allowlist says.
+        if forbidden
+            .iter()
+            .any(|f| f.as_slice() == entry.name.as_slice())
+        {
+            continue;
+        }
         let allowed = ctx
             .policy
             .env_allowlist
@@ -714,32 +832,43 @@ fn build_argv_envp(ctx: &ChildCtx<'_>) -> (Vec<CString>, Vec<CString>, bool) {
     (argv, envp, env_ok)
 }
 
-/// Close every open fd not in `keep`, then independently re-enumerate and require only keep-fds
-/// survive AND that no socket descriptor was inherited.
+/// Close every open fd not in `keep`, then independently re-verify the ledger. The enumeration is
+/// FILESYSTEM-FREE (`close_range` + `fcntl`), so — unlike `/proc/self/fd` — it keeps working after
+/// Landlock has restricted path access, which is exactly where the child scrubs (post-confinement,
+/// pre-`execveat`). One `close_range` collapses the whole high fd space above the highest kept fd;
+/// the few remaining low fds are closed individually.
 fn scrub_and_verify(keep: &[RawFd]) -> bool {
-    let Ok(fds) = seccomp::list_fds() else {
+    let keep_max = keep.iter().copied().max().unwrap_or(2);
+    // Collapse EVERYTHING above the highest kept fd in one syscall. After this, nothing numbered
+    // above `keep_max` can be open, which is what makes the bounded ledger scan below complete.
+    if seccomp::close_range_from(keep_max + 1).is_err() {
         return false;
-    };
-    for fd in fds {
-        if fd >= 0 && !keep.contains(&fd) {
+    }
+    for fd in 0..=keep_max {
+        if !keep.contains(&fd) {
             let _ = seccomp::close_fd(fd);
         }
     }
-    if !verify_ledger(keep) {
-        return false;
-    }
-    match seccomp::list_fds() {
-        Ok(remaining) => !remaining.iter().any(|&fd| seccomp::fd_is_socket(fd)),
-        Err(_) => false,
-    }
+    verify_ledger(keep)
 }
 
-/// The fd ledger as an executable contract: the open fd set must be a subset of `allowed`.
+/// The fd ledger as an executable contract: the open fd set must equal EXACTLY `allowed` — every
+/// allowed fd is open, no other fd is, and none of them is a socket. Relies on the caller having
+/// `close_range`d everything above `max(allowed)` (so a bounded `0..=max` scan is a COMPLETE census,
+/// no `/proc` needed).
 fn verify_ledger(allowed: &[RawFd]) -> bool {
-    match seccomp::list_fds() {
-        Ok(fds) => fds.iter().all(|fd| allowed.contains(fd)),
-        Err(_) => false,
+    let scan_max = allowed.iter().copied().max().unwrap_or(2);
+    for fd in 0..=scan_max {
+        let open = seccomp::fd_is_open(fd);
+        // A stray fd (open but not allowed) OR a required fd that vanished — both fail closed.
+        if open != allowed.contains(&fd) {
+            return false;
+        }
+        if open && seccomp::fd_is_socket(fd) {
+            return false;
+        }
     }
+    true
 }
 
 // ---- READY_TO_EXEC serialization (in-process, our code on both ends) ----------------------------
@@ -758,6 +887,8 @@ fn write_child_proof(pipe: RawFd, p: &ChildProof) -> Result<(), ()> {
     put_str(&mut buf, &p.policy_digest);
     put_str(&mut buf, &p.launch_spec_digest);
     put_str(&mut buf, &p.target_digest);
+    put_str(&mut buf, &p.exec_digest);
+    put_str(&mut buf, &p.runtime_profile);
     buf.extend_from_slice(&[
         u8::from(p.fs),
         u8::from(p.net),
@@ -794,6 +925,8 @@ fn read_child_proof(pipe: RawFd, child_pid: i32) -> Result<ChildProof, String> {
     let policy_digest = r.string()?;
     let launch_spec_digest = r.string()?;
     let target_digest = r.string()?;
+    let exec_digest = r.string()?;
+    let runtime_profile = r.string()?;
     let fs = r.u8()? == 1;
     let net = r.u8()? == 1;
     let env = r.u8()? == 1;
@@ -811,6 +944,8 @@ fn read_child_proof(pipe: RawFd, child_pid: i32) -> Result<ChildProof, String> {
         policy_digest,
         launch_spec_digest,
         target_digest,
+        exec_digest,
+        runtime_profile,
         fs,
         net,
         env,

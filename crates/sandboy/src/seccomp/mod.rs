@@ -21,7 +21,7 @@ mod sys;
 // The process/fd raw primitives the VB-4 launch state machine drives from safe code (their `unsafe`
 // lives in `sys`). Re-exported at `crate::seccomp::*` so `launch` needs no new unsafe location.
 pub(crate) use sys::{
-    borrow_fd_as_file, close_fd, dup2_fd, exit_now, fd_is_socket, fork_raw, list_fds,
+    close_fd, close_range_from, dup2_fd, exit_now, fd_is_open, fd_is_socket, fork_raw,
     make_pipe_cloexec, read_fd, try_wait, write_fd, ForkResult,
 };
 

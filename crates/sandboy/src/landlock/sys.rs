@@ -252,24 +252,6 @@ pub(crate) fn spawn_via_execveat(
     cmd.spawn()
 }
 
-/// The seal set that marks a fully-sealed memfd launch image: write + grow + shrink + seal. Only a
-/// genuine sealed memfd carries all four; a normal file returns EINVAL or a partial set.
-pub(crate) const FULL_SEALS: i32 =
-    libc::F_SEAL_WRITE | libc::F_SEAL_GROW | libc::F_SEAL_SHRINK | libc::F_SEAL_SEAL;
-
-/// Read the file seals on `fd` (`F_GET_SEALS`) — used to identify a fully-sealed memfd launch target
-/// from the OPENED fd, never from pathname text. Errors if the object does not support sealing.
-pub(crate) fn get_seals(fd: RawFd) -> io::Result<i32> {
-    // SAFETY: F_GET_SEALS takes no pointer arguments and returns the seal bitmask of a sealable fd,
-    // or -1 with errno set (e.g. EINVAL for a non-sealable object).
-    let ret = unsafe { libc::fcntl(fd, libc::F_GET_SEALS) };
-    if ret < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(ret)
-    }
-}
-
 /// `prctl(PR_SET_NO_NEW_PRIVS, 1)` — a prerequisite for `restrict_self` without `CAP_SYS_ADMIN`.
 pub(crate) fn set_no_new_privs() -> io::Result<()> {
     // SAFETY: `PR_SET_NO_NEW_PRIVS` sets a boolean thread flag; the trailing args are ignored and no

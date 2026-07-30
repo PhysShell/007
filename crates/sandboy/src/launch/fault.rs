@@ -32,6 +32,23 @@ pub(crate) enum FaultId {
     SeccompNoNewPrivs,
     SeccompApply,
     SeccompSelfCheck,
+    // private execution object (staging)
+    TargetNamespace,
+    TargetMount,
+    TargetTmpfile,
+    TargetCopy,
+    TargetDigest,
+    TargetCloseWriter,
+    TargetIdentity,
+    TargetLandlockRule,
+    TargetProcIsolation,
+    // runtime read policy
+    RuntimeProfile,
+    RuntimeInterpreter,
+    RuntimeObjectOpen,
+    RuntimeIdentity,
+    RuntimeRule,
+    RuntimePreloadCheck,
     // protocol (monitor/child)
     ReadyWrite,
     ReadyValidate,
@@ -55,6 +72,21 @@ impl FaultId {
             "seccomp_no_new_privs" => FaultId::SeccompNoNewPrivs,
             "seccomp_apply" => FaultId::SeccompApply,
             "seccomp_self_check" => FaultId::SeccompSelfCheck,
+            "target_namespace" => FaultId::TargetNamespace,
+            "target_mount" => FaultId::TargetMount,
+            "target_tmpfile" => FaultId::TargetTmpfile,
+            "target_copy" => FaultId::TargetCopy,
+            "target_digest" => FaultId::TargetDigest,
+            "target_close_writer" => FaultId::TargetCloseWriter,
+            "target_identity" => FaultId::TargetIdentity,
+            "target_landlock_rule" => FaultId::TargetLandlockRule,
+            "target_proc_isolation" => FaultId::TargetProcIsolation,
+            "runtime_profile" => FaultId::RuntimeProfile,
+            "runtime_interpreter" => FaultId::RuntimeInterpreter,
+            "runtime_object_open" => FaultId::RuntimeObjectOpen,
+            "runtime_identity" => FaultId::RuntimeIdentity,
+            "runtime_rule" => FaultId::RuntimeRule,
+            "runtime_preload_check" => FaultId::RuntimePreloadCheck,
             "ready_write" => FaultId::ReadyWrite,
             "ready_validate" => FaultId::ReadyValidate,
             "release" => FaultId::Release,
@@ -114,9 +146,40 @@ impl Faults {
             Some(FaultId::LandlockAddRule) => f.add_rule = true,
             Some(FaultId::LandlockRestrict) => f.restrict_self = true,
             Some(FaultId::LandlockSelfCheck) => f.selfcheck_outside_notdenied = true,
+            // The execution-object + runtime-object install faults live in `install_filesystem` too.
+            Some(FaultId::TargetLandlockRule) => f.exec_object_rule = true,
+            Some(FaultId::RuntimeObjectOpen) => f.runtime_open = true,
+            Some(FaultId::RuntimeIdentity) => f.runtime_open = true,
+            Some(FaultId::RuntimeRule) => f.runtime_rule = true,
             _ => {}
         }
         f
+    }
+
+    /// Map a staging fault to the private-execution-object module's forced-failure stage.
+    pub(crate) fn staging(&self) -> crate::staging::Faults {
+        use crate::staging::Stage;
+        let fail_at = match self.id {
+            Some(FaultId::TargetNamespace) => Some(Stage::Namespace),
+            Some(FaultId::TargetMount) => Some(Stage::MountTmpfs),
+            Some(FaultId::TargetTmpfile) => Some(Stage::Tmpfile),
+            Some(FaultId::TargetCopy) => Some(Stage::Copy),
+            Some(FaultId::TargetDigest) => Some(Stage::Digest),
+            Some(FaultId::TargetCloseWriter) => Some(Stage::CloseWriter),
+            Some(FaultId::TargetIdentity) => Some(Stage::Reopen),
+            Some(FaultId::TargetProcIsolation) => Some(Stage::ProcIsolation),
+            _ => None,
+        };
+        crate::staging::Faults { fail_at }
+    }
+
+    /// Map a runtime-resolution fault to the runtime module's forced-failure knob.
+    pub(crate) fn runtime(&self) -> crate::runtime::Faults {
+        crate::runtime::Faults {
+            fail_profile: self.id == Some(FaultId::RuntimeProfile),
+            fail_interpreter: self.id == Some(FaultId::RuntimeInterpreter),
+            fail_preload: self.id == Some(FaultId::RuntimePreloadCheck),
+        }
     }
 
     pub(crate) fn seccomp(&self) -> crate::seccomp::Fault {

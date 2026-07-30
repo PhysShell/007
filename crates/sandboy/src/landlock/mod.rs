@@ -28,7 +28,7 @@ pub(crate) use sys::execveat_replace;
 
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write as _};
-use std::os::fd::AsRawFd as _;
+use std::os::fd::{AsRawFd as _, RawFd};
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -190,6 +190,12 @@ pub(crate) struct Faults {
     pub(crate) no_new_privs: bool,
     pub(crate) restrict_self: bool,
     pub(crate) selfcheck_outside_notdenied: bool,
+    /// VB-4: force the private execution-object rule attach to fail.
+    pub(crate) exec_object_rule: bool,
+    /// VB-4: force a runtime read-object open (interpreter / library root) to fail.
+    pub(crate) runtime_open: bool,
+    /// VB-4: force a runtime read-object rule attach to fail.
+    pub(crate) runtime_rule: bool,
 }
 
 impl Faults {
@@ -313,29 +319,24 @@ fn write_probe(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// The identity of an already-open object, from its fd (no pathname).
-fn identity_of(file: &File) -> Result<(u64, u64), InstallError> {
-    use std::os::unix::fs::MetadataExt as _;
-    let md = file.metadata().map_err(|err| InstallError::OpenParent {
-        path: PathBuf::from("<launch-target>"),
-        err,
-    })?;
-    Ok((md.dev(), md.ino()))
-}
-
 /// Install and PROVE the Landlock filesystem policy for this thread against an unconfined baseline.
 /// `Ok(())` means fully enforced AND differentially self-checked; any error means the caller must NOT
-/// launch. `outside_probe` is a directory the self-check uses for its outside write — the default is
-/// a genuinely-outside temp dir; tests point it at pathological locations to exercise each verdict.
-/// `launch_target` is the already-opened exec target (for the exec op): the EXACT, fully-sealed memfd
-/// launch target — an anonymous inode no path rule can name — is the ONE `allow_exec` object that is
-/// deliberately NOT given a path rule (it runs via `execveat`); every other unruleable object fails
-/// closed.
+/// launch. `outside_probe` is a directory the self-check uses for its outside write.
+///
+/// Rights are SPLIT by authority class (see the runtime module + the contract-correction doc):
+///   - `worktree`            → write-family (no `EXECUTE`);
+///   - `allow_exec`          → `EXECUTE | READ_FILE` (ordinary programs);
+///   - `exec_object`         → `EXECUTE | READ_FILE` on the EXACT private, ruleable execution inode
+///     (its `O_PATH` fd), the object-capability that replaces the un-ruleable sealed `memfd`;
+///   - `runtime.interpreter` → `EXECUTE | READ_FILE` (the kernel `execve`s it as `PT_INTERP`);
+///   - `runtime` read roots + support files → `READ_FILE` ONLY (loading a shared object is a read,
+///     never an execute; an `EXECUTE` grant over a library dir would authorize every file there).
 pub(crate) fn install_filesystem(
     worktree: &Path,
     allow_exec: &[PathBuf],
     outside_probe: &Path,
-    launch_target: Option<&File>,
+    exec_object: Option<RawFd>,
+    runtime: &crate::runtime::RuntimePolicy,
     faults: Faults,
 ) -> Result<(), InstallError> {
     // 1. Probe the ABI FIRST — an fd or a version number alone restricts nothing.
@@ -374,11 +375,7 @@ pub(crate) fn install_filesystem(
     let ruleset = sys::create_ruleset(sys::HANDLED_FS_ABI3).map_err(InstallError::CreateRuleset)?;
 
     // 3. Rules — TOCTOU-safe. Open EVERY rule object ONCE (O_PATH) and attach rules to those SAME fds;
-    //    no pathname is ever re-resolved between the containment decision and the rule attachment. The
-    //    worktree is the single WRITABLE root (WORKTREE_RIGHTS, no EXECUTE); each allow_exec object is
-    //    read+execute, object-type-masked. A DESCENDANT of the worktree that is also allow-listed
-    //    naturally accumulates worktree-write + allow_exec-execute along the path hierarchy (documented
-    //    Landlock same-layer semantics) — no explicit union, no path classification.
+    //    no pathname is ever re-resolved between the containment decision and the rule attachment.
     if faults.add_rule {
         return Err(InstallError::AddRule {
             path: worktree.to_path_buf(),
@@ -396,23 +393,23 @@ pub(crate) fn install_filesystem(
         }
         exec_objs.push(open_object(path)?);
     }
-
-    // The ONE allow_exec object that may skip a path rule: the EXACT launch target, proven from its
-    // OPENED fd to be a fully-sealed memfd (an anonymous inode no path rule can name — it runs via
-    // execveat). Identified by opened-object identity, never pathname text.
-    let sealed_target_id: Option<(u64, u64)> = match launch_target {
-        Some(f) => {
-            let sealed = sys::get_seals(f.as_raw_fd())
-                .map(|s| s & sys::FULL_SEALS == sys::FULL_SEALS)
-                .unwrap_or(false);
-            if sealed {
-                Some(identity_of(f)?)
-            } else {
-                None
-            }
-        }
+    // Runtime read-policy objects, opened ONCE for their exact identity + rule (a separate authority
+    // class from allow_exec). An `interpreter` that cannot be opened, or any read root/support file
+    // the profile named but the host lacks, fails closed here — never a fallback to a broader grant.
+    if faults.runtime_open {
+        return Err(InstallError::OpenParent {
+            path: PathBuf::from("<runtime-object>"),
+            err: io::Error::from_raw_os_error(libc::ENOENT),
+        });
+    }
+    let interp_obj = match &runtime.interpreter {
+        Some(p) => Some(open_object(p)?),
         None => None,
     };
+    let mut read_objs = Vec::with_capacity(runtime.read_roots.len() + runtime.read_files.len());
+    for p in runtime.read_roots.iter().chain(runtime.read_files.iter()) {
+        read_objs.push(open_object(p)?);
+    }
 
     // Test-only deterministic barrier: after every object is OPEN, before any rule is ATTACHED.
     race_barrier();
@@ -420,7 +417,6 @@ pub(crate) fn install_filesystem(
     let exec_desired = access::EXECUTE | access::READ_FILE | access::READ_DIR;
     // EXACT-object overlap: only when an allow_exec object IS the worktree object (same dev+ino) do we
     // combine rights — into ONE deliberate rule — instead of adding a duplicate rule for that object.
-    // Identity is compared between the SAME opened objects, never between re-resolved paths.
     let mut worktree_rights = sys::WORKTREE_RIGHTS;
     for obj in &exec_objs {
         if obj.id == worktree_obj.id {
@@ -435,14 +431,45 @@ pub(crate) fn install_filesystem(
         if obj.id == worktree_obj.id {
             continue; // folded into the single worktree rule above
         }
-        if Some(obj.id) == sealed_target_id {
-            // The sanctioned detached sealed launch target: do NOT call landlock_add_rule for this
-            // anonymous inode (it would EBADFD). It executes via execveat; no path rule can name it.
-            continue;
-        }
-        // Any other object — including a sealed memfd that is NOT the launch target, or an unsealed
-        // memfd — is ruled normally; an unruleable one fails closed here (add_rule → EBADFD).
         let rights = mask_for_type(obj, exec_desired)?;
+        attach_rule(&ruleset, obj, rights)?;
+    }
+
+    // The PRIVATE EXECUTION OBJECT: `EXECUTE | READ_FILE` on the exact ruleable execution inode via
+    // its `O_PATH` fd. This is the object-capability that replaces the un-ruleable sealed `memfd` —
+    // a real tmpfs inode Landlock CAN name, so exec authority stays narrow (no root grant).
+    if let Some(fd) = exec_object {
+        if faults.exec_object_rule {
+            return Err(InstallError::AddRule {
+                path: PathBuf::from("<execution-object>"),
+                err: io::Error::from_raw_os_error(libc::EINVAL),
+            });
+        }
+        let rights = (access::EXECUTE | access::READ_FILE) & sys::FILE_APPLICABLE;
+        sys::add_path_beneath_rule(&ruleset, rights, fd).map_err(|err| InstallError::AddRule {
+            path: PathBuf::from("<execution-object>"),
+            err,
+        })?;
+    }
+
+    // Runtime interpreter: `EXECUTE | READ_FILE` (the kernel execs it as `PT_INTERP`).
+    if faults.runtime_rule && (interp_obj.is_some() || !read_objs.is_empty()) {
+        return Err(InstallError::AddRule {
+            path: PathBuf::from("<runtime-object>"),
+            err: io::Error::from_raw_os_error(libc::EINVAL),
+        });
+    }
+    if let Some(obj) = &interp_obj {
+        let rights = mask_for_type(obj, access::EXECUTE | access::READ_FILE)?;
+        attach_rule(&ruleset, obj, rights)?;
+    }
+    // Runtime read roots + support files: `READ_FILE` ONLY — NEVER `EXECUTE`. A directory rule with
+    // `READ_FILE` propagates the read right to the shared-library files beneath it, which is all the
+    // dynamic loader needs; it does not authorize executing anything stored there.
+    for obj in &read_objs {
+        // READ_FILE for the loader to map shared objects; READ_DIR so a directory read root can be
+        // enumerated (e.g. `/proc/self/fd`). NEVER EXECUTE.
+        let rights = mask_for_type(obj, access::READ_FILE | access::READ_DIR)?;
         attach_rule(&ruleset, obj, rights)?;
     }
 
@@ -592,20 +619,38 @@ pub(crate) fn harness_main() -> i32 {
     let mut rec = String::new();
 
     // For the exec op, open the target executable BEFORE confinement (its path is resolved now); it
-    // is executed via this fd AFTER restrict_self, so the exec restriction observed is Landlock's own
-    // — a real file's execute right is enforced by the kernel, while a sealed memfd (no path) runs.
+    // becomes the EXECUTION OBJECT (ruled `EXECUTE | READ_FILE`) and is executed via this same fd
+    // AFTER restrict_self. This harness exercises the SAME production `install_filesystem` with a
+    // REAL-file execution object (not a memfd), plus the runtime read policy resolved from the target.
     let exec_fd: Option<io::Result<File>> = match &args.op {
         Op::Exec { target, .. } => Some(OpenOptions::new().read(true).open(target)),
         Op::Fs { .. } => None,
     };
-    // The opened launch target (if the open succeeded) informs the sealed-memfd exception.
-    let launch_ref: Option<&File> = exec_fd.as_ref().and_then(|r| r.as_ref().ok());
+    let runtime = match &args.op {
+        Op::Exec { target, .. } => {
+            let bytes = std::fs::read(target).unwrap_or_default();
+            match crate::runtime::resolve(
+                &bytes,
+                &crate::runtime::PROFILE_V1,
+                &crate::runtime::Faults::default(),
+            ) {
+                Ok(r) => r,
+                Err(_) => crate::runtime::RuntimePolicy::empty(),
+            }
+        }
+        Op::Fs { .. } => crate::runtime::RuntimePolicy::empty(),
+    };
+    let exec_object: Option<RawFd> = exec_fd
+        .as_ref()
+        .and_then(|r| r.as_ref().ok())
+        .map(File::as_raw_fd);
 
     if let Err(e) = install_filesystem(
         &args.worktree,
         &args.allow_exec,
         &args.outside_probe,
-        launch_ref,
+        exec_object,
+        &runtime,
         faults,
     ) {
         rec.push_str("filesystem=not_enforced\n");
