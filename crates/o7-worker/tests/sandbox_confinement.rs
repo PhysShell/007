@@ -1451,20 +1451,60 @@ fn owned_cgroup_leaf_names() -> BTreeSet<String> {
     let dir = cgroup_dir(&cg);
     let rd = std::fs::read_dir(&dir)
         .unwrap_or_else(|e| panic!("fault oracle: cannot read owned cgroup subtree {dir:?}: {e}"));
-    rd.flatten()
-        .filter_map(|e| {
-            let n = e.file_name().to_string_lossy().into_owned();
-            n.starts_with("o7cg-").then_some(n)
-        })
-        .collect()
+    let mut names = BTreeSet::new();
+    for entry in rd {
+        // FAIL-CLOSED: a per-entry read error is NOT silently dropped (no `.flatten()`) — an
+        // uninspectable directory must never read as "nothing leaked".
+        let entry = entry.unwrap_or_else(|e| {
+            panic!("fault oracle: cgroup subtree {dir:?} entry read error: {e} (fail-closed)")
+        });
+        let n = entry.file_name().to_string_lossy().into_owned();
+        if n.starts_with("o7cg-") {
+            names.insert(n);
+        }
+    }
+    names
+}
+
+/// The TYPED classification of a spawn failure, derived by MATCHING the actual `BoundaryError` — never
+/// by substring-searching its message. `NotFullyEnforcedEvidence` requires the inner evidence string
+/// to EQUAL `SandboyLaunchError::NotFullyEnforced.to_string()` exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SpawnFailureKind {
+    NotFullyEnforcedEvidence,
+    OtherEvidence,
+    Signal,
+    Spawn,
+    Other,
+}
+
+fn classify_spawn_failure(err: &o7_worker::boundary::BoundaryError) -> SpawnFailureKind {
+    use o7_worker::boundary::BoundaryError as Be;
+    let nfe = o7_worker::SandboyLaunchError::NotFullyEnforced.to_string();
+    match err {
+        Be::Evidence(s) if *s == nfe => SpawnFailureKind::NotFullyEnforcedEvidence,
+        Be::Evidence(_) => SpawnFailureKind::OtherEvidence,
+        Be::Signal(_) => SpawnFailureKind::Signal,
+        Be::Spawn(_) => SpawnFailureKind::Spawn,
+        _ => SpawnFailureKind::Other,
+    }
 }
 
 /// The observation of a driven fault.
 struct FaultRun {
+    /// The TYPED classification of the spawn failure (authoritative), or `None` if spawn (wrongly)
+    /// succeeded.
+    failure_kind: Option<SpawnFailureKind>,
+    /// The formatted error — DIAGNOSTICS ONLY (assertions use `failure_kind`).
     spawn_err: Option<String>,
     target_ran: bool,
     witness: Option<String>,
     new_leaves: BTreeSet<String>,
+    /// A bounded cleanup operation timed out (an unexpected live pre-GO launch that would not reap).
+    cleanup_timed_out: bool,
+    /// The PRIMARY monitor wait timed out — a hang. For post-GO oracles this is a failure even if
+    /// emergency cleanup later removed the leaf.
+    monitor_wait_timed_out: bool,
 }
 
 /// Drive a PRE-GO fault; spawn must fail closed (report downgraded, GO withheld), so the target never
@@ -1488,19 +1528,29 @@ async fn run_pre_go_fault(fault: &str) -> FaultRun {
         Ok(s) => s,
         Err(_) => panic!("fault={fault}: spawn did not resolve within 45s (hang)"),
     };
+    let failure_kind = spawn.as_ref().err().map(classify_spawn_failure);
     let spawn_err = spawn.as_ref().err().map(std::string::ToString::to_string);
-    // A pre-GO fault must NOT return a live launch; if it (wrongly) did, reap it (bounded).
+    // A pre-GO fault must NOT return a live launch; if it (wrongly) did, reap it (bounded) — and a
+    // cleanup TIMEOUT is captured, never silently discarded.
+    let mut cleanup_timed_out = false;
     if let Ok(mut l) = spawn {
-        let _ = tokio::time::timeout(Duration::from_secs(10), l.process.force_stop()).await;
-        let _ = tokio::time::timeout(Duration::from_secs(10), l.process.wait()).await;
+        cleanup_timed_out |= tokio::time::timeout(Duration::from_secs(10), l.process.force_stop())
+            .await
+            .is_err();
+        cleanup_timed_out |= tokio::time::timeout(Duration::from_secs(10), l.process.wait())
+            .await
+            .is_err();
     }
     tokio::time::sleep(Duration::from_millis(200)).await;
     let after = owned_cgroup_leaf_names();
     FaultRun {
+        failure_kind,
         spawn_err,
         target_ran: ran.exists(),
         witness: std::fs::read_to_string(&witness).ok(),
         new_leaves: after.difference(&before).cloned().collect(),
+        cleanup_timed_out,
+        monitor_wait_timed_out: false,
     }
 }
 
@@ -1512,12 +1562,17 @@ fn check_pre_go_fault(fault: &str, expected_stage: &str, r: &FaultRun) -> Result
     if r.target_ran {
         return Err(format!("fault={fault}: a target ran before GO (fault ignored)"));
     }
-    let err = r.spawn_err.as_deref().unwrap_or("");
-    if !err.contains("full enforcement") {
+    // TYPED classification, not a substring: the launch must be rejected specifically as
+    // `BoundaryError::Evidence(SandboyLaunchError::NotFullyEnforced)` — never a Signal (an owned
+    // member survived), a Spawn/other error, or evidence whose wording merely contains the phrase.
+    if r.failure_kind != Some(SpawnFailureKind::NotFullyEnforcedEvidence) {
         return Err(format!(
-            "fault={fault}: expected NotFullyEnforced (report-verification, not a Signal/generic \
-             error), got spawn error {err:?}"
+            "fault={fault}: expected Evidence(NotFullyEnforced), got kind {:?} (error {:?})",
+            r.failure_kind, r.spawn_err
         ));
+    }
+    if r.cleanup_timed_out {
+        return Err(format!("fault={fault}: a bounded cleanup operation timed out (hang)"));
     }
     if r.witness.as_deref() != Some(expected_stage) {
         return Err(format!(
@@ -1636,19 +1691,33 @@ async fn run_post_go_no_target(fault: &str) -> FaultRun {
         Ok(s) => s,
         Err(_) => panic!("fault={fault}: spawn did not resolve within 45s (hang)"),
     };
+    let failure_kind = spawn.as_ref().err().map(classify_spawn_failure);
     let spawn_err = spawn.as_ref().err().map(std::string::ToString::to_string);
+    let mut monitor_wait_timed_out = false;
+    let mut cleanup_timed_out = false;
     if let Ok(mut l) = spawn {
-        let _ = tokio::time::timeout(Duration::from_secs(20), l.process.wait()).await;
-        let _ = tokio::time::timeout(Duration::from_secs(10), l.process.force_stop()).await;
-        let _ = tokio::time::timeout(Duration::from_secs(10), l.process.wait()).await;
+        // The PRIMARY monitor wait: a timeout here is a HANG (an authoritative failure) even if the
+        // emergency cleanup below later removes the leaf.
+        monitor_wait_timed_out =
+            tokio::time::timeout(Duration::from_secs(20), l.process.wait()).await.is_err();
+        // Emergency cleanup STILL runs (never leave livestock), and its timeouts are captured too.
+        cleanup_timed_out |= tokio::time::timeout(Duration::from_secs(10), l.process.force_stop())
+            .await
+            .is_err();
+        cleanup_timed_out |= tokio::time::timeout(Duration::from_secs(10), l.process.wait())
+            .await
+            .is_err();
     }
     tokio::time::sleep(Duration::from_millis(200)).await;
     let after = owned_cgroup_leaf_names();
     FaultRun {
+        failure_kind,
         spawn_err,
         target_ran: ran.exists(),
         witness: std::fs::read_to_string(&witness).ok(),
         new_leaves: after.difference(&before).cloned().collect(),
+        cleanup_timed_out,
+        monitor_wait_timed_out,
     }
 }
 
@@ -1663,6 +1732,11 @@ async fn fault_release_runs_no_target() {
          got {:?}",
         r.spawn_err
     );
+    assert!(
+        !r.monitor_wait_timed_out,
+        "fault=release: the monitor must EXIT within the bound — a wait timeout is a hang, not a pass"
+    );
+    assert!(!r.cleanup_timed_out, "fault=release: emergency cleanup timed out");
     assert!(!r.target_ran, "fault=release: the target must NOT run (release withheld)");
     assert_eq!(r.witness.as_deref(), Some("release"), "fault=release: witness must be `release`");
     assert!(
@@ -1677,6 +1751,11 @@ async fn fault_release_runs_no_target() {
 async fn fault_execveat_runs_no_target() {
     // Post-GO, at exec: the execveat is aborted in the pre-exec child, so the target image never runs.
     let r = run_post_go_no_target("execveat").await;
+    assert!(
+        !r.monitor_wait_timed_out,
+        "fault=execveat: the monitor must EXIT within the bound — a wait timeout is a hang, not a pass"
+    );
+    assert!(!r.cleanup_timed_out, "fault=execveat: emergency cleanup timed out");
     assert!(!r.target_ran, "fault=execveat: the target image must NOT run (execveat aborted)");
     assert_eq!(r.witness.as_deref(), Some("execveat"), "fault=execveat: witness must be `execveat`");
     assert!(
@@ -1704,13 +1783,14 @@ async fn assert_teardown_fault_dominates(fault: &str, expected_stage: &str, expe
         wt.path().join("survived"),
     );
     let witness = wt.path().join("fault.witness");
+    let before = owned_cgroup_leaf_names();
     let b = boundary_with_fault(wt.path(), fixture_exec_allow(), fault, &witness, Duration::from_secs(8));
     let mut launch = tokio::time::timeout(
         Duration::from_secs(45),
         b.spawn(fixture_target(&tpid, &cpid, &dpid, &survived, wt.path())),
     )
     .await
-    .expect("fault={fault}: spawn did not resolve in 45s")
+    .unwrap_or_else(|_| panic!("fault={fault}: spawn did not resolve in 45s"))
     .expect("the report is fully enforced, so spawn succeeds; the fault is in TEARDOWN");
 
     // Capture ALL THREE identities IN PARALLEL while the tree is alive (before the deadline teardown).
@@ -1723,8 +1803,12 @@ async fn assert_teardown_fault_dominates(fault: &str, expected_stage: &str, expe
     let child = child.expect("the ordinary child must run before the deadline teardown");
     let descendant = descendant.expect("the reparented descendant must run before the deadline teardown");
 
-    // Bounded wait for the launch to end under the faulted teardown.
+    // Bounded wait for the launch to end under the faulted teardown — a timeout is a HANG (a failure).
     let waited = tokio::time::timeout(Duration::from_secs(30), launch.process.wait()).await;
+    assert!(
+        waited.is_ok(),
+        "fault={fault}: the monitor must EXIT within the bound — a wait timeout is a hang, not a pass"
+    );
     let got_witness = std::fs::read_to_string(&witness).ok();
 
     // Reap the whole owned tree (bounded), whatever the faulted monitor left behind.
@@ -1735,12 +1819,35 @@ async fn assert_teardown_fault_dominates(fault: &str, expected_stage: &str, expe
             best_effort_kill(id.pid);
         }
     }
-    // A faulted teardown may leave the leaf behind — sweep any residue so the suite stays clean.
-    for name in owned_cgroup_leaf_names() {
-        if let Some(cg) = cgroup_of(std::process::id() as i32) {
-            let _ = std::fs::remove_dir(cgroup_dir(&cg).join(name));
+
+    // Manual cleanup of ONLY the leaves THIS launch introduced (not every visible `o7cg-*`), and it
+    // MUST succeed: the tree was just reaped, so a leaf may be briefly `EBUSY` — retry within a bound;
+    // `NotFound` is an acceptable already-removed. Then RE-READ and prove no introduced leaf remains.
+    let cg = cgroup_of(std::process::id() as i32).expect("harness cgroup (fail-closed)");
+    let introduced: BTreeSet<String> =
+        owned_cgroup_leaf_names().difference(&before).cloned().collect();
+    for name in &introduced {
+        let path = cgroup_dir(&cg).join(name);
+        let start = tokio::time::Instant::now();
+        loop {
+            match std::fs::remove_dir(&path) {
+                Ok(()) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+                Err(_) if start.elapsed() < Duration::from_secs(5) => {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+                Err(e) => panic!("fault={fault}: manual cleanup could not remove {path:?}: {e}"),
+            }
         }
     }
+    let residual: BTreeSet<String> = owned_cgroup_leaf_names()
+        .intersection(&introduced)
+        .cloned()
+        .collect();
+    assert!(
+        residual.is_empty(),
+        "fault={fault}: introduced cgroup leaves still present after cleanup: {residual:?}"
+    );
 
     // DOMINANCE: the witness is written ONLY on the teardown `Err` → `exit::TEARDOWN` path.
     assert_eq!(
@@ -1772,6 +1879,12 @@ async fn assert_teardown_fault_dominates(fault: &str, expected_stage: &str, expe
         identity_gone(&leader),
         identity_gone(&child),
         identity_gone(&descendant)
+    );
+    // The tree was killed before its 3600s sleep completed → the `survived` marker must be ABSENT.
+    assert!(
+        !survived.exists(),
+        "fault={fault}: the `survived` marker must be absent — the tree outlived neither the deadline \
+         nor the reap"
     );
 }
 

@@ -360,7 +360,8 @@ typed `FaultId` (`O7_FAULT_POINT`) into the REAL composed launch through the com
 seam, and read a MONITOR-owned stage witness (`O7_FAULT_WITNESS`, written by the unconfined
 monitor/pre-exec child — never the target). `confinement_backend()` stays the fake; no production flip.
 
-**ALL 32 typed `FaultId`s are exercised.** The 28 pre-GO ids are TABLE-DRIVEN
+**ALL 32 typed `FaultId`s are exercised.** The pre-GO table has 28 legs — **27 typed pre-GO
+`FaultId`s + 1 invalid-selection leg** — and is TABLE-DRIVEN
 (`every_pre_go_fault_fails_closed_at_its_exact_stage` over `PRE_GO_FAULTS`), plus `seccomp_self_check`
 (Class B) and the four post-GO/lifecycle ids (Class C). `runtime_identity` is DE-ALIASED from
 `runtime_object_open` — it now maps to a distinct `landlock::Faults.runtime_identity` knob and a distinct
@@ -407,7 +408,8 @@ still fails closed down its own injection path:
 **Same-stage witness collisions** (each still individually driven; the
 witness is the shared fine stage): `landlock_create`→`create_ruleset`, `landlock_add_rule`/
 `target_landlock_rule`/`runtime_rule`→`add_rule`, `landlock_self_check`→`self_check_outside_inconclusive`,
-`runtime_object_open`/`runtime_identity`→`open_parent`, `runtime_profile`→`runtime_profile`,
+`runtime_object_open`→`open_parent` (`runtime_identity` is DE-ALIASED — its own `runtime_identity`
+stage), `runtime_profile`→`runtime_profile`,
 `runtime_preload_check`→`runtime_preload_check`, `target_namespace`/`target_mount`/`target_copy`/
 `target_digest`/`target_close_writer`/`target_identity`/`target_proc_isolation`→their `target_*` stage,
 `seccomp_no_new_privs`→`no_new_privs`. (Staging `IdMap`/`MountPrivate`, several landlock ABI/omit knobs,
