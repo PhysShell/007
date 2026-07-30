@@ -228,12 +228,13 @@ sequence end to end:
 | no writer survives | writable staging fd closed before `restrict_self`; `execveat` clean (no `ETXTBSY`) |
 | same-UID external reopen blocked | `PR_SET_DUMPABLE(0)`: attacker `open("/proc/<child>/fd/<n>")` for **read and write** → **`EACCES`** |
 | private staging filesystem available | unprivileged `unshare(CLONE_NEWUSER\|CLONE_NEWNS)` + `uid_map`/`gid_map`/`setgroups=deny` + `mount` private `tmpfs` → **all succeed** (`unprivileged_userns_clone=1`) |
-| **integrated** userns→mountns→private tmpfs→`O_TMPFILE`→copy→digest-recheck→close-writers→non-dumpable→narrow Landlock→`restrict_self`→`execveat` | **passes end to end** (`EXEC_INODE_RAN_IN_NS`, env denied, worktree writable, exec-inode write-reopen denied) |
+| **integrated** userns→mountns→private tmpfs→**non-dumpable**→`O_TMPFILE`→copy→digest-recheck→close-writers→narrow Landlock→`restrict_self`→`execveat` | **passes end to end** (`EXEC_INODE_RAN_IN_NS`, env denied, worktree writable, exec-inode write-reopen denied) |
 
-The dynamic-loader detail: a real target is a PIE, so the ruleset must also grant `READ_FILE`/
-`EXECUTE` on the loader + system library directories (`/usr/lib`, `/usr/lib64`, `/lib`, `/lib64`) or
-`execveat` returns `EACCES` at the interpreter. This is standard for a path-exec sandbox and does
-**not** weaken oracle 7 (`/usr/bin/env` lives in `/usr/bin`, which is not a library dir). See §8.
+The dynamic-loader detail: a real target is a PIE, so the ruleset grants `EXECUTE | READ_FILE` on the
+EXACT interpreter and `READ_FILE`(+`READ_DIR`) **ONLY** on the system library directories (`/usr/lib`,
+`/usr/lib64`, `/lib`, `/lib64`) — loading a shared object is a read, not an execute — or `execveat`
+returns `EACCES` at the interpreter. This does **not** weaken oracle 7 (`/usr/bin/env` lives in
+`/usr/bin`, not a library dir), and is proven by `a_runtime_read_root_executable_is_denied…`. See §8.
 
 ## 8. Implementation plan (backend), and the one design point it surfaces
 
@@ -241,11 +242,13 @@ Planned changes to the launch child, before Landlock, replacing the memfd root-g
 
 1. `unshare(CLONE_NEWUSER | CLONE_NEWNS)`; write `setgroups=deny`, `uid_map`, `gid_map` (0→outer).
 2. `mount("", "/", MS_REC|MS_PRIVATE)`; `mount` a private `tmpfs` staging dir.
-3. `open(staging, O_TMPFILE|O_RDWR)`; copy bytes from the inherited sealed `memfd`.
-4. Read back and require the digest equal the **sealed source digest** AND the **LaunchSpec target
+3. `PR_SET_DUMPABLE(0)` **BEFORE any staging fd exists** (after the userns/id-map transition, which can
+   reset dumpability), then READ IT BACK (`PR_GET_DUMPABLE == 0`) — so `/proc/<pid>` is already
+   root-owned and the writable inode below is never reopenable by a same-UID external process.
+4. `open(staging, O_TMPFILE|O_RDWR)`; copy bytes from the inherited sealed `memfd`.
+5. Read back and require the digest equal the **sealed source digest** AND the **LaunchSpec target
    digest**; bind both source and execution identity into `READY_TO_EXEC`.
-5. Reopen `O_RDONLY` (exec fd) + `O_PATH` (rule fd) of the same `(dev, ino)`; close every writable fd.
-6. `PR_SET_DUMPABLE(0)`.
+6. Reopen `O_RDONLY` (exec fd) + `O_PATH` (rule fd) of the same `(dev, ino)`; close every writable fd.
 7. Landlock (SPLIT rights, as implemented): rule the exec inode `EXECUTE|READ_FILE`; rule `allow_exec`
    paths `EXECUTE|READ_FILE|READ_DIR`; rule the EXACT interpreter `EXECUTE|READ_FILE`; rule the library
    read roots + loader support files `READ_FILE`(+`READ_DIR`) **ONLY — never `EXECUTE`**; worktree
@@ -295,38 +298,44 @@ real backend via `O7_SANDBOY_BIN`.
 
 | old test | old property (why obsolete) | new test | new property | fixture/target | expected kernel outcome | disposition |
 |---|---|---|---|---|---|---|
-| `a_sealed_proc_fd_target_executes_under_confinement` | a sealed **memfd** executes under Landlock with the sealed `/proc/fd` path **inside `allow_exec`** — impossible: an anonymous inode is not a Landlock rule object (`add_rule`→EBADFD), and only a root grant would run it | `a_sealed_source_runs_as_private_execution_inode` | the sealed source is materialized into a private ruleable execution inode and executes under a NARROW ruleset; the `FullyEnforced` verdict attests the internal source→inode bindings (source seals+digest, destination-digest equality, exact exec-inode identity, complete resolved-runtime binding) — the backend refuses `FullyEnforced` unless they held | live sealed memfd source; `allow_exec` = system exec roots **+ the `/proc/<pid>/fd` DIRECTORY** (see finding A); `fs` probe | `inside=OK`, `create/overwrite/truncate=ERR:13`, spawn `FullyEnforced` | REPLACED |
+| `a_sealed_proc_fd_target_executes_under_confinement` | a sealed **memfd** executes under Landlock with the sealed `/proc/fd` path **inside `allow_exec`** — impossible: an anonymous inode is not a Landlock rule object (`add_rule`→EBADFD), and only a root grant would run it | `a_sealed_source_runs_as_private_execution_inode` | the sealed source is materialized into a private ruleable execution inode and executes under a NARROW ruleset; the `FullyEnforced` verdict attests the internal source→inode bindings (source seals+digest, destination-digest equality, exact exec-inode identity, complete resolved-runtime binding) — the backend refuses `FullyEnforced` unless they held | live sealed memfd source; `allow_exec` = ORDINARY dirs only (the sealed source is authorized by its seals, NOT `allow_exec`; `/proc/fd` is never in the allowlist — see §9.1); `fs` probe | `inside=OK`, `create/overwrite/truncate=ERR:13`, spawn `FullyEnforced` | REPLACED |
 | `the_confined_target_inherits_no_planted_socket` | planted non-CLOEXEC socket scrubbed — still valid, but the fd census must be provable, not a fixed constant, and the plant must sit at a HIGH fd | `the_confined_target_inherits_no_planted_socket` | planted socket **raised to a high fd** is still scrubbed; the target counts inherited sockets via `fstat` over `[3, RLIMIT_NOFILE)` (procfs-free, provable) | `fds` probe; sentinel `dup2`'d to a high fd | `inherited_sockets=0` | AMENDED |
 | `the_owned_cgroup_contains_the_tree_and_is_removed_on_teardown` | `/bin/dash -c` script builds the tree — host-shell dependency; and `force_stop` was used to end it (see finding B) | `the_owned_cgroup_contains_the_tree_and_is_removed_on_teardown` | hermetic fixture: leader + ordinary child + reparented double-fork descendant, all observed inside the owned cgroup; the MONITOR's OWN deadline teardown removes the leaf (NOT `force_stop`, which would SIGKILL the monitor first) | `__tree-fixture` (landed in `a26b63f`); short deadline; window from target-start | whole tree in the leaf; monitor completes teardown in-window; leaf gone | AMENDED |
 | `a_target_outliving_the_deadline_is_killed_with_its_descendants` | `/bin/dash` sleeps past the deadline; absolute window was measured from the `spawn` CALL, so slow backend setup made the monitor's deadline fire after the window (finding B) | `a_target_outliving_the_deadline_is_killed_with_its_descendants` | hermetic fixture sleeps past the absolute deadline; monitor kills the whole tree and removes the leaf within `deadline + grace` measured from TARGET-START (setup excluded); no `survived` marker | `__tree-fixture`; window from target-start | tree killed in-window; no survivor | AMENDED |
 | — (additive) | — | `an_explicitly_allowlisted_subprocess_executes` | a subprocess **inside `allow_exec`** exec'd BY the target runs | `exec` probe → `/usr/bin/touch`, `allow_exec`=`probe_dir + /usr/bin` | `secondary` created (the direct-exec'd `touch` ran) | ADDED |
 | — (additive) | — | `a_worktree_executable_is_denied_unless_allowlisted` | a binary in the writable worktree, exec'd BY the target, is denied (writable ≠ executable) | `exec` probe → worktree `touch` copy, `allow_exec`=`probe_dir + /usr/bin` (not the worktree) | `exec=ERR:13`, no `secondary` | ADDED |
 | — (additive) | — | `a_runtime_read_root_executable_is_denied_unless_allowlisted` | a file in a runtime read-root (`/usr/lib`, granted `READ_FILE` only) exec'd BY the target is denied — loading a shared object is a read, not an execute | `exec` probe → `/usr/lib/libc.so.6`, `allow_exec`=`probe_dir + /usr/bin` (runtime roots `READ_FILE` only) | `exec=ERR:13` (via `primary`) | ADDED |
-| — (additive) | — | `the_running_execution_inode_is_immutable_to_write_reopen` | while the target runs, a SAME-UID external open of its executable inode for write is denied (`ETXTBSY`) — the running private inode cannot be rewritten | `/proc/<pid>/exe` opened `O_RDWR` from the test process | `ETXTBSY` | ADDED |
+| — (additive) | — | `the_running_execution_inode_is_immutable_to_write_reopen` | while the target runs, a SAME-UID external open of its executable inode for write is denied (`ETXTBSY`) — supplementary to the mid-staging proc-isolation proof below | `/proc/<pid>/exe` opened `O_RDWR` from the test process | `ETXTBSY` | ADDED |
+| — (additive) | — | `a_second_sealed_memfd_is_not_executable_by_the_target` | the sealed target is the ONE exact capability: a SECOND sealed memfd the owner holds is exec-DENIED via `/proc/<owner>/fd/<other>` (launch-source authority ≠ `allow_exec`; `/proc/fd` never ruled) | two sealed memfds; `allow_exec` = ordinary dirs | `exec=ERR:13`, no `secondary` | ADDED (re-gate) |
+| — (additive) | — | `a_proc_fd_symlink_alias_in_allow_exec_fails_closed` | a SYMLINK ALIAS to `/proc/<owner>/fd` in `allow_exec` (lexical path NOT under `/proc`) is rejected by OPENED-OBJECT identity (`fstatfs`→PROC_SUPER_MAGIC) → setup fails closed, no target | `allow_exec` = `probe_dir` + alias→`/proc/<pid>/fd` | spawn `Err`, no target marker | ADDED (re-gate) |
+| — (additive) | — | `the_staging_inode_is_not_reopenable_during_materialize` | DIRECT proc-isolation proof: with `PR_SET_DUMPABLE(0)` set BEFORE the writable staging inode, a same-UID external `/proc/<child>/fd/<staging-fd>` reopen for READ and WRITE is denied mid-materialize; the post-release launch still completes FullyEnforced | compile-gated staging barrier witness + external reopen | both `EACCES`; launch `FullyEnforced` | ADDED (re-gate) |
 | `writes_are_confined_to_the_worktree` | unchanged | — | — | — | — | PRESERVED |
 | `exec_of_a_non_allowed_binary_is_denied_by_the_kernel` | already the "non-allowlisted subprocess denied by Landlock" oracle (target execs `/usr/bin/env`, not in `allow_exec`); assertions UNCHANGED, but its shared `exec_probe` helper was de-shelled (finding C) | — | — | — | — | PRESERVED (helper hermeticized) |
 | `network_sockets_are_denied` / `the_target_env_is_exactly_the_allowlist` / `setsid_is_denied_by_seccomp` / `setpgid_is_denied_by_seccomp` / `a_parseable_marker_paired_with_a_nonzero_exit_…` | unchanged | — | — | — | — | PRESERVED |
 | `a_landlock_setup_failure_runs_no_target` / `a_seccomp_setup_failure_runs_no_target` / `a_cgroup_setup_failure_runs_no_target` / `a_self_check_downgrade_runs_no_target` (+ `observe_setup_fault` / `assert_install_fault`) | `O7_FAKE_MODE` fake-driven setup faults | — | — | — | — | MOVED TO 7b.3 (real fault artifact + `O7_FAULT_POINT`) |
 
-Internal staging-window properties (source seals verified before staging, no writable fd surviving
-confinement, same-UID reopen blocked by non-dumpable DURING staging) are attested by the
-`FullyEnforced` verdict in this layer and get dedicated FORCED-FAILURE oracles
+Internal staging-window properties: the same-UID reopen block DURING staging is now proven DIRECTLY by
+`the_staging_inode_is_not_reopenable_during_materialize` (not merely attested by `FullyEnforced`). The
+remaining internal properties (source seals verified before staging, no writable fd surviving
+confinement) are attested by the `FullyEnforced` verdict and get dedicated FORCED-FAILURE oracles
 (`target_close_writer`, `target_proc_isolation`, `target_digest`, …) in Phase 7b.3.
 
 ### 9.1 Mechanism findings surfaced while running the amendment (no production change)
 
-Running the amended oracles through the real backend surfaced three interactions. None required a
-production-mechanism change — each is a test-layer correction that the frozen contracts already imply:
+Running the amended oracles through the real backend surfaced three interactions. Findings B and C were
+test-layer corrections; Finding A was initially mis-resolved as a test-only workaround and, on re-gate,
+corrected in the backend + boundary (commit `33c1b0e`):
 
-- **A — the sealed `/proc/fd` target is authorized by its DIRECTORY, which IS ruleable.** The frozen
-  Vertical-A gate `SandboxPolicy::permits_exec` authorizes a launch target by path, so a sealed
-  `/proc/<pid>/fd/<n>` source must appear under `allow_exec` (policy.rs §"grant that path or its
-  `/proc/<pid>/fd` directory"). Granting the exact `fd` file would be the anonymous-memfd inode the
-  §2 contradiction is about — but granting the `/proc/<pid>/fd` **directory** works: that directory
-  is a REAL procfs inode, so the backend's split-rights `install_filesystem` rules it with no
-  `EBADFD`, the gate passes, and the sealed source still runs via its private materialized inode. So
-  the "memfd in `allow_exec` → EBADFD" hazard never arises here (the ruled object is the directory,
-  not the anonymous inode), and no backend change was needed.
+- **A — launch-source authority is SEPARATE from `allow_exec` (CORRECTED).** The frozen Vertical-A gate
+  `SandboxPolicy::permits_exec` authorizes an ordinary target by path. A caller-held sealed
+  `/proc/<pid>/fd/<n>` source is NOT forced into `allow_exec`: the o7-worker boundary's
+  `source_authorized` authorizes it by its FULL SEAL SET (0xf) + bound digest at acquisition, and it
+  runs via its private execution inode — `permits_exec` (the frozen protocol) is unchanged. An earlier
+  attempt granted the `/proc/<pid>/fd` **directory** in `allow_exec` — **REJECTED**: that authorizes
+  EXECUTE over EVERY fd the owner holds. The backend now fail-closes any `allow_exec` object whose
+  OPENED identity is `procfs` (`fstatfs`→`PROC_SUPER_MAGIC`, so a symlink/bind alias to `/proc/<pid>/fd`
+  cannot bypass it). Proven by `a_second_sealed_memfd_is_not_executable_by_the_target` and
+  `a_proc_fd_symlink_alias_in_allow_exec_fails_closed`.
 
 - **B — the cgroup directory is removed ONLY by the monitor's OWN teardown.** `supervise` runs the
   teardown (move-out → `cgroup.kill` → drain → `rmdir`) on the monitor's own exit paths (deadline or

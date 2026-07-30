@@ -263,3 +263,21 @@ pub(crate) fn set_no_new_privs() -> io::Result<()> {
         Ok(())
     }
 }
+
+/// `PROC_SUPER_MAGIC` — the `fstatfs` `f_type` of every object on a `procfs` mount (`/proc/**`).
+const PROC_SUPER_MAGIC: i64 = 0x0000_9fa0;
+
+/// Whether the OPENED object behind `fd` lives on a `procfs` filesystem, decided by its actual
+/// superblock (`fstatfs` → `f_type`), NOT by its pathname. A symlink or bind alias to
+/// `/proc/<pid>/fd` therefore cannot disguise a procfs object as an ordinary exec allowance.
+pub(crate) fn is_procfs(fd: RawFd) -> io::Result<bool> {
+    // SAFETY: a zeroed `libc::statfs` is a valid all-bits-zero POD to be overwritten by the kernel.
+    let mut st: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: fstatfs writes one `struct statfs` through the provided pointer for a valid fd; the
+    // struct is stack-owned and correctly typed, the fd is caller-owned. Returns 0 or -1/errno.
+    let ret = unsafe { libc::fstatfs(fd, &mut st) };
+    if ret != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(st.f_type as i64 == PROC_SUPER_MAGIC)
+}

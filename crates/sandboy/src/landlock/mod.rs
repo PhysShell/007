@@ -63,8 +63,9 @@ pub(crate) enum InstallError {
         err: io::Error,
     },
     /// An `allow_exec` path is neither a directory nor a regular file (no correct rule mask exists),
-    /// OR it is a `/proc` path — never a legitimate subprocess exec allowance (a sealed launch SOURCE
-    /// is authorized separately and runs via its private execution inode, never by a `/proc/fd` grant).
+    /// OR the OPENED object lives on `procfs` (`fstatfs` → PROC_SUPER_MAGIC, incl. a symlink/bind alias
+    /// to `/proc/<pid>/fd`) — never a legitimate subprocess exec allowance (a sealed launch SOURCE is
+    /// authorized separately and runs via its private execution inode, never by a `/proc/fd` grant).
     UnsupportedObjectType {
         path: PathBuf,
     },
@@ -432,17 +433,26 @@ pub(crate) fn install_filesystem(
                 err: io::Error::from_raw_os_error(libc::EINVAL),
             });
         }
-        // DEFENSE IN DEPTH: a `/proc` path is NEVER a legitimate subprocess exec allowance. A
-        // `/proc/<pid>/fd/<n>` entry is a sealed launch SOURCE (authorized by its seals + digest and
-        // run via the private execution inode); granting its `/proc/<pid>/fd` DIRECTORY would
-        // authorize EXECUTE over EVERY fd the owner holds — the exact authority expansion the
-        // launch-source/allow_exec split forbids. Fail closed before it is ever opened or ruled.
-        if path.starts_with("/proc") {
+        // OBJECT-IDENTITY procfs rejection (NOT a pathname check). A `procfs` object is never a
+        // legitimate subprocess exec allowance: a `/proc/<pid>/fd/<n>` entry is a sealed launch SOURCE
+        // (authorized by its seals + digest, run via the private execution inode), and granting its
+        // `/proc/<pid>/fd` DIRECTORY would authorize EXECUTE over EVERY fd the owner holds. Decide by
+        // the OPENED object's superblock (`fstatfs` → PROC_SUPER_MAGIC), so a symlink/bind alias to
+        // `/proc/<pid>/fd` — whose lexical path does NOT start with `/proc` — cannot smuggle authority
+        // back in. Fail closed before any rule is attached.
+        let obj = open_object(path)?;
+        let on_procfs = sys::is_procfs(obj.file.as_raw_fd()).map_err(|err| {
+            InstallError::OpenParent {
+                path: path.to_path_buf(),
+                err,
+            }
+        })?;
+        if on_procfs {
             return Err(InstallError::UnsupportedObjectType {
                 path: path.to_path_buf(),
             });
         }
-        exec_objs.push(open_object(path)?);
+        exec_objs.push(obj);
     }
     // Runtime read-policy objects, opened ONCE for their exact identity + rule (a separate authority
     // class from allow_exec). An `interpreter` that cannot be opened, or any read root/support file

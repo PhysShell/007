@@ -64,7 +64,7 @@ fn confinement_backend() -> BackendImage {
 }
 
 /// TEST-ONLY pre-flip backend SELECTION SEAM. This is the ONLY backend every boundary in this matrix
-/// binds, so the 14 non-fault oracles are reproducible FROM THE COMMITTED TREE — no manual binary
+/// binds, so the 17 non-fault oracles are reproducible FROM THE COMMITTED TREE — no manual binary
 /// swap, no scratch file. With `O7_SANDBOY_BIN` set (the designated confinement job), it binds the
 /// PINNED fault-injection artifact as the REAL backend; with it unset, it falls back to the frozen
 /// fake (`confinement_backend()`), so the RED semantics against the stand-in are unchanged.
@@ -854,6 +854,55 @@ async fn a_second_sealed_memfd_is_not_executable_by_the_target() {
     );
 }
 
+/// VB-4 (new, re-gate: object-identity procfs rejection). The `/proc` allowlist ban is decided by the
+/// OPENED object's superblock (`fstatfs`), not its pathname — so a SYMLINK ALIAS whose lexical path is
+/// NOT under `/proc` but which resolves to the owner's `/proc/<pid>/fd` directory must STILL fail the
+/// install closed. Otherwise authority over the owner's whole fd table returns through the alias.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Vertical B / VB-4: a symlink alias to /proc/fd in allow_exec fails closed (object identity)"]
+async fn a_proc_fd_symlink_alias_in_allow_exec_fails_closed() {
+    let wt = tempfile::tempdir().unwrap();
+    let alias_dir = tempfile::tempdir().unwrap();
+    // An innocuously-NAMED symlink (lexical path NOT under /proc) that resolves to the owner's
+    // /proc/<pid>/fd directory — the exact bypass the object-identity check must catch.
+    let alias = alias_dir.path().join("harmless-name");
+    std::os::unix::fs::symlink(format!("/proc/{}/fd", std::process::id()), &alias).unwrap();
+    let marker = wt.path().join("fs.result");
+
+    // allow_exec = probe_dir (authorizes the target) + the procfs alias (must be rejected by identity).
+    let b = boundary(
+        wt.path(),
+        vec![probe_dir(), alias.clone()],
+        vec![],
+        Duration::from_secs(30),
+    );
+    let spawn = b
+        .spawn(probe_target(
+            &[
+                "fs",
+                &wt.path().to_string_lossy(),
+                &wt.path().join("c.txt").to_string_lossy(),
+                &wt.path().join("o.txt").to_string_lossy(),
+                &wt.path().join("t.txt").to_string_lossy(),
+            ],
+            wt.path(),
+            BTreeMap::new(),
+        ))
+        .await;
+
+    // Setup must FAIL CLOSED: the install rejects the procfs alias, so there is no FullyEnforced
+    // launch and the target never runs.
+    assert!(
+        spawn.is_err(),
+        "a procfs-alias allow_exec entry (symlink → /proc/<pid>/fd) must fail the launch CLOSED; got Ok"
+    );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        !marker.exists(),
+        "the target must NOT run when a procfs alias is present in allow_exec"
+    );
+}
+
 /// VB-4 (new, correction 3): the DIRECT proof of staging proc-isolation. `PR_SET_DUMPABLE(0)` is set
 /// BEFORE the writable staging inode is opened, so while the launch child holds that inode a SAME-UID
 /// external process must NOT be able to reopen `/proc/<child>/fd/<staging-fd>` for read OR write.
@@ -876,35 +925,57 @@ async fn the_staging_inode_is_not_reopenable_during_materialize() {
     // run the reopen probe CONCURRENTLY with the spawn, never awaiting spawn first (that would
     // deadlock against our own release).
     let probe = async {
-        // Await the witness (`<child-pid> <staging-fd>`), published once the staging inode is open and
-        // the child is already non-dumpable.
-        let (pid, fd) = loop {
-            if let Ok(s) = std::fs::read_to_string(&witness) {
-                let mut it = s.split_whitespace();
-                if let (Some(p), Some(f)) = (it.next(), it.next()) {
-                    if let (Ok(p), Ok(f)) = (p.parse::<i32>(), f.parse::<i32>()) {
-                        break (p, f);
+        // BOUNDED witness acquisition (`<child-pid> <staging-fd>`), published once the staging inode is
+        // open and the child is already non-dumpable. A missing witness must not hang the test.
+        let acquired = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Ok(s) = std::fs::read_to_string(&witness) {
+                    let mut it = s.split_whitespace();
+                    if let (Some(p), Some(f)) = (it.next(), it.next()) {
+                        if let (Ok(p), Ok(f)) = (p.parse::<i32>(), f.parse::<i32>()) {
+                            break (p, f);
+                        }
                     }
                 }
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        };
-        let path = format!("/proc/{pid}/fd/{fd}");
-        // Same-UID external reopen attempts — BOTH must be denied while the child is non-dumpable.
-        let rd = std::fs::OpenOptions::new().read(true).open(&path);
-        let wr = std::fs::OpenOptions::new().write(true).open(&path);
-        let rd_err = rd.err().and_then(|e| e.raw_os_error());
-        let wr_err = wr.err().and_then(|e| e.raw_os_error());
-        // Release the child so the launch can finish.
+        })
+        .await;
+        let result = acquired.ok().map(|(pid, fd)| {
+            let path = format!("/proc/{pid}/fd/{fd}");
+            // Same-UID external reopen attempts — BOTH must be denied while the child is non-dumpable.
+            let rd = std::fs::OpenOptions::new()
+                .read(true)
+                .open(&path)
+                .err()
+                .and_then(|e| e.raw_os_error());
+            let wr = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .err()
+                .and_then(|e| e.raw_os_error());
+            (rd, wr)
+        });
+        // ALWAYS release the child, on EVERY exit path (probe done OR witness timeout) — the child must
+        // never be left blocked at the barrier.
         let _ = std::fs::write(&go, b"go");
-        (rd_err, wr_err)
+        result
     };
 
-    let (launch, (rd_err, wr_err)) = tokio::join!(b.spawn(spec), probe);
-    if let Ok(mut l) = launch {
-        let _ = l.process.force_stop().await;
-        let _ = l.process.wait().await;
-    }
+    let (launch, probe_result) = tokio::join!(b.spawn(spec), probe);
+
+    // DISTINCT failures: the barrier must have published its witness...
+    let (rd_err, wr_err) =
+        probe_result.expect("staging barrier never published its witness within 10s");
+    // ...and the production-shaped launch MUST succeed after release — proving the reopen denial was
+    // observed inside a REAL enforced launch, not a broken one that merely happened to deny.
+    let mut launch = launch.expect("the launch must complete FullyEnforced after the barrier release");
+    launch
+        .process
+        .force_stop()
+        .await
+        .expect("force_stop the released launch");
+    launch.process.wait().await.expect("reap the released launch");
 
     assert_eq!(
         rd_err,

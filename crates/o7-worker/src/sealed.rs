@@ -75,11 +75,10 @@ pub struct SealedObject {
 }
 
 /// Whether `path` is a `/proc/<pid|self|thread-self>/fd/<n>` descriptor path — the frozen PR-3
-/// execution contract. Such a path is a procfs MAGIC SYMLINK to a held object, so it must be
-/// acquired by FOLLOWING it (never `O_NOFOLLOW`) into the exact object it points at, in this PID
-/// namespace. Every other path is an ordinary filesystem path, hardened with `O_NOFOLLOW`.
-/// Whether `path` is a `/proc/<pid|self|thread-self>/fd/<n>` descriptor path — a caller-held
-/// sealed launch SOURCE (authorized by its seals at acquisition), NOT an ordinary exec allowance.
+/// execution contract, and a caller-held sealed launch SOURCE (authorized by its seals at
+/// acquisition, NOT an ordinary exec allowance). Such a path is a procfs MAGIC SYMLINK to a held
+/// object, so it must be acquired by FOLLOWING it (never `O_NOFOLLOW`) into the exact object it points
+/// at, in this PID namespace. Every other path is an ordinary filesystem path, hardened `O_NOFOLLOW`.
 pub(crate) fn is_proc_fd_path(path: &Path) -> bool {
     use std::path::Component;
     fn normal<'a>(c: &Component<'a>) -> Option<&'a str> {
