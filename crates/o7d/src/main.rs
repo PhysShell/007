@@ -57,7 +57,15 @@ async fn main() -> anyhow::Result<()> {
     let ledger = o7_ledger::SqliteLedger::open(&ledger)?;
     let app = o7d::app(ledger, static_dir.as_deref());
     let listener = tokio::net::TcpListener::bind(listen).await?;
-    eprintln!("o7d: listening on http://{listen}");
+    // Report the ACTUAL bound address, not the `--listen` argument as typed:
+    // for `--listen 127.0.0.1:0` (ask the OS for any free port) those are
+    // different, and printing the raw `0` back is a useless log line no
+    // caller can actually connect to — a real, latent bug surfaced while
+    // building Q-Deck R0.5's real-subprocess daemon-restart test, which
+    // needs to parse this line to learn which port a `--listen ...:0`
+    // instance actually bound.
+    let bound_addr = listener.local_addr()?;
+    eprintln!("o7d: listening on http://{bound_addr}");
     if static_dir.is_none() {
         eprintln!("o7d: no --static-dir given — serving /api/v1 only (dev mode)");
     }

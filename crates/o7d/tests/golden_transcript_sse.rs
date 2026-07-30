@@ -2,9 +2,11 @@
 //! transcript (`tests/support`) driven through a REAL socket connect ->
 //! partial-receive -> disconnect -> reconnect-with-Last-Event-ID cycle, AND
 //! (the part the pre-existing `tests/sse.rs` reconnect test does not cover)
-//! an actual restart of the `o7d` SERVER PROCESS itself — not just the
-//! client — against the SAME on-disk SQLite file, proving a real daemon
-//! restart does not corrupt SSE resume.
+//! an actual restart of the `o7d` SERVER **PROCESS** itself — a genuinely
+//! separate OS process (the real compiled `o7d` binary via
+//! `CARGO_BIN_EXE_o7d`, killed and reaped, then respawned fresh), not a
+//! tokio task inside this test's own process — against the SAME on-disk
+//! SQLite file, proving a real daemon restart does not corrupt SSE resume.
 //!
 //! Invariant for the restriction-lint allowance below: every `unwrap`/
 //! `expect`/index here operates on this test's own controlled fixtures (a
@@ -20,8 +22,10 @@
 
 mod support;
 
+use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::path::Path;
+use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 use o7_ledger::SqliteLedger;
@@ -66,6 +70,95 @@ async fn spawn_server_on(db_path: &Path) -> (SocketAddr, tokio::task::JoinHandle
         let _ = axum::serve(listener, app).await;
     });
     (addr, handle)
+}
+
+/// Spawn the REAL, compiled `o7d` binary as its own OS process — a genuine
+/// process, not a task inside THIS test's own process.
+/// `env!("CARGO_BIN_EXE_o7d")` is cargo's own guarantee that this crate's
+/// `o7d` binary target is built before its integration tests run, and points
+/// at that exact executable.
+///
+/// `--listen 127.0.0.1:0` asks the OS for any free port; the actual bound
+/// port is learned by reading o7d's own startup line off its stderr pipe
+/// (`main.rs` reports `listener.local_addr()`, not the raw `--listen`
+/// argument, specifically so this works). The rest of stderr is drained for
+/// the process's whole lifetime in a background thread — see below for why
+/// that matters.
+fn spawn_o7d_process(db_path: &Path) -> (Child, SocketAddr) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_o7d"))
+        .args([
+            "serve",
+            "--ledger",
+            db_path.to_str().expect("utf8 path"),
+            "--listen",
+            "127.0.0.1:0",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn the real o7d binary");
+    let stderr = child.stderr.take().expect("piped stderr");
+    let mut reader = BufReader::new(stderr);
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .expect("read o7d's startup line");
+    let addr_str = line
+        .trim()
+        .strip_prefix("o7d: listening on http://")
+        .expect("startup line reports the bound address");
+    let addr: SocketAddr = addr_str.parse().expect("valid socket addr");
+
+    // Keep draining stderr for the rest of the process's life, in a plain
+    // OS thread (not a tokio task — this is deliberately independent of the
+    // async runtime and just needs to keep running for the child's
+    // lifetime). Dropping the read end here instead would leave the child
+    // writing into a pipe with nothing on the other end; `eprintln!` PANICS
+    // on any write failure (including the EPIPE that produces), which was
+    // silently killing the child moments after startup — a real bug in this
+    // test harness, not in `o7d` itself, found while making this test spawn
+    // a genuine subprocess.
+    std::thread::spawn(move || {
+        let mut discarded = String::new();
+        while reader.read_line(&mut discarded).unwrap_or(0) > 0 {
+            discarded.clear();
+        }
+    });
+
+    (child, addr)
+}
+
+/// Poll a REAL `o7d` process's health endpoint until it answers, or panic
+/// after a generous timeout. The bound TCP port is already listening by the
+/// time `spawn_o7d_process` returns (the kernel accepts the SYN as soon as
+/// `bind`+`listen` has happened, before axum's own accept loop necessarily
+/// gets scheduled) — but a fresh connection can still race axum's userspace
+/// accept loop actually servicing it, especially on a loaded machine. A real
+/// client reasonably retries a brand-new connection instead of assuming the
+/// first attempt always lands; this is that retry, not a workaround for
+/// something specific to this test harness.
+async fn wait_until_healthy(addr: SocketAddr) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        assert!(
+            tokio::time::Instant::now() <= deadline,
+            "o7d process never became reachable at {addr}"
+        );
+        if let Ok(mut stream) = tokio::net::TcpStream::connect(addr).await {
+            let wrote = stream
+                .write_all(
+                    b"GET /api/v1/health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+                )
+                .await;
+            if wrote.is_ok() {
+                let mut buf = [0_u8; 64];
+                if matches!(stream.read(&mut buf).await, Ok(n) if n > 0) {
+                    return;
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
 }
 
 async fn connect_and_request(
@@ -216,9 +309,11 @@ async fn transcript_reconnect_with_last_event_id_yields_exactly_the_missed_tail(
 
 #[tokio::test]
 async fn transcript_interrupted_outcome_frame_is_run_interrupted_not_run_failed() {
-    // The interrupted outcome must travel over SSE as `run.interrupted`, never
-    // collapsed into `run.failed` — the same honesty check as the ledger/REST
-    // proofs, at the SSE wire boundary.
+    // The interrupted outcome must travel over SSE as `run.interrupted`,
+    // never collapsed into `run.failed` — the same honesty check as the
+    // ledger/REST proofs, at the SSE wire boundary. Not a "terminal frame":
+    // interrupted is a resumable pause, not a sealed outcome (see the
+    // resume regression below and in golden_transcript_rest.rs).
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("ledger.sqlite3");
     let ledger = SqliteLedger::open(&db_path).unwrap();
@@ -261,28 +356,33 @@ async fn transcript_resume_survives_a_real_daemon_restart_against_the_same_db() 
         transcript.conversation.conversation_id.as_str()
     );
 
-    // First "daemon process": connect, receive events 1-4, then this
-    // process itself goes away (not just the client) — `.abort()` on the
-    // task's own JoinHandle, standing in for the daemon being stopped.
-    let (addr_a, handle_a) = spawn_server_on(&db_path).await;
+    // First REAL `o7d` process (its own OS process, a genuinely different
+    // PID from this test): connect, receive events 1-4, then the process
+    // itself is killed and reaped — not just the client disconnecting.
+    let (mut child_a, addr_a) = spawn_o7d_process(&db_path);
+    wait_until_healthy(addr_a).await;
     let mut client = connect_and_request(addr_a, &path, None).await;
     let received = read_n_data_frames(&mut client, 4).await;
     let last_seen = received.last().and_then(|f| f.id).unwrap();
     assert_eq!(last_seen, 4);
     drop(client);
-    handle_a.abort();
+    child_a.kill().expect("kill the first o7d process");
+    child_a.wait().expect("reap the killed o7d process");
 
-    // Second "daemon process": a brand-new `SqliteLedger::open` of the SAME
-    // file, a brand-new router, a brand-new listener on a new port — this is
-    // what `o7d serve --ledger <path>` looks like after a real restart, not
-    // a reused in-process value.
-    let (addr_b, _handle_b) = spawn_server_on(&db_path).await;
+    // Second REAL `o7d` process: a brand-new OS process (a new PID),
+    // opening the SAME on-disk file fresh — this is what `o7d serve
+    // --ledger <path>` actually looks like after a restart, not a reused
+    // in-process task or connection.
+    let (mut child_b, addr_b) = spawn_o7d_process(&db_path);
+    wait_until_healthy(addr_b).await;
     let mut resumed = connect_and_request(addr_b, &path, Some(last_seen)).await;
     let rest = read_n_data_frames(&mut resumed, 3).await;
     let ids: Vec<u64> = rest.iter().map(|f| f.id.unwrap()).collect();
     assert_eq!(
         ids,
         vec![5, 6, 7],
-        "a restarted daemon reading the same db file must resume with no gap and no duplicate"
+        "a restarted daemon PROCESS reading the same db file must resume with no gap and no duplicate"
     );
+    child_b.kill().expect("kill the second o7d process");
+    child_b.wait().expect("reap the second o7d process");
 }
