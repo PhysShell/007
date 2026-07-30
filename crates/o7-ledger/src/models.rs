@@ -249,6 +249,35 @@ pub struct NewRun {
     pub role: String,
 }
 
+/// A keyset-pagination cursor over a `(created_at, tiebreak)` total order,
+/// newest first.
+///
+/// `created_at` alone is not a safe cursor: two rows can share a millisecond
+/// under real load. The tiebreak is SQLite's own `rowid` for the underlying
+/// table — deliberately NOT the entity's UUID id: an id tiebreak would order a
+/// same-millisecond tie lexicographically, which is arbitrary relative to which
+/// row was actually inserted first. `rowid` is monotonic by insertion order for
+/// these append-only, never-deleted tables, so it makes same-millisecond ties
+/// resolve in their true relative order — "newest first" then means what it
+/// says even inside one millisecond, not just between distinct milliseconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListCursor {
+    pub created_at: i64,
+    pub tiebreak: i64,
+}
+
+/// One page of a keyset-paginated, newest-first listing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Page<T> {
+    pub items: Vec<T>,
+    /// Pass as the next call's `before` to continue further back into
+    /// history. `Some` on every non-empty page, including the final partial
+    /// one — its presence is NOT proof there are more rows. Exhaustion is
+    /// only established when a subsequent call with this cursor returns an
+    /// empty page; `None` here means only "this page itself was empty."
+    pub next_before: Option<ListCursor>,
+}
+
 /// What a recovery scan found: runs/attempts still in `running` at startup —
 /// i.e. interrupted by whatever stopped the previous process. The ledger does
 /// NOT change their status on its own; the control plane decides.

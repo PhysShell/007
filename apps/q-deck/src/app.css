@@ -1,0 +1,77 @@
+:root {
+  color-scheme: light dark;
+  --surface-0: #ffffff;
+  --surface-1: #f6f7f9;
+  --surface-2: #eceef1;
+  --border: #dde1e6;
+  --text: #16181c;
+  --text-muted: #666d76;
+  --accent: #2563eb;
+  --accent-soft: #dbe6fd;
+  --good: #15803d;
+  --good-soft: #dcf5e3;
+  --bad: #b91c1c;
+  --bad-soft: #fbdede;
+  --warn: #b45309;
+  --warn-soft: #fdecd2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-0: #101215;
+    --surface-1: #17191d;
+    --surface-2: #202329;
+    --border: #2c2f36;
+    --text: #e7e9ec;
+    --text-muted: #8a9099;
+    --accent: #6ea8fe;
+    --accent-soft: #1b2c4d;
+    --good: #4ade80;
+    --good-soft: #113322;
+    --bad: #f87171;
+    --bad-soft: #3a1414;
+    --warn: #fbbf24;
+    --warn-soft: #3a2c0d;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--surface-0);
+  color: var(--text);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif,
+    'Apple Color Emoji', 'Segoe UI Emoji';
+  font-size: 16px;
+  line-height: 1.4;
+  /* Mobile-first: usable one-handed at ~360-430px, and the page itself never
+     scrolls horizontally — wide content (the event payload viewer) scrolls
+     inside its own container instead. */
+  overflow-x: hidden;
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font-family: inherit;
+}
+
+pre,
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#app {
+  min-height: 100vh;
+}
