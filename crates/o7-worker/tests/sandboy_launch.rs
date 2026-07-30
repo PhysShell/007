@@ -57,6 +57,8 @@ fn boundary(allow_exec: Vec<PathBuf>, mode: &str) -> SandboyBoundary {
         .with_backend_config(o7_worker::BackendConfig {
             fake_mode: Some(mode.to_owned()),
             staging_probe: None,
+            fault_point: None,
+            fault_witness: None,
         })
 }
 
@@ -233,6 +235,8 @@ async fn an_rng_failure_fails_the_launch_before_any_backend_spawn() {
     .with_backend_config(o7_worker::BackendConfig {
         fake_mode: Some("ok".to_owned()),
         staging_probe: None,
+        fault_point: None,
+        fault_witness: None,
     });
     let dir = tempfile::tempdir().unwrap();
     let marker = dir.path().join("target-ran");

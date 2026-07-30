@@ -74,6 +74,8 @@ async fn run() -> i32 {
     .with_backend_config(BackendConfig {
         fake_mode: Some("ok".to_owned()),
         staging_probe: None,
+        fault_point: None,
+        fault_witness: None,
     });
 
     let spec = BoundarySpawnSpec {

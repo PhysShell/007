@@ -416,11 +416,11 @@ fn report_and_run(ctx: &mut MonitorCtx<'_>, plan: VerifiedLaunchPlan) -> i32 {
     }
 
     // 6. Release the SAME child with one token (one-shot). Then supervise under the deadline.
-    trip!(
-        ctx.faults,
-        Release,
-        return teardown_and(ctx.leaf, ctx.faults, exit::PLUMBING, "release")
-    );
+    trip!(ctx.faults, Release, {
+        // Post-GO, PRE-execution fault: the child never receives the token, so the target never runs.
+        write_fault_witness("release");
+        return teardown_and(ctx.leaf, ctx.faults, exit::PLUMBING, "release");
+    });
     if seccomp::write_fd(ctx.release_w, b"G")
         .map(|n| n == 1)
         .unwrap_or(false)
@@ -448,6 +448,9 @@ fn report_and_run(ctx: &mut MonitorCtx<'_>, plan: VerifiedLaunchPlan) -> i32 {
                 e.message(),
                 e.exit_code()
             );
+            // MONITOR-owned witness for a DEADLINE-teardown fault (kill/drain). Teardown DOMINATES the
+            // target's own status — the exit is TEARDOWN.
+            write_fault_witness(e.stage());
             exit::TEARDOWN
         }
     }
@@ -472,12 +475,30 @@ fn supervise(child_pid: i32, deadline_at: Instant) -> i32 {
     }
 }
 
+/// TEST-ONLY (`fault-injection`): record the reached fault `stage` to the MONITOR-owned witness path
+/// `O7_FAULT_WITNESS`, if set, so a stage-specific oracle proves the launch failed at EXACTLY this
+/// stage (not by a generic error). Written by the unconfined monitor (or the pre-exec child for
+/// `execveat`), NEVER by the confined target: a setup fault means the target never runs, and the
+/// target's env is rebuilt from the launch spec, so `O7_FAULT_WITNESS` can never reach it. Unlike
+/// `O7_FAULT_POINT`, this benign path is not removed from the env.
+#[cfg(feature = "fault-injection")]
+fn write_fault_witness(stage: &str) {
+    if let Some(p) = std::env::var_os("O7_FAULT_WITNESS") {
+        let _ = std::fs::write(p, stage.as_bytes());
+    }
+}
+#[cfg(not(feature = "fault-injection"))]
+fn write_fault_witness(_stage: &str) {}
+
 fn forced_downgrade(
     bindings: &Bindings,
     monitor: &MonitorProof,
     stage: &str,
 ) -> VerifiedLaunchPlan {
     eprintln!("sandboy: launch not enforced at {stage}");
+    // MONITOR-owned witness: the fine stage the launch was downgraded at (the child's reported stage
+    // for a child-side fault, or the monitor's own stage for ready_validate / ready_eof).
+    write_fault_witness(stage);
     let empty = ChildProof {
         ok: false,
         stage: stage.to_owned(),
@@ -529,6 +550,9 @@ fn teardown_and(leaf: &crate::cgroup::Leaf, faults: &Faults, on_ok: i32, why: &s
                 e.stage(),
                 e.message()
             );
+            // MONITOR-owned witness for a TEARDOWN fault (kill/drain): the exact teardown stage. The
+            // teardown failure DOMINATES `why` (the triggering error) — the exit code is TEARDOWN.
+            write_fault_witness(e.stage());
             exit::TEARDOWN
         }
     }
@@ -577,6 +601,10 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
     //    execution object and to parse the target ELF for the runtime read policy.
     let source = std::fs::read(format!("/proc/self/fd/{}", ctx.target_fd)).unwrap_or_default();
 
+    // The FINE stage of the FIRST failing setup step, reported in the child proof so the monitor can
+    // write a stage-specific fault witness (`O7_FAULT_WITNESS`). `None` on a clean launch.
+    let mut fault_stage: Option<String> = None;
+
     // D) Materialize the PRIVATE, RULEABLE EXECUTION OBJECT (userns → private tmpfs → O_TMPFILE →
     //    exact copy → digest recheck → close writers → non-dumpable). Its bytes are proven EQUAL to
     //    the sealed source AND to hash to the launch-spec target digest. Landlock cannot authorize a
@@ -589,6 +617,7 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
         Ok(o) => Some(o),
         Err(e) => {
             eprintln!("sandboy: private execution object failed: {e}");
+            fault_stage.get_or_insert_with(|| e.stage.as_str().to_owned());
             None
         }
     };
@@ -605,6 +634,7 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
         Ok(r) => Some(r),
         Err(e) => {
             eprintln!("sandboy: runtime policy unresolved: {e}");
+            fault_stage.get_or_insert_with(|| e.stage().to_owned());
             None
         }
     };
@@ -632,9 +662,13 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
     // one the rule protects).
     let (fs_ok, runtime_binding) = match (&exec_obj, &runtime) {
         (Some(o), Some(rt)) => match install_landlock(&ctx, o.rule_fd, rt) {
-            Some(binding) => (true, binding.as_str().to_owned()),
-            None => (false, String::new()),
+            Ok(binding) => (true, binding.as_str().to_owned()),
+            Err(stage) => {
+                fault_stage.get_or_insert_with(|| stage.to_owned());
+                (false, String::new())
+            }
         },
+        // exec_obj / runtime already failed above and recorded their fine stage.
         _ => (false, String::new()),
     };
     if rule_fd >= 0 {
@@ -642,7 +676,13 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
     }
 
     // I) seccomp network/process deny + effect-check.
-    let net_ok = install_seccomp_checked(&ctx);
+    let net_ok = match install_seccomp_checked(&ctx) {
+        Ok(()) => true,
+        Err(stage) => {
+            fault_stage.get_or_insert_with(|| stage.to_owned());
+            false
+        }
+    };
 
     // Identity bindings the child proves: the execution inode's digest + identity, and the resolved
     // runtime read policy (profile version + a digest over every granted object's identity).
@@ -662,12 +702,27 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
 
     let (fd_ok, env_ok, placement) =
         apply_launch_faults(ctx.faults, fd_built, env_built, placement_built);
+    // Capture the fd/env/placement fault stage: a dimension the launch BUILT but a fault then flipped.
+    #[cfg(feature = "fault-injection")]
+    if fault_stage.is_none() {
+        if fd_built && !fd_ok {
+            fault_stage = Some("fd_verify".to_owned());
+        } else if env_built && !env_ok {
+            fault_stage = Some("env_verify".to_owned());
+        } else if placement_built && !placement {
+            fault_stage = Some("cgroup_verify".to_owned());
+        }
+    }
 
-    // J) READY_TO_EXEC — one immutable record.
+    // J) READY_TO_EXEC — one immutable record. `stage` is the FINE fault stage when a fault was hit,
+    //    else the coarse first-failed dimension (unchanged 7b.2 behaviour on a clean/naturally-failing
+    //    launch).
     let all_ok = fs_ok && net_ok && env_ok && fd_ok && placement;
     let proof = ChildProof {
         ok: all_ok,
-        stage: first_failed_stage(fs_ok, net_ok, env_ok, fd_ok, placement),
+        stage: fault_stage
+            .clone()
+            .unwrap_or_else(|| first_failed_stage(fs_ok, net_ok, env_ok, fd_ok, placement)),
         child_pid: std::process::id() as i32,
         cgroup_path,
         nonce_hex: ctx.bindings.launch_nonce.as_str().to_owned(),
@@ -707,8 +762,13 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
         seccomp::exit_now(92);
     }
 
-    // M) Become the target: `execveat` the read-only private execution inode.
-    trip!(ctx.faults, Execveat, seccomp::exit_now(93));
+    // M) Become the target: `execveat` the read-only private execution inode. The `execveat` fault
+    //    fires HERE, in the pre-exec child (still the trusted launcher — the target image never runs),
+    //    so recording the witness here is monitor-side by trust, never target-manufactured.
+    trip!(ctx.faults, Execveat, {
+        write_fault_witness("execveat");
+        seccomp::exit_now(93);
+    });
     let argv_ptrs: Vec<*const libc::c_char> = argv
         .iter()
         .map(|c| c.as_ptr())
@@ -771,13 +831,15 @@ fn apply_launch_faults(
 /// `O_PATH`) + the runtime read policy, then restrict + differentially self-check. Returns whether the
 /// install was proven.
 /// Returns the runtime read-policy binding (computed from the EXACT ruled objects) on a proven
-/// install, or `None` if not enforced. The binding is the ONLY runtime commitment `READY_TO_EXEC`
-/// makes — no pathname is re-resolved after the rules attach.
+/// install, or `Err(fine-stage)` if not enforced — the fine `InstallError` stage (`create_ruleset`,
+/// `add_rule`, `restrict_self`, `self_check_outside_inconclusive`, …) so a fault oracle can prove the
+/// launch failed at EXACTLY that Landlock stage. The binding is the ONLY runtime commitment
+/// `READY_TO_EXEC` makes — no pathname is re-resolved after the rules attach.
 fn install_landlock(
     ctx: &ChildCtx<'_>,
     rule_fd: RawFd,
     runtime: &crate::runtime::RuntimePolicy,
-) -> Option<o7_sandbox_protocol::ids::Digest256> {
+) -> Result<o7_sandbox_protocol::ids::Digest256, &'static str> {
     match crate::landlock::install_filesystem(
         &ctx.policy.worktree,
         &ctx.policy.allow_exec,
@@ -786,23 +848,33 @@ fn install_landlock(
         runtime,
         ctx.faults.landlock(),
     ) {
-        Ok(proof) => Some(proof.runtime_binding),
+        Ok(proof) => Ok(proof.runtime_binding),
         Err(e) => {
             eprintln!("sandboy: landlock not enforced: {e}");
-            None
+            Err(e.stage())
         }
     }
 }
 
-fn install_seccomp_checked(ctx: &ChildCtx<'_>) -> bool {
+/// `Ok(())` when seccomp is installed AND the network-deny EFFECT is verified. `Err(fine-stage)`
+/// distinguishes an install CRASH (`no_new_privs`/`apply`) from a SELF-CHECK failure
+/// (`seccomp_self_check`: the filter installed but the effect check found network not actually denied)
+/// — the report-downgrade (Class B) case.
+fn install_seccomp_checked(ctx: &ChildCtx<'_>) -> Result<(), &'static str> {
     // NO blanket `execve` deny: exec confinement is Landlock's job (the narrow path allowlist +
     // the exact execution-object rule), so legitimate `allow_exec` subprocesses (`/bin/dash`,
     // `/bin/sleep`) still run while a non-allowed path exec is kernel-denied.
     match seccomp::install_seccomp(ctx.faults.seccomp()) {
-        Ok(()) => seccomp::network_is_denied(),
+        Ok(()) => {
+            if seccomp::network_is_denied() {
+                Ok(())
+            } else {
+                Err("seccomp_self_check")
+            }
+        }
         Err(e) => {
             eprintln!("sandboy: seccomp not enforced: {e}");
-            false
+            Err(e.stage())
         }
     }
 }

@@ -166,6 +166,19 @@ pub struct BackendConfig {
     #[cfg(feature = "test-harness")]
     #[doc(hidden)]
     pub staging_probe: Option<std::path::PathBuf>,
+    /// TEST-ONLY: the ONE typed fault point (`O7_FAULT_POINT`) the REAL fault-injection artifact
+    /// injects, delivered through the trusted control plane (never the target environment). The
+    /// artifact's monitor parses it ONCE and removes it before the fork; a production artifact has no
+    /// fault seam. Drives the Phase 7b.3 setup-failure/lifecycle matrix.
+    #[cfg(feature = "test-harness")]
+    #[doc(hidden)]
+    pub fault_point: Option<String>,
+    /// TEST-ONLY: a MONITOR-owned witness path the fault artifact writes the reached stage to, so a
+    /// stage-specific oracle proves the launch failed at EXACTLY the injected stage (not by a generic
+    /// error). Written by the unconfined monitor/child before the target exists — never by the target.
+    #[cfg(feature = "test-harness")]
+    #[doc(hidden)]
+    pub fault_witness: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone)]
@@ -308,6 +321,14 @@ impl SandboyBoundary {
         #[cfg(feature = "test-harness")]
         if let Some(p) = &self.backend_config.staging_probe {
             env.insert(OsString::from("O7_STAGING_PROBE"), p.clone().into_os_string());
+        }
+        #[cfg(feature = "test-harness")]
+        if let Some(fp) = &self.backend_config.fault_point {
+            env.insert(OsString::from("O7_FAULT_POINT"), OsString::from(fp));
+        }
+        #[cfg(feature = "test-harness")]
+        if let Some(w) = &self.backend_config.fault_witness {
+            env.insert(OsString::from("O7_FAULT_WITNESS"), w.clone().into_os_string());
         }
         env
     }
@@ -842,6 +863,13 @@ impl ProcessBoundary for SandboyBoundary {
             Ok(ev) => ev,
             Err(e) => {
                 drop(sock);
+                // Grant the monitor its BOUNDED self-teardown window: the dropped socket makes its
+                // GO read see EOF (NACK), and it then runs its own fail-close teardown
+                // (`cgroup.kill` → drain → rmdir → exit), REMOVING the owned cgroup leaf. Only then
+                // reap as a fallback. Without this window the reap SIGKILLs the monitor mid-`rmdir`
+                // and leaks an empty cgroup leaf (exposed by the Phase 7b.3 pre-GO fault matrix).
+                let _ =
+                    tokio::time::timeout(std::time::Duration::from_secs(4), child.wait()).await;
                 kill_and_reap(&mut child, pid).await?;
                 return Err(BoundaryError::Evidence(e.to_string()));
             }

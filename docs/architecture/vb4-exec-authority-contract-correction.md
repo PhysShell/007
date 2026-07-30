@@ -312,7 +312,7 @@ real backend via `O7_SANDBOY_BIN`.
 | `writes_are_confined_to_the_worktree` | unchanged | — | — | — | — | PRESERVED |
 | `exec_of_a_non_allowed_binary_is_denied_by_the_kernel` | already the "non-allowlisted subprocess denied by Landlock" oracle (target execs `/usr/bin/env`, not in `allow_exec`); assertions UNCHANGED, but its shared `exec_probe` helper was de-shelled (finding C) | — | — | — | — | PRESERVED (helper hermeticized) |
 | `network_sockets_are_denied` / `the_target_env_is_exactly_the_allowlist` / `setsid_is_denied_by_seccomp` / `setpgid_is_denied_by_seccomp` / `a_parseable_marker_paired_with_a_nonzero_exit_…` | unchanged | — | — | — | — | PRESERVED |
-| `a_landlock_setup_failure_runs_no_target` / `a_seccomp_setup_failure_runs_no_target` / `a_cgroup_setup_failure_runs_no_target` / `a_self_check_downgrade_runs_no_target` (+ `observe_setup_fault` / `assert_install_fault`) | `O7_FAKE_MODE` fake-driven setup faults | — | — | — | — | MOVED TO 7b.3 (real fault artifact + `O7_FAULT_POINT`) |
+| `a_landlock_setup_failure_runs_no_target` / `a_seccomp_setup_failure_runs_no_target` / `a_cgroup_setup_failure_runs_no_target` / `a_self_check_downgrade_runs_no_target` (+ `observe_setup_fault` / `assert_install_fault`) | `O7_FAKE_MODE` fake-driven setup faults | 16 `fault_*` oracles (real `O7_FAULT_POINT` artifact + monitor-owned `O7_FAULT_WITNESS`) | pre-GO A / self-check B / post-GO + teardown C — see §10 | real fault artifact via `matrix_backend()` | per §10 mapping | REPLACED in 7b.3 (`173a584`→this layer) |
 
 Internal staging-window properties: the same-UID reopen block DURING staging is now proven DIRECTLY by
 `the_staging_inode_is_not_reopenable_during_materialize` (not merely attested by `FullyEnforced`). The
@@ -352,3 +352,54 @@ corrected in the backend + boundary (commit `33c1b0e`):
   (`execv(target, [target, secondary])`): an allowed `/usr/bin/touch` creates `secondary` (proving
   it ran) and a Landlock-denied exec writes `exec=ERR:<errno>` to `primary`. Assertions of the
   preserved `exec_of_a_non_allowed_binary_…` oracle are unchanged; the helper is now hermetic.
+
+## 10. Phase 7b.3 — fault-point mapping (real fault-injection artifact)
+
+The four `O7_FAKE_MODE` setup oracles + `observe_setup_fault` are REPLACED by oracles that drive one
+typed `FaultId` (`O7_FAULT_POINT`) into the REAL composed launch through the committed `matrix_backend()`
+seam, and read a MONITOR-owned stage witness (`O7_FAULT_WITNESS`, written by the unconfined
+monitor/pre-exec child — never the target). `confinement_backend()` stays the fake; no production flip.
+
+Fault selection is typed, parsed ONCE in the unconfined monitor (`launch::monitor_faults`), permits
+exactly one fault/launch (single `Option<FaultId>` slot), and is `remove_var`'d before the fork so it
+never reaches the child/target; an unknown selection aborts (`invalid_fault`). The witness names the
+FINE stage actually reached (the child reports it in its bound proof; the monitor writes it), so a
+generic/malformed failure cannot satisfy a stage-specific oracle.
+
+**Witness delivery:** the child records the FINE stage of its first failing step into the bound
+`READY_TO_EXEC` proof; the monitor writes it to `O7_FAULT_WITNESS` from `forced_downgrade` (child faults
++ `ready_validate` + `ready_eof`), `refuse_before_child` (`cgroup_create`/`invalid_fault`), the
+`Release`/`Execveat` trips, and the teardown-`Err` path (`kill`/`drain`). Pre-exec only — never the target.
+
+| `O7_FAULT_POINT` | phase | class | witness stage | GO sent? | target start? | boundary result | cleanup evidence | oracle |
+|---|---|---|---|---|---|---|---|---|
+| `cgroup_create` | monitor, pre-fork | A | `cgroup_create` | no | no | `Evidence(NotFullyEnforced)` | no leaf created | `fault_cgroup_create_runs_no_target` |
+| `target_tmpfile` | child, staging | A | `target_tmpfile` | no | no | `Evidence(NFE)` | leaf removed | `fault_staging_target_tmpfile_runs_no_target` |
+| `runtime_interpreter` | child, runtime | A | `runtime_interpreter` | no | no | `Evidence(NFE)` | leaf removed | `fault_runtime_interpreter_runs_no_target` |
+| `landlock_restrict` | child, Landlock | A | `restrict_self` | no | no | `Evidence(NFE)` | leaf removed | `fault_landlock_restrict_runs_no_target` |
+| `seccomp_apply` | child, seccomp | A | `apply` | no | no | `Evidence(NFE)` | leaf removed | `fault_seccomp_apply_runs_no_target` |
+| `fd_verify` | child, fd scrub | A | `fd_verify` | no | no | `Evidence(NFE)` | leaf removed | `fault_fd_verify_runs_no_target` |
+| `env_verify` | child, env | A | `env_verify` | no | no | `Evidence(NFE)` | leaf removed | `fault_env_verify_runs_no_target` |
+| `cgroup_verify` | child, placement | A | `cgroup_verify` | no | no | `Evidence(NFE)` | leaf removed | `fault_cgroup_verify_runs_no_target` |
+| `ready_write` | child dies pre-proof | A | `ready_eof` | no | no | `Evidence(NFE)` | leaf removed | `fault_ready_write_runs_no_target` |
+| `ready_validate` | monitor, post-fork | A | `ready_validate` | no | no | `Evidence(NFE)` | leaf removed | `fault_ready_validate_runs_no_target` |
+| *(unknown string)* | monitor, pre-fork | A | `invalid_fault` | no | no | `Evidence(NFE)` | no leaf created | `fault_invalid_selection_runs_no_target` |
+| `seccomp_self_check` | child, seccomp effect-check | **B** | `seccomp_self_check` | no | no | `Evidence(NFE)` — correctly-bound report rejected on ENFORCEMENT merits (not a crash `apply`, not a binding mismatch) | leaf removed | `fault_seccomp_self_check_downgrade_is_rejected_on_merits` |
+| `release` | monitor, post-GO pre-exec | **C** | `release` | **yes** | no (token withheld) | `Ok(launch)`; monitor exits PLUMBING | leaf removed | `fault_release_runs_no_target` |
+| `execveat` | child, post-GO at exec | **C** | `execveat` | **yes** | no (exec aborted) | `Ok(launch)`; child exits 93 | leaf removed | `fault_execveat_runs_no_target` |
+| `kill` | monitor, deadline teardown | **C** | `kill` | **yes** | **yes** (tree ran) | `Ok(launch)` → boundary surfaces cleanup `Err` (tree survived faulted kill) | teardown-DOMINATES (exit TEARDOWN); tree reaped by boundary; leaf may leak (swept) | `fault_teardown_kill_dominates` |
+| `drain` | monitor, deadline teardown | **C** | `drain` | **yes** | **yes** (tree ran) | `Ok(launch, exit TEARDOWN)` | teardown-DOMINATES; tree killed (drain OBSERVATION faulted); leaf may leak (swept) | `fault_teardown_drain_dominates` |
+
+**FaultIds mapped but covered by a same-stage representative** (all fail closed identically; the
+witness is the shared fine stage): `landlock_create`→`create_ruleset`, `landlock_add_rule`/
+`target_landlock_rule`/`runtime_rule`→`add_rule`, `landlock_self_check`→`self_check_outside_inconclusive`,
+`runtime_object_open`/`runtime_identity`→`open_parent`, `runtime_profile`→`runtime_profile`,
+`runtime_preload_check`→`runtime_preload_check`, `target_namespace`/`target_mount`/`target_copy`/
+`target_digest`/`target_close_writer`/`target_identity`/`target_proc_isolation`→their `target_*` stage,
+`seccomp_no_new_privs`→`no_new_privs`. (Staging `IdMap`/`MountPrivate`, several landlock ABI/omit knobs,
+cgroup `move_out`, and the VB-3 `O7_SC_FAULT` seccomp variants are NOT reachable from a `FaultId`.)
+
+**Concrete defect fixed (exposed by the pre-GO fault matrix):** on a report-verification rejection the
+boundary `drop(sock)`'d then IMMEDIATELY `kill_and_reap`'d, SIGKILLing the monitor before its
+NACK→`cgroup.kill`→drain→`rmdir`→exit could remove the owned cgroup leaf — an empty-leaf leak. Fixed by
+granting the monitor a bounded self-teardown window before the fallback reap (`sandboy_boundary.rs`).

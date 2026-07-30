@@ -71,7 +71,6 @@ pub(crate) enum InstallError {
 }
 
 impl InstallError {
-    #[cfg(feature = "test-harness")]
     pub(crate) fn stage(&self) -> &'static str {
         match self {
             InstallError::UnsupportedArch => "unsupported_arch",

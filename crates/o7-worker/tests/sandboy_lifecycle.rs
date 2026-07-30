@@ -67,6 +67,8 @@ fn boundary(allow_exec: Vec<PathBuf>, mode: &str) -> SandboyBoundary {
     .with_backend_config(o7_worker::BackendConfig {
         fake_mode: Some(mode.to_owned()),
         staging_probe: None,
+        fault_point: None,
+        fault_witness: None,
     })
 }
 
