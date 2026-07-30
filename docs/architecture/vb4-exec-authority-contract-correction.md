@@ -360,6 +360,16 @@ typed `FaultId` (`O7_FAULT_POINT`) into the REAL composed launch through the com
 seam, and read a MONITOR-owned stage witness (`O7_FAULT_WITNESS`, written by the unconfined
 monitor/pre-exec child — never the target). `confinement_backend()` stays the fake; no production flip.
 
+**ALL 32 typed `FaultId`s are exercised.** The 28 pre-GO ids are TABLE-DRIVEN
+(`every_pre_go_fault_fails_closed_at_its_exact_stage` over `PRE_GO_FAULTS`), plus `seccomp_self_check`
+(Class B) and the four post-GO/lifecycle ids (Class C). `runtime_identity` is DE-ALIASED from
+`runtime_object_open` — it now maps to a distinct `landlock::Faults.runtime_identity` knob and a distinct
+`InstallError::RuntimeIdentity` (witness `runtime_identity`), failing AFTER the runtime objects open
+rather than at the open. EVERY spawn/wait is bounded (a hang fails the oracle); cgroup leak evidence is
+FAIL-CLOSED — an uninspectable subtree panics the oracle, and leaks are a leaf-NAME-SET difference (never
+a saturating count). Same-stage witness collisions (`add_rule` for `landlock_add_rule` /
+`target_landlock_rule` / `runtime_rule`) still drive each DISTINCT id down its own injection path.
+
 Fault selection is typed, parsed ONCE in the unconfined monitor (`launch::monitor_faults`), permits
 exactly one fault/launch (single `Option<FaultId>` slot), and is `remove_var`'d before the fork so it
 never reaches the child/target; an unknown selection aborts (`invalid_fault`). The witness names the
@@ -373,24 +383,28 @@ generic/malformed failure cannot satisfy a stage-specific oracle.
 
 | `O7_FAULT_POINT` | phase | class | witness stage | GO sent? | target start? | boundary result | cleanup evidence | oracle |
 |---|---|---|---|---|---|---|---|---|
-| `cgroup_create` | monitor, pre-fork | A | `cgroup_create` | no | no | `Evidence(NotFullyEnforced)` | no leaf created | `fault_cgroup_create_runs_no_target` |
-| `target_tmpfile` | child, staging | A | `target_tmpfile` | no | no | `Evidence(NFE)` | leaf removed | `fault_staging_target_tmpfile_runs_no_target` |
-| `runtime_interpreter` | child, runtime | A | `runtime_interpreter` | no | no | `Evidence(NFE)` | leaf removed | `fault_runtime_interpreter_runs_no_target` |
-| `landlock_restrict` | child, Landlock | A | `restrict_self` | no | no | `Evidence(NFE)` | leaf removed | `fault_landlock_restrict_runs_no_target` |
-| `seccomp_apply` | child, seccomp | A | `apply` | no | no | `Evidence(NFE)` | leaf removed | `fault_seccomp_apply_runs_no_target` |
-| `fd_verify` | child, fd scrub | A | `fd_verify` | no | no | `Evidence(NFE)` | leaf removed | `fault_fd_verify_runs_no_target` |
-| `env_verify` | child, env | A | `env_verify` | no | no | `Evidence(NFE)` | leaf removed | `fault_env_verify_runs_no_target` |
-| `cgroup_verify` | child, placement | A | `cgroup_verify` | no | no | `Evidence(NFE)` | leaf removed | `fault_cgroup_verify_runs_no_target` |
-| `ready_write` | child dies pre-proof | A | `ready_eof` | no | no | `Evidence(NFE)` | leaf removed | `fault_ready_write_runs_no_target` |
-| `ready_validate` | monitor, post-fork | A | `ready_validate` | no | no | `Evidence(NFE)` | leaf removed | `fault_ready_validate_runs_no_target` |
-| *(unknown string)* | monitor, pre-fork | A | `invalid_fault` | no | no | `Evidence(NFE)` | no leaf created | `fault_invalid_selection_runs_no_target` |
+| `cgroup_create` | monitor, pre-fork | A | `cgroup_create` | no | no | `Evidence(NotFullyEnforced)` | no leaf created | `every_pre_go_fault_…` |
+| `target_tmpfile` | child, staging | A | `target_tmpfile` | no | no | `Evidence(NFE)` | leaf removed | `every_pre_go_fault_…` |
+| `runtime_interpreter` | child, runtime | A | `runtime_interpreter` | no | no | `Evidence(NFE)` | leaf removed | `every_pre_go_fault_…` |
+| `landlock_restrict` | child, Landlock | A | `restrict_self` | no | no | `Evidence(NFE)` | leaf removed | `every_pre_go_fault_…` |
+| `seccomp_apply` | child, seccomp | A | `apply` | no | no | `Evidence(NFE)` | leaf removed | `every_pre_go_fault_…` |
+| `fd_verify` | child, fd scrub | A | `fd_verify` | no | no | `Evidence(NFE)` | leaf removed | `every_pre_go_fault_…` |
+| `env_verify` | child, env | A | `env_verify` | no | no | `Evidence(NFE)` | leaf removed | `every_pre_go_fault_…` |
+| `cgroup_verify` | child, placement | A | `cgroup_verify` | no | no | `Evidence(NFE)` | leaf removed | `every_pre_go_fault_…` |
+| `ready_write` | child dies pre-proof | A | `ready_eof` | no | no | `Evidence(NFE)` | leaf removed | `every_pre_go_fault_…` |
+| `ready_validate` | monitor, post-fork | A | `ready_validate` | no | no | `Evidence(NFE)` | leaf removed | `every_pre_go_fault_…` |
+| *(unknown string)* | monitor, pre-fork | A | `invalid_fault` | no | no | `Evidence(NFE)` | no leaf created | `every_pre_go_fault_…` |
 | `seccomp_self_check` | child, seccomp effect-check | **B** | `seccomp_self_check` | no | no | `Evidence(NFE)` — correctly-bound report rejected on ENFORCEMENT merits (not a crash `apply`, not a binding mismatch) | leaf removed | `fault_seccomp_self_check_downgrade_is_rejected_on_merits` |
 | `release` | monitor, post-GO pre-exec | **C** | `release` | **yes** | no (token withheld) | `Ok(launch)`; monitor exits PLUMBING | leaf removed | `fault_release_runs_no_target` |
 | `execveat` | child, post-GO at exec | **C** | `execveat` | **yes** | no (exec aborted) | `Ok(launch)`; child exits 93 | leaf removed | `fault_execveat_runs_no_target` |
-| `kill` | monitor, deadline teardown | **C** | `kill` | **yes** | **yes** (tree ran) | `Ok(launch)` → boundary surfaces cleanup `Err` (tree survived faulted kill) | teardown-DOMINATES (exit TEARDOWN); tree reaped by boundary; leaf may leak (swept) | `fault_teardown_kill_dominates` |
-| `drain` | monitor, deadline teardown | **C** | `drain` | **yes** | **yes** (tree ran) | `Ok(launch, exit TEARDOWN)` | teardown-DOMINATES; tree killed (drain OBSERVATION faulted); leaf may leak (swept) | `fault_teardown_drain_dominates` |
+| `kill` | monitor, deadline teardown | **C** | `kill` | **yes** | **yes** (tree ran) | `Ok(launch)` → boundary surfaces cleanup `Err` (tree survived faulted kill) | teardown-DOMINATES; the WHOLE owned tree (leader + ordinary child + reparented descendant) is reaped; leaf may leak (swept) | `fault_teardown_kill_dominates` |
+| `drain` | monitor, deadline teardown | **C** | `drain` | **yes** | **yes** (tree ran) | `Ok(launch)` with **EXACTLY `Code(77)`** | teardown-DOMINATES; tree killed (drain OBSERVATION faulted); WHOLE tree (leader+child+descendant) reaped; leaf may leak (swept) | `fault_teardown_drain_dominates` |
 
-**FaultIds mapped but covered by a same-stage representative** (all fail closed identically; the
+**Note (superseded):** every reachable `FaultId` is now individually EXERCISED (§table above +
+`PRE_GO_FAULTS`), so the following is only a *witness-collision* index, not a coverage gap — each id
+still fails closed down its own injection path:
+
+**Same-stage witness collisions** (each still individually driven; the
 witness is the shared fine stage): `landlock_create`→`create_ruleset`, `landlock_add_rule`/
 `target_landlock_rule`/`runtime_rule`→`add_rule`, `landlock_self_check`→`self_check_outside_inconclusive`,
 `runtime_object_open`/`runtime_identity`→`open_parent`, `runtime_profile`→`runtime_profile`,
@@ -399,7 +413,12 @@ witness is the shared fine stage): `landlock_create`→`create_ruleset`, `landlo
 `seccomp_no_new_privs`→`no_new_privs`. (Staging `IdMap`/`MountPrivate`, several landlock ABI/omit knobs,
 cgroup `move_out`, and the VB-3 `O7_SC_FAULT` seccomp variants are NOT reachable from a `FaultId`.)
 
-**Concrete defect fixed (exposed by the pre-GO fault matrix):** on a report-verification rejection the
-boundary `drop(sock)`'d then IMMEDIATELY `kill_and_reap`'d, SIGKILLing the monitor before its
-NACK→`cgroup.kill`→drain→`rmdir`→exit could remove the owned cgroup leaf — an empty-leaf leak. Fixed by
-granting the monitor a bounded self-teardown window before the fallback reap (`sandboy_boundary.rs`).
+**Concrete defect fixed (exposed by the pre-GO fault matrix):** an owned cgroup leaf leaked on a
+report-verification rejection, for two reasons, both fixed:
+1. the boundary `drop(sock)`'d then IMMEDIATELY `kill_and_reap`'d, SIGKILLing the monitor before its
+   NACK→teardown→`rmdir`→exit could run — fixed by a bounded monitor self-teardown window before the
+   fallback reap (`sandboy_boundary.rs`);
+2. the monitor tore down WITHOUT first reaping its exited child, so the child's zombie lingered in the
+   leaf and stalled the drain observation (~`DRAIN_BOUND`) until the graceful window occasionally tipped
+   over — fixed by reaping the child before the NACK/refused teardown (`launch/mod.rs::reap_child_bounded`),
+   which also makes the drain (and the pre-GO oracle suite) fast and deterministic.

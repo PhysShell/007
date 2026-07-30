@@ -86,6 +86,9 @@ pub(crate) enum InstallError {
     SelfCheckOutsideNotDenied(io::Error),
     /// After `restrict_self`, an inside-worktree write was denied — the ruleset is misbuilt.
     SelfCheckInsideDenied(io::Error),
+    /// A runtime read-object's IDENTITY binding failed AFTER it was opened (distinct from `OpenParent`,
+    /// which is the open itself failing). Fail-injection stage `runtime_identity`.
+    RuntimeIdentity,
 }
 
 impl InstallError {
@@ -104,6 +107,7 @@ impl InstallError {
             InstallError::SelfCheckOutsideAllowed => "self_check_outside",
             InstallError::SelfCheckOutsideNotDenied(_) => "self_check_outside_inconclusive",
             InstallError::SelfCheckInsideDenied(_) => "self_check_inside",
+            InstallError::RuntimeIdentity => "runtime_identity",
         }
     }
     #[cfg(feature = "test-harness")]
@@ -122,6 +126,7 @@ impl InstallError {
             InstallError::SelfCheckBaselineInsideDenied(_) => 90,
             InstallError::SelfCheckBaselineOutsideDenied(_) => 91,
             InstallError::UnsupportedObjectType { .. } => 92,
+            InstallError::RuntimeIdentity => 93,
         }
     }
 }
@@ -174,6 +179,9 @@ impl std::fmt::Display for InstallError {
                     "self-check: an inside-worktree write was denied post-restrict: {e}"
                 )
             }
+            InstallError::RuntimeIdentity => {
+                write!(f, "runtime read-object identity binding failed")
+            }
         }
     }
 }
@@ -196,6 +204,9 @@ pub(crate) struct Faults {
     pub(crate) exec_object_rule: bool,
     /// VB-4: force a runtime read-object open (interpreter / library root) to fail.
     pub(crate) runtime_open: bool,
+    /// VB-4: force the runtime read-object IDENTITY binding to fail AFTER the objects are opened —
+    /// a DISTINCT stage from `runtime_open` (which fails before opening).
+    pub(crate) runtime_identity: bool,
     /// VB-4: force a runtime read-object rule attach to fail.
     pub(crate) runtime_rule: bool,
 }
@@ -472,6 +483,11 @@ pub(crate) fn install_filesystem(
     let mut read_objs = Vec::with_capacity(n_roots + runtime.read_files.len());
     for p in runtime.read_roots.iter().chain(runtime.read_files.iter()) {
         read_objs.push(open_object(p)?);
+    }
+    // Runtime IDENTITY binding fault: distinct from `runtime_open` (opens succeeded above; the
+    // identity commitment fails here), so it fails closed at its OWN stage `runtime_identity`.
+    if faults.runtime_identity {
+        return Err(InstallError::RuntimeIdentity);
     }
 
     // Test-only deterministic barrier: after every object is OPEN, before any rule is ATTACHED.

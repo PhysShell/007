@@ -408,10 +408,14 @@ fn report_and_run(ctx: &mut MonitorCtx<'_>, plan: VerifiedLaunchPlan) -> i32 {
     let mut go = [0u8; 1];
     let authorized = matches!(ctx.sock.read_exact(&mut go), Ok(())) && go[0] == b'G';
     if !authorized {
+        // The child already reported (and, on a downgrade, exited); REAP it before teardown so its
+        // zombie does not linger in the leaf and stall the drain — then the leaf drains at once.
+        reap_child_bounded(ctx.child_pid);
         return teardown_and(ctx.leaf, ctx.faults, exit::NACK, "nack");
     }
     if !fully {
         eprintln!("sandboy: refusing to release — not fully enforced");
+        reap_child_bounded(ctx.child_pid);
         return teardown_and(ctx.leaf, ctx.faults, exit::REFUSED, "refused");
     }
 
@@ -452,6 +456,19 @@ fn report_and_run(ctx: &mut MonitorCtx<'_>, plan: VerifiedLaunchPlan) -> i32 {
             // target's own status — the exit is TEARDOWN.
             write_fault_witness(e.stage());
             exit::TEARDOWN
+        }
+    }
+}
+
+/// Reap the launch child (bounded ~2s) so a SELF-EXITED child's zombie leaves the cgroup leaf before
+/// the drain observation, rather than lingering and stalling it. Instant on a downgrade (the child has
+/// already exited); a still-running child returns `None` and is left for `cgroup.kill` in teardown.
+fn reap_child_bounded(pid: i32) {
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(2) {
+        match seccomp::try_wait(pid) {
+            Ok(Some(_)) | Err(_) => return,
+            Ok(None) => std::thread::sleep(Duration::from_millis(5)),
         }
     }
 }

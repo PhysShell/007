@@ -39,7 +39,7 @@
     clippy::indexing_slicing
 )]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -1408,15 +1408,20 @@ async fn a_target_outliving_the_deadline_is_killed_with_its_descendants() {
 // seam, and reads a MONITOR-owned stage witness (`O7_FAULT_WITNESS`, written by the unconfined
 // monitor/pre-exec child — never by the target, which never runs on a setup fault). The witness names
 // the EXACT stage reached, so a generic/malformed failure cannot satisfy a stage-specific oracle.
+//
+// EVERY spawn/wait is BOUNDED (a hang is a failure, not a pass) and cgroup evidence is FAIL-CLOSED (an
+// uninspectable subtree fails the oracle; leaked leaves are compared by NAME SET, never a saturating
+// count). ALL 32 typed `FaultId`s are exercised: the pre-GO table below, plus the self-check (Class B)
+// and the four post-GO/lifecycle faults (Class C).
 
 /// A boundary that injects ONE typed fault + a monitor-owned witness path into the real artifact,
-/// both through the trusted control plane (never the target env). `matrix_backend()` selects the real
-/// fault artifact when `O7_SANDBOY_BIN` is set; `confinement_backend()` stays the fake and is untouched.
+/// both through the trusted control plane (never the target env). `confinement_backend()` is untouched.
 fn boundary_with_fault(
     worktree: &Path,
     allow_exec: Vec<PathBuf>,
     fault: &str,
     witness: &Path,
+    timeout: Duration,
 ) -> SandboyBoundary {
     SandboyBoundary::new(
         matrix_backend(),
@@ -1425,7 +1430,7 @@ fn boundary_with_fault(
             allow_exec,
             network: NetworkPolicy::DenyAll,
             env_allowlist: vec![],
-            timeout: Duration::from_secs(30),
+            timeout,
         },
     )
     .expect("valid boundary")
@@ -1437,191 +1442,156 @@ fn boundary_with_fault(
     })
 }
 
-/// Count the monitor-owned `o7cg-*` cgroup leaves currently under the harness's own cgroup subtree. A
-/// fault that creates a leaf must leave NONE behind (the monitor's teardown removes it on fail-close);
-/// a leak is a cleanup failure.
-fn owned_cgroup_leaves() -> usize {
-    let Some(cg) = cgroup_of(std::process::id() as i32) else {
-        return 0;
-    };
+/// The SET of monitor-owned `o7cg-*` cgroup leaf names under the harness's own cgroup subtree.
+/// FAIL-CLOSED: if the harness cgroup cannot be resolved or its subtree cannot be read, the oracle
+/// PANICS — "couldn't inspect" must never be mistaken for "nothing leaked".
+fn owned_cgroup_leaf_names() -> BTreeSet<String> {
+    let cg = cgroup_of(std::process::id() as i32)
+        .expect("fault oracle: the harness cgroup must be resolvable (fail-closed)");
     let dir = cgroup_dir(&cg);
-    std::fs::read_dir(&dir)
-        .map(|rd| {
-            rd.flatten()
-                .filter(|e| {
-                    e.file_name()
-                        .to_string_lossy()
-                        .starts_with("o7cg-")
-                })
-                .count()
+    let rd = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("fault oracle: cannot read owned cgroup subtree {dir:?}: {e}"));
+    rd.flatten()
+        .filter_map(|e| {
+            let n = e.file_name().to_string_lossy().into_owned();
+            n.starts_with("o7cg-").then_some(n)
         })
-        .unwrap_or(0)
+        .collect()
 }
 
-/// The observation of a driven fault: whether spawn failed closed (and with what error), whether the
-/// target started, the monitor-owned witness, and how many owned cgroup leaves LEAKED.
+/// The observation of a driven fault.
 struct FaultRun {
     spawn_err: Option<String>,
     target_ran: bool,
     witness: Option<String>,
-    leaked_cgroups: usize,
+    new_leaves: BTreeSet<String>,
 }
 
-/// Drive a PRE-GO fault: spawn is expected to fail closed (the report is downgraded, GO withheld), so
-/// the target never runs. Bounded throughout; always reaps any (unexpected) live launch.
+/// Drive a PRE-GO fault; spawn must fail closed (report downgraded, GO withheld), so the target never
+/// runs. Every operation is bounded; cgroup leak evidence is a NAME-SET difference.
 async fn run_pre_go_fault(fault: &str) -> FaultRun {
     let wt = tempfile::tempdir().unwrap();
     let ran = wt.path().join("ran.marker");
     let witness = wt.path().join("fault.witness");
-    let before = owned_cgroup_leaves();
-    let b = boundary_with_fault(wt.path(), vec![probe_dir()], fault, &witness);
-    let spawn = b
-        .spawn(probe_target(
+    let before = owned_cgroup_leaf_names();
+    let b = boundary_with_fault(wt.path(), vec![probe_dir()], fault, &witness, Duration::from_secs(30));
+    let spawn = match tokio::time::timeout(
+        Duration::from_secs(45),
+        b.spawn(probe_target(
             &["ran", &ran.to_string_lossy()],
             wt.path(),
             BTreeMap::new(),
-        ))
-        .await;
+        )),
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(_) => panic!("fault={fault}: spawn did not resolve within 45s (hang)"),
+    };
     let spawn_err = spawn.as_ref().err().map(std::string::ToString::to_string);
-    // A pre-GO fault must NOT return a live launch; if it (wrongly) did, reap it so nothing leaks.
+    // A pre-GO fault must NOT return a live launch; if it (wrongly) did, reap it (bounded).
     if let Ok(mut l) = spawn {
-        let _ = l.process.force_stop().await;
-        let _ = l.process.wait().await;
+        let _ = tokio::time::timeout(Duration::from_secs(10), l.process.force_stop()).await;
+        let _ = tokio::time::timeout(Duration::from_secs(10), l.process.wait()).await;
     }
     tokio::time::sleep(Duration::from_millis(200)).await;
+    let after = owned_cgroup_leaf_names();
     FaultRun {
         spawn_err,
         target_ran: ran.exists(),
         witness: std::fs::read_to_string(&witness).ok(),
-        leaked_cgroups: owned_cgroup_leaves().saturating_sub(before),
+        new_leaves: after.difference(&before).cloned().collect(),
     }
 }
 
-/// Every PRE-GO fault shares this shape: NO target runs; the launch is rejected as `NotFullyEnforced`
-/// (a report-VERIFICATION rejection — NOT a cleanup `Signal` error, which would mean an owned member
-/// survived, so this also proves the monitor + child were reaped); the monitor-owned witness names
-/// EXACTLY the injected stage (a generic error cannot satisfy this); and no owned cgroup leaf leaks.
-fn assert_pre_go_fault(fault: &str, expected_stage: &str, r: &FaultRun) {
-    assert!(
-        !r.target_ran,
-        "fault={fault}: NO target may run before GO; the `ran` marker exists (the fault was ignored \
-         and the target ran)"
-    );
+/// Non-panicking check for a PRE-GO fault (so the table-driven test can report ALL failures): no
+/// target runs; rejected as `NotFullyEnforced` (a report-VERIFICATION rejection — NOT a cleanup
+/// `Signal` error, which would mean an owned member survived); the witness names EXACTLY the injected
+/// stage; and NO new owned cgroup leaf leaked.
+fn check_pre_go_fault(fault: &str, expected_stage: &str, r: &FaultRun) -> Result<(), String> {
+    if r.target_ran {
+        return Err(format!("fault={fault}: a target ran before GO (fault ignored)"));
+    }
     let err = r.spawn_err.as_deref().unwrap_or("");
+    if !err.contains("full enforcement") {
+        return Err(format!(
+            "fault={fault}: expected NotFullyEnforced (report-verification, not a Signal/generic \
+             error), got spawn error {err:?}"
+        ));
+    }
+    if r.witness.as_deref() != Some(expected_stage) {
+        return Err(format!(
+            "fault={fault}: witness must be EXACTLY `{expected_stage}`, got {:?}",
+            r.witness
+        ));
+    }
+    if !r.new_leaves.is_empty() {
+        return Err(format!(
+            "fault={fault}: leaked owned cgroup leaf/leaves {:?} (monitor teardown must remove them)",
+            r.new_leaves
+        ));
+    }
+    Ok(())
+}
+
+/// EVERY reachable PRE-GO `FaultId` and its EXACT fine witness stage. Table-driven so all are
+/// exercised; a same-stage collision (e.g. `add_rule` for landlock_add_rule / target_landlock_rule /
+/// runtime_rule) still drives each DISTINCT `FaultId` down its own injection path.
+const PRE_GO_FAULTS: &[(&str, &str)] = &[
+    // cgroup (the teardown ids kill/drain are Class C below)
+    ("cgroup_create", "cgroup_create"),
+    ("cgroup_verify", "cgroup_verify"),
+    // Landlock
+    ("landlock_create", "create_ruleset"),
+    ("landlock_add_rule", "add_rule"),
+    ("landlock_restrict", "restrict_self"),
+    ("landlock_self_check", "self_check_outside_inconclusive"),
+    // fd + env
+    ("fd_verify", "fd_verify"),
+    ("env_verify", "env_verify"),
+    // seccomp (self_check is Class B below)
+    ("seccomp_no_new_privs", "no_new_privs"),
+    ("seccomp_apply", "apply"),
+    // private execution object (staging)
+    ("target_namespace", "target_namespace"),
+    ("target_mount", "target_mount"),
+    ("target_tmpfile", "target_tmpfile"),
+    ("target_copy", "target_copy"),
+    ("target_digest", "target_digest"),
+    ("target_close_writer", "target_close_writer"),
+    ("target_identity", "target_identity"),
+    ("target_landlock_rule", "add_rule"),
+    ("target_proc_isolation", "target_proc_isolation"),
+    // runtime read policy (runtime_identity is DE-ALIASED from runtime_object_open)
+    ("runtime_profile", "runtime_profile"),
+    ("runtime_interpreter", "runtime_interpreter"),
+    ("runtime_object_open", "open_parent"),
+    ("runtime_identity", "runtime_identity"),
+    ("runtime_rule", "add_rule"),
+    ("runtime_preload_check", "runtime_preload_check"),
+    // protocol (release/execveat are Class C below)
+    ("ready_write", "ready_eof"),
+    ("ready_validate", "ready_validate"),
+    // an UNKNOWN selection must abort before the child
+    ("no_such_fault_xyz", "invalid_fault"),
+];
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Vertical B / VB-4 7b.3: every pre-GO FaultId fails closed at its exact stage, no target"]
+async fn every_pre_go_fault_fails_closed_at_its_exact_stage() {
+    let mut failures = Vec::new();
+    for (fault, stage) in PRE_GO_FAULTS {
+        let r = run_pre_go_fault(fault).await;
+        if let Err(e) = check_pre_go_fault(fault, stage, &r) {
+            failures.push(e);
+        }
+    }
     assert!(
-        err.contains("full enforcement"),
-        "fault={fault}: must be rejected as NotFullyEnforced (report-verification), NOT a cleanup \
-         Signal error (an owned member surviving) nor a generic setup error; spawn error: {err:?}"
-    );
-    assert_eq!(
-        r.witness.as_deref(),
-        Some(expected_stage),
-        "fault={fault}: the MONITOR-owned witness must name EXACTLY stage `{expected_stage}` (proving \
-         the launch failed at that stage, not by a generic error); witness: {:?}",
-        r.witness
-    );
-    assert_eq!(
-        r.leaked_cgroups, 0,
-        "fault={fault}: no owned cgroup leaf may leak — the monitor's fail-close teardown removes it"
-    );
-}
-
-// --- Class A: pre-GO setup faults (cgroup / staging / runtime / Landlock / seccomp / fd/env/placement
-//     / READY). One representative typed fault per stage class; each proves a DISTINCT witness stage. ---
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B / VB-4 7b.3: real cgroup-create fault fails closed with no target"]
-async fn fault_cgroup_create_runs_no_target() {
-    assert_pre_go_fault(
-        "cgroup_create",
-        "cgroup_create",
-        &run_pre_go_fault("cgroup_create").await,
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B / VB-4 7b.3: real staging (O_TMPFILE) fault fails closed with no target"]
-async fn fault_staging_target_tmpfile_runs_no_target() {
-    assert_pre_go_fault(
-        "target_tmpfile",
-        "target_tmpfile",
-        &run_pre_go_fault("target_tmpfile").await,
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B / VB-4 7b.3: real runtime-interpreter fault fails closed with no target"]
-async fn fault_runtime_interpreter_runs_no_target() {
-    assert_pre_go_fault(
-        "runtime_interpreter",
-        "runtime_interpreter",
-        &run_pre_go_fault("runtime_interpreter").await,
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B / VB-4 7b.3: real Landlock restrict_self fault fails closed with no target"]
-async fn fault_landlock_restrict_runs_no_target() {
-    assert_pre_go_fault(
-        "landlock_restrict",
-        "restrict_self",
-        &run_pre_go_fault("landlock_restrict").await,
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B / VB-4 7b.3: real seccomp apply fault fails closed with no target"]
-async fn fault_seccomp_apply_runs_no_target() {
-    assert_pre_go_fault("seccomp_apply", "apply", &run_pre_go_fault("seccomp_apply").await);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B / VB-4 7b.3: real fd-scrub verify fault fails closed with no target"]
-async fn fault_fd_verify_runs_no_target() {
-    assert_pre_go_fault("fd_verify", "fd_verify", &run_pre_go_fault("fd_verify").await);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B / VB-4 7b.3: real env verify fault fails closed with no target"]
-async fn fault_env_verify_runs_no_target() {
-    assert_pre_go_fault("env_verify", "env_verify", &run_pre_go_fault("env_verify").await);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B / VB-4 7b.3: real cgroup-placement verify fault fails closed with no target"]
-async fn fault_cgroup_verify_runs_no_target() {
-    assert_pre_go_fault(
-        "cgroup_verify",
-        "cgroup_verify",
-        &run_pre_go_fault("cgroup_verify").await,
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B / VB-4 7b.3: child dying before READY (ready_write) fails closed with no target"]
-async fn fault_ready_write_runs_no_target() {
-    // The child exits before writing its proof → the monitor sees premature EOF (`ready_eof`).
-    assert_pre_go_fault("ready_write", "ready_eof", &run_pre_go_fault("ready_write").await);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B / VB-4 7b.3: monitor READY-validation fault fails closed with no target"]
-async fn fault_ready_validate_runs_no_target() {
-    assert_pre_go_fault(
-        "ready_validate",
-        "ready_validate",
-        &run_pre_go_fault("ready_validate").await,
-    );
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B / VB-4 7b.3: an UNKNOWN fault selection aborts the launch (no target)"]
-async fn fault_invalid_selection_runs_no_target() {
-    // A malformed/unknown `O7_FAULT_POINT` must abort BEFORE the child — never run the target.
-    assert_pre_go_fault(
-        "no_such_fault_xyz",
-        "invalid_fault",
-        &run_pre_go_fault("no_such_fault_xyz").await,
+        failures.is_empty(),
+        "pre-GO fault matrix — {} of {} legs failed:\n{}",
+        failures.len(),
+        PRE_GO_FAULTS.len(),
+        failures.join("\n")
     );
 }
 
@@ -1637,41 +1607,48 @@ async fn fault_seccomp_self_check_downgrade_is_rejected_on_merits() {
     // so the parent rejects it PURELY on enforcement merits (`NotFullyEnforced`) — not on a binding
     // mismatch or an early crash — with GO withheld, no target, and teardown complete.
     let r = run_pre_go_fault("seccomp_self_check").await;
-    assert_pre_go_fault("seccomp_self_check", "seccomp_self_check", &r);
+    assert_eq!(
+        check_pre_go_fault("seccomp_self_check", "seccomp_self_check", &r),
+        Ok(())
+    );
 }
 
-// --- Class C: post-GO / lifecycle faults. Target-start is contractually possible only where noted;
-//     the release/execveat legs still run NO target (release withheld / exec fails). ---
+// --- Class C: post-GO / lifecycle faults. Target-start is contractually possible only where noted. ---
 
 /// Drive a POST-GO fault where the report was fully enforced (spawn SUCCEEDS + GO is sent), but the
-/// fault fires after GO and before the target image runs, so no target executes. Returns whether the
-/// target ran + the witness + leaked cgroups.
+/// fault fires after GO and before the target image runs, so NO target executes. Bounded throughout.
 async fn run_post_go_no_target(fault: &str) -> FaultRun {
     let wt = tempfile::tempdir().unwrap();
     let ran = wt.path().join("ran.marker");
     let witness = wt.path().join("fault.witness");
-    let before = owned_cgroup_leaves();
-    let b = boundary_with_fault(wt.path(), vec![probe_dir()], fault, &witness);
-    let spawn = b
-        .spawn(probe_target(
+    let before = owned_cgroup_leaf_names();
+    let b = boundary_with_fault(wt.path(), vec![probe_dir()], fault, &witness, Duration::from_secs(30));
+    let spawn = match tokio::time::timeout(
+        Duration::from_secs(45),
+        b.spawn(probe_target(
             &["ran", &ran.to_string_lossy()],
             wt.path(),
             BTreeMap::new(),
-        ))
-        .await;
-    // The report was fully enforced, so the parent SENT GO and spawn returned a live launch. Await the
-    // monitor's own exit (the post-GO fault ends it), then observe.
+        )),
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(_) => panic!("fault={fault}: spawn did not resolve within 45s (hang)"),
+    };
     let spawn_err = spawn.as_ref().err().map(std::string::ToString::to_string);
     if let Ok(mut l) = spawn {
-        let _ = l.process.wait().await;
-        let _ = l.process.force_stop().await;
+        let _ = tokio::time::timeout(Duration::from_secs(20), l.process.wait()).await;
+        let _ = tokio::time::timeout(Duration::from_secs(10), l.process.force_stop()).await;
+        let _ = tokio::time::timeout(Duration::from_secs(10), l.process.wait()).await;
     }
     tokio::time::sleep(Duration::from_millis(200)).await;
+    let after = owned_cgroup_leaf_names();
     FaultRun {
         spawn_err,
         target_ran: ran.exists(),
         witness: std::fs::read_to_string(&witness).ok(),
-        leaked_cgroups: owned_cgroup_leaves().saturating_sub(before),
+        new_leaves: after.difference(&before).cloned().collect(),
     }
 }
 
@@ -1687,13 +1664,12 @@ async fn fault_release_runs_no_target() {
         r.spawn_err
     );
     assert!(!r.target_ran, "fault=release: the target must NOT run (release withheld)");
-    assert_eq!(
-        r.witness.as_deref(),
-        Some("release"),
-        "fault=release: monitor witness must be `release`; got {:?}",
-        r.witness
+    assert_eq!(r.witness.as_deref(), Some("release"), "fault=release: witness must be `release`");
+    assert!(
+        r.new_leaves.is_empty(),
+        "fault=release: the monitor's teardown must remove the leaf; leaked {:?}",
+        r.new_leaves
     );
-    assert_eq!(r.leaked_cgroups, 0, "fault=release: the monitor's teardown must remove the leaf");
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1702,24 +1678,24 @@ async fn fault_execveat_runs_no_target() {
     // Post-GO, at exec: the execveat is aborted in the pre-exec child, so the target image never runs.
     let r = run_post_go_no_target("execveat").await;
     assert!(!r.target_ran, "fault=execveat: the target image must NOT run (execveat aborted)");
-    assert_eq!(
-        r.witness.as_deref(),
-        Some("execveat"),
-        "fault=execveat: monitor/pre-exec witness must be `execveat`; got {:?}",
-        r.witness
+    assert_eq!(r.witness.as_deref(), Some("execveat"), "fault=execveat: witness must be `execveat`");
+    assert!(
+        r.new_leaves.is_empty(),
+        "fault=execveat: the monitor's teardown must remove the leaf; leaked {:?}",
+        r.new_leaves
     );
-    assert_eq!(r.leaked_cgroups, 0, "fault=execveat: the monitor's teardown must remove the leaf");
 }
 
 // --- Class C teardown-failure dominance: the target RAN (a real tree), then the monitor's teardown is
-//     faulted. Cleanup failure DOMINATES; the boundary then fail-closed-reaps the surviving tree. ---
+//     faulted. The teardown failure DOMINATES; the whole owned tree is still ultimately reaped. ---
 
-/// Drive a TEARDOWN fault (kill/drain) against the hermetic tree fixture with a short deadline. The
-/// tree runs, the deadline fires, and the monitor's `cgroup.kill`/drain is faulted so teardown FAILS.
-/// Asserts: the injected teardown stage is witnessed, the monitor's exit is teardown-dominated (the
-/// boundary surfaces the cleanup failure, NOT a clean exit), and the boundary ultimately reaps the
-/// tree (no owned process survives the test).
-async fn assert_teardown_fault_dominates(fault: &str, expected_stage: &str) {
+/// Drive a TEARDOWN fault (kill/drain) against the hermetic tree fixture. Captures the LEADER, the
+/// ordinary CHILD, and the reparented double-fork DESCENDANT (in parallel, while alive), then proves:
+/// the injected teardown stage is witnessed (dominance — the witness is written ONLY on the
+/// `exit::TEARDOWN` path); the monitor's result matches the fault (`kill` → boundary cleanup `Err`
+/// since the tree survives; `drain` → EXACTLY `Code(77)` since the tree is killed but the drain
+/// OBSERVATION is faulted); and ALL THREE tree members are reaped.
+async fn assert_teardown_fault_dominates(fault: &str, expected_stage: &str, expect_exact_77: bool) {
     let wt = tempfile::tempdir().unwrap();
     let (tpid, cpid, dpid, survived) = (
         wt.path().join("t.pid"),
@@ -1728,94 +1704,88 @@ async fn assert_teardown_fault_dominates(fault: &str, expected_stage: &str) {
         wt.path().join("survived"),
     );
     let witness = wt.path().join("fault.witness");
-    let b = SandboyBoundary::new(
-        matrix_backend(),
-        SandboxPolicy {
-            worktree: wt.path().to_path_buf(),
-            allow_exec: fixture_exec_allow(),
-            network: NetworkPolicy::DenyAll,
-            env_allowlist: vec![],
-            timeout: Duration::from_secs(6),
-        },
+    let b = boundary_with_fault(wt.path(), fixture_exec_allow(), fault, &witness, Duration::from_secs(8));
+    let mut launch = tokio::time::timeout(
+        Duration::from_secs(45),
+        b.spawn(fixture_target(&tpid, &cpid, &dpid, &survived, wt.path())),
     )
-    .expect("valid boundary")
-    .with_backend_config(BackendConfig {
-        fake_mode: None,
-        staging_probe: None,
-        fault_point: Some(fault.to_owned()),
-        fault_witness: Some(witness.to_path_buf()),
-    });
-    let mut launch = b
-        .spawn(fixture_target(&tpid, &cpid, &dpid, &survived, wt.path()))
-        .await
-        .expect("the report is fully enforced, so spawn succeeds; the fault is in TEARDOWN");
-    let target = read_identity_bounded(&tpid, Duration::from_secs(5))
-        .await
-        .expect("the target tree must run before the deadline teardown");
-    // The monitor's teardown is faulted; wait for the launch to end (bounded). The witness is the
-    // dominance proof: `write_fault_witness` runs ONLY on the teardown Err → `exit::TEARDOWN` path, so
-    // a witnessed teardown stage means the teardown failure OVERRODE the target's own status. A KILL
-    // fault also leaves the tree alive → the boundary additionally surfaces a cleanup `Err`; a DRAIN
-    // fault kills the tree but faults the drain OBSERVATION, so the boundary may return the TEARDOWN
-    // exit as `Ok`. Either way, the reaping below must leave nothing owned alive.
-    let waited = tokio::time::timeout(Duration::from_secs(20), launch.process.wait()).await;
-    // A KILL fault leaves the tree alive → the boundary surfaces a cleanup `Err` (extra evidence); a
-    // DRAIN fault kills the tree but faults the OBSERVATION, so the boundary may return `Ok`.
-    let boundary_flagged_cleanup = matches!(waited, Ok(Err(_)));
+    .await
+    .expect("fault={fault}: spawn did not resolve in 45s")
+    .expect("the report is fully enforced, so spawn succeeds; the fault is in TEARDOWN");
+
+    // Capture ALL THREE identities IN PARALLEL while the tree is alive (before the deadline teardown).
+    let (leader, child, descendant) = tokio::join!(
+        read_identity_bounded(&tpid, Duration::from_secs(4)),
+        read_identity_bounded(&cpid, Duration::from_secs(4)),
+        read_identity_bounded(&dpid, Duration::from_secs(4)),
+    );
+    let leader = leader.expect("the leader must run before the deadline teardown");
+    let child = child.expect("the ordinary child must run before the deadline teardown");
+    let descendant = descendant.expect("the reparented descendant must run before the deadline teardown");
+
+    // Bounded wait for the launch to end under the faulted teardown.
+    let waited = tokio::time::timeout(Duration::from_secs(30), launch.process.wait()).await;
     let got_witness = std::fs::read_to_string(&witness).ok();
 
-    // Whatever the monitor left behind, the boundary + test must reap the whole owned tree.
-    let _ = launch.process.force_stop().await;
-    let _ = launch.process.wait().await;
-    if !identity_gone(&target) {
-        best_effort_kill(target.pid);
+    // Reap the whole owned tree (bounded), whatever the faulted monitor left behind.
+    let _ = tokio::time::timeout(Duration::from_secs(10), launch.process.force_stop()).await;
+    let _ = tokio::time::timeout(Duration::from_secs(10), launch.process.wait()).await;
+    for id in [&leader, &child, &descendant] {
+        if !identity_gone(id) {
+            best_effort_kill(id.pid);
+        }
     }
-    // The monitor faults the teardown, so the leaf may leak — sweep any residue so the suite stays clean.
-    if let Some(cg) = cgroup_of(std::process::id() as i32) {
-        if let Ok(rd) = std::fs::read_dir(cgroup_dir(&cg)) {
-            for e in rd.flatten() {
-                if e.file_name().to_string_lossy().starts_with("o7cg-") {
-                    let _ = std::fs::remove_dir(e.path());
-                }
-            }
+    // A faulted teardown may leave the leaf behind — sweep any residue so the suite stays clean.
+    for name in owned_cgroup_leaf_names() {
+        if let Some(cg) = cgroup_of(std::process::id() as i32) {
+            let _ = std::fs::remove_dir(cgroup_dir(&cg).join(name));
         }
     }
 
-    // DOMINANCE: the witness is written ONLY on the teardown `Err` → `exit::TEARDOWN` path, so a
-    // witnessed teardown stage proves the teardown failure OVERRODE the target's own status (the
-    // triggering deadline-kill). This is the robust dominance evidence for BOTH kill and drain.
+    // DOMINANCE: the witness is written ONLY on the teardown `Err` → `exit::TEARDOWN` path.
     assert_eq!(
         got_witness.as_deref(),
         Some(expected_stage),
         "fault={fault}: the monitor-owned witness must name the teardown stage `{expected_stage}` \
          (written only on the teardown-dominated exit path); got {got_witness:?}"
     );
-    // A KILL fault must ALSO surface a boundary cleanup error (the tree survived the faulted kill).
-    if fault == "kill" {
+    if expect_exact_77 {
+        // DRAIN: the tree IS killed (cgroup.kill succeeded) but the drain OBSERVATION is faulted, so the
+        // monitor exits EXACTLY Code(77) and the boundary surfaces it as `Ok(Code(77))`.
         assert!(
-            boundary_flagged_cleanup,
-            "fault=kill: a faulted `cgroup.kill` leaves the tree alive, so the boundary must surface a \
-             cleanup failure; waited: {waited:?}"
+            matches!(waited, Ok(Ok(o7_worker::boundary::BoundaryExit::Code(77)))),
+            "fault={fault}: teardown-dominance must yield EXACTLY exit Code(77); got {waited:?}"
+        );
+    } else {
+        // KILL: cgroup.kill is faulted → the tree SURVIVES → the boundary must surface a cleanup Err.
+        assert!(
+            matches!(waited, Ok(Err(_))),
+            "fault={fault}: a faulted `cgroup.kill` leaves the tree alive, so the boundary must \
+             surface a cleanup failure; got {waited:?}"
         );
     }
+    // FULL-TREE teardown: leader + ordinary child + reparented descendant must ALL be reaped.
     assert!(
-        identity_gone(&target),
-        "fault={fault}: the owned tree must ultimately be reaped (boundary fail-closed cleanup)"
+        identity_gone(&leader) && identity_gone(&child) && identity_gone(&descendant),
+        "fault={fault}: the WHOLE owned tree must be reaped — leader_gone={}, child_gone={}, \
+         descendant_gone={}",
+        identity_gone(&leader),
+        identity_gone(&child),
+        identity_gone(&descendant)
     );
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B / VB-4 7b.3: a faulted cgroup.kill teardown dominates; tree still reaped"]
+#[ignore = "Vertical B / VB-4 7b.3: a faulted cgroup.kill teardown dominates; whole tree still reaped"]
 async fn fault_teardown_kill_dominates() {
-    assert_teardown_fault_dominates("kill", "kill").await;
+    assert_teardown_fault_dominates("kill", "kill", false).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "Vertical B / VB-4 7b.3: a faulted drain-observation teardown dominates; tree still reaped"]
+#[ignore = "Vertical B / VB-4 7b.3: a faulted drain observation teardown exits exactly Code(77)"]
 async fn fault_teardown_drain_dominates() {
-    assert_teardown_fault_dominates("drain", "drain").await;
+    assert_teardown_fault_dominates("drain", "drain", true).await;
 }
-
 // --- Consumer-side exit gate (non-vacuous regression) ---
 
 /// Locks the ORDERING the seven positive-marker oracles enforce: the confined probe's exit code is

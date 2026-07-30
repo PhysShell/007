@@ -149,7 +149,7 @@ impl Faults {
             // The execution-object + runtime-object install faults live in `install_filesystem` too.
             Some(FaultId::TargetLandlockRule) => f.exec_object_rule = true,
             Some(FaultId::RuntimeObjectOpen) => f.runtime_open = true,
-            Some(FaultId::RuntimeIdentity) => f.runtime_open = true,
+            Some(FaultId::RuntimeIdentity) => f.runtime_identity = true,
             Some(FaultId::RuntimeRule) => f.runtime_rule = true,
             _ => {}
         }
