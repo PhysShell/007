@@ -220,3 +220,11 @@ that integration turns out to need changes to the shared event contract, the
 production worker, or `o7-run` itself, that is a new, separate seam to
 describe explicitly before touching any of it — not something to infer from
 this slice.
+
+**Update (R0.6, `docs/q-deck/r06-verdict-fidelity.md`)**: one concrete piece
+of that gap — `o7-ledger` had no status corresponding to `o7-run`'s sealed
+`Blocked`/`Error` verdicts, so a live producer could not have projected
+every canonical verdict without collapsing meaning — is now closed. R0.6
+does not wire the producer either; it only makes the ledger/API/Q-Deck
+vocabulary capable of representing what a real producer would eventually
+need to say.
