@@ -11,6 +11,7 @@ members = [
     "crates/o7-run",
     "crates/o7-sandbox-protocol",
     "crates/o7-harness-policy",
+    "crates/o7d",
 ]
 exclude = ["fuzz"]
 resolver = "2"

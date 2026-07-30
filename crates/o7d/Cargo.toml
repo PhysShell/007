@@ -1,0 +1,67 @@
+[package]
+name = "o7d"
+version = "0.1.0"
+edition = "2021"
+description = "007 control-plane daemon: the sole HTTP/SSE read surface over o7-ledger. Untrusted clients (Q-Deck) see only versioned transport DTOs — never a SQLite handle, a subprocess handle, or a control socket."
+publish = false
+
+[[bin]]
+name = "o7d"
+path = "src/main.rs"
+
+[lib]
+name = "o7d"
+path = "src/lib.rs"
+
+[dependencies]
+o7-ledger = { path = "../o7-ledger" }
+tokio = { version = "1", default-features = false, features = [
+    "rt",
+    "rt-multi-thread",
+    "macros",
+    "net",
+] }
+# R0's whole surface is bounded JSON + one-way SSE (task #4) over HTTP/1 — no
+# WebSocket (the brief is explicit: "WebSocket is not needed for a one-way
+# read-only stream"), no multipart, no form bodies, no static-file serving
+# feature (the Q-Deck static shell, once built, is served by hand from an axum
+# route, not axum's `fs` helper). `default-features = false` + this explicit
+# list keeps the graph to what R0 actually exercises.
+axum = { version = "0.7", default-features = false, features = [
+    "http1",
+    "json",
+    "query",
+    "tokio",
+] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+thiserror = "1"
+
+[dev-dependencies]
+# Router-level HTTP tests drive the real `axum::Router` as a `tower::Service`
+# via `oneshot` — real `http::Request`/`http::Response`, real routing/
+# extraction/serialization, no handler called directly. `tower` and
+# `http-body-util` are already compiled as part of axum's own dependency
+# graph (axum is built on `tower::Service`); depending on them here adds no
+# new crate to the tree, unlike a standalone HTTP client (reqwest pulls in
+# a full URL/TLS stack — icu4x/idna — for a capability this test doesn't need).
+tower = { version = "0.5", default-features = false, features = ["util"] }
+http-body-util = "0.1"
+tempfile = "3"
+
+# Mirror the workspace discipline: no unsafe, no panics-by-default.
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
