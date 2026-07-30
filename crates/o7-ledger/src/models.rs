@@ -33,6 +33,12 @@ impl ConversationStatus {
 
 /// Lifecycle status of a run. Transitions are enforced centrally in
 /// [`crate::transitions`]; never compare these as bare strings in SQL/CLI.
+///
+/// `Blocked`/`Error` (added in Q-Deck R0.6, see
+/// `docs/q-deck/r06-verdict-fidelity.md`) are the ledger's projection of
+/// `o7-run::Verdict`'s own sealed `Blocked`/`Error` — both are terminal here
+/// exactly as they are sealed there. `Interrupted` is a DIFFERENT concept
+/// (unsealed, resumable) and must never be conflated with `Error`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
@@ -42,6 +48,8 @@ pub enum RunStatus {
     Failed,
     Cancelled,
     Interrupted,
+    Blocked,
+    Error,
 }
 
 impl RunStatus {
@@ -54,6 +62,8 @@ impl RunStatus {
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
             Self::Interrupted => "interrupted",
+            Self::Blocked => "blocked",
+            Self::Error => "error",
         }
     }
 
@@ -66,18 +76,28 @@ impl RunStatus {
             "failed" => Some(Self::Failed),
             "cancelled" => Some(Self::Cancelled),
             "interrupted" => Some(Self::Interrupted),
+            "blocked" => Some(Self::Blocked),
+            "error" => Some(Self::Error),
             _ => None,
         }
     }
 
-    /// A terminal status can never transition further.
+    /// A terminal (sealed) status can never transition further.
+    /// `Interrupted` is deliberately excluded — it is resumable
+    /// (`resume_interrupted_run`), not sealed.
     #[must_use]
     pub fn is_terminal(self) -> bool {
-        matches!(self, Self::Completed | Self::Failed | Self::Cancelled)
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::Blocked | Self::Error
+        )
     }
 }
 
-/// Lifecycle status of a run attempt.
+/// Lifecycle status of a run attempt. Mirrors the sealed subset of
+/// [`RunStatus`] (plus `Interrupted`) so a blocked/errored run's attempt is
+/// never mislabeled — see [`crate::sqlite::terminal_attempt_status`], which
+/// this enum's variants must stay in lockstep with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttemptStatus {
@@ -86,6 +106,8 @@ pub enum AttemptStatus {
     Failed,
     Cancelled,
     Interrupted,
+    Blocked,
+    Error,
 }
 
 impl AttemptStatus {
@@ -97,6 +119,8 @@ impl AttemptStatus {
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
             Self::Interrupted => "interrupted",
+            Self::Blocked => "blocked",
+            Self::Error => "error",
         }
     }
 
@@ -108,14 +132,17 @@ impl AttemptStatus {
             "failed" => Some(Self::Failed),
             "cancelled" => Some(Self::Cancelled),
             "interrupted" => Some(Self::Interrupted),
+            "blocked" => Some(Self::Blocked),
+            "error" => Some(Self::Error),
             _ => None,
         }
     }
 }
 
-/// The closed set of event types for PR 1. Claude/Codex-specific events, tool
-/// calls, permission modes, model drift, delegation, artifacts and gates are
-/// intentionally NOT here — they arrive in PR 4.
+/// The closed set of event types for PR 1 (plus R0.6's `RunBlocked`/
+/// `RunErrored`). Claude/Codex-specific events, tool calls, permission
+/// modes, model drift, delegation, artifacts and gates are intentionally
+/// NOT here — they arrive in PR 4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventType {
     ConversationCreated,
@@ -125,6 +152,8 @@ pub enum EventType {
     RunFailed,
     RunCancelled,
     RunInterrupted,
+    RunBlocked,
+    RunErrored,
     UserMessage,
     SystemNote,
 }
@@ -140,6 +169,8 @@ impl EventType {
             Self::RunFailed => "run.failed",
             Self::RunCancelled => "run.cancelled",
             Self::RunInterrupted => "run.interrupted",
+            Self::RunBlocked => "run.blocked",
+            Self::RunErrored => "run.errored",
             Self::UserMessage => "user.message",
             Self::SystemNote => "system.note",
         }
@@ -155,6 +186,8 @@ impl EventType {
             "run.failed" => Some(Self::RunFailed),
             "run.cancelled" => Some(Self::RunCancelled),
             "run.interrupted" => Some(Self::RunInterrupted),
+            "run.blocked" => Some(Self::RunBlocked),
+            "run.errored" => Some(Self::RunErrored),
             "user.message" => Some(Self::UserMessage),
             "system.note" => Some(Self::SystemNote),
             _ => None,

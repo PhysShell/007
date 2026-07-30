@@ -7,7 +7,7 @@ import { goldenRun, goldenRunActive } from "../test-support/goldenTranscript";
 
 function runDto(overrides: Partial<RunDto> = {}): RunDto {
   return {
-    schema_version: 1,
+    schema_version: api.EXPECTED_SCHEMA_VERSION,
     run_id: "run-1",
     conversation_id: "conv-1",
     parent_run_id: null,
@@ -21,7 +21,7 @@ function runDto(overrides: Partial<RunDto> = {}): RunDto {
 }
 
 function page(items: RunDto[]): PageDto<RunDto> {
-  return { schema_version: 1, items, next_before: null };
+  return { schema_version: api.EXPECTED_SCHEMA_VERSION, items, next_before: null };
 }
 
 /** Dashboard now fetches "active" and "recent" as two independent listRuns
@@ -78,7 +78,7 @@ describe("Dashboard", () => {
       if (!params.status) return page([]); // the unfiltered "recent" call
       if (params.before === undefined) {
         return {
-          schema_version: 1,
+          schema_version: api.EXPECTED_SCHEMA_VERSION,
           items: [runDto({ run_id: "a1" }), runDto({ run_id: "a2" })],
           next_before: "cursor1",
         };
@@ -130,20 +130,24 @@ describe("Dashboard", () => {
     expect(screen.queryByText("Nothing running right now.")).not.toBeInTheDocument();
   });
 
-  it("shows the golden synthetic-run transcript's completed/failed/interrupted runs under Recent (not currently active, regardless of whether each is sealed)", async () => {
+  it("shows the golden synthetic-run transcript's completed/failed/interrupted/blocked/error runs under Recent (not currently active, regardless of whether each is sealed)", async () => {
     mockActiveAndRecent(
       [],
       [
         goldenRun("pass", { run_id: "r05-golden-run-pass" }),
         goldenRun("fail", { run_id: "r05-golden-run-fail" }),
         goldenRun("interrupted", { run_id: "r05-golden-run-interrupted" }),
+        goldenRun("blocked", { run_id: "r06-golden-run-blocked" }),
+        goldenRun("error", { run_id: "r06-golden-run-error" }),
       ],
     );
     render(Dashboard);
-    await waitFor(() => expect(screen.getAllByText("claude · implementer")).toHaveLength(3));
+    await waitFor(() => expect(screen.getAllByText("claude · implementer")).toHaveLength(5));
     expect(screen.getByText("completed")).toBeInTheDocument();
     expect(screen.getByText("failed")).toBeInTheDocument();
     expect(screen.getByText("interrupted")).toBeInTheDocument();
+    expect(screen.getByText("blocked")).toBeInTheDocument();
+    expect(screen.getByText("error")).toBeInTheDocument();
   });
 
   it("never renders a mutation control (start/stop/cancel/approve/reject) in R0", async () => {

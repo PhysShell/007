@@ -99,6 +99,48 @@ describe("RunPage", () => {
     await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
   });
 
+  it("shows blocked/error WITH a duration row — both are sealed (R0.6), unlike interrupted", async () => {
+    for (const outcome of ["blocked", "error"] as const) {
+      const run = goldenRun(outcome);
+      vi.spyOn(api, "getRun").mockResolvedValue(run);
+      vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents(outcome)));
+
+      const { unmount } = render(RunPage, { props: { runId: run.run_id } });
+      await waitFor(() => expect(screen.getByText(outcome)).toBeInTheDocument());
+      expect(screen.getByText(/duration/)).toBeInTheDocument();
+      unmount();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("stops polling once a run reaches blocked or error — both are sealed, not resumable like interrupted", async () => {
+    for (const outcome of ["blocked", "error"] as const) {
+      const active = goldenRunActive();
+      const sealed = goldenRun(outcome);
+      // If polling incorrectly continued past a sealed run, a THIRD getRun
+      // call (there isn't one queued) would be needed and this mock would
+      // reject, failing the test loudly instead of silently passing.
+      vi.spyOn(api, "getRun").mockResolvedValueOnce(active).mockResolvedValueOnce(sealed);
+      vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+      const { unmount } = render(RunPage, { props: { runId: active.run_id } });
+      await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+
+      await vi.advanceTimersByTimeAsync(5100);
+      await waitFor(() => expect(screen.getByText(outcome)).toBeInTheDocument());
+
+      // One more interval tick: if polling didn't stop, getRun would be
+      // called a third time against a mock with nothing left queued for it
+      // (vitest's mockResolvedValueOnce chain falls through to undefined),
+      // which would surface as a broken page instead of staying on outcome.
+      await vi.advanceTimersByTimeAsync(5100);
+      expect(screen.getByText(outcome)).toBeInTheDocument();
+
+      unmount();
+      vi.restoreAllMocks();
+    }
+  });
+
   it("renders this run's own timeline events in sequence order, from REST history alone (the reload path)", async () => {
     const completed = goldenRun("pass");
     const events = goldenEvents("pass");

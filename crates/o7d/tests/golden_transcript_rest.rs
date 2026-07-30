@@ -169,23 +169,31 @@ async fn transcript_conversation_is_reachable_by_id() {
 }
 
 #[tokio::test]
-async fn transcript_events_are_available_in_order() {
-    let (router, transcript) = seeded_router_with_transcript(GoldenOutcome::Fail).await;
-    let (status, page) = get(
-        &router,
-        &format!(
-            "/api/v1/conversations/{}/events",
-            transcript.conversation.conversation_id.as_str()
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK);
-    let items = page["items"].as_array().unwrap();
-    let expected = expected_types(GoldenOutcome::Fail);
-    assert_eq!(items.len(), expected.len());
-    for (i, event_type) in expected.iter().enumerate() {
-        assert_eq!(items[i]["sequence"], i as u64 + 1);
-        assert_eq!(items[i]["event_type"], *event_type);
+async fn transcript_events_are_available_in_order_for_every_outcome() {
+    for outcome in [
+        GoldenOutcome::Pass,
+        GoldenOutcome::Fail,
+        GoldenOutcome::Interrupted,
+        GoldenOutcome::Blocked,
+        GoldenOutcome::Error,
+    ] {
+        let (router, transcript) = seeded_router_with_transcript(outcome).await;
+        let (status, page) = get(
+            &router,
+            &format!(
+                "/api/v1/conversations/{}/events",
+                transcript.conversation.conversation_id.as_str()
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let items = page["items"].as_array().unwrap();
+        let expected = expected_types(outcome);
+        assert_eq!(items.len(), expected.len(), "outcome={outcome:?}");
+        for (i, event_type) in expected.iter().enumerate() {
+            assert_eq!(items[i]["sequence"], i as u64 + 1);
+            assert_eq!(items[i]["event_type"], *event_type);
+        }
     }
 }
 

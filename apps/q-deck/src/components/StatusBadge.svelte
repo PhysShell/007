@@ -10,6 +10,10 @@
     failed: "tone-bad",
     cancelled: "tone-neutral",
     interrupted: "tone-warn",
+    // R0.6 (docs/q-deck/r06-verdict-fidelity.md): sealed outcomes, distinct
+    // from `interrupted`'s resumable-pause tone-warn.
+    blocked: "tone-warn",
+    error: "tone-bad",
     open: "tone-active",
     closed: "tone-neutral",
   };

@@ -115,3 +115,11 @@ requiring an explicit mutation-scoped auth story R0 deliberately does not
 attempt. R1 should not begin until R0's read path has been proven reliable
 across a real mobile-network disconnect/reconnect, in production — a pretty
 "stop" button wired to nothing trustworthy is worse than no button.
+
+**R0.6 ("canonical verdict fidelity", `docs/q-deck/r06-verdict-fidelity.md`)
+added `RunStatus::Blocked`/`Error` (sealed) alongside the existing
+`Completed`/`Failed`/`Cancelled` (sealed) and `Interrupted` (unsealed,
+resumable) — closing the semantic gap that previously made it impossible
+for a live `o7-run` producer to project all four of its own sealed verdicts
+(`Pass`/`Fail`/`Blocked`/`Error`) without collapsing meaning. The next slice
+after R0.6 is wiring that real live producer — not R1.**

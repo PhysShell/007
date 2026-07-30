@@ -123,6 +123,44 @@ async fn golden_transcript_run_metadata_matches_transcript_fail() {
 }
 
 #[tokio::test]
+async fn golden_transcript_run_metadata_matches_transcript_blocked() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let transcript = apply_golden_transcript(&ledger, GoldenOutcome::Blocked)
+        .await
+        .unwrap();
+
+    let run = ledger
+        .run(transcript.run.run_id.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.status, o7_ledger::RunStatus::Blocked);
+    assert!(
+        run.finished_at.is_some(),
+        "BLOCKED is a sealed/closed terminal state — finished_at must be set"
+    );
+}
+
+#[tokio::test]
+async fn golden_transcript_run_metadata_matches_transcript_error() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let transcript = apply_golden_transcript(&ledger, GoldenOutcome::Error)
+        .await
+        .unwrap();
+
+    let run = ledger
+        .run(transcript.run.run_id.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.status, o7_ledger::RunStatus::Error);
+    assert!(
+        run.finished_at.is_some(),
+        "ERROR is a sealed/closed terminal state — finished_at must be set (and it is NOT the same thing as interrupted)"
+    );
+}
+
+#[tokio::test]
 async fn golden_transcript_run_metadata_matches_transcript_interrupted() {
     let ledger = SqliteLedger::open_in_memory().unwrap();
     let transcript = apply_golden_transcript(&ledger, GoldenOutcome::Interrupted)
@@ -199,42 +237,52 @@ async fn golden_transcript_terminal_status_is_a_ledger_fact_not_recomputed() {
 }
 
 #[tokio::test]
-async fn golden_transcript_restart_preserves_state() {
-    let dir = tempfile::tempdir().unwrap();
-    let db_path = dir.path().join("ledger.sqlite3");
+async fn golden_transcript_restart_preserves_state_for_every_outcome() {
+    for outcome in [
+        GoldenOutcome::Pass,
+        GoldenOutcome::Fail,
+        GoldenOutcome::Interrupted,
+        GoldenOutcome::Blocked,
+        GoldenOutcome::Error,
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("ledger.sqlite3");
 
-    let (conv_id, run_id, before_events) = {
-        let ledger = SqliteLedger::open(&db_path).unwrap();
-        let transcript = apply_golden_transcript(&ledger, GoldenOutcome::Pass)
-            .await
-            .unwrap();
-        let events = ledger
-            .read_events(&transcript.conversation.conversation_id, None, 100)
-            .await
-            .unwrap();
-        (
-            transcript.conversation.conversation_id.clone(),
-            transcript.run.run_id.clone(),
-            events,
-        )
-        // `ledger` (and its underlying connection) drops here.
-    };
+        let (conv_id, run_id, before_events) = {
+            let ledger = SqliteLedger::open(&db_path).unwrap();
+            let transcript = apply_golden_transcript(&ledger, outcome).await.unwrap();
+            let events = ledger
+                .read_events(&transcript.conversation.conversation_id, None, 100)
+                .await
+                .unwrap();
+            (
+                transcript.conversation.conversation_id.clone(),
+                transcript.run.run_id.clone(),
+                events,
+            )
+            // `ledger` (and its underlying connection) drops here.
+        };
 
-    // Reopen the SAME file as a brand-new `SqliteLedger` instance — this is
-    // what a real `o7d serve --ledger <path>` restart looks like, not just a
-    // fresh in-memory database that happens to be empty.
-    let reopened = SqliteLedger::open(&db_path).unwrap();
+        // Reopen the SAME file as a brand-new `SqliteLedger` instance — this
+        // is what a real `o7d serve --ledger <path>` restart looks like, not
+        // just a fresh in-memory database that happens to be empty.
+        let reopened = SqliteLedger::open(&db_path).unwrap();
 
-    let after_events = reopened.read_events(&conv_id, None, 100).await.unwrap();
-    assert_eq!(
-        before_events, after_events,
-        "every event must read back identically after a restart against the same db file"
-    );
+        let after_events = reopened.read_events(&conv_id, None, 100).await.unwrap();
+        assert_eq!(
+            before_events, after_events,
+            "every event must read back identically after a restart (outcome={outcome:?})"
+        );
 
-    let run = reopened.run(run_id).await.unwrap().unwrap();
-    assert_eq!(run.status, o7_ledger::RunStatus::Completed);
-    assert!(run.finished_at.is_some());
+        let run = reopened.run(run_id).await.unwrap().unwrap();
+        let expected_finished_at_is_some = outcome != GoldenOutcome::Interrupted;
+        assert_eq!(
+            run.finished_at.is_some(),
+            expected_finished_at_is_some,
+            "finished_at sealed-ness must survive a restart (outcome={outcome:?})"
+        );
 
-    let conversation = reopened.conversation(conv_id).await.unwrap().unwrap();
-    assert_eq!(conversation.status, o7_ledger::ConversationStatus::Open);
+        let conversation = reopened.conversation(conv_id).await.unwrap().unwrap();
+        assert_eq!(conversation.status, o7_ledger::ConversationStatus::Open);
+    }
 }

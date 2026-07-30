@@ -5,18 +5,17 @@
 // three copies implement. Test-only: nothing outside `*.test.ts` files
 // imports this module, so it is not part of the built production bundle.
 
+import { EXPECTED_SCHEMA_VERSION } from "../lib/api";
 import type { EventDto, EventPageDto, RunDto, RunStatus } from "../lib/types";
 
-// Only "pass"/"fail" are sealed/terminal outcomes (RunStatus completed/
-// failed). "interrupted" is NOT a third co-equal outcome of the same kind —
-// it is a resumable pause (o7-ledger's resume_interrupted_run can bring it
-// back to "running"), kept in this union only for apply_golden_transcript's
-// convenience. Never call it "terminal" or "ERROR": that name belongs to
-// o7-run::Verdict::Error, a genuinely different SEALED concept this fixture
-// does not represent — the projection from o7-run::Verdict onto
-// o7-ledger's status vocabulary is an open seam, not decided here (see
-// docs/q-deck/r05-live-readiness.md).
-export type GoldenOutcome = "pass" | "fail" | "interrupted";
+// "pass"/"fail"/"blocked"/"error" are sealed/terminal outcomes (RunStatus
+// completed/failed/blocked/error — "blocked"/"error" added in Q-Deck R0.6,
+// docs/q-deck/r06-verdict-fidelity.md, matching o7-run::Verdict's own
+// Blocked/Error by name). "interrupted" is NOT a co-equal outcome of the
+// same kind — it is a resumable pause (o7-ledger's resume_interrupted_run
+// can bring it back to "running"), kept in this union only for
+// apply_golden_transcript's convenience. Never conflate it with "error".
+export type GoldenOutcome = "pass" | "fail" | "interrupted" | "blocked" | "error";
 
 export const GOLDEN_CONVERSATION_ID = "r05-golden-conversation";
 export const GOLDEN_RUN_ID = "r05-golden-run";
@@ -30,6 +29,10 @@ function outcomeStatus(outcome: GoldenOutcome): RunStatus {
       return "failed";
     case "interrupted":
       return "interrupted";
+    case "blocked":
+      return "blocked";
+    case "error":
+      return "error";
   }
 }
 
@@ -41,6 +44,10 @@ function outcomeEventType(outcome: GoldenOutcome): string {
       return "run.failed";
     case "interrupted":
       return "run.interrupted";
+    case "blocked":
+      return "run.blocked";
+    case "error":
+      return "run.errored";
   }
 }
 
@@ -51,7 +58,7 @@ function outcomeEventType(outcome: GoldenOutcome): string {
  * "running" shape via a resume — see `goldenRunResumed`). */
 export function goldenRunActive(overrides: Partial<RunDto> = {}): RunDto {
   return {
-    schema_version: 1,
+    schema_version: EXPECTED_SCHEMA_VERSION,
     run_id: GOLDEN_RUN_ID,
     conversation_id: GOLDEN_CONVERSATION_ID,
     parent_run_id: null,
@@ -68,7 +75,7 @@ export function goldenRunActive(overrides: Partial<RunDto> = {}): RunDto {
 export function goldenRun(outcome: GoldenOutcome, overrides: Partial<RunDto> = {}): RunDto {
   const status = outcomeStatus(outcome);
   return {
-    schema_version: 1,
+    schema_version: EXPECTED_SCHEMA_VERSION,
     run_id: GOLDEN_RUN_ID,
     conversation_id: GOLDEN_CONVERSATION_ID,
     parent_run_id: null,
@@ -80,6 +87,7 @@ export function goldenRun(outcome: GoldenOutcome, overrides: Partial<RunDto> = {
     // stays unset, exactly mirroring the real ledger (see the Rust golden
     // transcript tests for the full rationale). Never backfilled to look
     // like a closed run just because this is the "outcome" fixture.
+    // blocked/error ARE sealed (R0.6) — finished_at is set for both.
     finished_at: status === "interrupted" ? null : BASE_CREATED_AT + 5_000,
     ...overrides,
   };
@@ -107,7 +115,7 @@ export function goldenEvents(outcome: GoldenOutcome): EventDto[] {
     outcomeEventType(outcome),
   ];
   return types.map((event_type, i) => ({
-    schema_version: 1,
+    schema_version: EXPECTED_SCHEMA_VERSION,
     event_id: `r05-golden-event-${i + 1}`,
     conversation_id: GOLDEN_CONVERSATION_ID,
     // conversation.created precedes the run's own existence — every other
@@ -129,7 +137,7 @@ export function goldenEventsActive(): EventDto[] {
 
 export function goldenEventPage(events: EventDto[]): EventPageDto {
   return {
-    schema_version: 1,
+    schema_version: EXPECTED_SCHEMA_VERSION,
     items: events,
     next_after: events.at(-1)?.sequence ?? null,
   };

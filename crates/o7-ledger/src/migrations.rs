@@ -4,9 +4,10 @@
 //! `user_version` is NEWER than this build supports is refused (an older binary
 //! must never write a newer schema). After migrating, the FULL live schema —
 //! tables, indexes, foreign keys, CHECK constraints, the partial unique index —
-//! is compared against a fresh reference built from this build's SCHEMA_V1, so a
-//! database that merely CLAIMS the current version but is missing a safety
-//! constraint (not just a column) fails closed.
+//! is compared against a fresh reference built by running every migration in
+//! order on an empty in-memory database, so a database that merely CLAIMS the
+//! current version but is missing a safety constraint (not just a column) fails
+//! closed.
 
 use std::collections::BTreeMap;
 
@@ -15,12 +16,11 @@ use rusqlite::{Connection, TransactionBehavior};
 use crate::LedgerError;
 
 /// Highest schema version this build knows about.
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 /// Ordered `(version, sql)` migrations. Never edit a SHIPPED migration in place —
-/// add a new one. (v1 has not shipped outside this PR, so it is still authored
-/// here directly.)
-const MIGRATIONS: &[(u32, &str)] = &[(1, SCHEMA_V1)];
+/// add a new one.
+const MIGRATIONS: &[(u32, &str)] = &[(1, SCHEMA_V1), (2, SCHEMA_V2)];
 
 const SCHEMA_V1: &str = "
 CREATE TABLE conversation (
@@ -85,6 +85,80 @@ CREATE TABLE idempotency_record (
 );
 ";
 
+/// Q-Deck R0.6 (`docs/q-deck/r06-verdict-fidelity.md`): rebuild `run` and
+/// `run_attempt` with explicit `CHECK` constraints enumerating their now-closed
+/// status vocabularies (`blocked`/`error` added alongside the existing set).
+/// `event.event_type` is deliberately NOT constrained — it stays
+/// forward-compatible by design (see its doc comment in `models.rs`); only
+/// `run.status`/`run_attempt.status` are tightly governed by the central
+/// transition tables and get this hardening.
+///
+/// SQLite has no `ALTER TABLE ADD CONSTRAINT` — a `CHECK` constraint requires
+/// the standard rebuild sequence (create new → copy → drop old → rename).
+/// `run_attempt`'s `FOREIGN KEY (run_id) REFERENCES run(run_id)`, and
+/// `event`'s FKs to both tables, are automatically rewritten to the renamed
+/// table by SQLite's own `ALTER TABLE ... RENAME TO` (not `legacy_alter_table`)
+/// — this migration does not touch `event` at all. Must run with
+/// `foreign_keys` OFF around it (see [`apply`]'s per-migration toggle) since
+/// toggling that pragma inside an active transaction is a no-op, and the
+/// interim state (old table dropped, FK-referencing tables briefly pointing
+/// at a table that doesn't exist yet under that name) would otherwise trip
+/// enforcement mid-rebuild.
+const SCHEMA_V2: &str = "
+CREATE TABLE run_v2 (
+    run_id          TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    parent_run_id   TEXT,
+    agent           TEXT NOT NULL,
+    role            TEXT NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN (
+        'queued','running','completed','failed','cancelled','interrupted','blocked','error'
+    )),
+    created_at      INTEGER NOT NULL,
+    finished_at     INTEGER,
+    UNIQUE(conversation_id, run_id),
+    FOREIGN KEY (conversation_id) REFERENCES conversation(conversation_id),
+    FOREIGN KEY (conversation_id, parent_run_id) REFERENCES run_v2(conversation_id, run_id)
+);
+INSERT INTO run_v2 (run_id, conversation_id, parent_run_id, agent, role, status, created_at, finished_at)
+    SELECT run_id, conversation_id, parent_run_id, agent, role, status, created_at, finished_at FROM run;
+DROP TABLE run;
+ALTER TABLE run_v2 RENAME TO run;
+CREATE INDEX idx_run_conversation ON run(conversation_id);
+
+CREATE TABLE run_attempt_v2 (
+    attempt_id     TEXT PRIMARY KEY,
+    run_id         TEXT NOT NULL,
+    attempt_number INTEGER NOT NULL,
+    status         TEXT NOT NULL CHECK (status IN (
+        'running','completed','failed','cancelled','interrupted','blocked','error'
+    )),
+    started_at     INTEGER NOT NULL,
+    finished_at    INTEGER,
+    UNIQUE(run_id, attempt_number),
+    UNIQUE(run_id, attempt_id),
+    FOREIGN KEY (run_id) REFERENCES run(run_id)
+);
+INSERT INTO run_attempt_v2 (attempt_id, run_id, attempt_number, status, started_at, finished_at)
+    SELECT attempt_id, run_id, attempt_number, status, started_at, finished_at FROM run_attempt;
+DROP TABLE run_attempt;
+ALTER TABLE run_attempt_v2 RENAME TO run_attempt;
+CREATE UNIQUE INDEX idx_one_running_attempt ON run_attempt(run_id) WHERE status = 'running';
+";
+
+/// Expose one migration's raw SQL by version, for tests that need to build a
+/// specific historical schema shape directly (e.g. proving a migration FROM
+/// that exact shape preserves data) without hand-duplicating DDL text that
+/// would silently drift from the real thing. Not used by `apply` itself
+/// (which iterates `MIGRATIONS` directly) — purely a test-support seam.
+#[must_use]
+pub fn migration_sql(version: u32) -> Option<&'static str> {
+    MIGRATIONS
+        .iter()
+        .find(|(v, _)| *v == version)
+        .map(|(_, sql)| *sql)
+}
+
 /// Read the currently-applied schema version.
 ///
 /// # Errors
@@ -94,12 +168,33 @@ pub fn current_version(conn: &Connection) -> Result<u32, LedgerError> {
     Ok(u32::try_from(v).unwrap_or(0))
 }
 
-/// Apply all pending migrations in a single transaction. Refuses a database
-/// newer than this build. Safe to call on every open.
+/// Rows returned by `PRAGMA foreign_key_check`, one per violation (empty means
+/// no violations). Column 0 is the table with the dangling reference.
+fn foreign_key_violations(conn: &Connection) -> Result<Vec<String>, LedgerError> {
+    let mut stmt = conn.prepare("PRAGMA foreign_key_check;")?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row?);
+    }
+    Ok(out)
+}
+
+/// Apply all pending migrations. Refuses a database newer than this build.
+/// Safe to call on every open. Each migration runs in its OWN transaction —
+/// not one shared transaction for every pending version — specifically so a
+/// table-rebuild migration can toggle `PRAGMA foreign_keys` around itself
+/// (a no-op inside a transaction, so it must happen outside one) and verify
+/// `foreign_key_check` is clean before committing. A crash between two
+/// migrations leaves `user_version` at the last one that fully committed —
+/// itself a completely valid, self-consistent state (`apply` simply resumes
+/// from there on the next open), not a half-migrated one.
 ///
 /// # Errors
-/// [`LedgerError::SchemaTooNew`] if the DB is newer than supported; SQLite errors
-/// (the transaction rolls back so a partial migration is never left behind).
+/// [`LedgerError::SchemaTooNew`] if the DB is newer than supported;
+/// [`LedgerError::Integrity`] if a rebuild migration introduces a foreign key
+/// violation; SQLite errors (each migration's own transaction rolls back so a
+/// partial migration is never left behind).
 pub fn apply(conn: &mut Connection) -> Result<(), LedgerError> {
     let start = current_version(conn)?;
     if start > CURRENT_SCHEMA_VERSION {
@@ -108,15 +203,26 @@ pub fn apply(conn: &mut Connection) -> Result<(), LedgerError> {
             supported: CURRENT_SCHEMA_VERSION,
         });
     }
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     for (version, sql) in MIGRATIONS {
-        if i64::from(*version) > i64::from(start) {
-            tx.execute_batch(sql)?;
-            // pragma_update cannot bind parameters; the version is a trusted constant.
-            tx.pragma_update(None, "user_version", *version)?;
+        if i64::from(*version) <= i64::from(start) {
+            continue;
         }
+        // Foreign key pragma changes are no-ops inside a transaction, so this
+        // has to happen at the connection level, before starting one.
+        conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        tx.execute_batch(sql)?;
+        // pragma_update cannot bind parameters; the version is a trusted constant.
+        tx.pragma_update(None, "user_version", *version)?;
+        let violations = foreign_key_violations(&tx)?;
+        if !violations.is_empty() {
+            return Err(LedgerError::Integrity(format!(
+                "migration to v{version} introduced foreign key violations in: {violations:?}"
+            )));
+        }
+        tx.commit()?;
+        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     }
-    tx.commit()?;
     Ok(())
 }
 
@@ -150,20 +256,21 @@ fn schema_objects(conn: &Connection) -> Result<BTreeMap<String, String>, LedgerE
     Ok(map)
 }
 
-/// Attest the LIVE schema against a fresh reference built from this build's
-/// `SCHEMA_V1`, requiring EXACT equality of the full object set — every table,
-/// index, trigger and view, with matching DDL (columns, foreign keys, CHECK
-/// constraints, the partial unique index). A missing, differing, OR **unexpected**
-/// object fails closed. The last case matters: an extra trigger/view could
-/// silently subvert append-only guarantees, so anything not in the reference is
-/// rejected.
+/// Attest the LIVE schema against a fresh reference built by running every
+/// migration in order on an empty in-memory database — exactly what a brand
+/// new database ends up looking like — requiring EXACT equality of the full
+/// object set — every table, index, trigger and view, with matching DDL
+/// (columns, foreign keys, CHECK constraints, the partial unique index). A
+/// missing, differing, OR **unexpected** object fails closed. The last case
+/// matters: an extra trigger/view could silently subvert append-only
+/// guarantees, so anything not in the reference is rejected.
 ///
 /// # Errors
 /// [`LedgerError::Integrity`] on any missing, differing, or unexpected object;
 /// SQLite errors.
 pub fn validate_schema(conn: &Connection) -> Result<(), LedgerError> {
-    let reference = Connection::open_in_memory()?;
-    reference.execute_batch(SCHEMA_V1)?;
+    let mut reference = Connection::open_in_memory()?;
+    apply(&mut reference)?;
     let expected = schema_objects(&reference)?;
     let actual = schema_objects(conn)?;
 

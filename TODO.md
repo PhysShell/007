@@ -21,6 +21,13 @@ Where we stopped + the exact next step. Updated 2026-07-02 (leaving for the day)
   `meta.json`. Root-package tests now run in the hosted gate.
   Deferred to the next slice, on purpose: the `o7-ledger` append path and
   the `o7-ledger`/`o7-run` id unification.
+  **Q-Deck R0.6 (`docs/q-deck/r06-verdict-fidelity.md`)** closed one
+  concrete piece of that gap: `o7-ledger`'s `RunStatus` now has sealed
+  `Blocked`/`Error` matching `o7-run::Verdict`'s own `Blocked`/`Error`
+  (previously there was no ledger status for either, so a live producer
+  couldn't have projected every sealed verdict without collapsing
+  meaning). Vocabulary alignment only — the actual append-path wiring and
+  id unification above remain the next slice, not R1 mutations.
 - **`o7 judge`** — read-only FP-triage. **Verified working**: produced a
   contract-conforming `fp-verdicts.json` on the oracle with grounded reasoning.
 - Contract reconciled to the domain's source of truth:

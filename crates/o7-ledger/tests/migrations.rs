@@ -16,7 +16,7 @@ use rusqlite::Connection;
 // (11) Migrations apply on an empty database (schema is usable afterwards).
 #[tokio::test]
 async fn migration_on_empty_database() {
-    assert_eq!(CURRENT_SCHEMA_VERSION, 1);
+    assert_eq!(CURRENT_SCHEMA_VERSION, 2);
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("fresh.db");
 

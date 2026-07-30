@@ -4,11 +4,12 @@
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { ConversationEventStream } from "./eventStream.svelte";
+import { EXPECTED_SCHEMA_VERSION } from "./api";
 import type { EventDto } from "./types";
 
 function eventDto(sequence: number, runId: string | null = null): EventDto {
   return {
-    schema_version: 1,
+    schema_version: EXPECTED_SCHEMA_VERSION,
     event_id: `evt-${sequence}`,
     conversation_id: "conv-1",
     run_id: runId,
@@ -55,7 +56,7 @@ beforeEach(() => {
   vi.stubGlobal("EventSource", MockEventSource);
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(
-      JSON.stringify({ schema_version: 1, items: [], next_after: null }),
+      JSON.stringify({ schema_version: EXPECTED_SCHEMA_VERSION, items: [], next_after: null }),
       { status: 200 },
     ),
   );
@@ -119,7 +120,7 @@ describe("ConversationEventStream", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
-          schema_version: 1,
+          schema_version: EXPECTED_SCHEMA_VERSION,
           items: [eventDto(1), eventDto(2)],
           next_after: 2,
         }),
@@ -152,6 +153,24 @@ describe("ConversationEventStream", () => {
     source.onmessage?.(
       new MessageEvent("message", {
         data: JSON.stringify({ ...eventDto(1), schema_version: 99 }),
+      }),
+    );
+    expect(stream.status).toBe("unsupported");
+    expect(stream.events).toEqual([]);
+    expect(source.closed).toBe(true);
+  });
+
+  it("closes as unsupported on schema_version 1 specifically — the real pre-R0.6 version, not just an arbitrary unknown one", async () => {
+    // The regression independent re-gate found on Q-Deck R0.6: 1 isn't a
+    // hypothetical version this build has never met, it's the exact value
+    // every build understood before blocked/error existed. A frame claiming
+    // it must be rejected the same way any other mismatch is.
+    const stream = new ConversationEventStream("conv-1");
+    await flush();
+    const source = MockEventSource.instances[0];
+    source.onmessage?.(
+      new MessageEvent("message", {
+        data: JSON.stringify({ ...eventDto(1), schema_version: 1 }),
       }),
     );
     expect(stream.status).toBe("unsupported");

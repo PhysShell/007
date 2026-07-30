@@ -6,9 +6,10 @@ use crate::models::{AttemptStatus, RunStatus};
 use crate::LedgerError;
 
 /// Allowed run transitions via the GENERAL path (`start_run`/`complete_run`/…):
-/// `queued → running` and `running → {completed, failed, cancelled, interrupted}`.
-/// Everything else — including `completed → running`, `failed → completed`,
-/// `cancelled → completed` — is forbidden here.
+/// `queued → running` and `running → {completed, failed, cancelled,
+/// interrupted, blocked, error}`. Everything else — including
+/// `completed → running`, `failed → completed`, `cancelled → completed` — is
+/// forbidden here.
 ///
 /// NOTE: `interrupted → running` is intentionally NOT in this set. Resuming an
 /// interrupted run is only possible through
@@ -17,7 +18,7 @@ use crate::LedgerError;
 /// `start_run` cannot revive an interrupted run without one.
 #[must_use]
 pub fn run_transition_allowed(from: RunStatus, to: RunStatus) -> bool {
-    use RunStatus::{Cancelled, Completed, Failed, Interrupted, Queued, Running};
+    use RunStatus::{Blocked, Cancelled, Completed, Error, Failed, Interrupted, Queued, Running};
     matches!(
         (from, to),
         (Queued, Running)
@@ -25,6 +26,8 @@ pub fn run_transition_allowed(from: RunStatus, to: RunStatus) -> bool {
             | (Running, Failed)
             | (Running, Cancelled)
             | (Running, Interrupted)
+            | (Running, Blocked)
+            | (Running, Error)
     )
 }
 
@@ -46,14 +49,19 @@ pub fn validate_run_transition(from: RunStatus, to: RunStatus) -> Result<(), Led
 }
 
 /// Allowed attempt transitions: an attempt starts `running` and may move to
-/// `{completed, failed, cancelled, interrupted}`. Attempts never restart — a
-/// new attempt is created instead.
+/// `{completed, failed, cancelled, interrupted, blocked, error}`. Attempts
+/// never restart — a new attempt is created instead.
 #[must_use]
 pub fn attempt_transition_allowed(from: AttemptStatus, to: AttemptStatus) -> bool {
-    use AttemptStatus::{Cancelled, Completed, Failed, Interrupted, Running};
+    use AttemptStatus::{Blocked, Cancelled, Completed, Error, Failed, Interrupted, Running};
     matches!(
         (from, to),
-        (Running, Completed) | (Running, Failed) | (Running, Cancelled) | (Running, Interrupted)
+        (Running, Completed)
+            | (Running, Failed)
+            | (Running, Cancelled)
+            | (Running, Interrupted)
+            | (Running, Blocked)
+            | (Running, Error)
     )
 }
 

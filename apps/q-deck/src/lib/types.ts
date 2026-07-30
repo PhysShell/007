@@ -2,8 +2,6 @@
 // from these — no field is invented client-side, per the R0 source-of-truth
 // rule (see docs/q-deck/architecture.md).
 
-export const API_SCHEMA_VERSION = 1;
-
 export interface HealthDto {
   schema_version: number;
   status: string;
@@ -24,7 +22,9 @@ export type RunStatus =
   | "completed"
   | "failed"
   | "cancelled"
-  | "interrupted";
+  | "interrupted"
+  | "blocked"
+  | "error";
 
 export interface RunDto {
   schema_version: number;
@@ -79,8 +79,17 @@ export function isActiveRun(status: RunStatus): boolean {
  * is deliberately NOT included: in `o7-ledger`, an interrupted run is
  * resumable (`resume_interrupted_run`) back to `running` — it is a pause,
  * not a sealed outcome. A client must keep watching an interrupted run (e.g.
- * keep polling it) in case it resumes; only completed/failed/cancelled are
- * safe to stop watching. */
+ * keep polling it) in case it resumes; only completed/failed/cancelled/
+ * blocked/error are safe to stop watching. `blocked`/`error` (Q-Deck R0.6,
+ * `docs/q-deck/r06-verdict-fidelity.md`) are the ledger's projection of
+ * `o7-run::Verdict`'s own sealed `Blocked`/`Error` — both sealed here exactly
+ * as they are sealed there, and never the same thing as `interrupted`. */
 export function isSealedRun(status: RunStatus): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled";
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "blocked" ||
+    status === "error"
+  );
 }

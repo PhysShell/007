@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/svelte";
 import EventTimeline from "./EventTimeline.svelte";
+import { EXPECTED_SCHEMA_VERSION } from "../lib/api";
 import type { EventDto } from "../lib/types";
 
 function eventDto(overrides: Partial<EventDto> = {}): EventDto {
   return {
-    schema_version: 1,
+    schema_version: EXPECTED_SCHEMA_VERSION,
     event_id: "evt-1",
     conversation_id: "conv-1",
     run_id: null,
