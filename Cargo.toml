@@ -90,6 +90,14 @@ indexing_slicing = "deny"     # panic-on-index; the two proven-safe slices carry
 
 [dev-dependencies]
 proptest = "1"
+tempfile = "3"
+# Q-Deck R0.7 process-level E2E test only (tests/live_ingress_e2e.rs): a
+# dev-dependency is Cargo's own documented way to make CARGO_BIN_EXE_o7d
+# available to this crate's integration tests, so the test can spawn the
+# REAL compiled o7d binary as its own OS process, not call into it in-memory.
+# The test itself is plain synchronous std (no async runtime needed for a
+# blocking Command::spawn + std::net::TcpStream harness).
+o7d = { path = "crates/o7d", version = "0.1.0" }
 
 [profile.release]
 strip = true

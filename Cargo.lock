@@ -1000,11 +1000,13 @@ dependencies = [
  "nix",
  "o7-ledger",
  "o7-run",
+ "o7d",
  "proptest",
  "serde",
  "serde_json",
  "sha1",
  "sha2",
+ "tempfile",
  "tokio",
  "toml",
 ]
