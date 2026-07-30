@@ -117,15 +117,21 @@ pub fn artifact(kind: ArtifactKind, locator: &str, bytes: &[u8]) -> ArtifactRef 
 }
 
 /// Mints digest-chained events with per-run monotonic sequence numbers.
-struct EventChain {
+///
+/// `pub`, not private: the live-ingress caller (`main.rs::execute_live`,
+/// Q-Deck R0.7, only when `--ledger` is given) mints events one at a time,
+/// interleaved with the actual work each event describes and a live ledger
+/// projection call, instead of only after everything has already finished
+/// (`build_events`, below, unchanged for the no-`--ledger` path).
+pub struct EventChain {
     run_id: RunId,
     seq: u64,
     prev: Digest256,
-    out: Vec<RunEvent>,
+    pub out: Vec<RunEvent>,
 }
 
 impl EventChain {
-    fn new(run_id: RunId) -> Self {
+    pub fn new(run_id: RunId) -> Self {
         EventChain {
             run_id,
             seq: 0,
@@ -134,7 +140,10 @@ impl EventChain {
         }
     }
 
-    fn push(&mut self, kind: RunEventKind) -> Result<()> {
+    /// Mint one event and return it (also retained in `self.out`) — the
+    /// live-ingress caller projects the returned event immediately rather
+    /// than indexing back into `out` after the fact.
+    pub fn push(&mut self, kind: RunEventKind) -> Result<RunEvent> {
         let event_id = RunEventId::new(format!("{}-e{}", self.run_id.as_str(), self.seq))
             .map_err(|e| anyhow!("minting event id: {e}"))?;
         let timestamp_millis = i64::try_from(
@@ -157,8 +166,8 @@ impl EventChain {
         event.event_digest = event.compute_digest();
         self.prev = event.event_digest.clone();
         self.seq = self.seq.checked_add(1).context("event sequence overflow")?;
-        self.out.push(event);
-        Ok(())
+        self.out.push(event.clone());
+        Ok(event)
     }
 }
 
@@ -223,7 +232,7 @@ pub fn build_events(
 }
 
 /// Map an executed step's verdict to the observed gate outcome.
-fn gate_outcome(v: Verdict) -> GateOutcome {
+pub fn gate_outcome(v: Verdict) -> GateOutcome {
     match v {
         Verdict::Pass => GateOutcome::Pass,
         Verdict::Fail => GateOutcome::Fail,
@@ -238,7 +247,7 @@ fn gate_outcome(v: Verdict) -> GateOutcome {
 /// was signal-terminated, but the MVP does not capture WHICH signal — that is
 /// a boundary observation gap, reported as such (the reducer scores any
 /// non-clean outcome `Error`, so honesty costs nothing here).
-fn agent_outcome(agent: &AgentRun) -> AgentOutcome {
+pub fn agent_outcome(agent: &AgentRun) -> AgentOutcome {
     match agent.exit_code {
         Some(code) => AgentOutcome::ExitedNormally { code },
         None => AgentOutcome::BoundaryFailure {
@@ -270,7 +279,7 @@ fn from_canonical(v: CanonicalVerdict) -> Verdict {
     }
 }
 
-fn to_canonical(v: Verdict) -> Result<CanonicalVerdict> {
+pub fn to_canonical(v: Verdict) -> Result<CanonicalVerdict> {
     Ok(match v {
         Verdict::Pass => CanonicalVerdict::Pass,
         Verdict::Fail => CanonicalVerdict::Fail,

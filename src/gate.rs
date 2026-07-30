@@ -100,82 +100,101 @@ impl GateManifest {
     /// Validates the manifest first (`validate`) — the log-collision check
     /// must hold on the execution path even for callers that skipped the
     /// pre-run contract build.
+    ///
+    /// This batch form is unchanged behavior-wise since before Q-Deck R0.7 —
+    /// the live-ingress caller (`main.rs::execute`, only when `--ledger` is
+    /// given) iterates `self.gate` and calls [`Self::run_one_step`] directly
+    /// instead, so it can mint+project a canonical event immediately after
+    /// each step rather than only after every step has already finished.
     pub fn run(&self, workdir: &Path, gate_out: &Path) -> Result<Vec<StepVerdict>> {
         self.validate()?;
         std::fs::create_dir_all(gate_out)?;
         let mut out = Vec::new();
-
         for step in &self.gate {
-            // MVP exercises the unix/bash path only. `env == "windows"` (OwnAudit's
-            // FlaUI/ClrMD/Roslyn gates on the host) is Phase 2 — the step cannot run
-            // here. The step's OWN `required` flag is preserved (the old code demoted
-            // it to `false`, which let `reduce` score a manifest of skipped required
-            // gates as PASS — a false green): with a pre-declared waiver the skip is
-            // legitimate (`NotApplicable` + the auditable reason); without one, a
-            // required step scores `Blocked` — existence of a step is not execution.
-            if step.env.as_deref() == Some("windows") {
-                let (verdict, waived) = match &step.waive_reason {
-                    Some(reason) if !reason.trim().is_empty() => {
-                        eprintln!("[o7] gate '{}' env=windows — waived: {}", step.name, reason);
-                        (Verdict::NotApplicable, Some(reason.clone()))
-                    }
-                    _ => {
-                        eprintln!(
-                            "[o7] gate '{}' env=windows — cannot run here and carries \
-                             no waiver: BLOCKED (declare `waive_reason` to skip \
-                             legitimately)",
-                            step.name
-                        );
-                        (Verdict::Blocked, None)
-                    }
-                };
-                out.push(StepVerdict {
-                    name: step.name.clone(),
-                    required: step.required,
-                    verdict,
-                    exit_code: None,
-                    log: String::new(),
-                    waived,
-                });
-                continue;
-            }
+            out.push(self.run_one_step(step, workdir, gate_out)?);
+        }
+        Ok(out)
+    }
 
-            println!("[o7]   gate: {} :: {}", step.name, step.cmd);
-            let result = Command::new("bash")
-                .arg("-lc")
-                .arg(&step.cmd)
-                .current_dir(workdir)
-                .output();
-
-            let (verdict, exit_code, combined) = match result {
-                Ok(o) => {
-                    let mut buf = String::new();
-                    buf.push_str(&String::from_utf8_lossy(&o.stdout));
-                    buf.push_str(&String::from_utf8_lossy(&o.stderr));
-                    let v = if o.status.success() {
-                        Verdict::Pass
-                    } else {
-                        Verdict::Fail
-                    };
-                    (v, o.status.code(), buf)
+    /// Run exactly one step, writing its log into `gate_out` if it actually
+    /// executes. Extracted from [`Self::run`]'s loop body so a live caller
+    /// can mint a canonical event immediately after each step, not only
+    /// after the whole manifest has finished.
+    ///
+    /// # Errors
+    /// Writing the step's log file fails.
+    pub fn run_one_step(
+        &self,
+        step: &GateStep,
+        workdir: &Path,
+        gate_out: &Path,
+    ) -> Result<StepVerdict> {
+        // MVP exercises the unix/bash path only. `env == "windows"` (OwnAudit's
+        // FlaUI/ClrMD/Roslyn gates on the host) is Phase 2 — the step cannot run
+        // here. The step's OWN `required` flag is preserved (the old code demoted
+        // it to `false`, which let `reduce` score a manifest of skipped required
+        // gates as PASS — a false green): with a pre-declared waiver the skip is
+        // legitimate (`NotApplicable` + the auditable reason); without one, a
+        // required step scores `Blocked` — existence of a step is not execution.
+        if step.env.as_deref() == Some("windows") {
+            let (verdict, waived) = match &step.waive_reason {
+                Some(reason) if !reason.trim().is_empty() => {
+                    eprintln!("[o7] gate '{}' env=windows — waived: {}", step.name, reason);
+                    (Verdict::NotApplicable, Some(reason.clone()))
                 }
-                Err(e) => (Verdict::Error, None, format!("failed to spawn bash: {e}")),
+                _ => {
+                    eprintln!(
+                        "[o7] gate '{}' env=windows — cannot run here and carries \
+                         no waiver: BLOCKED (declare `waive_reason` to skip \
+                         legitimately)",
+                        step.name
+                    );
+                    (Verdict::Blocked, None)
+                }
             };
-
-            let log_name = format!("{}.log", sanitize(&step.name));
-            std::fs::write(gate_out.join(&log_name), &combined)?;
-
-            out.push(StepVerdict {
+            return Ok(StepVerdict {
                 name: step.name.clone(),
                 required: step.required,
                 verdict,
-                exit_code,
-                log: format!("gate/{log_name}"),
-                waived: None,
+                exit_code: None,
+                log: String::new(),
+                waived,
             });
         }
 
-        Ok(out)
+        println!("[o7]   gate: {} :: {}", step.name, step.cmd);
+        let result = Command::new("bash")
+            .arg("-lc")
+            .arg(&step.cmd)
+            .current_dir(workdir)
+            .output();
+
+        let (verdict, exit_code, combined) = match result {
+            Ok(o) => {
+                let mut buf = String::new();
+                buf.push_str(&String::from_utf8_lossy(&o.stdout));
+                buf.push_str(&String::from_utf8_lossy(&o.stderr));
+                let v = if o.status.success() {
+                    Verdict::Pass
+                } else {
+                    Verdict::Fail
+                };
+                (v, o.status.code(), buf)
+            }
+            Err(e) => (Verdict::Error, None, format!("failed to spawn bash: {e}")),
+        };
+
+        let log_name = format!("{}.log", sanitize(&step.name));
+        std::fs::write(gate_out.join(&log_name), &combined)?;
+
+        Ok(StepVerdict {
+            name: step.name.clone(),
+            required: step.required,
+            verdict,
+            exit_code,
+            log: format!("gate/{log_name}"),
+            waived: None,
+        })
     }
 }
 
