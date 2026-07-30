@@ -63,6 +63,38 @@ fn confinement_backend() -> BackendImage {
     .expect("acquire backend")
 }
 
+/// TEST-ONLY pre-flip backend SELECTION SEAM. This is the ONLY backend every boundary in this matrix
+/// binds, so the 14 non-fault oracles are reproducible FROM THE COMMITTED TREE — no manual binary
+/// swap, no scratch file. With `O7_SANDBOY_BIN` set (the designated confinement job), it binds the
+/// PINNED fault-injection artifact as the REAL backend; with it unset, it falls back to the frozen
+/// fake (`confinement_backend()`), so the RED semantics against the stand-in are unchanged.
+///
+/// `confinement_backend()` itself is UNTOUCHED until Phase 8 (the production selector flip). This
+/// seam does NOT flip production — it only lets the amended oracles exercise the real backend through
+/// an explicit, committed env selection:
+///   `O7_SANDBOY_BIN=<fault artifact> cargo test -p o7-worker --test sandbox_confinement -- --ignored`
+fn matrix_backend() -> BackendImage {
+    match std::env::var_os("O7_SANDBOY_BIN") {
+        Some(path) => acquire_expected_fault_artifact(PathBuf::from(path)),
+        None => confinement_backend(),
+    }
+}
+
+/// Acquire the real backend at `path`, binding the HARD-EXPECTED fault-artifact identity
+/// (`sandboy-linux` / `0.1.0+faultinject`). The identity is a fixed constant — NEVER derived from the
+/// environment — so `O7_SANDBOY_BIN` can only select the designated fault artifact and can never
+/// smuggle in an arbitrary backend under a chosen identity. A production build is `0.1.0`, so a
+/// production binary can never be bound here.
+fn acquire_expected_fault_artifact(path: PathBuf) -> BackendImage {
+    let bytes = std::fs::read(&path).expect("read O7_SANDBOY_BIN backend binary");
+    BackendImage::acquire(
+        &path,
+        Digest256::of_bytes(&bytes),
+        BackendIdentity::new("sandboy-linux", "0.1.0+faultinject").unwrap(),
+    )
+    .expect("acquire fault-injection backend")
+}
+
 /// A boundary over the stand-in with an explicit fake-backend `mode` (control-plane only).
 fn boundary_mode(
     worktree: &Path,
@@ -72,7 +104,7 @@ fn boundary_mode(
     mode: &str,
 ) -> SandboyBoundary {
     SandboyBoundary::new(
-        confinement_backend(),
+        matrix_backend(),
         SandboxPolicy {
             worktree: worktree.to_path_buf(),
             allow_exec,
@@ -84,6 +116,7 @@ fn boundary_mode(
     .expect("valid boundary")
     .with_backend_config(BackendConfig {
         fake_mode: Some(mode.to_owned()),
+        staging_probe: None,
     })
 }
 
@@ -94,6 +127,30 @@ fn boundary(
     timeout: Duration,
 ) -> SandboyBoundary {
     boundary_mode(worktree, allow_exec, env_allowlist, timeout, "ok")
+}
+
+/// A boundary that hands the REAL backend a STAGING-BARRIER witness path (test-only control plane, not
+/// the target env) so the proc-isolation reopen oracle can probe the staging fd mid-materialize.
+fn boundary_with_staging_probe(
+    worktree: &Path,
+    allow_exec: Vec<PathBuf>,
+    witness: &Path,
+) -> SandboyBoundary {
+    SandboyBoundary::new(
+        matrix_backend(),
+        SandboxPolicy {
+            worktree: worktree.to_path_buf(),
+            allow_exec,
+            network: NetworkPolicy::DenyAll,
+            env_allowlist: vec![],
+            timeout: Duration::from_secs(30),
+        },
+    )
+    .expect("valid boundary")
+    .with_backend_config(BackendConfig {
+        fake_mode: None,
+        staging_probe: Some(witness.to_path_buf()),
+    })
 }
 
 fn probe_bin() -> PathBuf {
@@ -518,18 +575,39 @@ async fn a_worktree_executable_is_denied_unless_allowlisted() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Vertical B / VB-4: a runtime-read-root file is denied EXECUTE (READ_FILE only)"]
 async fn a_runtime_read_root_executable_is_denied_unless_allowlisted() {
-    let lib = ["/usr/lib/libc.so.6", "/lib/x86_64-linux-gnu/libc.so.6"]
+    // REQUIRED-HOST + DIFFERENTIAL. Find an executable inside an ACTUAL PROFILE_V1 runtime read root
+    // (`/usr/lib`, `/usr/lib64`, `/lib`, `/lib64`). `libc.so.6` is itself a runnable ELF that prints
+    // its version and exits 0. This is NOT a skippable test: on the designated confinement host such a
+    // candidate MUST exist — its absence is a FAILURE (the matrix header: a missing designated-host
+    // capability is a job failure, never a skip).
+    let lib = ["/usr/lib", "/usr/lib64", "/lib", "/lib64"]
         .into_iter()
-        .map(PathBuf::from)
-        .find(|p| p.exists());
-    let Some(lib) = lib else {
-        eprintln!("SKIP: no /usr/lib libc to probe");
-        return;
-    };
+        .map(|r| Path::new(r).join("libc.so.6"))
+        .find(|p| p.is_file())
+        .expect(
+            "designated host must carry libc.so.6 under a PROFILE_V1 runtime read root \
+             (/usr/lib{,64}, /lib{,64}) — a missing candidate is a job FAILURE, not a skip",
+        );
+
+    // UNCONFINED BASELINE: the EXACT candidate must execve successfully with NO confinement, so the
+    // confined denial below is attributable specifically to Landlock's READ_FILE-not-EXECUTE split —
+    // not to DAC, a missing execute bit, or ENOEXEC. `status().is_ok()` means the kernel exec'd it.
+    let baseline = std::process::Command::new(&lib)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    assert!(
+        baseline.is_ok(),
+        "unconfined baseline: {lib:?} must be kernel-executable (else a confined denial proves \
+         nothing about Landlock): {baseline:?}"
+    );
+
     let wt = tempfile::tempdir().unwrap();
     let secondary = wt.path().join("escaped");
     let primary = wt.path().join("exec.result");
-    // allow_exec is /usr/bin only; /usr/lib is a runtime READ root (READ_FILE, no EXECUTE).
+    // allow_exec = probe_dir + /usr/bin (the probe target + loader); the runtime read root (/usr/lib…)
+    // is granted READ_FILE only, NEVER EXECUTE.
     let b = boundary(
         wt.path(),
         vec![probe_dir(), PathBuf::from("/usr/bin"), PathBuf::from("/bin")],
@@ -555,7 +633,8 @@ async fn a_runtime_read_root_executable_is_denied_unless_allowlisted() {
     });
     assert!(
         report.contains("exec=ERR:13") || report.contains("exec=ERR:1"),
-        "executing a runtime-read-root file (READ_FILE only) must be DENIED; report: {report:?}"
+        "the SAME candidate that execs unconfined must be DENIED under confinement (runtime read root \
+         is READ_FILE only, EXECUTE denied); report: {report:?}"
     );
 }
 
@@ -599,12 +678,10 @@ async fn the_running_execution_inode_is_immutable_to_write_reopen() {
 // sealed `memfd` to EXECUTE under Landlock with the sealed `/proc/fd` path INSIDE `allow_exec` — an
 // impossible shape (an anonymous inode is not a Landlock rule object: `landlock_add_rule` → EBADFD,
 // and only a root grant would run it). The corrected contract: the sealed source is the transport +
-// sealed `memfd` to EXECUTE under Landlock with the sealed `/proc/fd` path INSIDE `allow_exec` — an
-// impossible shape (an anonymous inode is not a Landlock rule object: `landlock_add_rule` → EBADFD,
-// and only a root grant would run it). The corrected contract: the sealed source is the transport +
 // source-identity object; the backend materializes it into a PRIVATE, ruleable execution inode
-// proven byte-equal to the source, which is what executes under a NARROW ruleset. The `allow_exec`
-// list is ordinary program dirs — NEVER the sealed path.
+// proven byte-equal to the source, which is what executes under a NARROW ruleset. Launch-source
+// authority is SEPARATE from `allow_exec` — the sealed source is authorized by its seals, never by a
+// `/proc/<pid>/fd` grant (see `a_second_sealed_memfd_is_not_executable_by_the_target`).
 //
 // The internal source→inode bindings (source seals + digest, destination-digest equality, exact
 // execution-inode identity, complete resolved-runtime binding) are NOT matrix-visible; they are
@@ -649,17 +726,14 @@ async fn a_sealed_source_runs_as_private_execution_inode() {
     .expect("add seals");
     let sealed_path = PathBuf::from(format!("/proc/{}/fd/{}", std::process::id(), raw));
 
-    // The FROZEN Vertical-A exec-permission gate (`SandboxPolicy::permits_exec`) authorizes the
-    // launch TARGET by path: a sealed `/proc/<pid>/fd/<n>` source is authorized by granting its
-    // `/proc/<pid>/fd` directory (policy.rs §"grant that path or its `/proc/<pid>/fd` directory").
-    // That directory is a REAL procfs inode — unlike the anonymous memfd it lists — so the backend
-    // can Landlock-rule it; the sealed source itself still runs via its PRIVATE execution inode
-    // (materialized + ruled internally), and its interpreter/libraries via the resolved runtime read
-    // policy. Ordinary subprocess-exec dirs (`/bin`, `/usr/bin`) round out the allowlist.
-    let proc_fd_dir = PathBuf::from(format!("/proc/{}/fd", std::process::id()));
-    let mut allow = shell_exec_allow();
-    allow.push(proc_fd_dir);
-    let b = boundary(wt.path(), allow, vec![], Duration::from_secs(30));
+    // LAUNCH-SOURCE authority is SEPARATE from the subprocess `allow_exec` allowlist. The sealed
+    // `/proc/<pid>/fd/<n>` source is authorized by its FULL SEAL SET at acquisition (the boundary's
+    // `source_authorized` recognizes a `/proc/fd` source and defers to the seal check) — NOT by
+    // placing `/proc/<pid>/fd` in `allow_exec` (which would grant EXECUTE over every fd the owner
+    // holds; see the adversarial oracle below). `allow_exec` is therefore ORDINARY dirs only; the
+    // sealed source runs via its private execution inode and its interpreter/libraries via the
+    // resolved runtime read policy.
+    let b = boundary(wt.path(), shell_exec_allow(), vec![], Duration::from_secs(30));
     let spec = BoundarySpawnSpec {
         executable: sealed_path,
         arguments: vec![
@@ -696,6 +770,151 @@ async fn a_sealed_source_runs_as_private_execution_inode() {
     assert!(
         report.contains("create=ERR:13") || report.contains("create=ERR:1"),
         "the outside write must report the exact EACCES/EPERM; report: {report:?}"
+    );
+}
+
+/// Create a LIVE fully-sealed memfd holding `bytes`, returning the owning `File` (keep it alive for
+/// the launch) and its `/proc/<self>/fd/<n>` descriptor path — a caller-held sealed launch source.
+fn sealed_memfd(bytes: &[u8], name: &str) -> (std::fs::File, PathBuf) {
+    use std::io::Write as _;
+    use std::os::unix::io::AsRawFd as _;
+
+    use nix::fcntl::{fcntl, FcntlArg, SealFlag};
+    use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
+
+    let cname = std::ffi::CString::new(name).unwrap();
+    let owned = memfd_create(&cname, MemFdCreateFlag::MFD_ALLOW_SEALING).expect("memfd_create");
+    let mut file = std::fs::File::from(owned);
+    file.write_all(bytes).expect("write sealed bytes");
+    let raw = file.as_raw_fd();
+    fcntl(
+        raw,
+        FcntlArg::F_ADD_SEALS(
+            SealFlag::F_SEAL_WRITE
+                | SealFlag::F_SEAL_GROW
+                | SealFlag::F_SEAL_SHRINK
+                | SealFlag::F_SEAL_SEAL,
+        ),
+    )
+    .expect("add seals");
+    let path = PathBuf::from(format!("/proc/{}/fd/{}", std::process::id(), raw));
+    (file, path)
+}
+
+/// VB-4 (new, correction 2): the sealed launch target is the ONE exact execution capability. The
+/// owner holds a SECOND fully-sealed executable memfd; the confined target attempts to exec it via
+/// `/proc/<owner>/fd/<other>`. Because launch-source authority is SEPARATE from `allow_exec` and
+/// `/proc/<pid>/fd` is NEVER in the Landlock exec allowlist, the second memfd is not executable — the
+/// exec is kernel-denied. Proves "and nothing other than the target runs", which the old
+/// `/proc/<pid>/fd`-in-`allow_exec` workaround silently violated.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Vertical B / VB-4: a second sealed memfd is NOT executable — only the launch target runs"]
+async fn a_second_sealed_memfd_is_not_executable_by_the_target() {
+    let wt = tempfile::tempdir().unwrap();
+    let secondary = wt.path().join("escaped-second");
+    let primary = wt.path().join("exec.result");
+    // memfd #1 = the sealed launch TARGET (the probe). memfd #2 = a SECOND sealed executable the owner
+    // ALSO holds (`touch`) — if the target could exec it, `touch` would create `secondary`.
+    let (probe_file, probe_path) =
+        sealed_memfd(&std::fs::read(probe_bin()).unwrap(), "o7-sealed-target");
+    let (touch_file, touch_path) =
+        sealed_memfd(&std::fs::read(touch_bin()).unwrap(), "o7-sealed-second");
+    // `allow_exec` is ORDINARY dirs only — NEVER `/proc/fd`. The sealed target is authorized by its
+    // seals; the second memfd is authorized by NOTHING and must be kernel-denied.
+    let b = boundary(wt.path(), shell_exec_allow(), vec![], Duration::from_secs(30));
+    let spec = BoundarySpawnSpec {
+        executable: probe_path,
+        arguments: [
+            OsString::from("exec"),
+            OsString::from(&touch_path),
+            OsString::from(&secondary),
+            OsString::from(&primary),
+        ]
+        .to_vec(),
+        working_directory: wt.path().to_path_buf(),
+        environment: BTreeMap::new(),
+        stdin: StdinMode::Null,
+    };
+    let mut launch = b.spawn(spec).await.expect("the sealed target must launch");
+    let exit = launch.process.wait().await.expect("waited");
+    drop(probe_file);
+    drop(touch_file);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    assert!(
+        !secondary.exists(),
+        "a SECOND sealed memfd must NOT be executable by the confined target (only the launch target runs)"
+    );
+    let report = consume_marker_after_probe_success(exit, || {
+        std::fs::read_to_string(&primary).expect("a successful probe must publish its marker")
+    });
+    assert!(
+        report.contains("exec=ERR:13") || report.contains("exec=ERR:1"),
+        "exec of the second sealed memfd via /proc/<owner>/fd must be kernel-DENIED; report: {report:?}"
+    );
+}
+
+/// VB-4 (new, correction 3): the DIRECT proof of staging proc-isolation. `PR_SET_DUMPABLE(0)` is set
+/// BEFORE the writable staging inode is opened, so while the launch child holds that inode a SAME-UID
+/// external process must NOT be able to reopen `/proc/<child>/fd/<staging-fd>` for read OR write.
+/// (`ETXTBSY`-after-exec is only supplementary — it would hold even without `PR_SET_DUMPABLE`.) The
+/// backend's compile-gated staging barrier publishes `<pid> <fd>` and blocks until we release it.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Vertical B / VB-4: the staging inode is not reopenable by a same-UID external process"]
+async fn the_staging_inode_is_not_reopenable_during_materialize() {
+    let wt = tempfile::tempdir().unwrap();
+    let witness = wt.path().join("staging.witness");
+    let go = wt.path().join("staging.witness.go");
+    let b = boundary_with_staging_probe(wt.path(), vec![probe_dir()], &witness);
+    let spec = probe_target(
+        &["fs", &wt.path().to_string_lossy()],
+        wt.path(),
+        BTreeMap::new(),
+    );
+
+    // The child BLOCKS inside materialize at the barrier, so `spawn` stays pending until we release —
+    // run the reopen probe CONCURRENTLY with the spawn, never awaiting spawn first (that would
+    // deadlock against our own release).
+    let probe = async {
+        // Await the witness (`<child-pid> <staging-fd>`), published once the staging inode is open and
+        // the child is already non-dumpable.
+        let (pid, fd) = loop {
+            if let Ok(s) = std::fs::read_to_string(&witness) {
+                let mut it = s.split_whitespace();
+                if let (Some(p), Some(f)) = (it.next(), it.next()) {
+                    if let (Ok(p), Ok(f)) = (p.parse::<i32>(), f.parse::<i32>()) {
+                        break (p, f);
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        let path = format!("/proc/{pid}/fd/{fd}");
+        // Same-UID external reopen attempts — BOTH must be denied while the child is non-dumpable.
+        let rd = std::fs::OpenOptions::new().read(true).open(&path);
+        let wr = std::fs::OpenOptions::new().write(true).open(&path);
+        let rd_err = rd.err().and_then(|e| e.raw_os_error());
+        let wr_err = wr.err().and_then(|e| e.raw_os_error());
+        // Release the child so the launch can finish.
+        let _ = std::fs::write(&go, b"go");
+        (rd_err, wr_err)
+    };
+
+    let (launch, (rd_err, wr_err)) = tokio::join!(b.spawn(spec), probe);
+    if let Ok(mut l) = launch {
+        let _ = l.process.force_stop().await;
+        let _ = l.process.wait().await;
+    }
+
+    assert_eq!(
+        rd_err,
+        Some(nix::errno::Errno::EACCES as i32),
+        "a same-UID external READ reopen of the staging inode must be denied (EACCES); got {rd_err:?}"
+    );
+    assert_eq!(
+        wr_err,
+        Some(nix::errno::Errno::EACCES as i32),
+        "a same-UID external WRITE reopen of the staging inode must be denied (EACCES); got {wr_err:?}"
     );
 }
 

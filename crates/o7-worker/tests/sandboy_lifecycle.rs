@@ -66,6 +66,7 @@ fn boundary(allow_exec: Vec<PathBuf>, mode: &str) -> SandboyBoundary {
     .expect("valid boundary")
     .with_backend_config(o7_worker::BackendConfig {
         fake_mode: Some(mode.to_owned()),
+        staging_probe: None,
     })
 }
 

@@ -158,6 +158,14 @@ pub struct BackendConfig {
     #[cfg(feature = "test-harness")]
     #[doc(hidden)]
     pub fake_mode: Option<String>,
+    /// TEST-ONLY: a witness path handed to the REAL backend's compile-gated STAGING BARRIER. When set,
+    /// the launch child publishes `<pid> <staging-fd>` to it and blocks (bounded) until the test's
+    /// external same-UID reopen probe has run, so a test can prove `/proc/<child>/fd/<staging-fd>` is
+    /// NOT reopenable while staging (the `PR_SET_DUMPABLE(0)`-before-staging guarantee). A real backend
+    /// without the staging feature ignores it; production has no field to smuggle it through.
+    #[cfg(feature = "test-harness")]
+    #[doc(hidden)]
+    pub staging_probe: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone)]
@@ -297,6 +305,10 @@ impl SandboyBoundary {
         if let Some(mode) = &self.backend_config.fake_mode {
             env.insert(OsString::from("O7_FAKE_MODE"), OsString::from(mode));
         }
+        #[cfg(feature = "test-harness")]
+        if let Some(p) = &self.backend_config.staging_probe {
+            env.insert(OsString::from("O7_STAGING_PROBE"), p.clone().into_os_string());
+        }
         env
     }
 
@@ -356,13 +368,24 @@ impl SandboyBoundary {
     ///
     /// # Errors
     /// [`BoundaryError::Spawn`] if the target executable is not permitted by the policy.
+    /// Whether the launch SOURCE `exe` is authorized. Launch-source authority is SEPARATE from the
+    /// subprocess `allow_exec` allowlist (VB-4): an ordinary path is gated lexically by the policy
+    /// (`permits_exec`), while a caller-held sealed descriptor (`/proc/<pid>/fd/<n>`) is authorized
+    /// instead by its FULL SEAL SET at acquisition (`SealedObject::stage` → `acquire_proc_fd` requires
+    /// the 0xf seal set) plus its bound digest — it must NOT be forced into `allow_exec`, which would
+    /// make the backend grant Landlock EXECUTE over the WHOLE `/proc/<pid>/fd` directory (every fd the
+    /// owner holds). The exact sealed target runs solely via its private execution inode.
+    fn source_authorized(&self, exe: &Path) -> bool {
+        crate::sealed::is_proc_fd_path(exe) || self.policy.permits_exec(exe)
+    }
+
     pub fn backend_spawn_spec(
         &self,
         spec: &BoundarySpawnSpec,
         sealed_target: &Path,
         launch_nonce: &LaunchNonce,
     ) -> Result<BoundarySpawnSpec, BoundaryError> {
-        if !self.policy.permits_exec(&spec.executable) {
+        if !self.source_authorized(&spec.executable) {
             return Err(BoundaryError::Spawn(io::Error::other(format!(
                 "sandbox policy does not permit executing {}; refusing to launch",
                 spec.executable.display()
@@ -673,8 +696,11 @@ impl ProcessBoundary for SandboyBoundary {
         if !cfg!(target_os = "linux") {
             return Err(BoundaryError::UnsupportedPlatform);
         }
-        // Fail closed BEFORE anything if the ORIGINAL target path is not permitted by the policy.
-        if !self.policy.permits_exec(&spec.executable) {
+        // Fail closed BEFORE anything if the launch SOURCE is not authorized. An ordinary path is
+        // gated lexically by the policy; a caller-held sealed `/proc/<pid>/fd/<n>` source is
+        // authorized instead by its seals + digest at acquisition (see `source_authorized`), never by
+        // forcing a `/proc/<pid>/fd` grant into `allow_exec`.
+        if !self.source_authorized(&spec.executable) {
             return Err(BoundaryError::Spawn(io::Error::other(format!(
                 "sandbox policy does not permit executing {}; refusing to launch",
                 spec.executable.display()

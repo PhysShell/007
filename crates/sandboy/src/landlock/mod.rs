@@ -62,7 +62,9 @@ pub(crate) enum InstallError {
         path: PathBuf,
         err: io::Error,
     },
-    /// An `allow_exec` path is neither a directory nor a regular file — no correct rule mask exists.
+    /// An `allow_exec` path is neither a directory nor a regular file (no correct rule mask exists),
+    /// OR it is a `/proc` path — never a legitimate subprocess exec allowance (a sealed launch SOURCE
+    /// is authorized separately and runs via its private execution inode, never by a `/proc/fd` grant).
     UnsupportedObjectType {
         path: PathBuf,
     },
@@ -254,6 +256,45 @@ fn open_object(path: &Path) -> Result<RuleObject, InstallError> {
     })
 }
 
+/// What a proven `install_filesystem` returns to the launch child: the runtime read-policy binding,
+/// computed over the profile version plus the EXACT opened [`RuleObject`] identities the Landlock
+/// rules were attached to. Because it is derived from the SAME fds (never a re-resolved pathname),
+/// `READY_TO_EXEC` commits to the objects that were actually ruled — closing the window where a path
+/// swap between rule-attach and proof could bind object B while the rule protects object A.
+pub(crate) struct FilesystemInstallProof {
+    pub(crate) runtime_binding: o7_sandbox_protocol::ids::Digest256,
+}
+
+/// The runtime-binding digest over the profile version + every runtime RuleObject's path AND its
+/// opened-object identity `(dev, ino)`. Same tagged format the old `RuntimePolicy::binding_digest`
+/// produced, but sourced from the ruled fds rather than a fresh `metadata(path)`.
+fn runtime_binding_digest(
+    profile_version: &str,
+    interp: Option<&RuleObject>,
+    roots: &[RuleObject],
+    files: &[RuleObject],
+) -> o7_sandbox_protocol::ids::Digest256 {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(b"o7-runtime-binding-v1\n");
+    buf.extend_from_slice(profile_version.as_bytes());
+    buf.push(b'\n');
+    let mut push = |tag: &str, o: &RuleObject| {
+        buf.extend_from_slice(tag.as_bytes());
+        buf.extend_from_slice(o.path.as_os_str().as_encoded_bytes());
+        buf.extend_from_slice(format!(":{}:{}\n", o.id.0, o.id.1).as_bytes());
+    };
+    if let Some(i) = interp {
+        push("interp=", i);
+    }
+    for r in roots {
+        push("root=", r);
+    }
+    for f in files {
+        push("file=", f);
+    }
+    o7_sandbox_protocol::ids::Digest256::of_bytes(&buf)
+}
+
 /// Mask `desired` to the rights valid for this object's TYPE (from the opened fd): a directory keeps
 /// them all; a regular file keeps only the file-applicable subset (`READ_DIR` etc. on a file is
 /// EINVAL); any other type is rejected fail-closed.
@@ -338,7 +379,7 @@ pub(crate) fn install_filesystem(
     exec_object: Option<RawFd>,
     runtime: &crate::runtime::RuntimePolicy,
     faults: Faults,
-) -> Result<(), InstallError> {
+) -> Result<FilesystemInstallProof, InstallError> {
     // 1. Probe the ABI FIRST — an fd or a version number alone restricts nothing.
     let abi = if faults.abi_enosys {
         return Err(InstallError::Unsupported(io::Error::from_raw_os_error(
@@ -391,6 +432,16 @@ pub(crate) fn install_filesystem(
                 err: io::Error::from_raw_os_error(libc::EINVAL),
             });
         }
+        // DEFENSE IN DEPTH: a `/proc` path is NEVER a legitimate subprocess exec allowance. A
+        // `/proc/<pid>/fd/<n>` entry is a sealed launch SOURCE (authorized by its seals + digest and
+        // run via the private execution inode); granting its `/proc/<pid>/fd` DIRECTORY would
+        // authorize EXECUTE over EVERY fd the owner holds — the exact authority expansion the
+        // launch-source/allow_exec split forbids. Fail closed before it is ever opened or ruled.
+        if path.starts_with("/proc") {
+            return Err(InstallError::UnsupportedObjectType {
+                path: path.to_path_buf(),
+            });
+        }
         exec_objs.push(open_object(path)?);
     }
     // Runtime read-policy objects, opened ONCE for their exact identity + rule (a separate authority
@@ -406,7 +457,10 @@ pub(crate) fn install_filesystem(
         Some(p) => Some(open_object(p)?),
         None => None,
     };
-    let mut read_objs = Vec::with_capacity(runtime.read_roots.len() + runtime.read_files.len());
+    // `read_objs` is `read_roots ++ read_files`; remember the split so the runtime binding can label
+    // each with its correct tag (`root=` vs `file=`) from the SAME opened objects.
+    let n_roots = runtime.read_roots.len();
+    let mut read_objs = Vec::with_capacity(n_roots + runtime.read_files.len());
     for p in runtime.read_roots.iter().chain(runtime.read_files.iter()) {
         read_objs.push(open_object(p)?);
     }
@@ -515,7 +569,19 @@ pub(crate) fn install_filesystem(
             let _ = std::fs::remove_file(&outside_file);
             Err(InstallError::SelfCheckOutsideAllowed)
         }
-        Err(ref e) if is_denied(e) => Ok(()),
+        Err(ref e) if is_denied(e) => {
+            // Bind the runtime read policy from the SAME opened RuleObjects the rules attached to —
+            // `read_objs` is `read_roots ++ read_files`, so split it back at `n_roots`. This is the
+            // ONLY runtime binding the launch commits to; no pathname is re-resolved afterwards.
+            let (roots, files) = read_objs.split_at(n_roots);
+            let runtime_binding = runtime_binding_digest(
+                runtime.profile_version,
+                interp_obj.as_ref(),
+                roots,
+                files,
+            );
+            Ok(FilesystemInstallProof { runtime_binding })
+        }
         Err(e) => Err(InstallError::SelfCheckOutsideNotDenied(e)),
     }
 }

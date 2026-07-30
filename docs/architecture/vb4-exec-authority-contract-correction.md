@@ -246,25 +246,31 @@ Planned changes to the launch child, before Landlock, replacing the memfd root-g
    digest**; bind both source and execution identity into `READY_TO_EXEC`.
 5. Reopen `O_RDONLY` (exec fd) + `O_PATH` (rule fd) of the same `(dev, ino)`; close every writable fd.
 6. `PR_SET_DUMPABLE(0)`.
-7. Landlock: rule the exec inode `EXECUTE|READ_FILE`; rule `allow_exec` paths; rule the loader/lib
-   dirs `READ_FILE|EXECUTE|READ_DIR`; worktree write-family; `restrict_self`.
+7. Landlock (SPLIT rights, as implemented): rule the exec inode `EXECUTE|READ_FILE`; rule `allow_exec`
+   paths `EXECUTE|READ_FILE|READ_DIR`; rule the EXACT interpreter `EXECUTE|READ_FILE`; rule the library
+   read roots + loader support files `READ_FILE`(+`READ_DIR`) **ONLY — never `EXECUTE`**; worktree
+   write-family; `restrict_self`.
 8. `execveat(exec_ro_fd, "", AT_EMPTY_PATH)`.
 
-New `unsafe` (`unshare`, `mount`, `prctl(PR_SET_DUMPABLE)`) stays contained in the audited
-`seccomp/sys.rs` — the VB-4 unsafe-surface gate is unchanged (still only `landlock/sys.rs` +
-`seccomp/sys.rs`). New compile-gated FaultPoints per the directive: `target_namespace`,
+New `unsafe` (`unshare`, `mount`, `prctl(PR_SET_DUMPABLE)`) stays contained in a THIRD audited module
+`staging/sys.rs` — so the VB-4 unsafe-surface gate now names `landlock/sys.rs` + `seccomp/sys.rs` +
+`staging/sys.rs` (the staging syscalls were NOT smuggled into `seccomp/sys.rs`). New compile-gated
+FaultPoints per the directive: `target_namespace`,
 `target_mount`, `target_tmpfile`, `target_copy`, `target_digest`, `target_close_writer`,
 `target_identity`, `target_landlock_rule`, `target_proc_isolation`; each must yield no GO / no target
 marker / `NotEnforced` at the exact stage / cgroup teardown / teardown-dominance. If private ruleable
 staging cannot be established on a host, the backend returns `NotEnforced` and does **not** launch
 (no silent fallback to B).
 
-**Design point for the reviewer (needs a nod):** dynamic linking forces the ruleset to grant
-`READ_FILE|EXECUTE` on the loader + system library directories (`/usr/lib`, `/usr/lib64`, `/lib`,
-`/lib64`). This is necessary for *any* path-exec confinement of real PIE binaries (it is implicit in
-oracle 11's "`/bin/dash`/`/bin/sleep` run"), and it does not weaken oracle 7. Confirming the exact
-runtime-directory set (and whether it is fixed vs derived from the policy) is the only open contract
-detail before the GREEN flip.
+**Design point — RESOLVED as implemented (not as originally sketched):** dynamic linking does NOT
+force `EXECUTE` on the library directories. The implemented `RuntimePolicy` (see `runtime/mod.rs`,
+`PROFILE_V1`) is split-rights: only the EXACT ELF interpreter (`/lib64/ld-linux-x86-64.so.2` or
+`/usr/lib64/…`) is granted `EXECUTE|READ_FILE` (the kernel execs it as `PT_INTERP`); the system
+library directories (`/usr/lib`, `/usr/lib64`, `/lib`, `/lib64`) are granted `READ_FILE`(+`READ_DIR`)
+**ONLY**, because loading a shared object is a read, not an execute. This is a versioned compiled-in
+profile, verified against the target's `PT_INTERP`, and is proven by
+`a_runtime_read_root_executable_is_denied_unless_allowlisted` (a runtime-read-root file execs
+unconfined but is EACCES under confinement).
 
 ### Amended oracle (per the reviewer) — to be written openly before the flip
 

@@ -150,9 +150,24 @@ pub(crate) fn materialize(
         .map_err(|_| StageError::new(Stage::MountTmpfs, libc::EINVAL))?;
     sys::mount_private_tmpfs(&mount_c).map_err(|e| StageError::new(Stage::MountTmpfs, e))?;
 
-    // 4) Unnamed writable execution inode on the private tmpfs.
+    // 4) NON-DUMPABLE *before* any writable staging fd exists. This is the load-bearing proc-isolation
+    //    step, NOT a late touch-up: with `/proc/<pid>` already root-owned, the writable inode opened
+    //    below is never reopenable by a same-UID external process — there is no hash→exec mutation
+    //    window. A `unshare(CLONE_NEWUSER)` + id-map transition can reset dumpability, so we assert it
+    //    HERE (after that transition) and then READ IT BACK; an unconfirmed state fails closed.
+    faults.check(Stage::ProcIsolation)?;
+    sys::set_nondumpable().map_err(|e| StageError::new(Stage::ProcIsolation, e))?;
+    if !sys::is_nondumpable() {
+        return Err(StageError::new(Stage::ProcIsolation, libc::EPERM));
+    }
+
+    // 5) Unnamed writable execution inode on the private tmpfs — created while ALREADY non-dumpable.
     faults.check(Stage::Tmpfile)?;
     let wfd = sys::open_tmpfile(&mount_c).map_err(|e| StageError::new(Stage::Tmpfile, e))?;
+
+    // 5') TEST-ONLY barrier: with the writable staging fd OPEN and this process already non-dumpable,
+    //     let an external same-UID reopen probe run and PROVE `/proc/<pid>/fd/<wfd>` is denied.
+    staging_probe_barrier(wfd);
 
     // 5) Exact byte copy of the sealed source into the execution inode.
     faults.check(Stage::Copy)?;
@@ -196,17 +211,6 @@ pub(crate) fn materialize(
         let _ = crate::seccomp::close_fd(exec_fd);
         let _ = crate::seccomp::close_fd(rule_fd);
         return Err(StageError::new(Stage::CloseWriter, last_errno()));
-    }
-
-    // 9) Non-dumpable: close the /proc/<pid>/fd reopen vector against a same-UID external process.
-    faults.check(Stage::ProcIsolation).inspect_err(|_| {
-        let _ = crate::seccomp::close_fd(exec_fd);
-        let _ = crate::seccomp::close_fd(rule_fd);
-    })?;
-    if let Err(e) = sys::set_nondumpable() {
-        let _ = crate::seccomp::close_fd(exec_fd);
-        let _ = crate::seccomp::close_fd(rule_fd);
-        return Err(StageError::new(Stage::ProcIsolation, e));
     }
 
     // The exact inode identity of the execution object (via its own read-only fd, still reachable —
@@ -260,6 +264,31 @@ fn write_id_maps(uid: u32, gid: u32) -> Result<(), i32> {
 fn read_fd_contents(fd: RawFd) -> Result<Vec<u8>, i32> {
     std::fs::read(format!("/proc/self/fd/{fd}")).map_err(|e| e.raw_os_error().unwrap_or(libc::EIO))
 }
+
+/// TEST-ONLY staging barrier for the proc-isolation oracle. When `O7_STAGING_PROBE=<path>` is set,
+/// publish `<pid> <staging-fd>` to `<path>` and then BLOCK (bounded ~5s) until `<path>.go` appears —
+/// giving an external same-UID process a deterministic window to attempt `/proc/<pid>/fd/<staging-fd>`
+/// reopen and prove it is DENIED while this process is non-dumpable. Only present in the
+/// `test-harness`/`fault-injection` artifact; a production build compiles the no-op below, and even in
+/// a test artifact it is inert unless the (test-only) env var is set.
+#[cfg(any(feature = "test-harness", feature = "fault-injection"))]
+fn staging_probe_barrier(wfd: RawFd) {
+    let Some(p) = std::env::var_os("O7_STAGING_PROBE") else {
+        return;
+    };
+    let witness = std::path::PathBuf::from(&p);
+    let go = std::path::PathBuf::from(format!("{}.go", witness.display()));
+    let _ = std::fs::write(&witness, format!("{} {}", std::process::id(), wfd));
+    for _ in 0..500 {
+        if go.exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[cfg(not(any(feature = "test-harness", feature = "fault-injection")))]
+fn staging_probe_barrier(_wfd: RawFd) {}
 
 /// Stream `bytes` into `fd` in bounded chunks via the audited raw-write primitive.
 fn write_all_to(fd: RawFd, bytes: &[u8]) -> Result<(), i32> {

@@ -627,9 +627,15 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
 
     // H) Landlock: rule the private execution inode + `allow_exec` + the runtime read policy, then
     //    restrict. Close the `O_PATH` rule fd afterwards — it must not reach the target.
-    let fs_ok = match (&exec_obj, &runtime) {
-        (Some(o), Some(rt)) => install_landlock(&ctx, o.rule_fd, rt),
-        _ => false,
+    // `runtime_binding` is returned BY the install, computed from the exact ruled objects — never
+    // re-resolved from a pathname afterwards (that would let a swap bind a different object than the
+    // one the rule protects).
+    let (fs_ok, runtime_binding) = match (&exec_obj, &runtime) {
+        (Some(o), Some(rt)) => match install_landlock(&ctx, o.rule_fd, rt) {
+            Some(binding) => (true, binding.as_str().to_owned()),
+            None => (false, String::new()),
+        },
+        _ => (false, String::new()),
     };
     if rule_fd >= 0 {
         let _ = seccomp::close_fd(rule_fd);
@@ -652,11 +658,7 @@ fn launch_child(ctx: ChildCtx<'_>) -> i32 {
         .as_ref()
         .map(|r| r.profile_version.to_owned())
         .unwrap_or_default();
-    let runtime_binding = runtime
-        .as_ref()
-        .and_then(|r| r.binding_digest())
-        .map(|d| d.as_str().to_owned())
-        .unwrap_or_default();
+    // `runtime_binding` was bound at install time (step H) from the exact ruled objects.
 
     let (fd_ok, env_ok, placement) =
         apply_launch_faults(ctx.faults, fd_built, env_built, placement_built);
@@ -768,11 +770,14 @@ fn apply_launch_faults(
 /// Install Landlock for the worktree + `allow_exec` + the private execution object (`rule_fd`, its
 /// `O_PATH`) + the runtime read policy, then restrict + differentially self-check. Returns whether the
 /// install was proven.
+/// Returns the runtime read-policy binding (computed from the EXACT ruled objects) on a proven
+/// install, or `None` if not enforced. The binding is the ONLY runtime commitment `READY_TO_EXEC`
+/// makes — no pathname is re-resolved after the rules attach.
 fn install_landlock(
     ctx: &ChildCtx<'_>,
     rule_fd: RawFd,
     runtime: &crate::runtime::RuntimePolicy,
-) -> bool {
+) -> Option<o7_sandbox_protocol::ids::Digest256> {
     match crate::landlock::install_filesystem(
         &ctx.policy.worktree,
         &ctx.policy.allow_exec,
@@ -781,10 +786,10 @@ fn install_landlock(
         runtime,
         ctx.faults.landlock(),
     ) {
-        Ok(()) => true,
+        Ok(proof) => Some(proof.runtime_binding),
         Err(e) => {
             eprintln!("sandboy: landlock not enforced: {e}");
-            false
+            None
         }
     }
 }

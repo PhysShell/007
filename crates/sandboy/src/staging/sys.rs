@@ -125,7 +125,9 @@ pub(crate) fn open_path(path: &CStr, flags: libc::c_int) -> Result<RawFd, i32> {
 
 /// Mark this process NON-DUMPABLE (`prctl(PR_SET_DUMPABLE, 0)`), so `/proc/<pid>` becomes
 /// root-owned and a SAME-UID external process can no longer reopen the staging descriptors through
-/// `/proc/<pid>/fd/<n>` (proven by the `target_proc_isolation` oracle).
+/// `/proc/<pid>/fd/<n>` (proven by the `target_proc_isolation` oracle). Set BEFORE any staging fd is
+/// created, so no reopen window ever exists; a `unshare(CLONE_NEWUSER)`/id-map transition can reset
+/// dumpability, so the caller sets this AFTER that transition and then [`is_nondumpable`]-verifies it.
 pub(crate) fn set_nondumpable() -> Result<(), i32> {
     // SAFETY: prctl(PR_SET_DUMPABLE, 0) takes integer arguments only and reads no user memory;
     // returns 0 or -1.
@@ -135,4 +137,15 @@ pub(crate) fn set_nondumpable() -> Result<(), i32> {
     } else {
         Err(last_errno())
     }
+}
+
+/// Whether this process is CONFIRMED non-dumpable (`prctl(PR_GET_DUMPABLE) == 0`). Used to VERIFY
+/// that [`set_nondumpable`] actually took effect before any writable staging inode is opened — a
+/// successful `prctl` call is not trusted blindly; the state is read back.
+pub(crate) fn is_nondumpable() -> bool {
+    // SAFETY: prctl(PR_GET_DUMPABLE) takes integer arguments only and reads no user memory; it
+    // returns the current dumpable flag (0/1/2) or -1 on error. Any non-zero (incl. -1) is treated
+    // as "not confirmed non-dumpable" and fails closed at the caller.
+    let r = unsafe { libc::prctl(libc::PR_GET_DUMPABLE, 0, 0, 0, 0) };
+    r == 0
 }
