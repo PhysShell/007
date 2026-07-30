@@ -276,3 +276,64 @@ execution inode cannot be reopened for write/truncate after confinement; 9. a se
 second memfd / unsealed memfd / digest-mismatched copy fails closed; 10. a same-UID external process
 cannot mutate or reopen the staging object; 11. legitimate `/bin/dash`/`/bin/sleep` subprocesses stay
 governed by ordinary Landlock path rules.
+
+---
+
+## 9. Phase 7b.2 — frozen execution-authority oracle amendment (one-for-one mapping)
+
+The frozen matrix (`crates/o7-worker/tests/sandbox_confinement.rs`) is amended to the reviewed
+source→private-execution-inode model. Every affected oracle has exactly one row; no oracle disappears
+without a row. The backend selector `confinement_backend()` is **unchanged** in this layer (the
+atomic flip is Phase 8); the amended non-fault oracles are exercised through the explicitly-selected
+real backend via `O7_SANDBOY_BIN`.
+
+| old test | old property (why obsolete) | new test | new property | fixture/target | expected kernel outcome | disposition |
+|---|---|---|---|---|---|---|
+| `a_sealed_proc_fd_target_executes_under_confinement` | a sealed **memfd** executes under Landlock with the sealed `/proc/fd` path **inside `allow_exec`** — impossible: an anonymous inode is not a Landlock rule object (`add_rule`→EBADFD), and only a root grant would run it | `a_sealed_source_runs_as_private_execution_inode` | the sealed source is materialized into a private ruleable execution inode and executes under a NARROW ruleset; the `FullyEnforced` verdict attests the internal source→inode bindings (source seals+digest, destination-digest equality, exact exec-inode identity, complete resolved-runtime binding) — the backend refuses `FullyEnforced` unless they held | live sealed memfd source; `allow_exec` = system exec roots **+ the `/proc/<pid>/fd` DIRECTORY** (see finding A); `fs` probe | `inside=OK`, `create/overwrite/truncate=ERR:13`, spawn `FullyEnforced` | REPLACED |
+| `the_confined_target_inherits_no_planted_socket` | planted non-CLOEXEC socket scrubbed — still valid, but the fd census must be provable, not a fixed constant, and the plant must sit at a HIGH fd | `the_confined_target_inherits_no_planted_socket` | planted socket **raised to a high fd** is still scrubbed; the target counts inherited sockets via `fstat` over `[3, RLIMIT_NOFILE)` (procfs-free, provable) | `fds` probe; sentinel `dup2`'d to a high fd | `inherited_sockets=0` | AMENDED |
+| `the_owned_cgroup_contains_the_tree_and_is_removed_on_teardown` | `/bin/dash -c` script builds the tree — host-shell dependency; and `force_stop` was used to end it (see finding B) | `the_owned_cgroup_contains_the_tree_and_is_removed_on_teardown` | hermetic fixture: leader + ordinary child + reparented double-fork descendant, all observed inside the owned cgroup; the MONITOR's OWN deadline teardown removes the leaf (NOT `force_stop`, which would SIGKILL the monitor first) | `__tree-fixture` (landed in `a26b63f`); short deadline; window from target-start | whole tree in the leaf; monitor completes teardown in-window; leaf gone | AMENDED |
+| `a_target_outliving_the_deadline_is_killed_with_its_descendants` | `/bin/dash` sleeps past the deadline; absolute window was measured from the `spawn` CALL, so slow backend setup made the monitor's deadline fire after the window (finding B) | `a_target_outliving_the_deadline_is_killed_with_its_descendants` | hermetic fixture sleeps past the absolute deadline; monitor kills the whole tree and removes the leaf within `deadline + grace` measured from TARGET-START (setup excluded); no `survived` marker | `__tree-fixture`; window from target-start | tree killed in-window; no survivor | AMENDED |
+| — (additive) | — | `an_explicitly_allowlisted_subprocess_executes` | a subprocess **inside `allow_exec`** exec'd BY the target runs | `exec` probe → `/usr/bin/touch`, `allow_exec`=`probe_dir + /usr/bin` | `secondary` created (the direct-exec'd `touch` ran) | ADDED |
+| — (additive) | — | `a_worktree_executable_is_denied_unless_allowlisted` | a binary in the writable worktree, exec'd BY the target, is denied (writable ≠ executable) | `exec` probe → worktree `touch` copy, `allow_exec`=`probe_dir + /usr/bin` (not the worktree) | `exec=ERR:13`, no `secondary` | ADDED |
+| — (additive) | — | `a_runtime_read_root_executable_is_denied_unless_allowlisted` | a file in a runtime read-root (`/usr/lib`, granted `READ_FILE` only) exec'd BY the target is denied — loading a shared object is a read, not an execute | `exec` probe → `/usr/lib/libc.so.6`, `allow_exec`=`probe_dir + /usr/bin` (runtime roots `READ_FILE` only) | `exec=ERR:13` (via `primary`) | ADDED |
+| — (additive) | — | `the_running_execution_inode_is_immutable_to_write_reopen` | while the target runs, a SAME-UID external open of its executable inode for write is denied (`ETXTBSY`) — the running private inode cannot be rewritten | `/proc/<pid>/exe` opened `O_RDWR` from the test process | `ETXTBSY` | ADDED |
+| `writes_are_confined_to_the_worktree` | unchanged | — | — | — | — | PRESERVED |
+| `exec_of_a_non_allowed_binary_is_denied_by_the_kernel` | already the "non-allowlisted subprocess denied by Landlock" oracle (target execs `/usr/bin/env`, not in `allow_exec`); assertions UNCHANGED, but its shared `exec_probe` helper was de-shelled (finding C) | — | — | — | — | PRESERVED (helper hermeticized) |
+| `network_sockets_are_denied` / `the_target_env_is_exactly_the_allowlist` / `setsid_is_denied_by_seccomp` / `setpgid_is_denied_by_seccomp` / `a_parseable_marker_paired_with_a_nonzero_exit_…` | unchanged | — | — | — | — | PRESERVED |
+| `a_landlock_setup_failure_runs_no_target` / `a_seccomp_setup_failure_runs_no_target` / `a_cgroup_setup_failure_runs_no_target` / `a_self_check_downgrade_runs_no_target` (+ `observe_setup_fault` / `assert_install_fault`) | `O7_FAKE_MODE` fake-driven setup faults | — | — | — | — | MOVED TO 7b.3 (real fault artifact + `O7_FAULT_POINT`) |
+
+Internal staging-window properties (source seals verified before staging, no writable fd surviving
+confinement, same-UID reopen blocked by non-dumpable DURING staging) are attested by the
+`FullyEnforced` verdict in this layer and get dedicated FORCED-FAILURE oracles
+(`target_close_writer`, `target_proc_isolation`, `target_digest`, …) in Phase 7b.3.
+
+### 9.1 Mechanism findings surfaced while running the amendment (no production change)
+
+Running the amended oracles through the real backend surfaced three interactions. None required a
+production-mechanism change — each is a test-layer correction that the frozen contracts already imply:
+
+- **A — the sealed `/proc/fd` target is authorized by its DIRECTORY, which IS ruleable.** The frozen
+  Vertical-A gate `SandboxPolicy::permits_exec` authorizes a launch target by path, so a sealed
+  `/proc/<pid>/fd/<n>` source must appear under `allow_exec` (policy.rs §"grant that path or its
+  `/proc/<pid>/fd` directory"). Granting the exact `fd` file would be the anonymous-memfd inode the
+  §2 contradiction is about — but granting the `/proc/<pid>/fd` **directory** works: that directory
+  is a REAL procfs inode, so the backend's split-rights `install_filesystem` rules it with no
+  `EBADFD`, the gate passes, and the sealed source still runs via its private materialized inode. So
+  the "memfd in `allow_exec` → EBADFD" hazard never arises here (the ruled object is the directory,
+  not the anonymous inode), and no backend change was needed.
+
+- **B — the cgroup directory is removed ONLY by the monitor's OWN teardown.** `supervise` runs the
+  teardown (move-out → `cgroup.kill` → drain → `rmdir`) on the monitor's own exit paths (deadline or
+  child-exit); an external `force_stop` SIGKILLs the monitor before it can `rmdir`, leaking the leaf
+  DIRECTORY (the processes still die). The reviewer's model ("killed by the absolute deadline") is
+  the correct trigger: the amended cgroup-tree and deadline oracles capture the live tree, then let
+  the monitor's DEADLINE teardown run and assert leaf removal. The absolute window is measured from
+  TARGET-START (≈ `spawn` return) — where the monitor arms its deadline — not the `spawn` call, so
+  backend setup (which the deadline never governed) is correctly excluded; measuring from the call
+  made a slow debug setup push the monitor's deadline past the window.
+
+- **C — the exec probe is de-shelled.** `exec_probe` execed `env /bin/dash -c 'touch <secondary>'`,
+  a host-shell dependency (`/bin/dash` is absent here). It now execs the target DIRECTLY
+  (`execv(target, [target, secondary])`): an allowed `/usr/bin/touch` creates `secondary` (proving
+  it ran) and a Landlock-denied exec writes `exec=ERR:<errno>` to `primary`. Assertions of the
+  preserved `exec_of_a_non_allowed_binary_…` oracle are unchanged; the helper is now hermetic.

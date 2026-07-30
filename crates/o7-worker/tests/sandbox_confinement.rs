@@ -15,9 +15,9 @@
 //!   result depends on the other having run first;
 //! - a monitor-owned cgroup that CONTAINS the tree (monitor + target + ordinary child + a
 //!   double-forked descendant), is a DEDICATED non-root leaf, and is REMOVED on teardown;
-//! - a deadline whose teardown must COMPLETE inside one ABSOLUTE window (`timeout_at` from spawn,
-//!   result asserted — a late monitor fails), with identities captured in parallel so acquisition
-//!   never eats the window;
+//! - a deadline whose teardown must COMPLETE inside one ABSOLUTE window (`timeout_at` from
+//!   target-start, so backend setup is excluded, result asserted — a late monitor fails), with
+//!   identities captured in parallel so acquisition never eats the window;
 //! - a four-stage setup-failure/report-truthfulness matrix where each stage proves a DISTINCT
 //!   failure path via a stage-specific control-plane witness (and self-check proves a valid
 //!   downgraded report was REJECTED, not a crash);
@@ -180,15 +180,53 @@ fn best_effort_kill(pid: i32) {
     );
 }
 
-/// A `/bin/dash -c <script>` target (dash is a regular file, unlike the `/bin/sh` symlink).
-fn dash_target(script: String, worktree: &Path) -> BoundarySpawnSpec {
+/// The HERMETIC process-tree fixture binary (VB-4): the real sandboy artifact, whose `__tree-fixture`
+/// mode forks a leader + ordinary child + reparented double-fork descendant with NO host-shell
+/// dependency. Same `O7_SANDBOY_BIN` the designated confinement job builds and points at the backend;
+/// an unset path is a job failure, never a silent skip.
+fn tree_fixture_bin() -> PathBuf {
+    PathBuf::from(
+        std::env::var_os("O7_SANDBOY_BIN")
+            .expect("O7_SANDBOY_BIN must point at the sandboy artifact (its __tree-fixture mode)"),
+    )
+}
+
+/// A `__tree-fixture` target that writes leader/child/descendant pids to `tpid`/`cpid`/`dpid` and,
+/// only if it is never killed, `survived`. Replaces the old `/bin/dash -c <script>` tree target.
+fn fixture_target(
+    tpid: &Path,
+    cpid: &Path,
+    dpid: &Path,
+    survived: &Path,
+    worktree: &Path,
+) -> BoundarySpawnSpec {
     BoundarySpawnSpec {
-        executable: PathBuf::from("/bin/dash"),
-        arguments: vec![OsString::from("-c"), OsString::from(script)],
+        executable: tree_fixture_bin(),
+        arguments: [
+            "__tree-fixture",
+            &tpid.to_string_lossy(),
+            &cpid.to_string_lossy(),
+            &dpid.to_string_lossy(),
+            &survived.to_string_lossy(),
+        ]
+        .iter()
+        .map(OsString::from)
+        .collect(),
         working_directory: worktree.to_path_buf(),
         environment: BTreeMap::new(),
         stdin: StdinMode::Null,
     }
+}
+
+/// `allow_exec` for a fixture-target launch: the fixture's own directory (the exec-permission gate is
+/// on the SOURCE path) plus the loader/library dirs. The fixture forks — it execs no subprocess — so
+/// this is only what the exec-permission gate and the runtime read policy require.
+fn fixture_exec_allow() -> Vec<PathBuf> {
+    let mut v = shell_exec_allow();
+    if let Some(dir) = tree_fixture_bin().parent() {
+        v.push(dir.to_path_buf());
+    }
+    v
 }
 
 fn probe_target(
@@ -376,13 +414,207 @@ async fn exec_of_a_non_allowed_binary_is_denied_by_the_kernel() {
     );
 }
 
+/// A real `touch` binary — the exec-oracle subprocess target (running it creates the `secondary`
+/// marker, so an ALLOWED exec is observable without a shell).
+fn touch_bin() -> PathBuf {
+    for c in ["/usr/bin/touch", "/bin/touch"] {
+        let p = PathBuf::from(c);
+        if p.exists() {
+            return p;
+        }
+    }
+    PathBuf::from("/usr/bin/touch")
+}
+
+/// VB-4 subprocess-exec authority (new; the reviewer's assertion set). The confined target execs a
+/// subprocess INSIDE `allow_exec` — it must RUN. Complements `exec_of_a_non_allowed_binary…` (the
+/// denial direction). RED against the non-confining stand-in only in that it needs the real backend
+/// to prove the allowance is honored UNDER confinement.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Vertical B / VB-4: an allowlisted subprocess must execute under real Landlock"]
+async fn an_explicitly_allowlisted_subprocess_executes() {
+    let wt = tempfile::tempdir().unwrap();
+    let secondary = wt.path().join("ran-allowed");
+    let primary = wt.path().join("exec.result");
+    let touch = touch_bin();
+    // `/usr/bin` is in allow_exec, so `touch` may be exec'd by the target.
+    let b = boundary(
+        wt.path(),
+        vec![probe_dir(), PathBuf::from("/usr/bin"), PathBuf::from("/bin")],
+        vec![],
+        Duration::from_secs(30),
+    );
+    let mut launch = b
+        .spawn(probe_target(
+            &[
+                "exec",
+                &touch.to_string_lossy(),
+                &secondary.to_string_lossy(),
+                &primary.to_string_lossy(),
+            ],
+            wt.path(),
+            BTreeMap::new(),
+        ))
+        .await
+        .expect("launch");
+    let _ = launch.process.wait().await.expect("waited");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        secondary.exists(),
+        "an allowlisted subprocess ({touch:?}) must EXECUTE under confinement and create its marker",
+    );
+}
+
+/// VB-4 (new): a binary in the WRITABLE worktree is NOT executable unless separately allowlisted —
+/// the worktree root carries write rights but NOT `EXECUTE`, so a target that drops a binary there
+/// and execs it is denied by the kernel.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Vertical B / VB-4: a worktree executable is denied unless allowlisted"]
+async fn a_worktree_executable_is_denied_unless_allowlisted() {
+    let wt = tempfile::tempdir().unwrap();
+    let evil = wt.path().join("evil");
+    std::fs::copy(touch_bin(), &evil).unwrap();
+    let secondary = wt.path().join("escaped");
+    let primary = wt.path().join("exec.result");
+    // allow_exec is /usr/bin (loader/libraries), NOT the worktree — so the ONLY thing missing is an
+    // exec grant for the worktree binary.
+    let b = boundary(
+        wt.path(),
+        vec![probe_dir(), PathBuf::from("/usr/bin"), PathBuf::from("/bin")],
+        vec![],
+        Duration::from_secs(30),
+    );
+    let mut launch = b
+        .spawn(probe_target(
+            &[
+                "exec",
+                &evil.to_string_lossy(),
+                &secondary.to_string_lossy(),
+                &primary.to_string_lossy(),
+            ],
+            wt.path(),
+            BTreeMap::new(),
+        ))
+        .await
+        .expect("launch");
+    let exit = launch.process.wait().await.expect("waited");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        !secondary.exists(),
+        "a writable-worktree binary must NOT be kernel-executable when absent from allow_exec"
+    );
+    let report = consume_marker_after_probe_success(exit, || {
+        std::fs::read_to_string(&primary).expect("a successful probe must publish its marker")
+    });
+    assert!(
+        report.contains("exec=ERR:13") || report.contains("exec=ERR:1"),
+        "the denied worktree exec must report EACCES/EPERM; report: {report:?}"
+    );
+}
+
+/// VB-4 (new): a file in a RUNTIME READ ROOT (`/usr/lib`, granted `READ_FILE` only so the loader can
+/// map shared objects) is NOT executable — loading a shared object is a read, never an execute. A
+/// target that execs such a file is denied by the kernel.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Vertical B / VB-4: a runtime-read-root file is denied EXECUTE (READ_FILE only)"]
+async fn a_runtime_read_root_executable_is_denied_unless_allowlisted() {
+    let lib = ["/usr/lib/libc.so.6", "/lib/x86_64-linux-gnu/libc.so.6"]
+        .into_iter()
+        .map(PathBuf::from)
+        .find(|p| p.exists());
+    let Some(lib) = lib else {
+        eprintln!("SKIP: no /usr/lib libc to probe");
+        return;
+    };
+    let wt = tempfile::tempdir().unwrap();
+    let secondary = wt.path().join("escaped");
+    let primary = wt.path().join("exec.result");
+    // allow_exec is /usr/bin only; /usr/lib is a runtime READ root (READ_FILE, no EXECUTE).
+    let b = boundary(
+        wt.path(),
+        vec![probe_dir(), PathBuf::from("/usr/bin"), PathBuf::from("/bin")],
+        vec![],
+        Duration::from_secs(30),
+    );
+    let mut launch = b
+        .spawn(probe_target(
+            &[
+                "exec",
+                &lib.to_string_lossy(),
+                &secondary.to_string_lossy(),
+                &primary.to_string_lossy(),
+            ],
+            wt.path(),
+            BTreeMap::new(),
+        ))
+        .await
+        .expect("launch");
+    let exit = launch.process.wait().await.expect("waited");
+    let report = consume_marker_after_probe_success(exit, || {
+        std::fs::read_to_string(&primary).expect("a successful probe must publish its marker")
+    });
+    assert!(
+        report.contains("exec=ERR:13") || report.contains("exec=ERR:1"),
+        "executing a runtime-read-root file (READ_FILE only) must be DENIED; report: {report:?}"
+    );
+}
+
+/// VB-4 (new): the RUNNING private execution inode is immutable — a SAME-UID external open of it for
+/// write is denied with `ETXTBSY` (the kernel forbids writing a file that is being executed). The
+/// target (the tree fixture) exposes its executable via `/proc/<pid>/exe`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "Vertical B / VB-4: the running execution inode cannot be reopened for write (ETXTBSY)"]
+async fn the_running_execution_inode_is_immutable_to_write_reopen() {
+    let wt = tempfile::tempdir().unwrap();
+    let (tpid, cpid, dpid, survived) = (
+        wt.path().join("t.pid"),
+        wt.path().join("c.pid"),
+        wt.path().join("d.pid"),
+        wt.path().join("survived"),
+    );
+    let b = boundary(wt.path(), fixture_exec_allow(), vec![], Duration::from_secs(30));
+    let mut launch = b
+        .spawn(fixture_target(&tpid, &cpid, &dpid, &survived, wt.path()))
+        .await
+        .expect("launch");
+    let leader = read_pid_bounded(&tpid, Duration::from_secs(5))
+        .await
+        .expect("leader pid");
+    // Open the running executable inode for WRITE from THIS (same-UID) process → must be ETXTBSY.
+    let attempt = std::fs::OpenOptions::new()
+        .write(true)
+        .open(format!("/proc/{leader}/exe"));
+    let err = attempt.err().and_then(|e| e.raw_os_error());
+    launch.process.force_stop().await.ok();
+    let _ = launch.process.wait().await;
+    assert_eq!(
+        err,
+        Some(nix::errno::Errno::ETXTBSY as i32),
+        "reopening the RUNNING execution inode for write must fail with ETXTBSY; got {err:?}"
+    );
+}
+
+// VB-4 authority-model correction (see docs/architecture/vb4-exec-authority-contract-correction.md
+// §4, §9). REPLACES the old `a_sealed_proc_fd_target_executes_under_confinement`, which required a
+// sealed `memfd` to EXECUTE under Landlock with the sealed `/proc/fd` path INSIDE `allow_exec` — an
+// impossible shape (an anonymous inode is not a Landlock rule object: `landlock_add_rule` → EBADFD,
+// and only a root grant would run it). The corrected contract: the sealed source is the transport +
+// sealed `memfd` to EXECUTE under Landlock with the sealed `/proc/fd` path INSIDE `allow_exec` — an
+// impossible shape (an anonymous inode is not a Landlock rule object: `landlock_add_rule` → EBADFD,
+// and only a root grant would run it). The corrected contract: the sealed source is the transport +
+// source-identity object; the backend materializes it into a PRIVATE, ruleable execution inode
+// proven byte-equal to the source, which is what executes under a NARROW ruleset. The `allow_exec`
+// list is ordinary program dirs — NEVER the sealed path.
+//
+// The internal source→inode bindings (source seals + digest, destination-digest equality, exact
+// execution-inode identity, complete resolved-runtime binding) are NOT matrix-visible; they are
+// ATTESTED by the `FullyEnforced` verdict — `spawn` succeeds only if the backend reported every
+// dimension Enforced, and (per the launch monitor) `filesystem` is Enforced only when the child
+// bound the execution-inode identity + runtime-policy digest and the execution digest matched the
+// launch-spec target digest. Their FAILURE modes get dedicated forced-failure oracles in Phase 7b.3.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "Vertical B: real Landlock backend required; RED against the non-confining stand-in"]
-async fn a_sealed_proc_fd_target_executes_under_confinement() {
-    // PR-3 contract composed with Vertical B: a LIVE sealed `/proc/<pid>/fd/<n>` source (a sealed
-    // memfd held by THIS process) must EXECUTE under confinement with no path-copy — and while it
-    // runs, an outside-the-worktree write must be denied with the EXACT errno. RED: the stand-in
-    // runs it but does not confine, so the outside file appears.
+async fn a_sealed_source_runs_as_private_execution_inode() {
     use std::io::Write as _;
     use std::os::unix::io::AsRawFd as _;
 
@@ -398,6 +630,7 @@ async fn a_sealed_proc_fd_target_executes_under_confinement() {
     std::fs::write(&truncate, b"SIZED").unwrap();
     let marker = wt.path().join("fs.result");
 
+    // A LIVE fully-sealed memfd source holding the probe.
     let probe_bytes = std::fs::read(probe_bin()).expect("read probe");
     let name = std::ffi::CString::new("o7-sealed-sandbox-probe").unwrap();
     let owned = memfd_create(&name, MemFdCreateFlag::MFD_ALLOW_SEALING).expect("memfd_create");
@@ -416,12 +649,17 @@ async fn a_sealed_proc_fd_target_executes_under_confinement() {
     .expect("add seals");
     let sealed_path = PathBuf::from(format!("/proc/{}/fd/{}", std::process::id(), raw));
 
-    let b = boundary(
-        wt.path(),
-        vec![sealed_path.clone(), PathBuf::from("/bin")],
-        vec![],
-        Duration::from_secs(30),
-    );
+    // The FROZEN Vertical-A exec-permission gate (`SandboxPolicy::permits_exec`) authorizes the
+    // launch TARGET by path: a sealed `/proc/<pid>/fd/<n>` source is authorized by granting its
+    // `/proc/<pid>/fd` directory (policy.rs §"grant that path or its `/proc/<pid>/fd` directory").
+    // That directory is a REAL procfs inode — unlike the anonymous memfd it lists — so the backend
+    // can Landlock-rule it; the sealed source itself still runs via its PRIVATE execution inode
+    // (materialized + ruled internally), and its interpreter/libraries via the resolved runtime read
+    // policy. Ordinary subprocess-exec dirs (`/bin`, `/usr/bin`) round out the allowlist.
+    let proc_fd_dir = PathBuf::from(format!("/proc/{}/fd", std::process::id()));
+    let mut allow = shell_exec_allow();
+    allow.push(proc_fd_dir);
+    let b = boundary(wt.path(), allow, vec![], Duration::from_secs(30));
     let spec = BoundarySpawnSpec {
         executable: sealed_path,
         arguments: vec![
@@ -435,7 +673,12 @@ async fn a_sealed_proc_fd_target_executes_under_confinement() {
         environment: BTreeMap::new(),
         stdin: StdinMode::Null,
     };
-    let mut launch = b.spawn(spec).await.expect("the sealed memfd must execute");
+    // `spawn` succeeding IS the attestation: FullyEnforced ⇒ the backend bound the execution-inode
+    // identity + runtime-policy digest and matched the execution digest to the launch-spec target.
+    let mut launch = b
+        .spawn(spec)
+        .await
+        .expect("the sealed source must run as a FullyEnforced private execution inode");
     let exit = launch.process.wait().await.expect("waited");
     drop(file);
 
@@ -444,11 +687,11 @@ async fn a_sealed_proc_fd_target_executes_under_confinement() {
     });
     assert!(
         report.contains("inside=OK"),
-        "the sealed /proc/<pid>/fd source must EXECUTE under confinement; report: {report:?}"
+        "the private execution inode derived from the sealed source must EXECUTE; report: {report:?}"
     );
     assert!(
         !create.exists(),
-        "the sealed target must be confined; an outside write was allowed"
+        "the executing inode must be confined; an outside write was allowed"
     );
     assert!(
         report.contains("create=ERR:13") || report.contains("create=ERR:1"),
@@ -514,10 +757,16 @@ async fn the_confined_target_inherits_no_planted_socket() {
     let sentinel = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind sentinel");
     let raw = sentinel.as_raw_fd();
     fcntl(raw, FcntlArg::F_SETFD(FdFlag::empty())).expect("clear CLOEXEC");
-    let flags = fcntl(raw, FcntlArg::F_GETFD).expect("get flags");
+    // Raise the plant to a HIGH fd (VB-4): the target-side census scans `[3, RLIMIT_NOFILE)`, so a
+    // high-numbered inherited socket must be caught. A low-fd-only plant could pass merely because
+    // every other test fd happens to sit below some constant — this forces the whole range.
+    const PLANTED_HIGH_FD: std::os::fd::RawFd = 900;
+    nix::unistd::dup2(raw, PLANTED_HIGH_FD).expect("dup the sentinel to a high fd");
+    // dup2's target has CLOEXEC clear by default → inheritable.
+    let flags = fcntl(PLANTED_HIGH_FD, FcntlArg::F_GETFD).expect("get flags");
     assert!(
         flags & FdFlag::FD_CLOEXEC.bits() == 0,
-        "the sentinel must be inheritable for this test to mean anything"
+        "the high-fd sentinel must be inheritable for this test to mean anything"
     );
 
     let wt = tempfile::tempdir().unwrap();
@@ -543,6 +792,7 @@ async fn the_confined_target_inherits_no_planted_socket() {
         sentinel.local_addr().is_ok(),
         "the planted sentinel must still be open in the harness for this test to mean anything"
     );
+    let _ = nix::unistd::close(PLANTED_HIGH_FD);
     drop(sentinel);
 
     // The probe fails CLOSED: a success marker exists ONLY if enumeration succeeded (exit 0).
@@ -677,25 +927,26 @@ async fn the_owned_cgroup_contains_the_tree_and_is_removed_on_teardown() {
     let tpid = wt.path().join("target.pid");
     let cpid = wt.path().join("child.pid");
     let dpid = wt.path().join("desc.pid");
-    let script = format!(
-        "echo $$ > {tp}; \
-         /bin/dash -c 'echo $$ > {cp}; exec sleep 30' & \
-         ( /bin/dash -c 'echo $$ > {dp}; exec sleep 30' & ); \
-         sleep 30",
-        tp = tpid.display(),
-        cp = cpid.display(),
-        dp = dpid.display(),
-    );
-    let b = boundary(
-        wt.path(),
-        shell_exec_allow(),
-        vec![],
-        Duration::from_secs(30),
-    );
+    let survived = wt.path().join("survived");
+    // A SHORT absolute deadline: long enough to capture the live tree's membership, short enough that
+    // the MONITOR's OWN teardown (move-out → cgroup.kill → drain → rmdir) — the only path that removes
+    // the cgroup DIRECTORY — runs promptly. `force_stop` would SIGKILL the monitor before it can
+    // rmdir, so the removal is observed from the monitor's deadline teardown, never from an external
+    // kill. The grace bounds that teardown after the deadline fires.
+    let deadline = Duration::from_secs(8);
+    // Generous teardown grace: on a slow debug host the monitor's kill+drain (DRAIN_BOUND=3s)+rmdir,
+    // plus init reaping the reparented descendant and the boundary proving the group drained, carries
+    // real jitter. The SEMANTICS need only that the monitor's OWN teardown completes and removes the
+    // leaf; the wide grace bounds that without racing scheduler jitter on a 2GB VPS.
+    let grace = Duration::from_secs(12);
+    let b = boundary(wt.path(), fixture_exec_allow(), vec![], deadline);
     let mut launch = b
-        .spawn(dash_target(script, wt.path()))
+        .spawn(fixture_target(&tpid, &cpid, &dpid, &survived, wt.path()))
         .await
         .expect("launch");
+    // The monitor arms its deadline at target-start (≈ here); the teardown must land within
+    // `deadline + grace` of this instant, backend SETUP correctly excluded.
+    let bound_started = tokio::time::Instant::now();
 
     let monitor = launch.process.identity();
     let target = read_identity_bounded(&tpid, Duration::from_secs(3))
@@ -721,20 +972,31 @@ async fn the_owned_cgroup_contains_the_tree_and_is_removed_on_teardown() {
         .iter()
         .all(|p| members.contains(&p.pid));
 
-    launch.process.force_stop().await.expect("force_stop");
-    let _ = launch.process.wait().await;
+    // The MONITOR itself must finish its deadline teardown (kill tree, drain, rmdir, exit) inside the
+    // absolute window — the only path that removes the cgroup directory. A late monitor is a FAILURE.
+    let completed_in_bound = matches!(
+        tokio::time::timeout_at(bound_started + deadline + grace, launch.process.wait()).await,
+        Ok(Ok(_))
+    );
 
-    // RED: after drain the exact IDENTITIES must be gone AND the owned cgroup directory removed.
+    // Captured from the monitor's OWN teardown, BEFORE any best-effort cleanup below.
     let identities_gone = wait_identity_gone(&target, Duration::from_secs(3)).await
         && wait_identity_gone(&child, Duration::from_secs(3)).await
         && wait_identity_gone(&descendant, Duration::from_secs(3)).await;
     let cgroup_removed = !cgroup_dir(&target_cg).exists();
 
+    let _ = launch.process.force_stop().await;
+    let _ = launch.process.wait().await;
     for id in [&child, &descendant, &target] {
         if !identity_gone(id) {
             best_effort_kill(id.pid);
         }
     }
+
+    assert!(
+        completed_in_bound,
+        "the monitor must complete its deadline teardown INSIDE deadline + grace"
+    );
 
     assert!(
         dedicated,
@@ -759,29 +1021,26 @@ async fn the_owned_cgroup_contains_the_tree_and_is_removed_on_teardown() {
 async fn a_target_outliving_the_deadline_is_killed_with_its_descendants() {
     let wt = tempfile::tempdir().unwrap();
     let tpid = wt.path().join("target.pid");
+    let cpid = wt.path().join("child.pid");
     let dpid = wt.path().join("desc.pid");
     let survived = wt.path().join("survived");
-    let script = format!(
-        "echo $$ > {tp}; \
-         ( /bin/dash -c 'echo $$ > {dp}; exec sleep 10' & ); \
-         sleep 10; touch {s}",
-        tp = tpid.display(),
-        dp = dpid.display(),
-        s = survived.display(),
-    );
-    // The deadline is generous enough that a correct GREEN monitor does NOT tear the tree down
-    // before this test can capture the members' start times; the grace bounds the teardown itself.
-    let deadline = Duration::from_secs(2);
-    let grace = Duration::from_secs(3);
-    let b = boundary(wt.path(), shell_exec_allow(), vec![], deadline);
+    // The tree sleeps 3600s — far past the deadline — so the monitor MUST kill the whole tree and
+    // remove its cgroup. The deadline is the TARGET's absolute lifetime, armed by the monitor at
+    // target-start; the grace bounds the monitor's own kill+reap+cgroup-removal+exit after it fires.
+    let deadline = Duration::from_secs(8);
+    let grace = Duration::from_secs(12);
+    let b = boundary(wt.path(), fixture_exec_allow(), vec![], deadline);
 
-    // The ABSOLUTE window starts at spawn. Everything — the handshake, identity capture, AND the
-    // monitor's own kill+reap+cgroup-removal+exit — must complete inside `deadline + grace`.
-    let bound_started = tokio::time::Instant::now();
     let mut launch = b
-        .spawn(dash_target(script, wt.path()))
+        .spawn(fixture_target(&tpid, &cpid, &dpid, &survived, wt.path()))
         .await
         .expect("launch");
+    // The ABSOLUTE window is measured from HERE — the monitor arms its deadline at target-start
+    // (i.e. as `spawn` returns), NOT at the `spawn` CALL, so backend SETUP (materialize + narrow
+    // Landlock + handshake), which the deadline never governs, is correctly excluded. Everything the
+    // monitor still owes — identity capture, kill, reap, cgroup removal, exit — must land inside
+    // `deadline + grace` of this instant.
+    let bound_started = tokio::time::Instant::now();
     let monitor = launch.process.identity();
     // Capture the two live identities IN PARALLEL (not two sequential 2s reads), so identity
     // acquisition cannot itself consume the window.

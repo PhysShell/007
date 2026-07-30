@@ -237,12 +237,15 @@ fn exec_probe(target: &str, secondary: &str, primary: &str) -> i32 {
     let Ok(path) = CString::new(target) else {
         return 64;
     };
-    // `env /bin/dash -c 'touch <secondary>'`: if the exec is allowed, this creates `secondary`.
-    let argv: Vec<CString> = ["env", "/bin/dash", "-c", &format!("touch {secondary}")]
+    // Exec `<target> <secondary>` DIRECTLY — no shell (hermetic; `/bin/dash`/`bash` may be absent).
+    // When `target` is `/usr/bin/touch`, an ALLOWED exec creates `secondary` (proving it ran); a
+    // Landlock-DENIED exec returns without running, and `execv` writes `exec=ERR:<errno>` to `primary`.
+    // `execv` only returns on FAILURE; on success our process image is replaced (so `primary` is
+    // written ONLY on denial, and its absence means the exec succeeded).
+    let argv: Vec<CString> = [target, secondary]
         .into_iter()
         .filter_map(|s| CString::new(s).ok())
         .collect();
-    // `execv` only returns on FAILURE; on success our process image is replaced.
     match nix::unistd::execv(&path, &argv) {
         Ok(_) => 0,
         Err(e) => write_marker("exec", primary, format!("exec=ERR:{}\n", e as i32)),
