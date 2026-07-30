@@ -343,6 +343,25 @@ impl SqliteLedger {
             .await
     }
 
+    /// Transition `running → blocked` and emit `run.blocked`. Sealed: the
+    /// ledger projection of `o7-run::Verdict::Blocked`.
+    /// # Errors
+    /// See [`start_run`](Self::start_run).
+    pub async fn block_run(&self, run_id: crate::RunId) -> Result<Run, LedgerError> {
+        self.set_run_status(run_id, RunStatus::Blocked, EventType::RunBlocked)
+            .await
+    }
+
+    /// Transition `running → error` and emit `run.errored`. Sealed: the
+    /// ledger projection of `o7-run::Verdict::Error` — NOT the same concept
+    /// as `interrupted` (see `docs/q-deck/r06-verdict-fidelity.md`).
+    /// # Errors
+    /// See [`start_run`](Self::start_run).
+    pub async fn error_run(&self, run_id: crate::RunId) -> Result<Run, LedgerError> {
+        self.set_run_status(run_id, RunStatus::Error, EventType::RunErrored)
+            .await
+    }
+
     async fn set_run_status(
         &self,
         run_id: crate::RunId,
@@ -938,12 +957,20 @@ fn verify_effective_pragmas(
 /// Map a terminal/interrupted RUN status to the attempt status its running
 /// attempt should receive. Only called when the run target is terminal or
 /// interrupted.
+// Only ever called with a target that is terminal or `Interrupted` (see the
+// call site's guard) — `Queued`/`Running` never reach here. Every other
+// variant is listed explicitly, not behind a catch-all: a catch-all here
+// would silently mislabel e.g. a blocked/errored run's attempt as
+// `Completed`, exactly the meaning-collapse this ledger exists to prevent.
 fn terminal_attempt_status(run_target: RunStatus) -> AttemptStatus {
     match run_target {
+        RunStatus::Completed => AttemptStatus::Completed,
         RunStatus::Failed => AttemptStatus::Failed,
         RunStatus::Cancelled => AttemptStatus::Cancelled,
         RunStatus::Interrupted => AttemptStatus::Interrupted,
-        _ => AttemptStatus::Completed,
+        RunStatus::Blocked => AttemptStatus::Blocked,
+        RunStatus::Error => AttemptStatus::Error,
+        RunStatus::Queued | RunStatus::Running => AttemptStatus::Completed,
     }
 }
 
