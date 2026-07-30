@@ -1,5 +1,10 @@
 # Phase -1 — Consilium acquisition & divergence study — evidence index
 
+> **Historical snapshot.** This evidence was verified against 007 at `bf68e91`.
+> It is retained as evidence of what was true at that revision, not as a current
+> repository description. Current agentic architecture status is mapped in
+> [`docs/architecture/agentic-engineering-invariants.md`](../../docs/architecture/agentic-engineering-invariants.md).
+
 Research-only. No 007 production code changed. Branch `research/consilium-phase-minus-one`, base `main` (`bf68e91`). Consilium studied at `191f2d5f81458e041f60a734c60095e251e521b4` (MIT).
 
 **Main report:** [`docs/research/consilium-phase-minus-one.md`](../../docs/research/consilium-phase-minus-one.md)
@@ -15,7 +20,7 @@ Research-only. No 007 production code changed. Branch `research/consilium-phase-
 | `zero-quota-e2e.md` | Named, isolated, reproducible zero-quota E2E flows (incl. one through the verify stage) | B |
 | `final-state.txt` | Final `git status --short` / `git diff --stat main...HEAD` / `git log -1` | 10 |
 | `test-results.json` | Build/test/clippy/UI + provider-probe results (PASS/FAIL/BLOCKED/NOT_RUN) | B, E |
-| `007-current-state.md` | Audit of 007's ACTUAL state (implemented/partial/planned/absent/frozen) | A |
+| `007-current-state.md` | **Historical** audit of 007's state at `bf68e91` (implemented/partial/planned/absent/frozen) | A |
 | `consilium-module-map.md` | Per-module map of Consilium `core` + real control/data flow | C |
 | `event-mapping.json` | Consilium AgentEvent → proposed 007 event (lossless/lossy/missing/incompatible) | D |
 | `rungraph-divergence.md` | Consilium `conduct` vs 007 RunGraph, verified point-by-point | G |
