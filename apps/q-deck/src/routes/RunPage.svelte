@@ -33,10 +33,19 @@
     let cancelled = false;
     loadState = "loading";
     run = null;
-    stream?.close();
-    stream = null;
-    clearInterval(timer);
 
+    // Deliberately NOT `stream?.close()` / `stream = null` / `clearInterval(timer)`
+    // here at the top: reading `stream`/`timer` synchronously in this effect's
+    // own body — even just to tear them down — makes them tracked
+    // dependencies of this SAME effect. `stream`/`timer` are then written
+    // asynchronously below (inside `getRun(...).then(...)`, after this
+    // function has already returned), so that later write would retrigger
+    // this very effect, which tears down and reopens the stream/timer again,
+    // forever — a real, previously-undetected infinite loop (no test had ever
+    // actually rendered this component before Q-Deck R0.5). The effect's own
+    // `return () => {...}` cleanup below already closes the PREVIOUS
+    // stream/timer at exactly the right time (before this effect reruns for a
+    // new `runId`, and on unmount) without reading them reactively here.
     async function refreshRun(): Promise<void> {
       try {
         const r = await getRun(runId);

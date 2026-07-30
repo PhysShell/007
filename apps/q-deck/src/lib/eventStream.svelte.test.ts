@@ -144,4 +144,18 @@ describe("ConversationEventStream", () => {
     expect(stream.events).toEqual([]);
     stream.close();
   });
+
+  it("closes as unsupported on a frame with a schema_version this build doesn't understand, without adding it to events", async () => {
+    const stream = new ConversationEventStream("conv-1");
+    await flush();
+    const source = MockEventSource.instances[0];
+    source.onmessage?.(
+      new MessageEvent("message", {
+        data: JSON.stringify({ ...eventDto(1), schema_version: 99 }),
+      }),
+    );
+    expect(stream.status).toBe("unsupported");
+    expect(stream.events).toEqual([]);
+    expect(source.closed).toBe(true);
+  });
 });

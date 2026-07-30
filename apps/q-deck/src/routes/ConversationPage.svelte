@@ -20,7 +20,17 @@
     let cancelled = false;
     loadState = "loading";
     runs = [];
-    stream?.close();
+    // Deliberately NOT `stream?.close()` here first: reading `stream`
+    // synchronously in this effect's own body — even just to tear it down —
+    // makes it a tracked dependency of this SAME effect, and this same
+    // statement's own write (`stream = new ConversationEventStream(...)`,
+    // right below) would then retrigger this very effect, tearing down and
+    // reopening the stream forever — a real, previously-undetected infinite
+    // loop (no test had ever actually rendered this component before Q-Deck
+    // R0.5). The effect's own `return () => {...}` cleanup below already
+    // closes the PREVIOUS stream at exactly the right time (before this
+    // effect reruns for a new `conversationId`, and on unmount) without
+    // reading it reactively here.
     stream = new ConversationEventStream(conversationId);
 
     // Page through every run for this one conversation rather than trusting
