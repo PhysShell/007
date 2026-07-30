@@ -149,11 +149,21 @@ Same `PageDto` shape as `/conversations`, with `RunDto` items:
   "parent_run_id": "...|null",
   "agent": "claude",
   "role": "implementer",
-  "status": "queued|running|completed|failed|cancelled|interrupted",
+  "status": "queued|running|completed|failed|cancelled|interrupted|blocked|error",
   "created_at": 0,
   "finished_at": 0
 }
 ```
+
+`blocked`/`error` (Q-Deck R0.6, `docs/q-deck/r06-verdict-fidelity.md`) are
+sealed — `finished_at` is set, same as `completed`/`failed`/`cancelled`.
+`interrupted` remains the one non-sealed value in this set (`finished_at` is
+`null`) — it is a resumable pause, not a verdict, and must never be conflated
+with `error`. Adding these two values was an ADDITIVE change to this field —
+`schema_version` did not bump, following the same forward-compatibility
+policy `event_type` already established (see the events endpoint above): an
+unrecognized status string is a client's own problem to degrade gracefully
+on, not a wire-shape break.
 
 ## `GET /api/v1/runs/{run_id}`
 

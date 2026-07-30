@@ -36,6 +36,13 @@ impl From<o7_ledger::Conversation> for ConversationDto {
     }
 }
 
+/// `status` is a bare pass-through of `o7_ledger::RunStatus::as_str()` — Q-Deck
+/// R0.6's new `"blocked"`/`"error"` values need no change here at all: this
+/// DTO never enumerates statuses itself, so a wider ledger vocabulary flows
+/// through automatically without recomputation and without an
+/// `API_SCHEMA_VERSION` bump (see `docs/q-deck/r06-verdict-fidelity.md` and
+/// `crates/o7d/tests/verdict_fidelity.rs`, which prove this rather than just
+/// assert it).
 #[derive(Debug, Serialize)]
 pub struct RunDto {
     pub schema_version: u32,
