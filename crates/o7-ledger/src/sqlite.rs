@@ -867,6 +867,36 @@ impl SqliteLedger {
             .await
     }
 
+    /// The run's currently-`running` attempt, if any (read-only). At most
+    /// one exists per run by construction (`create_attempt`'s own
+    /// partial-unique-index invariant). For Q-Deck R0.7's live-ingress
+    /// projector: after a process restart, the in-memory `attempt_id` from
+    /// the crashed process is gone — this is how a resumed projector finds
+    /// the attempt it should keep projecting into instead of creating a
+    /// second one.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn running_attempt(
+        &self,
+        run_id: crate::RunId,
+    ) -> Result<Option<RunAttempt>, LedgerError> {
+        self.with_conn(move |conn| {
+            let id: Option<String> = conn
+                .query_row(
+                    "SELECT attempt_id FROM run_attempt WHERE run_id = ?1 AND status = 'running'",
+                    params![run_id.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            match id {
+                None => Ok(None),
+                Some(id) => load_attempt(conn, &id),
+            }
+        })
+        .await
+    }
+
     /// List conversations newest-first, keyset-paginated by `(created_at, id)`.
     /// `before = None` starts at the most recent conversation. Same exhaustion
     /// contract as [`Ledger::read_events`]: keep calling with
