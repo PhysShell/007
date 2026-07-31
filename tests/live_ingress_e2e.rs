@@ -665,6 +665,100 @@ fn interruption_before_seal_is_interrupted_never_error() {
     let _ = o7d_child.wait();
 }
 
+/// Q-Deck R0.7 third re-gate, defect #1: a durable `RunStarted` event, once
+/// on disk, references `task.md` by digest — a SIGKILL during the agent run
+/// (well after RunStarted lands, well before the run finishes) must never
+/// be able to leave that reference dangling. Kills at exactly the same
+/// point `interruption_before_seal_is_interrupted_never_error` does, but
+/// asserts on `task.md`'s existence and content digest instead of the
+/// ledger's interrupted status.
+#[test]
+fn sigkill_during_the_agent_leaves_a_durable_task_md_matching_run_started() {
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    let task_contents = "do the durable thing";
+    std::fs::write(&task_file, task_contents).unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    // Long enough that the test can reliably observe `running` and kill the
+    // process well before it would ever finish on its own.
+    let claude = fake_claude_dir(30, 0);
+
+    let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+    wait_until_healthy(addr);
+
+    let mut run_child = spawn_o7_run_process(&RunInvocation {
+        repo: repo.path(),
+        task_file: &task_file,
+        ledger_path: &ledger_path,
+        runs_dir: &runs_dir,
+        worktree_root: &work.path().join("worktrees"),
+        conversation_id: None,
+        claude_dir: claude.path(),
+        no_ledger: false,
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let run_id = poll_until(deadline, || {
+        let (status, page) = get(addr, "/api/v1/runs");
+        if status != 200 {
+            return None;
+        }
+        let items = page.get("items")?.as_array()?;
+        let item = items.first()?;
+        let status_str = item.get("status")?.as_str()?;
+        (status_str == "running").then(|| item.get("run_id")?.as_str().map(str::to_owned))?
+    });
+
+    // A real, uncatchable kill — the run's own tail-end writes (the OLD
+    // `write_task` timing, after the agent finished) never get a chance to
+    // run. `spawn_o7_run_process` never prints "record at" before this
+    // point either (that only happens at the very end of `execute()`), so
+    // the record dir is computed directly instead of parsed from stdout.
+    run_child.kill().expect("SIGKILL the o7 run process");
+    let _ = run_child.wait();
+
+    let target_name = repo
+        .path()
+        .file_name()
+        .expect("fixture repo has a name")
+        .to_string_lossy()
+        .to_string();
+    let record_dir = runs_dir.join(&target_name).join(&run_id);
+
+    let jsonl = read_events_jsonl(&record_dir);
+    assert!(
+        !jsonl.is_empty(),
+        "a durable RunStarted must exist even after an early SIGKILL"
+    );
+    let run_started = &jsonl[0];
+    assert_eq!(run_started["kind"]["type"], "run_started");
+    let expected_digest = run_started["kind"]["task"]["digest"]
+        .as_str()
+        .expect("RunStarted's task ArtifactRef carries a digest")
+        .to_owned();
+
+    let task_md_path = record_dir.join("task.md");
+    assert!(
+        task_md_path.exists(),
+        "task.md must exist durably even though the process was killed mid-agent, \
+         well before the point the old (post-agent) write used to happen"
+    );
+    let task_md_bytes = std::fs::read(&task_md_path).unwrap();
+    let actual_digest = o7_run::event::Digest256::of_bytes(&task_md_bytes);
+    assert_eq!(
+        actual_digest.as_str(),
+        expected_digest,
+        "task.md's actual content must hash to EXACTLY the digest RunStarted durably \
+         committed to, not just happen to exist"
+    );
+    assert_eq!(std::str::from_utf8(&task_md_bytes).unwrap(), task_contents);
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
 #[test]
 fn a_sink_that_lost_already_projected_events_is_fully_recovered_by_catch_up() {
     // A chmod-based "make the sink unwritable mid-run" was tried first and
