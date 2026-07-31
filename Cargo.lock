@@ -1002,6 +1002,7 @@ dependencies = [
  "o7-run",
  "o7d",
  "proptest",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha1",

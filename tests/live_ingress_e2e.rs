@@ -3,11 +3,11 @@
 //! projecting live into a REAL SQLite ledger, watched through a REAL `o7d`
 //! process (its binary path derived from `o7`'s own — see `o7d_bin_path`)
 //! over REST/SSE — never the projector called in-memory, never a post-run
-//! import. The only stand-in is the external
-//! `claude` CLI itself (no credentials in this environment): a tiny stub
-//! script shadows it on PATH, but every other step of the production path
-//! (worktree, real `bash` gate execution, canonical event minting, live
-//! ledger projection, real HTTP/SSE) is exercised for real.
+//! import. The only stand-in is the external `claude` CLI itself (no
+//! credentials in this environment): a tiny stub script shadows it on PATH,
+//! but every other step of the production path (worktree, real `bash` gate
+//! execution, canonical event minting, live ledger projection, real
+//! HTTP/SSE) is exercised for real.
 //!
 //! Invariant for the restriction-lint allowance below: every `unwrap`/
 //! `expect`/index here is on this test's own controlled fixtures/output —
@@ -49,13 +49,19 @@ fn o7d_bin_path() -> PathBuf {
 /// A tiny fake `claude` on its own PATH-prepended directory — the one
 /// external dependency this environment cannot exercise for real. Sleeps
 /// `sleep_secs` first so the test has a real window to observe `running`
-/// over REST before the process exits.
-fn fake_claude_dir(sleep_secs: u64) -> tempfile::TempDir {
+/// over REST before the process exits, then exits with `exit_code`. Writes
+/// a sentinel file on invocation so a test can prove the stub was (or, for
+/// the fail-fast cases, was NOT) ever actually run.
+fn fake_claude_dir(sleep_secs: u64, exit_code: u32) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
+    let sentinel = dir.path().join("invoked.sentinel");
     let script = dir.path().join("claude");
     std::fs::write(
         &script,
-        format!("#!/bin/sh\nsleep {sleep_secs}\necho '{{\"ok\":true}}'\nexit 0\n"),
+        format!(
+            "#!/bin/sh\ntouch {}\nsleep {sleep_secs}\necho '{{\"ok\":true}}'\nexit {exit_code}\n",
+            sentinel.display()
+        ),
     )
     .unwrap();
     let mut perms = std::fs::metadata(&script).unwrap().permissions();
@@ -64,10 +70,13 @@ fn fake_claude_dir(sleep_secs: u64) -> tempfile::TempDir {
     dir
 }
 
-/// A minimal real git repo: one commit, a trivial gate manifest with a
-/// single fast-passing gate, and a task file — everything `o7 run` needs
-/// downstream of the agent.
-fn fixture_repo() -> tempfile::TempDir {
+fn claude_was_invoked(claude_dir: &Path) -> bool {
+    claude_dir.join("invoked.sentinel").exists()
+}
+
+/// A minimal real git repo: one commit, a caller-supplied gate manifest,
+/// and a task file — everything `o7 run` needs downstream of the agent.
+fn fixture_repo(gate_toml: &str) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     let run = |args: &[&str]| {
         let status = Command::new("git")
@@ -83,15 +92,17 @@ fn fixture_repo() -> tempfile::TempDir {
     std::fs::write(dir.path().join("README.md"), "fixture\n").unwrap();
     let gate_dir = dir.path().join(".007");
     std::fs::create_dir_all(&gate_dir).unwrap();
-    std::fs::write(
-        gate_dir.join("gate.toml"),
-        "[[gate]]\nname = \"unit\"\ncmd = \"true\"\n",
-    )
-    .unwrap();
+    std::fs::write(gate_dir.join("gate.toml"), gate_toml).unwrap();
     run(&["add", "-A"]);
     run(&["commit", "-q", "-m", "initial"]);
     dir
 }
+
+const PASSING_GATE: &str = "[[gate]]\nname = \"unit\"\ncmd = \"true\"\n";
+const FAILING_GATE: &str = "[[gate]]\nname = \"unit\"\ncmd = \"false\"\n";
+/// A required gate that can never run here (no waiver) — the reducer
+/// scores an unwaived, unrun required obligation `Blocked`.
+const BLOCKED_GATE: &str = "[[gate]]\nname = \"windows-only\"\ncmd = \"true\"\nenv = \"windows\"\n";
 
 fn spawn_o7d_process(db_path: &Path) -> (Child, SocketAddr) {
     let mut child = Command::new(o7d_bin_path())
@@ -126,41 +137,44 @@ fn spawn_o7d_process(db_path: &Path) -> (Child, SocketAddr) {
     (child, addr)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn spawn_o7_run_process(
-    repo: &Path,
-    task_file: &Path,
-    ledger_path: &Path,
-    runs_dir: &Path,
-    worktree_root: &Path,
-    conversation_id: Option<&str>,
-    claude_dir: &Path,
-) -> Child {
+struct RunInvocation<'a> {
+    repo: &'a Path,
+    task_file: &'a Path,
+    ledger_path: &'a Path,
+    runs_dir: &'a Path,
+    worktree_root: &'a Path,
+    conversation_id: Option<&'a str>,
+    claude_dir: &'a Path,
+    no_ledger: bool,
+}
+
+fn spawn_o7_run_process(inv: &RunInvocation<'_>) -> Child {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_o7"));
     cmd.arg("run")
         .arg("--repo")
-        .arg(repo)
+        .arg(inv.repo)
         .arg("--task")
-        .arg(task_file)
-        .arg("--ledger")
-        .arg(ledger_path)
+        .arg(inv.task_file)
         .arg("--runs-dir")
-        .arg(runs_dir)
+        .arg(inv.runs_dir)
         .arg("--worktree-root")
-        .arg(worktree_root)
+        .arg(inv.worktree_root)
         .arg("--max-turns")
         .arg("1")
         .env(
             "PATH",
             format!(
                 "{}:{}",
-                claude_dir.display(),
+                inv.claude_dir.display(),
                 std::env::var("PATH").unwrap_or_default()
             ),
         )
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(id) = conversation_id {
+    if !inv.no_ledger {
+        cmd.arg("--ledger").arg(inv.ledger_path);
+    }
+    if let Some(id) = inv.conversation_id {
         cmd.arg("--conversation-id").arg(id);
     }
     cmd.spawn().expect("spawn the real o7 binary")
@@ -182,7 +196,6 @@ fn get(addr: SocketAddr, path: &str) -> (u16, serde_json::Value) {
         .and_then(|l| l.split_whitespace().nth(1))
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    // Body may be chunked; dechunk minimally like the other o7d test suites.
     let json_text = if head
         .to_ascii_lowercase()
         .contains("transfer-encoding: chunked")
@@ -242,9 +255,10 @@ fn wait_until_healthy(addr: SocketAddr) {
     });
 }
 
-/// One SSE frame's `data:` payload, read directly off a raw TCP connection —
-/// enough to prove a live event arrives before the run process exits.
-fn read_one_sse_data_frame(addr: SocketAddr, conversation_id: &str) -> String {
+/// Every `data:` line of every SSE frame on this connection, for up to
+/// `want` frames or until `deadline` — enough to search for a specific
+/// canonical kind rather than accepting the first frame of any shape.
+fn read_sse_data_frames(addr: SocketAddr, conversation_id: &str, want: usize) -> Vec<String> {
     let mut stream = std::net::TcpStream::connect(addr).unwrap();
     let req = format!(
         "GET /api/v1/conversations/{conversation_id}/events/stream HTTP/1.1\r\nHost: localhost\r\nConnection: keep-alive\r\n\r\n"
@@ -254,44 +268,68 @@ fn read_one_sse_data_frame(addr: SocketAddr, conversation_id: &str) -> String {
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();
     let mut reader = BufReader::new(stream);
-    let mut buf = String::new();
-    loop {
+    let mut out = Vec::new();
+    while out.len() < want {
         let mut line = String::new();
         let n = reader.read_line(&mut line).unwrap();
-        assert!(n != 0, "SSE stream closed before a data frame arrived");
-        buf.push_str(&line);
+        assert!(
+            n != 0,
+            "SSE stream closed before {want} data frame(s) arrived"
+        );
         if let Some(rest) = line.strip_prefix("data:") {
             if !rest.trim().is_empty() {
-                return rest.trim().to_string();
+                out.push(rest.trim().to_string());
             }
         }
     }
+    out
+}
+
+fn read_events_jsonl(run_dir: &Path) -> Vec<serde_json::Value> {
+    let text = std::fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
+    text.lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
+}
+
+fn find_record_dir(stdout: &str) -> String {
+    stdout
+        .lines()
+        .find(|l| l.contains(": record at "))
+        .expect("o7 run prints the record directory")
+        .split(": record at ")
+        .nth(1)
+        .expect("record dir after the marker")
+        .trim()
+        .to_string()
 }
 
 #[test]
 fn live_run_is_visible_before_and_after_completion_across_real_processes() {
-    let repo = fixture_repo();
+    let repo = fixture_repo(PASSING_GATE);
     let task_file = repo.path().join("task.md");
     std::fs::write(&task_file, "do the thing").unwrap();
     let work = tempfile::tempdir().unwrap();
     let ledger_path = work.path().join("ledger.sqlite3");
-    let claude = fake_claude_dir(1);
+    let claude = fake_claude_dir(1, 0);
 
     let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
     wait_until_healthy(addr);
 
-    let mut run_child = spawn_o7_run_process(
-        repo.path(),
-        &task_file,
-        &ledger_path,
-        &work.path().join("runs"),
-        &work.path().join("worktrees"),
-        None,
-        claude.path(),
-    );
+    let mut run_child = spawn_o7_run_process(&RunInvocation {
+        repo: repo.path(),
+        task_file: &task_file,
+        ledger_path: &ledger_path,
+        runs_dir: &work.path().join("runs"),
+        worktree_root: &work.path().join("worktrees"),
+        conversation_id: None,
+        claude_dir: claude.path(),
+        no_ledger: false,
+    });
 
-    // Proof (6): while the process is still executing, REST already shows
-    // the conversation and run, status running, no terminal status yet.
+    // Proof: while the process is still executing, REST already shows the
+    // conversation and run, status running, no terminal status yet.
     let deadline = Instant::now() + Duration::from_secs(5);
     let (conv_id, run_id) = poll_until(deadline, || {
         let (status, page) = get(addr, "/api/v1/runs");
@@ -310,10 +348,22 @@ fn live_run_is_visible_before_and_after_completion_across_real_processes() {
     assert_eq!(run["status"], "running", "seen before the process exits");
     assert!(run["finished_at"].is_null());
 
-    // Proof (7): a live SSE event arrives before the process has finished.
-    let frame = read_one_sse_data_frame(addr, &conv_id);
-    let frame_json: serde_json::Value = serde_json::from_str(&frame).unwrap();
-    assert!(frame_json.get("event_type").is_some());
+    // Proof: a LIVE canonical event (not just any event_type — specifically
+    // the projected AgentStarted, with matching provenance) arrives over
+    // SSE before the process exits.
+    // conversation.created, run.created, run.started, then the
+    // system.note provenance for RunStarted, THEN AgentStarted's — comfortable
+    // margin beyond that in case ordering shifts slightly.
+    let frames = read_sse_data_frames(addr, &conv_id, 8);
+    let agent_started_frame = frames
+        .iter()
+        .find_map(|f| {
+            let v: serde_json::Value = serde_json::from_str(f).ok()?;
+            (v["event_type"] == "system.note" && v["payload"]["canonical_kind"] == "agent_started")
+                .then_some(v)
+        })
+        .expect("an agent_started system.note must arrive live over SSE before completion");
+    assert_eq!(agent_started_frame["run_id"], run_id);
 
     let run_status = run_child.wait().unwrap();
     let mut run_stdout = String::new();
@@ -328,8 +378,34 @@ fn live_run_is_visible_before_and_after_completion_across_real_processes() {
         "the fixture gate/agent are set up to pass: {run_stdout}"
     );
 
-    // Proof (8): after completion, terminal status matches the canonical
-    // verdict, the right event type, finished_at set, no duplicates.
+    let record_dir = PathBuf::from(find_record_dir(&run_stdout));
+
+    // Proof: the SSE frame's provenance exactly matches the canonical
+    // events.jsonl's own AgentStarted event — not merely "some event_type".
+    let jsonl = read_events_jsonl(&record_dir);
+    // RunEventKind is internally tagged: #[serde(tag = "type", rename_all
+    // = "snake_case")] on o7_run::event::RunEventKind, nested under the
+    // event's own "kind" field — so the discriminant lives at
+    // kind.type, not at kind directly.
+    let jsonl_agent_started = jsonl
+        .iter()
+        .find(|e| e["kind"]["type"] == "agent_started")
+        .expect("AgentStarted must be present in the canonical record");
+    assert_eq!(
+        agent_started_frame["payload"]["canonical_sequence"],
+        jsonl_agent_started["sequence"]
+    );
+    assert_eq!(
+        agent_started_frame["payload"]["canonical_event_digest"],
+        jsonl_agent_started["event_digest"]
+    );
+    assert_eq!(
+        agent_started_frame["payload"]["canonical_run_id"],
+        jsonl_agent_started["run_id"]
+    );
+
+    // Proof: after completion, terminal status matches the canonical
+    // verdict, the right event type, finished_at set.
     let (status, run) = get(addr, &format!("/api/v1/runs/{run_id}"));
     assert_eq!(status, 200);
     assert_eq!(run["status"], "completed");
@@ -349,38 +425,69 @@ fn live_run_is_visible_before_and_after_completion_across_real_processes() {
     assert!(!event_types
         .iter()
         .any(|t| *t == "run.errored" || *t == "run.blocked"));
+
+    // Proof: ledger sequences are truly CONSECUTIVE (next == previous + 1),
+    // not merely sorted-and-unique — [1, 3, 8] would pass a sort+dedup
+    // check but must fail this one.
     let sequences: Vec<u64> = items
         .iter()
         .map(|e| e["sequence"].as_u64().unwrap())
         .collect();
-    let mut sorted = sequences.clone();
-    sorted.sort_unstable();
-    sorted.dedup();
-    assert_eq!(sequences, sorted, "gap-free, duplicate-free, in order");
+    for pair in sequences.windows(2) {
+        assert_eq!(
+            pair[1],
+            pair[0] + 1,
+            "ledger sequence must be gap-free and consecutive: {sequences:?}"
+        );
+    }
 
-    // Proof (9)+(10): restart o7d against the same file, read back identical.
+    // Proof: the SAME RunId bytes appear in the CLI's own stdout, the
+    // record directory name, meta.json, every events.jsonl line, and the
+    // REST DTO.
+    assert!(
+        run_stdout.contains(&run_id),
+        "CLI stdout must echo the run id"
+    );
+    assert_eq!(
+        record_dir.file_name().unwrap().to_str().unwrap(),
+        run_id,
+        "the run directory name must be exactly the run id"
+    );
+    let meta: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(record_dir.join("meta.json")).unwrap())
+            .unwrap();
+    assert_eq!(meta["run_id"], run_id);
+    for event in &jsonl {
+        assert_eq!(event["run_id"], run_id, "every canonical event: {event:?}");
+    }
+    assert_eq!(run["run_id"], run_id);
+
+    // Proof: restart o7d against the same file — the FULL event transcript
+    // (not just status/finished_at) reads back identically.
     let _ = o7d_child.kill();
     let _ = o7d_child.wait();
     let (mut o7d_child2, addr2) = spawn_o7d_process(&ledger_path);
     wait_until_healthy(addr2);
     let (status, run2) = get(addr2, &format!("/api/v1/runs/{run_id}"));
     assert_eq!(status, 200);
-    assert_eq!(run2["status"], "completed");
-    assert_eq!(run2["finished_at"], run["finished_at"]);
+    assert_eq!(
+        run2, run,
+        "the whole run DTO must be byte-identical after restart"
+    );
+    let (status, events2) = get(
+        addr2,
+        &format!("/api/v1/conversations/{conv_id}/events?limit=100"),
+    );
+    assert_eq!(status, 200);
+    assert_eq!(
+        events2, events,
+        "the FULL event transcript must be identical after restart, not just status"
+    );
 
-    // Proof (11): canonical replay of the flat record agrees with the ledger.
-    let record_line = run_stdout
-        .lines()
-        .find(|l| l.contains(": record at "))
-        .expect("o7 run prints the record directory");
-    let record_dir = record_line
-        .split(": record at ")
-        .nth(1)
-        .expect("record dir after the marker")
-        .trim();
+    // Proof: canonical replay of the flat record agrees with the ledger.
     let replay = Command::new(env!("CARGO_BIN_EXE_o7"))
         .arg("replay")
-        .arg(record_dir)
+        .arg(&record_dir)
         .output()
         .unwrap();
     assert!(replay.status.success(), "replay must verify a clean run");
@@ -390,8 +497,8 @@ fn live_run_is_visible_before_and_after_completion_across_real_processes() {
         "replay verdict must be Pass to match the ledger's completed: {replay_stdout}"
     );
 
-    // Proof (12): recovery against a run that already sealed cleanly is a
-    // safe, idempotent no-op — nothing left running to mark interrupted.
+    // Proof: recovery against a run that already sealed cleanly is a safe,
+    // idempotent no-op — nothing left running to mark interrupted.
     let recover1 = Command::new(env!("CARGO_BIN_EXE_o7"))
         .args(["recover", "--ledger"])
         .arg(&ledger_path)
@@ -416,29 +523,79 @@ fn live_run_is_visible_before_and_after_completion_across_real_processes() {
     let _ = o7d_child2.wait();
 }
 
+/// Every real root-process verdict mapping, end to end: Pass->Completed,
+/// Fail->Failed, Blocked->Blocked, plus (via a non-zero-exit fake claude)
+/// Error->Error — proving the process boundary, not just the unit-level
+/// projector mapping already covered in `src/ledger_projector.rs`.
+#[test]
+fn every_canonical_verdict_maps_correctly_across_real_processes() {
+    for (label, gate_toml, agent_exit_code, expected_status) in [
+        ("pass", PASSING_GATE, 0, "completed"),
+        ("fail", FAILING_GATE, 0, "failed"),
+        ("blocked", BLOCKED_GATE, 0, "blocked"),
+        ("error", PASSING_GATE, 1, "error"),
+    ] {
+        let repo = fixture_repo(gate_toml);
+        let task_file = repo.path().join("task.md");
+        std::fs::write(&task_file, "do the thing").unwrap();
+        let work = tempfile::tempdir().unwrap();
+        let ledger_path = work.path().join("ledger.sqlite3");
+        let claude = fake_claude_dir(0, agent_exit_code);
+
+        let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+        wait_until_healthy(addr);
+
+        let mut run_child = spawn_o7_run_process(&RunInvocation {
+            repo: repo.path(),
+            task_file: &task_file,
+            ledger_path: &ledger_path,
+            runs_dir: &work.path().join("runs"),
+            worktree_root: &work.path().join("worktrees"),
+            conversation_id: None,
+            claude_dir: claude.path(),
+            no_ledger: false,
+        });
+        let _ = run_child.wait();
+
+        let (status, page) = get(addr, "/api/v1/runs");
+        assert_eq!(status, 200, "label={label}");
+        let items = page["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1, "label={label}");
+        assert_eq!(
+            items[0]["status"], expected_status,
+            "label={label}: {items:?}"
+        );
+        assert!(items[0]["finished_at"].is_number(), "label={label}");
+
+        let _ = o7d_child.kill();
+        let _ = o7d_child.wait();
+    }
+}
+
 #[test]
 fn interruption_before_seal_is_interrupted_never_error() {
-    let repo = fixture_repo();
+    let repo = fixture_repo(PASSING_GATE);
     let task_file = repo.path().join("task.md");
     std::fs::write(&task_file, "do the thing").unwrap();
     let work = tempfile::tempdir().unwrap();
     let ledger_path = work.path().join("ledger.sqlite3");
     // Long enough that the test can reliably observe `running` and kill the
     // process well before it would ever seal on its own.
-    let claude = fake_claude_dir(30);
+    let claude = fake_claude_dir(30, 0);
 
     let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
     wait_until_healthy(addr);
 
-    let mut run_child = spawn_o7_run_process(
-        repo.path(),
-        &task_file,
-        &ledger_path,
-        &work.path().join("runs"),
-        &work.path().join("worktrees"),
-        None,
-        claude.path(),
-    );
+    let mut run_child = spawn_o7_run_process(&RunInvocation {
+        repo: repo.path(),
+        task_file: &task_file,
+        ledger_path: &ledger_path,
+        runs_dir: &work.path().join("runs"),
+        worktree_root: &work.path().join("worktrees"),
+        conversation_id: None,
+        claude_dir: claude.path(),
+        no_ledger: false,
+    });
 
     let deadline = Instant::now() + Duration::from_secs(5);
     let run_id = poll_until(deadline, || {
@@ -475,9 +632,7 @@ fn interruption_before_seal_is_interrupted_never_error() {
         "interrupted is unsealed — finished_at must stay unset"
     );
 
-    let (status, conv) = get(addr, &format!("/api/v1/runs/{run_id}"));
-    assert_eq!(status, 200);
-    let conversation_id = conv["conversation_id"].as_str().unwrap();
+    let conversation_id = run["conversation_id"].as_str().unwrap();
     let (status, events) = get(
         addr,
         &format!("/api/v1/conversations/{conversation_id}/events?limit=100"),
@@ -502,4 +657,315 @@ fn interruption_before_seal_is_interrupted_never_error() {
 
     let _ = o7d_child.kill();
     let _ = o7d_child.wait();
+}
+
+#[test]
+fn a_sink_that_lost_already_projected_events_is_fully_recovered_by_catch_up() {
+    // A chmod-based "make the sink unwritable mid-run" was tried first and
+    // does NOT work on Linux: a file descriptor already open for
+    // read-write (the live process's own SQLite connection, opened during
+    // Phase 1 before any chmod) keeps writing successfully regardless of
+    // the file's mode bits changing afterward — permission checks happen
+    // at open(), not at each write(). So this simulates the sink actually
+    // LOSING previously-projected data instead (e.g. a lossy restore) by
+    // deleting rows directly, bypassing o7-ledger's own API (which has no
+    // delete method, by design, being append-only) — the observable
+    // end-state a real sink failure would also produce: ledger rows that
+    // should exist, per the canonical record, don't.
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let claude = fake_claude_dir(0, 0);
+
+    let mut run_child = spawn_o7_run_process(&RunInvocation {
+        repo: repo.path(),
+        task_file: &task_file,
+        ledger_path: &ledger_path,
+        runs_dir: &work.path().join("runs"),
+        worktree_root: &work.path().join("worktrees"),
+        conversation_id: None,
+        claude_dir: claude.path(),
+        no_ledger: false,
+    });
+    let status = run_child.wait().unwrap();
+    let mut run_stdout = String::new();
+    run_child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut run_stdout)
+        .unwrap();
+    assert!(
+        status.success(),
+        "the fixture is set up to pass cleanly: {run_stdout}"
+    );
+    let record_dir = PathBuf::from(find_record_dir(&run_stdout));
+    let jsonl = read_events_jsonl(&record_dir);
+    assert!(jsonl.len() >= 5, "sanity: {jsonl:?}");
+
+    // Directly delete every system.note (the canonical provenance records —
+    // the ones the LIVE projector, not a dedicated status-transition method,
+    // is responsible for), simulating a sink that lost data it once
+    // successfully wrote. Their idempotency_record rows are deleted too: a
+    // REAL failure never leaves an idempotency record pointing at a
+    // never-written event (both are written in the same transaction), so
+    // leaving them behind here would be an unrealistic, inconsistent
+    // simulation — catch-up's idempotency check would find a stale
+    // "already done" record pointing at a row that no longer exists and
+    // error, instead of correctly re-creating it. (`run.completed` is
+    // deliberately left alone: it and the run's own `status` column are set
+    // atomically in the same transaction by `complete_run`, so a state
+    // where one exists without the other can never occur for real, and
+    // isn't simulated here.)
+    let deleted = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let mut ids_stmt = conn
+            .prepare("SELECT event_id FROM event WHERE event_type = 'system.note'")
+            .unwrap();
+        let ids: Vec<String> = ids_stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        drop(ids_stmt);
+        for id in &ids {
+            conn.execute(
+                "DELETE FROM idempotency_record WHERE result_reference = ?1",
+                [id],
+            )
+            .unwrap();
+        }
+        conn.execute("DELETE FROM event WHERE event_type = 'system.note'", [])
+            .unwrap()
+    };
+    assert!(
+        deleted >= 5,
+        "expected to delete several rows, got {deleted}"
+    );
+
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        recover.status.success(),
+        "catch-up failed: {}",
+        String::from_utf8_lossy(&recover.stderr)
+    );
+    assert!(String::from_utf8_lossy(&recover.stdout).contains("sealed"));
+
+    let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+    wait_until_healthy(addr);
+    let (status, page) = get(addr, "/api/v1/runs");
+    assert_eq!(status, 200);
+    let items = page["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "catch-up must not create a duplicate run");
+    assert_eq!(items[0]["status"], "completed");
+    let conv_id = items[0]["conversation_id"].as_str().unwrap();
+    let (status, events) = get(
+        addr,
+        &format!("/api/v1/conversations/{conv_id}/events?limit=100"),
+    );
+    assert_eq!(status, 200);
+    let event_types: Vec<&str> = events["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["event_type"].as_str().unwrap())
+        .collect();
+    assert!(event_types.contains(&"run.completed"));
+    let notes_after = event_types.iter().filter(|t| **t == "system.note").count();
+    assert!(
+        notes_after >= 5,
+        "catch-up must have restored the deleted system.note provenance records: {event_types:?}"
+    );
+
+    // Re-running catch-up again must be a safe, idempotent no-op.
+    let recover2 = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(recover2.status.success());
+    let (status, page2) = get(addr, "/api/v1/runs");
+    assert_eq!(status, 200);
+    assert_eq!(page2, page, "a repeated catch-up must be an exact no-op");
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+#[test]
+fn a_valid_existing_conversation_id_is_used_verbatim() {
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let claude = fake_claude_dir(0, 0);
+
+    let existing_conversation_id = {
+        let ledger = o7_ledger::SqliteLedger::open(&ledger_path).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(ledger.create_conversation(None))
+            .unwrap()
+            .conversation_id
+            .as_str()
+            .to_owned()
+    };
+
+    let mut run_child = spawn_o7_run_process(&RunInvocation {
+        repo: repo.path(),
+        task_file: &task_file,
+        ledger_path: &ledger_path,
+        runs_dir: &work.path().join("runs"),
+        worktree_root: &work.path().join("worktrees"),
+        conversation_id: Some(&existing_conversation_id),
+        claude_dir: claude.path(),
+        no_ledger: false,
+    });
+    let status = run_child.wait().unwrap();
+    assert!(status.success());
+
+    let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+    wait_until_healthy(addr);
+    let (status, page) = get(
+        addr,
+        &format!("/api/v1/conversations/{existing_conversation_id}"),
+    );
+    assert_eq!(status, 200);
+    let (status, runs) = get(addr, "/api/v1/runs");
+    assert_eq!(status, 200);
+    assert_eq!(
+        runs["items"][0]["conversation_id"], existing_conversation_id,
+        "the caller-supplied conversation must be used, not a new one"
+    );
+    let _ = page;
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+#[test]
+fn an_unknown_conversation_id_fails_before_the_agent_ever_starts() {
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let claude = fake_claude_dir(0, 0);
+
+    let mut run_child = spawn_o7_run_process(&RunInvocation {
+        repo: repo.path(),
+        task_file: &task_file,
+        ledger_path: &ledger_path,
+        runs_dir: &work.path().join("runs"),
+        worktree_root: &work.path().join("worktrees"),
+        conversation_id: Some("does-not-exist-anywhere"),
+        claude_dir: claude.path(),
+        no_ledger: false,
+    });
+    let status = run_child.wait().unwrap();
+    assert!(
+        !status.success(),
+        "an unknown --conversation-id must fail the run"
+    );
+    assert!(
+        !claude_was_invoked(claude.path()),
+        "the agent must never start when --conversation-id doesn't resolve"
+    );
+}
+
+#[test]
+fn conversation_id_without_ledger_is_rejected_at_cli_parse_time() {
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let claude = fake_claude_dir(0, 0);
+
+    let mut run_child = spawn_o7_run_process(&RunInvocation {
+        repo: repo.path(),
+        task_file: &task_file,
+        ledger_path: &work.path().join("unused-ledger.sqlite3"),
+        runs_dir: &work.path().join("runs"),
+        worktree_root: &work.path().join("worktrees"),
+        conversation_id: Some("whatever"),
+        claude_dir: claude.path(),
+        no_ledger: true, // --conversation-id given, --ledger deliberately not
+    });
+    let status = run_child.wait().unwrap();
+    assert!(
+        !status.success(),
+        "--conversation-id without --ledger must be rejected"
+    );
+    let mut stderr = String::new();
+    run_child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+    assert!(
+        stderr.contains("conversation-id") || stderr.contains("ledger"),
+        "clap's error should mention the offending flags: {stderr}"
+    );
+    assert!(
+        !claude_was_invoked(claude.path()),
+        "a CLI parse rejection must never reach the agent"
+    );
+}
+
+#[test]
+fn no_ledger_flag_creates_no_sqlite_file_and_preserves_legacy_behavior() {
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let would_be_ledger_path = work.path().join("never-created.sqlite3");
+    let claude = fake_claude_dir(0, 0);
+
+    let mut run_child = spawn_o7_run_process(&RunInvocation {
+        repo: repo.path(),
+        task_file: &task_file,
+        ledger_path: &would_be_ledger_path,
+        runs_dir: &work.path().join("runs"),
+        worktree_root: &work.path().join("worktrees"),
+        conversation_id: None,
+        claude_dir: claude.path(),
+        no_ledger: true,
+    });
+    let status = run_child.wait().unwrap();
+    assert!(status.success());
+    assert!(
+        !would_be_ledger_path.exists(),
+        "no --ledger must never create a SQLite file as a side effect"
+    );
+
+    let mut run_stdout = String::new();
+    run_child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut run_stdout)
+        .unwrap();
+    let record_dir = PathBuf::from(find_record_dir(&run_stdout));
+    // The legacy flat record is still fully present and replayable.
+    assert!(record_dir.join("events.jsonl").exists());
+    assert!(record_dir.join("meta.json").exists());
+    let replay = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("replay")
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(replay.status.success());
 }
