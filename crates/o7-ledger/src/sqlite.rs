@@ -897,6 +897,40 @@ impl SqliteLedger {
         .await
     }
 
+    /// The run's most recent attempt (read-only), **regardless of status** —
+    /// unlike [`Self::running_attempt`], this also finds a `completed`/
+    /// `failed`/`interrupted` attempt. For Q-Deck R0.7's `o7 recover`
+    /// catch-up: re-projecting an already-terminal run's canonical stream
+    /// must reuse the SAME `attempt_id` its events were originally recorded
+    /// under, because [`Self::append_system_note`]'s idempotency digest
+    /// includes `attempt_id` — attaching read-only with a DIFFERENT
+    /// `attempt_id` (e.g. `None`) than the one already-projected events used
+    /// would make a byte-identical re-projection of an already-applied event
+    /// fail as an idempotency conflict, not replay it.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn latest_attempt(
+        &self,
+        run_id: crate::RunId,
+    ) -> Result<Option<RunAttempt>, LedgerError> {
+        self.with_conn(move |conn| {
+            let id: Option<String> = conn
+                .query_row(
+                    "SELECT attempt_id FROM run_attempt WHERE run_id = ?1 \
+                     ORDER BY attempt_number DESC LIMIT 1",
+                    params![run_id.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            match id {
+                None => Ok(None),
+                Some(id) => load_attempt(conn, &id),
+            }
+        })
+        .await
+    }
+
     /// List conversations newest-first, keyset-paginated by `(created_at, id)`.
     /// `before = None` starts at the most recent conversation. Same exhaustion
     /// contract as [`Ledger::read_events`]: keep calling with

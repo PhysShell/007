@@ -123,8 +123,11 @@ impl PendingProjection {
     /// instead of erroring or creating a duplicate — `start_run` is skipped
     /// if the run is no longer `Queued`, and the existing `running` attempt
     /// is reused instead of creating a second one. A run already terminal
-    /// or interrupted is attached to read-only (no attempt to project
-    /// into — `attempt_id` is `None`).
+    /// or interrupted is attached read-only to its most recent attempt
+    /// (`SqliteLedger::latest_attempt`, regardless of status) — never
+    /// `None` — because `append_system_note`'s idempotency digest includes
+    /// `attempt_id`, so re-projecting an already-applied event must see the
+    /// SAME `attempt_id` it was originally recorded under.
     ///
     /// # Errors
     /// Any underlying ledger error.
@@ -150,10 +153,19 @@ impl PendingProjection {
                 },
             ))
             .with_context(|| format!("creating (or re-attaching to) ledger run {run_id}"))?;
-        // create_run_with_id's own idempotent-replay is authoritative on
-        // conversation_id: an existing row's REAL conversation (which may
-        // differ from what this call's own conversation resolution guessed,
-        // in the rare catch-up-before-any-attach case) always wins.
+        // The just-returned row's own conversation_id is authoritative
+        // (matters on the ordinary idempotent-replay path, where this call
+        // resolved the SAME conversation the run was originally created
+        // under, so this is simply that value echoed back). NOTE: this is
+        // NOT a substitute for resolving the correct `ConversationSelector`
+        // before calling `attach_run` — if the selector passed to
+        // `PendingProjection::open` disagrees with the run's real
+        // conversation_id, `create_run_with_id`'s idempotency digest (which
+        // includes conversation_id) mismatches and this call fails loudly
+        // with a conflict before this line is ever reached. Callers that may
+        // be attaching to an ALREADY-existing run (catch-up) must look the
+        // run up first and pass its real conversation — see
+        // `main.rs::catch_up`.
         let conversation_id = run.conversation_id.clone();
 
         if run.status == RunStatus::Queued {
@@ -180,8 +192,16 @@ impl PendingProjection {
         } else {
             // Already terminal or interrupted — attaching read-only, e.g.
             // to re-project an idempotent-safe missing tail without
-            // claiming a live attempt that no longer exists.
-            None
+            // claiming a live attempt that no longer exists. Reuse the
+            // SAME attempt_id already-projected events used (not `None`):
+            // `append_system_note`'s idempotency digest includes
+            // `attempt_id`, so re-projecting an already-applied event under
+            // a *different* attempt_id than it was originally recorded with
+            // would misfire as a conflict instead of replaying cleanly.
+            self.rt
+                .block_on(self.ledger.latest_attempt(run.run_id.clone()))
+                .with_context(|| format!("looking up the most recent attempt for run {run_id}"))?
+                .map(|a| a.attempt_id)
         };
 
         Ok(LiveLedgerProjector {
@@ -735,7 +755,7 @@ mod tests {
     }
 
     #[test]
-    fn attaching_to_an_already_terminal_run_has_no_live_attempt() {
+    fn attaching_to_an_already_terminal_run_reuses_its_original_attempt_id() {
         let path = tmp_ledger_path("resume-terminal");
         let run_id = CanonicalRunId::new("canon-run-resume-terminal".to_string()).unwrap();
 
@@ -747,11 +767,17 @@ mod tests {
             "implementer".to_string(),
         )
         .unwrap();
+        let original_attempt = first.attempt_id.clone();
+        assert!(original_attempt.is_some());
         first.seal(CanonicalVerdict::Pass).unwrap();
 
         // Catch-up runs again after the run already sealed (e.g. re-applying
         // a missing tail whose events were all already idempotently
-        // applied) — must attach read-only, not try to revive an attempt.
+        // applied) — must attach to the SAME original attempt_id, not
+        // `None`: `append_system_note`'s idempotency digest includes
+        // `attempt_id`, so a `None` here would make replaying an
+        // already-projected event (recorded under `Some(original_attempt)`)
+        // misfire as a conflict instead of a no-op.
         let resumed = LiveLedgerProjector::start(
             &path,
             ConversationSelector::New,
@@ -760,9 +786,66 @@ mod tests {
             "implementer".to_string(),
         )
         .unwrap();
-        assert_eq!(resumed.attempt_id, None);
+        assert_eq!(resumed.attempt_id, original_attempt);
         // Re-sealing with the SAME verdict is still a safe no-op.
         resumed.seal(CanonicalVerdict::Pass).unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_terminal_runs_already_projected_events_replay_idempotently_after_resume() {
+        let path = tmp_ledger_path("resume-terminal-reproject");
+        let run_id = CanonicalRunId::new("canon-run-resume-reproject".to_string()).unwrap();
+        let stream = tiny_stream(&run_id);
+
+        let first = LiveLedgerProjector::start(
+            &path,
+            ConversationSelector::New,
+            &run_id,
+            "claude".to_string(),
+            "implementer".to_string(),
+        )
+        .unwrap();
+        for event in &stream {
+            first.project(event).unwrap();
+        }
+        first.seal(CanonicalVerdict::Pass).unwrap();
+        drop(first); // simulates the process crashing right after sealing
+
+        // A resumed projector (e.g. `o7 recover`'s catch-up) re-projecting
+        // the SAME already-applied stream against an already-terminal run
+        // must be a genuine no-op, not an idempotency conflict — this is
+        // the exact case a naive `attempt_id: None` attach broke.
+        let resumed = LiveLedgerProjector::start(
+            &path,
+            ConversationSelector::New,
+            &run_id,
+            "claude".to_string(),
+            "implementer".to_string(),
+        )
+        .unwrap();
+        for event in &stream {
+            resumed.project(event).unwrap();
+        }
+
+        let ledger = o7_ledger::SqliteLedger::open(&path).unwrap();
+        let rt = verify_rt();
+        let ledger_run = rt
+            .block_on(ledger.run(o7_ledger::RunId::from_raw(run_id.as_str().to_string())))
+            .unwrap()
+            .unwrap();
+        let all_events = rt
+            .block_on(ledger.read_events(&ledger_run.conversation_id, None, 100))
+            .unwrap();
+        let notes = all_events
+            .iter()
+            .filter(|e| e.event_type == "system.note")
+            .count();
+        assert_eq!(
+            notes,
+            stream.len(),
+            "re-projecting an already-applied stream after resume must not duplicate: {all_events:?}"
+        );
         let _ = std::fs::remove_file(&path);
     }
 }

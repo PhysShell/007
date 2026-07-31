@@ -172,13 +172,34 @@ fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
         .map(|e| e.run_id.clone())
         .context("events.jsonl has no events to catch up")?;
 
-    // "New" is only exercised as a fallback for the narrow case where the
-    // run's ledger row was never created at all yet — create_run_with_id's
-    // own idempotent replay makes an EXISTING row's real conversation_id
-    // authoritative regardless of what selector this call passes.
-    let pending =
-        PendingProjection::open(ledger_path, ConversationSelector::New, &canonical_run_id)
-            .context("opening the ledger for catch-up")?;
+    // Look up whether this run's ledger row already exists BEFORE deciding
+    // how to resolve the conversation. `create_run_with_id`'s idempotency
+    // digest includes `conversation_id` — if the original run was created
+    // under an explicit `--conversation-id` and this call guessed `New`
+    // instead, the digest would mismatch and fail as a conflict before ever
+    // reaching any "existing row wins" replay logic. So: an existing run's
+    // OWN stored conversation_id is used verbatim; `New` is only the
+    // fallback for the genuinely-first-ever-attach case, where no row (and
+    // so no conversation to disagree with) exists yet.
+    let existing_conversation = {
+        let ledger = o7_ledger::SqliteLedger::open(ledger_path)
+            .with_context(|| format!("opening ledger at {}", ledger_path.display()))?;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("starting the catch-up lookup runtime")?;
+        rt.block_on(ledger.run(o7_ledger::RunId::from_raw(
+            canonical_run_id.as_str().to_owned(),
+        )))
+        .context("looking up this run's existing ledger row")?
+        .map(|run| run.conversation_id.as_str().to_owned())
+    };
+    let conversation = match existing_conversation {
+        Some(id) => ConversationSelector::Existing(id),
+        None => ConversationSelector::New,
+    };
+    let pending = PendingProjection::open(ledger_path, conversation, &canonical_run_id)
+        .context("opening the ledger for catch-up")?;
     let projector = pending
         .attach_run(
             &canonical_run_id,
