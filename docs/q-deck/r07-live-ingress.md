@@ -107,6 +107,18 @@ implementation of this path — it is explicitly reserved below as a
 recovery-only tool for catching a sink back up after a crash, never the
 primary way live data reaches the ledger.
 
+**Ordering, exactly** (tightened after an independent re-gate found the
+first implementation of this section got it backwards): for every
+canonical event, (1) mint it, (2) serialize it and durably append it —
+flushed (`sync_data`) — to `events.jsonl` BEFORE anything else happens, (3)
+only then project it to the ledger. A ledger row must never exist for an
+event that isn't yet part of the on-disk canonical record — the ledger run
+itself is not created (and `running` is not reported) until the canonical
+`RunStarted` line has already been flushed to disk. A canonical-journal
+write failure is fatal (propagates, aborting the run) — a *ledger
+projection* failure is not (see §2.5); these are deliberately different
+failure modes.
+
 ## 2.3 Identity
 
 One physical run has exactly one identity across every layer:
@@ -126,12 +138,15 @@ underlying representation (`crates/o7-run/src/ids.rs`,
 an explicit, lossless string conversion at the seam
 (`o7_ledger::RunId::new(o7_run_id.as_str().to_owned())`).
 
-The **minimal** ledger-side fix: add an optional `run_id: Option<crate::RunId>`
-field to `NewRun` (`None` preserves every existing caller's behavior byte-
-for-byte — the ledger still generates one, exactly as R0/R0.5/R0.6's tests
-expect; `Some(id)` is the new live-ingress path, which uses exactly that
-id and must fail with a distinct, documented conflict rather than silently
-minting a second run if that id is already taken by an unrelated row).
+The **minimal** ledger-side fix, as actually shipped: a new
+`create_run_with_id(request, run_id, idempotency)` sibling to `create_run`
+(not a field added to `NewRun` — `create_run` itself stays untouched, byte-
+for-byte, for every existing caller). Idempotency is **mandatory** here,
+keyed by `run_id` itself — a retry (a resumed live process, or `o7
+recover`'s catch-up) replays the existing row via the ordinary idempotent-
+replay path instead of hitting a raw `UNIQUE` constraint error on the
+primary key. The same key reused with a genuinely different `run_id` is a
+hard `IdempotencyConflict`.
 
 Other identities in this slice:
 - **Conversation ID**: `o7_ledger::ConversationId`, resolved per §2.4 below
@@ -173,6 +188,11 @@ none of the existing flags overlap):
   concurrently.
 - No browser-side / Q-Deck-side conversation creation — Q-Deck remains
   read-only; this flag only exists on the `o7 run` CLI.
+- `--conversation-id` without `--ledger` is rejected at CLI **parse** time
+  (`clap`'s `requires = "ledger"`), not silently ignored — an independent
+  re-gate correctly found the first implementation only checked this
+  inside the `Some(ledger)` branch, so a bare `--conversation-id` with no
+  `--ledger` was silently accepted and did nothing.
 
 ## 2.5 Opt-in ledger sink
 
@@ -193,12 +213,15 @@ none of the existing flags overlap):
 - A projection **write** failure *during* the run is never silently
   swallowed and never silently downgrades to "flat-file-only for the rest
   of this run" — the canonical run continues to completion (the canonical
-  record is never held hostage to sink health), but the CLI's own exit
-  path reports, separately and explicitly, that durable projection is
-  incomplete and this run needs the recovery path (§2.7) before Q-Deck's
-  view of it can be trusted. The canonical verdict printed and stored in
-  `meta.json` is never altered by a sink failure — a sink is
-  infrastructure, not verdict.
+  record is never held hostage to sink health), and the canonical verdict
+  printed and stored in `meta.json` is never altered by a sink failure — a
+  sink is infrastructure, not verdict. But the **process exit code** is:
+  a `Pass` whose explicitly requested ledger projection is incomplete is
+  never reported as a successful (`0`) exit — `o7 run` exits non-zero
+  (the same path as a non-`Pass` verdict) and prints a warning naming the
+  exact recovery command
+  (`o7 recover --ledger <path> --run-dir <run-dir>`, §2.7) to run before
+  trusting Q-Deck's view of that run.
 
 ## 2.6 Verdict mapping
 
@@ -245,16 +268,40 @@ change a terminal verdict, turn an interruption into a verdict, or create a
 second conversation. Re-applying `N+1..end` after a sink crash at event `N`
 must land exactly the missing suffix.
 
-**Recovery entry point** (narrow, reusing the existing `o7 replay`
-machinery rather than inventing an import framework): the projector itself
-is the reusable function
-(`project_event(&self, event: &RunEvent) -> Result<(), ProjectError>` or
-similar, one call per canonical event, safe to call twice for the same
-event). Recovery is: read `events.jsonl` for a run whose ledger state is
-`running`/absent past where the sink is known to have stopped, and call
-that same function again over the full (or tail) stream — no new
-"migration/import" surface, no second code path with different semantics
-than the live one.
+**Restart safety is not only per-event.** An independent re-gate correctly
+found that the first implementation of this section made the *events*
+idempotent but not the surrounding *lifecycle* — retrying
+`ConversationSelector::New` minted a second conversation with no
+idempotency key; a re-`start_run` on an already-`Running`/terminal run hit
+`ForbiddenTransition`; a re-`create_attempt` created a second attempt;
+re-sealing was not a no-op. Fixed:
+
+- Conversation creation under `New` is keyed
+  `conversation-for-run:{run_id}` — idempotent, resolves to the same
+  conversation on retry.
+- `attach_run` (§3) checks the run's CURRENT status before acting:
+  `start_run` only from `Queued`; the existing `running` attempt is looked
+  up (`SqliteLedger::running_attempt`, new — a run has at most one by
+  construction) and reused instead of creating a second one; a run already
+  terminal/interrupted is attached to read-only (`attempt_id: None`).
+- `seal(verdict)` reads the run's current status first: already sealed
+  with EXACTLY this verdict → no-op; already sealed/interrupted with a
+  **different** status → hard conflict (`LedgerError`-wrapping error), a
+  terminal outcome is never silently overwritten.
+
+**Recovery/catch-up entry point**: `o7 recover --ledger <path> --run-dir
+<run-dir>` (extends the existing R0.5 `o7 recover`, which still always
+runs its own still-running → `Interrupted` scan regardless). Reads
+`run-dir/events.jsonl`, structurally re-verifies it via
+`o7_run::reduce::reduce_all` (the same check `o7 replay` does — chain
+continuity, digests, sequence order), then reuses
+`PendingProjection::open` + `attach_run` (idempotently attaching to
+whatever the ledger already has) and re-projects the **entire** stream
+through the ordinary `project`/`seal` calls — every already-applied event
+is a safe no-op via its own idempotency key, so this is correct whether
+the sink missed nothing, a tail, or (the degenerate case) everything. No
+second reducer, no new import format — the exact same projector a live
+run uses.
 
 ## 3. Minimal production projector
 
@@ -265,40 +312,50 @@ canonical o7-run event (RunEvent)
        -> o7-ledger's existing public async API only — no raw SQL outside o7-ledger
 ```
 
-Responsibilities (owned entirely by this one type, not spread across
-`main.rs`):
-1. Resolve/create the conversation (§2.4) — once, before the run's first
-   event.
-2. Create the ledger run with the SAME `RunId` (§2.3's `NewRun.run_id`
-   extension) at `RunStarted`.
-3. `start_run` (→ `Running`) at the same moment.
-4. Create the ledger attempt via existing lifecycle APIs, once.
-5. Project every subsequent canonical event, in stream order.
-6. Persist source-event provenance for every projected event: source
-   `run_id`, canonical `sequence`, canonical `event_digest`, canonical
-   `kind`/`RUN_EVENT_SCHEMA_VERSION`. **Vehicle, not a new taxonomy**:
-   `o7-ledger::EventType` is a closed, documented enum
-   (`crates/o7-ledger/src/models.rs`: "Claude/Codex-specific events, tool
-   calls, ... artifacts and gates are intentionally NOT here — they arrive
-   in PR 4") — this slice does not widen it. `RunStarted`/`RunSealed`'s
-   terminal outcome map onto the EXISTING dedicated ledger calls
-   (`start_run`, and `complete_run`/`fail_run`/`block_run`/`error_run`/
-   `interrupt_run`, each of which already emits its own correctly-typed
-   ledger event, per R0.5/R0.6). Every OTHER canonical kind
-   (`AgentStarted`, `AgentExited`, `PatchCaptured`, `GateStarted`,
-   `GateFinished`, `WorktreeCreated`, `PolicyChecked`,
-   `SandboxEvidenceCaptured`) is projected as `EventType::SystemNote` with a
-   structured JSON payload carrying the provenance fields above plus the
-   kind-specific data — reusing the ledger's existing generic
-   event/payload/SSE path exactly as `system.note` already works, not a new
-   wire concept.
-7. Apply terminal status **only** from the sealed canonical `Verdict` the
+Split into two phases (`PendingProjection` → `LiveLedgerProjector`), matching
+§2.2's ordering fix — `main.rs::run()` calls phase 1 before the worktree
+exists; `main.rs::execute_live` calls phase 2 only after canonical
+`RunStarted` is durably on disk:
+
+1. **Phase 1** (`PendingProjection::open`): open the ledger, resolve/create
+   the conversation (§2.4) — idempotently, safe before the worktree exists
+   since it reports no run status.
+2. **Phase 2** (`PendingProjection::attach_run`, called only after durable
+   `RunStarted`): create the ledger run with the SAME `RunId`
+   (`create_run_with_id`, §2.3) — idempotently attaching if it already
+   exists; `start_run` only if still `Queued`; attach to the existing
+   `running` attempt or create one, only while the run is actually live.
+3. Project every canonical event, **including `RunStarted` and
+   `RunSealed`** — no exceptions, no events skipped by kind. Persisting
+   source-event provenance (source `run_id`, canonical `sequence`, `event_digest`,
+   `schema_version`, `kind`) for every one of them, first and last included,
+   is what makes it possible to durably correlate exactly which canonical
+   event produced any given ledger transition — an earlier version of this
+   projector treated `RunStarted`/`RunSealed` as no-ops here, which lost
+   that correlation for precisely the two most load-bearing events.
+   **Vehicle, not a new taxonomy**: `o7-ledger::EventType` is a closed,
+   documented enum (`crates/o7-ledger/src/models.rs`: "Claude/Codex-specific
+   events, tool calls, ... artifacts and gates are intentionally NOT here —
+   they arrive in PR 4") — this slice does not widen it. Every canonical
+   kind projects as `EventType::SystemNote` with a structured JSON payload
+   carrying the provenance fields above plus kind-specific data — reusing
+   the ledger's existing generic event/payload/SSE path, not a new wire
+   concept. The DEDICATED ledger lifecycle events
+   (`run.created`/`run.started`/`run.completed`/etc, from
+   `create_run_with_id`/`start_run`/`complete_run`/etc, per R0.5/R0.6) are
+   unaffected and remain the authoritative status transitions — the
+   `system.note` provenance record is additional correlation, not a
+   replacement for them.
+4. Apply terminal status **only** from the sealed canonical `Verdict` the
    caller hands it at `RunSealed` — never recomputed, never inferred.
-8. Finish the attempt with a status consistent with the run's terminal
-   status, via existing lifecycle APIs.
-9. No raw SQL outside `o7-ledger`'s own crate boundary.
-10. `o7-run`/the root CLI depend on `o7-ledger` (a plain Rust dependency);
-    neither depends on `o7d`, HTTP, or Q-Deck, directly or transitively.
+   Idempotent: already sealed with this exact verdict → no-op; sealed with
+   a different one → hard conflict, never silently overwritten (§2.7).
+5. Finishing the attempt happens as a side effect of the SAME transaction
+   that seals the run (`o7-ledger`'s own `set_run_status`, unchanged since
+   R0.6) — no separate attempt-finishing call is needed.
+6. No raw SQL outside `o7-ledger`'s own crate boundary.
+7. `o7-run`/the root CLI depend on `o7-ledger` (a plain Rust dependency);
+   neither depends on `o7d`, HTTP, or Q-Deck, directly or transitively.
 
 ## What R0.7 does not do
 
