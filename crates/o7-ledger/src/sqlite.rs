@@ -662,6 +662,11 @@ impl SqliteLedger {
     /// path's own ordinary `seal()`) is trusted to have independently
     /// verified a genuinely sealed canonical stream first.
     ///
+    /// Atomically repairs the run's own most-recent `interrupted` attempt to
+    /// the matching terminal attempt status too — a fourth re-gate found the
+    /// first version of this method left the run and its attempt internally
+    /// inconsistent (`run = completed`, attempt still `interrupted`).
+    ///
     /// # Errors
     /// [`LedgerError::NotFound`] if the run is missing; [`LedgerError::InvalidState`]
     /// if the run is not currently `interrupted`, or if `target` is not one of the four
@@ -697,6 +702,28 @@ impl SqliteLedger {
             tx.execute(
                 "UPDATE run SET status = ?1, finished_at = ?2 WHERE run_id = ?3",
                 params![target.as_str(), now, run_id.as_str()],
+            )?;
+            // An ordinary terminal transition (`set_run_status`) atomically
+            // closes the run's own attempt to a MATCHING terminal status —
+            // repair must too, or it leaves an internally inconsistent
+            // ledger (`run = completed`, its own attempt still
+            // `interrupted`). Plain recovery's `mark_interrupted` closed
+            // exactly one attempt alongside this run (the one that was
+            // `running` at the time), so the most recent `interrupted`
+            // attempt — not any earlier, already-settled one from a prior
+            // attempt cycle — is the one this repair concerns.
+            tx.execute(
+                "UPDATE run_attempt SET status = ?1, finished_at = ?2 \
+                 WHERE attempt_id = (
+                     SELECT attempt_id FROM run_attempt \
+                     WHERE run_id = ?3 AND status = 'interrupted' \
+                     ORDER BY attempt_number DESC LIMIT 1
+                 )",
+                params![
+                    terminal_attempt_status(target).as_str(),
+                    now,
+                    run_id.as_str()
+                ],
             )?;
             emit_event(
                 tx,
