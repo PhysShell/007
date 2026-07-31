@@ -5,6 +5,7 @@
 
 use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -13,7 +14,7 @@ use o7::events;
 use o7::gate::GateManifest;
 use o7::invoke;
 use o7::judge;
-use o7::ledger_projector::{ConversationSelector, LiveLedgerProjector};
+use o7::ledger_projector::{ConversationSelector, LiveLedgerProjector, PendingProjection};
 use o7::record::{RunMeta, RunRecord};
 use o7::verdict::{StepVerdict, Verdict};
 use o7::worktree;
@@ -39,8 +40,10 @@ enum Cmd {
     Replay(ReplayArgs),
     /// Recover: mark ledger runs/attempts left `running` by a dead process
     /// as `Interrupted` (never `Error`) — a thin CLI over o7-ledger's
-    /// existing `recover_scan`/`mark_interrupted` (Q-Deck R0.5), not a new
-    /// mechanism.
+    /// existing `recover_scan`/`mark_interrupted` (Q-Deck R0.5). With
+    /// `--run-dir`, ALSO re-verifies and re-applies one run's canonical
+    /// `events.jsonl` to the ledger — catch-up for a sink that fell behind
+    /// or a process that crashed mid-projection (Q-Deck R0.7).
     Recover(RecoverArgs),
 }
 
@@ -55,6 +58,12 @@ struct RecoverArgs {
     /// Ledger to scan and recover.
     #[arg(long)]
     ledger: PathBuf,
+    /// Re-verify and re-apply this run's canonical `events.jsonl` to the
+    /// ledger (idempotent — safe even if some or all of it was already
+    /// projected). Optional; the still-running -> `Interrupted` scan
+    /// always runs regardless of whether this is given.
+    #[arg(long)]
+    run_dir: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -100,11 +109,12 @@ struct RunArgs {
     /// is even created, same discipline as an invalid gate manifest.
     #[arg(long)]
     ledger: Option<PathBuf>,
-    /// Ledger conversation to project this run into (only meaningful with
-    /// `--ledger`). Omitted: a new conversation is created. Given: must
-    /// already exist — an unknown id fails loudly, never silently created
-    /// under the caller-supplied id and never "the most recent one."
-    #[arg(long)]
+    /// Ledger conversation to project this run into. Requires `--ledger` —
+    /// rejected at parse time otherwise, rather than silently ignored.
+    /// Omitted: a new conversation is created. Given: must already exist —
+    /// an unknown id fails loudly, never silently created under the
+    /// caller-supplied id and never "the most recent one."
+    #[arg(long, requires = "ledger")]
     conversation_id: Option<String>,
 }
 
@@ -118,9 +128,15 @@ fn main() -> Result<()> {
     }
 }
 
-/// Mark runs/attempts a dead process left `running` as `Interrupted`. Reuses
-/// o7-ledger's existing recovery scan (Q-Deck R0.5) — no new mechanism.
+/// Mark runs/attempts a dead process left `running` as `Interrupted`
+/// (reuses o7-ledger's existing recovery scan, Q-Deck R0.5), and, if
+/// `--run-dir` is given, first catch up that run's live projection from its
+/// canonical record.
 fn recover(a: &RecoverArgs) -> Result<()> {
+    if let Some(run_dir) = &a.run_dir {
+        catch_up(run_dir, &a.ledger)?;
+    }
+
     let ledger = o7_ledger::SqliteLedger::open(&a.ledger)
         .with_context(|| format!("opening ledger at {}", a.ledger.display()))?;
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -135,6 +151,61 @@ fn recover(a: &RecoverArgs) -> Result<()> {
     rt.block_on(ledger.mark_interrupted(state))
         .context("marking interrupted work")?;
     println!("[o7] recover: {runs} run(s), {attempts} attempt(s) marked interrupted");
+    Ok(())
+}
+
+/// Re-verify a run's canonical `events.jsonl` (chain continuity, digests,
+/// sequence order — the same structural check `o7 replay` does, via the
+/// same `reduce_all`) and re-apply it to the ledger: attach to (or create)
+/// the run/attempt idempotently, re-project every event (idempotent, so an
+/// already-applied prefix is a safe no-op), and idempotently apply the
+/// sealed verdict if the stream is sealed. Reuses `LiveLedgerProjector` —
+/// not a second reducer, not a separate import format.
+fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
+    let events_text = std::fs::read_to_string(run_dir.join(events::EVENTS_FILE))
+        .with_context(|| format!("reading canonical events.jsonl in {}", run_dir.display()))?;
+    let stream = events::from_jsonl(&events_text)?;
+    let state = o7_run::reduce::reduce_all(&stream)
+        .map_err(|e| anyhow::anyhow!("canonical stream failed structural verification: {e}"))?;
+    let canonical_run_id = stream
+        .first()
+        .map(|e| e.run_id.clone())
+        .context("events.jsonl has no events to catch up")?;
+
+    // "New" is only exercised as a fallback for the narrow case where the
+    // run's ledger row was never created at all yet — create_run_with_id's
+    // own idempotent replay makes an EXISTING row's real conversation_id
+    // authoritative regardless of what selector this call passes.
+    let pending =
+        PendingProjection::open(ledger_path, ConversationSelector::New, &canonical_run_id)
+            .context("opening the ledger for catch-up")?;
+    let projector = pending
+        .attach_run(
+            &canonical_run_id,
+            "claude".to_string(),
+            "implementer".to_string(),
+        )
+        .context("attaching the catch-up projector to the existing (or new) run")?;
+
+    for event in &stream {
+        projector
+            .project(event)
+            .with_context(|| format!("re-projecting canonical event seq {}", event.sequence))?;
+    }
+
+    let sealed = state.verdict.is_some();
+    if let Some(verdict) = state.verdict {
+        projector
+            .seal(verdict)
+            .context("applying the canonical stream's sealed verdict during catch-up")?;
+    }
+
+    println!(
+        "[o7] recover: caught up run {} ({} canonical event(s) re-applied, {})",
+        canonical_run_id.as_str(),
+        stream.len(),
+        if sealed { "sealed" } else { "still running" }
+    );
     Ok(())
 }
 
@@ -183,11 +254,13 @@ fn run(a: RunArgs) -> Result<()> {
     let secs = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let run_id = format!("{secs}-{}", std::process::id());
 
-    // A live ledger sink is opt-in and fails loudly BEFORE anything is
-    // spent — the same discipline the contract build above already has
-    // (Q-Deck R0.7, docs/q-deck/r07-live-ingress.md section 2.5). Built
-    // before the worktree even exists.
-    let projector = match &a.ledger {
+    // Phase 1 of the live-ledger sink, opt-in, fails loudly BEFORE anything
+    // is spent (Q-Deck R0.7, docs/q-deck/r07-live-ingress.md section 2.5):
+    // open the ledger and resolve the conversation. This does NOT create
+    // the ledger run yet — that must wait until canonical RunStarted is
+    // durably on disk (section 3's timing fix), which happens inside
+    // `execute`/`execute_live`, after the worktree exists.
+    let pending = match &a.ledger {
         None => None,
         Some(path) => {
             let canonical_run_id = CanonicalRunId::new(run_id.clone())
@@ -197,16 +270,9 @@ fn run(a: RunArgs) -> Result<()> {
                 None => ConversationSelector::New,
             };
             Some(
-                LiveLedgerProjector::start(
-                    path,
-                    conversation,
-                    &canonical_run_id,
-                    a.engine.clone(),
-                    "implementer".to_string(),
-                )
-                .with_context(|| {
-                    format!("starting live ledger projection at {}", path.display())
-                })?,
+                PendingProjection::open(path, conversation, &canonical_run_id).with_context(
+                    || format!("opening live ledger projection at {}", path.display()),
+                )?,
             )
         }
     };
@@ -230,7 +296,7 @@ fn run(a: RunArgs) -> Result<()> {
         &task,
         &manifest,
         contract,
-        projector.as_ref(),
+        pending,
     );
 
     if a.keep_worktree {
@@ -239,9 +305,20 @@ fn run(a: RunArgs) -> Result<()> {
         eprintln!("[o7] warning: worktree cleanup failed: {e}");
     }
 
-    let verdict = outcome?;
+    let (verdict, projection_incomplete) = outcome?;
     println!("[o7] {run_id}: verdict {verdict:?}");
-    if verdict != Verdict::Pass {
+    if projection_incomplete {
+        eprintln!(
+            "[o7] {run_id}: WARNING — live ledger projection is incomplete; run \
+             `o7 recover --ledger <path> --run-dir runs/{target}/{run_id}` to catch up \
+             before trusting Q-Deck's view of this run"
+        );
+    }
+    // A PASS whose explicitly requested ledger projection is incomplete is
+    // never reported as a successful process exit — the canonical verdict
+    // in meta.json/replay is unaffected, but the exit code must not lie
+    // about durable Q-Deck visibility having actually been achieved.
+    if verdict != Verdict::Pass || projection_incomplete {
         std::process::exit(1);
     }
     Ok(())
@@ -259,8 +336,8 @@ fn execute(
     task: &str,
     manifest: &GateManifest,
     contract: o7_run::event::RunContract,
-    projector: Option<&LiveLedgerProjector>,
-) -> Result<Verdict> {
+    pending: Option<PendingProjection>,
+) -> Result<(Verdict, bool)> {
     println!(
         "[o7] {run_id}: {} ({}) full-auto in worktree",
         a.engine, a.model
@@ -273,7 +350,7 @@ fn execute(
     // every gate run to completion first, then the whole canonical stream
     // is synthesized in one call. Byte/semantics-identical to before this
     // slice (docs/q-deck/r07-live-ingress.md section 2.5's requirement).
-    let (stream, steps, ar) = match projector {
+    let (stream, steps, ar, projection_incomplete) = match pending {
         None => {
             let ar = agent::run(engine, wt, task, &a.model, a.max_turns)?;
             rec.write_task(task)?;
@@ -285,31 +362,19 @@ fn execute(
             let stream = events::build_events(
                 run_id, contract, &task_ref, &diff_ref, &ar, &steps, &rec.dir,
             )?;
-            (stream, steps, ar)
+            (stream, steps, ar, false)
         }
         Some(p) => execute_live(
             a, run_id, wt, engine, task, &task_ref, manifest, contract, &rec, p,
         )?,
     };
 
+    // The live path already wrote events.jsonl incrementally, durably, per
+    // event (section 1's ordering fix) — this rewrite is the SAME bytes
+    // (identical events, identical serialization), harmless for both paths
+    // and keeps this tail uniform rather than special-cased.
     rec.write_text(events::EVENTS_FILE, &events::to_jsonl(&stream)?)?;
     let verdict = events::canonical_verdict(&stream)?;
-
-    if let Some(p) = projector {
-        // The terminal ledger status comes only from the verdict the
-        // canonical reducer above just produced — never recomputed by the
-        // projector itself (docs/q-deck/r07-live-ingress.md section 2.1).
-        // A sink failure here is reported, never allowed to change the
-        // canonical verdict this function returns.
-        if let Err(e) = events::to_canonical(verdict).and_then(|cv| p.seal(cv)) {
-            eprintln!(
-                "[o7] warning: canonical verdict is {verdict:?}, but sealing the live \
-                 ledger projection failed: {e:#} — this run's durable projection is \
-                 incomplete; run `o7 recover --ledger <path>` and re-apply the missing \
-                 tail before trusting Q-Deck's view of it"
-            );
-        }
-    }
 
     // The legacy per-step reduction stays as a cross-check surface: a
     // difference is expected exactly where the reducer is stricter (e.g. a
@@ -341,21 +406,33 @@ fn execute(
     };
     rec.write_meta(&meta)?;
     println!("[o7] {run_id}: record at {}", rec.dir.display());
-    Ok(verdict)
+    Ok((verdict, projection_incomplete))
 }
 
-/// The `--ledger` path: mints each canonical event immediately after the
-/// real thing it describes happens, and projects it to the ledger right
-/// away — Q-Deck R0.7's live ingress
-/// (`docs/q-deck/r07-live-ingress.md`). Produces the exact same
-/// `(stream, steps, AgentRun)` shape [`execute`]'s no-ledger branch does
-/// (proved equal for the same inputs by
-/// `tests/live_ingress_matches_batch.rs`), just built incrementally with a
-/// projection call after each event instead of in one call at the end.
+/// The `--ledger` path: for every canonical event, in order —
 ///
-/// A projection failure is reported but never aborts the run or changes
-/// what gets returned — the canonical record is never held hostage to sink
-/// health (docs/q-deck/r07-live-ingress.md section 2.5).
+/// 1. mint it;
+/// 2. serialize it and durably append it to `events.jsonl` (flushed before
+///    anything else happens — a canonical event must never be projected to
+///    the ledger before it is part of the on-disk canonical record, Q-Deck
+///    R0.7, docs/q-deck/r07-live-ingress.md section "Recovery and
+///    idempotency");
+/// 3. only then project it to the ledger.
+///
+/// `RunStarted` is durably appended BEFORE the ledger run is even created
+/// (`pending.attach_run` runs after step 2 for that first event, never
+/// before) — Q-Deck must never show a run `running` before its canonical
+/// record says it started. Each `GateStarted` is minted/appended/projected
+/// immediately before that gate's command actually runs, and each
+/// `GateFinished` only after it completes and its log is captured — not
+/// after the fact, the way the pre-corrective-review version of this
+/// function did.
+///
+/// A ledger *projection* failure (as opposed to a canonical-journal write
+/// failure, which is fatal and propagates) is reported but never aborts the
+/// run — the canonical record is never held hostage to sink health — but it
+/// IS tracked and returned, so the caller can report the run's exit
+/// honestly instead of claiming a complete projection that didn't happen.
 #[allow(clippy::too_many_arguments)]
 fn execute_live(
     a: &RunArgs,
@@ -367,29 +444,42 @@ fn execute_live(
     manifest: &GateManifest,
     contract: o7_run::event::RunContract,
     rec: &RunRecord,
-    projector: &LiveLedgerProjector,
+    pending: PendingProjection,
 ) -> Result<(
     Vec<o7_run::event::RunEvent>,
     Vec<StepVerdict>,
     agent::AgentRun,
+    bool,
 )> {
     let canonical_run_id = CanonicalRunId::new(run_id.to_string())
         .map_err(|e| anyhow::anyhow!("minting run id: {e}"))?;
-    let mut chain = events::EventChain::new(canonical_run_id);
-    let project =
-        |chain: &mut events::EventChain, kind: o7_run::event::RunEventKind| -> Result<()> {
-            let event = chain.push(kind)?;
-            if let Err(e) = projector.project(&event) {
-                eprintln!(
-                    "[o7] warning: live ledger projection of a canonical event failed: {e:#} — \
-                 continuing the run; this event's durable projection is incomplete and \
-                 needs `o7 recover --ledger <path>` afterward"
-                );
-            }
-            Ok(())
-        };
+    let mut chain = events::EventChain::new(canonical_run_id.clone());
+    let mut events_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(rec.dir.join(events::EVENTS_FILE))
+        .context("opening events.jsonl for durable per-event append")?;
+    let mut projection_incomplete = false;
 
-    project(
+    // Mint + durably append ONLY — no projector exists yet for the very
+    // first event (RunStarted), since the ledger run must not be created
+    // before this write lands on disk.
+    let mut append_only = |chain: &mut events::EventChain,
+                           kind: o7_run::event::RunEventKind|
+     -> Result<o7_run::event::RunEvent> {
+        let event = chain.push(kind)?;
+        let mut line = serde_json::to_string(&event).context("serializing canonical event")?;
+        line.push('\n');
+        events_file
+            .write_all(line.as_bytes())
+            .context("appending canonical event to events.jsonl")?;
+        events_file
+            .sync_data()
+            .context("flushing canonical event to disk")?;
+        Ok(event)
+    };
+
+    let run_started = append_only(
         &mut chain,
         o7_run::event::RunEventKind::RunStarted {
             contract,
@@ -397,65 +487,116 @@ fn execute_live(
         },
     )?;
 
-    project(&mut chain, o7_run::event::RunEventKind::AgentStarted)?;
+    // Only NOW — after RunStarted is durably on disk — does the ledger run
+    // get created/attached and reported `running`.
+    let projector = pending
+        .attach_run(
+            &canonical_run_id,
+            a.engine.clone(),
+            "implementer".to_string(),
+        )
+        .context("attaching the live ledger projector after durable RunStarted")?;
+
+    let project = |projector: &LiveLedgerProjector,
+                   event: &o7_run::event::RunEvent,
+                   incomplete: &mut bool| {
+        if let Err(e) = projector.project(event) {
+            *incomplete = true;
+            eprintln!(
+                "[o7] warning: live ledger projection of a canonical event failed: {e:#} — \
+                 continuing the run; this event's durable projection is incomplete and \
+                 needs `o7 recover --ledger <path> --run-dir <run-dir>` afterward"
+            );
+        }
+    };
+
+    project(&projector, &run_started, &mut projection_incomplete);
+
+    let agent_started = append_only(&mut chain, o7_run::event::RunEventKind::AgentStarted)?;
+    project(&projector, &agent_started, &mut projection_incomplete);
+
     let ar = agent::run(engine, wt, task, &a.model, a.max_turns)?;
-    project(
+
+    let agent_exited = append_only(
         &mut chain,
         o7_run::event::RunEventKind::AgentExited {
             outcome: events::agent_outcome(&ar),
         },
     )?;
+    project(&projector, &agent_exited, &mut projection_incomplete);
 
     rec.write_task(task)?;
     rec.write_agent_stdout(&ar.stdout)?;
     let diff = worktree::diff_vs_base(wt, &a.base).unwrap_or_default();
     rec.write_diff(&diff)?;
     let diff_ref = events::artifact(ArtifactKind::Diff, "diff.patch", diff.as_bytes());
-    project(
+    let patch_captured = append_only(
         &mut chain,
         o7_run::event::RunEventKind::PatchCaptured { patch: diff_ref },
     )?;
+    project(&projector, &patch_captured, &mut projection_incomplete);
 
     manifest.validate()?;
     let gate_out = rec.gate_dir();
     std::fs::create_dir_all(&gate_out)?;
     let mut steps = Vec::new();
     for step in &manifest.gate {
-        let verdict = manifest.run_one_step(step, wt, &gate_out)?;
-        // Mirrors build_events' own skip condition exactly: a step that
-        // never actually executed (windows-blocked or waived) emits no
-        // gate events — the contract alone carries its obligation.
-        if !matches!(verdict.verdict, Verdict::Blocked | Verdict::NotApplicable) {
-            let gate = o7_run::ids::GateId::new(step.name.clone())
-                .map_err(|e| anyhow::anyhow!("gate step name invalid as a gate id: {e}"))?;
-            project(
-                &mut chain,
-                o7_run::event::RunEventKind::GateStarted { gate: gate.clone() },
-            )?;
-            let log = if verdict.log.is_empty() {
-                None
-            } else {
-                let bytes = std::fs::read(rec.dir.join(&verdict.log))
-                    .with_context(|| format!("reading back gate log {}", verdict.log))?;
-                Some(events::artifact(
-                    o7_run::event::ArtifactKind::GateLog,
-                    &verdict.log,
-                    &bytes,
-                ))
-            };
-            project(
-                &mut chain,
-                o7_run::event::RunEventKind::GateFinished {
-                    gate,
-                    outcome: events::gate_outcome(verdict.verdict),
-                    log,
-                },
-            )?;
+        // Mirrors GateManifest::run_one_step's own skip predicate exactly —
+        // a step that will not actually execute (windows-blocked or
+        // waived) emits no gate events, the contract alone carries its
+        // obligation. Checked HERE, before calling run_one_step, so that
+        // for a step that DOES execute, GateStarted is minted/appended/
+        // projected before the command runs, not after.
+        if step.env.as_deref() == Some("windows") {
+            steps.push(manifest.run_one_step(step, wt, &gate_out)?);
+            continue;
         }
+
+        let gate = o7_run::ids::GateId::new(step.name.clone())
+            .map_err(|e| anyhow::anyhow!("gate step name invalid as a gate id: {e}"))?;
+        let gate_started = append_only(
+            &mut chain,
+            o7_run::event::RunEventKind::GateStarted { gate: gate.clone() },
+        )?;
+        project(&projector, &gate_started, &mut projection_incomplete);
+
+        let verdict = manifest.run_one_step(step, wt, &gate_out)?;
+        let log = if verdict.log.is_empty() {
+            None
+        } else {
+            let bytes = std::fs::read(rec.dir.join(&verdict.log))
+                .with_context(|| format!("reading back gate log {}", verdict.log))?;
+            Some(events::artifact(
+                o7_run::event::ArtifactKind::GateLog,
+                &verdict.log,
+                &bytes,
+            ))
+        };
+        let gate_finished = append_only(
+            &mut chain,
+            o7_run::event::RunEventKind::GateFinished {
+                gate,
+                outcome: events::gate_outcome(verdict.verdict),
+                log,
+            },
+        )?;
+        project(&projector, &gate_finished, &mut projection_incomplete);
         steps.push(verdict);
     }
 
-    project(&mut chain, o7_run::event::RunEventKind::RunSealed)?;
+    let run_sealed = append_only(&mut chain, o7_run::event::RunEventKind::RunSealed)?;
+    project(&projector, &run_sealed, &mut projection_incomplete);
 
-    Ok((chain.out, steps, ar))
+    let verdict = events::canonical_verdict(&chain.out)?;
+    if let Err(e) = events::to_canonical(verdict).and_then(|cv| projector.seal(cv)) {
+        projection_incomplete = true;
+        eprintln!(
+            "[o7] warning: canonical verdict is {verdict:?}, but sealing the live ledger \
+             projection failed: {e:#} — this run's durable projection is incomplete; run \
+             `o7 recover --ledger <path> --run-dir <run-dir>` before trusting Q-Deck's \
+             view of it"
+        );
+    }
+
+    Ok((chain.out, steps, ar, projection_incomplete))
 }
