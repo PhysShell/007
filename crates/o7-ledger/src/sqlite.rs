@@ -796,15 +796,40 @@ impl SqliteLedger {
                     request.parent_run_id, request.conversation_id
                 )));
             }
-            let already_continued: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM run WHERE parent_run_id = ?1",
-                params![request.parent_run_id.as_str()],
+            // A command never continues a run that hasn't finished its own
+            // work yet — "provider session exists" alone proves nothing
+            // about whether gates/RunSealed ever happened (the session is
+            // persisted right after the agent call, well before either).
+            // Continuing a still-`running`/`queued`/`interrupted` parent
+            // would let a NEW child run's own writes race the original
+            // run's own still-in-flight worktree/canonical-record work.
+            if !parent.status.is_terminal() {
+                return Err(LedgerError::ContinuationNotPermitted(format!(
+                    "run {} is not sealed yet (status {:?}) — a command can only continue a \
+                     run that has finished",
+                    request.parent_run_id, parent.status
+                )));
+            }
+            // "No other run already claims you as ITS parent" only proves
+            // `parent_run_id` is a LEAF — it does not prove it is the
+            // conversation's actual current tail. A conversation can hold
+            // more than one independent leaf at once (e.g. two plain `o7
+            // run --conversation-id` invocations, neither ever threaded as
+            // the other's child) — every leaf but the most recently
+            // created run in the conversation is still stale. `rowid` is
+            // SQLite's own monotonic insertion order, the same tiebreak
+            // `list_runs` already uses for its own newest-first ordering.
+            let latest_run_id: String = tx.query_row(
+                "SELECT run_id FROM run WHERE conversation_id = ?1 \
+                 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                params![request.conversation_id.as_str()],
                 |row| row.get(0),
             )?;
-            if already_continued > 0 {
+            if latest_run_id != request.parent_run_id.as_str() {
                 return Err(LedgerError::StaleParent(format!(
-                    "run {} already has a child run — it is no longer this conversation's tail",
-                    request.parent_run_id
+                    "run {} is not conversation {}'s current tail (that is run {latest_run_id}) \
+                     — it is no longer valid to continue from",
+                    request.parent_run_id, request.conversation_id
                 )));
             }
             let in_flight: i64 = tx.query_row(
@@ -1006,6 +1031,95 @@ impl SqliteLedger {
                         .ok_or_else(|| LedgerError::Integrity(format!("command {id} vanished")))
                 })
                 .collect()
+        })
+        .await
+    }
+
+    /// Q-Deck R1 corrective round: a command's `bind_command_child_run`
+    /// happens BEFORE the child's own `RunStarted` — if the process that
+    /// was going to spawn the provider continuation dies right after
+    /// binding (or the spawn itself fails), the command is durably `started`
+    /// with a `child_run_id` that will never get a ledger row, and (per
+    /// `create_command`'s stale-parent check) permanently blocks the
+    /// conversation. A caller (`o7d`, on a retried idempotent request) that
+    /// wants to re-spawn for such a command must FIRST win this claim —
+    /// compare-and-swap on `updated_at`, exactly like `bind_command_child_run`
+    /// compare-and-swaps on `child_run_id`. Two callers racing to redrive
+    /// the SAME command: only the one whose `expected_updated_at` still
+    /// matches the stored value wins (`true`); the other sees `false` and
+    /// must NOT spawn — otherwise two processes could both attach to the
+    /// same not-yet-existing child run id and corrupt its `events.jsonl`
+    /// with interleaved writes.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn claim_stale_command_for_redrive(
+        &self,
+        command_id: crate::CommandId,
+        expected_updated_at: i64,
+    ) -> Result<bool, LedgerError> {
+        self.with_tx(move |tx| {
+            // `now_millis()`'s resolution is only 1ms — two claims against
+            // the SAME `expected_updated_at`, both landing in the same
+            // millisecond (entirely possible for two fast, back-to-back
+            // in-process calls, and exactly what an earlier version of
+            // this method got wrong), must never both write the identical
+            // "new" value and let a second claim's `WHERE updated_at = ?`
+            // spuriously still match. `.max(expected_updated_at + 1)`
+            // guarantees the written value always differs from what a
+            // second claimant is comparing against, regardless of clock
+            // resolution — falling back to a plain +1 bump only in that
+            // same-millisecond edge case, never in the ordinary one.
+            let now = now_millis().max(expected_updated_at.saturating_add(1));
+            let changed = tx.execute(
+                "UPDATE command SET updated_at = ?1 \
+                 WHERE command_id = ?2 AND updated_at = ?3 AND status IN ('accepted','started')",
+                params![now, command_id.as_str(), expected_updated_at],
+            )?;
+            Ok(changed == 1)
+        })
+        .await
+    }
+
+    /// Q-Deck R1 corrective round: a command's post-seal bookkeeping
+    /// (`mark_command_completed`, called after the child run's OWN
+    /// canonical stream already sealed) is itself a best-effort ledger
+    /// write in `o7 continue` — if IT fails, the child run is genuinely
+    /// done but the command row is left stuck `accepted`/`started`
+    /// forever, again blocking the conversation. Unlike a stuck UNBOUND
+    /// command (`stuck_commands`, above), this case needs no provider
+    /// invocation to repair — the child run already reached a sealed
+    /// terminal status, so reconciling is pure, side-effect-free
+    /// bookkeeping. `o7 recover` calls this unconditionally; returns every
+    /// command it just repaired.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn reconcile_completed_commands(&self) -> Result<Vec<Command>, LedgerError> {
+        self.with_tx(|tx| {
+            let mut stmt = tx.prepare(
+                "SELECT c.command_id FROM command c \
+                 JOIN run r ON r.run_id = c.child_run_id \
+                 WHERE c.status IN ('accepted','started') \
+                 AND r.status IN ('completed','failed','cancelled','blocked','error')",
+            )?;
+            let ids = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            let now = now_millis();
+            let mut repaired = Vec::with_capacity(ids.len());
+            for id in &ids {
+                tx.execute(
+                    "UPDATE command SET status = 'completed', updated_at = ?1 \
+                     WHERE command_id = ?2",
+                    params![now, id],
+                )?;
+                repaired.push(
+                    load_command(tx, id)?
+                        .ok_or_else(|| LedgerError::Integrity(format!("command {id} vanished")))?,
+                );
+            }
+            Ok(repaired)
         })
         .await
     }

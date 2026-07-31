@@ -18,8 +18,12 @@ fn key(k: &str) -> Idempotency {
     Idempotency { key: k.to_owned() }
 }
 
-/// A conversation with one sealed run carrying a durable provider session —
-/// the ordinary "continuable" starting point most tests build on.
+/// A conversation with one ACTUALLY sealed (`completed`) run carrying a
+/// durable provider session — the ordinary "continuable" starting point
+/// most tests build on. A command may only continue a run that has
+/// genuinely finished (§ create_command's own sealed-parent check) — a
+/// provider session alone is not enough, since it is persisted well before
+/// gates/`RunSealed`.
 async fn conversation_with_continuable_run(ledger: &SqliteLedger) -> (ConversationId, RunId) {
     let conv = ledger.create_conversation(None).await.unwrap();
     let run = ledger
@@ -38,6 +42,8 @@ async fn conversation_with_continuable_run(ledger: &SqliteLedger) -> (Conversati
         .set_run_provider_session(run.run_id.clone(), "sess-1".to_owned())
         .await
         .unwrap();
+    ledger.start_run(run.run_id.clone()).await.unwrap();
+    ledger.complete_run(run.run_id.clone()).await.unwrap();
     (conv.conversation_id, run.run_id)
 }
 
@@ -223,7 +229,10 @@ async fn parent_without_a_provider_session_is_refused() {
         )
         .await
         .unwrap();
-    // Deliberately never calling set_run_provider_session.
+    // Sealed (so the sealed-parent check does not fire instead), but
+    // deliberately never calling set_run_provider_session.
+    ledger.start_run(run.run_id.clone()).await.unwrap();
+    ledger.complete_run(run.run_id.clone()).await.unwrap();
 
     let err = ledger
         .create_command(
@@ -233,6 +242,88 @@ async fn parent_without_a_provider_session_is_refused() {
         .await
         .unwrap_err();
     assert_eq!(err.code(), "CONTINUATION_NOT_PERMITTED");
+}
+
+#[tokio::test]
+async fn a_still_running_parent_is_refused_even_with_a_session() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let conv = ledger.create_conversation(None).await.unwrap();
+    let run = ledger
+        .create_run(
+            NewRun {
+                conversation_id: conv.conversation_id.clone(),
+                parent_run_id: None,
+                agent: "claude".to_owned(),
+                role: "implementer".to_owned(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    // A provider session can exist well before gates/RunSealed (it is
+    // persisted right after the agent call) — it must never be treated as
+    // proof the run itself has finished.
+    ledger
+        .set_run_provider_session(run.run_id.clone(), "sess-1".to_owned())
+        .await
+        .unwrap();
+    ledger.start_run(run.run_id.clone()).await.unwrap();
+    // Deliberately never sealing (no complete_run/fail_run/etc).
+
+    let err = ledger
+        .create_command(
+            new_command(&conv.conversation_id, &run.run_id, "hi"),
+            key("k"),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "CONTINUATION_NOT_PERMITTED");
+}
+
+#[tokio::test]
+async fn the_conversations_true_latest_run_wins_even_if_an_older_leaf_has_no_child() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, first) = conversation_with_continuable_run(&ledger).await;
+
+    // A second, INDEPENDENT sealed run in the SAME conversation — never
+    // threaded as `first`'s child (mirrors a plain `o7 run
+    // --conversation-id` invocation). Both `first` and `second` are
+    // leaves (neither has a child), but only `second` is the
+    // conversation's actual current tail.
+    let second = ledger
+        .create_run(
+            NewRun {
+                conversation_id: conv.clone(),
+                parent_run_id: None,
+                agent: "claude".to_owned(),
+                role: "implementer".to_owned(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    ledger
+        .set_run_provider_session(second.run_id.clone(), "sess-2".to_owned())
+        .await
+        .unwrap();
+    ledger.start_run(second.run_id.clone()).await.unwrap();
+    ledger.complete_run(second.run_id.clone()).await.unwrap();
+
+    let err = ledger
+        .create_command(new_command(&conv, &first, "hi"), key("k1"))
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.code(),
+        "STALE_PARENT",
+        "the OLDER leaf must be refused even though nothing ever claimed it as a parent"
+    );
+
+    let ok = ledger
+        .create_command(new_command(&conv, &second.run_id, "hi"), key("k2"))
+        .await
+        .unwrap();
+    assert_eq!(ok.parent_run_id, second.run_id);
 }
 
 #[tokio::test]
@@ -484,4 +575,150 @@ async fn stuck_commands_surfaces_unbound_and_orphaned_bindings_only() {
     assert!(stuck_ids.contains(&orphaned.command_id));
     assert!(!stuck_ids.contains(&properly_started.command_id));
     assert_eq!(stuck.len(), 2);
+}
+
+/// Q-Deck R1 corrective round (blocker 1): a command bound to a child run
+/// that never got a ledger row (the spawn died) must be safely re-drivable
+/// — but two callers racing to claim the SAME redrive must never both win.
+#[tokio::test]
+async fn claim_stale_command_for_redrive_is_compare_and_swap_safe() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, run) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &run, "hi"), key("k"))
+        .await
+        .unwrap();
+    let orphan_child = RunId::from_raw("never-started".to_owned());
+    let bound = ledger
+        .bind_command_child_run(command.command_id.clone(), orphan_child)
+        .await
+        .unwrap();
+
+    // Two racing callers both read the SAME `updated_at` (as they would
+    // from two concurrent GETs of the same idempotent-replay response),
+    // then both try to claim.
+    let claim_a = ledger
+        .claim_stale_command_for_redrive(command.command_id.clone(), bound.updated_at)
+        .await
+        .unwrap();
+    let claim_b = ledger
+        .claim_stale_command_for_redrive(command.command_id.clone(), bound.updated_at)
+        .await
+        .unwrap();
+    assert!(claim_a, "the first claim must win");
+    assert!(
+        !claim_b,
+        "a second claim against the SAME stale updated_at must lose"
+    );
+
+    // A THIRD claim, using the now-stale `updated_at` from before claim_a,
+    // must also lose — the successful claim already advanced it.
+    let claim_c = ledger
+        .claim_stale_command_for_redrive(command.command_id.clone(), bound.updated_at)
+        .await
+        .unwrap();
+    assert!(!claim_c);
+}
+
+#[tokio::test]
+async fn claim_stale_command_for_redrive_fails_for_an_already_completed_command() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, run) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &run, "hi"), key("k"))
+        .await
+        .unwrap();
+    let completed = ledger
+        .mark_command_completed(command.command_id.clone())
+        .await
+        .unwrap();
+
+    let claim = ledger
+        .claim_stale_command_for_redrive(command.command_id, completed.updated_at)
+        .await
+        .unwrap();
+    assert!(
+        !claim,
+        "a command that already resolved must never be re-driven"
+    );
+}
+
+/// Q-Deck R1 corrective round (blocker 3's mirror image): the child run
+/// sealed successfully, but the command's own post-seal bookkeeping never
+/// landed — `o7 recover` must reconcile it directly, no provider
+/// invocation involved.
+#[tokio::test]
+async fn reconcile_completed_commands_heals_a_sealed_child_with_stale_bookkeeping() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, run) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &run, "hi"), key("k"))
+        .await
+        .unwrap();
+    let child = ledger
+        .create_run(
+            NewRun {
+                conversation_id: conv.clone(),
+                parent_run_id: Some(run.clone()),
+                agent: "claude".to_owned(),
+                role: "implementer".to_owned(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    ledger
+        .bind_command_child_run(command.command_id.clone(), child.run_id.clone())
+        .await
+        .unwrap();
+    ledger.start_run(child.run_id.clone()).await.unwrap();
+    ledger.complete_run(child.run_id.clone()).await.unwrap();
+    // Deliberately never calling mark_command_completed — simulating the
+    // post-seal bookkeeping write itself failing.
+
+    let reconciled = ledger.reconcile_completed_commands().await.unwrap();
+    assert_eq!(reconciled.len(), 1);
+    assert_eq!(reconciled[0].command_id, command.command_id);
+    assert_eq!(reconciled[0].status, CommandStatus::Completed);
+
+    let read_back = ledger.command(command.command_id).await.unwrap().unwrap();
+    assert_eq!(read_back.status, CommandStatus::Completed);
+
+    // Idempotent: nothing left to reconcile on a second pass.
+    let again = ledger.reconcile_completed_commands().await.unwrap();
+    assert!(again.is_empty());
+}
+
+#[tokio::test]
+async fn reconcile_completed_commands_leaves_a_genuinely_unresolved_command_alone() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, run) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &run, "hi"), key("k"))
+        .await
+        .unwrap();
+    let child = ledger
+        .create_run(
+            NewRun {
+                conversation_id: conv,
+                parent_run_id: Some(run),
+                agent: "claude".to_owned(),
+                role: "implementer".to_owned(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    ledger
+        .bind_command_child_run(command.command_id.clone(), child.run_id.clone())
+        .await
+        .unwrap();
+    ledger.start_run(child.run_id).await.unwrap();
+    // Deliberately never sealing — the child run is genuinely still active.
+
+    let reconciled = ledger.reconcile_completed_commands().await.unwrap();
+    assert!(
+        reconciled.is_empty(),
+        "a command whose child run has not sealed must never be reconciled"
+    );
 }

@@ -256,6 +256,29 @@ fn recover(a: &RecoverArgs) -> Result<()> {
             }
         }
     }
+
+    // Q-Deck R1 corrective round: the mirror-image gap — a command whose
+    // child run already sealed, but whose OWN status bookkeeping never
+    // got updated (e.g. `o7 continue`'s post-seal write failed). Purely
+    // reconcilable: no provider invocation needed, so `o7 recover` fixes
+    // it directly rather than merely reporting it.
+    let reconciled = rt
+        .block_on(ledger.reconcile_completed_commands())
+        .context("reconciling commands whose child run already sealed")?;
+    if reconciled.is_empty() {
+        println!("[o7] recover: 0 command(s) reconciled");
+    } else {
+        println!(
+            "[o7] recover: {} command(s) reconciled to completed (child run already sealed):",
+            reconciled.len()
+        );
+        for command in &reconciled {
+            println!(
+                "[o7]   command {} (conversation {})",
+                command.command_id, command.conversation_id
+            );
+        }
+    }
     Ok(())
 }
 
@@ -684,7 +707,7 @@ fn execute(
         verdict,
         steps,
         agent_exit_code: ar.exit_code,
-        session_id: None,
+        session_id: ar.session_id.as_ref().map(|s| s.as_str().to_owned()),
         cost_usd: None,
         started_at: None,
         finished_at: None,
@@ -718,6 +741,30 @@ fn execute(
 /// run — the canonical record is never held hostage to sink health — but it
 /// IS tracked and returned, so the caller can report the run's exit
 /// honestly instead of claiming a complete projection that didn't happen.
+/// Best-effort: open a fresh connection to `ledger_path` and durably record
+/// `run_id`'s provider session identity. Callers must treat any error here
+/// as non-fatal to the canonical run (see `execute_live`'s and
+/// `continue_execute`'s own call sites) — this is a live-projection write
+/// like any other, never a gate on the canonical record.
+fn persist_provider_session(
+    ledger_path: &Path,
+    run_id: &CanonicalRunId,
+    session: &agent::ProviderSessionId,
+) -> Result<()> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("starting the session-persistence runtime")?;
+    let ledger = o7_ledger::SqliteLedger::open(ledger_path)
+        .with_context(|| format!("opening ledger at {}", ledger_path.display()))?;
+    rt.block_on(ledger.set_run_provider_session(
+        o7_ledger::RunId::from_raw(run_id.as_str().to_owned()),
+        session.as_str().to_owned(),
+    ))
+    .context("calling set_run_provider_session")?;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn execute_live(
     a: &RunArgs,
@@ -832,24 +879,25 @@ fn execute_live(
     // Q-Deck R1 (`docs/q-deck/r1-command.md` §9.1): persist the provider
     // session identity durably whenever one came back — a forward-looking
     // side effect of the ORIGINAL `o7 run --ledger` path that does not
-    // change this path's own observable behavior, but without it no future
-    // command could ever continue from this run (the run row already
-    // exists at this point — `attach_run`, above, ran before the agent
-    // call).
+    // change this path's own observable behavior. Best-effort, like every
+    // other live-projection write in this function (`project`, below) —
+    // NEVER `?`. R0.7 spent five corrective rounds establishing that a
+    // ledger-sink failure must never abort or gate the canonical record;
+    // an earlier version of this exact block used `?` here and would have
+    // silently reintroduced that regression, aborting the run before
+    // AgentExited/gates/RunSealed ever got appended. A failure here only
+    // means a future command can't continue from this run until `o7
+    // recover` catches it up — never that the run itself didn't happen.
     if let Some(session) = &ar.session_id {
         if let Some(ledger_path) = &a.ledger {
-            let persist_rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .context("starting the session-persistence runtime")?;
-            let session_ledger = o7_ledger::SqliteLedger::open(ledger_path)
-                .with_context(|| format!("opening ledger at {}", ledger_path.display()))?;
-            persist_rt
-                .block_on(session_ledger.set_run_provider_session(
-                    o7_ledger::RunId::from_raw(canonical_run_id.as_str().to_owned()),
-                    session.as_str().to_owned(),
-                ))
-                .context("persisting this run's provider session identity")?;
+            if let Err(e) = persist_provider_session(ledger_path, &canonical_run_id, session) {
+                projection_incomplete = true;
+                eprintln!(
+                    "[o7] warning: persisting this run's provider session identity failed: \
+                     {e:#} — continuing the run; a future command cannot continue from it \
+                     until this is caught up"
+                );
+            }
         }
     }
 
@@ -1047,26 +1095,45 @@ fn continue_run(a: &ContinueArgs) -> Result<()> {
         }
     };
 
-    let finish_rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .context("starting the command-completion runtime")?;
-    let ledger = o7_ledger::SqliteLedger::open(&a.ledger)
-        .with_context(|| format!("opening ledger at {}", a.ledger.display()))?;
-    if let Some(child_session) = child_session_id {
+    // From here on the CANONICAL run has already sealed successfully — the
+    // events.jsonl on disk is complete and correct regardless of what
+    // happens below. Every remaining step is ledger bookkeeping, so a
+    // failure here is reported the same way a live-projection failure is
+    // (`projection_incomplete`, a warning, a non-zero exit) — never an
+    // `anyhow` error that could read as "the run itself failed."
+    let mut projection_incomplete = projection_incomplete;
+    let finish = (|| -> Result<()> {
+        let finish_rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("starting the command-completion runtime")?;
+        let ledger = o7_ledger::SqliteLedger::open(&a.ledger)
+            .with_context(|| format!("opening ledger at {}", a.ledger.display()))?;
+        if let Some(child_session) = child_session_id {
+            finish_rt
+                .block_on(ledger.set_run_provider_session(
+                    o7_ledger::RunId::from_raw(a.run_id.clone()),
+                    child_session,
+                ))
+                .context("persisting the child run's own provider session")?;
+        }
+        // "completed" is command bookkeeping only — it means "dispatched to
+        // a sealed run", not any specific verdict; the child run's own
+        // ledger row stays the sole verdict authority
+        // (docs/q-deck/r1-command.md §2).
         finish_rt
-            .block_on(ledger.set_run_provider_session(
-                o7_ledger::RunId::from_raw(a.run_id.clone()),
-                child_session,
-            ))
-            .context("persisting the child run's own provider session")?;
+            .block_on(ledger.mark_command_completed(command_id))
+            .context("marking the command completed")?;
+        Ok(())
+    })();
+    if let Err(e) = finish {
+        projection_incomplete = true;
+        eprintln!(
+            "[o7] {}: warning — post-seal command bookkeeping failed: {e:#} — the child run \
+             itself sealed successfully; run `o7 recover --ledger <path>` to catch this up",
+            a.run_id
+        );
     }
-    // "completed" is command bookkeeping only — it means "dispatched to a
-    // sealed run", not any specific verdict; the child run's own ledger row
-    // stays the sole verdict authority (docs/q-deck/r1-command.md §2).
-    finish_rt
-        .block_on(ledger.mark_command_completed(command_id))
-        .context("marking the command completed")?;
 
     println!("[o7] {}: verdict {verdict:?}", a.run_id);
     if projection_incomplete {
