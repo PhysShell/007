@@ -395,6 +395,7 @@ mod tests {
         AgentRun {
             stdout: String::new(),
             exit_code: Some(0),
+            session_id: None,
         }
     }
 
@@ -503,6 +504,7 @@ mod tests {
         let agent = AgentRun {
             stdout: String::new(),
             exit_code: Some(1),
+            session_id: None,
         };
         let events = events_for(
             r#"
