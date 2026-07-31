@@ -21,7 +21,20 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+/// `cargo test` runs every `#[test]` in this binary concurrently by
+/// default. Each test here spawns several REAL processes (git, `o7`,
+/// `o7d`, the fake `claude`) — on a resource-constrained single-vCPU
+/// development VPS, running all 8 of these at once caused a genuine,
+/// reproducible flake: a spawned `o7d`'s very first stderr line failed to
+/// parse as its own startup banner under heavy concurrent scheduling
+/// pressure. Serializing every test in THIS file (never affects other
+/// test binaries' own parallelism) trades a little wall-clock time for
+/// reliability, which is the right trade for process-heavy integration
+/// tests on constrained hardware.
+static SERIAL: Mutex<()> = Mutex::new(());
 
 fn o7d_bin_path() -> PathBuf {
     let own = PathBuf::from(env!("CARGO_BIN_EXE_o7"));
@@ -142,36 +155,53 @@ fn spawn_o7d_with_exec(
     runs_dir: &Path,
     claude_dir: &Path,
 ) -> (Child, SocketAddr) {
-    let mut child = Command::new(o7d_bin_path())
-        .args([
-            "serve",
-            "--ledger",
-            db_path.to_str().expect("utf8 path"),
-            "--listen",
-            "127.0.0.1:0",
-            "--repo",
-        ])
-        .arg(repo)
-        .arg("--worktree-root")
-        .arg(worktree_root)
-        .arg("--runs-dir")
-        .arg(runs_dir)
-        .arg("--o7-bin")
-        .arg(env!("CARGO_BIN_EXE_o7"))
-        .arg("--max-turns")
-        .arg("1")
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                claude_dir.display(),
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn the real o7d binary");
+    spawn_o7d_with_exec_and_redrive_ms(db_path, repo, worktree_root, runs_dir, claude_dir, None)
+}
+
+/// Same as [`spawn_o7d_with_exec`], with the stale-command-redrive
+/// threshold overridden via `O7D_STALE_COMMAND_REDRIVE_MS` (production's
+/// 60s default would make proving blocker-1's redrive path impractically
+/// slow for a test).
+fn spawn_o7d_with_exec_and_redrive_ms(
+    db_path: &Path,
+    repo: &Path,
+    worktree_root: &Path,
+    runs_dir: &Path,
+    claude_dir: &Path,
+    redrive_ms: Option<u64>,
+) -> (Child, SocketAddr) {
+    let mut cmd = Command::new(o7d_bin_path());
+    cmd.args([
+        "serve",
+        "--ledger",
+        db_path.to_str().expect("utf8 path"),
+        "--listen",
+        "127.0.0.1:0",
+        "--repo",
+    ])
+    .arg(repo)
+    .arg("--worktree-root")
+    .arg(worktree_root)
+    .arg("--runs-dir")
+    .arg(runs_dir)
+    .arg("--o7-bin")
+    .arg(env!("CARGO_BIN_EXE_o7"))
+    .arg("--max-turns")
+    .arg("1")
+    .env(
+        "PATH",
+        format!(
+            "{}:{}",
+            claude_dir.display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    )
+    .stdout(Stdio::null())
+    .stderr(Stdio::piped());
+    if let Some(ms) = redrive_ms {
+        cmd.env("O7D_STALE_COMMAND_REDRIVE_MS", ms.to_string());
+    }
+    let mut child = cmd.spawn().expect("spawn the real o7d binary");
     let stderr = child.stderr.take().expect("piped stderr");
     let mut reader = BufReader::new(stderr);
     let mut line = String::new();
@@ -230,6 +260,13 @@ fn spawn_o7_run_process(
 
 fn http_roundtrip(addr: SocketAddr, request: &str) -> (u16, serde_json::Value) {
     let mut stream = std::net::TcpStream::connect(addr).unwrap();
+    // Defense in depth against a malformed request in THIS test file (e.g.
+    // a Content-Length that doesn't match the actual body) hanging the
+    // whole suite instead of failing loudly — a real incident this file
+    // already hit once.
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
     stream.write_all(request.as_bytes()).unwrap();
     let mut resp = Vec::new();
     stream.read_to_end(&mut resp).unwrap();
@@ -309,7 +346,7 @@ fn poll_until<T>(deadline: Instant, mut f: impl FnMut() -> Option<T>) -> T {
 }
 
 fn wait_until_healthy(addr: SocketAddr) {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(30);
     poll_until(deadline, || {
         let (status, _) = get(addr, "/api/v1/health");
         (status == 200).then_some(())
@@ -351,6 +388,7 @@ fn command_row_count(ledger_path: &Path) -> i64 {
 /// command rejected before ever touching the provider.
 #[test]
 fn command_vertical_end_to_end() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let repo = fixture_repo(PASSING_GATE);
     let task_file = repo.path().join("task.md");
     std::fs::write(&task_file, "do the initial thing").unwrap();
@@ -428,7 +466,7 @@ fn command_vertical_end_to_end() {
     assert_ne!(child_run_id, parent_run_id);
 
     // (3) the continuation is invoked EXACTLY once for this command.
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     claude.wait_for_invocation(2, deadline);
 
     // (11) the hostile command text reached the fake provider as ONE
@@ -448,7 +486,7 @@ fn command_vertical_end_to_end() {
     );
 
     // (4) + (5): the child run's lineage and terminal visibility over REST.
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     wait_for_run_status(addr, &child_run_id, "completed", deadline);
     let (status, child_run) = get(addr, &format!("/api/v1/runs/{child_run_id}"));
     assert_eq!(status, 200);
@@ -476,7 +514,7 @@ fn command_vertical_end_to_end() {
     // conversation's full replayed history (initial run + command) is
     // several `event:`/`id:`/`data:`/blank lines each, comfortably more
     // than a small fixed cap would allow for.
-    let sse_deadline = Instant::now() + Duration::from_secs(10);
+    let sse_deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < sse_deadline {
         let mut line = String::new();
         if sse_reader.read_line(&mut line).unwrap_or(0) == 0 {
@@ -550,6 +588,7 @@ fn command_vertical_end_to_end() {
 /// time, and the two continuations never run concurrently.
 #[test]
 fn a_second_concurrent_command_is_rejected_before_provider_invocation() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let repo = fixture_repo(PASSING_GATE);
     let task_file = repo.path().join("task.md");
     std::fs::write(&task_file, "do the initial thing").unwrap();
@@ -602,7 +641,7 @@ fn a_second_concurrent_command_is_rejected_before_provider_invocation() {
     // While the first is still in flight, a second, genuinely different
     // submission must be rejected — before ever invoking the provider a
     // second time.
-    let deadline = Instant::now() + Duration::from_secs(5);
+    let deadline = Instant::now() + Duration::from_secs(30);
     claude.wait_for_invocation(2, deadline); // the first continuation has started
     let (status, second) = post(
         addr,
@@ -644,7 +683,7 @@ fn a_second_concurrent_command_is_rejected_before_provider_invocation() {
         .as_str()
         .map(str::to_owned)
         .unwrap_or_else(|| first["run_id"].as_str().unwrap().to_owned());
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(30);
     wait_for_run_status(addr, &child_run_id, "completed", deadline);
 
     let _ = o7d_child.kill();
@@ -655,6 +694,7 @@ fn a_second_concurrent_command_is_rejected_before_provider_invocation() {
 /// remain observable — durable, not process-memory-only.
 #[test]
 fn accepted_command_and_child_run_survive_an_o7d_restart() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let repo = fixture_repo(PASSING_GATE);
     let task_file = repo.path().join("task.md");
     std::fs::write(&task_file, "do the initial thing").unwrap();
@@ -701,7 +741,7 @@ fn accepted_command_and_child_run_survive_an_o7d_restart() {
     );
     assert_eq!(status, 202, "{accepted:?}");
     let child_run_id = accepted["run_id"].as_str().unwrap().to_owned();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     wait_for_run_status(addr, &child_run_id, "completed", deadline);
     let (_, before) = get(addr, &format!("/api/v1/runs/{child_run_id}"));
 
@@ -738,6 +778,7 @@ fn accepted_command_and_child_run_survive_an_o7d_restart() {
 /// exercised here, only the crash itself is simulated.
 #[test]
 fn a_command_stuck_before_its_child_run_started_is_discoverable_via_recover() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let repo = fixture_repo(PASSING_GATE);
     let task_file = repo.path().join("task.md");
     std::fs::write(&task_file, "do the initial thing").unwrap();
@@ -813,6 +854,7 @@ fn a_command_stuck_before_its_child_run_started_is_discoverable_via_recover() {
 /// pre-existing read-only route keeps working exactly as before.
 #[test]
 fn without_exec_config_the_command_endpoint_fails_closed_and_reads_still_work() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let repo = fixture_repo(PASSING_GATE);
     let task_file = repo.path().join("task.md");
     std::fs::write(&task_file, "do the initial thing").unwrap();
@@ -889,4 +931,365 @@ fn without_exec_config_the_command_endpoint_fails_closed_and_reads_still_work() 
 
     let _ = child.kill();
     let _ = child.wait();
+}
+
+/// Q-Deck R1 corrective round, blocker 1 (independent re-gate on PR #90):
+/// a command bound to a child run whose own `RunStarted` never reached the
+/// ledger (the process that was going to spawn `o7 continue` died right
+/// after the bind) must be safely re-drivable by a retry of the SAME
+/// idempotent request — not permanently stuck, blocking the conversation
+/// forever. Modeled directly at the ledger level (the same established
+/// pattern `a_command_stuck_before_its_child_run_started_is_discoverable_via_recover`
+/// and `live_ingress_e2e.rs`'s own crash-simulation tests use): hand-insert
+/// a `command` row already `started`/bound to a run id that was never
+/// created, plus a matching `idempotency_record` so a real HTTP retry
+/// idempotently replays onto it — then prove the retry actually redrives
+/// the REAL provider continuation through to a sealed child run.
+#[test]
+fn a_command_stuck_before_dispatch_is_redriven_by_a_retry_after_the_stale_bound() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let row: (String, String) = conn
+            .query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        row
+    };
+
+    let command_text = "redrive check";
+    let idempotency_key = "key-redrive";
+    let child_run_id_before_redrive = o7_ledger::RunId::generate();
+    // A small positive epoch millis value — "1000ms after the epoch",
+    // i.e. as far in the past as this test needs: `now_millis() -
+    // stale_updated_at` is a huge number, comfortably past any sane
+    // staleness threshold.
+    let stale_updated_at = 1000i64;
+
+    // Hand-build EXACTLY the durable state a real durable-bind-then-crash
+    // would have left behind: a `command` row `started`/bound, plus the
+    // matching idempotency_record a genuine `create_command` call would
+    // have written (same scope, same digest formula) — so the HTTP retry
+    // below takes the REAL idempotent-replay code path, not a fabricated
+    // shortcut.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": parent_run_id,
+            "command_text": command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-stuck-redrive', ?1, ?2, ?3, 'started', ?4, 1000, ?5)",
+            rusqlite::params![
+                conversation_id,
+                parent_run_id,
+                command_text,
+                child_run_id_before_redrive.as_str(),
+                stale_updated_at,
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-stuck-redrive', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+    }
+
+    // A short redrive threshold isn't even needed here (`stale_updated_at`
+    // is already far enough in the past to be stale under ANY sane
+    // threshold), but set one anyway so this test does not silently start
+    // depending on production's 60s default.
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status, 202, "{retried:?}");
+    assert_eq!(retried["command_id"], "cmd-stuck-redrive");
+    // The redrive reuses the ALREADY-bound child run id — it must never
+    // mint a new one (that would orphan the original binding).
+    assert_eq!(retried["run_id"], child_run_id_before_redrive.as_str());
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    claude.wait_for_invocation(2, deadline);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    wait_for_run_status(
+        addr,
+        child_run_id_before_redrive.as_str(),
+        "completed",
+        deadline,
+    );
+
+    let (status, command_row) = get(
+        addr,
+        &format!("/api/v1/runs/{}", child_run_id_before_redrive.as_str()),
+    );
+    assert_eq!(status, 200);
+    assert_eq!(command_row["parent_run_id"], parent_run_id);
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 corrective round, blocker 2: a provider session can exist well
+/// before a run has actually finished (it is persisted right after the
+/// agent call, before gates/`RunSealed`) — a command must never be allowed
+/// to continue a parent that has not sealed, even over the real HTTP path.
+///
+/// A REAL long-running agent process was tried first to produce a
+/// genuinely `running` parent, and racing a `poll_until` against it proved
+/// reliably flaky on this development VPS under memory/scheduling pressure
+/// (a real, if environmental, timing issue — not what this test exists to
+/// prove). `live_ingress_e2e.rs`'s own established pattern for simulating a
+/// ledger state that would otherwise require a fragile real-time race
+/// (`plain_recover_marking_interrupted_never_permanently_blocks_a_sealed_canonical_verdict`,
+/// reverting `run.status` directly) is used here instead: run the initial
+/// agent QUICKLY to a real seal, then revert its `run.status` back to
+/// `running` directly — the exact state a genuinely-still-running parent
+/// would have, deterministically, with no race.
+#[test]
+fn a_command_against_a_still_running_parent_is_rejected_over_http() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let row: (String, String) = conn
+            .query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        // A real crash never gets this far without both being `running` —
+        // matches the fifth-re-gate precedent `live_ingress_e2e.rs` itself
+        // established for this exact kind of fixture (revert run AND its
+        // own attempt, never just one).
+        conn.execute(
+            "UPDATE run SET status = 'running', finished_at = NULL WHERE run_id = ?1",
+            [&row.0],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE run_attempt SET status = 'running', finished_at = NULL WHERE run_id = ?1",
+            [&row.0],
+        )
+        .unwrap();
+        row
+    };
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+    );
+    wait_until_healthy(addr);
+
+    let (status, body) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": "hi",
+            "idempotency_key": "key-still-running",
+        }),
+    );
+    assert_eq!(status, 422, "{body:?}");
+    assert_eq!(body["code"], "CONTINUATION_NOT_PERMITTED");
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "a rejected command must never invoke the provider"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 corrective round: malformed JSON, a field with the wrong
+/// type, an unknown field, and an oversized body must ALL answer with the
+/// SAME `ErrorDto` shape and `400` — never axum's own default rejection
+/// format, never an undocumented `413`.
+#[test]
+fn malformed_requests_all_answer_with_the_uniform_error_dto() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &work.path().join("runs"),
+        &work.path().join("worktrees"),
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec(
+        &ledger_path,
+        repo.path(),
+        &work.path().join("worktrees"),
+        &work.path().join("runs"),
+        claude.path(),
+    );
+    wait_until_healthy(addr);
+    let (_, page) = get(addr, "/api/v1/runs");
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let path = format!("/api/v1/conversations/{conversation_id}/commands");
+
+    // Invalid JSON syntax. Content-Length MUST match the body's actual
+    // byte length exactly — an over-declared length makes the server keep
+    // waiting for bytes that will never arrive, hanging the test instead
+    // of failing it.
+    let invalid_json_body = "{not json}";
+    let (status, body) = http_roundtrip(
+        addr,
+        &format!(
+            "POST {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: \
+             application/json\r\nContent-Length: {}\r\n\r\n{invalid_json_body}",
+            invalid_json_body.len()
+        ),
+    );
+    assert_eq!(status, 400, "invalid JSON syntax: {body:?}");
+    assert!(
+        body.get("code").is_some(),
+        "must be ErrorDto-shaped: {body:?}"
+    );
+
+    // A field with the wrong type.
+    let (status, body) = post(
+        addr,
+        &path,
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": 12345,
+            "command": "hi",
+            "idempotency_key": "k1",
+        }),
+    );
+    assert_eq!(status, 400, "wrong field type: {body:?}");
+    assert!(
+        body.get("code").is_some(),
+        "must be ErrorDto-shaped: {body:?}"
+    );
+
+    // An unknown field.
+    let (status, body) = post(
+        addr,
+        &path,
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": "whatever",
+            "command": "hi",
+            "idempotency_key": "k2",
+            "worktree_path": "/etc",
+        }),
+    );
+    assert_eq!(status, 400, "unknown field: {body:?}");
+    assert!(
+        body.get("code").is_some(),
+        "must be ErrorDto-shaped: {body:?}"
+    );
+
+    // An oversized body — must not be an undocumented 413 with a
+    // differently-shaped payload.
+    let oversized = "x".repeat(32 * 1024);
+    let big_body = serde_json::json!({
+        "schema_version": 1,
+        "parent_run_id": "whatever",
+        "command": oversized,
+        "idempotency_key": "k3",
+    })
+    .to_string();
+    let (status, body) = http_roundtrip(
+        addr,
+        &format!(
+            "POST {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Type: \
+             application/json\r\nContent-Length: {}\r\n\r\n{big_body}",
+            big_body.len()
+        ),
+    );
+    assert_eq!(status, 400, "oversized body: {body:?}");
+    assert!(
+        body.get("code").is_some(),
+        "must be ErrorDto-shaped: {body:?}"
+    );
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "not one of these malformed requests may ever reach the provider"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
 }
