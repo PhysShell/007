@@ -329,23 +329,29 @@ fn live_run_is_visible_before_and_after_completion_across_real_processes() {
     });
 
     // Proof: while the process is still executing, REST already shows the
-    // conversation and run, status running, no terminal status yet.
+    // conversation and run, status running, no terminal status yet. The run
+    // row is created `queued` (`create_run_with_id`) and only transitions to
+    // `running` in a SEPARATE, following `start_run` call — polling only
+    // until the row exists (not until it's specifically `running`) can
+    // observe that brief `queued` window and flake, so the poll condition
+    // itself checks for `running`, not mere existence.
     let deadline = Instant::now() + Duration::from_secs(5);
-    let (conv_id, run_id) = poll_until(deadline, || {
+    let (conv_id, run_id, run) = poll_until(deadline, || {
         let (status, page) = get(addr, "/api/v1/runs");
         if status != 200 {
             return None;
         }
         let items = page.get("items")?.as_array()?;
         let item = items.first()?;
+        if item.get("status")?.as_str()? != "running" {
+            return None;
+        }
         Some((
             item.get("conversation_id")?.as_str()?.to_owned(),
             item.get("run_id")?.as_str()?.to_owned(),
+            item.clone(),
         ))
     });
-    let (status, run) = get(addr, &format!("/api/v1/runs/{run_id}"));
-    assert_eq!(status, 200);
-    assert_eq!(run["status"], "running", "seen before the process exits");
     assert!(run["finished_at"].is_null());
 
     // Proof: a LIVE canonical event (not just any event_type — specifically
@@ -798,6 +804,362 @@ fn a_sink_that_lost_already_projected_events_is_fully_recovered_by_catch_up() {
     assert_eq!(status, 200);
     assert_eq!(page2, page, "a repeated catch-up must be an exact no-op");
 
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Runs `o7 run` with a passing gate through to completion, live-projecting
+/// into a fresh ledger at `ledger_path` under `work`. Returns the run's
+/// record directory. Shared by the catch-up/recovery tests below, which each
+/// need a REAL, fully-completed run — every already-projected `system.note`
+/// carrying its REAL (non-`None`) `attempt_id` — not a synthetic partial run.
+fn run_to_completion(work: &Path, ledger_path: &Path, conversation_id: Option<&str>) -> PathBuf {
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the thing").unwrap();
+    let claude = fake_claude_dir(0, 0);
+
+    let mut run_child = spawn_o7_run_process(&RunInvocation {
+        repo: repo.path(),
+        task_file: &task_file,
+        ledger_path,
+        runs_dir: &work.join("runs"),
+        worktree_root: &work.join("worktrees"),
+        conversation_id,
+        claude_dir: claude.path(),
+        no_ledger: false,
+    });
+    let status = run_child.wait().unwrap();
+    let mut run_stdout = String::new();
+    run_child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut run_stdout)
+        .unwrap();
+    assert!(
+        status.success(),
+        "fixture is set up to pass cleanly: {run_stdout}"
+    );
+    PathBuf::from(find_record_dir(&run_stdout))
+}
+
+/// Delete a `system.note` row (and its idempotency record, kept consistent
+/// with the same the same-transaction invariant the other recovery tests
+/// rely on) by ledger event id.
+fn delete_system_note(ledger_path: &Path, event_id: &str) {
+    let conn = rusqlite::Connection::open(ledger_path).unwrap();
+    conn.execute(
+        "DELETE FROM idempotency_record WHERE result_reference = ?1",
+        [event_id],
+    )
+    .unwrap();
+    let deleted = conn
+        .execute("DELETE FROM event WHERE event_id = ?1", [event_id])
+        .unwrap();
+    assert_eq!(
+        deleted, 1,
+        "expected to delete exactly one row for {event_id}"
+    );
+}
+
+fn system_note_ids_in_sequence_order(ledger_path: &Path) -> Vec<String> {
+    let conn = rusqlite::Connection::open(ledger_path).unwrap();
+    let mut stmt = conn
+        .prepare("SELECT event_id FROM event WHERE event_type = 'system.note' ORDER BY sequence")
+        .unwrap();
+    stmt.query_map([], |row| row.get(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect()
+}
+
+/// `(canonical_sequence, event_id)` pairs, sorted by the CANONICAL sequence
+/// carried in each note's own payload — not the ledger's own insertion-order
+/// `event.sequence` column, which a re-inserted (idempotency-record-lost)
+/// event always gets appended to the tail of, regardless of which canonical
+/// position it represents (`docs/q-deck/r07-live-ingress.md` 2.3: ledger
+/// sequence is distinct from canonical `RunEvent.sequence`). This is the
+/// correct axis for verifying "restored in place."
+fn system_notes_by_canonical_sequence(ledger_path: &Path) -> Vec<(i64, String)> {
+    let conn = rusqlite::Connection::open(ledger_path).unwrap();
+    let mut stmt = conn
+        .prepare("SELECT event_id, payload_json FROM event WHERE event_type = 'system.note'")
+        .unwrap();
+    let mut pairs: Vec<(i64, String)> = stmt
+        .query_map([], |row| {
+            let event_id: String = row.get(0)?;
+            let payload_json: String = row.get(1)?;
+            Ok((event_id, payload_json))
+        })
+        .unwrap()
+        .map(|r| r.unwrap())
+        .map(|(event_id, payload_json)| {
+            let payload: serde_json::Value = serde_json::from_str(&payload_json).unwrap();
+            let canonical_sequence = payload["canonical_sequence"].as_i64().unwrap();
+            (canonical_sequence, event_id)
+        })
+        .collect();
+    pairs.sort_by_key(|(seq, _)| *seq);
+    pairs
+}
+
+/// Q-Deck R0.7 second re-gate, blocker #2: a catch-up against a run that is
+/// ALREADY fully, correctly projected — nothing missing, nothing deleted —
+/// must be a genuine no-op. The prior version of this test file only proved
+/// full reconstruction from scratch (everything deleted first, including
+/// idempotency records), which never exercises the case where
+/// `append_system_note`'s idempotency digest must match against a REAL,
+/// already-recorded `attempt_id` rather than the `None` a naive "attach
+/// read-only to a terminal run" would otherwise use.
+#[test]
+fn intact_replay_is_a_complete_no_op_for_catch_up() {
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let record_dir = run_to_completion(work.path(), &ledger_path, None);
+
+    let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+    wait_until_healthy(addr);
+    let (_, before_runs) = get(addr, "/api/v1/runs");
+    let conv_id = before_runs["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (_, before_events) = get(
+        addr,
+        &format!("/api/v1/conversations/{conv_id}/events?limit=100"),
+    );
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        recover.status.success(),
+        "catch-up against an intact, fully-consistent ledger must succeed, not conflict: {}",
+        String::from_utf8_lossy(&recover.stderr)
+    );
+
+    let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+    wait_until_healthy(addr);
+    let (_, after_runs) = get(addr, "/api/v1/runs");
+    let (_, after_events) = get(
+        addr,
+        &format!("/api/v1/conversations/{conv_id}/events?limit=100"),
+    );
+    assert_eq!(
+        after_runs, before_runs,
+        "an intact replay must not change the run row at all"
+    );
+    assert_eq!(
+        after_events, before_events,
+        "an intact replay must not create, alter, or duplicate a single event"
+    );
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R0.7 second re-gate, blocker #2: a sink that fell behind near the
+/// END of a run (not one that lost everything) — catch-up must fill in only
+/// the missing suffix, leaving the earlier, already-correctly-projected
+/// notes (with their REAL original `attempt_id`) completely undisturbed —
+/// same `event_id`, not replaced.
+#[test]
+fn existing_prefix_plus_missing_suffix_is_filled_in_without_disturbing_the_prefix() {
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let record_dir = run_to_completion(work.path(), &ledger_path, None);
+    let canonical_len = read_events_jsonl(&record_dir).len();
+
+    let all_ids = system_note_ids_in_sequence_order(&ledger_path);
+    assert!(
+        all_ids.len() >= 3,
+        "need enough notes to leave a real prefix: {all_ids:?}"
+    );
+    let split = all_ids.len() - 2;
+    let (kept_ids, missing_ids) = all_ids.split_at(split);
+    for id in missing_ids {
+        delete_system_note(&ledger_path, id);
+    }
+
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        recover.status.success(),
+        "catch-up over an intact prefix + missing suffix must succeed: {}",
+        String::from_utf8_lossy(&recover.stderr)
+    );
+
+    let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+    wait_until_healthy(addr);
+    let (status, page) = get(addr, "/api/v1/runs");
+    assert_eq!(status, 200);
+    let conv_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (_, events) = get(
+        addr,
+        &format!("/api/v1/conversations/{conv_id}/events?limit=100"),
+    );
+    let restored_ids: Vec<&str> = events["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["event_type"] == "system.note")
+        .map(|e| e["event_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        restored_ids.len(),
+        canonical_len,
+        "the missing suffix must be filled back in: {restored_ids:?}"
+    );
+    for kept in kept_ids {
+        assert!(
+            restored_ids.contains(&kept.as_str()),
+            "an untouched prefix event must keep its ORIGINAL event_id, not be replaced: \
+             {kept} missing from {restored_ids:?}"
+        );
+    }
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R0.7 second re-gate, blocker #2 (the third named case): a single
+/// event missing from the MIDDLE of an otherwise fully-projected stream —
+/// not a prefix, not a suffix — must be filled in without disturbing any
+/// note before or after it.
+#[test]
+fn one_skipped_event_among_already_projected_is_restored_in_place() {
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let record_dir = run_to_completion(work.path(), &ledger_path, None);
+
+    let all_ids = system_note_ids_in_sequence_order(&ledger_path);
+    assert!(
+        all_ids.len() >= 3,
+        "need a real middle to delete: {all_ids:?}"
+    );
+    let middle_index = all_ids.len() / 2;
+    let missing_id = all_ids[middle_index].clone();
+    // Captured BEFORE deleting: this is the full, intact set of (canonical
+    // sequence, event_id) pairs to compare recovery's result against.
+    let before = system_notes_by_canonical_sequence(&ledger_path);
+    delete_system_note(&ledger_path, &missing_id);
+    // The deleted note's OWN idempotency record was deleted along with it
+    // (a realistic simulation — a real failure never leaves one without the
+    // other), so catch-up legitimately mints a FRESH ledger event_id for it
+    // when re-projecting that canonical sequence — there is no idempotency
+    // record left to replay against, and a fresh insert always lands at the
+    // ledger's own tail (insertion order), never back in the middle of
+    // `event.sequence`. So "restored in place" is verified against the
+    // CANONICAL sequence carried in each note's payload, not raw ledger
+    // insertion order — see `system_notes_by_canonical_sequence`.
+
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        recover.status.success(),
+        "catch-up over a single missing middle event must succeed: {}",
+        String::from_utf8_lossy(&recover.stderr)
+    );
+
+    let after = system_notes_by_canonical_sequence(&ledger_path);
+    let after_sequences: Vec<i64> = after.iter().map(|(seq, _)| *seq).collect();
+    let expected_sequences: Vec<i64> = (0..before.len() as i64).collect();
+    assert_eq!(
+        after_sequences, expected_sequences,
+        "every canonical sequence, including the restored one, must be present exactly once: {after:?}"
+    );
+    for (before_seq, before_id) in &before {
+        if *before_id == missing_id {
+            continue;
+        }
+        let after_id = after
+            .iter()
+            .find(|(seq, _)| seq == before_seq)
+            .map(|(_, id)| id);
+        assert_eq!(
+            after_id,
+            Some(before_id),
+            "an untouched neighbor (canonical seq {before_seq}) must keep its exact original id: {after:?}"
+        );
+    }
+}
+
+/// Q-Deck R0.7 second re-gate, blocker #1: catch-up must resolve the SAME
+/// conversation an explicit `--conversation-id` run used — not guess "New"
+/// and either fail (an idempotency-digest mismatch on the run's own
+/// `create_run_with_id` key) or create a phantom second conversation.
+#[test]
+fn catch_up_resolves_the_same_explicit_conversation_the_original_run_used() {
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+
+    let existing_conversation_id = {
+        let ledger = o7_ledger::SqliteLedger::open(&ledger_path).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(ledger.create_conversation(None))
+            .unwrap()
+            .conversation_id
+            .as_str()
+            .to_owned()
+    };
+
+    let record_dir = run_to_completion(work.path(), &ledger_path, Some(&existing_conversation_id));
+
+    // Delete one note so catch-up has real work to do — proving this isn't
+    // merely a no-op that happens to pass through unrelated code.
+    let all_ids = system_note_ids_in_sequence_order(&ledger_path);
+    let last_id = all_ids.last().expect("at least one note").clone();
+    delete_system_note(&ledger_path, &last_id);
+
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        recover.status.success(),
+        "catch-up under an explicit --conversation-id must succeed: {}",
+        String::from_utf8_lossy(&recover.stderr)
+    );
+
+    let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+    wait_until_healthy(addr);
+    let (status, convs) = get(addr, "/api/v1/conversations");
+    assert_eq!(status, 200);
+    assert_eq!(
+        convs["items"].as_array().unwrap().len(),
+        1,
+        "catch-up must not create a phantom second conversation"
+    );
+    let (status, runs) = get(addr, "/api/v1/runs");
+    assert_eq!(status, 200);
+    assert_eq!(
+        runs["items"][0]["conversation_id"], existing_conversation_id,
+        "catch-up must resolve the SAME explicit conversation the original run used"
+    );
     let _ = o7d_child.kill();
     let _ = o7d_child.wait();
 }
