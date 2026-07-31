@@ -449,6 +449,50 @@ recovery path, all fixed**:
    completely unchanged — `interrupted` stays an immovable dead-end for
    it, exactly as before.
 
+**A fifth independent re-gate found two more gaps, both fixed**:
+
+1. **Repair left the run's own attempt internally inconsistent.** An
+   ordinary terminal transition (`set_run_status`) atomically closes BOTH
+   the run and its own running attempt to matching statuses.
+   `repair_interrupted_run_to_terminal` only updated `run` — leaving
+   `run = completed` next to `attempt = interrupted`, an internally
+   contradictory ledger. The round-4 E2E proof for this repair also used an
+   impossible fixture (it reverted only `run.status`, when a real crash
+   before any seal would never have gotten the attempt — or the terminal
+   ledger event — to `completed` in the first place, so it could never
+   have caught this). Fixed: the repair now atomically closes the run's
+   most-recent `interrupted` attempt to the matching terminal attempt
+   status in the SAME transaction; the E2E fixture now reverts the run,
+   its attempt, AND removes the terminal event, and asserts the attempt's
+   post-repair status and that exactly one terminal ledger event exists.
+2. **An unsealed canonical prefix could attach to an already-terminal
+   ledger run.** `verify_prefix` legitimately tolerates an unsealed
+   stream — but catch-up did not check the EXISTING ledger run's status
+   before re-projecting: an unsealed prefix over an already-`completed`/
+   `failed`/`blocked`/`errored` ledger run silently succeeded, reporting
+   "still running" while the ledger disagreed. Fixed: catch-up now fails
+   closed, BEFORE touching the ledger, if the canonical stream is unsealed
+   and an existing ledger run is already one of the sealed terminal
+   statuses — only `queued`, `running`, or `interrupted` are acceptable
+   ledger statuses for an unsealed prefix to attach to.
+
+Also found: the existing-run branch of `ledger_binding.json` validation
+only compared `conversation_id`, silently accepting a binding whose
+`agent`/`role` disagreed with the persisted row — despite this section's
+own claim that "a disagreeing binding is refused." Both fields are now
+checked the same way `conversation_id` is.
+
+Six new regression tests now cover the binding-validation and artifact
+paths directly (a prior gap the re-gate also flagged): an altered artifact
+is refused BEFORE the ledger is touched at all (proved by snapshotting the
+full ledger state and asserting it is byte-identical after the refused
+attempt); an unsupported `ledger_binding.json` schema; a binding whose
+`run_id` doesn't match; a missing binding when no run row exists (a
+genuinely `--ledger`-less run recovered against a freshly-opened ledger); a
+binding copied verbatim from a different run's record directory; and a
+binding disagreeing with an existing run row across all three fields
+(`conversation_id`/`agent`/`role`, looped in one test).
+
 ## 3. Minimal production projector
 
 ```
