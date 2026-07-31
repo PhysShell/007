@@ -185,7 +185,7 @@ relevant fields of the request.
   `IdempotencyConflict` — no mutation, no provider invocation, mapped to
   HTTP `409`.
 
-## 5. Concurrency
+## 5. Concurrency and parent validity
 
 R1's first slice allows **at most one** `accepted` or `started` command
 per conversation at a time. A second command submitted while one is still
@@ -199,6 +199,35 @@ The concurrency check and the command insert happen inside the SAME
 `IMMEDIATE` SQLite transaction `o7-ledger`'s other writes already use
 (`SqliteLedger::with_tx`) — SQLite's own writer serialization is the
 concurrency guard; there is no separate lock table.
+
+**A command's parent must be sealed** (`RunStatus::is_terminal()` —
+`completed`/`failed`/`cancelled`/`blocked`/`error`; NOT `queued`/
+`running`/`interrupted`). A durable `provider_session_id` is NOT proof of
+this: the session is persisted right after the agent call returns, well
+before gates run or `RunSealed` is minted (§9.1) — a parent can be
+`running` with a real session already attached. Continuing a still-active
+parent would let the new child run's own worktree/canonical-record work
+race the original run's own still-in-flight work. Checked via
+`parent.status.is_terminal()` inside `create_command`'s own transaction,
+before the tail check below; violating it is `422
+CONTINUATION_NOT_PERMITTED`.
+
+**`parent_run_id` must be the conversation's actual current tail** — not
+merely "a run nothing has claimed as its parent yet" (a leaf). The two are
+NOT the same thing: `o7 run --conversation-id <existing>` never sets
+`parent_run_id`, so a conversation can hold more than one independent
+leaf at once (two ordinary runs, neither ever threaded as the other's
+child). Every leaf but the single most-recently-created run in the
+conversation is stale. `create_command` resolves the true tail with `SELECT
+run_id FROM run WHERE conversation_id = ? ORDER BY created_at DESC, rowid
+DESC LIMIT 1` (`rowid` — SQLite's own monotonic insertion order — is the
+tiebreak, the same one `list_runs` already uses for its own newest-first
+ordering) and rejects anything else as `409 STALE_PARENT`. An earlier
+draft checked only "no run already has you as `parent_run_id`" — which
+proves leaf-ness, not tail-ness, and would have let a command continue an
+older, superseded leaf. Caught on independent re-gate before merge; see
+`crates/o7-ledger/tests/commands.rs`'s
+`the_conversations_true_latest_run_wins_even_if_an_older_leaf_has_no_child`.
 
 ## 6. Provider session contract
 
@@ -231,18 +260,38 @@ continuation.
 
 ## 7. Recovery
 
-A `command` row's own lifecycle is scanned the same way R0.5's
-still-`running`-at-open scan works: `o7 recover` (plain, no new flags in
-this slice) additionally finds any `command` row stuck `accepted`/
-`started` whose `child_run_id` is unset, or whose `child_run_id`'s run has
-no durable canonical record yet, and reports it as pending/recoverable —
-visible, not silently dropped. Actually re-driving a stuck command (retrying
-the provider invocation automatically) is OUT of scope for this slice;
-the recovery surface only needs to make a stuck command DISCOVERABLE, not
-self-heal it — re-submission under the SAME idempotency key is the
-documented recovery path once a stuck command is found (§4 guarantees this
-is safe and won't double-invoke the provider once the child run's own
-canonical record exists).
+Two independent gaps, two independent mechanisms — corrected on
+independent re-gate after an earlier draft claimed retry-based recovery
+worked without actually implementing it (idempotent replay alone
+short-circuits before ever re-checking whether the bound child run was
+ever dispatched):
+
+**Gap A — bound but never dispatched.** A command's `child_run_id` is
+durably bound BEFORE the provider is invoked (§3); if the process that was
+going to spawn `o7 continue` dies right after binding, or the spawn itself
+fails, that child run will never get a ledger row, and (per §5's tail
+check) the command blocks the conversation forever. `o7 recover` (plain,
+no new flags) additionally finds every such `command` row via
+`stuck_commands` (`child_run_id` unset, or bound to a run with no ledger
+row) and reports it — visible, never silently dropped. `o7d`'s own POST
+handler ALSO actively heals this: a retry under the SAME idempotency key
+re-checks whether the bound child run's ledger row now exists; if not, and
+the binding is older than a staleness threshold (60s by default,
+`O7D_STALE_COMMAND_REDRIVE_MS` overridable for testing), the retry
+compare-and-swap-claims the redrive (`claim_stale_command_for_redrive` —
+two racing retries can never both win, so two processes can never both
+attach to the same not-yet-existing run id and corrupt its
+`events.jsonl`) and re-spawns `o7 continue` with the SAME child run id.
+The staleness bound exists specifically so an impatient retry never races
+a genuinely-still-spawning attempt.
+
+**Gap B — dispatched and sealed, bookkeeping never landed.** The mirror
+image: the child run reached a real sealed terminal status, but the
+command's own post-seal `mark_command_completed` write itself failed (a
+best-effort ledger write, per §9.1's non-fatal discipline). Pure,
+side-effect-free bookkeeping to repair — no provider invocation involved —
+so `o7 recover` fixes it directly via `reconcile_completed_commands`
+rather than merely reporting it.
 
 ## 8. HTTP API
 
@@ -299,6 +348,14 @@ caller-supplied strings that flow into this vertical are `conversation_id`
 (carried as inert text — see §9.2 on argv handling), and
 `idempotency_key`.
 
+**Wire-shape hardening** (corrective round): malformed JSON syntax, a
+field with the wrong type, an unknown field (the request DTO denies
+unknown fields), and a request body over the route's size limit all
+answer with the SAME `ErrorDto` shape and `400` — handled via a single
+`Result<Json<_>, JsonRejection>` extractor, rather than letting axum's own
+default (differently-shaped, and for an oversized body, undocumented
+`413`) rejection leak onto this route.
+
 ## 9. Minimal production vertical
 
 ### 9.1 Provider session extraction (`src/agent.rs`)
@@ -314,6 +371,17 @@ working exactly as before; it additionally persists the session identity
 durably (via the ledger, §9.3) whenever a ledger sink is active, purely as
 a forward-looking side effect — it does not change that path's own
 observable behavior.
+
+**Non-fatal, like every other live-projection write** (corrective round):
+persisting the session is best-effort — its failure sets
+`projection_incomplete`/logs a warning, exactly like a `LiveLedgerProjector::project`
+failure, and NEVER aborts the run. An earlier draft called it with `?` in
+the middle of `execute_live`'s canonical-event pipeline, which would have
+aborted the run — and lost `AgentExited`/gates/`RunSealed` entirely —
+on a transient ledger-sink hiccup. R0.7 spent five corrective rounds
+establishing that a ledger-sink failure must never gate or abort the
+canonical record; this would have silently reintroduced exactly that
+regression. Caught on independent re-gate before merge.
 
 ### 9.2 Continuation invocation (`src/agent.rs`)
 
@@ -520,6 +588,22 @@ than normal. This is the signature of severe scheduling/swap contention on
 a single-vCPU, ~2GB-RAM VPS, not a logic defect. The gate commands below
 additionally skip this one test, for the same reason and with the same
 scoping discipline as the two `crash_durability` skips above.
+
+**`tests/r1_command_e2e.rs`'s own tests are serialized** (a static
+`Mutex` acquired first thing in every `#[test]`), scoped to this one file
+only. Each test spawns several real processes (git, `o7`, `o7d`, the fake
+`claude`); running all of them concurrently (`cargo test`'s default) on
+this same constrained VPS caused a genuine, reproducible flake — a
+spawned `o7d`'s very first stderr line failed to parse as its own startup
+banner under scheduling pressure. One test in the file
+(`a_command_against_a_still_running_parent_is_rejected_over_http`) was
+additionally redesigned away from a real 30-second-sleeping agent
+process + a `poll_until` race (which stayed flaky even after
+serialization and a bumped 30s deadline, consistent with genuine
+scheduling starvation rather than a fixed logic bug) to the same direct
+ledger-row-manipulation pattern `live_ingress_e2e.rs` already established
+for simulating a state that would otherwise require a fragile real-time
+race.
 
 ## What R1 does not do
 
