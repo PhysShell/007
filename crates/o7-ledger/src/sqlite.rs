@@ -642,6 +642,81 @@ impl SqliteLedger {
         .await
     }
 
+    /// Repair a run stuck `interrupted` to its TRUE canonical terminal status
+    /// (`completed`/`failed`/`blocked`/`error`) — Q-Deck R0.7's third
+    /// corrective round. `interrupted` is otherwise an immovable settled
+    /// dead-end for every ordinary API (`complete_run`/`fail_run`/etc, and
+    /// the general transition table above), by design — a real crash mid-run
+    /// must never be silently reclassified as a clean terminal outcome.
+    ///
+    /// But a plain `o7 recover` (the still-running → `interrupted` scan) can
+    /// legitimately race a `RunSealed` that already landed durably in
+    /// `events.jsonl` but never made it into the ledger before the crash —
+    /// the run IS genuinely finished, just misclassified. This method is the
+    /// ONE narrow, explicit exception, mirroring
+    /// [`Self::resume_interrupted_run`]'s precedent of a precondition-gated
+    /// bypass of the general table rather than a loosening of it: the
+    /// precondition here is `current.status == Interrupted` (checked, not
+    /// assumed), and the caller (`o7 recover --run-dir`'s catch-up, via
+    /// `LiveLedgerProjector::seal_or_repair_interrupted` — never the live
+    /// path's own ordinary `seal()`) is trusted to have independently
+    /// verified a genuinely sealed canonical stream first.
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] if the run is missing; [`LedgerError::InvalidState`]
+    /// if the run is not currently `interrupted`, or if `target` is not one of the four
+    /// sealed terminal statuses; SQLite errors.
+    pub async fn repair_interrupted_run_to_terminal(
+        &self,
+        run_id: crate::RunId,
+        target: RunStatus,
+    ) -> Result<Run, LedgerError> {
+        let event_type = match target {
+            RunStatus::Completed => EventType::RunCompleted,
+            RunStatus::Failed => EventType::RunFailed,
+            RunStatus::Blocked => EventType::RunBlocked,
+            RunStatus::Error => EventType::RunErrored,
+            _ => {
+                return Err(LedgerError::InvalidState(format!(
+                    "repair target must be a sealed terminal status (completed/failed/\
+                     blocked/error), got {}",
+                    target.as_str()
+                )));
+            }
+        };
+        self.with_tx(move |tx| {
+            let current = load_run(tx, run_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("run {run_id}")))?;
+            if current.status != RunStatus::Interrupted {
+                return Err(LedgerError::InvalidState(format!(
+                    "cannot repair: run {run_id} is {}, not interrupted",
+                    current.status.as_str()
+                )));
+            }
+            let now = now_millis();
+            tx.execute(
+                "UPDATE run SET status = ?1, finished_at = ?2 WHERE run_id = ?3",
+                params![target.as_str(), now, run_id.as_str()],
+            )?;
+            emit_event(
+                tx,
+                &NewEvent {
+                    event_id: EventId::generate(),
+                    conversation_id: current.conversation_id.clone(),
+                    run_id: Some(run_id.clone()),
+                    attempt_id: None,
+                    event_type,
+                    schema_version: EVENT_SCHEMA_VERSION,
+                    payload: serde_json::json!({ "repaired_from": "interrupted" }),
+                },
+                now,
+            )?;
+            load_run(tx, run_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("run {run_id}")))
+        })
+        .await
+    }
+
     /// Append a `user.message` event, optionally idempotent under scope
     /// `append-user-message`.
     ///

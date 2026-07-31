@@ -346,11 +346,42 @@ impl LiveLedgerProjector {
     /// mapped status (a retried/resumed seal call), this is a no-op. If the
     /// run is already sealed (or interrupted) with a **different** status,
     /// this is a hard conflict — a terminal outcome must never be silently
-    /// overwritten.
+    /// overwritten. Used by the live path; `Interrupted` is treated as an
+    /// immovable settled dead-end here, same as every other terminal status
+    /// — see [`Self::seal_or_repair_interrupted`] for the one narrow,
+    /// explicit exception, reachable only from catch-up.
     ///
     /// # Errors
     /// A status conflict, or any underlying ledger error.
     pub fn seal(&self, verdict: CanonicalVerdict) -> Result<()> {
+        self.seal_inner(verdict, false)
+    }
+
+    /// Like [`Self::seal`], but with ONE additional narrow exception: if
+    /// this run is currently `Interrupted` — e.g. a prior PLAIN `o7 recover`
+    /// (no `--run-dir`) classified it that way before this stream was ever
+    /// consulted — repair it to the exact terminal status this verdict maps
+    /// to, via [`o7_ledger::SqliteLedger::repair_interrupted_run_to_terminal`],
+    /// instead of treating `Interrupted` as an immovable dead-end. A
+    /// temporary recovery classification must never be allowed to
+    /// permanently outrank a proven canonical verdict.
+    ///
+    /// Reachable ONLY from `main.rs::catch_up`, after it has independently
+    /// verified a genuinely sealed canonical stream — chain, digests,
+    /// reducer, AND every referenced artifact's content — via
+    /// `o7_run::replay::verify_prefix`. The live path's own `seal()` call
+    /// keeps its original, stricter behavior unchanged; this method exists
+    /// so that stricter behavior never has to be loosened to accommodate
+    /// catch-up's one legitimate exception.
+    ///
+    /// # Errors
+    /// The same conflict [`Self::seal`] raises for any OTHER already-settled
+    /// status that disagrees with `verdict`, or any underlying ledger error.
+    pub fn seal_or_repair_interrupted(&self, verdict: CanonicalVerdict) -> Result<()> {
+        self.seal_inner(verdict, true)
+    }
+
+    fn seal_inner(&self, verdict: CanonicalVerdict, allow_interrupted_repair: bool) -> Result<()> {
         let target = match verdict {
             CanonicalVerdict::Pass => RunStatus::Completed,
             CanonicalVerdict::Fail => RunStatus::Failed,
@@ -365,6 +396,20 @@ impl LiveLedgerProjector {
 
         if current.status == target {
             return Ok(()); // already sealed with this exact verdict — no-op.
+        }
+        if allow_interrupted_repair && current.status == RunStatus::Interrupted {
+            self.rt
+                .block_on(
+                    self.ledger
+                        .repair_interrupted_run_to_terminal(self.run_id.clone(), target),
+                )
+                .with_context(|| {
+                    format!(
+                        "repairing interrupted run {} to its verified canonical verdict {target:?}",
+                        self.run_id.as_str()
+                    )
+                })?;
+            return Ok(());
         }
         if is_settled(current.status) {
             anyhow::bail!(
