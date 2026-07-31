@@ -169,8 +169,10 @@ fn recover(a: &RecoverArgs) -> Result<()> {
 /// Structural/artifact verification failure (the exact same failure `o7
 /// replay` would report, once sealed); a `ledger_binding.json` that
 /// disagrees with either its own schema/run_id or an existing ledger run
-/// row; a run with neither an existing ledger row nor a `ledger_binding.json`
-/// to resolve its conversation from; any underlying ledger error.
+/// row's conversation/agent/role; a run with neither an existing ledger row
+/// nor a `ledger_binding.json` to resolve its conversation from; an unsealed
+/// canonical stream whose existing ledger run is already a sealed terminal
+/// status; any underlying ledger error.
 fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
     let events_text = std::fs::read_to_string(run_dir.join(events::EVENTS_FILE))
         .with_context(|| format!("reading canonical events.jsonl in {}", run_dir.display()))?;
@@ -230,6 +232,35 @@ fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
         .context("looking up this run's existing ledger row")?
     };
 
+    // Q-Deck R0.7 fourth re-gate, blocker #2: a canonical stream that is NOT
+    // sealed has no fixed verdict — but if the ledger already reports this
+    // run as one of the SEALED terminal statuses, that is a genuine
+    // conflict between the canonical authority (unsealed) and the ledger
+    // (terminal), not a case catch-up can resolve silently by re-projecting
+    // the prefix and reporting "still running" while the ledger disagrees.
+    // Fail closed before touching the ledger at all: an unsealed prefix may
+    // only attach to a run that is `Queued`, `Running`, or `Interrupted`.
+    if state.verdict.is_none() {
+        if let Some(run) = &existing_run {
+            anyhow::ensure!(
+                matches!(
+                    run.status,
+                    o7_ledger::RunStatus::Queued
+                        | o7_ledger::RunStatus::Running
+                        | o7_ledger::RunStatus::Interrupted
+                ),
+                "canonical stream in {} is NOT sealed (no fixed verdict yet), but the \
+                 existing ledger run {} is already {:?} — refusing to attach an unsealed \
+                 prefix on top of a sealed terminal ledger run; this is a genuine conflict \
+                 between the canonical record and the ledger, not something catch-up can \
+                 paper over",
+                run_dir.display(),
+                canonical_run_id.as_str(),
+                run.status
+            );
+        }
+    }
+
     // The PERSISTED ledger row, when one exists, is authoritative — never
     // overridden by the sidecar binding file. A binding that disagrees with
     // it is refused rather than silently preferred either way: `New` must
@@ -246,6 +277,27 @@ fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
                      ledger run's own conversation_id {} — refusing to trust the \
                      mismatched binding",
                     run.conversation_id.as_str()
+                );
+                // Fourth re-gate found this checked ONLY conversation_id —
+                // a binding whose agent/role disagreed with the persisted
+                // row was silently accepted, even though the surrounding
+                // claim ("a disagreeing binding is refused") said
+                // otherwise. `create_run_with_id`'s idempotency digest
+                // includes both, so trusting a mismatched one here isn't
+                // just dishonest, it also risks corrupting that digest.
+                anyhow::ensure!(
+                    b.agent == run.agent,
+                    "ledger_binding.json's agent ({}) disagrees with the existing ledger \
+                     run's own agent ({}) — refusing to trust the mismatched binding",
+                    b.agent,
+                    run.agent
+                );
+                anyhow::ensure!(
+                    b.role == run.role,
+                    "ledger_binding.json's role ({}) disagrees with the existing ledger \
+                     run's own role ({}) — refusing to trust the mismatched binding",
+                    b.role,
+                    run.role
                 );
             }
             (
