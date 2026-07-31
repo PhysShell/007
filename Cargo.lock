@@ -998,12 +998,17 @@ dependencies = [
  "clap",
  "jsonschema",
  "nix",
+ "o7-ledger",
  "o7-run",
+ "o7d",
  "proptest",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha1",
  "sha2",
+ "tempfile",
+ "tokio",
  "toml",
 ]
 

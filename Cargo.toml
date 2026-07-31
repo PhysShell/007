@@ -37,6 +37,14 @@ anyhow = "1"
 # `o7 run` emits the event stream and takes its verdict from `reduce_all`;
 # `o7 replay` re-verifies stored records (src/events.rs — the MVP stitch).
 o7-run = { path = "crates/o7-run", version = "0.1.0" }
+# Live-ingress projection (Q-Deck R0.7, docs/q-deck/r07-live-ingress.md):
+# a plain library dependency, same as o7-run above. o7-ledger's own API is
+# async; `tokio` here is purely an internal implementation detail of
+# src/ledger_projector.rs's synchronous facade (current-thread runtime,
+# .block_on per call) — the rest of the CLI stays exactly as synchronous
+# as it is today.
+o7-ledger = { path = "crates/o7-ledger", version = "0.1.0" }
+tokio = { version = "1", features = ["rt"] }
 sha1 = "0.10"
 sha2 = "0.10"
 # `invoke.rs` only: independently re-validates a backend's structured output
@@ -82,6 +90,19 @@ indexing_slicing = "deny"     # panic-on-index; the two proven-safe slices carry
 
 [dev-dependencies]
 proptest = "1"
+tempfile = "3"
+# tests/live_ingress_e2e.rs only: a raw connection to directly delete
+# already-projected rows, simulating a sink that lost data it once
+# successfully wrote — o7-ledger's own API has no delete method by design
+# (append-only), so this bypasses it deliberately, from the test side only.
+rusqlite = { version = "0.32", features = ["bundled"] }
+# Q-Deck R0.7 process-level E2E test only (tests/live_ingress_e2e.rs): a
+# dev-dependency is Cargo's own documented way to make CARGO_BIN_EXE_o7d
+# available to this crate's integration tests, so the test can spawn the
+# REAL compiled o7d binary as its own OS process, not call into it in-memory.
+# The test itself is plain synchronous std (no async runtime needed for a
+# blocking Command::spawn + std::net::TcpStream harness).
+o7d = { path = "crates/o7d", version = "0.1.0" }
 
 [profile.release]
 strip = true

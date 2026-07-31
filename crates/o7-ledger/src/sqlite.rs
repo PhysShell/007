@@ -11,7 +11,8 @@ use std::time::Duration;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::idempotency::{
-    self, IdemOutcome, SCOPE_APPEND_USER_MESSAGE, SCOPE_CREATE_CONVERSATION, SCOPE_CREATE_RUN,
+    self, IdemOutcome, SCOPE_APPEND_SYSTEM_NOTE, SCOPE_APPEND_USER_MESSAGE,
+    SCOPE_CREATE_CONVERSATION, SCOPE_CREATE_RUN, SCOPE_CREATE_RUN_WITH_ID,
 };
 use crate::migrations;
 use crate::models::{
@@ -231,7 +232,9 @@ impl SqliteLedger {
     }
 
     /// Create a run in `queued` state (and emit `run.created`). Optionally
-    /// idempotent under scope `create-run`.
+    /// idempotent under scope `create-run`. The ledger mints its own `RunId`
+    /// — for a run that must share an id with an external canonical stream,
+    /// see [`Self::create_run_with_id`].
     ///
     /// # Errors
     /// SQLite/foreign-key errors (e.g. unknown conversation); idempotency conflict.
@@ -240,11 +243,73 @@ impl SqliteLedger {
         request: NewRun,
         idempotency: Option<Idempotency>,
     ) -> Result<Run, LedgerError> {
+        // Unchanged from before create_run_with_id existed: the digest is
+        // computed over `request` alone, exactly as any already-persisted
+        // idempotency record for this scope was — a ledger file upgraded
+        // in place must keep replaying old create-run retries correctly.
         let request_digest = idempotency::digest_bytes(&serde_json::to_vec(&request)?);
+        self.create_run_inner(request, None, SCOPE_CREATE_RUN, idempotency, request_digest)
+            .await
+    }
+
+    /// Like [`Self::create_run`], but the run uses exactly `run_id` instead
+    /// of a ledger-generated one — for live-ingress projection (Q-Deck R0.7,
+    /// `docs/q-deck/r07-live-ingress.md`), where one physical run must carry
+    /// the same `RunId` in `o7-run`'s canonical stream and in the ledger.
+    ///
+    /// `idempotency` is mandatory here (unlike `create_run`'s optional one):
+    /// the natural, and required, idempotency key for this call is `run_id`
+    /// itself — a caller that retries after a crash between this insert and
+    /// its own bookkeeping must replay under the exact same key so a second
+    /// call for the same `run_id` returns the existing row (via the ordinary
+    /// idempotent-replay path) rather than hitting a raw `UNIQUE` constraint
+    /// error on the primary key.
+    ///
+    /// # Errors
+    /// SQLite/foreign-key errors (e.g. unknown conversation); idempotency
+    /// conflict (the same `idempotency.key` reused with a different request,
+    /// including a different `run_id` — this is what protects against a
+    /// caller ever using this call to secretly reassign an existing ledger
+    /// run to a different `RunId`).
+    pub async fn create_run_with_id(
+        &self,
+        request: NewRun,
+        run_id: crate::RunId,
+        idempotency: Idempotency,
+    ) -> Result<Run, LedgerError> {
+        // A new scope with no pre-existing persisted records, so this digest
+        // scheme (including run_id, unlike create_run's) is free to differ
+        // from create_run's without any upgrade-compatibility concern.
+        let digest_input = serde_json::json!({
+            "conversation_id": request.conversation_id.as_str(),
+            "parent_run_id": request.parent_run_id.as_ref().map(crate::RunId::as_str),
+            "agent": request.agent,
+            "role": request.role,
+            "run_id": run_id.as_str(),
+        });
+        let request_digest = idempotency::digest_bytes(&serde_json::to_vec(&digest_input)?);
+        self.create_run_inner(
+            request,
+            Some(run_id),
+            SCOPE_CREATE_RUN_WITH_ID,
+            Some(idempotency),
+            request_digest,
+        )
+        .await
+    }
+
+    async fn create_run_inner(
+        &self,
+        request: NewRun,
+        run_id: Option<crate::RunId>,
+        scope: &'static str,
+        idempotency: Option<Idempotency>,
+        request_digest: String,
+    ) -> Result<Run, LedgerError> {
         self.with_tx(move |tx| {
             if let Some(idem) = &idempotency {
                 if let IdemOutcome::Replayed(reference) =
-                    idempotency::check(tx, SCOPE_CREATE_RUN, &idem.key, &request_digest)?
+                    idempotency::check(tx, scope, &idem.key, &request_digest)?
                 {
                     return load_run(tx, &reference)?
                         .ok_or_else(|| LedgerError::NotFound(format!("run {reference}")));
@@ -252,7 +317,7 @@ impl SqliteLedger {
             }
             let now = now_millis();
             let run = Run {
-                run_id: crate::RunId::generate(),
+                run_id: run_id.clone().unwrap_or_else(crate::RunId::generate),
                 conversation_id: request.conversation_id.clone(),
                 parent_run_id: request.parent_run_id.clone(),
                 agent: request.agent.clone(),
@@ -290,7 +355,7 @@ impl SqliteLedger {
             if let Some(idem) = &idempotency {
                 idempotency::record(
                     tx,
-                    SCOPE_CREATE_RUN,
+                    scope,
                     &idem.key,
                     &request_digest,
                     run.run_id.as_str(),
@@ -577,6 +642,108 @@ impl SqliteLedger {
         .await
     }
 
+    /// Repair a run stuck `interrupted` to its TRUE canonical terminal status
+    /// (`completed`/`failed`/`blocked`/`error`) — Q-Deck R0.7's third
+    /// corrective round. `interrupted` is otherwise an immovable settled
+    /// dead-end for every ordinary API (`complete_run`/`fail_run`/etc, and
+    /// the general transition table above), by design — a real crash mid-run
+    /// must never be silently reclassified as a clean terminal outcome.
+    ///
+    /// But a plain `o7 recover` (the still-running → `interrupted` scan) can
+    /// legitimately race a `RunSealed` that already landed durably in
+    /// `events.jsonl` but never made it into the ledger before the crash —
+    /// the run IS genuinely finished, just misclassified. This method is the
+    /// ONE narrow, explicit exception, mirroring
+    /// [`Self::resume_interrupted_run`]'s precedent of a precondition-gated
+    /// bypass of the general table rather than a loosening of it: the
+    /// precondition here is `current.status == Interrupted` (checked, not
+    /// assumed), and the caller (`o7 recover --run-dir`'s catch-up, via
+    /// `LiveLedgerProjector::seal_or_repair_interrupted` — never the live
+    /// path's own ordinary `seal()`) is trusted to have independently
+    /// verified a genuinely sealed canonical stream first.
+    ///
+    /// Atomically repairs the run's own most-recent `interrupted` attempt to
+    /// the matching terminal attempt status too — a fourth re-gate found the
+    /// first version of this method left the run and its attempt internally
+    /// inconsistent (`run = completed`, attempt still `interrupted`).
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] if the run is missing; [`LedgerError::InvalidState`]
+    /// if the run is not currently `interrupted`, or if `target` is not one of the four
+    /// sealed terminal statuses; SQLite errors.
+    pub async fn repair_interrupted_run_to_terminal(
+        &self,
+        run_id: crate::RunId,
+        target: RunStatus,
+    ) -> Result<Run, LedgerError> {
+        let event_type = match target {
+            RunStatus::Completed => EventType::RunCompleted,
+            RunStatus::Failed => EventType::RunFailed,
+            RunStatus::Blocked => EventType::RunBlocked,
+            RunStatus::Error => EventType::RunErrored,
+            _ => {
+                return Err(LedgerError::InvalidState(format!(
+                    "repair target must be a sealed terminal status (completed/failed/\
+                     blocked/error), got {}",
+                    target.as_str()
+                )));
+            }
+        };
+        self.with_tx(move |tx| {
+            let current = load_run(tx, run_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("run {run_id}")))?;
+            if current.status != RunStatus::Interrupted {
+                return Err(LedgerError::InvalidState(format!(
+                    "cannot repair: run {run_id} is {}, not interrupted",
+                    current.status.as_str()
+                )));
+            }
+            let now = now_millis();
+            tx.execute(
+                "UPDATE run SET status = ?1, finished_at = ?2 WHERE run_id = ?3",
+                params![target.as_str(), now, run_id.as_str()],
+            )?;
+            // An ordinary terminal transition (`set_run_status`) atomically
+            // closes the run's own attempt to a MATCHING terminal status —
+            // repair must too, or it leaves an internally inconsistent
+            // ledger (`run = completed`, its own attempt still
+            // `interrupted`). Plain recovery's `mark_interrupted` closed
+            // exactly one attempt alongside this run (the one that was
+            // `running` at the time), so the most recent `interrupted`
+            // attempt — not any earlier, already-settled one from a prior
+            // attempt cycle — is the one this repair concerns.
+            tx.execute(
+                "UPDATE run_attempt SET status = ?1, finished_at = ?2 \
+                 WHERE attempt_id = (
+                     SELECT attempt_id FROM run_attempt \
+                     WHERE run_id = ?3 AND status = 'interrupted' \
+                     ORDER BY attempt_number DESC LIMIT 1
+                 )",
+                params![
+                    terminal_attempt_status(target).as_str(),
+                    now,
+                    run_id.as_str()
+                ],
+            )?;
+            emit_event(
+                tx,
+                &NewEvent {
+                    event_id: EventId::generate(),
+                    conversation_id: current.conversation_id.clone(),
+                    run_id: Some(run_id.clone()),
+                    attempt_id: None,
+                    event_type,
+                    schema_version: EVENT_SCHEMA_VERSION,
+                    payload: serde_json::json!({ "repaired_from": "interrupted" }),
+                },
+                now,
+            )?;
+            load_run(tx, run_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("run {run_id}")))
+        })
+        .await
+    }
+
     /// Append a `user.message` event, optionally idempotent under scope
     /// `append-user-message`.
     ///
@@ -628,6 +795,77 @@ impl SqliteLedger {
                     now,
                 )?;
             }
+            Ok(event)
+        })
+        .await
+    }
+
+    /// Append a `system.note` event, scoped to a run/attempt. Idempotency is
+    /// mandatory (unlike `append_user_message`'s optional one): this exists
+    /// for Q-Deck R0.7's live-ingress projector
+    /// (`docs/q-deck/r07-live-ingress.md`), where the natural and required
+    /// idempotency key is the source canonical event's own `{run_id}:
+    /// {sequence}` — a source event must project at most once, ever, and a
+    /// caller without a key for that has a bug, not an optional nicety.
+    ///
+    /// This is the vehicle for projecting `o7-run` canonical event kinds
+    /// that have no dedicated `o7-ledger` `EventType` of their own
+    /// (`AgentStarted`, `GateFinished`, etc. — deliberately not added to
+    /// `EventType` here; see `docs/q-deck/r07-live-ingress.md`'s projector
+    /// section) — `payload` carries the canonical kind, sequence, digest,
+    /// and schema version, plus kind-specific detail, so the same generic
+    /// event/payload/SSE path every other event already uses displays it,
+    /// with no new wire concept.
+    ///
+    /// # Errors
+    /// SQLite/foreign-key errors; idempotency conflict.
+    pub async fn append_system_note(
+        &self,
+        conversation_id: crate::ConversationId,
+        run_id: Option<crate::RunId>,
+        attempt_id: Option<crate::AttemptId>,
+        payload: serde_json::Value,
+        idempotency: Idempotency,
+    ) -> Result<PersistedEvent, LedgerError> {
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id.as_str(),
+            "run_id": run_id.as_ref().map(crate::RunId::as_str),
+            "attempt_id": attempt_id.as_ref().map(crate::AttemptId::as_str),
+            "payload": payload,
+        });
+        let request_digest = idempotency::digest_bytes(&serde_json::to_vec(&digest_input)?);
+        self.with_tx(move |tx| {
+            if let IdemOutcome::Replayed(reference) = idempotency::check(
+                tx,
+                SCOPE_APPEND_SYSTEM_NOTE,
+                &idempotency.key,
+                &request_digest,
+            )? {
+                return load_event(tx, &reference)?
+                    .ok_or_else(|| LedgerError::NotFound(format!("event {reference}")));
+            }
+            let now = now_millis();
+            let event = emit_event(
+                tx,
+                &NewEvent {
+                    event_id: EventId::generate(),
+                    conversation_id: conversation_id.clone(),
+                    run_id: run_id.clone(),
+                    attempt_id: attempt_id.clone(),
+                    event_type: EventType::SystemNote,
+                    schema_version: EVENT_SCHEMA_VERSION,
+                    payload: payload.clone(),
+                },
+                now,
+            )?;
+            idempotency::record(
+                tx,
+                SCOPE_APPEND_SYSTEM_NOTE,
+                &idempotency.key,
+                &request_digest,
+                event.event_id.as_str(),
+                now,
+            )?;
             Ok(event)
         })
         .await
@@ -729,6 +967,70 @@ impl SqliteLedger {
     ) -> Result<Option<RunAttempt>, LedgerError> {
         self.with_conn(move |conn| load_attempt(conn, attempt_id.as_str()))
             .await
+    }
+
+    /// The run's currently-`running` attempt, if any (read-only). At most
+    /// one exists per run by construction (`create_attempt`'s own
+    /// partial-unique-index invariant). For Q-Deck R0.7's live-ingress
+    /// projector: after a process restart, the in-memory `attempt_id` from
+    /// the crashed process is gone — this is how a resumed projector finds
+    /// the attempt it should keep projecting into instead of creating a
+    /// second one.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn running_attempt(
+        &self,
+        run_id: crate::RunId,
+    ) -> Result<Option<RunAttempt>, LedgerError> {
+        self.with_conn(move |conn| {
+            let id: Option<String> = conn
+                .query_row(
+                    "SELECT attempt_id FROM run_attempt WHERE run_id = ?1 AND status = 'running'",
+                    params![run_id.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            match id {
+                None => Ok(None),
+                Some(id) => load_attempt(conn, &id),
+            }
+        })
+        .await
+    }
+
+    /// The run's most recent attempt (read-only), **regardless of status** —
+    /// unlike [`Self::running_attempt`], this also finds a `completed`/
+    /// `failed`/`interrupted` attempt. For Q-Deck R0.7's `o7 recover`
+    /// catch-up: re-projecting an already-terminal run's canonical stream
+    /// must reuse the SAME `attempt_id` its events were originally recorded
+    /// under, because [`Self::append_system_note`]'s idempotency digest
+    /// includes `attempt_id` — attaching read-only with a DIFFERENT
+    /// `attempt_id` (e.g. `None`) than the one already-projected events used
+    /// would make a byte-identical re-projection of an already-applied event
+    /// fail as an idempotency conflict, not replay it.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn latest_attempt(
+        &self,
+        run_id: crate::RunId,
+    ) -> Result<Option<RunAttempt>, LedgerError> {
+        self.with_conn(move |conn| {
+            let id: Option<String> = conn
+                .query_row(
+                    "SELECT attempt_id FROM run_attempt WHERE run_id = ?1 \
+                     ORDER BY attempt_number DESC LIMIT 1",
+                    params![run_id.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            match id {
+                None => Ok(None),
+                Some(id) => load_attempt(conn, &id),
+            }
+        })
+        .await
     }
 
     /// List conversations newest-first, keyset-paginated by `(created_at, id)`.

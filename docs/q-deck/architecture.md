@@ -121,5 +121,15 @@ added `RunStatus::Blocked`/`Error` (sealed) alongside the existing
 `Completed`/`Failed`/`Cancelled` (sealed) and `Interrupted` (unsealed,
 resumable) — closing the semantic gap that previously made it impossible
 for a live `o7-run` producer to project all four of its own sealed verdicts
-(`Pass`/`Fail`/`Blocked`/`Error`) without collapsing meaning. The next slice
-after R0.6 is wiring that real live producer — not R1.**
+(`Pass`/`Fail`/`Blocked`/`Error`) without collapsing meaning.**
+
+**R0.7 ("real live ingress", `docs/q-deck/r07-live-ingress.md`) wired that
+producer: `o7 run --ledger <path>` now projects its canonical event stream
+into `o7-ledger` live, per event, as the run actually executes — not a
+post-run import. `o7-run`'s reducer remains the sole verdict authority;
+`o7-ledger` is a durable projection of it. The run's `RunId` is shared
+verbatim across the canonical stream, the flat record, and the ledger (a
+real blocker — `create_run` used to mint its own id — fixed with a new
+`create_run_with_id`). No Q-Deck component changed: the existing REST/SSE
+read surface already displayed exactly this shape correctly. The next
+slice after R0.7 is real multi-turn Command (R1) — not attempted here.**
