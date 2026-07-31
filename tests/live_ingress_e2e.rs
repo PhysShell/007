@@ -759,6 +759,124 @@ fn sigkill_during_the_agent_leaves_a_durable_task_md_matching_run_started() {
     let _ = o7d_child.wait();
 }
 
+/// Q-Deck R0.7 fourth re-gate, defect #3: a run whose canonical stream is
+/// genuinely SEALED (`RunSealed` durably in `events.jsonl`, a concrete
+/// reducer verdict) but whose ledger `seal()` call never landed (a crash, or
+/// a lost projection write) is legitimately still `running` in the ledger.
+/// A plain `o7 recover` (no `--run-dir`) then classifies it `interrupted` —
+/// correct AS FAR AS IT KNOWS, since it only scans for stale `running` rows,
+/// never consults `events.jsonl`. But `interrupted` must never be allowed to
+/// PERMANENTLY outrank the real, independently-verified canonical verdict:
+/// catch-up (`--run-dir`) must repair it to the exact terminal status once
+/// it has verified the sealed stream, and a repeated catch-up after that
+/// must be a complete no-op.
+#[test]
+fn plain_recover_marking_interrupted_never_permanently_blocks_a_sealed_canonical_verdict() {
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let record_dir = run_to_completion(work.path(), &ledger_path, None);
+
+    let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+    wait_until_healthy(addr);
+    let (status, page) = get(addr, "/api/v1/runs");
+    assert_eq!(status, 200);
+    let run_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        page["items"][0]["status"], "completed",
+        "sanity: the fixture run must have sealed cleanly the first time"
+    );
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+
+    // Simulate "the ledger's own seal() call never landed" by directly
+    // reverting the run row to `running` — leaving the (already-completed)
+    // attempt row untouched, exactly like a real crash between the
+    // durable, sealed events.jsonl and the ledger seal would: the run.
+    // status column is what a plain `o7 recover` scan actually reads.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let updated = conn
+            .execute(
+                "UPDATE run SET status = 'running', finished_at = NULL WHERE run_id = ?1",
+                [&run_id],
+            )
+            .unwrap();
+        assert_eq!(updated, 1);
+    }
+
+    // Plain recovery (no --run-dir): classifies the stuck-running row
+    // `interrupted`, exactly as R0.5 always has — it has no way to know
+    // events.jsonl is actually sealed.
+    let plain_recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .output()
+        .unwrap();
+    assert!(plain_recover.status.success());
+    assert!(String::from_utf8_lossy(&plain_recover.stdout).contains("1 run(s)"));
+
+    let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+    wait_until_healthy(addr);
+    let (status, run) = get(addr, &format!("/api/v1/runs/{run_id}"));
+    assert_eq!(status, 200);
+    assert_eq!(
+        run["status"], "interrupted",
+        "plain recovery must classify the stuck-running row interrupted"
+    );
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+
+    // Catch-up: verifies the canonical stream is genuinely sealed and
+    // repairs `interrupted` to the exact terminal verdict — never blocked
+    // by `interrupted` being an otherwise-settled dead-end.
+    let catch_up = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        catch_up.status.success(),
+        "catch-up must repair an interrupted-but-actually-sealed run: {}",
+        String::from_utf8_lossy(&catch_up.stderr)
+    );
+    assert!(String::from_utf8_lossy(&catch_up.stdout).contains("sealed"));
+
+    let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+    wait_until_healthy(addr);
+    let (status, repaired_run) = get(addr, &format!("/api/v1/runs/{run_id}"));
+    assert_eq!(status, 200);
+    assert_eq!(
+        repaired_run["status"], "completed",
+        "catch-up must repair the run to its true, independently-verified canonical verdict"
+    );
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+
+    // A repeated catch-up must be a complete no-op — the run is already
+    // `completed`, matching the verdict exactly.
+    let catch_up_again = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(catch_up_again.status.success());
+
+    let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+    wait_until_healthy(addr);
+    let (status, run_after) = get(addr, &format!("/api/v1/runs/{run_id}"));
+    assert_eq!(status, 200);
+    assert_eq!(
+        run_after, repaired_run,
+        "a repeated catch-up after the repair must be an exact no-op"
+    );
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
 #[test]
 fn a_sink_that_lost_already_projected_events_is_fully_recovered_by_catch_up() {
     // A chmod-based "make the sink unwritable mid-run" was tried first and
