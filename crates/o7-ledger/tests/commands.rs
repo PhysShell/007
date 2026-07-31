@@ -722,3 +722,106 @@ async fn reconcile_completed_commands_leaves_a_genuinely_unresolved_command_alon
         "a command whose child run has not sealed must never be reconciled"
     );
 }
+
+/// Q-Deck R1 second corrective round (blocker 3): the SAME validation
+/// `agent::ProviderSessionId::new` applies (non-empty, no control
+/// characters) must be checked here, before durable acceptance — not only
+/// later, inside the detached `o7 continue` process. An invalid session
+/// is a PERMANENT defect, never transient, so catching it only after 202
+/// would mean every subsequent retry keeps re-spawning a continuation
+/// guaranteed to fail the same way forever.
+#[tokio::test]
+async fn create_command_rejects_a_parent_session_containing_a_control_character() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let conv = ledger.create_conversation(None).await.unwrap();
+    let run = ledger
+        .create_run(
+            NewRun {
+                conversation_id: conv.conversation_id.clone(),
+                parent_run_id: None,
+                agent: "claude".to_owned(),
+                role: "implementer".to_owned(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    ledger
+        .set_run_provider_session(run.run_id.clone(), "sess\u{0007}-with-bell".to_owned())
+        .await
+        .unwrap();
+    ledger.start_run(run.run_id.clone()).await.unwrap();
+    ledger.complete_run(run.run_id.clone()).await.unwrap();
+
+    let err = ledger
+        .create_command(
+            new_command(&conv.conversation_id, &run.run_id, "hi"),
+            key("k"),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "CONTINUATION_NOT_PERMITTED");
+}
+
+#[tokio::test]
+async fn create_command_rejects_a_parent_session_that_is_an_empty_string() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let conv = ledger.create_conversation(None).await.unwrap();
+    let run = ledger
+        .create_run(
+            NewRun {
+                conversation_id: conv.conversation_id.clone(),
+                parent_run_id: None,
+                agent: "claude".to_owned(),
+                role: "implementer".to_owned(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    ledger
+        .set_run_provider_session(run.run_id.clone(), String::new())
+        .await
+        .unwrap();
+    ledger.start_run(run.run_id.clone()).await.unwrap();
+    ledger.complete_run(run.run_id.clone()).await.unwrap();
+
+    let err = ledger
+        .create_command(
+            new_command(&conv.conversation_id, &run.run_id, "hi"),
+            key("k"),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(err.code(), "CONTINUATION_NOT_PERMITTED");
+}
+
+/// Q-Deck R1 second corrective round (blocker 1): rebinding a command to a
+/// FRESH child run id (the redrive path for a child run that already has
+/// a ledger row, e.g. `interrupted`) must actually replace the binding —
+/// never leave the stale one in place, never silently no-op.
+#[tokio::test]
+async fn rebind_command_child_run_replaces_the_binding() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, run) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &run, "hi"), key("k"))
+        .await
+        .unwrap();
+    let first_child = RunId::from_raw("first-child".to_owned());
+    ledger
+        .bind_command_child_run(command.command_id.clone(), first_child.clone())
+        .await
+        .unwrap();
+
+    let second_child = RunId::from_raw("second-child".to_owned());
+    let rebound = ledger
+        .rebind_command_child_run(command.command_id.clone(), second_child.clone())
+        .await
+        .unwrap();
+    assert_eq!(rebound.child_run_id, Some(second_child.clone()));
+
+    let read_back = ledger.command(command.command_id).await.unwrap().unwrap();
+    assert_eq!(read_back.child_run_id, Some(second_child));
+    assert_ne!(read_back.child_run_id, Some(first_child));
+}

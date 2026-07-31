@@ -844,11 +844,34 @@ impl SqliteLedger {
                     request.conversation_id
                 )));
             }
-            if parent.provider_session_id.is_none() {
-                return Err(LedgerError::ContinuationNotPermitted(format!(
-                    "run {} has no durable provider session to continue from",
-                    request.parent_run_id
-                )));
+            match &parent.provider_session_id {
+                None => {
+                    return Err(LedgerError::ContinuationNotPermitted(format!(
+                        "run {} has no durable provider session to continue from",
+                        request.parent_run_id
+                    )));
+                }
+                // Independent re-gate on PR #90, blocker 3: the ORIGINAL
+                // validation (`agent::ProviderSessionId::new` — non-empty,
+                // no control characters) only ran inside the detached `o7
+                // continue` process, AFTER durable acceptance and the
+                // `202` response. A structurally invalid session is not a
+                // transient failure — it never becomes valid — so every
+                // subsequent retry (once past the redrive checks below)
+                // would just keep re-spawning a continuation guaranteed to
+                // fail the same way forever. `o7-ledger` cannot depend on
+                // the root crate's `agent` module (wrong dependency
+                // direction), so the SAME two rules are checked here,
+                // directly, before the command is ever durably accepted —
+                // never after.
+                Some(session) if session.is_empty() || session.chars().any(char::is_control) => {
+                    return Err(LedgerError::ContinuationNotPermitted(format!(
+                        "run {}'s durable provider session fails validation (empty or contains \
+                         a control character) — refusing to continue from a corrupt session",
+                        request.parent_run_id
+                    )));
+                }
+                Some(_) => {}
             }
 
             let now = now_millis();
@@ -1001,15 +1024,18 @@ impl SqliteLedger {
 
     /// Every command still `accepted`/`started`, across every conversation
     /// (`docs/q-deck/r1-command.md` §7) — `o7 recover`'s read side for
-    /// making a stuck command DISCOVERABLE. A command whose `child_run_id`
-    /// already has its own ledger run row is not returned here: that run is
-    /// an ordinary run row and the pre-existing still-`running`/`queued`
-    /// scan (`recover_scan`/`mark_interrupted`) already covers it — this
-    /// method exists only for the gap that scan cannot see: a command
-    /// durably accepted but never bound to a child run at all, or bound to
-    /// one whose `RunStarted` never made it to the ledger (the process
-    /// crashed between `bind_command_child_run` and the child's own durable
-    /// `attach_run`).
+    /// making a stuck command DISCOVERABLE. Three shapes, all covered:
+    /// `child_run_id` unset (never bound); bound to a run with no ledger
+    /// row at all (the process crashed between `bind_command_child_run`
+    /// and the child's own durable `attach_run`); or bound to a run that
+    /// IS a real ledger row but is `interrupted` — the pre-existing
+    /// still-`running`/`queued` scan (`recover_scan`/`mark_interrupted`)
+    /// already transitioned it there, but that scan has no concept of
+    /// `command` rows, so nothing else ever surfaces this one. A command
+    /// whose child run is `queued`/`running` (genuinely still active, or
+    /// merely not yet scanned) is deliberately NOT returned here — this
+    /// method only surfaces cases already CONFIRMED dead by an existing
+    /// mechanism, never a guess.
     ///
     /// # Errors
     /// Propagates SQLite errors.
@@ -1019,7 +1045,7 @@ impl SqliteLedger {
                 "SELECT c.command_id FROM command c \
                  LEFT JOIN run r ON r.run_id = c.child_run_id \
                  WHERE c.status IN ('accepted','started') \
-                 AND (c.child_run_id IS NULL OR r.run_id IS NULL) \
+                 AND (c.child_run_id IS NULL OR r.run_id IS NULL OR r.status = 'interrupted') \
                  ORDER BY c.created_at ASC",
             )?;
             let ids = stmt
@@ -1077,6 +1103,39 @@ impl SqliteLedger {
                 params![now, command_id.as_str(), expected_updated_at],
             )?;
             Ok(changed == 1)
+        })
+        .await
+    }
+
+    /// Q-Deck R1 second corrective round: rebind an already-`started`
+    /// command to a FRESH child `RunId`, after its previous child run was
+    /// confirmed `interrupted` (a genuinely dead process — never guessed;
+    /// `recover_scan`/`mark_interrupted` already made that determination).
+    /// The interrupted run itself is never resumed here — it stays exactly
+    /// as it is, a dead-end historical record; a brand new child run
+    /// replaces it as the command's live attempt. Callers MUST already
+    /// hold exclusive ownership of this redrive (this is a plain,
+    /// unconditional write — the caller's own `claim_stale_command_for_redrive`
+    /// call, or an equivalent liveness proof, is the actual safety
+    /// mechanism, not this method).
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] if the command is missing; SQLite errors.
+    pub async fn rebind_command_child_run(
+        &self,
+        command_id: crate::CommandId,
+        new_run_id: crate::RunId,
+    ) -> Result<Command, LedgerError> {
+        self.with_tx(move |tx| {
+            load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("command {command_id}")))?;
+            let now = now_millis();
+            tx.execute(
+                "UPDATE command SET child_run_id = ?1, updated_at = ?2 WHERE command_id = ?3",
+                params![new_run_id.as_str(), now, command_id.as_str()],
+            )?;
+            load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("command {command_id}")))
         })
         .await
     }
