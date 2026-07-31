@@ -2,7 +2,7 @@
 
 Status: **current-tree architecture map**
 
-Verified against: `main` at `29e8d0089646b33dc865a1f9107c728d0cfdf376`
+Verified against: `main` at `a8b3664f1aba1468b218ba873278c396725685c8`
 
 Verified on: `2026-07-31`
 
@@ -34,7 +34,7 @@ The purpose is to prevent two opposite errors:
 | Agent | **partial** | `o7 run`, `o7-worker` | 007 has bounded agent execution, but not yet a durable autonomous task-control loop. A subprocess lifecycle loop is not the same thing as a goal/repair/escalation loop. |
 | Execution model | **partial** | `o7-worker`, `ProcessBoundary` | Start, observation, cancellation, timeout and teardown are typed and fail closed. Model-level `think -> act -> observe` decisions are not yet canonical `o7-run` events with durable projection and replayable evidence. |
 | Durable state ownership | **enforced** | `o7-ledger`, canonical run artifacts | Durable truth belongs outside model context. `o7-ledger` owns its append-only ledger lifecycle state (conversations, runs, attempts, events); canonical run artifacts own their recorded evidence. Model context and summaries are projections, never the source of truth. |
-| Unified live agent state | **partial** | filesystem run records today; live ledger ingress pending | On current `main`, root `o7 run` writes filesystem run artifacts and does **not** write real runs into `o7-ledger`. Live root-run → ledger state unification is Q-Deck R0.7 (PR #89), which is draft and unmerged, so it is not current authority. An unmerged PR does not satisfy an enforced row. |
+| Unified live agent state | **partial** | `o7 run --ledger` live ingress (Q-Deck R0.7, merged); default path is flat records | Live root-run → ledger ingress is now current production code: `o7 run --ledger <path>` live-projects the run's canonical events into `o7-ledger` as they happen (Q-Deck R0.7, merged into `main` at `a8b3664`). The remaining limitation is that ingress is opt-in — a run **without** `--ledger` preserves the flat-record-only filesystem path, byte/semantics-unchanged — so live agent state is not yet unified by default. |
 | Planner/executor, router/specialist, map/reduce | **planned** | delegation fields and architecture notes only | Add a topology only after one reliable end-to-end provider vertical exists. Handoffs require typed identity, provenance, obligations and outcome authority. |
 | Project agent configuration | **partial** | `AGENTS.md` + binding architecture docs (policy); CI/compiler/tests/review (mechanical subset) | `AGENTS.md` and architecture documents define revision-controlled repository policy, and mechanical subsets are enforced by CI, compiler rules, tests and review gates. But there is no general typed or replayable evidence proving every agent actually loaded the expected instruction revision and complied with it; documentation presence is not execution enforcement. Keep always-loaded instructions short, repository-specific and reviewable; mechanical rules belong in CI, not repeated prose. |
 | Reusable workflow files | **planned** | `docs/workflow-scripting.md` | Start with narrow, observed procedures. Do not add a skill registry, generic DAG engine or generated instruction library before repeated work justifies it. |
