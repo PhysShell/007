@@ -260,30 +260,64 @@ continuation.
 
 ## 7. Recovery
 
-Two independent gaps, two independent mechanisms — corrected on
-independent re-gate after an earlier draft claimed retry-based recovery
-worked without actually implementing it (idempotent replay alone
-short-circuits before ever re-checking whether the bound child run was
-ever dispatched):
+Three independent gaps, corrected across TWO independent re-gates. The
+first re-gate found gap A's own recovery claim was false as shipped
+(idempotent replay alone short-circuits before ever re-checking whether a
+bound child run was actually dispatched). The second re-gate then found
+gap A's fix was itself incomplete (it only handled "child run row doesn't
+exist yet," not "child run row exists but never reached a sealed status,"
+whether because it crashed before anyone ran a plain `o7 recover`, or
+because `interrupted` isn't reachable from a redrive at all) — AND that a
+wall-clock staleness bound alone can never prove a process is dead, only
+that it's been a while.
 
-**Gap A — bound but never dispatched.** A command's `child_run_id` is
-durably bound BEFORE the provider is invoked (§3); if the process that was
-going to spawn `o7 continue` dies right after binding, or the spawn itself
-fails, that child run will never get a ledger row, and (per §5's tail
-check) the command blocks the conversation forever. `o7 recover` (plain,
-no new flags) additionally finds every such `command` row via
-`stuck_commands` (`child_run_id` unset, or bound to a run with no ledger
-row) and reports it — visible, never silently dropped. `o7d`'s own POST
-handler ALSO actively heals this: a retry under the SAME idempotency key
-re-checks whether the bound child run's ledger row now exists; if not, and
-the binding is older than a staleness threshold (60s by default,
-`O7D_STALE_COMMAND_REDRIVE_MS` overridable for testing), the retry
-compare-and-swap-claims the redrive (`claim_stale_command_for_redrive` —
-two racing retries can never both win, so two processes can never both
-attach to the same not-yet-existing run id and corrupt its
-`events.jsonl`) and re-spawns `o7 continue` with the SAME child run id.
-The staleness bound exists specifically so an impatient retry never races
-a genuinely-still-spawning attempt.
+**Gap A — bound but never resolved.** A command's `child_run_id` is
+durably bound BEFORE the provider is invoked (§3). If the process that was
+going to run the continuation dies at any point before the child run
+reaches a sealed terminal status — before its own ledger row even exists,
+or after, while still `queued`/`running`/`interrupted` — the command
+blocks the conversation forever (per §5's tail check, nothing else can
+become the tail while this child is the latest run and isn't sealed).
+`o7 recover` (plain, no new flags) additionally finds every command whose
+child run row is missing, or exists but is `interrupted`, via
+`stuck_commands`, and reports it — visible, never silently dropped (a
+child still `queued`/`running` is deliberately NOT reported here: that
+might be a live, genuinely in-progress attempt no existing mechanism has
+confirmed dead).
+
+`o7d`'s own POST handler ALSO actively heals this, for ALL non-terminal
+child states (missing row, or `queued`/`running`/`interrupted`) — gated by
+real proof, not a guess:
+
+1. A staleness bound (60s default, `O7D_STALE_COMMAND_REDRIVE_MS`
+   overridable for testing) — never even attempt a redrive on a request
+   that might still be genuinely in flight.
+2. **The actual safety proof**: `o7 continue` acquires an exclusive
+   `flock` on a path keyed by its own run id (`<runs_dir>/.locks/<run
+   id>.lock`) as the VERY FIRST thing it does, before touching the ledger
+   or the worktree, and holds it for its entire lifetime. `flock`
+   auto-releases on process death regardless of HOW the process died
+   (clean exit, panic, SIGKILL) — so `o7d`, before ever deciding to
+   redrive, attempts the SAME lock itself. Acquiring it proves no live
+   process holds it; failing to proves one still does, and the redrive is
+   refused outright, no matter how much wall-clock time has passed. A
+   staleness bound alone cannot make this distinction — a large worktree
+   checkout past 60s looks identical to a dead process from the timer's
+   point of view, but not from the lock's.
+3. Only once BOTH hold does a compare-and-swap claim
+   (`claim_stale_command_for_redrive`) decide the single winner among any
+   racing retries.
+
+A redrive ALWAYS mints a FRESH child run id via `rebind_command_child_run`
+— never reuses the original, even for "the row never existed in the
+ledger": a crashed first attempt may already have durably appended a
+partial `events.jsonl` for that run id (`RunStarted`, maybe more) before
+ever reaching the ledger; reusing it would let a second attempt append a
+SECOND, conflicting `RunStarted` at sequence 1 into the SAME file. A brand
+new run id's directory is always pristine. The original (if it ever got a
+ledger row) is never resumed — it stays a dead-end historical record,
+superseded by the fresh one, which naturally becomes the conversation's
+new tail once created.
 
 **Gap B — dispatched and sealed, bookkeeping never landed.** The mirror
 image: the child run reached a real sealed terminal status, but the
@@ -292,6 +326,15 @@ best-effort ledger write, per §9.1's non-fatal discipline). Pure,
 side-effect-free bookkeeping to repair — no provider invocation involved —
 so `o7 recover` fixes it directly via `reconcile_completed_commands`
 rather than merely reporting it.
+
+**Gap C — a run's own best-effort session persistence failed.** Separate
+from anything above: `execute_live`/`continue_execute`'s live session
+write (§9.1) can fail on its own, independent of the command/redrive
+machinery entirely. `o7 recover --run-dir <dir>` backfills the ledger's
+`provider_session_id` from the flat record's own `meta.json` (written
+regardless of whether the live ledger write succeeded) whenever the
+ledger is still missing it — closing the loop the live path's own warning
+message promises.
 
 ## 8. HTTP API
 
@@ -528,6 +571,27 @@ displayed by the browser — it never appears in this slice's response
 DTOs.
 
 ## Known limitations and evidence
+
+**Second independent re-gate (blockers 1–3, two major findings) — all
+fixed.** Summary (full detail in §5/§7/§9.1 above and the corresponding
+commits): (1) `create_command` now requires a SEALED true-tail parent,
+not merely a leaf, and validates the session string itself (non-empty, no
+control characters) before durable acceptance, not only later inside the
+detached `o7 continue`. (2) A command's own live session-persist failure
+can never abort the canonical event pipeline (`?` on a ledger write was
+replaced with the same best-effort/`projection_incomplete` discipline
+every other live-projection write already uses). (3) A stuck command's
+redrive is gated by an ACTUAL liveness proof (`flock`, auto-released on
+process death regardless of cause) rather than a wall-clock guess, covers
+a child run stuck at ANY non-terminal status (not only "row missing"),
+and always mints a fresh run id rather than risking a reused one whose
+`events.jsonl` may already hold a partial write. (4) `o7 recover
+--run-dir` now actually backfills a run's `provider_session_id` from
+`meta.json` when the live write failed, closing the loop its own warning
+message already promised. (5) The command response's `status` field now
+reports `"accepted"` for a request's own fresh acceptance, matching the
+frozen contract's example, rather than leaking the post-bind `"started"`
+value the same request's own synchronous dispatch happened to reach.
 
 **No worktree/diff carryover across a command.** `o7 continue`'s child run
 starts a FRESH worktree at `--base` (mirroring `o7 run`'s own
