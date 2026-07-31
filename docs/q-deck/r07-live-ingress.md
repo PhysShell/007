@@ -283,25 +283,73 @@ re-sealing was not a no-op. Fixed:
   `start_run` only from `Queued`; the existing `running` attempt is looked
   up (`SqliteLedger::running_attempt`, new — a run has at most one by
   construction) and reused instead of creating a second one; a run already
-  terminal/interrupted is attached to read-only (`attempt_id: None`).
+  terminal/interrupted is attached to its **most recent attempt regardless
+  of status** (`SqliteLedger::latest_attempt`, new), not `attempt_id: None`
+  — see the idempotency-across-terminal-attach fix below for why `None`
+  was wrong.
 - `seal(verdict)` reads the run's current status first: already sealed
   with EXACTLY this verdict → no-op; already sealed/interrupted with a
   **different** status → hard conflict (`LedgerError`-wrapping error), a
   terminal outcome is never silently overwritten.
+
+**A second independent re-gate found the above still incomplete** for two
+distinct reasons, both now fixed:
+
+1. **Conversation resolution for an already-existing run.** `attach_run`'s
+   own `create_run_with_id` call is idempotent on `run_id`, but its
+   idempotency digest also includes `conversation_id` (§2.3/§3) — so a
+   caller that guesses the WRONG `ConversationSelector` for an
+   already-existing run (e.g. catch-up always assuming `New` for a run that
+   was actually created under an explicit `--conversation-id`) hits an
+   `IdempotencyConflict` *before* any "the existing row's real conversation
+   wins" logic is ever reached — that logic runs strictly after the digest
+   check passes, not instead of it. Fixed at the call site, not inside
+   `attach_run`: `main.rs::catch_up` now looks the run up by
+   `canonical_run_id` FIRST, and if it already exists, passes
+   `ConversationSelector::Existing(run.conversation_id)` — never guesses.
+   `ConversationSelector::New` is now only the genuinely-first-attach
+   fallback, when no row (and so no conversation to disagree with) exists
+   yet.
+2. **`attempt_id` is part of `append_system_note`'s idempotency digest**
+   (§3's `project`), so it must be *stable* across a live run and a later
+   catch-up of the SAME event, not merely present-vs-absent. Attaching to a
+   terminal run with `attempt_id: None` (the original design) changed the
+   digest for every already-projected event's replay, since those events
+   were recorded with `Some(original_attempt)` — turning a should-be no-op
+   catch-up into a guaranteed `IdempotencyConflict` for anything already
+   correctly projected. `SqliteLedger::latest_attempt` (unlike
+   `running_attempt`, which only finds a *currently running* one) finds a
+   run's attempt by `attempt_number` regardless of status, so a terminal
+   attach now reuses the exact same `attempt_id` its events were originally
+   recorded under.
+
+The first implementation's own recovery test only proved the degenerate
+case (every `system.note` AND its idempotency record deleted, i.e. full
+reconstruction from scratch) — which never exercises either fix above,
+since a from-scratch catch-up never re-projects an already-correct event
+under a real `attempt_id`, and never resolves a conversation for a run
+that already has one. `tests/live_ingress_e2e.rs` now separately proves:
+an intact stream (nothing deleted) catches up as an exact no-op; an
+existing prefix plus a missing suffix restores only the tail without
+disturbing the prefix's original event ids; a single missing event
+among an otherwise fully-projected stream is restored in place; and
+catch-up under an explicit `--conversation-id` resolves that SAME
+conversation, not a phantom new one.
 
 **Recovery/catch-up entry point**: `o7 recover --ledger <path> --run-dir
 <run-dir>` (extends the existing R0.5 `o7 recover`, which still always
 runs its own still-running → `Interrupted` scan regardless). Reads
 `run-dir/events.jsonl`, structurally re-verifies it via
 `o7_run::reduce::reduce_all` (the same check `o7 replay` does — chain
-continuity, digests, sequence order), then reuses
-`PendingProjection::open` + `attach_run` (idempotently attaching to
-whatever the ledger already has) and re-projects the **entire** stream
-through the ordinary `project`/`seal` calls — every already-applied event
-is a safe no-op via its own idempotency key, so this is correct whether
-the sink missed nothing, a tail, or (the degenerate case) everything. No
-second reducer, no new import format — the exact same projector a live
-run uses.
+continuity, digests, sequence order), looks the run up first to resolve
+its real conversation (above), then reuses `PendingProjection::open` +
+`attach_run` (idempotently attaching to whatever the ledger already has)
+and re-projects the **entire** stream through the ordinary
+`project`/`seal` calls — every already-applied event is a safe no-op via
+its own idempotency key AND its original `attempt_id`, so this is correct
+whether the sink missed nothing, a tail, one event in the middle, or (the
+degenerate case) everything. No second reducer, no new import format —
+the exact same projector a live run uses.
 
 ## 3. Minimal production projector
 
