@@ -190,7 +190,10 @@ async fn migrating_v1_database_preserves_existing_rows() {
         .unwrap();
     }
 
-    assert_eq!(CURRENT_SCHEMA_VERSION, 2, "this test assumes v1 -> v2");
+    assert_eq!(
+        CURRENT_SCHEMA_VERSION, 3,
+        "this test assumes v1 -> current (now v3)"
+    );
     let ledger = SqliteLedger::open(&path).unwrap();
     let run = ledger
         .run(o7_ledger::RunId::from_raw("r1".to_owned()))
@@ -243,8 +246,9 @@ async fn v2_check_constraint_rejects_an_invalid_run_status_via_raw_sql() {
 #[tokio::test]
 async fn schema_v3_would_still_fail_closed() {
     // Same guard as tests/migrations.rs's schema_too_new_fails_closed, run
-    // again here to confirm it still holds at the NEW CURRENT_SCHEMA_VERSION
-    // (2), not just conceptually.
+    // again here to confirm it still holds at whatever CURRENT_SCHEMA_VERSION
+    // is now (checked symbolically, not a hardcoded number that would go
+    // stale the next time it's bumped), not just conceptually.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("too-new.sqlite3");
     SqliteLedger::open(&path).unwrap();

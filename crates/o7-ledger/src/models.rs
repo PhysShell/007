@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AttemptId, ConversationId, EventId, RunId};
+use crate::ids::{AttemptId, CommandId, ConversationId, EventId, RunId};
 
 /// Lifecycle status of a conversation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -214,6 +214,13 @@ pub struct Run {
     pub status: RunStatus,
     pub created_at: i64,
     pub finished_at: Option<i64>,
+    /// The provider's own session identity this run's agent call produced,
+    /// if any (Q-Deck R1, `docs/q-deck/r1-command.md` §6/§9.3,
+    /// `SCHEMA_V3`) — opaque to this crate (never parsed, never
+    /// interpreted), carried only so a FUTURE command can continue this
+    /// run's lineage. `None` for a run whose agent call never returned
+    /// one, a `--no-ledger` run, or any run that predates this column.
+    pub provider_session_id: Option<String>,
 }
 
 /// A run-attempt row.
@@ -225,6 +232,67 @@ pub struct RunAttempt {
     pub status: AttemptStatus,
     pub started_at: i64,
     pub finished_at: Option<i64>,
+}
+
+/// A durable command's own lifecycle status (Q-Deck R1,
+/// `docs/q-deck/r1-command.md` §2) — NEVER a second verdict authority. This
+/// is bookkeeping for the command's OWN acceptance/dispatch state;
+/// `Completed` means only "the child run reached a sealed terminal
+/// status," read back from that run, never independently decided here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandStatus {
+    Accepted,
+    Started,
+    Completed,
+    Rejected,
+}
+
+impl CommandStatus {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Started => "started",
+            Self::Completed => "completed",
+            Self::Rejected => "rejected",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "accepted" => Some(Self::Accepted),
+            "started" => Some(Self::Started),
+            "completed" => Some(Self::Completed),
+            "rejected" => Some(Self::Rejected),
+            _ => None,
+        }
+    }
+}
+
+/// A durably accepted command row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Command {
+    pub command_id: CommandId,
+    pub conversation_id: ConversationId,
+    pub parent_run_id: RunId,
+    pub command_text: String,
+    pub status: CommandStatus,
+    pub child_run_id: Option<RunId>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Input to [`crate::sqlite::SqliteLedger::create_command`]. Idempotency is
+/// mandatory (like [`crate::sqlite::SqliteLedger::create_run_with_id`]) —
+/// there is no legitimate "fire and forget, no idempotency key" case for a
+/// mutating HTTP endpoint a client may legitimately retry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewCommand {
+    pub conversation_id: ConversationId,
+    pub parent_run_id: RunId,
+    pub command_text: String,
 }
 
 /// Input to append an event. The `sequence` and `created_at` are assigned by the

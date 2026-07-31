@@ -20,10 +20,11 @@ pub mod recovery;
 pub mod sqlite;
 pub mod transitions;
 
-pub use ids::{AttemptId, ConversationId, EventId, RunId};
+pub use ids::{AttemptId, CommandId, ConversationId, EventId, RunId};
 pub use models::{
-    AttemptStatus, Conversation, ConversationStatus, EventType, Idempotency, IdempotencyRecord,
-    ListCursor, NewEvent, NewRun, Page, PersistedEvent, RecoveryState, Run, RunAttempt, RunStatus,
+    AttemptStatus, Command, CommandStatus, Conversation, ConversationStatus, EventType,
+    Idempotency, IdempotencyRecord, ListCursor, NewCommand, NewEvent, NewRun, Page, PersistedEvent,
+    RecoveryState, Run, RunAttempt, RunStatus,
 };
 pub use sqlite::{
     PragmaReport, SqliteLedger, EVENT_SCHEMA_VERSION, MAX_LIST_LIMIT, MAX_READ_LIMIT,
@@ -106,6 +107,25 @@ pub enum LedgerError {
     /// The connection mutex was poisoned by a panicking holder.
     #[error("ledger lock poisoned")]
     LockPoisoned,
+
+    /// Q-Deck R1 (`docs/q-deck/r1-command.md` §5, §8): `parent_run_id` is
+    /// not the conversation's current tail run — some other run already
+    /// continues from it. Kept distinct from [`Self::InvalidState`] so a
+    /// caller (`o7d`'s route handler) can map it to its own HTTP status
+    /// (`409`) without parsing error text.
+    #[error("stale parent run: {0}")]
+    StaleParent(String),
+
+    /// Q-Deck R1 §5: another command is already `accepted`/`started` for
+    /// this conversation — the first slice's single-in-flight-command rule.
+    #[error("command conflict: {0}")]
+    CommandConflict(String),
+
+    /// Q-Deck R1 §6: the parent run has no valid, durable provider session
+    /// to continue from — the fail-closed rule. Maps to `422`, distinct
+    /// from every `409` conflict above.
+    #[error("continuation not permitted: {0}")]
+    ContinuationNotPermitted(String),
 }
 
 impl LedgerError {
@@ -123,6 +143,9 @@ impl LedgerError {
             Self::Integrity(_) => "INTEGRITY",
             Self::Join => "JOIN",
             Self::LockPoisoned => "LOCK_POISONED",
+            Self::StaleParent(_) => "STALE_PARENT",
+            Self::CommandConflict(_) => "COMMAND_CONFLICT",
+            Self::ContinuationNotPermitted(_) => "CONTINUATION_NOT_PERMITTED",
         }
     }
 }

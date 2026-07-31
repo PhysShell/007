@@ -11,13 +11,13 @@ use std::time::Duration;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::idempotency::{
-    self, IdemOutcome, SCOPE_APPEND_SYSTEM_NOTE, SCOPE_APPEND_USER_MESSAGE,
+    self, IdemOutcome, SCOPE_APPEND_SYSTEM_NOTE, SCOPE_APPEND_USER_MESSAGE, SCOPE_CREATE_COMMAND,
     SCOPE_CREATE_CONVERSATION, SCOPE_CREATE_RUN, SCOPE_CREATE_RUN_WITH_ID,
 };
 use crate::migrations;
 use crate::models::{
-    Conversation, ConversationStatus, EventType, Idempotency, ListCursor, NewEvent, NewRun, Page,
-    PersistedEvent, RecoveryState, Run, RunAttempt, RunStatus,
+    Command, CommandStatus, Conversation, ConversationStatus, EventType, Idempotency, ListCursor,
+    NewCommand, NewEvent, NewRun, Page, PersistedEvent, RecoveryState, Run, RunAttempt, RunStatus,
 };
 use crate::transitions::{validate_attempt_transition, validate_run_transition};
 use crate::{now_millis, AttemptStatus, EventId, Ledger, LedgerError};
@@ -325,6 +325,7 @@ impl SqliteLedger {
                 status: RunStatus::Queued,
                 created_at: now,
                 finished_at: None,
+                provider_session_id: None,
             };
             tx.execute(
                 "INSERT INTO run (run_id, conversation_id, parent_run_id, agent, role, status, created_at, finished_at) \
@@ -744,6 +745,310 @@ impl SqliteLedger {
         .await
     }
 
+    /// Durably record ONE user-accepted command (Q-Deck R1,
+    /// `docs/q-deck/r1-command.md` §3/§4/§5/§6) — validated, idempotent,
+    /// concurrency- and staleness-checked, all inside ONE `IMMEDIATE`
+    /// transaction. No provider process is ever started as a side effect
+    /// of this call — it only durably records ACCEPTANCE; the caller
+    /// starts the provider afterward (§3's ordering).
+    ///
+    /// Validates, in order: the conversation exists; `parent_run_id`
+    /// belongs to it; `parent_run_id` is the conversation's current tail
+    /// (no run already has it as `parent_run_id`); no other
+    /// `accepted`/`started` command exists for this conversation; the
+    /// parent run has a durable, valid `provider_session_id`.
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] for an unknown conversation or parent run;
+    /// [`LedgerError::StaleParent`] if `parent_run_id` is not the tail;
+    /// [`LedgerError::CommandConflict`] if another command is already
+    /// in flight for this conversation; [`LedgerError::IdempotencyConflict`]
+    /// if `idempotency.key` was already used for a DIFFERENT request;
+    /// [`LedgerError::ContinuationNotPermitted`] if the parent has no valid
+    /// provider session; SQLite errors.
+    pub async fn create_command(
+        &self,
+        request: NewCommand,
+        idempotency: Idempotency,
+    ) -> Result<Command, LedgerError> {
+        let digest_input = serde_json::json!({
+            "conversation_id": request.conversation_id.as_str(),
+            "parent_run_id": request.parent_run_id.as_str(),
+            "command_text": request.command_text,
+        });
+        let request_digest = idempotency::digest_bytes(&serde_json::to_vec(&digest_input)?);
+        self.with_tx(move |tx| {
+            if let IdemOutcome::Replayed(reference) =
+                idempotency::check(tx, SCOPE_CREATE_COMMAND, &idempotency.key, &request_digest)?
+            {
+                return load_command(tx, &reference)?
+                    .ok_or_else(|| LedgerError::NotFound(format!("command {reference}")));
+            }
+
+            load_conversation(tx, request.conversation_id.as_str())?.ok_or_else(|| {
+                LedgerError::NotFound(format!("conversation {}", request.conversation_id))
+            })?;
+            let parent = load_run(tx, request.parent_run_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("run {}", request.parent_run_id)))?;
+            if parent.conversation_id != request.conversation_id {
+                return Err(LedgerError::NotFound(format!(
+                    "run {} does not belong to conversation {}",
+                    request.parent_run_id, request.conversation_id
+                )));
+            }
+            let already_continued: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM run WHERE parent_run_id = ?1",
+                params![request.parent_run_id.as_str()],
+                |row| row.get(0),
+            )?;
+            if already_continued > 0 {
+                return Err(LedgerError::StaleParent(format!(
+                    "run {} already has a child run — it is no longer this conversation's tail",
+                    request.parent_run_id
+                )));
+            }
+            let in_flight: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM command WHERE conversation_id = ?1 \
+                 AND status IN ('accepted','started')",
+                params![request.conversation_id.as_str()],
+                |row| row.get(0),
+            )?;
+            if in_flight > 0 {
+                return Err(LedgerError::CommandConflict(format!(
+                    "conversation {} already has a command in flight",
+                    request.conversation_id
+                )));
+            }
+            if parent.provider_session_id.is_none() {
+                return Err(LedgerError::ContinuationNotPermitted(format!(
+                    "run {} has no durable provider session to continue from",
+                    request.parent_run_id
+                )));
+            }
+
+            let now = now_millis();
+            let command = Command {
+                command_id: crate::CommandId::generate(),
+                conversation_id: request.conversation_id.clone(),
+                parent_run_id: request.parent_run_id.clone(),
+                command_text: request.command_text.clone(),
+                status: CommandStatus::Accepted,
+                child_run_id: None,
+                created_at: now,
+                updated_at: now,
+            };
+            tx.execute(
+                "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+                 status, child_run_id, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?6)",
+                params![
+                    command.command_id.as_str(),
+                    command.conversation_id.as_str(),
+                    command.parent_run_id.as_str(),
+                    command.command_text,
+                    command.status.as_str(),
+                    now,
+                ],
+            )?;
+            idempotency::record(
+                tx,
+                SCOPE_CREATE_COMMAND,
+                &idempotency.key,
+                &request_digest,
+                command.command_id.as_str(),
+                now,
+            )?;
+            Ok(command)
+        })
+        .await
+    }
+
+    /// Bind a durably accepted command to its allocated child `RunId` —
+    /// call once, right after minting the child run's identity, before
+    /// starting the provider continuation (§3's ordering: this binding
+    /// must be durable before the provider is invoked).
+    ///
+    /// Compare-and-swap, not a blind write: the `UPDATE` only takes effect
+    /// `WHERE child_run_id IS NULL`. Two callers racing to bind the SAME
+    /// command (e.g. `o7d` handling a retried idempotent request before the
+    /// first attempt's response landed) both call this; exactly one's write
+    /// matches inside SQLite's own `IMMEDIATE`-transaction writer
+    /// serialization, and BOTH calls return the SAME already-bound
+    /// [`Command`] afterward. The caller must compare the returned
+    /// `child_run_id` against the `run_id` it proposed — a mismatch means
+    /// it lost the race and must NOT spawn a second provider continuation.
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] if the command is missing; SQLite errors.
+    pub async fn bind_command_child_run(
+        &self,
+        command_id: crate::CommandId,
+        run_id: crate::RunId,
+    ) -> Result<Command, LedgerError> {
+        self.with_tx(move |tx| {
+            load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("command {command_id}")))?;
+            let now = now_millis();
+            tx.execute(
+                "UPDATE command SET child_run_id = ?1, status = 'started', updated_at = ?2 \
+                 WHERE command_id = ?3 AND child_run_id IS NULL",
+                params![run_id.as_str(), now, command_id.as_str()],
+            )?;
+            load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("command {command_id}")))
+        })
+        .await
+    }
+
+    /// Mark a command `completed` — its child run reached a sealed
+    /// terminal status. This is bookkeeping only; the child run's OWN
+    /// ledger row remains the sole verdict authority (§2).
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] if the command is missing; SQLite errors.
+    pub async fn mark_command_completed(
+        &self,
+        command_id: crate::CommandId,
+    ) -> Result<Command, LedgerError> {
+        self.set_command_status(command_id, CommandStatus::Completed)
+            .await
+    }
+
+    /// Mark a command `rejected` — durably accepted but never dispatched
+    /// to a provider (e.g. the child run could not be started at all).
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] if the command is missing; SQLite errors.
+    pub async fn mark_command_rejected(
+        &self,
+        command_id: crate::CommandId,
+    ) -> Result<Command, LedgerError> {
+        self.set_command_status(command_id, CommandStatus::Rejected)
+            .await
+    }
+
+    async fn set_command_status(
+        &self,
+        command_id: crate::CommandId,
+        status: CommandStatus,
+    ) -> Result<Command, LedgerError> {
+        self.with_tx(move |tx| {
+            load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("command {command_id}")))?;
+            let now = now_millis();
+            tx.execute(
+                "UPDATE command SET status = ?1, updated_at = ?2 WHERE command_id = ?3",
+                params![status.as_str(), now, command_id.as_str()],
+            )?;
+            load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("command {command_id}")))
+        })
+        .await
+    }
+
+    /// The conversation's currently `accepted`/`started` command, if any —
+    /// the read side of §5's concurrency check, and also what a recovery
+    /// scan uses to find a stuck command (§7).
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn active_command_for_conversation(
+        &self,
+        conversation_id: crate::ConversationId,
+    ) -> Result<Option<Command>, LedgerError> {
+        self.with_conn(move |conn| {
+            let id: Option<String> = conn
+                .query_row(
+                    "SELECT command_id FROM command WHERE conversation_id = ?1 \
+                     AND status IN ('accepted','started') \
+                     ORDER BY created_at DESC LIMIT 1",
+                    params![conversation_id.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            match id {
+                None => Ok(None),
+                Some(id) => load_command(conn, &id),
+            }
+        })
+        .await
+    }
+
+    /// Every command still `accepted`/`started`, across every conversation
+    /// (`docs/q-deck/r1-command.md` §7) — `o7 recover`'s read side for
+    /// making a stuck command DISCOVERABLE. A command whose `child_run_id`
+    /// already has its own ledger run row is not returned here: that run is
+    /// an ordinary run row and the pre-existing still-`running`/`queued`
+    /// scan (`recover_scan`/`mark_interrupted`) already covers it — this
+    /// method exists only for the gap that scan cannot see: a command
+    /// durably accepted but never bound to a child run at all, or bound to
+    /// one whose `RunStarted` never made it to the ledger (the process
+    /// crashed between `bind_command_child_run` and the child's own durable
+    /// `attach_run`).
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn stuck_commands(&self) -> Result<Vec<Command>, LedgerError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT c.command_id FROM command c \
+                 LEFT JOIN run r ON r.run_id = c.child_run_id \
+                 WHERE c.status IN ('accepted','started') \
+                 AND (c.child_run_id IS NULL OR r.run_id IS NULL) \
+                 ORDER BY c.created_at ASC",
+            )?;
+            let ids = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            ids.iter()
+                .map(|id| {
+                    load_command(conn, id)?
+                        .ok_or_else(|| LedgerError::Integrity(format!("command {id} vanished")))
+                })
+                .collect()
+        })
+        .await
+    }
+
+    /// Read a command by id (read-only), if present.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn command(
+        &self,
+        command_id: crate::CommandId,
+    ) -> Result<Option<Command>, LedgerError> {
+        self.with_conn(move |conn| load_command(conn, command_id.as_str()))
+            .await
+    }
+
+    /// Durably persist a run's provider session identity (Q-Deck R1 §9.1) —
+    /// call once, after the agent call that produced it succeeds. Never
+    /// interprets or validates the string beyond storing it — that is
+    /// `agent::ProviderSessionId::new`'s job, in the root crate, on both
+    /// the write side (before this call) and the strict read-back side
+    /// (§6's fail-closed check, which lives in `create_command` above).
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] if the run is missing; SQLite errors.
+    pub async fn set_run_provider_session(
+        &self,
+        run_id: crate::RunId,
+        session_id: String,
+    ) -> Result<Run, LedgerError> {
+        self.with_tx(move |tx| {
+            load_run(tx, run_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("run {run_id}")))?;
+            tx.execute(
+                "UPDATE run SET provider_session_id = ?1 WHERE run_id = ?2",
+                params![session_id, run_id.as_str()],
+            )?;
+            load_run(tx, run_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("run {run_id}")))
+        })
+        .await
+    }
+
     /// Append a `user.message` event, optionally idempotent under scope
     /// `append-user-message`.
     ///
@@ -1116,7 +1421,7 @@ impl SqliteLedger {
             // the variable shape.
             let mut sql = String::from(
                 "SELECT rowid, run_id, conversation_id, parent_run_id, agent, role, status, \
-                 created_at, finished_at FROM run WHERE 1=1",
+                 created_at, finished_at, provider_session_id FROM run WHERE 1=1",
             );
             let mut bound: Vec<Box<dyn rusqlite::ToSql + Send>> = Vec::new();
 
@@ -1157,12 +1462,24 @@ impl SqliteLedger {
                     row.get::<_, String>(6)?,
                     row.get::<_, i64>(7)?,
                     row.get::<_, Option<i64>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
                 ))
             })?;
             let mut items = Vec::new();
             let mut last_key: Option<(i64, i64)> = None;
             for row in rows {
-                let (rowid, id, conv, parent, agent, role, status, created_at, finished_at) = row?;
+                let (
+                    rowid,
+                    id,
+                    conv,
+                    parent,
+                    agent,
+                    role,
+                    status,
+                    created_at,
+                    finished_at,
+                    session,
+                ) = row?;
                 last_key = Some((created_at, rowid));
                 items.push(Run {
                     run_id: crate::RunId::from_raw(id),
@@ -1175,6 +1492,7 @@ impl SqliteLedger {
                     })?,
                     created_at,
                     finished_at,
+                    provider_session_id: session,
                 });
             }
             let next_before = last_key.map(|(created_at, tiebreak)| ListCursor {
@@ -1399,10 +1717,51 @@ fn load_conversation(
     }
 }
 
+fn load_command(conn: &Connection, command_id: &str) -> Result<Option<Command>, LedgerError> {
+    let row = conn
+        .query_row(
+            "SELECT command_id, conversation_id, parent_run_id, command_text, status, \
+             child_run_id, created_at, updated_at \
+             FROM command WHERE command_id = ?1",
+            params![command_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            },
+        )
+        .optional()?;
+    match row {
+        None => Ok(None),
+        Some((id, conv, parent, text, status, child, created_at, updated_at)) => {
+            Ok(Some(Command {
+                command_id: crate::CommandId::from_raw(id),
+                conversation_id: crate::ConversationId::from_raw(conv),
+                parent_run_id: crate::RunId::from_raw(parent),
+                command_text: text,
+                status: CommandStatus::parse(&status).ok_or_else(|| {
+                    LedgerError::Integrity(format!("bad command status {status}"))
+                })?,
+                child_run_id: child.map(crate::RunId::from_raw),
+                created_at,
+                updated_at,
+            }))
+        }
+    }
+}
+
 fn load_run(conn: &Connection, run_id: &str) -> Result<Option<Run>, LedgerError> {
     let row = conn
         .query_row(
-            "SELECT run_id, conversation_id, parent_run_id, agent, role, status, created_at, finished_at \
+            "SELECT run_id, conversation_id, parent_run_id, agent, role, status, created_at, \
+             finished_at, provider_session_id \
              FROM run WHERE run_id = ?1",
             params![run_id],
             |row| {
@@ -1415,23 +1774,27 @@ fn load_run(conn: &Connection, run_id: &str) -> Result<Option<Run>, LedgerError>
                     row.get::<_, String>(5)?,
                     row.get::<_, i64>(6)?,
                     row.get::<_, Option<i64>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
                 ))
             },
         )
         .optional()?;
     match row {
         None => Ok(None),
-        Some((id, conv, parent, agent, role, status, created_at, finished_at)) => Ok(Some(Run {
-            run_id: crate::RunId::from_raw(id),
-            conversation_id: crate::ConversationId::from_raw(conv),
-            parent_run_id: parent.map(crate::RunId::from_raw),
-            agent,
-            role,
-            status: RunStatus::parse(&status)
-                .ok_or_else(|| LedgerError::Integrity(format!("bad run status {status}")))?,
-            created_at,
-            finished_at,
-        })),
+        Some((id, conv, parent, agent, role, status, created_at, finished_at, session)) => {
+            Ok(Some(Run {
+                run_id: crate::RunId::from_raw(id),
+                conversation_id: crate::ConversationId::from_raw(conv),
+                parent_run_id: parent.map(crate::RunId::from_raw),
+                agent,
+                role,
+                status: RunStatus::parse(&status)
+                    .ok_or_else(|| LedgerError::Integrity(format!("bad run status {status}")))?,
+                created_at,
+                finished_at,
+                provider_session_id: session,
+            }))
+        }
     }
 }
 

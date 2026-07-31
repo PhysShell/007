@@ -16,11 +16,11 @@ use rusqlite::{Connection, TransactionBehavior};
 use crate::LedgerError;
 
 /// Highest schema version this build knows about.
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 /// Ordered `(version, sql)` migrations. Never edit a SHIPPED migration in place —
 /// add a new one.
-const MIGRATIONS: &[(u32, &str)] = &[(1, SCHEMA_V1), (2, SCHEMA_V2)];
+const MIGRATIONS: &[(u32, &str)] = &[(1, SCHEMA_V1), (2, SCHEMA_V2), (3, SCHEMA_V3)];
 
 const SCHEMA_V1: &str = "
 CREATE TABLE conversation (
@@ -144,6 +144,42 @@ INSERT INTO run_attempt_v2 (attempt_id, run_id, attempt_number, status, started_
 DROP TABLE run_attempt;
 ALTER TABLE run_attempt_v2 RENAME TO run_attempt;
 CREATE UNIQUE INDEX idx_one_running_attempt ON run_attempt(run_id) WHERE status = 'running';
+";
+
+/// Q-Deck R1 (`docs/q-deck/r1-command.md` §9.3): durable command acceptance
+/// and provider-session lineage. `run.provider_session_id` is a plain
+/// nullable `ADD COLUMN` — no CHECK constraint is added to `run`, so this
+/// does not need SCHEMA_V2's rebuild-and-copy dance. `command` is a brand
+/// new table; its own `status` vocabulary is CHECK-constrained from the
+/// start (nothing to migrate away from, unlike `run`/`run_attempt` in
+/// SCHEMA_V2).
+const SCHEMA_V3: &str = "
+ALTER TABLE run ADD COLUMN provider_session_id TEXT;
+
+CREATE TABLE command (
+    command_id      TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    parent_run_id   TEXT NOT NULL,
+    command_text    TEXT NOT NULL,
+    status          TEXT NOT NULL CHECK (status IN (
+        'accepted','started','completed','rejected'
+    )),
+    child_run_id    TEXT,
+    created_at      INTEGER NOT NULL,
+    updated_at      INTEGER NOT NULL,
+    FOREIGN KEY (conversation_id) REFERENCES conversation(conversation_id),
+    FOREIGN KEY (conversation_id, parent_run_id) REFERENCES run(conversation_id, run_id)
+    -- Deliberately NO FK on child_run_id -> run.run_id: bind_command_child_run
+    -- durably records the freshly minted child run id BEFORE that run's own
+    -- ledger row exists (the whole point of the ordering rule in
+    -- docs/q-deck/r1-command.md §3 — durable command->run binding must
+    -- precede the provider invocation that eventually creates the child's
+    -- RunStarted). A synchronous FK here would make that exact, required
+    -- ordering impossible. Referential correctness is instead the
+    -- application layer's job (SqliteLedger::bind_command_child_run only
+    -- ever writes an id it just minted itself).
+);
+CREATE INDEX idx_command_conversation ON command(conversation_id);
 ";
 
 /// Expose one migration's raw SQL by version, for tests that need to build a
