@@ -770,6 +770,13 @@ fn sigkill_during_the_agent_leaves_a_durable_task_md_matching_run_started() {
 /// catch-up (`--run-dir`) must repair it to the exact terminal status once
 /// it has verified the sealed stream, and a repeated catch-up after that
 /// must be a complete no-op.
+///
+/// Fifth re-gate: the fixture must revert the run's own ATTEMPT (not just
+/// `run.status`) to `running` and remove the terminal ledger event too — a
+/// real crash before any seal never gets either of those to `completed` in
+/// the first place. The first version of this test only reverted
+/// `run.status`, an impossible state that could never have caught a repair
+/// which fixed the run row but left its own attempt `interrupted`.
 #[test]
 fn plain_recover_marking_interrupted_never_permanently_blocks_a_sealed_canonical_verdict() {
     let work = tempfile::tempdir().unwrap();
@@ -788,11 +795,14 @@ fn plain_recover_marking_interrupted_never_permanently_blocks_a_sealed_canonical
     let _ = o7d_child.kill();
     let _ = o7d_child.wait();
 
-    // Simulate "the ledger's own seal() call never landed" by directly
-    // reverting the run row to `running` — leaving the (already-completed)
-    // attempt row untouched, exactly like a real crash between the
-    // durable, sealed events.jsonl and the ledger seal would: the run.
-    // status column is what a plain `o7 recover` scan actually reads.
+    // Simulate "the ledger's own seal() call never landed" REALISTICALLY:
+    // revert the run row AND its own attempt row to `running` (a real crash
+    // before any seal would never have gotten either to `completed`), and
+    // remove the terminal `run.completed` ledger event that only a
+    // successful seal would have produced. A prior version of this test
+    // only reverted `run.status`, leaving the attempt (and the terminal
+    // event) already `completed` — an impossible fixture that could never
+    // catch a repair which fixed the run but left the attempt behind.
     {
         let conn = rusqlite::Connection::open(&ledger_path).unwrap();
         let updated = conn
@@ -802,6 +812,27 @@ fn plain_recover_marking_interrupted_never_permanently_blocks_a_sealed_canonical
             )
             .unwrap();
         assert_eq!(updated, 1);
+        let attempt_updated = conn
+            .execute(
+                "UPDATE run_attempt SET status = 'running', finished_at = NULL \
+                 WHERE run_id = ?1",
+                [&run_id],
+            )
+            .unwrap();
+        assert_eq!(
+            attempt_updated, 1,
+            "sanity: exactly one attempt for this run"
+        );
+        let deleted = conn
+            .execute(
+                "DELETE FROM event WHERE run_id = ?1 AND event_type = 'run.completed'",
+                [&run_id],
+            )
+            .unwrap();
+        assert_eq!(
+            deleted, 1,
+            "sanity: exactly one terminal ledger event to remove"
+        );
     }
 
     // Plain recovery (no --run-dir): classifies the stuck-running row
@@ -853,6 +884,37 @@ fn plain_recover_marking_interrupted_never_permanently_blocks_a_sealed_canonical
     );
     let _ = o7d_child.kill();
     let _ = o7d_child.wait();
+
+    // The repair must be internally consistent, not just fix the run row in
+    // isolation: the run's own attempt must ALSO be repaired to a matching
+    // terminal status (not left `interrupted`), and there must be exactly
+    // one terminal ledger event — no duplicate, no stale leftover.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let attempt_status: String = conn
+            .query_row(
+                "SELECT status FROM run_attempt WHERE run_id = ?1",
+                [&run_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            attempt_status, "completed",
+            "repair must also close the run's own attempt to a matching terminal status, \
+             not leave it interrupted"
+        );
+        let terminal_events: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM event WHERE run_id = ?1 AND event_type = 'run.completed'",
+                [&run_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            terminal_events, 1,
+            "repair must produce exactly one terminal ledger event"
+        );
+    }
 
     // A repeated catch-up must be a complete no-op — the run is already
     // `completed`, matching the verdict exactly.
@@ -1374,6 +1436,304 @@ fn catch_up_resolves_the_same_explicit_conversation_the_original_run_used() {
     );
     let _ = o7d_child.kill();
     let _ = o7d_child.wait();
+}
+
+/// Q-Deck R0.7 fifth re-gate, blocker: an unsealed canonical prefix has no
+/// fixed verdict — but if the ledger already reports this run as a SEALED
+/// terminal status, that is a genuine conflict between the canonical
+/// authority (not sealed) and the ledger (terminal). Catch-up must fail
+/// closed instead of re-projecting the prefix and reporting "still running"
+/// while the ledger disagrees.
+#[test]
+fn catch_up_refuses_an_unsealed_prefix_over_an_already_terminal_ledger_run() {
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let record_dir = run_to_completion(work.path(), &ledger_path, None);
+
+    // Truncate the canonical record to an UNSEALED prefix (drop the final
+    // RunSealed line) while the ledger still legitimately reports this run
+    // `completed` from the original real run.
+    let jsonl_path = record_dir.join("events.jsonl");
+    let full = std::fs::read_to_string(&jsonl_path).unwrap();
+    let mut lines: Vec<&str> = full.lines().filter(|l| !l.trim().is_empty()).collect();
+    let last_kind_type = lines.last().map(|l| {
+        let v: serde_json::Value = serde_json::from_str(l).unwrap();
+        v["kind"]["type"].as_str().unwrap().to_owned()
+    });
+    assert_eq!(last_kind_type.as_deref(), Some("run_sealed"));
+    lines.pop();
+    std::fs::write(&jsonl_path, lines.join("\n") + "\n").unwrap();
+
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        !recover.status.success(),
+        "catch-up must refuse an unsealed prefix over an already-sealed terminal ledger run"
+    );
+    let stderr = String::from_utf8_lossy(&recover.stderr);
+    assert!(stderr.contains("NOT sealed"), "got: {stderr}");
+
+    let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+    wait_until_healthy(addr);
+    let (status, page) = get(addr, "/api/v1/runs");
+    assert_eq!(status, 200);
+    assert_eq!(
+        page["items"][0]["status"], "completed",
+        "a refused catch-up must never mutate the ledger"
+    );
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R0.7 fifth re-gate: a record whose `task.md` was altered after
+/// sealing must be refused BEFORE the ledger is touched at all — proved
+/// here by snapshotting the ledger's full state, letting the refused
+/// catch-up run, then asserting the ledger is byte-identical afterward.
+#[test]
+fn catch_up_refuses_an_altered_artifact_before_touching_the_ledger() {
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let record_dir = run_to_completion(work.path(), &ledger_path, None);
+
+    let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+    wait_until_healthy(addr);
+    let (_, before_runs) = get(addr, "/api/v1/runs");
+    let conv_id = before_runs["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (_, before_events) = get(
+        addr,
+        &format!("/api/v1/conversations/{conv_id}/events?limit=100"),
+    );
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+
+    // Alter task.md's content AFTER sealing — its content no longer hashes
+    // to RunStarted's durable digest.
+    std::fs::write(record_dir.join("task.md"), "tampered after sealing").unwrap();
+
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        !recover.status.success(),
+        "catch-up must refuse a record whose artifact no longer matches its digest"
+    );
+    let stderr = String::from_utf8_lossy(&recover.stderr);
+    assert!(stderr.contains("artifact"), "got: {stderr}");
+
+    let (mut o7d_child, addr) = spawn_o7d_process(&ledger_path);
+    wait_until_healthy(addr);
+    let (_, after_runs) = get(addr, "/api/v1/runs");
+    let (_, after_events) = get(
+        addr,
+        &format!("/api/v1/conversations/{conv_id}/events?limit=100"),
+    );
+    assert_eq!(
+        after_runs, before_runs,
+        "a refused catch-up must never mutate the run row"
+    );
+    assert_eq!(
+        after_events, before_events,
+        "a refused catch-up must never mutate a single ledger event"
+    );
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R0.7 fifth re-gate: `ledger_binding.json`'s `schema` must be
+/// validated, not blindly trusted.
+#[test]
+fn catch_up_refuses_an_unsupported_ledger_binding_schema() {
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let record_dir = run_to_completion(work.path(), &ledger_path, None);
+
+    let binding_path = record_dir.join("ledger_binding.json");
+    let mut binding: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&binding_path).unwrap()).unwrap();
+    binding["schema"] = serde_json::json!(2);
+    std::fs::write(&binding_path, serde_json::to_string(&binding).unwrap()).unwrap();
+
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        !recover.status.success(),
+        "catch-up must refuse an unsupported ledger_binding.json schema"
+    );
+    let stderr = String::from_utf8_lossy(&recover.stderr);
+    assert!(stderr.contains("schema"), "got: {stderr}");
+}
+
+/// Q-Deck R0.7 fifth re-gate: `ledger_binding.json`'s `run_id` must match
+/// the canonical stream it was found alongside.
+#[test]
+fn catch_up_refuses_a_ledger_binding_whose_run_id_does_not_match() {
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let record_dir = run_to_completion(work.path(), &ledger_path, None);
+
+    let binding_path = record_dir.join("ledger_binding.json");
+    let mut binding: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&binding_path).unwrap()).unwrap();
+    binding["run_id"] = serde_json::json!("some-other-run-id-entirely");
+    std::fs::write(&binding_path, serde_json::to_string(&binding).unwrap()).unwrap();
+
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        !recover.status.success(),
+        "catch-up must refuse a ledger_binding.json whose run_id does not match"
+    );
+    let stderr = String::from_utf8_lossy(&recover.stderr);
+    assert!(stderr.contains("run_id"), "got: {stderr}");
+}
+
+/// Q-Deck R0.7 fifth re-gate: when NEITHER an existing ledger run row NOR a
+/// `ledger_binding.json` exists, catch-up must fail loudly, never silently
+/// guess `ConversationSelector::New` — the exact back door the fourth
+/// corrective round closed. Constructed with a genuinely `--ledger`-less
+/// run (never writes a binding) recovered against a freshly-opened ledger
+/// (no run row either).
+#[test]
+fn catch_up_refuses_a_missing_ledger_binding_when_no_run_row_exists() {
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let claude = fake_claude_dir(0, 0);
+    let would_be_ledger_path = work.path().join("never-touched.sqlite3");
+
+    let mut run_child = spawn_o7_run_process(&RunInvocation {
+        repo: repo.path(),
+        task_file: &task_file,
+        ledger_path: &would_be_ledger_path,
+        runs_dir: &work.path().join("runs"),
+        worktree_root: &work.path().join("worktrees"),
+        conversation_id: None,
+        claude_dir: claude.path(),
+        no_ledger: true,
+    });
+    let status = run_child.wait().unwrap();
+    assert!(status.success());
+    let mut run_stdout = String::new();
+    run_child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut run_stdout)
+        .unwrap();
+    let record_dir = PathBuf::from(find_record_dir(&run_stdout));
+    assert!(
+        !record_dir.join("ledger_binding.json").exists(),
+        "sanity: a --ledger-less run never writes a binding"
+    );
+
+    let ledger_path = work.path().join("fresh-ledger.sqlite3");
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        !recover.status.success(),
+        "catch-up must refuse a record with no ledger run row and no ledger_binding.json"
+    );
+    let stderr = String::from_utf8_lossy(&recover.stderr);
+    assert!(stderr.contains("ledger_binding"), "got: {stderr}");
+}
+
+/// Q-Deck R0.7 fifth re-gate: a `ledger_binding.json` copied verbatim from a
+/// DIFFERENT run's record directory — a realistic file-management mistake,
+/// not a hand-crafted corruption — must be refused via the same run_id
+/// mismatch check.
+#[test]
+fn catch_up_refuses_a_ledger_binding_copied_from_a_different_run() {
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let record_dir_a = run_to_completion(work.path(), &ledger_path, None);
+    let record_dir_b = run_to_completion(work.path(), &ledger_path, None);
+
+    std::fs::copy(
+        record_dir_a.join("ledger_binding.json"),
+        record_dir_b.join("ledger_binding.json"),
+    )
+    .unwrap();
+
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir_b)
+        .output()
+        .unwrap();
+    assert!(
+        !recover.status.success(),
+        "catch-up must refuse a ledger_binding.json copied from a different run"
+    );
+    let stderr = String::from_utf8_lossy(&recover.stderr);
+    assert!(stderr.contains("run_id"), "got: {stderr}");
+}
+
+/// Q-Deck R0.7 fifth re-gate, the "major gap": an existing ledger run row's
+/// own `conversation_id`/`agent`/`role` must be authoritative over a
+/// disagreeing `ledger_binding.json` — the prior version of this check only
+/// compared `conversation_id`, silently accepting a mismatched `agent`/
+/// `role` despite the PR's own claim that "any disagreeing binding is
+/// refused."
+#[test]
+fn catch_up_refuses_a_ledger_binding_disagreeing_with_an_existing_run_row() {
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let record_dir = run_to_completion(work.path(), &ledger_path, None);
+    let binding_path = record_dir.join("ledger_binding.json");
+    let original: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&binding_path).unwrap()).unwrap();
+
+    for field in ["conversation_id", "agent", "role"] {
+        let mut tampered = original.clone();
+        tampered[field] = serde_json::json!(format!("tampered-{field}"));
+        std::fs::write(&binding_path, serde_json::to_string(&tampered).unwrap()).unwrap();
+
+        let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+            .args(["recover", "--ledger"])
+            .arg(&ledger_path)
+            .args(["--run-dir"])
+            .arg(&record_dir)
+            .output()
+            .unwrap();
+        assert!(
+            !recover.status.success(),
+            "catch-up must refuse a binding whose {field} disagrees with the existing run row"
+        );
+        let stderr = String::from_utf8_lossy(&recover.stderr);
+        assert!(stderr.contains(field), "field={field} got: {stderr}");
+    }
+
+    // Leave the ledger in a sane state for anything that runs after.
+    std::fs::write(&binding_path, serde_json::to_string(&original).unwrap()).unwrap();
 }
 
 #[test]
