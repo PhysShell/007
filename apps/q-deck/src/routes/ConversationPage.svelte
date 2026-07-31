@@ -7,6 +7,7 @@
   import StatusBadge from "../components/StatusBadge.svelte";
   import ConnectionIndicator from "../components/ConnectionIndicator.svelte";
   import EventTimeline from "../components/EventTimeline.svelte";
+  import CommandBox from "../components/CommandBox.svelte";
 
   let { conversationId }: { conversationId: string } = $props();
 
@@ -15,6 +16,13 @@
   let runs: RunDto[] = $state([]);
   let loadState: LoadState = $state("loading");
   let stream: ConversationEventStream | null = $state(null);
+
+  // The run a new command continues from — the most recently created run
+  // in this conversation. `null` until at least one run exists; the server
+  // is the actual authority on whether it's still a valid (non-stale,
+  // session-bearing) parent (docs/q-deck/r1-command.md §5/§6) — this is
+  // only which one to propose.
+  let latestRunId = $derived(runs.length > 0 ? runs[runs.length - 1].run_id : null);
 
   $effect(() => {
     let cancelled = false;
@@ -93,6 +101,11 @@
         {/each}
       </ul>
     {/if}
+  </section>
+
+  <section>
+    <h2>Command</h2>
+    <CommandBox {conversationId} parentRunId={latestRunId} />
   </section>
 
   <section>

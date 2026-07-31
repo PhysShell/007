@@ -3,6 +3,7 @@
 // place to update.
 
 import type {
+  CommandAcceptedDto,
   ConversationDto,
   ErrorDto,
   EventPageDto,
@@ -122,4 +123,45 @@ export function getRun(id: string): Promise<RunDto> {
 
 export function conversationEventsStreamUrl(id: string): string {
   return `/api/v1/conversations/${encodeURIComponent(id)}/events/stream`;
+}
+
+// Q-Deck R1 (docs/q-deck/r1-command.md §8): the command endpoint's response
+// is its own independently versioned wire surface, starting at 1 — NOT
+// EXPECTED_SCHEMA_VERSION (the read API's version, currently 2). A future
+// bump to one must never be conflated with a bump to the other.
+export const EXPECTED_COMMAND_SCHEMA_VERSION = 1;
+
+export interface NewCommandParams {
+  parentRunId: string;
+  command: string;
+  idempotencyKey: string;
+}
+
+/** `POST /api/v1/conversations/{id}/commands` — resolves only after the
+ * server durably accepted the command (`202`); any other status throws
+ * `ApiError` with the server's own `code`/message (`400`/`404`/`409`/`422`/
+ * `500`, §8's status table) so the caller can surface the exact reason. */
+export async function postCommand(
+  conversationId: string,
+  params: NewCommandParams,
+): Promise<CommandAcceptedDto> {
+  const resp = await fetch(`/api/v1/conversations/${encodeURIComponent(conversationId)}/commands`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      schema_version: 1,
+      parent_run_id: params.parentRunId,
+      command: params.command,
+      idempotency_key: params.idempotencyKey,
+    }),
+  });
+  const body = (await resp.json()) as CommandAcceptedDto | ErrorDto;
+  if (!resp.ok) {
+    throw new ApiError(resp.status, body as ErrorDto);
+  }
+  const accepted = body as CommandAcceptedDto;
+  if (accepted.schema_version !== EXPECTED_COMMAND_SCHEMA_VERSION) {
+    throw new UnsupportedSchemaError(accepted.schema_version, EXPECTED_COMMAND_SCHEMA_VERSION);
+  }
+  return accepted;
 }

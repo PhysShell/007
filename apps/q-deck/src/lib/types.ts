@@ -68,6 +68,23 @@ export interface ErrorDto {
   code: string;
 }
 
+/** Q-Deck R1 (`docs/q-deck/r1-command.md` §8). A command's own bookkeeping
+ * status — NOT the child run's verdict; `"completed"` here means only "the
+ * child run reached a sealed terminal status," nothing about which one. */
+export type CommandStatus = "accepted" | "started" | "completed" | "rejected";
+
+/** Response from `POST /api/v1/conversations/{id}/commands`, sent only
+ * after durable acceptance. Versioned independently of `API_SCHEMA_VERSION`
+ * — this is its own wire surface, starting at 1 (§8). */
+export interface CommandAcceptedDto {
+  schema_version: number;
+  command_id: string;
+  conversation_id: string;
+  parent_run_id: string;
+  run_id: string;
+  status: CommandStatus;
+}
+
 /** A run is currently doing something (queued to start, or running). Does
  * NOT mean "anything else is terminal" — `interrupted` is neither active nor
  * sealed, see `isSealedRun`. */
