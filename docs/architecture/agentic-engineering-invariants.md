@@ -32,7 +32,7 @@ The purpose is to prevent two opposite errors:
 | Concept | 007 status | Current authority | Binding interpretation |
 |---|---|---|---|
 | Agent | **partial** | `o7 run`, `o7-worker` | 007 has bounded agent execution, but not yet a durable autonomous task-control loop. A subprocess lifecycle loop is not the same thing as a goal/repair/escalation loop. |
-| Execution model | **partial** | `o7-worker`, `ProcessBoundary` | Start, observation, cancellation, timeout and teardown are typed and fail closed. Model-level `think -> act -> observe` decisions are not yet canonical ledger events. |
+| Execution model | **partial** | `o7-worker`, `ProcessBoundary` | Start, observation, cancellation, timeout and teardown are typed and fail closed. Model-level `think -> act -> observe` decisions are not yet canonical `o7-run` events with durable projection and replayable evidence. |
 | Durable state ownership | **enforced** | `o7-ledger`, canonical run artifacts | Durable truth belongs outside model context. `o7-ledger` owns its append-only ledger lifecycle state (conversations, runs, attempts, events); canonical run artifacts own their recorded evidence. Model context and summaries are projections, never the source of truth. |
 | Unified live agent state | **partial** | filesystem run records today; live ledger ingress pending | On current `main`, root `o7 run` writes filesystem run artifacts and does **not** write real runs into `o7-ledger`. Live root-run → ledger state unification is Q-Deck R0.7 (PR #89), which is draft and unmerged, so it is not current authority. An unmerged PR does not satisfy an enforced row. |
 | Planner/executor, router/specialist, map/reduce | **planned** | delegation fields and architecture notes only | Add a topology only after one reliable end-to-end provider vertical exists. Handoffs require typed identity, provenance, obligations and outcome authority. |
@@ -101,7 +101,8 @@ These rules apply regardless of provider, model, workflow format or UI.
    agent/provider streams that are currently stored whole (`agent.stdout`,
    `stdout.raw`, `stderr.log`).
 3. Complete one independently accepted live run/provider vertical through worker
-   observations, canonical ledger events, verifier and outcome evidence.
+   observations, canonical `o7-run` events and reducer, durable `o7-ledger`
+   projection, verifier and outcome evidence.
 4. Add operational metrics with explicit redaction and retention rules.
 5. Build the bounded task-control loop: retry, repair, no-progress detection,
    escalation and stop.
