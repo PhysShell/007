@@ -3,10 +3,13 @@
 //! Replay is where the tamper-evidence becomes an assertion: it (1) classifies the record
 //! (legacy / canonical / malformed), (2) validates per-event digests and chain-link
 //! continuity, (3) folds the stream through the pure [`crate::reduce`](mod@crate::reduce) reducer (structural
-//! validation + verdict), (4) requires a sealed run, (5) resolves every referenced artifact
-//! and checks its content digest, and (6) returns the recomputed verdict plus the anchor
-//! digests. [`replay_verify`] additionally compares the recomputed verdict to a stored one.
-//! Any unexplained mismatch fails loudly; a legacy record is never reported as verified.
+//! validation), (4) resolves every referenced artifact and checks its content digest, (5)
+//! requires a sealed run for a fixed verdict, and (6) returns the recomputed verdict plus
+//! the anchor digests. [`replay_verify`] additionally compares the recomputed verdict to a
+//! stored one. Any unexplained mismatch fails loudly; a legacy record is never reported as
+//! verified. Steps (1)-(4) are also exposed standalone as [`verify_prefix`] — everything
+//! above EXCEPT the sealed requirement — for a caller (Q-Deck R0.7's crash-prefix recovery)
+//! that must verify a not-yet-sealed stream just as strictly, without demanding a verdict.
 //!
 //! What the chain proves, precisely: it detects any modification NOT accompanied by a
 //! consistent recomputation of every downstream digest. It does NOT prove authenticity
@@ -141,20 +144,35 @@ pub enum ReplayError {
     StateDigestUnavailable,
 }
 
-/// Independently replay a stored run: verify the chain and artifacts and recompute the
-/// verdict.
+/// Everything [`replay`] checks EXCEPT the sealed/verdict requirement: per-event digest
+/// self-consistency, chain-link continuity, reducer structural validation, AND full
+/// artifact resolution + content-digest verification — run unconditionally, regardless of
+/// whether the stream is sealed yet. Returns the reduced state (whose `verdict` is `None`
+/// for a not-yet-sealed run) and the count of artifacts verified.
+///
+/// This is the shared primitive behind both [`replay`] (which additionally requires a
+/// sealed verdict) and Q-Deck R0.7's crash-prefix recovery (`o7 recover --run-dir`'s
+/// catch-up, `007`'s root crate), which must verify a still-running or crashed-mid-run
+/// prefix exactly as strictly as a sealed run — chain, digests, reducer, AND every
+/// referenced artifact's actual content — without requiring it to already be sealed.
+/// Skipping artifact verification for an unsealed prefix (as re-projecting via
+/// `reduce_all` alone would) would let catch-up accept — and the ledger then report as
+/// terminal — a record `replay` itself would reject once sealed.
 ///
 /// # Errors
-/// [`ReplayError`] on any chain break, digest mismatch, unresolved/altered artifact,
-/// unsealed run, or legacy record.
-pub fn replay(
+/// [`ReplayError::LegacyNonReplayable`] for an empty stream; [`ReplayError::EventDigestMismatch`]
+/// / [`ReplayError::ChainBroken`] for a tampered/broken chain; [`ReplayError::Reduce`] for a
+/// structurally invalid stream; [`ReplayError::ArtifactUnresolved`] /
+/// [`ReplayError::ArtifactDigestMismatch`] for a missing or altered referenced artifact.
+/// Never returns [`ReplayError::NotSealed`] — that is [`replay`]'s own, additional check.
+pub fn verify_prefix(
     events: &[RunEvent],
     artifacts: &dyn ArtifactResolver,
-) -> Result<ReplayReport, ReplayError> {
+) -> Result<(crate::state::RunState, u64), ReplayError> {
     // 1. A record with no canonical events is legacy — never "verified".
-    let Some(last) = events.last() else {
+    if events.is_empty() {
         return Err(ReplayError::LegacyNonReplayable);
-    };
+    }
 
     // 2. Per-event digest self-consistency and chain-link continuity. A deletion, reorder,
     //    insertion, or in-place edit is caught here before anything is trusted.
@@ -173,21 +191,13 @@ pub fn replay(
         prev = event.event_digest.clone();
     }
 
-    // 3. Structural validation + verdict via the pure reducer.
+    // 3. Structural validation via the pure reducer (sealed or not).
     let state = reduce_all(events)?;
 
-    // 4. Only a sealed run has a fixed verdict to verify.
-    if !state.is_sealed() {
-        return Err(ReplayError::NotSealed);
-    }
-    let verdict = match state.verdict {
-        Some(v) => v,
-        None => return Err(ReplayError::NotSealed),
-    };
-
-    // 5. Resolve every referenced artifact and verify its content digest in place. Distinct
-    //    (locator, digest) pairs are resolved once — a policy declared in the contract and
-    //    later re-referenced by a PolicyChecked is not double-resolved or double-counted.
+    // 4. Resolve every referenced artifact and verify its content digest in place —
+    //    UNCONDITIONALLY, whether or not the run is sealed yet. Distinct (locator, digest)
+    //    pairs are resolved once — a policy declared in the contract and later
+    //    re-referenced by a PolicyChecked is not double-resolved or double-counted.
     let mut seen: BTreeSet<(&str, &str)> = BTreeSet::new();
     let mut unique: Vec<&ArtifactRef> = Vec::new();
     for event in events {
@@ -207,7 +217,30 @@ pub fn replay(
         }
     }
 
-    // 6. Anchors.
+    Ok((state, artifacts_verified))
+}
+
+/// Independently replay a stored run: verify the chain and artifacts and recompute the
+/// verdict.
+///
+/// # Errors
+/// [`ReplayError`] on any chain break, digest mismatch, unresolved/altered artifact,
+/// unsealed run, or legacy record.
+pub fn replay(
+    events: &[RunEvent],
+    artifacts: &dyn ArtifactResolver,
+) -> Result<ReplayReport, ReplayError> {
+    let (state, artifacts_verified) = verify_prefix(events, artifacts)?;
+
+    // Only a sealed run has a fixed verdict to verify — checked AFTER, not instead of,
+    // full artifact verification above, so an unsealed run with an already-altered
+    // artifact is reported as tampered, not merely "not sealed yet".
+    let Some(verdict) = state.verdict else {
+        return Err(ReplayError::NotSealed);
+    };
+
+    // Anchors. `events` is non-empty (`verify_prefix` already rejected the empty case).
+    let last = events.last().ok_or(ReplayError::LegacyNonReplayable)?;
     let normalized_state_digest = state
         .normalized_digest()
         .ok_or(ReplayError::StateDigestUnavailable)?;
