@@ -67,7 +67,7 @@ jsonschema = { version = "0.47", default-features = false }
 # a Windows Job Object equivalent is explicitly out of scope. `nix` is MIT
 # (allowed in deny.toml); it pulls only bitflags/cfg-if/libc, all permissive.
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", default-features = false, features = ["signal"] }
+nix = { version = "0.29", default-features = false, features = ["signal", "fs"] }
 
 # Lints. Curated to pass `clippy --all-targets -D warnings` clean on today's code
 # (ratchet, not a blast): the broad pedantic/nursery families are deliberately

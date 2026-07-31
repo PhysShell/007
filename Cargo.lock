@@ -1111,6 +1111,7 @@ dependencies = [
  "clap",
  "futures-util",
  "http-body-util",
+ "nix",
  "o7-ledger",
  "serde",
  "serde_json",

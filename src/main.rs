@@ -489,6 +489,46 @@ fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
             .context("applying the canonical stream's verified sealed verdict during catch-up")?;
     }
 
+    // Independent re-gate on PR #90 (major finding): the live path's own
+    // best-effort session persistence (`persist_provider_session`, in
+    // `execute_live`/`continue_execute`) can fail independently of
+    // everything catch-up otherwise verifies — that failure's own warning
+    // message explicitly promises `o7 recover --run-dir` will catch it up.
+    // Backfill from the flat record's own `meta.json` (which durably
+    // records the session regardless of whether the live ledger write
+    // succeeded) whenever the ledger run is still missing it.
+    if let Ok(meta_text) = std::fs::read_to_string(run_dir.join("meta.json")) {
+        if let Ok(meta) = serde_json::from_str::<RunMeta>(&meta_text) {
+            if let Some(session) = meta.session_id {
+                let needs_backfill = {
+                    let ledger = o7_ledger::SqliteLedger::open(ledger_path)
+                        .with_context(|| format!("opening ledger at {}", ledger_path.display()))?;
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .context("starting the session-backfill lookup runtime")?;
+                    rt.block_on(ledger.run(o7_ledger::RunId::from_raw(
+                        canonical_run_id.as_str().to_owned(),
+                    )))
+                    .context("looking up the run for session backfill")?
+                    .is_some_and(|r| r.provider_session_id.is_none())
+                };
+                if needs_backfill {
+                    if let Ok(session) = agent::ProviderSessionId::new(session) {
+                        if let Err(e) =
+                            persist_provider_session(ledger_path, &canonical_run_id, &session)
+                        {
+                            eprintln!(
+                                "[o7] recover: warning — backfilling this run's provider session \
+                                 from meta.json failed: {e:#}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     println!(
         "[o7] recover: caught up run {} ({} canonical event(s) re-applied, {} artifact(s) \
          verified, {})",
@@ -984,6 +1024,18 @@ fn execute_live(
     Ok((chain.out, steps, ar, projection_incomplete))
 }
 
+/// Q-Deck R1 second corrective round: the run-id-keyed exclusive lock this
+/// process holds for its ENTIRE lifetime, mirrored exactly by `o7d`'s own
+/// pre-redrive liveness check (`crates/o7d/src/routes.rs::no_live_process_holds`
+/// — same path formula, deliberately duplicated rather than shared across
+/// crates for a two-line helper). `flock` auto-releases on process death
+/// regardless of how the process died (clean exit, panic, SIGKILL), so a
+/// caller can prove this exact run id has no live owner by attempting the
+/// SAME lock itself — a real liveness proof, not a wall-clock guess.
+fn command_lock_path(runs_dir: &Path, run_id: &str) -> PathBuf {
+    runs_dir.join(".locks").join(format!("{run_id}.lock"))
+}
+
 /// Q-Deck R1's command-continuation executor (`docs/q-deck/r1-command.md`
 /// §9.5) — dispatch ONE durably accepted command as a brand new sealed
 /// child run, continuing the parent run's own provider session. Reuses the
@@ -1000,6 +1052,45 @@ fn execute_live(
 /// before spending anything, exactly like an invalid gate manifest);
 /// any worktree, agent, gate, or ledger error.
 fn continue_run(a: &ContinueArgs) -> Result<()> {
+    // MUST be the very first thing this process does, before touching the
+    // ledger, the worktree, or anything else: prove no other live process
+    // already owns this exact run id. `o7d`'s own retry-redrive logic
+    // performs the SAME check before ever deciding to spawn a second
+    // process for this run id — if that check raced a genuinely slow (not
+    // dead) instance of this process, THIS acquisition is the backstop
+    // that turns a would-be double-write into a clean, silent no-op
+    // instead of two processes corrupting the same `events.jsonl`.
+    let lock_path = command_lock_path(&a.runs_dir, &a.run_id);
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating lock directory {}", parent.display()))?;
+    }
+    // The lock file's own content never matters — only its existence and
+    // flock state — so `truncate(false)` is explicit, not an oversight.
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("opening lock file {}", lock_path.display()))?;
+    let _lock_guard =
+        match nix::fcntl::Flock::lock(lock_file, nix::fcntl::FlockArg::LockExclusiveNonblock) {
+            Ok(guard) => guard,
+            Err((_file, _errno)) => {
+                // Another process already, provably, holds this run id's
+                // lock — it is the legitimate owner. Exit quietly WITHOUT
+                // touching any durable command/run state: a rejection here
+                // would incorrectly reject a command the other process may
+                // still complete successfully.
+                eprintln!(
+                    "[o7] continue: run {} is already owned by a live process — exiting without \
+                 touching any durable state",
+                    a.run_id
+                );
+                return Ok(());
+            }
+        };
+
     let repo = a
         .repo
         .canonicalize()

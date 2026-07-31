@@ -177,6 +177,40 @@ fn command_is_stale(command: &o7_ledger::Command) -> bool {
     now_millis().saturating_sub(command.updated_at) >= stale_redrive_threshold_ms()
 }
 
+/// Q-Deck R1 second corrective round: the run-id-keyed exclusive lock a
+/// spawned `o7 continue` holds for its ENTIRE lifetime (`src/main.rs`'s
+/// `continue_run` acquires the SAME path — deliberately duplicated rather
+/// than shared across crates for a two-line helper). Same formula as
+/// there: `<runs_dir>/.locks/<run_id>.lock`.
+fn command_lock_path(runs_dir: &std::path::Path, run_id: &str) -> std::path::PathBuf {
+    runs_dir.join(".locks").join(format!("{run_id}.lock"))
+}
+
+/// `true` only if this call itself just acquired (and immediately
+/// released) `run_id`'s lock — i.e. NO live process currently holds it.
+/// This is a real liveness proof (`flock` auto-releases on process death
+/// regardless of how the process died), not a wall-clock guess: a
+/// staleness timer alone cannot distinguish "dead" from "just slow
+/// creating a worktree past the threshold," and racing a genuinely slow
+/// (not dead) `o7 continue` would spawn a second process onto the same
+/// run id, corrupting its `events.jsonl` with interleaved writes.
+/// `Err`/any I/O failure is treated as "cannot prove it's safe" by the
+/// caller (fail closed — never spawn).
+fn no_live_process_holds(runs_dir: &std::path::Path, run_id: &str) -> std::io::Result<bool> {
+    let path = command_lock_path(runs_dir, run_id);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    // The lock file's own content never matters — only its existence and
+    // flock state — so `truncate(false)` is explicit, not an oversight.
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&path)?;
+    Ok(nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock).is_ok())
+}
+
 /// `POST /api/v1/conversations/{conversation_id}/commands` (§8/§9.6).
 /// Validate → durably accept (`SqliteLedger::create_command`, itself
 /// idempotent/stale-parent/concurrency-checked) → durably bind a freshly
@@ -257,33 +291,82 @@ pub(crate) async fn create_command(
         )
         .await?;
 
+    // The response's own `status` — reported as `accepted` for THIS
+    // request's own fresh acceptance regardless of what also happens to
+    // succeed synchronously moments later (binding, spawning): a `202`'s
+    // job is to confirm DURABLE ACCEPTANCE, matching the frozen contract's
+    // response example. A genuine idempotent REPLAY (this same request
+    // seen again) instead reports the command's real current status.
+    let is_fresh = command.child_run_id.is_none();
+
     let final_command = match &command.child_run_id {
         // Idempotent replay of a command already bound to a child run.
-        // Bound is NOT the same as dispatched: if the process that was
-        // going to spawn `o7 continue` died right after binding (or the
-        // spawn itself failed), this child run will never get a ledger
-        // row, and this command would otherwise block the conversation
-        // forever (`docs/q-deck/r1-command.md`'s stale-parent check never
-        // lets go of an unfinished tail). A retry of the SAME request is
-        // the documented recovery path for exactly that gap — but only
-        // after a generous staleness bound (never on a request that might
-        // still be genuinely in flight), and only after winning a
-        // compare-and-swap claim, so two concurrent retries can never both
-        // decide to respawn the same not-yet-existing run id and corrupt
-        // its `events.jsonl` with interleaved writes.
+        // Bound is NOT the same as dispatched-and-alive. Eligible for
+        // redrive whenever the child run has no ledger row at all (the
+        // process that was going to spawn `o7 continue` died right after
+        // binding, or the spawn itself failed) OR its ledger row exists
+        // but is NOT terminal (`queued`/`running`/`interrupted` — a crash
+        // right after `attach_run` leaves it `queued`/`running`, possibly
+        // for a while before anyone runs a plain `o7 recover` to reclassify
+        // it `interrupted`; the lock check below is what actually proves
+        // safety here, not the ledger status, so there is no need to wait
+        // for that reclassification). A run row already in a SEALED
+        // terminal status is never touched here — `reconcile_completed_commands`
+        // handles the mirror-image "sealed but command bookkeeping didn't
+        // land" case instead.
+        //
+        // A redrive ALWAYS mints a FRESH run id — never reuses the
+        // existing one, even when no ledger row for it exists yet: a
+        // crashed FIRST attempt may already have durably appended a
+        // partial `events.jsonl` for that run id (`RunStarted`, maybe
+        // more) before ever reaching the ledger — reusing it would let a
+        // second attempt append a SECOND, conflicting `RunStarted` at
+        // sequence 1 into the SAME file. A brand new run id's directory
+        // is always pristine.
+        //
+        // Gated by a staleness bound (never race a request that might
+        // still be in flight) AND — the actual safety proof, not a guess —
+        // `no_live_process_holds`, which only reports true after ACTUALLY
+        // acquiring the run id's own lock file itself (`flock` auto-
+        // releases on process death regardless of how it died — a
+        // wall-clock timer alone cannot tell "dead" from "just slow").
+        // Only then does a compare-and-swap claim decide the single
+        // winner among any racing retries.
         Some(run_id) => {
-            let dispatched = state.ledger.run(run_id.clone()).await?.is_some();
-            if !dispatched
-                && command_is_stale(&command)
-                && state
-                    .ledger
-                    .claim_stale_command_for_redrive(command.command_id.clone(), command.updated_at)
-                    .await?
-            {
-                spawn_continue(exec, &conversation_id, &parent_run_id, &command)
-                    .map_err(|_| ApiError::Internal("SPAWN_FAILED"))?;
+            let existing_run = state.ledger.run(run_id.clone()).await?;
+            let eligible = existing_run.is_none_or(|r| !r.status.is_terminal());
+            if eligible && command_is_stale(&command) {
+                match no_live_process_holds(&exec.runs_dir, run_id.as_str()) {
+                    Ok(true) => {
+                        if state
+                            .ledger
+                            .claim_stale_command_for_redrive(
+                                command.command_id.clone(),
+                                command.updated_at,
+                            )
+                            .await?
+                        {
+                            let fresh = o7_ledger::RunId::generate();
+                            let rebound = state
+                                .ledger
+                                .rebind_command_child_run(command.command_id.clone(), fresh)
+                                .await?;
+                            spawn_continue(exec, &conversation_id, &parent_run_id, &rebound)
+                                .map_err(|_| ApiError::Internal("SPAWN_FAILED"))?;
+                            rebound
+                        } else {
+                            command
+                        }
+                    }
+                    // A live process genuinely still holds the lock — it
+                    // is provably still working; never race it. An I/O
+                    // failure checking the lock is treated the same way:
+                    // fail closed, never spawn.
+                    Ok(false) | Err(_) => command,
+                }
+            } else {
+                command
             }
-            command
         }
         None => {
             let candidate = o7_ledger::RunId::generate();
@@ -307,6 +390,11 @@ pub(crate) async fn create_command(
         .ok_or(ApiError::Internal("COMMAND_BIND_MISSING"))?
         .as_str()
         .to_owned();
+    let status = if is_fresh {
+        o7_ledger::CommandStatus::Accepted.as_str().to_owned()
+    } else {
+        final_command.status.as_str().to_owned()
+    };
 
     Ok((
         StatusCode::ACCEPTED,
@@ -316,7 +404,7 @@ pub(crate) async fn create_command(
             conversation_id,
             parent_run_id,
             run_id,
-            status: final_command.status.as_str().to_owned(),
+            status,
         }),
     ))
 }
