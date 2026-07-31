@@ -168,11 +168,18 @@ pub struct EventsParams {
 
 /// `POST /api/v1/conversations/{conversation_id}/commands` request body
 /// (`docs/q-deck/r1-command.md` §8). Every field is `Option` even though
-/// all four are logically required — deserialization must always succeed
+/// all four are logically required — deserialization succeeds for a
+/// well-formed JSON object regardless of which of these four are absent,
 /// so the handler can report a precise, uniformly `ErrorDto`-shaped `400`
-/// for a missing/empty field, instead of axum's own differently-shaped
-/// JSON-extractor rejection.
+/// for a missing/empty *value* itself, rather than a generic "bad JSON"
+/// message. Malformed JSON, a field with the WRONG TYPE, or an unknown
+/// field still fail to deserialize at all (the last, because of
+/// `deny_unknown_fields` below) — the handler's own `JsonRejection`
+/// extractor catches exactly those and maps them to the SAME `ErrorDto`
+/// shape, so nothing on this route ever answers in axum's own default
+/// (differently-shaped) rejection format.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NewCommandRequestDto {
     pub schema_version: Option<u32>,
     pub parent_run_id: Option<String>,
