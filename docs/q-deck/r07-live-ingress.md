@@ -386,17 +386,68 @@ conversation, not a phantom new one.
 **Recovery/catch-up entry point**: `o7 recover --ledger <path> --run-dir
 <run-dir>` (extends the existing R0.5 `o7 recover`, which still always
 runs its own still-running → `Interrupted` scan regardless). Reads
-`run-dir/events.jsonl`, structurally re-verifies it via
-`o7_run::reduce::reduce_all` (the same check `o7 replay` does — chain
-continuity, digests, sequence order), looks the run up first to resolve
-its real conversation (above), then reuses `PendingProjection::open` +
-`attach_run` (idempotently attaching to whatever the ledger already has)
-and re-projects the **entire** stream through the ordinary
-`project`/`seal` calls — every already-applied event is a safe no-op via
-its own idempotency key AND its original `attempt_id`, so this is correct
-whether the sink missed nothing, a tail, one event in the middle, or (the
+`run-dir/events.jsonl`, looks the run up first to resolve its real
+conversation (above), then reuses `PendingProjection::open` + `attach_run`
+(idempotently attaching to whatever the ledger already has) and
+re-projects the **entire** stream through the ordinary `project`/`seal`
+calls — every already-applied event is a safe no-op via its own
+idempotency key AND its original `attempt_id`, so this is correct whether
+the sink missed nothing, a tail, one event in the middle, or (the
 degenerate case) everything. No second reducer, no new import format —
 the exact same projector a live run uses.
+
+**A fourth independent re-gate found three more gaps in this same
+recovery path, all fixed**:
+
+1. **Artifact-blind verification.** Catch-up used only
+   `o7_run::reduce::reduce_all` — chain continuity, digests, reducer
+   structure — never resolving or verifying referenced artifacts
+   (`task.md`, `diff.patch`, gate logs). A record whose `task.md` was
+   altered or deleted after the fact would still catch up cleanly and have
+   the ledger report it `Completed` — a record `o7 replay` itself would
+   reject once sealed. Fixed by extracting `o7_run::replay::verify_prefix`:
+   everything `replay` checks (chain, digests, reducer, AND full artifact
+   content-digest verification) EXCEPT the sealed requirement, so an
+   unsealed or crashed-mid-run prefix is verified exactly as strictly as a
+   sealed one, without demanding a verdict it doesn't have yet. `replay`
+   itself is now built on top of this same primitive — one code path, not
+   two divergent ones.
+2. **An untrusted `ledger_binding.json`.** `LedgerBinding::read` only
+   deserialized the file — never checked its `schema`, never checked its
+   `run_id` matched the canonical stream it was found alongside, and (when
+   an existing ledger run row was found) still let the sidecar file's
+   `agent`/`role` override the row's own persisted values instead of using
+   them directly. A stale or tampered sidecar could misdirect a no-row
+   recovery into the wrong conversation, corrupt `create_run_with_id`'s
+   idempotency digest for an already-existing run, or substitute a wrong
+   agent/role on first attach. Fixed: `schema`/`run_id` are validated
+   before the binding is trusted at all; when a ledger run row already
+   exists, its own `conversation_id`/`agent`/`role` are used VERBATIM (a
+   disagreeing binding is refused, not silently preferred either way);
+   when no row exists, the binding is REQUIRED (not merely consulted) —
+   its absence is now a hard error, not a fallback to
+   `ConversationSelector::New`. Every `--ledger` run since the third
+   corrective round writes its binding durably before `RunStarted`, so a
+   missing binding at this point means a corrupt or pre-fix record, never
+   a legitimate case to paper over with a guessed identity.
+3. **`Interrupted` could permanently outrank a proven sealed verdict.** A
+   plain `o7 recover` (no `--run-dir`) classifies any run stuck `running`
+   as `interrupted` — correct as far as it knows, since it never consults
+   `events.jsonl`. But if the canonical stream was ALREADY genuinely
+   sealed (a real `RunSealed`, a concrete reducer verdict) and only the
+   ledger's own `seal()` call never landed, ordinary `seal()` then refuses
+   to overwrite `interrupted` — it is, correctly, an otherwise-settled
+   dead-end for everyone else. Without an exception, that TEMPORARY
+   recovery classification would permanently block the TRUE canonical
+   verdict from ever reaching the ledger. Fixed with one narrow, explicit
+   bypass — `SqliteLedger::repair_interrupted_run_to_terminal` (mirroring
+   `resume_interrupted_run`'s existing precedent: a precondition-gated
+   exception to the general transition table, not a loosening of it) and
+   `LiveLedgerProjector::seal_or_repair_interrupted`, reachable ONLY from
+   `catch_up` after it has independently verified a genuinely sealed
+   stream via `verify_prefix` above. The live path's own `seal()` call is
+   completely unchanged — `interrupted` stays an immovable dead-end for
+   it, exactly as before.
 
 ## 3. Minimal production projector
 
@@ -467,3 +518,18 @@ exists; `main.rs::execute_live` calls phase 2 only after canonical
 
 **The next slice after R0.7** is real multi-turn Command (R1) — not
 attempted here.
+
+**Known follow-up, not a blocker for this slice** (fourth re-gate): canonical
+`RunSealed`/the ledger's own seal both land before `meta.json` is written
+(`execute`/`execute_live` in `main.rs`). A SIGKILL in that specific tail
+window leaves a fully sealed, artifact-verifiable `events.jsonl` but no
+`meta.json` — and `o7 replay` (`events::replay_record`) requires `meta.json`
+unconditionally, with no fallback, to read the *stored* verdict it compares
+the recomputed one against. `o7 recover --run-dir`'s catch-up is unaffected
+(it never reads `meta.json`), but a bare `o7 replay` against such a record
+fails. This gap predates R0.7's live-ingress work — `meta.json`'s own
+write timing hasn't changed here — so it is out of scope for this slice; a
+follow-up should either give `replay_record` a path that tolerates a missing
+`meta.json` (comparing only against the reducer's own recomputation, with no
+stored verdict to cross-check) or make `meta.json` durable at the same point
+`RunSealed` is.
