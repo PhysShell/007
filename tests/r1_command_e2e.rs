@@ -461,6 +461,11 @@ fn command_vertical_end_to_end() {
     assert_eq!(accepted["schema_version"], 1);
     assert_eq!(accepted["conversation_id"], conversation_id);
     assert_eq!(accepted["parent_run_id"], parent_run_id);
+    // The response's own status field reports "accepted" for THIS
+    // request's own fresh acceptance — matching the frozen contract's
+    // response example — even though binding+spawning ALSO happen to
+    // succeed synchronously within the same request.
+    assert_eq!(accepted["status"], "accepted");
     let command_id = accepted["command_id"].as_str().unwrap().to_owned();
     let child_run_id = accepted["run_id"].as_str().unwrap().to_owned();
     assert_ne!(child_run_id, parent_run_id);
@@ -1049,26 +1054,173 @@ fn a_command_stuck_before_dispatch_is_redriven_by_a_retry_after_the_stale_bound(
     );
     assert_eq!(status, 202, "{retried:?}");
     assert_eq!(retried["command_id"], "cmd-stuck-redrive");
-    // The redrive reuses the ALREADY-bound child run id — it must never
-    // mint a new one (that would orphan the original binding).
-    assert_eq!(retried["run_id"], child_run_id_before_redrive.as_str());
+    // A redrive ALWAYS mints a FRESH child run id — never reuses the
+    // originally-bound one, even though nothing durable was ever written
+    // under it in THIS test's fixture: a real crash could have left a
+    // PARTIAL events.jsonl already on disk for that id, and reusing it
+    // would risk a second, conflicting RunStarted at sequence 1.
+    let redriven_run_id = retried["run_id"].as_str().unwrap().to_owned();
+    assert_ne!(
+        redriven_run_id,
+        child_run_id_before_redrive.as_str(),
+        "a redrive must mint a fresh run id, never reuse the original binding"
+    );
 
     let deadline = Instant::now() + Duration::from_secs(30);
     claude.wait_for_invocation(2, deadline);
     let deadline = Instant::now() + Duration::from_secs(30);
-    wait_for_run_status(
-        addr,
-        child_run_id_before_redrive.as_str(),
-        "completed",
-        deadline,
-    );
+    wait_for_run_status(addr, &redriven_run_id, "completed", deadline);
 
-    let (status, command_row) = get(
-        addr,
-        &format!("/api/v1/runs/{}", child_run_id_before_redrive.as_str()),
-    );
+    let (status, command_row) = get(addr, &format!("/api/v1/runs/{redriven_run_id}"));
     assert_eq!(status, 200);
     assert_eq!(command_row["parent_run_id"], parent_run_id);
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 second corrective round, blocker 2: a wall-clock staleness
+/// bound alone is NOT proof a stuck command's original `o7 continue`
+/// process is dead — only slow (e.g. a large worktree checkout past the
+/// threshold). Proves the real safety mechanism: while THIS TEST ITSELF
+/// holds the exact same `flock` `o7 continue` would hold for its entire
+/// lifetime, a stale retry must NOT redrive (never invoke the provider a
+/// second time) — only once the lock is released does the SAME retry
+/// succeed.
+#[test]
+fn a_redrive_never_races_a_lock_genuinely_still_held_by_a_live_process() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let row: (String, String) = conn
+            .query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        row
+    };
+
+    let command_text = "lock check";
+    let idempotency_key = "key-lock";
+    let stuck_child_run_id = o7_ledger::RunId::generate();
+    let stale_updated_at = 1000i64;
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": parent_run_id,
+            "command_text": command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-lock-check', ?1, ?2, ?3, 'started', ?4, 1000, ?5)",
+            rusqlite::params![
+                conversation_id,
+                parent_run_id,
+                command_text,
+                stuck_child_run_id.as_str(),
+                stale_updated_at,
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-lock-check', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+    }
+
+    // Hold the EXACT lock a live `o7 continue` for this run id would hold
+    // — same path formula as both `src/main.rs::command_lock_path` and
+    // `crates/o7d/src/routes.rs::command_lock_path`.
+    let lock_path = runs_dir
+        .join(".locks")
+        .join(format!("{}.lock", stuck_child_run_id.as_str()));
+    std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .unwrap();
+    let held_lock = nix::fcntl::Flock::lock(lock_file, nix::fcntl::FlockArg::LockExclusiveNonblock)
+        .expect("test must be the first to acquire this fresh lock file");
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status, 202, "{retried:?}");
+    // Give any (incorrect) redrive attempt a real chance to happen before
+    // asserting it didn't.
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "a retry must NEVER spawn a second process while the original run id's lock is \
+         genuinely still held by a live process"
+    );
+
+    // Release — proving the original process finished (or died cleanly).
+    drop(held_lock);
+
+    let (status2, retried2) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status2, 202, "{retried2:?}");
+    let redriven_run_id = retried2["run_id"].as_str().unwrap().to_owned();
+    assert_ne!(redriven_run_id, stuck_child_run_id.as_str());
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    claude.wait_for_invocation(2, deadline);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    wait_for_run_status(addr, &redriven_run_id, "completed", deadline);
 
     let _ = o7d_child.kill();
     let _ = o7d_child.wait();
@@ -1292,4 +1444,92 @@ fn malformed_requests_all_answer_with_the_uniform_error_dto() {
 
     let _ = o7d_child.kill();
     let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 second corrective round, major finding: the live path's own
+/// best-effort session persistence can fail independently of everything
+/// else `o7 recover --run-dir` verifies — and that failure's own warning
+/// explicitly promises catch-up will fix it. Proves it actually does:
+/// `meta.json` (written regardless of whether the live ledger write
+/// succeeded) backfills the ledger's `provider_session_id` once it's
+/// missing there.
+#[test]
+fn recover_run_dir_backfills_a_missing_provider_session_from_meta_json() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+
+    let run_id = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let id: String = conn
+            .query_row("SELECT run_id FROM run LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        id
+    };
+    assert!(
+        provider_session_id(&ledger_path, &run_id).is_some(),
+        "sanity: the live path must have persisted a session normally"
+    );
+
+    // Simulate "the live best-effort persist failed" — revert JUST the
+    // ledger's own column, leaving meta.json (built independently, from
+    // the same in-memory AgentRun) untouched.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET provider_session_id = NULL WHERE run_id = ?1",
+            [&run_id],
+        )
+        .unwrap();
+    }
+    assert!(provider_session_id(&ledger_path, &run_id).is_none());
+
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let record_dir = runs_dir.join(&target_name).join(&run_id);
+    let meta_text = std::fs::read_to_string(record_dir.join("meta.json")).unwrap();
+    let meta: serde_json::Value = serde_json::from_str(&meta_text).unwrap();
+    let expected_session = meta["session_id"]
+        .as_str()
+        .expect("meta.json must carry the session independently of the ledger")
+        .to_owned();
+
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        recover.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recover.stderr)
+    );
+
+    assert_eq!(
+        provider_session_id(&ledger_path, &run_id),
+        Some(expected_session),
+        "catch-up must backfill the session from meta.json, exactly as its own warning promises"
+    );
 }
