@@ -45,6 +45,15 @@ enum Cmd {
     /// `events.jsonl` to the ledger — catch-up for a sink that fell behind
     /// or a process that crashed mid-projection (Q-Deck R0.7).
     Recover(RecoverArgs),
+    /// Continue: Q-Deck R1's command-continuation executor
+    /// (`docs/q-deck/r1-command.md` §9.5) — dispatch ONE durably accepted
+    /// command as a brand new sealed child run, continuing the parent
+    /// run's own provider session. Never invoked directly by an untrusted
+    /// caller; `o7d`'s mutation endpoint is this subcommand's sole
+    /// production caller (§9.4), always with a pre-minted, pre-bound
+    /// `--run-id`/`--command-id` and its own fixed repo/worktree/runs-dir
+    /// authority — never values taken from the HTTP request.
+    Continue(ContinueArgs),
 }
 
 #[derive(Args)]
@@ -64,6 +73,70 @@ struct RecoverArgs {
     /// always runs regardless of whether this is given.
     #[arg(long)]
     run_dir: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct ContinueArgs {
+    /// Target repo path — always `o7d`'s own fixed, server-configured
+    /// value (`docs/q-deck/r1-command.md` §9.4); never taken from an HTTP
+    /// request.
+    #[arg(long)]
+    repo: PathBuf,
+    /// Label for the run store (default: repo folder name) — must match
+    /// the value the conversation's earlier runs used, since the parent's
+    /// flat record lives at `runs/<target>/<parent-run-id>/`.
+    #[arg(long)]
+    target: Option<String>,
+    /// Base git ref for the child run's fresh worktree. This slice does
+    /// NOT carry the parent run's own file changes forward into the
+    /// child's worktree — only provider session continuity is proven
+    /// here (see `docs/q-deck/r1-command.md`'s known-limitations note).
+    #[arg(long, default_value = "HEAD")]
+    base: String,
+    /// Gate manifest (default: <repo>/.007/gate.toml).
+    #[arg(long)]
+    gate: Option<PathBuf>,
+    /// Model alias or id — `o7d`'s own fixed value, never client-supplied.
+    #[arg(long, default_value = "opus")]
+    model: String,
+    /// Max agent turns.
+    #[arg(long, default_value_t = 12)]
+    max_turns: u32,
+    /// Private run store root.
+    #[arg(long, default_value = "runs")]
+    runs_dir: PathBuf,
+    /// Worktree root.
+    #[arg(long, default_value = ".worktrees")]
+    worktree_root: PathBuf,
+    /// Keep the worktree after the run (default: remove it).
+    #[arg(long)]
+    keep_worktree: bool,
+    /// Ledger to project into — mandatory; a command's child run is always
+    /// ledger-tracked, there is no legacy no-ledger continuation path.
+    #[arg(long)]
+    ledger: PathBuf,
+    /// The conversation this command belongs to — must already exist.
+    #[arg(long)]
+    conversation_id: String,
+    /// The run this command continues from — must exist, belong to
+    /// `conversation_id`, and carry a durable provider session identity.
+    #[arg(long)]
+    parent_run_id: String,
+    /// The exact command text — carried as inert text throughout; never
+    /// interpreted by a shell (`agent::continue_session`'s own contract).
+    #[arg(long)]
+    command: String,
+    /// The child run's canonical id, pre-minted by the caller (`o7d`)
+    /// BEFORE spawning this process, so the durable command -> run binding
+    /// (`docs/q-deck/r1-command.md` §3/§9.6) can be committed before the
+    /// provider is ever invoked.
+    #[arg(long)]
+    run_id: String,
+    /// The durably accepted command this run dispatches — its own
+    /// bookkeeping status is updated to `completed`/`rejected` once this
+    /// run's outcome is known.
+    #[arg(long)]
+    command_id: String,
 }
 
 #[derive(Args)]
@@ -125,6 +198,7 @@ fn main() -> Result<()> {
         Cmd::Invoke(a) => invoke::run(&a),
         Cmd::Replay(a) => replay(&a),
         Cmd::Recover(a) => recover(&a),
+        Cmd::Continue(a) => continue_run(&a),
     }
 }
 
@@ -151,6 +225,37 @@ fn recover(a: &RecoverArgs) -> Result<()> {
     rt.block_on(ledger.mark_interrupted(state))
         .context("marking interrupted work")?;
     println!("[o7] recover: {runs} run(s), {attempts} attempt(s) marked interrupted");
+
+    // Q-Deck R1 (`docs/q-deck/r1-command.md` §7): a command durably
+    // accepted but never bound to a child run, or bound to one whose
+    // `RunStarted` never reached the ledger, must stay DISCOVERABLE — never
+    // silently dropped. Re-driving it is explicitly out of scope for this
+    // slice; re-submitting the identical request under the SAME
+    // idempotency key is the documented recovery path (safe per §4).
+    let stuck = rt
+        .block_on(ledger.stuck_commands())
+        .context("scanning for stuck commands")?;
+    if stuck.is_empty() {
+        println!("[o7] recover: 0 command(s) pending");
+    } else {
+        println!(
+            "[o7] recover: {} command(s) pending — not re-driven automatically:",
+            stuck.len()
+        );
+        for command in &stuck {
+            match &command.child_run_id {
+                None => println!(
+                    "[o7]   command {} (conversation {}): accepted, never bound to a child run",
+                    command.command_id, command.conversation_id
+                ),
+                Some(run_id) => println!(
+                    "[o7]   command {} (conversation {}): bound to run {run_id}, but that run's \
+                     RunStarted never reached the ledger",
+                    command.command_id, command.conversation_id
+                ),
+            }
+        }
+    }
     Ok(())
 }
 
@@ -336,7 +441,7 @@ fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
     let pending = PendingProjection::open(ledger_path, conversation, &canonical_run_id)
         .context("opening the ledger for catch-up")?;
     let projector = pending
-        .attach_run(&canonical_run_id, agent, role)
+        .attach_run(&canonical_run_id, agent, role, None)
         .context("attaching the catch-up projector to the existing (or new) run")?;
 
     for event in &stream {
@@ -700,6 +805,7 @@ fn execute_live(
             &canonical_run_id,
             a.engine.clone(),
             "implementer".to_string(),
+            None,
         )
         .context("attaching the live ledger projector after durable RunStarted")?;
 
@@ -722,6 +828,30 @@ fn execute_live(
     project(&projector, &agent_started, &mut projection_incomplete);
 
     let ar = agent::run(engine, wt, task, &a.model, a.max_turns)?;
+
+    // Q-Deck R1 (`docs/q-deck/r1-command.md` §9.1): persist the provider
+    // session identity durably whenever one came back — a forward-looking
+    // side effect of the ORIGINAL `o7 run --ledger` path that does not
+    // change this path's own observable behavior, but without it no future
+    // command could ever continue from this run (the run row already
+    // exists at this point — `attach_run`, above, ran before the agent
+    // call).
+    if let Some(session) = &ar.session_id {
+        if let Some(ledger_path) = &a.ledger {
+            let persist_rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .context("starting the session-persistence runtime")?;
+            let session_ledger = o7_ledger::SqliteLedger::open(ledger_path)
+                .with_context(|| format!("opening ledger at {}", ledger_path.display()))?;
+            persist_rt
+                .block_on(session_ledger.set_run_provider_session(
+                    o7_ledger::RunId::from_raw(canonical_run_id.as_str().to_owned()),
+                    session.as_str().to_owned(),
+                ))
+                .context("persisting this run's provider session identity")?;
+        }
+    }
 
     let agent_exited = append_only(
         &mut chain,
@@ -804,4 +934,355 @@ fn execute_live(
     }
 
     Ok((chain.out, steps, ar, projection_incomplete))
+}
+
+/// Q-Deck R1's command-continuation executor (`docs/q-deck/r1-command.md`
+/// §9.5) — dispatch ONE durably accepted command as a brand new sealed
+/// child run, continuing the parent run's own provider session. Reuses the
+/// SAME durability-ordering pipeline `execute_live` proves out for `o7 run
+/// --ledger`: durable task/binding before `RunStarted`, per-event
+/// append+sync, the two-phase `PendingProjection`/`attach_run` split, the
+/// canonical reducer, and `LiveLedgerProjector::seal` — never a second
+/// reducer, never a bypass of the ordinary live path.
+///
+/// # Errors
+/// The parent run does not exist, does not belong to `--conversation-id`,
+/// or has no durable provider session (defense-in-depth: `o7d`'s
+/// `create_command` already checked this, but this subcommand re-checks
+/// before spending anything, exactly like an invalid gate manifest);
+/// any worktree, agent, gate, or ledger error.
+fn continue_run(a: &ContinueArgs) -> Result<()> {
+    let repo = a
+        .repo
+        .canonicalize()
+        .with_context(|| format!("repo not found: {}", a.repo.display()))?;
+    let target = a.target.clone().unwrap_or_else(|| {
+        repo.file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "target".into())
+    });
+    let gate_path = a
+        .gate
+        .clone()
+        .unwrap_or_else(|| repo.join(".007").join("gate.toml"));
+    let manifest = GateManifest::load(&gate_path)?;
+    let contract = events::build_contract(&manifest)?;
+
+    let lookup_rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("starting the parent-lookup runtime")?;
+    let ledger = o7_ledger::SqliteLedger::open(&a.ledger)
+        .with_context(|| format!("opening ledger at {}", a.ledger.display()))?;
+    let parent_run_id = o7_ledger::RunId::from_raw(a.parent_run_id.clone());
+    let parent = lookup_rt
+        .block_on(ledger.run(parent_run_id.clone()))
+        .context("looking up the parent run")?
+        .with_context(|| format!("parent run {} does not exist", a.parent_run_id))?;
+    anyhow::ensure!(
+        parent.conversation_id.as_str() == a.conversation_id,
+        "parent run {} does not belong to conversation {}",
+        a.parent_run_id,
+        a.conversation_id
+    );
+    let parent_session_raw = parent.provider_session_id.clone().with_context(|| {
+        format!(
+            "parent run {} has no durable provider session to continue from — refusing to \
+             start a fresh, uncontinued session and call it a continuation",
+            a.parent_run_id
+        )
+    })?;
+    let session_id = agent::ProviderSessionId::new(parent_session_raw)
+        .context("parent run's stored provider session id is invalid")?;
+    drop(lookup_rt);
+
+    let command_id = o7_ledger::CommandId::from_raw(a.command_id.clone());
+    let mark_rejected = {
+        let command_id = command_id.clone();
+        move || -> Result<()> {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .context("starting the reject-marking runtime")?;
+            let ledger = o7_ledger::SqliteLedger::open(&a.ledger)
+                .with_context(|| format!("opening ledger at {}", a.ledger.display()))?;
+            rt.block_on(ledger.mark_command_rejected(command_id.clone()))
+                .context("marking the command rejected")?;
+            Ok(())
+        }
+    };
+
+    let base_commit = worktree::rev_parse(&repo, &a.base).unwrap_or_else(|_| a.base.clone());
+    let wt = a.worktree_root.join(format!("{target}-{}", a.run_id));
+    let branch = format!("o7/{}", a.run_id);
+    std::fs::create_dir_all(&a.worktree_root)?;
+    if let Err(e) = worktree::add(&repo, &a.base, &wt, &branch) {
+        let _ = mark_rejected();
+        return Err(e.context("creating the child run's worktree"));
+    }
+
+    let outcome = continue_execute(
+        a,
+        &repo,
+        &target,
+        &wt,
+        &base_commit,
+        &session_id,
+        &contract,
+        &manifest,
+        parent_run_id,
+    );
+
+    if a.keep_worktree {
+        eprintln!("[o7] worktree kept at {}", wt.display());
+    } else if let Err(e) = worktree::remove(&repo, &wt) {
+        eprintln!("[o7] warning: worktree cleanup failed: {e}");
+    }
+
+    let (verdict, projection_incomplete, child_session_id) = match outcome {
+        Ok(v) => v,
+        Err(e) => {
+            let _ = mark_rejected();
+            return Err(e);
+        }
+    };
+
+    let finish_rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("starting the command-completion runtime")?;
+    let ledger = o7_ledger::SqliteLedger::open(&a.ledger)
+        .with_context(|| format!("opening ledger at {}", a.ledger.display()))?;
+    if let Some(child_session) = child_session_id {
+        finish_rt
+            .block_on(ledger.set_run_provider_session(
+                o7_ledger::RunId::from_raw(a.run_id.clone()),
+                child_session,
+            ))
+            .context("persisting the child run's own provider session")?;
+    }
+    // "completed" is command bookkeeping only — it means "dispatched to a
+    // sealed run", not any specific verdict; the child run's own ledger row
+    // stays the sole verdict authority (docs/q-deck/r1-command.md §2).
+    finish_rt
+        .block_on(ledger.mark_command_completed(command_id))
+        .context("marking the command completed")?;
+
+    println!("[o7] {}: verdict {verdict:?}", a.run_id);
+    if projection_incomplete {
+        eprintln!(
+            "[o7] {}: WARNING — live ledger projection is incomplete; run \
+             `o7 recover --ledger <path> --run-dir runs/{target}/{}` to catch up \
+             before trusting Q-Deck's view of this run",
+            a.run_id, a.run_id
+        );
+    }
+    if verdict != Verdict::Pass || projection_incomplete {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn continue_execute(
+    a: &ContinueArgs,
+    repo: &Path,
+    target: &str,
+    wt: &Path,
+    base_commit: &str,
+    session_id: &agent::ProviderSessionId,
+    contract: &o7_run::event::RunContract,
+    manifest: &GateManifest,
+    parent_canonical_run_id: o7_ledger::RunId,
+) -> Result<(Verdict, bool, Option<String>)> {
+    println!(
+        "[o7] {}: continuing session, dispatching command in worktree",
+        a.run_id
+    );
+
+    let rec = RunRecord::create(&a.runs_dir, target, &a.run_id)?;
+    let task_ref = events::artifact(ArtifactKind::Task, "task.md", a.command.as_bytes());
+    let canonical_run_id = CanonicalRunId::new(a.run_id.clone())
+        .map_err(|e| anyhow::anyhow!("minting run id: {e}"))?;
+    let parent_canonical_run_id = CanonicalRunId::new(parent_canonical_run_id.as_str().to_owned())
+        .map_err(|e| anyhow::anyhow!("re-minting parent run id: {e}"))?;
+
+    // Durable before canonical RunStarted, exactly like `execute_live`.
+    LedgerBinding {
+        schema: 1,
+        run_id: a.run_id.clone(),
+        conversation_id: a.conversation_id.clone(),
+        agent: "claude".to_string(),
+        role: "implementer".to_string(),
+    }
+    .write_durable(&rec)
+    .context("durably writing ledger_binding.json before RunStarted")?;
+    rec.write_task_durable(&a.command)
+        .context("durably writing task.md before RunStarted")?;
+
+    let mut chain = events::EventChain::new(canonical_run_id.clone());
+    let mut events_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(rec.dir.join(events::EVENTS_FILE))
+        .context("opening events.jsonl for durable per-event append")?;
+    let mut projection_incomplete = false;
+
+    let mut append_only = |chain: &mut events::EventChain,
+                           kind: o7_run::event::RunEventKind|
+     -> Result<o7_run::event::RunEvent> {
+        let event = chain.push(kind)?;
+        let mut line = serde_json::to_string(&event).context("serializing canonical event")?;
+        line.push('\n');
+        events_file
+            .write_all(line.as_bytes())
+            .context("appending canonical event to events.jsonl")?;
+        events_file
+            .sync_data()
+            .context("flushing canonical event to disk")?;
+        Ok(event)
+    };
+
+    let run_started = append_only(
+        &mut chain,
+        o7_run::event::RunEventKind::RunStarted {
+            contract: contract.clone(),
+            task: task_ref.clone(),
+        },
+    )?;
+
+    let pending = PendingProjection::open(
+        &a.ledger,
+        ConversationSelector::Existing(a.conversation_id.clone()),
+        &canonical_run_id,
+    )
+    .context("opening the live ledger projection for this child run")?;
+    let projector = pending
+        .attach_run(
+            &canonical_run_id,
+            "claude".to_string(),
+            "implementer".to_string(),
+            Some(&parent_canonical_run_id),
+        )
+        .context("attaching the live ledger projector after durable RunStarted")?;
+
+    let project = |projector: &LiveLedgerProjector,
+                   event: &o7_run::event::RunEvent,
+                   incomplete: &mut bool| {
+        if let Err(e) = projector.project(event) {
+            *incomplete = true;
+            eprintln!(
+                "[o7] warning: live ledger projection of a canonical event failed: {e:#} — \
+                 continuing the run; this event's durable projection is incomplete and \
+                 needs `o7 recover --ledger <path> --run-dir <run-dir>` afterward"
+            );
+        }
+    };
+
+    project(&projector, &run_started, &mut projection_incomplete);
+
+    let agent_started = append_only(&mut chain, o7_run::event::RunEventKind::AgentStarted)?;
+    project(&projector, &agent_started, &mut projection_incomplete);
+
+    let ar = agent::continue_session(session_id, wt, &a.command, &a.model, a.max_turns)?;
+
+    let agent_exited = append_only(
+        &mut chain,
+        o7_run::event::RunEventKind::AgentExited {
+            outcome: events::agent_outcome(&ar),
+        },
+    )?;
+    project(&projector, &agent_exited, &mut projection_incomplete);
+
+    rec.write_agent_stdout(&ar.stdout)?;
+    let diff = worktree::diff_vs_base(wt, &a.base).unwrap_or_default();
+    rec.write_diff(&diff)?;
+    let diff_ref = events::artifact(ArtifactKind::Diff, "diff.patch", diff.as_bytes());
+    let patch_captured = append_only(
+        &mut chain,
+        o7_run::event::RunEventKind::PatchCaptured { patch: diff_ref },
+    )?;
+    project(&projector, &patch_captured, &mut projection_incomplete);
+
+    manifest.validate()?;
+    let gate_out = rec.gate_dir();
+    std::fs::create_dir_all(&gate_out)?;
+    let mut steps = Vec::new();
+    for step in &manifest.gate {
+        if step.env.as_deref() == Some("windows") {
+            steps.push(manifest.run_one_step(step, wt, &gate_out)?);
+            continue;
+        }
+
+        let gate = o7_run::ids::GateId::new(step.name.clone())
+            .map_err(|e| anyhow::anyhow!("gate step name invalid as a gate id: {e}"))?;
+        let gate_started = append_only(
+            &mut chain,
+            o7_run::event::RunEventKind::GateStarted { gate: gate.clone() },
+        )?;
+        project(&projector, &gate_started, &mut projection_incomplete);
+
+        let verdict = manifest.run_one_step(step, wt, &gate_out)?;
+        let log = if verdict.log.is_empty() {
+            None
+        } else {
+            let bytes = std::fs::read(rec.dir.join(&verdict.log))
+                .with_context(|| format!("reading back gate log {}", verdict.log))?;
+            Some(events::artifact(
+                o7_run::event::ArtifactKind::GateLog,
+                &verdict.log,
+                &bytes,
+            ))
+        };
+        let gate_finished = append_only(
+            &mut chain,
+            o7_run::event::RunEventKind::GateFinished {
+                gate,
+                outcome: events::gate_outcome(verdict.verdict),
+                log,
+            },
+        )?;
+        project(&projector, &gate_finished, &mut projection_incomplete);
+        steps.push(verdict);
+    }
+
+    let run_sealed = append_only(&mut chain, o7_run::event::RunEventKind::RunSealed)?;
+    project(&projector, &run_sealed, &mut projection_incomplete);
+
+    let verdict = events::canonical_verdict(&chain.out)?;
+    if let Err(e) = events::to_canonical(verdict).and_then(|cv| projector.seal(cv)) {
+        projection_incomplete = true;
+        eprintln!(
+            "[o7] warning: canonical verdict is {verdict:?}, but sealing the live ledger \
+             projection failed: {e:#} — this run's durable projection is incomplete; run \
+             `o7 recover --ledger <path> --run-dir <run-dir>` before trusting Q-Deck's view \
+             of it"
+        );
+    }
+
+    let meta = RunMeta {
+        schema: 1,
+        kind: "run".to_string(),
+        run_id: a.run_id.clone(),
+        target: target.to_string(),
+        repo: repo.to_string_lossy().to_string(),
+        base_commit: base_commit.to_string(),
+        engine: "claude".to_string(),
+        model: a.model.clone(),
+        verdict,
+        steps,
+        agent_exit_code: ar.exit_code,
+        session_id: ar.session_id.as_ref().map(|s| s.as_str().to_owned()),
+        cost_usd: None,
+        started_at: None,
+        finished_at: None,
+    };
+    rec.write_meta(&meta)?;
+    println!("[o7] {}: record at {}", a.run_id, rec.dir.display());
+
+    Ok((
+        verdict,
+        projection_incomplete,
+        ar.session_id.map(|s| s.as_str().to_owned()),
+    ))
 }
