@@ -4,15 +4,17 @@
 //! `o7-ledger`.
 
 use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use axum::Json;
 
 use crate::cursor;
 use crate::dto::{
-    ConversationDto, EventPageDto, EventsParams, HealthDto, ListParams, PageDto, RunDto,
-    RunsListParams, API_SCHEMA_VERSION,
+    CommandAcceptedDto, ConversationDto, EventPageDto, EventsParams, HealthDto, ListParams,
+    NewCommandRequestDto, PageDto, RunDto, RunsListParams, API_SCHEMA_VERSION,
+    COMMAND_SCHEMA_VERSION,
 };
 use crate::error::ApiError;
-use crate::state::AppState;
+use crate::state::{AppState, ExecutionConfig};
 use o7_ledger::Ledger as _;
 
 /// Default page size when a caller doesn't specify one. Small and
@@ -138,6 +140,177 @@ pub(crate) async fn get_run(
     let id = o7_ledger::RunId::from_raw(run_id);
     let run = state.ledger.run(id).await?.ok_or(ApiError::NotFound)?;
     Ok(Json(run.into()))
+}
+
+/// Q-Deck R1 (`docs/q-deck/r1-command.md` §8): the command text's own size
+/// limit — deliberately small, this is a command, not a file upload.
+const MAX_COMMAND_TEXT_BYTES: usize = 8 * 1024;
+
+/// `POST /api/v1/conversations/{conversation_id}/commands` (§8/§9.6).
+/// Validate → durably accept (`SqliteLedger::create_command`, itself
+/// idempotent/stale-parent/concurrency-checked) → durably bind a freshly
+/// minted child `RunId` (compare-and-swap safe against a racing retry of
+/// the same idempotency key, see `bind_command_child_run`'s doc comment) →
+/// spawn `o7 continue` ONLY if this request actually won that bind → 202,
+/// without waiting for the spawned process.
+///
+/// # Errors
+/// See the module doc / §8's status-code table: `400` malformed request,
+/// `404` unknown conversation or parent, `409` stale parent / idempotency
+/// conflict / concurrent command, `422` no continuable provider session,
+/// `500` if `o7d` was not started with execution authority configured, or
+/// a genuine spawn/storage failure.
+pub(crate) async fn create_command(
+    State(state): State<AppState>,
+    Path(conversation_id): Path<String>,
+    Json(body): Json<NewCommandRequestDto>,
+) -> Result<(StatusCode, Json<CommandAcceptedDto>), ApiError> {
+    let exec = state
+        .exec
+        .as_ref()
+        .ok_or(ApiError::Internal("EXEC_NOT_CONFIGURED"))?;
+
+    match body.schema_version {
+        Some(1) => {}
+        Some(v) => {
+            return Err(ApiError::BadRequest(format!(
+                "unsupported schema_version {v} (expected 1)"
+            )))
+        }
+        None => return Err(ApiError::BadRequest("missing schema_version".to_owned())),
+    }
+    let parent_run_id = body
+        .parent_run_id
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ApiError::BadRequest("missing or empty parent_run_id".to_owned()))?;
+    let command_text = body
+        .command
+        .ok_or_else(|| ApiError::BadRequest("missing command".to_owned()))?;
+    if command_text.trim().is_empty() {
+        return Err(ApiError::BadRequest(
+            "command must not be empty or whitespace-only".to_owned(),
+        ));
+    }
+    if command_text.len() > MAX_COMMAND_TEXT_BYTES {
+        return Err(ApiError::BadRequest(format!(
+            "command exceeds the {MAX_COMMAND_TEXT_BYTES}-byte limit"
+        )));
+    }
+    let idempotency_key = body
+        .idempotency_key
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ApiError::BadRequest("missing or empty idempotency_key".to_owned()))?;
+
+    let request = o7_ledger::NewCommand {
+        conversation_id: o7_ledger::ConversationId::from_raw(conversation_id.clone()),
+        parent_run_id: o7_ledger::RunId::from_raw(parent_run_id.clone()),
+        command_text,
+    };
+    let command = state
+        .ledger
+        .create_command(
+            request,
+            o7_ledger::Idempotency {
+                key: idempotency_key,
+            },
+        )
+        .await?;
+
+    let final_command = match &command.child_run_id {
+        // Idempotent replay of a command that already progressed past
+        // acceptance — the provider was already invoked once; never again.
+        Some(_) => command,
+        None => {
+            let candidate = o7_ledger::RunId::generate();
+            let bound = state
+                .ledger
+                .bind_command_child_run(command.command_id.clone(), candidate.clone())
+                .await?;
+            let won = bound.child_run_id.as_ref().map(o7_ledger::RunId::as_str)
+                == Some(candidate.as_str());
+            if won {
+                spawn_continue(exec, &conversation_id, &parent_run_id, &bound)
+                    .map_err(|_| ApiError::Internal("SPAWN_FAILED"))?;
+            }
+            bound
+        }
+    };
+
+    let run_id = final_command
+        .child_run_id
+        .as_ref()
+        .ok_or(ApiError::Internal("COMMAND_BIND_MISSING"))?
+        .as_str()
+        .to_owned();
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(CommandAcceptedDto {
+            schema_version: COMMAND_SCHEMA_VERSION,
+            command_id: final_command.command_id.as_str().to_owned(),
+            conversation_id,
+            parent_run_id,
+            run_id,
+            status: final_command.status.as_str().to_owned(),
+        }),
+    ))
+}
+
+/// Spawn `o7 continue` for a just-bound command — explicit argv via
+/// `std::process::Command`, never a shell (same discipline as
+/// `agent::continue_session`, §9.2). The child is detached (never awaited
+/// here — §9.6's "respond without waiting for full provider completion")
+/// but still reaped via a background blocking task, so a long-lived `o7d`
+/// process never accumulates zombie children across many commands.
+fn spawn_continue(
+    exec: &ExecutionConfig,
+    conversation_id: &str,
+    parent_run_id: &str,
+    command: &o7_ledger::Command,
+) -> std::io::Result<()> {
+    let mut cmd = std::process::Command::new(&exec.o7_bin);
+    cmd.arg("continue")
+        .arg("--repo")
+        .arg(&exec.repo)
+        .arg("--worktree-root")
+        .arg(&exec.worktree_root)
+        .arg("--runs-dir")
+        .arg(&exec.runs_dir)
+        .arg("--model")
+        .arg(&exec.model)
+        .arg("--max-turns")
+        .arg(exec.max_turns.to_string())
+        .arg("--ledger")
+        .arg(&exec.ledger_path)
+        .arg("--conversation-id")
+        .arg(conversation_id)
+        .arg("--parent-run-id")
+        .arg(parent_run_id)
+        .arg("--command")
+        .arg(&command.command_text)
+        .arg("--run-id")
+        .arg(
+            command
+                .child_run_id
+                .as_ref()
+                .map(o7_ledger::RunId::as_str)
+                .unwrap_or_default(),
+        )
+        .arg("--command-id")
+        .arg(command.command_id.as_str());
+    if let Some(gate) = &exec.gate {
+        cmd.arg("--gate").arg(gate);
+    }
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    let child = cmd.spawn()?;
+    tokio::task::spawn_blocking(move || {
+        let mut child = child;
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 /// Matches any `/api/v1/*` path none of the literal routes above claimed —

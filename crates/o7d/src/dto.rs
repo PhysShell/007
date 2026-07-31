@@ -165,3 +165,37 @@ pub struct EventsParams {
     pub after: Option<u64>,
     pub limit: Option<usize>,
 }
+
+/// `POST /api/v1/conversations/{conversation_id}/commands` request body
+/// (`docs/q-deck/r1-command.md` §8). Every field is `Option` even though
+/// all four are logically required — deserialization must always succeed
+/// so the handler can report a precise, uniformly `ErrorDto`-shaped `400`
+/// for a missing/empty field, instead of axum's own differently-shaped
+/// JSON-extractor rejection.
+#[derive(Debug, Deserialize)]
+pub struct NewCommandRequestDto {
+    pub schema_version: Option<u32>,
+    pub parent_run_id: Option<String>,
+    pub command: Option<String>,
+    pub idempotency_key: Option<String>,
+}
+
+/// The command endpoint's own wire version — independent of
+/// `API_SCHEMA_VERSION` (the read API's version). Starts at 1 (§8); do not
+/// conflate a bump to one with a bump to the other.
+pub const COMMAND_SCHEMA_VERSION: u32 = 1;
+
+/// Response body, sent only after durable acceptance (§8). `status` mirrors
+/// the command's own current bookkeeping status (`accepted`/`started`/
+/// `completed`/`rejected`) — for a fresh acceptance this is always
+/// `"accepted"`; an idempotent replay of an already-progressed command
+/// reports its real current status rather than lying that it just happened.
+#[derive(Debug, Serialize)]
+pub struct CommandAcceptedDto {
+    pub schema_version: u32,
+    pub command_id: String,
+    pub conversation_id: String,
+    pub parent_run_id: String,
+    pub run_id: String,
+    pub status: String,
+}

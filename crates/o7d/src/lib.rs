@@ -12,11 +12,12 @@ mod state;
 mod stream;
 
 pub use error::ApiError;
-pub use state::AppState;
+pub use state::{AppState, ExecutionConfig};
 
 use std::path::Path;
 
-use axum::routing::{any, get};
+use axum::extract::DefaultBodyLimit;
+use axum::routing::{any, get, post};
 use axum::Router;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -36,7 +37,17 @@ use tower_http::services::{ServeDir, ServeFile};
 /// `static_dir = None` serves the API alone (used in dev, where Vite's dev
 /// server serves the shell and proxies `/api` to this process instead).
 pub fn app(ledger: o7_ledger::SqliteLedger, static_dir: Option<&Path>) -> Router {
-    let api = router(ledger);
+    app_with_exec(ledger, static_dir, None)
+}
+
+/// Same as [`app`], plus the command-continuation execution authority (Q-Deck
+/// R1) — see [`router_with_exec`].
+pub fn app_with_exec(
+    ledger: o7_ledger::SqliteLedger,
+    static_dir: Option<&Path>,
+    exec: Option<state::ExecutionConfig>,
+) -> Router {
+    let api = router_with_exec(ledger, exec);
     match static_dir {
         Some(dir) => {
             let index = dir.join("index.html");
@@ -66,7 +77,26 @@ pub fn app(ledger: o7_ledger::SqliteLedger, static_dir: Option<&Path>) -> Router
 /// version, where an unmatched `/api/v1/*` path fell all the way through to
 /// the SPA shell and got served with a 200 instead of a 404.
 pub fn router(ledger: o7_ledger::SqliteLedger) -> Router {
-    let state = AppState { ledger };
+    router_with_exec(ledger, None)
+}
+
+/// Q-Deck R1 (`docs/q-deck/r1-command.md` §9.4/§9.6): same router as
+/// [`router`], plus the command-continuation mutation route. `exec` is
+/// `None` in R0's plain read-only deployment (and in any test that only
+/// exercises the read surface) — the route is still registered either way,
+/// so a caller that hits it on an unconfigured `o7d` gets an honest `500`
+/// naming the missing configuration, never a bare 404 from the wildcard
+/// catch-all.
+pub fn router_with_exec(
+    ledger: o7_ledger::SqliteLedger,
+    exec: Option<state::ExecutionConfig>,
+) -> Router {
+    let state = AppState { ledger, exec };
+    // Small, fixed cap on the request body (`docs/q-deck/r1-command.md`
+    // §9.6: "this is a command, not a file upload") — scoped to this one
+    // route via `route_layer`, so every other route keeps axum's ordinary
+    // default limit.
+    const MAX_COMMAND_BODY_BYTES: usize = 16 * 1024;
     Router::new()
         .route("/api/v1/health", get(routes::health))
         .route("/api/v1/conversations", get(routes::list_conversations))
@@ -81,6 +111,10 @@ pub fn router(ledger: o7_ledger::SqliteLedger) -> Router {
         .route(
             "/api/v1/conversations/:conversation_id/events/stream",
             get(stream::conversation_events_stream),
+        )
+        .route(
+            "/api/v1/conversations/:conversation_id/commands",
+            post(routes::create_command).route_layer(DefaultBodyLimit::max(MAX_COMMAND_BODY_BYTES)),
         )
         .route("/api/v1/runs", get(routes::list_runs))
         .route("/api/v1/runs/:run_id", get(routes::get_run))
