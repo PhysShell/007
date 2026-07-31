@@ -15,7 +15,7 @@ use o7::gate::GateManifest;
 use o7::invoke;
 use o7::judge;
 use o7::ledger_projector::{ConversationSelector, LiveLedgerProjector, PendingProjection};
-use o7::record::{RunMeta, RunRecord};
+use o7::record::{LedgerBinding, RunMeta, RunRecord};
 use o7::verdict::{StepVerdict, Verdict};
 use o7::worktree;
 use o7_run::event::ArtifactKind;
@@ -178,9 +178,7 @@ fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
     // under an explicit `--conversation-id` and this call guessed `New`
     // instead, the digest would mismatch and fail as a conflict before ever
     // reaching any "existing row wins" replay logic. So: an existing run's
-    // OWN stored conversation_id is used verbatim; `New` is only the
-    // fallback for the genuinely-first-ever-attach case, where no row (and
-    // so no conversation to disagree with) exists yet.
+    // OWN stored conversation_id is used verbatim.
     let existing_conversation = {
         let ledger = o7_ledger::SqliteLedger::open(ledger_path)
             .with_context(|| format!("opening ledger at {}", ledger_path.display()))?;
@@ -194,18 +192,40 @@ fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
         .context("looking up this run's existing ledger row")?
         .map(|run| run.conversation_id.as_str().to_owned())
     };
+
+    // If no run row exists yet (the process crashed between durable
+    // RunStarted and `attach_run`), `ConversationSelector::New` must never
+    // be GUESSED — that would silently discard an explicit
+    // `--conversation-id` the original run was actually given, and create a
+    // phantom second conversation instead. The durable `ledger_binding.json`
+    // (written before RunStarted — see `record::LedgerBinding`) records the
+    // conversation the live run actually resolved to, so catch-up reads
+    // the real answer instead of guessing. It is absent only for a run that
+    // predates this fix or crashed before ITS OWN durable write, in which
+    // case there's genuinely nothing more to go on than the pre-existing
+    // `New` fallback.
+    let binding =
+        LedgerBinding::read(run_dir).context("reading this run's ledger_binding.json, if any")?;
     let conversation = match existing_conversation {
         Some(id) => ConversationSelector::Existing(id),
-        None => ConversationSelector::New,
+        None => match &binding {
+            Some(b) => ConversationSelector::Existing(b.conversation_id.clone()),
+            None => ConversationSelector::New,
+        },
     };
+    // Likewise, `agent`/`role` are part of `create_run_with_id`'s own
+    // idempotency digest — reusing the run's actual original values (from
+    // the same binding record) rather than a hardcoded guess keeps catch-up
+    // correct once a second agent engine exists, not just for `claude`.
+    let (agent, role) = match &binding {
+        Some(b) => (b.agent.clone(), b.role.clone()),
+        None => ("claude".to_string(), "implementer".to_string()),
+    };
+
     let pending = PendingProjection::open(ledger_path, conversation, &canonical_run_id)
         .context("opening the ledger for catch-up")?;
     let projector = pending
-        .attach_run(
-            &canonical_run_id,
-            "claude".to_string(),
-            "implementer".to_string(),
-        )
+        .attach_run(&canonical_run_id, agent, role)
         .context("attaching the catch-up projector to the existing (or new) run")?;
 
     for event in &stream {
@@ -366,6 +386,7 @@ fn execute(
 
     let rec = RunRecord::create(&a.runs_dir, target, run_id)?;
     let task_ref = events::artifact(ArtifactKind::Task, "task.md", task.as_bytes());
+    let was_live = pending.is_some();
 
     // No ledger: EXACTLY today's pre-R0.7 path, untouched — the agent and
     // every gate run to completion first, then the whole canonical stream
@@ -390,11 +411,27 @@ fn execute(
         )?,
     };
 
-    // The live path already wrote events.jsonl incrementally, durably, per
-    // event (section 1's ordering fix) — this rewrite is the SAME bytes
-    // (identical events, identical serialization), harmless for both paths
-    // and keeps this tail uniform rather than special-cased.
-    rec.write_text(events::EVENTS_FILE, &events::to_jsonl(&stream)?)?;
+    if was_live {
+        // The live path already durably appended every event, one at a
+        // time, with `sync_data()` after each (section 1's ordering fix).
+        // Truncating and rewriting the SAME bytes here — even though they
+        // are byte-identical — would still open a real window where the
+        // file is empty or partial between the truncate and the rewrite
+        // landing, destroying the durability guarantee the per-event
+        // append path exists to provide. So the live path only ever reads
+        // back and verifies; it never rewrites its own already-durable
+        // journal.
+        let on_disk = std::fs::read_to_string(rec.dir.join(events::EVENTS_FILE))
+            .context("reading back the durably-appended events.jsonl for verification")?;
+        let expected = events::to_jsonl(&stream)?;
+        anyhow::ensure!(
+            on_disk == expected,
+            "durably-appended events.jsonl does not match the in-memory canonical stream \
+             — this should never happen"
+        );
+    } else {
+        rec.write_text(events::EVENTS_FILE, &events::to_jsonl(&stream)?)?;
+    }
     let verdict = events::canonical_verdict(&stream)?;
 
     // The legacy per-step reduction stays as a cross-check surface: a
@@ -474,6 +511,32 @@ fn execute_live(
 )> {
     let canonical_run_id = CanonicalRunId::new(run_id.to_string())
         .map_err(|e| anyhow::anyhow!("minting run id: {e}"))?;
+
+    // Durable, in this order, BEFORE canonical RunStarted is even minted:
+    //
+    // 1. The ledger-binding record — which conversation this run's live
+    //    projection resolved to (`pending.conversation_id()`), so a crash
+    //    before the ledger run row exists still lets `o7 recover` find the
+    //    real conversation instead of guessing `New` and losing an explicit
+    //    `--conversation-id` (second corrective round, defect 3).
+    // 2. `task.md` itself — RunStarted's own canonical `task` ArtifactRef
+    //    durably references it by digest; writing it only after the agent
+    //    finishes (as the no-ledger path still does, and as this path used
+    //    to) left a window where a crash mid-agent-run produced a durable
+    //    RunStarted whose referenced artifact didn't exist on disk yet
+    //    (second corrective round, defect 1).
+    LedgerBinding {
+        schema: 1,
+        run_id: run_id.to_string(),
+        conversation_id: pending.conversation_id().as_str().to_string(),
+        agent: a.engine.clone(),
+        role: "implementer".to_string(),
+    }
+    .write_durable(rec)
+    .context("durably writing ledger_binding.json before RunStarted")?;
+    rec.write_task_durable(task)
+        .context("durably writing task.md before RunStarted")?;
+
     let mut chain = events::EventChain::new(canonical_run_id.clone());
     let mut events_file = std::fs::OpenOptions::new()
         .create(true)
@@ -546,7 +609,6 @@ fn execute_live(
     )?;
     project(&projector, &agent_exited, &mut projection_incomplete);
 
-    rec.write_task(task)?;
     rec.write_agent_stdout(&ar.stdout)?;
     let diff = worktree::diff_vs_base(wt, &a.base).unwrap_or_default();
     rec.write_diff(&diff)?;
