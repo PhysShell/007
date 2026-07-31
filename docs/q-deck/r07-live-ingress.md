@@ -119,6 +119,32 @@ write failure is fatal (propagates, aborting the run) — a *ledger
 projection* failure is not (see §2.5); these are deliberately different
 failure modes.
 
+**A third independent re-gate found two more crash-consistency gaps in
+this same durability chain, both fixed**:
+
+- `RunStarted` durably references `task.md` by digest (`ArtifactRef`) — but
+  the live path used to write `task.md` itself only after the agent
+  finished (the no-ledger path's original timing). A SIGKILL during the
+  agent run left a durable `RunStarted` whose referenced artifact didn't
+  exist on disk: structurally valid for `reduce_all` (which never resolves
+  artifact content), but not for a real replay that does. Fixed: on the
+  live path only, `RunRecord::write_task_durable` (`write_all` +
+  `sync_data`, unlike `write_task`'s plain `std::fs::write`) runs BEFORE
+  `RunStarted` is even minted — proved by
+  `sigkill_during_the_agent_leaves_a_durable_task_md_matching_run_started`
+  (`tests/live_ingress_e2e.rs`), which kills mid-agent and asserts
+  `task.md`'s content hashes to exactly the digest `RunStarted` committed
+  to.
+- After every event was already durably appended one at a time, `execute()`
+  still finished with a single `rec.write_text(EVENTS_FILE, ...)` over the
+  WHOLE stream — same bytes, but `write_text` is a plain `std::fs::write`
+  (open, truncate, rewrite, no `sync_data`), reopening a window where the
+  file could be empty or partial between the truncate and the rewrite
+  landing, for a journal that was otherwise already fully durable. Fixed:
+  the live path never rewrites its own journal — it only reads it back and
+  verifies the bytes match the in-memory stream. The no-ledger path (which
+  never did the live per-event append) keeps the original one-shot write.
+
 ## 2.3 Identity
 
 One physical run has exactly one identity across every layer:
@@ -322,6 +348,27 @@ distinct reasons, both now fixed:
    run's attempt by `attempt_number` regardless of status, so a terminal
    attach now reuses the exact same `attempt_id` its events were originally
    recorded under.
+
+**A third independent re-gate found one more window in this same
+lifecycle, fixed**: `PendingProjection::open` (phase 1 — resolves, and for
+a fresh conversation actually CREATES, the ledger conversation) runs
+*before the worktree even exists*; `attach_run` (which creates the ledger
+RUN row) doesn't run until well after, once canonical `RunStarted` is
+durable. If the process crashes in that window, catch-up finds no run row
+and — even with fix #1 above — has nothing to look an existing row's
+conversation up FROM. Guessing `ConversationSelector::New` here silently
+discards an explicit `--conversation-id` the original invocation was
+actually given, creating a phantom second conversation instead of
+resolving the real one. Fixed with a small durable
+`ledger_binding.json` (`run_id`, `conversation_id`, `agent`, `role`,
+`record::LedgerBinding`) written — durably, `write_all` + `sync_data` —
+in the run's record directory BEFORE canonical `RunStarted` is even
+minted, from the SAME `conversation_id` phase 1 already resolved. Catch-up,
+when no run row exists, reads this file instead of guessing; `New` is now
+only the residual fallback for a run whose record predates this fix (or
+crashed before this file's own durable write — impossible from this point
+on, since nothing durable exists yet at that point for there to be
+anything to catch up).
 
 The first implementation's own recovery test only proved the degenerate
 case (every `system.note` AND its idempotency record deleted, i.e. full
