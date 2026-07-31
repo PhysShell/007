@@ -154,32 +154,70 @@ fn recover(a: &RecoverArgs) -> Result<()> {
     Ok(())
 }
 
-/// Re-verify a run's canonical `events.jsonl` (chain continuity, digests,
-/// sequence order — the same structural check `o7 replay` does, via the
-/// same `reduce_all`) and re-apply it to the ledger: attach to (or create)
-/// the run/attempt idempotently, re-project every event (idempotent, so an
-/// already-applied prefix is a safe no-op), and idempotently apply the
-/// sealed verdict if the stream is sealed. Reuses `LiveLedgerProjector` —
-/// not a second reducer, not a separate import format.
+/// Re-verify a run's canonical `events.jsonl` — chain continuity, per-event
+/// digests, reducer structural validation, AND every referenced artifact's
+/// content digest (`task.md`, `diff.patch`, gate logs, ...), via the SAME
+/// `o7_run::replay::verify_prefix` primitive `o7 replay` itself is built on,
+/// tolerating a not-yet-sealed prefix rather than requiring one — and
+/// re-apply it to the ledger: attach to (or create) the run/attempt
+/// idempotently, re-project every event (idempotent, so an already-applied
+/// prefix is a safe no-op), and idempotently apply the sealed verdict if the
+/// stream is sealed. Reuses `LiveLedgerProjector` — not a second reducer,
+/// not a separate import format.
+///
+/// # Errors
+/// Structural/artifact verification failure (the exact same failure `o7
+/// replay` would report, once sealed); a `ledger_binding.json` that
+/// disagrees with either its own schema/run_id or an existing ledger run
+/// row; a run with neither an existing ledger row nor a `ledger_binding.json`
+/// to resolve its conversation from; any underlying ledger error.
 fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
     let events_text = std::fs::read_to_string(run_dir.join(events::EVENTS_FILE))
         .with_context(|| format!("reading canonical events.jsonl in {}", run_dir.display()))?;
     let stream = events::from_jsonl(&events_text)?;
-    let state = o7_run::reduce::reduce_all(&stream)
-        .map_err(|e| anyhow::anyhow!("canonical stream failed structural verification: {e}"))?;
+    // Q-Deck R0.7 fourth re-gate, blocker #1: `reduce_all` alone (the prior
+    // check here) never resolves or verifies referenced artifacts, so a
+    // record whose `task.md`/`diff.patch`/gate log was altered or deleted
+    // after the fact could still catch up cleanly and have the ledger
+    // report it `Completed` — a record `o7 replay` itself would reject.
+    // `verify_prefix` runs the identical chain/digest/reducer/artifact
+    // checks `replay` does, just without requiring the stream to be sealed.
+    let resolver = events::RecordDirResolver {
+        base: run_dir.to_path_buf(),
+    };
+    let (state, artifacts_verified) =
+        o7_run::replay::verify_prefix(&stream, &resolver).map_err(|e| {
+            anyhow::anyhow!(
+                "canonical record failed verification (chain/digest/reducer/artifacts) — \
+                 the same check `o7 replay` applies once sealed: {e}"
+            )
+        })?;
     let canonical_run_id = stream
         .first()
         .map(|e| e.run_id.clone())
         .context("events.jsonl has no events to catch up")?;
 
-    // Look up whether this run's ledger row already exists BEFORE deciding
-    // how to resolve the conversation. `create_run_with_id`'s idempotency
-    // digest includes `conversation_id` — if the original run was created
-    // under an explicit `--conversation-id` and this call guessed `New`
-    // instead, the digest would mismatch and fail as a conflict before ever
-    // reaching any "existing row wins" replay logic. So: an existing run's
-    // OWN stored conversation_id is used verbatim.
-    let existing_conversation = {
+    // Q-Deck R0.7 fourth re-gate, blocker #2: `ledger_binding.json` is a
+    // caller-controlled sidecar file — it must be validated, not blindly
+    // trusted, before it's allowed to steer identity resolution.
+    let binding =
+        LedgerBinding::read(run_dir).context("reading this run's ledger_binding.json, if any")?;
+    if let Some(b) = &binding {
+        anyhow::ensure!(
+            b.schema == 1,
+            "ledger_binding.json has unsupported schema {} (expected 1) — refusing to trust it",
+            b.schema
+        );
+        anyhow::ensure!(
+            b.run_id == canonical_run_id.as_str(),
+            "ledger_binding.json's run_id {} does not match this record's canonical run_id \
+             {} — refusing to trust a mismatched binding",
+            b.run_id,
+            canonical_run_id.as_str()
+        );
+    }
+
+    let existing_run = {
         let ledger = o7_ledger::SqliteLedger::open(ledger_path)
             .with_context(|| format!("opening ledger at {}", ledger_path.display()))?;
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -190,36 +228,57 @@ fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
             canonical_run_id.as_str().to_owned(),
         )))
         .context("looking up this run's existing ledger row")?
-        .map(|run| run.conversation_id.as_str().to_owned())
     };
 
-    // If no run row exists yet (the process crashed between durable
-    // RunStarted and `attach_run`), `ConversationSelector::New` must never
-    // be GUESSED — that would silently discard an explicit
-    // `--conversation-id` the original run was actually given, and create a
-    // phantom second conversation instead. The durable `ledger_binding.json`
-    // (written before RunStarted — see `record::LedgerBinding`) records the
-    // conversation the live run actually resolved to, so catch-up reads
-    // the real answer instead of guessing. It is absent only for a run that
-    // predates this fix or crashed before ITS OWN durable write, in which
-    // case there's genuinely nothing more to go on than the pre-existing
-    // `New` fallback.
-    let binding =
-        LedgerBinding::read(run_dir).context("reading this run's ledger_binding.json, if any")?;
-    let conversation = match existing_conversation {
-        Some(id) => ConversationSelector::Existing(id),
-        None => match &binding {
-            Some(b) => ConversationSelector::Existing(b.conversation_id.clone()),
-            None => ConversationSelector::New,
-        },
-    };
-    // Likewise, `agent`/`role` are part of `create_run_with_id`'s own
-    // idempotency digest — reusing the run's actual original values (from
-    // the same binding record) rather than a hardcoded guess keeps catch-up
-    // correct once a second agent engine exists, not just for `claude`.
-    let (agent, role) = match &binding {
-        Some(b) => (b.agent.clone(), b.role.clone()),
-        None => ("claude".to_string(), "implementer".to_string()),
+    // The PERSISTED ledger row, when one exists, is authoritative — never
+    // overridden by the sidecar binding file. A binding that disagrees with
+    // it is refused rather than silently preferred either way: `New` must
+    // never be guessed (see the `None` arm), but an existing row's own
+    // conversation/agent/role must never be second-guessed by a sidecar
+    // file either, so a stale or tampered `ledger_binding.json` cannot
+    // redirect an already-created run or corrupt its idempotency digest.
+    let (conversation, agent, role) = match &existing_run {
+        Some(run) => {
+            if let Some(b) = &binding {
+                anyhow::ensure!(
+                    b.conversation_id == run.conversation_id.as_str(),
+                    "ledger_binding.json's conversation_id disagrees with the existing \
+                     ledger run's own conversation_id {} — refusing to trust the \
+                     mismatched binding",
+                    run.conversation_id.as_str()
+                );
+            }
+            (
+                ConversationSelector::Existing(run.conversation_id.as_str().to_owned()),
+                run.agent.clone(),
+                run.role.clone(),
+            )
+        }
+        None => {
+            // No run row yet (the process crashed between durable
+            // RunStarted and `attach_run`): the durable `ledger_binding.json`
+            // (written before RunStarted — see `record::LedgerBinding`) is
+            // the ONLY legitimate source for the conversation this run
+            // resolved to. Every `--ledger` run since this fix writes it
+            // before RunStarted, so its absence here means a corrupt or
+            // pre-fix record — `ConversationSelector::New` must NEVER be
+            // guessed as a substitute; that would silently discard an
+            // explicit `--conversation-id` and create a phantom
+            // conversation.
+            let b = binding.as_ref().with_context(|| {
+                format!(
+                    "no existing ledger run row for {canonical_run_id} and no \
+                     ledger_binding.json in {} — refusing to guess a conversation; this \
+                     run's record may be corrupt or predates the durable-binding fix",
+                    run_dir.display()
+                )
+            })?;
+            (
+                ConversationSelector::Existing(b.conversation_id.clone()),
+                b.agent.clone(),
+                b.role.clone(),
+            )
+        }
     };
 
     let pending = PendingProjection::open(ledger_path, conversation, &canonical_run_id)
@@ -236,15 +295,26 @@ fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
 
     let sealed = state.verdict.is_some();
     if let Some(verdict) = state.verdict {
+        // Q-Deck R0.7 fourth re-gate, blocker #3: a prior PLAIN `o7 recover`
+        // (no `--run-dir`) may have already classified this run
+        // `Interrupted` before this fully-verified, sealed canonical stream
+        // was ever consulted. Ordinary `seal()` correctly refuses to
+        // overwrite ANY settled status, `Interrupted` included — so without
+        // this, a temporary recovery classification could permanently
+        // outrank a proven canonical verdict. `seal_or_repair_interrupted`
+        // is reachable ONLY from here, never from the live path's own
+        // `seal()` call.
         projector
-            .seal(verdict)
-            .context("applying the canonical stream's sealed verdict during catch-up")?;
+            .seal_or_repair_interrupted(verdict)
+            .context("applying the canonical stream's verified sealed verdict during catch-up")?;
     }
 
     println!(
-        "[o7] recover: caught up run {} ({} canonical event(s) re-applied, {})",
+        "[o7] recover: caught up run {} ({} canonical event(s) re-applied, {} artifact(s) \
+         verified, {})",
         canonical_run_id.as_str(),
         stream.len(),
+        artifacts_verified,
         if sealed { "sealed" } else { "still running" }
     );
     Ok(())
