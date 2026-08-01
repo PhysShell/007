@@ -129,6 +129,24 @@ impl PendingProjection {
     /// `attempt_id`, so re-projecting an already-applied event must see the
     /// SAME `attempt_id` it was originally recorded under.
     ///
+    /// `parent_run_id` (Q-Deck R1, `docs/q-deck/r1-command.md` §0/§9.3): the
+    /// run this one continues from, or `None` for an ordinary top-level run
+    /// (the plain `o7 run` live path always passes `None`). Threaded
+    /// straight into `NewRun`, part of `create_run_with_id`'s own
+    /// idempotency digest, so a retry with a DIFFERENT parent than the one
+    /// actually used the first time is caught as a conflict rather than
+    /// silently accepted.
+    ///
+    /// Q-Deck R1 fourth corrective round: `o7 recover`'s catch-up used to
+    /// ALWAYS pass `None` here too, regardless of whether the run being
+    /// re-attached actually had one — since this value is part of the
+    /// idempotency digest, re-attaching a command-continuation child run
+    /// (created with `Some(parent)`) under `None` always hit an idempotency
+    /// conflict, making catch-up fail outright for exactly the runs R1
+    /// introduces. Catch-up now resolves the run's REAL parent first (from
+    /// the existing ledger row if one exists, or `ledger_binding.json`
+    /// otherwise — see `main.rs::catch_up`) and passes that.
+    ///
     /// # Errors
     /// Any underlying ledger error.
     pub fn attach_run(
@@ -136,6 +154,7 @@ impl PendingProjection {
         run_id: &CanonicalRunId,
         agent: String,
         role: String,
+        parent_run_id: Option<&CanonicalRunId>,
     ) -> Result<LiveLedgerProjector> {
         let shared_run_id = LedgerRunId::from_raw(run_id.as_str().to_owned());
         let run = self
@@ -143,7 +162,8 @@ impl PendingProjection {
             .block_on(self.ledger.create_run_with_id(
                 NewRun {
                     conversation_id: self.conversation_id.clone(),
-                    parent_run_id: None,
+                    parent_run_id:
+                        parent_run_id.map(|p| LedgerRunId::from_raw(p.as_str().to_owned())),
                     agent,
                     role,
                 },
@@ -237,8 +257,14 @@ impl LiveLedgerProjector {
         run_id: &CanonicalRunId,
         agent: String,
         role: String,
+        parent_run_id: Option<&CanonicalRunId>,
     ) -> Result<Self> {
-        PendingProjection::open(ledger_path, conversation, run_id)?.attach_run(run_id, agent, role)
+        PendingProjection::open(ledger_path, conversation, run_id)?.attach_run(
+            run_id,
+            agent,
+            role,
+            parent_run_id,
+        )
     }
 
     #[must_use]
@@ -305,6 +331,14 @@ impl LiveLedgerProjector {
                     "report": report,
                     "outcome": outcome,
                 }),
+            ),
+            RunEventKind::ProviderSessionCaptured { receipt } => (
+                "provider_session_captured",
+                serde_json::json!({ "receipt": receipt }),
+            ),
+            RunEventKind::CommandBindingCaptured { binding } => (
+                "command_binding_captured",
+                serde_json::json!({ "binding": binding }),
             ),
         };
 
@@ -556,6 +590,7 @@ mod tests {
             &run_id,
             "claude".to_string(),
             "implementer".to_string(),
+            None,
         )
         .unwrap();
 
@@ -580,6 +615,7 @@ mod tests {
             &run_id,
             "claude".to_string(),
             "implementer".to_string(),
+            None,
         ) {
             Ok(_) => panic!("expected an error for an unknown --conversation-id"),
             Err(e) => e,
@@ -604,6 +640,7 @@ mod tests {
                 &run_id,
                 "claude".to_string(),
                 "implementer".to_string(),
+                None,
             )
             .unwrap();
             projector.seal(verdict).unwrap();
@@ -629,6 +666,7 @@ mod tests {
             &run_id,
             "claude".to_string(),
             "implementer".to_string(),
+            None,
         )
         .unwrap();
         projector.seal(CanonicalVerdict::Pass).unwrap();
@@ -655,6 +693,7 @@ mod tests {
             &run_id,
             "claude".to_string(),
             "implementer".to_string(),
+            None,
         )
         .unwrap();
         projector.seal(CanonicalVerdict::Pass).unwrap();
@@ -678,6 +717,7 @@ mod tests {
             &run_id,
             "claude".to_string(),
             "implementer".to_string(),
+            None,
         )
         .unwrap();
         projector.interrupt().unwrap();
@@ -705,6 +745,7 @@ mod tests {
             &run_id,
             "claude".to_string(),
             "implementer".to_string(),
+            None,
         )
         .unwrap();
 
@@ -763,6 +804,7 @@ mod tests {
             &run_id,
             "claude".to_string(),
             "implementer".to_string(),
+            None,
         )
         .unwrap();
         let first_attempt = first.attempt_id.clone();
@@ -777,6 +819,7 @@ mod tests {
             &run_id,
             "claude".to_string(),
             "implementer".to_string(),
+            None,
         )
         .unwrap();
 
@@ -810,6 +853,7 @@ mod tests {
             &run_id,
             "claude".to_string(),
             "implementer".to_string(),
+            None,
         )
         .unwrap();
         let original_attempt = first.attempt_id.clone();
@@ -829,6 +873,7 @@ mod tests {
             &run_id,
             "claude".to_string(),
             "implementer".to_string(),
+            None,
         )
         .unwrap();
         assert_eq!(resumed.attempt_id, original_attempt);
@@ -849,6 +894,7 @@ mod tests {
             &run_id,
             "claude".to_string(),
             "implementer".to_string(),
+            None,
         )
         .unwrap();
         for event in &stream {
@@ -867,6 +913,7 @@ mod tests {
             &run_id,
             "claude".to_string(),
             "implementer".to_string(),
+            None,
         )
         .unwrap();
         for event in &stream {

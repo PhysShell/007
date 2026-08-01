@@ -14,7 +14,7 @@ mod common;
 
 use common::*;
 use o7_run::event::{ArtifactKind, GateOutcome};
-use o7_run::replay::{replay, replay_verify, ReplayError};
+use o7_run::replay::{classify_record, replay, replay_verify, RecordVerdict, ReplayError};
 use o7_run::{Digest256, RunEventKind, Verdict};
 
 /// A well-formed passing stream referencing a task, a diff, and a gate log, plus a resolver
@@ -216,4 +216,71 @@ fn a_legacy_run_without_events_is_non_replayable_never_verified() {
         matches!(err, ReplayError::LegacyNonReplayable),
         "a legacy run must be explicitly non-replayable, not silently verified: got {err:?}"
     );
+}
+
+// Q-Deck R1 fourth corrective round: `classify_record` is the shared
+// primitive `o7d`'s pre-redrive decision is built on (as well as the root
+// `o7` binary's `catch_up`) — these pin its four outcomes against the SAME
+// fixtures the `replay`/`verify_prefix` acceptance tests above already use,
+// so its behavior can never silently drift from what a sealed replay itself
+// would report.
+
+#[test]
+fn classify_record_reports_no_canonical_stream_for_an_empty_slice() {
+    let resolver = MapResolver::new();
+    assert_eq!(
+        classify_record(&[], &resolver),
+        RecordVerdict::NoCanonicalStream
+    );
+}
+
+#[test]
+fn classify_record_reports_valid_unsealed_for_a_genuine_in_progress_prefix() {
+    let events = chained(vec![
+        run_started(contract(vec![req("build")])),
+        RunEventKind::GateStarted {
+            gate: gate("build"),
+        },
+    ]);
+    let mut resolver = MapResolver::new();
+    resolver.insert("task.json", TASK_BYTES);
+    assert_eq!(
+        classify_record(&events, &resolver),
+        RecordVerdict::ValidUnsealed
+    );
+}
+
+#[test]
+fn classify_record_reports_valid_sealed_with_the_same_evidence_replay_would() {
+    let (events, resolver) = passing_run_with_artifacts();
+    let RecordVerdict::ValidSealed(report) = classify_record(&events, &resolver) else {
+        panic!("a clean, sealed record must classify as ValidSealed");
+    };
+    let direct = replay(&events, &resolver).expect("the same record replays cleanly");
+    assert_eq!(
+        report, direct,
+        "classify_record must not report weaker evidence than replay"
+    );
+}
+
+#[test]
+fn classify_record_reports_invalid_for_a_tampered_sealed_record_never_no_canonical_stream() {
+    let (events, mut resolver) = passing_run_with_artifacts();
+    resolver.insert("diff.patch", b"totally different patch bytes");
+    let RecordVerdict::Invalid(err) = classify_record(&events, &resolver) else {
+        panic!("a tampered artifact must classify as Invalid, never as absent or unsealed");
+    };
+    assert!(
+        matches!(err, ReplayError::ArtifactDigestMismatch { .. }),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn classify_record_reports_invalid_for_a_broken_chain_never_valid_unsealed() {
+    let (mut events, resolver) = passing_run_with_artifacts();
+    events.remove(2);
+    let RecordVerdict::Invalid(_) = classify_record(&events, &resolver) else {
+        panic!("a broken chain must never classify as a genuine unsealed prefix");
+    };
 }

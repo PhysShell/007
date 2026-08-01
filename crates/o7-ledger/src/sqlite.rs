@@ -11,13 +11,13 @@ use std::time::Duration;
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::idempotency::{
-    self, IdemOutcome, SCOPE_APPEND_SYSTEM_NOTE, SCOPE_APPEND_USER_MESSAGE,
+    self, IdemOutcome, SCOPE_APPEND_SYSTEM_NOTE, SCOPE_APPEND_USER_MESSAGE, SCOPE_CREATE_COMMAND,
     SCOPE_CREATE_CONVERSATION, SCOPE_CREATE_RUN, SCOPE_CREATE_RUN_WITH_ID,
 };
 use crate::migrations;
 use crate::models::{
-    Conversation, ConversationStatus, EventType, Idempotency, ListCursor, NewEvent, NewRun, Page,
-    PersistedEvent, RecoveryState, Run, RunAttempt, RunStatus,
+    Command, CommandStatus, Conversation, ConversationStatus, EventType, Idempotency, ListCursor,
+    NewCommand, NewEvent, NewRun, Page, PersistedEvent, RecoveryState, Run, RunAttempt, RunStatus,
 };
 use crate::transitions::{validate_attempt_transition, validate_run_transition};
 use crate::{now_millis, AttemptStatus, EventId, Ledger, LedgerError};
@@ -325,6 +325,7 @@ impl SqliteLedger {
                 status: RunStatus::Queued,
                 created_at: now,
                 finished_at: None,
+                provider_session_id: None,
             };
             tx.execute(
                 "INSERT INTO run (run_id, conversation_id, parent_run_id, agent, role, status, created_at, finished_at) \
@@ -744,6 +745,689 @@ impl SqliteLedger {
         .await
     }
 
+    /// Durably record ONE user-accepted command (Q-Deck R1,
+    /// `docs/q-deck/r1-command.md` §3/§4/§5/§6) — validated, idempotent,
+    /// concurrency- and staleness-checked, all inside ONE `IMMEDIATE`
+    /// transaction. No provider process is ever started as a side effect
+    /// of this call — it only durably records ACCEPTANCE; the caller
+    /// starts the provider afterward (§3's ordering).
+    ///
+    /// Validates, in order: the conversation exists; `parent_run_id`
+    /// belongs to it; `parent_run_id` is the conversation's current tail
+    /// (no run already has it as `parent_run_id`); no other
+    /// `accepted`/`started` command exists for this conversation; the
+    /// parent run has a durable, valid `provider_session_id`.
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] for an unknown conversation or parent run;
+    /// [`LedgerError::StaleParent`] if `parent_run_id` is not the tail;
+    /// [`LedgerError::CommandConflict`] if another command is already
+    /// in flight for this conversation; [`LedgerError::IdempotencyConflict`]
+    /// if `idempotency.key` was already used for a DIFFERENT request;
+    /// [`LedgerError::ContinuationNotPermitted`] if the parent has no valid
+    /// provider session; SQLite errors.
+    pub async fn create_command(
+        &self,
+        request: NewCommand,
+        idempotency: Idempotency,
+    ) -> Result<Command, LedgerError> {
+        let digest_input = serde_json::json!({
+            "conversation_id": request.conversation_id.as_str(),
+            "parent_run_id": request.parent_run_id.as_str(),
+            "command_text": request.command_text,
+        });
+        let request_digest = idempotency::digest_bytes(&serde_json::to_vec(&digest_input)?);
+        self.with_tx(move |tx| {
+            if let IdemOutcome::Replayed(reference) =
+                idempotency::check(tx, SCOPE_CREATE_COMMAND, &idempotency.key, &request_digest)?
+            {
+                return load_command(tx, &reference)?
+                    .ok_or_else(|| LedgerError::NotFound(format!("command {reference}")));
+            }
+
+            load_conversation(tx, request.conversation_id.as_str())?.ok_or_else(|| {
+                LedgerError::NotFound(format!("conversation {}", request.conversation_id))
+            })?;
+            let parent = load_run(tx, request.parent_run_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("run {}", request.parent_run_id)))?;
+            if parent.conversation_id != request.conversation_id {
+                return Err(LedgerError::NotFound(format!(
+                    "run {} does not belong to conversation {}",
+                    request.parent_run_id, request.conversation_id
+                )));
+            }
+            // A command never continues a run that hasn't finished its own
+            // work yet — "provider session exists" alone proves nothing
+            // about whether gates/RunSealed ever happened (the session is
+            // persisted right after the agent call, well before either).
+            // Continuing a still-`running`/`queued`/`interrupted` parent
+            // would let a NEW child run's own writes race the original
+            // run's own still-in-flight worktree/canonical-record work.
+            if !parent.status.is_terminal() {
+                return Err(LedgerError::ContinuationNotPermitted(format!(
+                    "run {} is not sealed yet (status {:?}) — a command can only continue a \
+                     run that has finished",
+                    request.parent_run_id, parent.status
+                )));
+            }
+            // "No other run already claims you as ITS parent" only proves
+            // `parent_run_id` is a LEAF — it does not prove it is the
+            // conversation's actual current tail. A conversation can hold
+            // more than one independent leaf at once (e.g. two plain `o7
+            // run --conversation-id` invocations, neither ever threaded as
+            // the other's child) — every leaf but the most recently
+            // created run in the conversation is still stale. `rowid` is
+            // SQLite's own monotonic insertion order, the same tiebreak
+            // `list_runs` already uses for its own newest-first ordering.
+            let latest_run_id: String = tx.query_row(
+                "SELECT run_id FROM run WHERE conversation_id = ?1 \
+                 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                params![request.conversation_id.as_str()],
+                |row| row.get(0),
+            )?;
+            if latest_run_id != request.parent_run_id.as_str() {
+                return Err(LedgerError::StaleParent(format!(
+                    "run {} is not conversation {}'s current tail (that is run {latest_run_id}) \
+                     — it is no longer valid to continue from",
+                    request.parent_run_id, request.conversation_id
+                )));
+            }
+            let in_flight: i64 = tx.query_row(
+                "SELECT COUNT(*) FROM command WHERE conversation_id = ?1 \
+                 AND status IN ('accepted','started')",
+                params![request.conversation_id.as_str()],
+                |row| row.get(0),
+            )?;
+            if in_flight > 0 {
+                return Err(LedgerError::CommandConflict(format!(
+                    "conversation {} already has a command in flight",
+                    request.conversation_id
+                )));
+            }
+            match &parent.provider_session_id {
+                None => {
+                    return Err(LedgerError::ContinuationNotPermitted(format!(
+                        "run {} has no durable provider session to continue from",
+                        request.parent_run_id
+                    )));
+                }
+                // Independent re-gate on PR #90, blocker 3: the ORIGINAL
+                // validation (`agent::ProviderSessionId::new` — non-empty,
+                // no control characters) only ran inside the detached `o7
+                // continue` process, AFTER durable acceptance and the
+                // `202` response. A structurally invalid session is not a
+                // transient failure — it never becomes valid — so every
+                // subsequent retry (once past the redrive checks below)
+                // would just keep re-spawning a continuation guaranteed to
+                // fail the same way forever. `o7-ledger` cannot depend on
+                // the root crate's `agent` module (wrong dependency
+                // direction), so the SAME two rules are checked here,
+                // directly, before the command is ever durably accepted —
+                // never after.
+                Some(session) if session.is_empty() || session.chars().any(char::is_control) => {
+                    return Err(LedgerError::ContinuationNotPermitted(format!(
+                        "run {}'s durable provider session fails validation (empty or contains \
+                         a control character) — refusing to continue from a corrupt session",
+                        request.parent_run_id
+                    )));
+                }
+                Some(_) => {}
+            }
+
+            let now = now_millis();
+            let command = Command {
+                command_id: crate::CommandId::generate(),
+                conversation_id: request.conversation_id.clone(),
+                parent_run_id: request.parent_run_id.clone(),
+                command_text: request.command_text.clone(),
+                status: CommandStatus::Accepted,
+                child_run_id: None,
+                created_at: now,
+                updated_at: now,
+            };
+            tx.execute(
+                "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+                 status, child_run_id, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?6, ?6)",
+                params![
+                    command.command_id.as_str(),
+                    command.conversation_id.as_str(),
+                    command.parent_run_id.as_str(),
+                    command.command_text,
+                    command.status.as_str(),
+                    now,
+                ],
+            )?;
+            idempotency::record(
+                tx,
+                SCOPE_CREATE_COMMAND,
+                &idempotency.key,
+                &request_digest,
+                command.command_id.as_str(),
+                now,
+            )?;
+            Ok(command)
+        })
+        .await
+    }
+
+    /// Bind a durably accepted command to its allocated child `RunId` —
+    /// call once, right after minting the child run's identity, before
+    /// starting the provider continuation (§3's ordering: this binding
+    /// must be durable before the provider is invoked).
+    ///
+    /// Compare-and-swap, not a blind write: the `UPDATE` only takes effect
+    /// `WHERE child_run_id IS NULL`. Two callers racing to bind the SAME
+    /// command (e.g. `o7d` handling a retried idempotent request before the
+    /// first attempt's response landed) both call this; exactly one's write
+    /// matches inside SQLite's own `IMMEDIATE`-transaction writer
+    /// serialization, and BOTH calls return the SAME already-bound
+    /// [`Command`] afterward. The caller must compare the returned
+    /// `child_run_id` against the `run_id` it proposed — a mismatch means
+    /// it lost the race and must NOT spawn a second provider continuation.
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] if the command is missing; SQLite errors.
+    pub async fn bind_command_child_run(
+        &self,
+        command_id: crate::CommandId,
+        run_id: crate::RunId,
+    ) -> Result<Command, LedgerError> {
+        self.with_tx(move |tx| {
+            load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("command {command_id}")))?;
+            let now = now_millis();
+            tx.execute(
+                "UPDATE command SET child_run_id = ?1, status = 'started', updated_at = ?2 \
+                 WHERE command_id = ?3 AND child_run_id IS NULL",
+                params![run_id.as_str(), now, command_id.as_str()],
+            )?;
+            load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("command {command_id}")))
+        })
+        .await
+    }
+
+    /// Mark a command `completed` — its child run reached a sealed
+    /// terminal status. This is bookkeeping only; the child run's OWN
+    /// ledger row remains the sole verdict authority (§2).
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] if the command is missing; SQLite errors.
+    pub async fn mark_command_completed(
+        &self,
+        command_id: crate::CommandId,
+    ) -> Result<Command, LedgerError> {
+        self.set_command_status(command_id, CommandStatus::Completed)
+            .await
+    }
+
+    /// Mark a command `rejected` — durably accepted but never dispatched
+    /// to a provider (e.g. the child run could not be started at all).
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] if the command is missing; SQLite errors.
+    pub async fn mark_command_rejected(
+        &self,
+        command_id: crate::CommandId,
+    ) -> Result<Command, LedgerError> {
+        self.set_command_status(command_id, CommandStatus::Rejected)
+            .await
+    }
+
+    async fn set_command_status(
+        &self,
+        command_id: crate::CommandId,
+        status: CommandStatus,
+    ) -> Result<Command, LedgerError> {
+        self.with_tx(move |tx| {
+            load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("command {command_id}")))?;
+            let now = now_millis();
+            tx.execute(
+                "UPDATE command SET status = ?1, updated_at = ?2 WHERE command_id = ?3",
+                params![status.as_str(), now, command_id.as_str()],
+            )?;
+            load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("command {command_id}")))
+        })
+        .await
+    }
+
+    /// The conversation's currently `accepted`/`started` command, if any —
+    /// the read side of §5's concurrency check, and also what a recovery
+    /// scan uses to find a stuck command (§7).
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn active_command_for_conversation(
+        &self,
+        conversation_id: crate::ConversationId,
+    ) -> Result<Option<Command>, LedgerError> {
+        self.with_conn(move |conn| {
+            let id: Option<String> = conn
+                .query_row(
+                    "SELECT command_id FROM command WHERE conversation_id = ?1 \
+                     AND status IN ('accepted','started') \
+                     ORDER BY created_at DESC LIMIT 1",
+                    params![conversation_id.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            match id {
+                None => Ok(None),
+                Some(id) => load_command(conn, &id),
+            }
+        })
+        .await
+    }
+
+    /// Every command still `accepted`/`started`, across every conversation
+    /// (`docs/q-deck/r1-command.md` §7) — `o7 recover`'s read side for
+    /// making a stuck command DISCOVERABLE. Three shapes, all covered:
+    /// `child_run_id` unset (never bound); bound to a run with no ledger
+    /// row at all (the process crashed between `bind_command_child_run`
+    /// and the child's own durable `attach_run`); or bound to a run that
+    /// IS a real ledger row but is `interrupted` — the pre-existing
+    /// still-`running`/`queued` scan (`recover_scan`/`mark_interrupted`)
+    /// already transitioned it there, but that scan has no concept of
+    /// `command` rows, so nothing else ever surfaces this one. A command
+    /// whose child run is `queued`/`running` (genuinely still active, or
+    /// merely not yet scanned) is deliberately NOT returned here — this
+    /// method only surfaces cases already CONFIRMED dead by an existing
+    /// mechanism, never a guess.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn stuck_commands(&self) -> Result<Vec<Command>, LedgerError> {
+        self.with_conn(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT c.command_id FROM command c \
+                 LEFT JOIN run r ON r.run_id = c.child_run_id \
+                 WHERE c.status IN ('accepted','started') \
+                 AND (c.child_run_id IS NULL OR r.run_id IS NULL OR r.status = 'interrupted') \
+                 ORDER BY c.created_at ASC",
+            )?;
+            let ids = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            ids.iter()
+                .map(|id| {
+                    load_command(conn, id)?
+                        .ok_or_else(|| LedgerError::Integrity(format!("command {id} vanished")))
+                })
+                .collect()
+        })
+        .await
+    }
+
+    /// Q-Deck R1 corrective round: a command's `bind_command_child_run`
+    /// happens BEFORE the child's own `RunStarted` — if the process that
+    /// was going to spawn the provider continuation dies right after
+    /// binding (or the spawn itself fails), the command is durably `started`
+    /// with a `child_run_id` that will never get a ledger row, and (per
+    /// `create_command`'s stale-parent check) permanently blocks the
+    /// conversation. A caller (`o7d`, on a retried idempotent request) that
+    /// wants to re-spawn for such a command must FIRST win this claim —
+    /// compare-and-swap on `updated_at`, exactly like `bind_command_child_run`
+    /// compare-and-swaps on `child_run_id`. Two callers racing to redrive
+    /// the SAME command: only the one whose `expected_updated_at` still
+    /// matches the stored value wins (`true`); the other sees `false` and
+    /// must NOT spawn — otherwise two processes could both attach to the
+    /// same not-yet-existing child run id and corrupt its `events.jsonl`
+    /// with interleaved writes.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn claim_stale_command_for_redrive(
+        &self,
+        command_id: crate::CommandId,
+        expected_updated_at: i64,
+    ) -> Result<bool, LedgerError> {
+        self.with_tx(move |tx| {
+            // `now_millis()`'s resolution is only 1ms — two claims against
+            // the SAME `expected_updated_at`, both landing in the same
+            // millisecond (entirely possible for two fast, back-to-back
+            // in-process calls, and exactly what an earlier version of
+            // this method got wrong), must never both write the identical
+            // "new" value and let a second claim's `WHERE updated_at = ?`
+            // spuriously still match. `.max(expected_updated_at + 1)`
+            // guarantees the written value always differs from what a
+            // second claimant is comparing against, regardless of clock
+            // resolution — falling back to a plain +1 bump only in that
+            // same-millisecond edge case, never in the ordinary one.
+            let now = now_millis().max(expected_updated_at.saturating_add(1));
+            let changed = tx.execute(
+                "UPDATE command SET updated_at = ?1 \
+                 WHERE command_id = ?2 AND updated_at = ?3 AND status IN ('accepted','started')",
+                params![now, command_id.as_str(), expected_updated_at],
+            )?;
+            Ok(changed == 1)
+        })
+        .await
+    }
+
+    /// Q-Deck R1 second corrective round: rebind an already-`started`
+    /// command to a FRESH child `RunId`, after its previous child run was
+    /// confirmed `interrupted` (a genuinely dead process — never guessed;
+    /// `recover_scan`/`mark_interrupted` already made that determination).
+    /// The interrupted run itself is never resumed here — it stays exactly
+    /// as it is, a dead-end historical record; a brand new child run
+    /// replaces it as the command's live attempt. Callers MUST already
+    /// hold exclusive ownership of this redrive (this is a plain,
+    /// unconditional write — the caller's own `claim_stale_command_for_redrive`
+    /// call, or an equivalent liveness proof, is the actual safety
+    /// mechanism, not this method).
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] if the command is missing; SQLite errors.
+    pub async fn rebind_command_child_run(
+        &self,
+        command_id: crate::CommandId,
+        new_run_id: crate::RunId,
+    ) -> Result<Command, LedgerError> {
+        self.with_tx(move |tx| {
+            load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("command {command_id}")))?;
+            let now = now_millis();
+            tx.execute(
+                "UPDATE command SET child_run_id = ?1, updated_at = ?2 WHERE command_id = ?3",
+                params![new_run_id.as_str(), now, command_id.as_str()],
+            )?;
+            load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("command {command_id}")))
+        })
+        .await
+    }
+
+    /// Q-Deck R1 fourth corrective round: rebind a command's `child_run_id`
+    /// to a FRESH run id as ONE atomic conditional `UPDATE` — replacing
+    /// [`Self::claim_stale_command_for_redrive`] followed by
+    /// [`Self::rebind_command_child_run`] as the load-bearing redrive path.
+    /// That two-step sequence left a window between the claim and the
+    /// rebind where the claim's own success said nothing about whether the
+    /// command was STILL bound to the exact old run id the caller had just
+    /// classified — collapsing both checks into the SAME `UPDATE`'s `WHERE`
+    /// clause removes that window entirely: the write can only land if
+    /// every precondition the caller observed is still true at the instant
+    /// of the write, not merely at the instant it was read.
+    ///
+    /// Predicates (all four, in the same `WHERE`): `command_id` matches;
+    /// `status` is `accepted` or `started` (never rebind a
+    /// `completed`/`rejected` command); `child_run_id` equals
+    /// `expected_old_run_id`; `updated_at` equals `expected_updated_at`.
+    /// Two callers racing to redrive the SAME command: at most one's
+    /// `UPDATE` can match (SQLite's own `IMMEDIATE`-transaction writer
+    /// serialization), so at most one [`RebindOutcome::Rebound`] is ever
+    /// produced — the loser reads back the CURRENT row and must use ITS
+    /// `child_run_id`, never the stale one it originally proposed rebinding
+    /// away from (see [`RebindOutcome`]'s own doc comment).
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn rebind_command_child_run_if_current(
+        &self,
+        command_id: crate::CommandId,
+        expected_old_run_id: crate::RunId,
+        expected_updated_at: i64,
+        fresh_run_id: crate::RunId,
+    ) -> Result<crate::models::RebindOutcome, LedgerError> {
+        use crate::models::RebindOutcome;
+        self.with_tx(move |tx| {
+            let Some(current) = load_command(tx, command_id.as_str())? else {
+                return Ok(RebindOutcome::NotFound);
+            };
+            if !matches!(
+                current.status,
+                CommandStatus::Accepted | CommandStatus::Started
+            ) {
+                return Ok(RebindOutcome::NotEligible(current));
+            }
+            if current.child_run_id.as_ref().map(crate::RunId::as_str)
+                != Some(expected_old_run_id.as_str())
+                || current.updated_at != expected_updated_at
+            {
+                return Ok(RebindOutcome::LostRace(current));
+            }
+            // Same same-millisecond safeguard `claim_stale_command_for_redrive`
+            // uses: the written `updated_at` must always differ from what a
+            // second, racing caller's own `expected_updated_at` compares
+            // against, regardless of clock resolution.
+            let now = now_millis().max(expected_updated_at.saturating_add(1));
+            let changed = tx.execute(
+                "UPDATE command SET child_run_id = ?1, updated_at = ?2 \
+                 WHERE command_id = ?3 AND status IN ('accepted','started') \
+                 AND child_run_id = ?4 AND updated_at = ?5",
+                params![
+                    fresh_run_id.as_str(),
+                    now,
+                    command_id.as_str(),
+                    expected_old_run_id.as_str(),
+                    expected_updated_at,
+                ],
+            )?;
+            if changed != 1 {
+                // Another writer's transaction committed between the read
+                // above and this UPDATE — re-read to report the truth.
+                let current = load_command(tx, command_id.as_str())?.ok_or_else(|| {
+                    LedgerError::Integrity(format!("command {command_id} vanished"))
+                })?;
+                return Ok(RebindOutcome::LostRace(current));
+            }
+            let updated = load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::Integrity(format!("command {command_id} vanished")))?;
+            Ok(RebindOutcome::Rebound(updated))
+        })
+        .await
+    }
+
+    /// Q-Deck R1 fourth corrective round: mark a command `completed` ONLY
+    /// if it is still bound to `expected_child_run_id` — one atomic
+    /// conditional `UPDATE`, not a read-then-write. Required for BOTH a
+    /// normal continuation's own post-seal finish (`o7 continue`) and
+    /// `o7d`'s sealed-canonical-record recovery path (Q-Deck R1 §7): in
+    /// either case, a superseded attempt (one a redrive has since rebound
+    /// away from) must never be able to complete bookkeeping that by now
+    /// belongs to a different, later attempt.
+    ///
+    /// Predicates: `status` is `accepted` or `started`; `child_run_id`
+    /// equals `expected_child_run_id`.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn mark_command_completed_if_bound(
+        &self,
+        command_id: crate::CommandId,
+        expected_child_run_id: crate::RunId,
+    ) -> Result<crate::models::CompletionOutcome, LedgerError> {
+        use crate::models::CompletionOutcome;
+        self.with_tx(move |tx| {
+            let Some(current) = load_command(tx, command_id.as_str())? else {
+                return Ok(CompletionOutcome::NotFound);
+            };
+            let bound = matches!(
+                current.status,
+                CommandStatus::Accepted | CommandStatus::Started
+            ) && current.child_run_id.as_ref().map(crate::RunId::as_str)
+                == Some(expected_child_run_id.as_str());
+            if !bound {
+                return Ok(CompletionOutcome::NotBound(current));
+            }
+            let now = now_millis();
+            let changed = tx.execute(
+                "UPDATE command SET status = 'completed', updated_at = ?1 \
+                 WHERE command_id = ?2 AND status IN ('accepted','started') \
+                 AND child_run_id = ?3",
+                params![now, command_id.as_str(), expected_child_run_id.as_str()],
+            )?;
+            if changed != 1 {
+                let current = load_command(tx, command_id.as_str())?.ok_or_else(|| {
+                    LedgerError::Integrity(format!("command {command_id} vanished"))
+                })?;
+                return Ok(CompletionOutcome::NotBound(current));
+            }
+            let updated = load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::Integrity(format!("command {command_id} vanished")))?;
+            Ok(CompletionOutcome::Completed(updated))
+        })
+        .await
+    }
+
+    /// Q-Deck R1 fifth corrective round: like
+    /// [`Self::mark_command_completed_if_bound`], but ALSO requires — in
+    /// the SAME transaction — that the bound child run itself actually
+    /// exists, is in a permitted TERMINAL status, and belongs to the same
+    /// conversation/parent as the command. This is the primitive `o7d`'s
+    /// sealed-canonical-record recovery path uses (Q-Deck R1 §7): a scoped
+    /// catch-up's own typed success receipt is necessary but not
+    /// sufficient on its own — the ledger row it just wrote (or failed to
+    /// write) is re-checked here, atomically, at the moment of completion,
+    /// rather than trusted from an earlier, separate read. A failed catch-up,
+    /// or one whose ledger write didn't actually land a terminal status,
+    /// must never complete the command's bookkeeping — this predicate is
+    /// what enforces that at the storage layer, not merely at the caller's
+    /// own control flow.
+    ///
+    /// Predicates (all in the SAME conditional `UPDATE`'s surrounding
+    /// checks): `command.status IN ('accepted','started')`;
+    /// `command.child_run_id == expected_child_run_id`; the child run
+    /// EXISTS; the child run's own `status` is a permitted terminal status
+    /// (`RunStatus::is_terminal`); the child run's `conversation_id`
+    /// equals the command's; the child run's `parent_run_id` equals the
+    /// command's `parent_run_id`.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn mark_command_completed_if_bound_and_terminal(
+        &self,
+        command_id: crate::CommandId,
+        expected_child_run_id: crate::RunId,
+    ) -> Result<crate::models::CompletionOutcome, LedgerError> {
+        use crate::models::CompletionOutcome;
+        self.with_tx(move |tx| {
+            let Some(current) = load_command(tx, command_id.as_str())? else {
+                return Ok(CompletionOutcome::NotFound);
+            };
+            let bound = matches!(
+                current.status,
+                CommandStatus::Accepted | CommandStatus::Started
+            ) && current.child_run_id.as_ref().map(crate::RunId::as_str)
+                == Some(expected_child_run_id.as_str());
+            if !bound {
+                return Ok(CompletionOutcome::NotBound(current));
+            }
+            let Some(child_run) = load_run(tx, expected_child_run_id.as_str())? else {
+                return Ok(CompletionOutcome::NotBound(current));
+            };
+            let child_ok = child_run.status.is_terminal()
+                && child_run.conversation_id == current.conversation_id
+                && child_run.parent_run_id.as_ref().map(crate::RunId::as_str)
+                    == Some(current.parent_run_id.as_str());
+            if !child_ok {
+                return Ok(CompletionOutcome::NotBound(current));
+            }
+            let now = now_millis();
+            let changed = tx.execute(
+                "UPDATE command SET status = 'completed', updated_at = ?1 \
+                 WHERE command_id = ?2 AND status IN ('accepted','started') \
+                 AND child_run_id = ?3",
+                params![now, command_id.as_str(), expected_child_run_id.as_str()],
+            )?;
+            if changed != 1 {
+                let current = load_command(tx, command_id.as_str())?.ok_or_else(|| {
+                    LedgerError::Integrity(format!("command {command_id} vanished"))
+                })?;
+                return Ok(CompletionOutcome::NotBound(current));
+            }
+            let updated = load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::Integrity(format!("command {command_id} vanished")))?;
+            Ok(CompletionOutcome::Completed(updated))
+        })
+        .await
+    }
+
+    /// Q-Deck R1 corrective round: a command's post-seal bookkeeping
+    /// (`mark_command_completed`, called after the child run's OWN
+    /// canonical stream already sealed) is itself a best-effort ledger
+    /// write in `o7 continue` — if IT fails, the child run is genuinely
+    /// done but the command row is left stuck `accepted`/`started`
+    /// forever, again blocking the conversation. Unlike a stuck UNBOUND
+    /// command (`stuck_commands`, above), this case needs no provider
+    /// invocation to repair — the child run already reached a sealed
+    /// terminal status, so reconciling is pure, side-effect-free
+    /// bookkeeping. `o7 recover` calls this unconditionally; returns every
+    /// command it just repaired.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn reconcile_completed_commands(&self) -> Result<Vec<Command>, LedgerError> {
+        self.with_tx(|tx| {
+            let mut stmt = tx.prepare(
+                "SELECT c.command_id FROM command c \
+                 JOIN run r ON r.run_id = c.child_run_id \
+                 WHERE c.status IN ('accepted','started') \
+                 AND r.status IN ('completed','failed','cancelled','blocked','error')",
+            )?;
+            let ids = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            let now = now_millis();
+            let mut repaired = Vec::with_capacity(ids.len());
+            for id in &ids {
+                tx.execute(
+                    "UPDATE command SET status = 'completed', updated_at = ?1 \
+                     WHERE command_id = ?2",
+                    params![now, id],
+                )?;
+                repaired.push(
+                    load_command(tx, id)?
+                        .ok_or_else(|| LedgerError::Integrity(format!("command {id} vanished")))?,
+                );
+            }
+            Ok(repaired)
+        })
+        .await
+    }
+
+    /// Read a command by id (read-only), if present.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn command(
+        &self,
+        command_id: crate::CommandId,
+    ) -> Result<Option<Command>, LedgerError> {
+        self.with_conn(move |conn| load_command(conn, command_id.as_str()))
+            .await
+    }
+
+    /// Durably persist a run's provider session identity (Q-Deck R1 §9.1) —
+    /// call once, after the agent call that produced it succeeds. Never
+    /// interprets or validates the string beyond storing it — that is
+    /// `agent::ProviderSessionId::new`'s job, in the root crate, on both
+    /// the write side (before this call) and the strict read-back side
+    /// (§6's fail-closed check, which lives in `create_command` above).
+    ///
+    /// # Errors
+    /// [`LedgerError::NotFound`] if the run is missing; SQLite errors.
+    pub async fn set_run_provider_session(
+        &self,
+        run_id: crate::RunId,
+        session_id: String,
+    ) -> Result<Run, LedgerError> {
+        self.with_tx(move |tx| {
+            load_run(tx, run_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("run {run_id}")))?;
+            tx.execute(
+                "UPDATE run SET provider_session_id = ?1 WHERE run_id = ?2",
+                params![session_id, run_id.as_str()],
+            )?;
+            load_run(tx, run_id.as_str())?
+                .ok_or_else(|| LedgerError::NotFound(format!("run {run_id}")))
+        })
+        .await
+    }
+
     /// Append a `user.message` event, optionally idempotent under scope
     /// `append-user-message`.
     ///
@@ -1116,7 +1800,7 @@ impl SqliteLedger {
             // the variable shape.
             let mut sql = String::from(
                 "SELECT rowid, run_id, conversation_id, parent_run_id, agent, role, status, \
-                 created_at, finished_at FROM run WHERE 1=1",
+                 created_at, finished_at, provider_session_id FROM run WHERE 1=1",
             );
             let mut bound: Vec<Box<dyn rusqlite::ToSql + Send>> = Vec::new();
 
@@ -1157,12 +1841,24 @@ impl SqliteLedger {
                     row.get::<_, String>(6)?,
                     row.get::<_, i64>(7)?,
                     row.get::<_, Option<i64>>(8)?,
+                    row.get::<_, Option<String>>(9)?,
                 ))
             })?;
             let mut items = Vec::new();
             let mut last_key: Option<(i64, i64)> = None;
             for row in rows {
-                let (rowid, id, conv, parent, agent, role, status, created_at, finished_at) = row?;
+                let (
+                    rowid,
+                    id,
+                    conv,
+                    parent,
+                    agent,
+                    role,
+                    status,
+                    created_at,
+                    finished_at,
+                    session,
+                ) = row?;
                 last_key = Some((created_at, rowid));
                 items.push(Run {
                     run_id: crate::RunId::from_raw(id),
@@ -1175,6 +1871,7 @@ impl SqliteLedger {
                     })?,
                     created_at,
                     finished_at,
+                    provider_session_id: session,
                 });
             }
             let next_before = last_key.map(|(created_at, tiebreak)| ListCursor {
@@ -1399,10 +2096,51 @@ fn load_conversation(
     }
 }
 
+fn load_command(conn: &Connection, command_id: &str) -> Result<Option<Command>, LedgerError> {
+    let row = conn
+        .query_row(
+            "SELECT command_id, conversation_id, parent_run_id, command_text, status, \
+             child_run_id, created_at, updated_at \
+             FROM command WHERE command_id = ?1",
+            params![command_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            },
+        )
+        .optional()?;
+    match row {
+        None => Ok(None),
+        Some((id, conv, parent, text, status, child, created_at, updated_at)) => {
+            Ok(Some(Command {
+                command_id: crate::CommandId::from_raw(id),
+                conversation_id: crate::ConversationId::from_raw(conv),
+                parent_run_id: crate::RunId::from_raw(parent),
+                command_text: text,
+                status: CommandStatus::parse(&status).ok_or_else(|| {
+                    LedgerError::Integrity(format!("bad command status {status}"))
+                })?,
+                child_run_id: child.map(crate::RunId::from_raw),
+                created_at,
+                updated_at,
+            }))
+        }
+    }
+}
+
 fn load_run(conn: &Connection, run_id: &str) -> Result<Option<Run>, LedgerError> {
     let row = conn
         .query_row(
-            "SELECT run_id, conversation_id, parent_run_id, agent, role, status, created_at, finished_at \
+            "SELECT run_id, conversation_id, parent_run_id, agent, role, status, created_at, \
+             finished_at, provider_session_id \
              FROM run WHERE run_id = ?1",
             params![run_id],
             |row| {
@@ -1415,23 +2153,27 @@ fn load_run(conn: &Connection, run_id: &str) -> Result<Option<Run>, LedgerError>
                     row.get::<_, String>(5)?,
                     row.get::<_, i64>(6)?,
                     row.get::<_, Option<i64>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
                 ))
             },
         )
         .optional()?;
     match row {
         None => Ok(None),
-        Some((id, conv, parent, agent, role, status, created_at, finished_at)) => Ok(Some(Run {
-            run_id: crate::RunId::from_raw(id),
-            conversation_id: crate::ConversationId::from_raw(conv),
-            parent_run_id: parent.map(crate::RunId::from_raw),
-            agent,
-            role,
-            status: RunStatus::parse(&status)
-                .ok_or_else(|| LedgerError::Integrity(format!("bad run status {status}")))?,
-            created_at,
-            finished_at,
-        })),
+        Some((id, conv, parent, agent, role, status, created_at, finished_at, session)) => {
+            Ok(Some(Run {
+                run_id: crate::RunId::from_raw(id),
+                conversation_id: crate::ConversationId::from_raw(conv),
+                parent_run_id: parent.map(crate::RunId::from_raw),
+                agent,
+                role,
+                status: RunStatus::parse(&status)
+                    .ok_or_else(|| LedgerError::Integrity(format!("bad run status {status}")))?,
+                created_at,
+                finished_at,
+                provider_session_id: session,
+            }))
+        }
     }
 }
 

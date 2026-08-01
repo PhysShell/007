@@ -19,6 +19,7 @@
 //! external journal or signature.
 
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -45,6 +46,47 @@ pub trait ArtifactResolver {
 pub struct ArtifactError {
     pub locator: String,
     pub reason: String,
+}
+
+/// Resolves an [`ArtifactRef`] locator against a run-record directory on
+/// disk (`<runs_dir>/<target>/<run_id>/`) — the ONE [`ArtifactResolver`]
+/// every real caller in this codebase uses, whether that's `o7 replay`/`o7
+/// recover --run-dir` (the root `o7` binary) or `o7d`'s own pre-redrive
+/// canonical-record classification (Q-Deck R1 fourth corrective round):
+/// both must resolve artifacts identically, so this lives here, in the one
+/// crate both depend on, rather than being duplicated per caller.
+///
+/// The locator must be a plain name — an absolute locator, a `..`, a `.`,
+/// or a prefix component is rejected, so a crafted record can neither read
+/// files outside the record (`/etc/...`) nor stall replay on a device file
+/// (`/dev/zero`). The check is lexical; a symlink planted INSIDE a record
+/// can still point out, which is out of the MVP threat model (records are
+/// produced by this harness) and recorded here so it is a decision, not an
+/// oversight.
+pub struct RecordDirResolver {
+    pub base: PathBuf,
+}
+
+fn confined(locator: &str) -> bool {
+    let p = Path::new(locator);
+    !locator.is_empty()
+        && p.components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+impl ArtifactResolver for RecordDirResolver {
+    fn resolve(&self, a: &ArtifactRef) -> Result<Vec<u8>, ArtifactError> {
+        if !confined(&a.locator) {
+            return Err(ArtifactError {
+                locator: a.locator.clone(),
+                reason: "locator escapes the record directory (absolute, `..`, or empty) — refused before I/O".to_string(),
+            });
+        }
+        std::fs::read(self.base.join(&a.locator)).map_err(|e| ArtifactError {
+            locator: a.locator.clone(),
+            reason: e.to_string(),
+        })
+    }
 }
 
 /// Whether — and how — a stored run can be independently replayed. Three states, so a
@@ -220,6 +262,78 @@ pub fn verify_prefix(
     Ok((state, artifacts_verified))
 }
 
+/// The result of classifying a stored (or not-yet-existing) canonical
+/// record — Q-Deck R1 fourth corrective round: a caller deciding whether
+/// re-invoking a provider for some already-bound run id is safe must never
+/// answer that question from a ledger projection alone (a ledger row can
+/// be stale, absent, or simply not yet caught up) — it must classify the
+/// record itself, via the SAME chain/digest/reducer/artifact verification
+/// [`verify_prefix`] and [`replay`] are built on. Four states, so a
+/// tampered-but-nonempty stream can never be confused with a merely
+/// not-yet-started one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordVerdict {
+    /// No canonical stream at all (missing or empty `events.jsonl`) — not
+    /// sealed, not even a replay candidate; safe to treat as "never
+    /// started".
+    NoCanonicalStream,
+    /// A valid, fully chain/digest/artifact-verified prefix with no fixed
+    /// verdict yet — genuinely still in progress (or crashed before
+    /// sealing).
+    ValidUnsealed,
+    /// A valid, fully verified, SEALED record — the provider already ran
+    /// to completion. Carries the same evidence [`replay`] would report.
+    ValidSealed(ReplayReport),
+    /// The stream is non-empty but fails verification (tampered, corrupt,
+    /// or otherwise structurally invalid). MUST fail closed — never
+    /// treated as either "never started" or "already sealed".
+    Invalid(ReplayError),
+}
+
+/// Classify a stored run's canonical record without requiring it to be
+/// sealed — the shared primitive behind both a plain "is this replayable"
+/// check and Q-Deck R1's pre-redrive decision (`crates/o7d/src/routes.rs`):
+/// a retry must recover an existing, already-sealed child rather than
+/// invoke the provider a second time, and ledger status alone can never be
+/// trusted to make that call. Reuses [`verify_prefix`] — not a second,
+/// lighter-weight parser; every byte of chain/digest/reducer/artifact
+/// verification a sealed run gets is applied here too.
+///
+/// # Errors
+/// Never returns an `Err` — verification failure is reported as
+/// [`RecordVerdict::Invalid`], not propagated, so a caller can pattern-match
+/// a single typed result instead of threading two failure channels.
+#[must_use]
+pub fn classify_record(events: &[RunEvent], artifacts: &dyn ArtifactResolver) -> RecordVerdict {
+    if events.is_empty() {
+        return RecordVerdict::NoCanonicalStream;
+    }
+    let (state, artifacts_verified) = match verify_prefix(events, artifacts) {
+        Ok(ok) => ok,
+        Err(e) => return RecordVerdict::Invalid(e),
+    };
+    let Some(verdict) = state.verdict else {
+        return RecordVerdict::ValidUnsealed;
+    };
+    let Some(last) = events.last() else {
+        // Unreachable: `events.is_empty()` was already checked above, and
+        // `verify_prefix` cannot produce a sealed verdict from an empty
+        // slice — kept as a typed `Invalid` rather than an early-return
+        // panic so this function truly never panics on any input.
+        return RecordVerdict::Invalid(ReplayError::LegacyNonReplayable);
+    };
+    let Some(normalized_state_digest) = state.normalized_digest() else {
+        return RecordVerdict::Invalid(ReplayError::StateDigestUnavailable);
+    };
+    RecordVerdict::ValidSealed(ReplayReport {
+        verdict,
+        events_verified: events.len() as u64,
+        artifacts_verified,
+        final_event_digest: last.event_digest.clone(),
+        normalized_state_digest,
+    })
+}
+
 /// Independently replay a stored run: verify the chain and artifacts and recompute the
 /// verdict.
 ///
@@ -289,6 +403,8 @@ fn referenced_artifacts(kind: &RunEventKind) -> Vec<&ArtifactRef> {
         RunEventKind::PolicyChecked { policy, .. } => vec![policy],
         RunEventKind::GateFinished { log: Some(log), .. } => vec![log],
         RunEventKind::SandboxEvidenceCaptured { report, .. } => vec![report],
+        RunEventKind::ProviderSessionCaptured { receipt } => vec![receipt],
+        RunEventKind::CommandBindingCaptured { binding } => vec![binding],
         RunEventKind::AgentStarted
         | RunEventKind::AgentExited { .. }
         | RunEventKind::GateStarted { .. }

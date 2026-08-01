@@ -65,3 +65,10 @@ id_type!(
     /// Identifies a single event.
     EventId
 );
+id_type!(
+    /// Identifies a durable, accepted command (Q-Deck R1,
+    /// `docs/q-deck/r1-command.md` §2) — a distinct namespace from
+    /// [`RunId`], [`EventId`], and a provider's own session identity
+    /// (opaque to this crate; carried as a plain string on [`crate::models::Run`]).
+    CommandId
+);

@@ -15,6 +15,22 @@ path = "src/lib.rs"
 
 [dependencies]
 o7-ledger = { path = "../o7-ledger", version = "0.1.0" }
+# Q-Deck R1 fifth corrective round: the scoped, single-record catch-up
+# primitive (`o7::recovery::catch_up_record`) that a sealed-recovery
+# decision needs is a LIBRARY function of the root crate — calling it
+# directly (never a subprocess) is what actually guarantees no global
+# recovery side effect (`recover_scan`/`mark_interrupted`/`stuck_commands`/
+# `reconcile_completed_commands`) can happen: there is no `o7 recover`
+# process for those to run inside of.
+o7 = { path = "../..", version = "0.1.0" }
+# Q-Deck R1 fourth corrective round: a redrive decision must classify the
+# OLD child's own canonical record (chain/digest/reducer/artifact
+# verification) before ever touching it — ledger status alone can never
+# authorize re-invoking the provider. `o7-run` is the one crate that
+# verification primitive (and its confined artifact resolver) lives in, so
+# this depends on it directly rather than re-deriving a second, lighter
+# verifier here.
+o7-run = { path = "../o7-run", version = "0.1.0" }
 tokio = { version = "1", default-features = false, features = [
     "rt",
     "rt-multi-thread",
@@ -55,6 +71,14 @@ serde_json = "1"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 thiserror = "1"
+# Q-Deck R1 second corrective round: proving a spawned `o7 continue`
+# process is actually dead (not just slow) before ever re-spawning a
+# second one for the SAME child run id. `flock` auto-releases on process
+# death regardless of how the process died (clean exit, panic, SIGKILL) —
+# a real liveness proof, unlike a wall-clock staleness guess. `fs` is the
+# only feature needed for `nix::fcntl::Flock`.
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", default-features = false, features = ["fs"] }
 
 [dev-dependencies]
 # Router-level HTTP tests drive the real `axum::Router` as a `tower::Service`

@@ -234,6 +234,16 @@ pub enum ReduceError {
     /// Any event after `RunSealed`.
     #[error("event after seal at sequence {sequence}")]
     EventAfterSeal { sequence: u64 },
+
+    /// A second `ProviderSessionCaptured` (the singleton evidence slot cannot be
+    /// overwritten).
+    #[error("duplicate ProviderSessionCaptured at sequence {sequence}")]
+    DuplicateProviderSessionReceipt { sequence: u64 },
+
+    /// A second `CommandBindingCaptured` (the singleton evidence slot cannot be
+    /// overwritten).
+    #[error("duplicate CommandBindingCaptured at sequence {sequence}")]
+    DuplicateCommandBinding { sequence: u64 },
 }
 
 /// Fold one event into the run state.
@@ -531,6 +541,22 @@ fn apply_with_contract(
                 .binary_search_by(|e| e.key.cmp(&entry.key))
                 .unwrap_or_else(|p| p);
             state.sandbox_evidence.insert(pos, entry);
+            Ok(())
+        }
+        RunEventKind::ProviderSessionCaptured { receipt } => {
+            validate_artifact(receipt, ArtifactKind::ProviderSession, seq)?;
+            if state.provider_session_receipt.is_some() {
+                return Err(ReduceError::DuplicateProviderSessionReceipt { sequence: seq });
+            }
+            state.provider_session_receipt = Some(receipt.clone());
+            Ok(())
+        }
+        RunEventKind::CommandBindingCaptured { binding } => {
+            validate_artifact(binding, ArtifactKind::CommandBinding, seq)?;
+            if state.command_binding.is_some() {
+                return Err(ReduceError::DuplicateCommandBinding { sequence: seq });
+            }
+            state.command_binding = Some(binding.clone());
             Ok(())
         }
         RunEventKind::RunSealed => {

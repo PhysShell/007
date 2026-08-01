@@ -11,5 +11,6 @@ pub mod invoke;
 pub mod judge;
 pub mod ledger_projector;
 pub mod record;
+pub mod recovery;
 pub mod verdict;
 pub mod worktree;

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{AttemptId, ConversationId, EventId, RunId};
+use crate::ids::{AttemptId, CommandId, ConversationId, EventId, RunId};
 
 /// Lifecycle status of a conversation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -214,6 +214,13 @@ pub struct Run {
     pub status: RunStatus,
     pub created_at: i64,
     pub finished_at: Option<i64>,
+    /// The provider's own session identity this run's agent call produced,
+    /// if any (Q-Deck R1, `docs/q-deck/r1-command.md` §6/§9.3,
+    /// `SCHEMA_V3`) — opaque to this crate (never parsed, never
+    /// interpreted), carried only so a FUTURE command can continue this
+    /// run's lineage. `None` for a run whose agent call never returned
+    /// one, a `--no-ledger` run, or any run that predates this column.
+    pub provider_session_id: Option<String>,
 }
 
 /// A run-attempt row.
@@ -225,6 +232,109 @@ pub struct RunAttempt {
     pub status: AttemptStatus,
     pub started_at: i64,
     pub finished_at: Option<i64>,
+}
+
+/// A durable command's own lifecycle status (Q-Deck R1,
+/// `docs/q-deck/r1-command.md` §2) — NEVER a second verdict authority. This
+/// is bookkeeping for the command's OWN acceptance/dispatch state;
+/// `Completed` means only "the child run reached a sealed terminal
+/// status," read back from that run, never independently decided here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandStatus {
+    Accepted,
+    Started,
+    Completed,
+    Rejected,
+}
+
+impl CommandStatus {
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Started => "started",
+            Self::Completed => "completed",
+            Self::Rejected => "rejected",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "accepted" => Some(Self::Accepted),
+            "started" => Some(Self::Started),
+            "completed" => Some(Self::Completed),
+            "rejected" => Some(Self::Rejected),
+            _ => None,
+        }
+    }
+}
+
+/// A durably accepted command row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Command {
+    pub command_id: CommandId,
+    pub conversation_id: ConversationId,
+    pub parent_run_id: RunId,
+    pub command_text: String,
+    pub status: CommandStatus,
+    pub child_run_id: Option<RunId>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// The outcome of [`crate::sqlite::SqliteLedger::rebind_command_child_run_if_current`]
+/// — Q-Deck R1 fourth corrective round: a redrive's rebind is a single
+/// atomic conditional `UPDATE`, never a separate claim-then-write pair, so
+/// exactly one racing caller can ever win it. Every variant carries the
+/// command row a caller needs to answer the request WITHOUT ever
+/// substituting a stale, pre-CAS run id of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RebindOutcome {
+    /// This call's predicates matched and the rebind landed — the returned
+    /// [`Command`] carries the FRESH `child_run_id`.
+    Rebound(Command),
+    /// The command was still eligible (`accepted`/`started`), but its
+    /// `child_run_id`/`updated_at` had already changed under this caller —
+    /// another racing rebind won first. The returned [`Command`] is the
+    /// CURRENT, authoritative row — a caller MUST answer with this run id,
+    /// never the stale one it originally proposed rebinding away from.
+    LostRace(Command),
+    /// The command is no longer in an eligible status at all (already
+    /// `completed`/`rejected`) — nothing to redrive. The returned
+    /// [`Command`] is the current row.
+    NotEligible(Command),
+    /// The command does not exist.
+    NotFound,
+}
+
+/// The outcome of [`crate::sqlite::SqliteLedger::mark_command_completed_if_bound`]
+/// — Q-Deck R1 fourth corrective round: completion is conditional on the
+/// caller's OWN run id still being the command's current binding, so a
+/// superseded (redriven-away-from) attempt's own completion write can never
+/// stomp bookkeeping that by now belongs to a different, later attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompletionOutcome {
+    /// This call's predicates matched and the command is now `completed`.
+    Completed(Command),
+    /// The command was not bound to the expected run id (already rebound
+    /// elsewhere, or in a terminal status) — left untouched. The returned
+    /// [`Command`] is the current, authoritative row.
+    NotBound(Command),
+    /// The command does not exist.
+    NotFound,
+}
+
+/// Input to [`crate::sqlite::SqliteLedger::create_command`]. Idempotency is
+/// mandatory (like [`crate::sqlite::SqliteLedger::create_run_with_id`]) —
+/// there is no legitimate "fire and forget, no idempotency key" case for a
+/// mutating HTTP endpoint a client may legitimately retry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NewCommand {
+    pub conversation_id: ConversationId,
+    pub parent_run_id: RunId,
+    pub command_text: String,
 }
 
 /// Input to append an event. The `sequence` and `created_at` are assigned by the

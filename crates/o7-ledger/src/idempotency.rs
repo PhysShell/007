@@ -21,6 +21,11 @@ pub const SCOPE_APPEND_SYSTEM_NOTE: &str = "append-system-note";
 /// caller-chosen (the shared `RunId` itself), not an arbitrary caller key
 /// under a ledger-generated id.
 pub const SCOPE_CREATE_RUN_WITH_ID: &str = "create-run-with-id";
+/// `SqliteLedger::create_command` (Q-Deck R1,
+/// `docs/q-deck/r1-command.md` §4) — mandatory, caller-chosen
+/// `idempotency_key`, digest over `(conversation_id, parent_run_id,
+/// command_text)`.
+pub const SCOPE_CREATE_COMMAND: &str = "create-command";
 
 /// Lowercase hex SHA-256 of the canonical request bytes.
 #[must_use]

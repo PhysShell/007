@@ -1008,6 +1008,7 @@ dependencies = [
  "sha1",
  "sha2",
  "tempfile",
+ "thiserror",
  "tokio",
  "toml",
 ]
@@ -1110,7 +1111,10 @@ dependencies = [
  "clap",
  "futures-util",
  "http-body-util",
+ "nix",
+ "o7",
  "o7-ledger",
+ "o7-run",
  "serde",
  "serde_json",
  "tempfile",
