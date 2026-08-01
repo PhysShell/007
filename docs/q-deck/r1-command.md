@@ -179,8 +179,15 @@ relevant fields of the request.
 - **Same key, byte-identical request** (same `conversation_id`,
   `parent_run_id`, `command_text`): replays the existing `command_id` and
   its `child_run_id` (once allocated) — the ordinary idempotent-replay
-  path already proven in R0.7. A provider process is NEVER started a
-  second time for a replayed request.
+  path already proven in R0.7. A LIVE provider process is never raced —
+  actually proven, not assumed, via the `flock`-based liveness check §7
+  describes — but a replay can, deliberately, supersede an attempt already
+  PROVEN dead: the provider is invoked again, under a freshly minted child
+  run id, exactly when the prior attempt's lock is provably free (dead or
+  never started) and the staleness bound has passed. "Never invoked
+  twice" describes the steady state, not an absolute — recovering from a
+  crashed continuation is the whole point of §7's redrive path, and it
+  necessarily invokes the provider again for that same logical command.
 - **Same key, a DIFFERENT request** (any of the three fields differs):
   `IdempotencyConflict` — no mutation, no provider invocation, mapped to
   HTTP `409`.
@@ -260,30 +267,48 @@ continuation.
 
 ## 7. Recovery
 
-Three independent gaps, corrected across TWO independent re-gates. The
-first re-gate found gap A's own recovery claim was false as shipped
-(idempotent replay alone short-circuits before ever re-checking whether a
-bound child run was actually dispatched). The second re-gate then found
-gap A's fix was itself incomplete (it only handled "child run row doesn't
-exist yet," not "child run row exists but never reached a sealed status,"
-whether because it crashed before anyone ran a plain `o7 recover`, or
-because `interrupted` isn't reachable from a redrive at all) — AND that a
-wall-clock staleness bound alone can never prove a process is dead, only
-that it's been a while.
+Three independent gaps, corrected across THREE independent re-gates. The
+first found gap A's own recovery claim was false as shipped (idempotent
+replay alone short-circuits before ever re-checking whether a bound child
+run was actually dispatched). The second found gap A's fix was itself
+incomplete (it only handled "child run row doesn't exist yet," not "child
+run row exists but never reached a sealed status") and that a wall-clock
+staleness bound alone can never prove a process is dead, only that it's
+been a while. The third found gap A's fix STILL had two holes: an
+ORDINARY error (not a crash) after the child row already exists was
+unconditionally rejecting the command anyway, defeating the whole
+mechanism; and the lock check alone doesn't close the window between a
+redrive deciding a process is dead and that same process — merely slow to
+start — finally getting scheduled. It also found gap C's backfill trusted
+an unverified sidecar file.
 
 **Gap A — bound but never resolved.** A command's `child_run_id` is
 durably bound BEFORE the provider is invoked (§3). If the process that was
-going to run the continuation dies at any point before the child run
-reaches a sealed terminal status — before its own ledger row even exists,
-or after, while still `queued`/`running`/`interrupted` — the command
-blocks the conversation forever (per §5's tail check, nothing else can
-become the tail while this child is the latest run and isn't sealed).
-`o7 recover` (plain, no new flags) additionally finds every command whose
-child run row is missing, or exists but is `interrupted`, via
-`stuck_commands`, and reports it — visible, never silently dropped (a
-child still `queued`/`running` is deliberately NOT reported here: that
-might be a live, genuinely in-progress attempt no existing mechanism has
-confirmed dead).
+going to run the continuation dies (or errors — see below) at any point
+before the child run reaches a sealed terminal status — before its own
+ledger row even exists, or after, while still `queued`/`running`/
+`interrupted` — the command blocks the conversation forever (per §5's tail
+check, nothing else can become the tail while this child is the latest
+run and isn't sealed). `o7 recover` (plain, no new flags) additionally
+finds every command whose child run row is missing, or exists but is
+`interrupted`, via `stuck_commands`, and reports it — visible, never
+silently dropped (a child still `queued`/`running` is deliberately NOT
+reported here: that might be a live, genuinely in-progress attempt no
+existing mechanism has confirmed dead).
+
+**`continue_run` never rejects a command whose child run already
+attached.** An earlier draft called `mark_command_rejected` unconditionally
+on ANY error from `continue_execute` — including an ORDINARY error well
+past `attach_run` (the provider binary vanishing mid-run, an artifact
+write failing, anything short of a crash). A `rejected` command is
+invisible to every discovery/redrive mechanism (all scoped to
+`accepted`/`started`), so this would have permanently blocked the
+conversation on nothing more dramatic than a normal runtime error — no
+`SIGKILL` required. Fixed: rejection now only happens if the child run
+NEVER got a ledger row at all (checked directly, right before deciding);
+once `attach_run` has succeeded, the command's bookkeeping is left exactly
+as `o7d`'s own bind left it (`started`), so the SAME redrive machinery
+below is what resolves it.
 
 `o7d`'s own POST handler ALSO actively heals this, for ALL non-terminal
 child states (missing row, or `queued`/`running`/`interrupted`) — gated by
@@ -303,10 +328,29 @@ real proof, not a guess:
    refused outright, no matter how much wall-clock time has passed. A
    staleness bound alone cannot make this distinction — a large worktree
    checkout past 60s looks identical to a dead process from the timer's
-   point of view, but not from the lock's.
+   point of view, but not from the lock's. Only `EWOULDBLOCK` means
+   genuine contention; any OTHER lock-check error is logged distinctly
+   (a real I/O problem is not the same situation, even though both fail
+   closed the same way — never spawn on either).
 3. Only once BOTH hold does a compare-and-swap claim
    (`claim_stale_command_for_redrive`) decide the single winner among any
    racing retries.
+4. **Closing the remaining TOCTOU window**: the lock check above cannot
+   see a process that hasn't reached its own `flock()` call yet — it may
+   be merely SLOW to start (not dead), and a redrive that raced exactly
+   this window would already have durably rebound the command elsewhere
+   before the original process gets there. So `o7 continue` checks, a
+   SECOND time, immediately after winning its own lock (before touching
+   the ledger, the worktree, or the agent): is the command's CURRENT
+   binding still this exact run id? If a redrive already happened while
+   this process was starting, the answer is no — and this process exits
+   immediately, doing NOTHING (no canonical record, no worktree, no
+   provider invocation, no bookkeeping mutation). The SAME check runs a
+   third time, symmetrically, right before this run's own post-seal
+   `mark_command_completed`/session-persist calls — those are keyed only
+   by `CommandId`, with no concept of "my run" built in, so a
+   superseded-but-still-finishing attempt must never be allowed to stomp
+   bookkeeping that by then belongs to a different, later-redriven run.
 
 A redrive ALWAYS mints a FRESH child run id via `rebind_command_child_run`
 — never reuses the original, even for "the row never existed in the
@@ -331,8 +375,19 @@ rather than merely reporting it.
 from anything above: `execute_live`/`continue_execute`'s live session
 write (§9.1) can fail on its own, independent of the command/redrive
 machinery entirely. `o7 recover --run-dir <dir>` backfills the ledger's
-`provider_session_id` from the flat record's own `meta.json` (written
-regardless of whether the live ledger write succeeded) whenever the
+`provider_session_id` from the flat record's own `meta.json` — but ONLY
+after verifying `meta.run_id` matches the run actually being recovered
+(the same discipline this function already applies to
+`ledger_binding.json`). `meta.json` is NOT part of the canonical event
+chain, so a clean replay proves nothing about whether it genuinely
+belongs to this run — without the check, a copy (by mistake or
+otherwise) from a DIFFERENT run's directory would silently attach an
+unrelated provider session, and the next command would continue in the
+wrong provider context entirely, with replay staying green throughout.
+An ordinary consistency check, not a cryptographic signature — the same
+trust level every other sidecar file in this codebase gets. Backfill is
+attempted (regardless of the check's outcome — a legitimate copy is still
+useful) whenever the
 ledger is still missing it — closing the loop the live path's own warning
 message promises.
 
