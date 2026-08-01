@@ -1140,6 +1140,139 @@ impl SqliteLedger {
         .await
     }
 
+    /// Q-Deck R1 fourth corrective round: rebind a command's `child_run_id`
+    /// to a FRESH run id as ONE atomic conditional `UPDATE` — replacing
+    /// [`Self::claim_stale_command_for_redrive`] followed by
+    /// [`Self::rebind_command_child_run`] as the load-bearing redrive path.
+    /// That two-step sequence left a window between the claim and the
+    /// rebind where the claim's own success said nothing about whether the
+    /// command was STILL bound to the exact old run id the caller had just
+    /// classified — collapsing both checks into the SAME `UPDATE`'s `WHERE`
+    /// clause removes that window entirely: the write can only land if
+    /// every precondition the caller observed is still true at the instant
+    /// of the write, not merely at the instant it was read.
+    ///
+    /// Predicates (all four, in the same `WHERE`): `command_id` matches;
+    /// `status` is `accepted` or `started` (never rebind a
+    /// `completed`/`rejected` command); `child_run_id` equals
+    /// `expected_old_run_id`; `updated_at` equals `expected_updated_at`.
+    /// Two callers racing to redrive the SAME command: at most one's
+    /// `UPDATE` can match (SQLite's own `IMMEDIATE`-transaction writer
+    /// serialization), so at most one [`RebindOutcome::Rebound`] is ever
+    /// produced — the loser reads back the CURRENT row and must use ITS
+    /// `child_run_id`, never the stale one it originally proposed rebinding
+    /// away from (see [`RebindOutcome`]'s own doc comment).
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn rebind_command_child_run_if_current(
+        &self,
+        command_id: crate::CommandId,
+        expected_old_run_id: crate::RunId,
+        expected_updated_at: i64,
+        fresh_run_id: crate::RunId,
+    ) -> Result<crate::models::RebindOutcome, LedgerError> {
+        use crate::models::RebindOutcome;
+        self.with_tx(move |tx| {
+            let Some(current) = load_command(tx, command_id.as_str())? else {
+                return Ok(RebindOutcome::NotFound);
+            };
+            if !matches!(
+                current.status,
+                CommandStatus::Accepted | CommandStatus::Started
+            ) {
+                return Ok(RebindOutcome::NotEligible(current));
+            }
+            if current.child_run_id.as_ref().map(crate::RunId::as_str)
+                != Some(expected_old_run_id.as_str())
+                || current.updated_at != expected_updated_at
+            {
+                return Ok(RebindOutcome::LostRace(current));
+            }
+            // Same same-millisecond safeguard `claim_stale_command_for_redrive`
+            // uses: the written `updated_at` must always differ from what a
+            // second, racing caller's own `expected_updated_at` compares
+            // against, regardless of clock resolution.
+            let now = now_millis().max(expected_updated_at.saturating_add(1));
+            let changed = tx.execute(
+                "UPDATE command SET child_run_id = ?1, updated_at = ?2 \
+                 WHERE command_id = ?3 AND status IN ('accepted','started') \
+                 AND child_run_id = ?4 AND updated_at = ?5",
+                params![
+                    fresh_run_id.as_str(),
+                    now,
+                    command_id.as_str(),
+                    expected_old_run_id.as_str(),
+                    expected_updated_at,
+                ],
+            )?;
+            if changed != 1 {
+                // Another writer's transaction committed between the read
+                // above and this UPDATE — re-read to report the truth.
+                let current = load_command(tx, command_id.as_str())?.ok_or_else(|| {
+                    LedgerError::Integrity(format!("command {command_id} vanished"))
+                })?;
+                return Ok(RebindOutcome::LostRace(current));
+            }
+            let updated = load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::Integrity(format!("command {command_id} vanished")))?;
+            Ok(RebindOutcome::Rebound(updated))
+        })
+        .await
+    }
+
+    /// Q-Deck R1 fourth corrective round: mark a command `completed` ONLY
+    /// if it is still bound to `expected_child_run_id` — one atomic
+    /// conditional `UPDATE`, not a read-then-write. Required for BOTH a
+    /// normal continuation's own post-seal finish (`o7 continue`) and
+    /// `o7d`'s sealed-canonical-record recovery path (Q-Deck R1 §7): in
+    /// either case, a superseded attempt (one a redrive has since rebound
+    /// away from) must never be able to complete bookkeeping that by now
+    /// belongs to a different, later attempt.
+    ///
+    /// Predicates: `status` is `accepted` or `started`; `child_run_id`
+    /// equals `expected_child_run_id`.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn mark_command_completed_if_bound(
+        &self,
+        command_id: crate::CommandId,
+        expected_child_run_id: crate::RunId,
+    ) -> Result<crate::models::CompletionOutcome, LedgerError> {
+        use crate::models::CompletionOutcome;
+        self.with_tx(move |tx| {
+            let Some(current) = load_command(tx, command_id.as_str())? else {
+                return Ok(CompletionOutcome::NotFound);
+            };
+            let bound = matches!(
+                current.status,
+                CommandStatus::Accepted | CommandStatus::Started
+            ) && current.child_run_id.as_ref().map(crate::RunId::as_str)
+                == Some(expected_child_run_id.as_str());
+            if !bound {
+                return Ok(CompletionOutcome::NotBound(current));
+            }
+            let now = now_millis();
+            let changed = tx.execute(
+                "UPDATE command SET status = 'completed', updated_at = ?1 \
+                 WHERE command_id = ?2 AND status IN ('accepted','started') \
+                 AND child_run_id = ?3",
+                params![now, command_id.as_str(), expected_child_run_id.as_str()],
+            )?;
+            if changed != 1 {
+                let current = load_command(tx, command_id.as_str())?.ok_or_else(|| {
+                    LedgerError::Integrity(format!("command {command_id} vanished"))
+                })?;
+                return Ok(CompletionOutcome::NotBound(current));
+            }
+            let updated = load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::Integrity(format!("command {command_id} vanished")))?;
+            Ok(CompletionOutcome::Completed(updated))
+        })
+        .await
+    }
+
     /// Q-Deck R1 corrective round: a command's post-seal bookkeeping
     /// (`mark_command_completed`, called after the child run's OWN
     /// canonical stream already sealed) is itself a best-effort ledger

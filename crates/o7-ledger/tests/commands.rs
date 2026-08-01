@@ -11,7 +11,8 @@
 )]
 
 use o7_ledger::{
-    CommandStatus, ConversationId, Idempotency, NewCommand, NewRun, RunId, SqliteLedger,
+    CommandStatus, CompletionOutcome, ConversationId, Idempotency, NewCommand, NewRun,
+    RebindOutcome, RunId, SqliteLedger,
 };
 
 fn key(k: &str) -> Idempotency {
@@ -824,4 +825,226 @@ async fn rebind_command_child_run_replaces_the_binding() {
     let read_back = ledger.command(command.command_id).await.unwrap().unwrap();
     assert_eq!(read_back.child_run_id, Some(second_child));
     assert_ne!(read_back.child_run_id, Some(first_child));
+}
+
+// Q-Deck R1 fourth corrective round: `rebind_command_child_run_if_current`
+// replaces `claim_stale_command_for_redrive` + `rebind_command_child_run` as
+// the load-bearing redrive path — one atomic conditional `UPDATE`, so a
+// racing loser can never learn about its loss from a separate, later read.
+
+#[tokio::test]
+async fn rebind_if_current_succeeds_when_every_predicate_matches() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, run) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &run, "hi"), key("k"))
+        .await
+        .unwrap();
+    let old_child = RunId::from_raw("old-child".to_owned());
+    let bound = ledger
+        .bind_command_child_run(command.command_id.clone(), old_child.clone())
+        .await
+        .unwrap();
+
+    let fresh = RunId::from_raw("fresh-child".to_owned());
+    let outcome = ledger
+        .rebind_command_child_run_if_current(
+            command.command_id.clone(),
+            old_child,
+            bound.updated_at,
+            fresh.clone(),
+        )
+        .await
+        .unwrap();
+    let RebindOutcome::Rebound(rebound) = outcome else {
+        panic!("expected Rebound, got {outcome:?}");
+    };
+    assert_eq!(rebound.child_run_id, Some(fresh.clone()));
+
+    let read_back = ledger.command(command.command_id).await.unwrap().unwrap();
+    assert_eq!(read_back.child_run_id, Some(fresh));
+}
+
+#[tokio::test]
+async fn rebind_if_current_is_compare_and_swap_safe_under_a_race() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, run) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &run, "hi"), key("k"))
+        .await
+        .unwrap();
+    let old_child = RunId::from_raw("old-child".to_owned());
+    let bound = ledger
+        .bind_command_child_run(command.command_id.clone(), old_child.clone())
+        .await
+        .unwrap();
+
+    // Two racing redrivers both observed the SAME pre-CAS snapshot
+    // (old_child, bound.updated_at) — e.g. two concurrent stale-command
+    // retries — and each proposes its OWN fresh run id.
+    let fresh_a = RunId::from_raw("fresh-a".to_owned());
+    let fresh_b = RunId::from_raw("fresh-b".to_owned());
+    let outcome_a = ledger
+        .rebind_command_child_run_if_current(
+            command.command_id.clone(),
+            old_child.clone(),
+            bound.updated_at,
+            fresh_a.clone(),
+        )
+        .await
+        .unwrap();
+    let outcome_b = ledger
+        .rebind_command_child_run_if_current(
+            command.command_id.clone(),
+            old_child,
+            bound.updated_at,
+            fresh_b,
+        )
+        .await
+        .unwrap();
+
+    let RebindOutcome::Rebound(winner) = outcome_a else {
+        panic!("expected the first caller to win, got {outcome_a:?}");
+    };
+    assert_eq!(winner.child_run_id, Some(fresh_a.clone()));
+
+    // The loser must NOT report its own stale `fresh_b` — it must read
+    // back and report the WINNER's fresh run id, never a locally-held one.
+    let RebindOutcome::LostRace(current) = outcome_b else {
+        panic!("expected the second caller to lose the race, got {outcome_b:?}");
+    };
+    assert_eq!(
+        current.child_run_id,
+        Some(fresh_a),
+        "the loser must report the AUTHORITATIVE current child, not its own stale proposal"
+    );
+}
+
+#[tokio::test]
+async fn rebind_if_current_refuses_a_command_that_is_no_longer_eligible() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, run) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &run, "hi"), key("k"))
+        .await
+        .unwrap();
+    let old_child = RunId::from_raw("old-child".to_owned());
+    let bound = ledger
+        .bind_command_child_run(command.command_id.clone(), old_child.clone())
+        .await
+        .unwrap();
+    let completed = ledger
+        .mark_command_completed(command.command_id.clone())
+        .await
+        .unwrap();
+
+    let outcome = ledger
+        .rebind_command_child_run_if_current(
+            command.command_id,
+            old_child,
+            bound.updated_at,
+            RunId::from_raw("fresh".to_owned()),
+        )
+        .await
+        .unwrap();
+    let RebindOutcome::NotEligible(current) = outcome else {
+        panic!("expected NotEligible for an already-completed command, got {outcome:?}");
+    };
+    assert_eq!(current.status, CommandStatus::Completed);
+    assert_eq!(current.child_run_id, completed.child_run_id);
+}
+
+#[tokio::test]
+async fn rebind_if_current_reports_not_found_for_an_unknown_command() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let outcome = ledger
+        .rebind_command_child_run_if_current(
+            o7_ledger::CommandId::from_raw("no-such-command".to_owned()),
+            RunId::from_raw("old".to_owned()),
+            0,
+            RunId::from_raw("fresh".to_owned()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome, RebindOutcome::NotFound);
+}
+
+// Q-Deck R1 fourth corrective round: `mark_command_completed_if_bound`
+// replaces the read-then-write pattern that used to live at the `o7
+// continue` call site — completion is now conditional on the caller's OWN
+// run id still being the command's current binding, atomically.
+
+#[tokio::test]
+async fn mark_completed_if_bound_succeeds_when_still_bound_to_the_expected_run() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, run) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &run, "hi"), key("k"))
+        .await
+        .unwrap();
+    let child = RunId::from_raw("child".to_owned());
+    ledger
+        .bind_command_child_run(command.command_id.clone(), child.clone())
+        .await
+        .unwrap();
+
+    let outcome = ledger
+        .mark_command_completed_if_bound(command.command_id.clone(), child)
+        .await
+        .unwrap();
+    let CompletionOutcome::Completed(completed) = outcome else {
+        panic!("expected Completed, got {outcome:?}");
+    };
+    assert_eq!(completed.status, CommandStatus::Completed);
+
+    let read_back = ledger.command(command.command_id).await.unwrap().unwrap();
+    assert_eq!(read_back.status, CommandStatus::Completed);
+}
+
+#[tokio::test]
+async fn mark_completed_if_bound_refuses_a_command_rebound_to_a_different_run() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, run) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &run, "hi"), key("k"))
+        .await
+        .unwrap();
+    let stale_child = RunId::from_raw("stale-child".to_owned());
+    ledger
+        .bind_command_child_run(command.command_id.clone(), stale_child.clone())
+        .await
+        .unwrap();
+    // A redrive rebinds the command to a DIFFERENT run WHILE the stale
+    // child's own process is still trying to finish.
+    let fresh_child = RunId::from_raw("fresh-child".to_owned());
+    ledger
+        .rebind_command_child_run(command.command_id.clone(), fresh_child.clone())
+        .await
+        .unwrap();
+
+    // The stale child's own (superseded) completion attempt must be
+    // refused — it must never stomp bookkeeping that now belongs to the
+    // fresh child.
+    let outcome = ledger
+        .mark_command_completed_if_bound(command.command_id.clone(), stale_child)
+        .await
+        .unwrap();
+    let CompletionOutcome::NotBound(current) = outcome else {
+        panic!("expected NotBound for a superseded run, got {outcome:?}");
+    };
+    assert_eq!(current.child_run_id, Some(fresh_child));
+    assert_ne!(current.status, CommandStatus::Completed);
+}
+
+#[tokio::test]
+async fn mark_completed_if_bound_reports_not_found_for_an_unknown_command() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let outcome = ledger
+        .mark_command_completed_if_bound(
+            o7_ledger::CommandId::from_raw("no-such-command".to_owned()),
+            RunId::from_raw("child".to_owned()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome, CompletionOutcome::NotFound);
 }

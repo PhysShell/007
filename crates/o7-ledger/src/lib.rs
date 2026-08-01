@@ -22,9 +22,9 @@ pub mod transitions;
 
 pub use ids::{AttemptId, CommandId, ConversationId, EventId, RunId};
 pub use models::{
-    AttemptStatus, Command, CommandStatus, Conversation, ConversationStatus, EventType,
-    Idempotency, IdempotencyRecord, ListCursor, NewCommand, NewEvent, NewRun, Page, PersistedEvent,
-    RecoveryState, Run, RunAttempt, RunStatus,
+    AttemptStatus, Command, CommandStatus, CompletionOutcome, Conversation, ConversationStatus,
+    EventType, Idempotency, IdempotencyRecord, ListCursor, NewCommand, NewEvent, NewRun, Page,
+    PersistedEvent, RebindOutcome, RecoveryState, Run, RunAttempt, RunStatus,
 };
 pub use sqlite::{
     PragmaReport, SqliteLedger, EVENT_SCHEMA_VERSION, MAX_LIST_LIMIT, MAX_READ_LIMIT,

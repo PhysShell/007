@@ -284,6 +284,48 @@ pub struct Command {
     pub updated_at: i64,
 }
 
+/// The outcome of [`crate::sqlite::SqliteLedger::rebind_command_child_run_if_current`]
+/// — Q-Deck R1 fourth corrective round: a redrive's rebind is a single
+/// atomic conditional `UPDATE`, never a separate claim-then-write pair, so
+/// exactly one racing caller can ever win it. Every variant carries the
+/// command row a caller needs to answer the request WITHOUT ever
+/// substituting a stale, pre-CAS run id of its own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RebindOutcome {
+    /// This call's predicates matched and the rebind landed — the returned
+    /// [`Command`] carries the FRESH `child_run_id`.
+    Rebound(Command),
+    /// The command was still eligible (`accepted`/`started`), but its
+    /// `child_run_id`/`updated_at` had already changed under this caller —
+    /// another racing rebind won first. The returned [`Command`] is the
+    /// CURRENT, authoritative row — a caller MUST answer with this run id,
+    /// never the stale one it originally proposed rebinding away from.
+    LostRace(Command),
+    /// The command is no longer in an eligible status at all (already
+    /// `completed`/`rejected`) — nothing to redrive. The returned
+    /// [`Command`] is the current row.
+    NotEligible(Command),
+    /// The command does not exist.
+    NotFound,
+}
+
+/// The outcome of [`crate::sqlite::SqliteLedger::mark_command_completed_if_bound`]
+/// — Q-Deck R1 fourth corrective round: completion is conditional on the
+/// caller's OWN run id still being the command's current binding, so a
+/// superseded (redriven-away-from) attempt's own completion write can never
+/// stomp bookkeeping that by now belongs to a different, later attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompletionOutcome {
+    /// This call's predicates matched and the command is now `completed`.
+    Completed(Command),
+    /// The command was not bound to the expected run id (already rebound
+    /// elsewhere, or in a terminal status) — left untouched. The returned
+    /// [`Command`] is the current, authoritative row.
+    NotBound(Command),
+    /// The command does not exist.
+    NotFound,
+}
+
 /// Input to [`crate::sqlite::SqliteLedger::create_command`]. Idempotency is
 /// mandatory (like [`crate::sqlite::SqliteLedger::create_run_with_id`]) —
 /// there is no legitimate "fire and forget, no idempotency key" case for a
