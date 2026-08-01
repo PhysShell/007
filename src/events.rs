@@ -26,7 +26,7 @@
 //! ordering key).
 
 use anyhow::{anyhow, bail, Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use o7_run::event::{
@@ -36,7 +36,7 @@ use o7_run::event::{
 };
 use o7_run::ids::{GateId, RunEventId, RunId};
 use o7_run::reduce::reduce_all;
-use o7_run::replay::{replay_verify, ArtifactError, ArtifactResolver, ReplayReport};
+use o7_run::replay::{replay_verify, ReplayReport};
 use o7_run::state::Verdict as CanonicalVerdict;
 
 use crate::agent::AgentRun;
@@ -325,39 +325,12 @@ pub fn from_jsonl(text: &str) -> Result<Vec<RunEvent>> {
 /// Resolves artifact locators relative to a run-record directory, so replay
 /// can digest-check `task.md`, `diff.patch`, and `gate/*.log` in place.
 ///
-/// A replayed record is UNTRUSTED input, so locators are confined to the
-/// record directory before any I/O (Codex P1 on #67): every path component
-/// must be a plain name — an absolute locator, a `..`, a `.`, or a prefix
-/// component is rejected, so a crafted record can neither read files outside
-/// the record (`/etc/...`) nor stall replay on a device file (`/dev/zero`).
-/// The check is lexical; a symlink planted INSIDE a record can still point
-/// out, which is out of the MVP threat model (records are produced by this
-/// harness) and recorded here so it is a decision, not an oversight.
-pub struct RecordDirResolver {
-    pub base: PathBuf,
-}
-
-fn confined(locator: &str) -> bool {
-    let p = Path::new(locator);
-    !locator.is_empty()
-        && p.components()
-            .all(|c| matches!(c, std::path::Component::Normal(_)))
-}
-
-impl ArtifactResolver for RecordDirResolver {
-    fn resolve(&self, a: &ArtifactRef) -> Result<Vec<u8>, ArtifactError> {
-        if !confined(&a.locator) {
-            return Err(ArtifactError {
-                locator: a.locator.clone(),
-                reason: "locator escapes the record directory (absolute, `..`, or empty) — refused before I/O".to_string(),
-            });
-        }
-        std::fs::read(self.base.join(&a.locator)).map_err(|e| ArtifactError {
-            locator: a.locator.clone(),
-            reason: e.to_string(),
-        })
-    }
-}
+/// Q-Deck R1 fourth corrective round: moved into `o7-run` itself (the one
+/// crate both this binary and `o7d` depend on) so `o7d`'s own pre-redrive
+/// canonical-record classification uses the EXACT same confined resolver
+/// this binary's `replay`/`recover --run-dir` always has — re-exported here
+/// so every existing caller in this crate keeps compiling unchanged.
+pub use o7_run::replay::RecordDirResolver;
 
 /// Independently re-verify a stored run record: chain continuity, per-event
 /// digests, artifact content digests, and a verdict recomputation checked
@@ -390,6 +363,7 @@ pub fn replay_record(dir: &Path) -> Result<ReplayReport> {
 mod tests {
     use super::*;
     use crate::gate::GateManifest;
+    use o7_run::replay::ArtifactResolver as _;
 
     fn agent_ok() -> AgentRun {
         AgentRun {
@@ -570,7 +544,23 @@ mod tests {
                 err.reason
             );
         }
-        assert!(confined("gate/unit.log") && confined("task.md"));
+        // A legitimate, plain-name locator must NOT be refused by
+        // confinement — any error for it is a missing-file I/O error, never
+        // the "refused before I/O" confinement message the bad locators
+        // above always get.
+        for locator in ["gate/unit.log", "task.md"] {
+            let a = ArtifactRef {
+                kind: ArtifactKind::GateLog,
+                locator: locator.into(),
+                digest: Digest256::genesis(),
+            };
+            if let Err(e) = r.resolve(&a) {
+                assert!(
+                    !e.reason.contains("refused before I/O"),
+                    "a plain-name locator {locator:?} must not be refused by confinement itself"
+                );
+            }
+        }
     }
 
     /// An invalid manifest is rejected at contract build — i.e. BEFORE the
