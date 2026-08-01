@@ -1984,3 +1984,1466 @@ fn recover_refuses_to_backfill_a_session_from_a_meta_json_with_the_wrong_run_id(
         "backfill must be refused outright, not partially applied"
     );
 }
+
+/// Q-Deck R1 fourth corrective round: a `meta.json` whose `run_id` matches
+/// exactly, but whose `schema` is one this build does not understand, must
+/// be refused for session backfill on schema grounds alone — matching the
+/// same "unsupported schema" refusal `ledger_binding.json` has always had.
+/// Refusing backfill must NOT also refuse the canonical verdict catch-up
+/// itself: the ledger's own stale (non-terminal) status must still be
+/// reconciled to the record's real sealed verdict, proving the two checks
+/// are independent, not one bundled all-or-nothing gate.
+#[test]
+fn recover_refuses_to_backfill_a_session_from_an_unsupported_meta_schema_but_still_catches_up_the_verdict(
+) {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+
+    let run_id = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let id: String = conn
+            .query_row("SELECT run_id FROM run LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        id
+    };
+
+    // Simulate the live path's own best-effort session persist failing
+    // (`provider_session_id` still NULL) — same setup as the wrong-run-id
+    // test above; the ledger's own status is untouched (already
+    // `completed`, matching the canonical record), so a passing catch-up
+    // here is a genuine no-op re-application, not a status transition —
+    // proving the schema refusal and the (already-settled) verdict
+    // catch-up are independent, neither blocking the other.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET provider_session_id = NULL WHERE run_id = ?1",
+            [&run_id],
+        )
+        .unwrap();
+    }
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let record_dir = runs_dir.join(&target_name).join(&run_id);
+    let meta_path = record_dir.join("meta.json");
+    let mut meta: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
+    assert_eq!(
+        meta["run_id"].as_str(),
+        Some(run_id.as_str()),
+        "sanity: run_id itself is correct — only schema is being corrupted"
+    );
+    meta["schema"] = serde_json::Value::Number(999.into());
+    std::fs::write(&meta_path, serde_json::to_string(&meta).unwrap()).unwrap();
+
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        recover.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recover.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&recover.stderr);
+    assert!(
+        stderr.contains("unsupported schema"),
+        "expected an honest diagnostic naming the schema mismatch, got: {stderr}"
+    );
+
+    assert!(
+        provider_session_id(&ledger_path, &run_id).is_none(),
+        "an unsupported meta.json schema must never be trusted for session backfill"
+    );
+
+    let status: String = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT status FROM run WHERE run_id = ?1", [&run_id], |r| {
+            r.get(0)
+        })
+        .unwrap()
+    };
+    assert_eq!(
+        status, "completed",
+        "the canonical verdict catch-up must still land even though session backfill was refused"
+    );
+}
+
+/// Q-Deck R1 fourth corrective round — THE blocker-kill test: a child run
+/// whose OWN canonical record is genuinely, fully sealed (the provider
+/// really did run to completion), but whose ledger projection is stale
+/// (still `running` — as if the live projector's own `seal()` call never
+/// landed), must be RECOVERED by a same-key retry — never redriven under a
+/// fresh id, never re-invoking the provider. Ledger status alone must
+/// never be trusted to authorize re-invoking the provider a second time.
+#[test]
+fn a_sealed_canonical_record_with_a_stale_ledger_status_is_recovered_never_redriven() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let row: (String, String) = conn
+            .query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        row
+    };
+
+    // Produce a REAL, fully sealed child record for a run id this test
+    // controls — invoke the real `o7 continue` binary directly, exactly
+    // the pipeline `o7d` itself would have spawned, with a WORKING
+    // provider. `continue_run`'s OWN binding-fence check
+    // (`command_still_bound_to_this_run`) refuses to do any work at all
+    // for a command id that doesn't durably exist yet, so the command row
+    // — bound to this exact run id — must already be present.
+    let old_run_id = "old-sealed-child";
+    let command_text = "second turn";
+    let idempotency_key = "key-sealed-stale";
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": parent_run_id,
+            "command_text": command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-sealed-stale', ?1, ?2, ?3, 'started', ?4, 1000, 1000)",
+            rusqlite::params![conversation_id, parent_run_id, command_text, old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-sealed-stale', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conversation_id)
+        .arg("--parent-run-id")
+        .arg(&parent_run_id)
+        .arg("--command")
+        .arg(command_text)
+        .arg("--run-id")
+        .arg(old_run_id)
+        .arg("--command-id")
+        .arg("cmd-sealed-stale")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(claude.invocation_count(), 2);
+    let status_before: String = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status FROM run WHERE run_id = ?1",
+            [old_run_id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        status_before, "completed",
+        "sanity: the child run really did seal"
+    );
+    let command_status_before: String = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status FROM command WHERE command_id = 'cmd-sealed-stale'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        command_status_before, "completed",
+        "sanity: `o7 continue`'s own post-seal bookkeeping landed"
+    );
+
+    // Now revert the run's status, its OWN attempt's status (a real crash
+    // in `projector.seal()` itself never marks either terminal — it never
+    // reaches that write at all), AND the command's own bookkeeping, all
+    // back to non-terminal — modeling a crash in the live projection AND
+    // the post-seal bookkeeping write AFTER the canonical stream itself
+    // fully sealed on disk (the flat record is never touched). Reverting
+    // the run's status WITHOUT its attempt would leave an inconsistent
+    // state no real crash produces: `attach_run` would find no `running`
+    // attempt for a `running` run and mint a SECOND one, and re-projecting
+    // `RunStarted` under that new attempt id would itself hit an
+    // idempotency conflict against the original attempt's own projection.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET status = 'running' WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE run_attempt SET status = 'running', finished_at = NULL \
+             WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE command SET status = 'started', updated_at = 1000 \
+             WHERE command_id = 'cmd-sealed-stale'",
+            [],
+        )
+        .unwrap();
+    }
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status, 202, "{retried:?}");
+    assert_eq!(
+        retried["run_id"], old_run_id,
+        "a sealed canonical record must be RECOVERED under its OWN run id, never redriven under \
+         a fresh one"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    poll_until(deadline, || {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let s: String = conn
+            .query_row(
+                "SELECT status FROM run WHERE run_id = ?1",
+                [old_run_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        (s == "completed").then_some(())
+    });
+
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "the provider must NEVER be invoked again for an already-sealed child record"
+    );
+
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-sealed-stale'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(command_status, "completed");
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 fourth corrective round: a child run's canonical record that
+/// LOOKS sealed but fails independent verification (its `diff.patch`
+/// tampered with after the fact) must fail closed — a stable, typed error,
+/// never silently redriven (which would double-invoke the provider) and
+/// never silently recovered (which would trust a corrupted verdict). The
+/// command's own binding/status must be left exactly as found, for manual
+/// investigation.
+#[test]
+fn a_tampered_sealed_record_fails_closed_never_redriven_never_recovered() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let row: (String, String) = conn
+            .query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        row
+    };
+
+    let old_run_id = "old-tampered-child";
+    let command_text = "second turn";
+    let idempotency_key = "key-tampered";
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": parent_run_id,
+            "command_text": command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-tampered', ?1, ?2, ?3, 'started', ?4, 1000, 1000)",
+            rusqlite::params![conversation_id, parent_run_id, command_text, old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-tampered', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conversation_id)
+        .arg("--parent-run-id")
+        .arg(&parent_run_id)
+        .arg("--command")
+        .arg(command_text)
+        .arg("--run-id")
+        .arg(old_run_id)
+        .arg("--command-id")
+        .arg("cmd-tampered")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(claude.invocation_count(), 2);
+
+    // Tamper an artifact AFTER the record sealed — the same class of
+    // post-seal edit `o7-run`'s own replay-acceptance suite proves `replay`
+    // itself rejects.
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let record_dir = runs_dir.join(&target_name).join(old_run_id);
+    std::fs::write(
+        record_dir.join("diff.patch"),
+        b"totally different patch bytes",
+    )
+    .unwrap();
+
+    // Revert to stale bookkeeping, exactly like the sealed-recovery test —
+    // this run's own record LOOKS like the blocker-kill scenario, except
+    // its evidence no longer verifies.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET status = 'running' WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE run_attempt SET status = 'running', finished_at = NULL \
+             WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE command SET status = 'started', updated_at = 1000 \
+             WHERE command_id = 'cmd-tampered'",
+            [],
+        )
+        .unwrap();
+    }
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(
+        status, 500,
+        "a tampered sealed record must fail closed with a stable error, not a 202: {retried:?}"
+    );
+    assert_eq!(retried["code"], "COMMAND_CANONICAL_RECORD_INVALID");
+
+    // Give any (incorrect) redrive/recovery attempt a real chance to
+    // happen before asserting it didn't.
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "the provider must never be invoked for a tampered record"
+    );
+
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-tampered'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        command_status, "started",
+        "the command must be left discoverable, never silently rejected or completed"
+    );
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 fourth corrective round: a child run whose canonical record is
+/// a genuinely valid but UNSEALED prefix (the process crashed before ever
+/// reaching the agent — a real, verified `RunStarted` on disk, nothing
+/// more) must be redriven exactly once, under a FRESH child run id, and the
+/// old partial record must be left byte-identical (never resumed, never
+/// rewritten).
+#[test]
+fn a_valid_unsealed_prefix_is_redriven_exactly_once_leaving_the_old_record_untouched() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+    let safe_bin = safe_bin_dir();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let row: (String, String) = conn
+            .query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        row
+    };
+
+    let old_run_id = "old-unsealed-child";
+    let command_text = "second turn";
+    let idempotency_key = "key-unsealed";
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": parent_run_id,
+            "command_text": command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-unsealed', ?1, ?2, ?3, 'started', ?4, 1000, 1000)",
+            rusqlite::params![conversation_id, parent_run_id, command_text, old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-unsealed', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+    }
+
+    // A genuinely unavailable provider (PATH excludes any `claude`
+    // whatsoever — see `safe_bin_dir`'s own doc comment on why deleting
+    // the fixture script alone isn't enough) makes `continue_execute`'s
+    // own agent call fail right after durably appending `RunStarted` (and
+    // `AgentStarted`) — a real, verified, chain-valid, UNSEALED prefix.
+    let output = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conversation_id)
+        .arg("--parent-run-id")
+        .arg(&parent_run_id)
+        .arg("--command")
+        .arg(command_text)
+        .arg("--run-id")
+        .arg(old_run_id)
+        .arg("--command-id")
+        .arg("cmd-unsealed")
+        .env("PATH", safe_bin.path())
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "the provider being unavailable must fail this continuation, not silently succeed"
+    );
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the unavailable-provider attempt must never have reached the real fixture"
+    );
+
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let record_dir = runs_dir.join(&target_name).join(old_run_id);
+    let events_before = std::fs::read_to_string(record_dir.join("events.jsonl")).unwrap();
+    assert!(
+        !events_before.contains("run_sealed"),
+        "sanity: the old record must genuinely be UNSEALED"
+    );
+    let (old_status, old_command_status): (String, String) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let s: String = conn
+            .query_row(
+                "SELECT status FROM run WHERE run_id = ?1",
+                [old_run_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let cs: String = conn
+            .query_row(
+                "SELECT status FROM command WHERE command_id = 'cmd-unsealed'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        (s, cs)
+    };
+    assert_ne!(
+        old_status, "completed",
+        "sanity: really not sealed in the ledger either"
+    );
+    assert_eq!(old_command_status, "started");
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status, 202, "{retried:?}");
+    let redriven_run_id = retried["run_id"].as_str().unwrap().to_owned();
+    assert_ne!(
+        redriven_run_id, old_run_id,
+        "a genuinely unsealed prefix must be redriven under a FRESH child run id"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    claude.wait_for_invocation(2, deadline);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    wait_for_run_status(addr, &redriven_run_id, "completed", deadline);
+
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "the provider must be invoked exactly once for the fresh child, on top of the one \
+         failed attempt against the old (unsealed) child"
+    );
+
+    let events_after = std::fs::read_to_string(record_dir.join("events.jsonl")).unwrap();
+    assert_eq!(
+        events_before, events_after,
+        "the old, superseded partial record must be left byte-identical — never resumed, \
+         never rewritten"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 fourth corrective round (Part 5): a spawn failure right after
+/// a SUCCESSFUL atomic CAS rebind (the fresh child run id is durably
+/// bound, but `o7 continue` itself never even started) must NOT reject the
+/// command — the fresh binding stays `started`, and the NEXT retry (once
+/// stale again) classifies that SAME fresh run id (still `Absent` — it
+/// never got a canonical record) and redrives it again. The conversation
+/// must never become permanently wedged by an ordinary spawn failure.
+#[test]
+fn a_spawn_failure_right_after_rebind_leaves_the_command_recoverable() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let row: (String, String) = conn
+            .query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        row
+    };
+
+    // A command already durably `started`/bound, its child run id's own
+    // ledger row never having landed — the exact same "stuck before
+    // dispatch" state the existing redrive test builds, reused here so
+    // this test is ONLY about what happens after the spawn itself fails.
+    let command_text = "spawn failure check";
+    let idempotency_key = "key-spawn-failure";
+    let child_run_id_before_redrive = o7_ledger::RunId::generate();
+    let stale_updated_at = 1000i64;
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": parent_run_id,
+            "command_text": command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-spawn-failure', ?1, ?2, ?3, 'started', ?4, 1000, ?5)",
+            rusqlite::params![
+                conversation_id,
+                parent_run_id,
+                command_text,
+                child_run_id_before_redrive.as_str(),
+                stale_updated_at,
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-spawn-failure', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+    }
+
+    // First `o7d`: a deliberately BOGUS `--o7-bin` — the CAS rebind itself
+    // (a pure ledger write) must still succeed; only the subsequent
+    // `std::process::Command::spawn()` for `o7 continue` fails (`ENOENT`).
+    let mut o7d_cmd = Command::new(o7d_bin_path());
+    o7d_cmd
+        .args([
+            "serve",
+            "--ledger",
+            ledger_path.to_str().unwrap(),
+            "--listen",
+            "127.0.0.1:0",
+            "--repo",
+        ])
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--o7-bin")
+        .arg("/nonexistent/o7-binary-does-not-exist")
+        .arg("--max-turns")
+        .arg("1")
+        .env("O7D_STALE_COMMAND_REDRIVE_MS", "200")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut o7d_child = o7d_cmd.spawn().expect("spawn the real o7d binary");
+    let stderr = o7d_child.stderr.take().unwrap();
+    let mut reader = BufReader::new(stderr);
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let addr: SocketAddr = line
+        .trim()
+        .strip_prefix("o7d: listening on http://")
+        .unwrap()
+        .parse()
+        .unwrap();
+    std::thread::spawn(move || {
+        let mut discarded = String::new();
+        while reader.read_line(&mut discarded).unwrap_or(0) > 0 {
+            discarded.clear();
+        }
+    });
+    wait_until_healthy(addr);
+
+    let (status, first_retry) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    // The rebind itself is a pure ledger write and succeeds regardless of
+    // whether the subsequent spawn does — this request still durably
+    // accepts/rebinds and answers normally.
+    assert_eq!(status, 202, "{first_retry:?}");
+    let first_fresh_run_id = first_retry["run_id"].as_str().unwrap().to_owned();
+    assert_ne!(first_fresh_run_id, child_run_id_before_redrive.as_str());
+
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-spawn-failure'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        command_status, "started",
+        "a spawn failure right after a successful rebind must NOT reject the command"
+    );
+    assert_eq!(command_child.as_deref(), Some(first_fresh_run_id.as_str()));
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+
+    // Give this fresh (never-actually-started) attempt time to become
+    // stale again, then retry against a SECOND `o7d` with a WORKING
+    // `--o7-bin` — proving the conversation is not permanently wedged.
+    std::thread::sleep(Duration::from_millis(400));
+    let (mut o7d_child2, addr2) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr2);
+
+    let (status2, second_retry) = post(
+        addr2,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status2, 202, "{second_retry:?}");
+    let second_fresh_run_id = second_retry["run_id"].as_str().unwrap().to_owned();
+    assert_ne!(
+        second_fresh_run_id, first_fresh_run_id,
+        "the never-started fresh attempt must itself be redriven, under ANOTHER fresh id"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    claude.wait_for_invocation(2, deadline);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    wait_for_run_status(addr2, &second_fresh_run_id, "completed", deadline);
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "the provider must be invoked exactly once for THIS command's own continuation, on top \
+         of the one earlier invocation for the initial setup run — the first (bogus-o7-bin) \
+         spawn attempt never even started a process"
+    );
+
+    let _ = o7d_child2.kill();
+    let _ = o7d_child2.wait();
+}
+
+/// Q-Deck R1 fourth corrective round (Part 3): two concurrent same-key
+/// retries against a stuck command must produce AT MOST one successful
+/// atomic CAS rebind — never two fresh child run ids, never two provider
+/// invocations. The CAS loser must report the WINNER's authoritative fresh
+/// run id, never a stale value of its own.
+#[test]
+fn two_concurrent_same_key_retries_produce_exactly_one_cas_winner() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let row: (String, String) = conn
+            .query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        row
+    };
+
+    let command_text = "concurrent redrive check";
+    let idempotency_key = "key-concurrent";
+    let child_run_id_before_redrive = o7_ledger::RunId::generate();
+    let stale_updated_at = 1000i64;
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": parent_run_id,
+            "command_text": command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-concurrent', ?1, ?2, ?3, 'started', ?4, 1000, ?5)",
+            rusqlite::params![
+                conversation_id,
+                parent_run_id,
+                command_text,
+                child_run_id_before_redrive.as_str(),
+                stale_updated_at,
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-concurrent', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+    }
+
+    // A deliberately GENEROUS staleness bound — unlike every other test
+    // here, this one needs the freshly-rebound attempt to NOT look stale
+    // again by the time the second concurrent request's own processing
+    // reaches the server (real subprocess-spawn/scheduling latency on a
+    // loaded single-core VPS can easily exceed a tight 200ms window),
+    // which would otherwise legitimately trigger a SECOND, independent
+    // redrive of the first request's own (still-attaching) fresh attempt —
+    // a different, already-covered scenario, not the one this test proves.
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(5000),
+    );
+    wait_until_healthy(addr);
+
+    let body = serde_json::json!({
+        "schema_version": 1,
+        "parent_run_id": parent_run_id,
+        "command": command_text,
+        "idempotency_key": idempotency_key,
+    });
+    let body_a = body.clone();
+    let conversation_id_a = conversation_id.clone();
+    let handle_a = std::thread::spawn(move || {
+        post(
+            addr,
+            &format!("/api/v1/conversations/{conversation_id_a}/commands"),
+            &body_a,
+        )
+    });
+    let handle_b = std::thread::spawn(move || {
+        post(
+            addr,
+            &format!("/api/v1/conversations/{conversation_id}/commands"),
+            &body,
+        )
+    });
+    let (status_a, retried_a) = handle_a.join().unwrap();
+    let (status_b, retried_b) = handle_b.join().unwrap();
+
+    assert_eq!(status_a, 202, "{retried_a:?}");
+    assert_eq!(status_b, 202, "{retried_b:?}");
+    let run_id_a = retried_a["run_id"].as_str().unwrap().to_owned();
+    let run_id_b = retried_b["run_id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        run_id_a, run_id_b,
+        "both concurrent retries must report the SAME authoritative fresh child run id — no \
+         stale response from the CAS loser"
+    );
+    assert_ne!(run_id_a, child_run_id_before_redrive.as_str());
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    claude.wait_for_invocation(2, deadline);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    wait_for_run_status(addr, &run_id_a, "completed", deadline);
+
+    // Give any (incorrect) second redrive a real chance to happen before
+    // asserting it didn't.
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "exactly one provider invocation for the redrive, never two"
+    );
+
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-concurrent'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(command_status, "completed");
+    assert_eq!(command_child.as_deref(), Some(run_id_a.as_str()));
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 fourth corrective round: "sealed canonical record with a
+/// missing ledger row" cannot actually arise. Ordering proof: a canonical
+/// stream only reaches `RunSealed` if `continue_execute` got PAST
+/// `attach_run` (it happens right after the durable `RunStarted` append,
+/// via `?` — any earlier failure returns before appending anything
+/// further, including `RunSealed`), and `attach_run`'s own
+/// `create_run_with_id` call is what creates the ledger row in the first
+/// place. So the state this test instead builds — a durable, chain-valid
+/// `RunStarted`-only prefix with NO ledger row at all — is the adjacent
+/// crash window the proof depends on: crashed between the durable
+/// `RunStarted` append and `attach_run` ever running. It must classify as
+/// `ValidUnsealed` (never `Absent`, never `Invalid`), and a same-key retry
+/// must redrive it normally under a fresh id, leaving this hand-crafted
+/// prefix byte-identical.
+#[test]
+fn a_run_started_only_prefix_with_no_ledger_row_is_valid_unsealed_and_redriven() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let row: (String, String) = conn
+            .query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        row
+    };
+
+    // Hand-construct EXACTLY the durable state a crash between
+    // `continue_execute`'s durable `RunStarted` append and its very next
+    // line (`attach_run`) would leave behind: `ledger_binding.json`,
+    // `task.md`, and a one-event, chain-valid `events.jsonl` — using the
+    // SAME public helpers `continue_execute` itself calls, never a
+    // hand-rolled shortcut format.
+    let old_run_id = "old-preattach-crash";
+    let command_text = "second turn";
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let rec = o7::record::RunRecord::create(&runs_dir, &target_name, old_run_id).unwrap();
+    o7::record::LedgerBinding {
+        schema: 1,
+        run_id: old_run_id.to_owned(),
+        conversation_id: conversation_id.clone(),
+        agent: "claude".to_owned(),
+        role: "implementer".to_owned(),
+        parent_run_id: Some(parent_run_id.clone()),
+    }
+    .write_durable(&rec)
+    .unwrap();
+    rec.write_task_durable(command_text).unwrap();
+    let manifest = o7::gate::GateManifest::load(&repo.path().join(".007/gate.toml")).unwrap();
+    let contract = o7::events::build_contract(&manifest).unwrap();
+    let task_ref = o7::events::artifact(
+        o7_run::event::ArtifactKind::Task,
+        "task.md",
+        command_text.as_bytes(),
+    );
+    let canonical_run_id = o7_run::ids::RunId::new(old_run_id).unwrap();
+    let mut chain = o7::events::EventChain::new(canonical_run_id);
+    let run_started = chain
+        .push(o7_run::event::RunEventKind::RunStarted {
+            contract,
+            task: task_ref,
+        })
+        .unwrap();
+    let events_before = o7::events::to_jsonl(&[run_started]).unwrap();
+    std::fs::write(rec.dir.join("events.jsonl"), &events_before).unwrap();
+
+    // Sanity: genuinely no ledger row for this run id — never touched.
+    let no_ledger_row: i64 = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM run WHERE run_id = ?1",
+            [old_run_id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(no_ledger_row, 0);
+
+    let idempotency_key = "key-preattach-crash";
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": parent_run_id,
+            "command_text": command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-preattach', ?1, ?2, ?3, 'started', ?4, 1000, 1000)",
+            rusqlite::params![conversation_id, parent_run_id, command_text, old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-preattach', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+    }
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status, 202, "{retried:?}");
+    let redriven_run_id = retried["run_id"].as_str().unwrap().to_owned();
+    assert_ne!(
+        redriven_run_id, old_run_id,
+        "a valid unsealed prefix with no ledger row must STILL be redriven under a fresh id, \
+         exactly like the missing-ledger-row-and-no-record case"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    claude.wait_for_invocation(2, deadline);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    wait_for_run_status(addr, &redriven_run_id, "completed", deadline);
+    assert_eq!(claude.invocation_count(), 2);
+
+    let events_after = std::fs::read_to_string(rec.dir.join("events.jsonl")).unwrap();
+    assert_eq!(
+        events_before, events_after,
+        "the hand-crafted pre-attach prefix must be left byte-identical"
+    );
+    let still_no_ledger_row: i64 = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT COUNT(*) FROM run WHERE run_id = ?1",
+            [old_run_id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        still_no_ledger_row, 0,
+        "the old (superseded) run id must never retroactively gain a ledger row either"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 fourth corrective round (Part 2, "delayed old process during
+/// held-lock rebind"): a genuinely redriven command's OLD child run id must
+/// stay permanently harmless — even if the original (merely slow, not
+/// dead) `o7 continue` process for it finally wakes up and runs AFTER the
+/// redrive has already completed and the fresh child has already sealed.
+/// Ties the redrive path and `continue_run`'s own child-side binding fence
+/// together in one full round trip (each already proven in isolation by
+/// `a_command_stuck_before_dispatch_is_redriven_by_a_retry_after_the_stale_bound`
+/// and `continue_exits_immediately_if_superseded_before_it_can_start_real_work`
+/// respectively).
+#[test]
+fn a_delayed_original_process_is_harmless_after_its_run_id_is_redriven_and_completes() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let row: (String, String) = conn
+            .query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        row
+    };
+
+    let command_text = "delayed original check";
+    let idempotency_key = "key-delayed-original";
+    let old_run_id = o7_ledger::RunId::generate();
+    let stale_updated_at = 1000i64;
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": parent_run_id,
+            "command_text": command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-delayed-original', ?1, ?2, ?3, 'started', ?4, 1000, ?5)",
+            rusqlite::params![
+                conversation_id,
+                parent_run_id,
+                command_text,
+                old_run_id.as_str(),
+                stale_updated_at,
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-delayed-original', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+    }
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status, 202, "{retried:?}");
+    let fresh_run_id = retried["run_id"].as_str().unwrap().to_owned();
+    assert_ne!(fresh_run_id, old_run_id.as_str());
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    claude.wait_for_invocation(2, deadline);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    wait_for_run_status(addr, &fresh_run_id, "completed", deadline);
+    assert_eq!(claude.invocation_count(), 2);
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+
+    // NOW the delayed original process for the OLD (superseded) run id
+    // finally gets scheduled and tries to do its own work — exactly what
+    // a genuinely slow (not dead) `o7 continue` would do the moment it
+    // reaches its own lock, long after the redrive already won.
+    let output = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conversation_id)
+        .arg("--parent-run-id")
+        .arg(&parent_run_id)
+        .arg("--command")
+        .arg(command_text)
+        .arg("--run-id")
+        .arg(old_run_id.as_str())
+        .arg("--command-id")
+        .arg("cmd-delayed-original")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "the delayed original process must exit cleanly, not error: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "the delayed original must NEVER invoke the provider — the command was already \
+         redriven and sealed under the fresh run id"
+    );
+
+    let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+    let old_run_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM run WHERE run_id = ?1",
+            [old_run_id.as_str()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        old_run_exists, 0,
+        "the delayed original must never create a ledger row for its own (superseded) run id"
+    );
+    let (command_status, command_child): (String, Option<String>) = conn
+        .query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-delayed-original'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(command_status, "completed");
+    assert_eq!(
+        command_child.as_deref(),
+        Some(fresh_run_id.as_str()),
+        "the command's binding must still point at the fresh (redriven) child — untouched by \
+         the delayed original"
+    );
+}
