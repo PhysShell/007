@@ -8,6 +8,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 
+use crate::canonical::{child_record_dir, classify_child_record, ChildRecordState};
 use crate::cursor;
 use crate::dto::{
     CommandAcceptedDto, ConversationDto, EventPageDto, EventsParams, HealthDto, ListParams,
@@ -182,53 +183,238 @@ fn command_is_stale(command: &o7_ledger::Command) -> bool {
 /// `continue_run` acquires the SAME path — deliberately duplicated rather
 /// than shared across crates for a two-line helper). Same formula as
 /// there: `<runs_dir>/.locks/<run_id>.lock`.
-fn command_lock_path(runs_dir: &std::path::Path, run_id: &str) -> std::path::PathBuf {
+pub(crate) fn command_lock_path(runs_dir: &std::path::Path, run_id: &str) -> std::path::PathBuf {
     runs_dir.join(".locks").join(format!("{run_id}.lock"))
 }
 
-/// `true` only if this call itself just acquired (and immediately
-/// released) `run_id`'s lock — i.e. NO live process currently holds it.
-/// This is a real liveness proof (`flock` auto-releases on process death
-/// regardless of how the process died), not a wall-clock guess: a
-/// staleness timer alone cannot distinguish "dead" from "just slow
-/// creating a worktree past the threshold," and racing a genuinely slow
-/// (not dead) `o7 continue` would spawn a second process onto the same
-/// run id, corrupting its `events.jsonl` with interleaved writes.
-/// `Err`/any I/O failure is treated as "cannot prove it's safe" by the
-/// caller (fail closed — never spawn).
-fn no_live_process_holds(runs_dir: &std::path::Path, run_id: &str) -> std::io::Result<bool> {
-    let path = command_lock_path(runs_dir, run_id);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+/// Spawn `o7 recover --ledger <path> --run-dir <dir>` for a child run whose
+/// OWN canonical record has just been classified `ValidSealed`, and wait
+/// for it to finish — reusing the root binary's EXACT existing catch-up
+/// machinery (`catch_up`, re-verify + re-project + apply the sealed
+/// verdict + best-effort session backfill) rather than re-deriving any of
+/// it here. Best-effort: any failure is logged, never propagated — the
+/// caller's own subsequent `mark_command_completed_if_bound` call is a
+/// safe no-op if this didn't manage to land the sealed status, and the
+/// core safety property (provider never re-invoked for an already-sealed
+/// record) holds regardless of whether this reconciliation succeeds.
+fn recover_sealed_child(exec: &ExecutionConfig, run_id: &str) {
+    let dir = match child_record_dir(exec, run_id) {
+        Ok(dir) => dir,
+        Err(e) => {
+            eprintln!(
+                "[o7d] warning: resolving the record directory to recover sealed child {run_id}: {e}"
+            );
+            return;
+        }
+    };
+    match std::process::Command::new(&exec.o7_bin)
+        .arg("recover")
+        .arg("--ledger")
+        .arg(&exec.ledger_path)
+        .arg("--run-dir")
+        .arg(&dir)
+        .stdin(std::process::Stdio::null())
+        .output()
+    {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => eprintln!(
+            "[o7d] warning: `o7 recover --run-dir {}` exited non-zero while catching up a sealed \
+             child record: {}",
+            dir.display(),
+            String::from_utf8_lossy(&output.stderr)
+        ),
+        Err(e) => eprintln!(
+            "[o7d] warning: spawning `o7 recover --run-dir {}` failed: {e}",
+            dir.display()
+        ),
+    }
+}
+
+/// Q-Deck R1 fourth corrective round: acquire `old_run_id`'s own liveness
+/// lock and, if won, hold it for the ENTIRE classify-then-transition
+/// decision — closing the window a probe-then-release pattern cannot: a
+/// redrive that only checks-then-drops the lock before deciding cannot see
+/// a process that hasn't reached its OWN `flock()` call yet (merely slow,
+/// not dead), so a genuinely slow original process could still wake up and
+/// invoke the provider concurrently with a freshly spawned redrive. Holding
+/// the lock through the WHOLE decision — classification, and whichever of
+/// recovery or CAS-rebind-plus-spawn follows — makes that impossible: no
+/// other process can win this exact lock while this call still holds it.
+///
+/// Runs synchronously (real, blocking file I/O and, for a sealed record, a
+/// blocking subprocess wait) — callers MUST run this via
+/// `tokio::task::spawn_blocking`, never inline in an async handler.
+///
+/// Returns `Ok(current_command)` for every outcome except a canonical
+/// record that fails verification/identity checks, which is the one case
+/// that must fail closed and surface as a stable error to the caller
+/// (`COMMAND_CANONICAL_RECORD_INVALID`) — the command is left exactly as
+/// found, discoverable for manual investigation.
+fn redrive_or_recover_locked(
+    exec: ExecutionConfig,
+    ledger: o7_ledger::SqliteLedger,
+    command: o7_ledger::Command,
+    old_run_id: o7_ledger::RunId,
+    conversation_id: String,
+    parent_run_id: String,
+) -> Result<o7_ledger::Command, String> {
+    let lock_path = command_lock_path(&exec.runs_dir, old_run_id.as_str());
+    if let Some(parent) = lock_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!(
+                "[o7d] warning: creating lock directory {}: {e} — refusing to redrive",
+                parent.display()
+            );
+            return Ok(command);
+        }
     }
     // The lock file's own content never matters — only its existence and
     // flock state — so `truncate(false)` is explicit, not an oversight.
-    let file = std::fs::OpenOptions::new()
+    let lock_file = match std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(false)
-        .open(&path)?;
-    match nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock) {
-        Ok(_flock) => Ok(true),
-        // Q-Deck R1 third corrective round (major finding): `EWOULDBLOCK`
-        // is the ONLY errno that actually means "a live process holds
-        // this lock" — anything else (permissions, a filesystem that
-        // doesn't support `flock`, etc.) is a genuine, unrelated I/O
-        // problem. Both still refuse to redrive (fail closed is correct
-        // either way — an unattended false negative is far cheaper than a
-        // double-spawn), but conflating them would make a real
-        // infrastructure fault silently indistinguishable from ordinary,
-        // expected contention — worth a distinct log line, not a
-        // different decision.
-        Err((_file, errno)) => {
-            if errno != nix::errno::Errno::EWOULDBLOCK {
+        .open(&lock_path)
+    {
+        Ok(file) => file,
+        Err(e) => {
+            eprintln!(
+                "[o7d] warning: opening lock file {}: {e} — refusing to redrive",
+                lock_path.display()
+            );
+            return Ok(command);
+        }
+    };
+    let handle = tokio::runtime::Handle::current();
+    let _old_child_lock =
+        match nix::fcntl::Flock::lock(lock_file, nix::fcntl::FlockArg::LockExclusiveNonblock) {
+            Ok(guard) => guard,
+            // Q-Deck R1 third corrective round (major finding, preserved):
+            // `EWOULDBLOCK` is the ONLY errno that actually means "a live
+            // owner holds this lock" — anything else is a genuine,
+            // unrelated I/O problem, and refuses immediately (fail closed).
+            //
+            // Q-Deck R1 fourth corrective round (Part 3, concurrent-retry
+            // requirement): the owner holding an `EWOULDBLOCK` lock is not
+            // always an external `o7 continue` process — it can just as
+            // well be ANOTHER concurrent request to THIS SAME endpoint,
+            // already mid-way through its own classify-then-CAS decision
+            // for this exact old run id (that is precisely what holding
+            // this lock through the whole decision, per Part 2, is FOR).
+            // Two truly concurrent same-key retries must converge on the
+            // SAME final child run id — so before giving up, briefly poll
+            // the command's own current binding: if it moves away from
+            // `old_run_id` within a short bound, that is the OTHER
+            // request's own CAS having just landed, and THIS request must
+            // report that SAME authoritative result, never a stale
+            // snapshot of its own. If the binding never moves within the
+            // bound, the lock's owner is a genuinely still-working
+            // external process — fall back to the original, unchanged
+            // command exactly as before.
+            Err((_file, errno)) => {
+                if errno != nix::errno::Errno::EWOULDBLOCK {
+                    eprintln!(
+                        "[o7d] warning: checking run {}'s lock failed with {errno} (not \
+                         EWOULDBLOCK — not ordinary contention); refusing to redrive until this \
+                         is investigated",
+                        old_run_id.as_str()
+                    );
+                    return Ok(command);
+                }
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+                loop {
+                    if std::time::Instant::now() >= deadline {
+                        return Ok(command);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(15));
+                    match handle.block_on(ledger.command(command.command_id.clone())) {
+                        Ok(Some(current))
+                            if current.child_run_id.as_ref().map(o7_ledger::RunId::as_str)
+                                != Some(old_run_id.as_str()) =>
+                        {
+                            return Ok(current);
+                        }
+                        _ => continue,
+                    }
+                }
+            }
+        };
+
+    // From here on, this call is the EXCLUSIVE, provable owner of the old
+    // child's lock — held through classification and whatever transition
+    // follows, released only when this function returns.
+    let state = classify_child_record(&exec, old_run_id.as_str(), &conversation_id);
+
+    match state {
+        ChildRecordState::Invalid(reason) => Err(reason),
+        ChildRecordState::ValidSealed => {
+            // Case A: the provider already ran to completion. Redrive is
+            // forbidden — recover instead (re-verify, catch up the
+            // projection, apply the verdict, best-effort session
+            // backfill), then conditionally complete the command, still
+            // bound to the SAME original child run id throughout.
+            recover_sealed_child(&exec, old_run_id.as_str());
+            if let Err(e) = handle.block_on(
+                ledger.mark_command_completed_if_bound(command.command_id.clone(), old_run_id),
+            ) {
                 eprintln!(
-                    "[o7d] warning: checking run {run_id}'s lock failed with {errno} (not \
-                     EWOULDBLOCK — not ordinary contention); refusing to redrive until this is \
-                     investigated"
+                    "[o7d] warning: marking command {} completed after sealed-record recovery \
+                     failed: {e}",
+                    command.command_id
                 );
             }
-            Ok(false)
+            match handle.block_on(ledger.command(command.command_id.clone())) {
+                Ok(Some(current)) => Ok(current),
+                _ => Ok(command),
+            }
+        }
+        ChildRecordState::Absent | ChildRecordState::ValidUnsealed => {
+            // Case B/C: genuinely never started, or genuinely still
+            // running (crashed before sealing) — safe to redrive with a
+            // FRESH child run id, exactly once, atomically.
+            let fresh = o7_ledger::RunId::generate();
+            match handle.block_on(ledger.rebind_command_child_run_if_current(
+                command.command_id.clone(),
+                old_run_id,
+                command.updated_at,
+                fresh,
+            )) {
+                Ok(o7_ledger::RebindOutcome::Rebound(rebound)) => {
+                    // Q-Deck R1 fourth corrective round (Part 5): a spawn
+                    // failure here must NOT reject the command — the
+                    // fresh binding already landed, `status` stays
+                    // `started`, and the NEXT same-key retry (once stale
+                    // again) will classify this fresh run id (Absent, since
+                    // it never got a canonical record) and redrive it
+                    // again. The conversation is never permanently wedged
+                    // by an ordinary spawn failure.
+                    if let Err(e) =
+                        spawn_continue(&exec, &conversation_id, &parent_run_id, &rebound)
+                    {
+                        eprintln!(
+                            "[o7d] warning: spawning `o7 continue` after a successful rebind \
+                             failed: {e} — command {} stays started, rebound to {}; a later \
+                             retry will redrive it again once stale",
+                            rebound.command_id,
+                            rebound
+                                .child_run_id
+                                .as_ref()
+                                .map(o7_ledger::RunId::as_str)
+                                .unwrap_or_default()
+                        );
+                    }
+                    Ok(rebound)
+                }
+                Ok(
+                    o7_ledger::RebindOutcome::LostRace(current)
+                    | o7_ledger::RebindOutcome::NotEligible(current),
+                ) => Ok(current),
+                Ok(o7_ledger::RebindOutcome::NotFound) => Ok(command),
+                Err(e) => {
+                    eprintln!("[o7d] warning: rebind_command_child_run_if_current failed: {e}");
+                    Ok(command)
+                }
+            }
         }
     }
 }
@@ -347,45 +533,44 @@ pub(crate) async fn create_command(
         // is always pristine.
         //
         // Gated by a staleness bound (never race a request that might
-        // still be in flight) AND — the actual safety proof, not a guess —
-        // `no_live_process_holds`, which only reports true after ACTUALLY
-        // acquiring the run id's own lock file itself (`flock` auto-
-        // releases on process death regardless of how it died — a
-        // wall-clock timer alone cannot tell "dead" from "just slow").
-        // Only then does a compare-and-swap claim decide the single
-        // winner among any racing retries.
+        // still be in flight) AND — the actual decision, not a guess —
+        // `redrive_or_recover_locked`: it classifies the old child's own
+        // canonical record (never trusting ledger status alone — a stale
+        // or not-yet-caught-up projection can show `queued`/`running`/
+        // `interrupted` for a run whose flat record is already fully
+        // sealed) while holding that exact run id's liveness lock for the
+        // WHOLE decision, so a merely-slow (not dead) original process can
+        // never race a redrive that has already moved on.
         Some(run_id) => {
             let existing_run = state.ledger.run(run_id.clone()).await?;
             let eligible = existing_run.is_none_or(|r| !r.status.is_terminal());
             if eligible && command_is_stale(&command) {
-                match no_live_process_holds(&exec.runs_dir, run_id.as_str()) {
-                    Ok(true) => {
-                        if state
-                            .ledger
-                            .claim_stale_command_for_redrive(
-                                command.command_id.clone(),
-                                command.updated_at,
-                            )
-                            .await?
-                        {
-                            let fresh = o7_ledger::RunId::generate();
-                            let rebound = state
-                                .ledger
-                                .rebind_command_child_run(command.command_id.clone(), fresh)
-                                .await?;
-                            spawn_continue(exec, &conversation_id, &parent_run_id, &rebound)
-                                .map_err(|_| ApiError::Internal("SPAWN_FAILED"))?;
-                            rebound
-                        } else {
-                            command
-                        }
-                    }
-                    // A live process genuinely still holds the lock — it
-                    // is provably still working; never race it. An I/O
-                    // failure checking the lock is treated the same way:
-                    // fail closed, never spawn.
-                    Ok(false) | Err(_) => command,
-                }
+                let exec_owned = exec.clone();
+                let ledger = state.ledger.clone();
+                let command_for_redrive = command.clone();
+                let old_run_id = run_id.clone();
+                let conversation_id_for_redrive = conversation_id.clone();
+                let parent_run_id_for_redrive = parent_run_id.clone();
+                let outcome = tokio::task::spawn_blocking(move || {
+                    redrive_or_recover_locked(
+                        exec_owned,
+                        ledger,
+                        command_for_redrive,
+                        old_run_id,
+                        conversation_id_for_redrive,
+                        parent_run_id_for_redrive,
+                    )
+                })
+                .await
+                .map_err(|_| ApiError::Internal("REDRIVE_TASK_PANICKED"))?;
+                outcome.map_err(|reason| {
+                    eprintln!(
+                        "[o7d] refusing to redrive command {}: its old child run's own canonical \
+                         record failed verification/identity checks: {reason}",
+                        command.command_id
+                    );
+                    ApiError::Internal("COMMAND_CANONICAL_RECORD_INVALID")
+                })?
             } else {
                 command
             }

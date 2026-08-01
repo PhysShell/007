@@ -4,6 +4,7 @@
 //! a control socket. R0 is read-only: no run creation, no mutation, nothing
 //! that changes ledger state lives behind this router.
 
+mod canonical;
 pub mod cursor;
 pub mod dto;
 mod error;
