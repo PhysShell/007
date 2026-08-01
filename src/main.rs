@@ -499,7 +499,28 @@ fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
     // succeeded) whenever the ledger run is still missing it.
     if let Ok(meta_text) = std::fs::read_to_string(run_dir.join("meta.json")) {
         if let Ok(meta) = serde_json::from_str::<RunMeta>(&meta_text) {
-            if let Some(session) = meta.session_id {
+            // Q-Deck R1 third corrective round (blocker 3): `meta.json` is
+            // NOT part of the canonical event chain — `verify_prefix`,
+            // above, never touches it, so nothing about a clean replay
+            // proves this file actually belongs to THIS run. Without this
+            // check, a `meta.json` copied (by mistake or otherwise) from a
+            // DIFFERENT run's directory would silently attach an unrelated
+            // provider session to this run — replay stays green, and the
+            // next command continues in the wrong provider context
+            // entirely. Same discipline this function already applies to
+            // `ledger_binding.json` (`b.run_id == canonical_run_id`,
+            // above) — an ordinary consistency check, not a cryptographic
+            // signature, matching the trust level every other sidecar file
+            // in this codebase gets.
+            if meta.run_id != canonical_run_id.as_str() {
+                eprintln!(
+                    "[o7] recover: warning — meta.json in {} claims run_id {}, not {} — \
+                     refusing to trust it for session backfill",
+                    run_dir.display(),
+                    meta.run_id,
+                    canonical_run_id.as_str()
+                );
+            } else if let Some(session) = meta.session_id {
                 let needs_backfill = {
                     let ledger = o7_ledger::SqliteLedger::open(ledger_path)
                         .with_context(|| format!("opening ledger at {}", ledger_path.display()))?;
@@ -1036,6 +1057,60 @@ fn command_lock_path(runs_dir: &Path, run_id: &str) -> PathBuf {
     runs_dir.join(".locks").join(format!("{run_id}.lock"))
 }
 
+/// `true` if `run_id` has a ledger row — used to decide whether rejecting
+/// a command outright is safe (see the `continue_execute` failure arm in
+/// `continue_run`). Defaults to `true` (assume attached) on any lookup
+/// failure — the safe direction: a spurious rejection of an attached
+/// command is exactly the bug this check exists to prevent, so uncertainty
+/// must never fall on the side that risks it.
+fn ledger_run_exists(ledger_path: &Path, run_id: &str) -> bool {
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(_) => return true,
+    };
+    let ledger = match o7_ledger::SqliteLedger::open(ledger_path) {
+        Ok(ledger) => ledger,
+        Err(_) => return true,
+    };
+    rt.block_on(ledger.run(o7_ledger::RunId::from_raw(run_id.to_owned())))
+        .map(|r| r.is_some())
+        .unwrap_or(true)
+}
+
+/// Q-Deck R1 third corrective round (blocker 2): closes the window between
+/// a redrive deciding "this run id's process is dead" (its lock check
+/// found nothing holding it) and this SAME process — merely slow to
+/// start, not actually dead — finally getting scheduled and acquiring its
+/// own lock. By the time THIS check runs (immediately after the lock
+/// acquisition succeeds, before touching the ledger, the worktree, or the
+/// agent), a redrive that raced this exact window has already durably
+/// rebound the command elsewhere; reading the command's CURRENT binding
+/// fresh catches that. `false` means this process has been superseded —
+/// it must do NOTHING further (never invoke the agent, never touch
+/// canonical state, never mutate command bookkeeping meant for whichever
+/// run actually holds the binding now).
+fn command_still_bound_to_this_run(
+    ledger_path: &Path,
+    command_id: &str,
+    run_id: &str,
+) -> Result<bool> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("starting the binding-check runtime")?;
+    let ledger = o7_ledger::SqliteLedger::open(ledger_path)
+        .with_context(|| format!("opening ledger at {}", ledger_path.display()))?;
+    let command = rt
+        .block_on(ledger.command(o7_ledger::CommandId::from_raw(command_id.to_owned())))
+        .context("looking up the command's current binding")?;
+    Ok(command
+        .and_then(|c| c.child_run_id)
+        .is_some_and(|bound| bound.as_str() == run_id))
+}
+
 /// Q-Deck R1's command-continuation executor (`docs/q-deck/r1-command.md`
 /// §9.5) — dispatch ONE durably accepted command as a brand new sealed
 /// child run, continuing the parent run's own provider session. Reuses the
@@ -1090,6 +1165,23 @@ fn continue_run(a: &ContinueArgs) -> Result<()> {
                 return Ok(());
             }
         };
+
+    // Closes the TOCTOU window a redrive's own pre-spawn lock check cannot:
+    // this process may have been merely SLOW to reach the lock above (not
+    // dead), and a redrive already decided otherwise and rebound the
+    // command elsewhere before this process got here. A fresh read of the
+    // command's CURRENT binding, taken immediately after winning the lock,
+    // catches that — if the binding has already moved on, do NOTHING
+    // further: never invoke the agent, never touch canonical state, never
+    // mutate bookkeeping that now belongs to a different run.
+    if !command_still_bound_to_this_run(&a.ledger, &a.command_id, &a.run_id)? {
+        eprintln!(
+            "[o7] continue: command {} no longer binds run {} — a redrive already superseded \
+             it while this process was starting; exiting without touching any durable state",
+            a.command_id, a.run_id
+        );
+        return Ok(());
+    }
 
     let repo = a
         .repo
@@ -1181,7 +1273,27 @@ fn continue_run(a: &ContinueArgs) -> Result<()> {
     let (verdict, projection_incomplete, child_session_id) = match outcome {
         Ok(v) => v,
         Err(e) => {
-            let _ = mark_rejected();
+            // Q-Deck R1 third corrective round (blocker 1): marking the
+            // COMMAND rejected here is only safe if this run never
+            // durably attached to the ledger at all — once `attach_run`
+            // (inside `continue_execute`) succeeds, the child is a real,
+            // durable tail. Rejecting the command while leaving that
+            // child non-terminal forever (an ordinary error well past
+            // attach — a gate command failing to spawn, an artifact write
+            // failing, anything) would permanently block the
+            // conversation: neither the old (now-stale) parent nor this
+            // non-terminal child could ever become a valid parent again,
+            // and a `rejected` command is invisible to every existing
+            // discovery/redrive mechanism (all scoped to
+            // `accepted`/`started`). So: reject ONLY if unattached — leave
+            // the command's bookkeeping exactly as `o7d` left it
+            // (`started`) otherwise, so the EXISTING stuck-command
+            // discovery/redrive machinery — already built to handle a
+            // child stuck at any non-terminal status — is what resolves
+            // it, not a premature rejection here.
+            if !ledger_run_exists(&a.ledger, &a.run_id) {
+                let _ = mark_rejected();
+            }
             return Err(e);
         }
     };
@@ -1208,13 +1320,37 @@ fn continue_run(a: &ContinueArgs) -> Result<()> {
                 ))
                 .context("persisting the child run's own provider session")?;
         }
-        // "completed" is command bookkeeping only — it means "dispatched to
-        // a sealed run", not any specific verdict; the child run's own
-        // ledger row stays the sole verdict authority
-        // (docs/q-deck/r1-command.md §2).
-        finish_rt
-            .block_on(ledger.mark_command_completed(command_id))
-            .context("marking the command completed")?;
+        // Q-Deck R1 third corrective round (blocker 2, defense-in-depth):
+        // only mutate the command's bookkeeping if it is STILL bound to
+        // THIS run. The lock (and the earlier post-acquisition binding
+        // check) already make it extremely unlikely this run was ever a
+        // superseded/orphaned attempt by the time it reaches its own
+        // seal, but this run's own command_id-scoped write must never be
+        // able to stomp bookkeeping that by now belongs to a different
+        // (later-redriven) run — `mark_command_completed`/`mark_command_rejected`
+        // are keyed only by CommandId, with no concept of "my run" built
+        // in, so that guarantee has to live here, at the call site.
+        let current = finish_rt
+            .block_on(ledger.command(command_id.clone()))
+            .context("re-checking the command's current binding before finishing it")?;
+        let still_mine = current
+            .and_then(|c| c.child_run_id)
+            .is_some_and(|bound| bound.as_str() == a.run_id);
+        if still_mine {
+            // "completed" is command bookkeeping only — it means
+            // "dispatched to a sealed run", not any specific verdict; the
+            // child run's own ledger row stays the sole verdict authority
+            // (docs/q-deck/r1-command.md §2).
+            finish_rt
+                .block_on(ledger.mark_command_completed(command_id))
+                .context("marking the command completed")?;
+        } else {
+            eprintln!(
+                "[o7] {}: this run sealed successfully, but the command it was dispatching has \
+                 since been rebound to a different run — not touching its bookkeeping",
+                a.run_id
+            );
+        }
         Ok(())
     })();
     if let Err(e) = finish {
