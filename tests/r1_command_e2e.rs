@@ -19,10 +19,13 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::SocketAddr;
+use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+
+use rusqlite::OptionalExtension as _;
 
 /// `cargo test` runs every `#[test]` in this binary concurrently by
 /// default. Each test here spawns several REAL processes (git, `o7`,
@@ -76,6 +79,7 @@ N=$(( $(cat "$DIR/count" 2>/dev/null || echo 0) + 1 ))
 echo "$N" > "$DIR/count"
 printf '%s\0' "$@" > "$DIR/argv.$N"
 touch "$DIR/invoked.$N"
+echo "$$" > "$DIR/pid.$N"
 S=$(cat "$DIR/sleep_seconds" 2>/dev/null || echo 0)
 sleep "$S"
 printf '{"result":"synthetic ok","session_id":"fixed-session-1","total_cost_usd":0.001}\n'
@@ -108,6 +112,19 @@ exit 0
     /// Wait (bounded) until at least `n` invocations have been recorded.
     fn wait_for_invocation(&self, n: u64, deadline: Instant) {
         poll_until(deadline, || (self.invocation_count() >= n).then_some(()));
+    }
+
+    /// The fixture shell's own PID for invocation number `n` (1-based) —
+    /// Q-Deck R1 sixth corrective round: lets a test that killed the real
+    /// `o7 continue` parent process mid-invocation ALSO reap the now-
+    /// orphaned fixture process itself, rather than leaving it to sleep
+    /// out its own timer in the background.
+    fn pid(&self, n: u64) -> i32 {
+        std::fs::read_to_string(self.dir.path().join(format!("pid.{n}")))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap()
     }
 
     /// The exact argv (excluding argv[0]) of invocation number `n` (1-based).
@@ -389,7 +406,10 @@ fn wait_for_run_status(addr: SocketAddr, run_id: &str, status: &str, deadline: I
 /// design (`docs/q-deck/r1-command.md` §6: never echoed back to a
 /// browser), so checked the same way other tests here check ledger-
 /// internal state Q-Deck's own DTOs deliberately don't surface: a direct
-/// read of the SQLite file.
+/// read of the SQLite file. A run with no ledger row at all (e.g. a
+/// hand-built canonical record that was never redriven/recovered) also
+/// reads back as `None` — "no known session" either way, never a query
+/// error a caller has to special-case.
 fn provider_session_id(ledger_path: &Path, run_id: &str) -> Option<String> {
     let conn = rusqlite::Connection::open(ledger_path).unwrap();
     conn.query_row(
@@ -397,7 +417,9 @@ fn provider_session_id(ledger_path: &Path, run_id: &str) -> Option<String> {
         [run_id],
         |row| row.get(0),
     )
+    .optional()
     .unwrap()
+    .flatten()
 }
 
 fn command_row_count(ledger_path: &Path) -> i64 {
@@ -1564,17 +1586,24 @@ fn recover_run_dir_backfills_a_missing_provider_session_from_the_canonical_recei
     );
 }
 
-/// Q-Deck R1 third corrective round, blocker 1: an ORDINARY error well
-/// after the child run's own ledger row exists (`attach_run` already
-/// succeeded — this is not a SIGKILL, just the provider binary vanishing
-/// out from under a real continuation attempt) must NEVER unconditionally
-/// mark the command `rejected`. A `rejected` command is invisible to
-/// every discovery/redrive mechanism (all scoped to `accepted`/`started`),
-/// and its non-terminal child (a real, durable tail — neither the old
-/// parent nor this child can ever be a valid parent again) would then
-/// block the conversation forever, no SIGKILL required.
+/// Q-Deck R1 third corrective round, blocker 1, REVISED by the sixth: an
+/// ORDINARY error well after the child run's own ledger row exists
+/// (`attach_run` already succeeded, `AgentStarted` durably appended — this
+/// is not a SIGKILL, just the provider binary vanishing out from under a
+/// real continuation attempt) must NEVER unconditionally mark the command
+/// `rejected`. A `rejected` command is invisible to every discovery/redrive
+/// mechanism (all scoped to `accepted`/`started`), and its non-terminal
+/// child (a real, durable tail — neither the old parent nor this child can
+/// ever be a valid parent again) would then block the conversation
+/// forever, no SIGKILL required. The third round's own contract additionally
+/// claimed this stays automatically REDRIVABLE once past the staleness
+/// bound; the sixth round's blocker review overturned exactly that half —
+/// a durable `AgentStarted` with nothing past it can never be told apart
+/// from "the provider may already be running", so this now fails closed as
+/// `409 COMMAND_PROVIDER_OUTCOME_AMBIGUOUS` instead of auto-redriving.
+/// Never rejected, never silently wedged — but never auto-redriven either.
 #[test]
-fn an_ordinary_error_after_attach_never_rejects_a_command_and_stays_redrivable() {
+fn an_ordinary_error_after_attach_is_provider_outcome_ambiguous_never_rejected_never_redriven() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let repo = fixture_repo(PASSING_GATE);
     let task_file = repo.path().join("task.md");
@@ -1723,9 +1752,11 @@ fn an_ordinary_error_after_attach_never_rejects_a_command_and_stays_redrivable()
         "the child run must NOT have sealed — the provider spawn genuinely failed"
     );
 
-    // Restore the provider and prove the conversation actually recovers:
-    // a retry of the SAME request, once past the staleness bound, must
-    // redrive onto a FRESH run id and complete successfully.
+    // Sixth corrective round: restoring the provider binary does NOT change
+    // anything — the durable canonical record already shows `AgentStarted`
+    // with nothing past it, and that classification depends only on what's
+    // already on disk, never on whether `claude` happens to exist now. A
+    // retry, even long past the staleness bound, must keep failing closed.
     let restored = claude.path().join("claude");
     std::fs::write(
         &restored,
@@ -1744,27 +1775,36 @@ exit 0
     std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
     std::fs::set_permissions(&restored, perms).unwrap();
 
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let redriven_run_id = poll_until(deadline, || {
-        let (status, retried) = post(
-            addr,
-            &format!("/api/v1/conversations/{conversation_id}/commands"),
-            &serde_json::json!({
-                "schema_version": 1,
-                "parent_run_id": parent_run_id,
-                "command": "this will fail to even spawn the provider",
-                "idempotency_key": "key-ordinary-error",
-            }),
-        );
-        if status != 202 {
-            return None;
-        }
-        let run_id = retried["run_id"].as_str()?.to_owned();
-        (run_id != child_run_id).then_some(run_id)
-    });
-
-    let deadline = Instant::now() + Duration::from_secs(30);
-    wait_for_run_status(addr, &redriven_run_id, "completed", deadline);
+    std::thread::sleep(Duration::from_millis(300));
+    let (status2, retried2) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": "this will fail to even spawn the provider",
+            "idempotency_key": "key-ordinary-error",
+        }),
+    );
+    assert_eq!(status2, 409, "{retried2:?}");
+    assert_eq!(retried2["code"], "COMMAND_PROVIDER_OUTCOME_AMBIGUOUS");
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "restoring the provider must not cause a retry to invoke it — the record's own \
+         classification never depends on whether `claude` currently exists"
+    );
+    let (command_status2, command_child2): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = ?1",
+            [&command_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(command_status2, "started");
+    assert_eq!(command_child2.as_deref(), Some(child_run_id.as_str()));
 
     let _ = o7d_child.kill();
     let _ = o7d_child.wait();
@@ -2816,14 +2856,20 @@ fn a_terminal_ledger_status_never_substitutes_for_canonical_verification() {
     let _ = o7d_child.wait();
 }
 
-/// Q-Deck R1 fourth corrective round: a child run whose canonical record is
-/// a genuinely valid but UNSEALED prefix (the process crashed before ever
-/// reaching the agent — a real, verified `RunStarted` on disk, nothing
-/// more) must be redriven exactly once, under a FRESH child run id, and the
-/// old partial record must be left byte-identical (never resumed, never
-/// rewritten).
+/// Q-Deck R1 fourth corrective round, REVISED by the sixth: a child run
+/// whose canonical record is a genuinely valid but UNSEALED prefix that
+/// reached the durable dispatch boundary (`AgentStarted` durably appended,
+/// then the agent invocation itself failed to even exec) is no longer
+/// auto-redriven. Under the fourth round's original contract this was safe
+/// to redrive (the provider "never really ran"); the sixth round's own
+/// blocker review established that the durable record ALONE can never
+/// prove that distinction to a later, independent reader — a crash
+/// immediately before the real spawn is indistinguishable on disk from a
+/// crash immediately after it. So this exact scenario is now, correctly,
+/// `409 COMMAND_PROVIDER_OUTCOME_AMBIGUOUS`: fails closed, never redriven,
+/// the old record left byte-identical, requiring manual resolution.
 #[test]
-fn a_valid_unsealed_prefix_is_redriven_exactly_once_leaving_the_old_record_untouched() {
+fn a_provider_spawn_failure_right_after_agent_started_is_provider_outcome_ambiguous() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let repo = fixture_repo(PASSING_GATE);
     let task_file = repo.path().join("task.md");
@@ -2977,30 +3023,39 @@ fn a_valid_unsealed_prefix_is_redriven_exactly_once_leaving_the_old_record_untou
             "idempotency_key": idempotency_key,
         }),
     );
-    assert_eq!(status, 202, "{retried:?}");
-    let redriven_run_id = retried["run_id"].as_str().unwrap().to_owned();
-    assert_ne!(
-        redriven_run_id, old_run_id,
-        "a genuinely unsealed prefix must be redriven under a FRESH child run id"
+    assert_eq!(
+        status, 409,
+        "sixth corrective round: AgentStarted durably present with nothing past it must fail \
+         closed as ambiguous, never auto-redrive, even when the failure is a genuine provider \
+         spawn error: {retried:?}"
     );
+    assert_eq!(retried["code"], "COMMAND_PROVIDER_OUTCOME_AMBIGUOUS");
 
-    let deadline = Instant::now() + Duration::from_secs(30);
-    claude.wait_for_invocation(2, deadline);
-    let deadline = Instant::now() + Duration::from_secs(30);
-    wait_for_run_status(addr, &redriven_run_id, "completed", deadline);
-
+    std::thread::sleep(Duration::from_millis(400));
     assert_eq!(
         claude.invocation_count(),
-        2,
-        "the provider must be invoked exactly once for the fresh child, on top of the one \
-         failed attempt against the old (unsealed) child"
+        1,
+        "the provider must NEVER be invoked again for an ambiguous record"
     );
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-unsealed'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        command_status, "started",
+        "the command must stay started/discoverable, never completed or rejected"
+    );
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
 
     let events_after = std::fs::read_to_string(record_dir.join("events.jsonl")).unwrap();
     assert_eq!(
         events_before, events_after,
-        "the old, superseded partial record must be left byte-identical — never resumed, \
-         never rewritten"
+        "an ambiguous record must never be mutated — no redrive, no resume, no rewrite"
     );
 
     let _ = o7d_child.kill();
@@ -4979,6 +5034,1332 @@ fn recovering_one_conversations_sealed_child_never_touches_a_different_conversat
     assert_eq!(final_b_run, "completed");
     assert_eq!(final_b_attempt, "completed");
     let _ = conv_b;
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+// ============================================================================
+// Q-Deck R1 sixth corrective round (review "5150998121"): phase-aware
+// unsealed recovery. A valid unsealed canonical record whose own state has
+// reached the durable dispatch boundary (`AgentStarted`) MAY already have a
+// live provider invocation behind it — nothing an unsealed record can ever
+// contain proves otherwise. Such a record must NEVER be automatically
+// redriven; it fails closed as `409 COMMAND_PROVIDER_OUTCOME_AMBIGUOUS`,
+// requiring manual resolution. Tests A-H below prove this end to end. Test
+// I (re-proving every Round 5 guarantee unchanged) is the full pre-existing
+// suite in this same file, run unmodified alongside these.
+// ============================================================================
+
+/// How far past the durable dispatch boundary a hand-built canonical prefix
+/// should be constructed — each `true` stage builds on the previous one,
+/// mirroring the exact real pipeline order `continue_execute` itself uses.
+#[derive(Default, Clone, Copy)]
+struct DispatchStage {
+    agent_started: bool,
+    agent_exited: bool,
+    session_captured: bool,
+    patch_captured: bool,
+}
+
+/// Q-Deck R1 sixth corrective round: hand-builds EXACTLY the durable state a
+/// genuine `continue_execute` crash at an increasingly later dispatch stage
+/// would leave behind — using the SAME public helpers `continue_execute`
+/// itself calls (`o7::record::{RunRecord,LedgerBinding,CommandBinding,
+/// ProviderSessionReceipt}`, `o7::events::{EventChain,artifact,to_jsonl,
+/// build_contract}`), never a hand-rolled shortcut format. Returns the
+/// `RunRecord` and the exact `events.jsonl` bytes written, so a caller can
+/// assert the prefix is left byte-identical after whatever the test does.
+#[allow(clippy::too_many_arguments)]
+fn build_hand_crafted_prefix(
+    repo: &Path,
+    runs_dir: &Path,
+    target_name: &str,
+    run_id: &str,
+    conversation_id: &str,
+    parent_run_id: &str,
+    command_id: &str,
+    command_text: &str,
+    stage: DispatchStage,
+) -> (o7::record::RunRecord, String) {
+    let rec = o7::record::RunRecord::create(runs_dir, target_name, run_id).unwrap();
+    o7::record::LedgerBinding {
+        schema: 1,
+        run_id: run_id.to_owned(),
+        conversation_id: conversation_id.to_owned(),
+        agent: "claude".to_owned(),
+        role: "implementer".to_owned(),
+        parent_run_id: Some(parent_run_id.to_owned()),
+    }
+    .write_durable(&rec)
+    .unwrap();
+    rec.write_task_durable(command_text).unwrap();
+    let manifest = o7::gate::GateManifest::load(&repo.join(".007/gate.toml")).unwrap();
+    let contract = o7::events::build_contract(&manifest).unwrap();
+    let task_ref = o7::events::artifact(
+        o7_run::event::ArtifactKind::Task,
+        "task.md",
+        command_text.as_bytes(),
+    );
+    let canonical_run_id = o7_run::ids::RunId::new(run_id).unwrap();
+    let mut chain = o7::events::EventChain::new(canonical_run_id);
+    let mut events = Vec::new();
+    events.push(
+        chain
+            .push(o7_run::event::RunEventKind::RunStarted {
+                contract,
+                task: task_ref,
+            })
+            .unwrap(),
+    );
+
+    let command_binding = o7::record::CommandBinding {
+        schema: 1,
+        command_id: command_id.to_owned(),
+        conversation_id: conversation_id.to_owned(),
+        parent_run_id: parent_run_id.to_owned(),
+        child_run_id: run_id.to_owned(),
+        command_sha256: o7_run::event::Digest256::of_bytes(command_text.as_bytes())
+            .as_str()
+            .to_owned(),
+    };
+    command_binding.write_durable(&rec).unwrap();
+    let command_binding_bytes = serde_json::to_vec(&command_binding).unwrap();
+    let command_binding_ref = o7::events::artifact(
+        o7_run::event::ArtifactKind::CommandBinding,
+        "command_binding.json",
+        &command_binding_bytes,
+    );
+    events.push(
+        chain
+            .push(o7_run::event::RunEventKind::CommandBindingCaptured {
+                binding: command_binding_ref,
+            })
+            .unwrap(),
+    );
+
+    if stage.agent_started {
+        events.push(
+            chain
+                .push(o7_run::event::RunEventKind::AgentStarted)
+                .unwrap(),
+        );
+    }
+    if stage.agent_exited {
+        events.push(
+            chain
+                .push(o7_run::event::RunEventKind::AgentExited {
+                    outcome: o7_run::event::AgentOutcome::ExitedNormally { code: 0 },
+                })
+                .unwrap(),
+        );
+    }
+    if stage.session_captured {
+        let receipt = o7::record::ProviderSessionReceipt {
+            schema: 1,
+            run_id: run_id.to_owned(),
+            engine: "claude".to_owned(),
+            provider: "claude".to_owned(),
+            model: "opus".to_owned(),
+            session_id: "fixed-session-1".to_owned(),
+        };
+        let receipt_bytes = serde_json::to_vec(&receipt).unwrap();
+        std::fs::write(
+            rec.dir.join(o7::record::PROVIDER_SESSION_RECEIPT_FILE),
+            &receipt_bytes,
+        )
+        .unwrap();
+        let receipt_ref = o7::events::artifact(
+            o7_run::event::ArtifactKind::ProviderSession,
+            "session_receipt.json",
+            &receipt_bytes,
+        );
+        events.push(
+            chain
+                .push(o7_run::event::RunEventKind::ProviderSessionCaptured {
+                    receipt: receipt_ref,
+                })
+                .unwrap(),
+        );
+    }
+    if stage.patch_captured {
+        let diff = "diff --git a/x b/x\nnew file mode 100644\n";
+        rec.write_diff(diff).unwrap();
+        let diff_ref = o7::events::artifact(
+            o7_run::event::ArtifactKind::Diff,
+            "diff.patch",
+            diff.as_bytes(),
+        );
+        events.push(
+            chain
+                .push(o7_run::event::RunEventKind::PatchCaptured { patch: diff_ref })
+                .unwrap(),
+        );
+    }
+
+    let bytes = o7::events::to_jsonl(&events).unwrap();
+    std::fs::write(rec.dir.join("events.jsonl"), &bytes).unwrap();
+    (rec, bytes)
+}
+
+/// Inserts a durably-accepted `command` row (plus its own idempotency
+/// record) bound to `run_id` — the same shape every other test in this
+/// file hand-constructs before invoking `o7 continue`/posting a retry.
+fn insert_bound_command(
+    ledger_path: &Path,
+    conversation_id: &str,
+    parent_run_id: &str,
+    command_id: &str,
+    command_text: &str,
+    run_id: &str,
+    idempotency_key: &str,
+) {
+    let conn = rusqlite::Connection::open(ledger_path).unwrap();
+    let digest_input = serde_json::json!({
+        "conversation_id": conversation_id,
+        "parent_run_id": parent_run_id,
+        "command_text": command_text,
+    });
+    let digest = o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+    conn.execute(
+        "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+         status, child_run_id, created_at, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, 'started', ?5, 1000, 1000)",
+        rusqlite::params![
+            command_id,
+            conversation_id,
+            parent_run_id,
+            command_text,
+            run_id
+        ],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+         created_at) VALUES ('create-command', ?1, ?2, ?3, 1000)",
+        rusqlite::params![idempotency_key, digest, command_id],
+    )
+    .unwrap();
+}
+
+/// Required test A ("pre-dispatch prefix remains redrivable"): a valid
+/// canonical prefix built strictly BEFORE the durable dispatch boundary
+/// (`RunStarted`+`CommandBindingCaptured` only — no `AgentStarted` at all)
+/// must still be redriven exactly once, under a fresh child run id, leaving
+/// the old prefix byte-identical, and complete normally through the fresh
+/// child.
+#[test]
+fn a_pre_dispatch_prefix_is_redriven_exactly_once_and_completes() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+    };
+
+    let old_run_id = "old-pre-dispatch";
+    let command_text = "second turn";
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let (rec, events_before) = build_hand_crafted_prefix(
+        repo.path(),
+        &runs_dir,
+        &target_name,
+        old_run_id,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-pre-dispatch",
+        command_text,
+        DispatchStage::default(),
+    );
+
+    let idempotency_key = "key-pre-dispatch";
+    insert_bound_command(
+        &ledger_path,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-pre-dispatch",
+        command_text,
+        old_run_id,
+        idempotency_key,
+    );
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status, 202, "{retried:?}");
+    let redriven_run_id = retried["run_id"].as_str().unwrap().to_owned();
+    assert_ne!(
+        redriven_run_id, old_run_id,
+        "a pre-dispatch prefix must still be redriven under a FRESH id"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    claude.wait_for_invocation(2, deadline);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    wait_for_run_status(addr, &redriven_run_id, "completed", deadline);
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "exactly one redrive invocation, never more"
+    );
+
+    let events_after = std::fs::read_to_string(rec.dir.join("events.jsonl")).unwrap();
+    assert_eq!(
+        events_before, events_after,
+        "the old pre-dispatch prefix must be left byte-identical"
+    );
+
+    // The command's own post-seal completion write is a SEPARATE step
+    // right after the run itself seals — poll rather than assume it has
+    // already landed the instant the run's own status turns "completed".
+    let deadline = Instant::now() + Duration::from_secs(15);
+    poll_until(deadline, || {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let s: String = conn
+            .query_row(
+                "SELECT status FROM command WHERE command_id = 'cmd-pre-dispatch'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        (s == "completed").then_some(())
+    });
+    let command_child: Option<String> = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT child_run_id FROM command WHERE command_id = 'cmd-pre-dispatch'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(command_child.as_deref(), Some(redriven_run_id.as_str()));
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Required test C ("AgentStarted-only prefix"): a valid canonical prefix
+/// whose state shows `AgentStarted` and NOTHING past it — no `AgentExited`,
+/// no session receipt, no provider output — must classify ambiguous and
+/// refuse automatic redrive, even though the fixture never got a chance to
+/// record any invocation evidence. This is the conservative side of the
+/// boundary: the ABSENCE of later evidence is the ambiguity, not proof
+/// against invocation.
+#[test]
+fn an_agent_started_only_prefix_is_provider_outcome_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+    };
+
+    let old_run_id = "old-agent-started-only";
+    let command_text = "second turn";
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let (rec, events_before) = build_hand_crafted_prefix(
+        repo.path(),
+        &runs_dir,
+        &target_name,
+        old_run_id,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-agent-started-only",
+        command_text,
+        DispatchStage {
+            agent_started: true,
+            ..Default::default()
+        },
+    );
+
+    let idempotency_key = "key-agent-started-only";
+    insert_bound_command(
+        &ledger_path,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-agent-started-only",
+        command_text,
+        old_run_id,
+        idempotency_key,
+    );
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(
+        status, 409,
+        "an AgentStarted-only unsealed record must fail closed, never redrive: {retried:?}"
+    );
+    assert_eq!(retried["code"], "COMMAND_PROVIDER_OUTCOME_AMBIGUOUS");
+
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the provider must never be invoked again for an ambiguous record"
+    );
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-agent-started-only'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        command_status, "started",
+        "an ambiguous record must leave the command started, discoverable, never completed or \
+         rejected"
+    );
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
+
+    let events_after = std::fs::read_to_string(rec.dir.join("events.jsonl")).unwrap();
+    assert_eq!(
+        events_before, events_after,
+        "an ambiguous record must never be mutated"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Required test D ("AgentExited without RunSealed"): even a full
+/// `AgentExited` outcome does not make the record safe to redrive — the
+/// provider genuinely ran; only `RunSealed` proves the run is done and
+/// stays fail-closed ambiguous otherwise.
+#[test]
+fn an_agent_exited_without_run_sealed_prefix_is_provider_outcome_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+    };
+
+    let old_run_id = "old-agent-exited";
+    let command_text = "second turn";
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    build_hand_crafted_prefix(
+        repo.path(),
+        &runs_dir,
+        &target_name,
+        old_run_id,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-agent-exited",
+        command_text,
+        DispatchStage {
+            agent_started: true,
+            agent_exited: true,
+            ..Default::default()
+        },
+    );
+
+    let idempotency_key = "key-agent-exited";
+    insert_bound_command(
+        &ledger_path,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-agent-exited",
+        command_text,
+        old_run_id,
+        idempotency_key,
+    );
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status, 409, "{retried:?}");
+    assert_eq!(retried["code"], "COMMAND_PROVIDER_OUTCOME_AMBIGUOUS");
+
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(claude.invocation_count(), 1);
+    let command_child: Option<String> = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT child_run_id FROM command WHERE command_id = 'cmd-agent-exited'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Required test E ("ProviderSessionCaptured without RunSealed"): a
+/// digest-bound session receipt existing durably does not make the record
+/// safe to redrive OR eligible for sealed-recovery/session-backfill — only
+/// `RunSealed` does either.
+#[test]
+fn a_provider_session_captured_without_run_sealed_prefix_is_provider_outcome_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+    };
+
+    let old_run_id = "old-session-captured";
+    let command_text = "second turn";
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    build_hand_crafted_prefix(
+        repo.path(),
+        &runs_dir,
+        &target_name,
+        old_run_id,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-session-captured",
+        command_text,
+        DispatchStage {
+            agent_started: true,
+            agent_exited: true,
+            session_captured: true,
+            ..Default::default()
+        },
+    );
+
+    let idempotency_key = "key-session-captured";
+    insert_bound_command(
+        &ledger_path,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-session-captured",
+        command_text,
+        old_run_id,
+        idempotency_key,
+    );
+
+    // Sanity: the ledger has NO session for this run yet — a wrongly-
+    // permissive path might backfill it via the sealed-recovery route.
+    assert_eq!(provider_session_id(&ledger_path, old_run_id), None);
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status, 409, "{retried:?}");
+    assert_eq!(retried["code"], "COMMAND_PROVIDER_OUTCOME_AMBIGUOUS");
+
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(claude.invocation_count(), 1);
+    assert_eq!(
+        provider_session_id(&ledger_path, old_run_id),
+        None,
+        "an ambiguous record must never backfill a session through the sealed-recovery path"
+    );
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-session-captured'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(command_status, "started");
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Required test F ("post-provider artifact/gate prefix"): a captured patch
+/// (or gate work) after the provider — the furthest an unsealed record can
+/// get short of `RunSealed` itself — is STILL ambiguous, never sealed,
+/// never redrivable.
+#[test]
+fn a_post_provider_artifact_prefix_is_provider_outcome_ambiguous() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+    };
+
+    let old_run_id = "old-post-provider-work";
+    let command_text = "second turn";
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    build_hand_crafted_prefix(
+        repo.path(),
+        &runs_dir,
+        &target_name,
+        old_run_id,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-post-provider-work",
+        command_text,
+        DispatchStage {
+            agent_started: true,
+            agent_exited: true,
+            session_captured: true,
+            patch_captured: true,
+        },
+    );
+
+    let idempotency_key = "key-post-provider-work";
+    insert_bound_command(
+        &ledger_path,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-post-provider-work",
+        command_text,
+        old_run_id,
+        idempotency_key,
+    );
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status, 409, "{retried:?}");
+    assert_eq!(retried["code"], "COMMAND_PROVIDER_OUTCOME_AMBIGUOUS");
+
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(claude.invocation_count(), 1);
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-post-provider-work'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(command_status, "started");
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Required test B ("crash after provider invocation begins", the load-
+/// bearing test of this whole round): a REAL `o7 continue` process is
+/// spawned, the REAL fake-`claude` fixture genuinely starts (proving the
+/// durable dispatch boundary was crossed for real, not merely hand-built),
+/// then BOTH the continuation process and the fixture process are killed —
+/// simulating a genuine host/OOM/segfault-class crash, not a graceful exit.
+/// The resulting record is a REAL, valid, unsealed prefix with `AgentStarted`
+/// and no more. Repeated same-key retries must NEVER invoke the provider
+/// again, never rebind, never mint a fresh run directory, and always answer
+/// `409 COMMAND_PROVIDER_OUTCOME_AMBIGUOUS`.
+#[test]
+fn a_real_crash_after_provider_invocation_begins_is_never_auto_redriven() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+    };
+
+    let old_run_id = "old-real-crash-mid-dispatch";
+    let command_text = "second turn";
+    let idempotency_key = "key-real-crash-mid-dispatch";
+    insert_bound_command(
+        &ledger_path,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-real-crash-mid-dispatch",
+        command_text,
+        old_run_id,
+        idempotency_key,
+    );
+
+    // A generous window: long enough that this test can reliably detect
+    // "the fixture really started" and kill BOTH processes well before the
+    // fixture's own sleep would otherwise let it exit and print output.
+    claude.set_sleep_seconds(20);
+
+    // `.process_group(0)` makes this REAL `o7 continue` process the leader
+    // of its OWN new process group — the fixture `claude` script it spawns
+    // inherits that same group (neither this test nor `o7 continue` itself
+    // does anything special when spawning it), so a single `killpg` reaches
+    // both the continuation process and its live agent child together.
+    let mut continue_child = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conversation_id)
+        .arg("--parent-run-id")
+        .arg(&parent_run_id)
+        .arg("--command")
+        .arg(command_text)
+        .arg("--run-id")
+        .arg(old_run_id)
+        .arg("--command-id")
+        .arg("cmd-real-crash-mid-dispatch")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .process_group(0)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn a real `o7 continue` process");
+
+    // Wait for the REAL fixture process to have genuinely started ITS
+    // SECOND invocation — the FIRST already happened via the parent run
+    // (`spawn_o7_run_process`, above) before this continuation was ever
+    // spawned, so waiting on invocation 1 here would already be satisfied
+    // and kill this process far too early, likely before it even reaches
+    // `RunRecord::create`. Reaching invocation 2 is proof the durable
+    // dispatch boundary (`AgentStarted`, appended and `sync_data`-flushed
+    // BEFORE `agent::continue_session` is ever called) has truly been
+    // crossed on disk for THIS continuation.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    claude.wait_for_invocation(2, deadline);
+
+    // Kill BOTH: the continuation process's own group (covers the fixture
+    // too, via shared pgid) AND — belt and suspenders — the fixture's own
+    // PID directly, ignoring an already-dead-process error from either.
+    let _ = nix::sys::signal::killpg(
+        nix::unistd::Pid::from_raw(continue_child.id() as i32),
+        nix::sys::signal::Signal::SIGKILL,
+    );
+    let _ = nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(claude.pid(2)),
+        nix::sys::signal::Signal::SIGKILL,
+    );
+    let _ = continue_child.wait();
+
+    // Sanity: a REAL, valid, unsealed prefix showing AgentStarted and
+    // nothing past it — never AgentExited, never RunSealed.
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let events_path = runs_dir
+        .join(&target_name)
+        .join(old_run_id)
+        .join("events.jsonl");
+    let events_text = std::fs::read_to_string(&events_path).unwrap_or_else(|e| {
+        fn list(dir: &Path, depth: usize, out: &mut String) {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return;
+            };
+            for entry in entries.flatten() {
+                out.push_str(&"  ".repeat(depth));
+                out.push_str(&entry.file_name().to_string_lossy());
+                out.push('\n');
+                if entry.path().is_dir() {
+                    list(&entry.path(), depth + 1, out);
+                }
+            }
+        }
+        let mut tree = String::new();
+        list(&runs_dir, 0, &mut tree);
+        panic!(
+            "failed to read {}: {e}\nactual runs_dir tree:\n{tree}",
+            events_path.display()
+        );
+    });
+    assert!(
+        events_text.contains("\"type\":\"agent_started\""),
+        "sanity: the real crash must have happened AFTER the durable dispatch boundary"
+    );
+    assert!(
+        !events_text.contains("\"type\":\"agent_exited\""),
+        "sanity: the real crash must have happened BEFORE the agent ever exited"
+    );
+    assert!(!events_text.contains("\"type\":\"run_sealed\""));
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    // Repeated same-key retries — none may ever invoke the provider again.
+    for attempt in 0..3 {
+        let (status, retried) = post(
+            addr,
+            &format!("/api/v1/conversations/{conversation_id}/commands"),
+            &serde_json::json!({
+                "schema_version": 1,
+                "parent_run_id": parent_run_id,
+                "command": command_text,
+                "idempotency_key": idempotency_key,
+            }),
+        );
+        assert_eq!(status, 409, "attempt {attempt}: {retried:?}");
+        assert_eq!(retried["code"], "COMMAND_PROVIDER_OUTCOME_AMBIGUOUS");
+        std::thread::sleep(Duration::from_millis(150));
+    }
+
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "exactly the parent run's own invocation plus the one real continuation invocation that \
+         was killed mid-flight — a real crash mid-dispatch must NEVER be auto-redriven into a \
+         THIRD provider invocation"
+    );
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command \
+             WHERE command_id = 'cmd-real-crash-mid-dispatch'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        command_status, "started",
+        "the command must stay started/discoverable, never silently completed or rejected"
+    );
+    assert_eq!(
+        command_child.as_deref(),
+        Some(old_run_id),
+        "the command must stay bound to its ORIGINAL child — never rebound to a fresh one"
+    );
+    // No fresh run directory was ever created for this command.
+    let run_dirs = std::fs::read_dir(runs_dir.join(&target_name))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        run_dirs
+            .iter()
+            .filter(|d| d.as_str() != old_run_id && d.as_str() != parent_run_id)
+            .count(),
+        0,
+        "no fresh child run directory may ever be created for an ambiguous command: {run_dirs:?}"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Required test G ("concurrent ambiguous retries"): two truly concurrent
+/// same-key retries against an ambiguous record must both fail closed,
+/// both agree, and never together cause a second provider invocation, a
+/// rebind, or a fresh child.
+#[test]
+fn two_concurrent_same_key_retries_against_an_ambiguous_record_both_fail_closed() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+    };
+
+    let old_run_id = "old-concurrent-ambiguous";
+    let command_text = "second turn";
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    build_hand_crafted_prefix(
+        repo.path(),
+        &runs_dir,
+        &target_name,
+        old_run_id,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-concurrent-ambiguous",
+        command_text,
+        DispatchStage {
+            agent_started: true,
+            ..Default::default()
+        },
+    );
+
+    let idempotency_key = "key-concurrent-ambiguous";
+    insert_bound_command(
+        &ledger_path,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-concurrent-ambiguous",
+        command_text,
+        old_run_id,
+        idempotency_key,
+    );
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let body = serde_json::json!({
+        "schema_version": 1,
+        "parent_run_id": parent_run_id,
+        "command": command_text,
+        "idempotency_key": idempotency_key,
+    });
+    let body_a = body.clone();
+    let conversation_id_a = conversation_id.clone();
+    let handle_a = std::thread::spawn(move || {
+        post(
+            addr,
+            &format!("/api/v1/conversations/{conversation_id_a}/commands"),
+            &body_a,
+        )
+    });
+    let handle_b = std::thread::spawn(move || {
+        post(
+            addr,
+            &format!("/api/v1/conversations/{conversation_id}/commands"),
+            &body,
+        )
+    });
+    let (status_a, retried_a) = handle_a.join().unwrap();
+    let (status_b, retried_b) = handle_b.join().unwrap();
+
+    assert_eq!(status_a, 409, "{retried_a:?}");
+    assert_eq!(status_b, 409, "{retried_b:?}");
+    assert_eq!(retried_a["code"], "COMMAND_PROVIDER_OUTCOME_AMBIGUOUS");
+    assert_eq!(retried_b["code"], "COMMAND_PROVIDER_OUTCOME_AMBIGUOUS");
+
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "only the PARENT run's own invocation (via spawn_o7_run_process) — an ambiguous record \
+         built entirely by hand must never see the provider invoked by either concurrent retry"
+    );
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-concurrent-ambiguous'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(command_status, "started");
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Required test H ("live owner"): while the old child's own liveness lock
+/// is genuinely held (modeling a still-working external process), a retry
+/// must still converge on the record's own true classification — an
+/// ambiguous record stays ambiguous (fails closed, `409`) regardless of
+/// whether its lock is currently held, and NEVER gets silently treated as
+/// "the owner is dead, safe to redrive" just because the lock was briefly
+/// contended.
+#[test]
+fn a_genuinely_held_lock_never_turns_an_ambiguous_record_into_a_redrive() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+    };
+
+    let old_run_id = "old-live-lock-ambiguous";
+    let command_text = "second turn";
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    build_hand_crafted_prefix(
+        repo.path(),
+        &runs_dir,
+        &target_name,
+        old_run_id,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-live-lock-ambiguous",
+        command_text,
+        DispatchStage {
+            agent_started: true,
+            ..Default::default()
+        },
+    );
+
+    let idempotency_key = "key-live-lock-ambiguous";
+    insert_bound_command(
+        &ledger_path,
+        &conversation_id,
+        &parent_run_id,
+        "cmd-live-lock-ambiguous",
+        command_text,
+        old_run_id,
+        idempotency_key,
+    );
+
+    // Hold the EXACT lock a live `o7 continue` for this run id would hold —
+    // same path formula as both `src/main.rs::command_lock_path` and
+    // `crates/o7d/src/routes.rs::command_lock_path`.
+    let lock_path = runs_dir.join(".locks").join(format!("{old_run_id}.lock"));
+    std::fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .unwrap();
+    let held_lock = nix::fcntl::Flock::lock(lock_file, nix::fcntl::FlockArg::LockExclusiveNonblock)
+        .expect("test must be the first to acquire this fresh lock file");
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(
+        status, 409,
+        "an ambiguous record must fail closed even while its lock is genuinely held — the \
+         classification, not the lock, is authoritative for ambiguity: {retried:?}"
+    );
+    assert_eq!(retried["code"], "COMMAND_PROVIDER_OUTCOME_AMBIGUOUS");
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "only the PARENT run's own invocation — never rebind, never spawn, never invoke a \
+         SECOND time while the lock is genuinely held"
+    );
+
+    // Release — the answer must be identical either way, since it was
+    // never about the lock's liveness in the first place.
+    drop(held_lock);
+
+    let (status2, retried2) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status2, 409, "{retried2:?}");
+    assert_eq!(retried2["code"], "COMMAND_PROVIDER_OUTCOME_AMBIGUOUS");
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-live-lock-ambiguous'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(command_status, "started");
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
 
     let _ = o7d_child.kill();
     let _ = o7d_child.wait();
