@@ -238,12 +238,12 @@ command status — it is, and stays, indistinguishable from any other
 pre-dispatch crash R1 already knows how to recover from.
 
 This also means A0 adds **zero new HTTP error codes and zero new `o7d`
-routes.rs redrive-decision logic** — `crates/o7d/src/canonical.rs`/
-`src/recovery.rs::classify_command_child` are untouched. The only `o7d`-
-adjacent change is read-only exposure of candidate-state fields on the
-existing run-detail DTO (§8) and an optional extension to `o7 recover`'s
-own discovery reporting (§9) — both additive, neither on the redrive
-decision path.
+routes.rs redrive-decision logic** — `src/recovery.rs::classify_command_child`
+and the redrive decision in `crates/o7d/src/routes.rs` are untouched. The
+only `o7d`-adjacent change is read-only exposure of candidate-state fields
+on the existing run-detail DTO (§8, via a new helper added to
+`crates/o7d/src/canonical.rs` alongside, but never called by, the existing
+redrive classifier) — additive, and nowhere near the redrive decision path.
 
 ## 6. Pre-provider failure semantics — the negative matrix
 
@@ -252,47 +252,65 @@ one already resolves via R1's EXISTING pre-dispatch-redrive machinery. The
 required proof for each is **provider invocation count == 0**, checked by a
 process-level test using the real deterministic `claude` fixture.
 
-Implemented and proven this round (`tests/a0_candidate_state_e2e.rs`):
+Implemented and proven this round, ten process-level tests in
+`tests/a0_candidate_state_e2e.rs` (each asserting provider invocation
+count stays exactly as it was before the negative command, and the
+command stays `started` — never rejected, never falsely completed):
 
-1. Parent has no candidate receipt at all (includes the "legacy sealed
-   parent predates A0" case — deliberately NOT a fallback to R1's old
+1. `missing_candidate_receipt_never_invokes_the_provider` — parent has no
+   candidate receipt at all (stands in for the "legacy sealed parent
+   predates A0" case too — deliberately NOT a fallback to R1's old
    zero-carryover behavior; A0 makes a valid receipt mandatory for every
    command continuation once live).
-2. Candidate receipt present but the referenced patch file is missing.
-3. Candidate receipt tampered (a field altered post-hoc, breaking its own
-   digest binding).
-4. Patch tampered (bytes altered; digest no longer matches the receipt).
-5. Receipt's `candidate_tree_oid` does not match the true tree the patch
-   (correctly applied) produces.
-6. Receipt's `base_commit` does not exist in this repository.
-7. Receipt's `repository_id` does not match this repository's own computed
-   identity.
-8. Receipt's `conversation_id` does not match the command's own conversation.
-9. Parent is not sealed (still running/interrupted).
-10. Parent is not the conversation's true tail (a stale/superseded leaf).
-11. The patch does not apply cleanly against the fresh worktree at
-    `base_commit` (a conflict).
-12. Two concurrent same-key retries against a command whose materialization
-    is failing: both converge on the same pre-dispatch-redrivable outcome,
-    neither invokes the provider, and — mirroring R1's own existing
-    concurrent-redrive guarantee — at most one ever wins a given attempt.
-13. Same-key retry after a pre-dispatch materialization failure succeeds
-    once the underlying cause is fixed (proves the record really is
-    redrivable, not permanently wedged).
+2. `missing_patch_file_never_invokes_the_provider` — receipt present, the
+   patch file it references is missing.
+3. `tampered_candidate_receipt_never_invokes_the_provider` — the receipt's
+   own `candidate_tree_oid` is altered post-hoc, so the tree materialization
+   independently computes no longer matches it (this is also the proof for
+   "receipt tampered" generally — any load-bearing field's corruption is
+   caught the same way, by the same tree-OID/identity checks in §5 step 8).
+4. `tampered_patch_content_never_invokes_the_provider` — the patch's own
+   bytes are altered; its digest no longer matches the receipt.
+5. `wrong_base_commit_never_invokes_the_provider` — the receipt's
+   `base_commit` does not exist in this repository.
+6. `wrong_repository_identity_never_invokes_the_provider` — the receipt's
+   `repository_id` does not match this repository's own computed identity.
+7. `wrong_conversation_id_never_invokes_the_provider` — the receipt's
+   `conversation_id` does not match the command's own conversation.
+8. `a_patch_apply_conflict_never_invokes_the_provider` — the patch does not
+   apply cleanly against the fresh worktree at `base_commit` (a genuine
+   `git apply` conflict, not merely a digest mismatch).
+9. `two_concurrent_retries_against_a_failing_materialization_both_fail_closed`
+   — two simultaneous same-key retries against a command whose
+   materialization is failing converge on the SAME child run id; neither
+   ever invokes the provider.
+10. `a_same_key_retry_succeeds_once_the_materialization_cause_is_fixed` —
+    fixing the underlying cause and retrying with the SAME idempotency key,
+    after the staleness bound, redrives and completes normally — proving a
+    pre-dispatch materialization failure is NOT permanently wedged.
+
+**Not re-implemented as NEW A0 tests, deliberately**: "parent is not
+sealed" and "parent is not the conversation's true tail" are unchanged,
+pre-existing R1 checks enforced synchronously inside `create_command`'s
+own ledger transaction, entirely before a child `RunId` is ever minted —
+they never reach A0's own materialization code at all, and R1's own test
+suite (`tests/r1_command_e2e.rs`, re-run unchanged and green this round)
+already covers them.
 
 Explicitly deferred to a future corrective round (disclosed, not hidden —
 matching this project's standing discipline): duplicate candidate receipts
 within one parent record; an unsupported/future receipt schema version;
 a Git path-traversal payload inside the patch; a submodule-mutation patch;
-a parent whose own canonical replay independently fails (distinct from "no
-receipt"); the specific crash-window matrix as individually
-triggered/killed sub-cases (§5's ordering already makes every one of them
-resolve to the same pre-dispatch-safe outcome as case 1-11 above — the
-CI-realistic crash windows R1 itself required real `SIGKILL` proof for were
-POST-dispatch ones; A0 introduces no new post-dispatch window, so the
-proof burden is smaller here by construction, but per-window explicit
-tests are still valuable future work); an externally-modified original
-repository checkout mid-materialization.
+a parent whose own canonical replay independently fails for a reason other
+than a missing/tampered candidate receipt; the specific crash-window
+matrix as individually triggered/killed sub-cases (§5's ordering already
+makes every one of them resolve to the same pre-dispatch-safe outcome the
+tests above already prove — the CI-realistic crash windows R1 itself
+required real `SIGKILL` proof for were POST-dispatch ones; A0 introduces
+no new post-dispatch window, so the proof burden is smaller here by
+construction, but per-window explicit kill-and-observe tests are still
+valuable future work); an externally-modified original repository
+checkout mid-materialization.
 
 ## 7. Idempotency and concurrency
 
@@ -315,11 +333,13 @@ server-side, exactly like `diff.patch` already does).
 
 ## 9. Operator discovery (`o7 recover`)
 
-`o7 recover`'s existing `--repo`/`--runs-dir` discovery reporting (R1 §11.5)
-is extended to also report, for a stuck command whose child attempted
-materialization: whether it reached `CandidateStateMaterialized` and, if
-not, why (mirroring the same read-only, never-mutating discipline every
-other discovery field already follows).
+**Not extended this round** — `o7 recover`'s existing `--repo`/`--runs-dir`
+discovery reporting (R1 §11.5) is unchanged. The REST-facing projection
+(§8) covers the immediate Q-Deck UI need; teaching the CLI's own
+discovery report to ALSO summarize candidate-state materialization status
+per stuck command (mirroring §8's fields, read-only, same discipline) is
+explicitly deferred to a future round rather than rushed in alongside
+everything else here.
 
 ## 10. Explicitly out of scope for this slice
 
@@ -332,11 +352,87 @@ changes. No executor qualification work. No Alpha A1 work of any kind.
 
 ## 11. Commit sequence (additive, no amend/rebase/squash/force-push)
 
-1. `docs(q-deck): define A0 candidate-state continuity contract` — this file.
-2. `feat(run): capture canonical cumulative candidate state` — §2-4.
-3. `feat(root): materialize verified parent candidate state` — §5.
-4. `feat(o7d): expose candidate-state lineage to command children` — §8-9.
-5. `test(q-deck): prove cumulative candidate-state continuity` — §6, the
-   A→B→C E2E.
+1. `71800fc` `docs(q-deck): define A0 candidate-state continuity contract` —
+   this file, frozen before any implementation.
+2. `78ed788` `feat(run): capture canonical cumulative candidate state` —
+   §2-4.
+3. `5fe3950` `feat(root): materialize verified parent candidate state` — §5.
+4. `458f34b` `test(q-deck): prove cumulative candidate-state continuity` —
+   §6, the A→B→C E2E and the ten negative cases.
+5. `ca590d0` `feat(o7d): expose candidate-state lineage to command
+   children` — §8-9.
 6. `docs(q-deck): record A0 evidence and limitations` — this file, final
-   update with results.
+   update with the results below (§12).
+
+## 12. Evidence — this round's exact gate results
+
+Exact new head after commit 6: see the PR body / `git log` (this section
+intentionally doesn't pin its own commit's hash into itself). Base:
+`main` at `eead3b775cf0d5d1ea567b6eb496a555637c1f95` (R1's own merge
+commit, PR #90).
+
+- `cargo fmt --check` — clean.
+- `git diff --check` — clean.
+- `cargo check -p o7 -p o7-run -p o7-ledger -p o7d` — clean.
+- `cargo test -p o7-run` — 72 unit + 18 `replay_acceptance` = 90 passing.
+- `cargo test -p o7-ledger --test commands` — 39/39 passing, unchanged.
+- `cargo test -p o7 --test r1_command_e2e` — **37/37 passing, unchanged**
+  — R1's own full suite re-proven against this round's restructuring
+  (worktree creation for continuations moved from `continue_run` into
+  `continue_execute`; every existing R1 test's parent run now also
+  captures a real candidate-state receipt "for free," since capture is
+  unconditional on both ledger-backed paths).
+- `cargo test -p o7 --test a0_candidate_state_e2e` — **11/11 passing**:
+  the A→B→C chain plus the ten negative cases (§6).
+- `cargo test -p o7d` — every existing suite green, unchanged (`api`,
+  `golden_transcript_rest`, `golden_transcript_sse`, `sse`,
+  `verdict_fidelity`, unit tests).
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean, 0
+  warnings, across the whole workspace.
+- `cargo test --workspace --no-fail-fast` — **every crate in the
+  workspace green, 0 failures**, including doc-tests, with the five
+  environmental exclusions R1 already disclosed and carries forward
+  unchanged (none of them touch any A0 code): `kill_after_commit_preserves_event`,
+  `kill_before_commit_leaves_no_partial`
+  (`crates/o7-ledger/tests/crash_durability.rs`, a pre-existing VPS hang
+  reproduced against the pristine R0.7 base too),
+  `a_blocking_fifo_target_fails_closed_within_a_bound`,
+  `no_control_descriptor_leaks_to_a_concurrent_sibling`, and
+  `a_live_launch_executes_the_sealed_target_not_a_swapped_source`
+  (`crates/o7-worker/tests/sandboy_lifecycle.rs`, timing-sensitive under
+  this VPS's contention, confirmed passing standalone) — `o7-worker`/
+  `o7-sandbox-protocol` remain byte-for-byte untouched by A0.
+- `cargo deny check advisories bans licenses sources` — fails to load the
+  local advisory-db snapshot on this dev VPS (the same pre-existing
+  `RUSTSEC-2026-0041`/`lz4_flex` `CVSS:4.0` parse error every prior R1
+  round already disclosed) — **zero new external dependencies**: the
+  only `Cargo.lock` change this round is adding `o7-worktree`, already an
+  in-workspace crate, as a new dependency edge of the root `o7` package.
+- `npm test` (`apps/q-deck`) — 45/45 pass, 8 files, unchanged (A0 does
+  not touch the frontend).
+- `npm run check` (`apps/q-deck`) — 0 errors, 0 warnings, 182 files,
+  unchanged.
+
+### Provider invocation counts (the load-bearing proof)
+
+- `candidate_state_flows_through_a_b_c_chain`: exactly 3 invocations
+  total (Run A, Command B, Command C), one each, ever.
+- Every one of the ten negative tests: invocation count stays at exactly
+  what it was before the negative command (1, from the real parent run)
+  — the provider is NEVER invoked a second time for a command whose
+  materialization fails.
+- `two_concurrent_retries_against_a_failing_materialization_both_fail_closed`:
+  invocation count stays at 1 across BOTH concurrent retries; both
+  converge on the same child run id.
+- `a_same_key_retry_succeeds_once_the_materialization_cause_is_fixed`:
+  invocation count is 1 after the broken first attempt (provider never
+  invoked), then 2 after the cause is fixed and a same-key retry
+  redrives and completes — exactly one successful invocation, never more.
+
+### What this round confirms about its own central design claim
+
+Zero new `o7d` HTTP error codes, zero new `ChildRecordState`/command
+lifecycle statuses, zero changes to `src/recovery.rs`'s redrive
+classifier or `crates/o7d/src/routes.rs`'s redrive decision — every one
+of the ten negative cases resolves through R1's existing pre-dispatch-
+redrive machinery exactly as §5 predicted before any test was written.
