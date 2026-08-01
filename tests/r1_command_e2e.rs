@@ -4032,13 +4032,56 @@ fn a_delayed_original_process_is_harmless_after_its_run_id_is_redriven_and_compl
         old_run_exists, 0,
         "the delayed original must never create a ledger row for its own (superseded) run id"
     );
-    let (command_status, command_child): (String, Option<String>) = conn
-        .query_row(
+
+    // The command's own post-seal completion write (`mark_command_completed_
+    // if_bound`, in continue_run's `finish` closure) is a SEPARATE step that
+    // runs strictly AFTER the fresh child's run row already reads back
+    // "completed" over HTTP (`complete_run` fires earlier, from inside the
+    // live ledger projection) — the same gap test A's own fix already
+    // documents. `wait_for_run_status` above only proves the RUN sealed; it
+    // says nothing about whether the command's own bookkeeping write has
+    // landed yet. Poll for it with a bounded deadline instead of assuming
+    // it's already there, and if it never lands, dump the surrounding
+    // evidence rather than fail with a bare mismatch.
+    let command_row = |conn: &rusqlite::Connection| -> (String, Option<String>) {
+        conn.query_row(
             "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-delayed-original'",
             [],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
-        .unwrap();
+        .unwrap()
+    };
+    let poll_deadline = Instant::now() + Duration::from_secs(15);
+    let mut last_seen;
+    let reached_completed = loop {
+        last_seen = command_row(&conn);
+        if last_seen.0 == "completed" {
+            break true;
+        }
+        if Instant::now() > poll_deadline {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    if !reached_completed {
+        let fresh_run_row: Option<(String,)> = conn
+            .query_row(
+                "SELECT status FROM run WHERE run_id = ?1",
+                [fresh_run_id.as_str()],
+                |r| Ok((r.get(0)?,)),
+            )
+            .optional()
+            .unwrap();
+        panic!(
+            "command 'cmd-delayed-original' never reached status=\"completed\" within 15s \
+             after its fresh child sealed over HTTP — evidence: command.status={:?}, \
+             command.child_run_id={:?}, fresh_run_id={fresh_run_id}, \
+             run[fresh_run_id].status={fresh_run_row:?}, old_run_id={old_run_id}, \
+             old_run_exists_in_ledger={old_run_exists}",
+            last_seen.0, last_seen.1
+        );
+    }
+    let (command_status, command_child) = last_seen;
     assert_eq!(command_status, "completed");
     assert_eq!(
         command_child.as_deref(),
