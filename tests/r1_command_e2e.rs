@@ -145,6 +145,31 @@ fn fixture_repo(gate_toml: &str) -> tempfile::TempDir {
 
 const PASSING_GATE: &str = "[[gate]]\nname = \"unit\"\ncmd = \"true\"\n";
 
+/// A directory holding ONLY symlinks to the exact external tools the
+/// worktree/gate machinery needs (`git`, `bash`, `sh`), resolved once via
+/// the CURRENT ambient `PATH`. Exists so a test can construct an EXPLICIT,
+/// minimal `PATH` for a spawned `o7d` that excludes every other directory
+/// — specifically, whatever directory holds a REAL `claude` binary this
+/// machine happens to have installed (this test suite itself runs inside
+/// a machine with Claude Code, so `/usr/bin/claude` existing alongside
+/// `/usr/bin/git`/`/usr/bin/bash` is the normal case, not an edge case —
+/// a test that needs "the provider is genuinely unfindable" cannot rely on
+/// deleting the fixture's own script alone, since PATH search would just
+/// fall through to that real binary next).
+fn safe_bin_dir() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    for tool in ["git", "bash", "sh"] {
+        let which = Command::new("which").arg(tool).output().unwrap();
+        assert!(
+            which.status.success(),
+            "{tool} must be on PATH for this test to run at all"
+        );
+        let real_path = String::from_utf8(which.stdout).unwrap().trim().to_owned();
+        std::os::unix::fs::symlink(&real_path, dir.path().join(tool)).unwrap();
+    }
+    dir
+}
+
 /// `o7d serve` with Q-Deck R1's execution authority configured — `--repo`/
 /// `--worktree-root`/`--runs-dir`/`--o7-bin` fixed at startup, never from a
 /// request (`docs/q-deck/r1-command.md` §9.4).
@@ -1531,5 +1556,431 @@ fn recover_run_dir_backfills_a_missing_provider_session_from_meta_json() {
         provider_session_id(&ledger_path, &run_id),
         Some(expected_session),
         "catch-up must backfill the session from meta.json, exactly as its own warning promises"
+    );
+}
+
+/// Q-Deck R1 third corrective round, blocker 1: an ORDINARY error well
+/// after the child run's own ledger row exists (`attach_run` already
+/// succeeded — this is not a SIGKILL, just the provider binary vanishing
+/// out from under a real continuation attempt) must NEVER unconditionally
+/// mark the command `rejected`. A `rejected` command is invisible to
+/// every discovery/redrive mechanism (all scoped to `accepted`/`started`),
+/// and its non-terminal child (a real, durable tail — neither the old
+/// parent nor this child can ever be a valid parent again) would then
+/// block the conversation forever, no SIGKILL required.
+#[test]
+fn an_ordinary_error_after_attach_never_rejects_a_command_and_stays_redrivable() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+
+    // This environment has a REAL `claude` binary on PATH (this test
+    // suite runs inside a machine with Claude Code itself installed) —
+    // sharing a directory with `git`/`bash`. Deleting the fixture's own
+    // `claude` script would NOT simulate "the provider vanished": PATH
+    // search would simply fall through past the now-empty fixture
+    // directory to that real binary next in line, which would actually
+    // run (and produce SOME sealed verdict, not the process-level spawn
+    // failure this test needs). So `o7d` (and the `o7 continue` it
+    // spawns) gets an EXPLICIT, minimal PATH here: the fixture's own
+    // `claude` directory plus a dedicated directory holding ONLY symlinks
+    // to the exact tools the worktree/gate machinery needs (`git`,
+    // `bash`, `sh`) — deliberately excluding every other PATH entry,
+    // so removing the fixture's `claude` script later genuinely leaves
+    // NOTHING named `claude` anywhere this process can find.
+    let safe_bin = safe_bin_dir();
+    let safe_path = format!("{}:{}", claude.path().display(), safe_bin.path().display());
+    let mut o7d_cmd = Command::new(o7d_bin_path());
+    o7d_cmd
+        .args([
+            "serve",
+            "--ledger",
+            ledger_path.to_str().unwrap(),
+            "--listen",
+            "127.0.0.1:0",
+            "--repo",
+        ])
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--o7-bin")
+        .arg(env!("CARGO_BIN_EXE_o7"))
+        .arg("--max-turns")
+        .arg("1")
+        .env("O7D_STALE_COMMAND_REDRIVE_MS", "200")
+        .env("PATH", &safe_path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut o7d_child = o7d_cmd.spawn().expect("spawn the real o7d binary");
+    let stderr = o7d_child.stderr.take().unwrap();
+    let mut reader = BufReader::new(stderr);
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let addr: SocketAddr = line
+        .trim()
+        .strip_prefix("o7d: listening on http://")
+        .unwrap()
+        .parse()
+        .unwrap();
+    std::thread::spawn(move || {
+        let mut discarded = String::new();
+        while reader.read_line(&mut discarded).unwrap_or(0) > 0 {
+            discarded.clear();
+        }
+    });
+    wait_until_healthy(addr);
+    let (_, page) = get(addr, "/api/v1/runs");
+    let parent_run_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Break the provider AFTER the initial run succeeded, so the upcoming
+    // command's own continuation attempt spawns for real, durably attaches
+    // its child run (RunStarted, attach_run, AgentStarted), and THEN fails
+    // trying to actually exec the (now-vanished) provider — a genuine
+    // error well past attach, never a SIGKILL.
+    std::fs::remove_file(claude.path().join("claude")).unwrap();
+
+    let (status, accepted) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": "this will fail to even spawn the provider",
+            "idempotency_key": "key-ordinary-error",
+        }),
+    );
+    assert_eq!(status, 202, "{accepted:?}");
+    let command_id = accepted["command_id"].as_str().unwrap().to_owned();
+    let child_run_id = accepted["run_id"].as_str().unwrap().to_owned();
+
+    // Wait for the child run to durably attach (become visible over
+    // REST at all) — proving attach_run really did succeed before the
+    // provider spawn then failed.
+    let deadline = Instant::now() + Duration::from_secs(30);
+    poll_until(deadline, || {
+        let (code, _) = get(addr, &format!("/api/v1/runs/{child_run_id}"));
+        (code == 200).then_some(())
+    });
+
+    // Give the doomed attempt time to actually fail and exit.
+    std::thread::sleep(Duration::from_millis(800));
+
+    let (command_status, run_status): (String, String) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let cmd_status: String = conn
+            .query_row(
+                "SELECT status FROM command WHERE command_id = ?1",
+                [&command_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let run_status: String = conn
+            .query_row(
+                "SELECT status FROM run WHERE run_id = ?1",
+                [&child_run_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        (cmd_status, run_status)
+    };
+    assert_ne!(
+        command_status, "rejected",
+        "an ordinary post-attach error must never mark the command rejected"
+    );
+    assert_eq!(
+        command_status, "started",
+        "the command must stay exactly as o7d's own bind left it"
+    );
+    assert_ne!(
+        run_status, "completed",
+        "the child run must NOT have sealed — the provider spawn genuinely failed"
+    );
+
+    // Restore the provider and prove the conversation actually recovers:
+    // a retry of the SAME request, once past the staleness bound, must
+    // redrive onto a FRESH run id and complete successfully.
+    let restored = claude.path().join("claude");
+    std::fs::write(
+        &restored,
+        r#"#!/bin/sh
+DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+N=$(( $(cat "$DIR/count" 2>/dev/null || echo 0) + 1 ))
+echo "$N" > "$DIR/count"
+printf '%s\0' "$@" > "$DIR/argv.$N"
+touch "$DIR/invoked.$N"
+printf '{"result":"synthetic ok","session_id":"fixed-session-1","total_cost_usd":0.001}\n'
+exit 0
+"#,
+    )
+    .unwrap();
+    let mut perms = std::fs::metadata(&restored).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+    std::fs::set_permissions(&restored, perms).unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let redriven_run_id = poll_until(deadline, || {
+        let (status, retried) = post(
+            addr,
+            &format!("/api/v1/conversations/{conversation_id}/commands"),
+            &serde_json::json!({
+                "schema_version": 1,
+                "parent_run_id": parent_run_id,
+                "command": "this will fail to even spawn the provider",
+                "idempotency_key": "key-ordinary-error",
+            }),
+        );
+        if status != 202 {
+            return None;
+        }
+        let run_id = retried["run_id"].as_str()?.to_owned();
+        (run_id != child_run_id).then_some(run_id)
+    });
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    wait_for_run_status(addr, &redriven_run_id, "completed", deadline);
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 third corrective round, blocker 2: closes the TOCTOU window
+/// between a redrive deciding a run id's process is dead and that SAME
+/// process — merely slow to start — finally acquiring its own lock. Proves
+/// the closing check directly: invoke the REAL `o7 continue` binary for a
+/// run id the command has ALREADY been rebound away from (modeling
+/// exactly what a genuinely-raced, merely-slow process would discover the
+/// instant it gets scheduled) — it must exit cleanly and do NOTHING:
+/// no canonical record, no worktree, no provider invocation.
+#[test]
+fn continue_exits_immediately_if_superseded_before_it_can_start_real_work() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let row: (String, String) = conn
+            .query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        row
+    };
+
+    // A command already bound to run id "superseded-run" — then REBOUND
+    // to "current-run", modeling exactly the durable state a redrive
+    // leaves behind while the ORIGINAL process for "superseded-run" was
+    // merely slow to start.
+    let superseded_run_id = "superseded-run";
+    let current_run_id = "current-run";
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-superseded', ?1, ?2, 'irrelevant text', 'started', ?3, 1000, 1000)",
+            rusqlite::params![conversation_id, parent_run_id, current_run_id],
+        )
+        .unwrap();
+    }
+
+    // Now run the REAL `o7 continue` binary for the SUPERSEDED run id —
+    // exactly what the original, merely-slow process would do the moment
+    // it finally gets scheduled and tries to acquire its own lock.
+    let output = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conversation_id)
+        .arg("--parent-run-id")
+        .arg(&parent_run_id)
+        .arg("--command")
+        .arg("irrelevant text")
+        .arg("--run-id")
+        .arg(superseded_run_id)
+        .arg("--command-id")
+        .arg("cmd-superseded")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "a superseded process must exit cleanly, not error: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // It must have done NOTHING: no run row for the superseded id, no
+    // canonical record directory, no provider invocation, and the
+    // command's bookkeeping (still pointing at current-run) untouched.
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the provider must never have been invoked again"
+    );
+    let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+    let superseded_run_exists: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM run WHERE run_id = ?1",
+            [superseded_run_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        superseded_run_exists, 0,
+        "a superseded process must never create a ledger row for its own (stale) run id"
+    );
+    let (command_status, command_child): (String, Option<String>) = conn
+        .query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-superseded'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(command_status, "started");
+    assert_eq!(
+        command_child.as_deref(),
+        Some(current_run_id),
+        "the command's binding must be untouched by the superseded process"
+    );
+}
+
+/// Q-Deck R1 third corrective round, blocker 3: `meta.json` is not part of
+/// the canonical event chain — a copy from a DIFFERENT run's directory
+/// must never be trusted for session backfill, even though replay of the
+/// canonical stream itself stays green regardless (replay never looks at
+/// `meta.json` at all).
+#[test]
+fn recover_refuses_to_backfill_a_session_from_a_meta_json_with_the_wrong_run_id() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+
+    let run_id = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let id: String = conn
+            .query_row("SELECT run_id FROM run LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        id
+    };
+
+    // Revert the ledger's own column (simulating "the live persist
+    // failed") and REPLACE meta.json with one claiming a DIFFERENT run_id
+    // — modeling a copy-paste mistake (or worse) rather than this run's
+    // own genuine record.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET provider_session_id = NULL WHERE run_id = ?1",
+            [&run_id],
+        )
+        .unwrap();
+    }
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let record_dir = runs_dir.join(&target_name).join(&run_id);
+    let meta_path = record_dir.join("meta.json");
+    let mut meta: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
+    let real_session = meta["session_id"].as_str().unwrap().to_owned();
+    meta["run_id"] = serde_json::Value::String("some-other-run-entirely".to_owned());
+    meta["session_id"] = serde_json::Value::String("attacker-controlled-session".to_owned());
+    std::fs::write(&meta_path, serde_json::to_string(&meta).unwrap()).unwrap();
+
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        recover.status.success(),
+        "{}",
+        String::from_utf8_lossy(&recover.stderr)
+    );
+
+    let after = provider_session_id(&ledger_path, &run_id);
+    assert_ne!(
+        after.as_deref(),
+        Some("attacker-controlled-session"),
+        "a meta.json claiming the WRONG run_id must never be trusted for backfill"
+    );
+    assert_ne!(after.as_deref(), Some(real_session.as_str()));
+    assert!(
+        after.is_none(),
+        "backfill must be refused outright, not partially applied"
     );
 }
