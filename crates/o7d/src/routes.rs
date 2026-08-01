@@ -8,7 +8,9 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 
-use crate::canonical::{child_record_dir, classify_child_record, ChildRecordState};
+use crate::canonical::{
+    child_record_dir, classify_child_record, ChildRecordState, DispatchProgress,
+};
 use crate::cursor;
 use crate::dto::{
     CommandAcceptedDto, ConversationDto, EventPageDto, EventsParams, HealthDto, ListParams,
@@ -207,6 +209,18 @@ enum RedriveError {
     /// during the lock-loser convergence poll, or reconciling after a
     /// scoped catch-up) — never silently treated as any other outcome.
     Storage(String),
+    /// Q-Deck R1 sixth corrective round: the old child's own canonical
+    /// record has passed the durable dispatch boundary (`AgentStarted`)
+    /// without sealing — the provider MAY already have been invoked for
+    /// this exact run id, and nothing here can prove otherwise. NEVER
+    /// automatically redriven, recovered, completed, or rejected; the
+    /// command stays `started`, bound to its existing child, exactly as
+    /// found. Requires manual resolution.
+    ProviderOutcomeAmbiguous {
+        command_id: String,
+        child_run_id: String,
+        phase: DispatchProgress,
+    },
 }
 
 /// Q-Deck R1 fifth corrective round (Part 1): re-verify and re-apply EXACTLY
@@ -317,6 +331,39 @@ fn redrive_or_recover_locked(
                     );
                     return Ok(command);
                 }
+                // Q-Deck R1 sixth corrective round: an ambiguous (or
+                // Invalid) outcome never mutates the ledger at all — a
+                // winner reaching either never touches `child_run_id` or
+                // `status`. Watching ONLY for a ledger mutation would
+                // therefore let a lock-loser wait out the entire bound and
+                // answer with a stale, misleadingly-normal snapshot of a
+                // command whose decision was actually "fail closed".
+                // Reclassifying the OLD child's own record here is safe
+                // WITHOUT holding its lock — it is read-only, and the
+                // record's bytes are already proven immutable once written
+                // (any live writer only ever appends, never rewrites) — so
+                // this converges the loser onto the SAME answer a winner
+                // holding the lock would give, never a stale one.
+                let ambiguous_or_invalid =
+                    |current: &o7_ledger::Command| match classify_child_record(
+                        &exec,
+                        old_run_id.as_str(),
+                        current,
+                    ) {
+                        ChildRecordState::ValidUnsealedDispatchAmbiguous { progress } => {
+                            Some(RedriveError::ProviderOutcomeAmbiguous {
+                                command_id: current.command_id.as_str().to_owned(),
+                                child_run_id: old_run_id.as_str().to_owned(),
+                                phase: progress,
+                            })
+                        }
+                        ChildRecordState::Invalid(reason) => {
+                            Some(RedriveError::InvalidRecord(reason))
+                        }
+                        ChildRecordState::Absent
+                        | ChildRecordState::ValidUnsealedPreDispatch
+                        | ChildRecordState::ValidSealed => None,
+                    };
                 let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
                 loop {
                     if std::time::Instant::now() >= deadline {
@@ -332,6 +379,9 @@ fn redrive_or_recover_locked(
                                 matches!(current.status, o7_ledger::CommandStatus::Completed);
                             if child_moved || now_completed {
                                 return Ok(current);
+                            }
+                            if let Some(err) = ambiguous_or_invalid(&current) {
+                                return Err(err);
                             }
                         }
                         Ok(None) => {
@@ -351,7 +401,13 @@ fn redrive_or_recover_locked(
                 // final authoritative re-read; never the stale pre-lock
                 // argument (`command`) this function was called with.
                 return match handle.block_on(ledger.command(command.command_id.clone())) {
-                    Ok(Some(current)) => Ok(current),
+                    Ok(Some(current)) => {
+                        if let Some(err) = ambiguous_or_invalid(&current) {
+                            Err(err)
+                        } else {
+                            Ok(current)
+                        }
+                    }
                     Ok(None) => Err(RedriveError::Storage(format!(
                         "command {} vanished before the final lock-loser re-read",
                         command.command_id
@@ -409,9 +465,25 @@ fn redrive_or_recover_locked(
                 ))),
             }
         }
-        ChildRecordState::Absent | ChildRecordState::ValidUnsealed => {
+        ChildRecordState::ValidUnsealedDispatchAmbiguous { progress } => {
+            // Q-Deck R1 sixth corrective round: the durable dispatch
+            // boundary has been reached — the provider MAY already have
+            // been invoked for this exact run id. NEVER mint a fresh run
+            // id, never rebind, never spawn, never invoke the provider,
+            // never complete or reject the command, never touch the
+            // canonical record. The command stays `started`, bound to
+            // its existing child, exactly as found — a deliberate,
+            // disclosed fail-closed state, not a hidden wedge.
+            Err(RedriveError::ProviderOutcomeAmbiguous {
+                command_id: command.command_id.as_str().to_owned(),
+                child_run_id: old_run_id.as_str().to_owned(),
+                phase: progress,
+            })
+        }
+        ChildRecordState::Absent | ChildRecordState::ValidUnsealedPreDispatch => {
             // Case B/C: genuinely never started, or genuinely still
-            // running (crashed before sealing) — safe to redrive with a
+            // running but never reached the durable dispatch boundary
+            // (crashed before AgentStarted) — safe to redrive with a
             // FRESH child run id, exactly once, atomically.
             let fresh = o7_ledger::RunId::generate();
             match handle.block_on(ledger.rebind_command_child_run_if_current(
@@ -640,6 +712,27 @@ pub(crate) async fn create_command(
                             command.command_id
                         );
                         ApiError::Internal("REDRIVE_STORAGE_ERROR")
+                    }
+                    RedriveError::ProviderOutcomeAmbiguous {
+                        command_id,
+                        child_run_id,
+                        phase,
+                    } => {
+                        eprintln!(
+                            "[o7d] refusing to auto-redrive command {command_id}: child run \
+                             {child_run_id} passed the durable dispatch boundary (last observed \
+                             phase: {phase}) without sealing — the provider may already have run; \
+                             manual recovery required"
+                        );
+                        ApiError::Conflict(
+                            "COMMAND_PROVIDER_OUTCOME_AMBIGUOUS",
+                            format!(
+                                "command {command_id}'s bound child run {child_run_id} is past \
+                                 the durable dispatch boundary (last durable phase: {phase}) but \
+                                 never sealed — the provider's outcome cannot be proven safe to \
+                                 retry automatically; manual recovery required"
+                            ),
+                        )
                     }
                 })?
             } else {
