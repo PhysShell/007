@@ -15,6 +15,14 @@ path = "src/lib.rs"
 
 [dependencies]
 o7-ledger = { path = "../o7-ledger", version = "0.1.0" }
+# Q-Deck R1 fifth corrective round: the scoped, single-record catch-up
+# primitive (`o7::recovery::catch_up_record`) that a sealed-recovery
+# decision needs is a LIBRARY function of the root crate — calling it
+# directly (never a subprocess) is what actually guarantees no global
+# recovery side effect (`recover_scan`/`mark_interrupted`/`stuck_commands`/
+# `reconcile_completed_commands`) can happen: there is no `o7 recover`
+# process for those to run inside of.
+o7 = { path = "../..", version = "0.1.0" }
 # Q-Deck R1 fourth corrective round: a redrive decision must classify the
 # OLD child's own canonical record (chain/digest/reducer/artifact
 # verification) before ever touching it — ledger status alone can never

@@ -1112,6 +1112,7 @@ dependencies = [
  "futures-util",
  "http-body-util",
  "nix",
+ "o7",
  "o7-ledger",
  "o7-run",
  "serde",
