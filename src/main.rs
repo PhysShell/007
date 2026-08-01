@@ -16,8 +16,9 @@ use o7::invoke;
 use o7::judge;
 use o7::ledger_projector::{ConversationSelector, LiveLedgerProjector, PendingProjection};
 use o7::record::{
-    CommandBinding, LedgerBinding, ProviderSessionReceipt, RunMeta, RunRecord,
-    PROVIDER_SESSION_RECEIPT_FILE,
+    CandidateStateReceipt, CommandBinding, LedgerBinding, ProviderSessionReceipt, RunMeta,
+    RunRecord, CANDIDATE_PATCH_FILE, CANDIDATE_PATCH_KIND_V1, CANDIDATE_STATE_RECEIPT_FILE,
+    PARENT_CANDIDATE_RECEIPT_FILE, PROVIDER_SESSION_RECEIPT_FILE,
 };
 use o7::verdict::{StepVerdict, Verdict};
 use o7::worktree;
@@ -534,7 +535,18 @@ fn execute(
             (stream, steps, ar, false)
         }
         Some(p) => execute_live(
-            a, run_id, wt, engine, task, &task_ref, manifest, contract, &rec, p,
+            a,
+            repo,
+            base_commit,
+            run_id,
+            wt,
+            engine,
+            task,
+            &task_ref,
+            manifest,
+            contract,
+            &rec,
+            p,
         )?,
     };
 
@@ -687,9 +699,203 @@ fn write_provider_session_receipt(
     ))
 }
 
+/// Q-Deck A0 (`docs/q-deck/a0-candidate-state.md` §2/§4): capture this run's
+/// own cumulative candidate state and durably write its receipt/patch pair,
+/// returning the `ArtifactRef` a caller appends as `CandidateStateCaptured`
+/// right after `PatchCaptured`. Shared by both `execute_live` and
+/// `continue_execute` — the two ledger-backed paths that can become a
+/// future command's parent.
+///
+/// `base_commit` here is the CONVERSATION's own immutable base (this run's
+/// own resolved `--base` for a fresh conversation's first run; the parent's
+/// own receipt `base_commit`, inherited unchanged, for a command
+/// continuation) — never re-resolved from a live ref.
+///
+/// # Errors
+/// Any underlying `git` failure, repository-identity resolution failure, or
+/// I/O failure durably writing the receipt/patch files.
+fn write_candidate_state_receipt(
+    rec: &RunRecord,
+    repo: &Path,
+    wt: &Path,
+    base_commit: &str,
+    run_id: &str,
+    conversation_id: &str,
+    parent_run_id: Option<&str>,
+) -> Result<o7_run::event::ArtifactRef> {
+    let (patch, tree_oid) = worktree::capture_cumulative_candidate(wt, base_commit)
+        .context("capturing this run's cumulative candidate state")?;
+    let repository_id = o7_worktree::git::HardenedGit::new(repo)
+        .canonical_repo_id()
+        .context("resolving this repository's canonical identity")?;
+    rec.write_bytes_durable(CANDIDATE_PATCH_FILE, patch.as_bytes())
+        .context("durably writing candidate.patch")?;
+    let receipt = CandidateStateReceipt {
+        schema: 1,
+        repository_id,
+        base_commit: base_commit.to_owned(),
+        run_id: run_id.to_owned(),
+        conversation_id: conversation_id.to_owned(),
+        parent_run_id: parent_run_id.map(str::to_owned),
+        candidate_tree_oid: tree_oid,
+        patch_locator: CANDIDATE_PATCH_FILE.to_owned(),
+        patch_sha256: o7_run::event::Digest256::of_bytes(patch.as_bytes())
+            .as_str()
+            .to_owned(),
+        patch_size: patch.len() as u64,
+        patch_kind: CANDIDATE_PATCH_KIND_V1.to_owned(),
+    };
+    receipt
+        .write_durable(rec)
+        .context("durably writing candidate_state_receipt.json")?;
+    let receipt_bytes =
+        serde_json::to_vec(&receipt).context("re-serializing candidate_state_receipt.json")?;
+    Ok(events::artifact(
+        ArtifactKind::CandidateState,
+        CANDIDATE_STATE_RECEIPT_FILE,
+        &receipt_bytes,
+    ))
+}
+
+/// Q-Deck A0 (`docs/q-deck/a0-candidate-state.md` §5): locate, verify, and
+/// materialize the PARENT run's own cumulative candidate state into the
+/// child's fresh worktree (created here, at the parent's own immutable
+/// `base_commit` — never the child's `--base` CLI flag) — everything a
+/// command-continuation child must prove BEFORE the durable dispatch
+/// boundary (`AgentStarted`). Every failure here is a plain `anyhow::Error`
+/// returned to the caller; by construction it always happens strictly
+/// before `AgentStarted` is ever appended, so it resolves through R1's
+/// existing pre-dispatch-redrive machinery with no new lifecycle status.
+///
+/// Returns the child's own `ArtifactRef` for its local copy of the parent's
+/// receipt (already durably written), the verified tree OID (expected ==
+/// actual, checked here — a mismatch is an `Err`, never a returned
+/// disagreement), and the conversation's own immutable `base_commit` (for
+/// this run's OWN candidate-state capture later, once it becomes a parent
+/// itself).
+///
+/// # Errors
+/// Any of: the parent's canonical record fails to load/parse/verify; it has
+/// no candidate-state receipt at all; the receipt fails to parse; its
+/// `repository_id`/`conversation_id`/`run_id`/`base_commit` disagree with
+/// this continuation's own identity or this repository; the patch file is
+/// missing or its digest/size disagrees with the receipt; the patch fails
+/// to apply cleanly; or the resulting tree OID disagrees with the
+/// receipt's own `candidate_tree_oid`.
+#[allow(clippy::too_many_arguments)]
+fn materialize_parent_candidate_state(
+    rec: &RunRecord,
+    repo: &Path,
+    runs_dir: &Path,
+    target: &str,
+    wt: &Path,
+    run_id: &str,
+    conversation_id: &str,
+    parent_run_id: &str,
+) -> Result<(o7_run::event::ArtifactRef, String, String)> {
+    let parent_dir = runs_dir.join(target).join(parent_run_id);
+    let parent_events_text = std::fs::read_to_string(parent_dir.join(events::EVENTS_FILE))
+        .with_context(|| {
+            format!(
+                "reading the parent run's own canonical events.jsonl at {}",
+                parent_dir.display()
+            )
+        })?;
+    let parent_events = events::from_jsonl(&parent_events_text)
+        .context("parsing the parent run's own canonical events.jsonl")?;
+    let resolver = events::RecordDirResolver {
+        base: parent_dir.clone(),
+    };
+    let (parent_state, _artifacts_verified) =
+        o7_run::replay::verify_prefix(&parent_events, &resolver).map_err(|e| {
+            anyhow::anyhow!("the parent run's own canonical record failed verification: {e}")
+        })?;
+
+    let candidate_ref = parent_state.candidate_state.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "the parent run has no candidate-state receipt — command continuations require \
+             one; a parent that predates Q-Deck A0 cannot be continued"
+        )
+    })?;
+    // `verify_prefix` above already resolved and digest-checked every
+    // referenced artifact, including this one — its bytes are safe to trust
+    // now.
+    let receipt_bytes = std::fs::read(parent_dir.join(&candidate_ref.locator))
+        .context("re-reading the parent's own candidate_state_receipt.json")?;
+    let receipt: CandidateStateReceipt = serde_json::from_slice(&receipt_bytes)
+        .context("parsing the parent's own candidate_state_receipt.json")?;
+    anyhow::ensure!(
+        receipt.schema == 1,
+        "the parent's candidate_state_receipt.json has unsupported schema {} (expected 1)",
+        receipt.schema
+    );
+    anyhow::ensure!(
+        receipt.run_id == parent_run_id,
+        "the parent's candidate_state_receipt.json's own run_id does not match the parent run"
+    );
+    anyhow::ensure!(
+        receipt.conversation_id == conversation_id,
+        "the parent's candidate-state receipt belongs to a different conversation"
+    );
+    let this_repo_id = o7_worktree::git::HardenedGit::new(repo)
+        .canonical_repo_id()
+        .context("resolving this repository's canonical identity")?;
+    anyhow::ensure!(
+        receipt.repository_id == this_repo_id,
+        "the parent's candidate-state receipt was captured against a different repository"
+    );
+    worktree::verify_commit_exists(repo, &receipt.base_commit).with_context(|| {
+        format!(
+            "the parent's candidate-state receipt names a base_commit ({}) that does not exist \
+             in this repository",
+            receipt.base_commit
+        )
+    })?;
+
+    let patch_bytes = std::fs::read(parent_dir.join(&receipt.patch_locator))
+        .context("reading the parent's own candidate.patch")?;
+    anyhow::ensure!(
+        patch_bytes.len() as u64 == receipt.patch_size,
+        "the parent's candidate.patch size does not match its own receipt"
+    );
+    let patch_digest = o7_run::event::Digest256::of_bytes(&patch_bytes);
+    anyhow::ensure!(
+        patch_digest.as_str() == receipt.patch_sha256,
+        "the parent's candidate.patch content does not match its own receipt's digest"
+    );
+    let patch_text = String::from_utf8(patch_bytes)
+        .context("the parent's candidate.patch is not valid UTF-8")?;
+
+    // Durable copy of the parent's own receipt, before the canonical event
+    // that references it — same crash-window discipline as
+    // `ledger_binding.json`/`command_binding.json`.
+    rec.write_bytes_durable(PARENT_CANDIDATE_RECEIPT_FILE, &receipt_bytes)
+        .context("durably writing parent_candidate_receipt.json")?;
+
+    worktree::add(repo, &receipt.base_commit, wt, &format!("o7/{run_id}"))
+        .context("creating the child run's worktree at the parent's own candidate base commit")?;
+    let actual_tree_oid = worktree::apply_candidate_patch(wt, &patch_text)
+        .context("applying the parent's own cumulative candidate patch")?;
+    anyhow::ensure!(
+        actual_tree_oid == receipt.candidate_tree_oid,
+        "materializing the parent's candidate state produced tree {actual_tree_oid}, but its \
+         own receipt declares {}",
+        receipt.candidate_tree_oid
+    );
+
+    let candidate_receipt_ref = events::artifact(
+        ArtifactKind::CandidateState,
+        PARENT_CANDIDATE_RECEIPT_FILE,
+        &receipt_bytes,
+    );
+    Ok((candidate_receipt_ref, receipt.base_commit, actual_tree_oid))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn execute_live(
     a: &RunArgs,
+    repo: &Path,
+    base_commit: &str,
     run_id: &str,
     wt: &Path,
     engine: Engine,
@@ -860,6 +1066,34 @@ fn execute_live(
         o7_run::event::RunEventKind::PatchCaptured { patch: diff_ref },
     )?;
     project(&projector, &patch_captured, &mut projection_incomplete);
+
+    // Q-Deck A0 (`docs/q-deck/a0-candidate-state.md`): this run's own
+    // cumulative candidate state, relative to the conversation's immutable
+    // base commit (this run's own `--base`, since a fresh top-level `o7 run
+    // --ledger` conversation has no parent to inherit one from) — so a
+    // future command continuation can materialize from it. Digest-bound and
+    // durable exactly like every other artifact event here.
+    let candidate_receipt_ref = write_candidate_state_receipt(
+        rec,
+        repo,
+        wt,
+        base_commit,
+        run_id,
+        projector.conversation_id().as_str(),
+        None,
+    )
+    .context("capturing this run's cumulative candidate state")?;
+    let candidate_state_captured = append_only(
+        &mut chain,
+        o7_run::event::RunEventKind::CandidateStateCaptured {
+            receipt: candidate_receipt_ref,
+        },
+    )?;
+    project(
+        &projector,
+        &candidate_state_captured,
+        &mut projection_incomplete,
+    );
 
     manifest.validate()?;
     let gate_out = rec.gate_dir();
@@ -1124,21 +1358,28 @@ fn continue_run(a: &ContinueArgs) -> Result<()> {
         }
     };
 
-    let base_commit = worktree::rev_parse(&repo, &a.base).unwrap_or_else(|_| a.base.clone());
+    // Q-Deck A0 (`docs/q-deck/a0-candidate-state.md` §5): the child's
+    // worktree is no longer created here, at the CLI's own `--base` flag —
+    // it is created INSIDE `continue_execute`, at the parent's own
+    // candidate-state receipt's immutable `base_commit`, only once that
+    // receipt has been located and verified. This is deliberate: creating
+    // it here (before the ledger row exists) would mean a materialization
+    // failure has to go through the SAME "reject, needs a fresh idempotency
+    // key" path an ordinary pre-attach worktree failure already does —
+    // whereas A0's own materialization failures must stay safely,
+    // same-key-redrivable, exactly like any other pre-`AgentStarted`
+    // failure. Moving worktree creation to AFTER `attach_run` (still well
+    // before `AgentStarted`) makes the EXISTING generic error handler below
+    // (`if !ledger_run_exists { reject } else { leave started }`) do the
+    // right thing for a materialization failure with zero special-casing.
     let wt = a.worktree_root.join(format!("{target}-{}", a.run_id));
-    let branch = format!("o7/{}", a.run_id);
     std::fs::create_dir_all(&a.worktree_root)?;
-    if let Err(e) = worktree::add(&repo, &a.base, &wt, &branch) {
-        let _ = mark_rejected();
-        return Err(e.context("creating the child run's worktree"));
-    }
 
     let outcome = continue_execute(
         a,
         &repo,
         &target,
         &wt,
-        &base_commit,
         &session_id,
         &contract,
         &manifest,
@@ -1264,7 +1505,6 @@ fn continue_execute(
     repo: &Path,
     target: &str,
     wt: &Path,
-    base_commit: &str,
     session_id: &agent::ProviderSessionId,
     contract: &o7_run::event::RunContract,
     manifest: &GateManifest,
@@ -1395,6 +1635,39 @@ fn continue_execute(
         &mut projection_incomplete,
     );
 
+    // Q-Deck A0 (`docs/q-deck/a0-candidate-state.md`): materialize the
+    // parent's own cumulative candidate state into a fresh worktree at its
+    // own immutable base commit — BEFORE the durable dispatch boundary
+    // (`AgentStarted`), so any failure here stays safely, same-key
+    // redrivable via R1's existing pre-dispatch machinery (this happens
+    // after `attach_run` above, so `ledger_run_exists` is already true).
+    let (candidate_receipt_ref, conversation_base_commit, materialized_tree_oid) =
+        materialize_parent_candidate_state(
+            &rec,
+            repo,
+            &a.runs_dir,
+            target,
+            wt,
+            &a.run_id,
+            &a.conversation_id,
+            parent_canonical_run_id.as_str(),
+        )
+        .context("materializing the parent's own candidate state")?;
+    let candidate_state_materialized = append_only(
+        &mut chain,
+        o7_run::event::RunEventKind::CandidateStateMaterialized {
+            source_run_id: parent_canonical_run_id.clone(),
+            candidate_receipt: candidate_receipt_ref,
+            expected_tree_oid: materialized_tree_oid.clone(),
+            actual_tree_oid: materialized_tree_oid,
+        },
+    )?;
+    project(
+        &projector,
+        &candidate_state_materialized,
+        &mut projection_incomplete,
+    );
+
     let agent_started = append_only(&mut chain, o7_run::event::RunEventKind::AgentStarted)?;
     project(&projector, &agent_started, &mut projection_incomplete);
 
@@ -1432,6 +1705,32 @@ fn continue_execute(
         o7_run::event::RunEventKind::PatchCaptured { patch: diff_ref },
     )?;
     project(&projector, &patch_captured, &mut projection_incomplete);
+
+    // Q-Deck A0: this run's OWN cumulative candidate state, relative to the
+    // conversation's immutable base commit inherited from the parent above
+    // — so a FUTURE command continuing from THIS run can materialize from
+    // it in turn.
+    let candidate_receipt_ref = write_candidate_state_receipt(
+        &rec,
+        repo,
+        wt,
+        &conversation_base_commit,
+        &a.run_id,
+        &a.conversation_id,
+        Some(parent_canonical_run_id.as_str()),
+    )
+    .context("capturing this run's own cumulative candidate state")?;
+    let candidate_state_captured = append_only(
+        &mut chain,
+        o7_run::event::RunEventKind::CandidateStateCaptured {
+            receipt: candidate_receipt_ref,
+        },
+    )?;
+    project(
+        &projector,
+        &candidate_state_captured,
+        &mut projection_incomplete,
+    );
 
     manifest.validate()?;
     let gate_out = rec.gate_dir();
@@ -1495,7 +1794,7 @@ fn continue_execute(
         run_id: a.run_id.clone(),
         target: target.to_string(),
         repo: repo.to_string_lossy().to_string(),
-        base_commit: base_commit.to_string(),
+        base_commit: conversation_base_commit,
         engine: "claude".to_string(),
         model: a.model.clone(),
         verdict,

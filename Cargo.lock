@@ -1000,6 +1000,7 @@ dependencies = [
  "nix",
  "o7-ledger",
  "o7-run",
+ "o7-worktree",
  "o7d",
  "proptest",
  "rusqlite",

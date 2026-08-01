@@ -187,6 +187,84 @@ impl CommandBinding {
     }
 }
 
+/// Q-Deck A0 (`docs/q-deck/a0-candidate-state.md`): a run's own durable,
+/// canonical receipt of its cumulative candidate state — referenced by
+/// digest from `RunEventKind::CandidateStateCaptured`, exactly like
+/// `ProviderSessionReceipt`/`CommandBinding` above. The raw cumulative patch
+/// lives alongside it as a separate file (`patch_locator`, `candidate.patch`
+/// by convention) — a SEPARATE artifact from R1's own `diff.patch` (this
+/// run's diff against its OWN `--base`, unrelated to conversation-wide
+/// cumulative continuity).
+///
+/// Load-bearing identity a child must verify before materializing from this
+/// receipt: `repository_id`, `base_commit`, `conversation_id`,
+/// `candidate_tree_oid`, and the patch's own digest/size. `run_id`/
+/// `parent_run_id` corroborate lineage but are not themselves sufficient —
+/// see `src/recovery.rs` (A0 additions) for the full check.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CandidateStateReceipt {
+    pub schema: u32,
+    pub repository_id: o7_worktree::identity::CanonicalRepoId,
+    pub base_commit: String,
+    pub run_id: String,
+    pub conversation_id: String,
+    #[serde(default)]
+    pub parent_run_id: Option<String>,
+    pub candidate_tree_oid: String,
+    pub patch_locator: String,
+    pub patch_sha256: String,
+    pub patch_size: u64,
+    pub patch_kind: String,
+}
+
+pub const CANDIDATE_STATE_RECEIPT_FILE: &str = "candidate_state_receipt.json";
+pub const CANDIDATE_PATCH_FILE: &str = "candidate.patch";
+pub const CANDIDATE_PATCH_KIND_V1: &str = "git-binary-cumulative-patch-v1";
+/// The locator a command-continuation child copies its PARENT's own
+/// candidate-state receipt to, inside the CHILD's own run directory — so
+/// replaying the child alone never depends on the parent's directory still
+/// existing (`docs/q-deck/a0-candidate-state.md` §2).
+pub const PARENT_CANDIDATE_RECEIPT_FILE: &str = "parent_candidate_receipt.json";
+
+impl CandidateStateReceipt {
+    /// Durably write this run's candidate-state receipt.
+    ///
+    /// # Errors
+    /// Any I/O failure opening, writing, or flushing the file.
+    pub fn write_durable(&self, rec: &RunRecord) -> Result<()> {
+        let bytes = serde_json::to_vec(self).context("serializing candidate_state_receipt.json")?;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(rec.dir.join(CANDIDATE_STATE_RECEIPT_FILE))
+            .context("opening candidate_state_receipt.json for a durable write")?;
+        f.write_all(&bytes)
+            .context("writing candidate_state_receipt.json")?;
+        f.sync_data()
+            .context("flushing candidate_state_receipt.json to disk")?;
+        Ok(())
+    }
+
+    /// Read a run directory's own candidate-state receipt, if one was ever
+    /// written — absent for a run that predates this event existing, or a
+    /// non-`--ledger` run that never captures one.
+    ///
+    /// # Errors
+    /// The file exists but fails to read or parse.
+    pub fn read(run_dir: &Path) -> Result<Option<Self>> {
+        let path = run_dir.join(CANDIDATE_STATE_RECEIPT_FILE);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let receipt: Self =
+            serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        Ok(Some(receipt))
+    }
+}
+
 /// A run record directory in `007`'s private store: `runs/<target>/<run-id>/`.
 pub struct RunRecord {
     pub dir: PathBuf,
@@ -238,6 +316,27 @@ impl RunRecord {
 
     pub fn write_diff(&self, d: &str) -> Result<()> {
         std::fs::write(self.dir.join("diff.patch"), d)?;
+        Ok(())
+    }
+
+    /// Durable (`write_all` + `sync_data`) raw-byte write of a named file in
+    /// this run's own directory — Q-Deck A0's own copy-parent's-receipt-
+    /// verbatim and write-candidate-patch-before-its-referencing-event uses,
+    /// same crash-window discipline as `write_task_durable`.
+    ///
+    /// # Errors
+    /// Any I/O failure opening, writing, or flushing the file.
+    pub fn write_bytes_durable(&self, name: &str, bytes: &[u8]) -> Result<()> {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(self.dir.join(name))
+            .with_context(|| format!("opening {name} for a durable write"))?;
+        f.write_all(bytes)
+            .with_context(|| format!("writing {name}"))?;
+        f.sync_data()
+            .with_context(|| format!("flushing {name} to disk"))?;
         Ok(())
     }
 
