@@ -76,6 +76,22 @@ struct RecoverArgs {
     /// always runs regardless of whether this is given.
     #[arg(long)]
     run_dir: Option<PathBuf>,
+    /// Q-Deck R1 sixth corrective round: when given together with
+    /// `--runs-dir`, additionally classify every "stuck" command's bound
+    /// child run's own canonical record — read-only, exactly the same
+    /// classifier `o7d`'s own redrive decision uses
+    /// (`o7::recovery::classify_command_child`), never a second one — so
+    /// an operator can see WHICH kind of "not automatically redriven" a
+    /// command actually is: safe pre-dispatch, provider-outcome-ambiguous
+    /// (with its last durable dispatch phase), sealed-but-not-yet-
+    /// reconciled, or an invalid/tampered record. Never mutates anything
+    /// and never re-invokes the provider — pure reporting.
+    #[arg(long, requires = "runs_dir")]
+    repo: Option<PathBuf>,
+    /// Private run store root — required alongside `--repo` to resolve a
+    /// stuck command's own record directory for classification.
+    #[arg(long, requires = "repo")]
+    runs_dir: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -238,6 +254,43 @@ fn recover(a: &RecoverArgs) -> Result<()> {
     let stuck = rt
         .block_on(ledger.stuck_commands())
         .context("scanning for stuck commands")?;
+    // Q-Deck R1 sixth corrective round: when the operator gives enough
+    // context to resolve a stuck command's own record directory, classify
+    // it with the SAME read-only classifier `o7d`'s own redrive decision
+    // uses — never a second, diverging one, and never anything that
+    // mutates state or invokes the provider.
+    let classify_stuck = |run_id: &str, command: &o7_ledger::Command| -> Option<String> {
+        let (repo, runs_dir) = (a.repo.as_ref()?, a.runs_dir.as_ref()?);
+        let target = repo
+            .canonicalize()
+            .ok()?
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "target".to_owned());
+        let dir = runs_dir.join(target).join(run_id);
+        Some(
+            match o7::recovery::classify_command_child(&dir, run_id, command) {
+                o7::recovery::ChildRecordState::Absent => "never actually started".to_owned(),
+                o7::recovery::ChildRecordState::ValidUnsealedPreDispatch => {
+                    "safe pre-dispatch redrive candidate (provider not yet invoked)".to_owned()
+                }
+                o7::recovery::ChildRecordState::ValidUnsealedDispatchAmbiguous { progress } => {
+                    format!(
+                        "PROVIDER-OUTCOME-AMBIGUOUS — past the durable dispatch boundary (last \
+                         phase: {progress}), never sealed; automatic redrive is refused; manual \
+                         resolution required"
+                    )
+                }
+                o7::recovery::ChildRecordState::ValidSealed => {
+                    "sealed — recoverable via a same-key retry or `o7 recover --run-dir`".to_owned()
+                }
+                o7::recovery::ChildRecordState::Invalid(reason) => {
+                    format!("INVALID canonical record: {reason}")
+                }
+            },
+        )
+    };
+
     if stuck.is_empty() {
         println!("[o7] recover: 0 command(s) pending");
     } else {
@@ -251,11 +304,19 @@ fn recover(a: &RecoverArgs) -> Result<()> {
                     "[o7]   command {} (conversation {}): accepted, never bound to a child run",
                     command.command_id, command.conversation_id
                 ),
-                Some(run_id) => println!(
-                    "[o7]   command {} (conversation {}): bound to run {run_id}, but that run's \
-                     RunStarted never reached the ledger",
-                    command.command_id, command.conversation_id
-                ),
+                Some(run_id) => {
+                    let classification = classify_stuck(run_id.as_str(), command)
+                        .unwrap_or_else(|| {
+                            "that run's RunStarted never reached the ledger (pass --repo/--runs-dir \
+                             to also classify its canonical record)"
+                                .to_owned()
+                        });
+                    println!(
+                        "[o7]   command {} (conversation {}): bound to run {run_id} — \
+                         {classification}",
+                        command.command_id, command.conversation_id
+                    );
+                }
             }
         }
     }
