@@ -1048,3 +1048,157 @@ async fn mark_completed_if_bound_reports_not_found_for_an_unknown_command() {
         .unwrap();
     assert_eq!(outcome, CompletionOutcome::NotFound);
 }
+
+// Q-Deck R1 fifth corrective round: `mark_command_completed_if_bound_and_terminal`
+// additionally requires — in the SAME transaction — that the bound child
+// run itself actually exists, is in a permitted terminal status, and
+// belongs to the same conversation/parent as the command. A scoped
+// catch-up's own typed success is necessary but not sufficient; this is
+// what the ledger itself enforces at the moment of completion.
+
+async fn create_terminal_child_run(
+    ledger: &SqliteLedger,
+    conversation_id: &ConversationId,
+    parent_run_id: &RunId,
+) -> RunId {
+    let run = ledger
+        .create_run(
+            NewRun {
+                conversation_id: conversation_id.clone(),
+                parent_run_id: Some(parent_run_id.clone()),
+                agent: "claude".to_owned(),
+                role: "implementer".to_owned(),
+            },
+            None,
+        )
+        .await
+        .unwrap();
+    ledger.start_run(run.run_id.clone()).await.unwrap();
+    ledger.complete_run(run.run_id.clone()).await.unwrap();
+    run.run_id
+}
+
+#[tokio::test]
+async fn mark_completed_if_bound_and_terminal_succeeds_for_a_real_terminal_child() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, parent) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &parent, "hi"), key("k"))
+        .await
+        .unwrap();
+    let child = create_terminal_child_run(&ledger, &conv, &parent).await;
+    ledger
+        .bind_command_child_run(command.command_id.clone(), child.clone())
+        .await
+        .unwrap();
+
+    let outcome = ledger
+        .mark_command_completed_if_bound_and_terminal(command.command_id.clone(), child)
+        .await
+        .unwrap();
+    let CompletionOutcome::Completed(completed) = outcome else {
+        panic!("expected Completed, got {outcome:?}");
+    };
+    assert_eq!(completed.status, CommandStatus::Completed);
+}
+
+#[tokio::test]
+async fn mark_completed_if_bound_and_terminal_refuses_a_child_that_is_not_terminal() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, parent) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &parent, "hi"), key("k"))
+        .await
+        .unwrap();
+    // A real run row, but still `running` — never sealed.
+    let child = ledger
+        .create_run(
+            NewRun {
+                conversation_id: conv.clone(),
+                parent_run_id: Some(parent.clone()),
+                agent: "claude".to_owned(),
+                role: "implementer".to_owned(),
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .run_id;
+    ledger.start_run(child.clone()).await.unwrap();
+    ledger
+        .bind_command_child_run(command.command_id.clone(), child.clone())
+        .await
+        .unwrap();
+
+    let outcome = ledger
+        .mark_command_completed_if_bound_and_terminal(command.command_id.clone(), child)
+        .await
+        .unwrap();
+    let CompletionOutcome::NotBound(current) = outcome else {
+        panic!("expected NotBound for a non-terminal child, got {outcome:?}");
+    };
+    assert_ne!(current.status, CommandStatus::Completed);
+}
+
+#[tokio::test]
+async fn mark_completed_if_bound_and_terminal_refuses_a_child_run_that_does_not_exist() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, parent) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &parent, "hi"), key("k"))
+        .await
+        .unwrap();
+    let phantom_child = RunId::from_raw("phantom-child".to_owned());
+    ledger
+        .bind_command_child_run(command.command_id.clone(), phantom_child.clone())
+        .await
+        .unwrap();
+
+    let outcome = ledger
+        .mark_command_completed_if_bound_and_terminal(command.command_id.clone(), phantom_child)
+        .await
+        .unwrap();
+    let CompletionOutcome::NotBound(current) = outcome else {
+        panic!("expected NotBound for a child run that doesn't exist, got {outcome:?}");
+    };
+    assert_ne!(current.status, CommandStatus::Completed);
+}
+
+#[tokio::test]
+async fn mark_completed_if_bound_and_terminal_refuses_a_child_from_a_different_conversation() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, parent) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &parent, "hi"), key("k"))
+        .await
+        .unwrap();
+    // A genuinely terminal run, but in a DIFFERENT conversation entirely.
+    let (other_conv, other_parent) = conversation_with_continuable_run(&ledger).await;
+    let foreign_child = create_terminal_child_run(&ledger, &other_conv, &other_parent).await;
+    ledger
+        .bind_command_child_run(command.command_id.clone(), foreign_child.clone())
+        .await
+        .unwrap();
+
+    let outcome = ledger
+        .mark_command_completed_if_bound_and_terminal(command.command_id.clone(), foreign_child)
+        .await
+        .unwrap();
+    let CompletionOutcome::NotBound(current) = outcome else {
+        panic!("expected NotBound for a run from a different conversation, got {outcome:?}");
+    };
+    assert_ne!(current.status, CommandStatus::Completed);
+}
+
+#[tokio::test]
+async fn mark_completed_if_bound_and_terminal_reports_not_found_for_an_unknown_command() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let outcome = ledger
+        .mark_command_completed_if_bound_and_terminal(
+            o7_ledger::CommandId::from_raw("no-such-command".to_owned()),
+            RunId::from_raw("child".to_owned()),
+        )
+        .await
+        .unwrap();
+    assert_eq!(outcome, CompletionOutcome::NotFound);
+}

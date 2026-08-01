@@ -1273,6 +1273,79 @@ impl SqliteLedger {
         .await
     }
 
+    /// Q-Deck R1 fifth corrective round: like
+    /// [`Self::mark_command_completed_if_bound`], but ALSO requires — in
+    /// the SAME transaction — that the bound child run itself actually
+    /// exists, is in a permitted TERMINAL status, and belongs to the same
+    /// conversation/parent as the command. This is the primitive `o7d`'s
+    /// sealed-canonical-record recovery path uses (Q-Deck R1 §7): a scoped
+    /// catch-up's own typed success receipt is necessary but not
+    /// sufficient on its own — the ledger row it just wrote (or failed to
+    /// write) is re-checked here, atomically, at the moment of completion,
+    /// rather than trusted from an earlier, separate read. A failed catch-up,
+    /// or one whose ledger write didn't actually land a terminal status,
+    /// must never complete the command's bookkeeping — this predicate is
+    /// what enforces that at the storage layer, not merely at the caller's
+    /// own control flow.
+    ///
+    /// Predicates (all in the SAME conditional `UPDATE`'s surrounding
+    /// checks): `command.status IN ('accepted','started')`;
+    /// `command.child_run_id == expected_child_run_id`; the child run
+    /// EXISTS; the child run's own `status` is a permitted terminal status
+    /// (`RunStatus::is_terminal`); the child run's `conversation_id`
+    /// equals the command's; the child run's `parent_run_id` equals the
+    /// command's `parent_run_id`.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn mark_command_completed_if_bound_and_terminal(
+        &self,
+        command_id: crate::CommandId,
+        expected_child_run_id: crate::RunId,
+    ) -> Result<crate::models::CompletionOutcome, LedgerError> {
+        use crate::models::CompletionOutcome;
+        self.with_tx(move |tx| {
+            let Some(current) = load_command(tx, command_id.as_str())? else {
+                return Ok(CompletionOutcome::NotFound);
+            };
+            let bound = matches!(
+                current.status,
+                CommandStatus::Accepted | CommandStatus::Started
+            ) && current.child_run_id.as_ref().map(crate::RunId::as_str)
+                == Some(expected_child_run_id.as_str());
+            if !bound {
+                return Ok(CompletionOutcome::NotBound(current));
+            }
+            let Some(child_run) = load_run(tx, expected_child_run_id.as_str())? else {
+                return Ok(CompletionOutcome::NotBound(current));
+            };
+            let child_ok = child_run.status.is_terminal()
+                && child_run.conversation_id == current.conversation_id
+                && child_run.parent_run_id.as_ref().map(crate::RunId::as_str)
+                    == Some(current.parent_run_id.as_str());
+            if !child_ok {
+                return Ok(CompletionOutcome::NotBound(current));
+            }
+            let now = now_millis();
+            let changed = tx.execute(
+                "UPDATE command SET status = 'completed', updated_at = ?1 \
+                 WHERE command_id = ?2 AND status IN ('accepted','started') \
+                 AND child_run_id = ?3",
+                params![now, command_id.as_str(), expected_child_run_id.as_str()],
+            )?;
+            if changed != 1 {
+                let current = load_command(tx, command_id.as_str())?.ok_or_else(|| {
+                    LedgerError::Integrity(format!("command {command_id} vanished"))
+                })?;
+                return Ok(CompletionOutcome::NotBound(current));
+            }
+            let updated = load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::Integrity(format!("command {command_id} vanished")))?;
+            Ok(CompletionOutcome::Completed(updated))
+        })
+        .await
+    }
+
     /// Q-Deck R1 corrective round: a command's post-seal bookkeeping
     /// (`mark_command_completed`, called after the child run's OWN
     /// canonical stream already sealed) is itself a best-effort ledger
