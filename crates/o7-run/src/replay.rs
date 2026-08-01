@@ -403,6 +403,8 @@ fn referenced_artifacts(kind: &RunEventKind) -> Vec<&ArtifactRef> {
         RunEventKind::PolicyChecked { policy, .. } => vec![policy],
         RunEventKind::GateFinished { log: Some(log), .. } => vec![log],
         RunEventKind::SandboxEvidenceCaptured { report, .. } => vec![report],
+        RunEventKind::ProviderSessionCaptured { receipt } => vec![receipt],
+        RunEventKind::CommandBindingCaptured { binding } => vec![binding],
         RunEventKind::AgentStarted
         | RunEventKind::AgentExited { .. }
         | RunEventKind::GateStarted { .. }

@@ -125,6 +125,19 @@ pub enum ArtifactKind {
     Worktree,
     /// A policy definition, bound by digest so a run proves WHICH policy it checked.
     Policy,
+    /// Q-Deck R1 fifth corrective round: a durable, canonical receipt of the
+    /// provider session identity a successful agent response returned —
+    /// see [`RunEventKind::ProviderSessionCaptured`]. The receipt's own
+    /// content (not defined by this crate — an untyped domain payload from
+    /// the caller's point of view) is bound by digest exactly like any
+    /// other artifact.
+    ProviderSession,
+    /// Q-Deck R1 fifth corrective round: a durable receipt binding this
+    /// canonical record to the EXACT accepted Command that dispatched it
+    /// (`command_id`/`conversation_id`/`parent_run_id`/`child_run_id`/a
+    /// digest of the command text) — see
+    /// [`RunEventKind::CommandBindingCaptured`].
+    CommandBinding,
 }
 
 /// A reference to an out-of-band artifact: WHERE it is plus the digest its content MUST
@@ -394,6 +407,28 @@ pub enum RunEventKind {
         report: ArtifactRef,
         outcome: SandboxEvidenceOutcome,
     },
+    /// Q-Deck R1 fifth corrective round: a durable, canonical receipt of the
+    /// provider session identity a successful agent response returned —
+    /// evidence-only (never verdict-bearing), at most once per run, bound
+    /// by digest like any other artifact. Its ABSENCE from an otherwise
+    /// sealed stream is not an error — a run whose agent call never
+    /// returned a session (or predates this event existing) simply has no
+    /// canonical session evidence, and stays honestly non-continuable
+    /// (`docs/q-deck/r1-command.md` §6/§7). Replaces `meta.json` as the
+    /// authority recovery trusts for session backfill: `meta.json` is not
+    /// part of this digest-chained stream, so nothing about a clean replay
+    /// ever proved it belonged to this run.
+    ProviderSessionCaptured { receipt: ArtifactRef },
+    /// Q-Deck R1 fifth corrective round: a durable receipt binding this
+    /// canonical record to the EXACT accepted Command that dispatched it —
+    /// evidence-only, at most once per run, bound by digest. Only a
+    /// command-continuation child run ever carries one; a plain `o7 run`
+    /// has no command to bind. A sealed record's own `task` artifact digest
+    /// independently corroborates the command TEXT (§9.5); this receipt is
+    /// what corroborates the command's IDENTITY (`command_id`,
+    /// `conversation_id`, `parent_run_id`, `child_run_id`) against tamper
+    /// or confusion between commands.
+    CommandBindingCaptured { binding: ArtifactRef },
     /// The run was sealed. MUST be the LAST event; the verdict is fixed here.
     RunSealed,
 }
@@ -413,6 +448,8 @@ impl RunEventKind {
             Self::GateFinished { .. } => 8,
             Self::SandboxEvidenceCaptured { .. } => 9,
             Self::RunSealed => 10,
+            Self::ProviderSessionCaptured { .. } => 11,
+            Self::CommandBindingCaptured { .. } => 12,
         }
     }
 
@@ -429,6 +466,8 @@ impl RunEventKind {
             Self::GateStarted { .. } => "gate_started",
             Self::GateFinished { .. } => "gate_finished",
             Self::SandboxEvidenceCaptured { .. } => "sandbox_evidence_captured",
+            Self::ProviderSessionCaptured { .. } => "provider_session_captured",
+            Self::CommandBindingCaptured { .. } => "command_binding_captured",
             Self::RunSealed => "run_sealed",
         }
     }
@@ -511,6 +550,8 @@ fn fold_kind(h: &mut Sha256, kind: &RunEventKind) {
             fold_artifact(h, report);
             h.update([sandbox_outcome_tag(*outcome)]);
         }
+        RunEventKind::ProviderSessionCaptured { receipt } => fold_artifact(h, receipt),
+        RunEventKind::CommandBindingCaptured { binding } => fold_artifact(h, binding),
     }
 }
 
@@ -636,6 +677,8 @@ fn artifact_kind_tag(kind: ArtifactKind) -> u8 {
         ArtifactKind::SandboxReport => 4,
         ArtifactKind::Worktree => 5,
         ArtifactKind::Policy => 6,
+        ArtifactKind::ProviderSession => 7,
+        ArtifactKind::CommandBinding => 8,
     }
 }
 

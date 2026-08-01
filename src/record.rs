@@ -108,6 +108,85 @@ impl LedgerBinding {
     }
 }
 
+/// Q-Deck R1 fifth corrective round: the canonical, durable receipt of a
+/// successful agent response's provider session identity
+/// (`session_receipt.json`) — referenced by digest from the canonical
+/// `ProviderSessionCaptured` event (`o7_run::event::RunEventKind`), so
+/// recovery can trust it exactly as much as any other digest-verified
+/// artifact. `meta.json`'s own `session_id` field is NOT this — it is not
+/// part of the digest-chained canonical stream, so nothing about a clean
+/// replay ever proved it belonged to this run; this receipt is what
+/// replaces it as recovery's session-backfill authority.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderSessionReceipt {
+    pub schema: u32,
+    pub run_id: String,
+    pub engine: String,
+    pub provider: String,
+    pub model: String,
+    pub session_id: String,
+}
+
+pub const PROVIDER_SESSION_RECEIPT_FILE: &str = "session_receipt.json";
+
+/// Q-Deck R1 fifth corrective round: the canonical, durable receipt binding
+/// a command-continuation child run to the EXACT accepted Command that
+/// dispatched it (`command_binding.json`) — referenced by digest from the
+/// canonical `CommandBindingCaptured` event. Written durably BEFORE
+/// `RunStarted`, exactly like `LedgerBinding`, so a crash between this
+/// write and the canonical event landing still leaves the identity
+/// recoverable; the canonical event is what makes it tamper-evident rather
+/// than a plain mutable sidecar.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandBinding {
+    pub schema: u32,
+    pub command_id: String,
+    pub conversation_id: String,
+    pub parent_run_id: String,
+    pub child_run_id: String,
+    pub command_sha256: String,
+}
+
+const COMMAND_BINDING_FILE: &str = "command_binding.json";
+
+impl CommandBinding {
+    /// Durably write this run's command-binding record.
+    ///
+    /// # Errors
+    /// Any I/O failure opening, writing, or flushing the file.
+    pub fn write_durable(&self, rec: &RunRecord) -> Result<()> {
+        let bytes = serde_json::to_vec(self).context("serializing command_binding.json")?;
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(rec.dir.join(COMMAND_BINDING_FILE))
+            .context("opening command_binding.json for a durable write")?;
+        f.write_all(&bytes)
+            .context("writing command_binding.json")?;
+        f.sync_data()
+            .context("flushing command_binding.json to disk")?;
+        Ok(())
+    }
+
+    /// Read a run directory's command-binding record, if one was ever
+    /// written — absent for a plain `o7 run` (no command to bind).
+    ///
+    /// # Errors
+    /// The file exists but fails to read or parse.
+    pub fn read(run_dir: &Path) -> Result<Option<Self>> {
+        let path = run_dir.join(COMMAND_BINDING_FILE);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let binding: Self =
+            serde_json::from_str(&text).with_context(|| format!("parsing {}", path.display()))?;
+        Ok(Some(binding))
+    }
+}
+
 /// A run record directory in `007`'s private store: `runs/<target>/<run-id>/`.
 pub struct RunRecord {
     pub dir: PathBuf,

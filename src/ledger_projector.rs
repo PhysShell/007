@@ -332,6 +332,14 @@ impl LiveLedgerProjector {
                     "outcome": outcome,
                 }),
             ),
+            RunEventKind::ProviderSessionCaptured { receipt } => (
+                "provider_session_captured",
+                serde_json::json!({ "receipt": receipt }),
+            ),
+            RunEventKind::CommandBindingCaptured { binding } => (
+                "command_binding_captured",
+                serde_json::json!({ "binding": binding }),
+            ),
         };
 
         let payload = serde_json::json!({

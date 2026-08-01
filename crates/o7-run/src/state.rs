@@ -162,6 +162,23 @@ pub struct RunState {
     pub sandbox_evidence: Vec<SandboxEvidenceEntry>,
     /// The fixed verdict, present only once `Sealed`.
     pub verdict: Option<Verdict>,
+    /// Q-Deck R1 fifth corrective round: the canonical provider-session
+    /// receipt (evidence-only for the verdict) — `None` for a run whose
+    /// agent call never returned a session, or that predates this event
+    /// existing. `#[serde(skip_serializing_if)]` keeps
+    /// [`RunState::initial`]'s own normalized-digest known-answer vector
+    /// (`tests/contract.rs`) byte-identical to before this field existed —
+    /// a genuinely new, non-`None` value naturally produces its own new
+    /// digest, never colliding with the frozen empty-state vector.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub provider_session_receipt: Option<ArtifactRef>,
+    /// Q-Deck R1 fifth corrective round: the canonical command-binding
+    /// receipt (evidence-only for the verdict) — `None` for a plain `o7
+    /// run` (no command to bind) or a record that predates this event
+    /// existing. Same digest-compatibility discipline as
+    /// `provider_session_receipt` above.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub command_binding: Option<ArtifactRef>,
 }
 
 impl RunState {
@@ -184,6 +201,8 @@ impl RunState {
             policy_results: Vec::new(),
             sandbox_evidence: Vec::new(),
             verdict: None,
+            provider_session_receipt: None,
+            command_binding: None,
         }
     }
 
