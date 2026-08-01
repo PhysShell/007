@@ -1474,12 +1474,16 @@ fn malformed_requests_all_answer_with_the_uniform_error_dto() {
 /// Q-Deck R1 second corrective round, major finding: the live path's own
 /// best-effort session persistence can fail independently of everything
 /// else `o7 recover --run-dir` verifies — and that failure's own warning
-/// explicitly promises catch-up will fix it. Proves it actually does:
-/// `meta.json` (written regardless of whether the live ledger write
-/// succeeded) backfills the ledger's `provider_session_id` once it's
-/// missing there.
+/// explicitly promises catch-up will fix it. Proves it actually does.
+///
+/// Fifth corrective round: renamed from "...from_meta_json" — Part 2
+/// retired `meta.json` as backfill authority entirely; this now backfills
+/// from the canonical `ProviderSessionCaptured` receipt
+/// (`session_receipt.json`), written unconditionally by `execute_live`
+/// alongside (never instead of) `meta.json`'s own diagnostic copy — the
+/// same underlying session value, but a DIFFERENT, digest-verified source.
 #[test]
-fn recover_run_dir_backfills_a_missing_provider_session_from_meta_json() {
+fn recover_run_dir_backfills_a_missing_provider_session_from_the_canonical_receipt() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let repo = fixture_repo(PASSING_GATE);
     let task_file = repo.path().join("task.md");
@@ -1532,11 +1536,11 @@ fn recover_run_dir_backfills_a_missing_provider_session_from_meta_json() {
         .to_string_lossy()
         .to_string();
     let record_dir = runs_dir.join(&target_name).join(&run_id);
-    let meta_text = std::fs::read_to_string(record_dir.join("meta.json")).unwrap();
-    let meta: serde_json::Value = serde_json::from_str(&meta_text).unwrap();
-    let expected_session = meta["session_id"]
+    let receipt_text = std::fs::read_to_string(record_dir.join("session_receipt.json")).unwrap();
+    let receipt: serde_json::Value = serde_json::from_str(&receipt_text).unwrap();
+    let expected_session = receipt["session_id"]
         .as_str()
-        .expect("meta.json must carry the session independently of the ledger")
+        .expect("session_receipt.json must carry the session independently of the ledger")
         .to_owned();
 
     let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
@@ -1555,7 +1559,8 @@ fn recover_run_dir_backfills_a_missing_provider_session_from_meta_json() {
     assert_eq!(
         provider_session_id(&ledger_path, &run_id),
         Some(expected_session),
-        "catch-up must backfill the session from meta.json, exactly as its own warning promises"
+        "catch-up must backfill the session from the canonical receipt, exactly as its own \
+         warning promises"
     );
 }
 
@@ -1897,13 +1902,16 @@ fn continue_exits_immediately_if_superseded_before_it_can_start_real_work() {
     );
 }
 
-/// Q-Deck R1 third corrective round, blocker 3: `meta.json` is not part of
-/// the canonical event chain — a copy from a DIFFERENT run's directory
-/// must never be trusted for session backfill, even though replay of the
-/// canonical stream itself stays green regardless (replay never looks at
-/// `meta.json` at all).
+/// Q-Deck R1 fifth corrective round (required test #2, "altered session
+/// ID"): `meta.json` is purely diagnostic metadata now — it is NOT part of
+/// the canonical event chain, and it is no longer even READ for session
+/// backfill at all (Part 2). Tampering its `session_id` (or its `run_id`,
+/// or both) must have NO EFFECT whatsoever: recovery still backfills the
+/// REAL session from the canonical `ProviderSessionCaptured` receipt, a
+/// subsequent continuation still uses the real session, and the tampered
+/// value never appears anywhere.
 #[test]
-fn recover_refuses_to_backfill_a_session_from_a_meta_json_with_the_wrong_run_id() {
+fn altering_meta_json_session_id_has_no_effect_on_recovery_or_continuation() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let repo = fixture_repo(PASSING_GATE);
     let task_file = repo.path().join("task.md");
@@ -1931,11 +1939,11 @@ fn recover_refuses_to_backfill_a_session_from_a_meta_json_with_the_wrong_run_id(
             .unwrap();
         id
     };
+    let real_session = provider_session_id(&ledger_path, &run_id).unwrap();
 
-    // Revert the ledger's own column (simulating "the live persist
-    // failed") and REPLACE meta.json with one claiming a DIFFERENT run_id
-    // — modeling a copy-paste mistake (or worse) rather than this run's
-    // own genuine record.
+    // Simulate the live path's own best-effort session persist failing
+    // (`provider_session_id` still NULL), then tamper ONLY `meta.json` —
+    // wrong run_id AND an attacker-controlled session_id.
     {
         let conn = rusqlite::Connection::open(&ledger_path).unwrap();
         conn.execute(
@@ -1954,7 +1962,6 @@ fn recover_refuses_to_backfill_a_session_from_a_meta_json_with_the_wrong_run_id(
     let meta_path = record_dir.join("meta.json");
     let mut meta: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
-    let real_session = meta["session_id"].as_str().unwrap().to_owned();
     meta["run_id"] = serde_json::Value::String("some-other-run-entirely".to_owned());
     meta["session_id"] = serde_json::Value::String("attacker-controlled-session".to_owned());
     std::fs::write(&meta_path, serde_json::to_string(&meta).unwrap()).unwrap();
@@ -1976,26 +1983,24 @@ fn recover_refuses_to_backfill_a_session_from_a_meta_json_with_the_wrong_run_id(
     assert_ne!(
         after.as_deref(),
         Some("attacker-controlled-session"),
-        "a meta.json claiming the WRONG run_id must never be trusted for backfill"
+        "meta.json is never consulted for session backfill at all"
     );
-    assert_ne!(after.as_deref(), Some(real_session.as_str()));
-    assert!(
-        after.is_none(),
-        "backfill must be refused outright, not partially applied"
+    assert_eq!(
+        after.as_deref(),
+        Some(real_session.as_str()),
+        "the REAL session, from the canonical receipt, must still be backfilled correctly"
     );
 }
 
-/// Q-Deck R1 fourth corrective round: a `meta.json` whose `run_id` matches
-/// exactly, but whose `schema` is one this build does not understand, must
-/// be refused for session backfill on schema grounds alone — matching the
-/// same "unsupported schema" refusal `ledger_binding.json` has always had.
-/// Refusing backfill must NOT also refuse the canonical verdict catch-up
-/// itself: the ledger's own stale (non-terminal) status must still be
-/// reconciled to the record's real sealed verdict, proving the two checks
-/// are independent, not one bundled all-or-nothing gate.
+/// Q-Deck R1 fifth corrective round (required test #3, "canonical receipt
+/// tampering"): altering the REAL canonical session receipt
+/// (`session_receipt.json`, referenced by digest from the
+/// `ProviderSessionCaptured` event) must fail canonical verification
+/// outright — never merely "skip session backfill" the way an
+/// unauthoritative `meta.json` tamper does. No session mutation, no
+/// command completion, no provider invocation.
 #[test]
-fn recover_refuses_to_backfill_a_session_from_an_unsupported_meta_schema_but_still_catches_up_the_verdict(
-) {
+fn tampering_the_canonical_session_receipt_fails_verification_outright() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let repo = fixture_repo(PASSING_GATE);
     let task_file = repo.path().join("task.md");
@@ -2023,18 +2028,17 @@ fn recover_refuses_to_backfill_a_session_from_an_unsupported_meta_schema_but_sti
             .unwrap();
         id
     };
+    let real_session = provider_session_id(&ledger_path, &run_id).unwrap();
 
-    // Simulate the live path's own best-effort session persist failing
-    // (`provider_session_id` still NULL) — same setup as the wrong-run-id
-    // test above; the ledger's own status is untouched (already
-    // `completed`, matching the canonical record), so a passing catch-up
-    // here is a genuine no-op re-application, not a status transition —
-    // proving the schema refusal and the (already-settled) verdict
-    // catch-up are independent, neither blocking the other.
     {
         let conn = rusqlite::Connection::open(&ledger_path).unwrap();
         conn.execute(
-            "UPDATE run SET provider_session_id = NULL WHERE run_id = ?1",
+            "UPDATE run SET provider_session_id = NULL, status = 'running' WHERE run_id = ?1",
+            [&run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE run_attempt SET status = 'running', finished_at = NULL WHERE run_id = ?1",
             [&run_id],
         )
         .unwrap();
@@ -2046,16 +2050,13 @@ fn recover_refuses_to_backfill_a_session_from_an_unsupported_meta_schema_but_sti
         .to_string_lossy()
         .to_string();
     let record_dir = runs_dir.join(&target_name).join(&run_id);
-    let meta_path = record_dir.join("meta.json");
-    let mut meta: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&meta_path).unwrap()).unwrap();
-    assert_eq!(
-        meta["run_id"].as_str(),
-        Some(run_id.as_str()),
-        "sanity: run_id itself is correct — only schema is being corrupted"
-    );
-    meta["schema"] = serde_json::Value::Number(999.into());
-    std::fs::write(&meta_path, serde_json::to_string(&meta).unwrap()).unwrap();
+    // Tamper the REAL canonical artifact this run's `ProviderSessionCaptured`
+    // event digest-references.
+    std::fs::write(
+        record_dir.join("session_receipt.json"),
+        br#"{"schema":1,"run_id":"unrelated","engine":"claude","provider":"claude","model":"opus","session_id":"attacker-controlled-session"}"#,
+    )
+    .unwrap();
 
     let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
         .args(["recover", "--ledger"])
@@ -2065,20 +2066,18 @@ fn recover_refuses_to_backfill_a_session_from_an_unsupported_meta_schema_but_sti
         .output()
         .unwrap();
     assert!(
-        recover.status.success(),
-        "{}",
-        String::from_utf8_lossy(&recover.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&recover.stderr);
-    assert!(
-        stderr.contains("unsupported schema"),
-        "expected an honest diagnostic naming the schema mismatch, got: {stderr}"
+        !recover.status.success(),
+        "a tampered canonical receipt must fail verification, not exit cleanly"
     );
 
-    assert!(
-        provider_session_id(&ledger_path, &run_id).is_none(),
-        "an unsupported meta.json schema must never be trusted for session backfill"
+    let after = provider_session_id(&ledger_path, &run_id);
+    assert_ne!(after.as_deref(), Some("attacker-controlled-session"));
+    assert_ne!(
+        after.as_deref(),
+        Some(real_session.as_str()),
+        "backfill must not happen at all when the canonical receipt itself fails verification"
     );
+    assert!(after.is_none());
 
     let status: String = {
         let conn = rusqlite::Connection::open(&ledger_path).unwrap();
@@ -2088,8 +2087,93 @@ fn recover_refuses_to_backfill_a_session_from_an_unsupported_meta_schema_but_sti
         .unwrap()
     };
     assert_eq!(
-        status, "completed",
-        "the canonical verdict catch-up must still land even though session backfill was refused"
+        status, "running",
+        "verdict catch-up must ALSO be refused — the whole canonical record failed verification, \
+         not just the session receipt"
+    );
+}
+
+/// Q-Deck R1 fifth corrective round (required test #4, "conflicting
+/// existing session"): the ledger already holds a DIFFERENT provider
+/// session for this run than its own (perfectly genuine, untampered)
+/// canonical receipt names. Recovery must fail closed — the existing
+/// ledger session must never be silently overwritten by the receipt's
+/// value, nor vice versa.
+#[test]
+fn recover_refuses_to_overwrite_a_ledger_session_that_disagrees_with_the_canonical_receipt() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+
+    let run_id = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let id: String = conn
+            .query_row("SELECT run_id FROM run LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        id
+    };
+    let real_session = provider_session_id(&ledger_path, &run_id).unwrap();
+
+    // The ledger already carries a DIFFERENT session than the run's own
+    // genuine, untampered canonical receipt — e.g. as if some earlier,
+    // unrelated write had landed a stale or foreign value.
+    let conflicting_session = "a-completely-different-session-already-recorded";
+    assert_ne!(conflicting_session, real_session.as_str());
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET provider_session_id = ?1 WHERE run_id = ?2",
+            rusqlite::params![conflicting_session, &run_id],
+        )
+        .unwrap();
+    }
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let record_dir = runs_dir.join(&target_name).join(&run_id);
+
+    let recover = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .args(["recover", "--ledger"])
+        .arg(&ledger_path)
+        .args(["--run-dir"])
+        .arg(&record_dir)
+        .output()
+        .unwrap();
+    assert!(
+        !recover.status.success(),
+        "a genuine session conflict must fail closed, not exit cleanly"
+    );
+    let stderr = String::from_utf8_lossy(&recover.stderr);
+    assert!(
+        stderr.contains("different provider session"),
+        "expected an honest diagnostic naming the session conflict, got: {stderr}"
+    );
+
+    let after = provider_session_id(&ledger_path, &run_id);
+    assert_eq!(
+        after.as_deref(),
+        Some(conflicting_session),
+        "the ledger's own existing session must be left completely untouched by a failed \
+         recovery — never overwritten by the receipt, and never cleared"
     );
 }
 
@@ -2513,6 +2597,218 @@ fn a_tampered_sealed_record_fails_closed_never_redriven_never_recovered() {
     assert_eq!(
         command_status, "started",
         "the command must be left discoverable, never silently rejected or completed"
+    );
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 fifth corrective round (required test #9, "terminal ledger
+/// never trusted alone"): the child run's OWN ledger row is genuinely
+/// `completed` (a real seal really did land) — but the COMMAND itself is
+/// still `started` (as if the post-seal command-completion write crashed
+/// separately), and the canonical record on disk has been tampered with
+/// after the fact. Part 5 requires the outer gate to inspect the canonical
+/// record whenever the command's own status is still active, REGARDLESS
+/// of the child ledger row already showing terminal — so this must still
+/// surface as an integrity failure, never be waved through because the
+/// ledger already "looks done".
+#[test]
+fn a_terminal_ledger_status_never_substitutes_for_canonical_verification() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+    };
+
+    let old_run_id = "old-terminal-but-tampered-child";
+    let command_text = "second turn";
+    let idempotency_key = "key-terminal-tampered";
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": parent_run_id,
+            "command_text": command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-terminal-tampered', ?1, ?2, ?3, 'started', ?4, 1000, 1000)",
+            rusqlite::params![conversation_id, parent_run_id, command_text, old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-terminal-tampered', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conversation_id)
+        .arg("--parent-run-id")
+        .arg(&parent_run_id)
+        .arg("--command")
+        .arg(command_text)
+        .arg("--run-id")
+        .arg(old_run_id)
+        .arg("--command-id")
+        .arg("cmd-terminal-tampered")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(claude.invocation_count(), 2);
+
+    let target_name = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let record_dir = runs_dir.join(&target_name).join(old_run_id);
+    // Tamper the canonical record AFTER it sealed — the same class of
+    // post-seal edit as the round-4 tampered test.
+    std::fs::write(
+        record_dir.join("diff.patch"),
+        b"totally different patch bytes",
+    )
+    .unwrap();
+
+    // Crucially: leave `run`/`run_attempt` status EXACTLY as `o7 continue`
+    // left them — genuinely `completed` — and revert ONLY the command's
+    // own bookkeeping to `started`, as if the post-seal command-completion
+    // write crashed separately from the run's own seal.
+    let (run_status_before, command_status_before): (String, String) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let rs: String = conn
+            .query_row(
+                "SELECT status FROM run WHERE run_id = ?1",
+                [old_run_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let cs: String = conn
+            .query_row(
+                "SELECT status FROM command WHERE command_id = 'cmd-terminal-tampered'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        (rs, cs)
+    };
+    assert_eq!(
+        run_status_before, "completed",
+        "sanity: the child run really did seal"
+    );
+    assert_eq!(
+        command_status_before, "completed",
+        "sanity: `o7 continue`'s own post-seal bookkeeping landed before we revert it"
+    );
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE command SET status = 'started', updated_at = 1000 \
+             WHERE command_id = 'cmd-terminal-tampered'",
+            [],
+        )
+        .unwrap();
+    }
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(
+        status, 500,
+        "a stale-but-active command must have its old child's canonical record inspected even \
+         though the ledger already shows that child as terminal: {retried:?}"
+    );
+    assert_eq!(retried["code"], "COMMAND_CANONICAL_RECORD_INVALID");
+
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "a terminal-looking-but-tampered record must never cause a redrive (double invocation)"
+    );
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-terminal-tampered'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        command_status, "started",
+        "the command must be left discoverable, never silently re-completed from the stale \
+         terminal ledger row alone"
     );
     assert_eq!(command_child.as_deref(), Some(old_run_id));
 
@@ -3079,6 +3375,229 @@ fn two_concurrent_same_key_retries_produce_exactly_one_cas_winner() {
     let _ = o7d_child.wait();
 }
 
+/// Q-Deck R1 fifth corrective round (required test #10, "concurrent
+/// sealed recovery convergence"): two truly concurrent same-key retries
+/// against an already-SEALED record must converge on the SAME final
+/// answer — the run id never changes for a sealed recovery, only the
+/// command's `status`, so this exercises Part 6's lock-loser poll
+/// directly (as opposed to the CAS/rebind path the test above covers for
+/// an unsealed record). The provider must never be invoked a third time,
+/// and neither response may be the stale pre-lock snapshot the losing
+/// thread's `redrive_or_recover_locked` call was originally given.
+#[test]
+fn two_concurrent_same_key_retries_against_a_sealed_record_converge_without_a_stale_snapshot() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+    };
+
+    let old_run_id = "old-concurrent-sealed-child";
+    let command_text = "second turn";
+    let idempotency_key = "key-concurrent-sealed";
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": parent_run_id,
+            "command_text": command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-concurrent-sealed', ?1, ?2, ?3, 'started', ?4, 1000, 1000)",
+            rusqlite::params![conversation_id, parent_run_id, command_text, old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-concurrent-sealed', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conversation_id)
+        .arg("--parent-run-id")
+        .arg(&parent_run_id)
+        .arg("--command")
+        .arg(command_text)
+        .arg("--run-id")
+        .arg(old_run_id)
+        .arg("--command-id")
+        .arg("cmd-concurrent-sealed")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(claude.invocation_count(), 2);
+
+    // Revert to stale, exactly like the blocker-kill test — a genuinely
+    // sealed record whose ledger bookkeeping alone looks like it needs
+    // recovering.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET status = 'running' WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE run_attempt SET status = 'running', finished_at = NULL WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE command SET status = 'started', updated_at = 1000 \
+             WHERE command_id = 'cmd-concurrent-sealed'",
+            [],
+        )
+        .unwrap();
+    }
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let body = serde_json::json!({
+        "schema_version": 1,
+        "parent_run_id": parent_run_id,
+        "command": command_text,
+        "idempotency_key": idempotency_key,
+    });
+    let body_a = body.clone();
+    let conversation_id_a = conversation_id.clone();
+    let handle_a = std::thread::spawn(move || {
+        post(
+            addr,
+            &format!("/api/v1/conversations/{conversation_id_a}/commands"),
+            &body_a,
+        )
+    });
+    let handle_b = std::thread::spawn(move || {
+        post(
+            addr,
+            &format!("/api/v1/conversations/{conversation_id}/commands"),
+            &body,
+        )
+    });
+    let (status_a, retried_a) = handle_a.join().unwrap();
+    let (status_b, retried_b) = handle_b.join().unwrap();
+
+    // Both threads must converge on the SAME final answer — a sealed
+    // recovery never changes the run id, so both must report either the
+    // original `old_run_id` (202, recovered) or — if one thread's own
+    // classify-then-recover round fully finished, including the atomic
+    // completion, before the other's HTTP handler even read the command
+    // row — a `409`-shaped/completed-command response is equally
+    // convergent. What must NEVER happen is a stale pre-lock snapshot: an
+    // OK response naming a run id that isn't `old_run_id`, or two
+    // responses disagreeing with each other.
+    for (status, body) in [(status_a, &retried_a), (status_b, &retried_b)] {
+        assert!(
+            status == 202 || status == 200,
+            "expected either an accepted recovery (202) or an idempotent replay of the already- \
+             completed command, got {status}: {body:?}"
+        );
+    }
+    if status_a == 202 {
+        assert_eq!(retried_a["run_id"], old_run_id);
+    }
+    if status_b == 202 {
+        assert_eq!(retried_b["run_id"], old_run_id);
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    poll_until(deadline, || {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let s: String = conn
+            .query_row(
+                "SELECT status FROM command WHERE command_id = 'cmd-concurrent-sealed'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        (s == "completed").then_some(())
+    });
+
+    // Give any (incorrect) additional redrive/recovery a real chance to
+    // happen before asserting it didn't.
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "two concurrent retries against an already-sealed record must never invoke the \
+         provider a third time"
+    );
+
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-concurrent-sealed'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(command_status, "completed");
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
 /// Q-Deck R1 fourth corrective round: "sealed canonical record with a
 /// missing ledger row" cannot actually arise. Ordering proof: a canonical
 /// stream only reaches `RunSealed` if `continue_execute` got PAST
@@ -3167,7 +3686,33 @@ fn a_run_started_only_prefix_with_no_ledger_row_is_valid_unsealed_and_redriven()
             task: task_ref,
         })
         .unwrap();
-    let events_before = o7::events::to_jsonl(&[run_started]).unwrap();
+    // Q-Deck R1 fifth corrective round: the classifier now requires the
+    // EXACT command-identity receipt too — durable before `RunStarted`
+    // (same crash-window discipline), tamper-evident via the canonical
+    // `CommandBindingCaptured` event right after it.
+    let command_binding = o7::record::CommandBinding {
+        schema: 1,
+        command_id: "cmd-preattach".to_owned(),
+        conversation_id: conversation_id.clone(),
+        parent_run_id: parent_run_id.clone(),
+        child_run_id: old_run_id.to_owned(),
+        command_sha256: o7_run::event::Digest256::of_bytes(command_text.as_bytes())
+            .as_str()
+            .to_owned(),
+    };
+    command_binding.write_durable(&rec).unwrap();
+    let command_binding_bytes = serde_json::to_vec(&command_binding).unwrap();
+    let command_binding_ref = o7::events::artifact(
+        o7_run::event::ArtifactKind::CommandBinding,
+        "command_binding.json",
+        &command_binding_bytes,
+    );
+    let command_binding_captured = chain
+        .push(o7_run::event::RunEventKind::CommandBindingCaptured {
+            binding: command_binding_ref,
+        })
+        .unwrap();
+    let events_before = o7::events::to_jsonl(&[run_started, command_binding_captured]).unwrap();
     std::fs::write(rec.dir.join("events.jsonl"), &events_before).unwrap();
 
     // Sanity: genuinely no ledger row for this run id — never touched.
@@ -3446,4 +3991,995 @@ fn a_delayed_original_process_is_harmless_after_its_run_id_is_redriven_and_compl
         "the command's binding must still point at the fresh (redriven) child — untouched by \
          the delayed original"
     );
+}
+
+/// Q-Deck R1 fifth corrective round (required test #8, "scoped catch-up
+/// itself failing"): the record classifies as `ValidSealed` — its lineage,
+/// digest, and command binding are all genuinely correct — but the scoped
+/// catch-up (`catch_up_record`) still fails on its OWN terms (here: a
+/// conflicting pre-existing ledger session, exactly like required test
+/// #4, but reached through the HTTP redrive path this time). The command
+/// must stay started/recoverable, the provider must never be invoked
+/// again, and — once the underlying conflict is cleared — a LATER retry
+/// must still be able to succeed.
+#[test]
+fn a_failing_scoped_catch_up_leaves_the_command_recoverable_for_a_later_retry() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+    };
+
+    let command_text = "second turn";
+    let old_run_id = "old-conflicting-session-child";
+    let idempotency_key = "key-conflicting-session";
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": parent_run_id,
+            "command_text": command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-conflicting-session', ?1, ?2, ?3, 'started', ?4, 1000, 1000)",
+            rusqlite::params![conversation_id, parent_run_id, command_text, old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-conflicting-session', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conversation_id)
+        .arg("--parent-run-id")
+        .arg(&parent_run_id)
+        .arg("--command")
+        .arg(command_text)
+        .arg("--run-id")
+        .arg(old_run_id)
+        .arg("--command-id")
+        .arg("cmd-conflicting-session")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(claude.invocation_count(), 2);
+
+    // A genuinely valid, fully-sealed, correctly-bound record — but the
+    // ledger's OWN session for this run now disagrees with its canonical
+    // receipt, exactly the conflict required test #4 exercises directly
+    // against `o7 recover`. Here it must surface through the HTTP redrive
+    // path as a scoped-catch-up FAILURE, not an identity/lineage failure.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET provider_session_id = 'a-conflicting-session-value' WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+    }
+
+    // Revert to stale, exactly like the other redrive tests.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET status = 'running' WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE run_attempt SET status = 'running', finished_at = NULL WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE command SET status = 'started', updated_at = 1000 WHERE command_id = 'cmd-conflicting-session'",
+            [],
+        )
+        .unwrap();
+    }
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status, 500, "{retried:?}");
+    assert_eq!(retried["code"], "COMMAND_RECOVERY_FAILED");
+
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "a failed scoped catch-up must never invoke the provider again"
+    );
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-conflicting-session'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        command_status, "started",
+        "a failed scoped catch-up must leave the command started, never completed"
+    );
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
+
+    // Clear the underlying conflict and prove a LATER retry can still
+    // succeed — a failed scoped catch-up must never permanently wedge the
+    // command.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET provider_session_id = NULL WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+    }
+    let (status2, retried2) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status2, 202, "{retried2:?}");
+    assert_eq!(retried2["run_id"], old_run_id);
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    poll_until(deadline, || {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let s: String = conn
+            .query_row(
+                "SELECT status FROM command WHERE command_id = 'cmd-conflicting-session'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        (s == "completed").then_some(())
+    });
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "recovering the same already-sealed record on a later retry must still never invoke \
+         the provider again"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 fifth corrective round (required test #5, "wrong parent"): a
+/// genuinely valid, sealed canonical record whose OWN `command_binding.json`
+/// carries a DIFFERENT `parent_run_id` than the command the ledger
+/// currently associates it with must be classified `Invalid` — never
+/// recovered, never redriven, never completed, provider never invoked
+/// again.
+#[test]
+fn a_sealed_record_with_a_command_binding_wrong_parent_fails_closed() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+    let (real_parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+    };
+
+    // The command row's OWN parent_run_id is a DIFFERENT (bogus) value —
+    // `o7 continue` itself is invoked with the REAL parent (so the record
+    // it produces is otherwise entirely genuine and sealed), but the
+    // ledger's command row disagrees about which run it continues from.
+    let wrong_parent_run_id = "wrong-parent-entirely";
+    let old_run_id = "old-wrong-parent-child";
+    let command_text = "second turn";
+    let idempotency_key = "key-wrong-parent";
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        // `command`'s own FK requires (conversation_id, parent_run_id) to
+        // name a REAL run row in this same conversation — a second, entirely
+        // unrelated sibling run stands in for "some other run this command
+        // was never actually continuing from".
+        conn.execute(
+            "INSERT INTO run (run_id, conversation_id, parent_run_id, agent, role, status, \
+             created_at, finished_at) \
+             VALUES (?1, ?2, NULL, 'claude', 'assistant', 'completed', 1000, 1000)",
+            rusqlite::params![wrong_parent_run_id, conversation_id],
+        )
+        .unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": wrong_parent_run_id,
+            "command_text": command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-wrong-parent', ?1, ?2, ?3, 'started', ?4, 1000, 1000)",
+            rusqlite::params![
+                conversation_id,
+                wrong_parent_run_id,
+                command_text,
+                old_run_id
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-wrong-parent', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conversation_id)
+        .arg("--parent-run-id")
+        .arg(&real_parent_run_id) // the REAL parent — the record itself is genuine
+        .arg("--command")
+        .arg(command_text)
+        .arg("--run-id")
+        .arg(old_run_id)
+        .arg("--command-id")
+        .arg("cmd-wrong-parent")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(claude.invocation_count(), 2);
+
+    // Revert to stale, exactly like the blocker-kill test.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET status = 'running' WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE run_attempt SET status = 'running', finished_at = NULL WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE command SET status = 'started', updated_at = 1000 WHERE command_id = 'cmd-wrong-parent'",
+            [],
+        )
+        .unwrap();
+    }
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": wrong_parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status, 500, "{retried:?}");
+    assert_eq!(retried["code"], "COMMAND_CANONICAL_RECORD_INVALID");
+
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "the provider must never be invoked for a record whose command binding disagrees on \
+         parent_run_id"
+    );
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-wrong-parent'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(command_status, "started");
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 fifth corrective round (required test #6, "wrong command
+/// text"): a genuinely valid, sealed canonical record whose `task.md`
+/// (and thus its `command_binding.json`'s own `command_sha256`) refers to
+/// DIFFERENT text than the command the ledger currently associates it
+/// with must be classified `Invalid` — never recovered, never redriven,
+/// never completed.
+#[test]
+fn a_sealed_record_bound_to_different_command_text_fails_closed() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+    };
+
+    let real_command_text = "the actual text this run was dispatched with";
+    let wrong_command_text = "a completely different command the ledger now claims";
+    let old_run_id = "old-wrong-text-child";
+    let idempotency_key = "key-wrong-text";
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": parent_run_id,
+            "command_text": wrong_command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-wrong-text', ?1, ?2, ?3, 'started', ?4, 1000, 1000)",
+            rusqlite::params![
+                conversation_id,
+                parent_run_id,
+                wrong_command_text,
+                old_run_id
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-wrong-text', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conversation_id)
+        .arg("--parent-run-id")
+        .arg(&parent_run_id)
+        .arg("--command")
+        .arg(real_command_text) // the REAL text this record's own task.md carries
+        .arg("--run-id")
+        .arg(old_run_id)
+        .arg("--command-id")
+        .arg("cmd-wrong-text")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(claude.invocation_count(), 2);
+
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET status = 'running' WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE run_attempt SET status = 'running', finished_at = NULL WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE command SET status = 'started', updated_at = 1000 WHERE command_id = 'cmd-wrong-text'",
+            [],
+        )
+        .unwrap();
+    }
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": wrong_command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status, 500, "{retried:?}");
+    assert_eq!(retried["code"], "COMMAND_CANONICAL_RECORD_INVALID");
+
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(claude.invocation_count(), 2);
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-wrong-text'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(command_status, "started");
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 fifth corrective round (required test #7, "wrong command
+/// ID"): the run id and conversation match, but the record's own
+/// `command_binding.json` names a DIFFERENT `command_id` than the one this
+/// decision is actually about. Fail closed.
+#[test]
+fn a_sealed_record_bound_to_a_different_command_id_fails_closed() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+    let (parent_run_id, conversation_id) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row("SELECT run_id, conversation_id FROM run LIMIT 1", [], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
+        .unwrap()
+    };
+
+    let command_text = "second turn";
+    let old_run_id = "old-wrong-command-id-child";
+    let idempotency_key = "key-wrong-command-id";
+    // TWO command rows both bound to the SAME child run id — `command`'s
+    // own `child_run_id` column has no FK or uniqueness constraint
+    // (`crates/o7-ledger/src/migrations.rs`'s own SCHEMA_V3 comment: durable
+    // binding must be able to precede the child run's own ledger row, so
+    // referential correctness there is the application's job, not the
+    // schema's). 'cmd-real' is the one the HTTP retry is actually about;
+    // `o7 continue` itself is invoked bound to 'cmd-foreign' instead, so the
+    // canonical record's own `command_binding.json` names a DIFFERENT
+    // command id than the command this decision is actually about.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conversation_id,
+            "parent_run_id": parent_run_id,
+            "command_text": command_text,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-real', ?1, ?2, ?3, 'started', ?4, 1000, 1000)",
+            rusqlite::params![conversation_id, parent_run_id, command_text, old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-real', 1000)",
+            rusqlite::params![idempotency_key, digest],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-foreign', ?1, ?2, ?3, 'started', ?4, 1000, 1000)",
+            rusqlite::params![conversation_id, parent_run_id, command_text, old_run_id],
+        )
+        .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conversation_id)
+        .arg("--parent-run-id")
+        .arg(&parent_run_id)
+        .arg("--command")
+        .arg(command_text)
+        .arg("--run-id")
+        .arg(old_run_id)
+        .arg("--command-id")
+        .arg("cmd-foreign") // bound and real, but a DIFFERENT command id than 'cmd-real'
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(claude.invocation_count(), 2);
+
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET status = 'running' WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE run_attempt SET status = 'running', finished_at = NULL WHERE run_id = ?1",
+            [old_run_id],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE command SET status = 'started', updated_at = 1000 WHERE command_id = 'cmd-real'",
+            [],
+        )
+        .unwrap();
+    }
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(status, 500, "{retried:?}");
+    assert_eq!(retried["code"], "COMMAND_CANONICAL_RECORD_INVALID");
+
+    std::thread::sleep(Duration::from_millis(400));
+    assert_eq!(claude.invocation_count(), 2);
+    let (command_status, command_child): (String, Option<String>) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT status, child_run_id FROM command WHERE command_id = 'cmd-real'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(command_status, "started");
+    assert_eq!(command_child.as_deref(), Some(old_run_id));
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Q-Deck R1 fifth corrective round (required test #1, "scoped recovery
+/// isolation"): recovering conversation A's own sealed-but-stale child run
+/// must NEVER touch anything belonging to a genuinely, concurrently LIVE
+/// run/attempt in a DIFFERENT conversation B — proving `catch_up_record`'s
+/// own scoping (no `recover_scan`/`mark_interrupted`/global side effects)
+/// end to end, not merely by code inspection.
+#[test]
+fn recovering_one_conversations_sealed_child_never_touches_a_different_conversations_live_run() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = FakeClaude::new();
+
+    // Conversation A: a real sealed child, reverted to a stale ledger
+    // status — exactly the blocker-kill scenario.
+    let mut run_child_a = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child_a.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+    let (parent_a, conv_a) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT run_id, conversation_id FROM run ORDER BY rowid DESC LIMIT 1",
+            [],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        )
+        .unwrap()
+    };
+    let command_text_a = "conversation A's command";
+    let idempotency_key_a = "key-isolation-a";
+    let old_run_id_a = "old-sealed-child-a";
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let digest_input = serde_json::json!({
+            "conversation_id": conv_a, "parent_run_id": parent_a, "command_text": command_text_a,
+        });
+        let digest =
+            o7_ledger::idempotency::digest_bytes(&serde_json::to_vec(&digest_input).unwrap());
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES ('cmd-isolation-a', ?1, ?2, ?3, 'started', ?4, 1000, 1000)",
+            rusqlite::params![conv_a, parent_a, command_text_a, old_run_id_a],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO idempotency_record (scope, key, request_digest, result_reference, \
+             created_at) VALUES ('create-command', ?1, ?2, 'cmd-isolation-a', 1000)",
+            rusqlite::params![idempotency_key_a, digest],
+        )
+        .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conv_a)
+        .arg("--parent-run-id")
+        .arg(&parent_a)
+        .arg("--command")
+        .arg(command_text_a)
+        .arg("--run-id")
+        .arg(old_run_id_a)
+        .arg("--command-id")
+        .arg("cmd-isolation-a")
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(claude.invocation_count(), 2);
+
+    // Conversation B: a genuinely LIVE run and attempt in an entirely
+    // separate conversation — modeling a real, concurrently in-progress
+    // run that must never be touched by conversation A's own scoped
+    // recovery (a GLOBAL `recover_scan`/`mark_interrupted`, which this
+    // round's whole point is to never trigger from a single request,
+    // would reclassify this as `interrupted`).
+    let (conv_b, parent_b) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let conv_b = "conv-b-live".to_owned();
+        conn.execute(
+            "INSERT INTO conversation (conversation_id, status, created_at) VALUES (?1, 'open', 1000)",
+            [&conv_b],
+        )
+        .unwrap();
+        let parent_b = "live-run-b".to_owned();
+        conn.execute(
+            "INSERT INTO run (run_id, conversation_id, parent_run_id, agent, role, status, created_at) \
+             VALUES (?1, ?2, NULL, 'claude', 'implementer', 'running', 1000)",
+            rusqlite::params![parent_b, conv_b],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO run_attempt (attempt_id, run_id, attempt_number, status, started_at) \
+             VALUES ('attempt-b-live', ?1, 1, 'running', 1000)",
+            [&parent_b],
+        )
+        .unwrap();
+        (conv_b, parent_b)
+    };
+
+    // Revert conversation A's own run/attempt/command to stale — the
+    // retry below is about A ONLY.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET status = 'running' WHERE run_id = ?1",
+            [old_run_id_a],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE run_attempt SET status = 'running', finished_at = NULL WHERE run_id = ?1",
+            [old_run_id_a],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE command SET status = 'started', updated_at = 1000 WHERE command_id = 'cmd-isolation-a'",
+            [],
+        )
+        .unwrap();
+    }
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(200),
+    );
+    wait_until_healthy(addr);
+
+    let (status, retried) = post(
+        addr,
+        &format!("/api/v1/conversations/{conv_a}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_a,
+            "command": command_text_a,
+            "idempotency_key": idempotency_key_a,
+        }),
+    );
+    assert_eq!(status, 202, "{retried:?}");
+    assert_eq!(retried["run_id"], old_run_id_a);
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    poll_until(deadline, || {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let s: String = conn
+            .query_row(
+                "SELECT status FROM run WHERE run_id = ?1",
+                [old_run_id_a],
+                |r| r.get(0),
+            )
+            .unwrap();
+        (s == "completed").then_some(())
+    });
+
+    // Conversation B's own run/attempt must be COMPLETELY untouched —
+    // still exactly `running`, never reclassified `interrupted` (which a
+    // GLOBAL `recover_scan`/`mark_interrupted` would have done).
+    let (conn_b_run_status, conn_b_attempt_status): (String, String) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT r.status, a.status FROM run r JOIN run_attempt a ON a.run_id = r.run_id \
+             WHERE r.run_id = ?1",
+            [&parent_b],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        conn_b_run_status, "running",
+        "an unrelated conversation's genuinely live run must never be touched by A's own \
+         scoped recovery"
+    );
+    assert_eq!(conn_b_attempt_status, "running");
+
+    // B can still seal normally afterward, proving it was never
+    // reclassified into a dead-end state.
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.execute(
+            "UPDATE run SET status = 'completed' WHERE run_id = ?1",
+            [&parent_b],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE run_attempt SET status = 'completed', finished_at = 2000 WHERE run_id = ?1",
+            [&parent_b],
+        )
+        .unwrap();
+    }
+    let (final_b_run, final_b_attempt): (String, String) = {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        conn.query_row(
+            "SELECT r.status, a.status FROM run r JOIN run_attempt a ON a.run_id = r.run_id \
+             WHERE r.run_id = ?1",
+            [&parent_b],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap()
+    };
+    assert_eq!(final_b_run, "completed");
+    assert_eq!(final_b_attempt, "completed");
+    let _ = conv_b;
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
 }
