@@ -58,3 +58,54 @@ pub(crate) fn classify_child_record(
         Err(e) => ChildRecordState::Invalid(format!("resolving the record directory: {e}")),
     }
 }
+
+/// Q-Deck A0 (`docs/q-deck/a0-candidate-state.md` §8): a read-only,
+/// best-effort candidate-state projection for `routes::get_run` — never
+/// mutates anything, never gates a redrive decision (that stays exactly
+/// `classify_child_record`/`o7::recovery::classify_command_child`, above,
+/// untouched by this). Returns `(candidate_source_run_id, candidate_tree_oid,
+/// materialization_status)`; all `None`/`"not_applicable"` for a run with no
+/// canonical record yet, or one that never attempted materialization (a
+/// top-level `o7 run`, or a continuation still pre-dispatch).
+pub(crate) fn candidate_projection(
+    exec: &ExecutionConfig,
+    run_id: &str,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let dir = match child_record_dir(exec, run_id) {
+        Ok(dir) => dir,
+        Err(e) => {
+            return (
+                None,
+                None,
+                Some(format!("failed: resolving record directory: {e}")),
+            )
+        }
+    };
+    let text = match std::fs::read_to_string(dir.join("events.jsonl")) {
+        Ok(text) => text,
+        Err(_) => return (None, None, Some("not_applicable".to_owned())),
+    };
+    for line in text.lines().rev() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let kind = event.get("kind");
+        if kind.and_then(|k| k.get("type")).and_then(|t| t.as_str())
+            == Some("candidate_state_materialized")
+        {
+            let source = kind
+                .and_then(|k| k.get("source_run_id"))
+                .and_then(|v| v.as_str())
+                .map(str::to_owned);
+            let oid = kind
+                .and_then(|k| k.get("actual_tree_oid"))
+                .and_then(|v| v.as_str())
+                .map(str::to_owned);
+            return (source, oid, Some("materialized".to_owned()));
+        }
+    }
+    (None, None, Some("not_applicable".to_owned()))
+}

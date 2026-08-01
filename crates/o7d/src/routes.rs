@@ -141,9 +141,18 @@ pub(crate) async fn get_run(
     State(state): State<AppState>,
     Path(run_id): Path<String>,
 ) -> Result<Json<RunDto>, ApiError> {
-    let id = o7_ledger::RunId::from_raw(run_id);
+    let id = o7_ledger::RunId::from_raw(run_id.clone());
     let run = state.ledger.run(id).await?.ok_or(ApiError::NotFound)?;
-    Ok(Json(run.into()))
+    let mut dto: RunDto = run.into();
+    // Q-Deck A0: read-only candidate-state projection, best-effort, never
+    // gating anything — see `canonical::candidate_projection`.
+    if let Some(exec) = &state.exec {
+        let (source, oid, status) = crate::canonical::candidate_projection(exec, &run_id);
+        dto.candidate_source_run_id = source;
+        dto.candidate_tree_oid = oid;
+        dto.materialization_status = status;
+    }
+    Ok(Json(dto))
 }
 
 /// Q-Deck R1 (`docs/q-deck/r1-command.md` §8): the command text's own size

@@ -66,6 +66,22 @@ pub struct RunDto {
     pub status: String,
     pub created_at: i64,
     pub finished_at: Option<i64>,
+    /// Q-Deck A0 (`docs/q-deck/a0-candidate-state.md` §8): read-only
+    /// candidate-state projection, populated by `routes::get_run` from the
+    /// run's own canonical record when server-side execution config is
+    /// available — additive-only (never populated: an older/no-A0 run, or
+    /// no `exec` config), so no `API_SCHEMA_VERSION` bump is needed (Q-Deck
+    /// never branches on these fields' exact values, only displays them).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_source_run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub candidate_tree_oid: Option<String>,
+    /// One of `"materialized"`, `"not_applicable"` (no command-continuation
+    /// materialization attempted for this run — e.g. a top-level `o7 run`),
+    /// or `"failed: <reason>"`. `None` only when no `exec` config was
+    /// available to even attempt the read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub materialization_status: Option<String>,
 }
 
 impl From<o7_ledger::Run> for RunDto {
@@ -80,6 +96,9 @@ impl From<o7_ledger::Run> for RunDto {
             status: r.status.as_str().to_owned(),
             created_at: r.created_at,
             finished_at: r.finished_at,
+            candidate_source_run_id: None,
+            candidate_tree_oid: None,
+            materialization_status: None,
         }
     }
 }
