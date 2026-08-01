@@ -192,16 +192,25 @@ relevant fields of the request.
   `IdempotencyConflict` — no mutation, no provider invocation, mapped to
   HTTP `409`.
 
-**The precise claim, stated once, plainly**: at-most-once provider
-invocation per accepted Command — never exactly-once, and never claimed
-across anything wider than the single-host, shared-filesystem, one-SQLite-
-file authority model this whole slice runs on (one `runs_dir`, one ledger
-file, `flock` as the sole liveness primitive). A canonical record's own
-verified evidence can always demote a would-be redrive back down to zero
-additional invocations (§7's `ValidSealed` case); nothing here promises a
-distributed lease, multi-host coordination, or safety if `runs_dir`/the
-ledger file are ever split across hosts — that is explicitly out of scope
-(see "What R1 does not do").
+**The precise claim, stated once, plainly (revised by the sixth corrective
+round — §11 has the full contract)**: once the canonical dispatch boundary
+is durable, an unsealed outcome is treated as ambiguous and is never
+automatically redriven. This preserves at-most-once provider invocation
+within the supported single-host model, at the cost of requiring manual
+resolution for ambiguous post-dispatch crashes. Never exactly-once, and
+never claimed across anything wider than the single-host, shared-
+filesystem, one-SQLite-file authority model this whole slice runs on (one
+`runs_dir`, one ledger file, `flock` as the sole liveness primitive). A
+canonical record's own verified evidence can always demote a would-be
+redrive back down to zero additional invocations (§7's `ValidSealed`
+case); nothing here promises a distributed lease, multi-host coordination,
+or safety if `runs_dir`/the ledger file are ever split across hosts — that
+is explicitly out of scope (see "What R1 does not do"). Automatic redrive
+is now possible ONLY pre-dispatch (§11.2) — a genuinely still-running
+process is only ever redriven after it is proven dead via `flock`, never
+on a wall-clock guess alone, exactly as before; this round changes what
+happens once a process crashes AFTER the dispatch boundary, not the
+liveness proof itself.
 
 ## 5. Concurrency and parent validity
 
@@ -899,14 +908,199 @@ than being silently swallowed into a stale answer.
 
 No broader "exactly-once" guarantee is made anywhere in this round — §4's
 at-most-once claim, scoped to this slice's single-host/one-ledger-file
-model, is unchanged and is not widened by anything here. A `ValidUnsealed`
-record discovered after `AgentStarted` (the provider genuinely still
-running, or crashed mid-turn) is handled exactly as §7 already describes —
-redriven once proven dead via `flock`, never on a wall-clock guess alone;
-this round changes nothing about that path except that `command_binding.json`
-is now also checked for it, per §10.3.
+model, is unchanged and is not widened by anything here.
+
+**Superseded by the sixth corrective round (§11):** the sentence that used
+to stand here — that a `ValidUnsealed` record discovered after
+`AgentStarted` is "redriven once proven dead via `flock`" — was itself the
+sixth round's own blocker finding. It is no longer true: `AgentStarted`
+durably present with nothing past it is now its own classification,
+`ValidUnsealedDispatchAmbiguous`, and is NEVER automatically redriven
+regardless of `flock` liveness. See §11 for the full, current contract; do
+not rely on this section's own fifth-round wording for that specific case.
+
+## 11. Sixth corrective round — phase-aware unsealed recovery
+
+Closing review "5150998121" — the one blocker every earlier round left
+standing: after the durable dispatch boundary, no unsealed record can
+ever prove the provider was NOT invoked. Every earlier round's own
+`ValidUnsealed` case quietly assumed it could — this round retracts that
+assumption and fails closed instead.
+
+### 11.1 The frozen durable dispatch boundary
+
+`RunEventKind::AgentStarted` (already the existing lifecycle event every
+run appends) is now explicitly frozen as the durable dispatch boundary a
+redrive decision relies on. Its own doc comment in
+`crates/o7-run/src/event.rs` states the exact, narrow claim: this event's
+append (including its `sync_data()`) always completes, in both
+`execute_live` and `continue_execute`, BEFORE the corresponding provider
+invocation (`agent::run`/`agent::continue_session`) is ever called. This
+is a ONE-DIRECTION guarantee — "no invocation can have happened before
+this is durable" — never the converse ("this durable means an invocation
+definitely happened", let alone "a later outcome is known"). A crash
+between this durable append and the real OS-level spawn is therefore
+STILL possible, and is deliberately treated identically to a crash after
+a real, successful invocation — see §11.2. No new event was added:
+`AgentStarted` was already exactly this conservative, and adding a
+second, nearly-identical marker would have bought nothing.
+
+### 11.2 Refined classification: pre-dispatch vs. dispatch-ambiguous
+
+`crates/o7d/src/canonical.rs`'s `ChildRecordState` (the type a redrive
+decision matches on) splits its old single `ValidUnsealed` into two:
+
+- `ValidUnsealedPreDispatch` — the durable dispatch boundary was NEVER
+  reached. Safe to redrive with a fresh id once the old process is
+  provably dead (`flock`) — unchanged from every earlier round.
+- `ValidUnsealedDispatchAmbiguous { progress: DispatchProgress }` — the
+  boundary WAS reached (or passed). `DispatchProgress` names the
+  FURTHEST evidence found — `AgentStarted`, `AgentExited`,
+  `ProviderSessionCaptured`, or `PostProviderWork` (a patch and/or gate
+  work captured after the provider) — purely for operator diagnostics;
+  every one of these four values is handled IDENTICALLY by the redrive
+  decision. NEVER automatically redriven, recovered, completed, or
+  rejected.
+
+Both variants — and the function that decides between them,
+`o7::recovery::classify_command_child` — live in the ROOT `o7` crate's
+`recovery` module now, not duplicated in `o7d`: `o7d`'s own
+`classify_child_record` is a thin wrapper that resolves the record
+directory from server-owned `ExecutionConfig` and delegates. This is the
+SAME primitive `o7 recover`'s own operator-discovery reporting uses
+(§11.5) — one classifier, never two that could silently drift apart.
+
+Classification is derived ENTIRELY from the already-verified/reduced
+`RunState` — `state.agent` (`AgentLifecycle::Started`/`Exited`),
+`state.provider_session_receipt`, `state.patch`, `state.gates` — never by
+searching `events.jsonl` text. `dispatch_progress()` picks the single
+FURTHEST stage present, most-advanced first: `PostProviderWork` >
+`ProviderSessionCaptured` > `AgentExited` > `AgentStarted` > (none, i.e.
+pre-dispatch).
+
+**The deliberate, disclosed cost**: a crash immediately AFTER
+`AgentStarted`'s durable append but immediately BEFORE the real
+OS-level `fork`/`exec` — i.e., the provider definitely, provably never
+ran — is STILL classified `ValidUnsealedDispatchAmbiguous`, identically
+to a crash after a genuine invocation. The durable record on disk cannot
+tell these two cases apart to a later, independent reader, and this
+round chooses to treat that as ambiguous rather than assume the more
+convenient case. This is why
+`a_provider_spawn_failure_right_after_agent_started_is_provider_outcome_ambiguous`
+and
+`an_ordinary_error_after_attach_is_provider_outcome_ambiguous_never_rejected_never_redriven`
+(both pre-existing tests from earlier rounds, whose ORIGINAL contract
+was "safe to auto-redrive") were revised this round to expect the new,
+stricter outcome instead — a deliberate behavior change, not a
+regression.
+
+### 11.3 Fail-closed HTTP contract
+
+`crates/o7d/src/routes.rs`'s `RedriveError` gains
+`ProviderOutcomeAmbiguous { command_id, child_run_id, phase }`, mapped to
+a stable `409 COMMAND_PROVIDER_OUTCOME_AMBIGUOUS` (`ApiError::Conflict`,
+matching the existing `409` family for stale-parent/idempotency-conflict/
+concurrent-command — never a `500`, since this is a well-understood,
+correctly-detected state, not an internal failure). The error message
+names the command id, the bound child run id, and the last observed
+durable dispatch phase — enough for an operator to act — and NEVER the
+raw provider session id (already impossible here: this path never reads
+`session_receipt.json`'s contents at all).
+
+For a `ValidUnsealedDispatchAmbiguous` classification, `redrive_or_recover_locked`
+does NONE of: mint a fresh `RunId`, call
+`rebind_command_child_run_if_current`, spawn `o7 continue`, invoke the
+provider, complete the command, reject the command, or touch the
+canonical record in any way. The command is left EXACTLY as found —
+`started`, bound to its existing child — a deliberate, disclosed
+fail-closed state, not a hidden wedge. The SAME command stays fully
+discoverable via `o7 recover`'s stuck-command reporting (§11.5) and via a
+later, manually-resolved retry once whatever made it ambiguous is
+addressed out of band (this round adds no automatic path for that
+resolution — see §11.6).
+
+### 11.4 Route decision matrix
+
+Under the old child's own liveness lock, held through the WHOLE decision
+exactly as every earlier round already established:
+
+```
+Absent                          -> existing atomic fresh-ID CAS redrive
+ValidUnsealedPreDispatch        -> existing atomic fresh-ID CAS redrive
+ValidUnsealedDispatchAmbiguous  -> no mutation, no spawn, 409 COMMAND_PROVIDER_OUTCOME_AMBIGUOUS
+ValidSealed                     -> existing scoped exact-lineage catch-up + conditional completion
+Invalid                         -> existing fail-closed integrity error
+```
+
+**Concurrent retries converge.** Since an ambiguous outcome never mutates
+the ledger (`child_run_id`/`status` both stay exactly as found), the
+existing lock-loser poll's OWN convergence signals (`child_run_id`
+changing, `status` becoming `Completed`) would never fire for it — a
+loser would otherwise wait out the full bound and answer with a stale,
+misleadingly-normal snapshot. The poll now ALSO independently
+reclassifies the old child's own record (read-only, safe without holding
+the lock — the record's bytes are already proven immutable once written)
+on every tick; if that reclassification is `ValidUnsealedDispatchAmbiguous`
+or `Invalid`, the loser returns the SAME error a winner reaches, rather
+than a stale snapshot. This does not extend to a `ValidSealed` record
+whose scoped catch-up itself fails — that remains a disclosed, unchanged
+fifth-round limitation (a losing thread can still see a stale snapshot in
+that one specific case).
+
+### 11.5 Operator discovery
+
+`o7 recover`'s existing stuck-command reporting (§7) now optionally
+classifies each bound-but-stuck command's own canonical record, when
+given `--repo`/`--runs-dir` (mirroring `o7 continue`'s own flags) —
+read-only, using the SAME `o7::recovery::classify_command_child` §11.2
+describes, never a second classifier, and never mutating anything or
+invoking the provider. Reported categories: "never actually started",
+"safe pre-dispatch redrive candidate", "PROVIDER-OUTCOME-AMBIGUOUS —
+past the durable dispatch boundary (last phase: ...)", "sealed —
+recoverable via a same-key retry or `o7 recover --run-dir`", or "INVALID
+canonical record: ...". Without these flags, reporting falls back to the
+pre-existing, coarser "that run's `RunStarted` never reached the ledger"
+message — a strict superset of information, never a regression for a
+caller that doesn't pass them.
+
+### 11.6 What this round does NOT add
+
+No force-redrive API, no approve/reject UI for an ambiguous command, no
+new `attempts` table, no automatic abandon of an ambiguous command, no
+provider-specific deduplication, no Alpha A0 (`#52`) work. Manual
+resolution of an ambiguous command is explicitly OUT of scope for this
+round — it stays discoverable (§11.5) and un-mutated; nothing here adds a
+way to clear it besides the operator's own out-of-band judgment (e.g.
+independently confirming via provider-side logs whether the invocation
+actually happened, then hand-editing the ledger — deliberately not
+automated by this slice).
 
 ## Known limitations and evidence
+
+**Sixth independent re-gate (the one remaining blocker, closing review
+"5150998121") — fixed.** Full detail in §11 above. Summary: after the
+durable dispatch boundary (`AgentStarted`), an unsealed record can never
+prove the provider was NOT invoked — every earlier round's redrive
+decision quietly assumed it could. `ChildRecordState::ValidUnsealed`
+splits into `ValidUnsealedPreDispatch` (unchanged: safe to redrive) and
+`ValidUnsealedDispatchAmbiguous { progress }` (new: NEVER auto-redriven,
+recovered, completed, or rejected — fails closed as `409
+COMMAND_PROVIDER_OUTCOME_AMBIGUOUS`). The classifier itself now lives in
+the root `o7` crate (`o7::recovery::classify_command_child`), shared by
+both `o7d`'s redrive decision and `o7 recover`'s new optional
+`--repo`/`--runs-dir` operator-discovery reporting — one classifier, not
+two. The lock-loser convergence poll additionally reclassifies the old
+child's record on every tick (read-only, safe without the lock) so a
+losing concurrent retry converges on the SAME ambiguous/invalid answer a
+winner reaches, never a stale snapshot. Two pre-existing tests from
+earlier rounds — `a_provider_spawn_failure_right_after_agent_started_is_provider_outcome_ambiguous`
+(previously `a_valid_unsealed_prefix_is_redriven_exactly_once_leaving_the_old_record_untouched`)
+and `an_ordinary_error_after_attach_is_provider_outcome_ambiguous_never_rejected_never_redriven`
+(previously `...stays_redrivable`) — were deliberately revised: both
+produce a genuine `AgentStarted`-then-nothing record via a real provider
+failure, which this round's own stricter contract now correctly refuses
+to auto-redrive. This is an intentional behavior change these two tests'
+own names and bodies were updated to reflect, not a regression.
 
 **Fifth independent re-gate (four latent recovery-machinery gaps, closing
 review "4834041346") — all fixed.** Full detail in §10 above. Summary: (1)
@@ -1061,7 +1255,13 @@ round's re-run of two OTHER apparent failures in this exact file,
 `a_live_launch_executes_the_sealed_target_not_a_swapped_source` and
 `an_unexpectedly_launched_target_is_a_fail_not_the_refusal_pass`,
 confirmed by passing cleanly in 13.19s and 24.72s respectively once
-isolated) and points at a genuine pre-existing hang. Scope, exactly as
+isolated) and points at a genuine pre-existing hang. (This sixth
+corrective round reproduced the exact same transient contention failure
+on `a_live_launch_executes_the_sealed_target_not_a_swapped_source` again,
+under a full workspace re-gate on a busier-than-usual VPS, and confirmed
+clean isolated passes 3/3 in 10.9-13.4s each — the same already-disclosed
+signature, not a new anomaly, and still not added to the skip list below
+for the same reason Round 5 didn't add it.) Scope, exactly as
 every other exclusion in this section: `git diff` against `origin`'s
 frozen head for `crates/o7-worker` and `crates/o7-sandbox-protocol` is
 byte-for-byte empty — R1 has never touched either crate, in any round,
