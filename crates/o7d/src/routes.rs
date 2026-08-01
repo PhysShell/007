@@ -208,7 +208,29 @@ fn no_live_process_holds(runs_dir: &std::path::Path, run_id: &str) -> std::io::R
         .write(true)
         .truncate(false)
         .open(&path)?;
-    Ok(nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock).is_ok())
+    match nix::fcntl::Flock::lock(file, nix::fcntl::FlockArg::LockExclusiveNonblock) {
+        Ok(_flock) => Ok(true),
+        // Q-Deck R1 third corrective round (major finding): `EWOULDBLOCK`
+        // is the ONLY errno that actually means "a live process holds
+        // this lock" — anything else (permissions, a filesystem that
+        // doesn't support `flock`, etc.) is a genuine, unrelated I/O
+        // problem. Both still refuse to redrive (fail closed is correct
+        // either way — an unattended false negative is far cheaper than a
+        // double-spawn), but conflating them would make a real
+        // infrastructure fault silently indistinguishable from ordinary,
+        // expected contention — worth a distinct log line, not a
+        // different decision.
+        Err((_file, errno)) => {
+            if errno != nix::errno::Errno::EWOULDBLOCK {
+                eprintln!(
+                    "[o7d] warning: checking run {run_id}'s lock failed with {errno} (not \
+                     EWOULDBLOCK — not ordinary contention); refusing to redrive until this is \
+                     investigated"
+                );
+            }
+            Ok(false)
+        }
+    }
 }
 
 /// `POST /api/v1/conversations/{conversation_id}/commands` (§8/§9.6).
