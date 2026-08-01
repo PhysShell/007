@@ -192,6 +192,17 @@ relevant fields of the request.
   `IdempotencyConflict` — no mutation, no provider invocation, mapped to
   HTTP `409`.
 
+**The precise claim, stated once, plainly**: at-most-once provider
+invocation per accepted Command — never exactly-once, and never claimed
+across anything wider than the single-host, shared-filesystem, one-SQLite-
+file authority model this whole slice runs on (one `runs_dir`, one ledger
+file, `flock` as the sole liveness primitive). A canonical record's own
+verified evidence can always demote a would-be redrive back down to zero
+additional invocations (§7's `ValidSealed` case); nothing here promises a
+distributed lease, multi-host coordination, or safety if `runs_dir`/the
+ledger file are ever split across hosts — that is explicitly out of scope
+(see "What R1 does not do").
+
 ## 5. Concurrency and parent validity
 
 R1's first slice allows **at most one** `accepted` or `started` command
@@ -267,129 +278,174 @@ continuation.
 
 ## 7. Recovery
 
-Three independent gaps, corrected across THREE independent re-gates. The
+Three independent gaps, corrected across FOUR independent re-gates. The
 first found gap A's own recovery claim was false as shipped (idempotent
 replay alone short-circuits before ever re-checking whether a bound child
 run was actually dispatched). The second found gap A's fix was itself
 incomplete (it only handled "child run row doesn't exist yet," not "child
 run row exists but never reached a sealed status") and that a wall-clock
 staleness bound alone can never prove a process is dead, only that it's
-been a while. The third found gap A's fix STILL had two holes: an
-ORDINARY error (not a crash) after the child row already exists was
-unconditionally rejecting the command anyway, defeating the whole
-mechanism; and the lock check alone doesn't close the window between a
-redrive deciding a process is dead and that same process — merely slow to
-start — finally getting scheduled. It also found gap C's backfill trusted
-an unverified sidecar file.
+been a while. The third found gap A's fix STILL had two holes (an ordinary
+error unconditionally rejecting an attached command; the lock check alone
+not closing the TOCTOU window against a merely-slow original process) and
+that gap C's backfill trusted an unverified sidecar file. The fourth found
+the DEEPEST hole yet: ledger STATUS was never actually authoritative for
+gap A's own redrive decision at all — a child run's canonical record on
+disk can be genuinely, fully sealed while its ledger projection still
+shows `queued`/`running`/`interrupted`, and every earlier round's redrive
+path would have re-invoked the provider for it anyway, having never once
+looked at the flat record itself.
 
-**Gap A — bound but never resolved.** A command's `child_run_id` is
-durably bound BEFORE the provider is invoked (§3). If the process that was
-going to run the continuation dies (or errors — see below) at any point
-before the child run reaches a sealed terminal status — before its own
-ledger row even exists, or after, while still `queued`/`running`/
-`interrupted` — the command blocks the conversation forever (per §5's tail
-check, nothing else can become the tail while this child is the latest
-run and isn't sealed). `o7 recover` (plain, no new flags) additionally
-finds every command whose child run row is missing, or exists but is
-`interrupted`, via `stuck_commands`, and reports it — visible, never
-silently dropped (a child still `queued`/`running` is deliberately NOT
-reported here: that might be a live, genuinely in-progress attempt no
-existing mechanism has confirmed dead).
+**Gap A, re-founded on canonical-first classification.** A command's
+`child_run_id` is durably bound BEFORE the provider is invoked (§3). If the
+process that was going to run the continuation dies (or errors) at any
+point before the child run reaches a sealed terminal status, the command
+blocks the conversation forever (per §5's tail check). `o7 recover` (plain,
+no new flags) finds every command whose child run row is missing, or
+exists but is `interrupted`, via `stuck_commands`, and reports it.
+`continue_run` never rejects a command whose child run already attached —
+rejection only fires if the child run never got a ledger row at all;
+otherwise the command's bookkeeping is left exactly as `o7d`'s own bind
+left it (`started`), for the SAME redrive machinery below to resolve.
 
-**`continue_run` never rejects a command whose child run already
-attached.** An earlier draft called `mark_command_rejected` unconditionally
-on ANY error from `continue_execute` — including an ORDINARY error well
-past `attach_run` (the provider binary vanishing mid-run, an artifact
-write failing, anything short of a crash). A `rejected` command is
-invisible to every discovery/redrive mechanism (all scoped to
-`accepted`/`started`), so this would have permanently blocked the
-conversation on nothing more dramatic than a normal runtime error — no
-`SIGKILL` required. Fixed: rejection now only happens if the child run
-NEVER got a ledger row at all (checked directly, right before deciding);
-once `attach_run` has succeeded, the command's bookkeeping is left exactly
-as `o7d`'s own bind left it (`started`), so the SAME redrive machinery
-below is what resolves it.
+`o7d`'s own POST handler actively heals this — but, since the fourth
+re-gate, NEVER on ledger status alone. Before ever deciding between
+"redrive" and "recover", it classifies the OLD child's own canonical
+record, using the identical chain/digest/reducer/artifact verification
+`o7 replay`/`o7 recover --run-dir` are built on
+(`o7_run::replay::classify_record`, shared via `o7-run` — not a second,
+lighter-weight parser):
 
-`o7d`'s own POST handler ALSO actively heals this, for ALL non-terminal
-child states (missing row, or `queued`/`running`/`interrupted`) — gated by
-real proof, not a guess:
+- **`Absent`** — no canonical stream at all (missing or empty
+  `events.jsonl`). Never started; safe to redrive.
+- **`ValidUnsealed`** — a valid, fully verified prefix with no fixed
+  verdict yet. Genuinely still in progress, or crashed before sealing;
+  safe to redrive once its process is provably dead.
+- **`ValidSealed`** — a valid, fully verified, SEALED record. The provider
+  already ran to completion. Redrive is FORBIDDEN; the command must be
+  RECOVERED under its existing child run id instead.
+- **`Invalid`** — non-empty but fails verification (tampered, corrupt), OR
+  its identity disagrees with the binding this decision is about (a
+  mismatched canonical `run_id`, a foreign/missing `ledger_binding.json`,
+  an unsupported schema, or an agent/role outside the one supported
+  continuation path). MUST fail closed — a stable `500
+  COMMAND_CANONICAL_RECORD_INVALID`, the command left untouched and
+  discoverable for manual investigation. A tampered-but-nonempty record is
+  never treated as either "never started" or "already sealed."
 
-1. A staleness bound (60s default, `O7D_STALE_COMMAND_REDRIVE_MS`
-   overridable for testing) — never even attempt a redrive on a request
-   that might still be genuinely in flight.
-2. **The actual safety proof**: `o7 continue` acquires an exclusive
-   `flock` on a path keyed by its own run id (`<runs_dir>/.locks/<run
-   id>.lock`) as the VERY FIRST thing it does, before touching the ledger
-   or the worktree, and holds it for its entire lifetime. `flock`
-   auto-releases on process death regardless of HOW the process died
-   (clean exit, panic, SIGKILL) — so `o7d`, before ever deciding to
-   redrive, attempts the SAME lock itself. Acquiring it proves no live
-   process holds it; failing to proves one still does, and the redrive is
-   refused outright, no matter how much wall-clock time has passed. A
-   staleness bound alone cannot make this distinction — a large worktree
-   checkout past 60s looks identical to a dead process from the timer's
-   point of view, but not from the lock's. Only `EWOULDBLOCK` means
-   genuine contention; any OTHER lock-check error is logged distinctly
-   (a real I/O problem is not the same situation, even though both fail
-   closed the same way — never spawn on either).
-3. Only once BOTH hold does a compare-and-swap claim
-   (`claim_stale_command_for_redrive`) decide the single winner among any
-   racing retries.
-4. **Closing the remaining TOCTOU window**: the lock check above cannot
-   see a process that hasn't reached its own `flock()` call yet — it may
-   be merely SLOW to start (not dead), and a redrive that raced exactly
-   this window would already have durably rebound the command elsewhere
-   before the original process gets there. So `o7 continue` checks, a
-   SECOND time, immediately after winning its own lock (before touching
-   the ledger, the worktree, or the agent): is the command's CURRENT
-   binding still this exact run id? If a redrive already happened while
-   this process was starting, the answer is no — and this process exits
-   immediately, doing NOTHING (no canonical record, no worktree, no
-   provider invocation, no bookkeeping mutation). The SAME check runs a
-   third time, symmetrically, right before this run's own post-seal
-   `mark_command_completed`/session-persist calls — those are keyed only
-   by `CommandId`, with no concept of "my run" built in, so a
-   superseded-but-still-finishing attempt must never be allowed to stomp
-   bookkeeping that by then belongs to a different, later-redriven run.
+**The old child's own liveness lock is now held through the WHOLE
+decision, not probed and released.** An earlier round's redrive checked
+the lock, then released it, then separately claimed and rebound — leaving
+a window between "decided the old process is dead" and "durably acted on
+that" where a genuinely slow (not dead) original process could still slip
+in. `o7d` now:
 
-A redrive ALWAYS mints a FRESH child run id via `rebind_command_child_run`
-— never reuses the original, even for "the row never existed in the
-ledger": a crashed first attempt may already have durably appended a
-partial `events.jsonl` for that run id (`RunStarted`, maybe more) before
-ever reaching the ledger; reusing it would let a second attempt append a
-SECOND, conflicting `RunStarted` at sequence 1 into the SAME file. A brand
-new run id's directory is always pristine. The original (if it ever got a
-ledger row) is never resumed — it stays a dead-end historical record,
-superseded by the fresh one, which naturally becomes the conversation's
-new tail once created.
+1. Applies a staleness bound first (60s default,
+   `O7D_STALE_COMMAND_REDRIVE_MS` overridable for testing) — never even
+   attempt this on a request that might still be genuinely in flight.
+2. Acquires the OLD child's exact run-id-keyed `flock`
+   (`<runs_dir>/.locks/<run id>.lock` — the SAME path/lifetime discipline
+   `o7 continue` itself uses) and **holds it for the entire
+   classify-then-act decision**, releasing only when the whole decision —
+   classification, and whichever of recovery or redrive-plus-spawn follows
+   — is complete. Only `EWOULDBLOCK` means genuine contention (logged
+   distinctly from any other lock-check I/O error, which still fails
+   closed the same way). Since this SAME lock can now be contended by
+   ANOTHER concurrent request to this same endpoint (not just an external
+   `o7 continue`), a caller that loses the lock race briefly polls the
+   command's own current binding before giving up — if it moved away from
+   the old run id (the other request's own outcome just landed), THIS
+   request reports that SAME authoritative result rather than a stale
+   snapshot of its own; if it times out, the lock's owner is a genuinely
+   still-working external process, and the original (unchanged) command is
+   returned exactly as before.
+3. **Case `ValidSealed`**: spawns `o7 recover --ledger <path> --run-dir
+   <dir>` and waits for it — reusing catch_up's EXACT existing
+   re-verify/re-project/apply-verdict/session-backfill pipeline, never a
+   parallel reimplementation — then calls the new atomic
+   `mark_command_completed_if_bound` (below) itself, and re-reads the
+   command to answer with. The child run id in the response is the
+   ORIGINAL one throughout; `o7 continue` is never spawned; no fresh run id
+   is ever minted; the provider's invocation count does not change.
+4. **Case `Absent`/`ValidUnsealed`**: mints a FRESH child run id and
+   performs the one atomic CAS rebind below — never reuses the original,
+   even when no ledger row exists for it yet, since a crashed attempt may
+   already hold a partial `events.jsonl` under that id.
+
+**One atomic CAS rebind, not claim-then-rebind.**
+`rebind_command_child_run_if_current(command_id, expected_old_run_id,
+expected_updated_at, fresh_run_id)` replaces the two-step
+`claim_stale_command_for_redrive` + `rebind_command_child_run` sequence as
+the load-bearing redrive path (both primitives still exist and are still
+covered by their own unit tests — just no longer wired into `o7d`'s
+production path). One `IMMEDIATE` transaction, one conditional `UPDATE`,
+requiring ALL of: `command_id` matches; `status IN ('accepted',
+'started')`; `child_run_id = expected_old_run_id`; `updated_at =
+expected_updated_at`. Outcomes are typed, never a bare bool:
+`Rebound(command)` (this call won); `LostRace(command)` (still eligible,
+but another rebind already won — the returned command carries the
+WINNER's authoritative fresh run id, never a stale value the loser
+proposed); `NotEligible(command)` (already `completed`/`rejected` —
+nothing to redrive); `NotFound`. Two concurrent same-key retries are
+proven (process-level) to converge on the identical final fresh child run
+id — the CAS loser always reports the winner's outcome, never its own.
+
+A spawn failure immediately after a successful CAS rebind (the fresh
+binding lands, but `o7 continue` itself never starts) does NOT reject the
+command — `status` stays `started`, the fresh (never-attached) binding
+stays in place, and the next same-key retry, once stale again,
+re-classifies that SAME fresh run id (still `Absent`) and redrives it
+again. An ordinary spawn failure can never permanently wedge a
+conversation.
 
 **Gap B — dispatched and sealed, bookkeeping never landed.** The mirror
 image: the child run reached a real sealed terminal status, but the
-command's own post-seal `mark_command_completed` write itself failed (a
-best-effort ledger write, per §9.1's non-fatal discipline). Pure,
-side-effect-free bookkeeping to repair — no provider invocation involved —
-so `o7 recover` fixes it directly via `reconcile_completed_commands`
-rather than merely reporting it.
+command's own post-seal completion write itself failed (a best-effort
+ledger write, per §9.1's non-fatal discipline). Pure, side-effect-free
+bookkeeping to repair — no provider invocation involved — so `o7 recover`
+fixes it directly via `reconcile_completed_commands` rather than merely
+reporting it. `o7 continue`'s own finish step now uses the SAME new
+atomic `mark_command_completed_if_bound(command_id, expected_child_run_id)`
+primitive (predicates: `status IN ('accepted','started')` AND
+`child_run_id = expected_child_run_id`, one conditional `UPDATE`) rather
+than a separate read-then-write pair — required for BOTH a normal
+continuation's own finish and `o7d`'s sealed-canonical-record recovery
+path (Case `ValidSealed` above), so a superseded attempt's own completion
+write can never stomp bookkeeping that by now belongs to a different,
+later attempt.
 
-**Gap C — a run's own best-effort session persistence failed.** Separate
-from anything above: `execute_live`/`continue_execute`'s live session
-write (§9.1) can fail on its own, independent of the command/redrive
-machinery entirely. `o7 recover --run-dir <dir>` backfills the ledger's
-`provider_session_id` from the flat record's own `meta.json` — but ONLY
-after verifying `meta.run_id` matches the run actually being recovered
-(the same discipline this function already applies to
-`ledger_binding.json`). `meta.json` is NOT part of the canonical event
-chain, so a clean replay proves nothing about whether it genuinely
-belongs to this run — without the check, a copy (by mistake or
-otherwise) from a DIFFERENT run's directory would silently attach an
-unrelated provider session, and the next command would continue in the
-wrong provider context entirely, with replay staying green throughout.
-An ordinary consistency check, not a cryptographic signature — the same
-trust level every other sidecar file in this codebase gets. Backfill is
-attempted (regardless of the check's outcome — a legitimate copy is still
-useful) whenever the
-ledger is still missing it — closing the loop the live path's own warning
-message promises.
+**Gap C — a run's own best-effort session persistence failed, hardened
+further.** Separate from anything above: `execute_live`/`continue_execute`'s
+live session write (§9.1) can fail on its own. `o7 recover --run-dir
+<dir>` backfills the ledger's `provider_session_id` from the flat record's
+own `meta.json` — but ONLY after ALL of: `meta.schema` is the one this
+build supports; `meta.run_id` matches the canonical run being recovered;
+an accompanying `ledger_binding.json` (ALREADY schema/run_id-validated
+elsewhere in the same function) exists at all — a genuine
+command-continuation record always writes one, so its absence for an
+otherwise non-empty canonical stream is itself a red flag, not a
+legitimate legacy case; and that binding's own `conversation_id` agrees
+with the conversation this catch-up actually resolved to. None of this is
+a cryptographic signature — it is the same ordinary consistency-check
+trust level every other sidecar file in this codebase gets, now applied
+across two independently-written files instead of one, so a single
+crafted/copied file can no longer be enough. A mismatch on ANY of these
+skips session backfill ONLY — the canonical verdict catch-up proceeds
+regardless, with an honest diagnostic naming exactly which check failed.
+
+**A latent bug this round's own test surfaced and fixed, unrelated to any
+external finding**: `catch_up`'s `attach_run` call always passed `None`
+for `parent_run_id`, regardless of whether the run being re-attached
+actually had one. Since `parent_run_id` is part of `create_run_with_id`'s
+own idempotency digest, re-attaching ANY command-continuation child run
+(every one of which is created with `Some(parent)`) under `None` always
+produced an idempotency conflict — silently breaking Case `ValidSealed`
+recovery for every R1 child run, the exact case this round's blocker-kill
+test exercises. `LedgerBinding` (`ledger_binding.json`) now carries its own
+`parent_run_id`, and `catch_up` resolves the real value first (from the
+existing ledger row if one exists, else the binding) before passing it to
+`attach_run`, with the same disagreement-is-refused discipline as every
+other field there.
 
 ## 8. HTTP API
 
@@ -595,7 +651,11 @@ append+`sync_data`, never rewritten; `LiveLedgerProjector` (unchanged
 type) for live projection; the frozen R0.6 verdict mapping; artifact-aware
 `o7 recover --run-dir` catch-up (`verify_prefix`, `seal_or_repair_interrupted`)
 applies to a command's child run exactly as it does to any other run — R1
-adds no second reducer and no second catch-up path.
+adds no second reducer and no second catch-up path. `ledger_binding.json`
+itself now also carries this child's own `parent_run_id` (fourth
+corrective round) — the only durable, pre-`attach_run` source `o7
+recover --run-dir`'s catch-up has for it when re-attaching to a run whose
+ledger row doesn't exist yet.
 
 ### 9.6 `o7d` mutation endpoint
 
@@ -626,6 +686,35 @@ displayed by the browser — it never appears in this slice's response
 DTOs.
 
 ## Known limitations and evidence
+
+**Fourth independent re-gate (the canonical-first-recovery blocker, one
+major CAS finding) — all fixed, plus one latent bug this round's own test
+surfaced.** Full detail in §4/§7 above. Summary: (1) a child run's ledger
+status is no longer ever trusted to authorize a redrive decision — `o7d`
+now classifies the OLD child's own canonical record first
+(`classify_child_record`/`o7_run::replay::classify_record`), and a
+genuinely sealed record is RECOVERED under its existing run id, never
+redriven under a fresh one, even when the ledger projection is stale. (2)
+The old child's `flock` is now held through the entire classify-then-act
+decision rather than probed and released, closing the remaining TOCTOU
+window; a caller that loses the (now possibly o7d-internal) lock race
+briefly polls for the winner's outcome rather than answering with a stale
+snapshot. (3) `claim_stale_command_for_redrive` +
+`rebind_command_child_run` (two separate calls) is replaced, as the
+production redrive path, by one atomic conditional
+`rebind_command_child_run_if_current`; a CAS loser always reports the
+winner's authoritative fresh run id. (4) `mark_command_completed_if_bound`
+replaces a read-then-write pattern at BOTH `o7 continue`'s own finish and
+`o7d`'s sealed-recovery path. (5) A tampered-but-nonempty canonical record
+fails closed with a stable `COMMAND_CANONICAL_RECORD_INVALID`, never
+silently treated as absent or sealed. (6) `meta.json` session backfill now
+also checks its own schema and requires a corroborating
+`ledger_binding.json`. (7) Proving the blocker-kill scenario end-to-end
+surfaced an UNRELATED, pre-existing latency bug this round also fixed:
+`catch_up`'s `attach_run` call always passed `None` for `parent_run_id`,
+so re-attaching any command-continuation child run (every one of which
+has a real parent) always hit an idempotency conflict — silently breaking
+sealed-record recovery for every R1 child run before this fix.
 
 **Second independent re-gate (blockers 1–3, two major findings) — all
 fixed.** Summary (full detail in §5/§7/§9.1 above and the corresponding
@@ -738,3 +827,15 @@ documented "`meta.json`-after-seal" replay gap (`docs/q-deck/r07-live-ingress.md
 own follow-up note) — unrelated to this slice. No raw-stream
 retention/redaction redesign. No R2 work of any kind. No reopening of a
 sealed run, under any circumstance, for any reason.
+
+Fourth round, specifically: no Alpha A0 (`#52`) candidate-state
+continuity work of any kind. No distributed leases or multi-host
+coordination — §4's at-most-once claim is scoped to exactly the
+single-host, one-`runs_dir`, one-ledger-file model this slice already
+assumes; a `runs_dir`/ledger split across hosts is out of scope, not
+merely unimplemented. No Windows `flock` equivalent (the liveness
+primitive stays Unix-only, matching every prior round). No new
+`command_attempts`-style table — an attempt's identity stays exactly
+"the command's current `child_run_id`", never a separate, accumulating
+history of past attempts. No provider-credential surface, no executor
+qualification.
