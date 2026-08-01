@@ -57,6 +57,14 @@ pub struct LedgerBinding {
     pub conversation_id: String,
     pub agent: String,
     pub role: String,
+    /// Q-Deck R1 fourth corrective round: the run this one continues from
+    /// (`None` for an ordinary top-level `o7 run --ledger`) — the ONLY
+    /// durable, pre-`attach_run` source `catch_up` can resolve this from
+    /// when no ledger run row exists yet. Its absence (an earlier-schema
+    /// record) deserializes as `None` via `#[serde(default)]` — never a
+    /// hard parse failure, since schema 1 predates this field.
+    #[serde(default)]
+    pub parent_run_id: Option<String>,
 }
 
 const LEDGER_BINDING_FILE: &str = "ledger_binding.json";

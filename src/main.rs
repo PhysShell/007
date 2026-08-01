@@ -396,7 +396,7 @@ fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
     // conversation/agent/role must never be second-guessed by a sidecar
     // file either, so a stale or tampered `ledger_binding.json` cannot
     // redirect an already-created run or corrupt its idempotency digest.
-    let (conversation, agent, role) = match &existing_run {
+    let (conversation, agent, role, parent_run_id_for_attach) = match &existing_run {
         Some(run) => {
             if let Some(b) = &binding {
                 anyhow::ensure!(
@@ -427,11 +427,26 @@ fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
                     b.role,
                     run.role
                 );
+                // Q-Deck R1 fourth corrective round: found WHILE proving
+                // out the round's own "sealed canonical, stale ledger"
+                // recovery test — `attach_run`'s `parent_run_id` is part
+                // of `create_run_with_id`'s idempotency digest (see its
+                // own doc comment), so re-attaching a command-continuation
+                // child run (one with a real parent) with the WRONG
+                // parent always hit an idempotency conflict. A mismatched
+                // binding is refused, same as every other field here.
+                anyhow::ensure!(
+                    b.parent_run_id.as_deref()
+                        == run.parent_run_id.as_ref().map(o7_ledger::RunId::as_str),
+                    "ledger_binding.json's parent_run_id disagrees with the existing ledger \
+                     run's own parent_run_id — refusing to trust the mismatched binding"
+                );
             }
             (
                 ConversationSelector::Existing(run.conversation_id.as_str().to_owned()),
                 run.agent.clone(),
                 run.role.clone(),
+                run.parent_run_id.as_ref().map(|p| p.as_str().to_owned()),
             )
         }
         None => {
@@ -457,14 +472,29 @@ fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
                 ConversationSelector::Existing(b.conversation_id.clone()),
                 b.agent.clone(),
                 b.role.clone(),
+                b.parent_run_id.clone(),
             )
         }
+    };
+    let parent_canonical_run_id_for_attach = parent_run_id_for_attach
+        .map(|p| {
+            CanonicalRunId::new(p).map_err(|e| anyhow::anyhow!("this run's own parent_run_id: {e}"))
+        })
+        .transpose()?;
+    let resolved_conversation_id = match &conversation {
+        ConversationSelector::Existing(id) => Some(id.clone()),
+        ConversationSelector::New => None,
     };
 
     let pending = PendingProjection::open(ledger_path, conversation, &canonical_run_id)
         .context("opening the ledger for catch-up")?;
     let projector = pending
-        .attach_run(&canonical_run_id, agent, role, None)
+        .attach_run(
+            &canonical_run_id,
+            agent,
+            role,
+            parent_canonical_run_id_for_attach.as_ref(),
+        )
         .context("attaching the catch-up projector to the existing (or new) run")?;
 
     for event in &stream {
@@ -497,28 +527,54 @@ fn catch_up(run_dir: &Path, ledger_path: &Path) -> Result<()> {
     // Backfill from the flat record's own `meta.json` (which durably
     // records the session regardless of whether the live ledger write
     // succeeded) whenever the ledger run is still missing it.
+    // Q-Deck R1 fourth corrective round (minor finding): the third round's
+    // `meta.run_id == canonical_run_id` check alone was still only ONE
+    // sidecar file's own self-report — a foreign `meta.json` that happened
+    // to set a matching `run_id` (or was crafted to) would still pass it.
+    // Hardened to require every one of: a supported `meta.schema`; the
+    // `run_id` match (unchanged from round three); a genuine, ALREADY
+    // schema/run_id-validated `ledger_binding.json` (checked unconditionally
+    // above, before this block, against this exact `canonical_run_id`) —
+    // requiring a SECOND, independently-durable sidecar (written at a
+    // different point in the run's own lifecycle) to corroborate raises
+    // the bar past "one crafted file" before a session is ever trusted; and
+    // that binding's own `conversation_id` agreeing with the conversation
+    // this catch-up actually resolved to. None of this is a cryptographic
+    // signature — it is the same ordinary consistency-check trust level
+    // every other sidecar file in this codebase gets, applied to two files
+    // instead of one.
+    const SUPPORTED_META_SCHEMA: u32 = 1;
     if let Ok(meta_text) = std::fs::read_to_string(run_dir.join("meta.json")) {
         if let Ok(meta) = serde_json::from_str::<RunMeta>(&meta_text) {
-            // Q-Deck R1 third corrective round (blocker 3): `meta.json` is
-            // NOT part of the canonical event chain — `verify_prefix`,
-            // above, never touches it, so nothing about a clean replay
-            // proves this file actually belongs to THIS run. Without this
-            // check, a `meta.json` copied (by mistake or otherwise) from a
-            // DIFFERENT run's directory would silently attach an unrelated
-            // provider session to this run — replay stays green, and the
-            // next command continues in the wrong provider context
-            // entirely. Same discipline this function already applies to
-            // `ledger_binding.json` (`b.run_id == canonical_run_id`,
-            // above) — an ordinary consistency check, not a cryptographic
-            // signature, matching the trust level every other sidecar file
-            // in this codebase gets.
-            if meta.run_id != canonical_run_id.as_str() {
-                eprintln!(
-                    "[o7] recover: warning — meta.json in {} claims run_id {}, not {} — \
-                     refusing to trust it for session backfill",
-                    run_dir.display(),
+            let mismatch = if meta.schema != SUPPORTED_META_SCHEMA {
+                Some(format!(
+                    "has unsupported schema {} (expected {SUPPORTED_META_SCHEMA})",
+                    meta.schema
+                ))
+            } else if meta.run_id != canonical_run_id.as_str() {
+                Some(format!(
+                    "claims run_id {}, not {}",
                     meta.run_id,
                     canonical_run_id.as_str()
+                ))
+            } else if binding.is_none() {
+                Some("has no accompanying ledger_binding.json to corroborate it".to_string())
+            } else if binding.as_ref().is_some_and(|b| {
+                Some(b.conversation_id.as_str()) != resolved_conversation_id.as_deref()
+            }) {
+                Some(
+                    "ledger_binding.json's conversation_id disagrees with the conversation this \
+                     catch-up resolved to"
+                        .to_string(),
+                )
+            } else {
+                None
+            };
+            if let Some(reason) = mismatch {
+                eprintln!(
+                    "[o7] recover: warning — meta.json in {} {reason} — refusing to trust it for \
+                     session backfill",
+                    run_dir.display(),
                 );
             } else if let Some(session) = meta.session_id {
                 let needs_backfill = {
@@ -866,6 +922,7 @@ fn execute_live(
         conversation_id: pending.conversation_id().as_str().to_string(),
         agent: a.engine.clone(),
         role: "implementer".to_string(),
+        parent_run_id: None,
     }
     .write_durable(rec)
     .context("durably writing ledger_binding.json before RunStarted")?;
@@ -1320,31 +1377,31 @@ fn continue_run(a: &ContinueArgs) -> Result<()> {
                 ))
                 .context("persisting the child run's own provider session")?;
         }
-        // Q-Deck R1 third corrective round (blocker 2, defense-in-depth):
-        // only mutate the command's bookkeeping if it is STILL bound to
-        // THIS run. The lock (and the earlier post-acquisition binding
-        // check) already make it extremely unlikely this run was ever a
-        // superseded/orphaned attempt by the time it reaches its own
-        // seal, but this run's own command_id-scoped write must never be
-        // able to stomp bookkeeping that by now belongs to a different
-        // (later-redriven) run — `mark_command_completed`/`mark_command_rejected`
-        // are keyed only by CommandId, with no concept of "my run" built
-        // in, so that guarantee has to live here, at the call site.
-        let current = finish_rt
-            .block_on(ledger.command(command_id.clone()))
-            .context("re-checking the command's current binding before finishing it")?;
-        let still_mine = current
-            .and_then(|c| c.child_run_id)
-            .is_some_and(|bound| bound.as_str() == a.run_id);
-        if still_mine {
-            // "completed" is command bookkeeping only — it means
-            // "dispatched to a sealed run", not any specific verdict; the
-            // child run's own ledger row stays the sole verdict authority
-            // (docs/q-deck/r1-command.md §2).
-            finish_rt
-                .block_on(ledger.mark_command_completed(command_id))
-                .context("marking the command completed")?;
-        } else {
+        // Q-Deck R1 fourth corrective round: `mark_command_completed_if_bound`
+        // is ONE atomic conditional write (`status IN (...) AND
+        // child_run_id = ?` in the SAME `UPDATE`), replacing the earlier
+        // read-then-write pattern here (re-check the binding, THEN
+        // unconditionally call `mark_command_completed`) — that pattern
+        // left its own narrow window between the read and the write. The
+        // lock (and the earlier post-acquisition binding check) already
+        // make it extremely unlikely this run was ever a superseded/
+        // orphaned attempt by the time it reaches its own seal, but this
+        // run's own command_id-scoped write must never be able to stomp
+        // bookkeeping that by now belongs to a different (later-redriven)
+        // run — that guarantee now lives inside the ledger call itself,
+        // not in a separate check at this call site.
+        //
+        // "completed" is command bookkeeping only — it means "dispatched
+        // to a sealed run", not any specific verdict; the child run's own
+        // ledger row stays the sole verdict authority
+        // (docs/q-deck/r1-command.md §2).
+        let outcome = finish_rt
+            .block_on(ledger.mark_command_completed_if_bound(
+                command_id,
+                o7_ledger::RunId::from_raw(a.run_id.clone()),
+            ))
+            .context("marking the command completed")?;
+        if matches!(outcome, o7_ledger::CompletionOutcome::NotBound(_)) {
             eprintln!(
                 "[o7] {}: this run sealed successfully, but the command it was dispatching has \
                  since been rebound to a different run — not touching its bookkeeping",
@@ -1408,6 +1465,7 @@ fn continue_execute(
         conversation_id: a.conversation_id.clone(),
         agent: "claude".to_string(),
         role: "implementer".to_string(),
+        parent_run_id: Some(parent_canonical_run_id.as_str().to_owned()),
     }
     .write_durable(&rec)
     .context("durably writing ledger_binding.json before RunStarted")?;

@@ -131,12 +131,21 @@ impl PendingProjection {
     ///
     /// `parent_run_id` (Q-Deck R1, `docs/q-deck/r1-command.md` §0/§9.3): the
     /// run this one continues from, or `None` for an ordinary top-level run
-    /// (the plain `o7 run` live path, and `o7 recover`'s catch-up, both
-    /// always pass `None` — only the new command-continuation path passes
-    /// `Some`). Threaded straight into `NewRun`, part of
-    /// `create_run_with_id`'s own idempotency digest, so a retry with a
-    /// DIFFERENT parent than the one actually used the first time is caught
-    /// as a conflict rather than silently accepted.
+    /// (the plain `o7 run` live path always passes `None`). Threaded
+    /// straight into `NewRun`, part of `create_run_with_id`'s own
+    /// idempotency digest, so a retry with a DIFFERENT parent than the one
+    /// actually used the first time is caught as a conflict rather than
+    /// silently accepted.
+    ///
+    /// Q-Deck R1 fourth corrective round: `o7 recover`'s catch-up used to
+    /// ALWAYS pass `None` here too, regardless of whether the run being
+    /// re-attached actually had one — since this value is part of the
+    /// idempotency digest, re-attaching a command-continuation child run
+    /// (created with `Some(parent)`) under `None` always hit an idempotency
+    /// conflict, making catch-up fail outright for exactly the runs R1
+    /// introduces. Catch-up now resolves the run's REAL parent first (from
+    /// the existing ledger row if one exists, or `ledger_binding.json`
+    /// otherwise — see `main.rs::catch_up`) and passes that.
     ///
     /// # Errors
     /// Any underlying ledger error.
