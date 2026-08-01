@@ -187,47 +187,46 @@ pub(crate) fn command_lock_path(runs_dir: &std::path::Path, run_id: &str) -> std
     runs_dir.join(".locks").join(format!("{run_id}.lock"))
 }
 
-/// Spawn `o7 recover --ledger <path> --run-dir <dir>` for a child run whose
-/// OWN canonical record has just been classified `ValidSealed`, and wait
-/// for it to finish — reusing the root binary's EXACT existing catch-up
-/// machinery (`catch_up`, re-verify + re-project + apply the sealed
-/// verdict + best-effort session backfill) rather than re-deriving any of
-/// it here. Best-effort: any failure is logged, never propagated — the
-/// caller's own subsequent `mark_command_completed_if_bound` call is a
-/// safe no-op if this didn't manage to land the sealed status, and the
-/// core safety property (provider never re-invoked for an already-sealed
-/// record) holds regardless of whether this reconciliation succeeds.
-fn recover_sealed_child(exec: &ExecutionConfig, run_id: &str) {
-    let dir = match child_record_dir(exec, run_id) {
-        Ok(dir) => dir,
-        Err(e) => {
-            eprintln!(
-                "[o7d] warning: resolving the record directory to recover sealed child {run_id}: {e}"
-            );
-            return;
-        }
-    };
-    match std::process::Command::new(&exec.o7_bin)
-        .arg("recover")
-        .arg("--ledger")
-        .arg(&exec.ledger_path)
-        .arg("--run-dir")
-        .arg(&dir)
-        .stdin(std::process::Stdio::null())
-        .output()
-    {
-        Ok(output) if output.status.success() => {}
-        Ok(output) => eprintln!(
-            "[o7d] warning: `o7 recover --run-dir {}` exited non-zero while catching up a sealed \
-             child record: {}",
-            dir.display(),
-            String::from_utf8_lossy(&output.stderr)
-        ),
-        Err(e) => eprintln!(
-            "[o7d] warning: spawning `o7 recover --run-dir {}` failed: {e}",
-            dir.display()
-        ),
-    }
+/// The outcome of [`redrive_or_recover_locked`]'s own decision — distinct
+/// from [`ApiError`] so the HTTP layer maps each case to its own stable
+/// code rather than collapsing every failure into one generic message.
+#[derive(Debug)]
+enum RedriveError {
+    /// The old child's own canonical record failed verification or its
+    /// identity disagreed with the exact accepted Command this decision is
+    /// about — never redriven, never recovered, command left untouched.
+    InvalidRecord(String),
+    /// Q-Deck R1 fifth corrective round (Part 4): a `ValidSealed` record's
+    /// own scoped catch-up either failed outright, or its typed receipt
+    /// was not actually terminal once re-checked against the ledger — in
+    /// EITHER case the command's bookkeeping must NOT be completed. The
+    /// command stays `started`, still bound to the same child run id, and
+    /// a later retry may attempt recovery again.
+    RecoveryFailed(String),
+    /// A storage read failed while re-checking authoritative state (either
+    /// during the lock-loser convergence poll, or reconciling after a
+    /// scoped catch-up) — never silently treated as any other outcome.
+    Storage(String),
+}
+
+/// Q-Deck R1 fifth corrective round (Part 1): re-verify and re-apply EXACTLY
+/// this one child run's canonical record to the ledger — calling
+/// `o7::recovery::catch_up_record` DIRECTLY (a library function of the root
+/// crate, never a subprocess) is what actually guarantees no GLOBAL
+/// recovery side effect can happen: there is no `o7 recover` process for
+/// `recover_scan`/`mark_interrupted`/`stuck_commands`/
+/// `reconcile_completed_commands` to run inside of. Scoped to exactly the
+/// run named by `run_id` and the exact Command identity `expected`
+/// describes — never anything else in the ledger.
+fn recover_sealed_child(
+    exec: &ExecutionConfig,
+    run_id: &str,
+    expected: &o7::recovery::ExpectedIdentity,
+) -> Result<o7::recovery::CatchUpReceipt, RedriveError> {
+    let dir = child_record_dir(exec, run_id)
+        .map_err(|e| RedriveError::Storage(format!("resolving the record directory: {e}")))?;
+    o7::recovery::catch_up_record(&exec.ledger_path, &dir, Some(expected))
+        .map_err(|e| RedriveError::RecoveryFailed(e.to_string()))
 }
 
 /// Q-Deck R1 fourth corrective round: acquire `old_run_id`'s own liveness
@@ -242,14 +241,12 @@ fn recover_sealed_child(exec: &ExecutionConfig, run_id: &str) {
 /// other process can win this exact lock while this call still holds it.
 ///
 /// Runs synchronously (real, blocking file I/O and, for a sealed record, a
-/// blocking subprocess wait) — callers MUST run this via
+/// scoped in-process catch-up) — callers MUST run this via
 /// `tokio::task::spawn_blocking`, never inline in an async handler.
 ///
-/// Returns `Ok(current_command)` for every outcome except a canonical
-/// record that fails verification/identity checks, which is the one case
-/// that must fail closed and surface as a stable error to the caller
-/// (`COMMAND_CANONICAL_RECORD_INVALID`) — the command is left exactly as
-/// found, discoverable for manual investigation.
+/// # Errors
+/// [`RedriveError`] — see its own variants. Never touches any
+/// run/attempt/command other than `command`'s own and `old_run_id`'s own.
 fn redrive_or_recover_locked(
     exec: ExecutionConfig,
     ledger: o7_ledger::SqliteLedger,
@@ -257,7 +254,7 @@ fn redrive_or_recover_locked(
     old_run_id: o7_ledger::RunId,
     conversation_id: String,
     parent_run_id: String,
-) -> Result<o7_ledger::Command, String> {
+) -> Result<o7_ledger::Command, RedriveError> {
     let lock_path = command_lock_path(&exec.runs_dir, old_run_id.as_str());
     if let Some(parent) = lock_path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
@@ -294,23 +291,22 @@ fn redrive_or_recover_locked(
             // owner holds this lock" — anything else is a genuine,
             // unrelated I/O problem, and refuses immediately (fail closed).
             //
-            // Q-Deck R1 fourth corrective round (Part 3, concurrent-retry
-            // requirement): the owner holding an `EWOULDBLOCK` lock is not
+            // Q-Deck R1 fourth/fifth corrective rounds (concurrent-retry
+            // convergence): the owner holding an `EWOULDBLOCK` lock is not
             // always an external `o7 continue` process — it can just as
             // well be ANOTHER concurrent request to THIS SAME endpoint,
-            // already mid-way through its own classify-then-CAS decision
-            // for this exact old run id (that is precisely what holding
-            // this lock through the whole decision, per Part 2, is FOR).
-            // Two truly concurrent same-key retries must converge on the
-            // SAME final child run id — so before giving up, briefly poll
-            // the command's own current binding: if it moves away from
-            // `old_run_id` within a short bound, that is the OTHER
-            // request's own CAS having just landed, and THIS request must
-            // report that SAME authoritative result, never a stale
-            // snapshot of its own. If the binding never moves within the
-            // bound, the lock's owner is a genuinely still-working
-            // external process — fall back to the original, unchanged
-            // command exactly as before.
+            // already mid-way through its own classify-then-act decision
+            // for this exact old run id. Two truly concurrent same-key
+            // retries must converge on the SAME final answer — so before
+            // giving up, poll the command's own current state: EITHER its
+            // binding moved away from `old_run_id` (a redrive just won) OR
+            // its status became `completed` (a SEALED recovery just landed
+            // — the run id does NOT change in that case, only the status
+            // does, so watching `child_run_id` alone is not enough). If
+            // neither happens within the bound, the lock's owner is a
+            // genuinely still-working external process — but even then, a
+            // FINAL authoritative re-read is returned, never the stale
+            // pre-lock snapshot this function was called with.
             Err((_file, errno)) => {
                 if errno != nix::errno::Errno::EWOULDBLOCK {
                     eprintln!(
@@ -324,48 +320,93 @@ fn redrive_or_recover_locked(
                 let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
                 loop {
                     if std::time::Instant::now() >= deadline {
-                        return Ok(command);
+                        break;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(15));
                     match handle.block_on(ledger.command(command.command_id.clone())) {
-                        Ok(Some(current))
-                            if current.child_run_id.as_ref().map(o7_ledger::RunId::as_str)
-                                != Some(old_run_id.as_str()) =>
-                        {
-                            return Ok(current);
+                        Ok(Some(current)) => {
+                            let child_moved =
+                                current.child_run_id.as_ref().map(o7_ledger::RunId::as_str)
+                                    != Some(old_run_id.as_str());
+                            let now_completed =
+                                matches!(current.status, o7_ledger::CommandStatus::Completed);
+                            if child_moved || now_completed {
+                                return Ok(current);
+                            }
                         }
-                        _ => continue,
+                        Ok(None) => {
+                            return Err(RedriveError::Storage(format!(
+                                "command {} vanished while polling for lock-loser convergence",
+                                command.command_id
+                            )))
+                        }
+                        Err(e) => {
+                            return Err(RedriveError::Storage(format!(
+                                "re-reading command during lock-loser poll: {e}"
+                            )))
+                        }
                     }
                 }
+                // Bounded wait elapsed without a decisive change — ONE
+                // final authoritative re-read; never the stale pre-lock
+                // argument (`command`) this function was called with.
+                return match handle.block_on(ledger.command(command.command_id.clone())) {
+                    Ok(Some(current)) => Ok(current),
+                    Ok(None) => Err(RedriveError::Storage(format!(
+                        "command {} vanished before the final lock-loser re-read",
+                        command.command_id
+                    ))),
+                    Err(e) => Err(RedriveError::Storage(format!(
+                        "final lock-loser re-read failed: {e}"
+                    ))),
+                };
             }
         };
 
     // From here on, this call is the EXCLUSIVE, provable owner of the old
     // child's lock — held through classification and whatever transition
     // follows, released only when this function returns.
-    let state = classify_child_record(&exec, old_run_id.as_str(), &conversation_id);
+    let state = classify_child_record(&exec, old_run_id.as_str(), &command);
 
     match state {
-        ChildRecordState::Invalid(reason) => Err(reason),
+        ChildRecordState::Invalid(reason) => Err(RedriveError::InvalidRecord(reason)),
         ChildRecordState::ValidSealed => {
             // Case A: the provider already ran to completion. Redrive is
             // forbidden — recover instead (re-verify, catch up the
-            // projection, apply the verdict, best-effort session
-            // backfill), then conditionally complete the command, still
-            // bound to the SAME original child run id throughout.
-            recover_sealed_child(&exec, old_run_id.as_str());
-            if let Err(e) = handle.block_on(
-                ledger.mark_command_completed_if_bound(command.command_id.clone(), old_run_id),
-            ) {
-                eprintln!(
-                    "[o7d] warning: marking command {} completed after sealed-record recovery \
-                     failed: {e}",
-                    command.command_id
-                );
+            // projection, apply the verdict, canonical-receipt session
+            // backfill), then complete the command ONLY against a
+            // verified-terminal typed receipt — never on a failed or
+            // partial catch-up.
+            let expected = o7::recovery::ExpectedIdentity {
+                command_id: command.command_id.as_str().to_owned(),
+                conversation_id: command.conversation_id.as_str().to_owned(),
+                parent_run_id: command.parent_run_id.as_str().to_owned(),
+                child_run_id: old_run_id.as_str().to_owned(),
+                command_text: command.command_text.clone(),
+            };
+            let receipt = recover_sealed_child(&exec, old_run_id.as_str(), &expected)?;
+            if !receipt.sealed {
+                return Err(RedriveError::RecoveryFailed(format!(
+                    "scoped catch-up for run {} did not report a sealed receipt",
+                    old_run_id.as_str()
+                )));
             }
-            match handle.block_on(ledger.command(command.command_id.clone())) {
-                Ok(Some(current)) => Ok(current),
-                _ => Ok(command),
+            match handle.block_on(ledger.mark_command_completed_if_bound_and_terminal(
+                command.command_id.clone(),
+                old_run_id,
+            )) {
+                Ok(o7_ledger::CompletionOutcome::Completed(updated)) => Ok(updated),
+                Ok(
+                    o7_ledger::CompletionOutcome::NotBound(_)
+                    | o7_ledger::CompletionOutcome::NotFound,
+                ) => Err(RedriveError::RecoveryFailed(
+                    "scoped catch-up reported success, but the ledger's own child run is \
+                         not (yet) a bound, terminal match — refusing to complete the command"
+                        .to_owned(),
+                )),
+                Err(e) => Err(RedriveError::Storage(format!(
+                    "marking command completed after sealed-record recovery: {e}"
+                ))),
             }
         }
         ChildRecordState::Absent | ChildRecordState::ValidUnsealed => {
@@ -410,10 +451,9 @@ fn redrive_or_recover_locked(
                     | o7_ledger::RebindOutcome::NotEligible(current),
                 ) => Ok(current),
                 Ok(o7_ledger::RebindOutcome::NotFound) => Ok(command),
-                Err(e) => {
-                    eprintln!("[o7d] warning: rebind_command_child_run_if_current failed: {e}");
-                    Ok(command)
-                }
+                Err(e) => Err(RedriveError::Storage(format!(
+                    "rebind_command_child_run_if_current failed: {e}"
+                ))),
             }
         }
     }
@@ -537,13 +577,28 @@ pub(crate) async fn create_command(
         // `redrive_or_recover_locked`: it classifies the old child's own
         // canonical record (never trusting ledger status alone — a stale
         // or not-yet-caught-up projection can show `queued`/`running`/
-        // `interrupted` for a run whose flat record is already fully
-        // sealed) while holding that exact run id's liveness lock for the
-        // WHOLE decision, so a merely-slow (not dead) original process can
-        // never race a redrive that has already moved on.
+        // `interrupted`, or even a TERMINAL status, for a run whose flat
+        // record disagrees) while holding that exact run id's liveness
+        // lock for the WHOLE decision, so a merely-slow (not dead)
+        // original process can never race a redrive that has already
+        // moved on.
+        //
+        // Q-Deck R1 fifth corrective round (Part 5): eligibility is now
+        // based ONLY on the command's OWN bookkeeping status — never the
+        // child run's ledger status. A ledger row already showing a
+        // terminal status is NOT, by itself, sufficient authority to skip
+        // classification: it might be stale, or it might disagree with the
+        // canonical record entirely (a tampered artifact after an
+        // otherwise-terminal-looking ledger row) — either way, an active
+        // (`accepted`/`started`) command past the staleness bound always
+        // gets its old child's record inspected. Only a command whose OWN
+        // status already reached `completed`/`rejected` is skipped — there
+        // is nothing left to redrive or recover for it.
         Some(run_id) => {
-            let existing_run = state.ledger.run(run_id.clone()).await?;
-            let eligible = existing_run.is_none_or(|r| !r.status.is_terminal());
+            let eligible = matches!(
+                command.status,
+                o7_ledger::CommandStatus::Accepted | o7_ledger::CommandStatus::Started
+            );
             if eligible && command_is_stale(&command) {
                 let exec_owned = exec.clone();
                 let ledger = state.ledger.clone();
@@ -563,13 +618,29 @@ pub(crate) async fn create_command(
                 })
                 .await
                 .map_err(|_| ApiError::Internal("REDRIVE_TASK_PANICKED"))?;
-                outcome.map_err(|reason| {
-                    eprintln!(
-                        "[o7d] refusing to redrive command {}: its old child run's own canonical \
-                         record failed verification/identity checks: {reason}",
-                        command.command_id
-                    );
-                    ApiError::Internal("COMMAND_CANONICAL_RECORD_INVALID")
+                outcome.map_err(|reason| match reason {
+                    RedriveError::InvalidRecord(reason) => {
+                        eprintln!(
+                            "[o7d] refusing to redrive command {}: its old child run's own \
+                             canonical record failed verification/identity checks: {reason}",
+                            command.command_id
+                        );
+                        ApiError::Internal("COMMAND_CANONICAL_RECORD_INVALID")
+                    }
+                    RedriveError::RecoveryFailed(reason) => {
+                        eprintln!(
+                            "[o7d] scoped recovery failed for command {}: {reason}",
+                            command.command_id
+                        );
+                        ApiError::Internal("COMMAND_RECOVERY_FAILED")
+                    }
+                    RedriveError::Storage(reason) => {
+                        eprintln!(
+                            "[o7d] storage error while redriving/recovering command {}: {reason}",
+                            command.command_id
+                        );
+                        ApiError::Internal("REDRIVE_STORAGE_ERROR")
+                    }
                 })?
             } else {
                 command
