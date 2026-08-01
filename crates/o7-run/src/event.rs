@@ -379,6 +379,26 @@ pub enum RunEventKind {
     /// The isolated worktree was materialized (evidence-only for the verdict).
     WorktreeCreated { worktree: ArtifactRef },
     /// The agent process was spawned.
+    ///
+    /// Q-Deck R1 sixth corrective round: this is the frozen, conservative
+    /// **durable dispatch boundary** a command-continuation redrive
+    /// decision relies on (`crates/o7d/src/canonical.rs::DispatchProgress`).
+    /// Every append of this event durably reaches `events.jsonl` — the
+    /// writer's own per-event `sync_data()` completes — BEFORE the
+    /// corresponding provider invocation (`agent::run`/
+    /// `agent::continue_session`) is ever called (`src/main.rs`'s
+    /// `execute_live`/`continue_execute`; this ordering is proven by a
+    /// dedicated process-level test, not merely asserted here). This does
+    /// NOT mean "the provider definitely received the request" — a crash
+    /// between this durable append and the actual OS-level process spawn
+    /// is still possible, and is treated as ambiguous, the same as a crash
+    /// after a real invocation. It means exactly the converse, and
+    /// weaker, claim: **no invocation can have happened before this event
+    /// is durable** — so a record with no `AgentStarted` at all is the
+    /// ONLY unsealed state safe to redrive automatically. Once this event
+    /// is durable, a still-unsealed record is fail-closed ambiguous, never
+    /// auto-redriven, by design — this is a deliberate at-most-once,
+    /// not-always-live choice; see `docs/q-deck/r1-command.md` §11.
     AgentStarted,
     /// The agent execution ended, with its terminal outcome.
     AgentExited { outcome: AgentOutcome },
