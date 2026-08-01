@@ -359,14 +359,13 @@ in. `o7d` now:
    snapshot of its own; if it times out, the lock's owner is a genuinely
    still-working external process, and the original (unchanged) command is
    returned exactly as before.
-3. **Case `ValidSealed`**: spawns `o7 recover --ledger <path> --run-dir
-   <dir>` and waits for it — reusing catch_up's EXACT existing
-   re-verify/re-project/apply-verdict/session-backfill pipeline, never a
-   parallel reimplementation — then calls the new atomic
-   `mark_command_completed_if_bound` (below) itself, and re-reads the
-   command to answer with. The child run id in the response is the
-   ORIGINAL one throughout; `o7 continue` is never spawned; no fresh run id
-   is ever minted; the provider's invocation count does not change.
+3. **Case `ValidSealed`**: calls `o7::recovery::catch_up_record` — a
+   scoped, single-record library primitive, IN-PROCESS, never a subprocess
+   (fifth corrective round; see §10) — then calls the new atomic
+   `mark_command_completed_if_bound_and_terminal` (below) itself, and
+   re-reads the command to answer with. The child run id in the response is
+   the ORIGINAL one throughout; `o7 continue` is never spawned; no fresh run
+   id is ever minted; the provider's invocation count does not change.
 4. **Case `Absent`/`ValidUnsealed`**: mints a FRESH child run id and
    performs the one atomic CAS rebind below — never reuses the original,
    even when no ledger row exists for it yet, since a crashed attempt may
@@ -414,24 +413,13 @@ path (Case `ValidSealed` above), so a superseded attempt's own completion
 write can never stomp bookkeeping that by now belongs to a different,
 later attempt.
 
-**Gap C — a run's own best-effort session persistence failed, hardened
-further.** Separate from anything above: `execute_live`/`continue_execute`'s
-live session write (§9.1) can fail on its own. `o7 recover --run-dir
-<dir>` backfills the ledger's `provider_session_id` from the flat record's
-own `meta.json` — but ONLY after ALL of: `meta.schema` is the one this
-build supports; `meta.run_id` matches the canonical run being recovered;
-an accompanying `ledger_binding.json` (ALREADY schema/run_id-validated
-elsewhere in the same function) exists at all — a genuine
-command-continuation record always writes one, so its absence for an
-otherwise non-empty canonical stream is itself a red flag, not a
-legitimate legacy case; and that binding's own `conversation_id` agrees
-with the conversation this catch-up actually resolved to. None of this is
-a cryptographic signature — it is the same ordinary consistency-check
-trust level every other sidecar file in this codebase gets, now applied
-across two independently-written files instead of one, so a single
-crafted/copied file can no longer be enough. A mismatch on ANY of these
-skips session backfill ONLY — the canonical verdict catch-up proceeds
-regardless, with an honest diagnostic naming exactly which check failed.
+**Gap C — a run's own best-effort session persistence failed.** Separate
+from anything above: `execute_live`/`continue_execute`'s live session
+write (§9.1) can fail on its own. As of the fifth corrective round (§10),
+`meta.json` is RETIRED as session-backfill authority entirely — backfill
+now uses ONLY the canonical, digest-bound `ProviderSessionCaptured`
+receipt, verified by the SAME chain/digest/reducer/artifact check every
+other canonical event gets. See §10 for the full rule.
 
 **A latent bug this round's own test surfaced and fixed, unrelated to any
 external finding**: `catch_up`'s `attach_run` call always passed `None`
@@ -685,7 +673,269 @@ channel. The provider session id is never received by, stored in, or
 displayed by the browser — it never appears in this slice's response
 DTOs.
 
+## 10. Fifth corrective round — scoped recovery, canonical session receipt, exact Command lineage
+
+Four independent re-gates (§7's own history) hardened the redrive/recover
+decision itself. This round found the recovery MACHINERY behind that
+decision still had four latent gaps — the decision was being made
+correctly, but its own load-bearing primitives were not scoped, bound, or
+atomic enough to trust blindly. Stated once, plainly, as the four rules
+this whole section exists to enforce:
+
+- **A single request's own recovery never scans unrelated runs.** Nothing
+  a request-scoped catch-up does may ever touch a run, attempt, or command
+  outside the one canonical record it was asked to catch up.
+- **Session recovery uses only canonical, digest-bound receipts.** A raw
+  `meta.json` field is never authority for anything; only a receipt whose
+  bytes are referenced by digest from a verified canonical event may
+  backfill a session.
+- **Sealed recovery requires the record to prove it belongs to the exact
+  Command in question** — not merely to have the right run id, but the
+  right command id, conversation, parent, and command text too.
+- **A failed recovery attempt never completes command bookkeeping.** Only
+  a verified-successful, verified-terminal receipt may mark a command
+  `completed`.
+
+### 10.1 Scoped catch-up vs. operator-global recovery (Part 1)
+
+`o7 recover` (no `--run-dir`) is a deliberate, OPERATOR-triggered global
+scan: `recover_scan`/`mark_interrupted` reclassify every `running` run/
+attempt in the WHOLE ledger as `interrupted`, and `stuck_commands`/
+`reconcile_completed_commands` scan every command. Exactly right for "a
+process died, go find everything it left behind" — exactly wrong as a side
+effect of one HTTP request recovering ONE sealed child run.
+
+Prior rounds' `o7d` redrive path recovered a sealed record by spawning `o7
+recover --ledger <path> --run-dir <dir>` as a **subprocess** and waiting for
+it. That subprocess-boundary was itself the bug: nothing prevented it from
+being (or becoming) the same code path as a bare `o7 recover`, and there was
+no structural guarantee the global scan could never run inside of it — only
+that it currently didn't, by the CLI parsing choosing a narrower branch. A
+single input change to that branch, or a copy-paste of the subcommand
+dispatch, would have silently reintroduced global side effects into every
+HTTP request's own recovery.
+
+Fixed by extracting `src/recovery.rs::catch_up_record(ledger_path, run_dir,
+expected_identity) -> Result<CatchUpReceipt, CatchUpError>` as a plain
+library function containing NO calls to `recover_scan`/`mark_interrupted`/
+`stuck_commands`/`reconcile_completed_commands` anywhere in its body — by
+construction, not by convention. `crates/o7d` now depends on the root `o7`
+crate as a genuine library dependency and calls `catch_up_record` directly,
+in-process — there is no subprocess, and therefore structurally no `o7
+recover` process for a global scan to ever run inside of. `o7 recover
+--run-dir <dir>` (the CLI form) now calls this SAME function too, so the
+CLI and the HTTP path share one implementation, not two.
+
+`CatchUpReceipt` is a typed, complete answer — `run_id`, `conversation_id`,
+`parent_run_id`, the independently re-derived `verdict`, `sealed`,
+`session_backfill: SessionBackfillOutcome`, and `projection_applied` — and
+`o7d` may only complete a command's bookkeeping after receiving one whose
+`sealed` is `true` (§10.4).
+
+### 10.2 Canonical provider-session receipt (Part 2)
+
+`meta.json`'s own `session_id` field is now NEVER consulted for session
+backfill, full stop — not "checked but distrusted more," removed as an
+input entirely. The sole authority is a new canonical event,
+`RunEventKind::ProviderSessionCaptured { receipt: ArtifactRef }`, appended
+right after a live/continuation agent call returns a session, referencing a
+durable `session_receipt.json` sidecar:
+
+```json
+{ "schema": 1, "run_id": "...", "engine": "claude", "provider": "claude", "model": "...", "session_id": "..." }
+```
+
+This is an evidence-only, at-most-once canonical event — the same shape as
+the existing `WorktreeCreated`/`PatchCaptured` precedent: one
+`ArtifactRef`, digest-verified by `verify_prefix`'s EXISTING artifact
+pipeline (no new verification code needed for the digest check itself —
+only two new `ArtifactKind` variants and `RunState` fields,
+`#[serde(skip_serializing_if = "Option::is_none")]` so the pinned
+normalized-state digest test and every pre-existing sealed record stay
+byte-identical; no schema-version bump). A duplicate
+`ProviderSessionCaptured` in one stream is a reducer error, exactly like a
+duplicate `WorktreeCreated`.
+
+Backfill from this receipt is allowed ONLY if ALL of:
+- the canonical event itself verifies (chain/digest/reducer/artifact —
+  `verify_prefix`, the same check `o7 replay` applies);
+- the receipt's own digest verifies (implied by the above, since
+  `catch_up_record` only reads the receipt bytes back AFTER `verify_prefix`
+  has already proven them authentic);
+- `receipt.run_id` equals the canonical run id being caught up;
+- `receipt.engine`/`receipt.provider` are the one supported continuation
+  path (`"claude"`/`"claude"`);
+- `receipt.session_id` parses as a valid `ProviderSessionId` (non-empty, no
+  control characters);
+- the ledger's existing `provider_session_id` for this run is either
+  `NULL` or byte-identical to the receipt's own value.
+
+Any other existing, DIFFERENT session in the ledger is a fail-closed
+`CatchUpError::SessionConflict` — the ledger's own value is left completely
+untouched, never overwritten in either direction, and the catch-up as a
+whole fails (verdict catch-up is refused too — §10.4 explains why a session
+conflict cannot be "backfill fails, verdict succeeds" the way a merely
+*absent* receipt can be).
+
+A legacy record with no `ProviderSessionCaptured` event at all (predates
+this round, or a `--no-ledger` run) reports
+`SessionBackfillOutcome::NoCanonicalReceipt` — verdict catch-up still
+proceeds normally; the run simply stays honestly non-continuable, exactly
+as before this round. No old sealed stream is ever retroactively rewritten
+to add a receipt it never had.
+
+The raw session id is never placed in an HTTP request/response DTO,
+browser-visible state, or an ordinary log line — unchanged from §6/§8's
+existing rule, now additionally true of the receipt's own storage: it lives
+only in `session_receipt.json` and the ledger's own `run.provider_session_id`
+column.
+
+### 10.3 Exact Command lineage (Part 3)
+
+Prior rounds bound a canonical record to a `RunId` (`ledger_binding.json`)
+but never to the exact accepted **Command** it was created to continue. A
+canonical record with the right run id could, in principle, be misattributed
+to the wrong command, the wrong parent, or wrong command text without any
+check ever catching it.
+
+Fixed with a second canonical event, `RunEventKind::CommandBindingCaptured
+{ binding: ArtifactRef }`, appended immediately after `RunStarted` in
+`continue_execute`, referencing a durable `command_binding.json`:
+
+```json
+{ "schema": 1, "command_id": "...", "conversation_id": "...", "parent_run_id": "...", "child_run_id": "...", "command_sha256": "..." }
+```
+
+written durably BEFORE `RunStarted` (mirroring `ledger_binding.json`'s own
+existing pre-`RunStarted` write) and referenced by digest from the
+canonical stream immediately after. `crates/o7d/src/canonical.rs`'s
+`classify_child_record` now takes the EXACT current `o7_ledger::Command`
+(not just a bare run id) and checks, for a record that classifies as
+sealed or unsealed-valid:
+
+- `command_binding.command_id == command.command_id`;
+- `command_binding.conversation_id == command.conversation_id`;
+- `command_binding.parent_run_id == command.parent_run_id`;
+- `command_binding.child_run_id == command.child_run_id == this record's own canonical run_id`;
+- `command_binding.command_sha256 == sha256(command.command_text)`;
+- redundant corroboration: the canonical `RunStarted.task` artifact's OWN
+  digest (already verified by `verify_prefix`) also equals
+  `sha256(command.command_text)` — two independently-written sources must
+  agree, not just the binding sidecar alone.
+
+Any mismatch — wrong parent, wrong command text, a foreign/absent command
+id, or a legacy record with no `command_binding.json` at all where one was
+expected — is `Invalid`, exactly like a tampered record: never
+sealed-recovered, never redriven, a stable `500
+COMMAND_CANONICAL_RECORD_INVALID`, the command left untouched for manual
+investigation. `catch_up_record` itself independently re-checks the SAME
+binding when called with an `ExpectedIdentity` (from `o7d`'s own
+classification) — a caller that classified correctly a moment ago is not
+proof the record hasn't changed since, and a future caller of
+`catch_up_record` may not classify at all.
+
+### 10.4 Completion only after a verified, terminal, bound receipt (Part 4)
+
+`o7d`'s `ValidSealed` handling no longer treats "the scoped catch-up
+returned `Ok`" as sufficient to complete a command. The new flow:
+classify `ValidSealed` → `catch_up_record` returns a `CatchUpReceipt` whose
+`sealed` is `true` → THEN, and only then, call the new atomic
+`SqliteLedger::mark_command_completed_if_bound_and_terminal(command_id,
+expected_child_run_id)`, which checks — in ONE transaction — ALL of:
+command `status IN ('accepted', 'started')`; `child_run_id ==
+expected_child_run_id`; that child run row actually EXISTS; its own
+`status.is_terminal()`; and its `conversation_id`/`parent_run_id` match the
+command's own. Any predicate failing reports `NotBound`/`NotFound`, mapped
+to `RedriveError::RecoveryFailed` — the command is left exactly as found,
+`started`, its old binding intact, discoverable and retriable, the provider
+never invoked.
+
+On ANY catch-up failure — a `CatchUpError` of any variant, including
+`SessionConflict` — the command stays `started`/recoverable, its binding
+unchanged, the provider is never invoked, and the API answers with a stable
+`COMMAND_RECOVERY_FAILED` (distinct from `COMMAND_CANONICAL_RECORD_INVALID`
+— the record's own identity was fine; the catch-up itself failed on its own
+terms, e.g. a session conflict). A later retry, once the underlying
+condition is resolved, can still succeed — a failed scoped catch-up never
+permanently wedges the command.
+
+### 10.5 The outer gate inspects canonical evidence regardless of ledger terminal-ness (Part 5)
+
+`create_command`'s own eligibility check for "does this conversation have a
+stale command to redrive/recover" used to short-circuit once the OLD
+child's ledger row already looked terminal. That is backwards: a
+`completed`-looking child run row is not proof the COMMAND's own
+bookkeeping is done — the command's `status` is the only authority for
+whether there is still active work to inspect. The gate is now keyed
+SOLELY on `command.status` — `Accepted`/`Started` is eligible for
+inspection (its old child's canonical record is classified regardless of
+what the ledger's `run.status` currently says); `Completed`/`Rejected`
+means there is nothing to do. This closes the exact gap a tampered record
+sitting behind an already-`completed`-looking ledger row would otherwise
+have slipped through unexamined.
+
+### 10.6 Lock-loser convergence tracks command status, not only child_run_id (Part 6)
+
+A sealed recovery (§7's `ValidSealed` case) never changes the command's
+`child_run_id` — only its `status`, from `started` to `completed`. The
+lock-loser poll (the branch that runs when this request loses the old
+child's `flock` race to another concurrent request) previously watched only
+`child_run_id` changing, which is the right signal for a CAS-rebind
+redrive but silently useless for a concurrent SEALED recovery: two racing
+threads recovering the same sealed record would each see `child_run_id`
+never move and poll all the way to the bound, having missed the OTHER
+signal that actually indicates convergence. The poll now checks EITHER
+`child_run_id` changing OR `command.status == Completed`, and — whether it
+converges early or exhausts the bounded wait — ALWAYS performs one final
+authoritative `ledger.command(...)` re-read before returning; it never
+returns the stale pre-lock `command` snapshot the function was originally
+called with. The 500ms bound remains a LATENCY bound only, never a
+correctness shortcut: what it returns after the bound is a fresh read, not
+a guess. A storage read failure at any point in this poll surfaces as a
+distinct, typed `RedriveError::Storage` (`REDRIVE_STORAGE_ERROR`) rather
+than being silently swallowed into a stale answer.
+
+### 10.7 What this round does NOT claim
+
+No broader "exactly-once" guarantee is made anywhere in this round — §4's
+at-most-once claim, scoped to this slice's single-host/one-ledger-file
+model, is unchanged and is not widened by anything here. A `ValidUnsealed`
+record discovered after `AgentStarted` (the provider genuinely still
+running, or crashed mid-turn) is handled exactly as §7 already describes —
+redriven once proven dead via `flock`, never on a wall-clock guess alone;
+this round changes nothing about that path except that `command_binding.json`
+is now also checked for it, per §10.3.
+
 ## Known limitations and evidence
+
+**Fifth independent re-gate (four latent recovery-machinery gaps, closing
+review "4834041346") — all fixed.** Full detail in §10 above. Summary: (1)
+the `o7d` redrive path's own sealed-recovery previously spawned `o7 recover`
+as a subprocess — replaced with a scoped `catch_up_record` library call, in
+the SAME process, containing no calls to any global-scan primitive by
+construction, closing the possibility that a request-scoped recovery could
+ever be, or become, the same code path as an operator's global scan. (2)
+`meta.json`'s own `session_id` is retired as backfill authority entirely,
+replaced by a canonical, digest-bound `ProviderSessionCaptured` receipt,
+verified by the same chain/digest/reducer/artifact check every other
+canonical event gets — a genuine, DIFFERENT existing ledger session now
+fails closed rather than either side silently overwriting the other. (3) A
+canonical record is now bound to the exact accepted Command — command id,
+conversation, parent, and a command-text digest — via a new
+`CommandBindingCaptured` canonical event, not merely to a `RunId`; any
+mismatch is `Invalid`, never sealed-recovered. (4) A command's bookkeeping
+is completed ONLY after a verified-successful, verified-terminal receipt,
+via a new atomic `mark_command_completed_if_bound_and_terminal`; a failed
+catch-up leaves the command started and retriable, never invoking the
+provider. (5) The outer eligibility gate no longer skips canonical
+classification merely because the ledger's child run row already looks
+terminal — only the command's OWN status gates whether there is work left
+to inspect. (6) The lock-loser convergence poll now tracks the command's
+own `status` becoming `completed`, not only `child_run_id` moving, and
+always performs one final authoritative re-read rather than ever answering
+with a stale pre-lock snapshot.
+
+
 
 **Fourth independent re-gate (the canonical-first-recovery blocker, one
 major CAS finding) — all fixed, plus one latent bug this round's own test
@@ -767,7 +1017,8 @@ the workspace (including the new `crates/o7-ledger/tests/commands.rs` and
 ```
 cargo test --workspace -- --skip kill_after_commit_preserves_event \
   --skip kill_before_commit_leaves_no_partial \
-  --skip a_blocking_fifo_target_fails_closed_within_a_bound
+  --skip a_blocking_fifo_target_fails_closed_within_a_bound \
+  --skip no_control_descriptor_leaks_to_a_concurrent_sibling
 ```
 
 and passes. CI (a proper multi-core, non-swapping runner) is expected not
@@ -796,6 +1047,28 @@ than normal. This is the signature of severe scheduling/swap contention on
 a single-vCPU, ~2GB-RAM VPS, not a logic defect. The gate commands below
 additionally skip this one test, for the same reason and with the same
 scoping discipline as the two `crash_durability` skips above.
+
+**A FOURTH test in the same file, found during this fifth corrective
+round's own `cargo test --workspace` re-gate**: `sandboy_lifecycle.rs`'s
+`no_control_descriptor_leaks_to_a_concurrent_sibling` — unlike the other
+anomalies in this file, which resolve cleanly the moment a competing
+`cargo`/`rustc` process is gone, this one does NOT: re-run completely in
+isolation (no other `cargo` process on the box), it was bounded twice —
+once at 120s, once at a much more generous 300s — and both times produced
+ZERO output progress before `timeout` killed it, never printing `ok` or
+`FAILED`. That rules out ordinary load-induced slowness (which this same
+round's re-run of two OTHER apparent failures in this exact file,
+`a_live_launch_executes_the_sealed_target_not_a_swapped_source` and
+`an_unexpectedly_launched_target_is_a_fail_not_the_refusal_pass`,
+confirmed by passing cleanly in 13.19s and 24.72s respectively once
+isolated) and points at a genuine pre-existing hang. Scope, exactly as
+every other exclusion in this section: `git diff` against `origin`'s
+frozen head for `crates/o7-worker` and `crates/o7-sandbox-protocol` is
+byte-for-byte empty — R1 has never touched either crate, in any round,
+including this one — so this is not attributable to anything in this
+slice's own diff, only disclosed here because `cargo test --workspace`
+surfaces it. Added to the same skip list below, with the same
+"disclose, don't hide" discipline as the other three.
 
 **`tests/r1_command_e2e.rs`'s own tests are serialized** (a static
 `Mutex` acquired first thing in every `#[test]`), scoped to this one file
