@@ -244,6 +244,30 @@ pub enum ReduceError {
     /// overwritten).
     #[error("duplicate CommandBindingCaptured at sequence {sequence}")]
     DuplicateCommandBinding { sequence: u64 },
+
+    /// A second `CandidateStateCaptured` (the singleton evidence slot cannot
+    /// be overwritten).
+    #[error("duplicate CandidateStateCaptured at sequence {sequence}")]
+    DuplicateCandidateState { sequence: u64 },
+
+    /// A second `CandidateStateMaterialized` (the singleton evidence slot
+    /// cannot be overwritten).
+    #[error("duplicate CandidateStateMaterialized at sequence {sequence}")]
+    DuplicateCandidateMaterialized { sequence: u64 },
+
+    /// `CandidateStateMaterialized`'s own `expected_tree_oid` disagreed with
+    /// its `actual_tree_oid` — by construction the writer never appends this
+    /// event unless the two already matched, so a stream where they
+    /// disagree is tamper/corruption, not a legitimate outcome.
+    #[error(
+        "CandidateStateMaterialized at sequence {sequence} disagrees with itself: expected tree \
+         oid {expected}, actual tree oid {actual}"
+    )]
+    CandidateTreeOidMismatch {
+        sequence: u64,
+        expected: String,
+        actual: String,
+    },
 }
 
 /// Fold one event into the run state.
@@ -557,6 +581,39 @@ fn apply_with_contract(
                 return Err(ReduceError::DuplicateCommandBinding { sequence: seq });
             }
             state.command_binding = Some(binding.clone());
+            Ok(())
+        }
+        RunEventKind::CandidateStateCaptured { receipt } => {
+            validate_artifact(receipt, ArtifactKind::CandidateState, seq)?;
+            if state.candidate_state.is_some() {
+                return Err(ReduceError::DuplicateCandidateState { sequence: seq });
+            }
+            state.candidate_state = Some(receipt.clone());
+            Ok(())
+        }
+        RunEventKind::CandidateStateMaterialized {
+            source_run_id,
+            candidate_receipt,
+            expected_tree_oid,
+            actual_tree_oid,
+        } => {
+            validate_artifact(candidate_receipt, ArtifactKind::CandidateState, seq)?;
+            if state.candidate_materialized.is_some() {
+                return Err(ReduceError::DuplicateCandidateMaterialized { sequence: seq });
+            }
+            if expected_tree_oid != actual_tree_oid {
+                return Err(ReduceError::CandidateTreeOidMismatch {
+                    sequence: seq,
+                    expected: expected_tree_oid.clone(),
+                    actual: actual_tree_oid.clone(),
+                });
+            }
+            state.candidate_materialized = Some(crate::state::CandidateMaterialization {
+                source_run_id: source_run_id.clone(),
+                candidate_receipt: candidate_receipt.clone(),
+                expected_tree_oid: expected_tree_oid.clone(),
+                actual_tree_oid: actual_tree_oid.clone(),
+            });
             Ok(())
         }
         RunEventKind::RunSealed => {

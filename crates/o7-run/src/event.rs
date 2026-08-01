@@ -138,6 +138,14 @@ pub enum ArtifactKind {
     /// digest of the command text) — see
     /// [`RunEventKind::CommandBindingCaptured`].
     CommandBinding,
+    /// Q-Deck A0: a candidate-state receipt — either the one THIS run
+    /// captured (see [`RunEventKind::CandidateStateCaptured`]) or a
+    /// command-continuation child's own local copy of its parent's receipt,
+    /// used to prove what it materialized from (see
+    /// [`RunEventKind::CandidateStateMaterialized`]). Both are "a
+    /// candidate-state receipt" — capturing vs. consuming one, not two
+    /// different shapes.
+    CandidateState,
 }
 
 /// A reference to an out-of-band artifact: WHERE it is plus the digest its content MUST
@@ -449,6 +457,34 @@ pub enum RunEventKind {
     /// `conversation_id`, `parent_run_id`, `child_run_id`) against tamper
     /// or confusion between commands.
     CommandBindingCaptured { binding: ArtifactRef },
+    /// Q-Deck A0: a durable, canonical receipt of this run's own cumulative
+    /// candidate state — evidence-only, at most once per run, bound by
+    /// digest. Emitted by both `execute_live` and `continue_execute` (the
+    /// two ledger-backed paths) immediately after `PatchCaptured`. A
+    /// command-continuation child materializes ITS parent's candidate
+    /// state from whichever run most recently captured one — see
+    /// [`Self::CandidateStateMaterialized`].
+    CandidateStateCaptured { receipt: ArtifactRef },
+    /// Q-Deck A0: a command-continuation child's durable proof of which
+    /// parent candidate state it materialized BEFORE invoking the provider
+    /// — evidence-only, at most once per run, emitted immediately after
+    /// `CommandBindingCaptured` and BEFORE `AgentStarted` (so a
+    /// materialization failure never reaches the durable dispatch boundary
+    /// — see `docs/q-deck/a0-candidate-state.md` §5). `candidate_receipt`
+    /// references this child's own local copy of the parent's receipt
+    /// bytes, so replaying this record alone never depends on the parent's
+    /// directory still existing. `expected_tree_oid` is the receipt's own
+    /// `candidate_tree_oid`; `actual_tree_oid` is what `git write-tree`
+    /// produced after applying the parent's patch — by construction the
+    /// two always agree wherever this event legitimately appears (the
+    /// reducer refuses a stream where they don't, see
+    /// `crate::reduce::ReduceError::CandidateTreeOidMismatch`).
+    CandidateStateMaterialized {
+        source_run_id: RunId,
+        candidate_receipt: ArtifactRef,
+        expected_tree_oid: String,
+        actual_tree_oid: String,
+    },
     /// The run was sealed. MUST be the LAST event; the verdict is fixed here.
     RunSealed,
 }
@@ -470,6 +506,8 @@ impl RunEventKind {
             Self::RunSealed => 10,
             Self::ProviderSessionCaptured { .. } => 11,
             Self::CommandBindingCaptured { .. } => 12,
+            Self::CandidateStateCaptured { .. } => 13,
+            Self::CandidateStateMaterialized { .. } => 14,
         }
     }
 
@@ -488,6 +526,8 @@ impl RunEventKind {
             Self::SandboxEvidenceCaptured { .. } => "sandbox_evidence_captured",
             Self::ProviderSessionCaptured { .. } => "provider_session_captured",
             Self::CommandBindingCaptured { .. } => "command_binding_captured",
+            Self::CandidateStateCaptured { .. } => "candidate_state_captured",
+            Self::CandidateStateMaterialized { .. } => "candidate_state_materialized",
             Self::RunSealed => "run_sealed",
         }
     }
@@ -572,6 +612,18 @@ fn fold_kind(h: &mut Sha256, kind: &RunEventKind) {
         }
         RunEventKind::ProviderSessionCaptured { receipt } => fold_artifact(h, receipt),
         RunEventKind::CommandBindingCaptured { binding } => fold_artifact(h, binding),
+        RunEventKind::CandidateStateCaptured { receipt } => fold_artifact(h, receipt),
+        RunEventKind::CandidateStateMaterialized {
+            source_run_id,
+            candidate_receipt,
+            expected_tree_oid,
+            actual_tree_oid,
+        } => {
+            frame(h, source_run_id.as_str().as_bytes());
+            fold_artifact(h, candidate_receipt);
+            frame(h, expected_tree_oid.as_bytes());
+            frame(h, actual_tree_oid.as_bytes());
+        }
     }
 }
 
@@ -699,6 +751,7 @@ fn artifact_kind_tag(kind: ArtifactKind) -> u8 {
         ArtifactKind::Policy => 6,
         ArtifactKind::ProviderSession => 7,
         ArtifactKind::CommandBinding => 8,
+        ArtifactKind::CandidateState => 9,
     }
 }
 

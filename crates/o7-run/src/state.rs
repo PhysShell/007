@@ -125,6 +125,17 @@ pub struct SandboxEvidenceEntry {
     pub outcome: SandboxEvidenceOutcome,
 }
 
+/// Q-Deck A0: a command-continuation child's folded proof of which parent
+/// candidate state it materialized before invoking the provider — see
+/// [`crate::event::RunEventKind::CandidateStateMaterialized`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CandidateMaterialization {
+    pub source_run_id: RunId,
+    pub candidate_receipt: ArtifactRef,
+    pub expected_tree_oid: String,
+    pub actual_tree_oid: String,
+}
+
 /// The pure, versioned reduced state. Serializes to a byte-stable normal form (`BTreeMap`/
 /// `BTreeSet` keep ordering deterministic), so replaying the same stream yields an
 /// identical serialization — the anchor for byte-stable replay and for
@@ -179,6 +190,18 @@ pub struct RunState {
     /// `provider_session_receipt` above.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub command_binding: Option<ArtifactRef>,
+    /// Q-Deck A0: this run's own captured candidate-state receipt
+    /// (evidence-only) — `None` for a run that predates this event
+    /// existing, or a non-`--ledger` run (`execute`) that never captures
+    /// one. Same digest-compatibility discipline as the two R1 fields
+    /// above.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub candidate_state: Option<ArtifactRef>,
+    /// Q-Deck A0: this run's own proof of which parent candidate state it
+    /// materialized (command-continuation children only) — `None` for a
+    /// non-continuation run, or a continuation that predates this event.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub candidate_materialized: Option<CandidateMaterialization>,
 }
 
 impl RunState {
@@ -203,6 +226,8 @@ impl RunState {
             verdict: None,
             provider_session_receipt: None,
             command_binding: None,
+            candidate_state: None,
+            candidate_materialized: None,
         }
     }
 

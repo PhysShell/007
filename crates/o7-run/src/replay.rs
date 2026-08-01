@@ -405,6 +405,10 @@ fn referenced_artifacts(kind: &RunEventKind) -> Vec<&ArtifactRef> {
         RunEventKind::SandboxEvidenceCaptured { report, .. } => vec![report],
         RunEventKind::ProviderSessionCaptured { receipt } => vec![receipt],
         RunEventKind::CommandBindingCaptured { binding } => vec![binding],
+        RunEventKind::CandidateStateCaptured { receipt } => vec![receipt],
+        RunEventKind::CandidateStateMaterialized {
+            candidate_receipt, ..
+        } => vec![candidate_receipt],
         RunEventKind::AgentStarted
         | RunEventKind::AgentExited { .. }
         | RunEventKind::GateStarted { .. }
