@@ -292,6 +292,18 @@ comparisons the original round hand-rolled.
    sealed. Full acceptance authority requires the semantic layer on top,
    which is what this step now runs.)*
 
+   *(Corrective round 2 update: as of this round, `o7_run::replay::
+   verify_prefix` ITSELF now runs the semantic layer automatically
+   whenever candidate evidence is present — see §16, Part 1. The
+   explicit separate call to `verify_candidate_state_captured` this
+   step (and step 2 above) still makes is no longer strictly necessary
+   for VERIFICATION — `verify_prefix` alone now already proves it — but
+   is still needed here for DATA EXTRACTION: `verify_prefix` returns
+   only the reduced `RunState`, never the parsed
+   `CandidateStateReceiptV1` itself, which this caller needs to read
+   `base_commit`/`patch.locator`/etc. from. This is a deliberate,
+   harmless double-check kept for that reason, not a residual gap.)*
+
 4. Read the receipt's own patch bytes (`std::fs::read` against the
    receipt's own already-digest-verified `patch.locator` — safe, since
    `verify_candidate_state_captured` already proved the digest matches).
@@ -643,8 +655,32 @@ force-push):
 10. `33f6b89` `test(q-deck): cover A0 confinement and replay adversaries` —
     §14 Part 8: the P6 symlink-escape process-level regression test, and
     the relaxed "never completes" assertion helper.
-11. `docs(q-deck): record the first corrective-round evidence` — this
-    file, §14-15, final update with this round's results.
+11. `7014bcc` `docs(q-deck): record the first corrective-round evidence` —
+    this file, §14-15, final update with that round's results.
+
+**Corrective round 2** (§16-17; additive on top of `7014bcc`, same
+discipline):
+
+12. `7abd4f1` `fix(replay): make candidate semantics authoritative` — §16
+    Part 1-2: `verify_prefix_core`/`verify_prefix` split; candidate
+    semantic verification now runs automatically inside `verify_prefix`;
+    wider cross-binding against a run's own `CommandBindingCaptured`
+    evidence (new `CommandBindingFacts`).
+13. `25ebf61` `fix(o7d): reject parents without usable candidate state` —
+    §16 Part 5: `parent_candidate_state_usable` admission preflight; the
+    new `COMMAND_PARENT_CANDIDATE_UNAVAILABLE` 409; the idempotency-key
+    peek that keeps replays exempt from the new preflight.
+14. `c437f55` `fix(root): terminate unattached legacy-parent commands` —
+    §16 Part 6: the atomic `mark_command_rejected_if_unattached_and_bound`;
+    `continue_run`'s early-failure path now actually invokes it.
+15. `3af641f` `fix(o7d): correct candidate lineage projection` — the
+    always-null DTO field-name defect fix, in its own narrow commit.
+16. `9f8f63e` `test(q-deck): cover semantic replay and legacy-parent
+    admission` — §16 Part 4/7/8: the restructured P8 proof, ten new
+    cross-binding negatives, three new legacy-parent-admission process
+    tests, one sealed-non-Pass-verdict-still-usable test.
+17. `docs(q-deck): record the second corrective-round evidence` — this
+    file, §16-17, final update with this round's results.
 
 ## 13. Evidence — original A0 round's exact gate results (historical, unchanged)
 
@@ -770,6 +806,17 @@ shows generic `verify_prefix` has no opinion on it (passes), and shows
 `verify_candidate_state_materialized` fails with a message naming the
 disagreement (§6, the thirteen new `crates/o7-run/tests/candidate_state.rs`
 tests).
+
+*(Corrective round 2 correction: "generic `verify_prefix` has no opinion
+on it (passes)" above was true when this round shipped, and was itself
+the residual defect an independent re-gate then found — the semantic
+layer existed but was never actually REACHED by `verify_prefix`/
+`replay`/`classify_record`, so a production consumer calling any of
+those (as every real caller in this codebase does) got no protection
+from it at all. §16/§17 record the fix: `verify_prefix` now runs this
+semantic layer itself, and the corresponding unit test was rewritten
+to prove `verify_prefix` — not just the standalone helper — rejects the
+mismatch.)*
 
 **The related major cluster**, closed alongside the two blockers:
 
@@ -944,3 +991,222 @@ sub-cases remain future work, unchanged from §13's own note. Frontend
 `git status --short` shows no unstaged/untracked changes beyond what this
 round's own commits already captured; every gate above was run against the
 exact commit this round's final push carries.
+
+## 16. Corrective round 2: authoritative semantic replay and legacy-parent admission
+
+An independent re-gate against corrective round 1's exact head
+(`7014bcc6f19ec8f4f7a3134b6ec21815b67640b1`) confirmed P6/byte-preservation
+stayed closed, but found the P8 fix, while real, was not yet
+AUTHORITATIVE, plus a genuine wedging defect in the round's own defense-
+in-depth. Neither is a rebuild of anything already accepted (the cumulative
+model, private temp store, byte-preserving transport, R1's dispatch
+boundary, and the command redrive classifier are all explicitly unchanged
+this round) — this round closes the gap between "the right check exists
+somewhere in this codebase" and "every real production caller actually
+runs it."
+
+**Defect 1 — candidate semantics existed but were not reached.**
+`o7_run::candidate::verify_candidate_state_captured`/
+`verify_candidate_state_materialized` (§14) were real, correct, and
+unit-tested — but `verify_prefix`, `replay`, `replay_verify`, and
+`classify_record` never called them. Every ACTUAL production consumer —
+`o7 replay`, `src/recovery.rs`'s `classify_command_child` (the decision
+behind `o7d`'s own redrive path AND `o7 recover`'s discovery report), this
+round's own new admission preflight, `o7d`'s candidate-lineage DTO
+projection — goes through one of those four functions, never the
+candidate helpers directly. So a syntactically valid, digest-consistent,
+internally-self-consistent candidate receipt with semantically MEANINGLESS
+content (the exact synthetic X/Y tree mismatch §14's own unit test proved
+the HELPER catches) sailed through every real caller untouched.
+
+**Fix**: `crates/o7-run/src/replay.rs`'s old `verify_prefix` body is now
+`pub(crate) fn verify_prefix_core` — everything it always did (chain/
+digest/reducer/artifact-digest), unreachable from outside the crate under
+a name that could be mistaken for full verification. The NEW `pub fn
+verify_prefix` (same name, same signature — every existing call site
+needed zero changes) runs `verify_prefix_core`, then — only when candidate
+evidence is actually present in the reduced state — the candidate semantic
+layer, mapping any failure to a new `ReplayError::CandidateSemantic`. A
+record with no candidate evidence at all (every pre-A0/pre-round-1 record)
+is entirely unaffected: the semantic step is simply never invoked, so
+`verify_prefix` stays byte-for-byte identical to `verify_prefix_core`'s own
+result for it — zero backward-compatibility risk.
+
+**Defect 1's own related cluster, closed alongside it**:
+- Cross-binding was too narrow: `verify_candidate_state_captured` only
+  checked "an initial run's receipt has no parent" in isolation; it never
+  proved a CONTINUATION's receipt actually agrees with its own
+  `CommandBindingCaptured` evidence. New dependency-free
+  `CommandBindingFacts` (mirroring the root crate's own `CommandBinding`,
+  same rationale as `RepositoryIdentity` mirroring `CanonicalRepoId` in
+  round 1) lets the semantic layer resolve and parse a run's own command-
+  binding artifact itself; both captured and materialized checks now
+  cross-bind `run_id`/`conversation_id`/`parent_run_id` against it
+  symmetrically.
+- Locators were checked for KIND but not for the exact canonical NAME —
+  new `require_locator` checks applied to every receipt/patch/child-local-
+  copy `ArtifactRef` (`candidate_state_receipt.json`, `candidate.patch`,
+  `parent_candidate_receipt.json`, `parent_candidate.patch`).
+- `verify_candidate_state_materialized` gained a `contract` parameter and
+  now cross-binds the copied source receipt against BOTH this run's own
+  command binding (`source_run_id == parent_run_id`) AND its own candidate
+  contract (`conversation_id`/`repository_id`/`base_commit`/`patch_kind`) —
+  not merely the internal receipt/event pair round 1 proved.
+- The always-null DTO field-name bug (`candidate_projection` reading a raw
+  JSON field, `actual_tree_oid`, that stopped existing the moment round 1
+  reshaped the event) is fixed in its own narrow commit, and the whole
+  function now runs full `verify_prefix` instead of trusting raw JSON —
+  it can no longer project `"materialized"` for a record full replay would
+  reject.
+
+**What a standalone materialized child record still does and does not
+prove** (explicitly not overclaimed): it proves its IMMEDIATE source
+lineage (this exact parent run id, this exact tree) and that its own
+copied evidence is internally consistent and cross-bound against this
+run's own contract/binding. It does NOT re-prove the parent's entire
+ancestry chain back to the conversation's original base run — that would
+require copying the parent's own command binding too, which this round
+does not do. The parent's own terminal, sealed state is proven separately,
+at the point of use, by the (unchanged) `materialize_parent_candidate_state`
+— this round did not weaken or remove that check.
+
+**Defect 2 — a legacy/unusable parent could wedge a conversation forever.**
+`continue_run`'s `mark_rejected` closure existed, but the candidate-
+obligation resolution most likely to need it ran BEFORE the closure was
+even defined — its failure propagated via a bare `?`, returning straight
+out of `continue_run` with NO terminal transition ever attempted. A
+command whose candidate obligation could not be inherited (a pre-A0
+parent reached directly via the CLI, or a stale accepted row from before
+this round's own new preflight existed) was left `started`/`accepted`
+forever: invisible to `stuck_commands` (scoped to unbound rows) and to
+`reconcile_completed_commands` (scoped to a sealed child that never
+existed).
+
+**Fix, two layers**:
+1. **Admission preflight** (`crates/o7d/src/canonical.rs`'s new
+   `parent_candidate_state_usable`, wired into `routes::create_command`):
+   for a GENUINELY fresh acceptance (checked via a new, pure read-only
+   `command_idempotency_key_seen` peek, so a replay of a request accepted
+   before this preflight existed is never retroactively rejected), the
+   parent must pass full authoritative replay, be sealed, declare a
+   candidate obligation, and have a captured receipt — else a new stable
+   `409 COMMAND_PARENT_CANDIDATE_UNAVAILABLE`, before any command row,
+   child run, or worktree ever exists.
+2. **Defense in depth** (`src/main.rs`'s `continue_run`, for whatever
+   reaches this code path DESPITE the preflight — a direct CLI invocation,
+   a race, or a row accepted by an older deployment): `mark_rejected` is
+   now defined and reachable BEFORE the candidate-obligation resolution
+   call, using a new atomic, single-transaction
+   `mark_command_rejected_if_unattached_and_bound` (replacing the old
+   check-then-act `ledger_run_exists`-then-`mark_command_rejected` pair,
+   which had its own separate-read/separate-write race window) — checks
+   AND writes, atomically, that the command is still bound to this run id
+   in a non-terminal status AND that run id has never attached a ledger
+   row.
+
+**Part 8 — canonical replay validity is not continuation eligibility.** A
+sealed `Blocked`/`Fail`/`Error` parent is an honest, replay-valid record of
+an unsuccessful run; `parent_candidate_state_usable` checks
+`state.verdict.is_none()` (not sealed) — never the verdict's VALUE — as
+its sealed/unsealed predicate, so a non-Pass verdict never by itself makes
+a parent's candidate state unusable. Proven directly by a new process-level
+test: a parent sealed with `Fail` (a required gate genuinely failing)
+still accepts a valid follow-up command normally.
+
+**Existing guarantees re-verified, unchanged**: P6 symlink confinement;
+byte-preserving transport; the A→B→C cumulative chain; R1's `AgentStarted`
+dispatch boundary; pre-dispatch materialization failures stay redrivable;
+post-dispatch unsealed state stays ambiguous and never auto-redriven;
+same-key concurrent requests converge; the provider is never invoked a
+second time; child evidence stays self-contained — every relevant existing
+test suite was re-run and stayed green (§17).
+
+## 17. Corrective round 2 — evidence
+
+Base for this round: the PR's own exact re-gated head,
+`7014bcc6f19ec8f4f7a3134b6ec21815b67640b1` (corrective round 1's final
+commit). New head: see the PR body / `git log`.
+
+- `cargo fmt --check` — clean.
+- `git diff --check` — clean.
+- `cargo check -p o7 -p o7-run -p o7-ledger -p o7d` — clean.
+- `cargo test -p o7-run` — 72 unit + 18 `replay_acceptance` = 90 passing,
+  unchanged.
+- `cargo test -p o7-run --test candidate_state` — **24/24 passing** (13
+  carried from round 1, 11 new this round): the restructured P8 proof
+  (now shown failing through `verify_prefix`/`classify_record`
+  themselves, not just the standalone helper) plus ten new cross-binding
+  negatives.
+- `cargo test -p o7-run --test replay_acceptance` — 18/18, unchanged.
+- `cargo test -p o7-ledger --test commands` — **45/45 passing** (39
+  carried, 6 new): `mark_command_rejected_if_unattached_and_bound`'s own
+  four cases and `command_idempotency_key_seen`'s two.
+- `cargo test -p o7 --test r1_command_e2e` — **37/37 passing, unchanged**
+  — confirms the new admission preflight does not affect any R1 fixture
+  (every fixture in this suite already goes through `o7 run --ledger`,
+  which has unconditionally captured candidate state since round 1, so
+  every one of its parents is already A0-usable).
+- `cargo test -p o7 --test a0_candidate_state_e2e` — **16/16 passing** (12
+  carried, 4 new): every existing tampering negative now accepts either
+  the new `409` (caught at admission) or the original `202`-then-never-
+  completes (caught only at materialization) as equally valid proof; two
+  tests' own tampering technique was fixed to keep the record chain-
+  consistent so each fails for the reason its name claims, not an
+  incidental digest mismatch; three new legacy-parent-admission process
+  tests (fresh/already-accepted/racing); one new sealed-non-Pass-verdict
+  test.
+- `cargo test -p o7d` — every existing suite green, unchanged.
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean, 0
+  warnings, across the whole workspace.
+- `cargo test --workspace --no-fail-fast` — every crate green with the
+  SAME six environmental exclusions §15 already disclosed, run
+  single-threaded (`--test-threads=1`) to avoid this VPS's own cross-
+  binary resource-contention flakiness under the default parallel
+  runner — none of the six touch any code this round changed.
+- `cargo deny check advisories bans licenses sources` — same pre-existing
+  local advisory-db parse error every prior round disclosed — **zero new
+  dependencies this round**: `Cargo.lock`/`Cargo.toml` are byte-for-byte
+  unchanged.
+- `npm test` / `npm run check` (`apps/q-deck`) — 45/45 / 0 errors,
+  unchanged (frontend untouched).
+
+### Provider invocation counts, this round
+
+- Every negative case in the process-level suite: invocation count stays
+  at exactly what it was before the negative command, whether caught at
+  admission (`409`, before any command row) or at materialization (`202`,
+  before `AgentStarted`).
+- The new legacy-parent tests: Case A (fresh command, pre-A0 parent) — 0
+  additional invocations, no command row. Case D (already-accepted legacy
+  row, direct `o7 continue`) — 0 additional invocations, command
+  transitions to `rejected`. Case E (two racing processes) — 0 additional
+  invocations from either, exactly one lock winner rejects the command
+  once.
+- The A→B→C chain and the sealed-non-Pass-verdict test: unchanged/expected
+  invocation counts (3 total; 1 for the Fail-verdict parent, then a normal
+  second invocation for its accepted follow-up).
+
+### Known limitations (disclosed, not hidden)
+
+Everything §15 already disclosed remains open (duplicate-receipt/
+unsupported-schema/path-traversal/submodule-mutation process-level tests;
+non-UTF-8 A→B→C process-level test; no temp-residue sweeper). New this
+round: `load_verified_candidate_receipt` (`src/main.rs`) still calls
+`verify_candidate_state_captured` explicitly after `verify_prefix` —
+deliberately kept (§5's own note) because it needs the parsed receipt
+object itself, which `verify_prefix` does not return, not because the
+verification is still missing from `verify_prefix`. The admission
+preflight (`parent_candidate_state_usable`) does not itself verify
+`base_commit` actually exists as a real Git commit in this repository —
+that check remains where it always was, in `materialize_parent_candidate_state`
+at the point of use, since the preflight never touches Git at all (a
+deliberate scope boundary: admission answers "does this parent's OWN
+record prove usable candidate state," not "will Git actually accept this
+patch," which only a real worktree can answer). No background GC added
+this round. Frontend remains entirely out of this slice.
+
+### Clean worktree confirmation
+
+`git status --short` shows no unstaged/untracked changes beyond what this
+round's own commits already captured; every gate above was run against
+the exact commit this round's final push carries.
