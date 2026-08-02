@@ -371,6 +371,18 @@ pub enum CandidatePatchKind {
     GitBinaryCumulativePatchV1,
 }
 
+/// The schema version this build understands for a `CandidateStateContractV1`
+/// obligation itself — deliberately distinct from
+/// `crate::candidate::CANDIDATE_STATE_RECEIPT_SCHEMA_V1`, which versions the
+/// RECEIPT an evidence artifact's own bytes deserialize to. The contract's
+/// `schema` field must be validated against THIS constant (Q-Deck A0
+/// corrective round 4, Codex P1): before this round nothing compared it to
+/// anything, so a `RunStarted` could declare `candidate_state.schema = 2`
+/// while every receipt stayed at schema 1 and be accepted as valid,
+/// authoritative continuation ancestry — an unknown contract format must
+/// fail closed, not become authority.
+pub const CANDIDATE_STATE_CONTRACT_SCHEMA_V1: u32 = 1;
+
 /// Q-Deck A0 corrective round 1 (`docs/q-deck/a0-candidate-state.md` §2): the
 /// candidate-state contract obligation, canonical-bound at `RunStarted` — a
 /// command-continuation child's captured/materialized candidate-state
@@ -378,7 +390,9 @@ pub enum CandidatePatchKind {
 /// receipt itself or a mutable CLI `--base` argument. A top-level run's own
 /// obligation is fixed from its own resolved base commit; a continuation
 /// child's is inherited UNCHANGED from its verified parent's own contract —
-/// never re-derived.
+/// never re-derived. `schema` must equal `CANDIDATE_STATE_CONTRACT_SCHEMA_V1`
+/// — validated structurally at `RunStarted` (`crate::reduce::validate_contract`)
+/// and again, in defense in depth, by the semantic layer (`crate::candidate`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CandidateStateContractV1 {
     pub schema: u32,

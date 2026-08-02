@@ -19,7 +19,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::event::{ArtifactKind, ArtifactRef, CandidatePatchKind, Digest256, RepositoryIdentity};
+use crate::event::{
+    ArtifactKind, ArtifactRef, CandidatePatchKind, Digest256, RepositoryIdentity,
+    CANDIDATE_STATE_CONTRACT_SCHEMA_V1,
+};
 use crate::ids::RunId;
 use crate::replay::{ArtifactError, ArtifactResolver};
 use crate::state::RunState;
@@ -225,6 +228,20 @@ pub fn verify_candidate_state_captured(
         .candidate_state
         .as_ref()
         .ok_or_else(|| fail("this run's own contract declares no candidate_state obligation"))?;
+    // Q-Deck A0 corrective round 4 (Codex P1), defense in depth: the
+    // reducer (`crate::reduce::validate_contract`) already refuses this at
+    // `RunStarted`, before this function is ever reachable through a real
+    // `replay`/`verify_prefix` call — re-checked here too, the same
+    // redundancy this layer already applies to every other obligation
+    // field, so a caller that somehow reached this function with an
+    // unvalidated contract still fails closed.
+    if obligation.schema != CANDIDATE_STATE_CONTRACT_SCHEMA_V1 {
+        return Err(fail(format!(
+            "this run's own contract declares unsupported candidate-state schema {} (expected \
+             {CANDIDATE_STATE_CONTRACT_SCHEMA_V1})",
+            obligation.schema
+        )));
+    }
     if receipt.conversation_id != obligation.conversation_id {
         return Err(fail(
             "receipt conversation_id disagrees with the run's own contract",
@@ -355,6 +372,16 @@ pub fn verify_candidate_state_materialized(
             "this run's own contract declares no candidate_state obligation to materialize against",
         )
     })?;
+    // Q-Deck A0 corrective round 4 (Codex P1), defense in depth: same
+    // redundant re-check as `verify_candidate_state_captured` — the reducer
+    // already refuses this at `RunStarted`.
+    if obligation.schema != CANDIDATE_STATE_CONTRACT_SCHEMA_V1 {
+        return Err(fail(format!(
+            "this run's own contract declares unsupported candidate-state schema {} (expected \
+             {CANDIDATE_STATE_CONTRACT_SCHEMA_V1})",
+            obligation.schema
+        )));
+    }
     // Q-Deck A0 corrective round 3 (Codex P1, Part 3): the command binding's
     // OWN `child_run_id` must equal THIS run's own canonical `run_id` —
     // without this, a record could carry a command binding minted for a

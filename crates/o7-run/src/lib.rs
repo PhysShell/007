@@ -62,7 +62,8 @@ pub use event::{
     CandidateStateContractV1, Digest256, DigestFormatError, ExecutionSubject, GateApplicability,
     GateObligation, GateOutcome, GateRequirement, PolicyObligation, PolicyOutcome,
     PolicyProtectedSubject, PolicyRequirement, RepositoryIdentity, RunContract, RunEvent,
-    RunEventKind, SandboxEvidenceOutcome, SandboxRequirement, RUN_EVENT_SCHEMA_VERSION,
+    RunEventKind, SandboxEvidenceOutcome, SandboxRequirement, CANDIDATE_STATE_CONTRACT_SCHEMA_V1,
+    RUN_EVENT_SCHEMA_VERSION,
 };
 pub use ids::{GateId, IdError, RunEventId, RunId};
 pub use reduce::{reduce, reduce_all, ReduceError};

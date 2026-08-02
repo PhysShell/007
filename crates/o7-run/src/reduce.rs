@@ -18,7 +18,7 @@ use crate::event::{
     AgentObligation, AgentOutcome, ArtifactKind, ArtifactRef, Digest256, ExecutionSubject,
     GateApplicability, GateObligation, GateOutcome, GateRequirement, PolicyObligation,
     PolicyOutcome, PolicyProtectedSubject, PolicyRequirement, RunContract, RunEvent, RunEventKind,
-    SandboxEvidenceOutcome, RUN_EVENT_SCHEMA_VERSION,
+    SandboxEvidenceOutcome, CANDIDATE_STATE_CONTRACT_SCHEMA_V1, RUN_EVENT_SCHEMA_VERSION,
 };
 use crate::ids::{GateId, RunEventId, RunId};
 use crate::state::{
@@ -79,6 +79,16 @@ pub enum ReduceError {
     /// The `RunStarted` contract declared the same gate id in more than one obligation.
     #[error("duplicate gate {gate} in the run contract")]
     DuplicateGateInContract { gate: GateId },
+
+    /// Q-Deck A0 corrective round 4 (Codex P1): the contract's own
+    /// `candidate_state.schema` is not one this build understands. Checked
+    /// structurally at `RunStarted`, before any candidate evidence is ever
+    /// folded, so an unsupported contract can never become continuation
+    /// authority regardless of what any later receipt declares.
+    #[error(
+        "unsupported candidate-state contract schema v{found} (this build supports v{supported})"
+    )]
+    UnsupportedCandidateContractSchema { found: u32, supported: u32 },
 
     /// A gate event referenced a gate that was never declared as an obligation.
     #[error("unknown gate {gate} at sequence {sequence}: not a declared obligation")]
@@ -715,6 +725,19 @@ fn validate_artifact(
 /// Fully validate the pre-execution contract at `RunStarted`.
 fn validate_contract(contract: &RunContract, seq: u64) -> Result<(), ReduceError> {
     let agent_declared = matches!(contract.agent, AgentObligation::Required);
+
+    // Q-Deck A0 corrective round 4 (Codex P1): an unsupported candidate-state
+    // contract schema fails closed HERE — the earliest authoritative layer —
+    // so a record can never replay as a known contract regardless of
+    // whether it ever captures/materializes any candidate evidence at all.
+    if let Some(obligation) = &contract.candidate_state {
+        if obligation.schema != CANDIDATE_STATE_CONTRACT_SCHEMA_V1 {
+            return Err(ReduceError::UnsupportedCandidateContractSchema {
+                found: obligation.schema,
+                supported: CANDIDATE_STATE_CONTRACT_SCHEMA_V1,
+            });
+        }
+    }
 
     // Gates: unique ids, and any waiver must match the run environment.
     let mut seen_gates: BTreeSet<&GateId> = BTreeSet::new();

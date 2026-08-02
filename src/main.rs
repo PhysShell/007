@@ -456,7 +456,7 @@ fn run(a: RunArgs) -> Result<()> {
     // for every future command continuation to inherit unchanged.
     if let Some(p) = &pending {
         contract.candidate_state = Some(CandidateStateContractV1 {
-            schema: o7_run::CANDIDATE_STATE_RECEIPT_SCHEMA_V1,
+            schema: o7_run::CANDIDATE_STATE_CONTRACT_SCHEMA_V1,
             conversation_id: p.conversation_id().as_str().to_owned(),
             repository_id: worktree::repository_identity(&repo)?,
             base_commit: base_commit.clone(),
@@ -857,8 +857,16 @@ fn resolve_inherited_candidate_obligation(
         "the parent's candidate-state receipt was captured against a different repository than \
          this server is currently configured for"
     );
+    // The child's own contract always declares THIS build's own understood
+    // candidate-state contract schema — never the parent's raw schema value
+    // (which `load_verified_candidate_receipt`'s full `verify_prefix` call
+    // above already proved equals this same constant, since Q-Deck A0
+    // corrective round 4's reducer check refuses any other value at the
+    // parent's own `RunStarted`). Naming this constant instead of borrowing
+    // `CANDIDATE_STATE_RECEIPT_SCHEMA_V1` keeps the contract and receipt
+    // schema spaces conceptually distinct even though both are `1` today.
     Ok(CandidateStateContractV1 {
-        schema: o7_run::CANDIDATE_STATE_RECEIPT_SCHEMA_V1,
+        schema: o7_run::CANDIDATE_STATE_CONTRACT_SCHEMA_V1,
         conversation_id: receipt.conversation_id,
         repository_id: receipt.repository_id,
         base_commit: receipt.base_commit,
