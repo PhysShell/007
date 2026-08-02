@@ -1271,29 +1271,6 @@ fn command_lock_path(runs_dir: &Path, run_id: &str) -> PathBuf {
     runs_dir.join(".locks").join(format!("{run_id}.lock"))
 }
 
-/// `true` if `run_id` has a ledger row — used to decide whether rejecting
-/// a command outright is safe (see the `continue_execute` failure arm in
-/// `continue_run`). Defaults to `true` (assume attached) on any lookup
-/// failure — the safe direction: a spurious rejection of an attached
-/// command is exactly the bug this check exists to prevent, so uncertainty
-/// must never fall on the side that risks it.
-fn ledger_run_exists(ledger_path: &Path, run_id: &str) -> bool {
-    let rt = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(rt) => rt,
-        Err(_) => return true,
-    };
-    let ledger = match o7_ledger::SqliteLedger::open(ledger_path) {
-        Ok(ledger) => ledger,
-        Err(_) => return true,
-    };
-    rt.block_on(ledger.run(o7_ledger::RunId::from_raw(run_id.to_owned())))
-        .map(|r| r.is_some())
-        .unwrap_or(true)
-}
-
 /// Q-Deck R1 third corrective round (blocker 2): closes the window between
 /// a redrive deciding "this run id's process is dead" (its lock check
 /// found nothing holding it) and this SAME process — merely slow to
@@ -1441,38 +1418,92 @@ fn continue_run(a: &ContinueArgs) -> Result<()> {
         .context("parent run's stored provider session id is invalid")?;
     drop(lookup_rt);
 
+    // Q-Deck A0 corrective round 2 (Part 6): `mark_rejected` is now defined
+    // BEFORE the candidate-obligation resolution below, and used to guard
+    // EVERY early failure — not just `continue_execute`'s own outcome. The
+    // original round's own bug: this closure existed but was only wired up
+    // to the LATE (post-`continue_execute`) error path; a failure inside
+    // `resolve_inherited_candidate_obligation` propagated via a bare `?`
+    // and returned straight out of `continue_run`, leaving an accepted
+    // command permanently `started`/`accepted` with no terminal transition
+    // ever attempted — invisible to `stuck_commands` (scoped to unbound
+    // rows) and to `reconcile_completed_commands` (scoped to a sealed
+    // child that never existed). Uses the atomic, single-transaction
+    // conditional (`mark_command_rejected_if_unattached_and_bound`) rather
+    // than the old check-then-act pair (`ledger_run_exists` followed by an
+    // unconditional `mark_command_rejected`) — a concurrent `attach_run`
+    // landing between a separate check and write can no longer be raced
+    // into an incorrect rejection of a command whose child has, by now,
+    // become real and durable.
+    let command_id = o7_ledger::CommandId::from_raw(a.command_id.clone());
+    let mark_rejected_if_unattached = {
+        let command_id = command_id.clone();
+        let run_id = a.run_id.clone();
+        let ledger_path = a.ledger.clone();
+        move || {
+            let rt = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    eprintln!("[o7] continue: starting the reject-marking runtime failed: {e}");
+                    return;
+                }
+            };
+            let ledger = match o7_ledger::SqliteLedger::open(&ledger_path) {
+                Ok(ledger) => ledger,
+                Err(e) => {
+                    eprintln!("[o7] continue: opening the ledger for reject-marking failed: {e}");
+                    return;
+                }
+            };
+            let outcome = rt.block_on(ledger.mark_command_rejected_if_unattached_and_bound(
+                command_id.clone(),
+                o7_ledger::RunId::from_raw(run_id.clone()),
+            ));
+            match outcome {
+                Ok(o7_ledger::RejectionOutcome::Rejected(_)) => {
+                    eprintln!(
+                        "[o7] continue: command {command_id} marked rejected (never attached)"
+                    );
+                }
+                Ok(
+                    o7_ledger::RejectionOutcome::NotEligible(_)
+                    | o7_ledger::RejectionOutcome::NotFound,
+                ) => {
+                    // Already terminal, rebound elsewhere, or — the safe direction —
+                    // the run id HAS attached a ledger row by now: leave it alone,
+                    // exactly as the old `ledger_run_exists` check's own "assume
+                    // attached on uncertainty" discipline required.
+                }
+                Err(e) => {
+                    eprintln!("[o7] continue: reject-marking failed: {e:#}");
+                }
+            }
+        }
+    };
+
     // Q-Deck A0 corrective round 1 (`docs/q-deck/a0-candidate-state.md`
     // §2.2): resolve the child's OWN candidate-state contract obligation by
     // inheriting it unchanged from the verified parent's own contract —
     // before RunStarted, at the SAME defense-in-depth re-validation point
-    // as the provider-session check just above (a failure here leaves the
-    // command exactly as `o7d` left it, same as that check's own failure
-    // mode).
-    contract.candidate_state = Some(
-        resolve_inherited_candidate_obligation(
-            &a.runs_dir,
-            &target,
-            &a.parent_run_id,
-            &a.conversation_id,
-        )
-        .context("resolving the parent's candidate-state contract obligation")?,
-    );
-
-    let command_id = o7_ledger::CommandId::from_raw(a.command_id.clone());
-    let mark_rejected = {
-        let command_id = command_id.clone();
-        move || -> Result<()> {
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .context("starting the reject-marking runtime")?;
-            let ledger = o7_ledger::SqliteLedger::open(&a.ledger)
-                .with_context(|| format!("opening ledger at {}", a.ledger.display()))?;
-            rt.block_on(ledger.mark_command_rejected(command_id.clone()))
-                .context("marking the command rejected")?;
-            Ok(())
+    // as the provider-session check just above. Q-Deck A0 corrective round
+    // 2 (Part 6): a failure here now ALSO attempts the same conditional
+    // reject-if-unattached transition every other early failure gets —
+    // fixing the exact gap the independent re-gate found.
+    match resolve_inherited_candidate_obligation(
+        &a.runs_dir,
+        &target,
+        &a.parent_run_id,
+        &a.conversation_id,
+    ) {
+        Ok(obligation) => contract.candidate_state = Some(obligation),
+        Err(e) => {
+            mark_rejected_if_unattached();
+            return Err(e.context("resolving the parent's candidate-state contract obligation"));
         }
-    };
+    }
 
     // Q-Deck A0 (`docs/q-deck/a0-candidate-state.md` §5): the child's
     // worktree is no longer created here, at the CLI's own `--base` flag —
@@ -1528,10 +1559,12 @@ fn continue_run(a: &ContinueArgs) -> Result<()> {
             // (`started`) otherwise, so the EXISTING stuck-command
             // discovery/redrive machinery — already built to handle a
             // child stuck at any non-terminal status — is what resolves
-            // it, not a premature rejection here.
-            if !ledger_run_exists(&a.ledger, &a.run_id) {
-                let _ = mark_rejected();
-            }
+            // it, not a premature rejection here. Q-Deck A0 corrective
+            // round 2: the atomic conditional transition itself now
+            // decides "unattached" (inside the SAME transaction as the
+            // write), replacing the old separate `ledger_run_exists`
+            // check-then-act.
+            mark_rejected_if_unattached();
             return Err(e);
         }
     };
@@ -1756,7 +1789,7 @@ fn continue_execute(
     // own immutable base commit — BEFORE the durable dispatch boundary
     // (`AgentStarted`), so any failure here stays safely, same-key
     // redrivable via R1's existing pre-dispatch machinery (this happens
-    // after `attach_run` above, so `ledger_run_exists` is already true).
+    // after `attach_run` above, so this run id already has a ledger row).
     let (source_receipt_ref, source_patch_ref, materialized_tree_oid) =
         materialize_parent_candidate_state(
             &rec,
