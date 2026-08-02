@@ -751,11 +751,17 @@ fn assert_command_never_completes_and_provider_never_reinvoked(
         1,
         "the provider must NEVER be invoked for a command whose materialization fails"
     );
+    // Q-Deck A0 corrective round 1: some negative cases (e.g. the parent's
+    // own candidate contract failing its EARLY, pre-RunStarted inheritance
+    // check) never create a ledger row for the child run id at all — a 404
+    // here is just as valid a "never completed" proof as a 200 with a
+    // non-terminal status; both mean `Absent`/safely pre-dispatch-
+    // redrivable, never a completed run.
     let (status, run) = get(addr, &format!("/api/v1/runs/{child_run_id}"));
-    assert_eq!(status, 200);
-    assert_ne!(
-        run["status"], "completed",
-        "a failed materialization must never complete the child run"
+    assert!(
+        status == 404 || (status == 200 && run["status"] != "completed"),
+        "a failed materialization must never complete the child run (got status {status}, \
+         run {run:?})"
     );
     assert_eq!(
         command_status(ledger_path, &command_id),
@@ -1221,4 +1227,194 @@ fn a_same_key_retry_succeeds_once_the_materialization_cause_is_fixed() {
 
     let _ = o7d_child.kill();
     let _ = o7d_child.wait();
+}
+
+/// Q-Deck A0 corrective round 1 (P6 regression, `docs/q-deck/a0-candidate-state.md`
+/// §1): the conversation's own base commit contains a symlink at the EXACT
+/// name the old, fixed-name temp file used
+/// (`.o7-candidate-patch.tmp`, inside the checkout) pointing OUTSIDE the
+/// repository at a sentinel file. A command continuation's own real patch
+/// application must NEVER write through that symlink — it must go to the
+/// confined private temp store instead. Proves: the outside sentinel's
+/// bytes are untouched, the checked-out symlink itself is byte-identical to
+/// what the base commit committed (never followed, read, or overwritten),
+/// the continuation still succeeds normally, and the provider is invoked
+/// exactly once for it (the presence of a hostile symlink in the base must
+/// not itself cause a false-closed failure for an otherwise-legitimate
+/// continuation).
+#[test]
+fn a_symlink_at_the_old_temp_files_exact_name_never_escapes_the_confined_temp_store() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+
+    // The outside sentinel: a file the candidate-controlled base commit's
+    // own symlink points at, OUTSIDE the repo and outside any o7-owned
+    // directory.
+    let sentinel_dir = tempfile::tempdir().unwrap();
+    let sentinel = sentinel_dir.path().join("sentinel.txt");
+    std::fs::write(&sentinel, "untouched-sentinel-content\n").unwrap();
+
+    // Bake the hostile symlink into the repo's OWN base commit — the git
+    // commands here mirror `fixture_repo`'s own style.
+    let git = |args: &[&str]| {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(repo.path())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    };
+    std::os::unix::fs::symlink(&sentinel, repo.path().join(".o7-candidate-patch.tmp")).unwrap();
+    git(&["add", "-A"]);
+    git(&[
+        "commit",
+        "-q",
+        "-m",
+        "hostile symlink at the old temp file's exact name",
+    ]);
+    let hostile_base = worktree_rev_parse(repo.path(), "HEAD");
+
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = ActionClaude::new();
+
+    claude.set_actions(1, "echo base-v1 > base.txt\n");
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        None,
+    );
+    wait_until_healthy(addr);
+    let (_, page) = get(addr, "/api/v1/runs");
+    let run_a_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Run A's own conversation base really is the hostile commit.
+    let target = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let receipt_a = read_candidate_receipt(&run_dir(&runs_dir, &target, &run_a_id));
+    assert_eq!(receipt_a["base_commit"], hostile_base);
+
+    // A legitimate continuation, with a REAL (non-empty) patch to apply —
+    // the case the old, fixed-name temp file inside the worktree was
+    // actually needed for.
+    claude.set_actions(2, "echo base-v2 > base.txt\necho from-b > b.txt\n");
+    let (status, accepted) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": run_a_id,
+            "command": "continue despite the hostile symlink",
+            "idempotency_key": "key-symlink-escape",
+        }),
+    );
+    assert_eq!(status, 202, "{accepted:?}");
+    let run_b_id = accepted["run_id"].as_str().unwrap().to_owned();
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    claude.wait_for_invocation(2, deadline);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    wait_for_run_status(addr, &run_b_id, "completed", deadline);
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "a hostile symlink in the base commit must not prevent a legitimate continuation \
+         from succeeding, and must never cause a second, spurious provider invocation"
+    );
+
+    // THE proof: the outside sentinel is byte-identical to what it started
+    // as — nothing ever wrote through the symlink.
+    assert_eq!(
+        std::fs::read_to_string(&sentinel).unwrap(),
+        "untouched-sentinel-content\n",
+        "the outside sentinel must be completely untouched by patch application"
+    );
+
+    // The materialized child's own candidate state still faithfully
+    // preserves the symlink itself as a real repository entry (never
+    // followed, dereferenced, or replaced) — verified via an independent
+    // scratch clone, exactly like the main cumulative-state test does.
+    let run_b_dir = run_dir(&runs_dir, &target, &run_b_id);
+    let verify_dir = tempfile::tempdir().unwrap();
+    let git_in = |args: &[&str], cwd: &Path| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git_in(
+        &[
+            "clone",
+            "-q",
+            repo.path().to_str().unwrap(),
+            verify_dir.path().to_str().unwrap(),
+        ],
+        Path::new("/"),
+    );
+    git_in(&["checkout", "-q", &hostile_base], verify_dir.path());
+    let patch_b = std::fs::read_to_string(run_b_dir.join("candidate.patch")).unwrap();
+    if !patch_b.trim().is_empty() {
+        let patch_file = verify_dir.path().join("verify.patch");
+        std::fs::write(&patch_file, &patch_b).unwrap();
+        git_in(
+            &["apply", "--binary", patch_file.to_str().unwrap()],
+            verify_dir.path(),
+        );
+    }
+    let symlink_meta =
+        std::fs::symlink_metadata(verify_dir.path().join(".o7-candidate-patch.tmp")).unwrap();
+    assert!(
+        symlink_meta.file_type().is_symlink(),
+        "the committed symlink must still be a symlink after materialization, never followed \
+         or replaced"
+    );
+    assert_eq!(
+        std::fs::read_link(verify_dir.path().join(".o7-candidate-patch.tmp")).unwrap(),
+        sentinel
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+fn worktree_rev_parse(dir: &Path, refname: &str) -> String {
+    let out = Command::new("git")
+        .args(["rev-parse", refname])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
