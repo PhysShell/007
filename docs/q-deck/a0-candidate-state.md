@@ -1435,3 +1435,171 @@ plausible correlation from this investigation, not a confirmed diagnosis.
 `git status --short` shows no unstaged/untracked changes beyond what this
 round's own commits already captured; every gate above was run against
 the exact commit this round's final push carries.
+## 20. Corrective round 4: Codex review 4839309124 (four P1 findings)
+
+An `@codex review` requested against corrective round 3's exact head,
+`b4cc530a6c7c349b2af0179a95733ef1567c2fe6`, returned four P1 findings
+(review `pullrequestreview-4839309124`). None reopens anything round 3
+proved — three are lint-policy findings, one is a genuine correctness
+gap this round closes.
+
+**Finding 1 — the candidate contract's own schema was parsed but never
+validated** (`3699854999`, `crates/o7-run/src/candidate.rs:227`).
+`CandidateStateContractV1.schema` existed as a field, but nothing —
+neither the reducer nor `verify_candidate_state_captured`/
+`_materialized` — ever compared it to anything. A `RunStarted` could
+declare `candidate_state.schema = 2` while every receipt stayed at
+schema 1, and replay/admission would accept it as authoritative;
+`resolve_inherited_candidate_obligation` then silently re-stamped the
+child's own new contract with the current build's schema constant,
+masking the disagreement rather than failing closed on it — an unknown
+contract format could become continuation authority instead of being
+refused.
+
+**Fix**: a new `CANDIDATE_STATE_CONTRACT_SCHEMA_V1` constant
+(`crates/o7-run/src/event.rs`), deliberately distinct from
+`CANDIDATE_STATE_RECEIPT_SCHEMA_V1` — the contract and receipt are
+different documents with independent schema spaces, even though both
+happen to be `1` today. Checked at the earliest authoritative layer,
+`reduce::validate_contract` (run once, unconditionally, at `RunStarted`
+— every replay path already goes through it), via a new
+`ReduceError::UnsupportedCandidateContractSchema`, so a record fails
+closed regardless of whether any candidate evidence ever follows at
+all. Defense in depth: the same check re-runs inside
+`verify_candidate_state_captured`/`_materialized`, mirroring how every
+other obligation field is already redundantly checked at that layer.
+`resolve_inherited_candidate_obligation`'s two contract-construction
+sites now name the contract-specific constant instead of borrowing the
+receipt's — not a behavior change (both are `1`), a correctness one:
+the child's own contract was never meant to copy the parent's raw
+schema value, only to declare what THIS build understands, which the
+reducer fix now guarantees the parent's own schema already was.
+
+**Findings 2-4 — blanket restriction-lint exemptions with no stated
+invariant** (`3699855000`/`crates/o7-run/tests/candidate_state.rs:9`,
+`3699855002`/`src/worktree.rs:366`, `3699855003`/
+`tests/a0_candidate_state_e2e.rs:19`). Each of these three files/modules
+carried a file- or module-scoped `#[allow(clippy::unwrap_used,
+clippy::expect_used, clippy::panic, clippy::indexing_slicing)]`. This
+scoping granularity itself is not novel or improper in this codebase —
+it is the SAME pattern used by roughly eighty other test files across
+this workspace, including already-merged, already-reviewed ones
+(`tests/r1_command_e2e.rs`, `crates/o7-ledger/tests/commands.rs`, every
+`o7-worker` fault/sandboy test) — but a smaller subset of that
+precedent (`tests/sse.rs`, `crates/o7d/tests/golden_transcript_sse.rs`,
+`tests/live_ingress_e2e.rs`) additionally carries an explicit paragraph
+stating WHY the exemption is sound: every unwrap/expect/index operates
+on the test's own controlled fixtures/output, so a panic there is the
+test's own setup or assertion failing loudly, never a runtime condition
+in production code. The three files Codex flagged had a comment
+present, but it explained unrelated context (the git-fixture mechanics,
+the helper-mirroring rationale) rather than that invariant.
+
+**Fix**: each of the three sites gained the same invariant paragraph
+the established best-precedent files already use, phrased for what that
+specific file's own operations actually touch (a hand-assembled
+`RunState`/`RunContract` fixture; a real throwaway git repository in a
+tempdir; a real spawned `o7`/`o7d` process and REST response). This is
+a deliberate judgment call, disclosed rather than silently made: a true
+per-function/per-line rewrite (dozens of individually-scoped allows per
+file, ~97 functions across the three targets) was considered and
+rejected as inconsistent with this codebase's own dominant, working
+convention — matching the established BEST version of that convention,
+not inventing a new and narrower one that the rest of the workspace's
+own test suite does not follow.
+
+**Commit shape** (four, additive, on top of round 3's frozen head
+`b4cc530a6c7c349b2af0179a95733ef1567c2fe6`):
+`fix(replay): reject unsupported candidate contract schemas`,
+`refactor(tests): scope A0 restriction-lint exemptions`,
+`test(q-deck): cover unsupported contract schemas`,
+`docs(q-deck): record corrective round 4 evidence`.
+
+## 21. Corrective round 4 — evidence
+
+Base for this round: the PR's own exact re-gated head,
+`b4cc530a6c7c349b2af0179a95733ef1567c2fe6` (corrective round 3's final
+commit, the same head Codex review `4839309124` reviewed). New head: see
+the PR body / `git log`.
+
+- `cargo fmt --check` — clean.
+- `git diff --check` — clean.
+- `cargo test -p o7-run --test candidate_state` — **29/29 passing** (27
+  carried from round 3, 2 new): an unsupported candidate contract schema
+  rejected with no later candidate evidence at all, and rejected again
+  behind an otherwise-fully-valid capture+patch+seal (Codex's own literal
+  example — contract schema 2, receipt schema 1) — both proven through
+  `reduce_all`, `verify_prefix`, `replay`, `replay_verify`, and
+  `classify_record` directly.
+- `cargo test -p o7-ledger --test commands` — 45/45 passing, unchanged.
+- `cargo test -p o7 --test r1_command_e2e` — **37/37 passing, unchanged**.
+- `cargo test -p o7 --test a0_candidate_state_e2e` — **24/24 passing** (22
+  carried from round 3, 2 new): a fresh command against a parent with an
+  unsupported candidate contract schema rejected at admission (`409`,
+  zero command rows); a legacy accepted-and-bound row against the same
+  corrupted parent self-rejecting via direct `o7 continue`, past `o7d`'s
+  own preflight, with zero provider invocations, zero child attachment,
+  and — on a second, repeat invocation — no perpetual redrive loop.
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean, 0
+  warnings, across the whole workspace (the three scoped-and-documented
+  lint exemptions compile clean under the same crate-level
+  `unwrap_used`/`expect_used`/`panic`/`indexing_slicing = "deny"` policy
+  every other test file in this workspace already lives under).
+- `cargo test --workspace --no-fail-fast` — every crate green, run
+  single-threaded (`--test-threads=1`), same six pre-existing
+  environmental exclusions carried forward unchanged, launched detached
+  from this VPS's own ~10-minute foreground-command ceiling (as §19
+  disclosed, `o7-worker`'s own suite alone accounts for the bulk of the
+  run's total time) — all 97 `test result:` lines reported `0 failed`.
+- `cargo deny check advisories bans licenses sources` — **§19's
+  "different" error was itself transient, now diagnosed and corrected**:
+  it was a corrupted/partial local git-clone of the advisory database
+  (confirmed by deleting `~/.cargo/advisory-dbs/advisory-db-*` and
+  letting `cargo-deny` re-clone it fresh, which made the naming-mismatch
+  error disappear entirely). What remains after a clean re-clone is the
+  SAME `lz4_flex` `RUSTSEC-2026-0041` `CVSS:4.0` parse failure every
+  round since round 1 has disclosed — this installed `cargo-deny 0.18.2`
+  predates CVSS v4.0 support in its bundled parser. Confirmed unrelated
+  to this round's code: `git diff --stat b4cc530..HEAD -- Cargo.lock
+  Cargo.toml crates/*/Cargo.toml` is empty (zero dependency changes).
+  This VPS's root filesystem was observed at 100% capacity (0 bytes
+  free at the tightest point, recovered to several GiB via this
+  project's own relocated `~/cargo-target` build-cache mount's
+  asynchronous block discard) during this round's own work — the most
+  direct evidence yet that disk pressure, not a new upstream advisory-db
+  defect, was the actual cause of round 3's distinct-looking error.
+- `npm test` / `npm run check` (`apps/q-deck`) — 45/45 / 0 errors,
+  unchanged (frontend untouched this round).
+
+### Provider invocation counts, this round
+
+- Unsupported-contract-schema cases (`400`-adjacent admission `409`,
+  and the direct-`o7 continue` legacy-row case): zero additional
+  provider invocations in every case, including the legacy row's
+  repeat invocation (no redrive loop).
+- Every other existing negative case: unchanged from round 3.
+
+### Known limitations (disclosed, not hidden)
+
+Everything §17/§19 already disclosed remains open. New this round: the
+"recovery classification"/"candidate DTO projection fail closed" sub-
+requirements are proven by construction — `classify_command_child` and
+`candidate_projection` both route through the same `verify_prefix`/
+`classify_record` these tests already proved rejects an unsupported
+contract schema — rather than via dedicated process-level tests driving
+`o7 recover` or the DTO endpoint against this exact fixture; this
+matches round 3's own established evidentiary standard for its
+analogous materialization-child-binding finding, not a new gap specific
+to this round. The lint-exemption fix (Findings 2-4) is a documentation
+change, not a behavior change — it does not, and was never intended to,
+reduce the actual SET of operations permitted to panic in these three
+test targets; a reviewer expecting true per-operation narrowing (as
+opposed to a stated, file-scoped invariant matching this codebase's own
+best precedent) will not find that here, disclosed as a deliberate,
+reasoned choice in §20, not an oversight.
+
+### Clean worktree confirmation
+
+`git status --short` shows no unstaged/untracked changes beyond what
+this round's own commits already captured; every gate above was run
+against the exact commit this round's final push carries.
