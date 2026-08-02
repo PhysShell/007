@@ -620,6 +620,48 @@ pub(crate) async fn create_command(
         .command_idempotency_key_seen(idempotency_key.clone())
         .await?;
     if !already_seen {
+        // Q-Deck A0 corrective round 3 (Codex P1, Part 1): `parent_run_id`
+        // here is still raw, unvalidated HTTP request text — the ledger has
+        // not yet proven it names a real run. Three DISTINCT failure shapes
+        // must not collapse into one status code:
+        //   - structurally invalid (would-be path traversal, absolute path,
+        //     `.`/`..`, a nested path) -> a stable 400, checked BEFORE any
+        //     filesystem I/O is even attempted (defense in depth:
+        //     `child_record_dir` itself also refuses it, per canonical.rs);
+        //   - well-formed but no such parent/conversation, or the parent
+        //     belongs to a DIFFERENT conversation -> the ESTABLISHED R1 wire
+        //     contract, 404 NOT_FOUND — proven here via a READ-ONLY ledger
+        //     reference preflight, before any candidate-record I/O, so this
+        //     common validation case never falls through to the newer 409
+        //     below;
+        //   - well-formed, exists, belongs to this conversation, but its own
+        //     candidate evidence is unusable -> 409
+        //     COMMAND_PARENT_CANDIDATE_UNAVAILABLE (unchanged from round 2).
+        //
+        // This preflight is READ-ONLY authority only, never a substitute for
+        // `SqliteLedger::create_command` below, which remains the final
+        // TRANSACTIONAL authority and independently repeats every mutation-
+        // time status/tail/idempotency check itself.
+        if !crate::canonical::is_confined_run_id_component(&parent_run_id) {
+            return Err(ApiError::BadRequest(format!(
+                "parent_run_id {parent_run_id:?} is not a valid run identifier"
+            )));
+        }
+        let conv_id_typed = o7_ledger::ConversationId::from_raw(conversation_id.clone());
+        state
+            .ledger
+            .conversation(conv_id_typed.clone())
+            .await?
+            .ok_or(ApiError::NotFound)?;
+        let parent = state
+            .ledger
+            .run(o7_ledger::RunId::from_raw(parent_run_id.clone()))
+            .await?
+            .ok_or(ApiError::NotFound)?;
+        if parent.conversation_id != conv_id_typed {
+            return Err(ApiError::NotFound);
+        }
+
         if let Err(reason) = crate::canonical::parent_candidate_state_usable(exec, &parent_run_id) {
             eprintln!(
                 "[o7d] refusing to accept a command against parent {parent_run_id}: {reason}"

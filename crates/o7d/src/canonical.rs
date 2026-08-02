@@ -37,10 +37,50 @@ fn child_target(exec: &ExecutionConfig) -> std::io::Result<String> {
         .unwrap_or_else(|| "target".to_owned()))
 }
 
+/// Q-Deck A0 corrective round 3 (Codex P1, Part 1): whether `id` is valid
+/// as the run-id component of a filesystem path — non-empty, not
+/// absolute, no `.`/`..`, no embedded separator: exactly one normal
+/// `std::path::Component`. `Path::new(id).components()` already collapses
+/// `.`/redundant separators and classifies `..`/an absolute root as their
+/// own non-`Normal` variants, so this is a complete, exhaustive check, not
+/// a denylist of specific substrings.
+///
+/// `pub(crate)`, not merely a private helper inside [`child_record_dir`]:
+/// `routes::create_command` calls this directly too, so a structurally
+/// invalid `parent_run_id` gets its own stable `400`, distinct from a
+/// well-formed-but-nonexistent one (`404`) or a well-formed, existing, but
+/// candidate-unusable one (`409`) — three different failure shapes that
+/// must not collapse into the same status code.
+#[must_use]
+pub(crate) fn is_confined_run_id_component(id: &str) -> bool {
+    let mut components = std::path::Path::new(id).components();
+    matches!(components.next(), Some(std::path::Component::Normal(_)))
+        && components.next().is_none()
+}
+
+fn confine_run_id_component(id: &str) -> std::io::Result<()> {
+    if is_confined_run_id_component(id) {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("run id {id:?} is not a valid single path component"),
+        ))
+    }
+}
+
 /// The exact record directory a child run's canonical stream lives in —
-/// computed ONLY from server-owned execution configuration (`exec`) and the
-/// already-durably-bound `run_id`, never from anything in the HTTP request.
+/// computed ONLY from server-owned execution configuration (`exec`) and
+/// `run_id`, never from anything else in the HTTP request. Q-Deck A0
+/// corrective round 3 (Codex P1, Part 1): `run_id` is confined to a
+/// single normal path component BEFORE it is ever joined into a path —
+/// checked HERE, inside the one shared path-construction primitive every
+/// caller goes through (including `parent_candidate_state_usable`, whose
+/// own `run_id` comes directly from raw, not-yet-ledger-validated HTTP
+/// request text), so no caller can forget it and no filesystem I/O is
+/// ever attempted against an unconfined path.
 pub(crate) fn child_record_dir(exec: &ExecutionConfig, run_id: &str) -> std::io::Result<PathBuf> {
+    confine_run_id_component(run_id)?;
     Ok(exec.runs_dir.join(child_target(exec)?).join(run_id))
 }
 
