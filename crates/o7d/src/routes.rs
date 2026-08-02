@@ -605,6 +605,36 @@ pub(crate) async fn create_command(
         .filter(|s| !s.is_empty())
         .ok_or_else(|| ApiError::BadRequest("missing or empty idempotency_key".to_owned()))?;
 
+    // Q-Deck A0 corrective round 2 (Part 5): a GENUINELY fresh acceptance
+    // (this exact idempotency key has never been seen for `create-command`)
+    // must prove the parent has USABLE candidate-state evidence before any
+    // command row is ever durably created — never merely discovered later,
+    // after `o7 continue` has already been spawned. A key that HAS been
+    // seen before (a true replay, or a digest conflict) skips this
+    // entirely and defers to `create_command`'s own existing idempotency
+    // handling below — exactly like every OTHER business check inside that
+    // call already does, so a replay of a request accepted before this
+    // preflight existed is never retroactively rejected.
+    let already_seen = state
+        .ledger
+        .command_idempotency_key_seen(idempotency_key.clone())
+        .await?;
+    if !already_seen {
+        if let Err(reason) = crate::canonical::parent_candidate_state_usable(exec, &parent_run_id) {
+            eprintln!(
+                "[o7d] refusing to accept a command against parent {parent_run_id}: {reason}"
+            );
+            return Err(ApiError::Conflict(
+                "COMMAND_PARENT_CANDIDATE_UNAVAILABLE",
+                format!(
+                    "parent run {parent_run_id} has no usable candidate-state evidence for a \
+                     command continuation — either it predates Q-Deck A0, or its own candidate \
+                     receipt failed semantic verification"
+                ),
+            ));
+        }
+    }
+
     let request = o7_ledger::NewCommand {
         conversation_id: o7_ledger::ConversationId::from_raw(conversation_id.clone()),
         parent_run_id: o7_ledger::RunId::from_raw(parent_run_id.clone()),

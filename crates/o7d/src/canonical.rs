@@ -59,6 +59,69 @@ pub(crate) fn classify_child_record(
     }
 }
 
+/// Q-Deck A0 corrective round 2 (Part 5): whether `parent_run_id`'s own
+/// canonical record proves it is USABLE as a command-continuation parent —
+/// checked BEFORE a new command is ever durably created, not merely
+/// discovered later when `o7 continue` itself fails after acceptance. A
+/// parent that predates Q-Deck A0 (a genuine R1-only run, sealed and
+/// otherwise perfectly valid, but with no `candidate_state` contract
+/// obligation at all) is EXPLICITLY not usable — A0 makes a valid,
+/// semantically verified candidate receipt mandatory for every
+/// continuation once live, never a silent fallback to R1's old
+/// zero-carryover behavior. Returns `Err(reason)` (a SERVER-side diagnostic
+/// string, never sent to the client verbatim — same discipline as
+/// `ApiError::Internal`'s stable code) for every one of: no canonical
+/// record at all; full replay failure (chain/digest/reducer/artifact/
+/// candidate-semantic — the SAME authoritative `verify_prefix` every other
+/// consumer uses); not sealed; no candidate-state contract obligation; no
+/// candidate-state evidence captured. A `Blocked`/`Fail`/`Error` sealed
+/// verdict is itself a legitimate, replay-valid record (§8: canonical
+/// replay validity is not the same question as continuation eligibility)
+/// — its own verdict is untouched by this check; only the SEPARATE
+/// candidate-continuation-eligibility question is answered here.
+///
+/// # Errors
+/// A diagnostic `String` (server-side only) describing why the parent is
+/// not usable.
+pub(crate) fn parent_candidate_state_usable(
+    exec: &ExecutionConfig,
+    parent_run_id: &str,
+) -> Result<(), String> {
+    let dir = child_record_dir(exec, parent_run_id)
+        .map_err(|e| format!("resolving parent record directory: {e}"))?;
+    let text = std::fs::read_to_string(dir.join("events.jsonl"))
+        .map_err(|e| format!("reading the parent's canonical record: {e}"))?;
+    let events = o7::events::from_jsonl(&text)
+        .map_err(|e| format!("parsing the parent's canonical record: {e}"))?;
+    let resolver = o7::events::RecordDirResolver { base: dir };
+    let (state, _artifacts_verified) = o7_run::replay::verify_prefix(&events, &resolver)
+        .map_err(|e| format!("the parent's canonical record failed full replay: {e}"))?;
+    if state.verdict.is_none() {
+        return Err("the parent run is not sealed".to_owned());
+    }
+    let has_obligation = state
+        .contract
+        .as_ref()
+        .is_some_and(|c| c.candidate_state.is_some());
+    if !has_obligation {
+        return Err(
+            "the parent run predates Q-Deck A0 (no candidate_state contract obligation) — a \
+             valid candidate receipt is mandatory for every command continuation"
+                .to_owned(),
+        );
+    }
+    if state.candidate_state.is_none() {
+        return Err(
+            "the parent run declares a candidate_state obligation but never captured a receipt"
+                .to_owned(),
+        );
+    }
+    // `verify_prefix` (above) already ran full candidate semantic
+    // verification on `state.candidate_state` as part of its own authoritative
+    // pass — its mere presence here, post-success, IS the proof it is usable.
+    Ok(())
+}
+
 /// Q-Deck A0 (`docs/q-deck/a0-candidate-state.md` §8): a read-only,
 /// best-effort candidate-state projection for `routes::get_run` — never
 /// mutates anything, never gates a redrive decision (that stays exactly
