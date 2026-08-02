@@ -133,6 +133,12 @@ fn fixture_repo(gate_toml: &str) -> tempfile::TempDir {
 }
 
 const PASSING_GATE: &str = "[[gate]]\nname = \"unit\"\ncmd = \"true\"\n";
+/// Q-Deck A0 corrective round 2 (Part 8): a required gate that always
+/// reports a domain failure — produces a genuinely SEALED, replay-valid
+/// parent run whose own verdict is `Fail`, not `Pass`, while candidate-state
+/// capture (which happens unconditionally, before the gate loop) still
+/// succeeds normally.
+const FAILING_GATE: &str = "[[gate]]\nname = \"unit\"\ncmd = \"false\"\n";
 
 fn spawn_o7d_with_exec_and_redrive_ms(
     db_path: &Path,
@@ -345,6 +351,45 @@ fn events_of_kind(dir: &Path, kind: &str) -> Vec<serde_json::Value> {
         .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
         .filter(|e| e["kind"]["type"] == kind)
         .collect()
+}
+
+/// Overwrite a run's own `candidate_state_receipt.json` with `new_receipt_bytes`, then
+/// re-point its `CandidateStateCaptured` event's own `receipt.digest` at the new bytes and
+/// recompute the digest chain FORWARD from there — so the record stays otherwise fully
+/// chain/digest-consistent (a genuinely tamper-evident record with exactly ONE deliberately
+/// altered fact, never a record that merely fails on an incidental stale digest). Used for
+/// negative cases that need the receipt's OWN content to disagree with something specific
+/// (e.g. a patch that will fail to apply) without ALSO tripping the unrelated "this file's
+/// bytes don't match what the canonical stream declared" check first.
+fn overwrite_captured_receipt_and_recompute_chain(dir: &Path, new_receipt_bytes: &[u8]) {
+    std::fs::write(dir.join("candidate_state_receipt.json"), new_receipt_bytes).unwrap();
+    let text = std::fs::read_to_string(dir.join("events.jsonl")).unwrap();
+    let mut events: Vec<o7_run::RunEvent> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let mutated_index = events
+        .iter()
+        .position(|e| matches!(e.kind, o7_run::RunEventKind::CandidateStateCaptured { .. }))
+        .expect("this run must have a CandidateStateCaptured event to overwrite");
+    let o7_run::RunEventKind::CandidateStateCaptured { receipt } = &mut events[mutated_index].kind
+    else {
+        unreachable!()
+    };
+    receipt.digest = o7_run::event::Digest256::of_bytes(new_receipt_bytes);
+    for i in mutated_index..events.len() {
+        if i > 0 {
+            events[i].previous_event_digest = events[i - 1].event_digest.clone();
+        }
+        events[i].event_digest = events[i].compute_digest();
+    }
+    let rewritten: String = events
+        .iter()
+        .map(|e| serde_json::to_string(e).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(dir.join("events.jsonl"), rewritten + "\n").unwrap();
 }
 
 fn command_status(ledger_path: &Path, command_id: &str) -> String {
@@ -716,10 +761,24 @@ fn setup_real_parent(
     )
 }
 
-/// Post a command and assert it is accepted (202) but never actually
-/// completes, and the provider is never invoked a second time, within a
-/// bounded observation window — the required proof for every pre-provider
-/// negative case (`docs/q-deck/a0-candidate-state.md` §6).
+/// Post a command and assert the provider is never invoked and the child
+/// run never completes, within a bounded observation window — the
+/// required proof for every pre-provider negative case
+/// (`docs/q-deck/a0-candidate-state.md` §6).
+///
+/// Q-Deck A0 corrective round 2 (Part 5): admission-preflight now catches
+/// many of these cases BEFORE any command row is ever created — a `409
+/// COMMAND_PARENT_CANDIDATE_UNAVAILABLE` (no command row, no child run, no
+/// worktree, provider count unchanged) is an equally valid, and now
+/// EARLIER, proof as the original round's `202` (accepted, but never
+/// completes; command stays `started`) — which cases that predates this
+/// round for a defect materialization alone can only catch (patch-apply
+/// conflicts, which never touch the parent's own admission-time validity)
+/// still produce. Both outcomes prove the same underlying safety property;
+/// which one a given negative case hits depends on whether its defect is
+/// visible from the parent's OWN record alone (caught at admission) or only
+/// by actually attempting materialization against a live worktree (caught
+/// later, same as corrective round 1).
 fn assert_command_never_completes_and_provider_never_reinvoked(
     addr: SocketAddr,
     conversation_id: &str,
@@ -737,6 +796,33 @@ fn assert_command_never_completes_and_provider_never_reinvoked(
             "idempotency_key": "key-negative",
         }),
     );
+
+    if status == 409 {
+        assert_eq!(
+            accepted["code"], "COMMAND_PARENT_CANDIDATE_UNAVAILABLE",
+            "a 409 for a candidate-state negative case must carry the stable admission code: \
+             {accepted:?}"
+        );
+        assert_eq!(
+            claude.invocation_count(),
+            1,
+            "admission-preflight rejection must never invoke the provider"
+        );
+        let conn = rusqlite::Connection::open(ledger_path).unwrap();
+        let rows: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM command WHERE parent_run_id = ?1 AND command_text = ?2",
+                [parent_run_id, "this must never reach the provider"],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            rows, 0,
+            "an admission-preflight rejection must never create a command row at all"
+        );
+        return;
+    }
+
     assert_eq!(status, 202, "{accepted:?}");
     let child_run_id = accepted["run_id"].as_str().unwrap().to_owned();
     let command_id = accepted["command_id"].as_str().unwrap().to_owned();
@@ -1047,21 +1133,29 @@ fn a_patch_apply_conflict_never_invokes_the_provider() {
          -this context line cannot possibly match the real file\n\
          +neither can this replacement\n";
     std::fs::write(dir.join("candidate.patch"), conflicting_patch).unwrap();
+    // The receipt's own nested `patch: ArtifactRef` digest must match the
+    // conflicting patch bytes just written, and the CANONICAL EVENT
+    // referencing the receipt must in turn be re-chained to match the
+    // receipt's own new bytes — so this record stays otherwise FULLY
+    // chain/digest/semantically valid (a legitimate parent, a real
+    // receipt, real digests throughout, admission-preflight-usable). The
+    // ONLY thing wrong is that the patch does not actually apply cleanly
+    // against the base commit — a fact that only surfaces at
+    // MATERIALIZATION time (a real `git apply`), never at admission-
+    // preflight time (which never touches Git at all).
     let mut receipt: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(dir.join("candidate_state_receipt.json")).unwrap(),
     )
     .unwrap();
-    receipt["patch_sha256"] = serde_json::Value::String(
+    receipt["patch"]["digest"] = serde_json::Value::String(
         o7_run::event::Digest256::of_bytes(conflicting_patch.as_bytes())
             .as_str()
             .to_owned(),
     );
-    receipt["patch_size"] = serde_json::Value::from(conflicting_patch.len() as u64);
-    std::fs::write(
-        dir.join("candidate_state_receipt.json"),
-        serde_json::to_string(&receipt).unwrap(),
-    )
-    .unwrap();
+    overwrite_captured_receipt_and_recompute_chain(
+        &dir,
+        serde_json::to_string(&receipt).unwrap().as_bytes(),
+    );
 
     assert_command_never_completes_and_provider_never_reinvoked(
         addr,
@@ -1096,7 +1190,35 @@ fn two_concurrent_retries_against_a_failing_materialization_both_fail_closed() {
         target,
     ) = setup_real_parent(&claude);
 
-    std::fs::remove_file(run_dir(&runs_dir, &target, &run_a_id).join("candidate.patch")).unwrap();
+    // Q-Deck A0 corrective round 2: uses a genuine PATCH-APPLY conflict
+    // (same technique as `a_patch_apply_conflict_never_invokes_the_provider`),
+    // not a missing/tampered receipt — the parent's own record stays fully
+    // admission-preflight-usable (a real, semantically valid, chain-
+    // consistent receipt), so this exercises the SAME concurrent-CAS
+    // convergence property the original round proved, now for a defect
+    // that is only reachable at MATERIALIZATION time, past admission.
+    let dir = run_dir(&runs_dir, &target, &run_a_id);
+    let conflicting_patch = "diff --git a/base.txt b/base.txt\n\
+         index 0000000000000000000000000000000000000000..2222222222222222222222222222222222222222 100644\n\
+         --- a/base.txt\n\
+         +++ b/base.txt\n\
+         @@ -1,50 +1,50 @@\n\
+         -this context line cannot possibly match either\n\
+         +neither can this one\n";
+    std::fs::write(dir.join("candidate.patch"), conflicting_patch).unwrap();
+    let mut receipt: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("candidate_state_receipt.json")).unwrap(),
+    )
+    .unwrap();
+    receipt["patch"]["digest"] = serde_json::Value::String(
+        o7_run::event::Digest256::of_bytes(conflicting_patch.as_bytes())
+            .as_str()
+            .to_owned(),
+    );
+    overwrite_captured_receipt_and_recompute_chain(
+        &dir,
+        serde_json::to_string(&receipt).unwrap().as_bytes(),
+    );
 
     let key = "key-concurrent-negative";
     let body = serde_json::json!({
@@ -1181,11 +1303,23 @@ fn a_same_key_retry_succeeds_once_the_materialization_cause_is_fixed() {
         .unwrap()
         .to_owned();
 
-    let receipt_path = run_dir(&runs_dir, &target, &run_a_id).join("candidate_state_receipt.json");
+    // Q-Deck A0 corrective round 2: the receipt is deliberately kept fully
+    // chain/digest/schema-consistent (via `overwrite_captured_receipt_and_
+    // recompute_chain`, which re-points the canonical event at the new
+    // bytes' own digest) — admission-preflight has no opinion on
+    // `candidate_tree_oid` at all, so this stays accepted (`202`) and the
+    // mismatch is caught ONLY where it always was: materialization's own
+    // explicit tree-OID comparison against an independently resolved
+    // source receipt.
+    let dir = run_dir(&runs_dir, &target, &run_a_id);
+    let receipt_path = dir.join("candidate_state_receipt.json");
     let original = std::fs::read_to_string(&receipt_path).unwrap();
     let mut broken: serde_json::Value = serde_json::from_str(&original).unwrap();
     broken["candidate_tree_oid"] = serde_json::Value::String("0".repeat(40));
-    std::fs::write(&receipt_path, serde_json::to_string(&broken).unwrap()).unwrap();
+    overwrite_captured_receipt_and_recompute_chain(
+        &dir,
+        serde_json::to_string(&broken).unwrap().as_bytes(),
+    );
 
     let key = "key-retry-after-fix";
     let body = serde_json::json!({
@@ -1205,8 +1339,10 @@ fn a_same_key_retry_succeeds_once_the_materialization_cause_is_fixed() {
         "the broken first attempt must not invoke the provider"
     );
 
-    // Fix the cause.
-    std::fs::write(&receipt_path, &original).unwrap();
+    // Fix the cause — restore the ORIGINAL receipt bytes AND re-chain the
+    // canonical event back to reference them (the same recompute as the
+    // break above, just in reverse).
+    overwrite_captured_receipt_and_recompute_chain(&dir, original.as_bytes());
 
     // Retry with the SAME idempotency key, after the staleness bound.
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -1417,4 +1553,598 @@ fn worktree_rev_parse(dir: &Path, refname: &str) -> String {
         .unwrap();
     assert!(out.status.success());
     String::from_utf8_lossy(&out.stdout).trim().to_owned()
+}
+
+// ==================== Q-Deck A0 corrective round 2: legacy-parent admission (Part 7) ====================
+//
+// Every test below uses a REAL o7d, REAL o7, a REAL SQLite ledger, and a REAL Git
+// repository — the only stand-in is the deterministic `claude` fixture, exactly like
+// every other test in this file.
+
+/// Simulates a genuinely pre-Q-Deck-A0 sealed parent run: strips its OWN
+/// `candidate_state` contract obligation and `CandidateStateCaptured` evidence entirely
+/// from its canonical record, re-sequences and re-chains every remaining event from
+/// genesis, and removes the now-orphaned candidate artifacts from disk — producing a
+/// record indistinguishable, from replay's point of view, from one an R1-only build
+/// (before Q-Deck A0 existed at all) would have produced: fully valid, sealed, a real
+/// provider session, simply never captured any A0 evidence.
+fn strip_candidate_state_and_make_pre_a0(dir: &Path) {
+    let text = std::fs::read_to_string(dir.join("events.jsonl")).unwrap();
+    let mut events: Vec<o7_run::RunEvent> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    events.retain(|e| !matches!(e.kind, o7_run::RunEventKind::CandidateStateCaptured { .. }));
+    for e in &mut events {
+        if let o7_run::RunEventKind::RunStarted { contract, .. } = &mut e.kind {
+            contract.candidate_state = None;
+        }
+    }
+    let mut prev = o7_run::event::Digest256::genesis();
+    for (i, e) in events.iter_mut().enumerate() {
+        e.sequence = i as u64;
+        e.previous_event_digest = prev.clone();
+        e.event_digest = e.compute_digest();
+        prev = e.event_digest.clone();
+    }
+    let rewritten: String = events
+        .iter()
+        .map(|e| serde_json::to_string(e).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(dir.join("events.jsonl"), rewritten + "\n").unwrap();
+    let _ = std::fs::remove_file(dir.join("candidate_state_receipt.json"));
+    let _ = std::fs::remove_file(dir.join("candidate.patch"));
+}
+
+fn conversation_run_count(ledger_path: &Path, conversation_id: &str) -> i64 {
+    let conn = rusqlite::Connection::open(ledger_path).unwrap();
+    conn.query_row(
+        "SELECT COUNT(*) FROM run WHERE conversation_id = ?1",
+        [conversation_id],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+fn command_row_count_for_parent(ledger_path: &Path, parent_run_id: &str) -> i64 {
+    let conn = rusqlite::Connection::open(ledger_path).unwrap();
+    conn.query_row(
+        "SELECT COUNT(*) FROM command WHERE parent_run_id = ?1",
+        [parent_run_id],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+/// Part 7 Case A: a FRESH command against a genuinely pre-A0 (R1-only) sealed parent
+/// must be rejected at admission — `409 COMMAND_PARENT_CANDIDATE_UNAVAILABLE`, no command
+/// row ever created, no child run, no worktree, the provider never invoked again, and the
+/// conversation's own run count (its "tail") unchanged.
+#[test]
+fn a_fresh_command_against_a_pre_a0_parent_is_rejected_at_admission() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let target = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    claude.set_actions(1, "echo base-v1 > base.txt\n");
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(addr);
+    let (_, page) = get(addr, "/api/v1/runs");
+    let run_a_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    strip_candidate_state_and_make_pre_a0(&run_dir(&runs_dir, &target, &run_a_id));
+    let runs_before = conversation_run_count(&ledger_path, &conversation_id);
+
+    let (status, accepted) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": run_a_id,
+            "command": "should never be accepted against a legacy parent",
+            "idempotency_key": "key-legacy-parent-fresh",
+        }),
+    );
+    assert_eq!(status, 409, "{accepted:?}");
+    assert_eq!(
+        accepted["code"], "COMMAND_PARENT_CANDIDATE_UNAVAILABLE",
+        "{accepted:?}"
+    );
+
+    assert_eq!(
+        command_row_count_for_parent(&ledger_path, &run_a_id),
+        0,
+        "a pre-A0 parent must never get a command row created against it at all"
+    );
+    assert_eq!(
+        conversation_run_count(&ledger_path, &conversation_id),
+        runs_before,
+        "no child run/worktree was ever created — the conversation's own tail is unchanged"
+    );
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the provider must never be invoked for a rejected legacy-parent command"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+    drop(repo);
+}
+
+/// Part 7 Case D: a command row created by an OLDER version — `accepted`, bound to a
+/// fresh `child_run_id` that has NEVER attached a ledger row, against a pre-A0 parent —
+/// simulated with a direct SQL insert (bypassing `o7d`'s own accept endpoint and its new
+/// admission preflight entirely, exactly as a real pre-round-2 deployment's already-
+/// accepted row would look). Running `o7 continue` directly against it (mirroring a
+/// direct CLI invocation, or a stale row a redrive resurrects) must: invoke the provider
+/// zero times, transition the command to `rejected` via the new conditional transition,
+/// and leave the parent conversation able to accept a fresh, valid command afterward —
+/// never permanently wedged behind an eternally-`accepted` row.
+#[test]
+fn an_already_accepted_legacy_command_against_a_pre_a0_parent_self_rejects_via_o7_continue() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let target = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    claude.set_actions(1, "echo base-v1 > base.txt\n");
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(addr);
+    let (_, page) = get(addr, "/api/v1/runs");
+    let run_a_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    strip_candidate_state_and_make_pre_a0(&run_dir(&runs_dir, &target, &run_a_id));
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+
+    // A legacy accepted-and-bound row, created directly in SQL — exactly what an
+    // OLDER `o7d` (predating this round's own admission preflight) would have left
+    // behind: `accepted`, bound to a fresh run id, that run id never attached.
+    let command_id = format!("cmd-legacy-{}", run_a_id);
+    let child_run_id = format!("legacy-child-{}", run_a_id);
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, 'accepted', ?5, ?6, ?6)",
+            rusqlite::params![
+                command_id,
+                conversation_id,
+                run_a_id,
+                "a legacy pre-round-2 command",
+                child_run_id,
+                now,
+            ],
+        )
+        .unwrap();
+    }
+
+    // Direct CLI invocation of `o7 continue` — mirroring `o7d`'s own `spawn_continue`
+    // argv shape exactly, but invoked here directly (as a real stale/redriven process,
+    // or a direct CLI call, would) rather than through the HTTP accept path this
+    // round's new preflight gates.
+    let gate_path = repo.path().join(".007").join("gate.toml");
+    let status = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--gate")
+        .arg(&gate_path)
+        .arg("--model")
+        .arg("opus")
+        .arg("--max-turns")
+        .arg("1")
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conversation_id)
+        .arg("--parent-run-id")
+        .arg(&run_a_id)
+        .arg("--command")
+        .arg("a legacy pre-round-2 command")
+        .arg("--run-id")
+        .arg(&child_run_id)
+        .arg("--command-id")
+        .arg(&command_id)
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("spawn the real o7 continue process directly");
+    assert!(
+        !status.success(),
+        "o7 continue must exit non-zero for an unusable legacy parent"
+    );
+
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the provider must never be invoked for a legacy pre-A0 parent, even via direct CLI \
+         invocation past o7d's own admission preflight"
+    );
+    let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+    let final_status: String = conn
+        .query_row(
+            "SELECT status FROM command WHERE command_id = ?1",
+            [&command_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        final_status, "rejected",
+        "the conditional reject-if-unattached-and-bound transition must have fired — this is \
+         the exact defense-in-depth gap corrective round 2 closes"
+    );
+    let attached: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM run WHERE run_id = ?1",
+            [&child_run_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        attached, 0,
+        "the legacy child run id must never have attached a ledger row"
+    );
+
+    // The conversation is NOT wedged: a fresh, valid command against the SAME
+    // (still pre-A0) parent still correctly gets the admission-preflight 409, proving
+    // the conversation's own in-flight-command slot was freed by the rejection above,
+    // not left stuck behind the now-rejected legacy row.
+    let (mut o7d_child2, addr2) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(addr2);
+    let (status2, accepted2) = post(
+        addr2,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": run_a_id,
+            "command": "a fresh follow-up after the legacy row was rejected",
+            "idempotency_key": "key-after-legacy-reject",
+        }),
+    );
+    assert_eq!(
+        status2, 409,
+        "the conversation must not be wedged behind the rejected legacy command: {accepted2:?}"
+    );
+    assert_eq!(accepted2["code"], "COMMAND_PARENT_CANDIDATE_UNAVAILABLE");
+
+    let _ = o7d_child2.kill();
+    let _ = o7d_child2.wait();
+    drop(repo);
+}
+
+/// Part 7 Case E: TWO processes simultaneously run `o7 continue` directly against the
+/// SAME legacy accepted-and-bound row (same construction as the previous test). The
+/// existing per-run-id `flock` (the very first thing `continue_run` acquires, unchanged
+/// by this round) already guarantees only one ever proceeds; this proves that guarantee
+/// composes correctly with THIS round's new early-failure path: at most one terminal
+/// rejection ever lands, the loser touches no durable state at all, no child run ever
+/// attaches, and the provider is invoked zero times by either.
+#[test]
+fn two_processes_racing_the_same_legacy_accepted_command_produce_at_most_one_rejection() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let target = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    claude.set_actions(1, "echo base-v1 > base.txt\n");
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(addr);
+    let (_, page) = get(addr, "/api/v1/runs");
+    let run_a_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    strip_candidate_state_and_make_pre_a0(&run_dir(&runs_dir, &target, &run_a_id));
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+
+    let command_id = format!("cmd-legacy-race-{}", run_a_id);
+    let child_run_id = format!("legacy-child-race-{}", run_a_id);
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, 'accepted', ?5, ?6, ?6)",
+            rusqlite::params![
+                command_id,
+                conversation_id,
+                run_a_id,
+                "a racing legacy command",
+                child_run_id,
+                now,
+            ],
+        )
+        .unwrap();
+    }
+
+    let gate_path = repo.path().join(".007").join("gate.toml");
+    let spawn_continue_directly = || {
+        Command::new(env!("CARGO_BIN_EXE_o7"))
+            .arg("continue")
+            .arg("--repo")
+            .arg(repo.path())
+            .arg("--worktree-root")
+            .arg(&worktree_root)
+            .arg("--runs-dir")
+            .arg(&runs_dir)
+            .arg("--gate")
+            .arg(&gate_path)
+            .arg("--model")
+            .arg("opus")
+            .arg("--max-turns")
+            .arg("1")
+            .arg("--ledger")
+            .arg(&ledger_path)
+            .arg("--conversation-id")
+            .arg(&conversation_id)
+            .arg("--parent-run-id")
+            .arg(&run_a_id)
+            .arg("--command")
+            .arg("a racing legacy command")
+            .arg("--run-id")
+            .arg(&child_run_id)
+            .arg("--command-id")
+            .arg(&command_id)
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    claude.path().display(),
+                    std::env::var("PATH").unwrap_or_default()
+                ),
+            )
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("spawn a real o7 continue process directly")
+    };
+    let (s1, s2) = std::thread::scope(|scope| {
+        let h1 = scope.spawn(spawn_continue_directly);
+        let h2 = scope.spawn(spawn_continue_directly);
+        (h1.join().unwrap(), h2.join().unwrap())
+    });
+    // Exactly one of the two either wins the flock and rejects the command (exit
+    // non-zero), or loses the flock and exits cleanly (exit zero, "already owned by a
+    // live process") without touching anything — never a crash on either side.
+    assert!(
+        s1.success() != s2.success(),
+        "exactly one of the two racing processes must be the lock winner: s1={s1:?} s2={s2:?}"
+    );
+
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "neither racing process may ever invoke the provider"
+    );
+    let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+    let final_status: String = conn
+        .query_row(
+            "SELECT status FROM command WHERE command_id = ?1",
+            [&command_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        final_status, "rejected",
+        "the lock winner must have rejected the command exactly once"
+    );
+    let attached: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM run WHERE run_id = ?1",
+            [&child_run_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        attached, 0,
+        "neither racing process may ever attach a child run"
+    );
+
+    drop(repo);
+}
+
+/// Part 8: canonical replay validity is NOT the same question as
+/// continuation eligibility. A sealed `Fail` (or, symmetrically, `Blocked`)
+/// parent is an honest record of an unsuccessful run — its own verdict is
+/// untouched by candidate-state admission, and a follow-up command against
+/// it must be accepted normally as long as its candidate evidence is
+/// itself valid. This is the DIRECT proof that `parent_candidate_state_usable`
+/// checks `state.verdict.is_none()` (not sealed) — never the verdict's
+/// VALUE — as its sealed/unsealed predicate.
+#[test]
+fn a_sealed_non_pass_verdict_parent_still_accepts_a_valid_command() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let repo = fixture_repo(FAILING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+
+    claude.set_actions(1, "echo base-v1 > base.txt\n");
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    // Deliberately NOT asserting success: the required gate always fails, so this run
+    // seals with verdict `Fail`, not `Pass` — exit code non-zero by this project's own
+    // "non-Pass verdict exits non-zero" convention.
+    let _ = run_child.wait().unwrap();
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(addr);
+    let (_, page) = get(addr, "/api/v1/runs");
+    let run_a_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        page["items"][0]["status"], "failed",
+        "the parent's own sealed status must genuinely be non-Pass for this test to prove \
+         anything: {:?}",
+        page["items"][0]
+    );
+
+    let (status, accepted) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": run_a_id,
+            "command": "continue from a failed-but-candidate-valid parent",
+            "idempotency_key": "key-non-pass-parent",
+        }),
+    );
+    assert_eq!(
+        status, 202,
+        "a sealed non-Pass verdict must not, by itself, make a parent unusable: {accepted:?}"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+    drop(repo);
 }
