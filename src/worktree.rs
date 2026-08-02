@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::collections::BTreeSet;
 use std::ffi::CString;
 use std::os::fd::OwnedFd;
 use std::path::Path;
@@ -45,28 +46,88 @@ pub fn verify_commit_exists(dir: &Path, commit: &str) -> Result<()> {
     Ok(())
 }
 
-/// Q-Deck A0: detect a gitlink (submodule-mode, `160000`) entry anywhere in
-/// `commit`'s own tree — a submodule mutation is explicitly unsupported
-/// (`docs/q-deck/a0-candidate-state.md` §7) and must fail closed rather than
-/// silently capture/apply a bare gitlink pointer with no actual content.
+/// A gitlink (submodule, mode `160000`) tree entry: its exact path as RAW
+/// bytes (never a lossy UTF-8 string — a path containing invalid UTF-8 or
+/// unusual bytes must still be authoritative) plus the object OID it
+/// points at.
+type GitlinkEntry = (Vec<u8>, String);
+
+/// Q-Deck A0 corrective round 3 (Codex P1, Part 2): the exact SET of
+/// gitlink (submodule, mode `160000`) entries in `commit`'s own tree,
+/// keyed by (raw path bytes, object OID) — the authority
+/// [`ensure_no_gitlink_mutation`] compares between the base and the
+/// resulting candidate tree. Uses `git ls-tree -r -z` (NUL-delimited
+/// records, Git's own machine-readable output mode) so a path containing
+/// whitespace, newlines, or non-UTF-8 bytes is parsed exactly, never
+/// corrupted or misread the way a lossy UTF-8 text scan would.
 ///
 /// # Errors
 /// Any underlying `git` failure.
-pub fn tree_has_gitlink(dir: &Path, commit: &str) -> Result<bool> {
-    let out = run_git(dir, &["ls-tree", "-r", commit])?;
-    Ok(out.lines().any(|line| line.starts_with("160000 commit ")))
+fn gitlink_entries(dir: &Path, commit: &str) -> Result<BTreeSet<GitlinkEntry>> {
+    let out = run_git_bytes(dir, &["ls-tree", "-r", "-z", commit])?;
+    let mut entries = BTreeSet::new();
+    for record in out.split(|&b| b == 0) {
+        if record.is_empty() {
+            continue;
+        }
+        // Git's own `ls-tree` record shape: "<mode> SP <type> SP <oid> TAB <path>".
+        let Some(tab) = record.iter().position(|&b| b == b'\t') else {
+            continue;
+        };
+        let (header, path_with_tab) = record.split_at(tab);
+        let path = path_with_tab.get(1..).unwrap_or_default().to_vec();
+        let header = String::from_utf8_lossy(header);
+        let mut fields = header.splitn(3, ' ');
+        let mode = fields.next().unwrap_or_default();
+        let _object_type = fields.next();
+        let oid = fields.next().unwrap_or_default();
+        if mode == "160000" {
+            entries.insert((path, oid.to_owned()));
+        }
+    }
+    Ok(entries)
 }
 
-/// Q-Deck A0: the SAME gitlink check as [`tree_has_gitlink`], applied to a
-/// cumulative patch's own text — a candidate patch that introduces or
-/// mutates a `160000` gitlink entry (rather than one already present,
-/// unchanged, in `base`) must fail closed at capture time, not silently
-/// produce a receipt a later materialization would have to reject alone.
+/// Q-Deck A0 corrective round 3 (Codex P1, Part 2): the FROZEN gitlink
+/// policy, enforced as an authoritative set comparison rather than a
+/// whole-tree "contains any gitlink" check — an unchanged gitlink already
+/// present in `base_commit` is explicitly ALLOWED (the original whole-tree
+/// check incorrectly rejected this, failing candidate capture for every
+/// ledger-backed run against a repository with an untouched submodule);
+/// every ADDED, DELETED, or OID-CHANGED gitlink between `base_commit` and
+/// `candidate` (a commit-ish OR a raw tree OID — `git ls-tree` accepts
+/// both) is REJECTED, including a mode transition to/from `160000` (a
+/// regular file replaced by a gitlink, or vice versa, changes which set
+/// contains that path, so it is caught the same way).
+///
+/// # Errors
+/// Any underlying `git` failure, or the candidate's own gitlink set
+/// disagrees with the base's.
+fn ensure_no_gitlink_mutation(dir: &Path, base_commit: &str, candidate: &str) -> Result<()> {
+    let base = gitlink_entries(dir, base_commit)?;
+    let candidate_entries = gitlink_entries(dir, candidate)?;
+    if base != candidate_entries {
+        let added: Vec<_> = candidate_entries.difference(&base).collect();
+        let removed: Vec<_> = base.difference(&candidate_entries).collect();
+        anyhow::bail!(
+            "the candidate tree mutates a gitlink (submodule) entry relative to the base \
+             commit — unsupported (added: {}, removed/changed: {})",
+            added.len(),
+            removed.len()
+        );
+    }
+    Ok(())
+}
+
+/// Q-Deck A0 corrective round 3 (Codex P1, Part 2): a heuristic, NON-
+/// AUTHORITATIVE early diagnostic only — Git's own extended-header line
+/// for a mode change/new entry at submodule mode, scanned as lossy text
+/// purely to log a hint sooner. An unchanged-MODE gitlink whose OID alone
+/// changed (a submodule pointer bump with no mode-change header at all)
+/// would NOT be caught by this heuristic — [`ensure_no_gitlink_mutation`]
+/// is the actual authority, always run regardless of what this returns.
 #[must_use]
 pub fn patch_touches_gitlink(patch: &[u8]) -> bool {
-    // Git's own extended-header line for a mode change/new entry at
-    // submodule mode — present verbatim in the patch text for any diff that
-    // adds, removes, or changes a gitlink, regardless of `--binary`.
     let text = String::from_utf8_lossy(patch);
     text.lines().any(|line| {
         line.contains("160000")
@@ -107,15 +168,19 @@ pub fn capture_cumulative_candidate(
             base_commit,
         ],
     )?;
-    anyhow::ensure!(
-        !patch_touches_gitlink(&patch),
-        "the candidate patch introduces or mutates a gitlink (submodule) entry — unsupported"
-    );
+    if patch_touches_gitlink(&patch) {
+        // Non-authoritative early diagnostic only (Part 2) — the real
+        // rejection, if any, comes from `ensure_no_gitlink_mutation` below,
+        // which is what actually distinguishes a mutation from an
+        // unchanged base gitlink this heuristic cannot tell apart.
+        eprintln!(
+            "[o7] candidate capture: patch text hints at a gitlink mode change — deferring to \
+             the authoritative tree comparison"
+        );
+    }
     let tree_oid = run_git(worktree, &["write-tree"])?.trim().to_string();
-    anyhow::ensure!(
-        !tree_has_gitlink(worktree, &tree_oid)?,
-        "the resulting candidate tree contains a gitlink (submodule) entry — unsupported"
-    );
+    ensure_no_gitlink_mutation(worktree, base_commit, &tree_oid)
+        .context("candidate capture's own gitlink policy check")?;
     Ok((patch, tree_oid))
 }
 
@@ -141,8 +206,14 @@ pub fn capture_cumulative_candidate(
 ///
 /// # Errors
 /// The patch fails to apply cleanly (conflict, malformed, wrong base), the
-/// resulting tree contains a gitlink, or any underlying `git`/i/o failure.
-pub fn apply_candidate_patch(runs_dir: &Path, worktree: &Path, patch: &[u8]) -> Result<String> {
+/// resulting tree mutates a gitlink relative to `base_commit`, or any
+/// underlying `git`/i/o failure.
+pub fn apply_candidate_patch(
+    runs_dir: &Path,
+    worktree: &Path,
+    base_commit: &str,
+    patch: &[u8],
+) -> Result<String> {
     // An empty cumulative patch is a legitimate outcome (a run that changed
     // nothing relative to base) — `git apply` itself treats an empty input
     // as an error ("No valid patches in input"), not a harmless no-op, so
@@ -150,7 +221,7 @@ pub fn apply_candidate_patch(runs_dir: &Path, worktree: &Path, patch: &[u8]) -> 
     // just-checked-out tree (identical to `base_commit`'s) is already the
     // correct result.
     if patch.is_empty() {
-        return finish_apply(worktree);
+        return finish_apply(worktree, base_commit);
     }
 
     let tmp_dir = runs_dir.join(".o7-candidate-tmp");
@@ -200,16 +271,13 @@ pub fn apply_candidate_patch(runs_dir: &Path, worktree: &Path, patch: &[u8]) -> 
     );
     let _ = fs::unlinkat(&dir_fd, cname.as_c_str(), fs::AtFlags::empty());
     result.map_err(|e| anyhow::anyhow!("git apply --index --binary failed: {e}"))?;
-    finish_apply(worktree)
+    finish_apply(worktree, base_commit)
 }
 
-fn finish_apply(worktree: &Path) -> Result<String> {
+fn finish_apply(worktree: &Path, base_commit: &str) -> Result<String> {
     let tree_oid = run_git(worktree, &["write-tree"])?.trim().to_string();
-    anyhow::ensure!(
-        !tree_has_gitlink(worktree, &tree_oid)?,
-        "materializing the candidate patch produced a tree containing a gitlink (submodule) \
-         entry — unsupported"
-    );
+    ensure_no_gitlink_mutation(worktree, base_commit, &tree_oid)
+        .context("materialization's own gitlink policy check")?;
     Ok(tree_oid)
 }
 

@@ -981,8 +981,9 @@ fn materialize_parent_candidate_state(
 
     worktree::add(repo, &receipt.base_commit, wt, &format!("o7/{run_id}"))
         .context("creating the child run's worktree at the parent's own candidate base commit")?;
-    let materialized_tree_oid = worktree::apply_candidate_patch(runs_dir, wt, &patch_bytes)
-        .context("applying the parent's own cumulative candidate patch")?;
+    let materialized_tree_oid =
+        worktree::apply_candidate_patch(runs_dir, wt, &receipt.base_commit, &patch_bytes)
+            .context("applying the parent's own cumulative candidate patch")?;
     anyhow::ensure!(
         materialized_tree_oid == receipt.candidate_tree_oid,
         "materializing the parent's candidate state produced tree {materialized_tree_oid}, but \
