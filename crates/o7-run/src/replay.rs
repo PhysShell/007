@@ -407,8 +407,10 @@ fn referenced_artifacts(kind: &RunEventKind) -> Vec<&ArtifactRef> {
         RunEventKind::CommandBindingCaptured { binding } => vec![binding],
         RunEventKind::CandidateStateCaptured { receipt } => vec![receipt],
         RunEventKind::CandidateStateMaterialized {
-            candidate_receipt, ..
-        } => vec![candidate_receipt],
+            source_receipt,
+            source_patch,
+            ..
+        } => vec![source_receipt, source_patch],
         RunEventKind::AgentStarted
         | RunEventKind::AgentExited { .. }
         | RunEventKind::GateStarted { .. }

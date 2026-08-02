@@ -819,6 +819,7 @@ fn a_protected_subject_starting_before_its_policy_is_allowed_fails_loudly() {
         sandbox_requirements: Vec::new(),
         agent: AgentObligation::Required,
         runner_environment: "linux".to_owned(),
+        candidate_state: None,
     };
     let events = chained(vec![
         run_started(contract),
@@ -1193,6 +1194,7 @@ fn a_duplicate_protected_subject_fails_loudly() {
         sandbox_requirements: Vec::new(),
         agent: AgentObligation::Required,
         runner_environment: "linux".to_owned(),
+        candidate_state: None,
     };
     let events = chained(vec![run_started(contract), RunEventKind::RunSealed]);
     assert!(matches!(
@@ -1213,6 +1215,7 @@ fn an_optional_policy_that_protects_a_subject_fails_loudly() {
         sandbox_requirements: Vec::new(),
         agent: AgentObligation::Required,
         runner_environment: "linux".to_owned(),
+        candidate_state: None,
     };
     let events = chained(vec![run_started(contract), RunEventKind::RunSealed]);
     assert!(matches!(
@@ -1330,6 +1333,7 @@ fn agent_protected_by_policy() -> RunContract {
         sandbox_requirements: Vec::new(),
         agent: AgentObligation::Required,
         runner_environment: "linux".to_owned(),
+        candidate_state: None,
     }
 }
 

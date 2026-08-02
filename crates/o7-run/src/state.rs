@@ -131,9 +131,9 @@ pub struct SandboxEvidenceEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CandidateMaterialization {
     pub source_run_id: RunId,
-    pub candidate_receipt: ArtifactRef,
-    pub expected_tree_oid: String,
-    pub actual_tree_oid: String,
+    pub source_receipt: ArtifactRef,
+    pub source_patch: ArtifactRef,
+    pub materialized_tree_oid: String,
 }
 
 /// The pure, versioned reduced state. Serializes to a byte-stable normal form (`BTreeMap`/

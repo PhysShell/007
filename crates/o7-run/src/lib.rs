@@ -46,17 +46,23 @@
 //! `WorkerObservation → RunEvent` adapter, the `o7-ledger` append path, and the `o7 replay`
 //! CLI.
 
+pub mod candidate;
 pub mod event;
 pub mod ids;
 pub mod reduce;
 pub mod replay;
 pub mod state;
 
+pub use candidate::{
+    CandidateMaterializationCheck, CandidateStateReceiptV1, CandidateVerifyError,
+    CANDIDATE_STATE_RECEIPT_SCHEMA_V1,
+};
 pub use event::{
-    AgentObligation, AgentOutcome, ArtifactKind, ArtifactRef, Digest256, DigestFormatError,
-    ExecutionSubject, GateApplicability, GateObligation, GateOutcome, GateRequirement,
-    PolicyObligation, PolicyOutcome, PolicyProtectedSubject, PolicyRequirement, RunContract,
-    RunEvent, RunEventKind, SandboxEvidenceOutcome, SandboxRequirement, RUN_EVENT_SCHEMA_VERSION,
+    AgentObligation, AgentOutcome, ArtifactKind, ArtifactRef, CandidatePatchKind,
+    CandidateStateContractV1, Digest256, DigestFormatError, ExecutionSubject, GateApplicability,
+    GateObligation, GateOutcome, GateRequirement, PolicyObligation, PolicyOutcome,
+    PolicyProtectedSubject, PolicyRequirement, RepositoryIdentity, RunContract, RunEvent,
+    RunEventKind, SandboxEvidenceOutcome, SandboxRequirement, RUN_EVENT_SCHEMA_VERSION,
 };
 pub use ids::{GateId, IdError, RunEventId, RunId};
 pub use reduce::{reduce, reduce_all, ReduceError};
