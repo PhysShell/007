@@ -355,6 +355,23 @@ pub fn verify_candidate_state_materialized(
             "this run's own contract declares no candidate_state obligation to materialize against",
         )
     })?;
+    // Q-Deck A0 corrective round 3 (Codex P1, Part 3): the command binding's
+    // OWN `child_run_id` must equal THIS run's own canonical `run_id` —
+    // without this, a record could carry a command binding minted for a
+    // DIFFERENT child, materialize and run under this run's own identity,
+    // then seal `Blocked` while skipping `CandidateStateCaptured` (whose
+    // OWN verifier is the only other place this exact check previously
+    // existed) — and full `replay` would still report it verified, since
+    // this materialization verifier never independently confirmed the
+    // binding belongs to the run it is embedded in.
+    let Some(canonical_run_id) = &state.run_id else {
+        return Err(fail("this run has no bound canonical run_id yet"));
+    };
+    if binding.child_run_id.as_str() != canonical_run_id.as_str() {
+        return Err(fail(
+            "this run's own command-binding child_run_id disagrees with its own canonical run_id",
+        ));
+    }
     if mat.source_run_id.as_str() != binding.parent_run_id.as_str() {
         return Err(fail(
             "materialization source_run_id disagrees with this run's own command-binding \
