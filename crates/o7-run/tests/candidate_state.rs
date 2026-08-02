@@ -1050,3 +1050,150 @@ fn materialization_command_binding_naming_a_different_child_is_rejected_everywhe
         "got: {replay_verify_err:?}"
     );
 }
+
+// ==================== Q-Deck A0 corrective round 4 (Codex P1) ====================
+//
+// `CandidateStateContractV1.schema` was parsed but never validated against anything —
+// a `RunStarted` could declare `candidate_state.schema = 2` while every receipt stayed
+// at schema 1, and `verify_prefix`/replay/admission would accept it as authoritative,
+// letting an unknown contract format become continuation authority instead of failing
+// closed. Checked structurally at `RunStarted` (`reduce::validate_contract`, the
+// earliest layer every replay path already goes through) — so it fails BEFORE any
+// candidate evidence is ever folded, with or without a later capture/seal.
+
+fn contract_with_unsupported_candidate_schema(
+    agent: o7_run::event::AgentObligation,
+) -> RunContract {
+    let mut c = contract_with_candidate(agent);
+    c.candidate_state.as_mut().unwrap().schema = 2; // <- unsupported; this build only understands 1
+    c
+}
+
+/// Case: the contract declares an unsupported schema and NO candidate evidence ever
+/// follows at all (not even a `CandidateStateCaptured`) — the earliest-layer check must
+/// still catch it, proving the reducer doesn't merely defer to a later, evidence-gated
+/// check that a schema-2-with-nothing-else record would simply never reach.
+#[test]
+fn an_unsupported_candidate_contract_schema_with_no_later_evidence_is_rejected_structurally() {
+    let events = chained(vec![run_started(
+        contract_with_unsupported_candidate_schema(not_used()),
+    )]);
+    let resolver = MapResolver::new();
+
+    assert!(
+        matches!(
+            structural_err(&events),
+            ReduceError::UnsupportedCandidateContractSchema {
+                found: 2,
+                supported: 1
+            }
+        ),
+        "reduce_all must reject an unsupported candidate contract schema"
+    );
+    let err = verify_prefix(&events, &resolver)
+        .expect_err("verify_prefix must reject an unsupported candidate contract schema");
+    assert!(
+        matches!(
+            err,
+            o7_run::replay::ReplayError::Reduce(
+                ReduceError::UnsupportedCandidateContractSchema { .. }
+            )
+        ),
+        "got: {err:?}"
+    );
+    let verdict = o7_run::replay::classify_record(&events, &resolver);
+    assert!(
+        matches!(verdict, o7_run::replay::RecordVerdict::Invalid(_)),
+        "got: {verdict:?}"
+    );
+}
+
+/// Case: the contract declares an unsupported schema, but everything AFTER it looks
+/// completely legitimate — a receipt at schema 1, matching every other contract field
+/// exactly, a valid patch, a clean seal. This is Codex's own literal example
+/// ("contract.candidate_state.schema = 2, receipt.schema = 1") — proving a perfectly
+/// well-formed downstream can never paper over the earliest-layer rejection, through
+/// every one of `reduce_all`/`verify_prefix`/`replay`/`replay_verify`/`classify_record`.
+#[test]
+fn an_unsupported_candidate_contract_schema_is_rejected_even_behind_an_otherwise_valid_capture_and_seal(
+) {
+    let patch_bytes = b"patch-round4-schema";
+    let receipt = CandidateStateReceiptV1 {
+        schema: o7_run::CANDIDATE_STATE_RECEIPT_SCHEMA_V1, // <- valid receipt schema (1)
+        repository_id: repo_id(),
+        base_commit: "a".repeat(40),
+        run_id: RunId::new("run-fixture-1").unwrap(),
+        conversation_id: "conv-1".to_owned(),
+        parent_run_id: None,
+        candidate_tree_oid: "b".repeat(40),
+        patch_kind: CandidatePatchKind::GitBinaryCumulativePatchV1,
+        patch: patch_artifact(patch_bytes),
+    };
+    let receipt_bytes = serde_json::to_vec(&receipt).unwrap();
+    let mut resolver = MapResolver::new();
+    resolver.insert("task.json", TASK_BYTES);
+    resolver.insert("diff.patch", b"");
+    resolver.insert("candidate_state_receipt.json", &receipt_bytes);
+    resolver.insert("candidate.patch", patch_bytes);
+
+    let events = chained(vec![
+        run_started(contract_with_unsupported_candidate_schema(not_used())),
+        RunEventKind::PatchCaptured {
+            patch: artifact(ArtifactKind::Diff, "diff.patch", b""),
+        },
+        RunEventKind::CandidateStateCaptured {
+            receipt: receipt_artifact(&receipt_bytes),
+        },
+        RunEventKind::RunSealed,
+    ]);
+
+    assert!(
+        matches!(
+            structural_err(&events),
+            ReduceError::UnsupportedCandidateContractSchema {
+                found: 2,
+                supported: 1
+            }
+        ),
+        "reduce_all must reject it even with an otherwise-valid capture"
+    );
+    let verify_err = verify_prefix(&events, &resolver)
+        .expect_err("verify_prefix must reject it even with an otherwise-valid capture");
+    assert!(
+        matches!(
+            verify_err,
+            o7_run::replay::ReplayError::Reduce(
+                ReduceError::UnsupportedCandidateContractSchema { .. }
+            )
+        ),
+        "got: {verify_err:?}"
+    );
+    let verdict = o7_run::replay::classify_record(&events, &resolver);
+    assert!(
+        matches!(verdict, o7_run::replay::RecordVerdict::Invalid(_)),
+        "got: {verdict:?}"
+    );
+    let replay_err =
+        o7_run::replay::replay(&events, &resolver).expect_err("replay must reject it too");
+    assert!(
+        matches!(
+            replay_err,
+            o7_run::replay::ReplayError::Reduce(
+                ReduceError::UnsupportedCandidateContractSchema { .. }
+            )
+        ),
+        "got: {replay_err:?}"
+    );
+    let replay_verify_err =
+        o7_run::replay::replay_verify(&events, &resolver, o7_run::Verdict::Pass)
+            .expect_err("replay_verify must reject it too");
+    assert!(
+        matches!(
+            replay_verify_err,
+            o7_run::replay::ReplayError::Reduce(
+                ReduceError::UnsupportedCandidateContractSchema { .. }
+            )
+        ),
+        "got: {replay_verify_err:?}"
+    );
+}

@@ -1618,6 +1618,49 @@ fn strip_candidate_state_and_make_pre_a0(dir: &Path) {
     let _ = std::fs::remove_file(dir.join("candidate.patch"));
 }
 
+/// Q-Deck A0 corrective round 4 (Codex P1): sets a run's own `RunStarted` contract's
+/// `candidate_state.schema` to an unsupported value, leaving EVERYTHING else untouched —
+/// its `CandidateStateCaptured` receipt stays at schema 1 (Codex's own literal example:
+/// "contract.candidate_state.schema = 2 while every receipt stayed at schema 1"), the
+/// receipt's own bytes/digest are never touched, only the contract event is mutated and
+/// the whole chain is re-sequenced/re-chained from genesis so the record stays otherwise
+/// fully self-consistent — a genuinely tamper-evident record with exactly ONE
+/// deliberately altered fact.
+fn corrupt_candidate_contract_schema(dir: &Path) {
+    let text = std::fs::read_to_string(dir.join("events.jsonl")).unwrap();
+    let mut events: Vec<o7_run::RunEvent> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let mut touched = false;
+    for e in &mut events {
+        if let o7_run::RunEventKind::RunStarted { contract, .. } = &mut e.kind {
+            if let Some(obligation) = contract.candidate_state.as_mut() {
+                obligation.schema = 2; // unsupported; this build only understands 1
+                touched = true;
+            }
+        }
+    }
+    assert!(
+        touched,
+        "this run must have a candidate_state contract obligation to corrupt"
+    );
+    let mut prev = o7_run::event::Digest256::genesis();
+    for (i, e) in events.iter_mut().enumerate() {
+        e.sequence = i as u64;
+        e.previous_event_digest = prev.clone();
+        e.event_digest = e.compute_digest();
+        prev = e.event_digest.clone();
+    }
+    let rewritten: String = events
+        .iter()
+        .map(|e| serde_json::to_string(e).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(dir.join("events.jsonl"), rewritten + "\n").unwrap();
+}
+
 fn conversation_run_count(ledger_path: &Path, conversation_id: &str) -> i64 {
     let conn = rusqlite::Connection::open(ledger_path).unwrap();
     conn.query_row(
@@ -2728,5 +2771,292 @@ fn an_old_accepted_row_against_foreign_repository_self_rejects_via_o7_continue()
         still_rejected, "rejected",
         "a repeat invocation must not revert or corrupt the already-rejected status — no \
          perpetual redrive loop"
+    );
+}
+
+// ==================== Q-Deck A0 corrective round 4 (Codex P1) ====================
+//
+// The contract's own candidate_state.schema was parsed but never validated — a
+// RunStarted could declare schema 2 while every receipt stayed at schema 1. Closed at
+// the reducer (crates/o7-run/src/reduce.rs), the earliest layer every replay path (and
+// therefore every one of admission/continuation/recovery/DTO projection below) already
+// goes through — proven here at the process level, against a real corrupted parent
+// record, not merely the in-memory unit fixtures in crates/o7-run/tests/candidate_state.rs.
+
+/// A FRESH command against a parent whose own contract declares an unsupported
+/// candidate-state schema must be rejected at admission — `409
+/// COMMAND_PARENT_CANDIDATE_UNAVAILABLE`, zero command rows, zero additional provider
+/// invocations, the conversation's own tail unchanged. Mirrors Part 7 Case A exactly,
+/// substituting the pre-A0 corruption for the schema corruption.
+#[test]
+fn a_fresh_command_against_a_parent_with_an_unsupported_candidate_contract_schema_is_rejected_at_admission(
+) {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let target = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    claude.set_actions(1, "echo base-v1 > base.txt\n");
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(addr);
+    let (_, page) = get(addr, "/api/v1/runs");
+    let run_a_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    corrupt_candidate_contract_schema(&run_dir(&runs_dir, &target, &run_a_id));
+    let runs_before = conversation_run_count(&ledger_path, &conversation_id);
+
+    let (status, accepted) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": run_a_id,
+            "command": "must never be accepted against an unsupported candidate contract schema",
+            "idempotency_key": "key-schema-corrupt-fresh",
+        }),
+    );
+    assert_eq!(status, 409, "{accepted:?}");
+    assert_eq!(
+        accepted["code"], "COMMAND_PARENT_CANDIDATE_UNAVAILABLE",
+        "{accepted:?}"
+    );
+    assert_eq!(
+        command_row_count_for_parent(&ledger_path, &run_a_id),
+        0,
+        "an unsupported candidate contract schema must never create a command row"
+    );
+    assert_eq!(
+        conversation_run_count(&ledger_path, &conversation_id),
+        runs_before,
+        "no child run/worktree was ever created — the conversation's own tail is unchanged"
+    );
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the provider must never be invoked against an unsupported candidate contract schema"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+    drop(repo);
+}
+
+/// Defense in depth (Codex P1 negative case 6): a legacy `accepted`-and-bound command row
+/// (direct SQL insert, modeling a pre-round-4 deployment — exactly like Part 7 Case D)
+/// naming a parent whose contract now declares an unsupported candidate schema, run
+/// through `o7 continue` DIRECTLY — past `o7d`'s own admission preflight entirely. Must:
+/// invoke the provider zero times; never attach a child run (so nothing is ever
+/// "normalized" — no child contract naming this build's own schema constant ever comes
+/// into existence for this parent); atomically transition to `rejected`; and not wedge —
+/// a second invocation must still never invoke the provider and must leave the command
+/// exactly as rejected as it already was.
+#[test]
+fn an_already_accepted_legacy_command_against_a_schema_corrupted_parent_self_rejects_via_o7_continue(
+) {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let target = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    claude.set_actions(1, "echo base-v1 > base.txt\n");
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(addr);
+    let (_, page) = get(addr, "/api/v1/runs");
+    let run_a_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    corrupt_candidate_contract_schema(&run_dir(&runs_dir, &target, &run_a_id));
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+
+    let command_id = format!("cmd-schema-corrupt-{run_a_id}");
+    let child_run_id = format!("schema-corrupt-child-{run_a_id}");
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, 'accepted', ?5, ?6, ?6)",
+            rusqlite::params![
+                command_id,
+                conversation_id,
+                run_a_id,
+                "a legacy command against an unsupported candidate contract schema",
+                child_run_id,
+                now,
+            ],
+        )
+        .unwrap();
+    }
+
+    let gate_path = repo.path().join(".007").join("gate.toml");
+    let run_continue = || {
+        Command::new(env!("CARGO_BIN_EXE_o7"))
+            .arg("continue")
+            .arg("--repo")
+            .arg(repo.path())
+            .arg("--worktree-root")
+            .arg(&worktree_root)
+            .arg("--runs-dir")
+            .arg(&runs_dir)
+            .arg("--gate")
+            .arg(&gate_path)
+            .arg("--model")
+            .arg("opus")
+            .arg("--max-turns")
+            .arg("1")
+            .arg("--ledger")
+            .arg(&ledger_path)
+            .arg("--conversation-id")
+            .arg(&conversation_id)
+            .arg("--parent-run-id")
+            .arg(&run_a_id)
+            .arg("--command")
+            .arg("a legacy command against an unsupported candidate contract schema")
+            .arg("--run-id")
+            .arg(&child_run_id)
+            .arg("--command-id")
+            .arg(&command_id)
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    claude.path().display(),
+                    std::env::var("PATH").unwrap_or_default()
+                ),
+            )
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("spawn o7 continue directly")
+    };
+
+    let status = run_continue();
+    assert!(
+        !status.success(),
+        "o7 continue must exit non-zero for an unsupported candidate contract schema"
+    );
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the provider must never be invoked against an unsupported candidate contract schema, \
+         even via direct CLI invocation"
+    );
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let final_status: String = conn
+            .query_row(
+                "SELECT status FROM command WHERE command_id = ?1",
+                [&command_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            final_status, "rejected",
+            "the conditional reject-if-unattached-and-bound transition must have fired"
+        );
+        let attached: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM run WHERE run_id = ?1",
+                [&child_run_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            attached, 0,
+            "the legacy child run id must never have attached — nothing was ever normalized \
+             into a valid child contract for this parent"
+        );
+    }
+
+    // Not wedged: a repeat invocation must still never invoke the provider and must leave
+    // the command exactly as rejected as it already was — no perpetual redrive loop.
+    let _second_status = run_continue();
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "a repeat invocation against an already-rejected legacy row must still never invoke \
+         the provider"
+    );
+    let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+    let still_rejected: String = conn
+        .query_row(
+            "SELECT status FROM command WHERE command_id = ?1",
+            [&command_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        still_rejected, "rejected",
+        "a repeat invocation must not revert or corrupt the already-rejected status"
     );
 }
