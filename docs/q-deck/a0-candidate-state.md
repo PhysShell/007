@@ -1210,3 +1210,228 @@ this round. Frontend remains entirely out of this slice.
 `git status --short` shows no unstaged/untracked changes beyond what this
 round's own commits already captured; every gate above was run against
 the exact commit this round's final push carries.
+## 18. Corrective round 3: Codex review 4838314243 (five P1 findings)
+
+An `@codex review` requested against corrective round 2's exact accepted
+head (`4ce14bfd6b5c029f0477b4373c8069850e6ba0c2`) returned five P1 findings
+(review `pullrequestreview-4838314243`). None reopens anything round 2
+proved (authoritative semantic replay, P6 confinement, byte-preserving
+transport, the A→B→C chain, R1's dispatch boundary, legacy-parent
+admission) — all five are genuinely new gaps this round closes.
+
+**Finding 1 — the parent ID reached the filesystem unconfined**
+(`3698894143`, `crates/o7d/src/routes.rs:623`). For a genuinely fresh
+idempotency key, `routes::create_command` called
+`parent_candidate_state_usable` — which calls `child_record_dir`, which
+joins the raw HTTP `parent_run_id` straight into a filesystem path — before
+the ledger had validated that string at all. A value like `../../outside`
+or an absolute path was never rejected as malformed; it was handed to the
+filesystem.
+
+**Fix**: a single shared validator, `crates/o7d/src/canonical.rs`'s new
+`is_confined_run_id_component`, checks (via `std::path::Component`
+matching, not a substring denylist) that a run id is exactly one normal
+path component — non-empty, not absolute, no `.`/`..`, no embedded slash.
+It is called from inside `child_record_dir` itself (so every filesystem
+helper that resolves a run id refuses before any I/O, not only the one
+HTTP call site that happened to check first), and `routes::create_command`
+now checks it explicitly and returns `400` before doing anything else.
+
+**Finding 2 — the established 404 contract had a gap** (`3698894147`,
+same file, line 628). Once the parent id was confined, nothing yet
+proved the parent existed or belonged to the requested conversation before
+falling through to the candidate-usability check — a well-formed but
+nonexistent or cross-conversation parent risked the wrong failure shape.
+
+**Fix**: a pure, read-only ledger reference preflight — conversation
+exists, parent exists, parent's own `conversation_id` matches — runs
+immediately after the confinement check and before any candidate-state
+I/O. It is explicitly not a substitute for `SqliteLedger::create_command`'s
+own transactional authority, which still repeats every mutation-time
+check; it exists only to give `404` the chance to fire before `409` would
+otherwise mask it. The three-way ordering is now: malformed id → `400`;
+unknown/wrong-conversation parent → `404`; known parent with unusable
+candidate evidence → `409 COMMAND_PARENT_CANDIDATE_UNAVAILABLE` — the same
+`404`/`409` contract round 2 established, now with `400` layered in front
+of both, never behind either.
+
+**Finding 3 — the gitlink policy rejected the wrong thing**
+(`3698894151`, `src/worktree.rs:117`). The existing check rejected a
+candidate tree for containing *any* gitlink at all, including one already
+present, unchanged, in the immutable base — so a repository with a
+pre-existing submodule could never accept a single valid follow-up
+command, a functional regression for any real repository shaped that way.
+
+**Fix**: `ensure_no_gitlink_mutation` replaces the whole-tree check with
+an authoritative *set* comparison. `gitlink_entries` runs
+`git ls-tree -r -z <commit>` — NUL-delimited, so paths are handled as raw
+bytes, never lossy-UTF8-decoded as an authority — and parses it into a
+`BTreeSet<(Vec<u8> path, String oid)>` of every `160000`-mode entry. The
+policy is: `base_commit`'s set must equal the candidate's set, exactly.
+Unchanged gitlinks pass; an added, deleted, or OID-modified gitlink, or a
+mode transition to/from `160000`, is rejected. Applied at both capture
+(`capture_cumulative_candidate`) and materialization (`finish_apply`, via
+`apply_candidate_patch`'s new `base_commit` parameter). The old lossy-text
+`patch_touches_gitlink` heuristic is kept only as a non-blocking
+diagnostic (`eprintln!`, not `anyhow::ensure!`) — an unchanged-mode,
+OID-only submodule bump need not contain a new/deleted mode header, so the
+heuristic was never sound as an authority.
+
+**Finding 4 — materialization bound the wrong identity**
+(`3698894153`, `crates/o7-run/src/candidate.rs:358`).
+`verify_candidate_state_captured` already cross-bound
+`receipt.run_id == command_binding.child_run_id`; the equivalent check was
+simply missing from `verify_candidate_state_materialized`, so a
+materialized-but-never-captured record could seal under a command binding
+naming a completely different child, and nothing in
+`replay`/`replay_verify`/`classify_record` would catch it.
+
+**Fix**: `verify_candidate_state_materialized` now requires `state.run_id`
+to exist and requires `binding.child_run_id == state.run_id`, symmetric
+with the captured-side check. Proven with a dedicated fixture: a sealed,
+chain-consistent `Blocked` record, valid contract/receipt/patch/tree, a
+command binding naming a different child, no `CandidateStateCaptured`
+evidence — rejected by `verify_prefix` (`ReplayError::CandidateSemantic`),
+by `replay` and `replay_verify` (same error variant), and by
+`classify_record` (`Invalid`); recovery and DTO projection fail closed by
+construction, since both route through the same `verify_prefix`.
+
+**Finding 5 — admission never checked which repository the evidence was
+captured against** (`3698894158`, `crates/o7d/src/canonical.rs:105`).
+`parent_candidate_state_usable` proved a parent's candidate contract was
+internally sealed and usable, but never compared its `repository_id`
+against the repository `o7d` is actually configured for — a command
+against a same-named-directory, different-repository parent's evidence
+would be accepted.
+
+**Fix, two layers, mirroring round 2's own admission/defense-in-depth
+shape**: `repository_identity` (previously private to `main.rs`) moved to
+`pub fn worktree::repository_identity` so both the binary and `o7d` (which
+depends on `o7` as a library) resolve the exact same canonical identity.
+`parent_candidate_state_usable` now compares the parent's own
+contract-level `repository_id` against `worktree::repository_identity(&exec.repo)`
+and rejects on mismatch. `resolve_inherited_candidate_obligation`
+(`src/main.rs`) gained a `repo: &Path` parameter and performs the same
+comparison against the parent's *receipt*-level `repository_id`, so a
+direct `o7 continue` invocation — bypassing `o7d`'s own preflight entirely
+— self-rejects the same way. Proven with two genuinely different Git
+repositories sharing the same final directory basename (both named
+`myrepo`, under distinct parent directories, one shared `runs_dir`/ledger)
+so `child_target`'s own "canonicalized repo's final path component"
+collision is actually exercised, not merely asserted: a fresh command
+against foreign-repository evidence gets `409`, zero command rows, zero
+provider invocations; a legacy accepted-and-bound row (direct SQL insert,
+modeling a pre-this-round deployment) self-rejects atomically via
+`o7 continue`, and a second invocation against the same row proves the
+rejection does not wedge into a redrive loop. The later, unrelated
+point-of-use repository check in `materialize_parent_candidate_state` is
+untouched by this round.
+
+**Commit shape** (five, additive, on top of round 2's frozen head
+`4ce14bfd6b5c029f0477b4373c8069850e6ba0c2`):
+`fix(o7d): confine and validate command parent preflight`,
+`fix(worktree): allow unchanged gitlinks only`,
+`fix(replay): bind materialization to child run identity`,
+`fix(o7d,root): bind candidate admission to configured repository`,
+`test(q-deck): cover Codex P1 findings`.
+
+## 19. Corrective round 3 — evidence
+
+Base for this round: the PR's own exact re-gated head,
+`4ce14bfd6b5c029f0477b4373c8069850e6ba0c2` (corrective round 2's final
+commit, the same head Codex review `4838314243` reviewed). New head: see
+the PR body / `git log`.
+
+- `cargo fmt --check` — clean.
+- `git diff --check` — clean.
+- `cargo test -p o7-run --test candidate_state` — **25/25 passing** (24
+  carried from round 2, 1 new): the materialization/child-binding negative
+  (Finding 4), proven rejected through `verify_prefix`, `replay`, and
+  `replay_verify` directly, not only through the standalone helper.
+- `cargo test -p o7-ledger --test commands` — 45/45 passing, unchanged.
+- `cargo test -p o7 --test r1_command_e2e` — **37/37 passing, unchanged**
+  — confirms the new confinement/404/repository checks do not affect any
+  R1 fixture.
+- `cargo test -p o7 --test a0_candidate_state_e2e` — **22/22 passing** (16
+  carried from round 2, 6 new): path-confinement negatives (traversal,
+  absolute, nested, `.`/`..`, each proven not to touch a planted outside
+  sentinel file/FIFO/large file); the established-404 negatives (unknown
+  parent, cross-conversation parent); the two foreign-repository-admission
+  process tests (fresh command, legacy accepted row via direct
+  `o7 continue`, including the no-perpetual-redrive-loop check).
+- gitlink policy — new unit test module in `src/worktree.rs`
+  (`gitlink_policy_tests`, 9 tests, pure Git-plumbing, no provider
+  process): unchanged pre-existing gitlink at capture and at
+  materialization; add/delete/OID-modify rejected at both; regular-file↔
+  gitlink transition rejected in both directions; nested and
+  unusually-named gitlink paths handled deterministically.
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean, 0
+  warnings, across the whole workspace.
+- `cargo test --workspace --no-fail-fast` — every crate green, run
+  single-threaded (`--test-threads=1`) for the same VPS cross-binary
+  resource-contention reason §15/§17 already disclosed, with the same six
+  environmental exclusions carried forward unchanged (none touch any code
+  this round changed). Total reported test time this round runs past the
+  10-minute ceiling this VPS's own shell tooling imposes on a single
+  foreground command (`o7-worker`'s own suite alone — unchanged by this
+  round — accounts for roughly 360 of the run's ~450 reported seconds), so
+  this round's run was launched detached from that ceiling rather than
+  split or shortened; every one of the resulting 97 `test result:` lines
+  across all eight workspace crates reported `0 failed`.
+- `cargo deny check advisories bans licenses sources` — a **different**
+  local advisory-db error from every prior round's disclosed `lz4_flex`/
+  `CVSS:4.0` parse failure: `git operation failed: expected .../
+  nostr-relay-pool/RUSTSEC-0000-0000.2.md to be named "RUSTSEC-0000-0000.md"`.
+  Confirmed unrelated to this round's code:
+  `git diff --stat 4ce14bf..HEAD -- Cargo.lock Cargo.toml crates/*/Cargo.toml`
+  is empty (zero dependency changes). This VPS's root filesystem was
+  observed at 100% capacity (276 MiB free of 52 GiB, almost entirely the
+  pre-existing relocated `~/cargo-target` build-cache mount and the Nix
+  store) while investigating — a plausible root cause for a corrupt/
+  partial local git-clone of the advisory database, though not confirmed
+  by direct inspection of that clone.
+- `npm test` / `npm run check` (`apps/q-deck`) — 45/45 / 0 errors,
+  unchanged (frontend untouched this round).
+
+### Provider invocation counts, this round
+
+- Malformed-parent-id cases (`400`): provider invocation count unchanged;
+  no command row created.
+- Unknown-parent and cross-conversation-parent cases (`404`): same.
+- Foreign-repository cases (`409` at fresh admission; atomic `rejected`
+  transition via direct `o7 continue` for the legacy row): zero
+  additional provider invocations in either case; the legacy-row test's
+  second, repeat `o7 continue` invocation also invokes the provider zero
+  times, confirming no redrive loop.
+- Materialization child-binding negative: no process-level provider
+  invocation involved (a constructed-event unit fixture, not a live run).
+- Gitlink-policy tests: pure Git-plumbing, no provider process spawned —
+  the fix does not touch provider-invocation logic, and the existing
+  `candidate_state_flows_through_a_b_c_chain` process test already
+  re-proves normal capture/materialization end-to-end with its own
+  unchanged invocation count.
+
+### Known limitations (disclosed, not hidden)
+
+Everything §15/§17 already disclosed remains open. New this round: the
+gitlink-policy tests are pure Git-plumbing unit tests, not process-level
+tests spawning a real provider — this round's own fix does not touch
+provider-invocation logic, but the requirement's own "provider invocation
+... unchanged" sub-claim is proven indirectly (by the fix's own scope)
+rather than by a dedicated process-level gitlink test. The materialization
+child-binding fix's "recovery and DTO projection fail closed" claim is
+proven by construction — `classify_command_child` and `candidate_projection`
+both route through the same `verify_prefix` this round proved rejects the
+fixture — rather than via a separate end-to-end process test exercising
+`o7 recover` or the DTO endpoint directly against this exact fixture. The
+foreign-repository fresh-command test asserts zero command rows and zero
+provider invocations but does not separately assert zero worktree
+directories were created (implied, not independently checked on disk).
+The `cargo deny` advisory-db error's disk-pressure root cause is a
+plausible correlation from this investigation, not a confirmed diagnosis.
+
+### Clean worktree confirmation
+
+`git status --short` shows no unstaged/untracked changes beyond what this
+round's own commits already captured; every gate above was run against
+the exact commit this round's final push carries.
