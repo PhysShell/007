@@ -75,6 +75,14 @@ jsonschema = { version = "0.47", default-features = false }
 # (allowed in deny.toml); it pulls only bitflags/cfg-if/libc, all permissive.
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", default-features = false, features = ["signal", "fs"] }
+# Q-Deck A0 corrective round 1 (`docs/q-deck/a0-candidate-state.md`): the
+# private candidate-patch temp store (`src/worktree.rs`) needs O_EXCL|
+# O_NOFOLLOW-confined file creation OUTSIDE the candidate-controlled
+# worktree, so a symlink a base commit's own tree contains can never redirect
+# a write. Already an in-tree, `deny.toml`-allowed dependency (`o7-worktree`
+# already uses it for its own no-follow confinement primitives) — reused
+# here rather than hand-rolling raw libc calls or adding a new crate.
+rustix = { version = "1", default-features = false, features = ["fs", "std"] }
 
 # Lints. Curated to pass `clippy --all-targets -D warnings` clean on today's code
 # (ratchet, not a blast): the broad pedantic/nursery families are deliberately
