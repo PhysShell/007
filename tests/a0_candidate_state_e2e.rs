@@ -12,6 +12,16 @@
 //! own doc comment already establishes the precedent of mirroring rather
 //! than sharing test-only helpers across independently-compiled
 //! integration test binaries).
+//!
+//! Invariant for the restriction-lint allowance below (Q-Deck A0
+//! corrective round 4, Codex P1): every `unwrap`/`expect`/index here
+//! operates on this test's own controlled fixtures and output — a
+//! throwaway repo/ledger/worktree this test itself created, a REST
+//! response body this test itself just parsed and is asserting the shape
+//! of, a child process this test itself spawned and is waiting on — a
+//! panic here is this test's own setup or assertion failing loudly, not a
+//! runtime condition in the production code under test. Matches the
+//! precedent in `crates/o7d/tests/golden_transcript_sse.rs`.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

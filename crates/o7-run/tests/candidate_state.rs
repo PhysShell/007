@@ -1,6 +1,14 @@
 //! Q-Deck A0 corrective round 1 (`docs/q-deck/a0-candidate-state.md`):
 //! structural ordering (the pure reducer) and semantic verification (the
 //! `candidate` module, built on `replay`) for candidate-state evidence.
+//!
+//! Invariant for the restriction-lint allowance below (Q-Deck A0 corrective
+//! round 4, Codex P1): every `unwrap`/`expect`/index here operates on a
+//! fixture this test itself just built (a hand-assembled `RunState`/
+//! `RunContract`/event list, an in-memory artifact map) — a panic means
+//! this test's own setup or assertion broke, never a runtime condition
+//! reachable through the production API under test. Matches the precedent
+//! in `crates/o7d/tests/golden_transcript_sse.rs`.
 #![allow(
     dead_code,
     clippy::unwrap_used,

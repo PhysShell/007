@@ -362,6 +362,15 @@ fn run_git_bytes(dir: &Path, args: &[&str]) -> Result<Vec<u8>> {
 /// corresponding working-tree path at all; without the placeholder, `add
 /// -A` would silently wipe a manually-`update-index`d gitlink right back
 /// out before it was ever committed.
+///
+/// Invariant for the restriction-lint allowance below (Q-Deck A0
+/// corrective round 4, Codex P1): every `unwrap`/`expect`/index here
+/// operates on a real git repository this test itself just created in a
+/// throwaway `tempfile::tempdir()`, or on this module's own git-plumbing
+/// output (`git ls-tree`, `git rev-parse`) — a panic means this test's own
+/// fixture setup or a git invocation it fully controls broke, never a
+/// runtime condition reachable through production code. Matches the
+/// precedent in `crates/o7d/tests/golden_transcript_sse.rs`.
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod gitlink_policy_tests {
