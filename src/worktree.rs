@@ -8,6 +8,29 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use rustix::fs::{self, Mode, OFlags};
 
+/// Q-Deck A0 corrective round 1: convert `o7-worktree`'s own canonical
+/// repository identity into `o7-run`'s dependency-free mirror of it
+/// (`docs/q-deck/a0-candidate-state.md` §2) — the one conversion point
+/// between the two. Q-Deck A0 corrective round 3 (Codex P1, Part 4): moved
+/// here, into the library, from being a `main.rs`-private helper — `o7d`
+/// (a separate crate, depending on `o7` as a library) now needs the exact
+/// same canonical identity for the configured `exec.repo`, to cross-check
+/// against a parent's own candidate-state contract before admission.
+///
+/// # Errors
+/// The repository's canonical identity cannot be resolved (not a Git
+/// repository, or an I/O failure).
+pub fn repository_identity(repo: &Path) -> Result<o7_run::event::RepositoryIdentity> {
+    let canonical = o7_worktree::git::HardenedGit::new(repo)
+        .canonical_repo_id()
+        .context("resolving this repository's canonical identity")?;
+    Ok(o7_run::event::RepositoryIdentity {
+        git_common_dir: canonical.git_common_dir.to_string_lossy().into_owned(),
+        dev: canonical.dev,
+        ino: canonical.ino,
+    })
+}
+
 /// Create a throwaway git worktree of `repo` at `base`, on a fresh branch.
 pub fn add(repo: &Path, base: &str, path: &Path, branch: &str) -> Result<()> {
     let p = path.to_string_lossy();

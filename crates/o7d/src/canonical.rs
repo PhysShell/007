@@ -99,26 +99,31 @@ pub(crate) fn classify_child_record(
     }
 }
 
-/// Q-Deck A0 corrective round 2 (Part 5): whether `parent_run_id`'s own
-/// canonical record proves it is USABLE as a command-continuation parent —
-/// checked BEFORE a new command is ever durably created, not merely
-/// discovered later when `o7 continue` itself fails after acceptance. A
-/// parent that predates Q-Deck A0 (a genuine R1-only run, sealed and
-/// otherwise perfectly valid, but with no `candidate_state` contract
-/// obligation at all) is EXPLICITLY not usable — A0 makes a valid,
-/// semantically verified candidate receipt mandatory for every
-/// continuation once live, never a silent fallback to R1's old
-/// zero-carryover behavior. Returns `Err(reason)` (a SERVER-side diagnostic
-/// string, never sent to the client verbatim — same discipline as
-/// `ApiError::Internal`'s stable code) for every one of: no canonical
-/// record at all; full replay failure (chain/digest/reducer/artifact/
-/// candidate-semantic — the SAME authoritative `verify_prefix` every other
-/// consumer uses); not sealed; no candidate-state contract obligation; no
-/// candidate-state evidence captured. A `Blocked`/`Fail`/`Error` sealed
-/// verdict is itself a legitimate, replay-valid record (§8: canonical
-/// replay validity is not the same question as continuation eligibility)
-/// — its own verdict is untouched by this check; only the SEPARATE
-/// candidate-continuation-eligibility question is answered here.
+/// Q-Deck A0 corrective round 2 (Part 5); repository-bound corrective
+/// round 3 (Codex P1, Part 4): whether `parent_run_id`'s own canonical
+/// record proves it is USABLE as a command-continuation parent — checked
+/// BEFORE a new command is ever durably created, not merely discovered
+/// later when `o7 continue` itself fails after acceptance. A parent that
+/// predates Q-Deck A0 (a genuine R1-only run, sealed and otherwise
+/// perfectly valid, but with no `candidate_state` contract obligation at
+/// all) is EXPLICITLY not usable — A0 makes a valid, semantically
+/// verified candidate receipt mandatory for every continuation once live,
+/// never a silent fallback to R1's old zero-carryover behavior. Returns
+/// `Err(reason)` (a SERVER-side diagnostic string, never sent to the
+/// client verbatim — same discipline as `ApiError::Internal`'s stable
+/// code) for every one of: no canonical record at all; full replay
+/// failure (chain/digest/reducer/artifact/candidate-semantic — the SAME
+/// authoritative `verify_prefix` every other consumer uses); not sealed;
+/// no candidate-state contract obligation; no candidate-state evidence
+/// captured; the parent's own candidate contract was captured against a
+/// DIFFERENT repository than this server is configured for (Part 4 — a
+/// server pointed at a different checkout sharing the same `target`
+/// basename must never treat that checkout's old record as usable). A
+/// `Blocked`/`Fail`/`Error` sealed verdict is itself a legitimate,
+/// replay-valid record (§8: canonical replay validity is not the same
+/// question as continuation eligibility) — its own verdict is untouched
+/// by this check; only the SEPARATE candidate-continuation-eligibility
+/// question is answered here.
 ///
 /// # Errors
 /// A diagnostic `String` (server-side only) describing why the parent is
@@ -139,20 +144,41 @@ pub(crate) fn parent_candidate_state_usable(
     if state.verdict.is_none() {
         return Err("the parent run is not sealed".to_owned());
     }
-    let has_obligation = state
+    let Some(obligation) = state
         .contract
         .as_ref()
-        .is_some_and(|c| c.candidate_state.is_some());
-    if !has_obligation {
+        .and_then(|c| c.candidate_state.as_ref())
+    else {
         return Err(
             "the parent run predates Q-Deck A0 (no candidate_state contract obligation) — a \
              valid candidate receipt is mandatory for every command continuation"
                 .to_owned(),
         );
-    }
+    };
     if state.candidate_state.is_none() {
         return Err(
             "the parent run declares a candidate_state obligation but never captured a receipt"
+                .to_owned(),
+        );
+    }
+    // Q-Deck A0 corrective round 3 (Codex P1, Part 4): the parent's OWN
+    // verified candidate contract must have been captured against THIS
+    // exact server's configured repository — `verify_prefix` (above)
+    // already proved the CAPTURED RECEIPT agrees with its OWN contract
+    // (internal self-consistency); it has no way to know whether that
+    // contract's `repository_id` matches the repository THIS server is
+    // configured for right now. Without this check, pointing the server
+    // at a different checkout sharing the same `target` basename would
+    // let a stale record from the OLD repository pass admission — the
+    // mismatch would only surface later, in
+    // `materialize_parent_candidate_state`, after the command already
+    // durably attached a child run.
+    let this_repo_id = o7::worktree::repository_identity(&exec.repo)
+        .map_err(|e| format!("resolving this server's own configured repository identity: {e}"))?;
+    if obligation.repository_id != this_repo_id {
+        return Err(
+            "the parent's candidate-state contract was captured against a different \
+             repository than this server is currently configured for"
                 .to_owned(),
         );
     }

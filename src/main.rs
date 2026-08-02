@@ -22,9 +22,7 @@ use o7::record::{
 };
 use o7::verdict::{StepVerdict, Verdict};
 use o7::worktree;
-use o7_run::event::{
-    ArtifactKind, CandidatePatchKind, CandidateStateContractV1, RepositoryIdentity,
-};
+use o7_run::event::{ArtifactKind, CandidatePatchKind, CandidateStateContractV1};
 use o7_run::ids::RunId as CanonicalRunId;
 use o7_run::CandidateStateReceiptV1;
 
@@ -460,7 +458,7 @@ fn run(a: RunArgs) -> Result<()> {
         contract.candidate_state = Some(CandidateStateContractV1 {
             schema: o7_run::CANDIDATE_STATE_RECEIPT_SCHEMA_V1,
             conversation_id: p.conversation_id().as_str().to_owned(),
-            repository_id: repository_identity(&repo)?,
+            repository_id: worktree::repository_identity(&repo)?,
             base_commit: base_commit.clone(),
             patch_kind: CandidatePatchKind::GitBinaryCumulativePatchV1,
         });
@@ -706,21 +704,6 @@ fn write_provider_session_receipt(
     ))
 }
 
-/// Q-Deck A0 corrective round 1: convert `o7-worktree`'s own canonical
-/// repository identity into `o7-run`'s dependency-free mirror of it
-/// (`docs/q-deck/a0-candidate-state.md` §2) — the one conversion point
-/// between the two.
-fn repository_identity(repo: &Path) -> Result<RepositoryIdentity> {
-    let canonical = o7_worktree::git::HardenedGit::new(repo)
-        .canonical_repo_id()
-        .context("resolving this repository's canonical identity")?;
-    Ok(RepositoryIdentity {
-        git_common_dir: canonical.git_common_dir.to_string_lossy().into_owned(),
-        dev: canonical.dev,
-        ino: canonical.ino,
-    })
-}
-
 /// Durably write `bytes` at `name` inside `rec`'s own directory as a
 /// canonical artifact, returning its `ArtifactRef`.
 fn write_candidate_artifact(
@@ -840,6 +823,7 @@ fn load_verified_candidate_receipt(
 /// The parent's own canonical record/receipt fails to load or semantically
 /// verify, or its `conversation_id` disagrees with `conversation_id`.
 fn resolve_inherited_candidate_obligation(
+    repo: &Path,
     runs_dir: &Path,
     target: &str,
     parent_run_id: &str,
@@ -859,6 +843,19 @@ fn resolve_inherited_candidate_obligation(
     anyhow::ensure!(
         receipt.run_id.as_str() == parent_run_id,
         "the parent's candidate-state receipt's own run_id does not match the parent run"
+    );
+    // Q-Deck A0 corrective round 3 (Codex P1, Part 4, defense in depth):
+    // the SAME repository-identity check `o7d`'s own admission preflight
+    // performs, re-verified here for whatever reaches this code path
+    // DESPITE that preflight — a direct CLI invocation, a race, or a row
+    // accepted by an older deployment. Rejecting here happens strictly
+    // before `RunStarted`/`attach_run`, so a foreign-repository parent
+    // never gets a run directory created for this child at all.
+    let this_repo_id = worktree::repository_identity(repo)?;
+    anyhow::ensure!(
+        receipt.repository_id == this_repo_id,
+        "the parent's candidate-state receipt was captured against a different repository than \
+         this server is currently configured for"
     );
     Ok(CandidateStateContractV1 {
         schema: o7_run::CANDIDATE_STATE_RECEIPT_SCHEMA_V1,
@@ -939,7 +936,7 @@ fn materialize_parent_candidate_state(
         receipt.conversation_id == conversation_id,
         "the parent's candidate-state receipt belongs to a different conversation"
     );
-    let this_repo_id = repository_identity(repo)?;
+    let this_repo_id = worktree::repository_identity(repo)?;
     anyhow::ensure!(
         receipt.repository_id == this_repo_id,
         "the parent's candidate-state receipt was captured against a different repository"
@@ -1494,6 +1491,7 @@ fn continue_run(a: &ContinueArgs) -> Result<()> {
     // reject-if-unattached transition every other early failure gets —
     // fixing the exact gap the independent re-gate found.
     match resolve_inherited_candidate_obligation(
+        &repo,
         &a.runs_dir,
         &target,
         &a.parent_run_id,
