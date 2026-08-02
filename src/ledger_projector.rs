@@ -346,16 +346,16 @@ impl LiveLedgerProjector {
             ),
             RunEventKind::CandidateStateMaterialized {
                 source_run_id,
-                candidate_receipt,
-                expected_tree_oid,
-                actual_tree_oid,
+                source_receipt,
+                source_patch,
+                materialized_tree_oid,
             } => (
                 "candidate_state_materialized",
                 serde_json::json!({
                     "source_run_id": source_run_id.as_str(),
-                    "candidate_receipt": candidate_receipt,
-                    "expected_tree_oid": expected_tree_oid,
-                    "actual_tree_oid": actual_tree_oid,
+                    "source_receipt": source_receipt,
+                    "source_patch": source_patch,
+                    "materialized_tree_oid": materialized_tree_oid,
                 }),
             ),
         };
@@ -548,6 +548,7 @@ mod tests {
             sandbox_requirements: Vec::new(),
             agent: o7_run::event::AgentObligation::Required,
             runner_environment: "linux".to_string(),
+            candidate_state: None,
         }
     }
 

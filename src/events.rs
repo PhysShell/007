@@ -103,6 +103,12 @@ pub fn build_contract(manifest: &GateManifest) -> Result<RunContract> {
         sandbox_requirements: Vec::new(),
         agent: AgentObligation::Required,
         runner_environment: RUNNER_ENVIRONMENT.to_string(),
+        // Q-Deck A0 corrective round 1: this helper only ever expresses GATE
+        // obligations from the manifest — the candidate-state obligation
+        // (when this run is ledger-backed) is bolted on afterward by the
+        // caller (`run`/`continue_run`, `src/main.rs`), once the
+        // conversation/repository identity it must canonical-bind is known.
+        candidate_state: None,
     })
 }
 
