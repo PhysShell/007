@@ -349,3 +349,240 @@ fn run_git_bytes(dir: &Path, args: &[&str]) -> Result<Vec<u8>> {
     }
     Ok(out.stdout)
 }
+/// Q-Deck A0 corrective round 3 (Codex P1, Part 2): unit tests for the
+/// authoritative gitlink-mutation policy — a real git repository per test
+/// (no o7d/ledger/process spawning needed; this is pure git plumbing),
+/// gitlinks planted via `git update-index --add --cacheinfo 160000,<oid>,
+/// <path>` (git never validates a gitlink's OID against a real object, so
+/// a fake 40-hex SHA is sufficient and does not require an actual nested
+/// repository). A placeholder DIRECTORY is created on disk at each gitlink
+/// path — exactly like a real submodule's own checkout directory — because
+/// `git add -A` (which both `capture_cumulative_candidate` and these tests'
+/// own commit helper call) stages a DELETION for any index entry with no
+/// corresponding working-tree path at all; without the placeholder, `add
+/// -A` would silently wipe a manually-`update-index`d gitlink right back
+/// out before it was ever committed.
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+mod gitlink_policy_tests {
+    use super::*;
+
+    fn run(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .expect("spawn git");
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    fn init_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        run(dir.path(), &["init", "-q"]);
+        run(dir.path(), &["config", "user.email", "t@example.com"]);
+        run(dir.path(), &["config", "user.name", "t"]);
+        dir
+    }
+
+    /// Stage everything currently on disk, then commit. Any gitlink whose
+    /// placeholder directory is still present survives this; one that was
+    /// removed (directory deleted) is correctly staged as a deletion.
+    fn commit_all(dir: &Path, msg: &str) -> String {
+        run(dir, &["add", "-A"]);
+        run(dir, &["commit", "-q", "-m", msg, "--allow-empty"]);
+        rev_parse(dir, "HEAD").unwrap()
+    }
+
+    fn add_gitlink(dir: &Path, path: &str, oid: &str) {
+        std::fs::create_dir_all(dir.join(path)).unwrap();
+        run(
+            dir,
+            &[
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &format!("160000,{oid},{path}"),
+            ],
+        );
+    }
+
+    fn remove_gitlink(dir: &Path, path: &str) {
+        run(dir, &["rm", "--cached", "-q", "-r", path]);
+        let _ = std::fs::remove_dir_all(dir.join(path));
+    }
+
+    const OID_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const OID_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    #[test]
+    fn unchanged_pre_existing_gitlink_succeeds_at_capture() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::write(dir.join("README"), "hi").unwrap();
+        add_gitlink(dir, "vendor/lib", OID_A);
+        let base = commit_all(dir, "base with gitlink");
+
+        // An unrelated change — the gitlink's own placeholder directory is
+        // left completely untouched, exactly like a real, un-modified
+        // submodule.
+        std::fs::write(dir.join("other.txt"), "unrelated change").unwrap();
+        let result = capture_cumulative_candidate(dir, &base);
+        assert!(
+            result.is_ok(),
+            "unchanged base gitlink must not be rejected: {result:?}"
+        );
+    }
+
+    #[test]
+    fn added_gitlink_is_rejected_at_capture() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::write(dir.join("README"), "hi").unwrap();
+        let base = commit_all(dir, "base without gitlink");
+
+        add_gitlink(dir, "vendor/new-lib", OID_A);
+        let result = capture_cumulative_candidate(dir, &base);
+        assert!(result.is_err(), "an ADDED gitlink must be rejected");
+    }
+
+    #[test]
+    fn deleted_gitlink_is_rejected_at_capture() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::write(dir.join("README"), "hi").unwrap();
+        add_gitlink(dir, "vendor/lib", OID_A);
+        let base = commit_all(dir, "base with gitlink");
+
+        remove_gitlink(dir, "vendor/lib");
+        let result = capture_cumulative_candidate(dir, &base);
+        assert!(result.is_err(), "a DELETED gitlink must be rejected");
+    }
+
+    #[test]
+    fn oid_modified_gitlink_is_rejected_at_capture() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::write(dir.join("README"), "hi").unwrap();
+        add_gitlink(dir, "vendor/lib", OID_A);
+        let base = commit_all(dir, "base with gitlink");
+
+        // Same path, DIFFERENT OID — a submodule pointer bump. The
+        // placeholder directory is already present from the base commit,
+        // so `add -A` (inside capture) will not mistake this for a deletion.
+        add_gitlink(dir, "vendor/lib", OID_B);
+        let result = capture_cumulative_candidate(dir, &base);
+        assert!(
+            result.is_err(),
+            "a gitlink whose OID changed (unchanged mode) must be rejected"
+        );
+    }
+
+    #[test]
+    fn regular_file_replaced_by_gitlink_is_rejected_at_capture() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::write(dir.join("thing"), "a regular file").unwrap();
+        let base = commit_all(dir, "base with a regular file");
+
+        std::fs::remove_file(dir.join("thing")).unwrap();
+        add_gitlink(dir, "thing", OID_A);
+        let result = capture_cumulative_candidate(dir, &base);
+        assert!(
+            result.is_err(),
+            "a regular file replaced by a gitlink at the same path must be rejected"
+        );
+    }
+
+    #[test]
+    fn gitlink_replaced_by_regular_file_is_rejected_at_capture() {
+        let repo = init_repo();
+        let dir = repo.path();
+        add_gitlink(dir, "thing", OID_A);
+        let base = commit_all(dir, "base with a gitlink");
+
+        remove_gitlink(dir, "thing");
+        std::fs::write(dir.join("thing"), "now a regular file").unwrap();
+        let result = capture_cumulative_candidate(dir, &base);
+        assert!(
+            result.is_err(),
+            "a gitlink replaced by a regular file at the same path must be rejected"
+        );
+    }
+
+    #[test]
+    fn nested_and_weird_name_gitlink_paths_are_handled_deterministically() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::write(dir.join("README"), "hi").unwrap();
+        add_gitlink(dir, "deeply/nested/vendor lib with spaces", OID_A);
+        let base = commit_all(dir, "base with a nested, weird-named gitlink");
+
+        // Unchanged: still allowed.
+        std::fs::write(dir.join("other.txt"), "unrelated").unwrap();
+        assert!(capture_cumulative_candidate(dir, &base).is_ok());
+
+        // Changed OID at the same nested/weird path: still rejected.
+        add_gitlink(dir, "deeply/nested/vendor lib with spaces", OID_B);
+        assert!(capture_cumulative_candidate(dir, &base).is_err());
+    }
+
+    #[test]
+    fn materialization_applies_the_same_policy_as_capture() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::write(dir.join("README"), "hi").unwrap();
+        add_gitlink(dir, "vendor/lib", OID_A);
+        let base = commit_all(dir, "base with gitlink");
+
+        // A cumulative patch that only touches an unrelated file — the base
+        // gitlink stays untouched, so materialization (finish_apply, via
+        // apply_candidate_patch) must succeed exactly like capture does.
+        std::fs::write(dir.join("added.txt"), "hello").unwrap();
+        let (patch, _tree) = capture_cumulative_candidate(dir, &base).unwrap();
+
+        // Reset back to base — `git reset --hard` restores the gitlink's
+        // own placeholder directory automatically, exactly like checking
+        // out a real submodule pointer does — then re-apply the SAME
+        // patch, proving materialization's own gitlink check passes for an
+        // unchanged base gitlink exactly like capture's did.
+        run(dir, &["reset", "--hard", "-q", &base]);
+        let runs_dir = tempfile::tempdir().unwrap();
+        let result = apply_candidate_patch(runs_dir.path(), dir, &base, &patch);
+        assert!(
+            result.is_ok(),
+            "materialization must accept an unchanged base gitlink: {result:?}"
+        );
+    }
+
+    #[test]
+    fn materialization_rejects_an_added_gitlink_via_the_patch() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::write(dir.join("README"), "hi").unwrap();
+        let base = commit_all(dir, "base without gitlink");
+
+        add_gitlink(dir, "vendor/new-lib", OID_A);
+        run(dir, &["add", "-A"]);
+        let patch = run_git_bytes(
+            dir,
+            &[
+                "diff",
+                "--cached",
+                "--binary",
+                "--full-index",
+                "--no-color",
+                "--no-ext-diff",
+                &base,
+            ],
+        )
+        .unwrap();
+
+        run(dir, &["reset", "--hard", "-q", &base]);
+        let runs_dir = tempfile::tempdir().unwrap();
+        let result = apply_candidate_patch(runs_dir.path(), dir, &base, &patch);
+        assert!(
+            result.is_err(),
+            "materialization must reject a patch that adds a gitlink: {result:?}"
+        );
+    }
+}

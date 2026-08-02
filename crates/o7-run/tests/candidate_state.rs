@@ -923,3 +923,122 @@ fn initial_run_captured_receipt_declaring_a_parent_is_rejected() {
 // (a_materialized_tree_disagreeing_..., patch_kind is symmetric with base_commit/
 // repository_id/conversation_id and covered by the same cross-binding code path,
 // a_receipt_with_an_unknown_field_is_rejected, a_receipt_with_an_unsupported_schema_...).
+
+// ==================== Q-Deck A0 corrective round 3 (Codex P1, Part 3) ====================
+//
+// Bind materialization evidence to THIS run's own canonical `RunId`, not merely to the
+// source's own `parent_run_id`. Without this, a record could carry a command binding
+// minted for a DIFFERENT child, materialize and run under this run's own identity, seal
+// `Blocked` (having skipped its own `CandidateStateCaptured`), and full `replay` would
+// still report it verified — because the ONLY place this exact `child_run_id` check
+// previously existed was `verify_candidate_state_captured`, which a record that never
+// captures anything simply never reaches.
+
+/// A fully sealed, chain/digest-consistent, otherwise-valid record: valid contract, valid
+/// source receipt and patch, a materialized tree that genuinely matches the source
+/// receipt's own `candidate_tree_oid` — but the command binding names a CHILD RUN ID that
+/// is NOT this record's own canonical `run_id` (`"run-fixture-1"`, the fixed id `chained`
+/// mints). No `CandidateStateCaptured` ever happens, so the record seals `Blocked` (a
+/// legitimate, honest, replay-valid-if-not-for-this-defect outcome) — proving the binding
+/// mismatch is what production replay must catch, not merely a missing capture.
+#[test]
+fn materialization_command_binding_naming_a_different_child_is_rejected_everywhere() {
+    let patch_bytes = b"patch-part3-child-binding";
+    let receipt = valid_source_receipt(&"7".repeat(40), patch_bytes);
+    let receipt_bytes = serde_json::to_vec(&receipt).unwrap();
+
+    // Deliberately WRONG: names a child_run_id that disagrees with this record's own
+    // canonical run_id ("run-fixture-1", per `chained`/`run_started`'s fixed id).
+    let wrong_binding_bytes = serde_json::to_vec(&serde_json::json!({
+        "schema": 1,
+        "command_id": "cmd-1",
+        "conversation_id": "conv-1",
+        "parent_run_id": "parent-1",
+        "child_run_id": "a-completely-different-child",
+        "command_sha256": "d".repeat(64),
+    }))
+    .unwrap();
+    let wrong_binding_artifact = artifact(
+        ArtifactKind::CommandBinding,
+        "command_binding.json",
+        &wrong_binding_bytes,
+    );
+
+    let mut resolver = MapResolver::new();
+    resolver.insert("task.json", TASK_BYTES);
+    resolver.insert("command_binding.json", &wrong_binding_bytes);
+    resolver.insert("parent_candidate_receipt.json", &receipt_bytes);
+    resolver.insert("parent_candidate.patch", patch_bytes);
+
+    let events = chained(vec![
+        run_started(contract_with_candidate(
+            o7_run::event::AgentObligation::Required,
+        )),
+        RunEventKind::CommandBindingCaptured {
+            binding: wrong_binding_artifact,
+        },
+        RunEventKind::CandidateStateMaterialized {
+            source_run_id: RunId::new("parent-1").unwrap(),
+            source_receipt: artifact(
+                ArtifactKind::CandidateState,
+                "parent_candidate_receipt.json",
+                &receipt_bytes,
+            ),
+            source_patch: artifact(
+                ArtifactKind::CandidatePatch,
+                "parent_candidate.patch",
+                patch_bytes,
+            ),
+            materialized_tree_oid: "7".repeat(40), // genuinely matches the source receipt
+        },
+        RunEventKind::AgentStarted,
+        RunEventKind::AgentExited {
+            outcome: o7_run::event::AgentOutcome::ExitedNormally { code: 0 },
+        },
+        // No CandidateStateCaptured — sealed anyway (this contract requires the
+        // obligation, so this alone would already make the verdict Blocked; the POINT of
+        // this test is the binding mismatch, proven via CandidateSemantic below, not the
+        // verdict value).
+        RunEventKind::RunSealed,
+    ]);
+
+    // verify_prefix / classify_record (shared helper).
+    assert_rejected_by_production_api(
+        &events,
+        &resolver,
+        "command binding child_run_id disagrees with this record's own canonical run_id",
+    );
+
+    // classify_record must report Invalid specifically (never ValidSealed, even though
+    // this record IS otherwise sealed with a self-consistent chain).
+    let verdict = o7_run::replay::classify_record(&events, &resolver);
+    assert!(
+        matches!(verdict, o7_run::replay::RecordVerdict::Invalid(_)),
+        "a sealed-but-semantically-invalid record must never classify as ValidSealed: {verdict:?}"
+    );
+
+    // replay (requires + verifies a stored verdict's sealed shape) must also fail.
+    let replay_err =
+        o7_run::replay::replay(&events, &resolver).expect_err("replay must reject it too");
+    assert!(
+        matches!(
+            replay_err,
+            o7_run::replay::ReplayError::CandidateSemantic(_)
+        ),
+        "got: {replay_err:?}"
+    );
+
+    // replay_verify (replay + compare against a stored verdict) must fail the same way,
+    // regardless of which verdict is asserted — the semantic check runs before any
+    // verdict comparison.
+    let replay_verify_err =
+        o7_run::replay::replay_verify(&events, &resolver, o7_run::Verdict::Blocked)
+            .expect_err("replay_verify must reject it too");
+    assert!(
+        matches!(
+            replay_verify_err,
+            o7_run::replay::ReplayError::CandidateSemantic(_)
+        ),
+        "got: {replay_verify_err:?}"
+    );
+}

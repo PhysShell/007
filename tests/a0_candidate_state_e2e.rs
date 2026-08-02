@@ -112,10 +112,21 @@ exit 0
 
 fn fixture_repo(gate_toml: &str) -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
+    fixture_repo_at(dir.path(), gate_toml);
+    dir
+}
+
+/// Same as [`fixture_repo`], but targeting an explicit, caller-chosen directory —
+/// Q-Deck A0 corrective round 3 (Codex P1, Part 4): lets a test control a repository's own
+/// final path COMPONENT (basename), which is what `child_target`/`o7d`'s own default
+/// `--target` derivation uses, so two genuinely DIFFERENT repositories can share the same
+/// `target` label on purpose (exercising a real target-name collision).
+fn fixture_repo_at(dir: &Path, gate_toml: &str) {
+    std::fs::create_dir_all(dir).unwrap();
     let run = |args: &[&str]| {
         let status = Command::new("git")
             .args(args)
-            .current_dir(dir.path())
+            .current_dir(dir)
             .status()
             .unwrap();
         assert!(status.success(), "git {args:?} failed");
@@ -123,13 +134,12 @@ fn fixture_repo(gate_toml: &str) -> tempfile::TempDir {
     run(&["init", "-q"]);
     run(&["config", "user.email", "test@example.com"]);
     run(&["config", "user.name", "test"]);
-    std::fs::write(dir.path().join("README.md"), "fixture\n").unwrap();
-    let gate_dir = dir.path().join(".007");
+    std::fs::write(dir.join("README.md"), "fixture\n").unwrap();
+    let gate_dir = dir.join(".007");
     std::fs::create_dir_all(&gate_dir).unwrap();
     std::fs::write(gate_dir.join("gate.toml"), gate_toml).unwrap();
     run(&["add", "-A"]);
     run(&["commit", "-q", "-m", "initial"]);
-    dir
 }
 
 const PASSING_GATE: &str = "[[gate]]\nname = \"unit\"\ncmd = \"true\"\n";
@@ -2147,4 +2157,566 @@ fn a_sealed_non_pass_verdict_parent_still_accepts_a_valid_command() {
     let _ = o7d_child.kill();
     let _ = o7d_child.wait();
     drop(repo);
+}
+
+// ==================== Q-Deck A0 corrective round 3 (Codex P1, Part 1) ====================
+//
+// Path confinement and admission ordering, all real o7d/o7/SQLite processes.
+
+fn command_row_count(ledger_path: &Path) -> i64 {
+    let conn = rusqlite::Connection::open(ledger_path).unwrap();
+    conn.query_row("SELECT COUNT(*) FROM command", [], |r| r.get(0))
+        .unwrap()
+}
+
+/// Case: a structurally invalid `parent_run_id` (path traversal, absolute path, a nested
+/// path, `.`, `..`) must be rejected with a stable `400` — BEFORE the ledger is even
+/// consulted, and before any candidate-record filesystem I/O is attempted. Every one of
+/// these previously reached `child_record_dir`'s own path join unconfined.
+#[test]
+fn a_malformed_parent_run_id_is_rejected_with_400_before_any_filesystem_access() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let (
+        repo,
+        _work,
+        ledger_path,
+        _runs_dir,
+        _worktree_root,
+        mut o7d_child,
+        addr,
+        _run_a_id,
+        conversation_id,
+        _target,
+    ) = setup_real_parent(&claude);
+
+    let malformed_ids = ["../../outside", "/etc/passwd", "a/b", ".", ".."];
+    for (i, bad_id) in malformed_ids.iter().enumerate() {
+        let (status, body) = post(
+            addr,
+            &format!("/api/v1/conversations/{conversation_id}/commands"),
+            &serde_json::json!({
+                "schema_version": 1,
+                "parent_run_id": bad_id,
+                "command": "should never reach the ledger",
+                "idempotency_key": format!("key-malformed-{i}"),
+            }),
+        );
+        assert_eq!(status, 400, "parent_run_id {bad_id:?}: {body:?}");
+    }
+
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the provider must never be invoked for any malformed parent_run_id"
+    );
+    assert_eq!(
+        command_row_count(&ledger_path),
+        0,
+        "no command row must ever be created for a malformed parent_run_id"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+    drop(repo);
+}
+
+/// Case: even when a traversal-shaped `parent_run_id` WOULD resolve to a real, existing
+/// file outside the run store (a regular file, a FIFO that blocks forever on open, or a
+/// large file that could exhaust memory if read), the path-confinement check rejects it
+/// BEFORE any filesystem access is attempted at all — proven by a fast (non-hanging)
+/// response and the sentinel's own bytes/existence staying completely untouched.
+#[test]
+fn a_malformed_parent_run_id_never_reads_an_outside_sentinel() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let (
+        repo,
+        work,
+        ledger_path,
+        _runs_dir,
+        _worktree_root,
+        mut o7d_child,
+        addr,
+        _run_a_id,
+        conversation_id,
+        _target,
+    ) = setup_real_parent(&claude);
+
+    // `runs_dir.join(target).join("../../<name>")` resolves to `work.path().join(<name>)`
+    // — one level above `runs_dir` itself, exactly what "../../" from
+    // `runs_dir/<target>/` traverses to.
+    let outside_dir = work.path();
+    let regular_sentinel = outside_dir.join("outside-regular.txt");
+    std::fs::write(&regular_sentinel, "sentinel content — must never change").unwrap();
+    let before_regular = std::fs::read(&regular_sentinel).unwrap();
+
+    let fifo_sentinel = outside_dir.join("outside.fifo");
+    assert!(Command::new("mkfifo")
+        .arg(&fifo_sentinel)
+        .status()
+        .unwrap()
+        .success());
+
+    let large_sentinel = outside_dir.join("outside-large.bin");
+    {
+        let f = std::fs::File::create(&large_sentinel).unwrap();
+        f.set_len(64 * 1024 * 1024).unwrap(); // 64 MiB sparse file — cheap to create, expensive to read whole.
+    }
+
+    for (label, sentinel_name) in [
+        ("regular", "outside-regular.txt"),
+        ("fifo", "outside.fifo"),
+        ("large", "outside-large.bin"),
+    ] {
+        let traversal = format!("../../{sentinel_name}");
+        let start = Instant::now();
+        let (status, body) = post(
+            addr,
+            &format!("/api/v1/conversations/{conversation_id}/commands"),
+            &serde_json::json!({
+                "schema_version": 1,
+                "parent_run_id": traversal,
+                "command": "must never read outside the run store",
+                "idempotency_key": format!("key-outside-{label}"),
+            }),
+        );
+        let elapsed = start.elapsed();
+        assert_eq!(status, 400, "{label}: {body:?}");
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "{label}: request must return quickly ({elapsed:?}) — a hang would mean the \
+             FIFO/large file was actually opened/read"
+        );
+    }
+
+    assert_eq!(
+        std::fs::read(&regular_sentinel).unwrap(),
+        before_regular,
+        "the outside regular file's bytes must be completely unchanged"
+    );
+    assert!(
+        fifo_sentinel.exists(),
+        "the FIFO itself must still exist, untouched"
+    );
+    assert_eq!(
+        std::fs::metadata(&large_sentinel).unwrap().len(),
+        64 * 1024 * 1024,
+        "the large sentinel file must be completely unchanged"
+    );
+
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(claude.invocation_count(), 1);
+    assert_eq!(command_row_count(&ledger_path), 0);
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+    drop(repo);
+}
+
+/// Case: a WELL-FORMED (single path component) but genuinely nonexistent `parent_run_id`
+/// must preserve the ESTABLISHED R1 wire contract — `404 NOT_FOUND` — never the newer
+/// `409` this round's own admission preflight introduces. This is exactly the case that
+/// used to reach the filesystem preflight FIRST and get the wrong status/code.
+#[test]
+fn a_well_formed_but_nonexistent_parent_gets_the_established_404() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let (
+        repo,
+        _work,
+        ledger_path,
+        _runs_dir,
+        _worktree_root,
+        mut o7d_child,
+        addr,
+        _run_a_id,
+        conversation_id,
+        _target,
+    ) = setup_real_parent(&claude);
+
+    let (status, body) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": "genuinely-does-not-exist-anywhere",
+            "command": "must 404, not 409",
+            "idempotency_key": "key-404-nonexistent-parent",
+        }),
+    );
+    assert_eq!(status, 404, "{body:?}");
+
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(claude.invocation_count(), 1);
+    assert_eq!(command_row_count(&ledger_path), 0);
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+    drop(repo);
+}
+
+/// Case: a well-formed, EXISTING run id that belongs to a DIFFERENT conversation than the
+/// one in the URL must also 404 — never leak cross-conversation existence as a 409.
+#[test]
+fn a_parent_from_a_different_conversation_gets_404_not_409() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+
+    // Two independent top-level runs against the SAME ledger/runs_dir/repo — each
+    // `o7 run --ledger` mints its OWN fresh conversation, since there is no
+    // `--conversation-id` flag for a top-level run.
+    claude.set_actions(2, "echo v1 > f.txt\n");
+    for _ in 0..2 {
+        let mut run_child = spawn_o7_run_process(
+            repo.path(),
+            &task_file,
+            &ledger_path,
+            &runs_dir,
+            &worktree_root,
+            claude.path(),
+        );
+        assert!(run_child.wait().unwrap().success());
+    }
+    assert_eq!(claude.invocation_count(), 2);
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(addr);
+    let (_, page) = get(addr, "/api/v1/runs");
+    let items = page["items"].as_array().unwrap();
+    assert_eq!(
+        items.len(),
+        2,
+        "two independent conversations, one run each"
+    );
+    let run_a = items[0]["run_id"].as_str().unwrap().to_owned();
+    let conv_a = items[0]["conversation_id"].as_str().unwrap().to_owned();
+    let conv_b = items[1]["conversation_id"].as_str().unwrap().to_owned();
+    assert_ne!(
+        conv_a, conv_b,
+        "these really must be two different conversations"
+    );
+
+    // Post against conversation B's URL, but naming conversation A's OWN run as parent.
+    let (status, body) = post(
+        addr,
+        &format!("/api/v1/conversations/{conv_b}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": run_a,
+            "command": "must 404, not leak cross-conversation existence as 409",
+            "idempotency_key": "key-cross-conversation-parent",
+        }),
+    );
+    assert_eq!(status, 404, "{body:?}");
+
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        claude.invocation_count(),
+        2,
+        "no additional provider invocation"
+    );
+    assert_eq!(command_row_count(&ledger_path), 0);
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+    drop(repo);
+}
+
+// ==================== Q-Deck A0 corrective round 3 (Codex P1, Part 4) ====================
+//
+// Repository-bound admission — two GENUINELY DIFFERENT repositories sharing the SAME
+// final directory basename (`target` label), so a real target-name collision is actually
+// exercised, not merely asserted about in prose.
+
+/// Case: a FRESH command against a parent whose own candidate evidence was captured
+/// against a DIFFERENT repository than the one `o7d` is currently configured for (same
+/// `target` basename, genuinely different canonical identity) must be rejected at
+/// admission — `409 COMMAND_PARENT_CANDIDATE_UNAVAILABLE`, zero command rows, zero child
+/// run ids, zero worktrees, zero additional provider invocations.
+#[test]
+fn a_fresh_command_against_foreign_repository_evidence_is_rejected_at_admission() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let repos_root = tempfile::tempdir().unwrap();
+    let repo_a = repos_root.path().join("repo-a").join("myrepo");
+    let repo_b = repos_root.path().join("repo-b").join("myrepo");
+    fixture_repo_at(&repo_a, PASSING_GATE);
+    fixture_repo_at(&repo_b, PASSING_GATE);
+    // Both share the SAME final basename ("myrepo"), so `child_target`'s own
+    // "canonicalized repo's final path component" derivation collides on purpose.
+    assert_eq!(repo_a.file_name(), repo_b.file_name());
+
+    let task_file = repo_a.join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+
+    // The parent run is captured against REPO A.
+    claude.set_actions(1, "echo base-v1 > base.txt\n");
+    let mut run_child = spawn_o7_run_process(
+        &repo_a,
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    // `o7d` itself is configured against REPO B — same runs_dir/ledger, same `target`
+    // basename, a GENUINELY different repository underneath.
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        &repo_b,
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(addr);
+    let (_, page) = get(addr, "/api/v1/runs");
+    let run_a_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let (status, accepted) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": run_a_id,
+            "command": "must never be accepted against foreign-repository evidence",
+            "idempotency_key": "key-foreign-repo-fresh",
+        }),
+    );
+    assert_eq!(status, 409, "{accepted:?}");
+    assert_eq!(
+        accepted["code"], "COMMAND_PARENT_CANDIDATE_UNAVAILABLE",
+        "{accepted:?}"
+    );
+    assert_eq!(
+        command_row_count(&ledger_path),
+        0,
+        "foreign-repository evidence must never create a command row"
+    );
+
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the provider must never be invoked for foreign-repository evidence"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+}
+
+/// Case (defense in depth): a legacy `accepted`-and-bound command row (direct SQL insert,
+/// bypassing `o7d`'s own admission preflight entirely — exactly what an older deployment,
+/// or a direct CLI invocation, could produce) naming a parent whose candidate evidence was
+/// captured against a DIFFERENT repository than `o7 continue` is invoked with. Must:
+/// invoke the provider zero times; never attach a child run; atomically transition to
+/// `rejected`; and NOT wedge — a subsequent fresh command against the same (still-foreign)
+/// parent must fail the SAME way, not loop or hang.
+#[test]
+fn an_old_accepted_row_against_foreign_repository_self_rejects_via_o7_continue() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let repos_root = tempfile::tempdir().unwrap();
+    let repo_a = repos_root.path().join("repo-a").join("myrepo");
+    let repo_b = repos_root.path().join("repo-b").join("myrepo");
+    fixture_repo_at(&repo_a, PASSING_GATE);
+    fixture_repo_at(&repo_b, PASSING_GATE);
+
+    let task_file = repo_a.join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+
+    claude.set_actions(1, "echo base-v1 > base.txt\n");
+    let mut run_child = spawn_o7_run_process(
+        &repo_a,
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    // Discover the parent's own ids via a throwaway o7d against REPO A itself (just to
+    // read `/api/v1/runs`; never used to accept the command under test).
+    let (mut discover_child, discover_addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        &repo_a,
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(discover_addr);
+    let (_, page) = get(discover_addr, "/api/v1/runs");
+    let run_a_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let _ = discover_child.kill();
+    let _ = discover_child.wait();
+
+    // A legacy accepted-and-bound row, direct SQL insert.
+    let command_id = format!("cmd-legacy-foreign-{run_a_id}");
+    let child_run_id = format!("legacy-child-foreign-{run_a_id}");
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, 'accepted', ?5, ?6, ?6)",
+            rusqlite::params![
+                command_id,
+                conversation_id,
+                run_a_id,
+                "a legacy command against foreign-repository evidence",
+                child_run_id,
+                now,
+            ],
+        )
+        .unwrap();
+    }
+
+    // Direct `o7 continue`, configured against REPO B — the SAME repository mismatch
+    // `parent_candidate_state_usable` would have caught, now hit via the CLI path
+    // directly, past any `o7d` preflight entirely.
+    let gate_path = repo_b.join(".007").join("gate.toml");
+    let run_continue = || {
+        Command::new(env!("CARGO_BIN_EXE_o7"))
+            .arg("continue")
+            .arg("--repo")
+            .arg(&repo_b)
+            .arg("--worktree-root")
+            .arg(&worktree_root)
+            .arg("--runs-dir")
+            .arg(&runs_dir)
+            .arg("--gate")
+            .arg(&gate_path)
+            .arg("--model")
+            .arg("opus")
+            .arg("--max-turns")
+            .arg("1")
+            .arg("--ledger")
+            .arg(&ledger_path)
+            .arg("--conversation-id")
+            .arg(&conversation_id)
+            .arg("--parent-run-id")
+            .arg(&run_a_id)
+            .arg("--command")
+            .arg("a legacy command against foreign-repository evidence")
+            .arg("--run-id")
+            .arg(&child_run_id)
+            .arg("--command-id")
+            .arg(&command_id)
+            .env(
+                "PATH",
+                format!(
+                    "{}:{}",
+                    claude.path().display(),
+                    std::env::var("PATH").unwrap_or_default()
+                ),
+            )
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("spawn o7 continue directly")
+    };
+
+    let status = run_continue();
+    assert!(
+        !status.success(),
+        "o7 continue must exit non-zero for foreign-repository evidence"
+    );
+
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the provider must never be invoked for foreign-repository evidence, even via direct \
+         CLI invocation"
+    );
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let final_status: String = conn
+            .query_row(
+                "SELECT status FROM command WHERE command_id = ?1",
+                [&command_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            final_status, "rejected",
+            "the conditional reject-if-unattached-and-bound transition must have fired"
+        );
+        let attached: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM run WHERE run_id = ?1",
+                [&child_run_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            attached, 0,
+            "the legacy child run id must never have attached"
+        );
+    }
+
+    // Not wedged: retrying `o7 continue` again for the SAME already-rejected command must
+    // not loop, hang, crash, or invoke the provider — it must observe the command is still
+    // `rejected` (never reverted, never double-processed) and exit harmlessly.
+    let _second_status = run_continue();
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "a repeat invocation against an already-rejected legacy row must still never invoke \
+         the provider"
+    );
+    let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+    let still_rejected: String = conn
+        .query_row(
+            "SELECT status FROM command WHERE command_id = ?1",
+            [&command_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        still_rejected, "rejected",
+        "a repeat invocation must not revert or corrupt the already-rejected status — no \
+         perpetual redrive loop"
+    );
 }
