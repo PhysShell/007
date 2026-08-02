@@ -122,11 +122,29 @@ pub(crate) fn parent_candidate_state_usable(
     Ok(())
 }
 
-/// Q-Deck A0 (`docs/q-deck/a0-candidate-state.md` §8): a read-only,
-/// best-effort candidate-state projection for `routes::get_run` — never
-/// mutates anything, never gates a redrive decision (that stays exactly
-/// `classify_child_record`/`o7::recovery::classify_command_child`, above,
-/// untouched by this). Returns `(candidate_source_run_id, candidate_tree_oid,
+/// Q-Deck A0 (`docs/q-deck/a0-candidate-state.md` §8), corrected corrective
+/// round 2 (Part 3): a read-only, best-effort candidate-state projection
+/// for `routes::get_run` — never mutates anything, never gates a redrive
+/// decision (that stays exactly `classify_child_record`/
+/// `o7::recovery::classify_command_child`, above, untouched by this).
+///
+/// The ORIGINAL implementation of this function had two defects, both fixed
+/// here: (1) it read the raw JSON's `actual_tree_oid` field, a name that
+/// stopped existing when corrective round 1 reshaped
+/// `CandidateStateMaterialized` to carry `materialized_tree_oid` instead —
+/// this projection's own tree-OID field had been silently, permanently
+/// `None` ever since; (2) it trusted whatever the last matching raw JSON
+/// line claimed, with NO chain/digest/reducer/artifact/candidate-semantic
+/// verification at all — a tampered or truncated record could be projected
+/// as "materialized" even though full replay would reject it. Both are
+/// fixed by running the SAME authoritative `o7_run::replay::verify_prefix`
+/// every other production consumer uses, and reading the tree OID back out
+/// of the typed, already-verified `RunState` — never raw JSON. A run whose
+/// full replay fails is projected as `"verification_failed"`, never
+/// `"materialized"` — this projection must not claim semantic lineage is
+/// verified when it is not.
+///
+/// Returns `(candidate_source_run_id, candidate_tree_oid,
 /// materialization_status)`; all `None`/`"not_applicable"` for a run with no
 /// canonical record yet, or one that never attempted materialization (a
 /// top-level `o7 run`, or a continuation still pre-dispatch).
@@ -148,27 +166,27 @@ pub(crate) fn candidate_projection(
         Ok(text) => text,
         Err(_) => return (None, None, Some("not_applicable".to_owned())),
     };
-    for line in text.lines().rev() {
-        if line.trim().is_empty() {
-            continue;
+    let events = match o7::events::from_jsonl(&text) {
+        Ok(events) => events,
+        Err(_) => {
+            return (
+                None,
+                None,
+                Some("verification_failed: malformed events.jsonl".to_owned()),
+            )
         }
-        let Ok(event) = serde_json::from_str::<serde_json::Value>(line) else {
-            continue;
-        };
-        let kind = event.get("kind");
-        if kind.and_then(|k| k.get("type")).and_then(|t| t.as_str())
-            == Some("candidate_state_materialized")
-        {
-            let source = kind
-                .and_then(|k| k.get("source_run_id"))
-                .and_then(|v| v.as_str())
-                .map(str::to_owned);
-            let oid = kind
-                .and_then(|k| k.get("actual_tree_oid"))
-                .and_then(|v| v.as_str())
-                .map(str::to_owned);
-            return (source, oid, Some("materialized".to_owned()));
-        }
+    };
+    let resolver = o7::events::RecordDirResolver { base: dir };
+    let (state, _artifacts_verified) = match o7_run::replay::verify_prefix(&events, &resolver) {
+        Ok(ok) => ok,
+        Err(e) => return (None, None, Some(format!("verification_failed: {e}"))),
+    };
+    match &state.candidate_materialized {
+        Some(mat) => (
+            Some(mat.source_run_id.as_str().to_owned()),
+            Some(mat.materialized_tree_oid.clone()),
+            Some("materialized".to_owned()),
+        ),
+        None => (None, None, Some("not_applicable".to_owned())),
     }
-    (None, None, Some("not_applicable".to_owned()))
 }
