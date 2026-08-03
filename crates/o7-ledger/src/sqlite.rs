@@ -766,37 +766,6 @@ impl SqliteLedger {
     /// if `idempotency.key` was already used for a DIFFERENT request;
     /// [`LedgerError::ContinuationNotPermitted`] if the parent has no valid
     /// provider session; SQLite errors.
-    /// Q-Deck A0 corrective round 2 (Part 5.3): a pure, read-only peek —
-    /// `true` iff `key` has ANY prior idempotency record in
-    /// [`crate::idempotency::SCOPE_CREATE_COMMAND`], regardless of whether
-    /// its stored digest would match a NEW request (a digest mismatch is
-    /// itself [`LedgerError::IdempotencyConflict`], which — like a genuine
-    /// replay — must skip every fresh-acceptance business check, including
-    /// `o7d`'s own new parent-candidate-usability preflight, exactly as it
-    /// already skips `create_command`'s OWN internal checks). Lets a caller
-    /// decide, BEFORE calling [`Self::create_command`], whether this
-    /// request is a genuinely fresh acceptance (run the preflight) or not
-    /// (the ledger's own existing idempotency handling is authoritative;
-    /// re-validating business rules against a record whose acceptance-time
-    /// answer may have been produced under this key already would risk
-    /// disagreeing with a decision already durably made).
-    ///
-    /// # Errors
-    /// Propagates SQLite errors.
-    pub async fn command_idempotency_key_seen(&self, key: String) -> Result<bool, LedgerError> {
-        self.with_conn(move |conn| {
-            let seen: Option<i64> = conn
-                .query_row(
-                    "SELECT 1 FROM idempotency_record WHERE scope = ?1 AND key = ?2",
-                    params![crate::idempotency::SCOPE_CREATE_COMMAND, key],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            Ok(seen.is_some())
-        })
-        .await
-    }
-
     pub async fn create_command(
         &self,
         request: NewCommand,
@@ -938,6 +907,37 @@ impl SqliteLedger {
                 now,
             )?;
             Ok(command)
+        })
+        .await
+    }
+
+    /// Q-Deck A0 corrective round 2 (Part 5.3): a pure, read-only peek —
+    /// `true` iff `key` has ANY prior idempotency record in
+    /// [`crate::idempotency::SCOPE_CREATE_COMMAND`], regardless of whether
+    /// its stored digest would match a NEW request (a digest mismatch is
+    /// itself [`LedgerError::IdempotencyConflict`], which — like a genuine
+    /// replay — must skip every fresh-acceptance business check, including
+    /// `o7d`'s own new parent-candidate-usability preflight, exactly as it
+    /// already skips `create_command`'s OWN internal checks). Lets a caller
+    /// decide, BEFORE calling [`Self::create_command`], whether this
+    /// request is a genuinely fresh acceptance (run the preflight) or not
+    /// (the ledger's own existing idempotency handling is authoritative;
+    /// re-validating business rules against a record whose acceptance-time
+    /// answer may have been produced under this key already would risk
+    /// disagreeing with a decision already durably made).
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn command_idempotency_key_seen(&self, key: String) -> Result<bool, LedgerError> {
+        self.with_conn(move |conn| {
+            let seen: Option<i64> = conn
+                .query_row(
+                    "SELECT 1 FROM idempotency_record WHERE scope = ?1 AND key = ?2",
+                    params![crate::idempotency::SCOPE_CREATE_COMMAND, key],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            Ok(seen.is_some())
         })
         .await
     }

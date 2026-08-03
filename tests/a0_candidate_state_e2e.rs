@@ -583,10 +583,16 @@ echo "from-b" > b.txt
         Path::new("/"),
     );
     git(&["checkout", "-q", &base_commit], verify_dir.path());
-    let patch_b = std::fs::read_to_string(run_b_dir.join("candidate.patch")).unwrap();
+    // Q-Deck A0 corrective round 5 (CodeRabbit nitpick): read as bytes, not
+    // text — the spec (§4) states the cumulative patch is not guaranteed
+    // valid UTF-8 and must never pass through a String. These fixtures
+    // write only ASCII today, so `read_to_string` would happen to succeed,
+    // but a future non-ASCII fixture would panic on the read instead of
+    // proving byte preservation.
+    let patch_b = std::fs::read(run_b_dir.join("candidate.patch")).unwrap();
     let patch_file = verify_dir.path().join("verify.patch");
     std::fs::write(&patch_file, &patch_b).unwrap();
-    if !patch_b.trim().is_empty() {
+    if !patch_b.is_empty() {
         git(
             &["apply", "--binary", patch_file.to_str().unwrap()],
             verify_dir.path(),
@@ -674,10 +680,10 @@ echo "from-c" > c.txt
         Path::new("/"),
     );
     git(&["checkout", "-q", &base_commit], verify_dir_c.path());
-    let patch_c = std::fs::read_to_string(run_c_dir.join("candidate.patch")).unwrap();
+    let patch_c = std::fs::read(run_c_dir.join("candidate.patch")).unwrap();
     let patch_file_c = verify_dir_c.path().join("verify.patch");
     std::fs::write(&patch_file_c, &patch_c).unwrap();
-    if !patch_c.trim().is_empty() {
+    if !patch_c.is_empty() {
         git(
             &["apply", "--binary", patch_file_c.to_str().unwrap()],
             verify_dir_c.path(),
@@ -1540,8 +1546,8 @@ fn a_symlink_at_the_old_temp_files_exact_name_never_escapes_the_confined_temp_st
         Path::new("/"),
     );
     git_in(&["checkout", "-q", &hostile_base], verify_dir.path());
-    let patch_b = std::fs::read_to_string(run_b_dir.join("candidate.patch")).unwrap();
-    if !patch_b.trim().is_empty() {
+    let patch_b = std::fs::read(run_b_dir.join("candidate.patch")).unwrap();
+    if !patch_b.is_empty() {
         let patch_file = verify_dir.path().join("verify.patch");
         std::fs::write(&patch_file, &patch_b).unwrap();
         git_in(
@@ -2164,10 +2170,16 @@ fn a_sealed_non_pass_verdict_parent_still_accepts_a_valid_command() {
         &worktree_root,
         claude.path(),
     );
-    // Deliberately NOT asserting success: the required gate always fails, so this run
-    // seals with verdict `Fail`, not `Pass` — exit code non-zero by this project's own
-    // "non-Pass verdict exits non-zero" convention.
-    let _ = run_child.wait().unwrap();
+    // The required gate always fails, so this run seals with verdict `Fail`,
+    // not `Pass`. Q-Deck A0 corrective round 5 (CodeRabbit nitpick): this is
+    // the one place in the suite that produces a genuine Fail-verdict run —
+    // the natural place to actually assert this project's own "exit code 0
+    // is reserved for PASS" convention, not merely state it in a comment.
+    let run_status = run_child.wait().unwrap();
+    assert!(
+        !run_status.success(),
+        "a sealed non-Pass (Fail) verdict must exit non-zero — exit code 0 is reserved for PASS"
+    );
     assert_eq!(claude.invocation_count(), 1);
 
     let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(

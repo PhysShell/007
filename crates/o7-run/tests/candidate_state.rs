@@ -928,9 +928,28 @@ fn initial_run_captured_receipt_declaring_a_parent_is_rejected() {
 }
 
 // Cases 1, 8, 15, 16 are covered above
-// (a_materialized_tree_disagreeing_..., patch_kind is symmetric with base_commit/
-// repository_id/conversation_id and covered by the same cross-binding code path,
+// (a_materialized_tree_disagreeing_...,
 // a_receipt_with_an_unknown_field_is_rejected, a_receipt_with_an_unsupported_schema_...).
+//
+// Case 8 (patch_kind cross-binding), Q-Deck A0 corrective round 5
+// (CodeRabbit nitpick) — honestly disclosed, not silently assumed:
+// `verify_candidate_state_materialized` DOES perform its own separate
+// `source_receipt.patch_kind != obligation.patch_kind` comparison (a real,
+// distinct line, not merely inferred from the other cross-bindings) — but
+// `CandidatePatchKind` has exactly ONE variant today, with deliberately NO
+// `#[serde(other)]` catch-all (see its own doc comment). A raw-JSON
+// receipt naming any OTHER `patch_kind` string therefore fails at
+// DESERIALIZATION, a strictly EARLIER and different failure point than
+// this comparison line — there is no way to construct a syntactically
+// valid, successfully-PARSED receipt with a patch_kind that disagrees with
+// the contract without either (a) adding a second, production-only-for-
+// testing enum variant (rejected: it would weaken the intentional
+// single-variant/no-catch-all design this type's own doc comment
+// documents) or (b) fabricating a test that only proves unknown-JSON
+// rejection, already covered by `a_receipt_with_an_unsupported_schema_
+// fails_through_the_production_api`'s own sibling case. This comparison
+// line will become independently testable the day a second
+// `CandidatePatchKind` variant is genuinely added to production.
 
 // ==================== Q-Deck A0 corrective round 3 (Codex P1, Part 3) ====================
 //

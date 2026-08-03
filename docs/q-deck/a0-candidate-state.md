@@ -35,7 +35,7 @@ Every run in a conversation stores its full cumulative state relative to the
 conversation's ORIGINAL, immutable base commit — never a delta against the
 previous child. Concretely, if a conversation's base is commit `X`:
 
-```
+```text
 Run A candidate  = (changes A) relative to X
 Command B candidate = (changes A + B) relative to X
 Command C candidate = (changes A + B + C) relative to X
@@ -193,7 +193,7 @@ receipt's own `patch: ArtifactRef` field rather than a raw filename string.
 In the run's own (already-isolated) worktree, once the agent has finished
 and R1's own `diff_vs_base`/`PatchCaptured` already ran:
 
-```
+```text
 git add -A                                                  # already done by diff_vs_base
 git diff --cached --binary --full-index --no-color \
   --no-ext-diff <conversation base_commit>                  # NOT this run's own --base
@@ -779,7 +779,7 @@ outside-file overwrite with attacker-influenceable patch bytes — reachable
 BEFORE any provider invocation, entirely inside code the original review
 had reason to trust. Fixed by removing the in-worktree temp file entirely
 and writing to a private, per-`runs_dir` confined store instead (§5 step
-6, §13 Part 1) — no name a candidate's own tree contains can ever collide
+6, §14 Part 1) — no name a candidate's own tree contains can ever collide
 with or redirect this write again, because the write no longer happens
 inside any checkout. Proven by a real process-level regression test that
 bakes the exact old symlink into a fixture repo's base commit and drives a
@@ -847,7 +847,7 @@ mismatch.)*
 - The point-of-use parent check accepted "a valid prefix that happens to
   carry a receipt" rather than requiring genuine terminal sealing. Split
   into an early contract-inheritance step and a late full-materialization
-  step (§5, §13 Part 6) that additionally requires the parent's own last
+  step (§5, §14 Part 6) that additionally requires the parent's own last
   canonical event to be `RunSealed`, not merely a verdict being present
   somewhere in a valid prefix.
 - Gitlink (submodule) mutations were undocumented and unchecked. Added
