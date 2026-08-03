@@ -222,32 +222,106 @@ fn ensure_no_dirty_submodule_worktree(dir: &Path) -> Result<()> {
             "-uall",
         ],
     )?;
-    for record in out.split(|&b| b == 0) {
+    check_no_dirty_submodule_status(&out)
+}
+
+/// Q-Deck A0 corrective round 6 (Part 3): a real `git status --porcelain=2
+/// -z` state machine, factored out of [`ensure_no_dirty_submodule_worktree`]
+/// so its byte-level parsing can be exercised directly with synthetic
+/// fixtures, no real `git` process required.
+///
+/// The ORIGINAL implementation split the entire NUL-delimited output and
+/// classified every resulting segment independently by its first byte. That
+/// is blind to one thing porcelain-v2 -z guarantees: a type-`2`
+/// (renamed/copied) record is `<record>\0<original-path>\0` — TWO separate
+/// NUL-terminated fields for ONE logical record, where the second field (the
+/// original path) carries NO type marker of its own and must never be
+/// reinterpreted as an independent record. A rename whose OLD name happened
+/// to start with `1 `/`2 ` followed by a space (e.g. a file literally named
+/// `2 - Section overview.md`) would misparse that trailing field as a bogus
+/// second status record — in this exact case, splitting it on spaces yields
+/// a `<sub>`-position field of `"Section"`, which starts with `S` and isn't
+/// `"S..."`, so the OLD code bails as if a submodule were dirty. This
+/// version tracks state across records: every type-`2` record unconditionally
+/// consumes the very next NUL field as its original path, never inspecting
+/// or reclassifying it.
+///
+/// Every OTHER record type (`1`, `u`, `?`, `!`) is exactly one NUL field.
+/// Only `1`/`2` carry a `<sub>` field (the 3rd whitespace-delimited token) —
+/// dirty-submodule detection depends ONLY on that documented field, never on
+/// a path substring match. Anything that doesn't parse as one of these five
+/// documented record shapes — an unrecognized type byte, a `1`/`2` record
+/// missing its fixed leading fields, a `2` record missing its mandatory
+/// original-path field, a stray empty record anywhere but the single
+/// trailing NUL `git` always emits after the last record — fails closed with
+/// an internal error. Silently treating malformed output as "no dirty
+/// submodule" would be exactly the kind of silent data loss this whole check
+/// exists to prevent.
+fn check_no_dirty_submodule_status(out: &[u8]) -> Result<()> {
+    let mut records = out.split(|&b| b == 0).peekable();
+    while let Some(record) = records.next() {
         if record.is_empty() {
+            if records.peek().is_some() {
+                anyhow::bail!(
+                    "malformed git status output: an empty record appeared before the final \
+                     trailing NUL"
+                );
+            }
             continue;
         }
-        // Only "ordinary changed" (`1 ...`) and "renamed/copied" (`2 ...`) entry
-        // lines carry a `<sub>` field, at the same fixed position (the 3rd
-        // whitespace-delimited token) in both; untracked (`?`)/ignored (`!`)/
-        // unmerged (`u`) lines never do and are irrelevant here.
-        if record.first() != Some(&b'1') && record.first() != Some(&b'2') {
-            continue;
-        }
-        let mut fields = record.splitn(4, |&b| b == b' ');
-        let _line_type = fields.next();
-        let _xy = fields.next();
-        let Some(sub) = fields.next() else {
-            continue;
-        };
-        if sub.first() == Some(&b'S') && sub != b"S..." {
-            let path = fields.next().unwrap_or_default();
-            anyhow::bail!(
-                "a submodule working tree has uncommitted content (status field {:?}) at \
-                 path {:?} — dirty submodule contents are unsupported and would be silently \
-                 lost by candidate-state capture",
-                String::from_utf8_lossy(sub),
-                String::from_utf8_lossy(path)
-            );
+        match record.first() {
+            Some(type_byte @ (b'1' | b'2')) => {
+                let mut fields = record.splitn(4, |&b| b == b' ');
+                let _line_type = fields.next();
+                let _xy = fields.next();
+                let Some(sub) = fields.next() else {
+                    anyhow::bail!(
+                        "malformed git status output: a `{:?}` record is missing its fixed \
+                         leading fields (expected at least `<type> <XY> <sub> ...`)",
+                        *type_byte as char
+                    );
+                };
+                if sub.first() == Some(&b'S') && sub != b"S..." {
+                    let path = fields.next().unwrap_or_default();
+                    anyhow::bail!(
+                        "a submodule working tree has uncommitted content (status field {:?}) \
+                         at path {:?} — dirty submodule contents are unsupported and would be \
+                         silently lost by candidate-state capture",
+                        String::from_utf8_lossy(sub),
+                        String::from_utf8_lossy(path)
+                    );
+                }
+                if *type_byte == b'2' {
+                    // The mandatory original-path field: a SEPARATE NUL
+                    // field belonging to THIS record, never independently
+                    // classified — consumed and discarded here,
+                    // unconditionally, regardless of what bytes it starts
+                    // with. A genuinely truncated stream (the type-2
+                    // record was the last thing present) and a present-
+                    // but-empty field are indistinguishable from a bare
+                    // `Option` alone — `split`'s own mandatory trailing
+                    // empty segment after the stream's FINAL terminating
+                    // NUL looks identical to "no more data" — so both are
+                    // rejected here: a real original path is never empty.
+                    match records.next() {
+                        Some(orig) if !orig.is_empty() => {}
+                        _ => anyhow::bail!(
+                            "malformed git status output: a `2` (renamed/copied) record is \
+                             missing its mandatory original-path field"
+                        ),
+                    }
+                }
+            }
+            Some(b'u') | Some(b'?') | Some(b'!') => {
+                // Unmerged/untracked/ignored: exactly one NUL field each,
+                // no `<sub>` field, nothing further to consume.
+            }
+            other => {
+                anyhow::bail!(
+                    "malformed or unsupported git status output: unrecognized record type \
+                     {other:?} (expected one of `1`, `2`, `u`, `?`, `!`)"
+                );
+            }
         }
     }
     Ok(())
@@ -969,6 +1043,199 @@ mod dirty_submodule_tests {
             "tampered\n",
             "the original checkout must not be corrupted by the failed capture"
         );
+    }
+
+    /// Q-Deck A0 corrective round 6 (Part 3) — the exact live counterexample:
+    /// the OLD implementation split `git status --porcelain=2 -z` output on
+    /// NUL and classified every segment independently, so a type-2 rename
+    /// record's separate original-path field (`2 - Section overview.md`) got
+    /// misread as a bogus second type-2 record whose `<sub>`-position field
+    /// (`"Section"`) starts with `S` and isn't `"S..."` — a false-positive
+    /// dirty-submodule bail with no submodule involved at all. This must
+    /// pass cleanly at the new head.
+    #[test]
+    fn rename_whose_old_name_looks_like_a_type2_record_is_not_rejected() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::write(dir.join("2 - Section overview.md"), "content\n").unwrap();
+        std::fs::write(dir.join("other.txt"), "unrelated\n").unwrap();
+        commit_all(dir, "initial");
+        run(
+            dir,
+            &["mv", "2 - Section overview.md", "renamed-section.md"],
+        );
+        assert!(
+            ensure_no_dirty_submodule_worktree(dir).is_ok(),
+            "an ordinary rename must never be misread as a dirty submodule record"
+        );
+    }
+
+    /// Renames whose OLD name starts with each OTHER record-type prefix
+    /// (`1 `, `u `, `? `, `! `) followed by a space are equally capable of
+    /// colliding with the naive per-segment classifier; all must pass.
+    #[test]
+    fn renames_with_other_record_prefix_lookalike_names_are_not_rejected() {
+        for old_name in [
+            "1 - looks like an ordinary-change record.md",
+            "u - looks like an unmerged record.md",
+            "? - looks like an untracked record.md",
+            "! - looks like an ignored record.md",
+        ] {
+            let repo = init_repo();
+            let dir = repo.path();
+            std::fs::write(dir.join(old_name), "content\n").unwrap();
+            commit_all(dir, "initial");
+            run(dir, &["mv", old_name, "renamed.md"]);
+            assert!(
+                ensure_no_dirty_submodule_worktree(dir).is_ok(),
+                "rename of {old_name:?} must not be misread as a dirty submodule record"
+            );
+        }
+    }
+
+    /// An ordinary untracked superproject file (no submodule involved at
+    /// all) must never be rejected — confirms this check's scope stays
+    /// confined to submodule dirtiness, not general worktree changes.
+    #[test]
+    fn ordinary_untracked_superproject_file_passes() {
+        let repo = init_repo();
+        let dir = repo.path();
+        commit_all(dir, "initial");
+        std::fs::write(dir.join("scratch.txt"), "untracked\n").unwrap();
+        assert!(ensure_no_dirty_submodule_worktree(dir).is_ok());
+    }
+}
+
+/// Q-Deck A0 corrective round 6 (Part 3): byte-level fixtures for
+/// [`check_no_dirty_submodule_status`] — the actual porcelain-v2 -z state
+/// machine, exercised directly with synthetic records so every documented
+/// record shape (and every malformed variant that must fail closed) is
+/// covered without spawning a real `git` process.
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+mod porcelain_v2_parser_tests {
+    use super::*;
+
+    fn join(records: &[&[u8]]) -> Vec<u8> {
+        let mut out = Vec::new();
+        for r in records {
+            out.extend_from_slice(r);
+            out.push(0);
+        }
+        out
+    }
+
+    #[test]
+    fn empty_output_passes() {
+        assert!(check_no_dirty_submodule_status(b"").is_ok());
+    }
+
+    #[test]
+    fn clean_type1_record_passes() {
+        let out = join(&[b"1 .M S... 100644 100644 100644 aaaa bbbb path.txt"]);
+        assert!(check_no_dirty_submodule_status(&out).is_ok());
+    }
+
+    #[test]
+    fn dirty_type1_submodule_record_is_rejected() {
+        let out = join(&[b"1 .M SC.M 160000 160000 160000 aaaa bbbb sub"]);
+        let err = check_no_dirty_submodule_status(&out).expect_err("must reject dirty submodule");
+        assert!(err.to_string().contains("dirty"), "got: {err}");
+    }
+
+    #[test]
+    fn clean_type2_rename_record_consumes_original_path_without_reclassifying_it() {
+        // The original path deliberately starts with `2 ` — proving it is
+        // consumed as a field, never reinterpreted as its own record.
+        let out = join(&[
+            b"2 R. S... 100644 100644 100644 aaaa bbbb R100 new.txt",
+            b"2 - Section overview.md",
+        ]);
+        assert!(check_no_dirty_submodule_status(&out).is_ok());
+    }
+
+    #[test]
+    fn dirty_type2_rename_record_is_rejected() {
+        let out = join(&[
+            b"2 R. SC.M 160000 160000 160000 aaaa bbbb R100 sub_new",
+            b"sub_old",
+        ]);
+        let err = check_no_dirty_submodule_status(&out).expect_err("must reject dirty submodule");
+        assert!(err.to_string().contains("dirty"), "got: {err}");
+    }
+
+    #[test]
+    fn truncated_type2_record_missing_original_path_fails_closed() {
+        let out = join(&[b"2 R. S... 100644 100644 100644 aaaa bbbb R100 new.txt"]);
+        let err = check_no_dirty_submodule_status(&out)
+            .expect_err("a type-2 record missing its original-path field must fail closed");
+        assert!(err.to_string().contains("original-path"), "got: {err}");
+    }
+
+    #[test]
+    fn unknown_record_type_fails_closed() {
+        let out = join(&[b"x something unexpected"]);
+        let err = check_no_dirty_submodule_status(&out)
+            .expect_err("an unknown record type must fail closed");
+        assert!(err.to_string().contains("unrecognized"), "got: {err}");
+    }
+
+    #[test]
+    fn malformed_type1_missing_fixed_fields_fails_closed() {
+        let out = join(&[b"1"]);
+        let err = check_no_dirty_submodule_status(&out)
+            .expect_err("a type-1 record missing its fixed fields must fail closed");
+        assert!(
+            err.to_string().contains("fixed leading fields"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn non_utf8_path_bytes_do_not_panic() {
+        let mut record = b"1 .M S... 100644 100644 100644 aaaa bbbb ".to_vec();
+        record.extend_from_slice(&[0xFF, 0xFE, 0xFD]);
+        let out = join(&[&record]);
+        assert!(check_no_dirty_submodule_status(&out).is_ok());
+    }
+
+    #[test]
+    fn non_utf8_path_in_dirty_submodule_message_does_not_panic() {
+        let mut record = b"1 .M SC.M 160000 160000 160000 aaaa bbbb ".to_vec();
+        record.extend_from_slice(&[0xFF, 0xFE, 0xFD]);
+        let out = join(&[&record]);
+        let err = check_no_dirty_submodule_status(&out).expect_err("must still reject");
+        assert!(err.to_string().contains("dirty"), "got: {err}");
+    }
+
+    #[test]
+    fn embedded_spaces_and_newlines_in_original_path_are_opaque() {
+        let out = join(&[
+            b"2 R. S... 100644 100644 100644 aaaa bbbb R100 new name.txt",
+            b"old name with spaces\nand a newline.txt",
+        ]);
+        assert!(check_no_dirty_submodule_status(&out).is_ok());
+    }
+
+    #[test]
+    fn untracked_ignored_unmerged_records_are_skipped() {
+        let out = join(&[
+            b"? untracked.txt",
+            b"! ignored.txt",
+            b"u UU S... 100644 100644 100644 100644 aaaa bbbb cccc conflict.txt",
+        ]);
+        assert!(check_no_dirty_submodule_status(&out).is_ok());
+    }
+
+    #[test]
+    fn stray_empty_record_before_trailing_nul_fails_closed() {
+        // Two consecutive NULs mid-stream — never legitimate git output.
+        let mut out = join(&[b"1 .M S... 100644 100644 100644 aaaa bbbb a.txt"]);
+        out.push(0); // an extra, interior empty record
+        out.extend(join(&[b"? b.txt"]));
+        let err = check_no_dirty_submodule_status(&out)
+            .expect_err("an interior empty record must fail closed, not be silently skipped");
+        assert!(err.to_string().contains("empty record"), "got: {err}");
     }
 }
 
