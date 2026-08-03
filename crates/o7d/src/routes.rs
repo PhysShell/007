@@ -137,6 +137,49 @@ pub(crate) async fn list_runs(
     }))
 }
 
+/// Q-Deck A0 corrective round 6 (Part 1): the ONE way any candidate-replay
+/// work runs on the blocking pool behind `state.candidate_replay_limiter`.
+/// Centralized here specifically so there is exactly one place this can be
+/// gotten wrong, not two (`get_run`'s projection and `create_command`'s
+/// admission preflight used to each acquire independently — one already
+/// moved the permit into the closure correctly, the other didn't).
+///
+/// Always `try_acquire_owned`, never `.await`s for a permit: a request that
+/// cannot get a slot right now fails/omits immediately rather than joining
+/// an unbounded wait queue — see [`super::error::ApiError::ServiceUnavailable`]
+/// for the caller that turns "no permit" into a hard failure, and `get_run`
+/// for the caller that turns it into best-effort omission. Either way, no
+/// `spawn_blocking` closure is ever constructed without already owning the
+/// permit that authorizes it to run, and the permit is moved INTO that
+/// closure — never left in this async frame — so it lives exactly as long
+/// as the blocking work does: released only when `work` returns, panics, or
+/// the join itself fails. A future that is cancelled (dropped) after this
+/// function returns has no effect on an already-spawned closure's permit;
+/// cancelling BEFORE it returns simply drops the `try_acquire_owned` future
+/// itself, which never held a permit in the first place.
+///
+/// Returns `None` if the limiter is saturated; `Some(Err(_))` if the
+/// blocking closure panicked (the join failed) — the panic itself still
+/// surfaces via Tokio's own panic hook, and the permit was already released
+/// by ordinary stack unwinding before this returns.
+async fn run_behind_replay_limiter<F, R>(
+    limiter: &std::sync::Arc<tokio::sync::Semaphore>,
+    work: F,
+) -> Option<Result<R, tokio::task::JoinError>>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    let permit = limiter.clone().try_acquire_owned().ok()?;
+    Some(
+        tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            work()
+        })
+        .await,
+    )
+}
+
 pub(crate) async fn get_run(
     State(state): State<AppState>,
     Path(run_id): Path<String>,
@@ -155,26 +198,24 @@ pub(crate) async fn get_run(
     // (exactly as if `exec` were unconfigured) rather than queuing a read
     // request behind unrelated replay work or failing it outright.
     if let Some(exec) = &state.exec {
-        if let Ok(_permit) = state.candidate_replay_limiter.clone().try_acquire_owned() {
-            let exec_owned = exec.clone();
-            let run_id_owned = run_id.clone();
-            let projected = tokio::task::spawn_blocking(move || {
-                crate::canonical::candidate_projection(&exec_owned, &run_id_owned)
-            })
-            .await;
-            if let Ok((source, oid, status)) = projected {
-                dto.candidate_source_run_id = source;
-                dto.candidate_tree_oid = oid;
-                dto.materialization_status = status;
-            }
-            // A join failure (task panic) is swallowed here deliberately —
-            // this projection is best-effort and must never turn a panic in
-            // read-only diagnostic code into a failed run-detail read; the
-            // panic itself still surfaces via Tokio's own panic hook.
+        let exec_owned = exec.clone();
+        let run_id_owned = run_id.clone();
+        let projected = run_behind_replay_limiter(&state.candidate_replay_limiter, move || {
+            crate::canonical::candidate_projection(&exec_owned, &run_id_owned)
+        })
+        .await;
+        // `None` (semaphore saturated) and `Some(Err(_))` (the blocking
+        // closure panicked — swallowed deliberately, this projection is
+        // best-effort and must never turn a panic in read-only diagnostic
+        // code into a failed run-detail read; the panic itself still
+        // surfaces via Tokio's own panic hook) both fall through here with
+        // the candidate fields simply left unset, exactly as if `exec`
+        // were unconfigured.
+        if let Some(Ok((source, oid, status))) = projected {
+            dto.candidate_source_run_id = source;
+            dto.candidate_tree_oid = oid;
+            dto.materialization_status = status;
         }
-        // Semaphore fully saturated: skip the projection for this request,
-        // same as the `exec.is_none()` case — never blocks waiting for a
-        // slot on a plain read endpoint.
     }
     Ok(Json(dto))
 }
@@ -690,27 +731,37 @@ pub(crate) async fn create_command(
         // 2): full authoritative replay of the parent's own canonical
         // record, run on the BLOCKING pool (never inline on this Tokio
         // worker), behind the SAME shared, bounded-concurrency semaphore
-        // `get_run`'s projection uses — unlike that best-effort read
-        // endpoint, admission genuinely needs this answer, so it AWAITS a
-        // permit rather than skipping under saturation; a permit is always
-        // released ordinarily (bounded queuing depth, never an unbounded
-        // pile-up of concurrent heavy replay jobs).
-        let permit = state
-            .candidate_replay_limiter
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(|_| ApiError::Internal("CANDIDATE_REPLAY_LIMITER_CLOSED"))?;
+        // `get_run`'s projection uses.
+        //
+        // Q-Deck A0 corrective round 6 (Part 1): admission previously
+        // AWAITED a permit (`acquire_owned().await`) rather than failing
+        // fast. That queues indefinitely under saturation — proven to have
+        // NO bound at all (200/200 concurrent requests eventually acquired
+        // and none were ever rejected) — which is the opposite of the
+        // "bounded queuing depth" this comment used to claim. There is no
+        // queue for replay admission: `run_behind_replay_limiter` either
+        // gets a permit right now or this request fails fast with a `503`.
+        // Zero command rows/child IDs/worktrees/provider invocations are
+        // created on the saturation path. A genuinely idempotent replay of
+        // an already-recorded request never reaches this block at all
+        // (guarded by `already_seen` above), so retrying an accepted
+        // command is unaffected by admission saturation.
         let exec_owned = exec.clone();
         let parent_for_check = parent_run_id.clone();
-        let usable = tokio::task::spawn_blocking(move || {
-            let result =
-                crate::canonical::parent_candidate_state_usable(&exec_owned, &parent_for_check);
-            drop(permit);
-            result
+        let usable = match run_behind_replay_limiter(&state.candidate_replay_limiter, move || {
+            crate::canonical::parent_candidate_state_usable(&exec_owned, &parent_for_check)
         })
         .await
-        .map_err(|_| ApiError::Internal("CANDIDATE_ADMISSION_TASK_PANICKED"))?;
+        {
+            None => {
+                return Err(ApiError::ServiceUnavailable(
+                    "CANDIDATE_REPLAY_BUSY",
+                    "candidate replay capacity is saturated; retry shortly".to_owned(),
+                ));
+            }
+            Some(Err(_)) => return Err(ApiError::Internal("CANDIDATE_ADMISSION_TASK_PANICKED")),
+            Some(Ok(usable)) => usable,
+        };
         if let Err(reason) = usable {
             eprintln!(
                 "[o7d] refusing to accept a command against parent {parent_run_id}: {reason}"
@@ -972,4 +1023,166 @@ fn spawn_continue(
 /// exist at all.
 pub(crate) async fn unknown_api_route() -> ApiError {
     ApiError::NotFound
+}
+
+/// Q-Deck A0 corrective round 6 (Part 1): direct, deterministic tests
+/// against [`run_behind_replay_limiter`] — the ONE shared primitive both
+/// `get_run`'s projection and `create_command`'s admission preflight now
+/// route through. This function does not exist at all before this round
+/// (`c979bc1` has two separate inline call sites instead, one of which
+/// held its permit incorrectly) — these tests cannot even compile against
+/// that head, a stronger guarantee than "fails reliably at the old head."
+/// They use the real `tokio::sync::Semaphore`/`tokio::task::spawn_blocking`
+/// primitives, never a reimplementation, so what they prove is exactly
+/// what production code does.
+#[cfg(test)]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic
+)]
+mod replay_limiter_tests {
+    use super::run_behind_replay_limiter;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// The core counterexample: many callers race a short timeout against
+    /// `run_behind_replay_limiter`, so most abandon (cancel) the call before
+    /// it resolves. At `c979bc1`, `get_run`'s own permit lived only in the
+    /// calling async frame — cancelling it released the permit immediately
+    /// while the already-spawned blocking closure kept running regardless,
+    /// unbounded (measured 40 concurrent against a declared limit of 4 in
+    /// an equivalent standalone harness). Here the permit is moved into the
+    /// closure itself, so cancelling the CALLER has no effect on it; peak
+    /// concurrency of the actual blocking work must never exceed the limit,
+    /// even under mass cancellation.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+    async fn permit_bounds_concurrency_even_under_mass_cancellation() {
+        const LIMIT: usize = 4;
+        let limiter = Arc::new(tokio::sync::Semaphore::new(LIMIT));
+        let current = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+
+        let mut handles = Vec::new();
+        for i in 0..80usize {
+            let limiter = limiter.clone();
+            let current = current.clone();
+            let peak = peak.clone();
+            handles.push(tokio::spawn(async move {
+                let work = move || {
+                    let now = current.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(now, Ordering::SeqCst);
+                    // Held long enough for genuinely overlapping callers to
+                    // race, inside the blocking closure the permit is
+                    // supposed to guard for its ENTIRE duration.
+                    std::thread::sleep(Duration::from_millis(20));
+                    current.fetch_sub(1, Ordering::SeqCst);
+                };
+                // Most calls (every one NOT a multiple of 3) are raced
+                // against a 1ms timeout — almost certain to cancel the
+                // CALLER before the 20ms blocking work finishes, exactly
+                // like a client disconnecting mid-`get_run`.
+                let budget = if i % 3 == 0 { 50 } else { 1 };
+                let _ = tokio::time::timeout(
+                    Duration::from_millis(budget),
+                    run_behind_replay_limiter(&limiter, work),
+                )
+                .await;
+            }));
+        }
+        for h in handles {
+            let _ = h.await;
+        }
+        // Let any closure whose CALLER was cancelled but which itself keeps
+        // running regardless (the exact production semantics) finish.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(
+            current.load(Ordering::SeqCst),
+            0,
+            "every spawned closure must have finished and decremented by now"
+        );
+        let observed_peak = peak.load(Ordering::SeqCst);
+        assert!(
+            observed_peak <= LIMIT,
+            "observed peak concurrency {observed_peak} exceeds the declared limit {LIMIT} — a \
+             permit is outliving its blocking work's own guard"
+        );
+    }
+
+    /// Saturation: once every permit is held, a new call must fail FAST
+    /// (`None`) and must never invoke `work` at all — the saturation path
+    /// has zero side effects, matching the round's "zero mutations on the
+    /// saturation path" requirement at the primitive's own level.
+    #[tokio::test]
+    async fn saturated_limiter_returns_none_without_running_work() {
+        let limiter = Arc::new(tokio::sync::Semaphore::new(1));
+        let _held = limiter
+            .clone()
+            .try_acquire_owned()
+            .expect("acquire the only permit");
+        let ran = Arc::new(AtomicUsize::new(0));
+        let ran_clone = ran.clone();
+        let result = run_behind_replay_limiter(&limiter, move || {
+            ran_clone.fetch_add(1, Ordering::SeqCst);
+        })
+        .await;
+        assert!(result.is_none(), "a saturated limiter must return None");
+        assert_eq!(
+            ran.load(Ordering::SeqCst),
+            0,
+            "work must never run when saturated"
+        );
+    }
+
+    /// A panic inside the blocking closure must still release the permit
+    /// (ordinary stack unwinding drops it) and must surface as
+    /// `Some(Err(_))` — a join failure — never silently swallowed at this
+    /// layer (callers decide what a join failure means for them).
+    #[tokio::test]
+    async fn panicking_work_releases_permit_and_reports_join_error() {
+        let limiter = Arc::new(tokio::sync::Semaphore::new(1));
+        let result = run_behind_replay_limiter(&limiter, || {
+            panic!("synthetic panic inside blocking replay work");
+        })
+        .await;
+        assert!(
+            matches!(result, Some(Err(_))),
+            "a panicking closure must report a join error, not be swallowed here"
+        );
+        // The permit must have been released despite the panic: a second
+        // call can still acquire one.
+        let second = run_behind_replay_limiter(&limiter, || 42).await;
+        assert_eq!(
+            second
+                .expect("permit must be available again")
+                .expect("no panic"),
+            42
+        );
+    }
+
+    /// Ordinary success path: a permit is available, `work` runs exactly
+    /// once, and its return value comes through unchanged.
+    #[tokio::test]
+    async fn normal_path_runs_work_once_and_returns_its_result() {
+        let limiter = Arc::new(tokio::sync::Semaphore::new(4));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_clone = calls.clone();
+        let result = run_behind_replay_limiter(&limiter, move || {
+            calls_clone.fetch_add(1, Ordering::SeqCst);
+            "candidate-projection-result"
+        })
+        .await;
+        assert_eq!(
+            result.expect("permit available").expect("no panic"),
+            "candidate-projection-result"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            limiter.available_permits(),
+            4,
+            "the permit must be back after the closure returns"
+        );
+    }
 }

@@ -27,10 +27,21 @@ pub enum ApiError {
     /// underlying `Display` (which can carry raw SQLite text) stays out of
     /// the wire response even on a private network; only the code crosses.
     Internal(&'static str),
+    /// Q-Deck A0 corrective round 6 (Part 1): a `503` — the shared,
+    /// bounded candidate-replay semaphore is saturated. Admission fails
+    /// FAST here (`try_acquire_owned`, never `.await`) rather than queuing
+    /// behind unrelated replay work: a queued admission has no bound on how
+    /// long a client waits, which is itself the "unbounded wait queue"
+    /// defect this round fixes. Zero command rows/child IDs/worktrees/
+    /// provider invocations are created on this path. Transient and
+    /// self-resolving (a permit frees the moment any in-flight replay job
+    /// finishes), so a `Retry-After` hint rides along.
+    ServiceUnavailable(&'static str, String),
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
+        let retry_after = matches!(self, Self::ServiceUnavailable(..));
         let (status, code, error) = match self {
             Self::NotFound => (StatusCode::NOT_FOUND, "NOT_FOUND", "not found".to_owned()),
             Self::BadRequest(msg) => (StatusCode::BAD_REQUEST, "BAD_REQUEST", msg),
@@ -41,13 +52,21 @@ impl IntoResponse for ApiError {
                 code,
                 "internal error".to_owned(),
             ),
+            Self::ServiceUnavailable(code, msg) => (StatusCode::SERVICE_UNAVAILABLE, code, msg),
         };
         let body = Json(ErrorDto {
             schema_version: API_SCHEMA_VERSION,
             error,
             code,
         });
-        (status, body).into_response()
+        let mut response = (status, body).into_response();
+        if retry_after {
+            response.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                axum::http::HeaderValue::from_static("1"),
+            );
+        }
+        response
     }
 }
 
