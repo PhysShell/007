@@ -911,6 +911,14 @@ mod dirty_submodule_tests {
                 "nested_sub",
             ],
         );
+        // `git submodule add` clones into a genuinely SEPARATE git config
+        // scope (`dir/sub/.git` -> `dir/.git/modules/sub`) — it does NOT
+        // inherit `sub`'s own upstream repo's LOCAL identity config, and a
+        // CI runner (unlike this environment) may have no GLOBAL git
+        // identity configured at all, making an un-configured `commit`
+        // here fail with "empty ident name".
+        run(&dir.join("sub"), &["config", "user.email", "t@example.com"]);
+        run(&dir.join("sub"), &["config", "user.name", "t"]);
         commit_all(&dir.join("sub"), "add nested submodule");
         commit_all(dir, "record nested submodule bump");
 
