@@ -3286,3 +3286,158 @@ fn a_dirty_submodule_fails_candidate_capture_and_can_never_become_a_continuation
     let _ = o7d_child.wait();
     drop(repo);
 }
+
+// ==================== Q-Deck A0 corrective round 5 (CodeRabbit Major) ====================
+//
+// A relative `--runs-dir` (this CLI's own DEFAULT value, "runs" — not an
+// edge case) must materialize correctly. `apply_candidate_patch`'s private
+// temp-patch path was built from `runs_dir` and passed to `git apply` as a
+// bare string argument, while that same `git` subprocess's own
+// `current_dir` is the WORKTREE — a genuinely different directory. A
+// relative `runs_dir` string is resolved by `git` itself against ITS OWN
+// cwd (the worktree), not the calling process's cwd, so continuations
+// failed to materialize whenever `runs_dir` was passed relative. Reproduced
+// with real git (`git -C <worktree> apply <relative-path-valid-elsewhere>`
+// fails to find the file) before fixing.
+
+/// Run A (ordinary absolute paths — it never materializes anything, so it
+/// cannot exercise this bug). Then `o7d` itself — and, transitively, every
+/// `o7 continue` child it spawns, which inherits `o7d`'s own cwd since
+/// neither sets an explicit `current_dir` for the other — is spawned with
+/// its OWN process cwd set to `work`, and `--runs-dir`/`--worktree-root`
+/// passed as the literal RELATIVE strings `"runs"`/`"worktrees"` (this
+/// CLI's own default values, when a caller doesn't override them). Command
+/// B's continuation must still materialize A's exact state and capture its
+/// own cumulative receipt correctly — proving the fix, not merely that the
+/// happy path with absolute paths (every other test in this suite) works.
+#[test]
+fn a_continuation_materializes_correctly_with_a_relative_runs_dir_and_worktree_root() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let claude = ActionClaude::new();
+
+    claude.set_actions(1, "echo base-v1 > base.txt\n");
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    // `o7d` itself spawned with cwd=`work` and RELATIVE `--runs-dir`/
+    // `--worktree-root` — both resolve to the exact same real directories
+    // run A already used, just spelled relative to `o7d`'s own cwd instead
+    // of absolute.
+    let mut cmd = Command::new(o7d_bin_path());
+    cmd.current_dir(work.path())
+        .args([
+            "serve",
+            "--ledger",
+            ledger_path.to_str().expect("utf8 path"),
+            "--listen",
+            "127.0.0.1:0",
+            "--repo",
+        ])
+        .arg(repo.path())
+        .args(["--worktree-root", "worktrees"])
+        .args(["--runs-dir", "runs"])
+        .arg("--o7-bin")
+        .arg(env!("CARGO_BIN_EXE_o7"))
+        .args(["--max-turns", "1"])
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    let mut o7d_child = cmd
+        .spawn()
+        .expect("spawn the real o7d binary with a relative runs_dir");
+    let stderr = o7d_child.stderr.take().expect("piped stderr");
+    let mut reader = BufReader::new(stderr);
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .expect("read o7d's startup line");
+    let addr_str = line
+        .trim()
+        .strip_prefix("o7d: listening on http://")
+        .expect("startup line reports the bound address");
+    let addr: SocketAddr = addr_str.parse().expect("valid socket addr");
+    std::thread::spawn(move || {
+        let mut discarded = String::new();
+        while reader.read_line(&mut discarded).unwrap_or(0) > 0 {
+            discarded.clear();
+        }
+    });
+    wait_until_healthy(addr);
+
+    let (status, page) = get(addr, "/api/v1/runs");
+    assert_eq!(status, 200);
+    let run_a_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    claude.set_actions(2, "echo base-v2 >> base.txt\n");
+    let (status, accepted_b) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": run_a_id,
+            "command": "continue with a relative runs_dir/worktree_root",
+            "idempotency_key": "key-relative-runs-dir",
+        }),
+    );
+    assert_eq!(status, 202, "{accepted_b:?}");
+    let run_b_id = accepted_b["run_id"].as_str().unwrap().to_owned();
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    claude.wait_for_invocation(2, deadline);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    wait_for_run_status(addr, &run_b_id, "completed", deadline);
+
+    let target = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    let run_b_dir = run_dir(&runs_dir, &target, &run_b_id);
+    let materialized_b = events_of_kind(&run_b_dir, "candidate_state_materialized");
+    assert_eq!(
+        materialized_b.len(),
+        1,
+        "command B must actually materialize A's state even with a relative runs_dir: {:?}",
+        materialized_b
+    );
+    let captured_b = events_of_kind(&run_b_dir, "candidate_state_captured");
+    assert_eq!(
+        captured_b.len(),
+        1,
+        "command B must capture its own cumulative candidate state: {:?}",
+        captured_b
+    );
+    let sealed_b = events_of_kind(&run_b_dir, "run_sealed");
+    assert_eq!(sealed_b.len(), 1, "command B must seal: {sealed_b:?}");
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+    drop(repo);
+}

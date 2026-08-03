@@ -32,17 +32,50 @@ pub fn repository_identity(repo: &Path) -> Result<o7_run::event::RepositoryIdent
 }
 
 /// Create a throwaway git worktree of `repo` at `base`, on a fresh branch.
+///
+/// # Errors
+/// `path` cannot be resolved to an absolute path, or the underlying `git
+/// worktree add` fails.
 pub fn add(repo: &Path, base: &str, path: &Path, branch: &str) -> Result<()> {
-    let p = path.to_string_lossy();
-    run_git(repo, &["worktree", "add", "-b", branch, p.as_ref(), base])
-        .with_context(|| format!("git worktree add at {}", path.display()))?;
+    // Q-Deck A0 corrective round 5 (CodeRabbit Major, same defect class as
+    // `apply_candidate_patch`'s own fix): this call runs with
+    // `current_dir(repo)` — a RELATIVE `path` (built from a relative
+    // `--worktree-root`) would be resolved by `git` itself against `repo`,
+    // not the CALLING process's own cwd, whenever they differ. `path`
+    // itself is entirely operator/CLI-constructed (never derived from a
+    // hostile base commit's own tree content, unlike the private
+    // candidate-patch temp store), so a plain LEXICAL absolutization
+    // (`std::path::absolute`, no filesystem access, no existence
+    // requirement) against the process's own real cwd is the correct fix
+    // here — no confinement/symlink question is reopened by it. Passed as
+    // `&OsStr` so a non-UTF-8 path is never truncated/mangled.
+    let abs_path = std::path::absolute(path)
+        .with_context(|| format!("resolving an absolute path for {}", path.display()))?;
+    run_git_with_path_args(
+        repo,
+        &["worktree", "add", "-b", branch],
+        abs_path.as_os_str(),
+        &[base],
+    )
+    .with_context(|| format!("git worktree add at {}", path.display()))?;
     Ok(())
 }
 
 /// Remove a worktree (its branch is left dangling; fine for throwaway runs).
+///
+/// # Errors
+/// `path` cannot be resolved to an absolute path, or the underlying `git
+/// worktree remove` fails.
 pub fn remove(repo: &Path, path: &Path) -> Result<()> {
-    let p = path.to_string_lossy();
-    run_git(repo, &["worktree", "remove", "--force", p.as_ref()])?;
+    // Q-Deck A0 corrective round 5: same fix as `add` above.
+    let abs_path = std::path::absolute(path)
+        .with_context(|| format!("resolving an absolute path for {}", path.display()))?;
+    run_git_with_path_args(
+        repo,
+        &["worktree", "remove", "--force"],
+        abs_path.as_os_str(),
+        &[],
+    )?;
     Ok(())
 }
 
@@ -367,19 +400,48 @@ pub fn apply_candidate_patch(
         }
     }
 
-    let tmp_path = tmp_dir.join(&name);
-    let result = run_git(
+    // Q-Deck A0 corrective round 5 (CodeRabbit Major): `git apply` below
+    // runs with `current_dir(worktree)` — a RELATIVE `tmp_path` (built from
+    // a relative `runs_dir`, resolved against whatever the CALLING
+    // process's own cwd happened to be) would be silently re-resolved
+    // against `worktree` instead, since that's the SUBPROCESS's cwd, not
+    // the caller's. Reproduced with real git: `git -C <worktree> apply
+    // <relative-path-valid-from-elsewhere>` fails to find the file.
+    //
+    // The fix does not canonicalize `tmp_dir` (the path string) — that
+    // would re-open the confinement question this same private store was
+    // built to close, trusting a path an attacker-influenced `runs_dir`
+    // argument could in principle still reference. Instead, the absolute
+    // path is read back from the KERNEL's own view of the exact directory
+    // already opened `O_NOFOLLOW` above (`dir_fd`), via `/proc/self/fd` —
+    // the identity check already performed by `open_dir_nofollow` is what
+    // this absolute path is anchored to, never a fresh, unverified
+    // `canonicalize` of caller-supplied input.
+    let tmp_dir_abs = absolute_path_of_open_dir(&dir_fd)
+        .with_context(|| format!("resolving the real absolute path of {}", tmp_dir.display()))?;
+    let tmp_path = tmp_dir_abs.join(&name);
+    // Passed as `&OsStr` (via `Command::arg`, never through a `&str`/
+    // `to_string_lossy` conversion) so a non-UTF-8 path is passed through
+    // exactly, not lossily mangled.
+    let result = run_git_with_path_args(
         worktree,
-        &[
-            "apply",
-            "--index",
-            "--binary",
-            tmp_path.to_string_lossy().as_ref(),
-        ],
+        &["apply", "--index", "--binary"],
+        tmp_path.as_os_str(),
+        &[],
     );
     let _ = fs::unlinkat(&dir_fd, cname.as_c_str(), fs::AtFlags::empty());
     result.map_err(|e| anyhow::anyhow!("git apply --index --binary failed: {e}"))?;
     finish_apply(worktree, base_commit)
+}
+
+/// The real, absolute path of an already-open directory file descriptor,
+/// read back from the kernel via `/proc/self/fd` — anchored to the
+/// directory identity that fd's own opener (`open_dir_nofollow`) already
+/// verified, never a fresh `canonicalize` of a caller-supplied path string.
+fn absolute_path_of_open_dir(dir_fd: &OwnedFd) -> Result<std::path::PathBuf> {
+    use std::os::fd::AsRawFd as _;
+    std::fs::read_link(format!("/proc/self/fd/{}", dir_fd.as_raw_fd()))
+        .context("reading /proc/self/fd for the private candidate-patch temp store")
 }
 
 fn finish_apply(worktree: &Path, base_commit: &str) -> Result<String> {
@@ -414,6 +476,38 @@ fn run_git(dir: &Path, args: &[&str]) -> Result<String> {
         anyhow::bail!(
             "git {:?} failed: {}",
             args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+/// Same as [`run_git`], but for a path argument (positioned between
+/// `leading_str_args` and `trailing_str_args`) that must be passed as raw
+/// `OsStr` bytes — Q-Deck A0 corrective round 5 (CodeRabbit Major): a
+/// non-UTF-8 path must never be truncated/mangled by a `to_string_lossy`
+/// conversion just to fit `&[&str]`.
+fn run_git_with_path_args(
+    dir: &Path,
+    leading_str_args: &[&str],
+    path_arg: &std::ffi::OsStr,
+    trailing_str_args: &[&str],
+) -> Result<String> {
+    let out = Command::new("git")
+        .args(leading_str_args)
+        .arg(path_arg)
+        .args(trailing_str_args)
+        .current_dir(dir)
+        .output()
+        .with_context(|| {
+            format!("running git {leading_str_args:?} {path_arg:?} {trailing_str_args:?}")
+        })?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git {:?} {:?} {:?} failed: {}",
+            leading_str_args,
+            path_arg,
+            trailing_str_args,
             String::from_utf8_lossy(&out.stderr)
         );
     }
@@ -866,6 +960,164 @@ mod dirty_submodule_tests {
             std::fs::read_to_string(dir.join("sub").join("tracked.txt")).unwrap(),
             "tampered\n",
             "the original checkout must not be corrupted by the failed capture"
+        );
+    }
+}
+
+/// Q-Deck A0 corrective round 5 (CodeRabbit Major): unit tests for
+/// [`apply_candidate_patch`]'s path handling — a `runs_dir` whose own final
+/// path component contains a space or non-UTF-8 bytes must never be
+/// truncated/mangled (the whole point of passing it as `&OsStr`, never
+/// through `to_string_lossy`), and a symlink planted at the temp store's
+/// exact expected name must still fail closed exactly like the existing
+/// (absolute-`runs_dir`) confinement test already proves.
+///
+/// Invariant for the restriction-lint allowance below: every
+/// `unwrap`/`expect`/index here operates on a real git repository this
+/// test itself just created in a throwaway `tempfile::tempdir()` — a panic
+/// means this test's own fixture setup broke, never a runtime condition
+/// reachable through production code.
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+mod special_runs_dir_path_tests {
+    use super::*;
+
+    fn run(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .expect("spawn git");
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    fn init_repo_with_one_commit() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        run(dir.path(), &["init", "-q"]);
+        run(dir.path(), &["config", "user.email", "t@example.com"]);
+        run(dir.path(), &["config", "user.name", "t"]);
+        std::fs::write(dir.path().join("f.txt"), "base\n").unwrap();
+        run(dir.path(), &["add", "-A"]);
+        run(dir.path(), &["commit", "-q", "-m", "base"]);
+        dir
+    }
+
+    /// A `runs_dir` whose own final path component contains a literal
+    /// space — a byte that would still round-trip through
+    /// `to_string_lossy`, but is a cheap, always-available proxy for "not a
+    /// bare identifier", exercising the `&OsStr` argument-passing path
+    /// rather than a plain ASCII name.
+    #[test]
+    fn a_runs_dir_with_a_space_in_its_path_is_handled_correctly() {
+        let repo = init_repo_with_one_commit();
+        let base = rev_parse(repo.path(), "HEAD").unwrap();
+        let (patch, _tree_oid) = capture_cumulative_candidate(repo.path(), &base).unwrap();
+        std::fs::write(repo.path().join("f.txt"), "changed\n").unwrap();
+        let patch2 = run_git_bytes(
+            repo.path(),
+            &[
+                "diff",
+                "--binary",
+                "--full-index",
+                "--no-color",
+                "--no-ext-diff",
+                &base,
+            ],
+        )
+        .unwrap();
+        run(repo.path(), &["checkout", "-q", "--", "."]);
+        let _ = patch; // (only needed to prove capture succeeds above)
+
+        let outer = tempfile::tempdir().unwrap();
+        let runs_dir = outer.path().join("runs with a space");
+        std::fs::create_dir_all(&runs_dir).unwrap();
+
+        let result = apply_candidate_patch(&runs_dir, repo.path(), &base, &patch2);
+        assert!(
+            result.is_ok(),
+            "a runs_dir containing a space must not break patch application: {result:?}"
+        );
+    }
+
+    /// A `runs_dir` whose own final path component contains a byte
+    /// sequence that is NOT valid UTF-8 (Unix-only: paths are raw bytes,
+    /// not required to be valid UTF-8 at all) must still work — proving
+    /// the `&OsStr` argument path never lossily mangles it into a
+    /// different, wrong path.
+    #[test]
+    fn a_runs_dir_with_a_non_utf8_path_component_is_handled_correctly() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let repo = init_repo_with_one_commit();
+        let base = rev_parse(repo.path(), "HEAD").unwrap();
+        std::fs::write(repo.path().join("f.txt"), "changed\n").unwrap();
+        let patch = run_git_bytes(
+            repo.path(),
+            &[
+                "diff",
+                "--binary",
+                "--full-index",
+                "--no-color",
+                "--no-ext-diff",
+                &base,
+            ],
+        )
+        .unwrap();
+        run(repo.path(), &["checkout", "-q", "--", "."]);
+
+        let outer = tempfile::tempdir().unwrap();
+        // 0xFF is not valid UTF-8 in any position; a real filesystem path
+        // component may still contain it on Unix.
+        let bad_name = std::ffi::OsStr::from_bytes(b"runs-\xffbad");
+        let runs_dir = outer.path().join(bad_name);
+        std::fs::create_dir_all(&runs_dir).unwrap();
+
+        let result = apply_candidate_patch(&runs_dir, repo.path(), &base, &patch);
+        assert!(
+            result.is_ok(),
+            "a non-UTF-8 runs_dir path component must not break patch application: {result:?}"
+        );
+    }
+
+    /// Same confinement guarantee the existing (absolute-`runs_dir`)
+    /// symlink test already proves, reconfirmed here for the private temp
+    /// store's own absolute-path resolution: a symlink planted at the
+    /// temp file's exact expected name never lets the write escape.
+    #[test]
+    fn a_symlink_at_the_temp_stores_own_directory_name_is_never_followed() {
+        let repo = init_repo_with_one_commit();
+        let base = rev_parse(repo.path(), "HEAD").unwrap();
+        std::fs::write(repo.path().join("f.txt"), "changed\n").unwrap();
+        let patch = run_git_bytes(
+            repo.path(),
+            &[
+                "diff",
+                "--binary",
+                "--full-index",
+                "--no-color",
+                "--no-ext-diff",
+                &base,
+            ],
+        )
+        .unwrap();
+        run(repo.path(), &["checkout", "-q", "--", "."]);
+
+        let outer = tempfile::tempdir().unwrap();
+        let sentinel = tempfile::tempdir().unwrap();
+        // A symlink at the EXACT name `open_dir_nofollow` would otherwise
+        // open as a real directory — `O_NOFOLLOW` must refuse this.
+        std::os::unix::fs::symlink(sentinel.path(), outer.path().join(".o7-candidate-tmp"))
+            .unwrap();
+
+        let result = apply_candidate_patch(outer.path(), repo.path(), &base, &patch);
+        assert!(
+            result.is_err(),
+            "a symlink at the private temp store's own name must be refused, not followed"
+        );
+        assert_eq!(
+            std::fs::read_dir(sentinel.path()).unwrap().count(),
+            0,
+            "the sentinel directory the symlink points at must stay untouched"
         );
     }
 }
