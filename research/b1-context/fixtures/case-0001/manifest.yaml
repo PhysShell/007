@@ -150,8 +150,9 @@ negative_control:
         - absence of access through external channels
       independence: same_platform_not_independent
       note: >
-        A platform export of session C can confirm transcript bytes and
-        ordering but remains same-platform evidence. Global absence of
+        A platform export of session C can corroborate transcript content
+        and ordering (not the container snapshot's exact bytes — it is a
+        separate capture path) but remains same-platform evidence. Global absence of
         access is not establishable without a confined-environment
         experiment or external attestation — and is not required for a
         negative control: producer claimed no access, the captured
