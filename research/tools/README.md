@@ -31,3 +31,22 @@ still stored honestly under *its own* (different) address — always compare
 the resulting digest against the *expected* one. Raw account exports and
 session transcripts are **never** committed here — only their digests and
 metadata.
+
+## S3 / encrypted offsite copy (restic -> Cloudflare R2)
+
+`flake.nix` here provides a `nix develop ./research/tools` shell with
+`restic`, `rclone`, and `aws` (awscli2). Copy 2 of the source-set is a
+**client-side-encrypted** restic repository on Cloudflare R2 (the provider
+only ever sees ciphertext).
+
+Secrets never live in git. They sit at `~/.config/o7-research/` (`0600`):
+- `restic.env` — `RESTIC_REPOSITORY` (`s3:https://<acct>.r2.cloudflarestorage.com/o7-cas/restic`), `RESTIC_PASSWORD_FILE`, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` (R2), `AWS_DEFAULT_REGION=auto`, `TMPDIR` (roomy — restic packs must not land on a small tmpfs).
+- `restic-password` — the **only** key that decrypts the backup. Keep a copy in a password manager; losing it = the R2 ciphertext is unrecoverable.
+
+Usage inside the dev shell:
+```
+restic backup ~/.local/share/o7-research --tag o7-cas    # incremental, dedup'd, encrypted
+restic snapshots                                         # list
+restic check --read-data                                 # full integrity (downloads + verifies)
+restic restore <snapshot-id> --target /some/dir          # recover
+```
