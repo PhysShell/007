@@ -36,7 +36,9 @@ decision.
 
 ```text
 schema/      state-observables schema v0 and event/assessment rules
-             (built only AFTER fixture RAW is captured — done)
+             (built only AFTER source capture; the interim source set is
+             captured — see fixtures/case-0001/manifest.yaml, promotion
+             to SOURCE_SET_COMPLETE still pending)
 fixtures/    golden development fixtures; case-0001 is the first
 holdout/     evaluation cases NOT used while designing the schema
 ```

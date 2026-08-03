@@ -124,13 +124,16 @@ negative_control:
         ordering but remains same-platform evidence. Global absence of
         access is not establishable without a confined-environment
         experiment or external attestation — and is not required for a
-        negative control: producer claimed no access, the canonical
-        transcript shows no prior access, global absence not established.
+        negative control: producer claimed no access, the captured
+        session-C transcript (interim snapshot) shows no prior access,
+        global absence not established.
     known_divergence_already_observed: >
       Reconstruction assumed working labels B and D were two separate
       conversations and did not know session E existed as a distinct chat.
-      Sealed before any RAW access; divergence is measurement data, not an
-      error to fix.
+      The reconstruction receipt precedes the first RAW-capture event
+      observed in the captured session-C transcript; the producer's
+      global no-access statement remains advisory. Divergence is
+      measurement data, not an error to fix.
 
 pending:
   - chatgpt account export (platform_export; supersedes/confirms the three interim captures)
