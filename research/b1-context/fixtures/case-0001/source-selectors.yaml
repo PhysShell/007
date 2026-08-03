@@ -19,7 +19,7 @@ sessions:
     coverage: short chat originating the Qodec context-compaction block
 
   - session_id: session-c
-    raw_source: claude-code-session-c-snapshot-1
+    raw_source: claude-code-session-c-snapshot-2
     coverage: >
       PR #93 exact-head review; issues #94/#95; #91 A0.0 inputs; program
       A/B1/B2/S convergence; this fixture's own capture protocol.
