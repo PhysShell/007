@@ -1197,3 +1197,97 @@ fn an_unsupported_candidate_contract_schema_is_rejected_even_behind_an_otherwise
         "got: {replay_verify_err:?}"
     );
 }
+
+// ==================== Q-Deck A0 corrective round 5 (CodeRabbit nitpick) ====================
+//
+// The command-binding artifact is now checked against its own canonical
+// locator, exactly like every other candidate artifact this module
+// resolves — a record naming it under any other locator must be rejected,
+// not silently accepted by kind alone.
+
+/// A command-binding artifact with entirely correct bytes/digest/schema,
+/// but referenced under the WRONG locator, must be rejected through every
+/// production entry point — `verify_prefix`, `replay`, `replay_verify`, and
+/// `classify_record`.
+#[test]
+fn a_command_binding_under_the_wrong_locator_is_rejected_everywhere() {
+    let patch_bytes = b"patch-part6-binding-locator";
+    let receipt = valid_source_receipt(&"9".repeat(40), patch_bytes);
+    let receipt_bytes = serde_json::to_vec(&receipt).unwrap();
+
+    // Deliberately WRONG: correct bytes/digest/schema, wrong locator.
+    let binding_bytes = valid_command_binding_bytes();
+    let wrong_locator_artifact = artifact(
+        ArtifactKind::CommandBinding,
+        "not_the_canonical_command_binding_name.json",
+        &binding_bytes,
+    );
+
+    let mut resolver = MapResolver::new();
+    resolver.insert("task.json", TASK_BYTES);
+    resolver.insert(
+        "not_the_canonical_command_binding_name.json",
+        &binding_bytes,
+    );
+    resolver.insert("parent_candidate_receipt.json", &receipt_bytes);
+    resolver.insert("parent_candidate.patch", patch_bytes);
+
+    let events = chained(vec![
+        run_started(contract_with_candidate(
+            o7_run::event::AgentObligation::Required,
+        )),
+        RunEventKind::CommandBindingCaptured {
+            binding: wrong_locator_artifact,
+        },
+        RunEventKind::CandidateStateMaterialized {
+            source_run_id: RunId::new("parent-1").unwrap(),
+            source_receipt: artifact(
+                ArtifactKind::CandidateState,
+                "parent_candidate_receipt.json",
+                &receipt_bytes,
+            ),
+            source_patch: artifact(
+                ArtifactKind::CandidatePatch,
+                "parent_candidate.patch",
+                patch_bytes,
+            ),
+            materialized_tree_oid: "9".repeat(40),
+        },
+        RunEventKind::AgentStarted,
+        RunEventKind::AgentExited {
+            outcome: o7_run::event::AgentOutcome::ExitedNormally { code: 0 },
+        },
+        RunEventKind::RunSealed,
+    ]);
+
+    assert_rejected_by_production_api(
+        &events,
+        &resolver,
+        "command-binding artifact referenced under the wrong canonical locator",
+    );
+
+    let verdict = o7_run::replay::classify_record(&events, &resolver);
+    assert!(
+        matches!(verdict, o7_run::replay::RecordVerdict::Invalid(_)),
+        "got: {verdict:?}"
+    );
+    let replay_err =
+        o7_run::replay::replay(&events, &resolver).expect_err("replay must reject it too");
+    assert!(
+        matches!(
+            replay_err,
+            o7_run::replay::ReplayError::CandidateSemantic(_)
+        ),
+        "got: {replay_err:?}"
+    );
+    let replay_verify_err =
+        o7_run::replay::replay_verify(&events, &resolver, o7_run::Verdict::Blocked)
+            .expect_err("replay_verify must reject it too");
+    assert!(
+        matches!(
+            replay_verify_err,
+            o7_run::replay::ReplayError::CandidateSemantic(_)
+        ),
+        "got: {replay_verify_err:?}"
+    );
+}

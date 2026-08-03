@@ -37,6 +37,16 @@ pub const CANDIDATE_STATE_RECEIPT_LOCATOR: &str = "candidate_state_receipt.json"
 pub const CANDIDATE_PATCH_LOCATOR: &str = "candidate.patch";
 pub const PARENT_CANDIDATE_RECEIPT_LOCATOR: &str = "parent_candidate_receipt.json";
 pub const PARENT_CANDIDATE_PATCH_LOCATOR: &str = "parent_candidate.patch";
+/// Q-Deck A0 corrective round 5 (CodeRabbit nitpick, semantic authority):
+/// every OTHER candidate artifact this module resolves is checked against
+/// its own canonical locator via [`require_locator`] — the command-binding
+/// artifact was the one remaining exception, resolved by kind alone. A
+/// locator is part of the contract, not decoration, exactly like the other
+/// four; this closes that gap. The production writer (`src/record.rs`'s
+/// `write_candidate_artifact`/`bind_command_child_run` call sites, root
+/// crate) has only ever written `command_binding.json` — confirmed by
+/// inspection, not merely assumed.
+pub const COMMAND_BINDING_LOCATOR: &str = "command_binding.json";
 
 pub const COMMAND_BINDING_SCHEMA_V1: u32 = 1;
 
@@ -163,6 +173,11 @@ fn resolve_command_binding_facts(
     let Some(binding_ref) = state.command_binding.as_ref() else {
         return Ok(None);
     };
+    require_locator(
+        binding_ref,
+        COMMAND_BINDING_LOCATOR,
+        "this run's own command-binding evidence",
+    )?;
     let bytes = resolve_and_verify(
         artifacts,
         binding_ref,
