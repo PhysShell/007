@@ -3060,3 +3060,229 @@ fn an_already_accepted_legacy_command_against_a_schema_corrupted_parent_self_rej
         "a repeat invocation must not revert or corrupt the already-rejected status"
     );
 }
+
+// ==================== Q-Deck A0 corrective round 5 (Codex P1, Part 1) ====================
+//
+// Dirty submodule contents must fail closed — process-level proof that the
+// worktree-level fix (`src/worktree.rs::ensure_no_dirty_submodule_worktree`)
+// actually stops a real `o7 run --ledger` invocation from silently sealing a
+// candidate receipt that omits a provider's own edit inside a submodule.
+
+/// Same as [`fixture_repo`], but with a REAL, committed Git submodule at
+/// `subdir`, containing one tracked file — returns the superproject dir AND
+/// the submodule's own upstream repo (kept alive for the duration of the
+/// test; not strictly required after `submodule add` clones it once, but
+/// cheap to keep around and matches how a real fixture would be built).
+fn fixture_repo_with_submodule(gate_toml: &str) -> (tempfile::TempDir, tempfile::TempDir) {
+    let dir = fixture_repo(gate_toml);
+    let run = |args: &[&str]| {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    };
+    let upstream = tempfile::tempdir().unwrap();
+    let run_upstream = |args: &[&str]| {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(upstream.path())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed (upstream)");
+    };
+    run_upstream(&["init", "-q"]);
+    run_upstream(&["config", "user.email", "test@example.com"]);
+    run_upstream(&["config", "user.name", "test"]);
+    std::fs::write(upstream.path().join("tracked.txt"), "original\n").unwrap();
+    run_upstream(&["add", "-A"]);
+    run_upstream(&["commit", "-q", "-m", "sub initial"]);
+
+    run(&[
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        "-q",
+        upstream.path().to_str().unwrap(),
+        "subdir",
+    ]);
+    run(&["commit", "-q", "-m", "add submodule"]);
+    (dir, upstream)
+}
+
+/// A provider that edits a tracked file INSIDE an already-initialized
+/// submodule, without touching the superproject's own gitlink, must never
+/// have that edit silently lost. The run's own candidate capture must fail
+/// closed — the process exits non-zero, the canonical record never reaches
+/// `RunSealed`, the provider is invoked exactly once (capture happens
+/// strictly after provider execution; this is not a redispatch), and the
+/// tampered file's own content survives on disk untouched (the check
+/// refuses, it does not revert or corrupt anything). Because the record
+/// never seals, it can never become a valid continuation parent either
+/// (`parent_candidate_state_usable`/`resolve_inherited_candidate_obligation`
+/// both require a sealed record) — so the change can never be silently
+/// lost to a LATER continuation either: there is no way to continue from
+/// this parent at all until a human resolves the dirty submodule.
+#[test]
+fn a_dirty_submodule_fails_candidate_capture_and_can_never_become_a_continuation_parent() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let (repo, _upstream) = fixture_repo_with_submodule(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let target = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    // The provider edits a TRACKED file inside the submodule directly,
+    // deliberately never updating the superproject's own gitlink entry —
+    // exactly the scenario `ensure_no_gitlink_mutation`'s pure tree
+    // comparison cannot see.
+    // `git worktree add` does not auto-initialize submodules in a fresh
+    // worktree — the provider itself initializes it (a realistic action
+    // for an agent that needs to touch tracked content inside one), then
+    // edits the tracked file directly, WITHOUT ever committing inside the
+    // submodule or touching the superproject's own gitlink entry.
+    claude.set_actions(
+        1,
+        "git -c protocol.file.allow=always submodule update --init subdir\n\
+         echo 'PROVIDER TAMPERED' >> subdir/tracked.txt\n",
+    );
+    // `--keep-worktree` so the tampered content can be inspected afterward —
+    // `o7 run` otherwise unconditionally removes the worktree regardless of
+    // outcome (`spawn_o7_run_process` doesn't pass this flag).
+    let mut run_child = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("run")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--task")
+        .arg(&task_file)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--keep-worktree")
+        .arg("--max-turns")
+        .arg("1")
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn the real o7 binary");
+    let status = run_child.wait().unwrap();
+    assert!(
+        !status.success(),
+        "the run must fail (never seal) when candidate capture rejects a dirty submodule"
+    );
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the provider ran exactly once — capture happens strictly after provider execution, \
+         this failure is not a redispatch"
+    );
+
+    // Find the single run directory this invocation created.
+    let target_dir = runs_dir.join(&target);
+    let run_id = std::fs::read_dir(&target_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .expect("the failed run must still have left a run directory behind");
+    let dir = run_dir(&runs_dir, &target, &run_id);
+
+    // The canonical record never reaches RunSealed.
+    let sealed = events_of_kind(&dir, "run_sealed");
+    assert!(
+        sealed.is_empty(),
+        "a run whose own candidate capture failed must never seal: {sealed:?}"
+    );
+    // ...and, consistently, no CandidateStateCaptured evidence exists either.
+    let captured = events_of_kind(&dir, "candidate_state_captured");
+    assert!(
+        captured.is_empty(),
+        "a dirty submodule must never produce trusted CandidateStateCaptured evidence: \
+         {captured:?}"
+    );
+
+    // The tampered content is exactly as the provider left it — refused, not
+    // reverted or corrupted, in either the run's own worktree or (since the
+    // superproject fixture and its worktree are the same checkout in this
+    // single-run scenario) the original checkout.
+    let worktree_dir = worktree_root
+        .read_dir()
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().is_dir())
+        .map(|e| e.path())
+        .expect("the run's own worktree must still exist");
+    let tampered = std::fs::read_to_string(worktree_dir.join("subdir").join("tracked.txt"))
+        .expect("the tampered file must still be present, not wiped by the failed check");
+    assert!(
+        tampered.contains("PROVIDER TAMPERED"),
+        "the tampered content must survive the rejection untouched: {tampered:?}"
+    );
+
+    // This unsealed record can never become a valid continuation parent —
+    // both admission paths require a sealed record, so the change can never
+    // be silently lost to a later continuation either.
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(addr);
+    let (status_code, page) = get(addr, "/api/v1/runs");
+    assert_eq!(status_code, 200);
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (status_code, accepted) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": run_id,
+            "command": "must never be accepted against an unsealed dirty-submodule parent",
+            "idempotency_key": "key-dirty-submodule-parent",
+        }),
+    );
+    assert_eq!(status_code, 409, "{accepted:?}");
+    assert_eq!(
+        command_row_count_for_parent(&ledger_path, &run_id),
+        0,
+        "an unsealed parent must never get a command row created against it"
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the provider must never be invoked again for a rejected dirty-submodule parent"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+    drop(repo);
+}

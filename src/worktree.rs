@@ -142,6 +142,84 @@ fn ensure_no_gitlink_mutation(dir: &Path, base_commit: &str, candidate: &str) ->
     Ok(())
 }
 
+/// Q-Deck A0 corrective round 5 (Codex P1, Part 1): an authoritative check
+/// for DIRTY content inside any submodule — `ensure_no_gitlink_mutation`'s
+/// pure tree-to-tree comparison can never see this, because a dirty
+/// submodule working tree (a tracked file edited but not committed inside
+/// it, or a new untracked file) never changes the SUPERPROJECT's own
+/// committed gitlink entry: `git add -A` at the superproject level cannot
+/// stage submodule-internal changes short of the submodule's own `HEAD`
+/// actually moving. Without this check, a provider editing a file inside an
+/// already-initialized submodule produces a cumulative patch that is
+/// byte-for-byte silent about the edit, and a candidate receipt that reads
+/// as complete — the next continuation then materializes the OLD submodule
+/// content, permanently and silently losing the change.
+///
+/// `git status --porcelain=2 -z --ignore-submodules=none -uall` is the
+/// authority: it recurses into every INITIALIZED submodule (including
+/// nested ones — verified empirically, a dirty nested submodule surfaces
+/// as dirtiness on its own top-level gitlink entry) and, for every entry
+/// that is a submodule, reports a 4-character `S<c><m><u>` field: `c`='C'
+/// iff its own `HEAD` commit changed (redundant with
+/// [`ensure_no_gitlink_mutation`]'s own comparison, checked here too for
+/// defense in depth), `m`='M' iff it has tracked modifications, `u`='U' iff
+/// it has untracked content. A DEINITIALIZED submodule (no working tree at
+/// all) or a genuinely clean initialized one never appears in this output
+/// at all — both are explicitly allowed. `-z` (NUL-delimited records) and
+/// byte-level field parsing (never a lossy UTF-8 text scan or substring
+/// match) make this authoritative rather than heuristic, exactly like
+/// [`gitlink_entries`]. `--ignore-submodules=none` is REQUIRED, not
+/// decorative: verified empirically that a `.gitmodules` entry declaring
+/// `submodule.<name>.ignore = all` (an attacker-reachable, tracked file)
+/// silently hides real dirtiness from a plain `git status` call with no
+/// override — `--ignore-submodules=none` on the command line takes
+/// precedence over that setting.
+///
+/// # Errors
+/// Any underlying `git` failure, or any submodule entry reports tracked,
+/// untracked, or commit-level dirtiness.
+fn ensure_no_dirty_submodule_worktree(dir: &Path) -> Result<()> {
+    let out = run_git_bytes(
+        dir,
+        &[
+            "status",
+            "--porcelain=2",
+            "-z",
+            "--ignore-submodules=none",
+            "-uall",
+        ],
+    )?;
+    for record in out.split(|&b| b == 0) {
+        if record.is_empty() {
+            continue;
+        }
+        // Only "ordinary changed" (`1 ...`) and "renamed/copied" (`2 ...`) entry
+        // lines carry a `<sub>` field, at the same fixed position (the 3rd
+        // whitespace-delimited token) in both; untracked (`?`)/ignored (`!`)/
+        // unmerged (`u`) lines never do and are irrelevant here.
+        if record.first() != Some(&b'1') && record.first() != Some(&b'2') {
+            continue;
+        }
+        let mut fields = record.splitn(4, |&b| b == b' ');
+        let _line_type = fields.next();
+        let _xy = fields.next();
+        let Some(sub) = fields.next() else {
+            continue;
+        };
+        if sub.first() == Some(&b'S') && sub != b"S..." {
+            let path = fields.next().unwrap_or_default();
+            anyhow::bail!(
+                "a submodule working tree has uncommitted content (status field {:?}) at \
+                 path {:?} — dirty submodule contents are unsupported and would be silently \
+                 lost by candidate-state capture",
+                String::from_utf8_lossy(sub),
+                String::from_utf8_lossy(path)
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Q-Deck A0 corrective round 3 (Codex P1, Part 2): a heuristic, NON-
 /// AUTHORITATIVE early diagnostic only — Git's own extended-header line
 /// for a mode change/new entry at submodule mode, scanned as lossy text
@@ -179,6 +257,13 @@ pub fn capture_cumulative_candidate(
     base_commit: &str,
 ) -> Result<(Vec<u8>, String)> {
     run_git_bytes(worktree, &["add", "-A"])?;
+    // Q-Deck A0 corrective round 5 (Codex P1, Part 1): checked immediately
+    // after staging, right before this run's own content is read for the
+    // patch/tree — the working-tree state `git status` inspects here is the
+    // exact same state `write-tree` below captures; nothing else touches
+    // this worktree between the two calls.
+    ensure_no_dirty_submodule_worktree(worktree)
+        .context("candidate capture's own dirty-submodule-worktree check")?;
     let patch = run_git_bytes(
         worktree,
         &[
@@ -298,6 +383,11 @@ pub fn apply_candidate_patch(
 }
 
 fn finish_apply(worktree: &Path, base_commit: &str) -> Result<String> {
+    // Q-Deck A0 corrective round 5 (Codex P1, Part 1), defense in depth:
+    // same check as `capture_cumulative_candidate`'s own, mirroring how
+    // `ensure_no_gitlink_mutation` is already duplicated at both sites.
+    ensure_no_dirty_submodule_worktree(worktree)
+        .context("materialization's own dirty-submodule-worktree check")?;
     let tree_oid = run_git(worktree, &["write-tree"])?.trim().to_string();
     ensure_no_gitlink_mutation(worktree, base_commit, &tree_oid)
         .context("materialization's own gitlink policy check")?;
@@ -592,6 +682,190 @@ mod gitlink_policy_tests {
         assert!(
             result.is_err(),
             "materialization must reject a patch that adds a gitlink: {result:?}"
+        );
+    }
+}
+
+/// Q-Deck A0 corrective round 5 (Codex P1, Part 1): unit tests for
+/// [`ensure_no_dirty_submodule_worktree`] — REAL Git submodules (not the
+/// fake `update-index --cacheinfo` gitlinks [`gitlink_policy_tests`] uses),
+/// since `git status`'s own submodule-dirtiness detection requires a path
+/// actually registered as a submodule (`.gitmodules` + `.git/config`), not
+/// merely a `160000`-mode tree entry.
+///
+/// Invariant for the restriction-lint allowance below: every
+/// `unwrap`/`expect`/index here operates on a real git repository this
+/// test itself just created in a throwaway `tempfile::tempdir()` — a panic
+/// means this test's own fixture setup or a fully-controlled git invocation
+/// broke, never a runtime condition reachable through production code.
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+mod dirty_submodule_tests {
+    use super::*;
+
+    fn run(dir: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .expect("spawn git");
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    fn init_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        run(dir.path(), &["init", "-q"]);
+        run(dir.path(), &["config", "user.email", "t@example.com"]);
+        run(dir.path(), &["config", "user.name", "t"]);
+        dir
+    }
+
+    fn commit_all(dir: &Path, msg: &str) -> String {
+        run(dir, &["add", "-A"]);
+        run(dir, &["commit", "-q", "-m", msg, "--allow-empty"]);
+        rev_parse(dir, "HEAD").unwrap()
+    }
+
+    /// A real, upstream one-file submodule repo added as a real committed
+    /// submodule at `path` inside `super_dir`. The returned `TempDir` is
+    /// the upstream repo, kept alive for the caller's own lifetime.
+    fn add_real_submodule(super_dir: &Path, path: &str) -> tempfile::TempDir {
+        let upstream = init_repo();
+        std::fs::write(upstream.path().join("tracked.txt"), "original\n").unwrap();
+        commit_all(upstream.path(), "sub initial");
+        run(
+            super_dir,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                upstream.path().to_str().unwrap(),
+                path,
+            ],
+        );
+        upstream
+    }
+
+    #[test]
+    fn unchanged_clean_initialized_submodule_passes() {
+        let repo = init_repo();
+        let dir = repo.path();
+        let _upstream = add_real_submodule(dir, "sub");
+        commit_all(dir, "add submodule");
+        assert!(ensure_no_dirty_submodule_worktree(dir).is_ok());
+    }
+
+    #[test]
+    fn deinitialized_submodule_with_unchanged_gitlink_passes() {
+        let repo = init_repo();
+        let dir = repo.path();
+        let _upstream = add_real_submodule(dir, "sub");
+        commit_all(dir, "add submodule");
+        run(dir, &["submodule", "deinit", "-f", "sub"]);
+        assert!(ensure_no_dirty_submodule_worktree(dir).is_ok());
+    }
+
+    #[test]
+    fn dirty_tracked_file_inside_initialized_submodule_is_rejected() {
+        let repo = init_repo();
+        let dir = repo.path();
+        let _upstream = add_real_submodule(dir, "sub");
+        commit_all(dir, "add submodule");
+        std::fs::write(dir.join("sub").join("tracked.txt"), "tampered\n").unwrap();
+        let err = ensure_no_dirty_submodule_worktree(dir)
+            .expect_err("dirty tracked content inside a submodule must be rejected");
+        assert!(err.to_string().contains("dirty"), "got: {err}");
+        // Original checkout not corrupted: the tampered content is still exactly
+        // on disk, never reverted/wiped by the check itself.
+        assert_eq!(
+            std::fs::read_to_string(dir.join("sub").join("tracked.txt")).unwrap(),
+            "tampered\n"
+        );
+    }
+
+    #[test]
+    fn dirty_untracked_file_inside_initialized_submodule_is_rejected() {
+        let repo = init_repo();
+        let dir = repo.path();
+        let _upstream = add_real_submodule(dir, "sub");
+        commit_all(dir, "add submodule");
+        std::fs::write(dir.join("sub").join("new_untracked.txt"), "new\n").unwrap();
+        let err = ensure_no_dirty_submodule_worktree(dir)
+            .expect_err("untracked content inside a submodule must be rejected");
+        assert!(err.to_string().contains("dirty"), "got: {err}");
+    }
+
+    #[test]
+    fn nested_dirty_submodule_is_rejected() {
+        let repo = init_repo();
+        let dir = repo.path();
+        let _upstream = add_real_submodule(dir, "sub");
+        let nested_upstream = init_repo();
+        std::fs::write(nested_upstream.path().join("n.txt"), "nested\n").unwrap();
+        commit_all(nested_upstream.path(), "nested initial");
+        run(
+            &dir.join("sub"),
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                nested_upstream.path().to_str().unwrap(),
+                "nested_sub",
+            ],
+        );
+        commit_all(&dir.join("sub"), "add nested submodule");
+        commit_all(dir, "record nested submodule bump");
+
+        std::fs::write(
+            dir.join("sub").join("nested_sub").join("n.txt"),
+            "TAMPERED\n",
+        )
+        .unwrap();
+        let err = ensure_no_dirty_submodule_worktree(dir)
+            .expect_err("a nested dirty submodule must be rejected");
+        assert!(err.to_string().contains("dirty"), "got: {err}");
+    }
+
+    /// Defense in depth: an attacker-reachable `.gitmodules` setting cannot
+    /// hide real dirtiness from this check — verified empirically that
+    /// plain `git status` (with no override) DOES get fooled by this, which
+    /// is exactly why `--ignore-submodules=none` is passed explicitly.
+    #[test]
+    fn gitmodules_ignore_all_cannot_hide_dirty_content() {
+        let repo = init_repo();
+        let dir = repo.path();
+        let _upstream = add_real_submodule(dir, "sub");
+        commit_all(dir, "add submodule");
+        run(
+            dir,
+            &["config", "-f", ".gitmodules", "submodule.sub.ignore", "all"],
+        );
+        std::fs::write(dir.join("sub").join("tracked.txt"), "tampered\n").unwrap();
+        let err = ensure_no_dirty_submodule_worktree(dir)
+            .expect_err("a .gitmodules ignore=all setting must not hide dirty submodule content");
+        assert!(err.to_string().contains("dirty"), "got: {err}");
+    }
+
+    #[test]
+    fn capture_cumulative_candidate_fails_closed_for_dirty_submodule() {
+        let repo = init_repo();
+        let dir = repo.path();
+        let _upstream = add_real_submodule(dir, "sub");
+        let base = commit_all(dir, "add submodule");
+        std::fs::write(dir.join("sub").join("tracked.txt"), "tampered\n").unwrap();
+        let result = capture_cumulative_candidate(dir, &base);
+        assert!(
+            result.is_err(),
+            "candidate capture must fail closed for a dirty submodule: {result:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("sub").join("tracked.txt")).unwrap(),
+            "tampered\n",
+            "the original checkout must not be corrupted by the failed capture"
         );
     }
 }
