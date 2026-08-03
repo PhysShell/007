@@ -1603,3 +1603,303 @@ reasoned choice in §20, not an oversight.
 `git status --short` shows no unstaged/untracked changes beyond what
 this round's own commits already captured; every gate above was run
 against the exact commit this round's final push carries.
+## 22. Corrective round 5: Codex review 4842896076 + CodeRabbit review 4842910559
+
+Two independent external reviews requested against corrective round 4's
+exact head, `6b77b9ac54f5b1e7583b63bee433b141fce44d3a`: Codex review
+`pullrequestreview-4842896076` (two P1 findings) and CodeRabbit review
+`pullrequestreview-4842910559` (9 actionable comments + 8 nitpicks). Every
+finding was reproduced against that exact head, with real git/real
+processes, before any fix landed — several findings changed shape or
+scope once reproduced (see below); one was confirmed a false positive.
+
+### Part 1 — dirty submodule contents fail closed (Codex P1, genuine BLOCKER)
+
+`crates/o7-run` PR discussion `3702966505` (`src/worktree.rs:132`).
+Reproduced with real git before fixing: a real committed submodule,
+initialized, its own tracked file edited WITHOUT committing inside it or
+touching the superproject's gitlink — `ensure_no_gitlink_mutation`'s pure
+tree-to-tree comparison saw identical base/candidate gitlink sets (since
+`git add -A` cannot stage submodule-internal changes short of the
+submodule's own `HEAD` moving), and the resulting cumulative patch was
+byte-for-byte empty. The provider's edit would have been silently and
+permanently lost.
+
+**Fix**: `ensure_no_dirty_submodule_worktree` (`src/worktree.rs`) runs
+`git status --porcelain=2 -z --ignore-submodules=none -uall` — NUL-
+delimited, byte-level field parsing (the `S<c><m><u>` submodule-status
+field), never a text scan — at both capture and materialization. Verified
+empirically that git's own submodule-dirtiness detection recurses into
+NESTED submodules automatically (a nested-submodule edit surfaces on the
+TOP-LEVEL gitlink entry), and that `--ignore-submodules=none` is required,
+not decorative: an attacker-reachable `.gitmodules`
+`submodule.<name>.ignore = all` setting successfully hides real dirtiness
+from plain `git status` with no override.
+
+### Part 2 — candidate replay bound off async Tokio workers (Codex P1 + CodeRabbit Major ×2)
+
+Codex discussion `3702966510` (`crates/o7d/src/routes.rs:150`); CodeRabbit
+`3702978286` (routes.rs:154, Major) and `3702978297` (routes.rs:677,
+Major) — the same underlying finding from two independent reviewers.
+`candidate_projection` (`GET /runs/{id}`) and `parent_candidate_state_usable`
+(command admission) both ran full authoritative replay — unbounded
+`events.jsonl`/artifact reads plus `reduce`/`verify_prefix` — directly on
+a Tokio worker thread, no concurrency limit.
+
+**Fix**: both now run on `tokio::task::spawn_blocking`, behind a shared,
+fixed `Semaphore(4)` (`AppState::candidate_replay_limiter`).
+`get_run`'s projection stays best-effort (`try_acquire`, never awaits a
+permit — under saturation it omits the candidate fields, same as an
+unconfigured `exec`); admission awaits a permit (bounded queuing, not
+skipping) and preserves the existing 409/404/400 contract. A join failure
+fails admission closed (500, no command row); the read-only projection
+swallows it as best-effort. Explicit byte limits, checked via `metadata`
+before any read: 8 MiB `events.jsonl`, 64 MiB per artifact, 128 MiB total
+hydrated per replay — a new `BoundedRecordDirResolver` scoped to ONLY
+these two HTTP-triggered call sites, deliberately not applied to the
+shared `RecordDirResolver` every CLI/operator path uses (a different risk
+profile this round does not change).
+
+### Part 4 — stable materialization_status values (CodeRabbit Major, folded into Part 2's own commit)
+
+CodeRabbit `3702978278` (Major) + `3702978266` (Minor), same function.
+`candidate_projection` built its status string from raw error `Display`
+output — `ReplayError::ArtifactUnresolved`/`ArtifactDigestMismatch` carry
+absolute server filesystem locators, sent verbatim to the HTTP client, and
+the value vocabulary (four prefixes) didn't match its own documentation
+(three). **Fixed**: exactly four stable, bare values —
+`materialized`/`not_applicable`/`failed`/`verification_failed` — never an
+interpolated error/path/locator; details go to server-side `eprintln!`
+only. Distinguishes a missing record (`events.jsonl` `NotFound` →
+`not_applicable`) from any OTHER I/O error (`failed`) from a malformed/
+replay-invalid record (`verification_failed`).
+
+### Part 3 — relative runs_dir/worktree_root (CodeRabbit Major)
+
+`3702978320` (`src/worktree.rs:296`). Reproduced with real git
+(`git -C <worktree> apply <relative-path-valid-elsewhere>` fails to find
+the file) before fixing — and, investigating further, found the SAME
+defect class ALSO breaks `worktree::add`/`worktree::remove` (used by
+`worktree::add` for EVERY worktree creation, both fresh runs and
+continuations), a more fundamental break than the originally-flagged
+`apply_candidate_patch` alone: a relative `--worktree-root` (this CLI's
+own DEFAULT value, not an edge case) resolved against `repo`'s own cwd,
+not the caller's, in `run_git(repo, [...])`.
+
+**Fix**: `apply_candidate_patch`'s private temp-patch directory resolves
+its own real absolute path via `/proc/self/fd` on the already-opened,
+`O_NOFOLLOW`-verified directory descriptor — never a fresh `canonicalize`
+of caller-supplied input, which would reopen the confinement question the
+private store exists to close. `worktree::add`/`remove` operate on paths
+that are entirely operator/CLI-constructed (never derived from a hostile
+base commit's own tree), so a plain lexical `std::path::absolute` is the
+correct, simpler fix there. All three pass the path as `&OsStr` via a new
+`run_git_with_path_args` helper, never through `to_string_lossy`.
+
+### Part 5 — structural sealed-parent check (CodeRabbit correctness finding)
+
+`3702978314` (`src/main.rs:937`). The substring scan
+(`line.contains("\"type\":\"run_sealed\"")`) is replaced by a structural
+comparison on the already-parsed `Vec<RunEvent>`
+`load_verified_candidate_receipt` now returns (no second `events.jsonl`
+read). Investigated, not merely fixed: proved via direct code inspection
+that this check is 100% redundant with the PRECEDING `verdict.is_some()`
+check — the reducer's own `EventAfterSeal` rule structurally forbids any
+event after `RunSealed`, and `state.verdict` is only ever set from inside
+`RunSealed`'s own reducer arm, so a record that already passed full
+`verify_prefix` with `verdict.is_some()` has, by construction, its last
+event equal to `RunSealed`. Kept as explicit, cheap, structural defense in
+depth anyway, consistent with this codebase's own established pattern; no
+adversarial test can isolate the new check from the preceding one for the
+same reason (disclosed, not fabricated around).
+
+### Part 6 — command-binding canonical locator (CodeRabbit nitpick, semantic authority)
+
+Nitpick on `crates/o7-run/src/candidate.rs:159-185`. Every other candidate
+artifact already went through `require_locator`; the command-binding
+artifact was the one remaining exception. Added `COMMAND_BINDING_LOCATOR`
+and enforced it. Confirmed by inspection, not assumed: the production
+writer (`src/record.rs`'s `COMMAND_BINDING_FILE` constant) has only ever
+written this exact name — no legacy-record compatibility concern.
+
+### Part 7 — continuation diff base alignment (CodeRabbit nitpick)
+
+Nitpick on `src/main.rs:1954`. `diff.patch` (evidence-only) was computed
+against the CLI `--base` flag while the worktree/`candidate.patch`/
+`RunMeta.base_commit` all already used the INHERITED candidate obligation.
+Fixed to use the same inherited base; `ContinueArgs.base`'s own doc
+comment (stale since before Q-Deck A0 — it claimed the flag selects the
+child worktree base and that parent changes are not carried forward, both
+false since A0) corrected to state it is accepted for CLI compatibility
+but genuinely ignored on the continuation path.
+
+### Part 8 — durability triage
+
+**8A, fixed**: nitpick on `src/record.rs:263-282`. `sync_data()` makes a
+file's contents durable but says nothing about the containing directory's
+own entry. All four durable-write call sites (`write_task_durable`,
+`write_bytes_durable`, `LedgerBinding::write_durable`,
+`CommandBinding::write_durable`) now also `fsync` the run directory itself
+after the file-level sync — Linux-only (the only platform this project
+targets; every confinement primitive in `src/worktree.rs` already depends
+on Linux-specific `rustix`/`O_NOFOLLOW`/`openat`).
+
+**8B, deferred and disclosed, not attempted unsafely**: nitpick on
+`src/worktree.rs:250-258` (stale `apply-input.<pid>.<n>` temp files after
+a hard crash). A safe cleanup needs a lock/lease mechanism to avoid racing
+a still-live process's own file — building that correctly was judged to
+meaningfully widen this round's scope. No age-only or PID-only heuristic
+delete was implemented, per the round's own explicit instruction not to
+let this nitpick produce an unsafe cleanup. Follow-up scope: a
+`flock`/lease-based reaper scoped only to `.o7-candidate-tmp`, bounded by
+count/bytes, run opportunistically (e.g. at `o7d` startup or via `o7
+recover`) — not implemented this round.
+
+### Part 9 — seven cheap, confirmed cleanups
+
+1. `command_idempotency_key_seen`'s doc comment had been inserted between
+   `create_command`'s own doc block and its signature (`crates/o7-ledger/src/sqlite.rs`),
+   leaving `create_command` with no doc comment and both functions'
+   `# Errors` sections misattributed. Relocated with its own doc to after
+   `create_command`.
+2. Three `candidate.patch` reads in `tests/a0_candidate_state_e2e.rs` now
+   use `std::fs::read`, not `read_to_string` — the spec states this
+   transport is not guaranteed valid UTF-8.
+3. The one test producing a genuine sealed `Fail` verdict now explicitly
+   asserts a non-zero exit code, instead of discarding it.
+4. Two stale `§13 Part N` doc cross-references corrected to `§14 Part N`.
+5. Two illustrative plain-text fenced code blocks now declare `text`.
+6. `patch_kind` cross-binding: replaced a vague comment with an honest
+   accounting — `CandidatePatchKind` has exactly one variant with
+   deliberately no `#[serde(other)]` catch-all, so any receipt naming a
+   different `patch_kind` fails at DESERIALIZATION, a different and
+   earlier failure point than the comparison line itself; a genuinely
+   isolating test would require either fabricating a test that only
+   re-proves unknown-JSON rejection (already covered) or adding a
+   production-only-for-testing second enum variant (rejected — weakens
+   the type's own intentional design).
+7. Already fixed as part of Part 2/4's own commit: unreadable
+   `events.jsonl` no longer classifies as `not_applicable` (only
+   `NotFound` does).
+
+### Part 10 — the rustix dependency claim: FALSE POSITIVE, confirmed with evidence
+
+CodeRabbit `3702978257` (Cargo.toml:85) claimed `rustix` is "not declared
+in any Cargo.toml and no Cargo.lock entry is present." Verified directly:
+`rustix` IS declared in the ROOT `Cargo.toml` (line 85) AND in
+`crates/o7-worktree/Cargo.toml`, `crates/o7-worker/Cargo.toml`,
+`crates/o7-verifier/Cargo.toml`; `Cargo.lock` has a complete resolved
+entry (`rustix v1.1.4`, full checksum, dependency list);
+`cargo tree -i rustix` shows real dependency edges from `o7` and
+`o7-worktree`. `git log -p` confirms it was added to the root manifest
+back in corrective round 1 (the P6 symlink-escape fix), with its own
+commit message explicitly noting it reuses the already-in-tree,
+`deny.toml`-allowed dependency `o7-worktree` already declared. No
+dependency change made — the claim does not match this repository's own
+state at the reviewed head, and the build has depended on it successfully
+across every round since.
+
+**Commit shape** (9 additive, on top of round 4's frozen head
+`6b77b9ac54f5b1e7583b63bee433b141fce44d3a`):
+`fix(worktree): reject dirty submodule contents`,
+`fix(o7d): bound candidate replay off async workers`,
+`fix(worktree): anchor relative candidate patch paths`,
+`fix(root): use structural sealed-parent evidence`,
+`fix(replay): enforce command-binding locator`,
+`fix(root): align continuation diff base with inherited candidate base`,
+`fix(root): fsync run directory after durable artifact writes`,
+`test(q-deck): cover external round 5 findings`,
+`docs(q-deck): record round 5 evidence and triage`. Fewer commits than
+the round's own suggested 8-commit sequence: Parts 2 and 4 (bounding off
+async workers, stabilizing projection statuses) touch the exact same
+lines of the exact same function — CodeRabbit's own two findings were on
+that same function — so they were committed together rather than split
+artificially; disclosed here rather than silently deviating.
+
+## 23. Corrective round 5 — evidence
+
+Base for this round: the PR's own exact re-gated head,
+`6b77b9ac54f5b1e7583b63bee433b141fce44d3a` (corrective round 4's final
+commit, the same head both Codex review `4842896076` and CodeRabbit
+review `4842910559` reviewed). New head: see the PR body / `git log`.
+
+- `cargo fmt --check` — clean. `git diff --check` — clean.
+- `cargo check -p o7 -p o7-run -p o7-ledger -p o7d` — clean.
+- `cargo test -p o7-run` (lib + `contract` + `reducer_transitions` +
+  `replay_acceptance` + `candidate_state`) — **130/130 passing** (28
+  candidate_state — 27 carried + 1 new locator test; 10 contract; 72
+  reducer_transitions; 18 replay_acceptance; 0 lib), unchanged except the
+  one new Part 6 test.
+- `cargo test -p o7-ledger --test commands` — 45/45, unchanged.
+- `cargo test -p o7 --test r1_command_e2e` — **37/37 passing, unchanged**.
+- `cargo test -p o7 --test a0_candidate_state_e2e` — **29/29 passing** (24
+  carried from round 4, 5 new): dirty-submodule capture failure + no
+  continuation-parent path (Part 1); oversized-`events.jsonl`
+  fail-closed at both call sites + large-replay-does-not-block-health
+  (Part 2); relative-runs_dir/worktree_root continuation succeeds (Part
+  3); continuation diff base matches the inherited candidate base despite
+  a deliberately wrong `--base` flag (Part 7).
+- `src/worktree.rs`'s own unit test modules — **10 new** (7
+  `dirty_submodule_tests`, 3 `special_runs_dir_path_tests`): clean/
+  deinitialized submodules pass; dirty tracked/untracked/nested
+  submodules rejected; a `.gitmodules` `ignore=all` bypass defeated;
+  `capture_cumulative_candidate` itself fails closed without corrupting
+  the original checkout; a `runs_dir` path containing a space or
+  non-UTF-8 bytes handled correctly; a symlink at the private temp
+  store's own name still refused.
+- `src/record.rs`'s own new `durability_tests` module — **3 new**:
+  `sync_dir` succeeds for a real directory, fails closed for a
+  nonexistent one; all four durable-write call sites still produce
+  correct content after the added directory sync.
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean, 0
+  warnings, across the whole workspace.
+- `cargo test --workspace --no-fail-fast` — every crate green, run
+  single-threaded, same six pre-existing environmental exclusions
+  carried forward unchanged, launched detached from this VPS's own
+  foreground-command time ceiling (as prior rounds disclosed) — all 97
+  `test result:` lines report `0 failed`.
+- `cargo deny check advisories bans licenses sources` — the SAME
+  `lz4_flex`/`RUSTSEC-2026-0041`/`CVSS:4.0` parse failure disclosed since
+  round 1 (this installed `cargo-deny 0.18.2` predates CVSS v4.0 support
+  in its bundled parser). Confirmed unrelated to this round's code: `git
+  diff --stat 6b77b9a..HEAD -- Cargo.lock Cargo.toml
+  crates/*/Cargo.toml` is empty.
+- `npm test`/`npm run check` (`apps/q-deck`) — 45/45 / 0 errors,
+  unchanged (frontend untouched this round).
+
+### Provider invocation counts, this round
+
+- Dirty-submodule case: provider invoked exactly once (capture happens
+  strictly AFTER provider execution; the failure is not a redispatch);
+  the unsealed record's subsequent admission-preflight rejection adds
+  zero further invocations.
+- Oversized-`events.jsonl` case: zero additional invocations at
+  admission (409, zero command rows).
+- Relative-runs_dir/diff-base-alignment continuations: normal, expected
+  invocation counts (one per run/continuation), unchanged from the
+  equivalent absolute-path/default-`--base` cases.
+
+### Known limitations (disclosed, not hidden)
+
+Everything §19/§21 already disclosed remains open. New this round: 8B
+(stale temp-file cleanup) is explicitly deferred, not fixed — see Part 8
+above for the exact follow-up scope. The Part 5 structural check's own
+adversarial-test requirement is unreachable by construction (proven, not
+assumed) — the existing unsealed-parent test suite already covers the
+only reachable manifestation. Part 9 item 6 (`patch_kind` coverage) is
+proven indirectly for the same class of reason — `CandidatePatchKind`'s
+own single-variant, no-catch-all design means the comparison line cannot
+be independently exercised without either weakening that design or
+fabricating a test that proves something else. Part 2's "task panic/join
+failure fails safely" requirement is proven by the code's own structure
+(the `.map_err`/best-effort-swallow paths exist and are exercised by
+every existing passing test that reaches them) rather than a dedicated
+fault-injection test — deliberately not engineered given the fragility of
+reliably triggering a genuine panic inside replay code without
+introducing an artificial injection point.
+
+### Clean worktree confirmation
+
+`git status --short` shows no unstaged/untracked changes beyond what this
+round's own commits already captured; every gate above was run against
+the exact commit this round's final push carries.
