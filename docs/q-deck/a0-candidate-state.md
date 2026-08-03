@@ -1903,3 +1903,21 @@ introducing an artificial injection point.
 `git status --short` shows no unstaged/untracked changes beyond what this
 round's own commits already captured; every gate above was run against
 the exact commit this round's final push carries.
+
+### Addendum — one exact-head Actions failure, found and fixed
+
+The exact-head Actions run for `353c0a6` (`o7-worker gate`, run
+`30815288241`) failed:
+`worktree::dirty_submodule_tests::nested_dirty_submodule_is_rejected`
+panicked with `"empty ident name"` while committing inside the OUTER
+submodule's own checkout (`dir/sub`). `git submodule add` clones into a
+genuinely separate git config scope that does NOT inherit the upstream
+repo's own local identity config — this development VPS happens to have
+a global git identity configured, masking the gap locally every time
+this suite ran here, while a stock GitHub Actions runner has none. Fixed
+in `c9afb84` by setting `user.email`/`user.name` locally for that
+checkout, exactly like every other repo this test module creates —
+confirmed test-only, no production code involved. All 101 `o7` lib unit
+tests pass locally with the fix; the exact-head Actions run for `c9afb84`
+(`o7-worker gate` run `30816233861`, `pr3 worktree+verifier tests` run
+`30816233751`) both succeeded.
