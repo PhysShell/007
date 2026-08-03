@@ -18,8 +18,13 @@
 //! record directory from server-owned execution configuration and the
 //! already-durably-bound `run_id`, then delegates.
 
+use std::ffi::OsStr;
+use std::io::Read as _;
+use std::os::fd::{AsFd, OwnedFd};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+use rustix::fs::{self, Mode, OFlags};
 
 pub(crate) use o7::recovery::{ChildRecordState, DispatchProgress};
 
@@ -54,14 +59,14 @@ const MAX_TOTAL_HYDRATED_BYTES: u64 = 128 * 1024 * 1024;
 /// unbounded read there is a different, already-accepted risk profile this
 /// round does not change.
 struct BoundedRecordDirResolver {
-    base: PathBuf,
+    dir_fd: OwnedFd,
     total_read: AtomicU64,
 }
 
 impl BoundedRecordDirResolver {
-    fn new(base: PathBuf) -> Self {
+    fn new(dir_fd: OwnedFd) -> Self {
         Self {
-            base,
+            dir_fd,
             total_read: AtomicU64::new(0),
         }
     }
@@ -72,6 +77,119 @@ fn confined_locator(locator: &str) -> bool {
     !locator.is_empty()
         && p.components()
             .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+/// Q-Deck A0 corrective round 6 (Part 1 counterexample #2 / Part 2): opens
+/// the record directory itself, no-follow, as a directory descriptor.
+/// Every subsequent open (`events.jsonl`, each artifact locator) happens
+/// relative to THIS descriptor via `openat`, never by re-resolving a path
+/// string — there is no second, independent path resolution between a
+/// check and a read left to race.
+///
+/// Only the FINAL path component (`run_id`, already proven to be a single
+/// confined component by [`confine_run_id_component`]) is genuinely
+/// variable here; `NOFOLLOW` on it rejects a symlinked record directory.
+/// The leading components (`exec.runs_dir`, the target label) are entirely
+/// server-configuration-controlled, never attacker input, so the kernel
+/// resolving symlinks within THEM (ordinary path resolution, unavoidable
+/// short of walking from a fixed root) is not a risk this round changes.
+fn open_record_dir(dir: &std::path::Path) -> std::io::Result<OwnedFd> {
+    fs::open(
+        dir,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(std::io::Error::from)
+}
+
+/// Opens `name` relative to `dir_fd`, no-follow, refusing anything that is
+/// not a plain regular file. `O_NONBLOCK` means a FIFO cannot hang this
+/// open even though the file-type check a moment later refuses it anyway.
+/// The size returned comes from `fstat` on the EXACT descriptor just
+/// opened — never a separate, independently-resolved `stat` call — so
+/// there is no window between "check" and "this is the file being read"
+/// for a TOCTOU swap to land in.
+fn open_regular_file_nofollow(dir_fd: impl AsFd, name: &OsStr) -> std::io::Result<(OwnedFd, u64)> {
+    // `?` on these two, not a `String`-formatting map_err: preserving the
+    // underlying `std::io::Error` (and critically its `ErrorKind`, e.g.
+    // `NotFound` for a missing `events.jsonl`) is what lets
+    // `candidate_projection` keep distinguishing "no record at all" from
+    // "a record exists but is broken" — collapsing everything to a string
+    // here would silently erase that distinction.
+    let fd = fs::openat(
+        dir_fd,
+        name,
+        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(std::io::Error::from)?;
+    let stat = fs::fstat(&fd).map_err(std::io::Error::from)?;
+    if !fs::FileType::from_raw_mode(stat.st_mode).is_file() {
+        return Err(std::io::Error::other(format!(
+            "{name:?} is not a regular file — a symlink, FIFO, socket, device, or directory is \
+             never valid record content"
+        )));
+    }
+    let size = u64::try_from(stat.st_size)
+        .map_err(|_| std::io::Error::other(format!("{name:?}: fstat reported a negative size")))?;
+    Ok((fd, size))
+}
+
+/// Walks `locator`'s components relative to `dir_fd`, opening every
+/// intermediate component as its own no-follow directory descriptor (never
+/// `base.join(locator)` followed by a single path-based open), and returns
+/// the final regular-file descriptor plus its `fstat`-observed size.
+/// [`confined_locator`] has already proven every component is a `Normal`
+/// component (no absolute path, no `..`, non-empty) before this runs.
+fn open_locator_nofollow(dir_fd: &OwnedFd, locator: &str) -> Result<(OwnedFd, u64), String> {
+    let path = std::path::Path::new(locator);
+    let mut components: Vec<&OsStr> = path.components().map(|c| c.as_os_str()).collect();
+    let Some(last) = components.pop() else {
+        return Err("empty locator".to_owned());
+    };
+    let mut intermediate: Option<OwnedFd> = None;
+    for component in components {
+        let parent: &OwnedFd = intermediate.as_ref().unwrap_or(dir_fd);
+        let next = fs::openat(
+            parent,
+            component,
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(|e| format!("open intermediate directory {component:?}: {e}"))?;
+        intermediate = Some(next);
+    }
+    let parent: &OwnedFd = intermediate.as_ref().unwrap_or(dir_fd);
+    open_regular_file_nofollow(parent, last).map_err(|e| format!("open {last:?}: {e}"))
+}
+
+/// Reads the ALREADY-OPENED descriptor `fd`, whose `fstat`-observed size
+/// was `declared_size`, capped at `limit` bytes — inclusive: a file of
+/// EXACTLY `limit` bytes is accepted, `limit + 1` is refused. Reads
+/// `limit + 1` bytes through the SAME descriptor the size came from (never
+/// a fresh open): if more than `limit` bytes are actually observed, the
+/// file grew after `fstat` (a sparse file, a concurrent writer, a device
+/// masquerading as a small file) and is refused rather than silently
+/// truncated or trusted on the strength of a now-stale declared size.
+fn read_bounded_from_fd(fd: OwnedFd, declared_size: u64, limit: u64) -> Result<Vec<u8>, String> {
+    if declared_size > limit {
+        return Err(format!(
+            "declared size {declared_size} exceeds the {limit}-byte limit"
+        ));
+    }
+    let mut file = std::fs::File::from(fd);
+    let mut buf = Vec::new();
+    (&mut file)
+        .take(limit + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("read: {e}"))?;
+    let observed = buf.len() as u64;
+    if observed > limit {
+        return Err(format!(
+            "grew past the {limit}-byte limit during read (observed at least {observed} bytes)"
+        ));
+    }
+    Ok(buf)
 }
 
 impl o7_run::replay::ArtifactResolver for BoundedRecordDirResolver {
@@ -90,17 +208,26 @@ impl o7_run::replay::ArtifactResolver for BoundedRecordDirResolver {
                     .to_owned(),
             ));
         }
-        let path = self.base.join(&a.locator);
-        let size = std::fs::metadata(&path)
-            .map_err(|e| fail(format!("stat before read: {e}")))?
-            .len();
+        let (fd, size) = open_locator_nofollow(&self.dir_fd, &a.locator).map_err(fail)?;
         if size > MAX_ARTIFACT_BYTES {
             return Err(fail(format!(
                 "artifact is {size} bytes, exceeding the {MAX_ARTIFACT_BYTES}-byte per-artifact \
                  limit for an HTTP-triggered candidate replay"
             )));
         }
-        let running_total = self.total_read.fetch_add(size, Ordering::Relaxed) + size;
+        // `checked_add` inside `fetch_update`, never a plain `fetch_add`:
+        // a plain add silently wraps on overflow with no signal at all —
+        // here, overflow instead fails the resolve outright. A repeated
+        // reference to the same artifact is never deduplicated; it always
+        // consumes budget again, so there is no way to evade the total by
+        // referencing one artifact many times.
+        let prev_total = self
+            .total_read
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |prev| {
+                prev.checked_add(size)
+            })
+            .map_err(|_| fail("total hydrated byte counter overflowed".to_owned()))?;
+        let running_total = prev_total + size;
         if running_total > MAX_TOTAL_HYDRATED_BYTES {
             return Err(fail(format!(
                 "total hydrated bytes for this replay would reach {running_total}, exceeding \
@@ -108,22 +235,28 @@ impl o7_run::replay::ArtifactResolver for BoundedRecordDirResolver {
                  candidate replay"
             )));
         }
-        std::fs::read(&path).map_err(|e| fail(e.to_string()))
+        read_bounded_from_fd(fd, size, MAX_ARTIFACT_BYTES).map_err(fail)
     }
 }
 
-/// Read `dir/events.jsonl`, refusing (before any read) a file larger than
-/// [`MAX_EVENTS_JSONL_BYTES`] — Q-Deck A0 corrective round 5, Part 2B.
-fn read_bounded_events_jsonl(dir: &std::path::Path) -> std::io::Result<String> {
-    let path = dir.join("events.jsonl");
-    let size = std::fs::metadata(&path)?.len();
+/// Read `events.jsonl` relative to the already-opened, no-follow record
+/// directory descriptor `dir_fd` — refusing (before any read) anything
+/// that is not a plain regular file, or a regular file larger than
+/// [`MAX_EVENTS_JSONL_BYTES`] (inclusive: exactly the limit is accepted).
+/// Q-Deck A0 corrective round 5, Part 2B; round 6, Part 2 (descriptor-
+/// based, TOCTOU-proof rewrite — see [`open_regular_file_nofollow`] and
+/// [`read_bounded_from_fd`]).
+fn read_bounded_events_jsonl(dir_fd: &OwnedFd) -> std::io::Result<String> {
+    let (fd, size) = open_regular_file_nofollow(dir_fd, OsStr::new("events.jsonl"))?;
     if size > MAX_EVENTS_JSONL_BYTES {
         return Err(std::io::Error::other(format!(
             "events.jsonl is {size} bytes, exceeding the {MAX_EVENTS_JSONL_BYTES}-byte limit \
              for an HTTP-triggered candidate replay"
         )));
     }
-    std::fs::read_to_string(path)
+    let buf =
+        read_bounded_from_fd(fd, size, MAX_EVENTS_JSONL_BYTES).map_err(std::io::Error::other)?;
+    String::from_utf8(buf).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 /// The run-store `target` label a command's child run record lives under —
@@ -236,11 +369,13 @@ pub(crate) fn parent_candidate_state_usable(
 ) -> Result<(), String> {
     let dir = child_record_dir(exec, parent_run_id)
         .map_err(|e| format!("resolving parent record directory: {e}"))?;
-    let text = read_bounded_events_jsonl(&dir)
+    let dir_fd =
+        open_record_dir(&dir).map_err(|e| format!("opening the parent's record directory: {e}"))?;
+    let text = read_bounded_events_jsonl(&dir_fd)
         .map_err(|e| format!("reading the parent's canonical record: {e}"))?;
     let events = o7::events::from_jsonl(&text)
         .map_err(|e| format!("parsing the parent's canonical record: {e}"))?;
-    let resolver = BoundedRecordDirResolver::new(dir);
+    let resolver = BoundedRecordDirResolver::new(dir_fd);
     let (state, _artifacts_verified) = o7_run::replay::verify_prefix(&events, &resolver)
         .map_err(|e| format!("the parent's canonical record failed full replay: {e}"))?;
     if state.verdict.is_none() {
@@ -335,7 +470,23 @@ pub(crate) fn candidate_projection(
     // Any OTHER I/O error (permission denied, a genuine device/read
     // failure) is a `failed` status, not silently folded into the exact
     // same "there's simply nothing here" value.
-    let text = match read_bounded_events_jsonl(&dir) {
+    //
+    // Q-Deck A0 corrective round 6 (Part 2): the record directory itself
+    // missing (no canonical record has ever been written for this run)
+    // and `events.jsonl` missing INSIDE an existing directory both surface
+    // as `ErrorKind::NotFound` — exactly as the old path-based `metadata`
+    // call collapsed both cases, preserved here for behavioral parity.
+    let dir_fd = match open_record_dir(&dir) {
+        Ok(fd) => fd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return (None, None, Some("not_applicable".to_owned()))
+        }
+        Err(e) => {
+            eprintln!("[o7d] candidate projection for run {run_id}: opening record directory: {e}");
+            return (None, None, Some("failed".to_owned()));
+        }
+    };
+    let text = match read_bounded_events_jsonl(&dir_fd) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return (None, None, Some("not_applicable".to_owned()))
@@ -352,7 +503,7 @@ pub(crate) fn candidate_projection(
             return (None, None, Some("verification_failed".to_owned()));
         }
     };
-    let resolver = BoundedRecordDirResolver::new(dir);
+    let resolver = BoundedRecordDirResolver::new(dir_fd);
     let (state, _artifacts_verified) = match o7_run::replay::verify_prefix(&events, &resolver) {
         Ok(ok) => ok,
         Err(e) => {
@@ -367,5 +518,283 @@ pub(crate) fn candidate_projection(
             Some("materialized".to_owned()),
         ),
         None => (None, None, Some("not_applicable".to_owned())),
+    }
+}
+
+/// Q-Deck A0 corrective round 6 (Part 2): adversarial, descriptor-level
+/// tests for the bounded, no-follow, TOCTOU-proof read path. At `c979bc1`
+/// these checks were path-based (`std::fs::metadata` then a SEPARATE
+/// `std::fs::read`/`read_to_string`) — a symlink from `events.jsonl` to
+/// `/dev/zero` reports `metadata().len() == 0` (character devices always
+/// do), passes the size gate, and the subsequent read follows the symlink
+/// and reads until OOM. Every test here that would otherwise risk an
+/// unbounded read is wrapped in an explicit wall-clock timeout so a
+/// regression fails the test loudly rather than hanging or exhausting this
+/// shared VPS's own memory.
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
+mod bounded_read_tests {
+    use super::*;
+    use o7_run::event::{ArtifactKind, ArtifactRef, Digest256};
+    use o7_run::replay::ArtifactResolver as _;
+    use std::time::Duration;
+
+    fn artifact_ref(locator: &str) -> ArtifactRef {
+        ArtifactRef {
+            kind: ArtifactKind::Diff,
+            locator: locator.to_owned(),
+            digest: Digest256::of_bytes(b""),
+        }
+    }
+
+    /// Every genuinely risky call in this module — anything that could, on
+    /// a regression, read unboundedly — runs on a blocking thread with a
+    /// hard wall-clock cap. A regression fails the assertion (or times out
+    /// the test itself) instead of ever actually exhausting memory.
+    fn run_with_timeout<F, R>(f: F) -> R
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("operation did not complete within the timeout — likely an unbounded read")
+    }
+
+    #[test]
+    fn events_jsonl_symlink_to_dev_zero_is_rejected_quickly() {
+        let dir = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink("/dev/zero", dir.path().join("events.jsonl")).unwrap();
+        let dir_path = dir.path().to_owned();
+        let result = run_with_timeout(move || {
+            let dir_fd = open_record_dir(&dir_path).unwrap();
+            read_bounded_events_jsonl(&dir_fd)
+        });
+        assert!(result.is_err(), "a symlink to /dev/zero must never be read");
+    }
+
+    #[test]
+    fn artifact_symlink_to_dev_zero_is_rejected_quickly() {
+        let dir = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink("/dev/zero", dir.path().join("evil.patch")).unwrap();
+        let dir_path = dir.path().to_owned();
+        let result: Result<Vec<u8>, _> = run_with_timeout(move || {
+            let dir_fd = open_record_dir(&dir_path).unwrap();
+            let resolver = BoundedRecordDirResolver::new(dir_fd);
+            resolver.resolve(&artifact_ref("evil.patch"))
+        });
+        assert!(result.is_err(), "a symlink to /dev/zero must never be read");
+    }
+
+    #[test]
+    fn symlink_to_an_oversized_regular_file_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let big = dir.path().join("big.bin");
+        // Sparse: a huge LOGICAL size with no real disk/time cost.
+        std::fs::File::create(&big)
+            .unwrap()
+            .set_len(MAX_ARTIFACT_BYTES + 1)
+            .unwrap();
+        std::os::unix::fs::symlink(&big, dir.path().join("evil.patch")).unwrap();
+        let dir_fd = open_record_dir(dir.path()).unwrap();
+        let resolver = BoundedRecordDirResolver::new(dir_fd);
+        let result = resolver.resolve(&artifact_ref("evil.patch"));
+        assert!(
+            result.is_err(),
+            "a symlink target is refused by NOFOLLOW regardless of its own size"
+        );
+    }
+
+    #[test]
+    fn fifo_is_rejected_without_hanging() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("events.jsonl");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("spawn mkfifo");
+        assert!(
+            status.success(),
+            "mkfifo must succeed for this test to be meaningful"
+        );
+        let dir_path = dir.path().to_owned();
+        let result = run_with_timeout(move || {
+            let dir_fd = open_record_dir(&dir_path).unwrap();
+            read_bounded_events_jsonl(&dir_fd)
+        });
+        assert!(
+            result.is_err(),
+            "a FIFO must never be treated as record content"
+        );
+    }
+
+    #[test]
+    fn socket_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock_path = dir.path().join("events.jsonl");
+        let _listener = std::os::unix::net::UnixListener::bind(&sock_path).unwrap();
+        let dir_fd = open_record_dir(dir.path()).unwrap();
+        let result = read_bounded_events_jsonl(&dir_fd);
+        assert!(
+            result.is_err(),
+            "a socket must never be treated as record content"
+        );
+    }
+
+    /// A device special file can't be created without root, and hard-
+    /// linking a real one (`/dev/null`) into a tempdir fails cross-device
+    /// (`/dev` and `TMPDIR` are different filesystems here). This tests the
+    /// file-type check itself directly against the real `/dev/null`
+    /// device — proving `FileType::from_raw_mode(..).is_file()` correctly
+    /// refuses a character device, independent of how a caller's fd came
+    /// to point at one (symlink-NOFOLLOW already covers that path above).
+    #[test]
+    fn file_type_check_rejects_a_real_character_device() {
+        let fd = fs::open(
+            "/dev/null",
+            OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
+            Mode::empty(),
+        )
+        .unwrap();
+        let stat = fs::fstat(&fd).unwrap();
+        assert!(
+            !fs::FileType::from_raw_mode(stat.st_mode).is_file(),
+            "/dev/null must never be classified as a regular file"
+        );
+    }
+
+    #[test]
+    fn toctou_path_replacement_after_open_does_not_affect_already_opened_fd() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("events.jsonl"), "original\n").unwrap();
+        let dir_fd = open_record_dir(dir.path()).unwrap();
+        let (fd, _size) = open_regular_file_nofollow(&dir_fd, OsStr::new("events.jsonl")).unwrap();
+        // Swap the path AFTER the descriptor is already open — a real
+        // TOCTOU attacker's move. Descriptor-based reads never re-resolve
+        // the path, so this must have no effect on what gets read.
+        std::fs::remove_file(dir.path().join("events.jsonl")).unwrap();
+        std::os::unix::fs::symlink("/dev/zero", dir.path().join("events.jsonl")).unwrap();
+        let content = read_bounded_from_fd(fd, 9, MAX_EVENTS_JSONL_BYTES).unwrap();
+        assert_eq!(content, b"original\n");
+    }
+
+    #[test]
+    fn post_fstat_growth_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("growing.txt");
+        std::fs::write(&path, "12345").unwrap();
+        let dir_fd = open_record_dir(dir.path()).unwrap();
+        let (fd, declared_size) =
+            open_regular_file_nofollow(&dir_fd, OsStr::new("growing.txt")).unwrap();
+        assert_eq!(declared_size, 5);
+        // Grow the file (via the ORIGINAL path, a separate handle) after
+        // the size was fstat'd but before the bounded read runs.
+        std::fs::write(&path, "1234567890").unwrap();
+        let result = read_bounded_from_fd(fd, declared_size, 5);
+        assert!(
+            result.is_err(),
+            "a file that grew past its fstat'd size must be rejected, not silently truncated"
+        );
+    }
+
+    #[test]
+    fn sparse_file_oversized_logical_length_is_rejected_before_any_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sparse.bin");
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(MAX_EVENTS_JSONL_BYTES + 1)
+            .unwrap();
+        std::fs::rename(&path, dir.path().join("events.jsonl")).unwrap();
+        let dir_fd = open_record_dir(dir.path()).unwrap();
+        let result = run_with_timeout(move || read_bounded_events_jsonl(&dir_fd));
+        assert!(
+            result.is_err(),
+            "an oversized declared (logical) size must be refused before any read at all"
+        );
+    }
+
+    #[test]
+    fn exact_limit_is_accepted_inclusive() {
+        let fd = tempfile::tempfile().unwrap();
+        let owned: std::os::fd::OwnedFd = fd.into();
+        let content = read_bounded_from_fd(owned, 0, 10);
+        assert!(content.is_ok());
+        // A real exact-limit boundary, using the actual event-log constant
+        // via a sparse (all-zero, valid-UTF8) file — fast, no huge write.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::File::create(dir.path().join("events.jsonl"))
+            .unwrap()
+            .set_len(MAX_EVENTS_JSONL_BYTES)
+            .unwrap();
+        let dir_fd = open_record_dir(dir.path()).unwrap();
+        let text = run_with_timeout(move || read_bounded_events_jsonl(&dir_fd))
+            .expect("exactly the limit must be accepted");
+        assert_eq!(text.len() as u64, MAX_EVENTS_JSONL_BYTES);
+    }
+
+    #[test]
+    fn limit_plus_one_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.bin");
+        std::fs::write(&path, vec![b'a'; 11]).unwrap();
+        let dir_fd = open_record_dir(dir.path()).unwrap();
+        let (fd, size) = open_regular_file_nofollow(&dir_fd, OsStr::new("f.bin")).unwrap();
+        let result = read_bounded_from_fd(fd, size, 10);
+        assert!(
+            result.is_err(),
+            "declared size one over the limit must be rejected"
+        );
+    }
+
+    #[test]
+    fn repeated_artifact_reference_always_consumes_budget_never_bypassed() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.patch"), vec![b'x'; 1000]).unwrap();
+        let dir_fd = open_record_dir(dir.path()).unwrap();
+        let resolver = BoundedRecordDirResolver::new(dir_fd);
+        // Seed the running total close to the ceiling so a THIRD read of
+        // the exact same artifact tips it over — proving repeated
+        // references are never deduplicated to evade the total budget.
+        resolver
+            .total_read
+            .store(MAX_TOTAL_HYDRATED_BYTES - 1500, Ordering::SeqCst);
+        assert!(resolver.resolve(&artifact_ref("a.patch")).is_ok());
+        let result = resolver.resolve(&artifact_ref("a.patch"));
+        assert!(
+            result.is_err(),
+            "a second read of the SAME artifact must still consume budget and can still exceed it"
+        );
+    }
+
+    #[test]
+    fn total_budget_overflow_is_rejected_not_wrapped() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.patch"), b"x").unwrap();
+        let dir_fd = open_record_dir(dir.path()).unwrap();
+        let resolver = BoundedRecordDirResolver::new(dir_fd);
+        resolver.total_read.store(u64::MAX, Ordering::SeqCst);
+        let result = resolver.resolve(&artifact_ref("a.patch"));
+        assert!(
+            result.is_err(),
+            "checked_add overflow must fail the resolve, never silently wrap the counter"
+        );
+    }
+
+    #[test]
+    fn malformed_locators_are_rejected_before_any_io() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_fd = open_record_dir(dir.path()).unwrap();
+        let resolver = BoundedRecordDirResolver::new(dir_fd);
+        for bad in ["../escape.txt", "/etc/passwd", "", "a/../../b"] {
+            let result = resolver.resolve(&artifact_ref(bad));
+            assert!(
+                result.is_err(),
+                "locator {bad:?} must be refused before any I/O"
+            );
+        }
     }
 }

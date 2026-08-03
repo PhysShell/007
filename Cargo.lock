@@ -1117,6 +1117,7 @@ dependencies = [
  "o7",
  "o7-ledger",
  "o7-run",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",
