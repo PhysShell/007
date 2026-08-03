@@ -23,9 +23,10 @@ decision.
 
 - Program record: the A/B1/B2/S convergence discussion (issues #91, #94,
   #95 and the PR #93 review thread).
-- Related accepted docs: `docs/agent-memory-layer.md`,
-  `docs/task-aware-context-generator.md`,
-  `docs/decision-and-admission-protocol.md`.
+- Related documents: `docs/agent-memory-layer.md` (draft),
+  `docs/task-aware-context-generator.md` (draft),
+  `docs/decision-and-admission-protocol.md` (accepted design decision,
+  merged to `main` via PR #93).
 - Qodec (`PhysShell/qodec`) is an experimental encoder/projection backend
   for representation experiments. It does not own the definitions of
   Decision, Assessment, Evidence, or ContextCompleteness — a codec must
@@ -42,9 +43,14 @@ holdout/     evaluation cases NOT used while designing the schema
 
 ## Storage policy
 
-- RAW blobs (platform exports, transcripts, captures, reconstructions)
-  live in the owner's external local CAS and are **never committed** to
-  this repository.
+- Source artifacts and experimental blobs live in the owner's external
+  local CAS and are **never committed** to this repository. They are
+  three distinct classes with different authority, never lumped together:
+  - **platform captures/exports** — RAW;
+  - **derived transcripts** — deterministic derivatives with provenance
+    to a RAW digest;
+  - **agent reconstructions** — advisory `agent_claim` negative controls,
+    not RAW under any circumstances.
 - The repository holds digests, sizes, selectors, manifests, and expected
   outputs only.
 - Digest mismatch on any referenced blob invalidates the fixture
