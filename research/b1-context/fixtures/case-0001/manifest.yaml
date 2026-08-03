@@ -89,10 +89,38 @@ raw_sources:
         container_reupload: sha256:011638b28a57cf7a10356a8d35e9ee39124a376503365099e8fcd51cd3fc2c4f
       checked_at: 2026-08-03
       result: match
+    superseded_by: claude-code-session-c-snapshot-2
     notes: >
       Live append-only JSONL. Any later snapshot of the same session MUST
       contain this snapshot as an exact byte prefix (integrity relation).
-      A final end-of-session snapshot is expected to supersede this one.
+      Superseded by claude-code-session-c-snapshot-2; retained as a
+      historical source.
+
+  - id: claude-code-session-c-snapshot-2
+    source_system: claude-code-container
+    capture_procedure: container-transcript-copy-v0
+    native_conversation_id: e85f6f87-7a4b-51ea-83e9-a3e7b748a981
+    session_url: https://claude.ai/code/session_011To1YzMvKuRefLMBsa89Rp
+    observed_at: 2026-08-03T10:22:32Z
+    events: 683
+    byte_length: 2839471
+    digest: sha256:6a86185402fd69d2fe4aad425a257b06c9bcfc4b28decc0b690d9b314f4066b9
+    authority: platform_artifact_snapshot
+    supersedes: claude-code-session-c-snapshot-1
+    storage_ref: cas:sha256:6a86185402fd69d2fe4aad425a257b06c9bcfc4b28decc0b690d9b314f4066b9
+    prefix_check:
+      against: claude-code-session-c-snapshot-1
+      against_digest: sha256:011638b28a57cf7a10356a8d35e9ee39124a376503365099e8fcd51cd3fc2c4f
+      bytes: 2020898
+      procedure: cmp-prefix-v0
+      checked_at: 2026-08-03T10:22:32Z
+      result: match
+    notes: >
+      End-of-session snapshot. Taken mid-final-turn: the closing receipt
+      message describing this snapshot is necessarily not contained in it
+      (a transcript cannot contain a description of its own last byte).
+      A later platform export of session C may extend it and must satisfy
+      the same byte-prefix relation.
 
 negative_control:
   - id: case-0001-claude-reconstruction-v0
@@ -137,7 +165,6 @@ negative_control:
 
 pending:
   - chatgpt account export (platform_export; supersedes/confirms the three interim captures)
-  - final session C snapshot (byte-prefix rule applies)
   - user-visible derived transcripts (extractors v0)
   - state-observables-schema-v0 (built only after this manifest)
 
