@@ -1,0 +1,147 @@
+schema: o7.b1.fixture-manifest/v0
+fixture_id: case-0001
+status: INTERIM_SOURCE_SET_CAPTURED
+# Promotion to SOURCE_SET_COMPLETE requires:
+#   - platform/account export (or an explicitly accepted equivalent source)
+#     for the chatgpt conversations;
+#   - final session C snapshot;
+#   - all digest and byte-prefix checks passing.
+# The set status speaks only to completeness of the set; each source keeps
+# its own class and authority ("RAW" never silently equalizes them).
+created: 2026-08-03
+
+storage_policy:
+  raw_blobs: external-local-cas          # NEVER committed to this repository
+  repository_holds: [digests, sizes, selectors, expected outputs]
+
+raw_sources:
+  - id: capture-sparrowx
+    source_system: chatgpt-backend-api
+    capture_procedure: backend-api-owner-download-v0
+    native_conversation_id: 6a6b171a-c104-83eb-b8b0-c2c2b67704bb
+    native_title: "Sparrow-X Архитектурная модель"
+    created_native: 1785403166.849779
+    updated_native: 1785405902.524075
+    mapping_nodes: 109
+    byte_length: 398326
+    digest: sha256:b39073a275d1a2f832cbbd139a71b8a74c44e48c51a6d887a3eaf1322e0ae216
+    authority: interim_capture
+    integrity_crosscheck:
+      procedure: sha256-pair-compare-v0
+      observed_digests:
+        owner_device: sha256:b39073a275d1a2f832cbbd139a71b8a74c44e48c51a6d887a3eaf1322e0ae216
+        session_container: sha256:b39073a275d1a2f832cbbd139a71b8a74c44e48c51a6d887a3eaf1322e0ae216
+      checked_at: 2026-08-03
+      result: match
+
+  - id: capture-main-dialog
+    source_system: chatgpt-backend-api
+    capture_procedure: backend-api-owner-download-v0
+    native_conversation_id: 6a6b6230-cb8c-83eb-ad3d-456c0d0c8ce3
+    native_title: "Адаптивная верификация кода"
+    created_native: 1785422530.831501
+    updated_native: 1785694974.906897
+    mapping_nodes: 334
+    byte_length: 3352173
+    digest: sha256:d34c4b9ab2eb90885e270d14199110989cb65eaae17de341db647af49f11cfb4
+    authority: interim_capture
+    integrity_crosscheck:
+      procedure: sha256-pair-compare-v0
+      observed_digests:
+        owner_device: sha256:d34c4b9ab2eb90885e270d14199110989cb65eaae17de341db647af49f11cfb4
+        session_container: sha256:d34c4b9ab2eb90885e270d14199110989cb65eaae17de341db647af49f11cfb4
+      checked_at: 2026-08-03
+      result: match
+
+  - id: capture-compaction
+    source_system: chatgpt-backend-api
+    capture_procedure: backend-api-owner-download-v0
+    native_conversation_id: 6a6f73b9-d1b0-83eb-a6cb-99064d7cc6cf
+    native_title: "Сжатие контекста агента"
+    created_native: 1785689099.411729
+    updated_native: 1785689185.151978
+    mapping_nodes: 8
+    byte_length: 76141
+    digest: sha256:4eac30055b0ff67c0fdd6e96903be9f70c2d734398744307bb6df8bbdced52c7
+    authority: interim_capture
+    integrity_crosscheck:
+      procedure: sha256-pair-compare-v0
+      observed_digests:
+        owner_device: sha256:4eac30055b0ff67c0fdd6e96903be9f70c2d734398744307bb6df8bbdced52c7
+        session_container: sha256:4eac30055b0ff67c0fdd6e96903be9f70c2d734398744307bb6df8bbdced52c7
+      checked_at: 2026-08-03
+      result: match
+
+  - id: claude-code-session-c-snapshot-1
+    source_system: claude-code-container
+    capture_procedure: container-transcript-copy-v0
+    native_conversation_id: e85f6f87-7a4b-51ea-83e9-a3e7b748a981
+    session_url: https://claude.ai/code/session_011To1YzMvKuRefLMBsa89Rp
+    observed_at: 2026-08-02T22:59:52Z
+    events: 368
+    byte_length: 2020898
+    digest: sha256:011638b28a57cf7a10356a8d35e9ee39124a376503365099e8fcd51cd3fc2c4f
+    authority: platform_artifact_snapshot
+    integrity_crosscheck:
+      procedure: sha256-round-trip-v0   # container -> owner device -> container
+      observed_digests:
+        container_original: sha256:011638b28a57cf7a10356a8d35e9ee39124a376503365099e8fcd51cd3fc2c4f
+        container_reupload: sha256:011638b28a57cf7a10356a8d35e9ee39124a376503365099e8fcd51cd3fc2c4f
+      checked_at: 2026-08-03
+      result: match
+    notes: >
+      Live append-only JSONL. Any later snapshot of the same session MUST
+      contain this snapshot as an exact byte prefix (integrity relation).
+      A final end-of-session snapshot is expected to supersede this one.
+
+negative_control:
+  - id: case-0001-claude-reconstruction-v0
+    kind: agent_reconstruction
+    authority: advisory
+    producer: { platform: claude, model_identity: claude-fable-5 }
+    generated_at: 2026-08-02T18:25:43Z
+    media_type: application/vnd.o7.agent-reconstruction+json
+    byte_length: 39496
+    digest: sha256:37110a62967504fb94eac52cd1e361117069e151a84d4b188ec4c63047c58056
+    owner_stored: confirmed            # owner report, 2026-08-03
+    producer_claim:
+      raw_access_at_generation: false
+      authority: advisory
+    precommit_evidence:
+      kind: session_event_ordering
+      source_ref:
+        raw_source: claude-code-session-c-snapshot-1
+        digest: sha256:011638b28a57cf7a10356a8d35e9ee39124a376503365099e8fcd51cd3fc2c4f
+      establishes:
+        - reconstruction receipt precedes the first RAW-capture event
+          observed in the session C transcript
+      does_not_establish:
+        - absence of unrecorded RAW access
+        - absence of access through external channels
+      independence: same_platform_not_independent
+      note: >
+        A platform export of session C can confirm transcript bytes and
+        ordering but remains same-platform evidence. Global absence of
+        access is not establishable without a confined-environment
+        experiment or external attestation — and is not required for a
+        negative control: producer claimed no access, the captured
+        session-C transcript (interim snapshot) shows no prior access,
+        global absence not established.
+    known_divergence_already_observed: >
+      Reconstruction assumed working labels B and D were two separate
+      conversations and did not know session E existed as a distinct chat.
+      The reconstruction receipt precedes the first RAW-capture event
+      observed in the captured session-C transcript; the producer's
+      global no-access statement remains advisory. Divergence is
+      measurement data, not an error to fix.
+
+pending:
+  - chatgpt account export (platform_export; supersedes/confirms the three interim captures)
+  - final session C snapshot (byte-prefix rule applies)
+  - user-visible derived transcripts (extractors v0)
+  - state-observables-schema-v0 (built only after this manifest)
+
+integrity_rules:
+  - digest mismatch on any blob => fixture invalid, fail closed
+  - missing blob => fixture unavailable (not invalid)
+  - session C snapshots must satisfy the byte-prefix relation

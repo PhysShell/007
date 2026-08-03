@@ -1,0 +1,44 @@
+schema: o7.b1.source-selectors/v0
+fixture_id: case-0001
+
+sessions:
+  - session_id: session-a
+    raw_source: capture-sparrowx
+    coverage: Sparrow-X architecture analysis; mission/goal-graph discussion
+
+  - session_id: session-bd
+    raw_source: capture-main-dialog
+    coverage: >
+      Single long-running conversation containing BOTH former working labels
+      B (harsh review of the TaskIR/Change Assurance research report) and
+      D (intent-compiled context / memory / "Frankenstein"), plus related
+      material.
+
+  - session_id: session-e
+    raw_source: capture-compaction
+    coverage: short chat originating the Qodec context-compaction block
+
+  - session_id: session-c
+    raw_source: claude-code-session-c-snapshot-1
+    coverage: >
+      PR #93 exact-head review; issues #94/#95; #91 A0.0 inputs; program
+      A/B1/B2/S convergence; this fixture's own capture protocol.
+
+label_history:
+  note: >
+    Working labels A/B/C/D were assigned during conversation before native
+    IDs were known. Capture revealed: B and D are one conversation
+    (session-bd); an additional unrecorded conversation existed (session-e).
+    The sealed reconstruction predates this discovery — first measured
+    divergence of the negative control.
+
+extractors:
+  - id: o7-chat-export-chatgpt-backend-api-v0
+    status: not_yet_implemented
+    input: chatgpt backend-api conversation JSON (mapping graph)
+    output: user_visible_only linear transcript JSONL
+
+  - id: o7-chat-export-claude-code-v0
+    status: not_yet_implemented
+    input: claude-code session transcript JSONL
+    output: user_visible_only linear transcript JSONL
