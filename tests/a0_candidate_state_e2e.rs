@@ -3441,3 +3441,199 @@ fn a_continuation_materializes_correctly_with_a_relative_runs_dir_and_worktree_r
     let _ = o7d_child.wait();
     drop(repo);
 }
+
+// ==================== Q-Deck A0 corrective round 5 (Codex P1 / CodeRabbit Major, Part 2) ====================
+//
+// candidate_projection/parent_candidate_state_usable now run on the
+// blocking pool, behind a shared bounded semaphore, with explicit byte
+// limits on events.jsonl/artifacts checked via `metadata` before any read.
+
+/// A parent whose own `events.jsonl` exceeds the HTTP-triggered replay's
+/// byte limit must be refused BEFORE any read is even attempted — both at
+/// admission (`409 COMMAND_PARENT_CANDIDATE_UNAVAILABLE`, zero command
+/// rows, zero provider invocations) and at run-detail projection
+/// (`materialization_status: "failed"`, never a hang or an OOM).
+#[test]
+fn an_oversized_events_jsonl_is_refused_before_any_read_at_both_call_sites() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let target = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    claude.set_actions(1, "echo base-v1 > base.txt\n");
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(addr);
+    let (_, page) = get(addr, "/api/v1/runs");
+    let run_a_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    // Pad the parent's own events.jsonl well past the 8 MiB limit. The
+    // limit is checked via `metadata` BEFORE any parse, so the padding
+    // does not need to keep the file syntactically valid JSONL.
+    let run_a_dir = run_dir(&runs_dir, &target, &run_a_id);
+    {
+        use std::io::Write as _;
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(run_a_dir.join("events.jsonl"))
+            .unwrap();
+        let padding = vec![b'#'; 9 * 1024 * 1024];
+        f.write_all(&padding).unwrap();
+    }
+
+    let (status, projected) = get(addr, &format!("/api/v1/runs/{run_a_id}"));
+    assert_eq!(status, 200);
+    assert_eq!(
+        projected["materialization_status"], "failed",
+        "an oversized events.jsonl must project as failed, never hang or crash: {projected:?}"
+    );
+
+    let (status, accepted) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": run_a_id,
+            "command": "must never be accepted against an oversized parent record",
+            "idempotency_key": "key-oversized-events-jsonl",
+        }),
+    );
+    assert_eq!(status, 409, "{accepted:?}");
+    assert_eq!(
+        accepted["code"], "COMMAND_PARENT_CANDIDATE_UNAVAILABLE",
+        "{accepted:?}"
+    );
+    assert_eq!(
+        command_row_count_for_parent(&ledger_path, &run_a_id),
+        0,
+        "an oversized parent record must never create a command row"
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the provider must never be invoked against an oversized parent record"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+    drop(repo);
+}
+
+/// A large candidate replay (a run-detail projection over a big, though
+/// within-limits, canonical record) must not block the Tokio runtime — a
+/// concurrent, unrelated request to a plain endpoint must still answer
+/// promptly while the large replay is in flight on the blocking pool.
+#[test]
+fn a_large_candidate_replay_does_not_block_concurrent_unrelated_requests() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let target = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    claude.set_actions(1, "echo base-v1 > base.txt\n");
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(addr);
+    let (_, page) = get(addr, "/api/v1/runs");
+    let run_a_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+
+    // Pad the record close to (but not over) the limit, so replay still
+    // succeeds but genuinely does non-trivial parse/hash work.
+    let run_a_dir = run_dir(&runs_dir, &target, &run_a_id);
+    let big_task_content = "x".repeat(6 * 1024 * 1024);
+    std::fs::write(run_a_dir.join("task.md"), &big_task_content).unwrap();
+
+    let n_concurrent_projections = 6;
+    let barrier_start = Instant::now();
+    let handles: Vec<_> = (0..n_concurrent_projections)
+        .map(|_| {
+            let run_a_id = run_a_id.clone();
+            std::thread::spawn(move || get(addr, &format!("/api/v1/runs/{run_a_id}")))
+        })
+        .collect();
+
+    // While those (possibly slow/queued behind the bounded semaphore)
+    // projections are in flight, a plain, unrelated health check must
+    // still answer promptly — proving it never got stuck behind them on
+    // the SAME Tokio worker thread.
+    let health_deadline = Duration::from_secs(5);
+    let health_start = Instant::now();
+    let (health_status, _) = get(addr, "/api/v1/health");
+    assert_eq!(health_status, 200);
+    assert!(
+        health_start.elapsed() < health_deadline,
+        "an unrelated health check must not be blocked by concurrent candidate replay work: \
+         took {:?}",
+        health_start.elapsed()
+    );
+
+    for h in handles {
+        let _ = h.join();
+    }
+    let _ = barrier_start.elapsed();
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+    drop(repo);
+}

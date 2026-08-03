@@ -19,10 +19,112 @@
 //! already-durably-bound `run_id`, then delegates.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(crate) use o7::recovery::{ChildRecordState, DispatchProgress};
 
 use crate::state::ExecutionConfig;
+
+/// Q-Deck A0 corrective round 5 (Codex P1 / CodeRabbit Major, Part 2B): the
+/// maximum `events.jsonl` size this server will read for an HTTP-triggered
+/// candidate replay (admission preflight, run-detail projection) — checked
+/// via `metadata` BEFORE any read, never after. A canonical record this
+/// large is already pathological; refusing it here bounds the worst case
+/// for an unauthenticated or low-trust caller hammering either endpoint.
+const MAX_EVENTS_JSONL_BYTES: u64 = 8 * 1024 * 1024;
+
+/// The maximum size of any SINGLE resolved artifact (a patch, a gate log,
+/// a candidate receipt) during one HTTP-triggered candidate replay.
+const MAX_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The maximum TOTAL bytes hydrated (summed across every artifact resolved)
+/// during one HTTP-triggered candidate replay — bounds a record with many
+/// individually-small-enough artifacts that would otherwise sum to an
+/// unbounded amount of memory.
+const MAX_TOTAL_HYDRATED_BYTES: u64 = 128 * 1024 * 1024;
+
+/// Q-Deck A0 corrective round 5: an [`o7_run::replay::ArtifactResolver`]
+/// that enforces [`MAX_ARTIFACT_BYTES`]/[`MAX_TOTAL_HYDRATED_BYTES`] before
+/// ever reading an artifact's bytes — scoped to ONLY the two HTTP-triggered
+/// candidate-replay call sites in this module (`parent_candidate_state_usable`,
+/// `candidate_projection`). Deliberately NOT applied to the shared
+/// `o7::events::RecordDirResolver` every other consumer (`o7 replay`, `o7
+/// recover`, this server's own pre-redrive classification) uses — those
+/// are operator-invoked, not reachable by an untrusted HTTP caller, so an
+/// unbounded read there is a different, already-accepted risk profile this
+/// round does not change.
+struct BoundedRecordDirResolver {
+    base: PathBuf,
+    total_read: AtomicU64,
+}
+
+impl BoundedRecordDirResolver {
+    fn new(base: PathBuf) -> Self {
+        Self {
+            base,
+            total_read: AtomicU64::new(0),
+        }
+    }
+}
+
+fn confined_locator(locator: &str) -> bool {
+    let p = std::path::Path::new(locator);
+    !locator.is_empty()
+        && p.components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+}
+
+impl o7_run::replay::ArtifactResolver for BoundedRecordDirResolver {
+    fn resolve(
+        &self,
+        a: &o7_run::event::ArtifactRef,
+    ) -> Result<Vec<u8>, o7_run::replay::ArtifactError> {
+        let fail = |reason: String| o7_run::replay::ArtifactError {
+            locator: a.locator.clone(),
+            reason,
+        };
+        if !confined_locator(&a.locator) {
+            return Err(fail(
+                "locator escapes the record directory (absolute, `..`, or empty) — refused \
+                 before I/O"
+                    .to_owned(),
+            ));
+        }
+        let path = self.base.join(&a.locator);
+        let size = std::fs::metadata(&path)
+            .map_err(|e| fail(format!("stat before read: {e}")))?
+            .len();
+        if size > MAX_ARTIFACT_BYTES {
+            return Err(fail(format!(
+                "artifact is {size} bytes, exceeding the {MAX_ARTIFACT_BYTES}-byte per-artifact \
+                 limit for an HTTP-triggered candidate replay"
+            )));
+        }
+        let running_total = self.total_read.fetch_add(size, Ordering::Relaxed) + size;
+        if running_total > MAX_TOTAL_HYDRATED_BYTES {
+            return Err(fail(format!(
+                "total hydrated bytes for this replay would reach {running_total}, exceeding \
+                 the {MAX_TOTAL_HYDRATED_BYTES}-byte total budget for an HTTP-triggered \
+                 candidate replay"
+            )));
+        }
+        std::fs::read(&path).map_err(|e| fail(e.to_string()))
+    }
+}
+
+/// Read `dir/events.jsonl`, refusing (before any read) a file larger than
+/// [`MAX_EVENTS_JSONL_BYTES`] — Q-Deck A0 corrective round 5, Part 2B.
+fn read_bounded_events_jsonl(dir: &std::path::Path) -> std::io::Result<String> {
+    let path = dir.join("events.jsonl");
+    let size = std::fs::metadata(&path)?.len();
+    if size > MAX_EVENTS_JSONL_BYTES {
+        return Err(std::io::Error::other(format!(
+            "events.jsonl is {size} bytes, exceeding the {MAX_EVENTS_JSONL_BYTES}-byte limit \
+             for an HTTP-triggered candidate replay"
+        )));
+    }
+    std::fs::read_to_string(path)
+}
 
 /// The run-store `target` label a command's child run record lives under —
 /// `o7d` never passes `--target` when spawning `o7 continue`
@@ -134,11 +236,11 @@ pub(crate) fn parent_candidate_state_usable(
 ) -> Result<(), String> {
     let dir = child_record_dir(exec, parent_run_id)
         .map_err(|e| format!("resolving parent record directory: {e}"))?;
-    let text = std::fs::read_to_string(dir.join("events.jsonl"))
+    let text = read_bounded_events_jsonl(&dir)
         .map_err(|e| format!("reading the parent's canonical record: {e}"))?;
     let events = o7::events::from_jsonl(&text)
         .map_err(|e| format!("parsing the parent's canonical record: {e}"))?;
-    let resolver = o7::events::RecordDirResolver { base: dir };
+    let resolver = BoundedRecordDirResolver::new(dir);
     let (state, _artifacts_verified) = o7_run::replay::verify_prefix(&events, &resolver)
         .map_err(|e| format!("the parent's canonical record failed full replay: {e}"))?;
     if state.verdict.is_none() {
@@ -219,33 +321,44 @@ pub(crate) fn candidate_projection(
     run_id: &str,
 ) -> (Option<String>, Option<String>, Option<String>) {
     let dir = match child_record_dir(exec, run_id) {
-        Ok(dir) => dir,
+        Ok(e) => e,
         Err(e) => {
-            return (
-                None,
-                None,
-                Some(format!("failed: resolving record directory: {e}")),
-            )
+            eprintln!(
+                "[o7d] candidate projection for run {run_id}: resolving record directory: {e}"
+            );
+            return (None, None, Some("failed".to_owned()));
         }
     };
-    let text = match std::fs::read_to_string(dir.join("events.jsonl")) {
+    // Q-Deck A0 corrective round 5 (CodeRabbit Major, Part 4): only a
+    // missing record (a run with no canonical record yet, or one that
+    // never captured/materialized anything) projects as `not_applicable`.
+    // Any OTHER I/O error (permission denied, a genuine device/read
+    // failure) is a `failed` status, not silently folded into the exact
+    // same "there's simply nothing here" value.
+    let text = match read_bounded_events_jsonl(&dir) {
         Ok(text) => text,
-        Err(_) => return (None, None, Some("not_applicable".to_owned())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return (None, None, Some("not_applicable".to_owned()))
+        }
+        Err(e) => {
+            eprintln!("[o7d] candidate projection for run {run_id}: reading events.jsonl: {e}");
+            return (None, None, Some("failed".to_owned()));
+        }
     };
     let events = match o7::events::from_jsonl(&text) {
         Ok(events) => events,
-        Err(_) => {
-            return (
-                None,
-                None,
-                Some("verification_failed: malformed events.jsonl".to_owned()),
-            )
+        Err(e) => {
+            eprintln!("[o7d] candidate projection for run {run_id}: malformed events.jsonl: {e}");
+            return (None, None, Some("verification_failed".to_owned()));
         }
     };
-    let resolver = o7::events::RecordDirResolver { base: dir };
+    let resolver = BoundedRecordDirResolver::new(dir);
     let (state, _artifacts_verified) = match o7_run::replay::verify_prefix(&events, &resolver) {
         Ok(ok) => ok,
-        Err(e) => return (None, None, Some(format!("verification_failed: {e}"))),
+        Err(e) => {
+            eprintln!("[o7d] candidate projection for run {run_id}: replay failed: {e}");
+            return (None, None, Some("verification_failed".to_owned()));
+        }
     };
     match &state.candidate_materialized {
         Some(mat) => (

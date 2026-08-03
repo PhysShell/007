@@ -3,6 +3,15 @@
 //! `State` extractor.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+
+/// Q-Deck A0 corrective round 5 (Codex P1 / CodeRabbit Major, Part 2B): the
+/// maximum number of candidate-replay verifications (admission preflight OR
+/// run-detail projection) allowed to run concurrently on the blocking pool.
+/// Small and fixed on purpose — this bounds worst-case concurrent
+/// replay/hydration work regardless of how many HTTP requests arrive at
+/// once; it is not meant to be tuned per deployment.
+pub(crate) const MAX_CONCURRENT_CANDIDATE_REPLAYS: usize = 4;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -14,6 +23,25 @@ pub struct AppState {
     /// the missing configuration, never a bare 404) but never spawns
     /// anything.
     pub exec: Option<ExecutionConfig>,
+    /// Q-Deck A0 corrective round 5: shared across BOTH candidate-replay
+    /// call sites (`routes::get_run`'s projection, `routes::create_command`'s
+    /// admission preflight) — the same mechanism, the same limit, so
+    /// neither can starve the other or, together, exceed
+    /// [`MAX_CONCURRENT_CANDIDATE_REPLAYS`] blocking-pool slots at once.
+    pub candidate_replay_limiter: Arc<tokio::sync::Semaphore>,
+}
+
+impl AppState {
+    #[must_use]
+    pub fn new(ledger: o7_ledger::SqliteLedger, exec: Option<ExecutionConfig>) -> Self {
+        Self {
+            ledger,
+            exec,
+            candidate_replay_limiter: Arc::new(tokio::sync::Semaphore::new(
+                MAX_CONCURRENT_CANDIDATE_REPLAYS,
+            )),
+        }
+    }
 }
 
 /// Everything the command-continuation mutation route needs to spawn `o7

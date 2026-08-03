@@ -76,10 +76,23 @@ pub struct RunDto {
     pub candidate_source_run_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub candidate_tree_oid: Option<String>,
-    /// One of `"materialized"`, `"not_applicable"` (no command-continuation
-    /// materialization attempted for this run — e.g. a top-level `o7 run`),
-    /// or `"failed: <reason>"`. `None` only when no `exec` config was
-    /// available to even attempt the read.
+    /// Q-Deck A0 corrective round 5 (CodeRabbit Major): one of exactly four
+    /// STABLE, bare values — never an interpolated internal error/path/
+    /// locator, which server-side logs carry instead:
+    /// - `"materialized"` — a command-continuation child that successfully
+    ///   materialized its parent's candidate state.
+    /// - `"not_applicable"` — no canonical record yet, or one that never
+    ///   attempted materialization (a top-level `o7 run`, or a
+    ///   continuation still pre-dispatch).
+    /// - `"failed"` — an I/O error other than "no record" (permission
+    ///   denied, a read failure, an oversized record refused before
+    ///   reading) prevented even attempting verification.
+    /// - `"verification_failed"` — a record was read but failed replay
+    ///   (malformed JSON, chain/digest/reducer/artifact/candidate-semantic
+    ///   failure).
+    ///
+    /// `None` only when no `exec` config was available to even attempt the
+    /// read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub materialization_status: Option<String>,
 }

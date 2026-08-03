@@ -144,13 +144,37 @@ pub(crate) async fn get_run(
     let id = o7_ledger::RunId::from_raw(run_id.clone());
     let run = state.ledger.run(id).await?.ok_or(ApiError::NotFound)?;
     let mut dto: RunDto = run.into();
-    // Q-Deck A0: read-only candidate-state projection, best-effort, never
-    // gating anything — see `canonical::candidate_projection`.
+    // Q-Deck A0 corrective round 5 (Codex P1 / CodeRabbit Major, Part 2):
+    // read-only candidate-state projection, best-effort, never gating
+    // anything — see `canonical::candidate_projection`. Run full replay on
+    // the BLOCKING pool, never inline on this Tokio worker (the record's
+    // own events.jsonl/artifacts can be large, and this endpoint is polled
+    // frequently). `try_acquire` (never `.await` here) preserves the
+    // best-effort contract this projection has always had: under
+    // saturation, this ONE request simply omits the candidate fields
+    // (exactly as if `exec` were unconfigured) rather than queuing a read
+    // request behind unrelated replay work or failing it outright.
     if let Some(exec) = &state.exec {
-        let (source, oid, status) = crate::canonical::candidate_projection(exec, &run_id);
-        dto.candidate_source_run_id = source;
-        dto.candidate_tree_oid = oid;
-        dto.materialization_status = status;
+        if let Ok(_permit) = state.candidate_replay_limiter.clone().try_acquire_owned() {
+            let exec_owned = exec.clone();
+            let run_id_owned = run_id.clone();
+            let projected = tokio::task::spawn_blocking(move || {
+                crate::canonical::candidate_projection(&exec_owned, &run_id_owned)
+            })
+            .await;
+            if let Ok((source, oid, status)) = projected {
+                dto.candidate_source_run_id = source;
+                dto.candidate_tree_oid = oid;
+                dto.materialization_status = status;
+            }
+            // A join failure (task panic) is swallowed here deliberately —
+            // this projection is best-effort and must never turn a panic in
+            // read-only diagnostic code into a failed run-detail read; the
+            // panic itself still surfaces via Tokio's own panic hook.
+        }
+        // Semaphore fully saturated: skip the projection for this request,
+        // same as the `exec.is_none()` case — never blocks waiting for a
+        // slot on a plain read endpoint.
     }
     Ok(Json(dto))
 }
@@ -662,7 +686,32 @@ pub(crate) async fn create_command(
             return Err(ApiError::NotFound);
         }
 
-        if let Err(reason) = crate::canonical::parent_candidate_state_usable(exec, &parent_run_id) {
+        // Q-Deck A0 corrective round 5 (Codex P1 / CodeRabbit Major, Part
+        // 2): full authoritative replay of the parent's own canonical
+        // record, run on the BLOCKING pool (never inline on this Tokio
+        // worker), behind the SAME shared, bounded-concurrency semaphore
+        // `get_run`'s projection uses — unlike that best-effort read
+        // endpoint, admission genuinely needs this answer, so it AWAITS a
+        // permit rather than skipping under saturation; a permit is always
+        // released ordinarily (bounded queuing depth, never an unbounded
+        // pile-up of concurrent heavy replay jobs).
+        let permit = state
+            .candidate_replay_limiter
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| ApiError::Internal("CANDIDATE_REPLAY_LIMITER_CLOSED"))?;
+        let exec_owned = exec.clone();
+        let parent_for_check = parent_run_id.clone();
+        let usable = tokio::task::spawn_blocking(move || {
+            let result =
+                crate::canonical::parent_candidate_state_usable(&exec_owned, &parent_for_check);
+            drop(permit);
+            result
+        })
+        .await
+        .map_err(|_| ApiError::Internal("CANDIDATE_ADMISSION_TASK_PANICKED"))?;
+        if let Err(reason) = usable {
             eprintln!(
                 "[o7d] refusing to accept a command against parent {parent_run_id}: {reason}"
             );
