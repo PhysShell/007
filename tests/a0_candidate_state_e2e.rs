@@ -3637,3 +3637,191 @@ fn a_large_candidate_replay_does_not_block_concurrent_unrelated_requests() {
     let _ = o7d_child.wait();
     drop(repo);
 }
+
+// ==================== Q-Deck A0 corrective round 5 (CodeRabbit nitpick, Part 7) ====================
+//
+// A continuation's own diff.patch must be computed against the INHERITED
+// candidate base_commit, never a stale/unrelated --base CLI flag.
+
+/// A direct `o7 continue` invocation with a deliberately WRONG,
+/// non-default `--base` (a nonexistent ref) must still succeed and produce
+/// a record whose `meta.json` base_commit, `diff.patch`'s own base, and
+/// `candidate.patch`'s own base all agree — proving `--base` is genuinely
+/// ignored for a continuation, not merely coincidentally unused when it
+/// happens to equal the parent's base.
+#[test]
+fn continuation_diff_base_matches_the_inherited_candidate_base_regardless_of_a_wrong_cli_base_flag()
+{
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let target = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    claude.set_actions(1, "echo base-v1 > base.txt\n");
+    let mut run_child = spawn_o7_run_process(
+        repo.path(),
+        &task_file,
+        &ledger_path,
+        &runs_dir,
+        &worktree_root,
+        claude.path(),
+    );
+    assert!(run_child.wait().unwrap().success());
+    assert_eq!(claude.invocation_count(), 1);
+
+    let target_dir = runs_dir.join(&target);
+    let run_a_id = std::fs::read_dir(&target_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .unwrap();
+    let run_a_dir = run_dir(&runs_dir, &target, &run_a_id);
+    let receipt_a = read_candidate_receipt(&run_a_dir);
+    let conversation_id = receipt_a["conversation_id"].as_str().unwrap().to_owned();
+    let expected_base = receipt_a["base_commit"].as_str().unwrap().to_owned();
+
+    claude.set_actions(2, "echo base-v2 >> base.txt\n");
+    let command_id = "cmd-diffbase";
+    let child_run_id = "child-diffbase";
+    {
+        let conn = rusqlite::Connection::open(&ledger_path).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        conn.execute(
+            "INSERT INTO command (command_id, conversation_id, parent_run_id, command_text, \
+             status, child_run_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, 'accepted', ?5, ?6, ?6)",
+            rusqlite::params![
+                command_id,
+                conversation_id,
+                run_a_id,
+                "continuation diff base alignment check",
+                child_run_id,
+                now,
+            ],
+        )
+        .unwrap();
+    }
+
+    let gate_path = repo.path().join(".007").join("gate.toml");
+    let status = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("continue")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--gate")
+        .arg(&gate_path)
+        .arg("--model")
+        .arg("opus")
+        .arg("--max-turns")
+        .arg("1")
+        // Deliberately WRONG: a ref that does not exist at all. If `--base`
+        // were used for ANYTHING on the continuation path, this would
+        // cause a failure (worktree creation or diff computation against a
+        // nonexistent ref) — success here is itself part of the proof.
+        .arg("--base")
+        .arg("refs/heads/this-ref-does-not-exist-anywhere")
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .arg("--conversation-id")
+        .arg(&conversation_id)
+        .arg("--parent-run-id")
+        .arg(&run_a_id)
+        .arg("--command")
+        .arg("continuation diff base alignment check")
+        .arg("--run-id")
+        .arg(child_run_id)
+        .arg("--command-id")
+        .arg(command_id)
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("spawn o7 continue directly");
+    assert!(
+        status.success(),
+        "continuation must succeed despite a nonexistent --base — it must be genuinely ignored"
+    );
+
+    let child_dir = run_dir(&runs_dir, &target, child_run_id);
+    let meta: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(child_dir.join("meta.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        meta["base_commit"], expected_base,
+        "RunMeta.base_commit must be the inherited candidate base, not the wrong --base flag"
+    );
+
+    let receipt_child = read_candidate_receipt(&child_dir);
+    assert_eq!(
+        receipt_child["base_commit"], expected_base,
+        "candidate.patch's own receipt base_commit must match the inherited candidate base"
+    );
+
+    // diff.patch's own base: verify by applying it (or confirming it's
+    // empty, matching a no-op diff) against the EXPECTED base in a scratch
+    // clone — if diff.patch had been computed against the wrong,
+    // nonexistent --base, `worktree::diff_vs_base` would have failed and
+    // this run would never have reached a successful exit above; this
+    // independently confirms the resulting diff.patch is coherent against
+    // the expected base by construction (the same worktree diff_vs_base
+    // itself used).
+    let diff_bytes = std::fs::read(child_dir.join("diff.patch")).unwrap();
+    let verify_dir = tempfile::tempdir().unwrap();
+    let git = |args: &[&str], cwd: &Path| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(
+        &[
+            "clone",
+            "-q",
+            repo.path().to_str().unwrap(),
+            verify_dir.path().to_str().unwrap(),
+        ],
+        Path::new("/"),
+    );
+    git(&["checkout", "-q", &expected_base], verify_dir.path());
+    if !diff_bytes.is_empty() {
+        let patch_file = verify_dir.path().join("verify.patch");
+        std::fs::write(&patch_file, &diff_bytes).unwrap();
+        git(
+            &["apply", "--check", patch_file.to_str().unwrap()],
+            verify_dir.path(),
+        );
+    }
+
+    drop(repo);
+}

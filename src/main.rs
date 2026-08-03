@@ -108,10 +108,15 @@ struct ContinueArgs {
     /// flat record lives at `runs/<target>/<parent-run-id>/`.
     #[arg(long)]
     target: Option<String>,
-    /// Base git ref for the child run's fresh worktree. This slice does
-    /// NOT carry the parent run's own file changes forward into the
-    /// child's worktree — only provider session continuity is proven
-    /// here (see `docs/q-deck/r1-command.md`'s known-limitations note).
+    /// Q-Deck A0 corrective round 5 (CodeRabbit nitpick): stale since
+    /// Q-Deck A0 landed — IGNORED for an actual continuation. The child's
+    /// worktree is created at, and its diff/candidate patch are both
+    /// computed against, the parent's own INHERITED candidate-state
+    /// `base_commit` (`worktree::add`'s own call site, `resolve_
+    /// inherited_candidate_obligation`) — never this flag. Accepted only
+    /// for CLI/argument-parsing compatibility; retained with its old
+    /// default so existing invocations do not need updating, but its
+    /// value is never read on the continuation path.
     #[arg(long, default_value = "HEAD")]
     base: String,
     /// Gate manifest (default: <repo>/.007/gate.toml).
@@ -1869,7 +1874,22 @@ fn continue_execute(
     }
 
     rec.write_agent_stdout(&ar.stdout)?;
-    let diff = worktree::diff_vs_base(wt, &a.base).unwrap_or_default();
+    // Q-Deck A0 corrective round 5 (CodeRabbit nitpick): a continuation's
+    // own worktree is created at the INHERITED candidate obligation's own
+    // `base_commit` (never `a.base`, which `RunMeta.base_commit` and
+    // `candidate.patch` both already correctly ignore for this path) — the
+    // evidence-only `diff.patch` must be computed against that SAME base,
+    // not a stale CLI flag that only happens to coincide with it under the
+    // default `--base HEAD`. `contract.candidate_state` is guaranteed
+    // `Some` here: this function only reaches this point after
+    // materializing the parent's candidate state, which itself requires
+    // the contract to declare the obligation.
+    let diff_base = contract
+        .candidate_state
+        .as_ref()
+        .map(|c| c.base_commit.as_str())
+        .unwrap_or(&a.base);
+    let diff = worktree::diff_vs_base(wt, diff_base).unwrap_or_default();
     rec.write_diff(&diff)?;
     let diff_ref = events::artifact(ArtifactKind::Diff, "diff.patch", diff.as_bytes());
     let patch_captured = append_only(
