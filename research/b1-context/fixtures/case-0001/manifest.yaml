@@ -119,8 +119,10 @@ raw_sources:
       End-of-session snapshot. Taken mid-final-turn: the closing receipt
       message describing this snapshot is necessarily not contained in it
       (a transcript cannot contain a description of its own last byte).
-      A later platform export of session C may extend it and must satisfy
-      the same byte-prefix relation.
+      Any later snapshot produced from the same append-only container
+      transcript must satisfy the byte-prefix relation. A platform export
+      is a separate capture path and may corroborate content and ordering
+      without byte identity.
 
 negative_control:
   - id: case-0001-claude-reconstruction-v0
