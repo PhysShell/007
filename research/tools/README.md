@@ -50,3 +50,31 @@ restic snapshots                                         # list
 restic check --read-data                                 # full integrity (downloads + verifies)
 restic restore <snapshot-id> --target /some/dir          # recover
 ```
+
+## Secrets: reference, not value (`o7-secret` + `o7-restic`)
+
+`o7-secret` is a tiny `age`-encrypted store demonstrating the "give a
+reference, not the value" discipline (the local twin of `bw get` / `op run`
+/ `bws run`):
+
+```
+o7-secret init                     # create the age identity (local unlock key)
+o7-secret set  NAME                # value read from your TTY (hidden), encrypted at rest
+o7-secret run  NAME[,NAME2] -- cmd # inject as env VARS into a subprocess — never printed
+o7-secret ls                       # names only, never values
+```
+
+`o7-restic` is `restic` with the R2 access keys pulled from that vault at
+call time, so **no secret ever lives as plaintext** in `restic.env`, the
+shell, history, or a chat:
+
+```
+o7-restic backup ~/.local/share/o7-research --tag o7-cas
+o7-restic snapshots ; o7-restic check --read-data ; o7-restic restore <snap> --target <dir>
+```
+
+**Two roots of trust** (neither is committed, neither is in the cloud
+backup — put both in your password manager): `~/.config/o7-research/age-identity.txt`
+(decrypts the secret vault) and `~/.config/o7-research/restic-password`
+(decrypts the R2 backup). The R2 backup holds only *age-encrypted* secrets —
+useless without the identity, which lives only on your machine + your PM.

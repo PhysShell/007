@@ -1,5 +1,5 @@
 {
-  description = "o7-research: S3/CAS backup tooling — restic (-> Cloudflare R2), rclone, awscli";
+  description = "o7-research tooling: restic (-> Cloudflare R2), rclone, awscli, age, and the o7-cas / o7-secret / o7-restic helpers";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";   # matches the repo's root flake pin
@@ -8,24 +8,29 @@
 
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
-      let pkgs = import nixpkgs { inherit system; };
+      let
+        pkgs = import nixpkgs { inherit system; };
+        # the committed scripts, wrapped as proper bins (no dependence on ~/.local/bin)
+        o7-cas    = pkgs.writeShellScriptBin "o7-cas"    (builtins.readFile ./o7-cas);
+        o7-secret = pkgs.writeShellScriptBin "o7-secret" (builtins.readFile ./o7-secret);
+        o7-restic = pkgs.writeShellScriptBin "o7-restic" (builtins.readFile ./o7-restic);
       in {
-        # `nix develop ./research/tools` — S3/backup tooling for the B1 source-set.
+        packages = { inherit o7-cas o7-secret o7-restic; };
+        # `nix develop ./research/tools`
         devShells.default = pkgs.mkShell {
-          packages = with pkgs; [ restic rclone awscli2 ];
+          packages = with pkgs; [
+            restic rclone awscli2 age coreutils gawk findutils
+            o7-cas o7-secret o7-restic
+          ];
           shellHook = ''
-            export PATH="$HOME/.local/bin:$PATH"   # o7-cas helper (also at research/tools/o7-cas)
             envf="$HOME/.config/o7-research/restic.env"
-            if [ -f "$envf" ]; then
-              set -a; . "$envf"; set +a
-              echo "[o7-research] restic env loaded — repo: $RESTIC_REPOSITORY"
-            else
-              echo "[o7-research] NOTE: $envf not found. Secrets (RESTIC_REPOSITORY, RESTIC_PASSWORD_FILE,"
-              echo "               AWS_* for R2) live OUTSIDE git at ~/.config/o7-research/*, mode 0600."
-            fi
-            echo "[o7-research] tools: restic rclone aws | helper: o7-cas"
-            echo "[o7-research] backup:  restic backup ~/.local/share/o7-research --tag o7-cas"
-            echo "[o7-research] verify:  restic check --read-data   |   restore: restic restore <snap> --target <dir>"
+            if [ -f "$envf" ]; then set -a; . "$envf"; set +a; fi
+            echo "[o7-research] tools: o7-cas o7-secret o7-restic | restic rclone aws age"
+            echo "[o7-research] secrets: R2 keys live ENCRYPTED in the o7-secret vault,"
+            echo "                       injected at call time by o7-restic (never plaintext in env/history/chat)."
+            echo "[o7-research] roots (KEEP, ideally in a password manager): ~/.config/o7-research/{age-identity.txt,restic-password}"
+            echo "[o7-research] set a secret (hidden input): o7-secret set NAME"
+            echo "[o7-research] backup: o7-restic backup ~/.local/share/o7-research --tag o7-cas   |   verify: o7-restic check --read-data"
           '';
         };
       });
