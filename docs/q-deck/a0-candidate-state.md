@@ -1921,3 +1921,212 @@ confirmed test-only, no production code involved. All 101 `o7` lib unit
 tests pass locally with the fix; the exact-head Actions run for `c9afb84`
 (`o7-worker gate` run `30816233861`, `pr3 worktree+verifier tests` run
 `30816233751`) both succeeded.
+
+## 24. Corrective round 6 — independent re-gate BLOCKED, response and evidence
+
+Round 5's own head (`c979bc181b922c7052f9a1730d9bcd0cc67bb13d`) was
+**BLOCKED**, not accepted, by an independent exact-head re-gate:
+`https://github.com/PhysShell/007/pull/92#issuecomment-5167813513`, four
+counterexamples. This section reproduces each at the old head, fixes it,
+and reports the new head's own gate results. No thread was resolved or
+reopened; the verdict comment itself was not edited.
+
+### Part 1 — semaphore permit did not outlive its blocking job (MAJOR); admission queued unboundedly (MINOR availability)
+
+Reproduced at `c979bc1` with a standalone harness using the REAL
+`tokio::sync::Semaphore`/`spawn_blocking` primitives in the exact
+structural shape `get_run`'s projection used: an `OwnedSemaphorePermit`
+acquired in the async caller's own frame, NOT moved into the
+`spawn_blocking` closure. Racing many callers against short timeouts
+(simulating client cancellation) measured **40 concurrent blocking jobs
+against a declared limit of 4** — the permit released the instant the
+cancelled caller's frame dropped, while the already-spawned closure kept
+running regardless. Separately, the admission path's
+`acquire_owned().await` was proven to have no bound at all: 200/200
+concurrent synthetic requests eventually acquired a permit and none were
+ever rejected, the opposite of the "bounded queuing depth" the old
+comment claimed.
+
+Fix: centralized the pattern into one function,
+`routes::run_behind_replay_limiter`, that both `get_run`'s projection and
+`create_command`'s admission preflight now call — `try_acquire_owned`
+(never `.await`), and the permit is moved INTO the `spawn_blocking`
+closure before it is ever awaited, so it lives exactly as long as the
+blocking work does. Admission converts from `acquire_owned().await` to
+this same fail-fast primitive: saturation now returns a `503` with the
+new stable code `CANDIDATE_REPLAY_BUSY` (optional `Retry-After: 1`),
+before any command row/child id/worktree/provider invocation — an
+idempotent replay of an already-recorded request never reaches this
+block at all (guarded by the existing `already_seen` check), so retrying
+an accepted command is unaffected.
+
+New tests (`crates/o7d/src/routes.rs::replay_limiter_tests`, all against
+the real primitive, none of which even compile against `c979bc1` since
+the function doesn't exist there): mass-cancellation concurrency bound
+(≤4 even racing 80 callers against short timeouts); saturated limiter
+returns `None` and never runs the work (zero mutations); a panicking
+closure still releases its permit and reports a join error; normal path
+runs once and returns correctly.
+
+### Part 2 — bounded reader was TOCTOU-vulnerable to a symlink (MAJOR)
+
+Reproduced at `c979bc1` by extracting `read_bounded_events_jsonl`'s exact
+logic and pointing `events.jsonl` at a symlink to `/dev/zero`: character
+devices report `metadata().len() == 0`, passing the size gate, and the
+subsequent `read_to_string` follows the symlink and reads unboundedly
+(proven safely via `ulimit -v` + `timeout`, never risking this shared
+VPS's own memory).
+
+Fix: every read in `crates/o7d/src/canonical.rs` now goes through an
+opened, no-follow file descriptor — `open_record_dir` opens the record
+directory itself as an `O_NOFOLLOW|O_DIRECTORY` descriptor (via
+`rustix`, newly added to `o7d`'s manifest: `nix`, already a dependency
+here, only exposes a bare `RawFd` from `openat`, and turning that into an
+owned `File` needs `unsafe`, which this crate's own
+`forbid(unsafe_code)` lint forbids — `rustix`'s `OwnedFd`-based API,
+already a workspace dependency via the root crate, converts to `File`
+with a safe `From` impl); `events.jsonl` and every artifact locator open
+`O_NOFOLLOW|O_NONBLOCK` relative to that descriptor (nested locators walk
+each intermediate component as its own no-follow directory descriptor,
+never `base.join(locator)`); `fstat` runs on the EXACT opened descriptor,
+never a separate path-based `stat`; the read itself is capped at
+`limit + 1` bytes through that SAME descriptor, rejecting if more than
+`limit` bytes are actually observed (catches post-`fstat` growth, a
+sparse file's oversized logical length, or a stale declared size) —
+inclusive at the boundary (exactly `limit` bytes is accepted). The
+running total-hydrated-bytes counter uses `checked_add` via
+`fetch_update`, never a plain `fetch_add` that could silently wrap; a
+repeated reference to the same artifact is never deduplicated — it
+always consumes budget again. Existing limits (8 MiB events.jsonl / 64
+MiB per-artifact / 128 MiB total) are unchanged. Projection/admission
+error-mapping semantics (not_applicable/failed/verification_failed;
+409 with zero mutations) are preserved exactly.
+
+New tests (`crates/o7d/src/canonical.rs::bounded_read_tests`, 14, all
+passing): symlink-to-`/dev/zero` for both `events.jsonl` and an artifact,
+each rejected quickly under an explicit timeout; a symlink to a
+sparse (real but oversized) regular file rejected purely by `NOFOLLOW`;
+a FIFO rejected without hanging; a Unix socket rejected; a real character
+device (`/dev/null`) proven rejected by the file-type check itself, not
+merely `NOFOLLOW`; a TOCTOU path-swap after the descriptor is already
+open proven to have no effect on what gets read; post-`fstat` growth
+rejected; a sparse oversized-logical-length file rejected before any
+read; exact-limit accepted (both a small synthetic limit and the real
+8 MiB `events.jsonl` constant, via a fast sparse file); `limit + 1`
+rejected; a repeated artifact reference proven to keep consuming budget
+(never bypasses the total); a seeded near-`u64::MAX` counter proven to
+reject via `checked_add` rather than wrap; malformed/traversal locators
+rejected before any I/O.
+
+### Part 3 — porcelain-v2 `-z` rename/copy records misparsed (MINOR correctness, could reject a legitimate run)
+
+Reproduced live at `c979bc1`: a real repo with a file named
+`2 - Section overview.md`, renamed. The old parser split the entire NUL-
+delimited stream and classified every resulting segment independently —
+a type-2 (rename/copy) record's own SEPARATE original-path NUL field has
+no type marker of its own, so `2 - Section overview.md` (the rename's old
+name) was read as if it were its own type-2 record, whose third
+whitespace-delimited field (`"Section"`) starts with `S` and isn't
+`"S..."` — an unconditional false-positive dirty-submodule bail with no
+submodule involved at all. Confirmed by running the exact extracted
+function against the live repro: `BAIL: status field "Section" at path
+"overview.md"`.
+
+Fix: `check_no_dirty_submodule_status` (`src/worktree.rs`) is now a real
+state machine over the five documented record shapes (`1`, `2`, `u`, `?`,
+`!`). A type-2 record unconditionally consumes the immediately following
+NUL field as its mandatory original path — never reinterpreting it,
+regardless of what bytes it starts with — and rejects it (fails closed)
+if that field is absent OR empty (a real original path is never empty;
+this also correctly separates "genuinely truncated" from the mandatory
+single trailing NUL every complete stream ends with). `<sub>` is read
+only from the documented fixed-field position on `1`/`2` records. Any
+record type outside the five documented shapes, or a `1`/`2` record
+missing its fixed leading fields, fails closed with an internal error —
+never silently treated as clean.
+
+New tests: 12 byte-level fixtures
+(`src/worktree.rs::porcelain_v2_parser_tests`) covering every record
+type, truncated/empty type-2 original-path fields, an unknown record
+type, malformed fixed fields, non-UTF-8 path bytes (proven not to
+panic), embedded spaces/newlines in the original path (proven opaque),
+and a stray interior empty record (fails closed, distinct from the one
+legitimate trailing empty segment). 3 real-git tests
+(`dirty_submodule_tests`): the exact `2 - Section overview.md`
+counterexample; renames whose old name starts with each of the other
+four record-type prefixes (`1 `, `u `, `? `, `! `); an ordinary untracked
+superproject file (unaffected, confirming this check's scope stays
+confined to submodule dirtiness). All prior dirty/clean-submodule tests
+(round 3/5) still pass unchanged.
+
+### Part 4 — no regression on prior rounds' closed findings
+
+Every finding closed in rounds 1–5 remains closed and untouched by this
+round's changes: dirty-submodule authority, `--ignore-submodules=none`,
+clean/deinitialized submodule handling, gitlink mutation rejection,
+relative `runs_dir`/`worktree_root`, the private no-follow temp store,
+the stable DTO status vocabulary, no path/error leakage, the structural
+`RunSealed` check, the command-binding locator, the continuation
+diff-base alignment, directory fsync ordering, the unsupported-schema
+rejection, repository/parent/child-id binding, and idempotency/legacy-row
+repair — all exercised by the SAME existing test files (`r1_command_e2e`,
+`a0_candidate_state_e2e`, `commands`, `contract`, `reducer_transitions`,
+`replay_acceptance`, `candidate_state`), unmodified except where this
+round's own new tests were added, all still passing.
+
+### Gates, this round
+
+- `cargo fmt --check` — clean. `git diff --check` — clean.
+- `cargo check -p o7 -p o7-run -p o7-ledger -p o7d` — clean.
+- `cargo test -p o7-run` (lib + `contract` + `reducer_transitions` +
+  `replay_acceptance` + `candidate_state`) — all passing, unchanged
+  except this round's own new coverage.
+- `cargo test -p o7-ledger --test commands` — 45/45, unchanged.
+- `cargo test -p o7 --test r1_command_e2e` — 37/37, unchanged.
+- `cargo test -p o7 --test a0_candidate_state_e2e` — 29/29, unchanged.
+- `cargo test -p o7d` — full suite green, including the 4 new
+  `replay_limiter_tests` and 14 new `bounded_read_tests`.
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean (fixed
+  two lints this round's own new test/production code introduced: a
+  `record[..1]` slice in the new porcelain parser's error path,
+  rewritten to bind the matched type byte instead of re-indexing; a
+  `panic!()` inside the new panic-safety test, exempted via the same
+  `#[allow(clippy::panic)]` pattern already used on similar fault-
+  injection tests elsewhere in this codebase).
+- `cargo test --workspace --no-fail-fast` — **818 tests passed, 0
+  failed**, across 97 test-result blocks. The SAME standing, previously-
+  disclosed environmental exclusions (§13/§15 and onward) were run
+  explicitly excluded via `-- --skip <name>`, each independently
+  reproduced hanging/failing again on THIS VPS AND confirmed to
+  reproduce identically against the pristine `c979bc1` base (via
+  `git stash`, not merely asserted) before being excluded — none touch
+  any code this round changed: `kill_after_commit_preserves_event`,
+  `kill_before_commit_leaves_no_partial`
+  (`crates/o7-ledger/tests/crash_durability.rs` — hangs past a 60s
+  timeout on both this round's head and the pristine base, identical
+  down to the exit code);
+  `a_blocking_fifo_target_fails_closed_within_a_bound` (times out at
+  exactly ~5.0s on both this round's head and the pristine base, same
+  panic message); `no_control_descriptor_leaks_to_a_concurrent_sibling`;
+  `an_unexpectedly_launched_target_is_a_fail_not_the_refusal_pass`
+  (`BackendObjectMismatch` — the previously-disclosed "sixth exclusion").
+  No new exclusion was found this round.
+- `cargo deny check advisories bans licenses sources` — the SAME
+  `lz4_flex`/`RUSTSEC-2026-0041`/`CVSS:4.0` parse failure disclosed since
+  round 1 (confirmed again after deleting and refetching the local
+  advisory-db cache — the failure is in the installed `cargo-deny
+  0.18.2`'s parser, not a stale cache); `bans`/`licenses`/`sources` all
+  pass clean on their own.
+- `npm test`/`npm run check` (`apps/q-deck`) — 45/45 passing / 0 errors,
+  0 warnings — frontend untouched this round.
+
+### Known limitations (disclosed, not hidden)
+
+Everything previously disclosed (§19/§21/§23) remains open and unchanged
+by this round.
+
+### Clean worktree confirmation
+
+`git status --short` shows no unstaged/untracked changes beyond what this
+round's own commits capture; every gate above ran against the exact
+commit this round's final push carries.
