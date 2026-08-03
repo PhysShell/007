@@ -789,7 +789,11 @@ fn write_candidate_state_receipt(
 /// artifact fails to resolve/digest-check.
 fn load_verified_candidate_receipt(
     dir: &Path,
-) -> Result<(o7_run::state::RunState, CandidateStateReceiptV1)> {
+) -> Result<(
+    o7_run::state::RunState,
+    CandidateStateReceiptV1,
+    Vec<o7_run::event::RunEvent>,
+)> {
     let events_text = std::fs::read_to_string(dir.join(events::EVENTS_FILE))
         .with_context(|| format!("reading the canonical events.jsonl at {}", dir.display()))?;
     let parsed = events::from_jsonl(&events_text).context("parsing canonical events.jsonl")?;
@@ -804,7 +808,7 @@ fn load_verified_candidate_receipt(
     let receipt =
         o7_run::candidate::verify_candidate_state_captured(&state, contract, &resolver)
             .map_err(|e| anyhow::anyhow!("candidate-state semantic verification failed: {e}"))?;
-    Ok((state, receipt))
+    Ok((state, receipt, parsed))
 }
 
 /// Q-Deck A0 corrective round 1 (`docs/q-deck/a0-candidate-state.md` §2.2):
@@ -830,8 +834,8 @@ fn resolve_inherited_candidate_obligation(
     conversation_id: &str,
 ) -> Result<CandidateStateContractV1> {
     let parent_dir = runs_dir.join(target).join(parent_run_id);
-    let (_parent_state, receipt) =
-        load_verified_candidate_receipt(&parent_dir).with_context(|| {
+    let (_parent_state, receipt, _parsed) = load_verified_candidate_receipt(&parent_dir)
+        .with_context(|| {
             "the parent run has no valid candidate-state receipt — command continuations require \
          one; a parent that predates Q-Deck A0, or whose receipt fails verification, cannot be \
          continued"
@@ -917,22 +921,34 @@ fn materialize_parent_candidate_state(
     String,
 )> {
     let parent_dir = runs_dir.join(target).join(parent_run_id);
-    let (parent_state, receipt) = load_verified_candidate_receipt(&parent_dir)?;
+    let (parent_state, receipt, parent_events) = load_verified_candidate_receipt(&parent_dir)?;
 
     anyhow::ensure!(
         parent_state.verdict.is_some(),
         "the parent run is not sealed — a truncated-after-capture prefix must not be \
          materialized from"
     );
-    let parent_events_text = std::fs::read_to_string(parent_dir.join(events::EVENTS_FILE))
-        .context("re-reading the parent's own canonical events.jsonl for its final event")?;
-    let last_kind_is_sealed = parent_events_text
-        .lines()
-        .rfind(|l| !l.trim().is_empty())
-        .map(|l| l.contains("\"type\":\"run_sealed\""))
-        .unwrap_or(false);
+    // Q-Deck A0 corrective round 5 (CodeRabbit correctness finding):
+    // structural check on the already-parsed event stream `load_verified_
+    // candidate_receipt` returns — never a second read of events.jsonl,
+    // never a substring scan of its serialized text (which a serializer
+    // change, or a payload/locator/task string that happens to CONTAIN the
+    // literal text `"type":"run_sealed"`, could silently defeat either
+    // way — matching wrongly in either direction). The reducer itself
+    // structurally forbids ANY event after `RunSealed`
+    // (`ReduceError::EventAfterSeal`) and only ever sets `state.verdict`
+    // from inside the `RunSealed` arm — so `parent_state.verdict.is_some()`
+    // above, having already passed full authoritative `verify_prefix`,
+    // ALREADY proves the last event is `RunSealed`; this check is kept as
+    // explicit, cheap, structural defense in depth (not because the prior
+    // check leaves any real gap), consistent with this codebase's own
+    // established pattern of redundant checks at every layer.
+    let last_event_is_sealed = matches!(
+        parent_events.last().map(|e| &e.kind),
+        Some(o7_run::event::RunEventKind::RunSealed)
+    );
     anyhow::ensure!(
-        last_kind_is_sealed,
+        last_event_is_sealed,
         "the parent's own canonical record's last event is not RunSealed"
     );
 
