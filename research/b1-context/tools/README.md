@@ -55,10 +55,14 @@ Properties enforced by the code:
   present legacy `expected-report-v0.json` exits non-zero and writes no fabricated
   report. A missing blob is UNAVAILABLE (→ PARTIAL), which is distinct from
   INVALID.
-- **Transactional freeze.** `--update-expectations` generates into a temporary
-  sibling, verifies every gate and two-run byte identity, and only then
-  atomically replaces the committed results and rewrites `expected-report-v1.json`.
-  A failed update leaves the previously committed artifacts untouched.
+- **Exception-safe staged freeze.** `--update-expectations` completes generation
+  and verification in temporary sibling directories before promotion: every gate
+  and the repeated byte-identity check pass first, and a failed pre-promotion
+  generation leaves the committed artifacts untouched. Each same-filesystem
+  rename is atomic, and ordinary Python exceptions trigger rollback. The
+  multi-step promotion of the results directory and `expected-report-v1.json` is
+  **not** crash-atomic: an abrupt process or machine failure may require recovery
+  from `.update-bak` before rerunning the update.
 - **Deterministic.** `context.json`, `context.md`, `context.meta.json`,
   `report.json`, `report.md` are byte-identical across runs (canonical UTF-8,
   sorted keys, LF, timestamps kept out of canonical digests).

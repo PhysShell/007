@@ -23,10 +23,14 @@ context.json/md/meta, projection-comparison.json, derived-manifest.actual.json,
 report.json, report.md. The report contract is `o7.b1.report/v1` and the frozen
 expectation is `fixtures/<fixture>/expected-report-v1.json`.
 
-`--update-expectations` is transactional: it generates into a temporary sibling,
-verifies every gate and two-run byte identity, and only then atomically replaces
-the committed result artifacts and rewrites the v1 expectation. A failure leaves
-the previously committed artifacts untouched.
+`--update-expectations` is an exception-safe staged freeze. Generation and
+verification complete in temporary sibling directories before promotion — every
+gate and the repeated byte-identity check must pass first, and a failed
+pre-promotion generation leaves the committed artifacts untouched. Each
+same-filesystem rename is atomic, and ordinary exceptions trigger rollback. The
+multi-step promotion of the results directory and expected-report-v1.json is not
+crash-atomic: an abrupt process or machine failure may require recovery from
+`.update-bak` before rerunning the update.
 """
 from __future__ import annotations
 
@@ -435,9 +439,14 @@ def _atomic_write_bytes(path: str, data: bytes) -> None:
 
 
 def run_update(fixture: str, data_root: str, target_out_dir: str) -> dict:
-    """Transactional freeze: generate + verify in temp dirs, then atomically
-    replace committed artifacts and rewrite expected-report-v1.json. A failure
-    leaves the previously committed artifacts and expectation untouched."""
+    """Exception-safe staged freeze. Generation and verification complete in
+    temporary sibling directories before promotion; every gate and the repeated
+    byte-identity check pass first, and a failed pre-promotion generation leaves
+    committed artifacts untouched. Each same-filesystem rename is atomic, and
+    ordinary exceptions trigger rollback. The multi-step promotion of the results
+    directory and expected-report-v1.json is not crash-atomic: an abrupt process
+    or machine failure may require recovery from `.update-bak` before rerunning
+    the update."""
     fdir = _fixture_dir(fixture)
     _guard_legacy_expectation(fdir)
     target_out_dir = os.path.abspath(target_out_dir)
