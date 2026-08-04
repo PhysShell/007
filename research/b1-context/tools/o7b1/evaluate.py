@@ -5,29 +5,46 @@ Arms
 A  full_derived      the concatenation of all derived transcripts (the naive
                      "dump everything" context).
 B  negative_control  the sealed advisory agent reconstruction.
-C  projection        the task-conditioned compiled projection.
+C  projection        the compiled, task-dependent projection.
 
-Support model (structural, transparent, uniform)
-------------------------------------------------
+Metric families are kept SEPARATE on purpose
+--------------------------------------------
+Corrective round `#issuecomment-5182632187` §3/§4/§5 found three distinct
+problems that all came from one mistake: forcing every arm through one metric
+family whose name implied more than it measured. So there are now three:
+
+1. STRUCTURAL COMPILATION coverage — uniform across arms, structural only.
+2. PROJECTION VALIDITY — computed from the presented records themselves
+   (`validity.py`), so it can actually fail. Applies to the projection arm.
+3. NEGATIVE-CONTROL DIAGNOSTICS — split into independently supported fields.
+   Applies to the negative-control arm.
+
+Non-applicable families are `null`, never a flattering zero.
+
+Structural support model (unchanged, and still the honest part)
+--------------------------------------------------------------
 Each arm exposes a set of AVAILABLE sources (source_ids + digests). An arm
 "carries" an in-force authoritative gold observation iff every provenance source
-that observation cites is available in the arm. The projection carries the full
-provenance of what it selected; raw transcripts and the advisory reconstruction
-do not reproduce the fixture/repo provenance, so they carry no compiled state.
-This is applied identically to all three arms — the asymmetry in the numbers is a
-property of the arms, not of the scoring.
+that observation cites is available in the arm. Applied identically to all three
+arms — the asymmetry in the numbers is a property of the arms, not the scoring.
 
-`evidence_source_presence` is a separate, softer metric: does the arm contain at
-least one cited source for a required observation (i.e. is the raw material in
-there at all), even if not lifted into a typed observation.
+What this DOES NOT measure: whether a fact is semantically present in, or
+answerable from, an arm's text. A raw transcript can perfectly well contain the
+information behind an observation while carrying neither the compiled
+observation nor its provenance graph — it would still score 0 here. That is why
+these fields are named `compiled_observation_coverage` and
+`structural_question_support` rather than "recall" or "answerability". A real
+recall number requires a separate extraction/readout experiment that does not
+exist yet. In particular, `full_derived`'s low coverage must NOT be read as
+"only that fraction of project state is present in the transcripts".
 
-The negative control's divergence is not hardcoded: it is confirmed from
-digest-bound fixture metadata (manifest.known_divergence_already_observed) and
-corroborated against the verified NC bytes (the NC references none of the
-captured chatgpt conversation ids that would carry the B/D merge or session E).
+`evidence_source_presence` is a softer companion: does the arm contain at least
+one cited source for a required observation (is the raw material in there at
+all), even if not lifted into a typed observation.
 """
 from __future__ import annotations
 
+from . import validity as vl
 from .canonical import canonical_bytes
 
 FULL_DERIVED = "full_derived"
@@ -101,25 +118,43 @@ def _evidence_present(gold: dict, required: set[str], avail: set[str]) -> set[st
 
 def _corrective_native_id(truth_obs: dict, manifest: dict) -> tuple[str | None, str | None]:
     """The captured conversation whose native id, if the NC referenced it, would
-    have corrected the superseded belief. Resolved from the truth observation's
-    provenance (by source_id or digest) against the manifest raw sources."""
+    have corrected the superseded belief."""
     raw = manifest["raw_sources"]
     for pr in truth_obs["provenance"]:
         for r in raw:
-            if pr.get("source_id") == r["id"] or (pr.get("digest") and pr["digest"] == r.get("digest")):
+            if pr.get("source_id") == r["id"] or (
+                    pr.get("digest") and pr["digest"] == r.get("digest")):
                 if r.get("native_conversation_id"):
                     return r["id"], r["native_conversation_id"]
     return None, None
 
 
-def detect_nc_divergences(gold: dict, nc_obj: dict, manifest: dict) -> dict:
-    """Confirm the negative control's divergences from verified inputs.
+def _contrary_markers(claim: dict) -> list[str]:
+    sv = claim.get("structured_value")
+    if isinstance(sv, dict):
+        markers = sv.get("contrary_markers")
+        if isinstance(markers, list):
+            return [str(m) for m in markers if str(m).strip()]
+    return []
 
-    Driven entirely by the gold state: for each superseded agent_claim, resolve
-    the captured conversation that supersedes it and check whether the NC bytes
-    reference that capture's native id. Absence == the NC still holds the old
-    belief. Corroborated by the digest-bound manifest divergence record. No
-    observation ids or native ids are hardcoded here.
+
+def detect_nc_divergences(gold: dict, nc_obj: dict, manifest: dict) -> dict:
+    """Report the negative control's divergence as SEPARATE, independently
+    supported claims (corrective round §7).
+
+    Three different propositions were previously collapsed into one boolean:
+
+    * `fixture_expected_divergence` — the digest-bound manifest records that this
+      sealed reconstruction is already known to diverge here.
+    * `corrective_evidence_absent_from_negative_control` — the NC bytes do not
+      reference the corrective capture's native conversation id. This is what
+      the byte check actually establishes: the reconstruction did not have that
+      corrective reference.
+    * `contrary_claim_detected` — whether the NC positively asserts the opposite
+      proposition. Absence of a corrective reference does NOT establish this.
+      Detected only when the superseded claim supplies `contrary_markers` in its
+      `structured_value` and one is found in the NC text; otherwise `null`
+      (= not evaluated), never silently folded into the fields above.
     """
     nc_text = canonical_bytes(nc_obj).decode("utf-8")
     by_id = {o["observation_id"]: o for o in gold["observations"]}
@@ -131,16 +166,29 @@ def detect_nc_divergences(gold: dict, nc_obj: dict, manifest: dict) -> dict:
         if truth is None:
             continue
         rid, native = _corrective_native_id(truth, manifest)
-        asserted = native is not None and native not in nc_text
+        corrective_absent = native is not None and native not in nc_text
+
+        markers = _contrary_markers(claim)
+        if markers:
+            hits = sorted(m for m in markers if m in nc_text)
+            contrary = bool(hits)
+        else:
+            hits = []
+            contrary = None
+
         out[claim["observation_id"]] = {
-            "asserted_by_negative_control": asserted,
             "superseded_by": claim.get("superseded_by"),
-            "corroboration": (
-                "manifest.known_divergence + NC does not reference corrective "
-                "capture %s native id %s" % (rid, native)
-                if native is not None else
-                "no corrective capture native id resolvable; not confirmed"),
-            "divergence_record_present": bool(divergence_record),
+            "fixture_expected_divergence": bool(divergence_record),
+            "corrective_evidence_absent_from_negative_control": corrective_absent,
+            "contrary_claim_detected": contrary,
+            "contrary_markers_found": hits,
+            "corrective_capture": rid,
+            "corrective_native_id_resolved": native is not None,
+            "establishes": (
+                "the reconstruction lacks corrective capture %s; this does not by "
+                "itself prove it asserts the opposite" % rid
+                if corrective_absent else
+                "no corrective-reference absence established"),
         }
     return out
 
@@ -152,7 +200,7 @@ def _superseded_claims(gold: dict) -> list[dict]:
 
 def evaluate(gold: dict, questions: dict, source_selectors: dict, manifest: dict,
              nc_obj: dict, derived_summary: dict, projection: dict,
-             context_json_bytes: int) -> dict:
+             context_json_bytes: int, budget: dict) -> dict:
     by_id = {o["observation_id"]: o for o in gold["observations"]}
     required_union = set()
     for q in questions["questions"]:
@@ -180,18 +228,14 @@ def evaluate(gold: dict, questions: dict, source_selectors: dict, manifest: dict
     }
 
     nc_div = detect_nc_divergences(gold, nc_obj, manifest)
-    superseded = _superseded_claims(gold)
-
-    def asserted_superseded_for(arm: str) -> list[dict]:
-        """Which superseded beliefs does this arm present as if in force?"""
-        if arm != NEGATIVE_CONTROL:
-            return []
-        out = []
-        for claim in superseded:
-            info = nc_div.get(claim["observation_id"])
-            if info and info["asserted_by_negative_control"]:
-                out.append(claim)
-        return out
+    nc_stale = sorted(
+        oid for oid, info in nc_div.items()
+        if info["corrective_evidence_absent_from_negative_control"])
+    nc_contrary = sorted(
+        oid for oid, info in nc_div.items() if info["contrary_claim_detected"] is True)
+    nc_superseders_missing = sorted(
+        {nc_div[oid]["superseded_by"] for oid in nc_stale
+         if nc_div[oid]["superseded_by"] in required_union})
 
     arms = {}
     matrix = []
@@ -199,23 +243,12 @@ def evaluate(gold: dict, questions: dict, source_selectors: dict, manifest: dict
         carried = _carried(gold, avail[arm])
         carried_req = carried & required_union
         ev_present = _evidence_present(gold, required_union, avail[arm])
-        asserted = asserted_superseded_for(arm)
-        # supersession/contradiction: the superseded belief's superseded_by is a
-        # required, in-force observation that the arm contradicts by asserting the
-        # old belief.
-        contradicted = sorted({c["superseded_by"] for c in asserted
-                               if c["superseded_by"] in required_union})
-        unsupported_claim_ids = sorted(c["observation_id"] for c in asserted)
 
         fully_supported_questions = 0
         for q in questions["questions"]:
             req = set(q["required_observation_ids"])
             supported = sorted(req & carried)
             missing = sorted(req - carried)
-            q_contra = sorted({c["superseded_by"] for c in asserted
-                               if c["superseded_by"] in req})
-            q_unsupported = sorted(c["observation_id"] for c in asserted
-                                   if c["superseded_by"] in req)
             if req and req <= carried:
                 fully_supported_questions += 1
             evidence_refs = sorted({sid for oid in supported
@@ -224,32 +257,67 @@ def evaluate(gold: dict, questions: dict, source_selectors: dict, manifest: dict
                 "question_id": q["id"],
                 "arm": arm,
                 "required_observation_ids": sorted(req),
-                "supported_observation_ids": supported,
+                "structurally_supported_observation_ids": supported,
                 "missing_observation_ids": missing,
-                "contradicted_observation_ids": q_contra,
-                "unsupported_claim_ids": q_unsupported,
                 "evidence_refs": evidence_refs,
             })
 
         n_req = len(required_union)
-        arms[arm] = {
+        entry = {
             "input_bytes": input_bytes[arm],
             "record_count": record_count[arm],
-            "required_observation_recall": round(len(carried_req) / n_req, 6),
-            "evidence_source_presence": round(len(ev_present) / n_req, 6),
-            "question_support_coverage": round(
+            # --- structural compilation family (uniform, structural only) ---
+            "compiled_observation_coverage": round(len(carried_req) / n_req, 6),
+            "structural_question_support": round(
                 fully_supported_questions / len(questions["questions"]), 6),
-            "unsupported_claim_count": len(unsupported_claim_ids),
-            "contradiction_count": len(contradicted),
-            "supersession_error_count": len(asserted),
-            "provenance_coverage": round(1.0 if carried else 0.0, 6),
+            "evidence_source_presence": round(len(ev_present) / n_req, 6),
+            "has_carried_provenance": bool(carried),
             "reduction_ratio_vs_full_derived": round(input_bytes[arm] / full_bytes, 6),
             "carried_required_observation_ids": sorted(carried_req),
-            "contradicted_required_observation_ids": contradicted,
+            # --- family-specific blocks, null where not applicable ---
+            "projection_validity": None,
+            "presented_provenance_ratio": None,
+            "negative_control_diagnostics": None,
         }
+        if arm == PROJECTION:
+            entry["projection_validity"] = vl.check_projection(
+                gold, projection["selector_spec"], projection["selected"],
+                projection["used_bytes"], budget)
+            entry["presented_provenance_ratio"] = vl.presented_provenance_ratio(
+                projection["selected"])
+        if arm == NEGATIVE_CONTROL:
+            entry["negative_control_diagnostics"] = {
+                "stale_belief_ids": nc_stale,
+                "stale_belief_count": len(nc_stale),
+                "contrary_claim_detected_ids": nc_contrary,
+                "contrary_claim_detected_count": len(nc_contrary),
+                "required_superseders_missing": nc_superseders_missing,
+                "required_superseders_missing_count": len(nc_superseders_missing),
+            }
+        arms[arm] = entry
 
     return {
         "required_observation_union": sorted(required_union),
+        "metric_semantics": {
+            "compiled_observation_coverage":
+                "fraction of required observations whose COMPILED form and full "
+                "provenance are structurally present in this arm; NOT semantic "
+                "recall and NOT answerability",
+            "structural_question_support":
+                "fraction of questions whose every required observation is "
+                "structurally carried; NOT evidence the question can be answered "
+                "from the arm's prose",
+            "evidence_source_presence":
+                "fraction of required observations for which at least one cited "
+                "source is present in this arm",
+            "has_carried_provenance":
+                "boolean: this arm carries at least one observation with complete "
+                "provenance (replaces the former `provenance_coverage`, which was "
+                "this same boolean reported as a 0.0/1.0 ratio)",
+            "presented_provenance_ratio":
+                "projection only: fraction of PRESENTED records carrying complete "
+                "provenance; null for an empty projection",
+        },
         "arms": arms,
         "question_support_matrix": matrix,
         "negative_control_divergence": nc_div,
