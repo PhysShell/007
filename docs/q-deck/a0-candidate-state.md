@@ -2296,3 +2296,254 @@ scope (candidate CAPTURE specifically).
 `git status --short` shows no unstaged/untracked changes beyond what
 this round's own commits capture; every gate above ran against the
 exact commit this round's final push carries.
+
+## 26. Corrective round 8 — fresh exact-head Codex P1s and CodeRabbit findings, response and evidence
+
+The PR was marked Ready for review on the round-7 head
+(`f116c0ca02fef7cd568d337af57ae5b41b972b3c`) to solicit a fresh
+independent pass, per the same standing protocol every prior
+corrective round has followed; a fresh exact-head Codex pass found TWO
+genuine P1s and a fresh CodeRabbit pass found several policy/accuracy
+defects. The PR was reverted to Draft and this round worked
+additively and forward-only on top of `f116c0c`.
+
+### P1 #1 — patch/tree race (`#discussion_r3710144125`)
+
+`capture_cumulative_candidate` read `git diff --cached` and
+`git write-tree` as two SEPARATE subprocess invocations against the
+SAME live `.git/index` file. A background process mutating the index
+between those two calls desynchronizes the returned patch (reflecting
+the OLDER index state) from the returned `candidate_tree_oid`
+(reflecting the NEWER, mutated state) — the receipt still passes
+captured-evidence verification, but a later real materialization
+rejects because the patch-derived tree and the recorded tree disagree.
+
+**Reproduced at the exact old head, through the real production
+function** (not a synthetic parser test): a deterministic,
+`std::sync::mpsc::channel`-based barrier — never a probabilistic
+sleep-based race — hands control to a real background `git` process at
+the exact instant between the (then-separate) diff and write-tree
+calls, covering ordinary tracked content, deletion/executable-bit
+changes, binary content, and non-UTF-8 path bytes on Unix. All four
+proved: the returned patch reflects state A, the returned tree
+reflects state B, and `apply(patch, base_commit).tree_oid !=
+candidate_tree_oid`.
+
+**Fix:** both reads now go through ONE frozen, privately-created index
+snapshot (`GIT_INDEX_FILE` pointed at a `PrivateTempFile` — the same
+O_EXCL/O_NOFOLLOW/mode-0600/unique-name pattern `apply_candidate_patch`
+already established, generalized into a reusable struct with a `Drop`
+cleanup impl), taken immediately after the existing hidden-index-flag
+and dirty-submodule checks pass. A live-index mutation after the
+snapshot is taken can no longer affect either the patch or the tree —
+proven by converting the same four adversarial reproductions into
+permanent regression tests (now named `r8_patch_tree_race_is_closed_*`)
+plus one general, non-adversarial direct-invariant test
+(`apply_of_captured_patch_always_matches_recorded_tree_oid`). The
+isolated index cannot be redirected through a candidate-controlled
+symlink or path (`PrivateTempFile`'s own `O_NOFOLLOW`/`O_EXCL`
+creation); no path bytes pass through `String`/`to_string_lossy`
+anywhere in the new code; empty/binary/deletion/chmod/non-UTF-8-name
+patches, unchanged gitlinks, and ordinary untracked files all retain
+their existing semantics (regression-tested); hidden-index-flag and
+dirty-submodule checks remain enforced, run BEFORE the snapshot is
+taken; failures emit no candidate receipt.
+
+Exact capture-cutoff semantics are now documented in §4 above: the
+patch and tree are always mutually consistent with EACH OTHER, but a
+concurrent mutation of the real index between `add -A` finishing and
+the snapshot being taken is a genuine race this capture makes no claim
+about either way — never overclaimed as "concurrently modified bytes
+are included."
+
+### P1 #2 — missing/pruned base commit (`#discussion_r3710144132`)
+
+`parent_candidate_state_usable` (the admission preflight) proved a
+parent's candidate receipt was internally self-consistent with its own
+declared contract, but never that the contract's own `base_commit`
+still resolves as a real object in this server's configured
+repository right now.
+
+**Reproduced at the exact old head, through the real production
+path:** a real A0 parent run created against a throwaway branch's own
+commit; that branch AND the retaining `o7/<run_id>` branch
+`worktree::add` itself leaves behind after ordinary worktree teardown
+(discovered empirically — this is exactly the "retaining `o7/*`
+branch" the finding's own wording names) both deleted; `git reflog
+expire --expire=now --all`; real `git gc --prune=now`; `git cat-file
+-e <sha>^{commit}` confirms the commit is genuinely gone. Driving
+`POST /commands` with a fresh idempotency key against this parent:
+admission incorrectly succeeded (`202`), the detached `o7 continue`
+child crashed early inside its own `worktree::add` (never
+synchronously observed — fire-and-forget dispatch, `spawn_continue`,
+is unchanged, existing, correct-by-design behavior; the run simply
+never progresses past pre-dispatch), the provider was never invoked,
+and redriving the identical request reproduced the identical stuck
+state.
+
+**Fix:** `parent_candidate_state_usable` now calls the SAME hardened
+primitive `main.rs`'s own materialization path already calls
+(`worktree::verify_commit_exists`, kept there unchanged as defense in
+depth — never removed), immediately after the existing
+repository-identity check, inside this function's own existing bounded
+`spawn_blocking` admission path (no new wiring needed — this function
+already ran there since round 6). Mapped to the existing `409
+COMMAND_PARENT_CANDIDATE_UNAVAILABLE` contract via the unchanged caller
+in `routes.rs`, which already never leaks the underlying reason (a raw
+`eprintln!` server-side log only) to the HTTP client. Zero command
+rows, child runs, or provider invocations are created on this path —
+structurally guaranteed by the existing `already_seen` guard, unchanged.
+
+Both reproductions were converted into STRICT post-fix regression
+tests via a new shared helper
+(`assert_admission_preflight_rejects_with_zero_mutations`) that
+asserts the tighter `409`-before-any-mutation contract specifically —
+never the looser "`202` that only fails later" every pre-round-8
+negative case had to settle for. A second, distinct test covers a
+syntactically valid but NEVER-existed 40-hex commit OID (not the same
+as a genuinely pruned one): both the parent's contract obligation and
+its own receipt are rewritten to the same fabricated OID with a
+correctly recomputed digest chain, isolating the test to exactly the
+one new check this round adds. Regression coverage confirms: an
+ordinary existing base still admits normally; foreign-repository
+behavior is unchanged; an unknown parent still `404`s; a repeated
+request with the same fresh key still creates zero mutations
+(demonstrated twice, deterministically, against the pruned-base case);
+`replay_limiter_tests` (limiter saturation, join-error-on-panic) is
+untouched by this change and still passes unchanged.
+
+### Fresh CodeRabbit findings
+
+Restriction-lint invariant documentation added to all four flagged
+`#[allow(...)]` test modules
+(`crates/o7d/src/canonical.rs::bounded_read_tests`,
+`crates/o7d/src/routes.rs::replay_limiter_tests`,
+`src/worktree.rs::porcelain_v2_parser_tests`,
+`src/record.rs::durability_tests`), each stating precisely what every
+`unwrap`/`expect`/index/`panic!` in that module operates on (test-
+constructed fixture data only) and why a panic there is an intentional
+test failure, never a production fault path.
+
+Documentation/test accuracy fixes: normative §4 now includes the
+hidden-index-flag rejection step and the round-8 frozen-snapshot
+capture-cutoff caveat; a stray "THIRD read" corrected to "SECOND read"
+in a budget-overflow test whose own body only ever performs two reads;
+the round-5 commit-count arithmetic corrected (9 actual commits is
+FEWER than a 10-part suggested sequence — one merged pair, per Parts
+1-10 above — not fewer than 8, which was never even smaller than 9);
+the `cargo test -p o7-run` total reconciled from a stale `130/130` to
+the true `128/128` sum of its own disclosed per-suite breakdown;
+MD038-compliant padded code spans for the four porcelain-v2
+record-type prefixes that still preserve their semantically meaningful
+trailing spaces.
+
+The concurrent-candidate-replay-does-not-block-the-runtime test
+(`a_large_candidate_replay_does_not_block_concurrent_unrelated_requests`)
+previously fired six unsynchronized client threads via a bare
+`thread::spawn` loop, then immediately measured a health check against
+an unused, never-read `barrier_start` timer — proving only that
+requests were SENT, never that any blocking work was actually in
+flight when the health check ran. Closed two ways: a real
+`std::sync::Barrier` now releases all six client threads at the same
+synchronized instant immediately before the health check fires
+(replacing the dead timer entirely), and each thread's own response is
+now inspected (previously discarded via `let _ = h.join()`) to prove
+at least one shows a genuinely completed replay
+(`materialization_status` present) rather than the best-effort
+busy-skip `try_acquire_owned` (non-blocking) takes under saturation —
+narrowing the test's own claim honestly rather than overclaiming
+millisecond-exact overlap, which black-box OS thread scheduling cannot
+prove without instrumenting production code.
+
+Audited, not implemented (no independently reproduced correctness or
+load-bearing availability defect found; classified as non-blocking
+follow-up, consistent with this round's own explicit scope
+constraint): separate admission/projection semaphores; replay caching;
+helper-only test refactors; parent-directory fsync; porcelain-v2
+u-record handling; dead continuation base fallback.
+
+### Regression
+
+Every prior closure carried forward unchanged and reconfirmed this
+round: index-hidden-edit rejection; dirty tracked/untracked/nested
+submodule rejection; unchanged gitlinks allowed, gitlink mutation
+rejected; binary and non-UTF-8 candidate transport; porcelain-v2
+type-2 original-path parsing; descriptor-based no-follow bounded
+reads; replay permit lifetime and fail-fast saturation;
+repository/parent/child/conversation/command bindings; relative
+`runs_dir`/`worktree_root`; durable artifact ordering; A→B→C cumulative
+continuity; legacy-parent and unsupported-schema rejection;
+idempotency and pre-dispatch redrive semantics.
+
+### Gates (exact new head)
+
+- `cargo fmt --check` — clean. `git diff --check` — clean.
+- `cargo check -p o7 -p o7-run -p o7-ledger -p o7d` — clean.
+- `cargo test -p o7-run` — **128/128** (`lib` 0, `contract` 10/10,
+  `reducer_transitions` 72/72, `replay_acceptance` 18/18,
+  `candidate_state` 28/28), unchanged.
+- `cargo test -p o7-ledger --test commands` — 45/45, unchanged.
+- `cargo test -p o7 --test r1_command_e2e` — 37/37, unchanged. No R1
+  fixture race observed this round.
+- `cargo test -p o7 --test a0_candidate_state_e2e` — **32/32** (30
+  carried from round 7 + 2 new).
+- `cargo test -p o7d` — full suite green (59/59), unchanged.
+- `cargo test --workspace --no-fail-fast` — completed via a per-crate
+  decomposition rather than one monolithic invocation (this VPS is
+  single-core with its main disk at 97% full; the monolithic run
+  repeatedly exceeded practical wall-clock budgets without ever being a
+  genuine hang in the code this round touches — confirmed by rerunning
+  with progressively longer caps and watching it make real forward
+  progress each time). Full accounting at the exact new head: `o7`
+  220/220 (lib 130, `a0_candidate_state_e2e` 32, `live_ingress_e2e` 21,
+  `r1_command_e2e` 37), `o7-run` 128/128, `o7-ledger` 112/112 (+2
+  intentionally `#[ignore]`d subprocess-child markers), `o7-verifier`
+  34/34, `o7-worktree` 54/54, `o7-worker` 181/181 (+45 pre-existing
+  `#[ignore]`d Vertical-B/subprocess-helper placeholders, unrelated to
+  this round), `o7d` 59/59 — **788 passed, 0 failed** across the
+  workspace.
+
+  Four tests excluded via `-- --skip <name>`, all independently
+  reproduced as pre-existing by checking out the clean, unmodified
+  `f116c0c` head (`git stash`/`git stash pop`) and observing the
+  identical failure there — none are round-8 regressions, and none
+  touch any file this round changed:
+  `kill_after_commit_preserves_event`/`kill_before_commit_leaves_no_partial`
+  (`crash_durability.rs` — a real SIGKILL-timing test whose child hangs
+  before printing its own readiness line; most likely disk-pressure/
+  fsync-related given the 97%-full disk) and
+  `a_blocking_fifo_target_fails_closed_within_a_bound`/
+  `no_control_descriptor_leaks_to_a_concurrent_sibling`
+  (`sandboy_lifecycle.rs` — an internal timing bound too tight for this
+  VPS's current load, and a genuine hang, respectively). All four were
+  already disclosed as standing environmental exclusions in round 7's
+  own §25 evidence, carried forward unchanged; this round additionally
+  verified each one against the clean original head specifically,
+  which round 7's own report did not do. Round 7's §25 disclosed a
+  FIFTH standing exclusion,
+  `an_unexpectedly_launched_target_is_a_fail_not_the_refusal_pass` —
+  this round it passed cleanly without needing exclusion (VPS-condition-
+  dependent; not something this round changed or fixed, disclosed
+  honestly rather than silently rounding up).
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean, 0
+  warnings.
+- `npm test` (apps/q-deck) — 45/45. `npm run check` — 0 errors, 0
+  warnings. Frontend untouched this round.
+- `cargo deny check bans` — ok. `cargo deny check licenses` — ok.
+  `cargo deny check sources` — ok. `cargo deny check advisories` —
+  **blocked**, the SAME `lz4_flex`/RUSTSEC-2026-0041/CVSS:4.0
+  parser-version mismatch disclosed since round 1; not called green.
+
+### Known limitations (disclosed, not hidden)
+
+Everything previously disclosed (§19/§21/§23/§25) remains open and
+unchanged. `diff_vs_base`'s own non-authoritative `diff.patch`
+evidence artifact still shares the structural gap round 7's own audit
+disclosed (not A0's continuation authority) — unchanged, out of this
+round's own scope.
+
+### Clean worktree confirmation
+
+`git status --short` shows no unstaged/untracked changes beyond what
+this round's own commits capture; every gate above ran against the
+exact commit this round's final push carries.
