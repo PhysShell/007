@@ -8,6 +8,10 @@ pub mod agent;
 pub mod events;
 pub mod gate;
 pub mod invoke;
+// The arliai HTTP layer for `o7 invoke` — crate-internal on purpose: its
+// only consumer is `invoke.rs`, and nothing outside the crate should be
+// able to reach the raw call/extraction seam around the status classifier.
+mod invoke_arliai;
 pub mod judge;
 pub mod ledger_projector;
 pub mod record;

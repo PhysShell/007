@@ -22,6 +22,11 @@ allow = [
     "Zlib",
     "Unicode-DFS-2016",
     "Unicode-3.0",
+    # webpki-roots (ureq's bundled Mozilla CA root store): CDLA-Permissive-2.0
+    # is a permissive license for DATA (the certificate list), no copyleft, no
+    # attribution-in-binary obligations -- the standard license Mozilla ships
+    # its root store under.
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.8
 unused-allowed-license = "allow"
