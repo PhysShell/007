@@ -327,6 +327,85 @@ fn check_no_dirty_submodule_status(out: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Q-Deck A0 corrective round 7 (fresh exact-head Codex P1,
+/// `#discussion_r3707367805`): before this run's own cumulative candidate
+/// state (or, at materialization, [`finish_apply`]'s own resulting tree)
+/// is ever trusted, prove the index carries no `assume-unchanged`/
+/// `skip-worktree` entries.
+///
+/// `git add -A` HONORS both flags: a tracked path marked either way is
+/// left exactly as the index already has it, no matter what its
+/// working-tree bytes now say — `git status`/`git diff --cached` show
+/// NOTHING for such a path. A genuinely edited file can therefore produce
+/// an EMPTY cumulative patch and a tree OID identical to `base_commit`'s
+/// own, letting the run seal with a candidate receipt that reads as a
+/// complete no-op while silently discarding the edit — reproduced live
+/// through `capture_cumulative_candidate` itself: `git update-index
+/// --assume-unchanged f` (or `--skip-worktree`) then editing `f` produces
+/// `Ok((vec![], base_commit's own tree))`.
+///
+/// `git ls-files -v -z` is the authority. `-v`'s status letter (`H`
+/// cached, `S` skip-worktree, `M` unmerged, `R` removed, `C` modified,
+/// `K` to-be-killed — never otherwise lowercase on their own) is lowered
+/// for an ADDITIONALLY assume-unchanged entry, so any lowercase letter
+/// means assume-unchanged regardless of the base status, and `S`/`s`
+/// specifically marks skip-worktree (lowercase again when both flags are
+/// set at once). `-z` keeps every path as raw, NUL-delimited bytes —
+/// parsed here as a fixed `<letter><space><path>` byte layout, never
+/// re-split on spaces or reinterpreted as UTF-8 for comparison; only the
+/// final error message formats the path lossily for display, exactly
+/// like every other diagnostic in this file.
+///
+/// A conservative, BLANKET policy: ANY index entry carrying either flag
+/// rejects the whole capture, regardless of whether that specific
+/// entry's current blob actually differs from its working-tree bytes
+/// right now — proving that precisely would mean re-reading the flagged
+/// path's own content, reopening exactly the TOCTOU window this check
+/// exists to close. Sparse-checkout/`skip-worktree` and
+/// `assume-unchanged` worktrees are UNSUPPORTED for candidate capture by
+/// design — a documented limitation, never claimed as supported.
+///
+/// This check is READ-ONLY: it never calls `update-index` to clear or
+/// mutate either flag on the caller's behalf, and never touches the
+/// working tree — a rejection leaves the original checkout and index
+/// exactly as found.
+///
+/// # Errors
+/// Any underlying `git` failure, or at least one index entry carries
+/// `assume-unchanged` or `skip-worktree`.
+fn ensure_no_index_hidden_flags(worktree: &Path) -> Result<()> {
+    let out = run_git_bytes(worktree, &["ls-files", "-v", "-z"])?;
+    for record in out.split(|&b| b == 0) {
+        if record.is_empty() {
+            continue;
+        }
+        let Some(&letter) = record.first() else {
+            continue;
+        };
+        let assume_unchanged = letter.is_ascii_lowercase();
+        let skip_worktree = letter == b'S' || letter == b's';
+        if !assume_unchanged && !skip_worktree {
+            continue;
+        }
+        let path = record.get(2..).unwrap_or_default();
+        let flag = match (assume_unchanged, skip_worktree) {
+            (true, true) => "skip-worktree+assume-unchanged",
+            (true, false) => "assume-unchanged",
+            (false, true) => "skip-worktree",
+            (false, false) => unreachable!("guarded by the check above"),
+        };
+        anyhow::bail!(
+            "index entry {:?} carries {flag} — a hidden edit to this path would never appear \
+             in `git status`/`git diff --cached`, silently producing an incomplete candidate \
+             patch/tree; sparse-checkout/skip-worktree/assume-unchanged worktrees are \
+             unsupported for candidate capture, this fails closed rather than trust an index \
+             that may not reflect the working tree",
+            String::from_utf8_lossy(path)
+        );
+    }
+    Ok(())
+}
+
 /// Q-Deck A0 corrective round 3 (Codex P1, Part 2): a heuristic, NON-
 /// AUTHORITATIVE early diagnostic only — Git's own extended-header line
 /// for a mode change/new entry at submodule mode, scanned as lossy text
@@ -364,6 +443,14 @@ pub fn capture_cumulative_candidate(
     base_commit: &str,
 ) -> Result<(Vec<u8>, String)> {
     run_git_bytes(worktree, &["add", "-A"])?;
+    // Q-Deck A0 corrective round 7 (fresh exact-head Codex P1): checked
+    // right after staging, as close as practical to the authoritative
+    // index capture below — `add -A` itself does not clear
+    // assume-unchanged/skip-worktree flags (they are orthogonal to
+    // staging), so this catches them regardless of whether they were set
+    // before or would still be set after.
+    ensure_no_index_hidden_flags(worktree)
+        .context("candidate capture's own index-hidden-flags check")?;
     // Q-Deck A0 corrective round 5 (Codex P1, Part 1): checked immediately
     // after staging, right before this run's own content is read for the
     // patch/tree — the working-tree state `git status` inspects here is the
@@ -519,6 +606,18 @@ fn absolute_path_of_open_dir(dir_fd: &OwnedFd) -> Result<std::path::PathBuf> {
 }
 
 fn finish_apply(worktree: &Path, base_commit: &str) -> Result<String> {
+    // Q-Deck A0 corrective round 7 (fresh exact-head Codex P1), defense in
+    // depth: same check as `capture_cumulative_candidate`'s own, mirroring
+    // how `ensure_no_gitlink_mutation`/`ensure_no_dirty_submodule_worktree`
+    // are already duplicated at both sites. A freshly applied patch has no
+    // way to itself SET either flag (`git apply` only ever touches the
+    // named paths' content, never `update-index --assume-unchanged`/
+    // `--skip-worktree` bits), but this worktree is reused for the next
+    // continuation's own agent turn — a flag any earlier operator/tooling
+    // step left set survives across that reuse, so this authoritative
+    // write-tree stays protected the same way capture is.
+    ensure_no_index_hidden_flags(worktree)
+        .context("materialization's own index-hidden-flags check")?;
     // Q-Deck A0 corrective round 5 (Codex P1, Part 1), defense in depth:
     // same check as `capture_cumulative_candidate`'s own, mirroring how
     // `ensure_no_gitlink_mutation` is already duplicated at both sites.
@@ -880,6 +979,20 @@ mod dirty_submodule_tests {
         assert!(status.success(), "git {args:?} failed");
     }
 
+    /// Like [`run`], but the final path argument is a raw `OsStr` — for
+    /// tests that need a non-UTF-8 filename, which cannot round-trip
+    /// through a plain `&str` argument at all.
+    fn run_os(dir: &Path, leading: &[&str], args: &[&str], path: &std::ffi::OsStr) {
+        let status = Command::new("git")
+            .args(leading)
+            .args(args)
+            .arg(path)
+            .current_dir(dir)
+            .status()
+            .expect("spawn git");
+        assert!(status.success(), "git {leading:?} {args:?} {path:?} failed");
+    }
+
     fn init_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         run(dir.path(), &["init", "-q"]);
@@ -1042,6 +1155,164 @@ mod dirty_submodule_tests {
             std::fs::read_to_string(dir.join("sub").join("tracked.txt")).unwrap(),
             "tampered\n",
             "the original checkout must not be corrupted by the failed capture"
+        );
+    }
+
+    /// Q-Deck A0 corrective round 7 (fresh exact-head Codex P1,
+    /// `#discussion_r3707367805`): the exact live counterexample —
+    /// `git update-index --assume-unchanged` on a tracked file, then
+    /// editing it, made `capture_cumulative_candidate` (the REAL
+    /// production function, not a synthetic fixture) return
+    /// `Ok((vec![], base_commit's own tree))` at the old head: an empty
+    /// patch and an unchanged tree OID despite the tampered content on
+    /// disk. Must now fail closed instead.
+    #[test]
+    fn assume_unchanged_modified_tracked_file_rejects() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::write(dir.join("tracked.txt"), "original\n").unwrap();
+        let base = commit_all(dir, "init");
+        run(dir, &["update-index", "--assume-unchanged", "tracked.txt"]);
+        std::fs::write(dir.join("tracked.txt"), "TAMPERED\n").unwrap();
+        let result = capture_cumulative_candidate(dir, &base);
+        let err = result.expect_err("an assume-unchanged hidden edit must fail closed");
+        assert!(
+            format!("{err:?}").contains("assume-unchanged"),
+            "got: {err:?}"
+        );
+    }
+
+    /// Same counterexample, for `skip-worktree` instead.
+    #[test]
+    fn skip_worktree_modified_tracked_file_rejects() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::write(dir.join("tracked.txt"), "original\n").unwrap();
+        let base = commit_all(dir, "init");
+        run(dir, &["update-index", "--skip-worktree", "tracked.txt"]);
+        std::fs::write(dir.join("tracked.txt"), "TAMPERED\n").unwrap();
+        let result = capture_cumulative_candidate(dir, &base);
+        let err = result.expect_err("a skip-worktree hidden edit must fail closed");
+        assert!(format!("{err:?}").contains("skip-worktree"), "got: {err:?}");
+    }
+
+    #[test]
+    fn assume_unchanged_on_a_nested_path_rejects() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::create_dir_all(dir.join("a/b/c")).unwrap();
+        std::fs::write(dir.join("a/b/c/nested.txt"), "original\n").unwrap();
+        let base = commit_all(dir, "init");
+        run(
+            dir,
+            &["update-index", "--assume-unchanged", "a/b/c/nested.txt"],
+        );
+        std::fs::write(dir.join("a/b/c/nested.txt"), "TAMPERED\n").unwrap();
+        let err = capture_cumulative_candidate(dir, &base)
+            .expect_err("a nested assume-unchanged hidden edit must fail closed");
+        assert!(
+            format!("{err:?}").contains("assume-unchanged"),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn skip_worktree_with_spaces_and_newline_in_path_rejects() {
+        let repo = init_repo();
+        let dir = repo.path();
+        // A literal newline byte inside a filename is valid on Linux;
+        // `git ls-files -z`'s NUL-delimited output is exactly what makes
+        // this safe to parse without ambiguity.
+        let name = "dir with spaces/file\nwith a newline.txt";
+        std::fs::create_dir_all(dir.join("dir with spaces")).unwrap();
+        std::fs::write(dir.join(name), "original\n").unwrap();
+        let base = commit_all(dir, "init");
+        run(dir, &["update-index", "--skip-worktree", name]);
+        std::fs::write(dir.join(name), "TAMPERED\n").unwrap();
+        let err = capture_cumulative_candidate(dir, &base)
+            .expect_err("skip-worktree on a path with spaces/newline must still be caught");
+        assert!(format!("{err:?}").contains("skip-worktree"), "got: {err:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn assume_unchanged_on_a_non_utf8_path_rejects_without_panicking() {
+        use std::os::unix::ffi::OsStrExt;
+        let repo = init_repo();
+        let dir = repo.path();
+        let mut raw = b"bad_".to_vec();
+        raw.extend_from_slice(&[0xFF, 0xFE]);
+        raw.extend_from_slice(b"_name.txt");
+        let name = std::ffi::OsStr::from_bytes(&raw);
+        std::fs::write(dir.join(name), "original\n").unwrap();
+        let base = commit_all(dir, "init");
+        run_os(
+            dir,
+            &["-c", "core.quotepath=false"],
+            &["update-index", "--assume-unchanged"],
+            name,
+        );
+        std::fs::write(dir.join(name), "TAMPERED\n").unwrap();
+        let err = capture_cumulative_candidate(dir, &base)
+            .expect_err("a non-UTF-8 path must still be caught, not silently skipped or panic");
+        assert!(
+            format!("{err:?}").contains("assume-unchanged"),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn ordinary_tracked_edit_still_captures() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::write(dir.join("tracked.txt"), "original\n").unwrap();
+        let base = commit_all(dir, "init");
+        std::fs::write(dir.join("tracked.txt"), "edited\n").unwrap();
+        let (patch, tree_oid) = capture_cumulative_candidate(dir, &base)
+            .expect("an ordinary tracked edit with no hidden-index flags must still capture");
+        assert!(!patch.is_empty(), "the edit must appear in the patch");
+        assert_ne!(
+            tree_oid,
+            rev_parse(dir, &format!("{base}^{{tree}}")).unwrap()
+        );
+    }
+
+    #[test]
+    fn untracked_file_still_captures() {
+        let repo = init_repo();
+        let dir = repo.path();
+        let base = commit_all(dir, "init");
+        std::fs::write(dir.join("new_untracked.txt"), "new\n").unwrap();
+        let (patch, _tree_oid) = capture_cumulative_candidate(dir, &base)
+            .expect("a plain untracked file with no hidden-index flags must still capture");
+        assert!(!patch.is_empty(), "the new file must appear in the patch");
+    }
+
+    #[test]
+    fn rejection_leaves_index_flags_and_working_tree_bytes_untouched() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::write(dir.join("tracked.txt"), "original\n").unwrap();
+        let base = commit_all(dir, "init");
+        run(dir, &["update-index", "--assume-unchanged", "tracked.txt"]);
+        std::fs::write(dir.join("tracked.txt"), "TAMPERED\n").unwrap();
+        assert!(capture_cumulative_candidate(dir, &base).is_err());
+        // Working-tree bytes: untouched.
+        assert_eq!(
+            std::fs::read_to_string(dir.join("tracked.txt")).unwrap(),
+            "TAMPERED\n",
+            "a rejected capture must never revert/mutate the working tree"
+        );
+        // Index flag: still set — the check must never itself clear it.
+        let out = Command::new("git")
+            .args(["ls-files", "-v"])
+            .current_dir(dir)
+            .output()
+            .expect("spawn git");
+        let ls = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            ls.lines().any(|l| l == "h tracked.txt"),
+            "a rejected capture must never clear the user's own assume-unchanged flag: {ls:?}"
         );
     }
 
