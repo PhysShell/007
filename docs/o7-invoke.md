@@ -21,7 +21,7 @@ and where responsibility for those guarantees sits.
 
 ```bash
 o7 invoke
-  --engine claude|codex
+  --engine claude|codex|arliai
   --prompt-file prompt.txt
   --input-manifest input-manifest.json   # optional; hashed for provenance
   --schema output.schema.json
@@ -69,6 +69,13 @@ not a silent fallback to some default posture. `read-only-data` maps to:
   shell" and *not* "no network"; that gap is what keeps `--engine codex`
   unfit for untrusted content until live-verified (below).
 
+- **Arli AI**: there is no subprocess and no tool surface at all — the
+  backend is a direct HTTPS API call (below). `read-only-data` is satisfied
+  structurally: the request carries `tool_choice: "none"`, and a response
+  that nevertheless contains `tool_calls` is rejected as
+  `FAIL_INVALID_OUTPUT` (belt and braces — this layer never executes a tool
+  either way).
+
 **`o7 invoke` itself does not refuse `--engine codex`** — it is a general
 primitive, and a caller reaching for codex purely to check
 reachability/auth (no untrusted content involved) is a legitimate use this
@@ -81,6 +88,140 @@ fixed, non-adversarial prompt. Any future caller of `o7 invoke` inherits
 the same unverified posture and needs to make the same call for its own
 untrusted-content paths — this primitive documents the gap accurately, it
 does not close it by fiat.
+
+## Arli AI backend (`--engine arliai`)
+
+The third backend is not a CLI: it is a direct HTTPS call to Arli AI's
+OpenAI-compatible chat-completions API. It exists so `o7 invoke` can be
+exercised against a cheap hosted open-weights provider without installing
+another vendor CLI. The contract below is normative and was written before
+the implementation (contract-first).
+
+### Endpoint binding
+
+- The endpoint is a **compile-time constant**:
+  `https://api.arliai.com/v1/chat/completions`. There is no flag, no
+  environment variable, and no config file that can point the call anywhere
+  else — an endpoint override would be a credential-redirection vector (the
+  `Authorization` header goes wherever the URL says).
+- **Redirects are disabled.** Any 3xx response is terminal:
+  `BLOCKED_PROVIDER` (`error_kind: "redirect"`), never followed. HTTP
+  clients generally strip `Authorization` on cross-origin redirects anyway;
+  the ban is about endpoint binding, not only header leakage — this
+  primitive talks to exactly one URL or it doesn't talk.
+- **No proxy support** in this slice: the connection is direct, proxy
+  environment variables are deliberately ignored (same endpoint-binding
+  rationale; revisit as an explicit decision if a deployment ever needs
+  one).
+- **No retry** in this slice, on anything — one request, one classified
+  outcome. Retry policy belongs to the caller (and, for canonical runs, to
+  the R1 dispatch-boundary rules), not inside this primitive.
+
+### Configuration refusals (pre-network)
+
+Both are refused with a plain error before any artifact is written or any
+connection is opened — config errors, not run outcomes (no `meta.json`,
+same as an unknown `--capability-profile`):
+
+- `ARLIAI_API_KEY` unset or empty — there is no interactive login state to
+  fall back to, unlike the CLI backends;
+- `--model` absent — the API has no server-side default model; `o7` pins
+  none (consistent with the CLI backends, which also pin none).
+
+### Request shape
+
+```json
+{
+  "model": "<--model>",
+  "messages": [{ "role": "user", "content": "<prompt-file text>" }],
+  "response_format": { "type": "json_schema", "json_schema": { "schema": { } } },
+  "tool_choice": "none",
+  "stream": false
+}
+```
+
+- `response_format` uses Arli AI's **documented** form — `json_schema`
+  with a bare `schema` object, **no `name` field** (the OpenAI-flavored
+  `name` wrapper is not part of Arli's documented shape; start from the
+  documented form, let the live fixture arbitrate).
+- The schema sent is the same `$schema`-meta-key-stripped copy the claude
+  path sends (`strip_dollar_schema`) — one precedent, one behavior.
+- Server-side `response_format` enforcement is **best effort, advisory**:
+  the local `jsonschema` re-validation (next section) is the only judge
+  that counts, exactly as for both CLI backends.
+
+### Response handling
+
+`message.content` must be a string that parses as **bare JSON** after
+whitespace trimming — no fence tolerance (with server-side constrained
+decoding requested, a fenced answer is a real anomaly worth failing loudly;
+`stdout.raw` keeps the evidence). The extracted value then goes through the
+same independent schema validation as every other engine.
+
+Classification matrix (normative):
+
+| Observation | status | `error_kind` |
+|---|---|---|
+| 2xx, content parses, schema-valid | `PASS` | — |
+| 2xx, content parses, schema-invalid | `FAIL_SCHEMA` | `schema_violation` |
+| 2xx, body not JSON / envelope malformed | `FAIL_INVALID_OUTPUT` | `bad_envelope` |
+| 2xx, `choices` empty | `FAIL_INVALID_OUTPUT` | `empty_choices` |
+| 2xx, `content` null/absent | `FAIL_INVALID_OUTPUT` | `null_content` |
+| 2xx, `tool_calls` present (non-empty) | `FAIL_INVALID_OUTPUT` | `tool_calls_present` |
+| 2xx, content string is not JSON | `FAIL_INVALID_OUTPUT` | `invalid_json` |
+| 3xx (any) | `BLOCKED_PROVIDER` | `redirect` |
+| 401 / 403 | `BLOCKED_AUTH` | `auth` |
+| 429 | `BLOCKED_USAGE` | `usage_limit` |
+| 5xx | `BLOCKED_PROVIDER` | `http_5xx` |
+| any other status (e.g. 400, 404) | `FAIL_INVALID_OUTPUT` | `http_status` |
+| DNS / TLS / connection refused / reset | `BLOCKED_PROVIDER` | `transport` |
+| timeout (`--timeout-secs`) | `BLOCKED_TIMEOUT` | `timeout` |
+
+`BLOCKED_PROVIDER` is **new, and 007-side only**: it has no counterpart in
+`demand_radar.models.AgentRunStatus` yet. That is deliberate and safe —
+the cross-repo conformance gate runs `claude`/`codex` only (see the gate
+section below), so the shared-vocabulary invariant it checks is untouched.
+If Demand Radar ever grows an `arliai` path, its vocabulary must adopt
+`BLOCKED_PROVIDER` first. The "any other status" row mirrors the CLI
+backends' `nonzero_exit` precedent: an unexplained failure is a `FAIL`,
+never silently absorbed into a `BLOCKED_*` bucket.
+
+### Artifacts and `meta.json` mapping
+
+Same run-dir contract (`--out` absent-or-empty, refused otherwise):
+
+- `stdout.raw` — the **raw HTTP response body**, byte-for-byte, whatever
+  the status (transport failures leave it empty). The analogue of a CLI
+  backend's raw stdout: the unmodified provider evidence.
+- `stderr.log` — transport/timeout error detail; empty on an HTTP
+  response.
+- `result.json` — the extracted (normalized) content value, written only
+  when one was extracted, same as the CLI paths.
+- `meta.json` — `provider: "arliai-api"`, `command_version: null` (there
+  is no CLI to probe), `exit_code: null` (no subprocess; both fields are
+  already nullable in the schema — no schema change), `model` always set
+  (it is required), everything else as for the CLI backends.
+
+### Key handling (the fifth security boundary)
+
+The existing four key rules (stdin-not-argv prompts, key-stripping before
+provider subprocesses, no credential storage read, independent
+re-validation) gain a fifth for a backend that *does* hold a key in
+process memory:
+
+- `ARLIAI_API_KEY` is read once in `run`, lives only in a local variable,
+  and is passed by reference into the one function that sets the
+  `Authorization` header. It is **never stored in any struct**, never
+  formatted into any error/log/artifact string, and never reaches
+  `meta.json` or the run dir.
+- It is added to `strip_provider_api_keys`, so a `claude`/`codex`
+  subprocess never inherits it either.
+- HTTP-client wire logging is the classic leak path for exactly this kind
+  of header (`ureq` logs via the `log` facade, and at TRACE that can
+  include request internals). The `o7` binary **initializes no logger** —
+  the `log` facade's records go nowhere by construction. That is part of
+  this contract: adding a logger to `o7` later requires re-visiting this
+  boundary first.
 
 ## Output re-validation
 
@@ -115,9 +256,11 @@ across CLI versions, so `o7` accepts exactly those two and nothing looser:
 
 ## Auth
 
-Neither engine's credential storage is read directly — both shell out to
-whichever CLI the user already authenticated interactively. `ANTHROPIC_API_KEY`/
-`CLAUDE_API_KEY`/`OPENAI_API_KEY`/`CODEX_API_KEY` are stripped
+Neither CLI engine's credential storage is read directly — both shell out
+to whichever CLI the user already authenticated interactively (`arliai`,
+having no CLI, authenticates with `ARLIAI_API_KEY` directly — see its own
+section above). `ANTHROPIC_API_KEY`/
+`CLAUDE_API_KEY`/`OPENAI_API_KEY`/`CODEX_API_KEY`/`ARLIAI_API_KEY` are stripped
 (`strip_provider_api_keys`) before **every provider subprocess** — the real
 call *and* the best-effort `--version` probe (the probe also runs under a
 short bounded timeout, degrading to `command_version: null` rather than
@@ -152,8 +295,10 @@ real error.
 ## Cross-repo conformance gate
 
 `demand-radar/scripts/o7_conformance_gate.py` runs the same prompt/schema/
-input through `o7 invoke` directly and through `O7InvokeRunner`, for both
-engines, asserting they agree on `status`/`schema_valid`/`error_kind`/
+input through `o7 invoke` directly and through `O7InvokeRunner`, for the
+two **CLI** engines (`claude`, `codex` — the gate is deliberately not
+`arliai`-aware, and `BLOCKED_PROVIDER` stays 007-side vocabulary until
+Demand Radar adopts it), asserting they agree on `status`/`schema_valid`/`error_kind`/
 structured output/`input_hashes`/`provider`/`model`/`exit_code`, plus an
 independently-recomputed prompt hash in a third language. It is a
 translation-fidelity gate (does the wrapper faithfully relay what `o7
