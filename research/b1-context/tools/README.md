@@ -50,10 +50,15 @@ Properties enforced by the code:
   access). Nothing is written to the CAS or to any source blob. All outputs land
   under `--out`.
 - **Fail closed.** A digest/size mismatch, a derived transcript that disagrees
-  with the committed `derived-manifest.yaml`, or a report that disagrees with the
-  committed `expected-report-v0.json` exits non-zero and writes no fabricated
+  with the committed `derived-manifest.yaml`, a report that disagrees with the
+  committed `expected-report-v1.json`, a task-dependence acceptance failure, or a
+  present legacy `expected-report-v0.json` exits non-zero and writes no fabricated
   report. A missing blob is UNAVAILABLE (→ PARTIAL), which is distinct from
   INVALID.
+- **Transactional freeze.** `--update-expectations` generates into a temporary
+  sibling, verifies every gate and two-run byte identity, and only then
+  atomically replaces the committed results and rewrites `expected-report-v1.json`.
+  A failed update leaves the previously committed artifacts untouched.
 - **Deterministic.** `context.json`, `context.md`, `context.meta.json`,
   `report.json`, `report.md` are byte-identical across runs (canonical UTF-8,
   sorted keys, LF, timestamps kept out of canonical digests).
@@ -64,9 +69,10 @@ Properties enforced by the code:
 ## Outputs
 
 Canonical artifacts are written under `--out`; the committed copies live in
-`../results/case-0001-v0/` (report + context) and `../fixtures/case-0001/`
-(inputs + `expected-report-v0.json`). Derived transcripts are written to
-`<out>/derived/*.jsonl`; they are **external CAS blobs** and are never committed.
+`../results/case-0001-v0/` (report + per-task context + projection-comparison) and
+`../fixtures/case-0001/` (inputs + `expected-report-v1.json`). Derived transcripts
+are written to `<out>/derived/*.jsonl`; they are **external CAS blobs** and are
+never committed (also `.gitignore`d under `results/`).
 To store them in the owner's CAS after a run:
 
 ```sh

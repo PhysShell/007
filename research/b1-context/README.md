@@ -49,9 +49,18 @@ holdout/     evaluation cases NOT used while designing the schema
 
 ## Reproducible development vertical (case-0001 v0)
 
-One command runs the whole vertical (verified RAW → derived transcripts →
-schema v0 → gold state → task + versioned selector contract → task-dependent
-projection → honest structural evaluation → measured report):
+Two commands. The **projection** half needs no CAS, no secrets and no network —
+anyone can reproduce the task-dependence result from a checkout:
+
+```sh
+python3 research/b1-context/tools/project_case.py \
+  --fixture case-0001 --out research/b1-context/results/case-0001-v0
+```
+
+The full vertical (verified RAW → derived transcripts → schema v0 → gold state →
+task registry + versioned selector contract → task-dependent projection → honest
+structural 3-arm evaluation → measured report) additionally needs the owner's
+local CAS:
 
 ```sh
 python3 research/b1-context/tools/run_case.py \
@@ -60,17 +69,33 @@ python3 research/b1-context/tools/run_case.py \
   --out /tmp/o7-b1-case-0001
 ```
 
-Offline, no secrets, read-only over inputs, fail-closed, byte-identical across
-runs. See `tools/README.md` for details and `results/case-0001-v0/report.md` for
-the current result.
+Offline where noted, no secrets, read-only over inputs, fail-closed,
+byte-identical across runs. Both tools read one task registry
+(`fixtures/case-0001/tasks-v0.yaml`) and drive projection through the same
+`o7b1.pipeline`. See `tools/README.md` for details.
 
-**Honest status:** the latest run is `development_result: PASS` on this single
-golden fixture — the pipeline runs end-to-end and detects the negative control's
-known state loss. That is **not** proof of generalization. `generalization:
-NOT_EVALUATED`, `source_set_complete: false`, `holdout_evaluated: false`,
-`authoritative_for_a_series: false`. A golden fixture whose questions were shaped
-on its own material can debug the representation; it cannot show the pipeline
-works on new cases.
+**Honest status (pre CAS-backed regeneration):**
+
+```text
+deterministic_compilation_pipeline: PASS
+task_conditioned_projection: IMPLEMENTED
+development_result: PARTIAL
+cas_backed_report: PENDING
+schema_frozen: false
+generalization: NOT_EVALUATED
+source_set_complete: false
+holdout_evaluated: false
+authoritative_for_a_series: false
+```
+
+The committed per-task projections under `results/case-0001-v0/tasks/` and
+`projection-comparison.json` are current and reproducible offline. The 3-arm
+`report.json` / `report.md` and the frozen `expected-report-v1.json` are
+regenerated on a CAS-equipped machine (see
+`results/case-0001-v0/PENDING-CAS-REGENERATION.md`); until then there is no
+current CAS-backed report, and `run_case.py` fails closed rather than presenting
+a stale one. A golden fixture whose questions were shaped on its own material can
+debug the representation; it cannot show the pipeline works on new cases.
 
 ## Storage policy
 

@@ -2,31 +2,38 @@
 """run_case.py — the single documented command that runs the whole B1 vertical.
 
 Requires the owner's local CAS. The task-dependent PROJECTION half needs no
-private data at all and is reproducible by anyone via `project_case.py`; only
-the 3-arm evaluation (derived transcripts + sealed negative control) needs the
-CAS. Both tools read the same `TASKS` list, so they can never disagree about
-which tasks exist.
+private data at all and is reproducible by anyone via `project_case.py`; only the
+3-arm evaluation (derived transcripts + sealed negative control) needs the CAS.
+Both tools read the SAME task registry (`fixtures/<fixture>/tasks-v0.yaml`) via
+`o7b1.registry` and drive projection through the SAME `o7b1.pipeline`, so they can
+never disagree about which tasks exist or produce different projection artifacts.
 
     python3 research/b1-context/tools/run_case.py \
       --fixture case-0001 \
       --data-root "$HOME/.local/share/o7-research" \
       --out /tmp/o7-b1-case-0001
 
-It is offline, needs no secrets, and is READ-ONLY with respect to its inputs: it
-reads RAW blobs from the local CAS, writes derived transcripts and canonical
-artifacts only under --out, and never writes to the CAS or to any source blob.
-It fails closed: a digest mismatch or a broken determinism/expectation check
-exits non-zero and never fabricates a report.
+Read-only over inputs; writes derived transcripts and canonical artifacts only
+under --out, never to the CAS or a source blob. Fails closed: any digest,
+determinism, acceptance or expectation mismatch exits non-zero and never
+fabricates a report.
 
-Canonical, digest-bound outputs (byte-identical across runs): context.json,
-context.md, context.meta.json, report.json, report.md. A separate run-receipt
-(with wall-clock time; NOT part of any canonical digest) is written alongside.
+Canonical, digest-bound outputs (byte-identical across runs): each task's
+context.json/md/meta, projection-comparison.json, derived-manifest.actual.json,
+report.json, report.md. The report contract is `o7.b1.report/v1` and the frozen
+expectation is `fixtures/<fixture>/expected-report-v1.json`.
+
+`--update-expectations` is transactional: it generates into a temporary sibling,
+verifies every gate and two-run byte identity, and only then atomically replaces
+the committed result artifacts and rewrites the v1 expectation. A failure leaves
+the previously committed artifacts untouched.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import shutil
 import sys
 
 import yaml
@@ -35,9 +42,11 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 
 from o7b1 import evaluate as ev
+from o7b1 import pipeline as pl
 from o7b1 import projector as pj
-from o7b1 import selector as sl
+from o7b1 import registry as rg
 from o7b1 import report as rp
+from o7b1 import selector as sl
 from o7b1.canonical import (canonical_bytes, canonical_file_bytes, jsonl_bytes,
                             sha256_hex, sha256_of_file)
 from o7b1.cas import BlobDigestMismatch, BlobUnavailable, Cas
@@ -46,14 +55,8 @@ from o7b1.schema import default_schema_path, validate_gold_state
 
 BYTE_BUDGET = 20000
 RECORD_BUDGET = 32
-
-#: (task file, questions file) per fixture, deterministic order. Task A first.
-#: Kept identical to project_case.TASKS so the offline projection artifacts and
-#: the CAS-backed report can never describe different task sets.
-TASKS = [
-    ("task-v0.yaml", "questions-v0.yaml"),
-    ("task-b-v0.yaml", "questions-b-v0.yaml"),
-]
+EXPECTED_REPORT_FILENAME = "expected-report-v1.json"
+LEGACY_EXPECTED_REPORT_FILENAME = "expected-report-v0.json"
 
 _EXTRACTOR_BY_SYSTEM = {
     "chatgpt-backend-api": ChatGPTBackendApiV0,
@@ -75,8 +78,7 @@ def _fixture_dir(fixture: str) -> str:
 
 
 def _raw_source_index(manifest: dict) -> dict:
-    idx = {r["id"]: r for r in manifest["raw_sources"]}
-    return idx
+    return {r["id"]: r for r in manifest["raw_sources"]}
 
 
 def _run_extractors(cas: Cas, manifest: dict, source_selectors: dict, out_dir: str):
@@ -126,8 +128,7 @@ def _run_extractors(cas: Cas, manifest: dict, source_selectors: dict, out_dir: s
 
         blob = jsonl_bytes(records)
         derived_digest = "sha256:" + sha256_hex(blob)
-        dpath = os.path.join(derived_dir, "%s.jsonl" % sid)
-        with open(dpath, "wb") as fh:
+        with open(os.path.join(derived_dir, "%s.jsonl" % sid), "wb") as fh:
             fh.write(blob)
 
         total_bytes += len(blob)
@@ -172,7 +173,7 @@ def _write_text(path: str, text: str) -> str:
     return "sha256:" + sha256_hex(data)
 
 
-def _build_derived_manifest(fixture: str, manifest_digests: dict, per_session: list) -> dict:
+def _build_derived_manifest(fixture: str, per_session: list) -> dict:
     return {
         "schema": "o7.b1.derived-manifest/v0",
         "fixture_id": fixture,
@@ -191,16 +192,27 @@ def _build_derived_manifest(fixture: str, manifest_digests: dict, per_session: l
 
 
 def _canonical_reproduce_command(fixture: str) -> str:
-    # Stable, independent of the actual --out path, so report.json stays
-    # byte-identical no matter where you run it.
     return ("python3 research/b1-context/tools/run_case.py --fixture %s "
             "--data-root \"$HOME/.local/share/o7-research\" --out /tmp/o7-b1-%s"
             % (fixture, fixture))
 
 
-def run(fixture: str, data_root: str, out_dir: str, update_expectations: bool = False) -> dict:
-    reproduce_command = _canonical_reproduce_command(fixture)
+def _guard_legacy_expectation(fdir: str) -> None:
+    legacy = os.path.join(fdir, LEGACY_EXPECTED_REPORT_FILENAME)
+    if os.path.isfile(legacy):
+        raise FailClosed(
+            "legacy %s is present. The report contract is now o7.b1.report/v1 and "
+            "the expectation is %s; a v0 expectation must never be silently ignored "
+            "or confused with v1 authority. Remove the v0 file."
+            % (LEGACY_EXPECTED_REPORT_FILENAME, EXPECTED_REPORT_FILENAME))
+
+
+def _generate(fixture: str, data_root: str, out_dir: str) -> dict:
+    """Full generation into out_dir. Writes every canonical artifact; does NOT
+    read, write or check the committed expectation. Returns the report bytes so a
+    caller can either verify or (transactionally) freeze them."""
     fdir = _fixture_dir(fixture)
+    _guard_legacy_expectation(fdir)
     schema_path = default_schema_path()
     cas = Cas(os.path.join(data_root, "cas"))
     os.makedirs(out_dir, exist_ok=True)
@@ -223,11 +235,10 @@ def run(fixture: str, data_root: str, out_dir: str, update_expectations: bool = 
         except BlobDigestMismatch as e:
             raise FailClosed("input digest mismatch for %s: %s" % (r["id"], e))
 
-    # (2) extractors -> derived transcripts (written under out/, not the CAS)
+    # (2) extractors -> derived transcripts (written under out/derived, not the CAS)
     derived_summary, per_session, all_available = _run_extractors(
         cas, manifest, source_selectors, out_dir)
-
-    derived_manifest = _build_derived_manifest(fixture, input_digests, per_session)
+    derived_manifest = _build_derived_manifest(fixture, per_session)
     committed_dm_path = os.path.join(fdir, "derived-manifest.yaml")
     if os.path.isfile(committed_dm_path):
         committed = _load_yaml(committed_dm_path)
@@ -247,85 +258,49 @@ def run(fixture: str, data_root: str, out_dir: str, update_expectations: bool = 
         nc_obj = json.loads(cas.read_bytes(nc_meta["digest"], expected_size=nc_meta["byte_length"]))
 
     schema_digest = "sha256:" + sha256_of_file(schema_path)
-    input_observation_digest = "sha256:" + sha256_hex(canonical_bytes(gold["observations"]))
     budget = {"byte_budget": BYTE_BUDGET, "record_budget": RECORD_BUDGET,
               "unit": "utf8_bytes+records"}
 
-    # (3) task-dependent projection + (4) evaluation, PER TASK
+    # (3) task-dependent projection via the shared pipeline (writes context.* +
+    #     enforces generic task-dependence acceptance + fixture expectation)
+    proj = pl.run_projection(fixture, fdir, gold, schema_digest, out_dir, budget)
+    comparison = proj["comparison"]
+    registry_digest = proj["registry_digest"]
+    _write_canonical(os.path.join(out_dir, "projection-comparison.json"), comparison)
+
+    # (4) evaluation per task (needs the CAS-backed negative control)
     task_entries = []
-    selection_by_task = {}
-    for task_file, questions_file in TASKS:
-        task = _load_yaml(os.path.join(fdir, task_file))
-        questions = _load_yaml(os.path.join(fdir, questions_file))
-        if questions.get("task_id") != task["task_id"]:
-            raise FailClosed("%s declares task_id %r but %s is %r"
-                             % (questions_file, questions.get("task_id"),
-                                task_file, task["task_id"]))
-        try:
-            sel = pj.select(gold, task, byte_budget=BYTE_BUDGET, record_budget=RECORD_BUDGET)
-        except sl.SelectorError as e:
-            raise FailClosed("selector refused task %s: %s" % (task["task_id"], e))
-        validity = pj.validate(gold, sel, byte_budget=BYTE_BUDGET, record_budget=RECORD_BUDGET)
-        selection_by_task[task["task_id"]] = set(sel["selected_ids"])
-
-        task_dir = os.path.join(out_dir, "tasks", task["task_id"])
-        context_json = pj.build_context_json(gold, task, sel)
-        context_md = pj.build_context_md(gold, task, sel)
-        ctx_json_digest = _write_canonical(os.path.join(task_dir, "context.json"), context_json)
-        ctx_md_digest = _write_text(os.path.join(task_dir, "context.md"), context_md)
-        artifact_digests = {"context.json": ctx_json_digest, "context.md": ctx_md_digest}
-        task_digest = "sha256:" + sha256_hex(canonical_bytes(task))
-        questions_digest = "sha256:" + sha256_hex(canonical_bytes(questions))
-        meta = pj.build_context_meta(
-            gold, task, task_digest, questions_digest, schema_digest, sel, budget,
-            artifact_digests, input_observation_digest, validity)
-        ctx_meta_digest = _write_canonical(
-            os.path.join(task_dir, "context.meta.json"), meta)
-
+    for entry in proj["entries"]:
+        task, questions, sel, summary = (entry["task"], entry["questions"],
+                                         entry["sel"], entry["summary"])
         evaluation = None
         if nc_obj is not None:
             evaluation = ev.evaluate(gold, questions, source_selectors, manifest, nc_obj,
-                                     derived_summary, sel,
-                                     len(canonical_file_bytes(context_json)), budget)
+                                     derived_summary, sel, summary["context_bytes"], budget)
         task_entries.append({
             "task_id": task["task_id"],
-            "task_digest": task_digest,
-            "questions_digest": questions_digest,
+            "task_digest": "sha256:" + sha256_hex(canonical_bytes(task)),
+            "questions_digest": "sha256:" + sha256_hex(canonical_bytes(questions)),
             "selector": sel["selector_ref"],
             "selectors": sel["selector_spec"],
             "projection": {
-                "selected_count": len(sel["selected"]),
-                "selected_ids": sel["selected_ids"],
-                "omitted_count": len(sel["omitted"]),
-                "used_bytes": sel["used_bytes"],
-                "validity": validity,
-                "context_artifact_digests": {**artifact_digests,
-                                             "context.meta.json": ctx_meta_digest},
+                "selected_count": summary["selected_count"],
+                "selected_ids": summary["selected_ids"],
+                "omitted_count": summary["omitted_count"],
+                "used_bytes": summary["used_bytes"],
+                "validity": summary["projection_validity"],
+                "context_artifact_digests": summary["artifact_digests"],
             },
             "evaluation": evaluation,
         })
 
-    # task dependence, as data
-    ids = [t["task_id"] for t in task_entries]
-    sa, sb = selection_by_task[ids[0]], selection_by_task[ids[1]]
-    task_dependence = {
-        "task_a": ids[0],
-        "task_b": ids[1],
-        "selected_only_by_a": sorted(sa - sb),
-        "selected_only_by_b": sorted(sb - sa),
-        "selected_by_both": sorted(sa & sb),
-        "symmetric_difference_count": len(sa ^ sb),
-        "projections_differ": sa != sb,
-        "neither_is_a_superset": not (sa <= sb) and not (sb <= sa),
-    }
-
-    # (5) status + report
-    development_result = _decide_result(all_available, task_entries, task_dependence)
+    development_result = _decide_result(all_available, task_entries, comparison)
     report = {
         "schema": "o7.b1.report/v1",
         "fixture_id": fixture,
         "cutoff_identity": gold["cutoff"]["identity"],
-        "reproduce_command": reproduce_command,
+        "reproduce_command": _canonical_reproduce_command(fixture),
+        "registry_digest": registry_digest,
         "input_digests": input_digests,
         "derived": {
             "total_records": derived_summary["total_records"],
@@ -341,11 +316,12 @@ def run(fixture: str, data_root: str, out_dir: str, update_expectations: bool = 
         },
         "budget": budget,
         "tasks": task_entries,
-        "task_dependence": task_dependence,
+        "task_dependence": comparison["task_dependence"],
         "status": {
             "deterministic_compilation_pipeline": "PASS" if all_available else "PARTIAL",
             "task_conditioned_projection": (
-                "IMPLEMENTED" if task_dependence["projections_differ"] else "NOT_IMPLEMENTED"),
+                "IMPLEMENTED" if comparison["task_dependence"]["projections_differ"]
+                else "NOT_IMPLEMENTED"),
             "development_result": development_result,
             "generalization": "NOT_EVALUATED",
             "source_set_complete": False,
@@ -357,54 +333,25 @@ def run(fixture: str, data_root: str, out_dir: str, update_expectations: bool = 
     report_json_digest = "sha256:" + sha256_hex(report_bytes)
     with open(os.path.join(out_dir, "report.json"), "wb") as fh:
         fh.write(report_bytes)
-    report_md = rp.build_report_md(report)
-    _write_text(os.path.join(out_dir, "report.md"), report_md)
-
-    # Fail-closed regression gate against the committed frozen expectation.
-    expected_path = os.path.join(fdir, "expected-report-v0.json")
-    if update_expectations:
-        if not all_available:
-            raise FailClosed(
-                "refusing to freeze an expectation from an incomplete run: the "
-                "CAS did not provide every input blob")
-        with open(expected_path, "wb") as fh:
-            fh.write(report_bytes)
-        sys.stderr.write("expectation re-frozen: %s -> %s\n"
-                         % (expected_path, report_json_digest))
-    elif os.path.isfile(expected_path):
-        with open(expected_path, "rb") as fh:
-            expected_bytes = fh.read()
-        if expected_bytes != report_bytes:
-            raise FailClosed(
-                "report.json does not match committed expected-report-v0.json "
-                "(expected %s, got %s). If this follows a deliberate contract "
-                "change, re-freeze with --update-expectations on a CAS-equipped "
-                "machine."
-                % ("sha256:" + sha256_hex(expected_bytes), report_json_digest))
-    else:
-        raise FailClosed(
-            "no committed expected-report-v0.json to check against. The corrective "
-            "round changed the schema, selector contract and metric names, so the "
-            "previous expectation was retired rather than left silently wrong. "
-            "Re-freeze it once with --update-expectations on a CAS-equipped machine.")
+    _write_text(os.path.join(out_dir, "report.md"), rp.build_report_md(report))
 
     return {
         "report": report,
+        "report_bytes": report_bytes,
         "report_json_digest": report_json_digest,
+        "all_available": all_available,
         "out_dir": out_dir,
     }
 
 
-def _decide_result(all_available: bool, task_entries: list, task_dependence: dict) -> str:
-    """PASS requires task-dependent selection AND a valid projection per task.
-
-    Structural coverage alone is deliberately NOT enough any more: before the
-    corrective round the projection arm's coverage was 1.0 by construction, so
-    gating on it gated on nothing.
-    """
+def _decide_result(all_available: bool, task_entries: list, comparison: dict) -> str:
+    """PASS requires accepted task-dependence AND a valid projection + healthy
+    evaluation per task. Structural coverage alone is deliberately not enough:
+    before the corrective round the projection arm's coverage was 1.0 by
+    construction, so gating on it gated on nothing."""
     if not all_available:
         return "PARTIAL"
-    if not task_dependence["projections_differ"] or not task_dependence["neither_is_a_superset"]:
+    if not comparison["task_dependence"]["acceptance"]["accepted"]:
         return "FAIL"
     for t in task_entries:
         if not t["projection"]["validity"]["valid"]:
@@ -423,22 +370,134 @@ def _decide_result(all_available: bool, task_entries: list, task_dependence: dic
     return "PASS"
 
 
+def run(fixture: str, data_root: str, out_dir: str) -> dict:
+    """Non-update run: generate, then verify against the committed v1 expectation."""
+    g = _generate(fixture, data_root, out_dir)
+    fdir = _fixture_dir(fixture)
+    expected_path = os.path.join(fdir, EXPECTED_REPORT_FILENAME)
+    if not os.path.isfile(expected_path):
+        raise FailClosed(
+            "no committed %s to check against. The corrective round retired the v0 "
+            "expectation; re-freeze once with --update-expectations on a CAS-equipped "
+            "machine." % EXPECTED_REPORT_FILENAME)
+    with open(expected_path, "rb") as fh:
+        expected_bytes = fh.read()
+    if expected_bytes != g["report_bytes"]:
+        raise FailClosed(
+            "report.json does not match committed %s (expected %s, got %s). If this "
+            "follows a deliberate contract change, re-freeze with "
+            "--update-expectations on a CAS-equipped machine."
+            % (EXPECTED_REPORT_FILENAME, "sha256:" + sha256_hex(expected_bytes),
+               g["report_json_digest"]))
+    return {"report": g["report"], "report_json_digest": g["report_json_digest"],
+            "out_dir": out_dir}
+
+
+# --- transactional --update-expectations -----------------------------------
+
+_CANONICAL_TOP = ("report.json", "report.md", "projection-comparison.json",
+                  "derived-manifest.actual.json")
+
+
+def _canonical_files(root: str) -> list[str]:
+    """Relative paths of canonical artifacts under root, excluding derived/."""
+    out = []
+    for name in _CANONICAL_TOP:
+        if os.path.isfile(os.path.join(root, name)):
+            out.append(name)
+    tasks_root = os.path.join(root, "tasks")
+    for dirpath, _dirs, files in os.walk(tasks_root):
+        for f in sorted(files):
+            full = os.path.join(dirpath, f)
+            out.append(os.path.relpath(full, root))
+    return sorted(out)
+
+
+def _assert_two_run_identity(a: str, b: str) -> None:
+    fa, fb = _canonical_files(a), _canonical_files(b)
+    if fa != fb:
+        raise FailClosed("two runs produced different canonical file sets: %s vs %s"
+                         % (fa, fb))
+    for rel in fa:
+        with open(os.path.join(a, rel), "rb") as fh:
+            ba = fh.read()
+        with open(os.path.join(b, rel), "rb") as fh:
+            bb = fh.read()
+        if ba != bb:
+            raise FailClosed("canonical output %s differs between two runs" % rel)
+
+
+def _atomic_write_bytes(path: str, data: bytes) -> None:
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as fh:
+        fh.write(data)
+    os.replace(tmp, path)
+
+
+def run_update(fixture: str, data_root: str, target_out_dir: str) -> dict:
+    """Transactional freeze: generate + verify in temp dirs, then atomically
+    replace committed artifacts and rewrite expected-report-v1.json. A failure
+    leaves the previously committed artifacts and expectation untouched."""
+    fdir = _fixture_dir(fixture)
+    _guard_legacy_expectation(fdir)
+    target_out_dir = os.path.abspath(target_out_dir)
+    tmp1 = target_out_dir + ".update-tmp1"
+    tmp2 = target_out_dir + ".update-tmp2"
+    bak = target_out_dir + ".update-bak"
+    for d in (tmp1, tmp2, bak):
+        shutil.rmtree(d, ignore_errors=True)
+    try:
+        g1 = _generate(fixture, data_root, tmp1)
+        if not g1["all_available"]:
+            raise FailClosed("refusing to freeze from an incomplete run: the CAS did "
+                             "not provide every input blob")
+        if g1["report"]["status"]["development_result"] != "PASS":
+            raise FailClosed("refusing to freeze a non-PASS report (%s)"
+                             % g1["report"]["status"]["development_result"])
+        # second independent generation, byte-identity gate
+        _generate(fixture, data_root, tmp2)
+        _assert_two_run_identity(tmp1, tmp2)
+
+        # derived transcripts are external CAS blobs; never commit their bodies
+        shutil.rmtree(os.path.join(tmp1, "derived"), ignore_errors=True)
+
+        # atomic swap of the committed results dir + the v1 expectation
+        if os.path.exists(target_out_dir):
+            os.rename(target_out_dir, bak)
+        try:
+            os.rename(tmp1, target_out_dir)
+            _atomic_write_bytes(os.path.join(fdir, EXPECTED_REPORT_FILENAME),
+                                g1["report_bytes"])
+        except Exception:
+            shutil.rmtree(target_out_dir, ignore_errors=True)
+            if os.path.exists(bak):
+                os.rename(bak, target_out_dir)
+            raise
+        shutil.rmtree(bak, ignore_errors=True)
+        return {"report": g1["report"], "report_json_digest": g1["report_json_digest"],
+                "out_dir": target_out_dir}
+    finally:
+        shutil.rmtree(tmp1, ignore_errors=True)
+        shutil.rmtree(tmp2, ignore_errors=True)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Run the B1 development vertical for one fixture.")
     ap.add_argument("--fixture", default="case-0001")
     ap.add_argument("--data-root", default=os.path.expanduser("~/.local/share/o7-research"))
     ap.add_argument("--out", required=True)
     ap.add_argument("--update-expectations", action="store_true",
-                    help="re-freeze expected-report-v0.json from THIS run; refuses "
-                         "unless every CAS input was available")
+                    help="transactionally re-freeze %s from THIS run (temp-generate, "
+                         "verify every gate + two-run byte identity, then atomically "
+                         "replace committed artifacts); refuses unless every CAS input "
+                         "was available and the report is PASS" % EXPECTED_REPORT_FILENAME)
     args = ap.parse_args(argv)
-
-    # Canonical, stable reproduce command (independent of the actual --out path,
-    # so report.json stays byte-identical no matter where you run it).
     try:
-        result = run(args.fixture, args.data_root, args.out,
-                     update_expectations=args.update_expectations)
-    except FailClosed as e:
+        if args.update_expectations:
+            result = run_update(args.fixture, args.data_root, args.out)
+        else:
+            result = run(args.fixture, args.data_root, args.out)
+    except (FailClosed, pl.PipelineError, rg.RegistryError, sl.SelectorError) as e:
         sys.stderr.write("FAIL CLOSED: %s\n" % e)
         return 2
     rep = result["report"]
@@ -447,7 +506,7 @@ def main(argv=None):
               "development_result"):
         sys.stderr.write("%s: %s\n" % (k, st[k]))
     sys.stderr.write("report.json: %s\n" % result["report_json_digest"])
-    return 0 if rep["status"]["development_result"] in ("PASS", "PARTIAL") else 3
+    return 0 if st["development_result"] in ("PASS", "PARTIAL") else 3
 
 
 if __name__ == "__main__":

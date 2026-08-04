@@ -11,6 +11,7 @@ import unittest
 
 import yaml
 
+from o7b1 import pipeline as pl
 from o7b1 import projector as pj
 from o7b1 import selector as sl
 from o7b1.canonical import canonical_file_bytes
@@ -18,6 +19,79 @@ from o7b1.canonical import canonical_file_bytes
 # `unittest discover -s tests` makes this directory the top-level package
 # root, so the shared fixtures are imported as a plain sibling module.
 import synth
+
+
+def _summary(task_id, selected_ids, omitted, *, valid=True, required=None):
+    """Minimal per-task projection summary for assess_task_dependence()."""
+    return {
+        "task_id": task_id,
+        "selected_ids": sorted(selected_ids),
+        "omitted": omitted,
+        "projection_validity": {"valid": valid},
+        "required_observation_union": sorted(required if required is not None else selected_ids),
+        # digest stands in for context.json; equal iff selections equal
+        "artifact_digests": {"context.json": "sha256:" + ",".join(sorted(selected_ids))},
+    }
+
+
+def _rel(oid):
+    return {"observation_id": oid, "reason": "not relevant to this task: ..."}
+
+
+def _budget(oid):
+    return {"observation_id": oid, "reason": "budget exceeded (byte_budget=1, record_budget=1)"}
+
+
+class AcceptanceTest(unittest.TestCase):
+    """The generic 5-point task-dependence acceptance (corrective round §3)."""
+
+    def test_non_overlapping_selections_accepted(self):
+        a = _summary("A", ["x1", "x2"], [_rel("y1"), _rel("y2")])
+        b = _summary("B", ["y1", "y2"], [_rel("x1"), _rel("x2")])
+        self.assertTrue(pl.assess_task_dependence(a, b)["accepted"])
+
+    def test_legitimate_strict_superset_accepted(self):
+        # B needs everything A needs plus s2; A omits s2 for relevance.
+        a = _summary("A", ["s1"], [_rel("s2")])
+        b = _summary("B", ["s1", "s2"], [], required=["s1", "s2"])
+        acc = pl.assess_task_dependence(a, b)
+        self.assertTrue(acc["accepted"])  # a superset is NOT rejected
+        self.assertTrue(acc["difference_is_selector_relevance"])
+
+    def test_identical_selections_rejected(self):
+        a = _summary("A", ["s1", "s2"], [])
+        b = _summary("B", ["s1", "s2"], [])
+        acc = pl.assess_task_dependence(a, b)
+        self.assertFalse(acc["accepted"])
+        self.assertIn("selections are identical", acc["rejection_reasons"])
+
+    def test_budget_only_difference_rejected(self):
+        # Same relevance, B's extra omitted by A ONLY for budget -> not task-dependent.
+        a = _summary("A", ["s1"], [_budget("s2")])
+        b = _summary("B", ["s1", "s2"], [], required=["s1"])
+        acc = pl.assess_task_dependence(a, b)
+        self.assertFalse(acc["accepted"])
+        self.assertFalse(acc["difference_is_selector_relevance"])
+        self.assertIn("solely budget truncation", " ".join(acc["rejection_reasons"]))
+
+    def test_real_case0001_neither_superset_and_accepted(self):
+        gold = _gold()
+        schema = None
+        import tempfile
+        from o7b1 import registry as rg
+        reg = rg.load_task_registry(FDIR, "case-0001")
+        summaries = []
+        with tempfile.TemporaryDirectory() as td:
+            for e in reg["entries"]:
+                r = pl.project_task(gold, e["task"], e["questions"],
+                                    "sha256:" + "0" * 64, td,
+                                    {"byte_budget": 20000, "record_budget": 32,
+                                     "unit": "utf8_bytes+records"})
+                summaries.append(r["summary"])
+        comp = pl.build_comparison("case-0001", gold, summaries, reg["registry_digest"])
+        td_block = comp["task_dependence"]
+        self.assertTrue(td_block["neither_is_a_superset"])
+        self.assertTrue(td_block["acceptance"]["accepted"])
 
 HERE = os.path.dirname(__file__)
 FDIR = os.path.normpath(os.path.join(HERE, "..", "..", "fixtures", "case-0001"))

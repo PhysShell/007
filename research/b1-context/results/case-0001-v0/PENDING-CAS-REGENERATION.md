@@ -29,7 +29,7 @@ neither a superset of the other.
 The 3-arm evaluation needs the derived transcripts and the sealed negative
 control out of the owner's local CAS. It cannot run on a machine without those
 private blobs, so `report.json`, `report.md` and
-`fixtures/case-0001/expected-report-v0.json` are absent until the owner runs, once:
+`fixtures/case-0001/expected-report-v1.json` are absent until the owner runs, once:
 
 ```sh
 python3 research/b1-context/tools/run_case.py \

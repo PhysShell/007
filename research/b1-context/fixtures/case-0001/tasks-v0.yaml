@@ -1,0 +1,11 @@
+schema: o7.b1.fixture-tasks/v0
+fixture_id: case-0001
+# The single source of truth for which tasks this fixture defines. Both
+# project_case.py and run_case.py read this file; neither carries a hardcoded
+# task list. Order is canonical (Task A first). Adding a task or a holdout
+# fixture means editing YAML here, never Python.
+tasks:
+  - task_file: task-v0.yaml
+    questions_file: questions-v0.yaml
+  - task_file: task-b-v0.yaml
+    questions_file: questions-b-v0.yaml

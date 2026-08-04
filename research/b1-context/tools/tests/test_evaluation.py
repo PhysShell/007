@@ -133,12 +133,19 @@ class IntegrationTest(unittest.TestCase):
     def test_full_run_if_cas_available(self):
         import os
         import tempfile
-        data_root = os.path.expanduser("~/.local/share/o7-research")
+        # O7B1_DATA_ROOT lets the offline suite deliberately point at a
+        # nonexistent CAS so this one test skips (Part 2 offline behaviour).
+        data_root = os.environ.get(
+            "O7B1_DATA_ROOT", os.path.expanduser("~/.local/share/o7-research"))
         cas_root = os.path.join(data_root, "cas")
         probe = os.path.join(cas_root, "sha256", "6a",
                              "86185402fd69d2fe4aad425a257b06c9bcfc4b28decc0b690d9b314f4066b9")
         if not os.path.isfile(probe):
             self.skipTest("local CAS with private RAW blobs not present")
+        fdir = os.path.normpath(os.path.join(
+            os.path.dirname(__file__), "..", "..", "fixtures", "case-0001"))
+        if not os.path.isfile(os.path.join(fdir, "expected-report-v1.json")):
+            self.skipTest("expected-report-v1.json not yet frozen (pre-regeneration)")
         import run_case
         with tempfile.TemporaryDirectory() as td:
             result = run_case.run("case-0001", data_root, td)
@@ -146,6 +153,8 @@ class IntegrationTest(unittest.TestCase):
             self.assertEqual(st["development_result"], "PASS")
             self.assertEqual(st["task_conditioned_projection"], "IMPLEMENTED")
             self.assertTrue(result["report"]["task_dependence"]["projections_differ"])
+            self.assertTrue(
+                result["report"]["task_dependence"]["acceptance"]["accepted"])
 
 
 if __name__ == "__main__":
