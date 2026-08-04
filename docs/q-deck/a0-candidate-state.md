@@ -2130,3 +2130,149 @@ by this round.
 `git status --short` shows no unstaged/untracked changes beyond what this
 round's own commits capture; every gate above ran against the exact
 commit this round's final push carries.
+
+## 25. Corrective round 7 — fresh exact-head Codex P1, response and evidence
+
+The PR was marked Ready for review on the round-6 head
+(`994408c4e9582cf2fd0c9e2f9398f7a440fb563e`) to solicit a fresh
+independent pass; a fresh exact-head Codex P1
+(`#discussion_r3707367805`) found a genuine, previously-unaddressed
+defect in candidate capture itself. The PR was reverted to Draft, per the
+same standing protocol every prior corrective round has followed.
+
+### The finding — index-hidden edits bypass candidate capture
+
+`git add -A` (the very first line of `capture_cumulative_candidate`)
+HONORS `assume-unchanged`/`skip-worktree` index entries: a tracked path
+marked either way is left exactly as the index already has it, no
+matter what its working-tree bytes now say. `git status`/`git diff
+--cached` show NOTHING for such a path. A provider that edits a path it
+(or an earlier turn) marked this way therefore produces an EMPTY
+cumulative patch and a tree OID identical to `base_commit`'s own — the
+run seals with a candidate receipt that reads as a complete no-op while
+the edit is silently discarded, exactly the "run-record integrity"
+concern AGENTS.md §3 (L58-L61) names.
+
+**Reproduced at the exact old head, through the REAL production
+function** (not a synthetic fixture): a fresh repo, a tracked file
+committed, `git update-index --assume-unchanged tracked.txt`, then the
+file edited on disk. `capture_cumulative_candidate` returned
+`Ok((vec![], base_commit's own tree))` — confirmed identical for
+`--skip-worktree`. `git ls-files -v -z` is the authority for detecting
+either flag: `-v`'s status letter (`H`/`S`/`M`/`R`/`C`/`K` — never
+otherwise lowercase on their own) is lowered for an assume-unchanged
+entry, and `S`/`s` specifically marks skip-worktree (lowercase again
+when both are set); verified live with nested paths, paths containing
+spaces, and non-UTF-8 path bytes, all parsed correctly through `-z`'s
+NUL-delimited raw-byte records.
+
+### Fix
+
+`ensure_no_index_hidden_flags` (`src/worktree.rs`) runs `git ls-files -v
+-z`, parses each NUL-delimited record as a fixed `<letter><space><path>`
+raw-byte layout — never re-split on spaces, never reinterpreted as
+UTF-8 for comparison (only the final error message formats the path
+lossily for display, like every other diagnostic in this file) — and
+fails closed on ANY entry carrying either flag. This is a deliberate,
+documented, CONSERVATIVE blanket policy: it does not attempt to prove
+the flagged entry's current blob actually differs from its working-tree
+bytes (that would mean re-reading the flagged path's own content,
+reopening the identical TOCTOU window this check exists to close).
+Sparse-checkout/`skip-worktree` and `assume-unchanged` worktrees are
+UNSUPPORTED for candidate capture by design — documented as a
+limitation, never claimed as supported. The check is READ-ONLY: it
+never calls `update-index` to clear or mutate either flag, and never
+touches the working tree — a rejection leaves the original checkout and
+index exactly as found.
+
+Wired into BOTH `capture_cumulative_candidate` (run right after `add
+-A`, as close as practical to the authoritative index capture — the
+flags are orthogonal to staging, so this catches them regardless of
+when they were set) AND `finish_apply` (materialization's own
+`write-tree`), mirroring the existing precedent that
+`ensure_no_dirty_submodule_worktree`/`ensure_no_gitlink_mutation` are
+already duplicated at both sites.
+
+**Audit for other/later code paths (explicitly requested this round):**
+`diff_vs_base` (`src/worktree.rs`) shares the identical `add -A` + `diff
+--cached` structure, but its own output feeds ONLY R1's general,
+non-authoritative `diff.patch` evidence artifact (recorded via
+`PatchCaptured`, `src/main.rs`) — never A0's own candidate-state
+continuation authority (`candidate.patch`/`candidate_tree_oid`, produced
+exclusively by `capture_cumulative_candidate`). Disclosed here as a
+known, structurally-related, OUT-OF-SCOPE limitation for a future round,
+not silently fixed beyond this round's actual mandate and not silently
+omitted from the audit either. `finish_apply`'s own `write-tree` cannot
+itself be reached by a hostile candidate PATCH (`git apply` only ever
+touches the named paths' content, never `update-index` flag bits) — the
+defense-in-depth duplication there protects the worktree's REUSE across
+the next continuation's own agent turn, not a gap in THIS round's
+specific threat model.
+
+### Tests
+
+`src/worktree.rs`, 8 new unit tests (real Git, no synthetic fixtures):
+`assume-unchanged`/`skip-worktree` + a modified tracked file both reject
+(the exact live counterexample); a nested path; a path with spaces and
+an embedded newline byte; a non-UTF-8 path (Unix, proven not to panic);
+an ordinary tracked edit with no hidden-index flags still captures; a
+plain untracked file still captures; a rejection leaves BOTH the
+working-tree bytes and the index flag itself untouched (proven by
+re-reading `git ls-files -v` after the rejected call). All prior
+dirty-submodule (10) and gitlink-policy (8) tests, and all 12 porcelain-
+v2 parser tests, still pass unchanged.
+
+`tests/a0_candidate_state_e2e.rs`, 1 new process-level test —
+`an_index_hidden_edit_fails_candidate_capture_and_can_never_become_a_continuation_parent`
+— mirrors the round-5 dirty-submodule e2e test exactly: a real `o7 run
+--ledger` invocation, the provider marks `README.md` assume-unchanged
+then edits it; the process exits non-zero, `RunSealed`/
+`CandidateStateCaptured` never appear in the canonical record, the
+provider is invoked exactly once (not a redispatch), the tampered
+content AND the assume-unchanged flag both survive untouched, and a
+follow-up command against this unsealed parent is rejected `409` with
+zero command rows created.
+
+### Gates (exact new head)
+
+- `cargo fmt --check` — clean. `git diff --check` — clean.
+- `cargo check -p o7 -p o7-run -p o7-ledger -p o7d` — clean.
+- `cargo test -p o7-run` (`contract` 10/10, `reducer_transitions` 72/72,
+  `replay_acceptance` 18/18, `candidate_state` 28/28) — unchanged.
+- `cargo test -p o7-ledger --test commands` — 45/45, unchanged.
+- `cargo test -p o7 --test r1_command_e2e` — 37/37, unchanged.
+- `cargo test -p o7 --test a0_candidate_state_e2e` — **30/30** (29
+  carried from round 6 + 1 new).
+- `cargo test -p o7d` — full suite green, unchanged.
+- `cargo clippy --workspace --all-targets -- -D warnings` — clean.
+- `cargo test --workspace --no-fail-fast` — **827 tests passed, 0
+  failed** (818 carried from round 6 + 9 new), 97 test-result blocks.
+  The SAME standing, previously-disclosed environmental exclusions
+  carried forward unchanged, run explicitly excluded via `-- --skip
+  <name>`: `kill_after_commit_preserves_event`/
+  `kill_before_commit_leaves_no_partial`
+  (`crash_durability.rs`), `a_blocking_fifo_target_fails_closed_within_a_bound`,
+  `no_control_descriptor_leaks_to_a_concurrent_sibling`,
+  `an_unexpectedly_launched_target_is_a_fail_not_the_refusal_pass`
+  (`BackendObjectMismatch`) — none touch any code this round changed. No
+  new exclusion found this round.
+- `cargo deny check advisories bans licenses sources` — the SAME
+  `lz4_flex`/RUSTSEC-2026-0041/CVSS:4.0 parser-version mismatch
+  disclosed since round 1; `bans`/`licenses`/`sources` all pass clean
+  independently.
+- `npm test` — 45/45. `npm run check` — 0 errors, 0 warnings. Frontend
+  untouched this round.
+
+### Known limitations (disclosed, not hidden)
+
+Everything previously disclosed (§19/§21/§23) remains open and
+unchanged. New this round: `diff_vs_base`'s own non-authoritative
+`diff.patch` evidence artifact shares the identical structural gap
+(see "Audit" above) — disclosed, not fixed, out of this round's own
+scope (candidate CAPTURE specifically).
+
+### Clean worktree confirmation
+
+`git status --short` shows no unstaged/untracked changes beyond what
+this round's own commits capture; every gate above ran against the
+exact commit this round's final push carries.
