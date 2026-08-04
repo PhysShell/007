@@ -1,0 +1,24 @@
+schema: o7.b1.questions/v0
+fixture_id: case-0001
+task_id: case-0001-audit-source-capture-v0
+# Questions for TASK B, frozen and digest-bound BEFORE projection/evaluation.
+# Deliberately disjoint in intent from Task A's: an auditor is asked about
+# capture status, topology and divergence, never about B1's hypothesis or its
+# next permitted action.
+questions:
+  - id: qb1-source-set-status
+    text: What is the current source-set status and why is it not complete?
+    required_observation_ids:
+      [obs-source-set-status-interim, obs-source-set-not-complete-conditions, obs-account-export-pending]
+  - id: qb2-source-classes
+    text: Which source classes exist and which are authoritative vs advisory?
+    required_observation_ids: [obs-source-classes-authority, obs-negative-control-advisory]
+  - id: qb3-session-topology
+    text: What is the actual session topology after capture?
+    required_observation_ids: [obs-bd-one-conversation, obs-session-e-separate]
+  - id: qb4-snapshot-relation
+    text: How do session C snapshot-1 and snapshot-2 relate?
+    required_observation_ids: [obs-snapshot2-supersedes-1, obs-byte-prefix-scope]
+  - id: qb5-negative-control-divergence
+    text: Which negative-control claims turned out wrong or incomplete?
+    required_observation_ids: [obs-nc-divergence-bd, obs-nc-divergence-e]

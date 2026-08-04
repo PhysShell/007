@@ -13,215 +13,485 @@
     "controller_or_repo_record",
     "agent_claim"
   ],
+  "topic_vocabulary": [
+    "authority-boundary",
+    "b1-scope",
+    "capture-topology",
+    "holdout-readiness",
+    "negative-control",
+    "source-capture"
+  ],
   "observations": [
     {
       "observation_id": "obs-b1-hypothesis",
       "kind": "goal",
+      "topics": [
+        "b1-scope"
+      ],
       "statement": "B1 tests one narrow hypothesis: selected project-state observables can be projected into a concrete task's context (typed state + task-conditioned projection), preserving working state, reducing context cost, and improving next-step execution.",
       "authority": "controller_or_repo_record",
       "status": "current",
       "observed_at": "2026-08-03",
       "provenance": [
-        {"source_id": "b1-readme", "source_class": "repo_record", "source_pointer": "research/b1-context/README.md", "selector": "hypothesis blockquote"}
+        {
+          "source_id": "b1-readme",
+          "source_class": "repo_record",
+          "source_pointer": "research/b1-context/README.md",
+          "selector": "hypothesis blockquote"
+        }
       ]
     },
     {
       "observation_id": "obs-b1-readonly-boundary",
       "kind": "constraint",
+      "topics": [
+        "authority-boundary",
+        "b1-scope"
+      ],
       "statement": "B1 is READ-ONLY R&D and NON-AUTHORITATIVE: nothing in it gains authority over campaign or admission state without an explicit promotion decision.",
       "authority": "controller_or_repo_record",
       "status": "current",
       "provenance": [
-        {"source_id": "b1-readme", "source_class": "repo_record", "source_pointer": "research/b1-context/README.md", "selector": "STATUS banner + authority paragraph"}
+        {
+          "source_id": "b1-readme",
+          "source_class": "repo_record",
+          "source_pointer": "research/b1-context/README.md",
+          "selector": "STATUS banner + authority paragraph"
+        }
       ]
     },
     {
       "observation_id": "obs-b1-independent-a-series",
       "kind": "constraint",
+      "topics": [
+        "authority-boundary",
+        "b1-scope"
+      ],
       "statement": "B1 must not drive A-series transitions; B1/B2 do not block each other and neither blocks the A-series (A0 candidate-state continuity onward).",
       "authority": "controller_or_repo_record",
       "status": "current",
       "provenance": [
-        {"source_id": "b1-readme", "source_class": "repo_record", "source_pointer": "research/b1-context/README.md", "selector": "A/B1/B2/S split paragraph"}
+        {
+          "source_id": "b1-readme",
+          "source_class": "repo_record",
+          "source_pointer": "research/b1-context/README.md",
+          "selector": "A/B1/B2/S split paragraph"
+        }
       ]
     },
     {
       "observation_id": "obs-source-set-status-interim",
       "kind": "status",
+      "topics": [
+        "source-capture"
+      ],
       "statement": "The case-0001 source set status is INTERIM_SOURCE_SET_CAPTURED; it is not SOURCE_SET_COMPLETE.",
       "authority": "controller_or_repo_record",
       "status": "current",
       "observed_at": "2026-08-03",
       "provenance": [
-        {"source_id": "case-0001-manifest", "source_class": "fixture_metadata", "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml", "selector": "status: INTERIM_SOURCE_SET_CAPTURED"}
+        {
+          "source_id": "case-0001-manifest",
+          "source_class": "fixture_metadata",
+          "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml",
+          "selector": "status: INTERIM_SOURCE_SET_CAPTURED"
+        }
       ]
     },
     {
       "observation_id": "obs-source-set-not-complete-conditions",
       "kind": "constraint",
+      "topics": [
+        "holdout-readiness",
+        "source-capture"
+      ],
       "statement": "Promotion to SOURCE_SET_COMPLETE requires: a platform/account export (or an explicitly accepted equivalent) for the chatgpt conversations, a final session C snapshot, and all digest and byte-prefix checks passing.",
       "authority": "controller_or_repo_record",
       "status": "current",
       "provenance": [
-        {"source_id": "case-0001-manifest", "source_class": "fixture_metadata", "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml", "selector": "status promotion comment"}
+        {
+          "source_id": "case-0001-manifest",
+          "source_class": "fixture_metadata",
+          "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml",
+          "selector": "status promotion comment"
+        }
       ]
     },
     {
       "observation_id": "obs-source-classes-authority",
       "kind": "decision",
+      "topics": [
+        "authority-boundary",
+        "source-capture"
+      ],
       "statement": "Sources are three distinct classes with different authority, never lumped as one RAW: platform captures/snapshots (RAW), deterministic derived transcripts (provenance to a RAW digest), and agent reconstructions (advisory agent_claim negative controls, never RAW).",
       "authority": "controller_or_repo_record",
       "status": "current",
       "provenance": [
-        {"source_id": "b1-readme", "source_class": "repo_record", "source_pointer": "research/b1-context/README.md", "selector": "Storage policy list"},
-        {"source_id": "case-0001-manifest", "source_class": "fixture_metadata", "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml", "selector": "status comment: RAW never silently equalizes"}
+        {
+          "source_id": "b1-readme",
+          "source_class": "repo_record",
+          "source_pointer": "research/b1-context/README.md",
+          "selector": "Storage policy list"
+        },
+        {
+          "source_id": "case-0001-manifest",
+          "source_class": "fixture_metadata",
+          "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml",
+          "selector": "status comment: RAW never silently equalizes"
+        }
       ]
     },
     {
       "observation_id": "obs-bd-one-conversation",
       "kind": "evidence",
+      "topics": [
+        "capture-topology",
+        "source-capture"
+      ],
       "statement": "Former working labels B and D are a single long-running conversation (session-bd), not two conversations; capture-main-dialog carries both under one native conversation id.",
       "authority": "platform_capture",
       "status": "current",
       "observed_at": "2026-08-03",
       "provenance": [
-        {"source_id": "capture-main-dialog", "source_class": "raw_capture", "digest": "sha256:d34c4b9ab2eb90885e270d14199110989cb65eaae17de341db647af49f11cfb4", "selector": "native_conversation_id 6a6b6230-cb8c-83eb-ad3d-456c0d0c8ce3"},
-        {"source_id": "case-0001-source-selectors", "source_class": "fixture_metadata", "source_pointer": "research/b1-context/fixtures/case-0001/source-selectors.yaml", "selector": "sessions[session-bd].coverage + label_history"}
+        {
+          "source_id": "capture-main-dialog",
+          "source_class": "raw_capture",
+          "digest": "sha256:d34c4b9ab2eb90885e270d14199110989cb65eaae17de341db647af49f11cfb4",
+          "selector": "native_conversation_id 6a6b6230-cb8c-83eb-ad3d-456c0d0c8ce3"
+        },
+        {
+          "source_id": "case-0001-source-selectors",
+          "source_class": "fixture_metadata",
+          "source_pointer": "research/b1-context/fixtures/case-0001/source-selectors.yaml",
+          "selector": "sessions[session-bd].coverage + label_history"
+        }
       ]
     },
     {
       "observation_id": "obs-session-e-separate",
       "kind": "evidence",
+      "topics": [
+        "capture-topology",
+        "source-capture"
+      ],
       "statement": "Session E is a distinct, previously unaccounted conversation (capture-compaction, the Qodec context-compaction chat) with its own native conversation id, separate from sessions A, B/D and C.",
       "authority": "platform_capture",
       "status": "current",
       "observed_at": "2026-08-03",
       "provenance": [
-        {"source_id": "capture-compaction", "source_class": "raw_capture", "digest": "sha256:4eac30055b0ff67c0fdd6e96903be9f70c2d734398744307bb6df8bbdced52c7", "selector": "native_conversation_id 6a6f73b9-d1b0-83eb-a6cb-99064d7cc6cf"},
-        {"source_id": "case-0001-source-selectors", "source_class": "fixture_metadata", "source_pointer": "research/b1-context/fixtures/case-0001/source-selectors.yaml", "selector": "sessions[session-e] + label_history"}
+        {
+          "source_id": "capture-compaction",
+          "source_class": "raw_capture",
+          "digest": "sha256:4eac30055b0ff67c0fdd6e96903be9f70c2d734398744307bb6df8bbdced52c7",
+          "selector": "native_conversation_id 6a6f73b9-d1b0-83eb-a6cb-99064d7cc6cf"
+        },
+        {
+          "source_id": "case-0001-source-selectors",
+          "source_class": "fixture_metadata",
+          "source_pointer": "research/b1-context/fixtures/case-0001/source-selectors.yaml",
+          "selector": "sessions[session-e] + label_history"
+        }
       ]
     },
     {
       "observation_id": "obs-snapshot2-supersedes-1",
       "kind": "decision",
+      "topics": [
+        "capture-topology",
+        "source-capture"
+      ],
       "statement": "claude-code-session-c-snapshot-2 (683 events) is the selected full snapshot of session C and supersedes snapshot-1 (368 events), which is retained only as a historical prefix source.",
       "authority": "controller_or_repo_record",
       "status": "current",
       "observed_at": "2026-08-03",
       "provenance": [
-        {"source_id": "claude-code-session-c-snapshot-2", "source_class": "platform_artifact_snapshot", "digest": "sha256:6a86185402fd69d2fe4aad425a257b06c9bcfc4b28decc0b690d9b314f4066b9", "selector": "supersedes: claude-code-session-c-snapshot-1"},
-        {"source_id": "claude-code-session-c-snapshot-1", "source_class": "platform_artifact_snapshot", "digest": "sha256:011638b28a57cf7a10356a8d35e9ee39124a376503365099e8fcd51cd3fc2c4f", "selector": "superseded_by: claude-code-session-c-snapshot-2"}
+        {
+          "source_id": "claude-code-session-c-snapshot-2",
+          "source_class": "platform_artifact_snapshot",
+          "digest": "sha256:6a86185402fd69d2fe4aad425a257b06c9bcfc4b28decc0b690d9b314f4066b9",
+          "selector": "supersedes: claude-code-session-c-snapshot-1"
+        },
+        {
+          "source_id": "claude-code-session-c-snapshot-1",
+          "source_class": "platform_artifact_snapshot",
+          "digest": "sha256:011638b28a57cf7a10356a8d35e9ee39124a376503365099e8fcd51cd3fc2c4f",
+          "selector": "superseded_by: claude-code-session-c-snapshot-2"
+        }
       ]
     },
     {
       "observation_id": "obs-byte-prefix-scope",
       "kind": "constraint",
+      "topics": [
+        "capture-topology",
+        "source-capture"
+      ],
       "statement": "The byte-prefix invariant holds only between snapshots of the same append-only container representation (snapshot-2 must contain snapshot-1 as an exact byte prefix). A platform export is a separate capture path and may corroborate content and ordering without byte identity.",
       "authority": "controller_or_repo_record",
       "status": "current",
       "provenance": [
-        {"source_id": "case-0001-manifest", "source_class": "fixture_metadata", "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml", "selector": "snapshot-2 notes + prefix_check + integrity_rules"}
+        {
+          "source_id": "case-0001-manifest",
+          "source_class": "fixture_metadata",
+          "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml",
+          "selector": "snapshot-2 notes + prefix_check + integrity_rules"
+        }
       ]
     },
     {
       "observation_id": "obs-negative-control-advisory",
       "kind": "decision",
+      "topics": [
+        "authority-boundary",
+        "negative-control"
+      ],
       "statement": "case-0001-claude-reconstruction-v0 is an advisory agent_reconstruction negative control (authority: advisory, agent_claim). It is never RAW, never contributes to expected state, and exists only to be measured against RAW.",
       "authority": "controller_or_repo_record",
       "status": "current",
       "provenance": [
-        {"source_id": "case-0001-manifest", "source_class": "fixture_metadata", "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml", "selector": "negative_control[0] authority: advisory"},
-        {"source_id": "case-0001-claude-reconstruction-v0", "source_class": "agent_reconstruction", "digest": "sha256:37110a62967504fb94eac52cd1e361117069e151a84d4b188ec4c63047c58056", "selector": "authority + raw_access_at_generation: false"}
+        {
+          "source_id": "case-0001-manifest",
+          "source_class": "fixture_metadata",
+          "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml",
+          "selector": "negative_control[0] authority: advisory"
+        },
+        {
+          "source_id": "case-0001-claude-reconstruction-v0",
+          "source_class": "agent_reconstruction",
+          "digest": "sha256:37110a62967504fb94eac52cd1e361117069e151a84d4b188ec4c63047c58056",
+          "selector": "authority + raw_access_at_generation: false"
+        }
       ]
     },
     {
       "observation_id": "obs-nc-divergence-bd",
       "kind": "evidence",
+      "topics": [
+        "capture-topology",
+        "negative-control"
+      ],
       "statement": "Measured divergence of the negative control from captured topology: it treated former labels B and D as two separate conversations, whereas capture shows one conversation (session-bd). This is measurement data, not an error to fix.",
       "authority": "controller_or_repo_record",
       "status": "current",
       "provenance": [
-        {"source_id": "case-0001-manifest", "source_class": "fixture_metadata", "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml", "selector": "negative_control.known_divergence_already_observed"},
-        {"source_id": "case-0001-claude-reconstruction-v0", "source_class": "agent_reconstruction", "digest": "sha256:37110a62967504fb94eac52cd1e361117069e151a84d4b188ec4c63047c58056"}
+        {
+          "source_id": "case-0001-manifest",
+          "source_class": "fixture_metadata",
+          "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml",
+          "selector": "negative_control.known_divergence_already_observed"
+        },
+        {
+          "source_id": "case-0001-claude-reconstruction-v0",
+          "source_class": "agent_reconstruction",
+          "digest": "sha256:37110a62967504fb94eac52cd1e361117069e151a84d4b188ec4c63047c58056"
+        }
       ]
     },
     {
       "observation_id": "obs-nc-divergence-e",
       "kind": "evidence",
+      "topics": [
+        "capture-topology",
+        "negative-control"
+      ],
       "statement": "Measured divergence of the negative control: it did not account for session E as a distinct conversation, which capture shows exists (session-e).",
       "authority": "controller_or_repo_record",
       "status": "current",
       "provenance": [
-        {"source_id": "case-0001-manifest", "source_class": "fixture_metadata", "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml", "selector": "negative_control.known_divergence_already_observed"},
-        {"source_id": "case-0001-source-selectors", "source_class": "fixture_metadata", "source_pointer": "research/b1-context/fixtures/case-0001/source-selectors.yaml", "selector": "label_history: an additional unrecorded conversation existed"}
+        {
+          "source_id": "case-0001-manifest",
+          "source_class": "fixture_metadata",
+          "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml",
+          "selector": "negative_control.known_divergence_already_observed"
+        },
+        {
+          "source_id": "case-0001-source-selectors",
+          "source_class": "fixture_metadata",
+          "source_pointer": "research/b1-context/fixtures/case-0001/source-selectors.yaml",
+          "selector": "label_history: an additional unrecorded conversation existed"
+        }
       ]
     },
     {
       "observation_id": "obs-account-export-pending",
       "kind": "status",
+      "topics": [
+        "holdout-readiness",
+        "source-capture"
+      ],
       "statement": "A chatgpt platform/account export is pending; it would supersede/confirm the three interim captures. Its absence blocks promotion to SOURCE_SET_COMPLETE but does NOT block the development experiment.",
       "authority": "controller_or_repo_record",
       "status": "pending",
       "provenance": [
-        {"source_id": "case-0001-manifest", "source_class": "fixture_metadata", "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml", "selector": "pending[0] chatgpt account export"}
+        {
+          "source_id": "case-0001-manifest",
+          "source_class": "fixture_metadata",
+          "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml",
+          "selector": "pending[0] chatgpt account export"
+        }
       ]
     },
     {
       "observation_id": "obs-next-step-extractors-schema",
       "kind": "next_action",
+      "topics": [
+        "b1-scope",
+        "holdout-readiness"
+      ],
       "statement": "At the cutoff, the next allowed step was to implement the two deterministic extractors v0 (user-visible derived transcripts) and build state-observables schema v0 from the captured set.",
       "authority": "controller_or_repo_record",
       "status": "current",
       "provenance": [
-        {"source_id": "case-0001-manifest", "source_class": "fixture_metadata", "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml", "selector": "pending[1..2] derived transcripts + schema"},
-        {"source_id": "case-0001-source-selectors", "source_class": "fixture_metadata", "source_pointer": "research/b1-context/fixtures/case-0001/source-selectors.yaml", "selector": "extractors[*].status: not_yet_implemented"}
+        {
+          "source_id": "case-0001-manifest",
+          "source_class": "fixture_metadata",
+          "source_pointer": "research/b1-context/fixtures/case-0001/manifest.yaml",
+          "selector": "pending[1..2] derived transcripts + schema"
+        },
+        {
+          "source_id": "case-0001-source-selectors",
+          "source_class": "fixture_metadata",
+          "source_pointer": "research/b1-context/fixtures/case-0001/source-selectors.yaml",
+          "selector": "extractors[*].status: not_yet_implemented"
+        }
       ]
     },
     {
       "observation_id": "obs-holdout-no-generalization",
       "kind": "constraint",
+      "topics": [
+        "authority-boundary",
+        "holdout-readiness"
+      ],
       "statement": "case-0001 is a golden development fixture whose questions were shaped on its own material; it can debug the representation but cannot prove generalization. Only holdout cases (questions fixed and digest-bound before compaction) support generalization claims; case-0001 is permanently excluded from holdout.",
       "authority": "controller_or_repo_record",
       "status": "current",
       "provenance": [
-        {"source_id": "b1-holdout-readme", "source_class": "repo_record", "source_pointer": "research/b1-context/holdout/README.md", "selector": "rules 1 and 4"},
-        {"source_id": "b1-readme", "source_class": "repo_record", "source_pointer": "research/b1-context/README.md", "selector": "Rules[2]"}
+        {
+          "source_id": "b1-holdout-readme",
+          "source_class": "repo_record",
+          "source_pointer": "research/b1-context/holdout/README.md",
+          "selector": "rules 1 and 4"
+        },
+        {
+          "source_id": "b1-readme",
+          "source_class": "repo_record",
+          "source_pointer": "research/b1-context/README.md",
+          "selector": "Rules[2]"
+        }
       ]
     },
     {
       "observation_id": "obs-nc-claim-bd-separate",
       "kind": "evidence",
+      "topics": [
+        "capture-topology",
+        "negative-control"
+      ],
       "statement": "Negative-control belief (advisory, now superseded by capture): that former labels B and D were two separate conversations.",
       "authority": "agent_claim",
       "status": "superseded",
       "superseded_by": "obs-bd-one-conversation",
       "provenance": [
-        {"source_id": "case-0001-claude-reconstruction-v0", "source_class": "agent_reconstruction", "digest": "sha256:37110a62967504fb94eac52cd1e361117069e151a84d4b188ec4c63047c58056", "selector": "known_divergence (assumed B and D separate)"}
-      ]
+        {
+          "source_id": "case-0001-claude-reconstruction-v0",
+          "source_class": "agent_reconstruction",
+          "digest": "sha256:37110a62967504fb94eac52cd1e361117069e151a84d4b188ec4c63047c58056",
+          "selector": "known_divergence (assumed B and D separate)"
+        }
+      ],
+      "structured_value": {
+        "contrary_markers": [
+          "separate conversation",
+          "two separate conversations",
+          "distinct conversations"
+        ]
+      }
     },
     {
       "observation_id": "obs-nc-claim-no-session-e",
       "kind": "evidence",
+      "topics": [
+        "capture-topology",
+        "negative-control"
+      ],
       "statement": "Negative-control belief (advisory, now superseded by capture): that no separate session E existed.",
       "authority": "agent_claim",
       "status": "superseded",
       "superseded_by": "obs-session-e-separate",
       "provenance": [
-        {"source_id": "case-0001-claude-reconstruction-v0", "source_class": "agent_reconstruction", "digest": "sha256:37110a62967504fb94eac52cd1e361117069e151a84d4b188ec4c63047c58056", "selector": "known_divergence (did not know session E existed)"}
-      ]
+        {
+          "source_id": "case-0001-claude-reconstruction-v0",
+          "source_class": "agent_reconstruction",
+          "digest": "sha256:37110a62967504fb94eac52cd1e361117069e151a84d4b188ec4c63047c58056",
+          "selector": "known_divergence (did not know session E existed)"
+        }
+      ],
+      "structured_value": {
+        "contrary_markers": [
+          "no session e",
+          "session e was not",
+          "there is no session e"
+        ]
+      }
     }
   ],
   "relations": [
-    {"kind": "supports", "from": "obs-b1-independent-a-series", "to": "obs-b1-readonly-boundary"},
-    {"kind": "part_of", "from": "obs-source-set-not-complete-conditions", "to": "obs-source-set-status-interim"},
-    {"kind": "blocks", "from": "obs-account-export-pending", "to": "obs-source-set-not-complete-conditions"},
-    {"kind": "depends_on", "from": "obs-next-step-extractors-schema", "to": "obs-source-set-status-interim"},
-    {"kind": "supersedes", "from": "obs-bd-one-conversation", "to": "obs-nc-claim-bd-separate"},
-    {"kind": "supersedes", "from": "obs-session-e-separate", "to": "obs-nc-claim-no-session-e"},
-    {"kind": "contradicts", "from": "obs-nc-claim-bd-separate", "to": "obs-bd-one-conversation"},
-    {"kind": "contradicts", "from": "obs-nc-claim-no-session-e", "to": "obs-session-e-separate"},
-    {"kind": "derived_from", "from": "obs-nc-divergence-bd", "to": "obs-nc-claim-bd-separate"},
-    {"kind": "derived_from", "from": "obs-nc-divergence-e", "to": "obs-nc-claim-no-session-e"},
-    {"kind": "supports", "from": "obs-holdout-no-generalization", "to": "obs-b1-readonly-boundary"}
+    {
+      "kind": "supports",
+      "from": "obs-b1-independent-a-series",
+      "to": "obs-b1-readonly-boundary"
+    },
+    {
+      "kind": "part_of",
+      "from": "obs-source-set-not-complete-conditions",
+      "to": "obs-source-set-status-interim"
+    },
+    {
+      "kind": "blocks",
+      "from": "obs-account-export-pending",
+      "to": "obs-source-set-not-complete-conditions"
+    },
+    {
+      "kind": "depends_on",
+      "from": "obs-next-step-extractors-schema",
+      "to": "obs-source-set-status-interim"
+    },
+    {
+      "kind": "supersedes",
+      "from": "obs-bd-one-conversation",
+      "to": "obs-nc-claim-bd-separate"
+    },
+    {
+      "kind": "supersedes",
+      "from": "obs-session-e-separate",
+      "to": "obs-nc-claim-no-session-e"
+    },
+    {
+      "kind": "contradicts",
+      "from": "obs-nc-claim-bd-separate",
+      "to": "obs-bd-one-conversation"
+    },
+    {
+      "kind": "contradicts",
+      "from": "obs-nc-claim-no-session-e",
+      "to": "obs-session-e-separate"
+    },
+    {
+      "kind": "derived_from",
+      "from": "obs-nc-divergence-bd",
+      "to": "obs-nc-claim-bd-separate"
+    },
+    {
+      "kind": "derived_from",
+      "from": "obs-nc-divergence-e",
+      "to": "obs-nc-claim-no-session-e"
+    },
+    {
+      "kind": "supports",
+      "from": "obs-holdout-no-generalization",
+      "to": "obs-b1-readonly-boundary"
+    }
   ]
 }

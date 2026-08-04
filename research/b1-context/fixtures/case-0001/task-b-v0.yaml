@@ -1,0 +1,35 @@
+schema: o7.b1.task/v0
+task_id: case-0001-audit-source-capture-v0
+fixture_id: case-0001
+# Task B. A materially different intent over the SAME gold state, added by the
+# corrective round to prove selection actually depends on the task:
+#
+#   same gold + different tasks -> different byte-stable projections
+#
+# Task B is an auditor: it cares about how the sources were captured, what the
+# resulting topology is, and where the sealed reconstruction diverged. It does
+# NOT need B1's hypothesis or its next permitted step, and must not receive them.
+statement: >-
+  Audit source-capture integrity and completeness for case-0001: what was
+  captured, how the sessions actually relate, and where the sealed advisory
+  reconstruction diverged from the verified captures.
+selectors:
+  required_topics:
+    - source-capture
+  preferred_topics:
+    - capture-topology
+    - negative-control
+  excluded_topics: []
+  # An integrity audit is only meaningful with the capture status, the captured
+  # evidence itself, and the constraints bounding what the capture proves.
+  required_kinds:
+    - status
+    - evidence
+    - constraint
+  anchor_observation_ids: []
+  anchor_rationale: {}
+constraints:
+  - Report only what the verified captures and digest-bound metadata establish.
+  - The sealed reconstruction is advisory, never authoritative (obs-negative-control-advisory).
+  - Do not promote the source set to SOURCE_SET_COMPLETE (obs-source-set-not-complete-conditions).
+cutoff: end of claude-code-session-c-snapshot-2

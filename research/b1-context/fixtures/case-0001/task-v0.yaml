@@ -1,15 +1,38 @@
 schema: o7.b1.task/v0
 task_id: case-0001-continue-b1-v0
 fixture_id: case-0001
-# This task is frozen and digest-bound BEFORE any projection runs. run_case.py
-# records its canonical digest in context.meta.json and report.json.
+# Task A. Frozen and digest-bound BEFORE any projection runs. run_case.py records
+# its canonical digest in context.meta.json and report.json.
+#
+# The `selectors` block below is what makes the projection TASK-DEPENDENT: it is
+# read by the versioned selector contract o7.b1.selector/v0, which filters and
+# ranks observations by their task-independent `topics`. Before the corrective
+# round (#issuecomment-5182632187) the projector ignored the task entirely and
+# selected every in-force authoritative observation.
 statement: >-
   Continue B1 from the fixed captured state toward the next allowed experiment,
   without raising B1's authority and without changing the A-series.
+selectors:
+  # What this task is about: B1's own scope and what it may do next.
+  required_topics:
+    - b1-scope
+  # Useful context for deciding the next allowed step.
+  preferred_topics:
+    - authority-boundary
+    - holdout-readiness
+  excluded_topics: []
+  # A continuation task is useless without the goal, the constraints and the
+  # permitted next action.
+  required_kinds:
+    - goal
+    - constraint
+    - next_action
+  # Selection is driven by the topic vocabulary alone; no id-level overrides.
+  anchor_observation_ids: []
+  anchor_rationale: {}
 constraints:
   - B1 stays READ-ONLY and NON-AUTHORITATIVE (obs-b1-readonly-boundary).
   - Do not drive or alter A-series transitions (obs-b1-independent-a-series).
-  - Do not promote the source set to SOURCE_SET_COMPLETE (obs-source-set-status-interim,
-    obs-source-set-not-complete-conditions).
+  - Do not promote the source set to SOURCE_SET_COMPLETE (obs-source-set-not-complete-conditions).
   - Make no generalization claim from this golden fixture (obs-holdout-no-generalization).
 cutoff: end of claude-code-session-c-snapshot-2
