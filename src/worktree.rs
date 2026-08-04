@@ -1838,6 +1838,13 @@ mod dirty_submodule_tests {
 /// machine, exercised directly with synthetic records so every documented
 /// record shape (and every malformed variant that must fail closed) is
 /// covered without spawning a real `git` process.
+// Q-Deck A0 corrective round 8 (fresh CodeRabbit finding): every
+// `unwrap`/`expect`/index in this module operates ONLY on synthetic
+// porcelain-v2 byte fixtures this same test assembles (via `join`, below)
+// — never on untrusted input reaching this process from a real caller. A
+// panic here is this test failing loudly on its own broken assumption
+// about the parser's contract, not a production fault path this lint
+// would otherwise guard.
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod porcelain_v2_parser_tests {

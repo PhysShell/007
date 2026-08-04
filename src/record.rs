@@ -342,6 +342,12 @@ impl RunRecord {
 
 /// Q-Deck A0 corrective round 5 (CodeRabbit durability finding): focused
 /// unit tests for the new directory-fsync durability step.
+// Q-Deck A0 corrective round 8 (fresh CodeRabbit finding): every
+// `unwrap`/`expect` in this module operates ONLY on this test's own
+// tempdir paths and freshly written fixture files — never on untrusted
+// input reaching this process from a real caller. A panic here is this
+// test failing loudly on its own broken assumption, not a production
+// fault path this lint would otherwise guard.
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod durability_tests {

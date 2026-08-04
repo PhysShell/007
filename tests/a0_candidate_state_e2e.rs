@@ -3800,7 +3800,32 @@ fn an_oversized_events_jsonl_is_refused_before_any_read_at_both_call_sites() {
 /// A large candidate replay (a run-detail projection over a big, though
 /// within-limits, canonical record) must not block the Tokio runtime — a
 /// concurrent, unrelated request to a plain endpoint must still answer
-/// promptly while the large replay is in flight on the blocking pool.
+/// promptly while genuine replay work is contending for the SAME bounded
+/// blocking-pool semaphore.
+///
+/// Q-Deck A0 corrective round 8 (fresh CodeRabbit finding): a worker
+/// merely SIGNALING before calling GET is not proof the blocking work it
+/// requested has actually acquired a permit and is in flight — a
+/// scheduling delay could let the health check race ahead of every
+/// projection thread's own HTTP connection. This version closes that gap
+/// two ways: (1) a real `std::sync::Barrier` releases all
+/// `n_concurrent_projections` client threads at the same synchronized
+/// instant, immediately before the health check is issued, rather than
+/// relying on an unsynchronized `thread::spawn` loop where later threads
+/// could start arbitrarily late; (2) `n_concurrent_projections` (6)
+/// deliberately EXCEEDS `MAX_CONCURRENT_CANDIDATE_REPLAYS` (4, real
+/// constant, `crates/o7d/src/state.rs`), and each thread's own response is
+/// now inspected rather than discarded: `try_acquire_owned` is
+/// non-blocking (a request that loses the race for a permit gets its
+/// candidate fields best-effort skipped immediately, never queued or
+/// retried), so not every one of the 6 is guaranteed to show a completed
+/// replay — but at least one must, or this test would be proving nothing
+/// about concurrent replay work at all. This narrower, honest claim does
+/// not, and cannot without instrumenting production code, prove
+/// millisecond-exact overlap with the health check's own wall-clock
+/// window — that residual is inherent to testing real OS thread
+/// scheduling black-box, and is why the health check's own deadline stays
+/// generous rather than tight.
 #[test]
 fn a_large_candidate_replay_does_not_block_concurrent_unrelated_requests() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -3849,19 +3874,34 @@ fn a_large_candidate_replay_does_not_block_concurrent_unrelated_requests() {
     let big_task_content = "x".repeat(6 * 1024 * 1024);
     std::fs::write(run_a_dir.join("task.md"), &big_task_content).unwrap();
 
+    // Deliberately exceeds `MAX_CONCURRENT_CANDIDATE_REPLAYS` (4, real
+    // constant) so at least some of these requests can only be genuinely
+    // concurrent, real replay work if every permit is actually saturated
+    // at once.
     let n_concurrent_projections = 6;
-    let barrier_start = Instant::now();
+    // A real barrier — not a timer, not a signal-then-hope — releases
+    // every client thread's own GET at the same synchronized instant,
+    // immediately before the health check fires, so "these requests are
+    // all in flight when the health check runs" is enforced by the client
+    // side's own synchronization, not left to `thread::spawn` scheduling
+    // luck.
+    let start_barrier = std::sync::Arc::new(std::sync::Barrier::new(n_concurrent_projections + 1));
     let handles: Vec<_> = (0..n_concurrent_projections)
         .map(|_| {
             let run_a_id = run_a_id.clone();
-            std::thread::spawn(move || get(addr, &format!("/api/v1/runs/{run_a_id}")))
+            let start_barrier = std::sync::Arc::clone(&start_barrier);
+            std::thread::spawn(move || {
+                start_barrier.wait();
+                get(addr, &format!("/api/v1/runs/{run_a_id}"))
+            })
         })
         .collect();
+    start_barrier.wait();
 
-    // While those (possibly slow/queued behind the bounded semaphore)
-    // projections are in flight, a plain, unrelated health check must
-    // still answer promptly — proving it never got stuck behind them on
-    // the SAME Tokio worker thread.
+    // While those projections are contending for the SAME bounded
+    // blocking-pool semaphore, a plain, unrelated health check must still
+    // answer promptly — proving it never got stuck behind them on the
+    // SAME Tokio worker thread.
     let health_deadline = Duration::from_secs(5);
     let health_start = Instant::now();
     let (health_status, _) = get(addr, "/api/v1/health");
@@ -3873,10 +3913,30 @@ fn a_large_candidate_replay_does_not_block_concurrent_unrelated_requests() {
         health_start.elapsed()
     );
 
+    // Every response must succeed regardless of which outcome it hit
+    // (`try_acquire_owned` is non-blocking — a request that loses the race
+    // for one of the 4 permits gets its candidate fields best-effort
+    // skipped, immediately, never queued or retried; it is not an error).
+    // At least one of these six simultaneously-released requests showing
+    // a GENUINELY completed replay (`materialization_status` present,
+    // never null) is proof real concurrent blocking-pool work actually
+    // happened under this load, not merely that requests were sent and
+    // ignored — ruling out the degenerate case where every request
+    // silently no-ops.
+    let mut genuine_replays = 0;
     for h in handles {
-        let _ = h.join();
+        let (status, projected) = h.join().expect("projection thread must not panic");
+        assert_eq!(status, 200, "{projected:?}");
+        if projected["materialization_status"].is_string() {
+            genuine_replays += 1;
+        }
     }
-    let _ = barrier_start.elapsed();
+    assert!(
+        genuine_replays >= 1,
+        "at least one of the {n_concurrent_projections} simultaneously-released requests must \
+         show a genuinely completed replay — otherwise this test cannot be proving anything \
+         about concurrent replay work at all"
+    );
 
     let _ = o7d_child.kill();
     let _ = o7d_child.wait();

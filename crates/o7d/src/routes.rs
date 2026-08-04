@@ -1035,6 +1035,14 @@ pub(crate) async fn unknown_api_route() -> ApiError {
 /// They use the real `tokio::sync::Semaphore`/`tokio::task::spawn_blocking`
 /// primitives, never a reimplementation, so what they prove is exactly
 /// what production code does.
+// Q-Deck A0 corrective round 8 (fresh CodeRabbit finding): every
+// `unwrap`/`expect`/index/`panic!` in this module operates ONLY on this
+// test's own in-memory counters, channels, and synthetic closures — never
+// on untrusted input reaching this process from a real caller. The
+// deliberate `panic!` in the "panicking work" fixture exists specifically
+// to prove `run_behind_replay_limiter` still releases its permit when the
+// wrapped closure panics; it is the test's own controlled fault
+// injection, not a production fault path this lint would otherwise guard.
 #[cfg(test)]
 #[allow(
     clippy::unwrap_used,

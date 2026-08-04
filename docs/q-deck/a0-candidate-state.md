@@ -195,14 +195,20 @@ and R1's own `diff_vs_base`/`PatchCaptured` already ran:
 
 ```text
 git add -A                                                  # already done by diff_vs_base
+# reject if any tracked path carries an assume-unchanged/skip-worktree
+# hidden-index flag (round 7) or a dirty/nested submodule (round 5) —
+# both checked against the SAME staged state the snapshot below freezes
+freeze a private copy of the real index file                # round 8
 git diff --cached --binary --full-index --no-color \
-  --no-ext-diff <conversation base_commit>                  # NOT this run's own --base
-git write-tree                                              # -> candidate_tree_oid
+  --no-ext-diff <conversation base_commit>                  # against the FROZEN copy, via GIT_INDEX_FILE
+git write-tree                                              # -> candidate_tree_oid, against the SAME frozen copy
+# reject if the patch or resulting tree touches a gitlink (mode 160000, §7)
 ```
 
-`capture_cumulative_candidate(worktree, base_commit) -> Result<(Vec<u8>,
-String)>` returns the diff's stdout as **raw `Vec<u8>` bytes end to end** —
-never through a `String` at any point in the transport path. Git's own diff
+`capture_cumulative_candidate(worktree, tmp_parent, base_commit) ->
+Result<(Vec<u8>, String)>` returns the diff's stdout as **raw `Vec<u8>`
+bytes end to end** — never through a `String` at any point in the
+transport path. Git's own diff
 output for an arbitrary repository is not guaranteed valid UTF-8 (a tracked
 file with invalid-UTF-8 content, a binary blob, a non-UTF-8 filename on
 Unix), and a lossy or lossless text round-trip anywhere in this path would
@@ -217,6 +223,19 @@ patch bytes portable and free of any repo-configured external diff driver.
 Symlinks are preserved as Git already represents them (a blob mode
 `120000`) — no special handling needed beyond what `add -A`/`diff --binary`
 already do.
+
+**Exact capture cutoff (round 8):** the patch and `candidate_tree_oid` are
+both derived from the ONE frozen index snapshot taken right after the
+hidden-flag and dirty-submodule checks above pass — never from the live
+worktree index again. This guarantees the two are always mutually
+consistent (`apply(patch, base_commit).tree_oid == candidate_tree_oid`,
+always), but it does NOT guarantee that every edit present in the working
+tree at the moment `add -A` finished is included: a concurrent mutation of
+the real index between `add -A` and the snapshot read is a genuine race
+this capture makes no claim about either way. Do not read this section as
+claiming concurrently modified working-tree bytes are captured — only
+that whatever the snapshot froze is what both the patch and the tree
+faithfully, consistently represent.
 
 The ONLY place patch bytes are ever read as text is a heuristic,
 after-the-fact scan for a gitlink (submodule, mode `160000`) mutation
@@ -1810,7 +1829,8 @@ across every round since.
 `fix(root): fsync run directory after durable artifact writes`,
 `test(q-deck): cover external round 5 findings`,
 `docs(q-deck): record round 5 evidence and triage`. Fewer commits than
-the round's own suggested 8-commit sequence: Parts 2 and 4 (bounding off
+the round's own suggested 10-commit sequence (one part per numbered Part
+1-10 above): Parts 2 and 4 (bounding off
 async workers, stabilizing projection statuses) touch the exact same
 lines of the exact same function — CodeRabbit's own two findings were on
 that same function — so they were committed together rather than split
@@ -1826,7 +1846,7 @@ review `4842910559` reviewed). New head: see the PR body / `git log`.
 - `cargo fmt --check` — clean. `git diff --check` — clean.
 - `cargo check -p o7 -p o7-run -p o7-ledger -p o7d` — clean.
 - `cargo test -p o7-run` (lib + `contract` + `reducer_transitions` +
-  `replay_acceptance` + `candidate_state`) — **130/130 passing** (28
+  `replay_acceptance` + `candidate_state`) — **128/128 passing** (28
   candidate_state — 27 carried + 1 new locator test; 10 contract; 72
   reducer_transitions; 18 replay_acceptance; 0 lib), unchanged except the
   one new Part 6 test.
@@ -2054,7 +2074,7 @@ and a stray interior empty record (fails closed, distinct from the one
 legitimate trailing empty segment). 3 real-git tests
 (`dirty_submodule_tests`): the exact `2 - Section overview.md`
 counterexample; renames whose old name starts with each of the other
-four record-type prefixes (`1 `, `u `, `? `, `! `); an ordinary untracked
+four record-type prefixes (` 1  `, ` u  `, ` ?  `, ` !  `); an ordinary untracked
 superproject file (unaffected, confirming this check's scope stays
 confined to submodule dirtiness). All prior dirty/clean-submodule tests
 (round 3/5) still pass unchanged.
