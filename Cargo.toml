@@ -45,6 +45,13 @@ o7-run = { path = "crates/o7-run", version = "0.1.0" }
 # .block_on per call) — the rest of the CLI stays exactly as synchronous
 # as it is today.
 o7-ledger = { path = "crates/o7-ledger", version = "0.1.0" }
+# Q-Deck A0 (docs/q-deck/a0-candidate-state.md): reuses this crate's own
+# `identity::CanonicalRepoId`/`git::HardenedGit::canonical_repo_id()` for
+# candidate-state receipts' repository identity, rather than reinventing
+# one. Its heavier materialize/store/reap machinery (built for materializing
+# an already-committed revision under a strict security preflight, not
+# applying an out-of-band patch) is deliberately NOT used here.
+o7-worktree = { path = "crates/o7-worktree", version = "0.1.0" }
 tokio = { version = "1", features = ["rt"] }
 sha1 = "0.10"
 sha2 = "0.10"
@@ -68,6 +75,14 @@ jsonschema = { version = "0.47", default-features = false }
 # (allowed in deny.toml); it pulls only bitflags/cfg-if/libc, all permissive.
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", default-features = false, features = ["signal", "fs"] }
+# Q-Deck A0 corrective round 1 (`docs/q-deck/a0-candidate-state.md`): the
+# private candidate-patch temp store (`src/worktree.rs`) needs O_EXCL|
+# O_NOFOLLOW-confined file creation OUTSIDE the candidate-controlled
+# worktree, so a symlink a base commit's own tree contains can never redirect
+# a write. Already an in-tree, `deny.toml`-allowed dependency (`o7-worktree`
+# already uses it for its own no-follow confinement primitives) — reused
+# here rather than hand-rolling raw libc calls or adding a new crate.
+rustix = { version = "1", default-features = false, features = ["fs", "std"] }
 
 # Lints. Curated to pass `clippy --all-targets -D warnings` clean on today's code
 # (ratchet, not a blast): the broad pedantic/nursery families are deliberately

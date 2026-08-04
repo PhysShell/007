@@ -138,6 +138,19 @@ pub enum ArtifactKind {
     /// digest of the command text) — see
     /// [`RunEventKind::CommandBindingCaptured`].
     CommandBinding,
+    /// Q-Deck A0: a candidate-state receipt — either the one THIS run
+    /// captured (see [`RunEventKind::CandidateStateCaptured`]) or a
+    /// command-continuation child's own local copy of its parent's receipt,
+    /// used to prove what it materialized from (see
+    /// [`RunEventKind::CandidateStateMaterialized`]). Both are "a
+    /// candidate-state receipt" — capturing vs. consuming one, not two
+    /// different shapes.
+    CandidateState,
+    /// Q-Deck A0 corrective round 1: the raw cumulative Git patch a
+    /// candidate-state receipt's own `patch` field references — a distinct
+    /// kind from [`Self::CandidateState`] (the receipt itself) so a receipt
+    /// artifact can never be mistaken for a patch artifact or vice versa.
+    CandidatePatch,
 }
 
 /// A reference to an out-of-band artifact: WHERE it is plus the digest its content MUST
@@ -322,6 +335,71 @@ pub struct RunContract {
     /// The runner environment tag (e.g. `linux`). Opaque to the reducer except for matching a
     /// gate waiver's declared environment.
     pub runner_environment: String,
+    /// Q-Deck A0 corrective round 1 (`docs/q-deck/a0-candidate-state.md`): the
+    /// canonical-binding authority a command-continuation child's candidate
+    /// state must match, fixed HERE at `RunStarted` — never self-declared by
+    /// a receipt or taken from a mutable CLI argument. `None` for a run that
+    /// declares no candidate-state obligation at all (pre-A0, or any future
+    /// non-A0 run) — `#[serde(default, skip_serializing_if = "Option::is_none")]`
+    /// so a pre-existing contract with no such field parses unchanged and the
+    /// frozen normalized-state known-answer digest stays byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_state: Option<CandidateStateContractV1>,
+}
+
+/// Q-Deck A0 corrective round 1: a stable, comparable repository identity —
+/// mirrors `o7_worktree::identity::CanonicalRepoId` (`git_common_dir`/`dev`/
+/// `ino`) exactly, WITHOUT this crate depending on `o7-worktree` (which pulls
+/// `nix`/`rustix` and is Unix-only) — this crate stays dependency-light
+/// (serde + sha2 + thiserror only) by design. The root `o7` crate, which
+/// already depends on `o7-worktree`, converts at the one point of
+/// construction and the one point of comparison.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepositoryIdentity {
+    pub git_common_dir: String,
+    pub dev: u64,
+    pub ino: u64,
+}
+
+/// The supported cumulative-patch transport format. A single variant today;
+/// an unrecognized/future value on the wire fails closed at deserialization
+/// (an unknown string is a parse error, never a silent match-fallthrough) —
+/// there is deliberately no `#[serde(other)]` catch-all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CandidatePatchKind {
+    GitBinaryCumulativePatchV1,
+}
+
+/// The schema version this build understands for a `CandidateStateContractV1`
+/// obligation itself — deliberately distinct from
+/// `crate::candidate::CANDIDATE_STATE_RECEIPT_SCHEMA_V1`, which versions the
+/// RECEIPT an evidence artifact's own bytes deserialize to. The contract's
+/// `schema` field must be validated against THIS constant (Q-Deck A0
+/// corrective round 4, Codex P1): before this round nothing compared it to
+/// anything, so a `RunStarted` could declare `candidate_state.schema = 2`
+/// while every receipt stayed at schema 1 and be accepted as valid,
+/// authoritative continuation ancestry — an unknown contract format must
+/// fail closed, not become authority.
+pub const CANDIDATE_STATE_CONTRACT_SCHEMA_V1: u32 = 1;
+
+/// Q-Deck A0 corrective round 1 (`docs/q-deck/a0-candidate-state.md` §2): the
+/// candidate-state contract obligation, canonical-bound at `RunStarted` — a
+/// command-continuation child's captured/materialized candidate-state
+/// receipts must match this exactly, never a self-declared value inside the
+/// receipt itself or a mutable CLI `--base` argument. A top-level run's own
+/// obligation is fixed from its own resolved base commit; a continuation
+/// child's is inherited UNCHANGED from its verified parent's own contract —
+/// never re-derived. `schema` must equal `CANDIDATE_STATE_CONTRACT_SCHEMA_V1`
+/// — validated structurally at `RunStarted` (`crate::reduce::validate_contract`)
+/// and again, in defense in depth, by the semantic layer (`crate::candidate`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CandidateStateContractV1 {
+    pub schema: u32,
+    pub conversation_id: String,
+    pub repository_id: RepositoryIdentity,
+    pub base_commit: String,
+    pub patch_kind: CandidatePatchKind,
 }
 
 /// How the agent execution ended. This mirrors the frozen o7-worker `WorkerResult`
@@ -449,6 +527,37 @@ pub enum RunEventKind {
     /// `conversation_id`, `parent_run_id`, `child_run_id`) against tamper
     /// or confusion between commands.
     CommandBindingCaptured { binding: ArtifactRef },
+    /// Q-Deck A0: a durable, canonical receipt of this run's own cumulative
+    /// candidate state — evidence-only, at most once per run, bound by
+    /// digest. Emitted by both `execute_live` and `continue_execute` (the
+    /// two ledger-backed paths) immediately after `PatchCaptured`. A
+    /// command-continuation child materializes ITS parent's candidate
+    /// state from whichever run most recently captured one — see
+    /// [`Self::CandidateStateMaterialized`].
+    CandidateStateCaptured { receipt: ArtifactRef },
+    /// Q-Deck A0 corrective round 1: a command-continuation child's durable
+    /// proof of which parent candidate state it materialized BEFORE invoking
+    /// the provider — evidence-only, at most once per run, emitted
+    /// immediately after `CommandBindingCaptured` and BEFORE `AgentStarted`
+    /// (so a materialization failure never reaches the durable dispatch
+    /// boundary — see `docs/q-deck/a0-candidate-state.md` §5).
+    /// `source_receipt`/`source_patch` reference this child's own local
+    /// copies of the PARENT's receipt/patch bytes (raw, digest-bound), so
+    /// replaying this record alone never depends on the parent's directory
+    /// still existing. `materialized_tree_oid` is what `git write-tree`
+    /// produced after applying the parent's patch — this event does NOT
+    /// itself carry the "expected" value to compare it against; that
+    /// authority is `source_receipt`'s own `candidate_tree_oid`, once
+    /// resolved and semantically verified (`crate::candidate::
+    /// verify_candidate_state_materialized`) — a self-referential
+    /// expected/actual pair inside one event proves nothing about a SECOND,
+    /// independent source.
+    CandidateStateMaterialized {
+        source_run_id: RunId,
+        source_receipt: ArtifactRef,
+        source_patch: ArtifactRef,
+        materialized_tree_oid: String,
+    },
     /// The run was sealed. MUST be the LAST event; the verdict is fixed here.
     RunSealed,
 }
@@ -470,6 +579,8 @@ impl RunEventKind {
             Self::RunSealed => 10,
             Self::ProviderSessionCaptured { .. } => 11,
             Self::CommandBindingCaptured { .. } => 12,
+            Self::CandidateStateCaptured { .. } => 13,
+            Self::CandidateStateMaterialized { .. } => 14,
         }
     }
 
@@ -488,6 +599,8 @@ impl RunEventKind {
             Self::SandboxEvidenceCaptured { .. } => "sandbox_evidence_captured",
             Self::ProviderSessionCaptured { .. } => "provider_session_captured",
             Self::CommandBindingCaptured { .. } => "command_binding_captured",
+            Self::CandidateStateCaptured { .. } => "candidate_state_captured",
+            Self::CandidateStateMaterialized { .. } => "candidate_state_materialized",
             Self::RunSealed => "run_sealed",
         }
     }
@@ -572,6 +685,18 @@ fn fold_kind(h: &mut Sha256, kind: &RunEventKind) {
         }
         RunEventKind::ProviderSessionCaptured { receipt } => fold_artifact(h, receipt),
         RunEventKind::CommandBindingCaptured { binding } => fold_artifact(h, binding),
+        RunEventKind::CandidateStateCaptured { receipt } => fold_artifact(h, receipt),
+        RunEventKind::CandidateStateMaterialized {
+            source_run_id,
+            source_receipt,
+            source_patch,
+            materialized_tree_oid,
+        } => {
+            frame(h, source_run_id.as_str().as_bytes());
+            fold_artifact(h, source_receipt);
+            fold_artifact(h, source_patch);
+            frame(h, materialized_tree_oid.as_bytes());
+        }
     }
 }
 
@@ -601,6 +726,7 @@ fn fold_contract(h: &mut Sha256, contract: &RunContract) {
     }
     fold_agent_obligation(h, &contract.agent);
     frame(h, contract.runner_environment.as_bytes());
+    fold_optional_candidate_state_contract(h, contract.candidate_state.as_ref());
 }
 
 fn fold_applicability(h: &mut Sha256, a: &GateApplicability) {
@@ -654,6 +780,28 @@ fn fold_optional_artifact(h: &mut Sha256, a: Option<&ArtifactRef>) {
     }
 }
 
+fn fold_optional_candidate_state_contract(h: &mut Sha256, c: Option<&CandidateStateContractV1>) {
+    match c {
+        Some(c) => {
+            h.update([1u8]);
+            frame(h, &c.schema.to_le_bytes());
+            frame(h, c.conversation_id.as_bytes());
+            frame(h, c.repository_id.git_common_dir.as_bytes());
+            frame(h, &c.repository_id.dev.to_le_bytes());
+            frame(h, &c.repository_id.ino.to_le_bytes());
+            frame(h, c.base_commit.as_bytes());
+            h.update([candidate_patch_kind_tag(c.patch_kind)]);
+        }
+        None => h.update([0u8]),
+    }
+}
+
+fn candidate_patch_kind_tag(kind: CandidatePatchKind) -> u8 {
+    match kind {
+        CandidatePatchKind::GitBinaryCumulativePatchV1 => 1,
+    }
+}
+
 fn fold_agent_outcome(h: &mut Sha256, outcome: &AgentOutcome) {
     match outcome {
         AgentOutcome::ExitedNormally { code } => {
@@ -699,6 +847,8 @@ fn artifact_kind_tag(kind: ArtifactKind) -> u8 {
         ArtifactKind::Policy => 6,
         ArtifactKind::ProviderSession => 7,
         ArtifactKind::CommandBinding => 8,
+        ArtifactKind::CandidateState => 9,
+        ArtifactKind::CandidatePatch => 10,
     }
 }
 

@@ -5,6 +5,35 @@ use std::path::{Path, PathBuf};
 
 use crate::verdict::{StepVerdict, Verdict};
 
+/// Q-Deck A0 corrective round 5 (CodeRabbit durability finding): `sync_data`
+/// on a file makes its CONTENTS durable; it says nothing about the
+/// containing directory's own entry for that file. If the machine loses
+/// power after a durable artifact file's own `sync_data()` but before this
+/// directory's own metadata reaches disk, the run directory can come back
+/// after a crash with the file's own bytes gone — not merely stale — even
+/// though the write itself reported success. Opening the directory
+/// read-only and `fsync`-ing that file descriptor is the standard way to
+/// force its own entries durable on Linux (the only platform this project
+/// targets — every other confinement primitive in `src/worktree.rs`
+/// already depends on Linux-specific `rustix`/`O_NOFOLLOW`/`openat`
+/// semantics, so this is not a NEW portability boundary).
+///
+/// Crash ordering this establishes: after `write_*_durable` returns `Ok`,
+/// both the artifact file's contents AND its directory entry are durable.
+/// The canonical event that references the artifact (by digest) is
+/// appended, and itself synced, strictly AFTER this call at every real
+/// call site — so a crash between the two still leaves a replay-safe
+/// state: the artifact exists and is intact, but the record's own
+/// events.jsonl simply does not reference it yet (indistinguishable from
+/// "this artifact was never durably written," which every existing
+/// recovery/replay path already treats as an incomplete-prefix record, not
+/// a corrupt one).
+fn sync_dir(dir: &Path) -> Result<()> {
+    std::fs::File::open(dir)
+        .and_then(|f| f.sync_all())
+        .with_context(|| format!("syncing directory {}", dir.display()))
+}
+
 /// Canonical run record metadata (`meta.json`).
 ///
 /// serde-versioned with optional/future fields skipped when empty — the
@@ -85,6 +114,8 @@ impl LedgerBinding {
         f.write_all(&bytes).context("writing ledger_binding.json")?;
         f.sync_data()
             .context("flushing ledger_binding.json to disk")?;
+        sync_dir(&rec.dir)
+            .context("syncing the run directory after writing ledger_binding.json")?;
         Ok(())
     }
 
@@ -166,6 +197,8 @@ impl CommandBinding {
             .context("writing command_binding.json")?;
         f.sync_data()
             .context("flushing command_binding.json to disk")?;
+        sync_dir(&rec.dir)
+            .context("syncing the run directory after writing command_binding.json")?;
         Ok(())
     }
 
@@ -186,6 +219,25 @@ impl CommandBinding {
         Ok(Some(binding))
     }
 }
+
+/// Q-Deck A0 corrective round 1 (`docs/q-deck/a0-candidate-state.md`): the
+/// typed candidate-state receipt content itself now lives in
+/// `o7_run::CandidateStateReceiptV1` (so `o7-run`'s own replay/semantic-
+/// verification layer can deserialize and cross-check it without depending
+/// on this root crate) — this module only keeps the well-known file names
+/// every candidate-state artifact locator uses. The raw cumulative patch
+/// lives alongside the receipt as a separate file (`CANDIDATE_PATCH_FILE`)
+/// — a SEPARATE artifact from R1's own `diff.patch` (this run's diff
+/// against its OWN `--base`, unrelated to conversation-wide cumulative
+/// continuity).
+pub const CANDIDATE_STATE_RECEIPT_FILE: &str = "candidate_state_receipt.json";
+pub const CANDIDATE_PATCH_FILE: &str = "candidate.patch";
+/// The locator a command-continuation child copies its PARENT's own
+/// candidate-state receipt/patch to, inside the CHILD's own run directory —
+/// so replaying the child alone never depends on the parent's directory
+/// still existing (`docs/q-deck/a0-candidate-state.md` §2/§3).
+pub const PARENT_CANDIDATE_RECEIPT_FILE: &str = "parent_candidate_receipt.json";
+pub const PARENT_CANDIDATE_PATCH_FILE: &str = "parent_candidate.patch";
 
 /// A run record directory in `007`'s private store: `runs/<target>/<run-id>/`.
 pub struct RunRecord {
@@ -228,6 +280,7 @@ impl RunRecord {
             .context("opening task.md for a durable write")?;
         f.write_all(task.as_bytes()).context("writing task.md")?;
         f.sync_data().context("flushing task.md to disk")?;
+        sync_dir(&self.dir).context("syncing the run directory after writing task.md")?;
         Ok(())
     }
 
@@ -238,6 +291,29 @@ impl RunRecord {
 
     pub fn write_diff(&self, d: &str) -> Result<()> {
         std::fs::write(self.dir.join("diff.patch"), d)?;
+        Ok(())
+    }
+
+    /// Durable (`write_all` + `sync_data`) raw-byte write of a named file in
+    /// this run's own directory — Q-Deck A0's own copy-parent's-receipt-
+    /// verbatim and write-candidate-patch-before-its-referencing-event uses,
+    /// same crash-window discipline as `write_task_durable`.
+    ///
+    /// # Errors
+    /// Any I/O failure opening, writing, or flushing the file.
+    pub fn write_bytes_durable(&self, name: &str, bytes: &[u8]) -> Result<()> {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(self.dir.join(name))
+            .with_context(|| format!("opening {name} for a durable write"))?;
+        f.write_all(bytes)
+            .with_context(|| format!("writing {name}"))?;
+        f.sync_data()
+            .with_context(|| format!("flushing {name} to disk"))?;
+        sync_dir(&self.dir)
+            .with_context(|| format!("syncing the run directory after writing {name}"))?;
         Ok(())
     }
 
@@ -261,5 +337,83 @@ impl RunRecord {
             serde_json::to_string_pretty(&meta.steps)?,
         )?;
         Ok(())
+    }
+}
+
+/// Q-Deck A0 corrective round 5 (CodeRabbit durability finding): focused
+/// unit tests for the new directory-fsync durability step.
+// Q-Deck A0 corrective round 8 (fresh CodeRabbit finding): every
+// `unwrap`/`expect` in this module operates ONLY on this test's own
+// tempdir paths and freshly written fixture files — never on untrusted
+// input reaching this process from a real caller. A panic here is this
+// test failing loudly on its own broken assumption, not a production
+// fault path this lint would otherwise guard.
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod durability_tests {
+    use super::*;
+
+    #[test]
+    fn sync_dir_succeeds_for_a_real_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        sync_dir(dir.path()).expect("syncing a real, existing directory must succeed");
+    }
+
+    #[test]
+    fn sync_dir_fails_closed_for_a_nonexistent_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("does-not-exist");
+        assert!(
+            sync_dir(&missing).is_err(),
+            "syncing a nonexistent directory must fail, not silently succeed"
+        );
+    }
+
+    /// `write_task_durable`/`write_bytes_durable`/`LedgerBinding::write_durable`/
+    /// `CommandBinding::write_durable` all now sync their containing
+    /// directory after the file-level `sync_data()` — confirms this
+    /// doesn't change their own observable behavior (content still
+    /// correct, still succeeds) for the ordinary case.
+    #[test]
+    fn durable_writes_still_produce_correct_content_after_the_directory_sync() {
+        let runs_dir = tempfile::tempdir().unwrap();
+        let rec = RunRecord::create(runs_dir.path(), "target", "run-1").unwrap();
+
+        rec.write_task_durable("do the thing").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(rec.dir.join("task.md")).unwrap(),
+            "do the thing"
+        );
+
+        rec.write_bytes_durable("candidate.patch", b"patch bytes")
+            .unwrap();
+        assert_eq!(
+            std::fs::read(rec.dir.join("candidate.patch")).unwrap(),
+            b"patch bytes"
+        );
+
+        LedgerBinding {
+            schema: 1,
+            run_id: "run-1".to_owned(),
+            conversation_id: "conv-1".to_owned(),
+            agent: "claude".to_owned(),
+            role: "implementer".to_owned(),
+            parent_run_id: None,
+        }
+        .write_durable(&rec)
+        .unwrap();
+        assert!(rec.dir.join(LEDGER_BINDING_FILE).exists());
+
+        CommandBinding {
+            schema: 1,
+            command_id: "cmd-1".to_owned(),
+            conversation_id: "conv-1".to_owned(),
+            parent_run_id: "parent-1".to_owned(),
+            child_run_id: "run-1".to_owned(),
+            command_sha256: "d".repeat(64),
+        }
+        .write_durable(&rec)
+        .unwrap();
+        assert!(rec.dir.join(COMMAND_BINDING_FILE).exists());
     }
 }

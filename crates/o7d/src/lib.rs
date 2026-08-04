@@ -92,7 +92,7 @@ pub fn router_with_exec(
     ledger: o7_ledger::SqliteLedger,
     exec: Option<state::ExecutionConfig>,
 ) -> Router {
-    let state = AppState { ledger, exec };
+    let state = AppState::new(ledger, exec);
     // Small, fixed cap on the request body (`docs/q-deck/r1-command.md`
     // §9.6: "this is a command, not a file upload") — scoped to this one
     // route via `route_layer`, so every other route keeps axum's ordinary

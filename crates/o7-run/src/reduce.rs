@@ -18,7 +18,7 @@ use crate::event::{
     AgentObligation, AgentOutcome, ArtifactKind, ArtifactRef, Digest256, ExecutionSubject,
     GateApplicability, GateObligation, GateOutcome, GateRequirement, PolicyObligation,
     PolicyOutcome, PolicyProtectedSubject, PolicyRequirement, RunContract, RunEvent, RunEventKind,
-    SandboxEvidenceOutcome, RUN_EVENT_SCHEMA_VERSION,
+    SandboxEvidenceOutcome, CANDIDATE_STATE_CONTRACT_SCHEMA_V1, RUN_EVENT_SCHEMA_VERSION,
 };
 use crate::ids::{GateId, RunEventId, RunId};
 use crate::state::{
@@ -79,6 +79,16 @@ pub enum ReduceError {
     /// The `RunStarted` contract declared the same gate id in more than one obligation.
     #[error("duplicate gate {gate} in the run contract")]
     DuplicateGateInContract { gate: GateId },
+
+    /// Q-Deck A0 corrective round 4 (Codex P1): the contract's own
+    /// `candidate_state.schema` is not one this build understands. Checked
+    /// structurally at `RunStarted`, before any candidate evidence is ever
+    /// folded, so an unsupported contract can never become continuation
+    /// authority regardless of what any later receipt declares.
+    #[error(
+        "unsupported candidate-state contract schema v{found} (this build supports v{supported})"
+    )]
+    UnsupportedCandidateContractSchema { found: u32, supported: u32 },
 
     /// A gate event referenced a gate that was never declared as an obligation.
     #[error("unknown gate {gate} at sequence {sequence}: not a declared obligation")]
@@ -244,6 +254,57 @@ pub enum ReduceError {
     /// overwritten).
     #[error("duplicate CommandBindingCaptured at sequence {sequence}")]
     DuplicateCommandBinding { sequence: u64 },
+
+    /// A second `CandidateStateCaptured` (the singleton evidence slot cannot
+    /// be overwritten).
+    #[error("duplicate CandidateStateCaptured at sequence {sequence}")]
+    DuplicateCandidateState { sequence: u64 },
+
+    /// A second `CandidateStateMaterialized` (the singleton evidence slot
+    /// cannot be overwritten).
+    #[error("duplicate CandidateStateMaterialized at sequence {sequence}")]
+    DuplicateCandidateMaterialized { sequence: u64 },
+
+    /// Q-Deck A0 corrective round 1: `CandidateStateCaptured` appeared before
+    /// `PatchCaptured` — capture is defined as "this run's own patch, plus a
+    /// tree OID", so it cannot precede the patch it describes.
+    #[error("CandidateStateCaptured at sequence {sequence} appeared before PatchCaptured")]
+    CandidateCaptureBeforePatch { sequence: u64 },
+
+    /// Q-Deck A0 corrective round 1: `CandidateStateCaptured` appeared while
+    /// a required agent had not yet reached a terminal outcome.
+    #[error(
+        "CandidateStateCaptured at sequence {sequence} appeared before the agent reached a \
+         terminal outcome"
+    )]
+    CandidateCaptureBeforeAgentTerminal { sequence: u64 },
+
+    /// Q-Deck A0 corrective round 1: `CandidateStateMaterialized` appeared
+    /// without a durable `CommandBindingCaptured` already folded — only a
+    /// command-continuation child ever materializes a parent's candidate
+    /// state; a plain top-level run has no parent to materialize from.
+    #[error(
+        "CandidateStateMaterialized at sequence {sequence} appeared without a prior \
+         CommandBindingCaptured"
+    )]
+    CandidateMaterializationWithoutCommandBinding { sequence: u64 },
+
+    /// Q-Deck A0 corrective round 1: `CandidateStateMaterialized` appeared
+    /// at or after `AgentStarted` — materialization must complete strictly
+    /// BEFORE the durable dispatch boundary, never after.
+    #[error("CandidateStateMaterialized at sequence {sequence} appeared at or after AgentStarted")]
+    CandidateMaterializationAfterAgentStarted { sequence: u64 },
+
+    /// Q-Deck A0 corrective round 1: a command-continuation child (one with
+    /// a durable `CommandBindingCaptured`) whose contract declares a
+    /// candidate-state obligation reached `AgentStarted` without a prior
+    /// `CandidateStateMaterialized` — the durable dispatch boundary must
+    /// never be reached before materialization completes.
+    #[error(
+        "AgentStarted at sequence {sequence} for a command-continuation child with a \
+         candidate-state obligation, but no CandidateStateMaterialized was folded first"
+    )]
+    AgentStartedWithoutCandidateMaterialization { sequence: u64 },
 }
 
 /// Fold one event into the run state.
@@ -406,6 +467,18 @@ fn apply_with_contract(
             if !matches!(state.agent, AgentLifecycle::NotObserved) {
                 return Err(ReduceError::DuplicateAgentStart { sequence: seq });
             }
+            // Q-Deck A0 corrective round 1: a command-continuation child
+            // (has a durable command binding) whose OWN contract declares a
+            // candidate-state obligation must have already materialized it
+            // before it may ever reach the durable dispatch boundary.
+            if contract.candidate_state.is_some()
+                && state.command_binding.is_some()
+                && state.candidate_materialized.is_none()
+            {
+                return Err(ReduceError::AgentStartedWithoutCandidateMaterialization {
+                    sequence: seq,
+                });
+            }
             check_protected_start(state, contract, &PolicyProtectedSubject::Agent, seq)?;
             state.agent = AgentLifecycle::Started;
             Ok(())
@@ -559,6 +632,58 @@ fn apply_with_contract(
             state.command_binding = Some(binding.clone());
             Ok(())
         }
+        RunEventKind::CandidateStateCaptured { receipt } => {
+            validate_artifact(receipt, ArtifactKind::CandidateState, seq)?;
+            if state.candidate_state.is_some() {
+                return Err(ReduceError::DuplicateCandidateState { sequence: seq });
+            }
+            // Q-Deck A0 corrective round 1: a run's own candidate state
+            // describes "this run's patch, plus a tree OID" — it cannot
+            // precede the patch it describes, and (for a required agent)
+            // cannot precede the agent's own terminal outcome.
+            if state.patch.is_none() {
+                return Err(ReduceError::CandidateCaptureBeforePatch { sequence: seq });
+            }
+            if matches!(contract.agent, AgentObligation::Required)
+                && !matches!(state.agent, AgentLifecycle::Exited { .. })
+            {
+                return Err(ReduceError::CandidateCaptureBeforeAgentTerminal { sequence: seq });
+            }
+            state.candidate_state = Some(receipt.clone());
+            Ok(())
+        }
+        RunEventKind::CandidateStateMaterialized {
+            source_run_id,
+            source_receipt,
+            source_patch,
+            materialized_tree_oid,
+        } => {
+            validate_artifact(source_receipt, ArtifactKind::CandidateState, seq)?;
+            validate_artifact(source_patch, ArtifactKind::CandidatePatch, seq)?;
+            if state.candidate_materialized.is_some() {
+                return Err(ReduceError::DuplicateCandidateMaterialized { sequence: seq });
+            }
+            // Q-Deck A0 corrective round 1: only a command-continuation
+            // child ever materializes a parent's candidate state, and it
+            // must complete strictly before the durable dispatch boundary.
+            if state.command_binding.is_none() {
+                return Err(ReduceError::CandidateMaterializationWithoutCommandBinding {
+                    sequence: seq,
+                });
+            }
+            if !matches!(state.agent, AgentLifecycle::NotObserved) {
+                return Err(ReduceError::CandidateMaterializationAfterAgentStarted {
+                    sequence: seq,
+                });
+            }
+            state.candidate_materialized = Some(crate::state::CandidateMaterialization {
+                source_run_id: source_run_id.clone(),
+                source_receipt: source_receipt.clone(),
+                source_patch: source_patch.clone(),
+                materialized_tree_oid: materialized_tree_oid.clone(),
+            });
+            Ok(())
+        }
         RunEventKind::RunSealed => {
             state.verdict = Some(compute_verdict(state, contract));
             state.phase = RunPhase::Sealed;
@@ -600,6 +725,19 @@ fn validate_artifact(
 /// Fully validate the pre-execution contract at `RunStarted`.
 fn validate_contract(contract: &RunContract, seq: u64) -> Result<(), ReduceError> {
     let agent_declared = matches!(contract.agent, AgentObligation::Required);
+
+    // Q-Deck A0 corrective round 4 (Codex P1): an unsupported candidate-state
+    // contract schema fails closed HERE — the earliest authoritative layer —
+    // so a record can never replay as a known contract regardless of
+    // whether it ever captures/materializes any candidate evidence at all.
+    if let Some(obligation) = &contract.candidate_state {
+        if obligation.schema != CANDIDATE_STATE_CONTRACT_SCHEMA_V1 {
+            return Err(ReduceError::UnsupportedCandidateContractSchema {
+                found: obligation.schema,
+                supported: CANDIDATE_STATE_CONTRACT_SCHEMA_V1,
+            });
+        }
+    }
 
     // Gates: unique ids, and any waiver must match the run environment.
     let mut seen_gates: BTreeSet<&GateId> = BTreeSet::new();
@@ -803,6 +941,16 @@ fn compute_verdict(state: &RunState, contract: &RunContract) -> Verdict {
                 SandboxEvidenceOutcome::Error => error = true,
             },
         }
+    }
+
+    // Q-Deck A0 corrective round 1: a contract that declares a candidate-
+    // state obligation must have discharged it by seal time — an
+    // undischarged obligation is Blocked, exactly like an unmet required
+    // gate/policy/sandbox requirement above, never a structural error (the
+    // reducer already refuses any ORDERING violation involving this
+    // obligation earlier, at the specific event that would violate it).
+    if contract.candidate_state.is_some() && state.candidate_state.is_none() {
+        blocked = true;
     }
 
     if error {

@@ -911,6 +911,37 @@ impl SqliteLedger {
         .await
     }
 
+    /// Q-Deck A0 corrective round 2 (Part 5.3): a pure, read-only peek —
+    /// `true` iff `key` has ANY prior idempotency record in
+    /// [`crate::idempotency::SCOPE_CREATE_COMMAND`], regardless of whether
+    /// its stored digest would match a NEW request (a digest mismatch is
+    /// itself [`LedgerError::IdempotencyConflict`], which — like a genuine
+    /// replay — must skip every fresh-acceptance business check, including
+    /// `o7d`'s own new parent-candidate-usability preflight, exactly as it
+    /// already skips `create_command`'s OWN internal checks). Lets a caller
+    /// decide, BEFORE calling [`Self::create_command`], whether this
+    /// request is a genuinely fresh acceptance (run the preflight) or not
+    /// (the ledger's own existing idempotency handling is authoritative;
+    /// re-validating business rules against a record whose acceptance-time
+    /// answer may have been produced under this key already would risk
+    /// disagreeing with a decision already durably made).
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn command_idempotency_key_seen(&self, key: String) -> Result<bool, LedgerError> {
+        self.with_conn(move |conn| {
+            let seen: Option<i64> = conn
+                .query_row(
+                    "SELECT 1 FROM idempotency_record WHERE scope = ?1 AND key = ?2",
+                    params![crate::idempotency::SCOPE_CREATE_COMMAND, key],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            Ok(seen.is_some())
+        })
+        .await
+    }
+
     /// Bind a durably accepted command to its allocated child `RunId` —
     /// call once, right after minting the child run's identity, before
     /// starting the provider continuation (§3's ordering: this binding
@@ -1342,6 +1373,61 @@ impl SqliteLedger {
             let updated = load_command(tx, command_id.as_str())?
                 .ok_or_else(|| LedgerError::Integrity(format!("command {command_id} vanished")))?;
             Ok(CompletionOutcome::Completed(updated))
+        })
+        .await
+    }
+
+    /// Q-Deck A0 corrective round 2 (Part 6): atomically reject a command
+    /// IFF it is still bound to `expected_child_run_id` in a non-terminal
+    /// (`accepted`/`started`) status AND that exact run id has NEVER
+    /// attached a ledger row (`run` table) — i.e. exactly the pre-
+    /// `attach_run` failure window `continue_run`'s own early failure paths
+    /// (candidate-obligation resolution, parent verification) now use, in
+    /// place of the old check-then-act pair (`ledger_run_exists` followed
+    /// by an unconditional `mark_command_rejected`). Both the "still
+    /// eligible" and "never attached" predicates are evaluated AND written
+    /// in the SAME transaction, so a concurrent `attach_run` landing
+    /// between a separate check and write can never be raced into an
+    /// incorrect rejection of a command whose child has, by now, become
+    /// real and durable.
+    ///
+    /// # Errors
+    /// Propagates SQLite errors.
+    pub async fn mark_command_rejected_if_unattached_and_bound(
+        &self,
+        command_id: crate::CommandId,
+        expected_child_run_id: crate::RunId,
+    ) -> Result<crate::models::RejectionOutcome, LedgerError> {
+        use crate::models::RejectionOutcome;
+        self.with_tx(move |tx| {
+            let Some(current) = load_command(tx, command_id.as_str())? else {
+                return Ok(RejectionOutcome::NotFound);
+            };
+            let bound = matches!(
+                current.status,
+                CommandStatus::Accepted | CommandStatus::Started
+            ) && current.child_run_id.as_ref().map(crate::RunId::as_str)
+                == Some(expected_child_run_id.as_str());
+            if !bound {
+                return Ok(RejectionOutcome::NotEligible(current));
+            }
+            let now = now_millis();
+            let changed = tx.execute(
+                "UPDATE command SET status = 'rejected', updated_at = ?1 \
+                 WHERE command_id = ?2 AND status IN ('accepted','started') \
+                 AND child_run_id = ?3 \
+                 AND NOT EXISTS (SELECT 1 FROM run WHERE run_id = ?3)",
+                params![now, command_id.as_str(), expected_child_run_id.as_str()],
+            )?;
+            if changed != 1 {
+                let current = load_command(tx, command_id.as_str())?.ok_or_else(|| {
+                    LedgerError::Integrity(format!("command {command_id} vanished"))
+                })?;
+                return Ok(RejectionOutcome::NotEligible(current));
+            }
+            let updated = load_command(tx, command_id.as_str())?
+                .ok_or_else(|| LedgerError::Integrity(format!("command {command_id} vanished")))?;
+            Ok(RejectionOutcome::Rejected(updated))
         })
         .await
     }

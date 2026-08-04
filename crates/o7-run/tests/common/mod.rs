@@ -79,6 +79,7 @@ pub fn contract_full(
         sandbox_requirements: sandbox,
         agent,
         runner_environment: "linux".to_owned(),
+        candidate_state: None,
     }
 }
 

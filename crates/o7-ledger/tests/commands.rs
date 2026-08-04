@@ -1001,6 +1001,145 @@ async fn mark_completed_if_bound_succeeds_when_still_bound_to_the_expected_run()
     assert_eq!(read_back.status, CommandStatus::Completed);
 }
 
+// ==================== Q-Deck A0 corrective round 2 (Part 6): atomic reject-if-unattached ====================
+
+#[tokio::test]
+async fn reject_if_unattached_and_bound_rejects_a_bound_command_whose_run_never_attached() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, run) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &run, "hi"), key("k"))
+        .await
+        .unwrap();
+    let child = RunId::from_raw("child-never-attached".to_owned());
+    ledger
+        .bind_command_child_run(command.command_id.clone(), child.clone())
+        .await
+        .unwrap();
+
+    let outcome = ledger
+        .mark_command_rejected_if_unattached_and_bound(command.command_id.clone(), child)
+        .await
+        .unwrap();
+    let o7_ledger::RejectionOutcome::Rejected(rejected) = outcome else {
+        panic!("expected Rejected, got {outcome:?}");
+    };
+    assert_eq!(rejected.status, CommandStatus::Rejected);
+    let read_back = ledger.command(command.command_id).await.unwrap().unwrap();
+    assert_eq!(read_back.status, CommandStatus::Rejected);
+}
+
+#[tokio::test]
+async fn reject_if_unattached_and_bound_leaves_alone_a_run_that_has_attached() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, run) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &run, "hi"), key("k"))
+        .await
+        .unwrap();
+    let child = RunId::from_raw("child-attached".to_owned());
+    ledger
+        .bind_command_child_run(command.command_id.clone(), child.clone())
+        .await
+        .unwrap();
+    // The child run id NOW attaches a real ledger row — exactly the case this
+    // conditional transition must never reject, since the child is real and durable.
+    ledger
+        .create_run_with_id(
+            NewRun {
+                conversation_id: conv.clone(),
+                parent_run_id: Some(run.clone()),
+                agent: "claude".to_owned(),
+                role: "implementer".to_owned(),
+            },
+            child.clone(),
+            key("attach"),
+        )
+        .await
+        .unwrap();
+
+    let outcome = ledger
+        .mark_command_rejected_if_unattached_and_bound(command.command_id.clone(), child)
+        .await
+        .unwrap();
+    let o7_ledger::RejectionOutcome::NotEligible(current) = outcome else {
+        panic!("expected NotEligible, got {outcome:?}");
+    };
+    assert_eq!(current.status, CommandStatus::Started);
+    let read_back = ledger.command(command.command_id).await.unwrap().unwrap();
+    assert_eq!(
+        read_back.status,
+        CommandStatus::Started,
+        "a command whose child run has genuinely attached must never be rejected by this path"
+    );
+}
+
+#[tokio::test]
+async fn reject_if_unattached_and_bound_leaves_alone_an_already_terminal_command() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, run) = conversation_with_continuable_run(&ledger).await;
+    let command = ledger
+        .create_command(new_command(&conv, &run, "hi"), key("k"))
+        .await
+        .unwrap();
+    let child = RunId::from_raw("child-x".to_owned());
+    ledger
+        .bind_command_child_run(command.command_id.clone(), child.clone())
+        .await
+        .unwrap();
+    ledger
+        .mark_command_rejected(command.command_id.clone())
+        .await
+        .unwrap();
+
+    let outcome = ledger
+        .mark_command_rejected_if_unattached_and_bound(command.command_id.clone(), child)
+        .await
+        .unwrap();
+    assert!(matches!(
+        outcome,
+        o7_ledger::RejectionOutcome::NotEligible(_)
+    ));
+}
+
+#[tokio::test]
+async fn reject_if_unattached_and_bound_reports_not_found_for_an_unknown_command() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let outcome = ledger
+        .mark_command_rejected_if_unattached_and_bound(
+            o7_ledger::CommandId::from_raw("nonexistent".to_owned()),
+            RunId::from_raw("whatever".to_owned()),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(outcome, o7_ledger::RejectionOutcome::NotFound));
+}
+
+// ==================== Q-Deck A0 corrective round 2 (Part 5.3): idempotency-key peek ====================
+
+#[tokio::test]
+async fn command_idempotency_key_seen_is_false_before_any_create_command_call() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    assert!(!ledger
+        .command_idempotency_key_seen("never-used".to_owned())
+        .await
+        .unwrap());
+}
+
+#[tokio::test]
+async fn command_idempotency_key_seen_is_true_after_a_successful_create_command_call() {
+    let ledger = SqliteLedger::open_in_memory().unwrap();
+    let (conv, run) = conversation_with_continuable_run(&ledger).await;
+    ledger
+        .create_command(new_command(&conv, &run, "hi"), key("seen-me"))
+        .await
+        .unwrap();
+    assert!(ledger
+        .command_idempotency_key_seen("seen-me".to_owned())
+        .await
+        .unwrap());
+}
+
 #[tokio::test]
 async fn mark_completed_if_bound_refuses_a_command_rebound_to_a_different_run() {
     let ledger = SqliteLedger::open_in_memory().unwrap();

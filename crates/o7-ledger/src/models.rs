@@ -309,6 +309,28 @@ pub enum RebindOutcome {
     NotFound,
 }
 
+/// The outcome of
+/// [`crate::sqlite::SqliteLedger::mark_command_rejected_if_unattached_and_bound`]
+/// — Q-Deck A0 corrective round 2: rejection is conditional on BOTH the
+/// command still being bound to the caller's own run id in a non-terminal
+/// status AND that run id never having attached a ledger row — checked and
+/// written in ONE transaction, never a separate read-then-write. A command
+/// already rejected/completed, rebound to a different run, or whose run id
+/// HAS attached (meaning `continue_execute` reached `attach_run` and the
+/// generic post-`continue_execute` handler is the one responsible for it,
+/// not this early defense-in-depth path) is left untouched.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RejectionOutcome {
+    /// This call's predicates matched and the command is now `rejected`.
+    Rejected(Command),
+    /// Not eligible for THIS call to reject (already terminal, rebound
+    /// elsewhere, or the run id has already attached a ledger row). The
+    /// returned [`Command`] is the current, authoritative row.
+    NotEligible(Command),
+    /// The command does not exist.
+    NotFound,
+}
+
 /// The outcome of [`crate::sqlite::SqliteLedger::mark_command_completed_if_bound`]
 /// — Q-Deck R1 fourth corrective round: completion is conditional on the
 /// caller's OWN run id still being the command's current binding, so a

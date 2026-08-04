@@ -340,6 +340,24 @@ impl LiveLedgerProjector {
                 "command_binding_captured",
                 serde_json::json!({ "binding": binding }),
             ),
+            RunEventKind::CandidateStateCaptured { receipt } => (
+                "candidate_state_captured",
+                serde_json::json!({ "receipt": receipt }),
+            ),
+            RunEventKind::CandidateStateMaterialized {
+                source_run_id,
+                source_receipt,
+                source_patch,
+                materialized_tree_oid,
+            } => (
+                "candidate_state_materialized",
+                serde_json::json!({
+                    "source_run_id": source_run_id.as_str(),
+                    "source_receipt": source_receipt,
+                    "source_patch": source_patch,
+                    "materialized_tree_oid": materialized_tree_oid,
+                }),
+            ),
         };
 
         let payload = serde_json::json!({
@@ -530,6 +548,7 @@ mod tests {
             sandbox_requirements: Vec::new(),
             agent: o7_run::event::AgentObligation::Required,
             runner_environment: "linux".to_string(),
+            candidate_state: None,
         }
     }
 

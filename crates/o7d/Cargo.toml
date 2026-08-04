@@ -79,6 +79,18 @@ thiserror = "1"
 # only feature needed for `nix::fcntl::Flock`.
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.29", default-features = false, features = ["fs"] }
+# Q-Deck A0 corrective round 6 (Part 2): bounded, no-follow, TOCTOU-proof
+# reads of `events.jsonl`/artifacts need `openat`/`fstat` returning a safe,
+# owned file descriptor this crate can convert straight into a
+# `std::fs::File` with NO `unsafe` — required by this crate's own
+# `forbid(unsafe_code)` lint. `nix::fcntl::openat` (used above only for
+# `flock`) returns a bare `RawFd`; turning that into an owned `File`
+# needs `File::from_raw_fd`, itself `unsafe`. `rustix` is already a
+# workspace dependency (the root `o7` crate's private no-follow temp
+# store, round 1) built entirely around `OwnedFd`/`BorrowedFd`, which
+# convert to `File` via a safe `From` impl — the same version/features
+# already locked workspace-wide, not a new crate to the dependency graph.
+rustix = { version = "1", default-features = false, features = ["fs", "std"] }
 
 [dev-dependencies]
 # Router-level HTTP tests drive the real `axum::Router` as a `tower::Service`

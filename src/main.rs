@@ -17,12 +17,14 @@ use o7::judge;
 use o7::ledger_projector::{ConversationSelector, LiveLedgerProjector, PendingProjection};
 use o7::record::{
     CommandBinding, LedgerBinding, ProviderSessionReceipt, RunMeta, RunRecord,
-    PROVIDER_SESSION_RECEIPT_FILE,
+    CANDIDATE_PATCH_FILE, CANDIDATE_STATE_RECEIPT_FILE, PARENT_CANDIDATE_PATCH_FILE,
+    PARENT_CANDIDATE_RECEIPT_FILE, PROVIDER_SESSION_RECEIPT_FILE,
 };
 use o7::verdict::{StepVerdict, Verdict};
 use o7::worktree;
-use o7_run::event::ArtifactKind;
+use o7_run::event::{ArtifactKind, CandidatePatchKind, CandidateStateContractV1};
 use o7_run::ids::RunId as CanonicalRunId;
+use o7_run::CandidateStateReceiptV1;
 
 #[derive(Parser)]
 #[command(name = "o7", version, about = "007 — one isolated, gated agent run")]
@@ -106,10 +108,15 @@ struct ContinueArgs {
     /// flat record lives at `runs/<target>/<parent-run-id>/`.
     #[arg(long)]
     target: Option<String>,
-    /// Base git ref for the child run's fresh worktree. This slice does
-    /// NOT carry the parent run's own file changes forward into the
-    /// child's worktree — only provider session continuity is proven
-    /// here (see `docs/q-deck/r1-command.md`'s known-limitations note).
+    /// Q-Deck A0 corrective round 5 (CodeRabbit nitpick): stale since
+    /// Q-Deck A0 landed — IGNORED for an actual continuation. The child's
+    /// worktree is created at, and its diff/candidate patch are both
+    /// computed against, the parent's own INHERITED candidate-state
+    /// `base_commit` (`worktree::add`'s own call site, `resolve_
+    /// inherited_candidate_obligation`) — never this flag. Accepted only
+    /// for CLI/argument-parsing compatibility; retained with its old
+    /// default so existing invocations do not need updating, but its
+    /// value is never read on the continuation path.
     #[arg(long, default_value = "HEAD")]
     base: String,
     /// Gate manifest (default: <repo>/.007/gate.toml).
@@ -417,7 +424,7 @@ fn run(a: RunArgs) -> Result<()> {
     // worktree, the agent, or any gate command spends anything — an invalid
     // manifest (blank/duplicate names, log collisions) must cost nothing and
     // must never abort a run after the fact without its canonical record.
-    let contract = events::build_contract(&manifest)?;
+    let mut contract = events::build_contract(&manifest)?;
 
     let secs = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
     let run_id = format!("{secs}-{}", std::process::id());
@@ -446,6 +453,21 @@ fn run(a: RunArgs) -> Result<()> {
     };
 
     let base_commit = worktree::rev_parse(&repo, &a.base).unwrap_or_else(|_| a.base.clone());
+
+    // Q-Deck A0 corrective round 1 (`docs/q-deck/a0-candidate-state.md`
+    // §2.2): a fresh, ledger-backed top-level run FIXES its own
+    // candidate-state contract obligation here, before RunStarted — its
+    // own resolved base commit becomes the conversation's immutable base
+    // for every future command continuation to inherit unchanged.
+    if let Some(p) = &pending {
+        contract.candidate_state = Some(CandidateStateContractV1 {
+            schema: o7_run::CANDIDATE_STATE_CONTRACT_SCHEMA_V1,
+            conversation_id: p.conversation_id().as_str().to_owned(),
+            repository_id: worktree::repository_identity(&repo)?,
+            base_commit: base_commit.clone(),
+            patch_kind: CandidatePatchKind::GitBinaryCumulativePatchV1,
+        });
+    }
 
     let wt = a.worktree_root.join(format!("{target}-{run_id}"));
     let branch = format!("o7/{run_id}");
@@ -687,6 +709,318 @@ fn write_provider_session_receipt(
     ))
 }
 
+/// Durably write `bytes` at `name` inside `rec`'s own directory as a
+/// canonical artifact, returning its `ArtifactRef`.
+fn write_candidate_artifact(
+    rec: &RunRecord,
+    name: &str,
+    kind: ArtifactKind,
+    bytes: &[u8],
+) -> Result<o7_run::event::ArtifactRef> {
+    rec.write_bytes_durable(name, bytes)
+        .with_context(|| format!("durably writing {name}"))?;
+    Ok(events::artifact(kind, name, bytes))
+}
+
+/// Q-Deck A0 (`docs/q-deck/a0-candidate-state.md` §2/§4): capture this run's
+/// own cumulative candidate state and durably write its receipt/patch pair,
+/// returning the `ArtifactRef` a caller appends as `CandidateStateCaptured`
+/// right after `PatchCaptured`. Shared by both `execute_live` and
+/// `continue_execute` — the two ledger-backed paths that can become a
+/// future command's parent.
+///
+/// `obligation` is this run's OWN canonical-bound contract obligation
+/// (`docs/q-deck/a0-candidate-state.md` §2.2) — its `base_commit` is the
+/// CONVERSATION's own immutable base (this run's own resolved `--base` for
+/// a fresh conversation's first run; inherited UNCHANGED from the verified
+/// parent's own contract for a command continuation), never re-resolved
+/// from a live ref or a receipt's own self-claim.
+///
+/// # Errors
+/// Any underlying `git` failure, or I/O failure durably writing the
+/// receipt/patch files.
+fn write_candidate_state_receipt(
+    rec: &RunRecord,
+    wt: &Path,
+    obligation: &CandidateStateContractV1,
+    run_id: &str,
+    parent_run_id: Option<&str>,
+) -> Result<o7_run::event::ArtifactRef> {
+    let (patch, tree_oid) =
+        worktree::capture_cumulative_candidate(wt, &rec.dir, &obligation.base_commit)
+            .context("capturing this run's cumulative candidate state")?;
+    let patch_ref = write_candidate_artifact(
+        rec,
+        CANDIDATE_PATCH_FILE,
+        ArtifactKind::CandidatePatch,
+        &patch,
+    )
+    .context("durably writing candidate.patch")?;
+    let receipt = CandidateStateReceiptV1 {
+        schema: o7_run::CANDIDATE_STATE_RECEIPT_SCHEMA_V1,
+        repository_id: obligation.repository_id.clone(),
+        base_commit: obligation.base_commit.clone(),
+        run_id: o7_run::ids::RunId::new(run_id.to_owned())
+            .map_err(|e| anyhow::anyhow!("minting run id for the candidate receipt: {e}"))?,
+        conversation_id: obligation.conversation_id.clone(),
+        parent_run_id: parent_run_id
+            .map(|p| o7_run::ids::RunId::new(p.to_owned()))
+            .transpose()
+            .map_err(|e| anyhow::anyhow!("minting parent run id for the candidate receipt: {e}"))?,
+        candidate_tree_oid: tree_oid,
+        patch_kind: obligation.patch_kind,
+        patch: patch_ref,
+    };
+    let receipt_bytes =
+        serde_json::to_vec(&receipt).context("serializing candidate_state_receipt.json")?;
+    write_candidate_artifact(
+        rec,
+        CANDIDATE_STATE_RECEIPT_FILE,
+        ArtifactKind::CandidateState,
+        &receipt_bytes,
+    )
+    .context("durably writing candidate_state_receipt.json")
+}
+
+/// Q-Deck A0 corrective round 1: load, replay-verify, and semantically
+/// verify a run directory's own candidate-state receipt against ITS OWN
+/// contract — the one shared primitive both the early (pre-`RunStarted`)
+/// contract-inheritance step and the late (post-`attach_run`) materialization
+/// step build on, so the two never drift apart on what counts as "verified."
+///
+/// # Errors
+/// The directory's canonical record fails to load/parse/chain/digest/
+/// structurally verify, it has no candidate-state receipt, the receipt
+/// fails to parse or disagrees with its own contract, or its nested patch
+/// artifact fails to resolve/digest-check.
+fn load_verified_candidate_receipt(
+    dir: &Path,
+) -> Result<(
+    o7_run::state::RunState,
+    CandidateStateReceiptV1,
+    Vec<o7_run::event::RunEvent>,
+)> {
+    let events_text = std::fs::read_to_string(dir.join(events::EVENTS_FILE))
+        .with_context(|| format!("reading the canonical events.jsonl at {}", dir.display()))?;
+    let parsed = events::from_jsonl(&events_text).context("parsing canonical events.jsonl")?;
+    let resolver = events::RecordDirResolver {
+        base: dir.to_path_buf(),
+    };
+    let (state, _artifacts_verified) = o7_run::replay::verify_prefix(&parsed, &resolver)
+        .map_err(|e| anyhow::anyhow!("canonical record failed verification: {e}"))?;
+    let contract = state.contract.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("canonical record has no contract (unreachable for a valid stream)")
+    })?;
+    let receipt =
+        o7_run::candidate::verify_candidate_state_captured(&state, contract, &resolver)
+            .map_err(|e| anyhow::anyhow!("candidate-state semantic verification failed: {e}"))?;
+    Ok((state, receipt, parsed))
+}
+
+/// Q-Deck A0 corrective round 1 (`docs/q-deck/a0-candidate-state.md` §2.2):
+/// resolve the CHILD's own candidate-state contract obligation by
+/// inheriting it UNCHANGED from the verified PARENT's own contract — never
+/// re-derived from a mutable CLI argument or a receipt's own self-claim.
+/// Called EARLY, before `RunStarted` is even minted (so it can be embedded
+/// in the child's own contract) — a failure here leaves the command
+/// exactly as `o7d` left it (no run directory for this child ever gets
+/// created), which the existing redrive machinery already treats as safely
+/// redrivable (`Absent`), mirroring the pre-existing "re-validate the
+/// parent's provider session" check this same caller already performs at
+/// the same point.
+///
+/// # Errors
+/// The parent's own canonical record/receipt fails to load or semantically
+/// verify, or its `conversation_id` disagrees with `conversation_id`.
+fn resolve_inherited_candidate_obligation(
+    repo: &Path,
+    runs_dir: &Path,
+    target: &str,
+    parent_run_id: &str,
+    conversation_id: &str,
+) -> Result<CandidateStateContractV1> {
+    let parent_dir = runs_dir.join(target).join(parent_run_id);
+    let (_parent_state, receipt, _parsed) = load_verified_candidate_receipt(&parent_dir)
+        .with_context(|| {
+            "the parent run has no valid candidate-state receipt — command continuations require \
+         one; a parent that predates Q-Deck A0, or whose receipt fails verification, cannot be \
+         continued"
+        })?;
+    anyhow::ensure!(
+        receipt.conversation_id == conversation_id,
+        "the parent's candidate-state receipt belongs to a different conversation"
+    );
+    anyhow::ensure!(
+        receipt.run_id.as_str() == parent_run_id,
+        "the parent's candidate-state receipt's own run_id does not match the parent run"
+    );
+    // Q-Deck A0 corrective round 3 (Codex P1, Part 4, defense in depth):
+    // the SAME repository-identity check `o7d`'s own admission preflight
+    // performs, re-verified here for whatever reaches this code path
+    // DESPITE that preflight — a direct CLI invocation, a race, or a row
+    // accepted by an older deployment. Rejecting here happens strictly
+    // before `RunStarted`/`attach_run`, so a foreign-repository parent
+    // never gets a run directory created for this child at all.
+    let this_repo_id = worktree::repository_identity(repo)?;
+    anyhow::ensure!(
+        receipt.repository_id == this_repo_id,
+        "the parent's candidate-state receipt was captured against a different repository than \
+         this server is currently configured for"
+    );
+    // The child's own contract always declares THIS build's own understood
+    // candidate-state contract schema — never the parent's raw schema value
+    // (which `load_verified_candidate_receipt`'s full `verify_prefix` call
+    // above already proved equals this same constant, since Q-Deck A0
+    // corrective round 4's reducer check refuses any other value at the
+    // parent's own `RunStarted`). Naming this constant instead of borrowing
+    // `CANDIDATE_STATE_RECEIPT_SCHEMA_V1` keeps the contract and receipt
+    // schema spaces conceptually distinct even though both are `1` today.
+    Ok(CandidateStateContractV1 {
+        schema: o7_run::CANDIDATE_STATE_CONTRACT_SCHEMA_V1,
+        conversation_id: receipt.conversation_id,
+        repository_id: receipt.repository_id,
+        base_commit: receipt.base_commit,
+        patch_kind: receipt.patch_kind,
+    })
+}
+
+/// Q-Deck A0 corrective round 1 (`docs/q-deck/a0-candidate-state.md` §5/§6):
+/// locate, FULLY replay- and semantically verify, and materialize the
+/// PARENT run's own cumulative candidate state into the child's fresh
+/// worktree (created here, at the parent's own immutable `base_commit` —
+/// never the child's `--base` CLI flag) — everything a command-continuation
+/// child must prove BEFORE the durable dispatch boundary (`AgentStarted`).
+/// Every failure here is a plain `anyhow::Error` returned to the caller; by
+/// construction it always happens strictly before `AgentStarted` is ever
+/// appended, so it resolves through R1's existing pre-dispatch-redrive
+/// machinery with no new lifecycle status.
+///
+/// Requires the parent to be genuinely SEALED and its canonical record's
+/// last event to be `RunSealed` — a truncated-after-capture parent (valid
+/// prefix, but never actually sealed) is refused here, not merely "trusted
+/// because a receipt happened to be present."
+///
+/// Returns the child's own `source_receipt`/`source_patch` `ArtifactRef`s
+/// (both already durably copied) and `materialized_tree_oid` for the
+/// caller to append as `CandidateStateMaterialized`.
+///
+/// # Errors
+/// Any of: the parent's canonical record fails to load/parse/verify or is
+/// not sealed; its candidate-state receipt fails semantic verification
+/// against its own contract; its `run_id`/`conversation_id` disagree with
+/// this continuation; the patch fails to apply cleanly; the resulting tree
+/// OID disagrees with the receipt's own `candidate_tree_oid`; or the
+/// resulting tree contains a gitlink.
+#[allow(clippy::too_many_arguments)]
+fn materialize_parent_candidate_state(
+    rec: &RunRecord,
+    repo: &Path,
+    runs_dir: &Path,
+    target: &str,
+    wt: &Path,
+    run_id: &str,
+    conversation_id: &str,
+    parent_run_id: &str,
+) -> Result<(
+    o7_run::event::ArtifactRef,
+    o7_run::event::ArtifactRef,
+    String,
+)> {
+    let parent_dir = runs_dir.join(target).join(parent_run_id);
+    let (parent_state, receipt, parent_events) = load_verified_candidate_receipt(&parent_dir)?;
+
+    anyhow::ensure!(
+        parent_state.verdict.is_some(),
+        "the parent run is not sealed — a truncated-after-capture prefix must not be \
+         materialized from"
+    );
+    // Q-Deck A0 corrective round 5 (CodeRabbit correctness finding):
+    // structural check on the already-parsed event stream `load_verified_
+    // candidate_receipt` returns — never a second read of events.jsonl,
+    // never a substring scan of its serialized text (which a serializer
+    // change, or a payload/locator/task string that happens to CONTAIN the
+    // literal text `"type":"run_sealed"`, could silently defeat either
+    // way — matching wrongly in either direction). The reducer itself
+    // structurally forbids ANY event after `RunSealed`
+    // (`ReduceError::EventAfterSeal`) and only ever sets `state.verdict`
+    // from inside the `RunSealed` arm — so `parent_state.verdict.is_some()`
+    // above, having already passed full authoritative `verify_prefix`,
+    // ALREADY proves the last event is `RunSealed`; this check is kept as
+    // explicit, cheap, structural defense in depth (not because the prior
+    // check leaves any real gap), consistent with this codebase's own
+    // established pattern of redundant checks at every layer.
+    let last_event_is_sealed = matches!(
+        parent_events.last().map(|e| &e.kind),
+        Some(o7_run::event::RunEventKind::RunSealed)
+    );
+    anyhow::ensure!(
+        last_event_is_sealed,
+        "the parent's own canonical record's last event is not RunSealed"
+    );
+
+    anyhow::ensure!(
+        receipt.run_id.as_str() == parent_run_id,
+        "the parent's candidate-state receipt's own run_id does not match the parent run"
+    );
+    anyhow::ensure!(
+        receipt.conversation_id == conversation_id,
+        "the parent's candidate-state receipt belongs to a different conversation"
+    );
+    let this_repo_id = worktree::repository_identity(repo)?;
+    anyhow::ensure!(
+        receipt.repository_id == this_repo_id,
+        "the parent's candidate-state receipt was captured against a different repository"
+    );
+    worktree::verify_commit_exists(repo, &receipt.base_commit).with_context(|| {
+        format!(
+            "the parent's candidate-state receipt names a base_commit ({}) that does not exist \
+             in this repository",
+            receipt.base_commit
+        )
+    })?;
+
+    // `load_verified_candidate_receipt` already proved the receipt's own
+    // nested patch artifact resolves and its digest matches — safe to
+    // re-read those exact bytes now.
+    let patch_bytes = std::fs::read(parent_dir.join(&receipt.patch.locator))
+        .context("re-reading the parent's own candidate.patch")?;
+
+    // Durable copies of the parent's own receipt AND patch, before the
+    // canonical event that references them — same crash-window discipline
+    // as `ledger_binding.json`/`command_binding.json`. Raw-byte copies (not
+    // re-serialized), so their digests trivially match the originals.
+    let receipt_bytes = std::fs::read(parent_dir.join(CANDIDATE_STATE_RECEIPT_FILE))
+        .context("re-reading the parent's own candidate_state_receipt.json bytes")?;
+    let source_receipt_ref = write_candidate_artifact(
+        rec,
+        PARENT_CANDIDATE_RECEIPT_FILE,
+        ArtifactKind::CandidateState,
+        &receipt_bytes,
+    )
+    .context("durably writing parent_candidate_receipt.json")?;
+    let source_patch_ref = write_candidate_artifact(
+        rec,
+        PARENT_CANDIDATE_PATCH_FILE,
+        ArtifactKind::CandidatePatch,
+        &patch_bytes,
+    )
+    .context("durably writing parent_candidate.patch")?;
+
+    worktree::add(repo, &receipt.base_commit, wt, &format!("o7/{run_id}"))
+        .context("creating the child run's worktree at the parent's own candidate base commit")?;
+    let materialized_tree_oid =
+        worktree::apply_candidate_patch(runs_dir, wt, &receipt.base_commit, &patch_bytes)
+            .context("applying the parent's own cumulative candidate patch")?;
+    anyhow::ensure!(
+        materialized_tree_oid == receipt.candidate_tree_oid,
+        "materializing the parent's candidate state produced tree {materialized_tree_oid}, but \
+         its own receipt declares {}",
+        receipt.candidate_tree_oid
+    );
+
+    Ok((source_receipt_ref, source_patch_ref, materialized_tree_oid))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn execute_live(
     a: &RunArgs,
@@ -759,6 +1093,9 @@ fn execute_live(
             .context("flushing canonical event to disk")?;
         Ok(event)
     };
+
+    // Extracted before `contract` moves into `RunStarted` below.
+    let candidate_state_obligation = contract.candidate_state.clone();
 
     let run_started = append_only(
         &mut chain,
@@ -861,6 +1198,30 @@ fn execute_live(
     )?;
     project(&projector, &patch_captured, &mut projection_incomplete);
 
+    // Q-Deck A0 (`docs/q-deck/a0-candidate-state.md`): this run's own
+    // cumulative candidate state, relative to the conversation's immutable
+    // base commit (this run's own `--base`, since a fresh top-level `o7 run
+    // --ledger` conversation has no parent to inherit one from) — so a
+    // future command continuation can materialize from it. Digest-bound and
+    // durable exactly like every other artifact event here.
+    let candidate_obligation = candidate_state_obligation.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("this ledger-backed run's own contract has no candidate_state obligation")
+    })?;
+    let candidate_receipt_ref =
+        write_candidate_state_receipt(rec, wt, candidate_obligation, run_id, None)
+            .context("capturing this run's cumulative candidate state")?;
+    let candidate_state_captured = append_only(
+        &mut chain,
+        o7_run::event::RunEventKind::CandidateStateCaptured {
+            receipt: candidate_receipt_ref,
+        },
+    )?;
+    project(
+        &projector,
+        &candidate_state_captured,
+        &mut projection_incomplete,
+    );
+
     manifest.validate()?;
     let gate_out = rec.gate_dir();
     std::fs::create_dir_all(&gate_out)?;
@@ -936,29 +1297,6 @@ fn execute_live(
 /// SAME lock itself — a real liveness proof, not a wall-clock guess.
 fn command_lock_path(runs_dir: &Path, run_id: &str) -> PathBuf {
     runs_dir.join(".locks").join(format!("{run_id}.lock"))
-}
-
-/// `true` if `run_id` has a ledger row — used to decide whether rejecting
-/// a command outright is safe (see the `continue_execute` failure arm in
-/// `continue_run`). Defaults to `true` (assume attached) on any lookup
-/// failure — the safe direction: a spurious rejection of an attached
-/// command is exactly the bug this check exists to prevent, so uncertainty
-/// must never fall on the side that risks it.
-fn ledger_run_exists(ledger_path: &Path, run_id: &str) -> bool {
-    let rt = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(rt) => rt,
-        Err(_) => return true,
-    };
-    let ledger = match o7_ledger::SqliteLedger::open(ledger_path) {
-        Ok(ledger) => ledger,
-        Err(_) => return true,
-    };
-    rt.block_on(ledger.run(o7_ledger::RunId::from_raw(run_id.to_owned())))
-        .map(|r| r.is_some())
-        .unwrap_or(true)
 }
 
 /// Q-Deck R1 third corrective round (blocker 2): closes the window between
@@ -1078,7 +1416,7 @@ fn continue_run(a: &ContinueArgs) -> Result<()> {
         .clone()
         .unwrap_or_else(|| repo.join(".007").join("gate.toml"));
     let manifest = GateManifest::load(&gate_path)?;
-    let contract = events::build_contract(&manifest)?;
+    let mut contract = events::build_contract(&manifest)?;
 
     let lookup_rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -1108,37 +1446,116 @@ fn continue_run(a: &ContinueArgs) -> Result<()> {
         .context("parent run's stored provider session id is invalid")?;
     drop(lookup_rt);
 
+    // Q-Deck A0 corrective round 2 (Part 6): `mark_rejected` is now defined
+    // BEFORE the candidate-obligation resolution below, and used to guard
+    // EVERY early failure — not just `continue_execute`'s own outcome. The
+    // original round's own bug: this closure existed but was only wired up
+    // to the LATE (post-`continue_execute`) error path; a failure inside
+    // `resolve_inherited_candidate_obligation` propagated via a bare `?`
+    // and returned straight out of `continue_run`, leaving an accepted
+    // command permanently `started`/`accepted` with no terminal transition
+    // ever attempted — invisible to `stuck_commands` (scoped to unbound
+    // rows) and to `reconcile_completed_commands` (scoped to a sealed
+    // child that never existed). Uses the atomic, single-transaction
+    // conditional (`mark_command_rejected_if_unattached_and_bound`) rather
+    // than the old check-then-act pair (`ledger_run_exists` followed by an
+    // unconditional `mark_command_rejected`) — a concurrent `attach_run`
+    // landing between a separate check and write can no longer be raced
+    // into an incorrect rejection of a command whose child has, by now,
+    // become real and durable.
     let command_id = o7_ledger::CommandId::from_raw(a.command_id.clone());
-    let mark_rejected = {
+    let mark_rejected_if_unattached = {
         let command_id = command_id.clone();
-        move || -> Result<()> {
-            let rt = tokio::runtime::Builder::new_current_thread()
+        let run_id = a.run_id.clone();
+        let ledger_path = a.ledger.clone();
+        move || {
+            let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .context("starting the reject-marking runtime")?;
-            let ledger = o7_ledger::SqliteLedger::open(&a.ledger)
-                .with_context(|| format!("opening ledger at {}", a.ledger.display()))?;
-            rt.block_on(ledger.mark_command_rejected(command_id.clone()))
-                .context("marking the command rejected")?;
-            Ok(())
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    eprintln!("[o7] continue: starting the reject-marking runtime failed: {e}");
+                    return;
+                }
+            };
+            let ledger = match o7_ledger::SqliteLedger::open(&ledger_path) {
+                Ok(ledger) => ledger,
+                Err(e) => {
+                    eprintln!("[o7] continue: opening the ledger for reject-marking failed: {e}");
+                    return;
+                }
+            };
+            let outcome = rt.block_on(ledger.mark_command_rejected_if_unattached_and_bound(
+                command_id.clone(),
+                o7_ledger::RunId::from_raw(run_id.clone()),
+            ));
+            match outcome {
+                Ok(o7_ledger::RejectionOutcome::Rejected(_)) => {
+                    eprintln!(
+                        "[o7] continue: command {command_id} marked rejected (never attached)"
+                    );
+                }
+                Ok(
+                    o7_ledger::RejectionOutcome::NotEligible(_)
+                    | o7_ledger::RejectionOutcome::NotFound,
+                ) => {
+                    // Already terminal, rebound elsewhere, or — the safe direction —
+                    // the run id HAS attached a ledger row by now: leave it alone,
+                    // exactly as the old `ledger_run_exists` check's own "assume
+                    // attached on uncertainty" discipline required.
+                }
+                Err(e) => {
+                    eprintln!("[o7] continue: reject-marking failed: {e:#}");
+                }
+            }
         }
     };
 
-    let base_commit = worktree::rev_parse(&repo, &a.base).unwrap_or_else(|_| a.base.clone());
-    let wt = a.worktree_root.join(format!("{target}-{}", a.run_id));
-    let branch = format!("o7/{}", a.run_id);
-    std::fs::create_dir_all(&a.worktree_root)?;
-    if let Err(e) = worktree::add(&repo, &a.base, &wt, &branch) {
-        let _ = mark_rejected();
-        return Err(e.context("creating the child run's worktree"));
+    // Q-Deck A0 corrective round 1 (`docs/q-deck/a0-candidate-state.md`
+    // §2.2): resolve the child's OWN candidate-state contract obligation by
+    // inheriting it unchanged from the verified parent's own contract —
+    // before RunStarted, at the SAME defense-in-depth re-validation point
+    // as the provider-session check just above. Q-Deck A0 corrective round
+    // 2 (Part 6): a failure here now ALSO attempts the same conditional
+    // reject-if-unattached transition every other early failure gets —
+    // fixing the exact gap the independent re-gate found.
+    match resolve_inherited_candidate_obligation(
+        &repo,
+        &a.runs_dir,
+        &target,
+        &a.parent_run_id,
+        &a.conversation_id,
+    ) {
+        Ok(obligation) => contract.candidate_state = Some(obligation),
+        Err(e) => {
+            mark_rejected_if_unattached();
+            return Err(e.context("resolving the parent's candidate-state contract obligation"));
+        }
     }
+
+    // Q-Deck A0 (`docs/q-deck/a0-candidate-state.md` §5): the child's
+    // worktree is no longer created here, at the CLI's own `--base` flag —
+    // it is created INSIDE `continue_execute`, at the parent's own
+    // candidate-state receipt's immutable `base_commit`, only once that
+    // receipt has been located and verified. This is deliberate: creating
+    // it here (before the ledger row exists) would mean a materialization
+    // failure has to go through the SAME "reject, needs a fresh idempotency
+    // key" path an ordinary pre-attach worktree failure already does —
+    // whereas A0's own materialization failures must stay safely,
+    // same-key-redrivable, exactly like any other pre-`AgentStarted`
+    // failure. Moving worktree creation to AFTER `attach_run` (still well
+    // before `AgentStarted`) makes the EXISTING generic error handler below
+    // (`if !ledger_run_exists { reject } else { leave started }`) do the
+    // right thing for a materialization failure with zero special-casing.
+    let wt = a.worktree_root.join(format!("{target}-{}", a.run_id));
+    std::fs::create_dir_all(&a.worktree_root)?;
 
     let outcome = continue_execute(
         a,
         &repo,
         &target,
         &wt,
-        &base_commit,
         &session_id,
         &contract,
         &manifest,
@@ -1171,10 +1588,12 @@ fn continue_run(a: &ContinueArgs) -> Result<()> {
             // (`started`) otherwise, so the EXISTING stuck-command
             // discovery/redrive machinery — already built to handle a
             // child stuck at any non-terminal status — is what resolves
-            // it, not a premature rejection here.
-            if !ledger_run_exists(&a.ledger, &a.run_id) {
-                let _ = mark_rejected();
-            }
+            // it, not a premature rejection here. Q-Deck A0 corrective
+            // round 2: the atomic conditional transition itself now
+            // decides "unattached" (inside the SAME transaction as the
+            // write), replacing the old separate `ledger_run_exists`
+            // check-then-act.
+            mark_rejected_if_unattached();
             return Err(e);
         }
     };
@@ -1264,7 +1683,6 @@ fn continue_execute(
     repo: &Path,
     target: &str,
     wt: &Path,
-    base_commit: &str,
     session_id: &agent::ProviderSessionId,
     contract: &o7_run::event::RunContract,
     manifest: &GateManifest,
@@ -1395,6 +1813,39 @@ fn continue_execute(
         &mut projection_incomplete,
     );
 
+    // Q-Deck A0 (`docs/q-deck/a0-candidate-state.md`): materialize the
+    // parent's own cumulative candidate state into a fresh worktree at its
+    // own immutable base commit — BEFORE the durable dispatch boundary
+    // (`AgentStarted`), so any failure here stays safely, same-key
+    // redrivable via R1's existing pre-dispatch machinery (this happens
+    // after `attach_run` above, so this run id already has a ledger row).
+    let (source_receipt_ref, source_patch_ref, materialized_tree_oid) =
+        materialize_parent_candidate_state(
+            &rec,
+            repo,
+            &a.runs_dir,
+            target,
+            wt,
+            &a.run_id,
+            &a.conversation_id,
+            parent_canonical_run_id.as_str(),
+        )
+        .context("materializing the parent's own candidate state")?;
+    let candidate_state_materialized = append_only(
+        &mut chain,
+        o7_run::event::RunEventKind::CandidateStateMaterialized {
+            source_run_id: parent_canonical_run_id.clone(),
+            source_receipt: source_receipt_ref,
+            source_patch: source_patch_ref,
+            materialized_tree_oid,
+        },
+    )?;
+    project(
+        &projector,
+        &candidate_state_materialized,
+        &mut projection_incomplete,
+    );
+
     let agent_started = append_only(&mut chain, o7_run::event::RunEventKind::AgentStarted)?;
     project(&projector, &agent_started, &mut projection_incomplete);
 
@@ -1424,7 +1875,22 @@ fn continue_execute(
     }
 
     rec.write_agent_stdout(&ar.stdout)?;
-    let diff = worktree::diff_vs_base(wt, &a.base).unwrap_or_default();
+    // Q-Deck A0 corrective round 5 (CodeRabbit nitpick): a continuation's
+    // own worktree is created at the INHERITED candidate obligation's own
+    // `base_commit` (never `a.base`, which `RunMeta.base_commit` and
+    // `candidate.patch` both already correctly ignore for this path) — the
+    // evidence-only `diff.patch` must be computed against that SAME base,
+    // not a stale CLI flag that only happens to coincide with it under the
+    // default `--base HEAD`. `contract.candidate_state` is guaranteed
+    // `Some` here: this function only reaches this point after
+    // materializing the parent's candidate state, which itself requires
+    // the contract to declare the obligation.
+    let diff_base = contract
+        .candidate_state
+        .as_ref()
+        .map(|c| c.base_commit.as_str())
+        .unwrap_or(&a.base);
+    let diff = worktree::diff_vs_base(wt, diff_base).unwrap_or_default();
     rec.write_diff(&diff)?;
     let diff_ref = events::artifact(ArtifactKind::Diff, "diff.patch", diff.as_bytes());
     let patch_captured = append_only(
@@ -1432,6 +1898,33 @@ fn continue_execute(
         o7_run::event::RunEventKind::PatchCaptured { patch: diff_ref },
     )?;
     project(&projector, &patch_captured, &mut projection_incomplete);
+
+    // Q-Deck A0: this run's OWN cumulative candidate state, relative to the
+    // conversation's immutable base commit inherited from the parent above
+    // — so a FUTURE command continuing from THIS run can materialize from
+    // it in turn.
+    let candidate_obligation = contract.candidate_state.as_ref().ok_or_else(|| {
+        anyhow::anyhow!("this continuation's own contract has no candidate_state obligation")
+    })?;
+    let candidate_receipt_ref = write_candidate_state_receipt(
+        &rec,
+        wt,
+        candidate_obligation,
+        &a.run_id,
+        Some(parent_canonical_run_id.as_str()),
+    )
+    .context("capturing this run's own cumulative candidate state")?;
+    let candidate_state_captured = append_only(
+        &mut chain,
+        o7_run::event::RunEventKind::CandidateStateCaptured {
+            receipt: candidate_receipt_ref,
+        },
+    )?;
+    project(
+        &projector,
+        &candidate_state_captured,
+        &mut projection_incomplete,
+    );
 
     manifest.validate()?;
     let gate_out = rec.gate_dir();
@@ -1495,7 +1988,7 @@ fn continue_execute(
         run_id: a.run_id.clone(),
         target: target.to_string(),
         repo: repo.to_string_lossy().to_string(),
-        base_commit: base_commit.to_string(),
+        base_commit: candidate_obligation.base_commit.clone(),
         engine: "claude".to_string(),
         model: a.model.clone(),
         verdict,

@@ -184,30 +184,41 @@ pub enum ReplayError {
     /// impossible for a well-formed run; surfaced rather than panicked).
     #[error("normalized state digest unavailable")]
     StateDigestUnavailable,
+
+    /// Q-Deck A0 corrective round 2: candidate-state evidence is present
+    /// (this run captured its own receipt, and/or is a continuation that
+    /// materialized a parent's) but its CONTENT fails semantic
+    /// verification — the chain/digest/reducer/artifact-digest checks
+    /// above all passed, yet the evidence does not actually prove the
+    /// lineage it claims. Distinct from every other variant because it is
+    /// raised by a layer built ON TOP of the generic checks, not by them.
+    #[error("candidate-state semantic verification failed: {0}")]
+    CandidateSemantic(#[from] crate::candidate::CandidateVerifyError),
 }
 
-/// Everything [`replay`] checks EXCEPT the sealed/verdict requirement: per-event digest
-/// self-consistency, chain-link continuity, reducer structural validation, AND full
-/// artifact resolution + content-digest verification — run unconditionally, regardless of
-/// whether the stream is sealed yet. Returns the reduced state (whose `verdict` is `None`
-/// for a not-yet-sealed run) and the count of artifacts verified.
+/// The structural/digest-only core: per-event digest self-consistency, chain-link
+/// continuity, reducer structural validation, AND full artifact resolution +
+/// content-digest verification — run unconditionally, regardless of whether the stream is
+/// sealed yet. Returns the reduced state (whose `verdict` is `None` for a not-yet-sealed
+/// run) and the count of artifacts verified.
 ///
-/// This is the shared primitive behind both [`replay`] (which additionally requires a
-/// sealed verdict) and Q-Deck R0.7's crash-prefix recovery (`o7 recover --run-dir`'s
-/// catch-up, `007`'s root crate), which must verify a still-running or crashed-mid-run
-/// prefix exactly as strictly as a sealed run — chain, digests, reducer, AND every
-/// referenced artifact's actual content — without requiring it to already be sealed.
-/// Skipping artifact verification for an unsealed prefix (as re-projecting via
-/// `reduce_all` alone would) would let catch-up accept — and the ledger then report as
-/// terminal — a record `replay` itself would reject once sealed.
+/// Q-Deck A0 corrective round 2: this is deliberately `pub(crate)`, not exported — it is
+/// necessary but NOT sufficient authority for candidate-state evidence: it proves an
+/// artifact's declared digest matches its resolved bytes, never that the bytes MEAN
+/// anything (a syntactically valid, digest-consistent, internally-self-consistent
+/// candidate receipt is not evidence of anything a materialization decision can trust —
+/// see [`crate::candidate`]). No production caller outside this module may reach this
+/// primitive under a name that could be mistaken for full canonical verification; every
+/// external caller goes through [`verify_prefix`] instead, which always runs this AND the
+/// candidate semantic layer together, so it is structurally impossible to call the wrong
+/// one by accident.
 ///
 /// # Errors
 /// [`ReplayError::LegacyNonReplayable`] for an empty stream; [`ReplayError::EventDigestMismatch`]
 /// / [`ReplayError::ChainBroken`] for a tampered/broken chain; [`ReplayError::Reduce`] for a
 /// structurally invalid stream; [`ReplayError::ArtifactUnresolved`] /
 /// [`ReplayError::ArtifactDigestMismatch`] for a missing or altered referenced artifact.
-/// Never returns [`ReplayError::NotSealed`] — that is [`replay`]'s own, additional check.
-pub fn verify_prefix(
+pub(crate) fn verify_prefix_core(
     events: &[RunEvent],
     artifacts: &dyn ArtifactResolver,
 ) -> Result<(crate::state::RunState, u64), ReplayError> {
@@ -256,6 +267,63 @@ pub fn verify_prefix(
             return Err(ReplayError::ArtifactDigestMismatch {
                 locator: artifact.locator.clone(),
             });
+        }
+    }
+
+    Ok((state, artifacts_verified))
+}
+
+/// The ONE authoritative production verification API: everything
+/// [`verify_prefix_core`] checks, PLUS candidate-state semantic verification
+/// whenever candidate evidence is present in the reduced state — run
+/// unconditionally, regardless of whether the stream is sealed yet. Q-Deck
+/// A0 corrective round 2: this closes the defect where semantic candidate
+/// verification existed but was never actually reached by [`replay`],
+/// [`replay_verify`], or [`classify_record`] — every one of those, and
+/// every OTHER production consumer (`o7 recover`'s catch-up, `o7d`'s
+/// pre-redrive classification, this run's own point-of-use parent
+/// verification), calls this single function, so it is no longer possible
+/// to accidentally accept a record whose candidate evidence is
+/// digest-consistent but semantically meaningless.
+///
+/// If this run captured its own `CandidateStateCaptured` receipt, its
+/// content is verified against `state.contract`'s own candidate obligation
+/// and (for a continuation) this run's own `CommandBindingCaptured`
+/// evidence. If this run materialized a parent's `CandidateStateMaterialized`
+/// evidence, it is cross-bound the same way, PLUS its `materialized_tree_oid`
+/// is proven against an independently-resolved source receipt. A run with
+/// no candidate evidence at all (every pre-A0 record, and any run whose
+/// contract declares no candidate obligation) is entirely unaffected — this
+/// step is then simply never invoked, so [`verify_prefix`] is byte-for-byte
+/// the same as [`verify_prefix_core`] for it.
+///
+/// # Errors
+/// Everything [`verify_prefix_core`] can return, plus
+/// [`ReplayError::CandidateSemantic`] if candidate evidence is present but
+/// its content fails semantic verification.
+pub fn verify_prefix(
+    events: &[RunEvent],
+    artifacts: &dyn ArtifactResolver,
+) -> Result<(crate::state::RunState, u64), ReplayError> {
+    let (state, artifacts_verified) = verify_prefix_core(events, artifacts)?;
+
+    if state.candidate_state.is_some() || state.candidate_materialized.is_some() {
+        // Unreachable for a valid stream: both fields require a prior
+        // `RunStarted`, which always carries a contract (the reducer's own
+        // genesis requirement) — kept as a typed error rather than an
+        // `unwrap`/panic, matching this crate's no-panic discipline.
+        let Some(contract) = state.contract.as_ref() else {
+            return Err(ReplayError::CandidateSemantic(
+                crate::candidate::CandidateVerifyError(
+                    "candidate evidence is present but this run has no contract".to_owned(),
+                ),
+            ));
+        };
+        if state.candidate_state.is_some() {
+            crate::candidate::verify_candidate_state_captured(&state, contract, artifacts)?;
+        }
+        if state.candidate_materialized.is_some() {
+            crate::candidate::verify_candidate_state_materialized(&state, contract, artifacts)?;
         }
     }
 
@@ -405,6 +473,12 @@ fn referenced_artifacts(kind: &RunEventKind) -> Vec<&ArtifactRef> {
         RunEventKind::SandboxEvidenceCaptured { report, .. } => vec![report],
         RunEventKind::ProviderSessionCaptured { receipt } => vec![receipt],
         RunEventKind::CommandBindingCaptured { binding } => vec![binding],
+        RunEventKind::CandidateStateCaptured { receipt } => vec![receipt],
+        RunEventKind::CandidateStateMaterialized {
+            source_receipt,
+            source_patch,
+            ..
+        } => vec![source_receipt, source_patch],
         RunEventKind::AgentStarted
         | RunEventKind::AgentExited { .. }
         | RunEventKind::GateStarted { .. }
