@@ -6,11 +6,26 @@ A single deterministic, offline, read-only pipeline that takes the verified
 ```
 verified RAW sources (local CAS)
   -> deterministic derived transcripts (extractors v0)
-  -> state-observables schema v0
+  -> state-observables schema v0 (observations carry task-independent `topics`)
   -> evidence-backed gold state
-  -> task-conditioned projection
-  -> deterministic 3-arm evaluation
+  -> task + versioned selector contract (o7.b1.selector/v0)
+  -> task-dependent projection
+  -> deterministic 3-arm evaluation (structural metrics, honestly named)
   -> report with real metrics
+```
+
+Selection is a pure deterministic function of
+`gold state + task + selector contract/version + budget`. Two different tasks
+over the same gold state produce different projections; `project_case.py` writes
+the proof as data (`projection-comparison.json`).
+
+The **projection** half needs no CAS, no secrets and no network — anyone can
+reproduce it from a checkout. Only the 3-arm evaluation needs the owner's
+private blobs.
+
+```sh
+python3 research/b1-context/tools/project_case.py \
+  --fixture case-0001 --out research/b1-context/results/case-0001-v0
 ```
 
 This directory is **not** part of the cargo workspace and no production crate

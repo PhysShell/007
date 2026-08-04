@@ -42,15 +42,16 @@ schema/      state-observables schema v0 and event/assessment rules
 tools/       the deterministic development vertical (extractors, projector,
              evaluator, run_case.py) — not part of the cargo workspace
 fixtures/    golden development fixtures; case-0001 is the first
-results/     actual measured results per fixture (report.json/report.md)
+results/     actual measured results per fixture (per-task projections,
+             projection-comparison.json, report.json/report.md)
 holdout/     evaluation cases NOT used while designing the schema
 ```
 
 ## Reproducible development vertical (case-0001 v0)
 
 One command runs the whole vertical (verified RAW → derived transcripts →
-schema v0 → gold state → task-conditioned projection → deterministic 3-arm
-evaluation → measured report):
+schema v0 → gold state → task + versioned selector contract → task-dependent
+projection → honest structural evaluation → measured report):
 
 ```sh
 python3 research/b1-context/tools/run_case.py \
