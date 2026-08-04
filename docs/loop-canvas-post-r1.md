@@ -57,3 +57,27 @@ A3  exact-head GitHub/CI autonomous corrective loop
 ```
 
 This note is descriptive. It neither expands A0's implementation scope nor defines the final campaign event schema.
+## Execution status reconciliation (2026-08-04)
+
+Everything above is the accepted post-R1 design record and is preserved
+unchanged as history. Actual execution has since moved past it:
+
+```text
+R1                  ACCEPTED / CLOSED / FROZEN (PR #90)
+A0.0 contract       COMPLETED — contract-first commit 71800fc
+                    ("docs(q-deck): define A0 candidate-state continuity
+                    contract", the first commit of PR #92, frozen before
+                    any implementation)
+A0                  ACCEPTED at head 52627c3, merged as f1ac458 (PR #92)
+A1 contract freeze  NEXT (issue #95; A0.0 precondition satisfied)
+A1 implementation   after the A1 freeze
+A2 / A3             later
+B1 research         parallel, non-authoritative (research/b1-context/)
+```
+
+In particular, the delta-table claim above that "Candidate file state does
+not yet continue across Commands; A0 tracks that prerequisite" is now
+historical: A0 candidate-state continuity is merged. The normative A0
+source is `docs/q-deck/a0-candidate-state.md` at the accepted head.
+Post-A0 hardening residuals are tracked as a separate follow-up issue and
+do not reopen A0 acceptance.
