@@ -3299,6 +3299,182 @@ fn a_dirty_submodule_fails_candidate_capture_and_can_never_become_a_continuation
     drop(repo);
 }
 
+// ============= Q-Deck A0 corrective round 7 (fresh exact-head Codex P1) =============
+//
+// An index-hidden edit (`assume-unchanged`/`skip-worktree`) must fail closed —
+// process-level proof that the worktree-level fix
+// (`src/worktree.rs::ensure_no_index_hidden_flags`) actually stops a real
+// `o7 run --ledger` invocation from silently sealing a candidate receipt that
+// omits a provider's own edit to a path it marked `assume-unchanged`.
+
+/// A provider that marks a tracked file `assume-unchanged` and then edits it
+/// must never have that edit silently lost. The run's own candidate capture
+/// must fail closed — the process exits non-zero, the canonical record never
+/// reaches `RunSealed`, the provider is invoked exactly once, and the
+/// tampered file's own content survives on disk untouched. Because the
+/// record never seals, it can never become a valid continuation parent
+/// either — mirrors
+/// `a_dirty_submodule_fails_candidate_capture_and_can_never_become_a_continuation_parent`
+/// exactly, substituting the index-hidden-edit counterexample for the dirty-
+/// submodule one.
+#[test]
+fn an_index_hidden_edit_fails_candidate_capture_and_can_never_become_a_continuation_parent() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let target = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    // The provider marks the already-tracked `README.md` assume-unchanged,
+    // then edits it directly — exactly the scenario `git status`/`git diff
+    // --cached` cannot see, and the counterexample the fresh Codex P1
+    // reported (`#discussion_r3707367805`).
+    claude.set_actions(
+        1,
+        "git update-index --assume-unchanged README.md\n\
+         echo 'PROVIDER TAMPERED' >> README.md\n",
+    );
+    let mut run_child = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("run")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--task")
+        .arg(&task_file)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--keep-worktree")
+        .arg("--max-turns")
+        .arg("1")
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn the real o7 binary");
+    let status = run_child.wait().unwrap();
+    assert!(
+        !status.success(),
+        "the run must fail (never seal) when candidate capture rejects an index-hidden edit"
+    );
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the provider ran exactly once — capture happens strictly after provider execution, \
+         this failure is not a redispatch"
+    );
+
+    let target_dir = runs_dir.join(&target);
+    let run_id = std::fs::read_dir(&target_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().is_dir())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .expect("the failed run must still have left a run directory behind");
+    let dir = run_dir(&runs_dir, &target, &run_id);
+
+    let sealed = events_of_kind(&dir, "run_sealed");
+    assert!(
+        sealed.is_empty(),
+        "a run whose own candidate capture failed must never seal: {sealed:?}"
+    );
+    let captured = events_of_kind(&dir, "candidate_state_captured");
+    assert!(
+        captured.is_empty(),
+        "an index-hidden edit must never produce trusted CandidateStateCaptured evidence: \
+         {captured:?}"
+    );
+
+    // The tampered content and the assume-unchanged flag both survive
+    // exactly as the provider left them — refused, not reverted, cleared,
+    // or corrupted.
+    let worktree_dir = worktree_root
+        .read_dir()
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().is_dir())
+        .map(|e| e.path())
+        .expect("the run's own worktree must still exist");
+    let tampered = std::fs::read_to_string(worktree_dir.join("README.md"))
+        .expect("the tampered file must still be present, not wiped by the failed check");
+    assert!(
+        tampered.contains("PROVIDER TAMPERED"),
+        "the tampered content must survive the rejection untouched: {tampered:?}"
+    );
+    let ls_out = Command::new("git")
+        .args(["ls-files", "-v"])
+        .current_dir(&worktree_dir)
+        .output()
+        .unwrap();
+    let ls = String::from_utf8_lossy(&ls_out.stdout);
+    assert!(
+        ls.lines().any(|l| l == "h README.md"),
+        "the rejection must never clear the provider's own assume-unchanged flag: {ls:?}"
+    );
+
+    // This unsealed record can never become a valid continuation parent.
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(addr);
+    let (status_code, page) = get(addr, "/api/v1/runs");
+    assert_eq!(status_code, 200);
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (status_code, accepted) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": run_id,
+            "command": "must never be accepted against an unsealed index-hidden-edit parent",
+            "idempotency_key": "key-index-hidden-edit-parent",
+        }),
+    );
+    assert_eq!(status_code, 409, "{accepted:?}");
+    assert_eq!(
+        command_row_count_for_parent(&ledger_path, &run_id),
+        0,
+        "an unsealed parent must never get a command row created against it"
+    );
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "the provider must never be invoked again for a rejected index-hidden-edit parent"
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+    drop(repo);
+}
+
 // ==================== Q-Deck A0 corrective round 5 (CodeRabbit Major) ====================
 //
 // A relative `--runs-dir` (this CLI's own DEFAULT value, "runs" — not an
