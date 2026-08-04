@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """run_case.py — the single documented command that runs the whole B1 vertical.
 
+Requires the owner's local CAS. The task-dependent PROJECTION half needs no
+private data at all and is reproducible by anyone via `project_case.py`; only
+the 3-arm evaluation (derived transcripts + sealed negative control) needs the
+CAS. Both tools read the same `TASKS` list, so they can never disagree about
+which tasks exist.
+
     python3 research/b1-context/tools/run_case.py \
       --fixture case-0001 \
       --data-root "$HOME/.local/share/o7-research" \
@@ -30,6 +36,7 @@ sys.path.insert(0, _HERE)
 
 from o7b1 import evaluate as ev
 from o7b1 import projector as pj
+from o7b1 import selector as sl
 from o7b1 import report as rp
 from o7b1.canonical import (canonical_bytes, canonical_file_bytes, jsonl_bytes,
                             sha256_hex, sha256_of_file)
@@ -39,6 +46,14 @@ from o7b1.schema import default_schema_path, validate_gold_state
 
 BYTE_BUDGET = 20000
 RECORD_BUDGET = 32
+
+#: (task file, questions file) per fixture, deterministic order. Task A first.
+#: Kept identical to project_case.TASKS so the offline projection artifacts and
+#: the CAS-backed report can never describe different task sets.
+TASKS = [
+    ("task-v0.yaml", "questions-v0.yaml"),
+    ("task-b-v0.yaml", "questions-b-v0.yaml"),
+]
 
 _EXTRACTOR_BY_SYSTEM = {
     "chatgpt-backend-api": ChatGPTBackendApiV0,
@@ -141,6 +156,7 @@ def _run_extractors(cas: Cas, manifest: dict, source_selectors: dict, out_dir: s
 
 def _write_canonical(path: str, obj) -> str:
     data = canonical_file_bytes(obj)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "wb") as fh:
         fh.write(data)
     return "sha256:" + sha256_hex(data)
@@ -150,6 +166,7 @@ def _write_text(path: str, text: str) -> str:
     data = text.encode("utf-8")
     if not data.endswith(b"\n"):
         data += b"\n"
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "wb") as fh:
         fh.write(data)
     return "sha256:" + sha256_hex(data)
@@ -181,7 +198,7 @@ def _canonical_reproduce_command(fixture: str) -> str:
             % (fixture, fixture))
 
 
-def run(fixture: str, data_root: str, out_dir: str) -> dict:
+def run(fixture: str, data_root: str, out_dir: str, update_expectations: bool = False) -> dict:
     reproduce_command = _canonical_reproduce_command(fixture)
     fdir = _fixture_dir(fixture)
     schema_path = default_schema_path()
@@ -190,8 +207,6 @@ def run(fixture: str, data_root: str, out_dir: str) -> dict:
 
     manifest = _load_yaml(os.path.join(fdir, "manifest.yaml"))
     source_selectors = _load_yaml(os.path.join(fdir, "source-selectors.yaml"))
-    task = _load_yaml(os.path.join(fdir, "task-v0.yaml"))
-    questions = _load_yaml(os.path.join(fdir, "questions-v0.yaml"))
     with open(os.path.join(fdir, "gold-state-v0.json"), encoding="utf-8") as fh:
         gold = json.load(fh)
 
@@ -212,10 +227,8 @@ def run(fixture: str, data_root: str, out_dir: str) -> dict:
     derived_summary, per_session, all_available = _run_extractors(
         cas, manifest, source_selectors, out_dir)
 
-    # verify against the committed derived-manifest expectation, if present
     derived_manifest = _build_derived_manifest(fixture, input_digests, per_session)
     committed_dm_path = os.path.join(fdir, "derived-manifest.yaml")
-    derived_mismatch = None
     if os.path.isfile(committed_dm_path):
         committed = _load_yaml(committed_dm_path)
         exp = {s["session_id"]: (s["derived_digest"], s["derived_byte_length"], s["record_count"])
@@ -223,50 +236,93 @@ def run(fixture: str, data_root: str, out_dir: str) -> dict:
         for s in derived_manifest["sessions"]:
             got = (s["derived_digest"], s["derived_byte_length"], s["record_count"])
             if exp.get(s["session_id"]) != got:
-                derived_mismatch = (s["session_id"], exp.get(s["session_id"]), got)
                 raise FailClosed("derived transcript for %s does not match committed "
                                  "derived-manifest: expected %s got %s"
-                                 % derived_mismatch)
+                                 % (s["session_id"], exp.get(s["session_id"]), got))
     _write_canonical(os.path.join(out_dir, "derived-manifest.actual.json"), derived_manifest)
 
-    # load negative control object for the evaluation
     nc_meta = manifest["negative_control"][0]
     nc_obj = None
     if input_digests[nc_meta["id"]]["status"] == "OK":
         nc_obj = json.loads(cas.read_bytes(nc_meta["digest"], expected_size=nc_meta["byte_length"]))
 
-    # (3) projection
-    sel = pj.select(gold, byte_budget=BYTE_BUDGET, record_budget=RECORD_BUDGET)
-    task_digest = "sha256:" + sha256_hex(canonical_bytes(task))
-    questions_digest = "sha256:" + sha256_hex(canonical_bytes(questions))
     schema_digest = "sha256:" + sha256_of_file(schema_path)
     input_observation_digest = "sha256:" + sha256_hex(canonical_bytes(gold["observations"]))
+    budget = {"byte_budget": BYTE_BUDGET, "record_budget": RECORD_BUDGET,
+              "unit": "utf8_bytes+records"}
 
-    context_json = pj.build_context_json(gold, task, sel)
-    context_md = pj.build_context_md(gold, task, sel)
-    ctx_json_digest = _write_canonical(os.path.join(out_dir, "context.json"), context_json)
-    ctx_md_digest = _write_text(os.path.join(out_dir, "context.md"), context_md)
-    context_json_bytes = len(canonical_file_bytes(context_json))
+    # (3) task-dependent projection + (4) evaluation, PER TASK
+    task_entries = []
+    selection_by_task = {}
+    for task_file, questions_file in TASKS:
+        task = _load_yaml(os.path.join(fdir, task_file))
+        questions = _load_yaml(os.path.join(fdir, questions_file))
+        if questions.get("task_id") != task["task_id"]:
+            raise FailClosed("%s declares task_id %r but %s is %r"
+                             % (questions_file, questions.get("task_id"),
+                                task_file, task["task_id"]))
+        try:
+            sel = pj.select(gold, task, byte_budget=BYTE_BUDGET, record_budget=RECORD_BUDGET)
+        except sl.SelectorError as e:
+            raise FailClosed("selector refused task %s: %s" % (task["task_id"], e))
+        validity = pj.validate(gold, sel, byte_budget=BYTE_BUDGET, record_budget=RECORD_BUDGET)
+        selection_by_task[task["task_id"]] = set(sel["selected_ids"])
 
-    artifact_digests = {"context.json": ctx_json_digest, "context.md": ctx_md_digest}
-    context_meta = pj.build_context_meta(
-        gold, task_digest, questions_digest, schema_digest, sel,
-        budget={"byte_budget": BYTE_BUDGET, "record_budget": RECORD_BUDGET,
-                "unit": "utf8_bytes+records"},
-        artifact_digests=artifact_digests, input_observation_digest=input_observation_digest)
-    ctx_meta_digest = _write_canonical(os.path.join(out_dir, "context.meta.json"), context_meta)
+        task_dir = os.path.join(out_dir, "tasks", task["task_id"])
+        context_json = pj.build_context_json(gold, task, sel)
+        context_md = pj.build_context_md(gold, task, sel)
+        ctx_json_digest = _write_canonical(os.path.join(task_dir, "context.json"), context_json)
+        ctx_md_digest = _write_text(os.path.join(task_dir, "context.md"), context_md)
+        artifact_digests = {"context.json": ctx_json_digest, "context.md": ctx_md_digest}
+        task_digest = "sha256:" + sha256_hex(canonical_bytes(task))
+        questions_digest = "sha256:" + sha256_hex(canonical_bytes(questions))
+        meta = pj.build_context_meta(
+            gold, task, task_digest, questions_digest, schema_digest, sel, budget,
+            artifact_digests, input_observation_digest, validity)
+        ctx_meta_digest = _write_canonical(
+            os.path.join(task_dir, "context.meta.json"), meta)
 
-    # (4) evaluation (requires the negative control blob)
-    if nc_obj is None:
         evaluation = None
-    else:
-        evaluation = ev.evaluate(gold, questions, source_selectors, manifest, nc_obj,
-                                 derived_summary, sel, context_json_bytes)
+        if nc_obj is not None:
+            evaluation = ev.evaluate(gold, questions, source_selectors, manifest, nc_obj,
+                                     derived_summary, sel,
+                                     len(canonical_file_bytes(context_json)), budget)
+        task_entries.append({
+            "task_id": task["task_id"],
+            "task_digest": task_digest,
+            "questions_digest": questions_digest,
+            "selector": sel["selector_ref"],
+            "selectors": sel["selector_spec"],
+            "projection": {
+                "selected_count": len(sel["selected"]),
+                "selected_ids": sel["selected_ids"],
+                "omitted_count": len(sel["omitted"]),
+                "used_bytes": sel["used_bytes"],
+                "validity": validity,
+                "context_artifact_digests": {**artifact_digests,
+                                             "context.meta.json": ctx_meta_digest},
+            },
+            "evaluation": evaluation,
+        })
+
+    # task dependence, as data
+    ids = [t["task_id"] for t in task_entries]
+    sa, sb = selection_by_task[ids[0]], selection_by_task[ids[1]]
+    task_dependence = {
+        "task_a": ids[0],
+        "task_b": ids[1],
+        "selected_only_by_a": sorted(sa - sb),
+        "selected_only_by_b": sorted(sb - sa),
+        "selected_by_both": sorted(sa & sb),
+        "symmetric_difference_count": len(sa ^ sb),
+        "projections_differ": sa != sb,
+        "neither_is_a_superset": not (sa <= sb) and not (sb <= sa),
+    }
 
     # (5) status + report
-    development_result = _decide_result(all_available, evaluation)
+    development_result = _decide_result(all_available, task_entries, task_dependence)
     report = {
-        "schema": "o7.b1.report/v0",
+        "schema": "o7.b1.report/v1",
         "fixture_id": fixture,
         "cutoff_identity": gold["cutoff"]["identity"],
         "reproduce_command": reproduce_command,
@@ -278,16 +334,18 @@ def run(fixture: str, data_root: str, out_dir: str) -> dict:
         },
         "schema_digest": schema_digest,
         "gold_state_digest": "sha256:" + sha256_hex(canonical_bytes(gold)),
-        "task_digest": task_digest,
-        "questions_digest": questions_digest,
-        "projection": {
-            "selected_count": len(sel["selected"]),
-            "omitted_count": len(sel["omitted"]),
-            "used_bytes": sel["used_bytes"],
-            "context_artifact_digests": {**artifact_digests, "context.meta.json": ctx_meta_digest},
+        "selector_contract": {
+            "selector_id": sl.SELECTOR_ID,
+            "selector_version": sl.SELECTOR_VERSION,
+            "selector_impl_digest": sl.selector_impl_digest(),
         },
-        "evaluation": evaluation,
+        "budget": budget,
+        "tasks": task_entries,
+        "task_dependence": task_dependence,
         "status": {
+            "deterministic_compilation_pipeline": "PASS" if all_available else "PARTIAL",
+            "task_conditioned_projection": (
+                "IMPLEMENTED" if task_dependence["projections_differ"] else "NOT_IMPLEMENTED"),
             "development_result": development_result,
             "generalization": "NOT_EVALUATED",
             "source_set_complete": False,
@@ -304,41 +362,65 @@ def run(fixture: str, data_root: str, out_dir: str) -> dict:
 
     # Fail-closed regression gate against the committed frozen expectation.
     expected_path = os.path.join(fdir, "expected-report-v0.json")
-    if os.path.isfile(expected_path):
+    if update_expectations:
+        if not all_available:
+            raise FailClosed(
+                "refusing to freeze an expectation from an incomplete run: the "
+                "CAS did not provide every input blob")
+        with open(expected_path, "wb") as fh:
+            fh.write(report_bytes)
+        sys.stderr.write("expectation re-frozen: %s -> %s\n"
+                         % (expected_path, report_json_digest))
+    elif os.path.isfile(expected_path):
         with open(expected_path, "rb") as fh:
             expected_bytes = fh.read()
         if expected_bytes != report_bytes:
             raise FailClosed(
                 "report.json does not match committed expected-report-v0.json "
-                "(expected %s, got %s)"
+                "(expected %s, got %s). If this follows a deliberate contract "
+                "change, re-freeze with --update-expectations on a CAS-equipped "
+                "machine."
                 % ("sha256:" + sha256_hex(expected_bytes), report_json_digest))
+    else:
+        raise FailClosed(
+            "no committed expected-report-v0.json to check against. The corrective "
+            "round changed the schema, selector contract and metric names, so the "
+            "previous expectation was retired rather than left silently wrong. "
+            "Re-freeze it once with --update-expectations on a CAS-equipped machine.")
 
     return {
         "report": report,
         "report_json_digest": report_json_digest,
-        "canonical_digests": {
-            "context.json": ctx_json_digest,
-            "context.md": ctx_md_digest,
-            "context.meta.json": ctx_meta_digest,
-            "report.json": report_json_digest,
-        },
         "out_dir": out_dir,
     }
 
 
-def _decide_result(all_available: bool, evaluation) -> str:
-    if not all_available or evaluation is None:
+def _decide_result(all_available: bool, task_entries: list, task_dependence: dict) -> str:
+    """PASS requires task-dependent selection AND a valid projection per task.
+
+    Structural coverage alone is deliberately NOT enough any more: before the
+    corrective round the projection arm's coverage was 1.0 by construction, so
+    gating on it gated on nothing.
+    """
+    if not all_available:
         return "PARTIAL"
-    C = evaluation["arms"]["projection"]
-    B = evaluation["arms"]["negative_control"]
-    ok = (
-        C["required_observation_recall"] == 1.0
-        and C["question_support_coverage"] == 1.0
-        and C["contradiction_count"] == 0
-        and C["supersession_error_count"] == 0
-        and B["contradiction_count"] >= 1  # the fixture must detect the known loss
-    )
-    return "PASS" if ok else "FAIL"
+    if not task_dependence["projections_differ"] or not task_dependence["neither_is_a_superset"]:
+        return "FAIL"
+    for t in task_entries:
+        if not t["projection"]["validity"]["valid"]:
+            return "FAIL"
+        evl = t["evaluation"]
+        if evl is None:
+            return "PARTIAL"
+        C = evl["arms"]["projection"]
+        B = evl["arms"]["negative_control"]
+        if C["compiled_observation_coverage"] != 1.0:
+            return "FAIL"
+        if C["structural_question_support"] != 1.0:
+            return "FAIL"
+        if B["negative_control_diagnostics"]["stale_belief_count"] < 1:
+            return "FAIL"
+    return "PASS"
 
 
 def main(argv=None):
@@ -346,17 +428,24 @@ def main(argv=None):
     ap.add_argument("--fixture", default="case-0001")
     ap.add_argument("--data-root", default=os.path.expanduser("~/.local/share/o7-research"))
     ap.add_argument("--out", required=True)
+    ap.add_argument("--update-expectations", action="store_true",
+                    help="re-freeze expected-report-v0.json from THIS run; refuses "
+                         "unless every CAS input was available")
     args = ap.parse_args(argv)
 
     # Canonical, stable reproduce command (independent of the actual --out path,
     # so report.json stays byte-identical no matter where you run it).
     try:
-        result = run(args.fixture, args.data_root, args.out)
+        result = run(args.fixture, args.data_root, args.out,
+                     update_expectations=args.update_expectations)
     except FailClosed as e:
         sys.stderr.write("FAIL CLOSED: %s\n" % e)
         return 2
     rep = result["report"]
-    sys.stderr.write("development_result: %s\n" % rep["status"]["development_result"])
+    st = rep["status"]
+    for k in ("deterministic_compilation_pipeline", "task_conditioned_projection",
+              "development_result"):
+        sys.stderr.write("%s: %s\n" % (k, st[k]))
     sys.stderr.write("report.json: %s\n" % result["report_json_digest"])
     return 0 if rep["status"]["development_result"] in ("PASS", "PARTIAL") else 3
 
