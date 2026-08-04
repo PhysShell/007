@@ -434,13 +434,62 @@ pub fn patch_touches_gitlink(patch: &[u8]) -> bool {
 /// lossy/lossless `String` round-trip — a patch is opaque binary transport,
 /// not text) plus the exact tree OID that patch represents.
 ///
+/// Q-Deck A0 corrective round 8 (fresh exact-head Codex P1,
+/// `#discussion_r3710144125`): the patch and the tree OID are now derived
+/// from ONE frozen index snapshot, never the worktree's own live index
+/// twice. At the old head, `diff --cached` (the patch) and `write-tree`
+/// (the tree) were two separate reads of the SAME live index — a
+/// background process mutating that index between the two calls (e.g. the
+/// provider's own leftover process) made the returned patch reflect one
+/// index state while the returned tree reflected another, letting a run
+/// seal with a receipt whose two halves silently disagree. Reproduced
+/// through this exact function (see `dirty_submodule_tests::
+/// r8_patch_tree_race_*`, a deterministic real-git barrier, no sleep):
+/// ordinary content, deletion/executable-bit, binary content, and
+/// non-UTF-8 paths all desynchronized identically at the old structure.
+///
+/// **Capture cutoff semantics, stated precisely and only as far as
+/// proven:** the snapshot freezes the index EXACTLY as `git add -A` (plus
+/// the hidden-flag/dirty-submodule checks) left it — any worktree edit
+/// that has not yet been staged by that `add -A` was never part of what
+/// gets frozen, whether it happens before or after this call returns. A
+/// concurrent mutation to an ALREADY-staged path after the snapshot is
+/// taken can never appear in the result, proven by the round-8 tests
+/// above under real adversarial mutation. This function does NOT claim
+/// (and nothing here proves) that a mutation happening to land in the
+/// narrow window between `add -A` finishing and the snapshot copy
+/// starting is impossible in principle — only that once the snapshot
+/// exists, correctness is time-independent from that point on.
+///
+/// `tmp_parent` is a SERVER-owned directory (never the candidate-
+/// controlled `worktree`) the private, unique, `O_EXCL`/`O_NOFOLLOW`
+/// snapshot file is created under — the same confinement
+/// [`apply_candidate_patch`]'s own private temp store already
+/// established, so no candidate-planted symlink can redirect the write.
+///
 /// # Errors
 /// Any underlying `git` failure (a non-worktree directory, a `base_commit`
 /// this repo does not have, an I/O failure), or the resulting tree contains
 /// a gitlink (submodule) entry — explicitly unsupported.
 pub fn capture_cumulative_candidate(
     worktree: &Path,
+    tmp_parent: &Path,
     base_commit: &str,
+) -> Result<(Vec<u8>, String)> {
+    capture_cumulative_candidate_with_hook(worktree, tmp_parent, base_commit, || {})
+}
+
+/// Same as [`capture_cumulative_candidate`], but `after_snapshot` runs
+/// immediately after the index snapshot is frozen and before it is ever
+/// read for the patch/tree — production always passes a no-op; ONLY the
+/// round-8 regression tests use it, to deterministically prove a real
+/// concurrent mutation of the LIVE index at exactly this point can no
+/// longer desynchronize the returned patch from the returned tree.
+fn capture_cumulative_candidate_with_hook(
+    worktree: &Path,
+    tmp_parent: &Path,
+    base_commit: &str,
+    after_snapshot: impl FnOnce(),
 ) -> Result<(Vec<u8>, String)> {
     run_git_bytes(worktree, &["add", "-A"])?;
     // Q-Deck A0 corrective round 7 (fresh exact-head Codex P1): checked
@@ -452,14 +501,34 @@ pub fn capture_cumulative_candidate(
     ensure_no_index_hidden_flags(worktree)
         .context("candidate capture's own index-hidden-flags check")?;
     // Q-Deck A0 corrective round 5 (Codex P1, Part 1): checked immediately
-    // after staging, right before this run's own content is read for the
-    // patch/tree — the working-tree state `git status` inspects here is the
-    // exact same state `write-tree` below captures; nothing else touches
-    // this worktree between the two calls.
+    // after staging, right before the index is frozen below — the
+    // working-tree state `git status` inspects here is the exact same
+    // state the snapshot freezes; nothing else touches this worktree
+    // between the two calls.
     ensure_no_dirty_submodule_worktree(worktree)
         .context("candidate capture's own dirty-submodule-worktree check")?;
-    let patch = run_git_bytes(
+
+    // THE authority: one frozen copy of the index, taken now. Every read
+    // below goes through this SAME file via `GIT_INDEX_FILE`, never the
+    // worktree's own live index again.
+    let index_path = resolve_git_index_path(worktree)
+        .context("resolving this worktree's own real index file path")?;
+    let index_bytes = std::fs::read(&index_path)
+        .with_context(|| format!("reading the current index at {}", index_path.display()))?;
+    let (snapshot, mut snapshot_file) = PrivateTempFile::create(tmp_parent, "candidate-index")
+        .context("creating the private frozen-index snapshot file")?;
+    {
+        use std::io::Write as _;
+        snapshot_file
+            .write_all(&index_bytes)
+            .and_then(|()| snapshot_file.sync_all())
+            .context("writing the frozen index snapshot")?;
+    }
+    after_snapshot();
+
+    let patch = run_git_bytes_with_index(
         worktree,
+        snapshot.path(),
         &[
             "diff",
             "--cached",
@@ -480,7 +549,9 @@ pub fn capture_cumulative_candidate(
              the authoritative tree comparison"
         );
     }
-    let tree_oid = run_git(worktree, &["write-tree"])?.trim().to_string();
+    let tree_oid = run_git_with_index(worktree, snapshot.path(), &["write-tree"])?
+        .trim()
+        .to_string();
     ensure_no_gitlink_mutation(worktree, base_commit, &tree_oid)
         .context("candidate capture's own gitlink policy check")?;
     Ok((patch, tree_oid))
@@ -639,6 +710,122 @@ fn open_dir_nofollow(path: &Path) -> Result<OwnedFd, rustix::io::Errno> {
     )
 }
 
+/// Q-Deck A0 corrective round 8 (fresh exact-head Codex P1): a private,
+/// unique, `O_EXCL`/`O_NOFOLLOW`, mode `0600` temp file created inside
+/// `<parent>/.o7-candidate-tmp/` — the SAME private-store pattern
+/// `apply_candidate_patch` already established, generalized here for a
+/// second caller ([`capture_cumulative_candidate`]'s own index snapshot).
+/// `parent` must be server-owned, never a candidate-controlled path (a
+/// worktree), so no candidate-planted symlink can redirect the write —
+/// callers pass a run's own private record directory. Fail-closed: a name
+/// collision (extraordinarily unlikely given a PID+counter suffix) is a
+/// hard error, never a silent overwrite. Deleted on `Drop`, regardless of
+/// how the holder's own scope exits (success, error, or panic-unwind).
+struct PrivateTempFile {
+    dir_fd: OwnedFd,
+    cname: CString,
+    path: std::path::PathBuf,
+}
+
+impl PrivateTempFile {
+    fn create(parent: &Path, prefix: &str) -> Result<(Self, std::fs::File)> {
+        let tmp_dir = parent.join(".o7-candidate-tmp");
+        std::fs::create_dir_all(&tmp_dir).with_context(|| {
+            format!(
+                "creating the private candidate temp store at {}",
+                tmp_dir.display()
+            )
+        })?;
+        let dir_fd = open_dir_nofollow(&tmp_dir)
+            .with_context(|| format!("opening {} O_NOFOLLOW", tmp_dir.display()))?;
+        let name = format!(
+            "{prefix}.{}.{}",
+            std::process::id(),
+            TMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+        let cname =
+            CString::new(name.as_bytes()).context("private temp filename contained a NUL byte")?;
+        let file_fd = fs::openat(
+            &dir_fd,
+            cname.as_c_str(),
+            OFlags::RDWR | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+            Mode::from_raw_mode(0o600),
+        )
+        .with_context(|| format!("creating a fresh, exclusive temp file {name:?}"))?;
+        let tmp_dir_abs = absolute_path_of_open_dir(&dir_fd).with_context(|| {
+            format!("resolving the real absolute path of {}", tmp_dir.display())
+        })?;
+        let path = tmp_dir_abs.join(&name);
+        let file = std::fs::File::from(file_fd);
+        Ok((
+            Self {
+                dir_fd,
+                cname,
+                path,
+            },
+            file,
+        ))
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for PrivateTempFile {
+    fn drop(&mut self) {
+        let _ = fs::unlinkat(&self.dir_fd, self.cname.as_c_str(), fs::AtFlags::empty());
+    }
+}
+
+/// Q-Deck A0 corrective round 8: the exact real index file `worktree`'s own
+/// Git considers authoritative — resolved via `git rev-parse --git-path
+/// index` rather than a hardcoded `worktree/.git/index`, because a LINKED
+/// worktree's own index lives elsewhere entirely
+/// (`<main-repo>/.git/worktrees/<name>/index`, confirmed empirically to be
+/// reported as an absolute path already; a plain repository reports a
+/// path relative to `worktree` itself, `.git/index`).
+fn resolve_git_index_path(worktree: &Path) -> Result<std::path::PathBuf> {
+    let raw = run_git(worktree, &["rev-parse", "--git-path", "index"])?;
+    let raw = raw.trim();
+    let path = Path::new(raw);
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        let abs_worktree = std::path::absolute(worktree)
+            .with_context(|| format!("resolving an absolute path for {}", worktree.display()))?;
+        Ok(abs_worktree.join(path))
+    }
+}
+
+/// Like [`run_git_bytes`], but runs with `GIT_INDEX_FILE` pointed at
+/// `index_file` — every index-reading operation (`diff --cached`,
+/// `write-tree`) resolves against THAT file, never `worktree`'s own live
+/// index, regardless of what happens to the live index concurrently.
+fn run_git_bytes_with_index(dir: &Path, index_file: &Path, args: &[&str]) -> Result<Vec<u8>> {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_INDEX_FILE", index_file)
+        .output()
+        .with_context(|| format!("running git {args:?} against a frozen index snapshot"))?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "git {:?} (frozen index snapshot) failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    Ok(out.stdout)
+}
+
+/// Like [`run_git_bytes_with_index`], but returns stdout as a lossy
+/// `String` — used only for `write-tree`'s own OID output, which is always
+/// plain ASCII hex.
+fn run_git_with_index(dir: &Path, index_file: &Path, args: &[&str]) -> Result<String> {
+    Ok(String::from_utf8_lossy(&run_git_bytes_with_index(dir, index_file, args)?).into_owned())
+}
+
 fn run_git(dir: &Path, args: &[&str]) -> Result<String> {
     let out = Command::new("git")
         .args(args)
@@ -792,7 +979,7 @@ mod gitlink_policy_tests {
         // left completely untouched, exactly like a real, un-modified
         // submodule.
         std::fs::write(dir.join("other.txt"), "unrelated change").unwrap();
-        let result = capture_cumulative_candidate(dir, &base);
+        let result = capture_cumulative_candidate(dir, dir, &base);
         assert!(
             result.is_ok(),
             "unchanged base gitlink must not be rejected: {result:?}"
@@ -807,7 +994,7 @@ mod gitlink_policy_tests {
         let base = commit_all(dir, "base without gitlink");
 
         add_gitlink(dir, "vendor/new-lib", OID_A);
-        let result = capture_cumulative_candidate(dir, &base);
+        let result = capture_cumulative_candidate(dir, dir, &base);
         assert!(result.is_err(), "an ADDED gitlink must be rejected");
     }
 
@@ -820,7 +1007,7 @@ mod gitlink_policy_tests {
         let base = commit_all(dir, "base with gitlink");
 
         remove_gitlink(dir, "vendor/lib");
-        let result = capture_cumulative_candidate(dir, &base);
+        let result = capture_cumulative_candidate(dir, dir, &base);
         assert!(result.is_err(), "a DELETED gitlink must be rejected");
     }
 
@@ -836,7 +1023,7 @@ mod gitlink_policy_tests {
         // placeholder directory is already present from the base commit,
         // so `add -A` (inside capture) will not mistake this for a deletion.
         add_gitlink(dir, "vendor/lib", OID_B);
-        let result = capture_cumulative_candidate(dir, &base);
+        let result = capture_cumulative_candidate(dir, dir, &base);
         assert!(
             result.is_err(),
             "a gitlink whose OID changed (unchanged mode) must be rejected"
@@ -852,7 +1039,7 @@ mod gitlink_policy_tests {
 
         std::fs::remove_file(dir.join("thing")).unwrap();
         add_gitlink(dir, "thing", OID_A);
-        let result = capture_cumulative_candidate(dir, &base);
+        let result = capture_cumulative_candidate(dir, dir, &base);
         assert!(
             result.is_err(),
             "a regular file replaced by a gitlink at the same path must be rejected"
@@ -868,7 +1055,7 @@ mod gitlink_policy_tests {
 
         remove_gitlink(dir, "thing");
         std::fs::write(dir.join("thing"), "now a regular file").unwrap();
-        let result = capture_cumulative_candidate(dir, &base);
+        let result = capture_cumulative_candidate(dir, dir, &base);
         assert!(
             result.is_err(),
             "a gitlink replaced by a regular file at the same path must be rejected"
@@ -885,11 +1072,11 @@ mod gitlink_policy_tests {
 
         // Unchanged: still allowed.
         std::fs::write(dir.join("other.txt"), "unrelated").unwrap();
-        assert!(capture_cumulative_candidate(dir, &base).is_ok());
+        assert!(capture_cumulative_candidate(dir, dir, &base).is_ok());
 
         // Changed OID at the same nested/weird path: still rejected.
         add_gitlink(dir, "deeply/nested/vendor lib with spaces", OID_B);
-        assert!(capture_cumulative_candidate(dir, &base).is_err());
+        assert!(capture_cumulative_candidate(dir, dir, &base).is_err());
     }
 
     #[test]
@@ -904,7 +1091,7 @@ mod gitlink_policy_tests {
         // gitlink stays untouched, so materialization (finish_apply, via
         // apply_candidate_patch) must succeed exactly like capture does.
         std::fs::write(dir.join("added.txt"), "hello").unwrap();
-        let (patch, _tree) = capture_cumulative_candidate(dir, &base).unwrap();
+        let (patch, _tree) = capture_cumulative_candidate(dir, dir, &base).unwrap();
 
         // Reset back to base — `git reset --hard` restores the gitlink's
         // own placeholder directory automatically, exactly like checking
@@ -1146,7 +1333,7 @@ mod dirty_submodule_tests {
         let _upstream = add_real_submodule(dir, "sub");
         let base = commit_all(dir, "add submodule");
         std::fs::write(dir.join("sub").join("tracked.txt"), "tampered\n").unwrap();
-        let result = capture_cumulative_candidate(dir, &base);
+        let result = capture_cumulative_candidate(dir, dir, &base);
         assert!(
             result.is_err(),
             "candidate capture must fail closed for a dirty submodule: {result:?}"
@@ -1156,6 +1343,256 @@ mod dirty_submodule_tests {
             "tampered\n",
             "the original checkout must not be corrupted by the failed capture"
         );
+    }
+
+    /// Runs `git` and returns captured stdout, asserting success — like
+    /// [`run`], but for callers that need the output (`git show`, `git
+    /// cat-file`), not just a pass/fail signal.
+    fn run_capture(dir: &Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("spawn git");
+        assert!(out.status.success(), "git {args:?} failed: {out:?}");
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// Q-Deck A0 corrective round 8 (fresh exact-head Codex P1,
+    /// `#discussion_r3710144125`): drives the REAL, fixed
+    /// `capture_cumulative_candidate_with_hook` with a DETERMINISTIC
+    /// rendezvous — a real background thread spawning a REAL `git` process
+    /// to mutate the live index, synchronized via channels (never `sleep`)
+    /// so the mutation is GUARANTEED to land immediately after the index
+    /// snapshot is frozen, exactly the point that desynchronized the patch
+    /// from the tree at the old head (`c979bc1`..`f116c0c`, proven via the
+    /// identical harness against the pre-fix structure before this fix
+    /// landed — see the round-8 implementation report for that evidence).
+    ///
+    /// `setup` commits the initial content and returns `base_commit`, after
+    /// making the edit (state A) the snapshot freezes. `mutate` is the
+    /// background process's own real edit (state B) to the LIVE index,
+    /// applied strictly after the snapshot already exists — proving it can
+    /// no longer affect anything, since both the patch and the tree are now
+    /// derived from the frozen copy, never the live index again.
+    fn reproduce_patch_tree_race(
+        setup: impl FnOnce(&Path) -> String,
+        mutate: impl FnOnce(&Path) + Send + 'static,
+    ) -> (tempfile::TempDir, String, Vec<u8>, String) {
+        let repo = init_repo();
+        let dir = repo.path().to_path_buf();
+        let base = setup(&dir);
+        let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+        let (done_tx, done_rx) = std::sync::mpsc::channel::<()>();
+        let mutator_dir = dir.clone();
+        let mutator = std::thread::spawn(move || {
+            go_rx.recv().expect("main thread must signal go");
+            mutate(&mutator_dir);
+            done_tx.send(()).expect("main thread must still be waiting");
+        });
+        let result = capture_cumulative_candidate_with_hook(&dir, &dir, &base, || {
+            go_tx.send(()).expect("mutator thread must still be alive");
+            done_rx
+                .recv()
+                .expect("mutator thread must complete its real git mutation");
+        });
+        mutator.join().expect("mutator thread must not panic");
+        let (patch, tree_oid) = result.expect("a fixed capture with no hidden flags must succeed");
+        (repo, base, patch, tree_oid)
+    }
+
+    /// The direct invariant Round 8 requires for every successful capture:
+    /// applying the exact captured patch to `base_commit` reproduces
+    /// exactly the recorded `tree_oid` — never merely "a" tree.
+    fn assert_apply_matches_recorded_tree(
+        repo: &tempfile::TempDir,
+        base: &str,
+        patch: &[u8],
+        tree_oid: &str,
+    ) {
+        let apply_dir = tempfile::tempdir().unwrap();
+        run(
+            repo.path(),
+            &[
+                "worktree",
+                "add",
+                "-q",
+                apply_dir.path().to_str().unwrap(),
+                base,
+            ],
+        );
+        let materialized_tree = apply_candidate_patch(
+            &tempfile::tempdir().unwrap().keep(),
+            apply_dir.path(),
+            base,
+            patch,
+        )
+        .expect("applying the captured patch to its own declared base must succeed cleanly");
+        assert_eq!(
+            materialized_tree, tree_oid,
+            "apply(captured_patch, base_commit).tree_oid must equal the recorded candidate_tree_oid"
+        );
+    }
+
+    #[test]
+    fn r8_patch_tree_race_is_closed_ordinary_tracked_content() {
+        let (repo, base, patch, tree_oid) = reproduce_patch_tree_race(
+            |dir| {
+                std::fs::write(dir.join("tracked.txt"), "original\n").unwrap();
+                let base = commit_all(dir, "init");
+                std::fs::write(dir.join("tracked.txt"), "state A: first edit\n").unwrap();
+                base
+            },
+            |dir| {
+                std::fs::write(dir.join("tracked.txt"), "state B: mutator edit\n").unwrap();
+                let status = Command::new("git")
+                    .args(["add", "-A"])
+                    .current_dir(dir)
+                    .status()
+                    .expect("spawn git");
+                assert!(status.success());
+            },
+        );
+        let dir = repo.path();
+
+        // The returned PATCH reflects state A — frozen before the mutator
+        // ever ran.
+        let patch_text = String::from_utf8_lossy(&patch);
+        assert!(
+            patch_text.contains("state A: first edit"),
+            "got: {patch_text}"
+        );
+        assert!(!patch_text.contains("state B"), "got: {patch_text}");
+
+        // The returned TREE ALSO reflects state A — the mutator's real
+        // `git add -A` to the LIVE index, run strictly after the snapshot
+        // was taken, has NO effect on it.
+        let tree_content = run_capture(dir, &["show", &format!("{tree_oid}:tracked.txt")]);
+        assert!(
+            tree_content.contains("state A: first edit"),
+            "the recorded tree must be UNAFFECTED by the post-snapshot mutation: {tree_content:?}"
+        );
+        assert!(!tree_content.contains("state B"), "got: {tree_content:?}");
+
+        assert_apply_matches_recorded_tree(&repo, &base, &patch, &tree_oid);
+    }
+
+    #[test]
+    fn r8_patch_tree_race_is_closed_deletion_and_executable_bit() {
+        let (repo, base, patch, tree_oid) = reproduce_patch_tree_race(
+            |dir| {
+                std::fs::write(dir.join("to_delete.txt"), "will be deleted\n").unwrap();
+                std::fs::write(dir.join("script.sh"), "#!/bin/sh\necho hi\n").unwrap();
+                let base = commit_all(dir, "init");
+                std::fs::remove_file(dir.join("to_delete.txt")).unwrap();
+                base
+            },
+            |dir| {
+                // Executable-bit flip, staged by a real background `git`
+                // process, strictly after the snapshot was already frozen.
+                let mut perm = std::fs::metadata(dir.join("script.sh"))
+                    .unwrap()
+                    .permissions();
+                std::os::unix::fs::PermissionsExt::set_mode(&mut perm, 0o755);
+                std::fs::set_permissions(dir.join("script.sh"), perm).unwrap();
+                let status = Command::new("git")
+                    .args(["add", "-A"])
+                    .current_dir(dir)
+                    .status()
+                    .expect("spawn git");
+                assert!(status.success());
+            },
+        );
+        let dir = repo.path();
+        let patch_text = String::from_utf8_lossy(&patch);
+        assert!(
+            patch_text.contains("deleted file") || patch_text.contains("to_delete.txt"),
+            "the patch must reflect the deletion captured before the mutator ran: {patch_text}"
+        );
+        assert!(
+            !patch_text.contains("old mode") && !patch_text.contains("new mode"),
+            "the patch must NOT reflect the mutator's later executable-bit flip: {patch_text}"
+        );
+        // The recorded tree must ALSO be unaffected by the mutator's
+        // post-snapshot executable-bit flip: still non-executable.
+        let ls_tree = run_capture(dir, &["ls-tree", &tree_oid, "script.sh"]);
+        assert!(
+            ls_tree.starts_with("100644"),
+            "the recorded tree must be UNAFFECTED by the post-snapshot executable-bit flip: \
+             {ls_tree:?}"
+        );
+        assert_apply_matches_recorded_tree(&repo, &base, &patch, &tree_oid);
+    }
+
+    #[test]
+    fn r8_patch_tree_race_is_closed_binary_content() {
+        let (repo, base, patch, tree_oid) = reproduce_patch_tree_race(
+            |dir| {
+                std::fs::write(dir.join("bin.dat"), [0u8, 1, 2, 3, 255, 254]).unwrap();
+                let base = commit_all(dir, "init");
+                std::fs::write(dir.join("bin.dat"), [10u8, 20, 30, 0, 255]).unwrap();
+                base
+            },
+            |dir| {
+                std::fs::write(dir.join("bin.dat"), [99u8, 98, 97, 0, 1, 2]).unwrap();
+                let status = Command::new("git")
+                    .args(["add", "-A"])
+                    .current_dir(dir)
+                    .status()
+                    .expect("spawn git");
+                assert!(status.success());
+            },
+        );
+        let dir = repo.path();
+        assert!(
+            String::from_utf8_lossy(&patch).contains("GIT binary patch"),
+            "a binary content change must produce a binary patch marker: {:?}",
+            String::from_utf8_lossy(&patch)
+        );
+        let tree_bytes = Command::new("git")
+            .args(["show", &format!("{tree_oid}:bin.dat")])
+            .current_dir(dir)
+            .output()
+            .expect("spawn git")
+            .stdout;
+        assert_eq!(
+            tree_bytes,
+            vec![10u8, 20, 30, 0, 255],
+            "the recorded tree must be UNAFFECTED by the mutator's post-snapshot binary content"
+        );
+        assert_apply_matches_recorded_tree(&repo, &base, &patch, &tree_oid);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn r8_patch_tree_race_is_closed_non_utf8_path() {
+        use std::os::unix::ffi::OsStrExt;
+        let mut raw = b"bad_".to_vec();
+        raw.extend_from_slice(&[0xFF, 0xFE]);
+        raw.extend_from_slice(b"_name.txt");
+        let name = std::ffi::OsStr::from_bytes(&raw).to_os_string();
+        let name_for_mutate = name.clone();
+        let (repo, base, patch, tree_oid) = reproduce_patch_tree_race(
+            move |dir| {
+                std::fs::write(dir.join(&name), "original\n").unwrap();
+                let base = commit_all(dir, "init");
+                std::fs::write(dir.join(&name), "state A\n").unwrap();
+                base
+            },
+            move |dir| {
+                std::fs::write(dir.join(&name_for_mutate), "state B\n").unwrap();
+                let status = Command::new("git")
+                    .args(["add", "-A"])
+                    .current_dir(dir)
+                    .status()
+                    .expect("spawn git");
+                assert!(status.success());
+            },
+        );
+        let patch_text = String::from_utf8_lossy(&patch);
+        assert!(patch_text.contains("state A"), "got: {patch_text}");
+        assert!(!patch_text.contains("state B"), "got: {patch_text}");
+        assert_apply_matches_recorded_tree(&repo, &base, &patch, &tree_oid);
     }
 
     /// Q-Deck A0 corrective round 7 (fresh exact-head Codex P1,
@@ -1174,7 +1611,7 @@ mod dirty_submodule_tests {
         let base = commit_all(dir, "init");
         run(dir, &["update-index", "--assume-unchanged", "tracked.txt"]);
         std::fs::write(dir.join("tracked.txt"), "TAMPERED\n").unwrap();
-        let result = capture_cumulative_candidate(dir, &base);
+        let result = capture_cumulative_candidate(dir, dir, &base);
         let err = result.expect_err("an assume-unchanged hidden edit must fail closed");
         assert!(
             format!("{err:?}").contains("assume-unchanged"),
@@ -1191,7 +1628,7 @@ mod dirty_submodule_tests {
         let base = commit_all(dir, "init");
         run(dir, &["update-index", "--skip-worktree", "tracked.txt"]);
         std::fs::write(dir.join("tracked.txt"), "TAMPERED\n").unwrap();
-        let result = capture_cumulative_candidate(dir, &base);
+        let result = capture_cumulative_candidate(dir, dir, &base);
         let err = result.expect_err("a skip-worktree hidden edit must fail closed");
         assert!(format!("{err:?}").contains("skip-worktree"), "got: {err:?}");
     }
@@ -1208,7 +1645,7 @@ mod dirty_submodule_tests {
             &["update-index", "--assume-unchanged", "a/b/c/nested.txt"],
         );
         std::fs::write(dir.join("a/b/c/nested.txt"), "TAMPERED\n").unwrap();
-        let err = capture_cumulative_candidate(dir, &base)
+        let err = capture_cumulative_candidate(dir, dir, &base)
             .expect_err("a nested assume-unchanged hidden edit must fail closed");
         assert!(
             format!("{err:?}").contains("assume-unchanged"),
@@ -1229,7 +1666,7 @@ mod dirty_submodule_tests {
         let base = commit_all(dir, "init");
         run(dir, &["update-index", "--skip-worktree", name]);
         std::fs::write(dir.join(name), "TAMPERED\n").unwrap();
-        let err = capture_cumulative_candidate(dir, &base)
+        let err = capture_cumulative_candidate(dir, dir, &base)
             .expect_err("skip-worktree on a path with spaces/newline must still be caught");
         assert!(format!("{err:?}").contains("skip-worktree"), "got: {err:?}");
     }
@@ -1253,7 +1690,7 @@ mod dirty_submodule_tests {
             name,
         );
         std::fs::write(dir.join(name), "TAMPERED\n").unwrap();
-        let err = capture_cumulative_candidate(dir, &base)
+        let err = capture_cumulative_candidate(dir, dir, &base)
             .expect_err("a non-UTF-8 path must still be caught, not silently skipped or panic");
         assert!(
             format!("{err:?}").contains("assume-unchanged"),
@@ -1268,7 +1705,7 @@ mod dirty_submodule_tests {
         std::fs::write(dir.join("tracked.txt"), "original\n").unwrap();
         let base = commit_all(dir, "init");
         std::fs::write(dir.join("tracked.txt"), "edited\n").unwrap();
-        let (patch, tree_oid) = capture_cumulative_candidate(dir, &base)
+        let (patch, tree_oid) = capture_cumulative_candidate(dir, dir, &base)
             .expect("an ordinary tracked edit with no hidden-index flags must still capture");
         assert!(!patch.is_empty(), "the edit must appear in the patch");
         assert_ne!(
@@ -1283,9 +1720,28 @@ mod dirty_submodule_tests {
         let dir = repo.path();
         let base = commit_all(dir, "init");
         std::fs::write(dir.join("new_untracked.txt"), "new\n").unwrap();
-        let (patch, _tree_oid) = capture_cumulative_candidate(dir, &base)
+        let (patch, _tree_oid) = capture_cumulative_candidate(dir, dir, &base)
             .expect("a plain untracked file with no hidden-index flags must still capture");
         assert!(!patch.is_empty(), "the new file must appear in the patch");
+    }
+
+    /// Q-Deck A0 corrective round 8: the direct invariant required for
+    /// EVERY successful candidate capture, no adversarial mutation
+    /// involved — a plain, uncontested capture must still satisfy
+    /// `apply(captured_patch, base_commit).tree_oid == candidate_tree_oid`.
+    #[test]
+    fn apply_of_captured_patch_always_matches_recorded_tree_oid() {
+        let repo = init_repo();
+        let dir = repo.path();
+        std::fs::write(dir.join("a.txt"), "original\n").unwrap();
+        std::fs::write(dir.join("b.txt"), "keep\n").unwrap();
+        let base = commit_all(dir, "init");
+        std::fs::write(dir.join("a.txt"), "edited\n").unwrap();
+        std::fs::write(dir.join("c.txt"), "new\n").unwrap();
+        std::fs::remove_file(dir.join("b.txt")).unwrap();
+        let (patch, tree_oid) = capture_cumulative_candidate(dir, dir, &base)
+            .expect("an ordinary multi-file change must capture");
+        assert_apply_matches_recorded_tree(&repo, &base, &patch, &tree_oid);
     }
 
     #[test]
@@ -1296,7 +1752,7 @@ mod dirty_submodule_tests {
         let base = commit_all(dir, "init");
         run(dir, &["update-index", "--assume-unchanged", "tracked.txt"]);
         std::fs::write(dir.join("tracked.txt"), "TAMPERED\n").unwrap();
-        assert!(capture_cumulative_candidate(dir, &base).is_err());
+        assert!(capture_cumulative_candidate(dir, dir, &base).is_err());
         // Working-tree bytes: untouched.
         assert_eq!(
             std::fs::read_to_string(dir.join("tracked.txt")).unwrap(),
@@ -1557,7 +2013,8 @@ mod special_runs_dir_path_tests {
     fn a_runs_dir_with_a_space_in_its_path_is_handled_correctly() {
         let repo = init_repo_with_one_commit();
         let base = rev_parse(repo.path(), "HEAD").unwrap();
-        let (patch, _tree_oid) = capture_cumulative_candidate(repo.path(), &base).unwrap();
+        let (patch, _tree_oid) =
+            capture_cumulative_candidate(repo.path(), repo.path(), &base).unwrap();
         std::fs::write(repo.path().join("f.txt"), "changed\n").unwrap();
         let patch2 = run_git_bytes(
             repo.path(),

@@ -746,8 +746,9 @@ fn write_candidate_state_receipt(
     run_id: &str,
     parent_run_id: Option<&str>,
 ) -> Result<o7_run::event::ArtifactRef> {
-    let (patch, tree_oid) = worktree::capture_cumulative_candidate(wt, &obligation.base_commit)
-        .context("capturing this run's cumulative candidate state")?;
+    let (patch, tree_oid) =
+        worktree::capture_cumulative_candidate(wt, &rec.dir, &obligation.base_commit)
+            .context("capturing this run's cumulative candidate state")?;
     let patch_ref = write_candidate_artifact(
         rec,
         CANDIDATE_PATCH_FILE,
