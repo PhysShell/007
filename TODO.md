@@ -3,6 +3,22 @@
 Where we stopped + the exact next step. Updated 2026-07-02 (leaving for the day);
 2026-07-26: verdict soundness + the o7-run stitch landed (see below).
 
+## A-series status (reconciled 2026-08-04)
+
+The sections below are preserved as history; they predate the A-series.
+Current authoritative state:
+
+- **R1** (durable follow-up Command): accepted/merged, PR #90.
+- **A0.0 contract**: completed contract-first — commit `71800fc`, the first
+  commit of PR #92, frozen before any implementation.
+- **A0 candidate-state continuity**: accepted at `52627c3`, merged as
+  `f1ac458` (PR #92, eight forward-only corrective rounds). Normative
+  source: `docs/q-deck/a0-candidate-state.md`.
+- **Next: A1 contract freeze** (issue #95 — A0.0 precondition satisfied);
+  A1 implementation only after the freeze.
+- **Post-A0 hardening**: separate follow-up issue; does not reopen A0.
+- **B1** (`research/b1-context/`): parallel, read-only, non-authoritative.
+
 ## Built & working
 - **`o7 run`** — one isolated gated agent run (WSL worktree → full-auto claude →
   gate manifest → harvest). Scaffolded; not yet exercised on a real coding task.
