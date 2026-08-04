@@ -2,36 +2,72 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://physshell.dev/007/research/b1-context/schema/state-observables-v0.schema.json",
   "title": "o7.b1.state-observables/v0",
-  "description": "Minimal typed state for one B1 experiment (case-0001). Not a universal ontology; sufficient to represent, project, and evaluate a single development fixture. Codec-independent: nothing here depends on Qodec or any other encoder backend.",
+  "description": "Minimal typed state for one B1 experiment (case-0001). Not a universal ontology; sufficient to represent, project, and evaluate a single development fixture. Codec-independent: nothing here depends on Qodec or any other encoder backend. Observations carry task-independent `topics`; task-relative priority lives in the separate versioned selector contract o7.b1.selector/v0.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "fixture_id", "cutoff", "observations", "relations"],
+  "required": [
+    "schema",
+    "fixture_id",
+    "cutoff",
+    "topic_vocabulary",
+    "observations",
+    "relations"
+  ],
   "properties": {
-    "schema": {"const": "o7.b1.state-observables/v0"},
-    "fixture_id": {"type": "string", "minLength": 1},
+    "schema": {
+      "const": "o7.b1.state-observables/v0"
+    },
+    "fixture_id": {
+      "type": "string",
+      "minLength": 1
+    },
     "cutoff": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["identity"],
+      "required": [
+        "identity"
+      ],
       "description": "The exact point in time/state the gold state describes.",
       "properties": {
-        "identity": {"type": "string", "minLength": 1},
-        "raw_source_id": {"type": "string"},
-        "raw_source_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        "identity": {
+          "type": "string",
+          "minLength": 1
+        },
+        "raw_source_id": {
+          "type": "string"
+        },
+        "raw_source_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
       }
     },
     "authority_vocabulary": {
       "type": "array",
-      "items": {"$ref": "#/$defs/authority"},
+      "items": {
+        "$ref": "#/$defs/authority"
+      },
       "description": "Informational echo of the closed authority vocabulary."
+    },
+    "topic_vocabulary": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/topic_id"
+      },
+      "minItems": 1,
+      "description": "Closed set of topic identifiers this fixture may use. The selector contract validates every task selector against this list and FAILS CLOSED on an unknown topic, so a task can never silently match nothing."
     },
     "observations": {
       "type": "array",
-      "items": {"$ref": "#/$defs/observation"}
+      "items": {
+        "$ref": "#/$defs/observation"
+      }
     },
     "relations": {
       "type": "array",
-      "items": {"$ref": "#/$defs/relation"}
+      "items": {
+        "$ref": "#/$defs/relation"
+      }
     }
   },
   "$defs": {
@@ -62,7 +98,13 @@
     },
     "observation_status": {
       "type": "string",
-      "enum": ["current", "superseded", "resolved", "rejected", "pending"]
+      "enum": [
+        "current",
+        "superseded",
+        "resolved",
+        "rejected",
+        "pending"
+      ]
     },
     "relation_kind": {
       "type": "string",
@@ -79,27 +121,70 @@
     "provenance_ref": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["source_id"],
+      "required": [
+        "source_id"
+      ],
       "description": "A pointer back to a specific source. digest binds it; source_pointer/selector locates within the source. A provenance ref is not required to quote content — the fixture repo holds pointers, not transcripts.",
       "properties": {
-        "source_id": {"type": "string", "minLength": 1},
+        "source_id": {
+          "type": "string",
+          "minLength": 1
+        },
         "source_class": {
           "type": "string",
-          "enum": ["raw_capture", "platform_artifact_snapshot", "derived_transcript", "agent_reconstruction", "repo_record", "fixture_metadata"]
+          "enum": [
+            "raw_capture",
+            "platform_artifact_snapshot",
+            "derived_transcript",
+            "agent_reconstruction",
+            "repo_record",
+            "fixture_metadata"
+          ]
         },
-        "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-        "source_pointer": {"type": "string"},
-        "selector": {"type": "string"},
-        "note": {"type": "string"}
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "source_pointer": {
+          "type": "string"
+        },
+        "selector": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
       }
     },
     "observation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["observation_id", "kind", "statement", "authority", "status", "provenance"],
+      "required": [
+        "observation_id",
+        "kind",
+        "statement",
+        "authority",
+        "status",
+        "provenance",
+        "topics"
+      ],
       "properties": {
-        "observation_id": {"type": "string", "pattern": "^obs-[a-z0-9][a-z0-9-]*$"},
-        "kind": {"$ref": "#/$defs/observation_kind"},
+        "observation_id": {
+          "type": "string",
+          "pattern": "^obs-[a-z0-9][a-z0-9-]*$"
+        },
+        "kind": {
+          "$ref": "#/$defs/observation_kind"
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/topic_id"
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "Task-independent classification. Required: without it selection cannot be task-dependent. Deliberately NOT accompanied by any global importance/priority field."
+        },
         "statement": {
           "type": "string",
           "minLength": 1,
@@ -107,39 +192,90 @@
         },
         "structured_value": {
           "description": "Optional machine-readable value when the observation is not purely textual.",
-          "type": ["object", "array", "string", "number", "boolean", "null"]
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
         },
-        "authority": {"$ref": "#/$defs/authority"},
-        "status": {"$ref": "#/$defs/observation_status"},
+        "authority": {
+          "$ref": "#/$defs/authority"
+        },
+        "status": {
+          "$ref": "#/$defs/observation_status"
+        },
         "provenance": {
           "type": "array",
           "minItems": 1,
-          "items": {"$ref": "#/$defs/provenance_ref"},
+          "items": {
+            "$ref": "#/$defs/provenance_ref"
+          },
           "description": "At least one provenance ref. An observation with no verifiable provenance is not admissible."
         },
-        "valid_from": {"type": "string"},
-        "observed_at": {"type": "string"},
-        "valid_to": {"type": "string"},
-        "superseded_by": {"type": "string", "pattern": "^obs-[a-z0-9][a-z0-9-]*$"}
+        "valid_from": {
+          "type": "string"
+        },
+        "observed_at": {
+          "type": "string"
+        },
+        "valid_to": {
+          "type": "string"
+        },
+        "superseded_by": {
+          "type": "string",
+          "pattern": "^obs-[a-z0-9][a-z0-9-]*$"
+        }
       },
       "allOf": [
         {
           "$comment": "A superseded observation must name what supersedes it, so it can be kept out of the current projection.",
-          "if": {"properties": {"status": {"const": "superseded"}}},
-          "then": {"required": ["superseded_by"]}
+          "if": {
+            "properties": {
+              "status": {
+                "const": "superseded"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "superseded_by"
+            ]
+          }
         }
       ]
     },
     "relation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "from", "to"],
+      "required": [
+        "kind",
+        "from",
+        "to"
+      ],
       "properties": {
-        "kind": {"$ref": "#/$defs/relation_kind"},
-        "from": {"type": "string", "pattern": "^obs-[a-z0-9][a-z0-9-]*$"},
-        "to": {"type": "string", "pattern": "^obs-[a-z0-9][a-z0-9-]*$"},
-        "note": {"type": "string"}
+        "kind": {
+          "$ref": "#/$defs/relation_kind"
+        },
+        "from": {
+          "type": "string",
+          "pattern": "^obs-[a-z0-9][a-z0-9-]*$"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^obs-[a-z0-9][a-z0-9-]*$"
+        },
+        "note": {
+          "type": "string"
+        }
       }
+    },
+    "topic_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Stable, TASK-INDEPENDENT subject identifier. A topic says what a statement is ABOUT; it never encodes how much that statement matters. Task-relative priority lives only in a task's selector block (o7.b1.selector/v0), never here."
     }
   }
 }

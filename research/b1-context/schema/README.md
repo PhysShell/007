@@ -13,10 +13,39 @@ and evaluate the `case-0001` golden fixture.
 **Relation kinds:** `supports`, `derived_from`, `supersedes`, `contradicts`,
 `blocks`, `depends_on`, `part_of`.
 
-Every observation carries a stable `observation_id`, a `kind`, a `statement`
-(and optional `structured_value`), an `authority`, a `status`, at least one
-`provenance` ref, and — where the source provides them — `observed_at` /
-`valid_from` / `valid_to` / `superseded_by`.
+Every observation carries a stable `observation_id`, a `kind`, `topics`, a
+`statement` (and optional `structured_value`), an `authority`, a `status`, at
+least one `provenance` ref, and — where the source provides them — `observed_at`
+/ `valid_from` / `valid_to` / `superseded_by`.
+
+## Topics, and what they are deliberately not
+
+`topics` is **task-independent** classification: it says what a statement is
+*about*, never how much it matters. Topic ids are drawn from the gold state's own
+closed `topic_vocabulary`, and the selector contract fails closed on any id
+outside it, so a task can never silently match nothing.
+
+An observation may **not** carry a global `importance`/priority field — the
+validator rejects it. Priority is meaningless without a task, and putting it on
+the observation would let one task's judgement leak into every other task's
+projection. Task-relative priority lives in `selector-v0.schema.json`
+(`o7.b1.selector/v0`) and nowhere else.
+
+## Companion contract
+
+`selector-v0.schema.json` defines how a task's `selectors` block turns a gold
+state into a projection: eligibility, exclusion, relevance, scoring, the anchor
+escape hatch and its ratio ceiling, deterministic ordering, budget behaviour and
+the full fail-closed list. Selection is a pure deterministic function of
+`gold state + task + selector contract/version + budget`.
+
+## Not frozen
+
+Neither schema is frozen. The corrective round
+(`#issuecomment-5182632187` §7) blocked freezing precisely because the
+task-applicability representation had not been chosen yet; `topics` plus an
+external selector contract is the *first* working answer, not a settled one. A
+freeze needs at least a second fixture and a holdout, neither of which exists.
 
 ## Authority vocabulary (closed)
 

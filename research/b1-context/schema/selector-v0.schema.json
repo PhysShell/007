@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://physshell.dev/007/research/b1-context/schema/selector-v0.schema.json",
+  "title": "o7.b1.selector/v0",
+  "description": "The versioned selector contract. Selection is a pure deterministic function of (gold state, task, selector contract/version, budget). Observations carry task-INDEPENDENT `topics`; a task carries task-RELATIVE priority here. The two never mix: no global `importance` is permitted on an observation, and no observation id drives selection except through the explicitly justified, ratio-capped anchor escape hatch. The reference implementation is research/b1-context/tools/o7b1/selector.py, whose file digest is recorded alongside every projection so a result can be traced to the exact logic that produced it.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["required_topics", "preferred_topics", "excluded_topics", "required_kinds"],
+  "properties": {
+    "required_topics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/topic_id" },
+      "uniqueItems": true,
+      "description": "Topics this task is about. Weight 2 in the score. Every required topic must be represented in the final selection or the projection is INVALID (validity.missing_required_topics)."
+    },
+    "preferred_topics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/topic_id" },
+      "uniqueItems": true,
+      "description": "Useful context. Weight 1. Makes an observation relevant, but its absence is not a validity failure."
+    },
+    "excluded_topics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/topic_id" },
+      "uniqueItems": true,
+      "description": "Hard deny. Exclusion is applied BEFORE relevance and beats a required-topic match, so a task can deny a topic without enumerating what else matches."
+    },
+    "required_kinds": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/observation_kind" },
+      "uniqueItems": true,
+      "description": "Kinds this task cannot function without. Adds 1 to the score, and a kind with no selected representative makes the projection INVALID (validity.missing_required_kinds)."
+    },
+    "anchor_observation_ids": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^obs-[a-z0-9][a-z0-9-]*$" },
+      "uniqueItems": true,
+      "description": "Escape hatch for genuinely id-specific needs. An anchor forces an ELIGIBLE observation in regardless of topic match; it can never resurrect an ineligible one. Each anchor requires a rationale, and if more than 34% of the selection matched ONLY by anchor the contract refuses the task outright — that would be an answer key rather than a selector."
+    },
+    "anchor_rationale": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 },
+      "description": "observation_id -> why the topic vocabulary is insufficient for it. Required for every anchor."
+    }
+  },
+  "$defs": {
+    "topic_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Must appear in the gold state's own closed `topic_vocabulary`. An unknown topic FAILS CLOSED rather than silently matching nothing."
+    },
+    "observation_kind": {
+      "type": "string",
+      "enum": [
+        "goal", "decision", "constraint", "status", "work_item",
+        "unresolved_question", "evidence", "risk", "next_action"
+      ]
+    }
+  },
+  "x-selection-algorithm": {
+    "order": [
+      "1. ELIGIBILITY (task-independent): status in {current, pending} AND authority != agent_claim. Ineligible observations can never be selected, whatever a task asks for.",
+      "2. EXCLUSION: any overlap with excluded_topics omits the observation, beating any required match.",
+      "3. RELEVANCE: the observation must share at least one topic with required_topics or preferred_topics, otherwise it is omitted with an explicit reason.",
+      "4. ANCHORS: justified anchors bypass step 3 only.",
+      "5. SCORE: 2*|topics ∩ required| + 1*|topics ∩ preferred| + 1 if kind ∈ required_kinds + 1 if anchored.",
+      "6. ORDER: (-score, fixed kind order, observation_id) — a total order, so output is byte-stable.",
+      "7. BUDGET: admit in that order until byte or record budget is reached; every rejection is reported with a budget reason."
+    ],
+    "fail_closed_on": [
+      "unknown selector field",
+      "topic id absent from the gold state's topic_vocabulary",
+      "unknown observation kind in required_kinds",
+      "missing `selectors` block (an absent selector is NOT read as 'select everything')",
+      "neither required_topics nor preferred_topics given",
+      "gold state without topic_vocabulary",
+      "observation without topics",
+      "anchor naming an unknown or ineligible observation",
+      "anchor without a rationale",
+      "anchor-only share of the selection above 34%"
+    ],
+    "digest_binding": [
+      "selector_id and selector_version identify the contract",
+      "selector_impl_digest is the sha256 of the reference implementation file",
+      "selectors_digest is the sha256 of this task's own canonicalized selector block"
+    ]
+  }
+}
