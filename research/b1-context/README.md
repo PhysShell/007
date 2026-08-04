@@ -74,13 +74,13 @@ byte-identical across runs. Both tools read one task registry
 (`fixtures/case-0001/tasks-v0.yaml`) and drive projection through the same
 `o7b1.pipeline`. See `tools/README.md` for details.
 
-**Honest status (pre CAS-backed regeneration):**
+**Honest status (CAS-backed report v1 frozen):**
 
 ```text
 deterministic_compilation_pipeline: PASS
 task_conditioned_projection: IMPLEMENTED
-development_result: PARTIAL
-cas_backed_report: PENDING
+development_result: PASS
+cas_backed_report: PRESENT
 schema_frozen: false
 generalization: NOT_EVALUATED
 source_set_complete: false
@@ -88,14 +88,17 @@ holdout_evaluated: false
 authoritative_for_a_series: false
 ```
 
-The committed per-task projections under `results/case-0001-v0/tasks/` and
-`projection-comparison.json` are current and reproducible offline. The 3-arm
-`report.json` / `report.md` and the frozen `expected-report-v1.json` are
-regenerated on a CAS-equipped machine (see
-`results/case-0001-v0/PENDING-CAS-REGENERATION.md`); until then there is no
-current CAS-backed report, and `run_case.py` fails closed rather than presenting
-a stale one. A golden fixture whose questions were shaped on its own material can
-debug the representation; it cannot show the pipeline works on new cases.
+The current result is `results/case-0001-v0/report.md` (report `o7.b1.report/v1`,
+expectation `fixtures/case-0001/expected-report-v1.json`, byte-identical to
+`report.json`). Two independent runs reproduce every canonical output
+byte-for-byte. A `PASS` here means only that the case-0001 development vertical v1
+is complete and reproducible — the pipeline runs end-to-end, both tasks get
+genuinely different task-dependent projections, and the negative control's known
+state loss is detected. It does **not** mean B1 is proven, the selector
+generalizes, the schema is universal, context preservation is solved, or anything
+is production ready. A golden fixture whose questions were shaped on its own
+material can debug the representation; it cannot show the pipeline works on new
+cases.
 
 ## Storage policy
 
