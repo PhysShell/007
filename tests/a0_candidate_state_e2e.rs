@@ -883,6 +883,63 @@ fn assert_command_never_completes_and_provider_never_reinvoked(
     );
 }
 
+/// Q-Deck A0 corrective round 8: the STRICT admission-preflight-rejects
+/// proof. Unlike `assert_command_never_completes_and_provider_never_reinvoked`
+/// above (which deliberately accepts EITHER an admission-time `409` OR a
+/// `202` that later fails to complete — most pre-round-8 negative cases
+/// could only be caught this way), the base-commit-existence check this
+/// round adds is provable strictly BEFORE any command row exists. A test
+/// asserting this round's fix must observe `409` specifically: a
+/// regression back to the old "admitted, then stuck" behavior must FAIL
+/// this assertion, never silently pass it by falling through to the
+/// lenient either/or the older helper allows.
+fn assert_admission_preflight_rejects_with_zero_mutations(
+    addr: SocketAddr,
+    conversation_id: &str,
+    parent_run_id: &str,
+    claude: &ActionClaude,
+    ledger_path: &Path,
+    command_text: &str,
+    idempotency_key: &str,
+) {
+    let (status, accepted) = post(
+        addr,
+        &format!("/api/v1/conversations/{conversation_id}/commands"),
+        &serde_json::json!({
+            "schema_version": 1,
+            "parent_run_id": parent_run_id,
+            "command": command_text,
+            "idempotency_key": idempotency_key,
+        }),
+    );
+    assert_eq!(
+        status, 409,
+        "this round's base-commit-existence check must reject at admission, strictly before any \
+         command row is created — never a 202 that only fails later: {accepted:?}"
+    );
+    assert_eq!(
+        accepted["code"], "COMMAND_PARENT_CANDIDATE_UNAVAILABLE",
+        "a 409 for an unusable base commit must carry the stable admission code: {accepted:?}"
+    );
+    assert_eq!(
+        claude.invocation_count(),
+        1,
+        "admission-preflight rejection must never invoke the provider"
+    );
+    let conn = rusqlite::Connection::open(ledger_path).unwrap();
+    let rows: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM command WHERE parent_run_id = ?1 AND command_text = ?2",
+            [parent_run_id, command_text],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        rows, 0,
+        "an admission-preflight rejection must never create a command row at all"
+    );
+}
+
 #[test]
 fn missing_candidate_receipt_never_invokes_the_provider() {
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -4011,5 +4068,290 @@ fn continuation_diff_base_matches_the_inherited_candidate_base_regardless_of_a_w
         );
     }
 
+    drop(repo);
+}
+
+// ============= Q-Deck A0 corrective round 8 (fresh exact-head Codex P1) =============
+//
+// Admission does not prove the candidate base commit still exists —
+// process-level reproduction, at the old head, before the fix.
+
+/// Q-Deck A0 corrective round 8 (fresh exact-head Codex P1,
+/// `#discussion_r3710144132`, now CLOSED): a real A0 parent whose
+/// `base_commit` is made genuinely unreachable (retaining branches
+/// deleted, reflog expired, real `git gc --prune=now`) and PROVEN gone via
+/// `git cat-file`. Before this round's fix, `parent_candidate_state_usable`
+/// declared the parent usable regardless (full internal-consistency replay
+/// and the repository-identity check both pass even for a pruned base),
+/// `POST /commands` durably accepted and bound a child, and only the
+/// child's own later `o7 continue` materialization failed at
+/// `verify_commit_exists` — after the command/child state already
+/// existed. The fix adds the SAME `verify_commit_exists` primitive to the
+/// admission preflight itself, so the command is now rejected with `409
+/// COMMAND_PARENT_CANDIDATE_UNAVAILABLE` before any command row, child
+/// run, worktree, or provider invocation is created — proven twice, via
+/// the shared negative-case helper, to show the rejection is deterministic
+/// (a repeated identical request reproduces the identical zero-mutation
+/// rejection, never a different outcome).
+#[test]
+fn pruned_base_commit_is_rejected_before_admission() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let repo = fixture_repo(PASSING_GATE);
+    let task_file = repo.path().join("task.md");
+    std::fs::write(&task_file, "do the initial thing").unwrap();
+    let work = tempfile::tempdir().unwrap();
+    let ledger_path = work.path().join("ledger.sqlite3");
+    let runs_dir = work.path().join("runs");
+    let worktree_root = work.path().join("worktrees");
+    let target = repo
+        .path()
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+
+    let git = |args: &[&str], dir: &Path| {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    };
+    let git_out = |args: &[&str], dir: &Path| {
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?} failed: {out:?}");
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+
+    // A commit that will be the parent's own candidate-state base, on a
+    // throwaway branch never merged into the repo's own default branch —
+    // so deleting that ONE branch, expiring reflogs, and running real gc
+    // orphans exactly this commit while leaving the repo otherwise intact.
+    let default_branch = git_out(&["branch", "--show-current"], repo.path());
+    git(&["checkout", "-q", "-b", "o7/prunable-base"], repo.path());
+    std::fs::write(repo.path().join("prunable.txt"), "will be pruned\n").unwrap();
+    // Scoped `add`, never `-A`: this branch must never accidentally stage
+    // (and later, on checkout back to the default branch, delete) the
+    // task file already sitting untracked in the working directory.
+    git(&["add", "prunable.txt"], repo.path());
+    git(&["commit", "-q", "-m", "prunable base"], repo.path());
+    let prunable_base = git_out(&["rev-parse", "HEAD"], repo.path());
+    git(&["checkout", "-q", &default_branch], repo.path());
+
+    claude.set_actions(1, "echo from-run-a >> a.txt\n");
+    let run_child = Command::new(env!("CARGO_BIN_EXE_o7"))
+        .arg("run")
+        .arg("--repo")
+        .arg(repo.path())
+        .arg("--task")
+        .arg(&task_file)
+        .arg("--base")
+        .arg(&prunable_base)
+        .arg("--runs-dir")
+        .arg(&runs_dir)
+        .arg("--worktree-root")
+        .arg(&worktree_root)
+        .arg("--max-turns")
+        .arg("1")
+        .arg("--ledger")
+        .arg(&ledger_path)
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                claude.path().display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        )
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn the real o7 binary");
+    let run_a_output = run_child.wait_with_output().unwrap();
+    assert!(
+        run_a_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&run_a_output.stdout),
+        String::from_utf8_lossy(&run_a_output.stderr)
+    );
+    assert_eq!(claude.invocation_count(), 1);
+
+    let (mut o7d_child, addr) = spawn_o7d_with_exec_and_redrive_ms(
+        &ledger_path,
+        repo.path(),
+        &worktree_root,
+        &runs_dir,
+        claude.path(),
+        Some(3_600_000),
+    );
+    wait_until_healthy(addr);
+    let (status, page) = get(addr, "/api/v1/runs");
+    assert_eq!(status, 200);
+    let run_a_id = page["items"][0]["run_id"].as_str().unwrap().to_owned();
+    let conversation_id = page["items"][0]["conversation_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let run_a_dir = run_dir(&runs_dir, &target, &run_a_id);
+    let receipt_a = read_candidate_receipt(&run_a_dir);
+    assert_eq!(receipt_a["base_commit"], prunable_base);
+
+    // Now genuinely prune the base commit: delete the retaining branch,
+    // expire every reflog, run real gc.
+    git(&["branch", "-D", "o7/prunable-base"], repo.path());
+    // `worktree::add` itself creates a retaining branch `o7/<run_id>` at
+    // `--base` for every run's own worktree — it survives ordinary
+    // worktree teardown (`git worktree remove` never deletes the branch
+    // it was created with). THIS is the actual "retaining o7/* branch"
+    // the fresh Codex finding names; it must be deleted too, or the base
+    // commit stays reachable through it regardless of the scaffold branch
+    // above.
+    git(&["branch", "-D", &format!("o7/{run_a_id}")], repo.path());
+    git(&["reflog", "expire", "--expire=now", "--all"], repo.path());
+    git(&["gc", "--prune=now"], repo.path());
+    let cat_file = Command::new("git")
+        .args(["cat-file", "-e", &format!("{prunable_base}^{{commit}}")])
+        .current_dir(repo.path())
+        .status()
+        .unwrap();
+    assert!(
+        !cat_file.success(),
+        "the base commit must be genuinely unreachable after real gc/prune"
+    );
+
+    claude.set_actions(2, "echo from-command-b >> b.txt\n");
+    // Post-fix: the STRICT helper posts a command against this exact
+    // parent and asserts the fixed-admission outcome specifically — `409
+    // COMMAND_PARENT_CANDIDATE_UNAVAILABLE` BEFORE any command row exists,
+    // the provider never invoked again, zero command rows created for
+    // that request. Calling it TWICE, with the SAME idempotency key both
+    // times, proves the rejection is deterministic — a repeated identical
+    // request reproduces the identical zero-mutation 409, never a
+    // different outcome (there is no accepted command row for this key to
+    // replay against; each attempt independently re-evaluates admission
+    // and independently fails the same way).
+    assert_admission_preflight_rejects_with_zero_mutations(
+        addr,
+        &conversation_id,
+        &run_a_id,
+        &claude,
+        &ledger_path,
+        "continue against a pruned base",
+        "key-pruned-base",
+    );
+    assert_admission_preflight_rejects_with_zero_mutations(
+        addr,
+        &conversation_id,
+        &run_a_id,
+        &claude,
+        &ledger_path,
+        "continue against a pruned base",
+        "key-pruned-base",
+    );
+
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
+    drop(repo);
+}
+
+/// Q-Deck A0 corrective round 8 (fresh exact-head Codex P1, required test
+/// matrix item): a syntactically valid 40-hex commit OID that never
+/// existed as a real object in this repository — distinct from a
+/// genuinely pruned commit (`pruned_base_commit_is_rejected_before_admission`
+/// above), which DID exist and was made unreachable. Both the parent's own
+/// declared contract obligation (`RunStarted.contract.candidate_state.base_commit`)
+/// and its captured receipt (`candidate_state_receipt.json`'s own
+/// `base_commit`) are rewritten to the SAME fabricated OID and the full
+/// event digest chain is recomputed, so the record stays fully
+/// chain-valid and internally self-consistent (receipt agrees with its
+/// own contract) — isolating this test to the ONE new check this round
+/// adds: whether `base_commit` resolves as a real commit in this server's
+/// configured repository at all.
+#[test]
+fn a_well_formed_but_never_existed_base_commit_is_rejected_at_admission() {
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let claude = ActionClaude::new();
+    let (
+        repo,
+        _work,
+        ledger_path,
+        runs_dir,
+        _worktree_root,
+        mut o7d_child,
+        addr,
+        run_a_id,
+        conversation_id,
+        target,
+    ) = setup_real_parent(&claude);
+
+    let fake_commit = "d".repeat(40);
+    let dir = run_dir(&runs_dir, &target, &run_a_id);
+
+    let receipt_path = dir.join("candidate_state_receipt.json");
+    let mut receipt: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&receipt_path).unwrap()).unwrap();
+    receipt["base_commit"] = serde_json::Value::String(fake_commit.clone());
+    let new_receipt_bytes = serde_json::to_string(&receipt).unwrap().into_bytes();
+    std::fs::write(&receipt_path, &new_receipt_bytes).unwrap();
+
+    let text = std::fs::read_to_string(dir.join("events.jsonl")).unwrap();
+    let mut events: Vec<o7_run::RunEvent> = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let mut touched_contract = false;
+    let mut touched_receipt = false;
+    for e in &mut events {
+        match &mut e.kind {
+            o7_run::RunEventKind::RunStarted { contract, .. } => {
+                if let Some(obligation) = contract.candidate_state.as_mut() {
+                    obligation.base_commit = fake_commit.clone();
+                    touched_contract = true;
+                }
+            }
+            o7_run::RunEventKind::CandidateStateCaptured { receipt } => {
+                receipt.digest = o7_run::event::Digest256::of_bytes(&new_receipt_bytes);
+                touched_receipt = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        touched_contract && touched_receipt,
+        "this run must have both a candidate_state contract obligation and a captured receipt \
+         to rewrite"
+    );
+    let mut prev = o7_run::event::Digest256::genesis();
+    for (i, e) in events.iter_mut().enumerate() {
+        e.sequence = i as u64;
+        e.previous_event_digest = prev.clone();
+        e.event_digest = e.compute_digest();
+        prev = e.event_digest.clone();
+    }
+    let rewritten: String = events
+        .iter()
+        .map(|e| serde_json::to_string(e).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(dir.join("events.jsonl"), rewritten + "\n").unwrap();
+
+    assert_admission_preflight_rejects_with_zero_mutations(
+        addr,
+        &conversation_id,
+        &run_a_id,
+        &claude,
+        &ledger_path,
+        "continue against a never-existed base",
+        "key-never-existed-base",
+    );
+    let _ = o7d_child.kill();
+    let _ = o7d_child.wait();
     drop(repo);
 }
