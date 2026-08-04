@@ -1,0 +1,15 @@
+schema: o7.b1.task/v0
+task_id: case-0001-continue-b1-v0
+fixture_id: case-0001
+# This task is frozen and digest-bound BEFORE any projection runs. run_case.py
+# records its canonical digest in context.meta.json and report.json.
+statement: >-
+  Continue B1 from the fixed captured state toward the next allowed experiment,
+  without raising B1's authority and without changing the A-series.
+constraints:
+  - B1 stays READ-ONLY and NON-AUTHORITATIVE (obs-b1-readonly-boundary).
+  - Do not drive or alter A-series transitions (obs-b1-independent-a-series).
+  - Do not promote the source set to SOURCE_SET_COMPLETE (obs-source-set-status-interim,
+    obs-source-set-not-complete-conditions).
+  - Make no generalization claim from this golden fixture (obs-holdout-no-generalization).
+cutoff: end of claude-code-session-c-snapshot-2

@@ -39,9 +39,37 @@ schema/      state-observables schema v0 and event/assessment rules
              (built only AFTER source capture; the interim source set is
              captured — see fixtures/case-0001/manifest.yaml, promotion
              to SOURCE_SET_COMPLETE still pending)
+tools/       the deterministic development vertical (extractors, projector,
+             evaluator, run_case.py) — not part of the cargo workspace
 fixtures/    golden development fixtures; case-0001 is the first
+results/     actual measured results per fixture (report.json/report.md)
 holdout/     evaluation cases NOT used while designing the schema
 ```
+
+## Reproducible development vertical (case-0001 v0)
+
+One command runs the whole vertical (verified RAW → derived transcripts →
+schema v0 → gold state → task-conditioned projection → deterministic 3-arm
+evaluation → measured report):
+
+```sh
+python3 research/b1-context/tools/run_case.py \
+  --fixture case-0001 \
+  --data-root "$HOME/.local/share/o7-research" \
+  --out /tmp/o7-b1-case-0001
+```
+
+Offline, no secrets, read-only over inputs, fail-closed, byte-identical across
+runs. See `tools/README.md` for details and `results/case-0001-v0/report.md` for
+the current result.
+
+**Honest status:** the latest run is `development_result: PASS` on this single
+golden fixture — the pipeline runs end-to-end and detects the negative control's
+known state loss. That is **not** proof of generalization. `generalization:
+NOT_EVALUATED`, `source_set_complete: false`, `holdout_evaluated: false`,
+`authoritative_for_a_series: false`. A golden fixture whose questions were shaped
+on its own material can debug the representation; it cannot show the pipeline
+works on new cases.
 
 ## Storage policy
 
