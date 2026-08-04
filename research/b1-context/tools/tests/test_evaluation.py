@@ -1,8 +1,8 @@
 """Evaluation-engine tests on SYNTHETIC state (no private RAW).
 
-They pin the core measured behaviours: the projection carries required
-observations with provenance; the negative control *contradicts* (not merely
-omits) a captured fact; and the scoring is deterministic.
+They pin the core measured behaviours after the corrective round: honest metric
+names, a real provenance ratio, negative-control claims split into independently
+supported fields, and deterministic scoring.
 """
 import unittest
 
@@ -10,91 +10,80 @@ from o7b1 import evaluate as ev
 from o7b1 import projector as pj
 from o7b1.canonical import canonical_bytes
 
-# A minimal synthetic gold state: one captured truth, one superseded agent_claim
-# belief that contradicts it, plus a couple of repo-record observations.
-GOLD = {
-    "schema": "o7.b1.state-observables/v0",
-    "fixture_id": "syn",
-    "cutoff": {"identity": "syn-cutoff"},
-    "observations": [
-        {"observation_id": "obs-truth-topology", "kind": "evidence",
-         "statement": "X and Y are one conversation.", "authority": "platform_capture",
-         "status": "current",
-         "provenance": [{"source_id": "cap-xy", "digest": "sha256:" + "a" * 64}]},
-        {"observation_id": "obs-goal", "kind": "goal", "statement": "the goal.",
-         "authority": "controller_or_repo_record", "status": "current",
-         "provenance": [{"source_id": "readme"}]},
-        {"observation_id": "obs-claim-separate", "kind": "evidence",
-         "statement": "belief: X and Y are separate.", "authority": "agent_claim",
-         "status": "superseded", "superseded_by": "obs-truth-topology",
-         "provenance": [{"source_id": "nc-recon", "digest": "sha256:" + "b" * 64}]},
-    ],
-    "relations": [
-        {"kind": "supersedes", "from": "obs-truth-topology", "to": "obs-claim-separate"},
-        {"kind": "contradicts", "from": "obs-claim-separate", "to": "obs-truth-topology"},
-    ],
-}
-QUESTIONS = {"questions": [
-    {"id": "q-topology", "required_observation_ids": ["obs-truth-topology"]},
-    {"id": "q-goal", "required_observation_ids": ["obs-goal"]},
-]}
-SOURCE_SELECTORS = {"sessions": [
-    {"session_id": "sess-xy", "raw_source": "cap-xy"},
-]}
-MANIFEST = {
-    "raw_sources": [
-        {"id": "cap-xy", "digest": "sha256:" + "a" * 64, "byte_length": 10,
-         "native_conversation_id": "native-xy"},
-        {"id": "capture-main-dialog", "digest": "sha256:" + "c" * 64, "byte_length": 10,
-         "native_conversation_id": "native-bd"},
-        {"id": "capture-compaction", "digest": "sha256:" + "d" * 64, "byte_length": 10,
-         "native_conversation_id": "native-e"},
-    ],
-    "negative_control": [
-        {"id": "nc-recon", "digest": "sha256:" + "b" * 64, "byte_length": 20,
-         "known_divergence_already_observed": "assumed X and Y separate; unaware of E"}],
-}
-# NC object that does NOT reference the captured native ids -> divergence detected.
-NC_OBJ = {"events": [{"seq": 0, "role": "assistant", "gist": "reconstruction"}],
-          "subject": "session recall without native ids"}
+# `unittest discover -s tests` makes this directory the top-level package
+# root, so the shared fixtures are imported as a plain sibling module.
+import synth
+
+GOLD = synth.GOLD
+QUESTIONS = synth.QUESTIONS_B
+SOURCE_SELECTORS = synth.SOURCE_SELECTORS
+MANIFEST = synth.MANIFEST
+NC_OBJ = synth.NC_OBJ
 
 
 class EvaluationTest(unittest.TestCase):
-    def _run(self):
-        sel = pj.select(GOLD, byte_budget=20000, record_budget=32)
-        ctx_bytes = 1234
+    def _run(self, nc=NC_OBJ, questions=QUESTIONS):
+        sel = pj.select(GOLD, synth.task_b(), byte_budget=20000, record_budget=32)
         derived_summary = {"total_bytes": 99999, "total_records": 50}
-        return ev.evaluate(GOLD, QUESTIONS, SOURCE_SELECTORS, MANIFEST, NC_OBJ,
-                           derived_summary, sel, ctx_bytes), sel
+        return ev.evaluate(GOLD, questions, SOURCE_SELECTORS, MANIFEST, nc,
+                           derived_summary, sel, 1234, synth.BUDGET), sel
 
-    def test_projection_full_recall_and_coverage(self):
+    def test_projection_structural_coverage(self):
         result, _ = self._run()
         C = result["arms"]["projection"]
-        self.assertEqual(C["required_observation_recall"], 1.0)
-        self.assertEqual(C["question_support_coverage"], 1.0)
-        self.assertEqual(C["contradiction_count"], 0)
-        self.assertEqual(C["provenance_coverage"], 1.0)
+        self.assertEqual(C["compiled_observation_coverage"], 1.0)
+        self.assertEqual(C["structural_question_support"], 1.0)
+        self.assertTrue(C["has_carried_provenance"])
+        self.assertEqual(C["presented_provenance_ratio"], 1.0)
 
-    def test_negative_control_contradicts_not_just_omits(self):
+    def test_old_misleading_metric_names_are_gone(self):
+        """Renamed in the corrective round; nothing may reintroduce them."""
+        result, _ = self._run()
+        for arm in result["arms"].values():
+            self.assertNotIn("required_observation_recall", arm)
+            self.assertNotIn("question_support_coverage", arm)
+            self.assertNotIn("provenance_coverage", arm)
+
+    def test_metric_semantics_are_published_with_the_numbers(self):
+        result, _ = self._run()
+        sem = result["metric_semantics"]
+        self.assertIn("NOT semantic recall", sem["compiled_observation_coverage"])
+        self.assertIn("NOT evidence the question can be answered",
+                      sem["structural_question_support"])
+
+    def test_projection_validity_block_present_and_valid(self):
+        result, _ = self._run()
+        C = result["arms"]["projection"]
+        self.assertIsNotNone(C["projection_validity"])
+        self.assertTrue(C["projection_validity"]["valid"])
+
+    def test_families_are_null_where_not_applicable(self):
+        """No arm gets a flattering zero from a family that does not apply."""
+        result, _ = self._run()
+        A = result["arms"]["full_derived"]
+        B = result["arms"]["negative_control"]
+        C = result["arms"]["projection"]
+        self.assertIsNone(A["projection_validity"])
+        self.assertIsNone(A["negative_control_diagnostics"])
+        self.assertIsNone(A["presented_provenance_ratio"])
+        self.assertIsNone(B["projection_validity"])
+        self.assertIsNotNone(B["negative_control_diagnostics"])
+        self.assertIsNone(C["negative_control_diagnostics"])
+
+    def test_negative_control_diagnostics(self):
         result, _ = self._run()
         B = result["arms"]["negative_control"]
-        self.assertEqual(B["required_observation_recall"], 0.0)
-        self.assertEqual(B["contradiction_count"], 1)
-        self.assertEqual(B["supersession_error_count"], 1)
-        self.assertIn("obs-truth-topology", B["contradicted_required_observation_ids"])
+        d = B["negative_control_diagnostics"]
+        self.assertEqual(B["compiled_observation_coverage"], 0.0)
+        self.assertEqual(d["stale_belief_count"], 1)
+        self.assertIn("obs-claim-separate", d["stale_belief_ids"])
+        self.assertIn("obs-truth-topology", d["required_superseders_missing"])
 
     def test_full_derived_carries_capture_backed_obs(self):
         result, _ = self._run()
         A = result["arms"]["full_derived"]
-        # obs-truth-topology is provenance-satisfiable from the transcript -> carried
         self.assertIn("obs-truth-topology", A["carried_required_observation_ids"])
-        # obs-goal cites a repo record not in the transcript -> not carried
-        self.assertNotIn("obs-goal", A["carried_required_observation_ids"])
-
-    def test_divergence_detection_from_bytes(self):
-        div = ev.detect_nc_divergences(GOLD, NC_OBJ, MANIFEST)
-        # NC does not reference native-xy (the corrective capture) -> belief asserted
-        self.assertTrue(div["obs-claim-separate"]["asserted_by_negative_control"])
+        self.assertNotIn("obs-beta-status", A["carried_required_observation_ids"])
 
     def test_deterministic(self):
         r1, _ = self._run()
@@ -102,15 +91,50 @@ class EvaluationTest(unittest.TestCase):
         self.assertEqual(canonical_bytes(r1), canonical_bytes(r2))
 
 
+class NegativeControlSplitTest(unittest.TestCase):
+    """Corrective round §7: three propositions, three fields, no conflation."""
+
+    def test_absent_corrective_reference_is_reported_separately(self):
+        div = ev.detect_nc_divergences(GOLD, NC_OBJ, MANIFEST)["obs-claim-separate"]
+        self.assertTrue(div["corrective_evidence_absent_from_negative_control"])
+        self.assertTrue(div["fixture_expected_divergence"])
+        self.assertIn("does not by itself prove", div["establishes"])
+
+    def test_contrary_claim_detected_when_marker_present(self):
+        div = ev.detect_nc_divergences(GOLD, NC_OBJ, MANIFEST)["obs-claim-separate"]
+        self.assertIs(div["contrary_claim_detected"], True)
+        self.assertIn("separate conversation", div["contrary_markers_found"])
+
+    def test_contrary_claim_not_evaluated_without_markers(self):
+        gold = synth.gold()
+        for o in gold["observations"]:
+            if o["observation_id"] == "obs-claim-separate":
+                o.pop("structured_value", None)
+        div = ev.detect_nc_divergences(gold, NC_OBJ, MANIFEST)["obs-claim-separate"]
+        self.assertIsNone(div["contrary_claim_detected"])
+
+    def test_absence_of_marker_does_not_imply_contrary_claim(self):
+        """The NC lacks the corrective id AND lacks the contrary phrasing: the
+        first is true, the second must be False — not silently inherited."""
+        nc = {"events": [{"seq": 0, "gist": "no opinion on topology"}]}
+        div = ev.detect_nc_divergences(GOLD, nc, MANIFEST)["obs-claim-separate"]
+        self.assertTrue(div["corrective_evidence_absent_from_negative_control"])
+        self.assertIs(div["contrary_claim_detected"], False)
+
+    def test_corrected_negative_control_is_not_flagged_stale(self):
+        div = ev.detect_nc_divergences(
+            GOLD, synth.NC_OBJ_CORRECTED, MANIFEST)["obs-claim-separate"]
+        self.assertFalse(div["corrective_evidence_absent_from_negative_control"])
+
+
 class IntegrationTest(unittest.TestCase):
-    """Full pipeline — runs only if the local CAS with the private blobs exists."""
+    """Full CAS-backed pipeline — runs only if the owner's local CAS exists."""
 
     def test_full_run_if_cas_available(self):
         import os
         import tempfile
         data_root = os.path.expanduser("~/.local/share/o7-research")
         cas_root = os.path.join(data_root, "cas")
-        # requires the owner's private RAW blobs; skip cleanly if absent
         probe = os.path.join(cas_root, "sha256", "6a",
                              "86185402fd69d2fe4aad425a257b06c9bcfc4b28decc0b690d9b314f4066b9")
         if not os.path.isfile(probe):
@@ -118,7 +142,10 @@ class IntegrationTest(unittest.TestCase):
         import run_case
         with tempfile.TemporaryDirectory() as td:
             result = run_case.run("case-0001", data_root, td)
-            self.assertEqual(result["report"]["status"]["development_result"], "PASS")
+            st = result["report"]["status"]
+            self.assertEqual(st["development_result"], "PASS")
+            self.assertEqual(st["task_conditioned_projection"], "IMPLEMENTED")
+            self.assertTrue(result["report"]["task_dependence"]["projections_differ"])
 
 
 if __name__ == "__main__":
