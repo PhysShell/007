@@ -419,6 +419,27 @@ pub(crate) fn parent_candidate_state_usable(
                 .to_owned(),
         );
     }
+    // Q-Deck A0 corrective round 8 (fresh exact-head Codex P1,
+    // `#discussion_r3710144132`): `verify_prefix` above proves the
+    // receipt's OWN internal consistency, never that `base_commit` is
+    // still a real, resolvable object in `exec.repo` right now. A pruned
+    // base (its retaining branch deleted, reflog expired, real `git gc`
+    // run — reproduced live) previously still passed this whole function,
+    // and `create_command` durably attached a child before the resulting
+    // `o7 continue` crashed inside `worktree::add`'s own `git worktree
+    // add`, leaving a stuck, never-dispatched, unrecoverable-by-redrive
+    // child behind. Checked here, using the SAME hardened primitive
+    // `main.rs`'s own materialization path already calls
+    // (`worktree::verify_commit_exists`, `git cat-file -e`) — never a
+    // second, lighter reimplementation — and inside this function's own
+    // existing bounded `spawn_blocking` admission path, so it costs
+    // nothing beyond what full replay already spends there.
+    o7::worktree::verify_commit_exists(&exec.repo, &obligation.base_commit).map_err(|e| {
+        format!(
+            "the parent's candidate-state base commit no longer resolves in this server's \
+             configured repository: {e}"
+        )
+    })?;
     // `verify_prefix` (above) already ran full candidate semantic
     // verification on `state.candidate_state` as part of its own authoritative
     // pass — its mere presence here, post-success, IS the proof it is usable.
