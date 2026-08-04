@@ -39,9 +39,66 @@ schema/      state-observables schema v0 and event/assessment rules
              (built only AFTER source capture; the interim source set is
              captured — see fixtures/case-0001/manifest.yaml, promotion
              to SOURCE_SET_COMPLETE still pending)
+tools/       the deterministic development vertical (extractors, projector,
+             evaluator, run_case.py) — not part of the cargo workspace
 fixtures/    golden development fixtures; case-0001 is the first
+results/     actual measured results per fixture (per-task projections,
+             projection-comparison.json, report.json/report.md)
 holdout/     evaluation cases NOT used while designing the schema
 ```
+
+## Reproducible development vertical (case-0001 v0)
+
+Two commands. The **projection** half needs no CAS, no secrets and no network —
+anyone can reproduce the task-dependence result from a checkout:
+
+```sh
+python3 research/b1-context/tools/project_case.py \
+  --fixture case-0001 --out research/b1-context/results/case-0001-v0
+```
+
+The full vertical (verified RAW → derived transcripts → schema v0 → gold state →
+task registry + versioned selector contract → task-dependent projection → honest
+structural 3-arm evaluation → measured report) additionally needs the owner's
+local CAS:
+
+```sh
+python3 research/b1-context/tools/run_case.py \
+  --fixture case-0001 \
+  --data-root "$HOME/.local/share/o7-research" \
+  --out /tmp/o7-b1-case-0001
+```
+
+Offline where noted, no secrets, read-only over inputs, fail-closed,
+byte-identical across runs. Both tools read one task registry
+(`fixtures/case-0001/tasks-v0.yaml`) and drive projection through the same
+`o7b1.pipeline`. See `tools/README.md` for details.
+
+**Honest status (CAS-backed report v1 frozen):**
+
+```text
+deterministic_compilation_pipeline: PASS
+task_conditioned_projection: IMPLEMENTED
+development_result: PASS
+cas_backed_report: PRESENT
+schema_frozen: false
+generalization: NOT_EVALUATED
+source_set_complete: false
+holdout_evaluated: false
+authoritative_for_a_series: false
+```
+
+The current result is `results/case-0001-v0/report.md` (report `o7.b1.report/v1`,
+expectation `fixtures/case-0001/expected-report-v1.json`, byte-identical to
+`report.json`). Two independent runs reproduce every canonical output
+byte-for-byte. A `PASS` here means only that the case-0001 development vertical v1
+is complete and reproducible — the pipeline runs end-to-end, both tasks get
+genuinely different task-dependent projections, and the negative control's known
+state loss is detected. It does **not** mean B1 is proven, the selector
+generalizes, the schema is universal, context preservation is solved, or anything
+is production ready. A golden fixture whose questions were shaped on its own
+material can debug the representation; it cannot show the pipeline works on new
+cases.
 
 ## Storage policy
 

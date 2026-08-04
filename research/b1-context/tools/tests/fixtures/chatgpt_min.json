@@ -1,0 +1,36 @@
+{
+  "conversation_id": "conv-synthetic-0001",
+  "title": "synthetic chatgpt fixture",
+  "current_node": "n5",
+  "mapping": {
+    "root": {"id": "root", "parent": null, "children": ["n1"], "message": null},
+    "n1": {"id": "n1", "parent": "root", "children": ["n2"], "message": {
+      "id": "m1", "author": {"role": "system"}, "recipient": "all",
+      "content": {"content_type": "text", "parts": ["you are a helpful assistant"]},
+      "metadata": {}, "create_time": 1.0}},
+    "n2": {"id": "n2", "parent": "n1", "children": ["n3"], "message": {
+      "id": "m2", "author": {"role": "user"}, "recipient": "all",
+      "content": {"content_type": "text", "parts": ["hello, design question"]},
+      "metadata": {}, "create_time": 2.0}},
+    "n3": {"id": "n3", "parent": "n2", "children": ["n4"], "message": {
+      "id": "m3", "author": {"role": "assistant"}, "recipient": "all",
+      "content": {"content_type": "thoughts", "parts": ["secret chain of thought"]},
+      "metadata": {}, "create_time": 3.0}},
+    "n4": {"id": "n4", "parent": "n3", "children": ["n5", "n6"], "message": {
+      "id": "m4", "author": {"role": "assistant"}, "recipient": "api_tool.call_tool",
+      "content": {"content_type": "code", "parts": ["tool_call(...)"]},
+      "metadata": {}, "create_time": 4.0}},
+    "n5": {"id": "n5", "parent": "n4", "children": [], "message": {
+      "id": "m5", "author": {"role": "assistant"}, "recipient": "all",
+      "content": {"content_type": "multimodal_text", "parts": ["here is the answer", {"content_type": "image_asset_pointer"}]},
+      "metadata": {}, "create_time": 5.0}},
+    "n6": {"id": "n6", "parent": "n4", "children": [], "message": {
+      "id": "m6", "author": {"role": "assistant"}, "recipient": "all",
+      "content": {"content_type": "text", "parts": ["OFF-PATH edit branch, must not appear"]},
+      "metadata": {}, "create_time": 6.0}},
+    "nH": {"id": "nH", "parent": "n2", "children": [], "message": {
+      "id": "mH", "author": {"role": "assistant"}, "recipient": "all",
+      "content": {"content_type": "text", "parts": ["hidden from conversation"]},
+      "metadata": {"is_visually_hidden_from_conversation": true}, "create_time": 2.5}}
+  }
+}

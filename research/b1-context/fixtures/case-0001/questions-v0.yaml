@@ -1,0 +1,32 @@
+schema: o7.b1.questions/v0
+fixture_id: case-0001
+task_id: case-0001-continue-b1-v0
+# Questions for TASK A, frozen and digest-bound BEFORE projection/evaluation.
+# Each question names the observation IDs a faithful answer must be supported by.
+# Scoped to what Task A's selector actually admits: a continuation task is not
+# asked to reconstruct capture topology, and is not credited for it either.
+# (case-0001 is a development fixture: questions written against its own material
+# debug the representation; per holdout/README.md they cannot substantiate
+# generalization.)
+questions:
+  - id: q1-hypothesis
+    text: What is the exact B1 hypothesis?
+    required_observation_ids: [obs-b1-hypothesis]
+  - id: q2-authority-boundaries
+    text: What are B1's authority boundaries?
+    required_observation_ids: [obs-b1-readonly-boundary, obs-b1-independent-a-series]
+  - id: q3-source-classes
+    text: Which source classes are authoritative and which are advisory?
+    required_observation_ids: [obs-source-classes-authority, obs-negative-control-advisory]
+  - id: q4-completeness-conditions
+    text: What must be true before the source set may be called complete?
+    required_observation_ids: [obs-source-set-not-complete-conditions]
+  - id: q5-next-step
+    text: What is the next allowed step?
+    required_observation_ids: [obs-next-step-extractors-schema]
+  - id: q6-forbidden
+    text: Which actions or claims are forbidden right now?
+    required_observation_ids: [obs-b1-readonly-boundary, obs-holdout-no-generalization]
+  - id: q7-pending-vs-blocking
+    text: Which pending items actually block generalization but not the development run?
+    required_observation_ids: [obs-account-export-pending, obs-holdout-no-generalization]
