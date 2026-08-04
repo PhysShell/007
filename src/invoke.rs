@@ -371,13 +371,30 @@ fn run_cli(a: &InvokeArgs, engine: Engine) -> Result<()> {
 /// artifact/meta contract as the CLI engines. Contract: `docs/o7-invoke.md`,
 /// "Arli AI backend".
 fn run_arliai(a: &InvokeArgs) -> Result<()> {
+    // Fail-closed wire-logging preflight, before ANY other step (run dir,
+    // artifacts, connection). ureq logs through the `log` facade and its
+    // wire-level TRACE is unredacted; "o7 installs no logger" is a fact
+    // about today's binary, not a boundary. If the global max level admits
+    // TRACE — because a logger was added to o7 later, or an embedder of
+    // this crate installed one — the run degrades to a refusal, never to a
+    // Bearer token on a log sink (docs/o7-invoke.md, key handling).
+    if log::max_level() >= log::LevelFilter::Trace {
+        anyhow::bail!(
+            "refusing --engine arliai: the global `log` max level admits TRACE, \
+             and HTTP wire tracing could expose the Authorization header -- \
+             lower the log level (or remove the logger) to use this backend"
+        );
+    }
+
     // Pre-network configuration refusals — plain errors, not run outcomes:
     // nothing is written, no connection is opened (same class as an unknown
     // --capability-profile).
     let Some(model) = a.model.as_deref() else {
         anyhow::bail!(
-            "--engine arliai requires --model: the API has no server-side default \
-             and o7 pins none (consistent with the CLI engines)"
+            "--engine arliai requires --model: Arli AI would otherwise fall back \
+             to a provider-selected 'default served model', and 007 refuses that \
+             implicit model identity -- the request must carry the explicit \
+             requested model (o7 itself pins none, consistent with the CLI engines)"
         );
     };
     // The key lives in this one local binding on its way to the
@@ -426,6 +443,10 @@ fn run_arliai(a: &InvokeArgs) -> Result<()> {
         ArliOutcome::Redirect { detail } | ArliOutcome::Transport { detail } => {
             (&[], format!("{detail}\n"))
         }
+        ArliOutcome::TooLarge { limit } => (
+            &[],
+            format!("arliai response body exceeded the {limit}-byte bound\n"),
+        ),
     };
     std::fs::write(&stdout_path, raw_body)?;
     std::fs::write(&stderr_path, stderr_text)?;
@@ -492,6 +513,11 @@ fn classify_arli(
         ArliOutcome::TimedOut => (InvokeStatus::BlockedTimeout, None, Some("timeout")),
         ArliOutcome::Redirect { .. } => (InvokeStatus::BlockedProvider, None, Some("redirect")),
         ArliOutcome::Transport { .. } => (InvokeStatus::BlockedProvider, None, Some("transport")),
+        ArliOutcome::TooLarge { .. } => (
+            InvokeStatus::BlockedProvider,
+            None,
+            Some("response_too_large"),
+        ),
         ArliOutcome::Http { status, body } => match *status {
             200..=299 => match invoke_arliai::extract_content(body) {
                 // Reuses the CLI paths' Pass/FailSchema split verbatim: a
@@ -1480,7 +1506,7 @@ mod tests {
             );
         }
 
-        // Transport / timeout.
+        // Transport / timeout / over-limit body.
         let (s, _, k) = classify_arli(
             &ArliOutcome::Transport {
                 detail: "connection refused".into(),
@@ -1490,6 +1516,75 @@ mod tests {
         assert_eq!((s, k), (InvokeStatus::BlockedProvider, Some("transport")));
         let (s, _, k) = classify_arli(&ArliOutcome::TimedOut, &validator);
         assert_eq!((s, k), (InvokeStatus::BlockedTimeout, Some("timeout")));
+        let (s, _, k) = classify_arli(&ArliOutcome::TooLarge { limit: 64 }, &validator);
+        assert_eq!(
+            (s, k),
+            (InvokeStatus::BlockedProvider, Some("response_too_large"))
+        );
+    }
+
+    /// Live smoke against the real Arli endpoint, driven through the
+    /// PRODUCTION classifier: it must prove the schema-bound structured
+    /// output property (`PASS` + the exact normalized value), not merely
+    /// that the server can emit braces. Ignored by default; both env vars
+    /// are REQUIRED — no fallback model id, because a stale hardcoded
+    /// model would make the smoke test the author's memory, not the
+    /// protocol. Run:
+    /// `ARLIAI_API_KEY=... ARLIAI_SMOKE_MODEL=<exact id> \
+    ///    cargo test --lib live_smoke_arliai -- --ignored --nocapture`
+    /// On success it prints the evidence line (model id, HTTP status,
+    /// SHA-256 of the raw response body) — never the key, never the body.
+    #[test]
+    #[ignore = "live network + ARLIAI_API_KEY + ARLIAI_SMOKE_MODEL required"]
+    fn live_smoke_arliai() {
+        let key = std::env::var("ARLIAI_API_KEY").unwrap_or_default();
+        assert!(
+            !key.trim().is_empty(),
+            "live smoke needs ARLIAI_API_KEY set"
+        );
+        let model = std::env::var("ARLIAI_SMOKE_MODEL").unwrap_or_default();
+        assert!(
+            !model.trim().is_empty(),
+            "live smoke needs ARLIAI_SMOKE_MODEL set to an exact, current model id \
+             (deliberately no fallback)"
+        );
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": { "ok": { "type": "boolean" } },
+            "required": ["ok"],
+            "additionalProperties": false
+        });
+        let validator = jsonschema::validator_for(&schema);
+        assert!(validator.is_ok(), "smoke schema failed to build");
+        let Ok(validator) = validator else { return };
+
+        let outcome = invoke_arliai::call(
+            "Return exactly this JSON object and nothing else: {\"ok\": true}",
+            &strip_dollar_schema(&schema),
+            &model,
+            &key,
+            Duration::from_secs(90),
+        );
+        if let ArliOutcome::Http { status, body } = &outcome {
+            println!(
+                "[live-smoke] model={model} http={status} raw_sha256={}",
+                sha256_hex_bytes(body)
+            );
+        }
+
+        let (status, structured, error_kind) = classify_arli(&outcome, &validator);
+        assert_eq!(
+            status,
+            InvokeStatus::Pass,
+            "live classification was {} (error_kind: {error_kind:?}), not PASS",
+            status.label()
+        );
+        assert_eq!(
+            structured,
+            Some(serde_json::json!({"ok": true})),
+            "normalized result must be exactly {{\"ok\": true}}"
+        );
+        println!("[live-smoke] classification=PASS normalized={{\"ok\":true}}");
     }
 
     #[test]

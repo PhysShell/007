@@ -1009,6 +1009,7 @@ dependencies = [
  "anyhow",
  "clap",
  "jsonschema",
+ "log",
  "nix",
  "o7-ledger",
  "o7-run",

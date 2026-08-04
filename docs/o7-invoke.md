@@ -125,8 +125,15 @@ same as an unknown `--capability-profile`):
 
 - `ARLIAI_API_KEY` unset or empty — there is no interactive login state to
   fall back to, unlike the CLI backends;
-- `--model` absent — the API has no server-side default model; `o7` pins
-  none (consistent with the CLI backends, which also pin none).
+- `--model` absent — Arli AI documents `model` as optional, falling back
+  to a provider-selected "default served model". 007 refuses that
+  implicit identity: a call whose model the provider silently chose is
+  not attributable evidence, so the request must carry the explicit
+  requested model (`o7` itself still pins none, consistent with the CLI
+  backends);
+- a global `log` max level that admits TRACE — see the key-handling
+  boundary below; this is a fail-closed wire-logging preflight, checked
+  before the run dir, artifacts, or any connection.
 
 ### Request shape
 
@@ -136,7 +143,8 @@ same as an unknown `--capability-profile`):
   "messages": [{ "role": "user", "content": "<prompt-file text>" }],
   "response_format": { "type": "json_schema", "json_schema": { "schema": { } } },
   "tool_choice": "none",
-  "stream": false
+  "stream": false,
+  "include_reasoning": false
 }
 ```
 
@@ -146,6 +154,11 @@ same as an unknown `--capability-profile`):
   documented form, let the live fixture arbitrate).
 - The schema sent is the same `$schema`-meta-key-stripped copy the claude
   path sends (`strip_dollar_schema`) — one precedent, one behavior.
+- `include_reasoning: false`, explicitly — Arli documents it as
+  defaulting to true. Reasoning output is not normative evidence for this
+  primitive (the evidence is provider bytes + normalized result + local
+  validation), and leaving it on inflates latency, response size, and
+  `stdout.raw` for nothing this layer reads.
 - Server-side `response_format` enforcement is **best effort, advisory**:
   the local `jsonschema` re-validation (next section) is the only judge
   that counts, exactly as for both CLI backends.
@@ -157,6 +170,12 @@ whitespace trimming — no fence tolerance (with server-side constrained
 decoding requested, a fenced answer is a real anomaly worth failing loudly;
 `stdout.raw` keeps the evidence). The extracted value then goes through the
 same independent schema validation as every other engine.
+
+The response body is bounded by an **explicit** limit,
+`MAX_ARLIAI_RESPONSE_BYTES` (10 MiB): a body exceeding it is
+`BLOCKED_PROVIDER` (`error_kind: "response_too_large"`). The bound is part
+of this contract, not an inherited SDK default — a runtime boundary must
+not exist only as "the library happens to do that".
 
 Classification matrix (normative):
 
@@ -173,6 +192,7 @@ Classification matrix (normative):
 | 401 / 403 | `BLOCKED_AUTH` | `auth` |
 | 429 | `BLOCKED_USAGE` | `usage_limit` |
 | 5xx | `BLOCKED_PROVIDER` | `http_5xx` |
+| body exceeds `MAX_ARLIAI_RESPONSE_BYTES` | `BLOCKED_PROVIDER` | `response_too_large` |
 | any other status (e.g. 400, 404) | `FAIL_INVALID_OUTPUT` | `http_status` |
 | DNS / TLS / connection refused / reset | `BLOCKED_PROVIDER` | `transport` |
 | timeout (`--timeout-secs`) | `BLOCKED_TIMEOUT` | `timeout` |
@@ -217,11 +237,15 @@ process memory:
 - It is added to `strip_provider_api_keys`, so a `claude`/`codex`
   subprocess never inherits it either.
 - HTTP-client wire logging is the classic leak path for exactly this kind
-  of header (`ureq` logs via the `log` facade, and at TRACE that can
-  include request internals). The `o7` binary **initializes no logger** —
-  the `log` facade's records go nowhere by construction. That is part of
-  this contract: adding a logger to `o7` later requires re-visiting this
-  boundary first.
+  of header (`ureq` logs via the `log` facade, and its wire-level TRACE
+  is documented as unredacted). Today the `o7` binary initializes no
+  logger, so the facade's records go nowhere — but that is an ambient
+  fact about the current binary, not a boundary anyone enforces. The
+  enforced boundary is a **fail-closed preflight**: `run_arliai` refuses
+  to dispatch when the global `log` max level admits TRACE
+  (`log::max_level() >= Trace`), before the run dir, any artifact, or any
+  connection. A future logger in `o7` (or any embedder of this crate)
+  degrades that run to a refusal, never to a key on a log sink.
 
 ## Output re-validation
 
