@@ -552,6 +552,12 @@ pub(crate) fn candidate_projection(
 /// unbounded read is wrapped in an explicit wall-clock timeout so a
 /// regression fails the test loudly rather than hanging or exhausting this
 /// shared VPS's own memory.
+// Q-Deck A0 corrective round 8 (fresh CodeRabbit finding): every
+// `unwrap`/`expect`/index in this module operates ONLY on bytes and paths
+// this same test just constructed (fixture files, in-memory buffers,
+// literals) — never on untrusted input reaching this process from a real
+// caller. A panic here is this test failing loudly on its own broken
+// assumption, not a production fault path this lint would otherwise guard.
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::indexing_slicing)]
 mod bounded_read_tests {
@@ -777,7 +783,7 @@ mod bounded_read_tests {
         std::fs::write(dir.path().join("a.patch"), vec![b'x'; 1000]).unwrap();
         let dir_fd = open_record_dir(dir.path()).unwrap();
         let resolver = BoundedRecordDirResolver::new(dir_fd);
-        // Seed the running total close to the ceiling so a THIRD read of
+        // Seed the running total close to the ceiling so a SECOND read of
         // the exact same artifact tips it over — proving repeated
         // references are never deduplicated to evade the total budget.
         resolver
