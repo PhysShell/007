@@ -1,0 +1,121 @@
+{
+  "additional_closure": [
+    "history_rationale non-normative + forbidden",
+    "full_derived requirements as closed IDs",
+    "pair_expectations list with explicit left/right; key-disagreement class removed",
+    "consistency gates as exactly 11 gate IDs",
+    "metric_semantics key-completeness declared as verifier gate"
+  ],
+  "base_commit": "fdf9fffe3221f027c49e67780202e1a978bf3db7",
+  "case_0002_scored": false,
+  "commit_a": {
+    "commit": "45b46c426e486abf8a75b133b47f017975815a62",
+    "tree": "26a7e7dc22cbed58dc6ded3138a08e0a0ef53c6f"
+  },
+  "contract": {
+    "rev2": {
+      "artifact_bytes_sha256": "sha256:b212463a40eb6f4660467394e7fd517d1da798c60480ea8607950586e29b5f54",
+      "canonical_object_sha256": "sha256:9c5b0299296c254890ba198295d58baed21fd0548f280a084258a9655ce302ba",
+      "git_blob": "59e93ef1c3af452c3b6b36f0f33979cb916d4939",
+      "instance": "evaluation-contract-v1-r2.yaml"
+    },
+    "rev3": {
+      "artifact_bytes_sha256": "sha256:8f5060f0d68ec3a5796714322c7f0541ade58539c25bb0d535b2bb4c315c00e7",
+      "canonical_object_sha256": "sha256:9784516db193e5987a2e6bf78713ee3f7affe58dc7864424eef59a131a95e081",
+      "contract_revision": 3,
+      "git_blob": "18660fe5880fa66d534a37b0dcb99774eb279abc",
+      "instance": "evaluation-contract-v1-r3.yaml",
+      "semantic_revision_from_r2": false,
+      "supersedes_contract_revision": 2,
+      "validation_revision": true
+    }
+  },
+  "evaluator_executed": false,
+  "evaluator_implemented": false,
+  "expectation_created": false,
+  "findings_closed": {
+    "1_bound_inputs": "fully typed, additionalProperties false, 12 members, dual digests / private-body shape",
+    "2_family_applicability": "exact families + exact arms + const values",
+    "3_input_digest_identity": "artifact_kind oneOf: structured requires both digests; body requires artifact-bytes only and forbids canonical",
+    "4_endpoint_policy_evidence": "if/then: all_current requires materialization fields; edge_witness forbids them",
+    "5_impl_path_uniqueness": "relative_path constrained (repo-relative/normalized/traversal-free); uniqueness+entrypoint-presence declared as verifier gates",
+    "6_impl_identity_fields": "output_must_record restructured to object, exactly 4 required keys, additionalProperties false"
+  },
+  "forbidden_actions_confirmed_not_taken": [
+    "no evaluator CLI/module code",
+    "no evaluate.py edit",
+    "no case-0002 scoring",
+    "no A1 integration",
+    "no R3/R3.1 edit",
+    "no state schema/selector change",
+    "no expectation",
+    "no Qodec arm/holdout",
+    "qodec PR #16 untouched",
+    "no PR opened or merged"
+  ],
+  "frozen_untouched": [
+    "research/b1-context/tools/**",
+    "evaluate.py",
+    "state-observables/v0",
+    "selector/v0",
+    "evaluation-contract-v1-r2.yaml",
+    "evaluation-contract-v1-r2.schema.json",
+    "evaluation-output-v1.schema.json",
+    "evaluator-implementation-manifest-v0.schema.json",
+    "evaluation-contract-v1-r2.md",
+    "R3/R3.1 results",
+    "budget-v0.yaml",
+    "gold-state-v0.json",
+    "case-0002 task expectations"
+  ],
+  "kind": "design_and_validation_only",
+  "next_round": "R4B (standalone evaluator build vs synthetic positive+adversarial fixtures first; then R4C on frozen R3.1 bytes) \u2014 requires separate authorization",
+  "not_schema_expressible_declared": [
+    "pair endpoint distinctness + N-choose-2 completeness",
+    "manifest relative_path uniqueness + entrypoint-in-files",
+    "metric_semantics key completeness"
+  ],
+  "r4a1_commits": {
+    "artifacts": "f7e647f79fff7da37ca63c6bf7a36d0521816b6e",
+    "receipt": "fdf9fffe3221f027c49e67780202e1a978bf3db7"
+  },
+  "record": "o7.b1.r4a2-decision-record/v0",
+  "round": "R4A.2",
+  "schemas": {
+    "contract_v1_r3": {
+      "artifact_bytes_sha256": "sha256:69cd318cd6ec1c65e0ed5805c7a8ad950caf0def0ab9fb87f78a53b49ed00136",
+      "path": "research/b1-context/schema/evaluation-contract-v1-r3.schema.json"
+    },
+    "manifest_v0_r2": {
+      "artifact_bytes_sha256": "sha256:c6142b76b1956276eb00966f0ca7f0047b0b8f4d4c24bb46da167ee7a42b9138",
+      "path": "research/b1-context/schema/evaluator-implementation-manifest-v0-r2.schema.json"
+    },
+    "output_v1_r2": {
+      "artifact_bytes_sha256": "sha256:b81e2376d4ec15d49d1adaf25459f8e69f12ca2bdff4d03de71d0470ab44d5d1",
+      "path": "research/b1-context/schema/evaluation-output-v1-r2.schema.json"
+    }
+  },
+  "semantic_equivalence": {
+    "artifact_bytes_sha256": "sha256:94fd2065e2cde022644df447fa0591b52292fc8d36bd4aa93dd47959685671df",
+    "record": "research/b1-context/results/case-0002-r4a.2-schema-closure-v1/semantic-equivalence-r2-vs-r3.json",
+    "semantic_equivalent": true,
+    "semantic_revision": false
+  },
+  "validation": {
+    "negative": {
+      "all_pass": true,
+      "artifact_bytes_sha256": "sha256:7ddd6935aa58c2d8b17f0cc93432b8e0a5b93345925241382bfb01e62e609319",
+      "oracle_confirmed": "validator + json-path recorded per fixture, not merely nonzero",
+      "results_record": "research/b1-context/results/case-0002-r4a.2-schema-closure-v1/negative-oracle-results.json",
+      "schema_oracle_fixtures": 23,
+      "schema_oracle_pass": 23,
+      "verifier_consistency_fixtures": 3,
+      "verifier_consistency_pass": 3
+    },
+    "positive": {
+      "contract_r3": "VALID",
+      "evaluation_output_r2": "VALID",
+      "evaluator_manifest_r2": "VALID"
+    }
+  }
+}
