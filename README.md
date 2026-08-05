@@ -66,6 +66,10 @@ Loop design (`o7 run` mapped to the nine-field loop-engineering canvas, and wher
 the deferred loop parts — control loop, ledger, sandbox slot — attach):
 `docs/loop-canvas.md`.
 
+Current graph view (execution/evidence/control nodes, implemented contracts vs.
+unwired seams, and why a generic DAG or multi-agent framework is not the next
+step): `docs/graph-engineering.md`.
+
 Security layers (what's real, what's absent, and the triggers for
 Cedar/Verus/Kani/fuzz plus the `run`/gate sandbox slot): `docs/security-layers.md`.
 Zero Trust roadmap (phased plan to close that gap, cross-repo division of labor
