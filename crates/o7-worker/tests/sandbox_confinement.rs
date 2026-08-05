@@ -25,11 +25,22 @@
 //!   outside-denial errno.
 //!
 //! Teardown oracles compare PID + start-time IDENTITY (not a bare PID number), so PID reuse can
-//! never read as a successful teardown. Every test is `#[ignore]`d: the PORTABLE workspace suite
-//! stays host-agnostic, and the DESIGNATED Linux confinement CI job runs them with
-//! `--include-ignored` after PROVING the kernel features — a missing capability is a job FAILURE
-//! there, never a skip. GREEN makes the real backend enforce and points `confinement_backend()` at
-//! it, without rewriting a single assertion.
+//! never read as a successful teardown.
+//!
+//! For marker-producing probes, a clean exit establishes only that the probe completed validly; it
+//! is a prerequisite for consuming the marker, not evidence of confinement. Process or pipeline exit
+//! and gate verdict must never by themselves establish a confinement property. Every confinement
+//! claim requires a direct, dimension-specific, independently non-vacuous oracle; kernel-enforced
+//! dimensions must be tied to the relevant kernel-observable effect. (A dimension whose evidence is
+//! not a syscall errno — the exact env, cgroup membership, teardown identity, the absolute deadline,
+//! the survivor-set — still asserts its own effect directly, never a process/pipeline exit code.)
+//!
+//! Every real-kernel-confinement acceptance test is `#[ignore]`d and runs only on the DESIGNATED
+//! Linux confinement CI job (with `--include-ignored`, after PROVING the kernel features — a missing
+//! capability is a job FAILURE there, never a skip); the PORTABLE workspace suite stays
+//! host-agnostic. The portable non-ignored regression below pins the consumer-side
+//! exit-before-marker ordering on every hosted gate. GREEN makes the real backend enforce and points
+//! `confinement_backend()` at it, without rewriting a single assertion.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
