@@ -46,8 +46,16 @@ when a change *adds an `#[allow(...)]`*; see rule 4.
    tree. That includes the indirect paths a secret scanner cannot see: logging
    or `Debug`-printing an env var, serialising a config struct that holds one,
    or writing agent stdout into a run record without considering what the agent
-   may have echoed. Auth is external (`claude login` / `codex login`) and this
-   project never reads or stores it.
+   may have echoed. Auth for the CLI engines is external (`claude login` /
+   `codex login`) and never read or stored. The one scoped exception is
+   `o7 invoke --engine arliai` (a direct HTTPS API with no vendor CLI to
+   delegate auth to): `ARLIAI_API_KEY` is read at call time and held in a
+   single local binding on its way to the `Authorization` header — never in
+   any struct, artifact, run record, or error string; it is stripped from
+   every provider subprocess environment, and dispatch refuses fail-closed
+   when the `log` facade's max level admits TRACE (HTTP wire logging). The
+   normative contract is `docs/o7-invoke.md` ("Key handling"); any change
+   that widens where that key can flow is a P0 finding.
 
 2. **Verdict semantics.** `PASS` / `FAIL` / `ERROR` are three distinct states:
    `FAIL` means the gate ran and the target failed it; `ERROR` means the

@@ -402,8 +402,12 @@ fn run_arliai(a: &InvokeArgs) -> Result<()> {
     // into any artifact/error text, and (via `strip_provider_api_keys`)
     // never inherited by a claude/codex subprocess either — the fifth
     // security boundary in docs/o7-invoke.md.
-    let api_key = std::env::var("ARLIAI_API_KEY").unwrap_or_default();
-    if api_key.trim().is_empty() {
+    let api_key_raw = std::env::var("ARLIAI_API_KEY").unwrap_or_default();
+    // Trimmed once here: a stray trailing newline (an `echo`-built env var)
+    // would otherwise ride into the Authorization header as a malformed
+    // value and surface as a confusing transport failure.
+    let api_key = api_key_raw.trim();
+    if api_key.is_empty() {
         anyhow::bail!(
             "ARLIAI_API_KEY is not set (or empty) -- refusing before any artifact \
              is written or any connection is opened"
@@ -423,7 +427,7 @@ fn run_arliai(a: &InvokeArgs) -> Result<()> {
         &prompt,
         &strip_dollar_schema(&schema),
         model,
-        &api_key,
+        api_key,
         Duration::from_secs(a.timeout_secs),
     );
     let finished_at = now_epoch_tag();
@@ -529,6 +533,15 @@ fn classify_arli(
             300..=399 => (InvokeStatus::BlockedProvider, None, Some("redirect")),
             401 | 403 => (InvokeStatus::BlockedAuth, None, Some("auth")),
             429 => (InvokeStatus::BlockedUsage, None, Some("usage_limit")),
+            // Request rejected — the server states the request was NOT
+            // processed, so no model output ever existed. FAIL here would
+            // collapse "no trustworthy answer" into "ran and failed"
+            // (docs/o7-invoke.md, "On the 4xx split").
+            400 | 404 | 405 | 422 => (
+                InvokeStatus::BlockedProvider,
+                None,
+                Some("http_request_rejected"),
+            ),
             500..=599 => (InvokeStatus::BlockedProvider, None, Some("http_5xx")),
             _ => (InvokeStatus::FailInvalidOutput, None, Some("http_status")),
         },
@@ -1496,9 +1509,19 @@ mod tests {
             assert_eq!((s, k), (InvokeStatus::BlockedProvider, Some("http_5xx")));
         }
 
-        // Any other status (400, 404) -> FAIL, never silently BLOCKED
-        // (the nonzero_exit precedent).
-        for other in [400, 404] {
+        // Request-rejection 4xx -> BLOCKED_PROVIDER: the server states the
+        // request was not processed, so no model output existed to FAIL on.
+        for rejected in [400, 404, 405, 422] {
+            let (s, _, k) = classify_arli(&http(rejected, Vec::new()), &validator);
+            assert_eq!(
+                (s, k),
+                (InvokeStatus::BlockedProvider, Some("http_request_rejected"))
+            );
+        }
+
+        // Genuinely unclassifiable statuses -> FAIL, never silently
+        // absorbed into a named BLOCKED_* bucket.
+        for other in [402, 418] {
             let (s, _, k) = classify_arli(&http(other, Vec::new()), &validator);
             assert_eq!(
                 (s, k),

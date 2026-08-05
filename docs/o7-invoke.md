@@ -37,8 +37,12 @@ status — callers must read `meta.json`, not just the exit code.
 
 The `--out` dir must be **absent or empty**: a non-empty one is refused up
 front, before the version probe or any backend spawn, and never partially
-overwritten. A given outcome writes only its own files (a `FAIL` leaves no
-`result.json`), so refusing a dirty dir is what stops a previous run's stale
+overwritten. A given outcome writes only its own files — precisely:
+`result.json` exists iff a JSON value was extracted, so
+`FAIL_INVALID_OUTPUT` (and every `BLOCKED_*`) leaves none, while
+`FAIL_SCHEMA` DOES write one (the offending schema-invalid value is
+evidence worth keeping; `schema_valid: false` in `meta.json` is what marks
+it failed). Refusing a dirty dir is what stops a previous run's stale
 `result.json` from masquerading as this run's output.
 
 ## Capability profiles
@@ -210,9 +214,10 @@ Classification matrix (normative):
 | 3xx (any) | `BLOCKED_PROVIDER` | `redirect` |
 | 401 / 403 | `BLOCKED_AUTH` | `auth` |
 | 429 | `BLOCKED_USAGE` | `usage_limit` |
+| 400 / 404 / 405 / 422 (request rejected — nothing was generated) | `BLOCKED_PROVIDER` | `http_request_rejected` |
 | 5xx | `BLOCKED_PROVIDER` | `http_5xx` |
 | body exceeds `MAX_ARLIAI_RESPONSE_BYTES` | `BLOCKED_PROVIDER` | `response_too_large` |
-| any other status (e.g. 400, 404) | `FAIL_INVALID_OUTPUT` | `http_status` |
+| any other status (e.g. 402, 418, 1xx) | `FAIL_INVALID_OUTPUT` | `http_status` |
 | DNS / TLS / connection refused / reset | `BLOCKED_PROVIDER` | `transport` |
 | timeout (`--timeout-secs`) | `BLOCKED_TIMEOUT` | `timeout` |
 
@@ -221,19 +226,32 @@ Classification matrix (normative):
 the cross-repo conformance gate runs `claude`/`codex` only (see the gate
 section below), so the shared-vocabulary invariant it checks is untouched.
 If Demand Radar ever grows an `arliai` path, its vocabulary must adopt
-`BLOCKED_PROVIDER` first. The "any other status" row mirrors the CLI
-backends' `nonzero_exit` precedent: an unexplained failure is a `FAIL`,
-never silently absorbed into a `BLOCKED_*` bucket.
+`BLOCKED_PROVIDER` first.
+
+On the 4xx split (a review-round correction): a request-rejection status
+(400/404/405/422) is the server explicitly stating the request was **not
+processed** — no model output ever existed, so recording it as
+`FAIL_INVALID_OUTPUT` would claim the model produced bad output and
+collapse "no trustworthy answer" into "ran and failed" (the repo's
+FAIL/ERROR distinction). The CLI backends' `nonzero_exit` precedent does
+not transfer: a CLI that exits nonzero *ran*, and its output is genuinely
+ambiguous. The wildcard `FAIL_INVALID_OUTPUT` / `http_status` row stays
+only for statuses that are genuinely unclassifiable — an unexplained
+outcome still must not be silently absorbed into a named `BLOCKED_*`
+bucket.
 
 ### Artifacts and `meta.json` mapping
 
 Same run-dir contract (`--out` absent-or-empty, refused otherwise):
 
 - `stdout.raw` — the **raw HTTP response body**, byte-for-byte, whatever
-  the status (transport failures leave it empty). The analogue of a CLI
-  backend's raw stdout: the unmodified provider evidence.
-- `stderr.log` — transport/timeout error detail; empty on an HTTP
-  response.
+  the status, for every response within the `MAX_ARLIAI_RESPONSE_BYTES`
+  bound. The analogue of a CLI backend's raw stdout: the unmodified
+  provider evidence. Two outcomes leave it empty: transport failures (no
+  body existed) and an over-limit response (the body is deliberately not
+  persisted; the size message goes to `stderr.log`).
+- `stderr.log` — transport/timeout/over-limit detail; empty on an
+  in-bound HTTP response.
 - `result.json` — the extracted (normalized) content value, written only
   when one was extracted, same as the CLI paths.
 - `meta.json` — `provider: "arliai-api"`, `command_version: null` (there
