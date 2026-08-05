@@ -82,6 +82,34 @@ FAILED
 
 `READY_TO_MERGE` does not authorize an unconditional merge. It means the exact current candidate head has an accepted review verdict and all required gates are green. A maintainer policy still decides whether merge is automatic or human-approved.
 
+### Authority escalation
+
+`HUMAN_REQUIRED` is not a conversational handoff. It is the general escalation state, and it is reachable from several distinct causes: conflicting evidence, a repeated blocker, a change to frozen scope, an ambiguous provider outcome, the absence of a useful next observation, or insufficient authority for the requested action.
+
+Only the last class is authority escalation. When the blocked transition requires authority the controller does not hold, it emits `AuthorityEscalationRequested` — a typed cause of the transition, not a replacement for the general `HumanDecisionRequired` event:
+
+```text
+AuthorityEscalationRequested
+    -> HUMAN_REQUIRED
+```
+
+Resumption requires a durable `HumanAuthorityDecisionReceipt`, referenced by `HumanAuthorityDecisionRecorded`. A human authority decision may authorize, deny, or constrain the requested action. Authorization permits a later guarded transition; **it is not evidence that the action was executed** — treating it as such is the same lower-layer signal impersonating an upper-layer fact that `docs/evidence-and-decision-discipline.md` exists to prevent.
+
+A future `HumanAuthorityDecisionReceipt` should at minimum bind (meaning fixed here; the schema is deferred with the rest of the event schema):
+
+```text
+campaign identity
+requested transition or action
+authoritative precondition identity
+candidate head, where applicable
+decision: authorized | denied | constrained
+constraints
+human identity
+decision time
+```
+
+`MergeAuthorized` remains a distinct domain event. It may reference the corresponding receipt; it is not replaced by the general `HumanAuthorityDecisionRecorded`.
+
 ### Candidate events
 
 The exact schema is deferred, but transitions must be driven by typed, replayable events such as:
@@ -104,6 +132,8 @@ CorrectionStarted
 CorrectionCommitted
 BudgetExceeded
 HumanDecisionRequired
+AuthorityEscalationRequested
+HumanAuthorityDecisionRecorded
 CampaignCancelled
 MergeAuthorized
 CampaignMerged
