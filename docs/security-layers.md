@@ -22,6 +22,33 @@ missing layer worth building.
 | **typed tool surface (MCP schemas)** | arg validation before execution | ❌ N/A — 007 consumes external CLIs (`claude`, `git`, `bash`); it does not publish its own MCP tools. |
 | **structured audit log** | forensics / replay (not defense) | ✅ `record.rs` → `meta.json`, `diff.patch`, `agent.stdout`, `gate/*.log`. |
 
+## Sandboy status reconciliation (post-Vertical-A)
+
+Sandboy status reconciliation, locally verified against `c875122` (governing
+artifacts: `docs/architecture/sandboy-boundary.md`,
+`crates/o7-worker/tests/sandboy_lifecycle.rs`,
+`crates/o7-worker/tests/sandbox_confinement.rs`). At the `o7-worker`
+protocol/lifecycle layer, the exact primary target is acquired and sealed;
+source-path replacement cannot change the primary object executed by the live
+launch (`a_live_launch_executes_the_sealed_target_not_a_swapped_source`, a
+non-ignored GREEN test); and a nonce-bearing launch request is bound to the
+verified report and the parent GO authorization barrier. Distinct layers:
+*identity* is `LaunchRequest::spec_digest`, *evidence binding* is the report's
+`launch_spec_digest`, *authorization* is the parent's verification + GO — the
+digest names the launch instance, it is not itself the decision.
+
+**These properties do not yet protect the production `o7 run`/gate surface.**
+The real Vertical-B kernel backend — the *syscall sandbox* row above — and its
+integration remain unestablished: the confinement acceptance matrix is RED
+against the frozen fake. Also not established (trigger-gated): remote-artifact
+materialization through an authorized fetch phase; immutable interpreted-payload
+delivery (by identity, not a mutable pathname); reusable nonce-free approval
+identity independent of the per-launch nonce; and transitive execution closure.
+
+This anchor is local to this subsection. The document-level `Last verified
+against 29f6191` is deliberately left unchanged — one local reconciliation does
+not re-certify the whole note.
+
 ## The gap the layer list understates
 
 `o7 run` executes **arbitrary `bash -lc <cmd>` from the target repo's
