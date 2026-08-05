@@ -1,0 +1,57 @@
+{
+ "adjudication_decisions": [
+  "Arms are capability-based: full_derived+projection required, negative_control optional; missing optional -> NOT_APPLICABLE (never zero/PARTIAL/PASS); missing required -> UNAVAILABLE; no synthetic nc arm; gold state is oracle not an arm.",
+  "Relation evaluation is depth-1 only; targets derived from the FROZEN gold graph, never from observed output; a gold-absent edge is fabricated and fails closed; relation-only stale reference does not count as current.",
+  "Audit qa3 supersession requirements use endpoint_policy edge_witness (targets are superseded/stale); impact qi1 depends_on uses all_current_targets_materialized (targets are current).",
+  "Forbidden stale-as-current fails ONLY when a listed id is selected as current/pending; absent / stale-relation-endpoint-only / selected-with-stale-status are reported but not failures.",
+  "Task-dependence computed over ALL unordered pairs; only intent-level shapes frozen (resume/audit materially_different, audit/impact left_strict_superset, resume/impact materially_different); no exact IDs/counts frozen.",
+  "Budget bound to budget-v0.yaml by digest; values unchanged (20000/32); no tuning.",
+  "Outcome lattice PASS/FAIL/UNAVAILABLE; PARTIAL not used in eval v1 (legacy report-v1 only); optional diagnostics cannot upgrade a failing required gate; generation success separate from evaluation PASS.",
+  "Structural metrics named structural; NOT semantic recall or answerability; no LLM judge.",
+  "Migration: eval v0 stays for case-0001; case-0001 bytes unchanged; R3/R3.1 immutable; report.json integration needs a later explicit report-contract revision; o7.b1.report/v1 not redefined."
+ ],
+ "artifact_digests": {
+  "budget_sha256": "sha256:d293cdf19bb0be792bc962ea58f0d601cbd8a83832354171d6afc29eacceedf4",
+  "design_doc_sha256": "sha256:e6217543778d2e2afee7db5f4177091c6986df54f773134411eca5f8fb13c11e",
+  "evaluation_contract_schema_sha256": "sha256:51d9b7886cd73d8990ae5303d8f63b2873a42e23c6295d75620b505cf895e979",
+  "evaluation_contract_v1_yaml_sha256": "sha256:feef81c6b06e2c77f1246dde23af2e617fe5cbc30b95ac083446352222425b26",
+  "gold_state_sha256": "sha256:7e00505b25a7f0d815556ef6cc9db710b1ae0d3144e6f91a0c4eedcaa733c147",
+  "questions_audit_sha256": "sha256:e89769b6df78fd8fa1cfa52d3de7acfd6909d91df4da788b2d56c4fc19909501",
+  "questions_impact_sha256": "sha256:f41bdd036062165aefb6ec40b0b8afa18f7ac2f593730b0ee5a51e0db3869ebc",
+  "questions_resume_sha256": "sha256:0478856382b1a0ac7f4fbb78a532041e9a770d3d14337b3a790181c27a706936"
+ },
+ "bound_baseline": {
+  "r3_1_artifact_commit": "3bf00a677b1c9a9e832dd0da9eae5a967f221744",
+  "r3_1_artifact_tree": "6bf29b441a268f8f6ac96b1e5e548a7873e51c85",
+  "r3_1_receipt_commit": "0f78e1cd0b7f87e282b8be0dd1bf2e4c08574805",
+  "r3_1_report_sha256": "sha256:7f72133abc88ff88873c9d5dea1139535ff6583baee5e96b74ed7b0e4aeafba6"
+ },
+ "commit_A": {
+  "commit": "cec6b39eedb1733971eebfef45379d4775aa27c7",
+  "contents": [
+   "schema/evaluation-contract-v1.schema.json",
+   "docs/evaluation-contract-v1.md",
+   "fixtures/case-0002/evaluation-contract-v1.yaml"
+  ],
+  "tree": "489abdf461ff9acbb56a86d5817b06a5eb9bc369"
+ },
+ "design_only": true,
+ "next": "R4B standalone evaluator implementation against synthetic fixtures first; R4C applies it to frozen R3.1 bytes; R4D optional report integration. NOT started.",
+ "no_evaluator_code_written_or_executed": true,
+ "no_expectation_created": true,
+ "no_scored_result": true,
+ "note": "Not self-referential. Commit B (this record + report) may be bound by the next external decision.",
+ "provenance_role": {
+  "case_role": "development",
+  "designed_after_observing_case_0002": true,
+  "generalization_claim_allowed": false,
+  "holdout_evidence": false
+ },
+ "round": "R4A \u2014 evaluation-contract v1 design freeze (design-only)",
+ "schema": "o7.case0002.r4a-decision-record/v0",
+ "unresolved_design_issues": [
+  "byte-budget counted representation (per-record canonical bytes vs rendered context.json total) \u2014 carried to R4B",
+  "full_derived arm structural-support metric definition \u2014 carried to R4B",
+  "multi-hop relation traversal \u2014 out of scope in v1 (depth-1 only)"
+ ]
+}
