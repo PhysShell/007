@@ -1,0 +1,63 @@
+{
+ "adapter_implementation_commit": "e62ee7354220d0eab7d727ab1a581d1ea8c3741d",
+ "adapter_implementation_tree": "aefc5a3e8182382021fe33e0bd421841549db58a",
+ "base_r2_commit": "25e9ace6124e8f40762f3201f56c691f40d0205c",
+ "commit_A_changed_files": [
+  "research/b1-context/tools/run_case.py",
+  "research/b1-context/tools/README.md",
+  "research/b1-context/tools/tests/test_admission_r2.py"
+ ],
+ "commit_A_files_deliberately_not_touched": [
+  "o7b1/pipeline.py",
+  "o7b1/registry.py",
+  "project_case.py",
+  "o7b1/selector.py",
+  "o7b1/projector.py",
+  "o7b1/evaluate.py",
+  "o7b1/schema.py",
+  "o7b1/report.py",
+  "research/b1-context/schema/*",
+  "all fixtures",
+  "all frozen baseline/adjudication results"
+ ],
+ "external_two_run_identity_check": {
+  "fixture": "case-0002",
+  "mode": "actual-only",
+  "note": "performed externally in verification; not implied by exit 0",
+  "registry": "tasks-v1.yaml",
+  "two_runs_byte_identical": true
+ },
+ "finding_1_reproduce_command": {
+  "case_0001_actual_only_differs_only_in": "reproduce_command (mode provenance)",
+  "case_0001_actual_only_reproduce": "python3 research/b1-context/tools/run_case.py --fixture case-0001 --actual-only --data-root \"$HOME/.local/share/o7-research\" --out /tmp/o7-b1-case-0001",
+  "case_0001_normal_byte_identical": true,
+  "case_0002_actual_only_reproduce": "python3 research/b1-context/tools/run_case.py --fixture case-0002 --registry tasks-v1.yaml --actual-only --data-root \"$HOME/.local/share/o7-research\" --out /tmp/o7-b1-case-0002",
+  "fix": "explicit mode threaded into _generate + _canonical_reproduce_command; actual-only appends --actual-only (+ non-default --registry); verify/update byte-unchanged."
+ },
+ "finding_2_determinism_overclaim": {
+  "determinism_established_by": "external two-run comparison (R3 protocol)",
+  "exit0_claims_determinism": false,
+  "fix": "docstring/CLI help/README/diagnostic corrected: actual-only exit 0 = generation completed successfully, NOT determinism. No implicit second run added."
+ },
+ "metadata_binding": "external_exact_head",
+ "note": "This receipt commit is NOT self-referential; if a later round (R3) needs to bind THIS metadata commit, it does so externally by its own exact head.",
+ "r3_started": false,
+ "round": "R2.1 \u2014 actual-only provenance + receipt binding correction",
+ "schema": "o7.case0002.r2.1-receipt/v0",
+ "semantics_changed": {
+  "budget": false,
+  "evaluation": false,
+  "report_contract": false,
+  "schema": false,
+  "selection": false,
+  "selector": false,
+  "status": false
+ },
+ "tests": {
+  "new": [
+   "reproduce-command mode/registry unit tests",
+   "case-0001 normal-identical + actual-only-differs-only-in-mode"
+  ],
+  "total": 115
+ }
+}
