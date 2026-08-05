@@ -1,6 +1,6 @@
 //! `o7 invoke` — a narrow, read-only, schema-bound single-shot agent call.
 //!
-//! `o7 invoke --engine claude|codex --prompt-file <f> --schema <f>
+//! `o7 invoke --engine claude|codex|arliai --prompt-file <f> --schema <f>
 //! --capability-profile read-only-data --out <dir>`. Not a workflow, not a
 //! DAG, not a provider framework: one prompt in, one schema-checked JSON
 //! object out, closed-world by construction. This is `judge.rs`'s
@@ -9,6 +9,13 @@
 //! see `docs/o7-invoke.md` for why this exists and what it deliberately does
 //! not do. Zero changes to `o7 run` or `o7 judge`'s own domain behavior:
 //! this module is additive only.
+//!
+//! Two backend families share one contract: the CLI engines (`claude`,
+//! `codex` — subprocesses) and the `arliai` HTTPS API backend
+//! (`invoke_arliai.rs` — no subprocess at all). The status vocabulary,
+//! artifact layout, and independent schema re-validation are identical
+//! across all three; classification inputs differ (exit codes + stderr
+//! markers vs. HTTP statuses).
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -19,6 +26,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::agent::Engine;
+use crate::invoke_arliai::{self, ArliOutcome};
 
 /// The one capability bundle this MVP implements. A named label mapped to a
 /// fixed, hardcoded flag set — not something a caller's string can widen.
@@ -38,7 +46,7 @@ const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(clap::Args)]
 pub struct InvokeArgs {
-    /// Backend agent CLI: claude | codex.
+    /// Backend: claude | codex (agent CLIs) | arliai (direct HTTPS API).
     #[arg(long)]
     pub engine: String,
     /// Prompt text, read as-is and piped to the backend over stdin (never
@@ -76,6 +84,11 @@ pub struct InvokeArgs {
 /// spec vocabulary shared with Demand Radar's `AgentRunStatus` — the
 /// cross-repo conformance gate (`docs/o7-invoke.md`) compares these strings
 /// directly, so they must not drift from `demand_radar.models.AgentRunStatus`.
+/// One deliberate exception: `BlockedProvider` is 007-side only (the arliai
+/// backend's provider-fault bucket — 3xx/5xx/transport). The gate runs
+/// `claude`/`codex` only, so the shared-vocabulary invariant it checks is
+/// untouched; Demand Radar must adopt `BLOCKED_PROVIDER` before ever growing
+/// an arliai path of its own (docs/o7-invoke.md, classification matrix).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InvokeStatus {
     Pass,
@@ -83,6 +96,7 @@ enum InvokeStatus {
     BlockedUsage,
     BlockedTimeout,
     BlockedNotInstalled,
+    BlockedProvider,
     FailInvalidOutput,
     FailSchema,
 }
@@ -95,8 +109,33 @@ impl InvokeStatus {
             InvokeStatus::BlockedUsage => "BLOCKED_USAGE",
             InvokeStatus::BlockedTimeout => "BLOCKED_TIMEOUT",
             InvokeStatus::BlockedNotInstalled => "BLOCKED_NOT_INSTALLED",
+            InvokeStatus::BlockedProvider => "BLOCKED_PROVIDER",
             InvokeStatus::FailInvalidOutput => "FAIL_INVALID_OUTPUT",
             InvokeStatus::FailSchema => "FAIL_SCHEMA",
+        }
+    }
+}
+
+/// Backend selector local to `o7 invoke`. Deliberately NOT `agent::Engine`:
+/// that enum means "CLI agent engine" everywhere else in the repo (`o7 run`,
+/// `judge`, consensus plans), and the arliai HTTPS backend must not leak
+/// into those call sites through a widened shared type. `Engine` stays
+/// exactly what it is; this maps onto it only for the two CLI arms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InvokeBackend {
+    Claude,
+    Codex,
+    ArliAi,
+}
+
+impl std::str::FromStr for InvokeBackend {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s {
+            "claude" => Ok(InvokeBackend::Claude),
+            "codex" => Ok(InvokeBackend::Codex),
+            "arliai" => Ok(InvokeBackend::ArliAi),
+            other => anyhow::bail!("unknown --engine '{other}' (claude | codex | arliai)"),
         }
     }
 }
@@ -131,24 +170,26 @@ struct InputManifest {
     input_paths: Vec<PathBuf>,
 }
 
-pub fn run(a: &InvokeArgs) -> Result<()> {
-    if a.capability_profile != READ_ONLY_DATA_PROFILE {
-        anyhow::bail!(
-            "unknown --capability-profile '{}' (only '{READ_ONLY_DATA_PROFILE}' is \
-             implemented) -- refusing to run rather than silently narrow or widen it",
-            a.capability_profile
-        );
-    }
-    let engine: Engine = a.engine.parse()?;
+/// Everything both backend families need before any network/subprocess
+/// activity: run-dir integrity, prompt/schema/manifest reads, the
+/// independent validator, provenance hashes, and the `prompt.txt` artifact.
+/// One shared function so the two paths cannot drift on refusal order or
+/// hashing behavior.
+struct PreparedCall {
+    prompt: String,
+    schema: serde_json::Value,
+    validator: jsonschema::Validator,
+    input_hashes: Vec<String>,
+    prompt_hash: String,
+}
 
+fn prepare(a: &InvokeArgs) -> Result<PreparedCall> {
     // Run-dir integrity: the out dir must be absent or an existing EMPTY dir,
-    // checked BEFORE the version probe or any backend spawn. A non-empty --out
-    // is refused, never partially overwritten -- otherwise a stale result.json
-    // from a previous PASS could be mistaken for the output of this run (which,
-    // if it FAILs, writes no result.json of its own).
+    // checked BEFORE the version probe or any backend spawn/connection. A
+    // non-empty --out is refused, never partially overwritten -- otherwise a
+    // stale result.json from a previous PASS could be mistaken for the output
+    // of this run (which, if it FAILs, writes no result.json of its own).
     ensure_empty_out(&a.out)?;
-
-    let command_version = detect_version(engine.label());
 
     let prompt = std::fs::read_to_string(&a.prompt_file)
         .with_context(|| format!("reading prompt file {}", a.prompt_file.display()))?;
@@ -178,6 +219,43 @@ pub fn run(a: &InvokeArgs) -> Result<()> {
     std::fs::write(a.out.join("prompt.txt"), &prompt)
         .with_context(|| format!("writing {}/prompt.txt", a.out.display()))?;
     let prompt_hash = sha256_hex_text(&prompt);
+
+    Ok(PreparedCall {
+        prompt,
+        schema,
+        validator,
+        input_hashes,
+        prompt_hash,
+    })
+}
+
+pub fn run(a: &InvokeArgs) -> Result<()> {
+    if a.capability_profile != READ_ONLY_DATA_PROFILE {
+        anyhow::bail!(
+            "unknown --capability-profile '{}' (only '{READ_ONLY_DATA_PROFILE}' is \
+             implemented) -- refusing to run rather than silently narrow or widen it",
+            a.capability_profile
+        );
+    }
+    let backend: InvokeBackend = a.engine.parse()?;
+    match backend {
+        InvokeBackend::Claude => run_cli(a, Engine::Claude),
+        InvokeBackend::Codex => run_cli(a, Engine::Codex),
+        InvokeBackend::ArliAi => run_arliai(a),
+    }
+}
+
+fn run_cli(a: &InvokeArgs, engine: Engine) -> Result<()> {
+    let prepared = prepare(a)?;
+    let PreparedCall {
+        prompt,
+        schema,
+        validator,
+        input_hashes,
+        prompt_hash,
+    } = prepared;
+
+    let command_version = detect_version(engine.label());
 
     let timeout = Duration::from_secs(a.timeout_secs);
     let started_at = now_epoch_tag();
@@ -289,6 +367,195 @@ pub fn run(a: &InvokeArgs) -> Result<()> {
     Ok(())
 }
 
+/// The arliai path: one HTTPS POST to the pinned endpoint, then the same
+/// artifact/meta contract as the CLI engines. Contract: `docs/o7-invoke.md`,
+/// "Arli AI backend".
+fn run_arliai(a: &InvokeArgs) -> Result<()> {
+    // Fail-closed wire-logging preflight, before ANY other step (run dir,
+    // artifacts, connection). ureq logs through the `log` facade and its
+    // wire-level TRACE is unredacted; "o7 installs no logger" is a fact
+    // about today's binary, not a boundary. If the global max level admits
+    // TRACE — because a logger was added to o7 later, or an embedder of
+    // this crate installed one — the run degrades to a refusal, never to a
+    // Bearer token on a log sink (docs/o7-invoke.md, key handling).
+    if log::max_level() >= log::LevelFilter::Trace {
+        anyhow::bail!(
+            "refusing --engine arliai: the global `log` max level admits TRACE, \
+             and HTTP wire tracing could expose the Authorization header -- \
+             lower the log level (or remove the logger) to use this backend"
+        );
+    }
+
+    // Pre-network configuration refusals — plain errors, not run outcomes:
+    // nothing is written, no connection is opened (same class as an unknown
+    // --capability-profile).
+    let Some(model) = a.model.as_deref() else {
+        anyhow::bail!(
+            "--engine arliai requires --model: Arli AI would otherwise fall back \
+             to a provider-selected 'default served model', and 007 refuses that \
+             implicit model identity -- the request must carry the explicit \
+             requested model (o7 itself pins none, consistent with the CLI engines)"
+        );
+    };
+    // The key lives in one function-local owned value; only a borrowed,
+    // trimmed view of it goes to the HTTP layer. The properties that
+    // matter: it is never stored in any struct, never formatted into any
+    // artifact/error text, and (via `strip_provider_api_keys`) never
+    // inherited by a claude/codex subprocess — the fifth security boundary
+    // in docs/o7-invoke.md.
+    let api_key_raw = std::env::var("ARLIAI_API_KEY").unwrap_or_default();
+    // Trimmed once here: a stray trailing newline (an `echo`-built env var)
+    // would otherwise ride into the Authorization header as a malformed
+    // value and surface as a confusing transport failure.
+    let api_key = api_key_raw.trim();
+    if api_key.is_empty() {
+        anyhow::bail!(
+            "ARLIAI_API_KEY is not set (or empty) -- refusing before any artifact \
+             is written or any connection is opened"
+        );
+    }
+
+    let PreparedCall {
+        prompt,
+        schema,
+        validator,
+        input_hashes,
+        prompt_hash,
+    } = prepare(a)?;
+
+    let started_at = now_epoch_tag();
+    let outcome = invoke_arliai::call(
+        &prompt,
+        &strip_dollar_schema(&schema),
+        model,
+        api_key,
+        Duration::from_secs(a.timeout_secs),
+    );
+    let finished_at = now_epoch_tag();
+
+    let stdout_path = a.out.join("stdout.raw");
+    let stderr_path = a.out.join("stderr.log");
+    let result_path = a.out.join("result.json");
+
+    // stdout.raw = the raw HTTP response body, byte-for-byte (the analogue
+    // of a CLI backend's raw stdout); stderr.log = transport/timeout detail.
+    let (raw_body, stderr_text): (&[u8], String) = match &outcome {
+        ArliOutcome::Http { body, .. } => (body.as_slice(), String::new()),
+        ArliOutcome::TimedOut => (
+            &[],
+            format!("arliai call timed out after {}s\n", a.timeout_secs),
+        ),
+        ArliOutcome::Redirect { detail } | ArliOutcome::Transport { detail } => {
+            (&[], format!("{detail}\n"))
+        }
+        ArliOutcome::TooLarge { limit } => (
+            &[],
+            format!("arliai response body exceeded the {limit}-byte bound\n"),
+        ),
+    };
+    std::fs::write(&stdout_path, raw_body)?;
+    std::fs::write(&stderr_path, stderr_text)?;
+
+    let (status, structured, error_kind) = classify_arli(&outcome, &validator);
+
+    let structured_output_path = if structured.is_some() {
+        Some(result_path.clone())
+    } else {
+        None
+    };
+    if let Some(v) = &structured {
+        std::fs::write(&result_path, serde_json::to_string_pretty(v)?)?;
+    }
+
+    let schema_valid = status == InvokeStatus::Pass;
+    write_meta(
+        a,
+        &InvokeMeta {
+            schema: 1,
+            provider: "arliai-api",
+            command_version: None, // no CLI to probe
+            model: a.model.clone(),
+            started_at,
+            finished_at,
+            exit_code: None, // no subprocess
+            status: status.label(),
+            stdout_path: display(&stdout_path),
+            stderr_path: display(&stderr_path),
+            structured_output_path: structured_output_path.as_deref().map(display),
+            schema_valid,
+            prompt_hash,
+            input_hashes,
+            error_kind,
+        },
+    )?;
+
+    println!(
+        "[o7 invoke] arliai: {} -> {}",
+        status.label(),
+        a.out.display()
+    );
+    if status != InvokeStatus::Pass {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+/// Terminal status for an arliai call — the code form of the normative
+/// classification matrix in `docs/o7-invoke.md`. Pure over the outcome +
+/// validator so the whole matrix is unit-testable without a socket. The
+/// FAIL/BLOCKED boundary is exact: FAIL_* only when the provider claimed
+/// success (2xx) and the payload was unusable; every non-2xx means no
+/// trustworthy answer was produced and classifies as a BLOCKED_* — an
+/// unknown cause does not turn ERROR into FAIL.
+fn classify_arli(
+    outcome: &ArliOutcome,
+    validator: &jsonschema::Validator,
+) -> (
+    InvokeStatus,
+    Option<serde_json::Value>,
+    Option<&'static str>,
+) {
+    match outcome {
+        ArliOutcome::TimedOut => (InvokeStatus::BlockedTimeout, None, Some("timeout")),
+        ArliOutcome::Redirect { .. } => (InvokeStatus::BlockedProvider, None, Some("redirect")),
+        ArliOutcome::Transport { .. } => (InvokeStatus::BlockedProvider, None, Some("transport")),
+        ArliOutcome::TooLarge { .. } => (
+            InvokeStatus::BlockedProvider,
+            None,
+            Some("response_too_large"),
+        ),
+        ArliOutcome::Http { status, body } => match *status {
+            200..=299 => match invoke_arliai::extract_content(body) {
+                // Reuses the CLI paths' Pass/FailSchema split verbatim: a
+                // schema-violating value reached the validator, so it is
+                // FAIL_SCHEMA with the offending value recorded.
+                Ok(v) => classify_extracted(Some(v), validator),
+                Err(e) => (InvokeStatus::FailInvalidOutput, None, Some(e.error_kind())),
+            },
+            // Every non-2xx arm below is a BLOCKED_*: the provider did not
+            // claim success, so no model output existed and there is nothing
+            // to FAIL on. FAIL_* is reserved for the 2xx path above, where
+            // the provider claimed success but the payload was unusable
+            // (docs/o7-invoke.md, "The FAIL/BLOCKED boundary").
+            300..=399 => (InvokeStatus::BlockedProvider, None, Some("redirect")),
+            401 | 403 => (InvokeStatus::BlockedAuth, None, Some("auth")),
+            402 | 429 => (InvokeStatus::BlockedUsage, None, Some("usage_limit")),
+            408 => (InvokeStatus::BlockedTimeout, None, Some("timeout")),
+            400..=499 => (
+                InvokeStatus::BlockedProvider,
+                None,
+                Some("http_request_rejected"),
+            ),
+            500..=599 => (InvokeStatus::BlockedProvider, None, Some("http_5xx")),
+            _ => (
+                InvokeStatus::BlockedProvider,
+                None,
+                Some("http_status_unclassified"),
+            ),
+        },
+    }
+}
+
 fn provider_label(engine: Engine) -> &'static str {
     match engine {
         Engine::Claude => "claude-cli",
@@ -350,12 +617,16 @@ fn now_epoch_tag() -> String {
 /// substitute for that subscription auth. Applied to both engines
 /// regardless of which is being called, since `o7 invoke` is a shared
 /// primitive, not two independent code paths that could drift.
+/// `ARLIAI_API_KEY` is stripped too: it IS a real credential for the arliai
+/// backend (which spawns no children), and precisely for that reason must
+/// never leak into a claude/codex subprocess's environment.
 fn strip_provider_api_keys(cmd: &mut Command) {
     for key in [
         "ANTHROPIC_API_KEY",
         "CLAUDE_API_KEY",
         "OPENAI_API_KEY",
         "CODEX_API_KEY",
+        "ARLIAI_API_KEY",
     ] {
         cmd.env_remove(key);
     }
@@ -1133,6 +1404,250 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The full normative classification matrix for the arliai backend
+    /// (docs/o7-invoke.md), driven through the pure classifier — no socket.
+    #[test]
+    fn arliai_classification_matrix() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"],
+            "additionalProperties": false
+        });
+        let validator = match jsonschema::validator_for(&schema) {
+            Ok(v) => v,
+            Err(_) => return, // environmental, not under test
+        };
+        let ok_body = |content: &str| -> Vec<u8> {
+            serde_json::json!({
+                "choices": [{"message": {"role": "assistant", "content": content}}]
+            })
+            .to_string()
+            .into_bytes()
+        };
+        let http = |status: u16, body: Vec<u8>| ArliOutcome::Http { status, body };
+
+        // 2xx + valid content + schema-valid -> PASS.
+        let (s, v, k) = classify_arli(&http(200, ok_body("{\"ok\": true}")), &validator);
+        assert_eq!(
+            (s, k),
+            (InvokeStatus::Pass, None),
+            "200 + schema-valid must PASS"
+        );
+        assert_eq!(v, Some(serde_json::json!({"ok": true})));
+
+        // 2xx + valid JSON content violating the schema -> FAIL_SCHEMA,
+        // offending value recorded.
+        let (s, v, k) = classify_arli(&http(200, ok_body("{\"ok\": 123}")), &validator);
+        assert_eq!((s, k), (InvokeStatus::FailSchema, Some("schema_violation")));
+        assert_eq!(v, Some(serde_json::json!({"ok": 123})));
+
+        // 2xx + non-JSON body -> FAIL_INVALID_OUTPUT / bad_envelope.
+        let (s, v, k) = classify_arli(&http(200, b"<html>oops</html>".to_vec()), &validator);
+        assert_eq!(
+            (s, v, k),
+            (InvokeStatus::FailInvalidOutput, None, Some("bad_envelope"))
+        );
+
+        // 2xx + empty choices -> FAIL_INVALID_OUTPUT / empty_choices.
+        let (s, _, k) = classify_arli(&http(200, br#"{"choices": []}"#.to_vec()), &validator);
+        assert_eq!(
+            (s, k),
+            (InvokeStatus::FailInvalidOutput, Some("empty_choices"))
+        );
+
+        // 2xx + null content -> FAIL_INVALID_OUTPUT / null_content.
+        let null_content = serde_json::json!({
+            "choices": [{"message": {"role": "assistant", "content": null}}]
+        })
+        .to_string()
+        .into_bytes();
+        let (s, _, k) = classify_arli(&http(200, null_content), &validator);
+        assert_eq!(
+            (s, k),
+            (InvokeStatus::FailInvalidOutput, Some("null_content"))
+        );
+
+        // 2xx + tool_calls present -> FAIL_INVALID_OUTPUT / tool_calls_present.
+        let tool_calls = serde_json::json!({
+            "choices": [{"message": {"role": "assistant", "content": "{\"ok\": true}",
+                "tool_calls": [{"id": "t", "type": "function",
+                                "function": {"name": "x", "arguments": "{}"}}]}}]
+        })
+        .to_string()
+        .into_bytes();
+        let (s, _, k) = classify_arli(&http(200, tool_calls), &validator);
+        assert_eq!(
+            (s, k),
+            (InvokeStatus::FailInvalidOutput, Some("tool_calls_present"))
+        );
+
+        // 2xx + content string that is not JSON -> invalid_json.
+        let (s, _, k) = classify_arli(&http(200, ok_body("sure, here it is")), &validator);
+        assert_eq!(
+            (s, k),
+            (InvokeStatus::FailInvalidOutput, Some("invalid_json"))
+        );
+
+        // 3xx -> BLOCKED_PROVIDER / redirect (endpoint binding), both via a
+        // returned response and via ureq's refused-redirect error path.
+        let (s, _, k) = classify_arli(&http(302, Vec::new()), &validator);
+        assert_eq!((s, k), (InvokeStatus::BlockedProvider, Some("redirect")));
+        let (s, _, k) = classify_arli(
+            &ArliOutcome::Redirect {
+                detail: "redirect refused".into(),
+            },
+            &validator,
+        );
+        assert_eq!((s, k), (InvokeStatus::BlockedProvider, Some("redirect")));
+
+        // 401/403 -> BLOCKED_AUTH; 402/429 -> BLOCKED_USAGE; 408 (server-side
+        // request timeout) -> BLOCKED_TIMEOUT.
+        for auth_status in [401, 403] {
+            let (s, _, k) = classify_arli(&http(auth_status, Vec::new()), &validator);
+            assert_eq!((s, k), (InvokeStatus::BlockedAuth, Some("auth")));
+        }
+        for usage_status in [402, 429] {
+            let (s, _, k) = classify_arli(&http(usage_status, Vec::new()), &validator);
+            assert_eq!((s, k), (InvokeStatus::BlockedUsage, Some("usage_limit")));
+        }
+        let (s, _, k) = classify_arli(&http(408, Vec::new()), &validator);
+        assert_eq!((s, k), (InvokeStatus::BlockedTimeout, Some("timeout")));
+
+        // 5xx -> BLOCKED_PROVIDER / http_5xx.
+        for server_err in [500, 502, 503] {
+            let (s, _, k) = classify_arli(&http(server_err, Vec::new()), &validator);
+            assert_eq!((s, k), (InvokeStatus::BlockedProvider, Some("http_5xx")));
+        }
+
+        // Every remaining 4xx -> BLOCKED_PROVIDER / http_request_rejected:
+        // the server states the request was not processed, so no model
+        // output existed to FAIL on.
+        for rejected in [400, 404, 405, 418, 422, 451] {
+            let (s, _, k) = classify_arli(&http(rejected, Vec::new()), &validator);
+            assert_eq!(
+                (s, k),
+                (InvokeStatus::BlockedProvider, Some("http_request_rejected"))
+            );
+        }
+
+        // Anything else non-2xx (1xx, non-standard codes) -> still BLOCKED,
+        // never FAIL: an unknown cause does not turn ERROR into FAIL.
+        for other in [100, 101, 999] {
+            let (s, _, k) = classify_arli(&http(other, Vec::new()), &validator);
+            assert_eq!(
+                (s, k),
+                (
+                    InvokeStatus::BlockedProvider,
+                    Some("http_status_unclassified")
+                )
+            );
+        }
+
+        // Transport / timeout / over-limit body.
+        let (s, _, k) = classify_arli(
+            &ArliOutcome::Transport {
+                detail: "connection refused".into(),
+            },
+            &validator,
+        );
+        assert_eq!((s, k), (InvokeStatus::BlockedProvider, Some("transport")));
+        let (s, _, k) = classify_arli(&ArliOutcome::TimedOut, &validator);
+        assert_eq!((s, k), (InvokeStatus::BlockedTimeout, Some("timeout")));
+        let (s, _, k) = classify_arli(&ArliOutcome::TooLarge { limit: 64 }, &validator);
+        assert_eq!(
+            (s, k),
+            (InvokeStatus::BlockedProvider, Some("response_too_large"))
+        );
+    }
+
+    /// Live smoke against the real Arli endpoint, driven through the
+    /// PRODUCTION classifier: it must prove the schema-bound structured
+    /// output property (`PASS` + the exact normalized value), not merely
+    /// that the server can emit braces. Ignored by default; both env vars
+    /// are REQUIRED — no fallback model id, because a stale hardcoded
+    /// model would make the smoke test the author's memory, not the
+    /// protocol. Run:
+    /// `ARLIAI_API_KEY=... ARLIAI_SMOKE_MODEL=<exact id> \
+    ///    cargo test --lib live_smoke_arliai -- --ignored --nocapture`
+    /// On success it prints the evidence line (model id, HTTP status,
+    /// SHA-256 of the raw response body) — never the key, never the body.
+    #[test]
+    #[ignore = "live network + ARLIAI_API_KEY + ARLIAI_SMOKE_MODEL required"]
+    fn live_smoke_arliai() {
+        let key = std::env::var("ARLIAI_API_KEY").unwrap_or_default();
+        assert!(
+            !key.trim().is_empty(),
+            "live smoke needs ARLIAI_API_KEY set"
+        );
+        let model = std::env::var("ARLIAI_SMOKE_MODEL").unwrap_or_default();
+        assert!(
+            !model.trim().is_empty(),
+            "live smoke needs ARLIAI_SMOKE_MODEL set to an exact, current model id \
+             (deliberately no fallback)"
+        );
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": { "ok": { "type": "boolean" } },
+            "required": ["ok"],
+            "additionalProperties": false
+        });
+        let validator = jsonschema::validator_for(&schema);
+        assert!(validator.is_ok(), "smoke schema failed to build");
+        let Ok(validator) = validator else { return };
+
+        let outcome = invoke_arliai::call(
+            "Return exactly this JSON object and nothing else: {\"ok\": true}",
+            &strip_dollar_schema(&schema),
+            &model,
+            &key,
+            Duration::from_secs(90),
+        );
+        if let ArliOutcome::Http { status, body } = &outcome {
+            println!(
+                "[live-smoke] model={model} http={status} raw_sha256={}",
+                sha256_hex_bytes(body)
+            );
+        }
+
+        let (status, structured, error_kind) = classify_arli(&outcome, &validator);
+        assert_eq!(
+            status,
+            InvokeStatus::Pass,
+            "live classification was {} (error_kind: {error_kind:?}), not PASS",
+            status.label()
+        );
+        assert_eq!(
+            structured,
+            Some(serde_json::json!({"ok": true})),
+            "normalized result must be exactly {{\"ok\": true}}"
+        );
+        println!("[live-smoke] classification=PASS normalized={{\"ok\":true}}");
+    }
+
+    #[test]
+    fn invoke_backend_parses_all_three_and_refuses_the_rest() {
+        assert_eq!(
+            "claude".parse::<InvokeBackend>().ok(),
+            Some(InvokeBackend::Claude)
+        );
+        assert_eq!(
+            "codex".parse::<InvokeBackend>().ok(),
+            Some(InvokeBackend::Codex)
+        );
+        assert_eq!(
+            "arliai".parse::<InvokeBackend>().ok(),
+            Some(InvokeBackend::ArliAi)
+        );
+        assert!("gpt4all".parse::<InvokeBackend>().is_err());
+        assert!("ArliAI".parse::<InvokeBackend>().is_err()); // exact, lowercase
+    }
+
+    #[test]
+    fn blocked_provider_label_matches_docs() {
+        assert_eq!(InvokeStatus::BlockedProvider.label(), "BLOCKED_PROVIDER");
     }
 
     #[cfg(unix)]

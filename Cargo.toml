@@ -64,6 +64,27 @@ sha2 = "0.10"
 # MIT-0, strictly more permissive than plain MIT -- added to deny.toml),
 # advisories/bans/sources all clean.
 jsonschema = { version = "0.47", default-features = false }
+# `invoke.rs` (arliai backend) only: one HTTPS POST to a compile-time-fixed
+# endpoint (docs/o7-invoke.md, "Arli AI backend"). ureq, not reqwest, for the
+# same reason reqwest is explicitly off elsewhere in this file: a blocking,
+# small-surface client with no async runtime and no full URL/TLS/idna stack
+# beyond what one pinned endpoint needs. Default features off; `rustls` is
+# the only one enabled (TLS is non-negotiable for a Bearer-carrying call) --
+# no gzip/json/charset/cookies/socks-proxy, none of which this single POST
+# uses. Redirect-following is disabled at the call site (endpoint binding).
+# `cargo deny check` run against this addition: advisories/bans/sources
+# clean; one new license to allow (`webpki-roots` is CDLA-Permissive-2.0,
+# Mozilla's permissive data license for the CA root store -- added to
+# deny.toml with rationale). Notably absent from the added subtree: the
+# icu4x/idna/url stack that motivated keeping reqwest out.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+# `invoke.rs` (arliai wire-logging preflight) only: read the `log` facade's
+# global max level to REFUSE arliai dispatch when TRACE is admitted -- ureq
+# logs through this facade and its wire-level TRACE is unredacted, so the
+# boundary must be an enforced fail-closed check, not "o7 currently installs
+# no logger" (docs/o7-invoke.md, key handling). Already in the tree as
+# ureq's own dependency; this adds no new crate.
+log = "0.4"
 
 # `invoke.rs` timeout path only (unix): SIGKILL the backend's WHOLE process
 # group, not just the direct child, so a descendant still holding the stdout/

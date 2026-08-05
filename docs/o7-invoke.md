@@ -21,7 +21,7 @@ and where responsibility for those guarantees sits.
 
 ```bash
 o7 invoke
-  --engine claude|codex
+  --engine claude|codex|arliai
   --prompt-file prompt.txt
   --input-manifest input-manifest.json   # optional; hashed for provenance
   --schema output.schema.json
@@ -37,8 +37,12 @@ status — callers must read `meta.json`, not just the exit code.
 
 The `--out` dir must be **absent or empty**: a non-empty one is refused up
 front, before the version probe or any backend spawn, and never partially
-overwritten. A given outcome writes only its own files (a `FAIL` leaves no
-`result.json`), so refusing a dirty dir is what stops a previous run's stale
+overwritten. A given outcome writes only its own files — precisely:
+`result.json` exists iff a JSON value was extracted, so
+`FAIL_INVALID_OUTPUT` (and every `BLOCKED_*`) leaves none, while
+`FAIL_SCHEMA` DOES write one (the offending schema-invalid value is
+evidence worth keeping; `schema_valid: false` in `meta.json` is what marks
+it failed). Refusing a dirty dir is what stops a previous run's stale
 `result.json` from masquerading as this run's output.
 
 ## Capability profiles
@@ -69,6 +73,13 @@ not a silent fallback to some default posture. `read-only-data` maps to:
   shell" and *not* "no network"; that gap is what keeps `--engine codex`
   unfit for untrusted content until live-verified (below).
 
+- **Arli AI**: there is no subprocess and no tool surface at all — the
+  backend is a direct HTTPS API call (below). `read-only-data` is satisfied
+  structurally: the request carries `tool_choice: "none"`, and a response
+  that nevertheless contains `tool_calls` is rejected as
+  `FAIL_INVALID_OUTPUT` (belt and braces — this layer never executes a tool
+  either way).
+
 **`o7 invoke` itself does not refuse `--engine codex`** — it is a general
 primitive, and a caller reaching for codex purely to check
 reachability/auth (no untrusted content involved) is a legitimate use this
@@ -81,6 +92,201 @@ fixed, non-adversarial prompt. Any future caller of `o7 invoke` inherits
 the same unverified posture and needs to make the same call for its own
 untrusted-content paths — this primitive documents the gap accurately, it
 does not close it by fiat.
+
+## Arli AI backend (`--engine arliai`)
+
+The third backend is not a CLI: it is a direct HTTPS call to Arli AI's
+OpenAI-compatible chat-completions API. It exists so `o7 invoke` can be
+exercised against a cheap hosted open-weights provider without installing
+another vendor CLI. The contract below is normative and was written before
+the implementation (contract-first).
+
+### Endpoint binding
+
+- The endpoint is a **compile-time constant**:
+  `https://api.arliai.com/v1/chat/completions`. There is no flag, no
+  environment variable, and no config file that can point the call anywhere
+  else — an endpoint override would be a credential-redirection vector (the
+  `Authorization` header goes wherever the URL says).
+- **Redirects are disabled.** Any 3xx response is terminal:
+  `BLOCKED_PROVIDER` (`error_kind: "redirect"`), never followed. HTTP
+  clients generally strip `Authorization` on cross-origin redirects anyway;
+  the ban is about endpoint binding, not only header leakage — this
+  primitive talks to exactly one URL or it doesn't talk.
+- **No proxy support** in this slice: the connection is direct, proxy
+  environment variables are deliberately ignored (same endpoint-binding
+  rationale; revisit as an explicit decision if a deployment ever needs
+  one).
+- **No retry** in this slice, on anything — one request, one classified
+  outcome. Retry policy belongs to the caller (and, for canonical runs, to
+  the R1 dispatch-boundary rules), not inside this primitive.
+
+### Configuration refusals (pre-network)
+
+Both are refused with a plain error before any artifact is written or any
+connection is opened — config errors, not run outcomes (no `meta.json`,
+same as an unknown `--capability-profile`):
+
+- `ARLIAI_API_KEY` unset or empty — there is no interactive login state to
+  fall back to, unlike the CLI backends;
+- `--model` absent — Arli AI documents `model` as optional, falling back
+  to a provider-selected "default served model". 007 refuses that
+  implicit identity: a call whose model the provider silently chose is
+  not attributable evidence, so the request must carry the explicit
+  requested model (`o7` itself still pins none, consistent with the CLI
+  backends);
+- a global `log` max level that admits TRACE — see the key-handling
+  boundary below; this is a fail-closed wire-logging preflight, checked
+  before the run dir, artifacts, or any connection.
+
+### Request shape
+
+```json
+{
+  "model": "<--model>",
+  "messages": [{ "role": "user", "content": "<prompt-file text>" }],
+  "response_format": { "type": "json_schema", "json_schema": { "name": "o7_result", "schema": { } } },
+  "tool_choice": "none",
+  "stream": false
+}
+```
+
+- `response_format` carries the OpenAI-flavored `name` field
+  (`"o7_result"`, a fixed label with no semantics here). This is a
+  **live-fixture arbitration result**, not Arli's documentation: their
+  docs show a bare `schema` with no `name`, but the deployed endpoint's
+  request validator (vLLM-style) rejects that form with
+  `400 — {'loc': ('body','response_format',…,'json_schema','name'),
+  'msg': 'Field required'}` (observed 2026-08-05 against `GLM-4.7`; the
+  same probe confirmed `tool_choice: "none"` and
+  `include_reasoning: false` are accepted). The documented form was
+  implemented first and lost to the live evidence — exactly the
+  arbitration this section originally reserved.
+- The schema sent is the same `$schema`-meta-key-stripped copy the claude
+  path sends (`strip_dollar_schema`) — one precedent, one behavior.
+- **No reasoning controls are sent — deliberately, by live-fixture
+  arbitration.** `include_reasoning: false` (Arli-documented, defaults
+  true) was implemented first and turned out to be actively harmful on
+  the deployed endpoint: with it, a reasoning model (`GLM-4.7`,
+  2026-08-05) generated the answer (6 completion tokens,
+  `finish_reason: "stop"`) but the response carried `content: null` AND
+  `reasoning: null` — the generated output was placed nowhere. The same
+  request without the parameter returns the answer in `content`
+  correctly (with the chain in the non-normative `reasoning` field).
+  So nothing is sent: reasoning output may then appear in the response's
+  `reasoning` field and therefore in `stdout.raw` (raw provider
+  evidence), but it is structurally excluded from the normative result —
+  `extract_content` reads `message.content` only, and only that value
+  reaches `result.json`. (`chat_template_kwargs: {"enable_thinking":
+  false}` was verified to suppress thinking cheaply on GLM, but it is a
+  model-family-specific template kwarg; this primitive takes an
+  arbitrary `--model` and injects no per-model magic. A future explicit
+  opt-in flag may expose it; silently defaulting it is out.)
+- Server-side `response_format` enforcement is **best effort, advisory**:
+  the local `jsonschema` re-validation (next section) is the only judge
+  that counts, exactly as for both CLI backends.
+
+### Response handling
+
+`message.content` must be a string that parses as **bare JSON** after
+whitespace trimming — no fence tolerance (with server-side constrained
+decoding requested, a fenced answer is a real anomaly worth failing loudly;
+`stdout.raw` keeps the evidence). The extracted value then goes through the
+same independent schema validation as every other engine.
+
+The response body is bounded by an **explicit** limit,
+`MAX_ARLIAI_RESPONSE_BYTES` (10 MiB): a body exceeding it is
+`BLOCKED_PROVIDER` (`error_kind: "response_too_large"`). The bound is part
+of this contract, not an inherited SDK default — a runtime boundary must
+not exist only as "the library happens to do that".
+
+Classification matrix (normative):
+
+| Observation | status | `error_kind` |
+|---|---|---|
+| 2xx, content parses, schema-valid | `PASS` | — |
+| 2xx, content parses, schema-invalid | `FAIL_SCHEMA` | `schema_violation` |
+| 2xx, body not JSON / envelope malformed | `FAIL_INVALID_OUTPUT` | `bad_envelope` |
+| 2xx, `choices` empty | `FAIL_INVALID_OUTPUT` | `empty_choices` |
+| 2xx, `content` null/absent | `FAIL_INVALID_OUTPUT` | `null_content` |
+| 2xx, `tool_calls` present (non-empty) | `FAIL_INVALID_OUTPUT` | `tool_calls_present` |
+| 2xx, content string is not JSON | `FAIL_INVALID_OUTPUT` | `invalid_json` |
+| 3xx (any) | `BLOCKED_PROVIDER` | `redirect` |
+| 401 / 403 | `BLOCKED_AUTH` | `auth` |
+| 402 / 429 | `BLOCKED_USAGE` | `usage_limit` |
+| 408 (server-side request timeout) | `BLOCKED_TIMEOUT` | `timeout` |
+| any other 4xx (request rejected — nothing was generated) | `BLOCKED_PROVIDER` | `http_request_rejected` |
+| 5xx | `BLOCKED_PROVIDER` | `http_5xx` |
+| body exceeds `MAX_ARLIAI_RESPONSE_BYTES` | `BLOCKED_PROVIDER` | `response_too_large` |
+| any other non-2xx (1xx, non-standard codes) | `BLOCKED_PROVIDER` | `http_status_unclassified` |
+| DNS / TLS / connection refused / reset | `BLOCKED_PROVIDER` | `transport` |
+| timeout (`--timeout-secs`) | `BLOCKED_TIMEOUT` | `timeout` |
+
+`BLOCKED_PROVIDER` is **new, and 007-side only**: it has no counterpart in
+`demand_radar.models.AgentRunStatus` yet. That is deliberate and safe —
+the cross-repo conformance gate runs `claude`/`codex` only (see the gate
+section below), so the shared-vocabulary invariant it checks is untouched.
+If Demand Radar ever grows an `arliai` path, its vocabulary must adopt
+`BLOCKED_PROVIDER` first.
+
+**The FAIL/BLOCKED boundary** (review-round corrections, rounds 5–6):
+`FAIL_*` is reserved for the 2xx path — the provider claimed success and
+the payload proved unusable (bad envelope, null content, non-JSON,
+schema violation). Every non-2xx response means no trustworthy answer was
+produced — the request was rejected, redirected, throttled, or failed
+upstream — and classifies as a `BLOCKED_*`, with `error_kind`
+distinguishing the cause; an *unknown* cause (`http_status_unclassified`)
+is still an absence of an answer, never a model failure. This is the
+repo's FAIL/ERROR distinction applied to HTTP: recording a non-2xx as
+`FAIL_INVALID_OUTPUT` would claim the model produced bad output when
+nothing ran. The CLI backends' `nonzero_exit` precedent does not
+transfer: a CLI that exits nonzero *ran*, and its output is genuinely
+ambiguous.
+
+### Artifacts and `meta.json` mapping
+
+Same run-dir contract (`--out` absent-or-empty, refused otherwise):
+
+- `stdout.raw` — the **raw HTTP response body**, byte-for-byte, whatever
+  the status, for every response within the `MAX_ARLIAI_RESPONSE_BYTES`
+  bound. The analogue of a CLI backend's raw stdout: the unmodified
+  provider evidence. Two outcomes leave it empty: transport failures (no
+  body existed) and an over-limit response (the body is deliberately not
+  persisted; the size message goes to `stderr.log`).
+- `stderr.log` — transport/timeout/over-limit detail; empty on an
+  in-bound HTTP response.
+- `result.json` — the extracted (normalized) content value, written only
+  when one was extracted, same as the CLI paths.
+- `meta.json` — `provider: "arliai-api"`, `command_version: null` (there
+  is no CLI to probe), `exit_code: null` (no subprocess; both fields are
+  already nullable in the schema — no schema change), `model` always set
+  (it is required), everything else as for the CLI backends.
+
+### Key handling (the fifth security boundary)
+
+The existing four key rules (stdin-not-argv prompts, key-stripping before
+provider subprocesses, no credential storage read, independent
+re-validation) gain a fifth for a backend that *does* hold a key in
+process memory:
+
+- `ARLIAI_API_KEY` is read once in `run` into one function-local owned
+  value; only a borrowed, trimmed view of it is passed into the one
+  function that sets the `Authorization` header. The load-bearing
+  properties: it is **never stored in any struct**, never formatted into
+  any error/log/artifact string, and never reaches `meta.json` or the
+  run dir.
+- It is added to `strip_provider_api_keys`, so a `claude`/`codex`
+  subprocess never inherits it either.
+- HTTP-client wire logging is the classic leak path for exactly this kind
+  of header (`ureq` logs via the `log` facade, and its wire-level TRACE
+  is documented as unredacted). Today the `o7` binary initializes no
+  logger, so the facade's records go nowhere — but that is an ambient
+  fact about the current binary, not a boundary anyone enforces. The
+  enforced boundary is a **fail-closed preflight**: `run_arliai` refuses
+  to dispatch when the global `log` max level admits TRACE
+  (`log::max_level() >= Trace`), before the run dir, any artifact, or any
+  connection. A future logger in `o7` (or any embedder of this crate)
+  degrades that run to a refusal, never to a key on a log sink.
 
 ## Output re-validation
 
@@ -115,9 +321,11 @@ across CLI versions, so `o7` accepts exactly those two and nothing looser:
 
 ## Auth
 
-Neither engine's credential storage is read directly — both shell out to
-whichever CLI the user already authenticated interactively. `ANTHROPIC_API_KEY`/
-`CLAUDE_API_KEY`/`OPENAI_API_KEY`/`CODEX_API_KEY` are stripped
+Neither CLI engine's credential storage is read directly — both shell out
+to whichever CLI the user already authenticated interactively (`arliai`,
+having no CLI, authenticates with `ARLIAI_API_KEY` directly — see its own
+section above). `ANTHROPIC_API_KEY`/
+`CLAUDE_API_KEY`/`OPENAI_API_KEY`/`CODEX_API_KEY`/`ARLIAI_API_KEY` are stripped
 (`strip_provider_api_keys`) before **every provider subprocess** — the real
 call *and* the best-effort `--version` probe (the probe also runs under a
 short bounded timeout, degrading to `command_version: null` rather than
@@ -152,8 +360,10 @@ real error.
 ## Cross-repo conformance gate
 
 `demand-radar/scripts/o7_conformance_gate.py` runs the same prompt/schema/
-input through `o7 invoke` directly and through `O7InvokeRunner`, for both
-engines, asserting they agree on `status`/`schema_valid`/`error_kind`/
+input through `o7 invoke` directly and through `O7InvokeRunner`, for the
+two **CLI** engines (`claude`, `codex` — the gate is deliberately not
+`arliai`-aware, and `BLOCKED_PROVIDER` stays 007-side vocabulary until
+Demand Radar adopts it), asserting they agree on `status`/`schema_valid`/`error_kind`/
 structured output/`input_hashes`/`provider`/`model`/`exit_code`, plus an
 independently-recomputed prompt hash in a third language. It is a
 translation-fidelity gate (does the wrapper faithfully relay what `o7
