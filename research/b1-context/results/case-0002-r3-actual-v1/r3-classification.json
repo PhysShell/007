@@ -1,0 +1,73 @@
+{
+ "actual_report_status": {
+  "authoritative_for_a_series": false,
+  "deterministic_compilation_pipeline": "PARTIAL",
+  "development_result": "PARTIAL",
+  "generalization": "NOT_EVALUATED",
+  "holdout_evaluated": false,
+  "source_set_complete": false,
+  "task_conditioned_projection": "IMPLEMENTED"
+ },
+ "axes": {
+  "determinism": "DETERMINISTIC",
+  "evaluation": "UNAVAILABLE_UNDER_V0",
+  "generation": "PASS",
+  "overall_observation": "UNTUNED_PROJECTION_SURVIVED__EVALUATION_UNAVAILABLE",
+  "projection": "SURVIVED_UNTUNED",
+  "task_dependence": {
+   "acceptance_accepted": true,
+   "measured_pair": [
+    "case-0002-resume-product-integration",
+    "case-0002-audit-r21-evidence-provenance"
+   ],
+   "projections_differ": true,
+   "symmetric_difference_count": 14,
+   "v0_limitation": "v0 compares ONLY the first two task summaries; the third task (case-0002-assess-change-impact-on-oracle-topology) is projected and valid but is NOT part of this pairwise comparison. The result is NOT generalized to the third task."
+  }
+ },
+ "evaluation_note": "negative_control is []; every task evaluation is null. This is UNAVAILABLE_UNDER_V0 \u2014 NOT an evaluation PASS and NOT a projection failure.",
+ "fixture": "case-0002",
+ "not_done": [
+  "no expectation created",
+  "no remediation",
+  "no selector/schema/evaluation/budget change",
+  "no relation closure",
+  "no stale-state checks",
+  "no synthetic negative control"
+ ],
+ "per_task": [
+  {
+   "evaluation_null": true,
+   "selected": 6,
+   "task_id": "case-0002-resume-product-integration",
+   "valid": true
+  },
+  {
+   "evaluation_null": true,
+   "selected": 10,
+   "task_id": "case-0002-audit-r21-evidence-provenance",
+   "valid": true
+  },
+  {
+   "evaluation_null": true,
+   "selected": 9,
+   "task_id": "case-0002-assess-change-impact-on-oracle-topology",
+   "valid": true
+  }
+ ],
+ "projection_survived_untuned_conditions": {
+  "all_three_tasks_generated": true,
+  "every_validity_block_valid": true,
+  "no_missing_required_topic_or_kind": true,
+  "no_selector_or_schema_modification": true
+ },
+ "registry": "tasks-v1.yaml",
+ "schema": "o7.case0002.r3-classification/v0",
+ "static_v0_limitations_not_r3_failures": [
+  "task-dependence considers only the first two task summaries",
+  "budget-v0.yaml is not consumed (budget hard-coded)",
+  "required_relation_paths is not evaluated",
+  "forbidden_stale_as_current is not evaluated",
+  "no negative-control arm exists for case-0002"
+ ]
+}

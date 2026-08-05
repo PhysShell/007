@@ -1,0 +1,98 @@
+{
+ "all_corresponding_bytes_identical": true,
+ "per_path": [
+  {
+   "identical": true,
+   "path": "derived-manifest.actual.json",
+   "run1_sha256": "c161997708752b16e58f2a98f30faacd38b2eecb69e24b6e430b9c7f88ab64c1",
+   "run2_sha256": "c161997708752b16e58f2a98f30faacd38b2eecb69e24b6e430b9c7f88ab64c1"
+  },
+  {
+   "identical": true,
+   "path": "derived/reviewer.jsonl",
+   "run1_sha256": "374bbac69d810ed034164d842050b28865f260ad8856f81ab550be5af01539ff",
+   "run2_sha256": "374bbac69d810ed034164d842050b28865f260ad8856f81ab550be5af01539ff"
+  },
+  {
+   "identical": true,
+   "path": "projection-comparison.json",
+   "run1_sha256": "160d145c9cb250e878d036d0c7892835af62d762461abe63d5843eb97a53c4c3",
+   "run2_sha256": "160d145c9cb250e878d036d0c7892835af62d762461abe63d5843eb97a53c4c3"
+  },
+  {
+   "identical": true,
+   "path": "report.json",
+   "run1_sha256": "9b4cd434d1dac50a0789650d8a55e919e570a7840cb4e2f327804f9f948ebfa2",
+   "run2_sha256": "9b4cd434d1dac50a0789650d8a55e919e570a7840cb4e2f327804f9f948ebfa2"
+  },
+  {
+   "identical": true,
+   "path": "report.md",
+   "run1_sha256": "68cdcc15752c52753d8c2ad280656e3def83f6d7d4785d43e6d5fe65d7a801aa",
+   "run2_sha256": "68cdcc15752c52753d8c2ad280656e3def83f6d7d4785d43e6d5fe65d7a801aa"
+  },
+  {
+   "identical": true,
+   "path": "tasks/case-0002-assess-change-impact-on-oracle-topology/context.json",
+   "run1_sha256": "eec21faee941a2f086762148cb838e353c5c74861d327272b6f7bdf9fed2bdc8",
+   "run2_sha256": "eec21faee941a2f086762148cb838e353c5c74861d327272b6f7bdf9fed2bdc8"
+  },
+  {
+   "identical": true,
+   "path": "tasks/case-0002-assess-change-impact-on-oracle-topology/context.md",
+   "run1_sha256": "2244806ac463708ffd604b57b4fadaa6f734720d81c7352f50ed61f7bb04ae6a",
+   "run2_sha256": "2244806ac463708ffd604b57b4fadaa6f734720d81c7352f50ed61f7bb04ae6a"
+  },
+  {
+   "identical": true,
+   "path": "tasks/case-0002-assess-change-impact-on-oracle-topology/context.meta.json",
+   "run1_sha256": "02bfb0bd5e919c2e628013638cbf205a4eb9a4ada44227687e2aedebb385ab0d",
+   "run2_sha256": "02bfb0bd5e919c2e628013638cbf205a4eb9a4ada44227687e2aedebb385ab0d"
+  },
+  {
+   "identical": true,
+   "path": "tasks/case-0002-audit-r21-evidence-provenance/context.json",
+   "run1_sha256": "ba8b0e8f6d2732a3b1e86cff7c302b522291b0a73cf05b122c601d581b00718d",
+   "run2_sha256": "ba8b0e8f6d2732a3b1e86cff7c302b522291b0a73cf05b122c601d581b00718d"
+  },
+  {
+   "identical": true,
+   "path": "tasks/case-0002-audit-r21-evidence-provenance/context.md",
+   "run1_sha256": "55b97194bc4fae87374202a32cf0aff4963982459fd8e8da2ecb6784f5179467",
+   "run2_sha256": "55b97194bc4fae87374202a32cf0aff4963982459fd8e8da2ecb6784f5179467"
+  },
+  {
+   "identical": true,
+   "path": "tasks/case-0002-audit-r21-evidence-provenance/context.meta.json",
+   "run1_sha256": "6ec7b2ea375379c9f42ae33bf9360a59849dbca4b47f92267a2169febc5ae54d",
+   "run2_sha256": "6ec7b2ea375379c9f42ae33bf9360a59849dbca4b47f92267a2169febc5ae54d"
+  },
+  {
+   "identical": true,
+   "path": "tasks/case-0002-resume-product-integration/context.json",
+   "run1_sha256": "7c4003679e047e5f333ade9b905d9056ad42ba6bc5857dfe1a909d2ba5ef7fdf",
+   "run2_sha256": "7c4003679e047e5f333ade9b905d9056ad42ba6bc5857dfe1a909d2ba5ef7fdf"
+  },
+  {
+   "identical": true,
+   "path": "tasks/case-0002-resume-product-integration/context.md",
+   "run1_sha256": "63cff6423a60a93116aedbcc0bd936af5fa82ae2002483a8b1f927b0b7cd4425",
+   "run2_sha256": "63cff6423a60a93116aedbcc0bd936af5fa82ae2002483a8b1f927b0b7cd4425"
+  },
+  {
+   "identical": true,
+   "path": "tasks/case-0002-resume-product-integration/context.meta.json",
+   "run1_sha256": "507208143f2bbee176cb4f70268b9dd4c7b8218e9c04dd40345f93be57843852",
+   "run2_sha256": "507208143f2bbee176cb4f70268b9dd4c7b8218e9c04dd40345f93be57843852"
+  }
+ ],
+ "run1_exit": 0,
+ "run1_tree_manifest_sha256": "ae6770eff382805393f1e6edb19dca284e78c77d8b00e444113bd85fcff1ca78",
+ "run2_exit": 0,
+ "run2_tree_manifest_sha256": "56461c5b225c48699c1e1a425b30d825c704c42327741670575100890926bf80",
+ "same_relative_file_set": true,
+ "schema": "o7.case0002.r3-comparison/v0",
+ "stderr_identical": true,
+ "stdout_identical": true,
+ "verdict": "DETERMINISTIC"
+}
