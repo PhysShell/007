@@ -1,0 +1,57 @@
+{
+ "artifact_digests": {
+  "contract_r2_schema": "sha256:ae5ba5aaeb4d4d5b09d4c3833cc236400638690aa0c6e0a2c4e0b80d0b16cf33",
+  "design_doc": "sha256:e29ec7394be6b5ce612349cef035122cab2ee85b880b9f4f99cb8fed69d348f1",
+  "evaluator_manifest_schema": "sha256:01be72a02c9fc7440b5668bc6b526d55b2fc39ba75d0cd4f7aee90e5868bc7c9",
+  "output_v1_schema": "sha256:14305b8f6e50b2003111b3c053a040d334d67872d430a8f6f7770d0d6c4cb067"
+ },
+ "closed_ambiguities": [
+  "budget counted representation -> selector-v0-canonical-record-jsonl (gating); rendered context sizes non-gating diagnostics; UNRESOLVED removed from normative revision (kept in history).",
+  "full_derived semantics -> family_applicability: full_derived required for source_compilation only; projection arm carries projection-validity/observation/relation/stale gates; full_derived source-compilation verifies frozen derived artifacts, no extraction rerun, no semantic judgement.",
+  "digest domains -> artifact_bytes_sha256 + canonical_object_sha256 (o7-canonical-json-v0); text/binary bodies artifact-bytes only; gold state bound in both (7e00505b / 2589319a).",
+  "evaluator input closure -> ordered input inventory of every opened file (public+private), undeclared open fails closed; relation checks bind task context.json.",
+  "contract_input_consistency -> new required axis, 11 gates; gold_derived_targets recomputed from the frozen gold graph.",
+  "task-shape -> materially_different replaced by incomparable (differ + neither subset + both directional diffs non-empty); case-0002 resume/audit + resume/impact incomparable, audit/impact left_strict_superset.",
+  "evaluator implementation identity -> evaluator-implementation-manifest/v0 + output records entrypoint/module/checkout digests.",
+  "schemas made genuinely fail-closed (additionalProperties false, closed enums, exact sha256, coverage [0,1], 2-distinct/unique pairs, JSON null); 14 negative fixtures all rejected."
+ ],
+ "corrected_commit_A": {
+  "commit": "f7e647f79fff7da37ca63c6bf7a36d0521816b6e",
+  "tree": "2035c6d5ceeb40de4d72eadb377ccc50b85deb3d"
+ },
+ "design_only": true,
+ "gold_state_dual_binding": {
+  "artifact_bytes_sha256": "sha256:7e00505b25a7f0d815556ef6cc9db710b1ae0d3144e6f91a0c4eedcaa733c147",
+  "canonical_object_sha256": "sha256:2589319a8094671c15bee9d9ff7839729e69fb6de410d3f3502b1e7dc073eaf4"
+ },
+ "next": "R4B standalone evaluator vs synthetic fixtures first; R4C apply to frozen R3.1 bytes; R4D optional report integration.",
+ "no_evaluator_code_written_or_executed": true,
+ "no_expectation_created": true,
+ "no_scored_result": true,
+ "note": "Not self-referential. R4B/C/D not started.",
+ "original_contract_digest": {
+  "artifact_bytes_sha256": "sha256:feef81c6b06e2c77f1246dde23af2e617fe5cbc30b95ac083446352222425b26",
+  "instance": "evaluation-contract-v1.yaml"
+ },
+ "preserves_unchanged": {
+  "r4a_contract_commit": "cec6b39eedb1733971eebfef45379d4775aa27c7",
+  "r4a_decision_record_commit": "b7888392617325f180b29b117bc73f3104c8bfff"
+ },
+ "remaining_non_normative_future_issues": [
+  "multi-hop relation traversal out of scope (depth-1 only) until a future contract defines it \u2014 a scope boundary, not a semantic ambiguity"
+ ],
+ "round": "R4A.1 \u2014 evaluation-contract v1 semantic + validation closure (design-only)",
+ "schema": "o7.case0002.r4a.1-decision-record/v0",
+ "schema_validation": {
+  "contract_r2_instance_valid": true,
+  "negative_cases_rejected": 14,
+  "positive_manifest_valid": true,
+  "positive_output_valid": true,
+  "schemas_wellformed": true
+ },
+ "superseding_contract_digest": {
+  "artifact_bytes_sha256": "sha256:b212463a40eb6f4660467394e7fd517d1da798c60480ea8607950586e29b5f54",
+  "contract_revision": 2,
+  "instance": "evaluation-contract-v1-r2.yaml"
+ }
+}
