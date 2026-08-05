@@ -97,6 +97,11 @@ task-specific, evidence-backed agent context),
 `docs/CFR.md` (CFR/game-theoretic scheduling survey),
 `docs/fastcontext.md`, `docs/omnigraph.md`.
 
+The representation decision for that memory layer — does it need RDF/OWL? —
+is settled in `docs/synapse-open-ontologies-arch.md` (accepted): typed relations
+and recursive queries, no ontology dependency, with explicit escalation criteria
+and a competency-question corpus as the admission test.
+
 QODEC (token-aware lossless codec lab) has moved to its own standalone
 repository: [`PhysShell/qodec`](https://github.com/PhysShell/qodec). See
 [`docs/qodec-migrated.md`](docs/qodec-migrated.md) for the migration record.
