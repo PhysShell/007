@@ -1,0 +1,80 @@
+{
+ "adapter": {
+  "execution_checkout_commit": "fabeaf846b4a414d79b4ba72c0748ecf96254f53",
+  "implementation_commit": "e62ee7354220d0eab7d727ab1a581d1ea8c3741d",
+  "implementation_tree": "aefc5a3e8182382021fe33e0bd421841549db58a"
+ },
+ "cas_object_count": 14,
+ "cas_objects": {
+  "derived-manifest.actual.json": "cas:sha256:c161997708752b16e58f2a98f30faacd38b2eecb69e24b6e430b9c7f88ab64c1",
+  "derived/reviewer.jsonl": "cas:sha256:374bbac69d810ed034164d842050b28865f260ad8856f81ab550be5af01539ff",
+  "projection-comparison.json": "cas:sha256:160d145c9cb250e878d036d0c7892835af62d762461abe63d5843eb97a53c4c3",
+  "report.json": "cas:sha256:9b4cd434d1dac50a0789650d8a55e919e570a7840cb4e2f327804f9f948ebfa2",
+  "report.md": "cas:sha256:68cdcc15752c52753d8c2ad280656e3def83f6d7d4785d43e6d5fe65d7a801aa",
+  "tasks/case-0002-assess-change-impact-on-oracle-topology/context.json": "cas:sha256:eec21faee941a2f086762148cb838e353c5c74861d327272b6f7bdf9fed2bdc8",
+  "tasks/case-0002-assess-change-impact-on-oracle-topology/context.md": "cas:sha256:2244806ac463708ffd604b57b4fadaa6f734720d81c7352f50ed61f7bb04ae6a",
+  "tasks/case-0002-assess-change-impact-on-oracle-topology/context.meta.json": "cas:sha256:02bfb0bd5e919c2e628013638cbf205a4eb9a4ada44227687e2aedebb385ab0d",
+  "tasks/case-0002-audit-r21-evidence-provenance/context.json": "cas:sha256:ba8b0e8f6d2732a3b1e86cff7c302b522291b0a73cf05b122c601d581b00718d",
+  "tasks/case-0002-audit-r21-evidence-provenance/context.md": "cas:sha256:55b97194bc4fae87374202a32cf0aff4963982459fd8e8da2ecb6784f5179467",
+  "tasks/case-0002-audit-r21-evidence-provenance/context.meta.json": "cas:sha256:6ec7b2ea375379c9f42ae33bf9360a59849dbca4b47f92267a2169febc5ae54d",
+  "tasks/case-0002-resume-product-integration/context.json": "cas:sha256:7c4003679e047e5f333ade9b905d9056ad42ba6bc5857dfe1a909d2ba5ef7fdf",
+  "tasks/case-0002-resume-product-integration/context.md": "cas:sha256:63cff6423a60a93116aedbcc0bd936af5fa82ae2002483a8b1f927b0b7cd4425",
+  "tasks/case-0002-resume-product-integration/context.meta.json": "cas:sha256:507208143f2bbee176cb4f70268b9dd4c7b8218e9c04dd40345f93be57843852"
+ },
+ "contracts": {
+  "budget": {
+   "byte_budget": 20000,
+   "record_budget": 32,
+   "unit": "utf8_bytes+records"
+  },
+  "evaluation_impl_sha256": "sha256:fc28f7f35cea02fffb2f4ff1659e509cff83223aea94bc90d91caa0555ea93bf",
+  "report_contract": "o7.b1.report/v1",
+  "selector_id": "o7.b1.selector/v0",
+  "selector_impl_sha256": "sha256:8e2dd816e6fdd82f6af4ec559e012e5f82484231ba36cc5f38f7e7759dacb029",
+  "state_schema_id": "o7.b1.state-observables/v0",
+  "state_schema_sha256": "sha256:2b6ba48c919cda56f209192477131675c4536293a8bf91be4af6f4d9910a5691"
+ },
+ "determinism_verdict": "DETERMINISTIC",
+ "fixture": {
+  "fixture_lock_v1_sha256": "sha256:5668153405cd59c1ba56bfda96f019fc419232e92689798b976af971f52d9ebb",
+  "gold_state_sha256": "sha256:7e00505b25a7f0d815556ef6cc9db710b1ae0d3144e6f91a0c4eedcaa733c147",
+  "logical_id": "case-0002",
+  "manifest_sha256": "sha256:c09f6f8337632f3c4dfb0db2bc12128156ce227ca9758a0d5c91c5300304586a",
+  "question_file_digests": {
+   "questions-audit-v0.yaml": "sha256:e89769b6df78fd8fa1cfa52d3de7acfd6909d91df4da788b2d56c4fc19909501",
+   "questions-impact-v0.yaml": "sha256:f41bdd036062165aefb6ec40b0b8afa18f7ac2f593730b0ee5a51e0db3869ebc",
+   "questions-resume-v0.yaml": "sha256:0478856382b1a0ac7f4fbb78a532041e9a770d3d14337b3a790181c27a706936"
+  },
+  "registry_digest_in_report": "sha256:067c1c868b7f192bdca14f5768c8f83893359b7bff90c8c7ceb811fcca60270a",
+  "registry_filename": "tasks-v1.yaml",
+  "registry_sha256": "sha256:067c1c868b7f192bdca14f5768c8f83893359b7bff90c8c7ceb811fcca60270a",
+  "source_selectors_sha256": "sha256:a7792d5c416a82a809391f06675de8803c38ac6378a2d21bca0db75965d0ccd0",
+  "task_file_digests": {
+   "task-audit-v1.yaml": "sha256:2bb14a3149277e3da3a56e779d02e3ab8fadf43be588694eac20a9c14669c2a7",
+   "task-impact-v0.yaml": "sha256:ed91f7b93794a1228f43404b642527e21c85a3514f6d596446f690bdf7863c40",
+   "task-resume-v0.yaml": "sha256:a7ef0a7c9c0868f9bb4407f4b93c5f64e91521bdae73621065f93082418f4074"
+  }
+ },
+ "no_expectation_created": true,
+ "no_remediation": true,
+ "note": "Not self-referential. This receipt commit's own head may be bound by the next external decision record.",
+ "offsite_snapshot": "b780b82f",
+ "output_byte_identity": true,
+ "overall_observation": "UNTUNED_PROJECTION_SURVIVED__EVALUATION_UNAVAILABLE",
+ "plane_record": {
+  "cas_object": "cas:sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139",
+  "sha256": "sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139"
+ },
+ "r3_artifact_commit": "e7861f0c4de76803d77e30f758975e0b89c2b65d",
+ "r3_artifact_tree": "5ca521e477179639e23f23ffc5af935acc7b231c",
+ "report_json_sha256": "sha256:9b4cd434d1dac50a0789650d8a55e919e570a7840cb4e2f327804f9f948ebfa2",
+ "round": "R3 \u2014 authoritative case-0002 untuned actual baseline freeze",
+ "round0_manifest": {
+  "object_id": "cas:sha256:59e0c168b7c82d0a19c5aeae1b5bdf27e0a1937483c67534ff68a4ab579cdef6",
+  "path": "~/.local/share/o7-research/manifests/case-0002-round0-source-lock.yaml",
+  "sha256": "sha256:59e0c168b7c82d0a19c5aeae1b5bdf27e0a1937483c67534ff68a4ab579cdef6"
+ },
+ "run1_tree_manifest_sha256": "sha256:ae6770eff382805393f1e6edb19dca284e78c77d8b00e444113bd85fcff1ca78",
+ "run2_tree_manifest_sha256": "sha256:56461c5b225c48699c1e1a425b30d825c704c42327741670575100890926bf80",
+ "schema": "o7.case0002.r3-receipt/v0"
+}
