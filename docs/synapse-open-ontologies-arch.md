@@ -105,6 +105,18 @@ tableaux reasoner, ontology alignment, versioning, drift detection
 server, and a Tauri studio. `src/drift.rs:18` canonicalises each snapshot via
 RDFC 1.0 before diffing.
 
+*Artifact says.* `src/` at that commit carries, among ~65 modules,
+`tableaux.rs`, `shacl.rs`, `align.rs`/`align_fuzzy.rs`, `plan_pddl.rs`/
+`plan_classical.rs`, `civex_pywhy.rs`, `clinical.rs`, `embed.rs`/`hnsw_index.rs`/
+`poincare.rs`, `eval_rag.rs` and `marketplace.rs`, alongside a `studio/` desktop
+application.
+
+*Inference.* Description-logic reasoning, shape validation, ontology alignment,
+classical and PDDL planning, causal inference, clinical crosswalks, vector
+indexing, RAG evaluation and a GUI in one crate means subsystem maturity is
+almost certainly uneven, and a dependent inherits the whole surface. This is a
+scope observation about the artifact, not a claim about who maintains it.
+
 *Artifact says.* `docs/determinism.md` documents two nondeterminism defects and
 their fixes. Tableaux classification failed on 2 runs in 6 on a fixed commit and
 machine because `named_classes` is a `HashSet` and five expansion sites in
@@ -248,7 +260,8 @@ all four are implementable against the existing `runs/` layout.
 3. **Deterministic traversal rule** — every hash-derived traversal is fully
    sorted, with a total order on ties, and the ordering is asserted in tests
    rather than assumed. This is not borrowed elegance; it is the defect class
-   from `docs/determinism.md`, whose signature is a silently omitted true result.
+   from `docs/determinism.md`, whose signature is a silently omitted true result
+   ([§6.1](#61-the-silent-omission-defect-class)).
 4. **Stable documentation anchors** — separate `snapshot_hash`,
    `block_content_hash`, and a `block_id` that survives edits elsewhere in the
    file.
@@ -266,6 +279,35 @@ heading ancestry
 with `snapshot_hash`, source span, and `block_content_hash` stored separately, so
 that "moved", "edited", "deleted", and "file changed elsewhere" stay
 distinguishable.
+
+### 6.1 The silent-omission defect class
+
+Item (3) is not specific to tableaux. The general shape:
+
+```text
+unordered traversal
+→ variable work order
+→ finite budget exhausted on a different frontier
+→ true result omitted
+→ omission mistaken for a negative
+```
+
+Every 007 component that combines an unordered set with a limit inherits it:
+bounded impact analysis, witness search, candidate deduplication, top-k recall,
+and any traversal that stops early. The rule is therefore a test discipline, not
+a code-review reminder:
+
+```text
+same canonical input
++ different insertion orders / hash seeds
+→ byte-identical ordered result
++ identical verdict
++ identical omission / unknown accounting
+```
+
+The third line is the one that catches this class. Comparing verdicts alone
+passes while a budget silently swallows different true results on each seed —
+what was omitted, and why, has to be part of the compared output.
 
 ## 7. Competency questions as the admission test
 
@@ -331,7 +373,7 @@ exists, or a README depicts a brain.
 | Rejected | Ground |
 | --- | --- |
 | Synapse's fact-from-Markdown trust model | Inverts `I1`/`I5` ([§4](#4-facts-versus-claims)) |
-| Open Ontologies as a Cargo dependency | Single-author project, department-sized scope, recent inverted-benchmark history; the useful parts are specifications (RDFC 1.0, KGCL) implementable directly, and Oxigraph is reachable without the wrapper |
+| Open Ontologies as a Cargo dependency | Scope breadth ([§3.2](#32-open-ontologies)) against a recent inverted-benchmark history; the useful parts are specifications (RDFC 1.0, KGCL) implementable directly, and Oxigraph is reachable without the wrapper |
 | OWL2-DL reasoner | [§5](#5-why-007-does-not-need-rdfowl-today) — measured cost, no matching query need |
 | RDF store as default memory representation | Same |
 | Label-based elevated truth | See below |
