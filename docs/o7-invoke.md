@@ -143,8 +143,7 @@ same as an unknown `--capability-profile`):
   "messages": [{ "role": "user", "content": "<prompt-file text>" }],
   "response_format": { "type": "json_schema", "json_schema": { "name": "o7_result", "schema": { } } },
   "tool_choice": "none",
-  "stream": false,
-  "include_reasoning": false
+  "stream": false
 }
 ```
 
@@ -161,11 +160,24 @@ same as an unknown `--capability-profile`):
   arbitration this section originally reserved.
 - The schema sent is the same `$schema`-meta-key-stripped copy the claude
   path sends (`strip_dollar_schema`) — one precedent, one behavior.
-- `include_reasoning: false`, explicitly — Arli documents it as
-  defaulting to true. Reasoning output is not normative evidence for this
-  primitive (the evidence is provider bytes + normalized result + local
-  validation), and leaving it on inflates latency, response size, and
-  `stdout.raw` for nothing this layer reads.
+- **No reasoning controls are sent — deliberately, by live-fixture
+  arbitration.** `include_reasoning: false` (Arli-documented, defaults
+  true) was implemented first and turned out to be actively harmful on
+  the deployed endpoint: with it, a reasoning model (`GLM-4.7`,
+  2026-08-05) generated the answer (6 completion tokens,
+  `finish_reason: "stop"`) but the response carried `content: null` AND
+  `reasoning: null` — the generated output was placed nowhere. The same
+  request without the parameter returns the answer in `content`
+  correctly (with the chain in the non-normative `reasoning` field).
+  So nothing is sent: reasoning output may then appear in the response's
+  `reasoning` field and therefore in `stdout.raw` (raw provider
+  evidence), but it is structurally excluded from the normative result —
+  `extract_content` reads `message.content` only, and only that value
+  reaches `result.json`. (`chat_template_kwargs: {"enable_thinking":
+  false}` was verified to suppress thinking cheaply on GLM, but it is a
+  model-family-specific template kwarg; this primitive takes an
+  arbitrary `--model` and injects no per-model magic. A future explicit
+  opt-in flag may expose it; silently defaulting it is out.)
 - Server-side `response_format` enforcement is **best effort, advisory**:
   the local `jsonschema` re-validation (next section) is the only judge
   that counts, exactly as for both CLI backends.

@@ -86,10 +86,14 @@ pub(crate) fn call(
 /// a bare `schema`, but the deployed endpoint's validator 400s without
 /// `name` ("Field required"; live-fixture arbitration, 2026-08-05, GLM-4.7).
 /// `"o7_result"` is a fixed label with no semantics. `tool_choice: "none"`;
-/// `stream: false`; `include_reasoning: false` explicitly — Arli documents
-/// it as defaulting to true, and reasoning output is not normative evidence
-/// for this primitive (it would only inflate latency and `stdout.raw`).
-/// Split out so the shape is unit-testable without a socket.
+/// `stream: false`. NO reasoning controls: `include_reasoning: false`
+/// (Arli-documented) was tried first and is actively harmful on the
+/// deployed endpoint — it nulls out `content` while also dropping
+/// `reasoning`, losing the generated answer entirely (same arbitration
+/// date/model; docs have the full evidence). Reasoning stays out of the
+/// normative result structurally: `extract_content` reads
+/// `message.content` only. Split out so the shape is unit-testable
+/// without a socket.
 fn request_body(prompt: &str, schema_for_api: &Value, model: &str) -> String {
     serde_json::json!({
         "model": model,
@@ -100,7 +104,6 @@ fn request_body(prompt: &str, schema_for_api: &Value, model: &str) -> String {
         },
         "tool_choice": "none",
         "stream": false,
-        "include_reasoning": false,
     })
     .to_string()
 }
@@ -395,11 +398,13 @@ mod tests {
             Some(&Value::String("o7_result".into())),
             "json_schema.name is required by the live endpoint"
         );
-        // Reasoning explicitly off (Arli defaults it to true).
+        // NO reasoning controls — deliberate: include_reasoning:false nulls
+        // out `content` on the deployed endpoint (live-fixture arbitration;
+        // see request_body's doc comment and docs/o7-invoke.md).
         assert_eq!(
             parsed.get("include_reasoning"),
-            Some(&Value::Bool(false)),
-            "include_reasoning: false must be explicit"
+            None,
+            "include_reasoning must NOT be sent (it loses the answer live)"
         );
         // Prompt rides as the single user message.
         assert_eq!(
@@ -524,8 +529,8 @@ mod tests {
             "json_schema must carry the live-required name field: {request}"
         );
         assert!(
-            request.contains("\"include_reasoning\":false"),
-            "include_reasoning: false missing from the wire body: {request}"
+            !request.contains("include_reasoning"),
+            "include_reasoning must not appear on the wire (nulls content live): {request}"
         );
         Ok(())
     }
