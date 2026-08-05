@@ -1,0 +1,372 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit configuration for 007 — advisory v1.
+#
+# Architectural boundary (see AGENTS.md and docs/public-governance.md):
+# CodeRabbit is a PERMANENT ADVISORY reviewer. Its findings are candidate
+# observations, not repository authority. Its availability, review completion,
+# approval, or commit status must never gate merge or acceptance. That is why
+# review_progress, commit_status, and fail_commit_status are all disabled:
+# no status surface exists for branch protection to accidentally adopt.
+#
+# Reviews are label-gated: apply the `review-ready` label to request a review
+# of the assembled head. Incremental re-review on every push is off; request
+# follow-up rounds explicitly with `@coderabbitai review`.
+
+language: en-US
+
+tone_instructions: >-
+  Be terse and evidence-based. Report only actionable P0/P1 defects with a
+  concrete failure scenario. No praise, style comments, or speculative
+  refactors.
+
+early_access: false
+inheritance: false
+
+reviews:
+  # AGENTS.md asks for P0/P1 findings only.
+  profile: quiet
+
+  # Resolving CodeRabbit comments is not equivalent to independent acceptance.
+  request_changes_workflow: false
+
+  high_level_summary: true
+  high_level_summary_in_walkthrough: true
+  high_level_summary_instructions: |
+    Summarize:
+    1. the intended behavior change;
+    2. the affected repository invariants;
+    3. the evidence and gates added or changed;
+    4. any unresolved risk or trust-boundary change.
+
+    Distinguish implemented behavior from documentation, plans, and deferred
+    work. Do not write marketing-style release notes.
+
+  review_status: true
+  review_details: true
+
+  # Advisory means NO outward status surface at all — nothing a branch
+  # protection rule could later be pointed at.
+  review_progress: false
+  commit_status: false
+  fail_commit_status: false
+
+  collapse_walkthrough: true
+  changed_files_summary: true
+
+  # Decorative output off.
+  sequence_diagrams: false
+  estimate_code_review_effort: false
+  in_progress_fortune: false
+  poem: false
+
+  # 007 work is explicitly staged and gated; linked context matters.
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+
+  suggested_labels: false
+  suggested_reviewers: false
+  auto_assign_reviewers: false
+
+  # Useful for handing a concrete finding to a coding agent; CodeRabbit
+  # itself must not mutate the branch (see finishing_touches below).
+  enable_prompt_for_ai_agents: true
+
+  slop_detection:
+    enabled: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+
+    # Review only when explicitly requested via label, on the assembled head.
+    labels:
+      - "review-ready"
+
+    # No automatic re-review on every push; corrective rounds are requested
+    # explicitly with `@coderabbitai review`.
+    auto_incremental_review: false
+    auto_pause_after_reviewed_commits: 0
+
+    # Include stacked PRs whose base is another feature branch.
+    base_branches:
+      - ".*"
+
+    ignore_title_keywords:
+      - "[skip review]"
+      - "DO NOT REVIEW"
+
+  # CodeRabbit stays on the reviewer side of the trust boundary: it never
+  # writes code, tests, docstrings, or CI fixes into this repository.
+  # Most of these default to ENABLED upstream — keep every one pinned false.
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+    autofix:
+      enabled: false
+    fix_ci:
+      enabled: false
+    resolve_merge_conflict:
+      enabled: false
+
+  # Mechanically checkable lint belongs to the repository's own tooling,
+  # not to the advisory reviewer (AGENTS.md: no mechanically-enforceable
+  # nits in review). Both default to enabled upstream.
+  tools:
+    markdownlint:
+      enabled: false
+    languagetool:
+      enabled: false
+
+  path_instructions:
+    - path: "**"
+      instructions: |
+        Treat AGENTS.md and the configured guideline documents as binding.
+
+        Review the complete pull request, its linked issue, and related or
+        stacked pull requests before making localized comments.
+
+        Report P0 and P1 defects only.
+
+        Do not repeat findings already enforced mechanically by cargo fmt,
+        clippy, cargo check, cargo-deny, or the repository test workflows,
+        unless the change weakens, bypasses, excludes, or misconfigures that
+        enforcement.
+
+        Every finding must contain a concrete failure scenario: relevant
+        input, state, interleaving, or repository condition followed by the
+        resulting incorrect behavior.
+
+        Do not treat successful compilation, passing local tests, or a
+        resolved CodeRabbit thread as proof that the repository's independent
+        acceptance gate has passed.
+
+    - path: "Cargo.toml"
+      instructions: |
+        Review dependency and workspace changes as capability changes, not
+        routine manifest edits.
+
+        Check for:
+        - new default features that add network, process, filesystem, dynamic
+          loading, serialization, or unsafe-code capability;
+        - workspace members silently disappearing from normal CI coverage;
+        - new exclusions without a dedicated workflow that owns the package;
+        - weakened lint levels or newly permitted unsafe code;
+        - path/version inconsistencies between internal workspace crates;
+        - dependency changes not reflected in Cargo.lock and deny policy.
+
+        Do not comment merely on version style or formatting.
+
+    - path: ".github/workflows/**"
+      instructions: |
+        Treat CI changes as changes to the evidence and acceptance boundary.
+
+        Flag:
+        - workspace crates or targets that can now escape testing;
+        - path filters or conditionals that accidentally skip required gates;
+        - success paths that run after a failed or cancelled prerequisite;
+        - artifacts consumed without binding them to the expected commit,
+          inputs, tool identity, or producing job;
+        - permissions broader than the workflow requires;
+        - evidence that can be overwritten or confused across matrix jobs;
+        - retries or allow-failure behavior that can convert infrastructure
+          errors into apparent success.
+
+    - path: "src/**"
+      instructions: |
+        Preserve the CLI and orchestration contracts.
+
+        Review especially:
+        - PASS, FAIL, and ERROR remaining semantically distinct;
+        - process exit behavior remaining consistent with repository
+          contracts;
+        - subprocess timeout, cancellation, descendant cleanup, and pipe
+          lifecycle;
+        - path confinement, symlink handling, TOCTOU windows, and bounded
+          reads;
+        - accidental capture of credentials, environment data, request
+          bodies, or raw agent output into logs and run records;
+        - partially written records being distinguishable from complete
+          records;
+        - worktree isolation not being described or treated as a sandbox.
+
+    - path: "crates/o7-run/**"
+      instructions: |
+        Treat the event protocol, reducer, and replay implementation as one
+        consistency boundary.
+
+        Verify:
+        - reduction is deterministic and independent of incidental ordering;
+        - terminal events cannot be duplicated, contradicted, or followed by
+          accepted non-terminal events;
+        - malformed or incomplete streams fail closed;
+        - replay does not trust derived verdicts supplied by the producer;
+        - serialization or schema changes preserve explicit compatibility;
+        - candidate identity and evidence remain bound to the intended run.
+
+    - path: "crates/o7-ledger/**"
+      instructions: |
+        Preserve append-only and deterministic projection semantics.
+
+        Check:
+        - transaction boundaries and crash behavior;
+        - retry and idempotency behavior;
+        - stable canonical ordering and identity;
+        - duplicate, missing, or partially projected events;
+        - restart and recovery behavior;
+        - readers observing impossible intermediate state;
+        - migrations or schema changes preserving old records and replay.
+
+    - path: "crates/o7-worktree/**"
+      instructions: |
+        Review this code as filesystem and repository boundary code.
+
+        Check:
+        - symlink and path traversal resistance;
+        - canonical repository and revision identity;
+        - no-follow and exclusive-create behavior;
+        - cleanup after cancellation, failure, and partial construction;
+        - races between validation and use;
+        - attacker-controlled repository contents redirecting reads or
+          writes;
+        - no claim that cwd or a Git worktree provides sandbox confinement.
+
+    - path: "crates/o7-worker/**"
+      instructions: |
+        Review worker changes for lifecycle and concurrency correctness.
+
+        Check:
+        - permit ownership lasting for the entire protected operation;
+        - cancellation releasing all permits, tasks, descriptors, and
+          children;
+        - bounded reads and bounded queues;
+        - no detached work continuing after a terminal result;
+        - race-safe shutdown and exactly-once terminal reporting;
+        - retries not duplicating externally visible actions or evidence.
+
+    - path: "crates/o7-sandbox-protocol/**"
+      instructions: |
+        Treat this crate as the canonical wire and digest authority shared by
+        the worker and any external sandboy backend.
+
+        Check:
+        - digest formulas change only together with their domain-separation
+          version string (e.g. o7-sandbox-policy\0v2\0), never silently;
+        - frames stay length-bounded and fail closed on malformed input;
+        - policy validation stays set-semantic (duplicates rejected) and
+          fail closed;
+        - report dimensions remain required fields with
+          enforced/partial/not_enforced semantics, never a boolean;
+        - no I/O, unsafe code, or process launching enters this crate.
+
+    - path: "crates/o7-verifier/**"
+      instructions: |
+        Preserve verifier independence.
+
+        The verifier must derive its answer from canonical evidence and must
+        not trust producer-authored summaries, verdicts, paths, counts, or
+        hashes without independently checking them.
+
+        Missing, malformed, ambiguous, stale, or mismatched evidence must
+        fail closed as ERROR rather than being interpreted as PASS or
+        ordinary FAIL.
+
+    - path: "crates/o7d/**"
+      instructions: |
+        Review daemon and API changes for:
+        - bounded request bodies and collections;
+        - deterministic canonicalization;
+        - explicit state transitions;
+        - cancellation and connection cleanup;
+        - concurrent readers and writers observing valid state;
+        - untrusted identifiers being confined before filesystem or Git use;
+        - internal errors not being converted into successful API responses.
+
+    - path: "tests/**"
+      instructions: |
+        Require tests to demonstrate the externally observable contract, not
+        private implementation details.
+
+        For behavior changes, expect coverage of:
+        - the successful path;
+        - the concrete regression or failure scenario;
+        - cancellation, malformed input, and partial-state behavior where
+          relevant;
+        - deterministic replay or repeated execution;
+        - negative assertions proving that forbidden side effects did not
+          occur.
+
+        Do not request tests merely to increase line coverage.
+
+    - path: "fuzz/**"
+      instructions: |
+        Keep fuzz targets aligned with the actual untrusted-input parsers.
+
+        Parser or slicing changes must extend the corresponding fuzz target
+        or explain why the existing target already reaches the changed
+        behavior. Do not accept harnesses that discard the inputs or states
+        most likely to exercise the changed boundary.
+
+    - path: "docs/**"
+      instructions: |
+        Review documentation for parity with implemented behavior and current
+        repository invariants.
+
+        Flag:
+        - security or isolation claims stronger than the implementation;
+        - plans or deferred work written as already implemented;
+        - obsolete status, commit, phase, or acceptance claims;
+        - changed protocols or record formats without migration implications;
+        - contradictions with AGENTS.md, README.md, public governance,
+          security-layers, or verification documentation.
+
+        Do not spend review comments on prose preferences unless wording
+        changes the technical claim.
+
+knowledge_base:
+  # Review should be grounded in repository evidence, not mutable web
+  # material.
+  web_search:
+    enabled: false
+
+  code_guidelines:
+    enabled: true
+    # AGENTS.md is picked up by the upstream defaults. These are additional
+    # stable, repository-level invariant documents.
+    filePatterns:
+      - "docs/public-governance.md"
+      - "docs/security-layers.md"
+      - "docs/verification.md"
+
+  # Prevent experience learned from other repositories from contaminating
+  # 007, and keep a human window to reject a bad learning.
+  learnings:
+    scope: local
+    approval_delay: 30
+
+  issues:
+    scope: local
+
+  pull_requests:
+    scope: local
+
+  automatic_repository_linking: false
+
+chat:
+  art: false
+  # Public repository: outsiders must not be able to drive the bot, and the
+  # bot must not reply without an explicit @coderabbitai mention.
+  auto_reply: false
+  allow_non_org_members: false
+
+issue_enrichment:
+  auto_enrich:
+    enabled: false
+  # Defaults to enabled upstream — planning stays out of the advisory scope.
+  planning:
+    enabled: false
