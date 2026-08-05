@@ -37,11 +37,16 @@ Per rule 4 of `docs/evidence-and-decision-discipline.md`, the factual claims her
 are bound to their primary artifacts and verification date; distinguish what the
 artifact *says* from the inference drawn on it.
 
-**Artifact says** (verified 2026-08-05):
+**Artifact says** (verified 2026-08-05 against GitHub REST API version
+2022-11-28 — an external artifact is not captured by this repo's commit, so it
+carries its own version anchor, and its selected-version contract is re-verified
+empirically for the chosen GitHub App installation token and repository ruleset
+at implementation):
 
 - `PUT /repos/{owner}/{repo}/pulls/{pull_number}/merge` accepts a `sha`
   parameter ("SHA that pull request head must match to allow merge") and returns
-  **409 Conflict** if the head moved — GitHub REST API docs, Pulls.
+  **409 Conflict** if the head moved — GitHub REST API docs, endpoint "Merge a
+  pull request" (Pulls).
 - The same endpoint requires **Contents: write** — GitHub fine-grained-PAT
   permissions reference, section "Repository permissions for 'Contents'".
   (Adjacent actions mislead: create/update/review a PR use the *Pull requests*
