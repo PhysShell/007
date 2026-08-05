@@ -21,8 +21,15 @@ Revision history, kept because the errors are load-bearing:
   survived: the protocol had learned to kill the product but had granted itself
   diplomatic immunity — the only cost measurement sat after the codebook freeze,
   and the packet carried no resource ceiling of its own.
-- **rev 4** (this) — the pre-freeze cost-floor probe, the numeric caps, the
+- **rev 4** (`d557578`) — the pre-freeze cost-floor probe, the numeric caps, the
   banned `EXTEND` outcome, and external-only reopening after `STOP`.
+- **rev 4 erratum** (this) — execution fix, not a methodological revision: two
+  branches of the early stopping rule were unreachable because a three-hour
+  censor caps `B_floor` at 174h, and the aggregator over the four timings was
+  never named. §10.3 now decides on censored-case count, the 200/400h thresholds
+  move to the post-freeze gate in §8.4, and exclusion handling in §10.2 stops the
+  denominator from shrinking silently. Taxonomy, corpus model, claim cells, and
+  scope are untouched.
 
 Scope: **subject definition, evaluation protocol, and pre-registered decision
 thresholds — not an implementation contract.**
@@ -519,6 +526,23 @@ at zero observed failures:
 This is the most likely place for the project to take a shovel to the head, and
 learning it before the locator exists is the good outcome.
 
+**Post-freeze economic gate (the only place the 200/400h thresholds mean
+anything).** The projection above uses `p90` over a cost distribution that is not
+truncated from above, so it is the gate that can legitimately return a large
+number. Evaluated after step 8 of §10.5, on the pre-locator corpus:
+
+```text
+projected pre-locator corpus cost > 400h   → STOP
+                            200h .. 400h   → NARROW to the cheapest cells with
+                                             historical delta supply
+                                  ≤ 200h   → FREEZE admissible on this criterion
+```
+
+The aggregator is fixed here and now — `p90` of accepted-cluster cost per claim
+cell, as written above — and not chosen once the numbers are visible. The early
+probe of §10.2 cannot feed this gate: its costs are right-censored at three
+hours, so no aggregate over them can exceed 174h by construction.
+
 ## 9. Asset accounting, and 007's narrowed role
 
 | Asset | Real status | Role in AMA |
@@ -588,6 +612,10 @@ they are cost-driver strata used only to force heterogeneity:
 4. historically messy or reproduction-hostile
 ```
 
+A **reserve case per stratum** is designated at the same time as the four, before
+any work starts — otherwise a replacement becomes a second case selection made
+with knowledge of the first one's outcome.
+
 Measured: `T_provider_artifact_review`, `T_blind_normalization`,
 `T_repository_reproduction`, `T_primary_adjudication`, `T_evidence_packaging`.
 
@@ -600,49 +628,68 @@ At three hours each case takes exactly one outcome — `accepted`, `excluded wit
 reason`, or `right-censored at >3h`. Not "one more hour, it's nearly done". That
 is how methodology packets acquire permanent residency.
 
-### 10.3 The early arithmetic stopping rule
-
-The projection uses the hypothesis **most favourable to the project**: two claim
-cells at `N_publish = 29`, which corresponds only to a ~10% false-assurance
-ceiling at zero observed failures. If the economics fail even there, a serious
-assurance product certainly does not exist.
+**Exclusions do not silently shrink the denominator.** The decision rule of
+§10.3 counts censored cases out of four, so an exclusion must be classified:
 
 ```text
-B_floor = 2 × 29 × observed accepted-cluster cost floor
+excluded for cost-adjacent reasons     counts as CENSORED
+  (repository will not reproduce, toolchain unobtainable, provider artifacts
+   exist but are unusable without disproportionate effort)
+  — the exclusion is itself cost evidence
+
+excluded for validity reasons          replaced from the stratum's reserve
+  (blinding cannot be attested, no provider-side artifact exists at all)
+  — a sampling defect, not a cost signal; if no reserve can be run inside the
+    12-hour budget, the probe is incomplete and outcomes are restricted to
+    NARROW or STOP
 ```
 
-Censored cases enter at their censor value (`>3h`), never at zero and never at a
-mean.
+### 10.3 The early stopping rule
 
-**Censoring precondition (binding).** With **≥2 of 4 cases right-censored**, the
-floor is uninformative and the probe's admissible outcomes are restricted to
-`NARROW` or `STOP`. Without this, three censored cases project
-`2 × 29 × 3 = 174h` and the literal rule returns "continue" — the most favourable
-verdict from the least informative probe, which is exactly backwards.
+**Erratum against the first form of this section** (rev 4, `d557578`; history not
+rewritten): it projected `B_floor = 2 × 29 × cost floor` against 200h/400h
+branches while censoring every case at three hours. Any completed case therefore
+satisfies `cost ≤ 3h`, so `B_floor ≤ 174h` **by construction** and both branches
+were unreachable; a single censored case left the true value somewhere in
+`(174, ∞)` with no way to place it. The aggregator over four timings was also
+never named, and choosing one after seeing the numbers would have been the exact
+retrospective self-approval this note was written against. The mechanical
+consequence: the early probe cannot evaluate corpus economics at all, and the
+200h/400h thresholds belong to the post-freeze gate in §8.4, where the cost
+distribution is not truncated from above.
+
+What twelve hours can honestly establish is only whether deliberately
+heterogeneous cases fit under a three-hour floor. So the rule counts outcomes,
+not money:
 
 ```text
-B_floor > 400h                → STOP
-200h < B_floor ≤ 400h         → NARROW to the cheapest cells with historical delta supply
-B_floor ≤ 200h                → AMA-0.5 may continue   (requires ≤1 censored case)
+0 censored cases
+  → AMA-0.5 may continue
+  → record only: B_floor ≤ 174h. This is NOT a qualification of the economics.
+
+1 censored case
+  → NARROW
+  → the narrowing must exclude, or separately isolate, that cost-driver stratum
+  → if the stratum is commercially mandatory: STOP
+
+≥2 censored cases
+  → STOP
 ```
 
-Why 400 hours: roughly eight times the AMA-0.5 budget itself, before a single
-line of locator. If preparing a minimally publishable corpus already costs more,
-this is not a product wedge but a separate multi-year research programme.
+The four timings are recorded as inputs to the post-freeze gate. They are **not**
+aggregated into any early decision — there is no aggregator, because the decision
+no longer depends on one.
 
-Two properties of this projection are deliberate and must not be "fixed" by a
-later reader:
+Two properties of this design are deliberate and must not be "fixed" by a later
+reader:
 
-- **It is biased upward, on purpose.** The probe measures per-*case* cost while
-  `B_floor` multiplies by the number of *clusters*; one `repository × delta` case
-  usually spans several cells, across which reproduction and normalization
-  amortize. A one-sided kill instrument wants exactly this sign: a `STOP` from it
-  is trustworthy, a pass means nothing.
-- **`STOP` here is a verdict on the product, not on the research question.** The
-  economics are computed over `N_publish` — publishable assurance. A cheap
-  one-off comparison ("does specialised localization beat a strong agent at all?")
-  remains meaningful afterwards, but as separate one-time work, never as AMA
-  continuing under another name.
+- **The probe is one-sided by construction.** It can only observe that a stratum
+  refuses to fit in three hours. Four cheap cases establish nothing about
+  publishable-corpus cost, and the `0 censored` branch says so in its own text.
+- **A `STOP` here is a verdict on the product, not on the research question.** A
+  cheap one-off comparison ("does specialised localization beat a strong agent at
+  all?") remains meaningful afterwards, but as separate one-time work, never as
+  AMA continuing under another name.
 
 ### 10.4 Package cap
 
@@ -735,8 +782,8 @@ inadmissible:
 
 The latter is simply revisions 5, 6, and 19, each impeccably justifying the next.
 
-These figures — 4 cases, 12h, 3h censor, 48h cap, 6h per case, 400h pre-locator
-ceiling — are not scientifically ideal constants. They are management boundaries,
+These figures — 4 cases, 12h, 3h censor, 48h cap, 6h per case, and the 400h
+post-freeze pre-locator ceiling of §8.4 — are not scientifically ideal constants. They are management boundaries,
 and their purpose is not to establish a law of nature but to stop an inquiry into
 provability from quietly becoming a multi-year inquiry into itself.
 
