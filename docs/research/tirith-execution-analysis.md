@@ -1,12 +1,14 @@
 # Tirith — execution-path analysis (выверенная редакция)
 
-**Статус: зафиксированные выводы приняты оператором; нормативные следствия для
-007 вынесены в [`docs/tasks/ra0-remote-admission-contract.md`](../tasks/ra0-remote-admission-contract.md).**
+**Статус: REVIEWED DRAFT.** Ключевые утверждения повторно сверены с кодом
+Tirith на pinned revision (Appendix A); документ считается ПРИНЯТЫМ только
+после review и merge. Нормативные следствия для 007 — в
+[`docs/tasks/ra0-remote-admission-contract.md`](../tasks/ra0-remote-admission-contract.md)
+(design draft, не frozen).
 
-Происхождение утверждений: код Tirith проверен оператором на ревизии
-`1bf050fefa09d8aa4ed986e3006c0097d8d0b24b`. Репозиторий Tirith не входит в
-sources этой сессии, поэтому утверждения о его коде здесь **записаны со слов
-проверявшего**, не перепроверены независимо; каждое утверждение о 007
+Происхождение утверждений: внешняя доказательная база — Appendix A
+(репозиторий и ревизия запинены, осмотренные пути перечислены; выводы не
+распространяются на более поздние версии Tirith). Каждое утверждение о 007
 ссылается на код и документы этого репозитория. Первая (чатовая) редакция
 разбора содержала четыре фактические ошибки — они исправлены в §10 и не
 воспроизводятся в основном тексте.
@@ -298,5 +300,30 @@ execution substrate направление 007 сильнее, но менее �
 > executable bytes.**
 
 Tirith реализует это наполовину — на уровне хорошего пользовательского
-workflow. 007 доводит это до enforcement contract: нормативная фиксация — в
+workflow. 007 доводит это до enforcement contract: нормативный черновик — в
 [`docs/tasks/ra0-remote-admission-contract.md`](../tasks/ra0-remote-admission-contract.md).
+
+## Appendix A — External evidence basis
+
+```text
+Repository: sheeki03/tirith
+Revision:   1bf050fefa09d8aa4ed986e3006c0097d8d0b24b
+
+Inspected paths:
+- crates/tirith-core/src/runner.rs
+- crates/tirith-core/src/receipt.rs
+- crates/tirith-core/src/rules/cloaking.rs
+- crates/tirith-core/src/command_card.rs
+- crates/tirith-core/src/policy.rs
+- crates/tirith-core/src/checkpoint.rs
+- docs/threat-model.md
+
+Status: source-inspected at the pinned revision.
+        Not a claim about later Tirith versions.
+```
+
+Утверждения о 007 привязаны к этому репозиторию:
+`crates/o7-sandbox-protocol/src/request.rs` (`LaunchRequest::spec_digest`),
+`crates/o7-worker/src/sealed.rs` (`SealedObject`),
+`docs/architecture/sandboy-boundary.md` (Decisions 1–6, RED-контракт
+Vertical B).
