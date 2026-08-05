@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PhysShell/007/ama/ama-0.5/measurement-record.schema.json",
+  "title": "AMA-0.5 cost-probe measurement record",
+  "description": "One record per primary case, plus one per legitimately activated reserve. Totals are DERIVED from the append-only timer log, never asserted independently: self-reported active minutes are the weakest evidence in the protocol and the quantity that decides STOP, so the record carries the raw events that produce them.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "case_id",
+    "manifest_commit",
+    "role",
+    "timer_log",
+    "maintainer_minutes",
+    "total_maintainer_minutes",
+    "outcome",
+    "evidence_digest"
+  ],
+  "properties": {
+    "case_id": {
+      "type": "string",
+      "description": "Must match a case_id present in the committed manifest."
+    },
+    "manifest_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "The selection commit — the commit that added the manifest. Recorded here, where it is an external fact, rather than inside the manifest, where it would be self-referential."
+    },
+    "role": {
+      "enum": ["primary", "reserve"],
+      "description": "A reserve record is admissible only if the corresponding primary record has outcome=excluded_validity."
+    },
+    "timer_log": {
+      "type": "array",
+      "minItems": 2,
+      "description": "Append-only active-time events. Wall-clock duration and time spent waiting on an agent or CI are not active maintainer time and must fall between a pause and a resume.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["event", "at"],
+        "properties": {
+          "event": { "enum": ["start", "pause", "resume", "stop"] },
+          "at": { "type": "string", "format": "date-time" },
+          "phase": {
+            "enum": [
+              "provider_artifact_review",
+              "blind_normalization",
+              "repository_reproduction",
+              "primary_adjudication",
+              "evidence_packaging"
+            ]
+          },
+          "note": { "type": "string" }
+        }
+      }
+    },
+    "maintainer_minutes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider_artifact_review",
+        "blind_normalization",
+        "repository_reproduction",
+        "primary_adjudication",
+        "evidence_packaging"
+      ],
+      "description": "Per-phase active minutes, derived from timer_log. T_independent_secondary_pass and T_disagreement_resolution are deliberately absent: without a second human the result is a LOWER BOUND on the full T_case (§10.2), not an approximation of it.",
+      "properties": {
+        "provider_artifact_review": { "type": "integer", "minimum": 0 },
+        "blind_normalization": { "type": "integer", "minimum": 0 },
+        "repository_reproduction": { "type": "integer", "minimum": 0 },
+        "primary_adjudication": { "type": "integer", "minimum": 0 },
+        "evidence_packaging": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "total_maintainer_minutes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Sum of maintainer_minutes; must equal the active time derived from timer_log. Capped at per_case_censor_minutes — reaching the censor ends the case."
+    },
+    "outcome": {
+      "enum": ["accepted", "excluded_validity", "excluded_cost_adjacent", "censored"],
+      "description": "excluded_cost_adjacent COUNTS AS CENSORED in the §10.3 tally — repository will not reproduce, toolchain unobtainable, artifacts unusable without disproportionate effort — because the exclusion is itself cost evidence. Only excluded_validity permits a reserve."
+    },
+    "exclusion_reason": {
+      "type": ["string", "null"],
+      "description": "Required whenever outcome starts with excluded_. Names the specific defect, not a mood."
+    },
+    "reserve_activated": {
+      "type": "boolean",
+      "description": "True only on a primary record with outcome=excluded_validity, and only within max_reserve_activations."
+    },
+    "candidate_occurrences": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Recorded for later cost-driver analysis. Not used by the §10.3 decision, which counts outcomes rather than money."
+    },
+    "confirmed_occurrences": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "evidence_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "Digest over the case's produced evidence bundle — normalized delta, reproduction notes, adjudication output."
+    }
+  }
+}

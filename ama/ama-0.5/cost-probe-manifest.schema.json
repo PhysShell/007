@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PhysShell/007/ama/ama-0.5/cost-probe-manifest.schema.json",
+  "title": "AMA-0.5 pre-freeze cost-floor probe manifest",
+  "description": "Immutable selection record for the pre-freeze cost-floor probe of docs/architecture/api-migration-direction.md §10.2. Committing a document conforming to this schema IS the selection act: the git commit that adds it binds the selection, per rule 4 of docs/evidence-and-decision-discipline.md. The manifest therefore carries no field for its own commit hash — a self-referential field cannot be filled without changing the object it claims to identify. After that commit the manifest is never edited; a legitimate reserve activation is recorded in the measurement records, not by mutating this file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol_commit",
+    "maintainer_budget_minutes",
+    "per_case_censor_minutes",
+    "reserve_activation_budget_minutes",
+    "max_reserve_activations",
+    "cases"
+  ],
+  "properties": {
+    "protocol_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$",
+      "description": "Commit of PhysShell/007 whose docs/architecture/api-migration-direction.md governs this probe. Binds the selection to a specific revision of the protocol, so a later protocol change makes this probe's claims STALE rather than silently reinterpreted."
+    },
+    "maintainer_budget_minutes": {
+      "type": "integer",
+      "const": 720,
+      "description": "Total active maintainer minutes for the four PRIMARY cases (§10.2: 12 hours). Reserve activations do not draw on this budget."
+    },
+    "per_case_censor_minutes": {
+      "type": "integer",
+      "const": 180,
+      "description": "Hard censor per case (§10.2: 3 hours of active maintainer time). On reaching it the case outcome is written before any further work — the censor is enforced on the timer, not on judgement."
+    },
+    "reserve_activation_budget_minutes": {
+      "type": "integer",
+      "description": "Active maintainer minutes available for reserve activations, drawn from the AMA-0.5 package remainder (§10.4), not from maintainer_budget_minutes. Four primaries censoring consume the 720-minute budget exactly, so reserves are unfunded unless this is declared separately."
+    },
+    "max_reserve_activations": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Upper bound on reserve activations across the whole probe. Exceeding it means the probe is incomplete, restricting outcomes to NARROW or STOP (§10.2)."
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "description": "Exactly four cost-driver strata, each with one primary and one reserve, all designated before any work starts. Strata are NOT claim cells — no codebook exists yet (§10.2).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stratum", "primary", "reserve"],
+        "properties": {
+          "stratum": {
+            "enum": [
+              "provider-clear-repo-reproducible",
+              "wrapper-alias-indirection",
+              "semantic-control-flow-dependence",
+              "historically-messy-or-reproduction-hostile"
+            ],
+            "description": "Expected cost driver. The four strata differ deliberately, to force heterogeneity rather than to sample a population."
+          },
+          "primary": { "$ref": "#/$defs/case" },
+          "reserve": {
+            "allOf": [{ "$ref": "#/$defs/case" }],
+            "description": "Run ONLY on a validity exclusion of the primary (blinding cannot be attested, no provider-side artifact exists). A cost-adjacent exclusion counts as CENSORED and confers no right to reach for an easier case (§10.2)."
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_id", "repository", "commit", "provider_artifacts"],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable identifier, unique within the manifest."
+        },
+        "repository": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Consumer repository the localization task is posed over."
+        },
+        "commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$",
+          "description": "Pinned consumer-repository commit. Immutable: a moving ref would make the measured cost unattributable."
+        },
+        "sdk": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["identity", "old_version", "new_version"],
+          "properties": {
+            "identity": { "type": "string" },
+            "old_version": { "type": "string" },
+            "new_version": { "type": "string" }
+          }
+        },
+        "provider_artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Provider-side artifacts the blind normalizer is permitted to read (§4). Pinned by digest, not by a link to living documentation — a URL alone points at a page that may be rewritten tomorrow.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["identity", "digest"],
+            "properties": {
+              "identity": {
+                "type": "string",
+                "description": "What the artifact is: changelog entry, spec diff, release note, migration guide."
+              },
+              "retrieved_from": {
+                "type": "string",
+                "description": "Where the pinned copy came from. Provenance, not the binding."
+              },
+              "retrieved_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "digest": {
+                "type": "string",
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "description": "Digest of the retrieved bytes. This is the binding."
+              }
+            }
+          }
+        },
+        "notes": {
+          "type": "string",
+          "description": "Selection rationale. Written before any work; never amended afterwards."
+        }
+      }
+    }
+  }
+}
