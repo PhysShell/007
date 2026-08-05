@@ -31,6 +31,27 @@ python3 research/b1-context/tools/project_case.py \
 This directory is **not** part of the cargo workspace and no production crate
 imports it.
 
+## Admission modes (R2 plumbing — no change to selection/evaluation/schema/budget meaning)
+
+- `--registry <bare-filename>` (default `tasks-v0.yaml`): run a versioned task
+  registry inside the SAME fixture directory, so a fixture revision runs without
+  cloning the fixture into a new directory. The name must be a bare filename
+  confined to the fixture dir (absolute paths, separators, `..`, missing files
+  and escapes fail closed). The selected registry filename (when non-default) and
+  its digest are recorded in the generated metadata.
+- `--actual-only`: generate the honest actual report and write every ordinary
+  artifact under `--out`, but never read, write or verify a committed
+  expectation. Exits 0 on deterministic generation regardless of the report's
+  `development_result`; operational success and evaluation status are printed
+  separately. Mutually exclusive with `--update-expectations`.
+- Negative-control cardinality is fail-closed: `negative_control: []` runs with
+  no negative-control arm (evaluations stay `null`, `development_result` PARTIAL);
+  exactly one entry preserves the existing behaviour; more than one, a missing
+  field, or a non-list value fail closed (never silently pick the first).
+
+Normal (verification) mode is unchanged: it still requires the committed
+`expected-report-v1.json` and fails closed on mismatch or absence.
+
 ## Run it
 
 ```sh

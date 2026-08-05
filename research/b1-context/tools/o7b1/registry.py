@@ -61,16 +61,22 @@ def _safe_fixture_path(fixture_dir: str, name: str) -> str:
     return full
 
 
-def load_task_registry(fixture_dir: str, fixture_id: str) -> dict:
+def load_task_registry(fixture_dir: str, fixture_id: str,
+                       registry_filename: str = REGISTRY_FILENAME) -> dict:
     """Load and fully validate the fixture task registry.
 
-    Returns {"registry_path", "registry_digest", "entries": [
-        {"task_file", "questions_file", "task", "questions"} ... ]} in the
+    `registry_filename` selects a versioned registry within the SAME fixture
+    directory (default `tasks-v0.yaml`); it must be a bare filename confined to
+    the fixture dir (no absolute path, no separators, no `..`, no escape), so a
+    fixture revision can be run without cloning the whole fixture into a new
+    directory. The logical fixture identity is unchanged — it is still whatever
+    `fixture_id` the registry declares.
+
+    Returns {"registry_path", "registry_filename", "registry_digest", "entries":
+        [{"task_file", "questions_file", "task", "questions"} ...]} in the
     canonical order the registry lists them.
     """
-    registry_path = os.path.join(fixture_dir, REGISTRY_FILENAME)
-    if not os.path.isfile(registry_path):
-        raise RegistryError("no fixture task registry at %s" % registry_path)
+    registry_path = _safe_fixture_path(fixture_dir, registry_filename)
     reg = _load_yaml(registry_path)
     if not isinstance(reg, dict):
         raise RegistryError("registry must be a mapping")
@@ -132,6 +138,7 @@ def load_task_registry(fixture_dir: str, fixture_id: str) -> dict:
 
     return {
         "registry_path": registry_path,
+        "registry_filename": registry_filename,
         "registry_digest": "sha256:" + sha256_of_file(registry_path),
         "entries": entries,
     }

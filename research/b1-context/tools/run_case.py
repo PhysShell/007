@@ -195,10 +195,12 @@ def _build_derived_manifest(fixture: str, per_session: list) -> dict:
     }
 
 
-def _canonical_reproduce_command(fixture: str) -> str:
-    return ("python3 research/b1-context/tools/run_case.py --fixture %s "
+def _canonical_reproduce_command(fixture: str,
+                                 registry_filename: str = rg.REGISTRY_FILENAME) -> str:
+    reg = "" if registry_filename == rg.REGISTRY_FILENAME else " --registry %s" % registry_filename
+    return ("python3 research/b1-context/tools/run_case.py --fixture %s%s "
             "--data-root \"$HOME/.local/share/o7-research\" --out /tmp/o7-b1-%s"
-            % (fixture, fixture))
+            % (fixture, reg, fixture))
 
 
 def _guard_legacy_expectation(fdir: str) -> None:
@@ -211,7 +213,28 @@ def _guard_legacy_expectation(fdir: str) -> None:
             % (LEGACY_EXPECTED_REPORT_FILENAME, EXPECTED_REPORT_FILENAME))
 
 
-def _generate(fixture: str, data_root: str, out_dir: str) -> dict:
+def _negative_control_entry(manifest: dict) -> dict | None:
+    """Fail-closed cardinality of the optional negative-control source.
+
+    []            -> None  (no negative-control arm; evaluation stays null)
+    one entry     -> that entry (preserves existing single-nc behaviour)
+    >1 entries    -> fail closed; never silently pick the first
+    missing/non-list -> fail closed (absence must be an explicit empty list)
+    """
+    nc = manifest.get("negative_control")
+    if not isinstance(nc, list):
+        raise FailClosed(
+            "manifest 'negative_control' must be a list; absence is expressed as "
+            "[], not by omission or a non-list value (got %r)" % type(nc).__name__)
+    if len(nc) > 1:
+        raise FailClosed(
+            "manifest declares %d negative-control sources; the v0 evaluation "
+            "supports at most one and refuses to silently select the first" % len(nc))
+    return nc[0] if nc else None
+
+
+def _generate(fixture: str, data_root: str, out_dir: str,
+              registry_filename: str = rg.REGISTRY_FILENAME) -> dict:
     """Full generation into out_dir. Writes every canonical artifact; does NOT
     read, write or check the committed expectation. Returns the report bytes so a
     caller can either verify or (transactionally) freeze them."""
@@ -228,8 +251,9 @@ def _generate(fixture: str, data_root: str, out_dir: str) -> dict:
 
     # (1) verify inputs + gold state
     validate_gold_state(gold, schema_path)
+    nc_meta = _negative_control_entry(manifest)   # fail-closed cardinality
     input_digests = {}
-    for r in manifest["raw_sources"] + manifest["negative_control"]:
+    for r in manifest["raw_sources"] + ([nc_meta] if nc_meta else []):
         try:
             cas.resolve(r["digest"], expected_size=r["byte_length"])
             input_digests[r["id"]] = {"digest": r["digest"], "byte_length": r["byte_length"],
@@ -256,9 +280,8 @@ def _generate(fixture: str, data_root: str, out_dir: str) -> dict:
                                  % (s["session_id"], exp.get(s["session_id"]), got))
     _write_canonical(os.path.join(out_dir, "derived-manifest.actual.json"), derived_manifest)
 
-    nc_meta = manifest["negative_control"][0]
     nc_obj = None
-    if input_digests[nc_meta["id"]]["status"] == "OK":
+    if nc_meta is not None and input_digests[nc_meta["id"]]["status"] == "OK":
         nc_obj = json.loads(cas.read_bytes(nc_meta["digest"], expected_size=nc_meta["byte_length"]))
 
     schema_digest = "sha256:" + sha256_of_file(schema_path)
@@ -267,7 +290,8 @@ def _generate(fixture: str, data_root: str, out_dir: str) -> dict:
 
     # (3) task-dependent projection via the shared pipeline (writes context.* +
     #     enforces generic task-dependence acceptance + fixture expectation)
-    proj = pl.run_projection(fixture, fdir, gold, schema_digest, out_dir, budget)
+    proj = pl.run_projection(fixture, fdir, gold, schema_digest, out_dir, budget,
+                             registry_filename)
     comparison = proj["comparison"]
     registry_digest = proj["registry_digest"]
     _write_canonical(os.path.join(out_dir, "projection-comparison.json"), comparison)
@@ -303,7 +327,7 @@ def _generate(fixture: str, data_root: str, out_dir: str) -> dict:
         "schema": "o7.b1.report/v1",
         "fixture_id": fixture,
         "cutoff_identity": gold["cutoff"]["identity"],
-        "reproduce_command": _canonical_reproduce_command(fixture),
+        "reproduce_command": _canonical_reproduce_command(fixture, registry_filename),
         "registry_digest": registry_digest,
         "input_digests": input_digests,
         "derived": {
@@ -333,6 +357,10 @@ def _generate(fixture: str, data_root: str, out_dir: str) -> dict:
             "authoritative_for_a_series": False,
         },
     }
+    # Record a NON-DEFAULT registry filename only, so existing reports (case-0001)
+    # stay byte-identical.
+    if registry_filename != rg.REGISTRY_FILENAME:
+        report["registry_filename"] = registry_filename
     report_bytes = canonical_file_bytes(report)
     report_json_digest = "sha256:" + sha256_hex(report_bytes)
     with open(os.path.join(out_dir, "report.json"), "wb") as fh:
@@ -374,9 +402,10 @@ def _decide_result(all_available: bool, task_entries: list, comparison: dict) ->
     return "PASS"
 
 
-def run(fixture: str, data_root: str, out_dir: str) -> dict:
+def run(fixture: str, data_root: str, out_dir: str,
+        registry_filename: str = rg.REGISTRY_FILENAME) -> dict:
     """Non-update run: generate, then verify against the committed v1 expectation."""
-    g = _generate(fixture, data_root, out_dir)
+    g = _generate(fixture, data_root, out_dir, registry_filename)
     fdir = _fixture_dir(fixture)
     expected_path = os.path.join(fdir, EXPECTED_REPORT_FILENAME)
     if not os.path.isfile(expected_path):
@@ -394,6 +423,19 @@ def run(fixture: str, data_root: str, out_dir: str) -> dict:
             % (EXPECTED_REPORT_FILENAME, "sha256:" + sha256_hex(expected_bytes),
                g["report_json_digest"]))
     return {"report": g["report"], "report_json_digest": g["report_json_digest"],
+            "out_dir": out_dir}
+
+
+def run_actual_only(fixture: str, data_root: str, out_dir: str,
+                    registry_filename: str = rg.REGISTRY_FILENAME) -> dict:
+    """Actual-only run: generate the honest report and write every ordinary
+    artifact under --out, but NEVER read, write or verify a committed expectation.
+    Operational success (deterministic generation) is independent of the report's
+    development_result — the caller reports the two separately so an operational
+    exit 0 can never be mistaken for evaluation success."""
+    g = _generate(fixture, data_root, out_dir, registry_filename)
+    return {"report": g["report"], "report_json_digest": g["report_json_digest"],
+            "development_result": g["report"]["status"]["development_result"],
             "out_dir": out_dir}
 
 
@@ -438,7 +480,8 @@ def _atomic_write_bytes(path: str, data: bytes) -> None:
     os.replace(tmp, path)
 
 
-def run_update(fixture: str, data_root: str, target_out_dir: str) -> dict:
+def run_update(fixture: str, data_root: str, target_out_dir: str,
+               registry_filename: str = rg.REGISTRY_FILENAME) -> dict:
     """Exception-safe staged freeze. Generation and verification complete in
     temporary sibling directories before promotion; every gate and the repeated
     byte-identity check pass first, and a failed pre-promotion generation leaves
@@ -456,7 +499,7 @@ def run_update(fixture: str, data_root: str, target_out_dir: str) -> dict:
     for d in (tmp1, tmp2, bak):
         shutil.rmtree(d, ignore_errors=True)
     try:
-        g1 = _generate(fixture, data_root, tmp1)
+        g1 = _generate(fixture, data_root, tmp1, registry_filename)
         if not g1["all_available"]:
             raise FailClosed("refusing to freeze from an incomplete run: the CAS did "
                              "not provide every input blob")
@@ -464,7 +507,7 @@ def run_update(fixture: str, data_root: str, target_out_dir: str) -> dict:
             raise FailClosed("refusing to freeze a non-PASS report (%s)"
                              % g1["report"]["status"]["development_result"])
         # second independent generation, byte-identity gate
-        _generate(fixture, data_root, tmp2)
+        _generate(fixture, data_root, tmp2, registry_filename)
         _assert_two_run_identity(tmp1, tmp2)
 
         # derived transcripts are external CAS blobs; never commit their bodies
@@ -495,17 +538,39 @@ def main(argv=None):
     ap.add_argument("--fixture", default="case-0001")
     ap.add_argument("--data-root", default=os.path.expanduser("~/.local/share/o7-research"))
     ap.add_argument("--out", required=True)
+    ap.add_argument("--registry", default=rg.REGISTRY_FILENAME,
+                    help="task registry filename within the fixture dir (bare "
+                         "filename; default %s)" % rg.REGISTRY_FILENAME)
     ap.add_argument("--update-expectations", action="store_true",
                     help="transactionally re-freeze %s from THIS run (temp-generate, "
                          "verify every gate + two-run byte identity, then atomically "
                          "replace committed artifacts); refuses unless every CAS input "
                          "was available and the report is PASS" % EXPECTED_REPORT_FILENAME)
+    ap.add_argument("--actual-only", action="store_true",
+                    help="generate the honest actual report without reading, writing "
+                         "or verifying any committed expectation; exits 0 on "
+                         "deterministic generation regardless of the report's "
+                         "development_result. Mutually exclusive with "
+                         "--update-expectations.")
     args = ap.parse_args(argv)
+    if args.actual_only and args.update_expectations:
+        sys.stderr.write("FAIL CLOSED: --actual-only and --update-expectations are "
+                         "mutually exclusive\n")
+        return 2
     try:
+        if args.actual_only:
+            result = run_actual_only(args.fixture, args.data_root, args.out, args.registry)
+            st = result["report"]["status"]
+            # operational success and evaluation status are reported SEPARATELY, so
+            # an operational exit 0 can never be read as evaluation success.
+            sys.stderr.write("actual_only_generation: OK\n")
+            sys.stderr.write("report_development_result: %s\n" % st["development_result"])
+            sys.stderr.write("report.json: %s\n" % result["report_json_digest"])
+            return 0
         if args.update_expectations:
-            result = run_update(args.fixture, args.data_root, args.out)
+            result = run_update(args.fixture, args.data_root, args.out, args.registry)
         else:
-            result = run(args.fixture, args.data_root, args.out)
+            result = run(args.fixture, args.data_root, args.out, args.registry)
     except (FailClosed, pl.PipelineError, rg.RegistryError, sl.SelectorError) as e:
         sys.stderr.write("FAIL CLOSED: %s\n" % e)
         return 2

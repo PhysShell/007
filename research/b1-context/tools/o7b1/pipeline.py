@@ -183,13 +183,13 @@ def assess_task_dependence(a: dict, b: dict) -> dict:
 
 
 def build_comparison(fixture: str, gold: dict, summaries: list[dict],
-                     registry_digest: str) -> dict:
+                     registry_digest: str, registry_filename: str | None = None) -> dict:
     if len(summaries) < 2:
         raise PipelineError("task dependence needs at least two tasks")
     a, b = summaries[0], summaries[1]
     sa, sb = set(a["selected_ids"]), set(b["selected_ids"])
     acceptance = assess_task_dependence(a, b)
-    return {
+    comparison = {
         "schema": COMPARISON_SCHEMA,
         "fixture_id": fixture,
         "registry_digest": registry_digest,
@@ -212,6 +212,11 @@ def build_comparison(fixture: str, gold: dict, summaries: list[dict],
             "acceptance": acceptance,
         },
     }
+    # Record a NON-DEFAULT registry filename only; the default keeps every
+    # existing comparison (e.g. case-0001) byte-identical.
+    if registry_filename is not None and registry_filename != rg.REGISTRY_FILENAME:
+        comparison["registry_filename"] = registry_filename
+    return comparison
 
 
 def check_expected_projection(comparison: dict, fixture_dir: str) -> None:
@@ -256,17 +261,21 @@ def check_expected_projection(comparison: dict, fixture_dir: str) -> None:
 
 
 def run_projection(fixture: str, fixture_dir: str, gold: dict, schema_digest: str,
-                   out_dir: str, budget: dict) -> dict:
+                   out_dir: str, budget: dict,
+                   registry_filename: str = rg.REGISTRY_FILENAME) -> dict:
     """Load the task registry, project every task, build + check the comparison.
 
-    Returns {"entries", "summaries", "comparison", "registry_digest"}. The caller
-    writes projection-comparison.json (identically in both CLIs).
+    `registry_filename` selects a versioned registry inside the fixture dir
+    (default `tasks-v0.yaml`). Returns {"entries", "summaries", "comparison",
+    "registry_digest", "registry_filename"}. The caller writes
+    projection-comparison.json (identically in both CLIs).
     """
-    reg = rg.load_task_registry(fixture_dir, fixture)
+    reg = rg.load_task_registry(fixture_dir, fixture, registry_filename)
     entries = [project_task(gold, e["task"], e["questions"], schema_digest, out_dir, budget)
                for e in reg["entries"]]
     summaries = [e["summary"] for e in entries]
-    comparison = build_comparison(fixture, gold, summaries, reg["registry_digest"])
+    comparison = build_comparison(fixture, gold, summaries, reg["registry_digest"],
+                                  reg["registry_filename"])
     acc = comparison["task_dependence"]["acceptance"]
     if not acc["accepted"]:
         raise PipelineError(
@@ -277,4 +286,5 @@ def run_projection(fixture: str, fixture_dir: str, gold: dict, schema_digest: st
         "summaries": summaries,
         "comparison": comparison,
         "registry_digest": reg["registry_digest"],
+        "registry_filename": reg["registry_filename"],
     }

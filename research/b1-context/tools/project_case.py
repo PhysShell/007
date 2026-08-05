@@ -48,7 +48,7 @@ def _fixture_dir(fixture: str) -> str:
     return os.path.normpath(os.path.join(_HERE, "..", "fixtures", fixture))
 
 
-def run(fixture: str, out_dir: str) -> dict:
+def run(fixture: str, out_dir: str, registry_filename: str = rg.REGISTRY_FILENAME) -> dict:
     fdir = _fixture_dir(fixture)
     schema_path = default_schema_path()
     schema_digest = "sha256:" + sha256_of_file(schema_path)
@@ -58,7 +58,8 @@ def run(fixture: str, out_dir: str) -> dict:
 
     budget = {"byte_budget": BYTE_BUDGET, "record_budget": RECORD_BUDGET,
               "unit": "utf8_bytes+records"}
-    proj = pl.run_projection(fixture, fdir, gold, schema_digest, out_dir, budget)
+    proj = pl.run_projection(fixture, fdir, gold, schema_digest, out_dir, budget,
+                             registry_filename)
 
     data = canonical_file_bytes(proj["comparison"])
     path = os.path.join(out_dir, "projection-comparison.json")
@@ -75,9 +76,12 @@ def main(argv=None):
         description="Project every task of a fixture (offline, no CAS required).")
     ap.add_argument("--fixture", default="case-0001")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--registry", default=rg.REGISTRY_FILENAME,
+                    help="task registry filename within the fixture dir "
+                         "(bare filename; default %s)" % rg.REGISTRY_FILENAME)
     args = ap.parse_args(argv)
     try:
-        res = run(args.fixture, args.out)
+        res = run(args.fixture, args.out, args.registry)
     except (pl.PipelineError, rg.RegistryError, sl.SelectorError) as e:
         sys.stderr.write("FAIL CLOSED: %s\n" % e)
         return 2

@@ -1,0 +1,114 @@
+{
+ "actual_only_tests": {
+  "mutual_exclusion_with_update": "rejected (exit 2)",
+  "no_expectation_created_or_changed": true,
+  "no_expected_report_required": true,
+  "operational_exit0_not_pass_rewrite": true,
+  "status": "PASS",
+  "two_runs_byte_identical": true
+ },
+ "adapter_commit": "<this commit>",
+ "base_commit": "50ddadc63fe44d7468e5d0482e83d337415a0b83",
+ "branch": "research/b1-case-0002-r2-admission",
+ "case_0001_byte_identity": {
+  "actual_only": "report.json sha256:52f9d2be\u2026 == committed; expectation untouched",
+  "default_registry": "tasks-v0.yaml",
+  "default_vertical": "report.json sha256:52f9d2be\u2026 == committed (byte-identical)"
+ },
+ "case_0002_smoke": {
+  "command": "run_case.py --fixture case-0002 --registry tasks-v1.yaml --actual-only",
+  "deterministic": true,
+  "evaluation_present": false,
+  "expectation_created": false,
+  "generation_reached": true,
+  "index_error": false,
+  "note": "non-authoritative smoke; NOT committed as an expected result. Ran WITHOUT the case-0002-v1 pseudo-dir.",
+  "operational_exit": 0,
+  "reason": "evaluation unavailable because negative_control is absent (empty list)",
+  "report_status": "PARTIAL",
+  "tasks_generated": 3
+ },
+ "changed_files": [
+  "research/b1-context/tools/README.md",
+  "research/b1-context/tools/o7b1/pipeline.py",
+  "research/b1-context/tools/o7b1/registry.py",
+  "research/b1-context/tools/project_case.py",
+  "research/b1-context/tools/run_case.py"
+ ],
+ "changes": [
+  {
+   "desc": "_negative_control_entry(): []->None, one->entry, >1->fail-closed, missing/non-list->fail-closed. No synthetic nc arm.",
+   "file": "run_case.py",
+   "id": "negative-control-cardinality"
+  },
+  {
+   "desc": "--actual-only + run_actual_only(): generate without reading/writing/verifying any expectation; exit 0 on deterministic generation regardless of PASS/PARTIAL/FAIL; prints digest+status separately; mutually exclusive with --update-expectations.",
+   "file": "run_case.py",
+   "id": "actual-only-mode"
+  },
+  {
+   "desc": "--registry bare-filename threaded through both CLIs -> pipeline.run_projection -> registry.load_task_registry (path-safe); default tasks-v0.yaml; non-default filename+digest recorded in metadata; logical fixture identity unchanged.",
+   "files": [
+    "run_case.py",
+    "project_case.py",
+    "o7b1/pipeline.py",
+    "o7b1/registry.py"
+   ],
+   "id": "registry-override"
+  }
+ ],
+ "files_not_modified": [
+  "o7b1/selector.py",
+  "o7b1/projector.py",
+  "o7b1/evaluate.py",
+  "o7b1/schema.py",
+  "o7b1/report.py",
+  "research/b1-context/schema/*",
+  "all case-0002 fixture artifacts",
+  "all frozen baseline/adjudication results",
+  "fixtures/case-0002-v1/ (historical evidence, untouched)"
+ ],
+ "negative_control_cardinality_tests": {
+  "missing": "fail-closed",
+  "non_list": "fail-closed",
+  "one": "byte-identical",
+  "status": "PASS",
+  "two": "fail-closed",
+  "zero": "None/PARTIAL"
+ },
+ "out_of_scope_untouched": [
+  "task-dependence beyond first two tasks",
+  "relation-path evaluation",
+  "stale-as-current evaluation",
+  "external budget loading",
+  "evaluation v1",
+  "selector v1",
+  "schema v1",
+  "Qodec arm",
+  "holdout",
+  "any expected case-0002 result",
+  "qodec PR #16"
+ ],
+ "registry_override_tests": {
+  "both_clis_byte_identical_projection": true,
+  "default_unchanged": true,
+  "digest_recorded": true,
+  "missing_absolute_nested_traversal_fail_closed": true,
+  "override_works_for_case0002": true,
+  "status": "PASS"
+ },
+ "round": "R2 \u2014 generic admission plumbing (behavior-preserving adapter)",
+ "schema": "o7.case0002.r2-receipt/v0",
+ "semantics_changed": {
+  "budget": false,
+  "evaluation": false,
+  "report_contract": false,
+  "schema": false,
+  "selector": false
+ },
+ "test_totals": {
+  "full_cas_backed": 113,
+  "offline": "113 (4 skipped)",
+  "r2_tests": 12
+ }
+}
