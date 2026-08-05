@@ -1,0 +1,141 @@
+{
+ "arms": {
+  "full_derived": "BOGUS",
+  "negative_control": "NOT_APPLICABLE",
+  "projection": "AVAILABLE"
+ },
+ "budget": {
+  "budget_digest": {
+   "artifact_bytes_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "canonical_object_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "byte_budget": 20000,
+  "counted_representation_id": "selector-v0-canonical-record-jsonl",
+  "record_budget": 32,
+  "unit": "utf8_bytes+records"
+ },
+ "contract_digest": {
+  "artifact_bytes_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "canonical_object_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ },
+ "contract_id": "o7.b1.evaluation-contract/v1",
+ "contract_revision": 2,
+ "evaluator_entrypoint_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+ "evaluator_implementation_manifest_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+ "evaluator_module_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+ "execution_checkout_commit": "0000000000000000000000000000000000000000",
+ "execution_checkout_tree": "0000000000000000000000000000000000000000",
+ "inputs": {
+  "artifacts": [
+   {
+    "artifact_bytes_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "byte_length": 100,
+    "canonical_object_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "logical_id": "gold-state-v0.json",
+    "role": "gold_state",
+    "visibility": "public"
+   }
+  ]
+ },
+ "metric_semantics": {
+  "required_observation_coverage": "structural: fraction of a question's required observation IDs present in the projection's selected set. NOT semantic recall."
+ },
+ "outcome_axes": {
+  "contract_input_consistency": "PASS",
+  "negative_control_diagnostics": "NOT_APPLICABLE",
+  "projection_validity": "PASS",
+  "question_observation_support": "PASS",
+  "relation_support": "PASS",
+  "source_compilation": "PASS",
+  "stale_state_safety": "PASS",
+  "task_dependence": "PASS"
+ },
+ "overall": "PASS",
+ "schema": "o7.b1.evaluation/v1",
+ "source_compilation": {
+  "axis": "PASS",
+  "derived_session_completeness": [
+   {
+    "byte_length_matches": true,
+    "present": true,
+    "record_count_reproduced": true,
+    "session_id": "coder",
+    "sha256_matches": true
+   }
+  ],
+  "extractor_identity": {
+   "coder": {
+    "extractor_id": "o7-chat-export-claude-code-v0",
+    "extractor_impl_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "extractor_version": "0"
+   }
+  },
+  "requested_source_availability": [
+   {
+    "cas_resolvable": "OK",
+    "id": "coder-prefix",
+    "requested_bytes": 1,
+    "requested_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "round_trip": true
+   }
+  ]
+ },
+ "task_dependence_matrix": [
+  {
+   "context_digest_equality": false,
+   "difference_source": "selector_relevance",
+   "expected_shape": "left_strict_superset",
+   "left_superset_of_right": true,
+   "pair": [
+    "case-0002-audit-r21-evidence-provenance",
+    "case-0002-assess-change-impact-on-oracle-topology"
+   ],
+   "right_superset_of_left": false,
+   "set_equality": false,
+   "shape_satisfied": true,
+   "symmetric_difference_count": 1
+  }
+ ],
+ "tasks": [
+  {
+   "projection_validity_axis": "PASS",
+   "question_observation_support": [
+    {
+     "fully_supported": true,
+     "missing_required_ids": [],
+     "question_id": "qa1-why-active",
+     "required_observation_coverage": 1.0,
+     "required_observation_ids": [
+      "obs-repo-authority-04108e7"
+     ],
+     "selected_required_ids": [
+      "obs-repo-authority-04108e7"
+     ]
+    }
+   ],
+   "relation_support": [
+    {
+     "endpoint_policy": "edge_witness",
+     "fabricated_edges": [],
+     "from": "obs-round0-closed",
+     "gold_edges": [
+      "obs-plane-record-not-frozen-v6"
+     ],
+     "kind": "supersedes",
+     "present_edges": [
+      "obs-plane-record-not-frozen-v6"
+     ],
+     "question_id": "qa3-superseded",
+     "satisfied": true
+    }
+   ],
+   "stale_state_checks": [
+    {
+     "classification": "stale_relation_endpoint_only",
+     "forbidden_id": "obs-plane-record-not-frozen-v6"
+    }
+   ],
+   "task_id": "case-0002-audit-r21-evidence-provenance"
+  }
+ ]
+}

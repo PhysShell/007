@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://physshell.dev/007/research/b1-context/schema/evaluator-implementation-manifest-v0.schema.json",
+  "title": "o7.b1.evaluator-implementation-manifest/v0",
+  "description": "Closure manifest of the standalone evaluator implementation. Its canonical_object_sha256 becomes evaluator_implementation_manifest_digest in the evaluation output. Every file the evaluator (CLI + module) is composed of must appear here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "files", "entrypoint", "python_version", "dependency_versions"],
+  "properties": {
+    "schema": {"const": "o7.b1.evaluator-implementation-manifest/v0"},
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relative_path", "artifact_bytes_sha256"],
+        "properties": {
+          "relative_path": {"type": "string", "minLength": 1},
+          "artifact_bytes_sha256": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    },
+    "entrypoint": {"type": "string", "minLength": 1},
+    "python_version": {"type": "string", "minLength": 1},
+    "dependency_versions": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "artifact-bytes SHA-256 of a source file (digest domain: artifact_bytes)."}
+  }
+}
