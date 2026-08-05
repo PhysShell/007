@@ -38,6 +38,15 @@ HTTP 409             ≠  the epistemic status STALE
      classified by the authority adapter is STALE)
 ```
 
+Per rule 4, these worked examples are themselves factual claims about existing
+code, and they are bound to **this document's own revision** — the natural
+revision anchor a versioned file already carries (git records the commit; that
+is the binding, not a SHA copied into prose, which would be a fresh unbound
+claim in its own right). Line numbers are illustrative and drift; the named
+**property**, not the line, is the claim. Each example is stale once its cited
+file changes — re-verify against current `HEAD`, and keep the artifact-says /
+inference split, before citing any of them as evidence.
+
 The cross-cutting constraint that follows from all three (an implementation
 constraint, **not** a fifth rule — it threads through rules 1, 2, and 4):
 
