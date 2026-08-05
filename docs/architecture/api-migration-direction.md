@@ -1,20 +1,31 @@
 # API migration assurance direction (AMA-0)
 
-Status: **accepted direction, exploration gated at AMA-1** · Track: **AMA** (this
-note is AMA-0) · Revision: **2** — supersedes revision 1 (`3ec1343`), which
-scoped the track as coverage assurance for API migrations generally. That scope
-contained a false product: locating type-*visible* breaks is packaging `tsc` and
-invoicing for it. §1 records the correction.
+Status: **accepted direction, exploration gated at the AMA-0.5 protocol-formation
+packet** · Track: **AMA** (this note is AMA-0) · Revision: **3**.
+
+Revision history, kept because the errors are load-bearing:
+
+- **rev 1** (`3ec1343`) — scoped the track as coverage assurance for API
+  migrations generally. That scope contained a false product: locating
+  type-*visible* breaks is packaging `tsc` and invoicing for it.
+- **rev 2** (`288e5e7`) — narrowed the subject to type-invisible semantic
+  change; introduced the mutation oracle, blind normalization, construct
+  families, and confidence-bound thresholds. Two defects survived: §7.2
+  over-claimed what the mutation oracle can witness, and a single-axis
+  construct family with an undefined trial unit could not support the bounds
+  it was being asked to carry.
+- **rev 3** (this) — factorized claim cells, oracle fidelity, delta provenance,
+  the independent-cluster definition, the `N_qualify` / `N_publish` split,
+  adjudicator-independence limits, and the AMA-0.5 packet.
 
 Scope: **subject definition, evaluation protocol, and pre-registered decision
 thresholds — not an implementation contract.**
 
-Implementation gate: **nothing beyond the corpus, the oracles, and the AMA-1
-qualification experiment** (§10). No analyzer product, no delta extraction from
-release notes, no PR authoring, no service. PR generation is a *forbidden*
-downstream artifact until the gate passes — otherwise the patch generator gets
-polished while the central question, "did we find the right facts at all",
-quietly decomposes in the corner.
+Implementation gate: **the AMA-0.5 protocol-formation packet only** (§10). No
+locator, no analyzer product, no delta extraction from release notes, no PR
+authoring, no service. PR generation is a *forbidden* downstream artifact until
+AMA-1 passes — otherwise the patch generator gets polished while the central
+question, "did we find the right facts at all", quietly decomposes in the corner.
 
 Ratification: adjudicated in an interactive session with the maintainer, so per
 rule 3's carve-out in `docs/evidence-and-decision-discipline.md` this is
@@ -36,11 +47,11 @@ resolvable use of that member a type error.
 enumerated completely and at zero marginal cost by the consumer's own compiler.
 
 **Decision:** the compiler is adopted in two roles — a **free negative
-baseline** marking where no product exists, and a **machine oracle for the
-locator** (§6). The product surface is what it cannot diagnose.
+baseline** marking where no product exists, and a **fidelity-bounded oracle for
+the locator** (§6). The product surface is what it cannot diagnose.
 
-The four layers that revision 1's appraisal was summing, kept here because the
-confusion recurs:
+The four layers that rev 1's appraisal was summing, kept because the confusion
+recurs:
 
 ```text
 1. execution provability   — built in 007 (§9)
@@ -152,143 +163,355 @@ measure finding things. It measures whether the system refrains from claiming a
 completed analysis.
 
 Per-case record: SDK identity and versions · normalized delta + blinding
-provenance · empirical class per §3 · construct family per §7.1 · repository
-commit · toolchain and `tsconfig` · adjudicated fact occurrences · expected
-opaque regions · negative examples · adjudication provenance · known limits.
+provenance · `delta_provenance` (§6.3) · empirical class per §3 · claim cell per
+§7.1 · cluster id per §7.2 · repository commit · toolchain and `tsconfig` ·
+adjudicated fact occurrences · expected opaque regions · negative examples ·
+adjudication provenance and adjudicator independence status (§8.3) · known
+limits.
 
-## 6. Oracles, and their stated limits
+## 6. Oracles, their fidelity, and delta provenance
 
-**Mutation oracle (lab).** At a pinned commit and configuration, mutate the SDK
-declaration surface — delete a field, rename a method, narrow a literal union,
-flip optionality, change a generic constraint — and take the resulting `tsc`
-diagnostics as reproducible ground truth for that configuration. Measures
-resolution recall, symbol-resolution precision, analyzability lost after a PR,
-wrapper and dynamic-dispatch effects, and covered-surface change — without human
-beings reading commits until they start seeing ASTs in their sleep.
+### 6.1 The mutation oracle
+
+At a pinned commit and configuration, mutate the SDK declaration surface —
+delete a field, rename a method, narrow a literal union, flip optionality,
+change a generic constraint — and take the resulting `tsc` diagnostics as
+reproducible ground truth for that configuration. Measures resolution recall,
+symbol-resolution precision, analyzability lost after a PR, wrapper and
+dynamic-dispatch effects, and covered-surface change — without human beings
+reading commits until they start seeing ASTs in their sleep.
 
 > **Limit, binding:** the mutation oracle qualifies the ability to *locate
 > occurrences of a known contract fact*. It proves nothing about the ability to
 > *detect the semantic change itself*, which is problem A and out of scope.
 
-**Field self-calibration (the lab→field bridge).** `false assurance rate` is
-observable in the corpus and **not observable in production**, where a miss
-surfaces only through an incident: a biased, delayed, lossy channel. A
-pre-registered threshold therefore governs a lab quantity while the customer
-buys a field one. The mutation oracle closes part of that gap, because it can be
-run **on the customer's own repository at analysis time**: inject synthetic
-contract-fact mutations, measure the locator against the customer's actual code
-and configuration, and report that measurement instead of inheriting a benchmark
-number.
+### 6.2 Oracle fidelity
+
+A mutation is a valid witness only when it is an adequate surrogate for the same
+contract-fact occurrence. Direct field access surveys cleanly; a changed default
+survives a conservative surrogate (temporarily make the optional field required
+— `tsc` then shows every site that omitted it); retry semantics do not survive
+at all — the compiler locating a call is not an oracle for *dependence on error
+behaviour*. The same holds for pagination termination logic, ordering and
+idempotency assumptions, downstream interpretation of a response, dependence on
+a pinned API version, and a field whose meaning changed without its type moving.
 
 ```text
-this repository, this tsconfig, this SDK version:
-  120 synthetic contract-fact mutations injected
-  118 located
-    2 missed — both in construct family "generic wrapper", declared opaque
+oracle_fidelity:
+  exact                mutation witnesses the same occurrence set
+  conservative_proxy   mutation witnesses a superset or a related set
+  unavailable          no mutation surrogate exists; adjudication only
 ```
 
-This is the strongest artifact the product can ship, and it is machine-produced.
-Whatever it cannot cover (problem-A detection, genuinely type-invisible
-semantics) stays an explicitly inherited lab claim with a stated similarity
-argument — never an implied one.
+Fidelity is a property of the pair *(semantic-fact kind, mutation strategy)* —
+**not** of a case, and not of an adjudicator's discretion at labelling time. One
+case routinely carries facts of differing fidelity. It is therefore determined in
+advance and recorded in the frozen codebook (§8), like every other threshold.
 
-## 7. Metrics and the statistical form of the thresholds
+Consequences, binding:
 
-### 7.1 Claims are stratified by construct family
+- **`exact`** may enter the machine-computed `false-opaque rate` and the strong
+  form of field self-calibration.
+- **`conservative_proxy`** supports a diagnostic report, never a guarantee.
+- **`unavailable`** stays with adjudication.
 
-The rule of three (`3/n` as the one-sided 95% upper bound at zero observed
-failures) requires **independent** trials. Corpus cases are not independent:
-failures cluster by construct — every DI case fails together, every generic
-wrapper fails together. The effective sample size is nearer the number of
-distinct construct families than the number of cases; 300 cases of which 240 are
-direct typed calls bound roughly like 60.
+Without this ladder, §7.3 performs exactly the substitution the whole document
+was built to prevent: "the compiler found something" quietly becomes "the
+compiler proved the semantic fact".
 
-Therefore the claim shape changes, and so does the report:
+### 6.3 Delta provenance
+
+`N_publish` (§7.4) is bounded not only by adjudication budget but by the
+**supply of semantic deltas**: independent clusters are limited by *available
+repositories × deltas of that kind that actually happened*. For rare cells —
+pagination termination, ordering, idempotency — the historical supply is
+single-digit. No provider has shipped fifty-nine pagination-semantics changes.
+
+Synthetic deltas relieve the shortage and break something else: authored by us,
+they measure the analyzer against *our model of what changes look like*. That is
+the same hazard as oracle fidelity on a different axis, and it takes the same
+ladder:
 
 ```text
-direct typed call        n=40, 0 misses  → upper bound  7.5%
-thin local wrapper       n=18, 1 miss    → bound per exact method
-DI-registered client     declared opaque → no claim made
+delta_provenance:
+  historical   a change that actually shipped        → may support an assurance claim
+  synthetic    constructed by us                     → diagnostic only, never assurance
+  hybrid       historical delta transplanted onto a different repository
+                                                     → recorded separately; claim strength
+                                                       decided at freeze, not afterwards
 ```
 
-No repository-wide single number. The universe is declared as a **set of
-construct families**, each carrying its own evidence and its own bound. This
-also makes the corpus tractable — n per family, not n across everything — and it
-tells a buyer whether *their* pattern is covered rather than the benchmark's
-average temperature.
+Cells are reported with their provenance mix. Otherwise a cell built from six
+synthetic deltas prints identically to one built from six historical ones, which
+is precisely how a benchmark becomes a mirror.
 
-### 7.2 Metrics
+## 7. Claim cells, independence, and the statistical form of the thresholds
+
+### 7.1 The claim cell is factorized on two axes
+
+Misses cluster by *how the client is obtained* and by *what kind of semantic
+dependence the code carries*. A single direct typed call may carry an explicit
+argument value, a dependence on an omitted field's default, a string key, a
+downstream response-field check, retry control flow, and a pagination
+termination condition. A locator can be flawless on the first three and useless
+on the last three; averaged into one "direct typed call" family, the number is
+again brilliant and meaningless.
+
+Candidate axes — **candidate**, to be replaced by the empirically discovered
+codebook of §8, not to be treated as the taxonomy:
+
+| Resolution construct | Semantic dependence |
+|---|---|
+| Direct symbol access | Explicit argument / value |
+| Local alias | Omitted field / default |
+| Thin wrapper | String key / path |
+| Interface or DI | Response-field interpretation |
+| Factory or registry | Error / retry control flow |
+| Generic abstraction | Pagination / iteration |
+| Dynamic / config-driven | Ordering / idempotency / version semantics |
+
+The published unit of claim is the cell:
 
 ```text
-fact-level recall        ground-truth fact occurrences found, per family
+thin local wrapper  ×  omitted-field/default dependence  ×  exact mutation oracle
+```
+
+Cells may be merged into a coarser family **only** under a rule fixed before
+measurement: same failure mechanism, same evidence procedure, and empirically
+compatible results. Never because merging is the cheapest way to reach `N`.
+
+### 7.2 What counts as one independent trial
+
+Stratification alone does not buy independence. Within one cell the following
+are correlated: many occurrences of one delta in one repository; several
+repositories sharing an internal wrapper library; many migrations of one SDK;
+several versions of one consumer; constructs emitted by one code generator.
+
+**Cluster unit:** `consumer repository × provider semantic delta × claim cell`.
+
+Inside a cluster, individual fact occurrences contribute to fact-level recall,
+but the whole cluster yields **one** outcome for the false-assurance bound:
+
+```text
+27 occurrences in one repo/delta/cell
+26 found, 1 missed
+
+fact recall:      26/27
+cluster outcome:  false assurance = 1
+effective n:      1, not 27
+```
+
+**Shared-ancestor collapsing (required).** The cluster unit above does not by
+itself handle the very correlation that motivated it: five repositories using
+the same wrapper library would count as five clusters. Clusters sharing a common
+code ancestor — the same wrapper package, the same generator, the same
+documentation template, or AST similarity above a pre-registered threshold —
+collapse to **one** outcome. Without this, the cheapest way to reach `N` is to
+count forks of the same code, which is also the most worthless.
+
+Otherwise the rule of three receives hundreds of pseudo-independent observations
+and returns a laboratory hallucination, this time wearing a confidence interval.
+
+### 7.3 Metrics
+
+```text
+fact-level recall        ground-truth fact occurrences found, per cell
 false assurance rate     runs claiming coverage while an occurrence inside the
                          declared universe was missed        (governing metric)
 assurance coverage       share of the real surface on which a strong claim was made
 opaque recall            known-opaque regions correctly declared opaque
-false-opaque rate        regions declared opaque that the mutation oracle resolves
-                         in the same configuration           (machine-measurable)
+false-opaque rate        regions declared opaque that an `exact`-fidelity mutation
+                         resolves in the same configuration  (machine-measurable)
 risk–coverage curve      assurance coverage as a function of accepted risk
 analysis cost            per report, at realistic repository size, and reproducibility
 ```
 
-`false-opaque rate` is deliberately defined against the oracle rather than
-against an adjudicator: it catches analyzer cowardice automatically, and leaves
-adjudication needed only for the opposite direction.
+`false-opaque rate` is defined against the oracle rather than an adjudicator, so
+analyzer cowardice is caught automatically — but only at `exact` fidelity (§6.2);
+a `conservative_proxy` witness cannot convict a region of being falsely opaque.
 
 `false assurance rate` governs — a spurious warning annoys, a false assurance
 report causes an incident. `assurance coverage` is its mandatory pair: a perfect
 false-assurance rate is trivially bought by declaring everything opaque, which is
 flawless and worthless.
 
-### 7.3 Thresholds are bounds, not point estimates
+**Field self-calibration (the lab→field bridge).** `false assurance rate` is
+observable in the corpus and **not observable in production**, where a miss
+surfaces only through an incident: a biased, delayed, lossy channel. The mutation
+oracle closes part of that gap, because it runs **on the customer's own
+repository at analysis time** — inject synthetic contract-fact mutations of
+`exact` fidelity, measure the locator against the customer's actual code and
+configuration, and report that measurement instead of inheriting a benchmark
+number.
+
+```text
+this repository, this tsconfig, this SDK version:
+  120 exact-fidelity contract-fact mutations injected
+  118 located
+    2 missed — both in cell "generic abstraction × response-field", declared opaque
+```
+
+This is the strongest artifact the product can ship, and it is machine-produced.
+Everything outside `exact` fidelity remains an explicitly inherited lab claim
+with a stated similarity argument — never an implied one.
+
+### 7.4 Thresholds are bounds, and there are two of them
 
 A raw percentage without confidence bounds deceives cheaply: zero misses in 20
-cases is not a 0% miss rate — its one-sided 95% upper bound is about 15%.
-Pre-commitment therefore takes this form, per construct family:
+clusters is not a 0% miss rate — its one-sided 95% upper bound is about 15%. At
+zero observed failures, the exact binomial requirement `n ≥ ln(0.05)/ln(1−X)` is:
 
 ```text
-one-sided 95% upper bound on false-assurance rate   ≤ X_family
-one-sided 95% lower bound on assurance coverage     ≥ Y_family
-minimum n per family before any claim is published  ≥ N_family
+X = 10%  →  n = 29
+X =  5%  →  n = 59
+X =  2%  →  n = 149
+X =  1%  →  n = 299
 ```
 
-And the differentiation threshold against the agent baseline is likewise paired:
+Per claim cell, in independent clusters after §7.2 collapsing. Not per corpus.
+
+**Two different `N`, because one number is being asked to serve two standards of
+proof.** Deciding whether research should continue and publishing an external
+assurance claim are not the same evidentiary bar:
 
 ```text
-at an identical accepted false-assurance ceiling, the specialised system must
-deliver a pre-registered minimum gain in fact-level recall or assurance coverage
+N_qualify   minimum clusters to justify CONTINUE / NARROW / STOP
+N_publish   minimum clusters before an external claim is made for that cell
 ```
 
-The numeric values of `X`, `Y`, `N`, and the required gain are fixed **when the
-AMA-1 protocol is frozen, before any analyzer result is seen**. A threshold
-chosen after seeing the score is not a threshold; it is retrospective
-self-approval with a table.
+Collapsing them would require AMA-1 to assemble a nearly commercial corpus
+before earning the right to decide whether assembling a corpus is worthwhile — a
+gate that demands a finished factory as a permit to build an experimental shed.
 
-## 8. Baseline protocol (pre-registered)
+Pre-commitment therefore takes this form, per cell:
 
-Baselines: the specialised locator · a strongest-form coding-agent baseline ·
-grep/AST · compiler-only (§1).
+```text
+one-sided 95% upper bound on false-assurance rate   ≤ X_cell
+one-sided 95% lower bound on assurance coverage     ≥ Y_cell
+minimum independent clusters                        ≥ N_qualify_cell / N_publish_cell
+```
 
-The agent baseline is held to the **same output contract** as the product —
-findings, coverage claim, evidence, known unknowns, potentially opaque regions,
-confidence and abstentions. Comparing a system required to publish its blind
-spots against an agent merely told "find everything" is a staged fight in which
-the opponent's shoelaces were tied beforehand.
+And the differentiation threshold against the agent baseline is stated on the
+*difference*, with its own uncertainty — not on two point estimates:
 
-Frozen before the run: model and version · prompt · available tools · whether
-compiler/grep/AST invocations are permitted · token budget · number of attempts
-· result-aggregation rules. Otherwise the baseline retroactively becomes an idiot
-or a genius depending on which conclusion the authors needed.
+```text
+at an accepted false-assurance upper bound ≤ X_cell:
 
-The decisive comparison:
+  lower confidence bound( assurance_coverage_specialised
+                        − assurance_coverage_agent )  ≥ Δ_cell
+```
 
-> At an identical accepted false-assurance rate, which system covers more of the
-> real surface?
+`X`, `Y`, both `N`s, and `Δ` are fixed **when the AMA-1 protocol is frozen,
+before any locator result is seen**. A threshold chosen after seeing the score is
+not a threshold; it is retrospective self-approval with a table.
 
-If a well-prompted agent matches on both fact-level recall and calibrated
-abstention, there is no specialised company here. There is a good prompt pack and
-possibly a workflow around it — a finding worth reaching in one experiment rather
-than in one funding round.
+## 8. Taxonomy discovery, adjudication, and their independence limits
+
+### 8.1 Discovery protocol
+
+The codebook is built empirically on a **discovery cohort that never enters the
+qualification corpus**:
+
+```text
+1. fix the sampling frame before looking at code — language, SDK, repository
+   sizes, inclusion and exclusion criteria
+2. the blind normalizer works from provider-side artifacts only (§4)
+3. two coders independently label consumer code by observed resolution
+   construct and semantic dependence
+4. disagreements produce a codebook with machine- or procedure-checkable
+   membership rules
+5. freeze the codebook
+6. validate classification reproducibility on a separate holdout cohort
+7. an unforeseen pattern is `unclassified` / opaque — never retrofitted into a
+   convenient cell
+```
+
+The locator is excluded from this process entirely — neither its outputs nor its
+internal capabilities. Otherwise the result is not a taxonomy of real code but an
+inventory of what the current implementation happens to digest.
+
+### 8.2 Frozen artifacts required before AMA-1
+
+```text
+sampling-frame hash          claim-cell construction rule
+discovery-cohort manifest    cluster independence + collapsing rule
+codebook revision            holdout validation result
+oracle-fidelity table        unclassified-pattern policy
+```
+
+### 8.3 Adjudicator independence (recorded limit, not a solved problem)
+
+The protocol above assumes several human coders. The actual team is one
+maintainer plus agents, and the tempting substitution — an agent as the second
+independent coder — destroys independence quietly and irreversibly: that coder
+correlates with the LLM baseline under evaluation and with the locator itself if
+it carries LLM components. Agreement between two instances of one model measures
+that model's consistency, not truth, while presenting as inter-rater agreement.
+
+```text
+agent as first-pass candidate enumerator   permitted (cheap, recall-oriented)
+agent as independent second adjudicator    prohibited while the locator or the
+                                           baseline shares its model family
+```
+
+Where a second human is unavailable, this is **recorded as a validity limit**,
+not dressed as double-blind adjudication.
+
+Ordering matters too: a time-and-motion pilot run before the codebook freeze
+conflates codebook immaturity with intrinsic case difficulty. Disagreement rate
+before and after the freeze are two different quantities and are reported
+separately.
+
+### 8.4 Adjudication cost is decomposed, not averaged
+
+A "case" has wildly variable mass: three direct occurrences in one, a monorepo
+with a wrapper layer, a historical refactor, and a CI that died during a previous
+administration in another.
+
+```text
+T_case = T_provider_artifact_review
+       + T_blind_normalization
+       + T_repository_reproduction
+       + T_primary_adjudication
+       + T_independent_secondary_pass
+       + T_disagreement_resolution
+       + T_evidence_packaging
+```
+
+Recorded per case: candidate occurrences · confirmed occurrences · claim cell ·
+cluster id · repository size · files touched · toolchain reproducibility ·
+presence of a historical migration commit · presence of tests or traces ·
+disagreement rate.
+
+Published as distribution, not mean — one light Stripe example would otherwise
+turn the mean into a sales flyer:
+
+```text
+p50 and p90 adjudication time per claim cell
+disagreement rate (pre- and post-freeze, separately)
+reproduction-failure rate
+cost per accepted independent cluster
+```
+
+Budget projection:
+
+```text
+Total = Σ over claim cells ( N_cell × p90 accepted-cluster cost )
+      + failed-reproduction cost
+      + taxonomy and normalization overhead
+```
+
+Not `number of families × mean time of a pretty case`. Six commercially
+meaningful cells at a modest four hours per independent cluster, for a 5% ceiling
+at zero observed failures:
+
+```text
+6 × 59 × 4 = 1,416 hours
+```
+
+— for `N_publish` alone, before failed setups, disagreements, and infrastructure.
+This is the most likely place for the project to take a shovel to the head, and
+learning it before the locator exists is the good outcome.
 
 ## 9. Asset accounting, and 007's narrowed role
 
@@ -300,60 +523,95 @@ than in one funding round.
 | `o7 replay` | Built | Independent re-verification of a run |
 | Live ingress / REST + SSE (`o7d`) | Partly built | Run observation |
 | Fact-occurrence locator | **Absent** | The product risk |
-| Three-part corpus + oracles | **Absent** | The first required artifact |
+| Codebook, corpus, oracles | **Absent** | The first required artifacts |
 | Capability / action broker | Direction only (ABR-0) | Not counted as implementation |
 | Agentopedia / documentation drift | Idea | Not counted as an asset |
 | Multi-tenant SaaS runtime | Absent | A separate future project |
-| Automatic PR generation | Commodity | Forbidden before the gate |
+| Automatic PR generation | Commodity | Forbidden before AMA-1 |
 
 007 is neither the analyzer nor the assurance product. Its available role is an
 **evaluation and evidence harness** around a future locator: pinned inputs →
 gates → digest-chained evidence → replay → decision record. Even that is
 secondary at this stage.
 
-The primary AMA-0 artifact is now:
+## 10. AMA-0.5 — the protocol-formation packet (the real first experiment)
+
+The only work permitted after this note. Not a locator.
 
 ```text
-normalized semantic-delta schema  +  fact-level ground-truth format
-+ mutation oracle                 +  three-part corpus
-+ baseline protocol               +  pre-committed decision thresholds
+1. empirical taxonomy discovery protocol (§8.1) executed on a discovery cohort
+2. factorized claim-cell schema (§7.1)
+3. oracle-fidelity table, per (fact kind, mutation strategy) (§6.2)
+4. delta-provenance classification and per-cell supply survey (§6.3)
+5. independent-cluster definition incl. shared-ancestor collapsing (§7.2)
+6. adjudication time-and-motion pilot, post-freeze (§8.3, §8.4)
+7. N_qualify / N_publish split and total budget projection (§7.4, §8.4)
+8. frozen X, Y, N, and Δ thresholds
 ```
 
-Not a GitHub App. Not PR generation. Not a SaaS. Not necessarily even a complete
-analyzer.
+Decision at the end of the packet: **FREEZE AMA-1 / NARROW taxonomy or scope /
+STOP before locator code.**
 
-## 10. AMA-1 — Semantic Impact Localization Qualification
+## 11. AMA-1 — Semantic Impact Localization Qualification
 
-The only experiment permitted after this note.
+Runs only if AMA-0.5 returns FREEZE.
 
 **Inputs:** a manually normalized semantic delta (blinded per §4) · a pinned
-TypeScript repository commit · pinned SDK, compiler, and `tsconfig`.
+TypeScript repository commit · pinned SDK, compiler, and `tsconfig` · the frozen
+codebook and thresholds.
 
 **Outputs:** fact-level inventory · evidence per finding · declared covered
-universe as a set of construct families · opaque set · machine-verifiable
-mutation-oracle score · adjudicated semantic-corpus score · strongest-agent
-baseline · per-family bounds per §7.3 · decision.
+universe as a set of claim cells · opaque set · mutation-oracle score with
+fidelity annotations · adjudicated semantic-corpus score · strongest-agent
+baseline · per-cell bounds per §7.4 · decision.
 
 **Decision: CONTINUE / NARROW / STOP.**
 
+### Baseline protocol (pre-registered)
+
+Baselines: the specialised locator · a strongest-form coding-agent baseline ·
+grep/AST · compiler-only (§1).
+
+The agent baseline is held to the **same output contract** as the product —
+findings, coverage claim, evidence, known unknowns, potentially opaque regions,
+confidence and abstentions — and receives the same normalized delta, the same
+claim-cell codebook, the same repository state, and the right to invoke `tsc`,
+grep, and AST tooling. It is denied sight of the qualification labels. Comparing
+a system required to publish its blind spots against an agent merely told "find
+everything" is a staged fight in which the opponent's shoelaces were tied
+beforehand.
+
+Frozen before the run: model and version · prompt · available tools · token
+budget · number of attempts · result-aggregation rules. Otherwise the baseline
+retroactively becomes an idiot or a genius depending on which conclusion the
+authors needed.
+
+The decisive comparison, per §7.4: at an identical accepted false-assurance
+ceiling, does the specialised system's coverage advantage survive its own
+confidence interval? If a well-prompted agent matches on both fact-level recall
+and calibrated abstention, there is no specialised company here — there is a good
+prompt pack and possibly a workflow around it, a finding worth reaching in one
+experiment rather than in one funding round.
+
 ### Kill criteria
 
-Spent effort is not an argument against these; citing it is precisely the
-failure mode they exist to stop.
+Spent effort is not an argument against these; citing it is precisely the failure
+mode they exist to stop.
 
 ```text
-- the false-assurance upper bound cannot be driven under X on any family that
-  covers a commercially meaningful share of real integrations
+- the false-assurance upper bound cannot be driven under X_cell on any cell
+  covering a commercially meaningful share of real integrations
 - adequate completeness holds only on an artificially narrow universe
   (assurance coverage below its pre-registered floor)
 - the opaque set swallows the majority of real integrations
-- a strongest-form agent baseline matches both recall and calibrated abstention
-- adjudication + analysis cost exceeds the value of the misses prevented
-- not enough blind-normalizable, high-quality cases are obtainable to reach
-  N_family on more than one family
+- a strongest-form agent baseline matches on both recall and calibrated
+  abstention, with Δ_cell not surviving its confidence bound
+- projected adjudication + analysis cost exceeds the value of the misses prevented
+- historical delta supply cannot reach N_publish on more than one cell, and the
+  shortfall can only be covered by synthetic deltas (diagnostic, not assurance)
 ```
 
-## 11. Deferred, and non-goals
+## 12. Deferred, and non-goals
 
 ```text
 semantic-delta extraction (problem A)   multi-language support
@@ -371,7 +629,7 @@ Two carry recorded reasoning so deferral is not mistaken for absence of thought:
   occurrences into opaque ones — dynamic dispatch introduced, a covered wrapper
   bypassed, the SDK version moved without an assurance run. That measures the
   degradation of a codebase's own analyzability, which is a stronger idea than
-  API linting, and it is meaningless before the locator has numbers.
+  API linting, and it is meaningless before the locator has per-cell numbers.
 - **Compliance.** Not a vertical; the *packaging* of the assurance report for
   change management — initiator, analyzed universe, versions compared, findings,
   changes made, checks run, what stayed opaque, who accepted the residual risk,
@@ -382,7 +640,7 @@ Non-goals: no claim of completeness over arbitrary code; no "provably
 unaffected" verdict (the phrase is retired from this track); no universal
 API-change platform; no product runtime built on subscription-auth CLIs.
 
-## 12. Liability boundary (recorded, not solved)
+## 13. Liability boundary (recorded, not solved)
 
 A provider-authored bot opening PRs in customer repositories creates a
 responsibility chain — recommendation, authored code, approved merge, production
@@ -393,17 +651,18 @@ repository and CI, and liability contained inside one organisation. They also
 make adjudication tractable, since they can confirm which services should have
 migrated.
 
-## 13. Unfreeze triggers
+## 14. Unfreeze triggers
 
 ```text
+AMA-1 qualification run      after AMA-0.5 returns FREEZE
 locator implementation       after AMA-1 returns CONTINUE on pre-registered bounds
 wrapper / DI analysis        after the corpus shows resolved-only coverage is too small
 delta extraction (problem A) after localization qualifies on a fixed normalized input
-PR-time regression signal    after the locator has published per-family numbers
+PR-time regression signal    after the locator has published per-cell numbers
 delivery runtime             after a paying internal-platform design partner exists
-provider-side distribution   after §12 is contractually settled
+provider-side distribution   after §13 is contractually settled
 ```
 
-Nothing is built now beyond the corpus, the oracles, and AMA-1. This note exists
-so the narrow wedge does not mutate, three commits later, into a SaaS, a GitHub
-App, a cloud runtime, and an insurance policy.
+Nothing is built now beyond the AMA-0.5 packet. This note exists so the narrow
+wedge does not mutate, three commits later, into a SaaS, a GitHub App, a cloud
+runtime, and an insurance policy.
