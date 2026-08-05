@@ -1,0 +1,25 @@
+schema: o7.b1.fixture-manifest/v0
+fixture_id: case-0002
+status: ROUND0_CLOSED_SOURCE_SET_FROZEN
+note: case-0002 has no negative-control reconstruction. Reviewer/plane-record are RAW/derived, not an
+  advisory agent reconstruction.
+raw_sources:
+- id: reviewer-export
+  source_system: chatgpt-backend-api
+  digest: sha256:ed518b334485ef5421aab0229a4e4a0dc9bc489cb78d1eba00b5eb50d286e7e8
+  byte_length: 5963644
+  authority: platform_capture
+  native_conversation_id: 6a6e220a-a154-83eb-9917-54e9a3cac8e5
+- id: coder-prefix
+  source_system: claude-code-container
+  digest: sha256:8392de803d600b19ac8273a43b2b766951d2eaf9a9197e1d8d43e97f541fca1c
+  byte_length: 87564394
+  authority: platform_capture
+  note: uncompressed prefix; committed as gzip blob 6d8a09a7 at qodec 427b677
+- id: plane-record
+  source_system: o7-plane-record
+  digest: sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139
+  byte_length: 94084
+  authority: controller_or_repo_record
+  note: frozen repository-state snapshot manifest (120 envelopes)
+negative_control: []

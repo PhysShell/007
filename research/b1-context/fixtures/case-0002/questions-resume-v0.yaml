@@ -1,0 +1,22 @@
+schema: o7.b1.questions/v0
+task_id: case-0002-resume-product-integration
+questions:
+- id: qr1-current-state
+  text: What is the current active state?
+  required_observation_ids:
+  - obs-round0-closed
+  - obs-plane-record-frozen
+- id: qr2-blocking
+  text: What blocks progress right now?
+  required_observation_ids:
+  - obs-round0-closed
+  forbidden_stale_as_current:
+  - obs-plane-record-not-frozen-v6
+- id: qr3-next-step
+  text: What is the next permitted step?
+  required_observation_ids:
+  - obs-next-permitted-step
+- id: qr4-authority
+  text: Which repository outcome is the authority for the accepted state?
+  required_observation_ids:
+  - obs-repo-authority-04108e7

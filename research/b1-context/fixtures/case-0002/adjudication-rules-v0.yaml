@@ -1,0 +1,33 @@
+schema: o7.b1.adjudication-rules/v0
+fixture_id: case-0002
+note: Adjudication decisions are recorded explicitly, not called mechanical derivation. Lifted from qodec
+  SOURCE-LOCK-v6 authority_rules @ 427b677.
+closed_authority_vocabulary:
+- platform_capture
+- deterministic_derivative
+- human_confirmed
+- controller_or_repo_record
+- agent_claim
+rules:
+- id: relayed-agent-text
+  decision: Relayed agent text stays agent_claim; pasting is transport, not authorship. The act of forwarding
+    is a separate human_confirmed evidence observation whose authority attaches only to the fact of forwarding.
+- id: human-authored-turn
+  decision: A platform-captured node with an exact source pointer, not attributable to either agent plane,
+    is human_confirmed.
+- id: git-pr-ci-evidence
+  decision: Git, PR, CI and evidence state are taken ONLY from the frozen plane-record (controller_or_repo_record);
+    a truncated embedded tool result establishes only its captured bytes, not complete external state.
+- id: no-cross-plane-corroboration
+  decision: The coder and reviewer chat planes are NOT treated as independent corroboration of each other
+    or of repository state.
+- id: deterministic-derivative
+  decision: A deterministic parse/comparison/digest of a captured artifact is deterministic_derivative,
+    distinct from the platform_capture it is computed from.
+- id: no-stale-as-current
+  decision: Superseded and rejected observations are never presented as current; supersession is recorded
+    with an explicit supersedes relation and superseded_by.
+- id: round0-supersedes-lock-status
+  decision: Round 0 completion (plane-record FROZEN; reviewer export durable in CAS) explicitly SUPERSEDES
+    the frozen SOURCE-LOCK-v6 statuses that recorded plane-record NOT-FROZEN and reviewer durability UNRESOLVED.
+    This is an adjudication decision, not a mechanical derivation.

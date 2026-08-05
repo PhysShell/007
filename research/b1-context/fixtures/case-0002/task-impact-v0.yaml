@@ -1,0 +1,19 @@
+schema: o7.b1.task/v0
+task_id: case-0002-assess-change-impact-on-oracle-topology
+fixture_id: case-0002
+statement: 'Assess change impact on the oracle topology: which decisions, work items, evidence and checks
+  depend on the chosen constraint, and what must be re-reviewed if it changes.'
+selectors:
+  required_topics:
+  - oracle-topology
+  preferred_topics:
+  - r21-evidence
+  - measurement
+  excluded_topics: []
+  required_kinds:
+  - constraint
+  - evidence
+  - risk
+  anchor_observation_ids: []
+  anchor_rationale: {}
+cutoff: case-0002 Round 0 CLOSED

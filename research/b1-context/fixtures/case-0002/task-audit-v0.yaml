@@ -1,0 +1,20 @@
+schema: o7.b1.task/v0
+task_id: case-0002-audit-r21-evidence-provenance
+fixture_id: case-0002
+statement: 'Audit R21 evidence provenance: why the current solution is considered active, which records
+  support it, what is superseded, which agent claims were wrong, and which repository outcome is the authority.'
+selectors:
+  required_topics:
+  - r21-evidence
+  preferred_topics:
+  - reviewer-acceptance
+  - supersession
+  - measurement
+  excluded_topics: []
+  required_kinds:
+  - evidence
+  - decision
+  - status
+  anchor_observation_ids: []
+  anchor_rationale: {}
+cutoff: case-0002 Round 0 CLOSED

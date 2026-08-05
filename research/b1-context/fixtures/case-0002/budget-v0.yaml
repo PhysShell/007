@@ -1,0 +1,8 @@
+schema: o7.b1.budget/v0
+fixture_id: case-0002
+byte_budget: 20000
+record_budget: 32
+unit: utf8_bytes+records
+note: 'Frozen intended budget. NOTE: the v0 runner (project_case.py / run_case.py) HARD-CODES BYTE_BUDGET=20000,
+  RECORD_BUDGET=32 and does NOT read this file; recorded here so the baseline can observe whether budget
+  is fixture-driven or hard-coded.'

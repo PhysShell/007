@@ -1,0 +1,16 @@
+schema: o7.b1.questions/v0
+task_id: case-0002-assess-change-impact-on-oracle-topology
+questions:
+- id: qi1-dependencies
+  text: What depends on the chosen constraint?
+  required_observation_ids:
+  - obs-oracle-topology-constraint
+  - obs-repo-authority-04108e7
+  required_relation_paths:
+  - from: obs-oracle-topology-constraint
+    kind: depends_on
+- id: qi2-rereview
+  text: What must be re-reviewed if the constraint changes?
+  required_observation_ids:
+  - obs-output-path-dependence
+  - obs-window-invariant
