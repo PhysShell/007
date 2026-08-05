@@ -96,3 +96,15 @@ when a change *adds an `#[allow(...)]`*; see rule 4.
   general concern. If you cannot state one, it is probably not P1.
 - `o7` is subprocess-bound (`docs/performance.md`). Micro-optimising code that
   is not on a subprocess boundary is not a finding.
+
+### Grounding factual claims
+
+A claim about what the code or an existing mechanism already does — in a review,
+a commit message, a doc, or a rationale for a change — must name the
+authoritative artifact and its exact property, and separate what the artifact
+*says* from the inference drawn on top of it. Do not accept (or write) "the core
+already guarantees this" without the file, the revision, and the specific
+property that establish it; a claim about existing architecture whose governing
+artifact has changed is stale until re-checked. Full rule and the failure class
+it guards against (a lower-layer signal is not an upper-layer fact):
+`docs/evidence-and-decision-discipline.md`.

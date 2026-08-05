@@ -1,0 +1,21 @@
+schema: o7.b1.expected-projection/v0
+fixture_id: case-0001
+# Fixture-SPECIFIC expected properties of the task-dependent projection. These
+# are NOT universal selector laws — they are what case-0001's particular gold
+# state and its two tasks happen to produce. `neither_is_a_superset` lives here,
+# not in the selector: a legitimate task may well be a strict superset of another
+# (see tests/test_task_dependence.py). For THIS pair it happens to be false, and
+# encoding it here lets the pipeline keep checking it without pretending it is a
+# law. Changing any number requires an explicit explanation, never silent drift.
+tasks:
+  case-0001-continue-b1-v0:
+    selected_count: 9
+  case-0001-audit-source-capture-v0:
+    selected_count: 11
+task_dependence:
+  selected_only_by_a_count: 5
+  selected_only_by_b_count: 7
+  selected_by_both_count: 4
+  symmetric_difference_count: 12
+  neither_is_a_superset: true
+  both_valid: true

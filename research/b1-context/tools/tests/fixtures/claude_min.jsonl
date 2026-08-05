@@ -1,0 +1,7 @@
+{"type":"system","subtype":"init","sessionId":"sess-syn-1","uuid":"s0","timestamp":"2026-01-01T00:00:00Z"}
+{"type":"user","sessionId":"sess-syn-1","uuid":"u1","parentUuid":null,"isSidechain":false,"timestamp":"2026-01-01T00:00:01Z","message":{"role":"user","content":"please review the change"}}
+{"type":"assistant","sessionId":"sess-syn-1","uuid":"a1","parentUuid":"u1","isSidechain":false,"timestamp":"2026-01-01T00:00:02Z","message":{"role":"assistant","content":[{"type":"thinking","thinking":"internal reasoning MUST NOT appear","signature":"xxx"},{"type":"text","text":"Looks good, one nit."},{"type":"tool_use","name":"Read","input":{"file":"x"}}]}}
+{"type":"user","sessionId":"sess-syn-1","uuid":"u2","parentUuid":"a1","isSidechain":false,"timestamp":"2026-01-01T00:00:03Z","message":{"role":"user","content":[{"type":"tool_result","content":"file bytes here"}]}}
+{"type":"assistant","sessionId":"sess-syn-1","uuid":"a2","parentUuid":"u2","isSidechain":true,"timestamp":"2026-01-01T00:00:04Z","message":{"role":"assistant","content":[{"type":"text","text":"subagent internal turn, excluded"}]}}
+{"type":"assistant","sessionId":"sess-syn-1","uuid":"a3","parentUuid":"u2","isSidechain":false,"timestamp":"2026-01-01T00:00:05Z","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]}}
+{"type":"mode","sessionId":"sess-syn-1","mode":"default"}
