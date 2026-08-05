@@ -59,11 +59,35 @@ The four timings are inputs to the post-freeze economic gate (§8.4), where a
 thresholds. No early aggregate exists, and none may be invented after the numbers
 are visible.
 
-## Open before the timer starts
+## Reserve budget (ratified)
 
-`reserve_activation_budget_minutes` and `max_reserve_activations` have no
-protocol-assigned values. Four primaries censoring consume the 720-minute budget
-exactly, so reserves are unfunded unless drawn from the AMA-0.5 package remainder
-(§10.4). Both fields are required by the schema so the question cannot be
-deferred past selection — a probe that discovers its reserve is unaffordable
-halfway through has already spent the budget that would have answered it.
+```text
+reserve_activation_budget_minutes: 360   (ceiling, drawn from the package remainder)
+max_reserve_activations:           2
+```
+
+Both are `const` in the schema, so a manifest carrying different values does not
+validate. The reasoning, recorded so it is not re-litigated mid-probe:
+
+- Each reserve obeys the same 180-minute censor, so 360 fully funds two
+  activations with no mid-experiment "give this one a bit longer".
+- After the maximum permitted reserves, 30 of the package's remaining 36 hours
+  survive for taxonomy discovery, codebook, holdout, and the post-freeze pilot.
+- One validity defect is ordinary sampling noise. A second is still recoverable —
+  that is precisely what a pre-designated reserve is for. A third means the
+  selection failed systemically, and continuing to swap cases would be resampling
+  against observed results.
+- `4 / 720` would permit replacing the entire original sample and eat a third of
+  the package. `1 / 180` is too brittle: a second independent validity defect
+  would kill a probe that the reserve construction already exists to rescue.
+
+Derived consequences:
+
+- 360 is a ceiling, not six hours pre-spent. Only minutes actually used count
+  against the 48-hour package cap; the remainder stays with the package.
+- A third `excluded_validity` outcome leaves the probe incomplete, restricting
+  outcomes to `NARROW` or `STOP`.
+- Each stratum has exactly one reserve, so two activations mean two different
+  strata. There is no reserve of a reserve.
+
+No protocol questions remain open. The next artifact is the committed manifest.

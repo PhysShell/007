@@ -31,12 +31,13 @@
     },
     "reserve_activation_budget_minutes": {
       "type": "integer",
-      "description": "Active maintainer minutes available for reserve activations, drawn from the AMA-0.5 package remainder (§10.4), not from maintainer_budget_minutes. Four primaries censoring consume the 720-minute budget exactly, so reserves are unfunded unless this is declared separately."
+      "const": 360,
+      "description": "Ceiling on active maintainer minutes for reserve activations, drawn from the AMA-0.5 package remainder (§10.4), not from maintainer_budget_minutes — four primaries censoring consume the 720-minute budget exactly, so reserves would otherwise be unfunded. Two activations at the same 180-minute censor are fully funded, with no mid-experiment 'give this one a bit longer'. This is a ceiling, not six hours already spent: only minutes actually used count against the 48-hour package cap, and the remainder stays with the package."
     },
     "max_reserve_activations": {
       "type": "integer",
-      "minimum": 0,
-      "description": "Upper bound on reserve activations across the whole probe. Exceeding it means the probe is incomplete, restricting outcomes to NARROW or STOP (§10.2)."
+      "const": 2,
+      "description": "Upper bound on reserve activations across the whole probe. One validity defect is ordinary sampling noise; a second is still recoverable, which is what pre-designated reserves are for; a third means the selection failed systemically, and continuing to swap cases would be resampling against observed results wearing an innocent expression. A third validity exclusion therefore leaves the probe incomplete, restricting outcomes to NARROW or STOP (§10.2)."
     },
     "cases": {
       "type": "array",
