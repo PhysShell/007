@@ -1,7 +1,10 @@
-# Capability FD transport (stage B) — accepted direction, not yet implemented
+# Capability FD transport (stage SB-B) — accepted direction, not yet implemented
 
 Status: **accepted (direction), contract-first, RED until implemented.**
-Prerequisite: Sandboy Vertical B GREEN (`docs/tasks/sandboy-a1-vertical-b.md`).
+Stage identifiers: SB-A0 → SB-A1 → SB-A2 → **SB-B** (this note) → MG-C
+(the `SB-` prefix avoids collision with the unrelated Q-Deck A0/A1).
+Prerequisite: Sandboy Vertical B GREEN (SB-A1,
+`docs/tasks/sandboy-a1-vertical-b.md`).
 This note fixes the load-bearing decisions so the implementing PR does not
 improvise architecture. Nothing here is Vertical B scope.
 
@@ -9,7 +12,7 @@ improvise architecture. Nothing here is Vertical B scope.
 
 A sandboxed agent must be able to hold a *capability* — a pre-opened, policy-bound
 connection to a trusted broker — without ever holding a secret, a bearer token, or
-the ability to open the connection itself. First consumer (stage C):
+the ability to open the connection itself. First consumer (stage MG-C):
 `o7-model-gate`, brokering ArliAI model invocation. The transport below is
 generic; Sandboy learns nothing about models, profiles, or upstreams.
 
@@ -21,7 +24,7 @@ numbers*, never the parent's live descriptor numbers:
 ```json
 {
   "capabilities": [
-    { "name": "model_invoke", "target_fd": 3, "kind": "unix_stream", "required": true }
+    { "name": "model_invoke", "target_fd": 3, "kind": "unix_stream" }
   ]
 }
 ```
@@ -31,7 +34,12 @@ numbers*, never the parent's live descriptor numbers:
 - Validation (fail closed, whole session): `target_fd` unique, ∉ {0,1,2}, below
   `CAP_TARGET_MAX`, disjoint from every internal/reserved descriptor range;
   `kind` from a closed enum; unknown fields rejected.
-- An empty manifest degrades to the capability-free choreography (see Decision 3).
+- Every declared capability is mandatory — the grant is atomic all-or-nothing
+  (Decision 4), so a `required` flag would be meaningless today and is
+  deliberately absent. Optional capabilities, if a real consumer ever needs
+  them, arrive as a future manifest version — not as improvised semantics
+  during implementation.
+- An empty manifest selects the capability-free choreography (see Decision 3).
 
 ## Decision 2 — two SCM_RIGHTS hops; descriptors exist in the child only after verification
 
@@ -84,10 +92,31 @@ must see its session fd close).
 of the frozen v1 choreography).** Vertical A's choreography — one report frame,
 backend half-closes its write side, parent proves EOF, one GO byte — cannot
 carry a second phase: the backend's write side is already closed after the
-report. Capability-bearing launches therefore negotiate `protocol_version` N+1:
-typed, length-prefixed frames in both directions, no half-close, explicit
-terminal states replacing the EOF-proof. Capability-free launches keep the v1
-choreography unchanged; v1 remains the default and the fallback.
+report. Capability-bearing launches therefore use **protocol v2**: typed,
+length-prefixed frames in both directions, no half-close, explicit terminal
+states replacing the EOF-proof.
+
+Version selection is determined by the manifest, and downgrade is prohibited:
+
+```
+empty capability manifest      → protocol v1 (unchanged)
+non-empty capability manifest  → protocol v2 REQUIRED
+backend does not support v2    → fail closed BEFORE any target launch
+automatic retry/downgrade v2→v1 → prohibited
+```
+
+There is no "fallback" for a capability-bearing launch: a launch that declared
+capabilities either runs under v2 with every barrier intact, or does not run.
+
+**v2 transport is `AF_UNIX + SOCK_SEQPACKET + SOCK_CLOEXEC`** — on both the
+parent↔monitor control socket and the monitor↔child rendezvous socketpair.
+SOCK_STREAM preserves no message boundaries, so "a frame without its expected
+ancillary payload fails closed" would be unenforceable without a hand-defined
+sendmsg/recvmsg envelope and partial-read handling. SEQPACKET keeps boundaries:
+each typed frame and its SCM_RIGHTS payload arrive in one `recvmsg`, surplus or
+truncated datagrams are directly detectable (`MSG_TRUNC`/`MSG_CTRUNC` fail
+closed), and the length prefix is retained as an internal size bound. v1 stays
+on the existing stream socketpair unchanged.
 
 ## Decision 4 — collision-safe descriptor mapping in the child
 
@@ -153,7 +182,10 @@ Extend `fd_probe` — do not write a third probe.
 - duplicate `target_fd`; target_fd ∈ {0,1,2}; target_fd colliding with an
   internal descriptor; descriptor number above the ordinary range;
 - surplus SCM_RIGHTS fds; missing fds; SCM_RIGHTS without frame; frame without
-  SCM_RIGHTS; malformed ancillary data;
+  SCM_RIGHTS; malformed ancillary data; surplus or truncated SEQPACKET
+  datagrams (`MSG_TRUNC`/`MSG_CTRUNC`);
+- a non-empty manifest against a v1-only backend fails closed before launch;
+  no v2→v1 downgrade path exists to exercise;
 - CAP_GRANT before sandbox authorization; duplicate CAP_GRANT; EXEC before
   CapabilityReady; duplicate EXEC; EOF at each barrier;
 - failure on the N-th mapping leaves no earlier capability reachable;
@@ -165,7 +197,7 @@ Extend `fd_probe` — do not write a third probe.
 
 ## Non-goals
 
-No ArliAI, model profiles, queueing, or credential handling (stage C —
+No ArliAI, model profiles, queueing, or credential handling (stage MG-C —
 `o7-model-gate`). No bearer tokens or secrets over this transport, ever. No TCP
 fallback. No generic RPC framework: this note defines descriptor *transfer*;
 what flows over a granted socket is the consumer's contract.

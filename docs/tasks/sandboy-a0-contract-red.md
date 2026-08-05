@@ -1,4 +1,10 @@
-# Задача A0: коррекция контракта Sandboy Vertical B + RED-оракулы (read confidentiality)
+# Задача SB-A0: коррекция контракта Sandboy Vertical B + RED-оракулы (read confidentiality)
+
+> Идентификаторы этапов: **SB-A0** (этот документ) → **SB-A1** (реальный backend,
+> `sandboy-a1-vertical-b.md`) → **SB-A2** (retirement Own.NET) → **SB-B**
+> (capability transport, `capability-fd-transport.md`) → **MG-C** (o7-model-gate).
+> Префикс SB- обязателен: в проекте уже существуют Q-Deck A0/A1
+> (`docs/q-deck/a0-candidate-state.md`), голые «A0»/«A1» двусмысленны.
 
 ## Роль
 
@@ -14,8 +20,8 @@ backend'а, никакого capability transport. Только правка к�
 - `crates/o7-sandbox-protocol/` — wire-протокол (policy, report, frame, request);
 - `crates/o7-worker/tests/sandbox_confinement.rs` — существующая RED-матрица;
 - `crates/o7-worker/src/bin/fd_probe.rs` и остальные harness-бинари;
-- `docs/architecture/capability-fd-transport.md` — принятое направление этапа B
-  (в этом PR НЕ реализуется);
+- `docs/architecture/capability-fd-transport.md` — принятое направление этапа
+  SB-B (в этом PR НЕ реализуется);
 - `Own.NET/sandboy/` (sibling-репозиторий) — только для понимания; см. запрет ниже.
 
 ## Зафиксированные решения (не пересматривать)
@@ -26,12 +32,13 @@ backend'а, никакого capability transport. Только правка к�
    fork и exec**, сам делает self-check и отдаёт результат монитору. Монитор
    никогда не попадает под target policy.
 2. **Capability FD не входит в Vertical B.** Направление зафиксировано в
-   `docs/architecture/capability-fd-transport.md`; в A0/A1 — ни строчки реализации.
-3. **Судьба standalone CLI**: новый backend (этап A1) никогда не имеет
+   `docs/architecture/capability-fd-transport.md`; в SB-A0/SB-A1 — ни строчки
+   реализации.
+3. **Судьба standalone CLI**: новый backend (этап SB-A1) никогда не имеет
    production-режима `run --policy <toml>`. Диагностический `probe` сохраняется.
    Ручная отладка — только через будущий dev-harness, говорящий на настоящем
    `o7-sandbox-protocol`. Второго policy-формата не существует.
-4. **Own.NET/sandboy неприкосновенен** до этапа A2:
+4. **Own.NET/sandboy неприкосновенен** до этапа SB-A2:
    - не изменять код спайка;
    - не чинить его `PartiallyEnforced → warn → continue`;
    - не переносить и не «улучшать» его TOML CLI;
@@ -59,26 +66,42 @@ pub struct SandboxPolicy {
 
 - валидация как у существующих полей: абсолютные пути, duplicates — ошибка
   (set-семантика, та же причина: одинаковый смысл ⇒ одинаковый digest);
-- `allow_read` входит в канонический `SandboxPolicy::digest()`;
-- known-answer fixtures digest'а обновляются осознанно (это ожидаемое изменение,
-  зафиксировать в комментарии фикстуры);
+- `allow_read` входит в канонический `SandboxPolicy::digest()`, и формула
+  получает **version bump domain-separation строки**:
+  `o7-sandbox-policy\0v1\0` → `o7-sandbox-policy\0v2\0` (policy.rs:278).
+  Просто обновить ожидаемый hash в фикстуре при старой строке v1 запрещено —
+  новая семантика не должна притворяться формулой v1;
+- known-answer fixtures digest'а обновляются осознанно под v2 (это ожидаемое
+  изменение, зафиксировать в комментарии фикстуры);
+- **argv-контракт policy обновляется механически** (это НЕ kernel-enforcement
+  и НЕ нарушение scope — без этого fake backend начнёт выдавать другой
+  `policy_digest` и Vertical A развалится):
+  - `SandboyBoundary::policy_flags()` добавляет `--allow-read`;
+  - `sandboy_fake` парсит `--allow-read`;
+  - `reconstructed_policy()` включает `allow_read`;
+  - contract-тесты проверяют argv и совпадение digest;
 - существующие смысловые oracle не ослаблять; механические правки конструкторов
   policy из-за нового поля допустимы. Compatibility-конструкторы «чтобы diff
   выглядел нетронутым» запрещены.
 
-### 2. Три независимых RED-оракула read/exec в `sandbox_confinement.rs`
+### 2. Оракулы read/exec в `sandbox_confinement.rs`: два RED + один GREEN control
 
 По конвенции существующей матрицы (конкретный errno, конкретный эффект, никакого
-`is_err()`), против замороженного fake backend (RED = наблюдаемый escape):
+`is_err()`). Точный статус каждого теста против замороженного fake backend:
 
-1. **Секрет вне allow_read**: файл с уникальным canary-содержимым вне
+1. **Секрет вне allow_read** — **RED** (fake backend не конфайнит, escape
+   наблюдаем): файл с уникальным canary-содержимым вне
    `worktree ∪ allow_read ∪ allow_exec`; probe пытается `read()` →
    ожидание `EACCES`/`EPERM`; байты canary НЕ появляются в stdout, stderr,
    marker artifact, report и evidence (универсальный canary-скан, по образцу
    env-canary Own.NET S0);
-2. **Read без execute**: файл внутри `allow_read`, не в `allow_exec`:
+2. **Read без execute** — **RED**: файл внутри `allow_read`, не в `allow_exec`:
    `read()` → OK; `execve()` → `EACCES`/`EPERM`;
-3. **Execute разрешён**: бинарь внутри `allow_exec`: `execve()` → OK.
+3. **Execute разрешён** — **GREEN positive control** (non-vacuity): бинарь
+   внутри `allow_exec`: `execve()` → OK. Этот тест зелёный уже на fake backend
+   и обязан ОСТАТЬСЯ зелёным на реальном — он доказывает, что оракулы 1–2
+   зелены не потому, что сломано всё подряд. НЕ пытаться искусственно сделать
+   его красным.
 
 ### 3. Чистка протухших комментариев протокола
 
@@ -113,18 +136,19 @@ pub struct SandboxPolicy {
 - IPv4/IPv6 prerequisites для будущих network-оракулов.
 
 Каждая проверка fail-closed: недоступная возможность = красный check, не warning.
-Прогон confinement-матрицы в VM — этап A1, сюда не тащить. Переиспользуй
+Прогон confinement-матрицы в VM — этап SB-A1, сюда не тащить. Переиспользуй
 проверки из `.github/workflows/sandbox-confinement.yml` (self-hosted preflight) —
 семантика должна совпадать.
 
 ## Обязательные тесты
 
 - unit: валидация `allow_read` (относительный путь, дубликат), digest меняется
-  при изменении `allow_read`, digest-фикстуры;
-- unit: сериализация policy round-trip с новым полем; `deny_unknown_fields`
-  поведение сохранено;
-- RED-оракулы №1–3 (designated-runner suite, `#[ignore]` по существующей
-  конвенции);
+  при изменении `allow_read`, digest-фикстуры под v2-формулой;
+- contract: `SandboxPolicy → policy_flags() → fake backend reconstructs →
+  reconstructed.digest == original.digest` (policy — НЕ serde wire-тип, он
+  передаётся argv-флагами; serde round-trip тут неприменим);
+- оракулы №1–3 из §2 (designated-runner suite, `#[ignore]` по существующей
+  конвенции), со статусами точно как заявлено: 1–2 RED, 3 GREEN;
 - canary-скан как переиспользуемый helper, не копипаста по тестам;
 - `nix flake check` зелёный, включая новый preflight.
 
@@ -144,6 +168,6 @@ pub struct SandboxPolicy {
 
 ## Non-goals
 
-Backend-реализация (A1), capability transport (B), o7-model-gate (C), любые
-изменения Own.NET (A2), ArliAI, очереди, credentials, изменение wire-формата
-протокола.
+Backend-реализация (SB-A1), capability transport (SB-B), o7-model-gate (MG-C),
+любые изменения Own.NET (SB-A2), ArliAI, очереди, credentials, изменение
+wire-формата протокола.

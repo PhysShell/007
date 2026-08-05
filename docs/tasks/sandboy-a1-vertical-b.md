@@ -1,4 +1,9 @@
-# Задача A1: Sandboy Vertical B — настоящий kernel-confinement backend в 007
+# Задача SB-A1: Sandboy Vertical B — настоящий kernel-confinement backend в 007
+
+> Идентификаторы этапов: **SB-A0** (контракт + RED) → **SB-A1** (этот документ) →
+> **SB-A2** (retirement Own.NET) → **SB-B** (capability transport) → **MG-C**
+> (o7-model-gate). Префикс SB- обязателен: голые «A0»/«A1» конфликтуют с
+> Q-Deck A0/A1 (`docs/q-deck/`).
 
 ## Роль
 
@@ -7,7 +12,7 @@
 seccomp + cgroup v2), который переводит существующую RED-матрицу Vertical B в
 GREEN. Не платформа, не gateway, не capability runtime.
 
-Пререквизит: этап A0 (`docs/tasks/sandboy-a0-contract-red.md`) принят — policy
+Пререквизит: этап SB-A0 (`docs/tasks/sandboy-a0-contract-red.md`) принят — policy
 содержит `allow_read`, read/exec-оракулы существуют и RED, VM preflight зелёный.
 
 Контекст, который ОБЯЗАТЕЛЬНО прочитать до изменений:
@@ -31,9 +36,22 @@ GREEN. Не платформа, не gateway, не capability runtime.
    (по образцу спайка Own.NET).
 2. **Топология**: монитор — неограниченный владелец lifecycle (cgroup owner,
    timeout, teardown, report relay). Confinement устанавливает **child между
-   fork и exec**: входит в cgroup → ставит Landlock → ставит seccomp →
-   self-check → отдаёт результат монитору по приватному pre-fork socketpair →
-   ждёт авторизации → exec target. Монитор никогда не под target policy.
+   fork и exec**, с **cgroup placement barrier** — членство в cgroup
+   устанавливает и доказывает МОНИТОР, child никогда сам не пишет в
+   `cgroup.procs`, и confinement не начинается до доказанного членства:
+
+   ```
+   fork
+   → child немедленно ждёт на приватном pre-fork socketpair
+   → monitor пишет PID child в cgroup.procs своего dedicated cgroup
+   → monitor перечитывает cgroup.procs и доказывает membership
+   → monitor посылает CHILD_CONTINUE
+   → child ставит no_new_privs → Landlock → seccomp
+   → child self-check → результат монитору по socketpair
+   → child ждёт авторизации → exec target
+   ```
+
+   Монитор никогда не под target policy.
 3. **Протокол**: только существующий `o7-sandbox-protocol` (LaunchRequest →
    report → EOF-proof → GO по socket на stdin). Никакого второго формата policy,
    никакого TOML CLI.
@@ -43,8 +61,8 @@ GREEN. Не платформа, не gateway, не capability runtime.
    enforcement). Дублирующего `strict`-рубильника в backend'е нет.
 5. **Own.NET/sandboy неприкосновенен** (переносим код копированием с указанием
    происхождения в commit message, не git-зависимостью; спайк, его CLI, его
-   workflow и S0 identity не трогаем — это этап A2).
-6. **Capability FD transport — вне scope** (этап B).
+   workflow и S0 identity не трогаем — это этап SB-A2).
+6. **Capability FD transport — вне scope** (этап SB-B).
 
 ## Техническое задание
 
@@ -104,8 +122,10 @@ serde/serde_json. Без tokio (backend — маленький синхронн�
 
 ### 5. cgroup v2 + lifecycle
 
-- монитор создаёт собственный cgroup, помещает child, следит за wall-clock
-  timeout (`cgroup.kill` по дедлайну), доказывает teardown (drain до пустого
+- монитор создаёт собственный cgroup, помещает child по placement barrier из
+  «Зафиксированных решений» п.2 (child ждёт CHILD_CONTINUE, монитор доказывает
+  membership перечитыванием `cgroup.procs`), следит за wall-clock timeout
+  (`cgroup.kill` по дедлайну), доказывает teardown (drain до пустого
   `cgroup.procs`, потом remove);
 - double-fork/descendant escape закрывается членством в cgroup — существующие
   оракулы процесс-дерева должны позеленеть без ослабления;
@@ -136,15 +156,16 @@ serde/serde_json. Без tokio (backend — маленький синхронн�
 
 - вся существующая RED-матрица `sandbox_confinement.rs` → GREEN. Смысловые
   oracle не ослаблять и не переписывать ради GREEN; допустимы механические
-  изменения из-за расширения policy (формулировка A0); новые read/exec-оракулы
-  A0 переходят RED → GREEN;
+  изменения из-за расширения policy (формулировка SB-A0); RED-оракулы SB-A0
+  переходят RED → GREEN, positive control (`execve` в `allow_exec`) остаётся
+  GREEN;
 - unit-тесты backend'а: маппинг policy → Landlock rights; argument-фильтры
   seccomp (socket AF_INET/AF_INET6 denied, AF_UNIX allowed, setsid/setpgid
   denied); отказ на отсутствующий путь policy; honest partial report на
   урезанном ABI (мокается статусом, не требует старого ядра);
 - fd scrub: после exec таблица дескрипторов target'а — ровно `{0,1,2}`
   (расширить существующий `fd_probe`, не создавать новый);
-- canary-скан A0 зелёный на реальном backend'е;
+- canary-скан SB-A0 зелёный на реальном backend'е;
 - `nix flake check` (включая VM-матрицу), `cargo test` workspace, clippy чистый.
 
 ## Definition of Done
@@ -163,6 +184,6 @@ serde/serde_json. Без tokio (backend — маленький синхронн�
 
 ## Non-goals
 
-Capability FD transport (этап B), o7-model-gate/ArliAI (этап C), чистка Own.NET
-(этап A2), Firecracker/microVM (Layer 1), address/domain egress (Layer 3),
+Capability FD transport (SB-B), o7-model-gate/ArliAI (MG-C), чистка Own.NET
+(SB-A2), Firecracker/microVM (Layer 1), address/domain egress (Layer 3),
 Agent Vault, любой multi-provider/gateway код.
