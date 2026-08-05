@@ -146,10 +146,11 @@ reviews:
         resolved CodeRabbit thread as proof that the repository's independent
         acceptance gate has passed.
 
-    - path: "Cargo.toml"
+    - path: "**/{Cargo.toml,Cargo.lock,deny.toml}"
       instructions: |
         Review dependency and workspace changes as capability changes, not
-        routine manifest edits.
+        routine manifest edits. This covers the workspace root, member and
+        fuzz crate manifests, the lockfile, and the cargo-deny policy.
 
         Check for:
         - new default features that add network, process, filesystem, dynamic
@@ -287,10 +288,11 @@ reviews:
         - untrusted identifiers being confined before filesystem or Git use;
         - internal errors not being converted into successful API responses.
 
-    - path: "tests/**"
+    - path: "**/tests/**"
       instructions: |
         Require tests to demonstrate the externally observable contract, not
-        private implementation details.
+        private implementation details. This applies to root integration
+        tests and to every workspace crate's own test directory.
 
         For behavior changes, expect coverage of:
         - the successful path;
