@@ -81,18 +81,23 @@ pub(crate) fn call(
     )
 }
 
-/// The documented Arli request shape (docs/o7-invoke.md): `json_schema`
-/// response_format with a bare `schema` object and NO OpenAI-flavored
-/// `name` wrapper; `tool_choice: "none"`; `stream: false`;
-/// `include_reasoning: false` explicitly — Arli documents it as defaulting
-/// to true, and reasoning output is not normative evidence for this
-/// primitive (it would only inflate latency and `stdout.raw`). Split out
-/// so the shape is unit-testable without a socket.
+/// The live-verified Arli request shape (docs/o7-invoke.md): `json_schema`
+/// response_format WITH the OpenAI-flavored `name` field — Arli's docs show
+/// a bare `schema`, but the deployed endpoint's validator 400s without
+/// `name` ("Field required"; live-fixture arbitration, 2026-08-05, GLM-4.7).
+/// `"o7_result"` is a fixed label with no semantics. `tool_choice: "none"`;
+/// `stream: false`; `include_reasoning: false` explicitly — Arli documents
+/// it as defaulting to true, and reasoning output is not normative evidence
+/// for this primitive (it would only inflate latency and `stdout.raw`).
+/// Split out so the shape is unit-testable without a socket.
 fn request_body(prompt: &str, schema_for_api: &Value, model: &str) -> String {
     serde_json::json!({
         "model": model,
         "messages": [{ "role": "user", "content": prompt }],
-        "response_format": { "type": "json_schema", "json_schema": { "schema": schema_for_api } },
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": { "name": "o7_result", "schema": schema_for_api }
+        },
         "tool_choice": "none",
         "stream": false,
         "include_reasoning": false,
@@ -376,7 +381,8 @@ mod tests {
             parsed.get("tool_choice"),
             Some(&Value::String("none".into()))
         );
-        // Documented Arli form: json_schema wraps a bare `schema`, no `name`.
+        // Live-verified Arli form: json_schema wraps `name` + `schema` —
+        // the deployed validator REQUIRES `name` (400 without it).
         let rf = parsed.get("response_format");
         assert_eq!(
             rf.and_then(|v| v.get("type")),
@@ -384,7 +390,11 @@ mod tests {
         );
         let js = rf.and_then(|v| v.get("json_schema"));
         assert_eq!(js.and_then(|v| v.get("schema")), Some(&schema));
-        assert_eq!(js.and_then(|v| v.get("name")), None);
+        assert_eq!(
+            js.and_then(|v| v.get("name")),
+            Some(&Value::String("o7_result".into())),
+            "json_schema.name is required by the live endpoint"
+        );
         // Reasoning explicitly off (Arli defaults it to true).
         assert_eq!(
             parsed.get("include_reasoning"),
@@ -510,8 +520,8 @@ mod tests {
             "tool_choice none missing from body: {request}"
         );
         assert!(
-            request.contains("\"json_schema\"") && !request.contains("\"name\""),
-            "json_schema must use the bare documented form (no name): {request}"
+            request.contains("\"json_schema\"") && request.contains("\"name\":\"o7_result\""),
+            "json_schema must carry the live-required name field: {request}"
         );
         assert!(
             request.contains("\"include_reasoning\":false"),

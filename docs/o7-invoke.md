@@ -141,17 +141,24 @@ same as an unknown `--capability-profile`):
 {
   "model": "<--model>",
   "messages": [{ "role": "user", "content": "<prompt-file text>" }],
-  "response_format": { "type": "json_schema", "json_schema": { "schema": { } } },
+  "response_format": { "type": "json_schema", "json_schema": { "name": "o7_result", "schema": { } } },
   "tool_choice": "none",
   "stream": false,
   "include_reasoning": false
 }
 ```
 
-- `response_format` uses Arli AI's **documented** form — `json_schema`
-  with a bare `schema` object, **no `name` field** (the OpenAI-flavored
-  `name` wrapper is not part of Arli's documented shape; start from the
-  documented form, let the live fixture arbitrate).
+- `response_format` carries the OpenAI-flavored `name` field
+  (`"o7_result"`, a fixed label with no semantics here). This is a
+  **live-fixture arbitration result**, not Arli's documentation: their
+  docs show a bare `schema` with no `name`, but the deployed endpoint's
+  request validator (vLLM-style) rejects that form with
+  `400 — {'loc': ('body','response_format',…,'json_schema','name'),
+  'msg': 'Field required'}` (observed 2026-08-05 against `GLM-4.7`; the
+  same probe confirmed `tool_choice: "none"` and
+  `include_reasoning: false` are accepted). The documented form was
+  implemented first and lost to the live evidence — exactly the
+  arbitration this section originally reserved.
 - The schema sent is the same `$schema`-meta-key-stripped copy the claude
   path sends (`strip_dollar_schema`) — one precedent, one behavior.
 - `include_reasoning: false`, explicitly — Arli documents it as
