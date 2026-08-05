@@ -1,0 +1,77 @@
+{
+ "adapter_decision": {
+  "built": false,
+  "reason": "A full untuned baseline cannot be reached by a behavior-preserving admission adapter: the SELECTOR_GAP requires a forbidden selector-semantics change. Per protocol, stop rather than mask a design change as plumbing."
+ },
+ "admission_blockers_observed": [
+  {
+   "behavior_preserving_adapter_possible": true,
+   "class": "EVALUATION_CONTRACT_GAP",
+   "entry_point": "run_case.py",
+   "id": "unconditional-negative-control",
+   "note": "Skipping the nc arm when negative_control is empty is admission plumbing; case-0001 (which has a negative control) stays byte-identical. NOT built in this step because it does not reach a baseline (see next)."
+  },
+  {
+   "behavior_preserving_adapter_possible": false,
+   "class": "SELECTOR_GAP",
+   "entry_point": "project_case.py (and run_case projection)",
+   "id": "required-kind-vs-topic-selection",
+   "note": "Resolving requires kind-aware selection = selector semantics change (forbidden). This is a genuine design break, not plumbing."
+  }
+ ],
+ "attempts": [
+  {
+   "command": "python3 research/b1-context/tools/project_case.py --fixture case-0002 --out <staging>",
+   "deterministic": true,
+   "entry_point": "project_case.py",
+   "exit_code": 2,
+   "explanation": "v0 selection is topic-only; the status-kind observations carry topics the audit task does not request, so a required_kinds validity gate cannot be met without topic bleed. Also readable as FIXTURE_ORACLE_DEFECT (required_kinds over-specified), but the underlying orthogonality of kind vs topic in the selector is the v0 characteristic.",
+   "outcome": "FAIL CLOSED \u2014 task case-0002-audit-r21-evidence-provenance produced an INVALID projection: missing_required_kinds ['status']",
+   "primary_failure_class": "SELECTOR_GAP",
+   "stderr_cas": "cas:sha256:a5d384ef454bdb643844758e42dec4c6593a4b14dd72d0f373270d306e016ab7",
+   "stdout_cas": "cas:sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+   "command": "python3 research/b1-context/tools/run_case.py --fixture case-0002 --data-root $HOME/.local/share/o7-research --out <staging>",
+   "deterministic": true,
+   "entry_point": "run_case.py",
+   "exit_code": 1,
+   "explanation": "The 3-arm evaluation unconditionally dereferences a negative-control source; case-0002 legitimately has none. Also EXECUTION_ADMISSION_GAP (not even a clean fail-closed).",
+   "outcome": "UNCAUGHT IndexError at manifest['negative_control'][0] (run_case.py:259) \u2014 case-0002 has no negative-control reconstruction",
+   "primary_failure_class": "EVALUATION_CONTRACT_GAP",
+   "stderr_cas": "cas:sha256:fbe202dac651f236dd943c61a4338f4ede8665987b98b457230dc3c74e63514a",
+   "stdout_cas": "cas:sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+ ],
+ "fixture_id": "case-0002",
+ "fixture_lock": {
+  "path": "fixtures/case-0002/fixture-lock-v0.yaml",
+  "sha256": "sha256:35f5c07013a8ae103c188e4d0e701fdd69e166ccd44bc9a5a90b53ea7f883f0e"
+ },
+ "hardcode_scan": {
+  "exactly_two_tasks_expected": "build_comparison/assess_task_dependence compare only summaries[0] and summaries[1]; the 3rd task (impact) is projected but excluded from the task-dependence comparison \u2014 confirmed by reading pipeline.py. Not reached at runtime because projection fails first.",
+  "hardcoded_budget": "BYTE_BUDGET=20000/RECORD_BUDGET=32 are hard-coded in project_case.py/run_case.py; budget-v0.yaml is NOT read (BUDGET_POLICY_GAP, latent).",
+  "hardcoded_case_0001": "none found; registry + gold-state paths are fixture-parameterised.",
+  "mandatory_expected_report": "run_case (non-update) requires committed expected-report-v1.json; case-0002 has none and one must not be minted from actual \u2014 a further admission blocker not reached because the IndexError precedes it."
+ },
+ "implementation": {
+  "commit": "c8751223a3ccf970c8e3c3f3089be9748ae3d8e6",
+  "named_module_blobs": {
+   "research/b1-context/tools/o7b1/evaluate.py": "37795659990cd9c1e324f31e1fbcfa557b405c44",
+   "research/b1-context/tools/o7b1/extractors/__init__.py": "bb08753ee46afac5c1e567087f7f15d23dbbe717",
+   "research/b1-context/tools/o7b1/extractors/chatgpt_backend_api_v0.py": "351e7410bd4999152c8738ef6da2ec9467e5ebec",
+   "research/b1-context/tools/o7b1/extractors/claude_code_v0.py": "31ce9180b3cd28651c5fcc38693aca2fc341f6d9",
+   "research/b1-context/tools/o7b1/pipeline.py": "92f2d409ab2dc9f88fb9360b99a362b53b06bdb5",
+   "research/b1-context/tools/o7b1/projector.py": "24c4ffc6799a58cc2d5557da3a8104d5f6ff896e",
+   "research/b1-context/tools/o7b1/registry.py": "73e7dae3ea553b839ca72c35ca5a290b1fd737eb",
+   "research/b1-context/tools/o7b1/schema.py": "516c9b500ad20daa4c20d4affcd465551e56b9f1",
+   "research/b1-context/tools/project_case.py": "576eb320561fce3deb730306ed9ca7cd10a11591",
+   "research/b1-context/tools/run_case.py": "86a5b82cafd07c8499ae682a4a743e398582ebce"
+  },
+  "python": "Python 3.14.6",
+  "pyyaml": "6.0.3",
+  "repository": "PhysShell/007",
+  "tree": "f074f5e89f305484312167cab2394978e05bc465"
+ },
+ "schema": "o7.case0002.preflight/v0"
+}

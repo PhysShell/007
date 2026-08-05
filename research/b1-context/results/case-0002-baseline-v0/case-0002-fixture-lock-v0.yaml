@@ -1,0 +1,77 @@
+schema: o7.b1.fixture-lock/v0
+fixture_id: case-0002
+frozen_before_first_projection: true
+amendment_policy: v0 is immutable. Corrections create v1 and preserve v0. No retroactive edits.
+implementation_binding:
+  repository: PhysShell/007
+  commit: c8751223a3ccf970c8e3c3f3089be9748ae3d8e6
+  tree: f074f5e89f305484312167cab2394978e05bc465
+  python: Python 3.14.6
+  pyyaml: 6.0.3
+contract_identities:
+  state_schema:
+    id: o7.b1.state-observables/v0
+    file: schema/state-observables-v0.schema.json
+    sha256: sha256:2b6ba48c919cda56f209192477131675c4536293a8bf91be4af6f4d9910a5691
+    git_blob: bce8a7f6d78fea5601f3ac8ca2506351670d7314
+  selector_contract:
+    id: o7.b1.selector/v0
+    git_blob: 42412fc2dd09c4f62388620cd025435957521cdb
+  evaluation_contract:
+    impl: o7b1/evaluate.py
+    git_blob: 37795659990cd9c1e324f31e1fbcfa557b405c44
+    pipeline_git_blob: 92f2d409ab2dc9f88fb9360b99a362b53b06bdb5
+    projector_git_blob: 24c4ffc6799a58cc2d5557da3a8104d5f6ff896e
+  registry:
+    id: o7.b1.fixture-tasks/v0
+    git_blob: 73e7dae3ea553b839ca72c35ca5a290b1fd737eb
+gold_state_digest: sha256:2589319a8094671c15bee9d9ff7839729e69fb6de410d3f3502b1e7dc073eaf4
+observation_count: 24
+relation_count: 15
+budget:
+  byte_budget: 20000
+  record_budget: 32
+  unit: utf8_bytes+records
+round0_authority:
+  source_lock_manifest: ~/.local/share/o7-research/manifests/case-0002-round0-source-lock.yaml
+  plane_record_cas: cas:sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139
+  reviewer_export_cas: cas:sha256:ed518b334485ef5421aab0229a4e4a0dc9bc489cb78d1eba00b5eb50d286e7e8
+  qodec_metadata_head: 427b677185266b23f1612c0d5fd0ba1b0010993e
+  source_lock_v6_sha256: sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76
+fixture_files:
+  adjudication-rules-v0.yaml:
+    sha256: sha256:8d73f29661157d2eb089dbbff7369094f5139375c36fdd09e9728a6ce0e7cfac
+    bytes: 1877
+  budget-v0.yaml:
+    sha256: sha256:d293cdf19bb0be792bc962ea58f0d601cbd8a83832354171d6afc29eacceedf4
+    bytes: 362
+  gold-state-v0.json:
+    sha256: sha256:7e00505b25a7f0d815556ef6cc9db710b1ae0d3144e6f91a0c4eedcaa733c147
+    bytes: 17904
+  manifest.yaml:
+    sha256: sha256:c09f6f8337632f3c4dfb0db2bc12128156ce227ca9758a0d5c91c5300304586a
+    bytes: 1054
+  questions-audit-v0.yaml:
+    sha256: sha256:e89769b6df78fd8fa1cfa52d3de7acfd6909d91df4da788b2d56c4fc19909501
+    bytes: 1128
+  questions-impact-v0.yaml:
+    sha256: sha256:f41bdd036062165aefb6ec40b0b8afa18f7ac2f593730b0ee5a51e0db3869ebc
+    bytes: 513
+  questions-resume-v0.yaml:
+    sha256: sha256:0478856382b1a0ac7f4fbb78a532041e9a770d3d14337b3a790181c27a706936
+    bytes: 672
+  source-selectors.yaml:
+    sha256: sha256:a7792d5c416a82a809391f06675de8803c38ac6378a2d21bca0db75965d0ccd0
+    bytes: 296
+  task-audit-v0.yaml:
+    sha256: sha256:0008154f3ddb122d2ee71e95df9896821e3965ccb0ef9e82b2dab5ec50ad3f68
+    bytes: 596
+  task-impact-v0.yaml:
+    sha256: sha256:ed91f7b93794a1228f43404b642527e21c85a3514f6d596446f690bdf7863c40
+    bytes: 554
+  task-resume-v0.yaml:
+    sha256: sha256:a7ef0a7c9c0868f9bb4407f4b93c5f64e91521bdae73621065f93082418f4074
+    bytes: 469
+  tasks-v0.yaml:
+    sha256: sha256:6a24b04061d410f43b7a201f9c05d4e8768f48688a13b69458d7dc36cdab4c88
+    bytes: 286

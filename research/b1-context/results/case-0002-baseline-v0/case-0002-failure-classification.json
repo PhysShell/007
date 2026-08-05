@@ -1,0 +1,51 @@
+{
+ "deliberately_not_fixed": "All of the above. No schema/selector/evaluation/relation-closure/budget change; no expectation minted; no adapter built.",
+ "failures": [
+  {
+   "entry_point": "run_case.py",
+   "fixable_as": "behavior-preserving admission adapter (skip nc arm when empty)",
+   "primary_class": "EVALUATION_CONTRACT_GAP",
+   "secondary": [
+    "EXECUTION_ADMISSION_GAP"
+   ],
+   "symptom": "IndexError manifest['negative_control'][0]"
+  },
+  {
+   "entry_point": "project_case.py",
+   "fixable_as": "requires selector semantics change (v1) \u2014 FORBIDDEN here",
+   "primary_class": "SELECTOR_GAP",
+   "secondary": [
+    "FIXTURE_ORACLE_DEFECT"
+   ],
+   "symptom": "INVALID projection: missing_required_kinds ['status']"
+  }
+ ],
+ "fixture_id": "case-0002",
+ "latent_not_reached": [
+  {
+   "class": "EXECUTION_ADMISSION_GAP",
+   "desc": "mandatory expected-report-v1.json in non-update run_case"
+  },
+  {
+   "class": "EVALUATION_CONTRACT_GAP",
+   "desc": "task-dependence compares only first two of three task summaries"
+  },
+  {
+   "class": "BUDGET_POLICY_GAP",
+   "desc": "budget hard-coded, budget-v0.yaml not read"
+  },
+  {
+   "class": "EVALUATION_CONTRACT_GAP",
+   "desc": "questions' required_relation_paths / forbidden_stale_as_current are v0-unknown fields, silently ignored"
+  }
+ ],
+ "result": "BASELINE_ADMISSION_BLOCKED",
+ "schema": "o7.case0002.failure-classification/v0",
+ "unfrozen": {
+  "evaluation_frozen": false,
+  "holdout_started": false,
+  "qodec_arm_started": false,
+  "schema_frozen": false,
+  "selector_frozen": false
+ }
+}

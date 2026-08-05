@@ -1,0 +1,31 @@
+{
+ "adapter_commit": null,
+ "authoritative_baseline_run_reached": false,
+ "committed_expectations_updated": false,
+ "determinism": {
+  "checked": true,
+  "method": "re-ran both entry points; stderr byte-identical across runs",
+  "note": "No canonical baseline outputs exist to byte-compare because admission was blocked; the FAILURE is deterministic."
+ },
+ "environment": {
+  "llm_judge": false,
+  "offline": true,
+  "python": "Python 3.14.6",
+  "pyyaml": "6.0.3",
+  "read_only_inputs": true
+ },
+ "fixture_id": "case-0002",
+ "fixture_lock_sha256": "sha256:35f5c07013a8ae103c188e4d0e701fdd69e166ccd44bc9a5a90b53ea7f883f0e",
+ "implementation_commit": "c8751223a3ccf970c8e3c3f3089be9748ae3d8e6",
+ "implementation_tree": "f074f5e89f305484312167cab2394978e05bc465",
+ "no_expected_report_created_from_actual": true,
+ "prerequisites": {
+  "cas_round_trip_ok": true,
+  "case_0001_full_vertical_byte_identical": true,
+  "case_0001_projection_reproduced": true,
+  "round0_manifest_verified": true,
+  "unit_tests": "101 PASS"
+ },
+ "reason": "BASELINE_ADMISSION_BLOCKED \u2014 the unmodified v0 cannot admit case-0002 through either entry point.",
+ "schema": "o7.case0002.baseline-run-receipt/v0"
+}
