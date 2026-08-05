@@ -1,279 +1,409 @@
 # API migration assurance direction (AMA-0)
 
-Status: **accepted direction, exploration gated at the corpus gate** · Track:
-**AMA** (this note is AMA-0) · Scope: **product model, asset accounting, and a
-pre-registered evaluation protocol — not an implementation contract**.
+Status: **accepted direction, exploration gated at AMA-1** · Track: **AMA** (this
+note is AMA-0) · Revision: **2** — supersedes revision 1 (`3ec1343`), which
+scoped the track as coverage assurance for API migrations generally. That scope
+contained a false product: locating type-*visible* breaks is packaging `tsc` and
+invoicing for it. §1 records the correction.
 
-Implementation gate: **nothing beyond a corpus and an evaluation protocol.** The
-next AMA step is permitted to build an adjudicated historical migration corpus,
-a differential ground-truth harness, and the baseline comparison. It is **not**
-permitted to build the analyzer as a product, a GitHub App, or a service. That
-decision belongs to the corpus gate in §6, which can also end the track.
+Scope: **subject definition, evaluation protocol, and pre-registered decision
+thresholds — not an implementation contract.**
+
+Implementation gate: **nothing beyond the corpus, the oracles, and the AMA-1
+qualification experiment** (§10). No analyzer product, no delta extraction from
+release notes, no PR authoring, no service. PR generation is a *forbidden*
+downstream artifact until the gate passes — otherwise the patch generator gets
+polished while the central question, "did we find the right facts at all",
+quietly decomposes in the corner.
 
 Ratification: adjudicated in an interactive session with the maintainer, so per
 rule 3's carve-out in `docs/evidence-and-decision-discipline.md` this is
-**ratified, not pending**. Like ABR-0, it is a frozen direction record: it exists
-so later work does not re-derive the forks, and does not silently restore the
-weaker forms.
+**ratified, not pending**. Like ABR-0, it is a frozen direction record.
 
-## 1. The four layers, and why conflating them was the original error
-
-The direction started from an appraisal that treated 007's existing evidence
-machinery as "half the solution" to verified API migrations. That arithmetic was
-wrong, because four separable layers were being added together:
+## 1. Subject
 
 ```text
-1. execution provability   — the run happened, gates really ran, the record is
-                             tamper-evident and independently replayable
-2. coverage provability    — the set of affected call sites is complete within a
-                             declared region, and the region's outside is named
-3. patch generation        — the code change itself
-4. delivery infrastructure — multi-tenant runtime, App install, billing, custody
+NOT:  bounded coverage assurance for API migrations
+BUT:  bounded assurance for the impact of type-invisible semantic API changes
 ```
 
-007 has layer 1 (§5). Layer 3 is commoditising and is not a differentiator.
-Layer 4 is a separate product runtime, not an adapter over 007. **Layer 2 does
-not exist in this repository in any form, and it is the entire research risk.**
+**Artifact says** (TypeScript compiler behaviour, a documented and stable
+property of `tsc`; re-verified empirically per configuration, see §3): removing
+or renaming a member of a typed declaration surface makes every statically
+resolvable use of that member a type error.
 
-Possessing layer 1 does not make layer 2 half-built. It makes layer 2's
-*eventual output* recordable. Those are different sentences.
+**Inference:** for the resolvable region, type-visible breaks are already
+enumerated completely and at zero marginal cost by the consumer's own compiler.
 
-The same care applies to methodology: QODEC's development rigour is not an
-importable dependency. There is no `qodec-rigor = "1.0"`, and adding one would
-not yield soundness.
+**Decision:** the compiler is adopted in two roles — a **free negative
+baseline** marking where no product exists, and a **machine oracle for the
+locator** (§6). The product surface is what it cannot diagnose.
 
-## 2. Accepted product model
-
-- **The product is bounded coverage assurance for external API migrations.** The
-  deliverable sold is an *assurance report*. PR authorship is a replaceable
-  downstream mechanism and may be performed by any coding agent or by a human.
-- **Completeness is claimed only inside an explicitly declared analyzable
-  universe.** "We find everything" is not a claim this track is permitted to
-  make, in a report or in marketing. The claim shape is fixed:
-
-  ```text
-  Universe U:  declared, machine-checkable membership conditions
-  Claim:       within U, the affected-site inventory is complete
-  Outside U:   the opaque set, enumerated, never summarised as "clean"
-  ```
-
-- **Three assertion levels, not three risk buckets.** `Resolved` (statically
-  resolved inside U) · `Evidence-bounded` (supported by named evidence — types,
-  imports, traces — falling short of resolution) · `Opaque` (completeness not
-  establishable by this analyzer). The opaque set is a first-class part of the
-  contract, printed at the top, not an appendix.
-- **"No trace found" is never "proven unaffected."** The phrase "provably
-  unaffected" is retired from this track.
-
-This is rule 4 applied to a product surface: what the analysis *says*, what is
-*inferred* from it, and what is *decided* on top must stay separated in the
-customer-facing artifact too.
-
-## 3. The value surface is type-invisible change
-
-**Artifact says** (TypeScript compiler behaviour, a stable documented property
-of `tsc`; re-verify empirically against the pinned toolchain at corpus
-construction): removing or renaming a member of a typed declaration surface
-makes every statically resolvable use of that member a type error.
-
-**Inference:** for the resolvable part of any declared universe, type-*visible*
-breaking changes are already enumerated completely, soundly, and at zero
-marginal cost by the consumer's own compiler. A product that locates them sells
-what `tsc` gives away.
-
-**Decision:** the AMA value surface is **breaking changes that do not produce a
-type error**. Representative classes, to be sampled deliberately in the corpus:
+The four layers that revision 1's appraisal was summing, kept here because the
+confusion recurs:
 
 ```text
-semantics of a field changed behind an unchanged signature
-enum / literal value added, removed, or re-meaninged
-default value or implicit behaviour changed
-pagination, ordering, or idempotency semantics changed
-deprecation without removal from the type surface
-required → optional (and the reverse, where inference hides it)
-error codes, retry, and rate-limit semantics
-behaviour bound to a pinned API version rather than to a symbol
-string-keyed payload internals: expand lists, filter and field names,
-  resource/operation strings — invisible to the type system by construction
+1. execution provability   — built in 007 (§9)
+2. coverage provability    — absent; the entire research risk
+3. patch generation        — commodity; not a differentiator
+4. delivery infrastructure — a separate runtime, not an adapter over 007
 ```
 
-Two consequences that bind the work downstream:
+Possessing layer 1 makes layer 2's eventual output *recordable*. It does not
+make it half-built. Likewise, development rigour is not an importable
+dependency: there is no `qodec-rigor = "1.0"`, and adding one would not yield
+soundness.
 
-- **Corpus filtering.** A historical case where the compiler alone catches every
-  affected site is a *negative* case: evidence that no product is needed there.
-  Such cases are collected and counted separately, never used to report recall.
-  Reporting them as successes would produce excellent, meaningless numbers.
-- **Granularity.** The inventory unit is not the call site but *(symbol, path to
-  the affected fact)* — field- and argument-level. A field-level change measured
-  at method granularity simultaneously over- and under-counts, so recall would
-  be measured against the wrong denominator.
+## 2. Unit of analysis: the contract fact occurrence
 
-## 4. Evaluation protocol (pre-registered)
+Not the call site. The unit is a changed **contract fact** and its concrete
+occurrences:
 
-Per rule 4's discipline, thresholds are fixed **before** measurement. A
-threshold chosen after seeing the analyzer's score is not a threshold; it is
-retrospective self-approval with a table.
+```text
+SDK symbol
+ └── semantic fact path
+      └── change kind
+           └── concrete occurrence in consumer code
 
-### 4.1 Two ground-truth sources, deliberately different
+stripe.paymentIntents.create
+ └── automatic_payment_methods.allow_redirects
+      └── changed default semantics
+           └── src/billing/intent.ts:88  (field omitted; relies on old default)
+```
 
-**Differential ground truth (machine-checked, cheap).** At a pinned repository
-commit and pinned toolchain, mutate the SDK type surface (delete or rename a
-member); the resulting compiler diagnostic set *is* the ground truth for the
-resolvable region. No human adjudication. It also empirically traces the
-boundary of U and measures covered-surface change per commit.
+One call may carry several independently affected facts; a hundred calls to the
+same method may touch none. Recall measured over call sites therefore has the
+wrong denominator, and would be well-formatted nonsense.
 
-Validity limit, stated up front: this oracle is only valid for type-visible
-mutations, so it measures the **locator**, not the semantic-change detector. It
-is exactly and only an oracle for `resolution recall`.
+## 3. Classification is empirical, never an a-priori list
 
-**Adjudicated historical corpus (expensive, irreplaceable).** Needed for what no
-compiler yields: global recall and opaque discovery on real, type-invisible
-changes. A historical migration commit is **not** ground truth by itself — the
-developer may have missed a site, fixed it later, deleted the feature, refactored
-in the same commit, migrated a wrapper instead of the call sites, or covered
-paths no test exercises. Adjudication combines historical evidence, before/after
-static analysis, release notes, manual review, and where available test or trace
+Whether a change is type-visible is a property of *(SDK declarations, toolchain,
+`tsconfig`, consumer code)*, not of the change's description. A new enum member
+is invisible to ordinary use but caught by an exhaustive `switch` with a `never`
+guard. A string key is opaque as `string` and fully resolvable as a literal
+union. Fixing the classes in advance would be a guess wearing a taxonomy.
+
+Membership is decided by experiment, per configuration:
+
+```text
+pinned repository commit + pinned SDK/toolchain + pinned tsconfig
+  → mutate the specific contract fact
+    → did relevant diagnostics appear?
+
+T-visible    compiler is already a sufficient locator  → negative product result
+T-invisible  no adequate diagnostic                    → the product surface
+Opaque       even the region of potential impact cannot be bounded
+```
+
+T-visible outcomes are **published, not hidden**: "on this class of change no
+specialised product is needed" is a finding. Suppressing it would turn the
+benchmark into a measurement of how well we reimplemented a free compiler
+feature.
+
+## 4. Scope split, and the leak it must not spring
+
+Two separable research problems:
+
+- **A — semantic-delta extraction.** From release notes, docs, spec diff, or SDK
+  diff, produce a normalized fact: *what changed, from what, to what.*
+- **B — impact localization.** Find the code whose logic depends on that fact.
+
+**AMA covers B only.** The semantic delta enters already normalized and
+confirmed. Running both at once merges two failure modes into one number: an
+extraction failure becomes indistinguishable from a localization failure, and
+the metrics turn to porridge.
+
+**Blind-normalization rule (experimental validity, mandatory).** A normalized
+delta written by someone who has seen the consumer repository has already
+performed part of the localization — the experiment would then measure a task
+that does not exist in production. Therefore: the normalized delta is authored
+**blind to the consumer repository**, from provider-side artifacts only, and the
+case provenance records who authored it, from which artifacts, and that the
+blinding held. A case whose blinding cannot be attested is excluded, not
+discounted.
+
+## 5. Corpus: three parts with three different jobs
+
+**5.1 Type-visible control corpus.** Mutations for which `tsc` yields ground
+truth. Job: qualify the locator, trace the boundary of the declared universe,
+establish where no product exists, and detect coverage regression. Machine-
+checked; no adjudication.
+
+**5.2 Semantic-impact corpus.** Real or synthetic changes producing no type
+error: changed default; re-meaninged field; retry/error semantics; new enum
+cases without exhaustiveness; deprecated-but-valid paths; API-version-dependent
+behaviour; string-keyed operation/expand/filter names; pagination semantics;
+`required → optional` in response semantics. Adjudicated at **fact-occurrence**
+granularity — not file, not method.
+
+A historical migration commit is **not** ground truth by itself: the developer
+may have missed a site, fixed it later, deleted the feature, refactored
+concurrently, migrated a wrapper instead of the call sites, or covered paths no
+test exercises. Adjudication combines historical evidence, before/after static
+analysis, release notes, manual review, and where available test or trace
 validation. Building an assurance product on an unadjudicated benchmark would
-make the benchmark itself a false-confidence generator.
+make the benchmark a false-confidence generator — an unusually elegant way to
+fail.
 
-Per-case record: API/SDK identity · old and new version · breaking-change
-declaration and its class per §3 · repository before/after · migration commits ·
-adjudicated affected sites · expected opaque regions · negative examples ·
-language and toolchain versions · resolution assumptions · known limitations ·
-adjudication provenance.
+**5.3 Opaque stress corpus.** Reflective dispatch; `client[resource][operation]`;
+DI through opaque registration; generic wrappers; runtime code generation; field
+paths built from data; configuration-selected operations. This corpus does not
+measure finding things. It measures whether the system refrains from claiming a
+completed analysis.
 
-### 4.2 Metrics
+Per-case record: SDK identity and versions · normalized delta + blinding
+provenance · empirical class per §3 · construct family per §7.1 · repository
+commit · toolchain and `tsconfig` · adjudicated fact occurrences · expected
+opaque regions · negative examples · adjudication provenance · known limits.
+
+## 6. Oracles, and their stated limits
+
+**Mutation oracle (lab).** At a pinned commit and configuration, mutate the SDK
+declaration surface — delete a field, rename a method, narrow a literal union,
+flip optionality, change a generic constraint — and take the resulting `tsc`
+diagnostics as reproducible ground truth for that configuration. Measures
+resolution recall, symbol-resolution precision, analyzability lost after a PR,
+wrapper and dynamic-dispatch effects, and covered-surface change — without human
+beings reading commits until they start seeing ASTs in their sleep.
+
+> **Limit, binding:** the mutation oracle qualifies the ability to *locate
+> occurrences of a known contract fact*. It proves nothing about the ability to
+> *detect the semantic change itself*, which is problem A and out of scope.
+
+**Field self-calibration (the lab→field bridge).** `false assurance rate` is
+observable in the corpus and **not observable in production**, where a miss
+surfaces only through an incident: a biased, delayed, lossy channel. A
+pre-registered threshold therefore governs a lab quantity while the customer
+buys a field one. The mutation oracle closes part of that gap, because it can be
+run **on the customer's own repository at analysis time**: inject synthetic
+contract-fact mutations, measure the locator against the customer's actual code
+and configuration, and report that measurement instead of inheriting a benchmark
+number.
 
 ```text
-resolution recall        ground-truth sites found, over ground-truth sites
-                         inside the declared universe          (differential oracle)
-global discovery recall  over all known affected sites, opaque patterns included
-opaque detection recall  known-opaque regions correctly declared opaque rather
-                         than silently reported clean
-false assurance rate     runs claiming coverage while a site inside the declared
-                         universe was missed
-covered-surface ratio    size of the region carrying the strong guarantee
-analysis cost            per report, at realistic repository size
+this repository, this tsconfig, this SDK version:
+  120 synthetic contract-fact mutations injected
+  118 located
+    2 missed — both in construct family "generic wrapper", declared opaque
 ```
 
-`false assurance rate` is the governing metric: a spurious warning annoys, a
-false assurance report causes an incident. `covered-surface ratio` is its
-mandatory pair — a perfect false-assurance rate is trivially obtained by
-declaring the whole repository opaque, which is flawless and worthless.
+This is the strongest artifact the product can ship, and it is machine-produced.
+Whatever it cannot cover (problem-A detection, genuinely type-invisible
+semantics) stays an explicitly inherited lab claim with a stated similarity
+argument — never an implied one.
 
-### 4.3 Baselines, in their strongest form
+## 7. Metrics and the statistical form of the thresholds
 
-Compared on every corpus case: the specialised analyzer · a coding-agent
-baseline (Claude Code / Codex) · a grep/AST baseline · the compiler-only
-baseline of §3.
+### 7.1 Claims are stratified by construct family
 
-The agent baseline must be given its **best** form — explicitly prompted to
-enumerate what it may have missed and why — because comparing recall alone is
-comparing against a strawman: an LLM baseline with no opaque set has an
-unbounded false assurance rate at *any* recall. The comparison is on the pair
-(recall, calibration).
+The rule of three (`3/n` as the one-sided 95% upper bound at zero observed
+failures) requires **independent** trials. Corpus cases are not independent:
+failures cluster by construct — every DI case fails together, every generic
+wrapper fails together. The effective sample size is nearer the number of
+distinct construct families than the number of cases; 300 cases of which 240 are
+direct typed calls bound roughly like 60.
 
-## 5. Asset accounting
+Therefore the claim shape changes, and so does the report:
 
-Rule 4, applied to our own inventory. "Direction only" and "idea" are not
-partial implementations.
+```text
+direct typed call        n=40, 0 misses  → upper bound  7.5%
+thin local wrapper       n=18, 1 miss    → bound per exact method
+DI-registered client     declared opaque → no claim made
+```
+
+No repository-wide single number. The universe is declared as a **set of
+construct families**, each carrying its own evidence and its own bound. This
+also makes the corpus tractable — n per family, not n across everything — and it
+tells a buyer whether *their* pattern is covered rather than the benchmark's
+average temperature.
+
+### 7.2 Metrics
+
+```text
+fact-level recall        ground-truth fact occurrences found, per family
+false assurance rate     runs claiming coverage while an occurrence inside the
+                         declared universe was missed        (governing metric)
+assurance coverage       share of the real surface on which a strong claim was made
+opaque recall            known-opaque regions correctly declared opaque
+false-opaque rate        regions declared opaque that the mutation oracle resolves
+                         in the same configuration           (machine-measurable)
+risk–coverage curve      assurance coverage as a function of accepted risk
+analysis cost            per report, at realistic repository size, and reproducibility
+```
+
+`false-opaque rate` is deliberately defined against the oracle rather than
+against an adjudicator: it catches analyzer cowardice automatically, and leaves
+adjudication needed only for the opposite direction.
+
+`false assurance rate` governs — a spurious warning annoys, a false assurance
+report causes an incident. `assurance coverage` is its mandatory pair: a perfect
+false-assurance rate is trivially bought by declaring everything opaque, which is
+flawless and worthless.
+
+### 7.3 Thresholds are bounds, not point estimates
+
+A raw percentage without confidence bounds deceives cheaply: zero misses in 20
+cases is not a 0% miss rate — its one-sided 95% upper bound is about 15%.
+Pre-commitment therefore takes this form, per construct family:
+
+```text
+one-sided 95% upper bound on false-assurance rate   ≤ X_family
+one-sided 95% lower bound on assurance coverage     ≥ Y_family
+minimum n per family before any claim is published  ≥ N_family
+```
+
+And the differentiation threshold against the agent baseline is likewise paired:
+
+```text
+at an identical accepted false-assurance ceiling, the specialised system must
+deliver a pre-registered minimum gain in fact-level recall or assurance coverage
+```
+
+The numeric values of `X`, `Y`, `N`, and the required gain are fixed **when the
+AMA-1 protocol is frozen, before any analyzer result is seen**. A threshold
+chosen after seeing the score is not a threshold; it is retrospective
+self-approval with a table.
+
+## 8. Baseline protocol (pre-registered)
+
+Baselines: the specialised locator · a strongest-form coding-agent baseline ·
+grep/AST · compiler-only (§1).
+
+The agent baseline is held to the **same output contract** as the product —
+findings, coverage claim, evidence, known unknowns, potentially opaque regions,
+confidence and abstentions. Comparing a system required to publish its blind
+spots against an agent merely told "find everything" is a staged fight in which
+the opponent's shoelaces were tied beforehand.
+
+Frozen before the run: model and version · prompt · available tools · whether
+compiler/grep/AST invocations are permitted · token budget · number of attempts
+· result-aggregation rules. Otherwise the baseline retroactively becomes an idiot
+or a genius depending on which conclusion the authors needed.
+
+The decisive comparison:
+
+> At an identical accepted false-assurance rate, which system covers more of the
+> real surface?
+
+If a well-prompted agent matches on both fact-level recall and calibrated
+abstention, there is no specialised company here. There is a good prompt pack and
+possibly a workflow around it — a finding worth reaching in one experiment rather
+than in one funding round.
+
+## 9. Asset accounting, and 007's narrowed role
 
 | Asset | Real status | Role in AMA |
 |---|---|---|
-| Worktree isolation | Built | Executing migrations |
-| Gate reduction, fail-closed verdicts | Built | Post-change verification |
-| Digest-chained event ledger | Built | Audit evidence |
-| `o7 replay` | Built | Independent re-verification of the record |
-| Live ingress / REST + SSE (`o7d`) | Partly built | Runtime observation |
-| Call-site coverage engine | **Absent** | The product risk |
-| Historical migration corpus | **Absent** | The first required artifact |
+| Worktree isolation | Built | Reproducible pinned-input runs |
+| Gate reduction, fail-closed verdicts | Built | Evaluation gating |
+| Digest-chained event ledger | Built | Evidence for each measurement |
+| `o7 replay` | Built | Independent re-verification of a run |
+| Live ingress / REST + SSE (`o7d`) | Partly built | Run observation |
+| Fact-occurrence locator | **Absent** | The product risk |
+| Three-part corpus + oracles | **Absent** | The first required artifact |
 | Capability / action broker | Direction only (ABR-0) | Not counted as implementation |
 | Agentopedia / documentation drift | Idea | Not counted as an asset |
 | Multi-tenant SaaS runtime | Absent | A separate future project |
-| Automatic PR generation | Commodity | Not a differentiator |
+| Automatic PR generation | Commodity | Forbidden before the gate |
 
-007's built assets are, in AMA terms, a shell for *executing and recording* a
-migration — reusable later, and irrelevant to whether the coverage engine works.
+007 is neither the analyzer nor the assurance product. Its available role is an
+**evaluation and evidence harness** around a future locator: pinned inputs →
+gates → digest-chained evidence → replay → decision record. Even that is
+secondary at this stage.
 
-## 6. First decision gate (the corpus gate)
+The primary AMA-0 artifact is now:
 
-Permitted before the gate: the adjudicated corpus, the differential harness, the
-baseline runs, the metric report. Nothing else.
+```text
+normalized semantic-delta schema  +  fact-level ground-truth format
++ mutation oracle                 +  three-part corpus
++ baseline protocol               +  pre-committed decision thresholds
+```
 
-The gate decides whether the product exists, on the pre-registered metrics of
-§4.2 evaluated against the thresholds fixed when the corpus protocol is frozen —
-before any analyzer result is seen.
+Not a GitHub App. Not PR generation. Not a SaaS. Not necessarily even a complete
+analyzer.
+
+## 10. AMA-1 — Semantic Impact Localization Qualification
+
+The only experiment permitted after this note.
+
+**Inputs:** a manually normalized semantic delta (blinded per §4) · a pinned
+TypeScript repository commit · pinned SDK, compiler, and `tsconfig`.
+
+**Outputs:** fact-level inventory · evidence per finding · declared covered
+universe as a set of construct families · opaque set · machine-verifiable
+mutation-oracle score · adjudicated semantic-corpus score · strongest-agent
+baseline · per-family bounds per §7.3 · decision.
+
+**Decision: CONTINUE / NARROW / STOP.**
 
 ### Kill criteria
 
-The track ends if any of these holds; existing effort is not an argument
-against them, and citing it is the failure mode these criteria exist to stop:
+Spent effort is not an argument against these; citing it is precisely the
+failure mode they exist to stop.
 
 ```text
-- false assurance rate cannot be driven to the pre-registered threshold
-- high completeness holds only on an artificially narrow universe
-  (covered-surface ratio below its pre-registered floor)
+- the false-assurance upper bound cannot be driven under X on any family that
+  covers a commercially meaningful share of real integrations
+- adequate completeness holds only on an artificially narrow universe
+  (assurance coverage below its pre-registered floor)
 - the opaque set swallows the majority of real integrations
-- a strongest-form coding-agent baseline matches both the recall and the
-  calibration of the specialised analyzer  (then this is a prompt, not a product)
+- a strongest-form agent baseline matches both recall and calibrated abstention
 - adjudication + analysis cost exceeds the value of the misses prevented
-- not enough high-quality historical cases are obtainable
+- not enough blind-normalizable, high-quality cases are obtainable to reach
+  N_family on more than one family
 ```
 
-## 7. Explicitly deferred
+## 11. Deferred, and non-goals
 
 ```text
-GitHub App                        multi-language support
-multi-tenant SaaS runtime         raw fetch / dynamic URL analysis
-automatic PR authoring            wrapper and DI-indirection analysis
-provider→customer distribution    compliance productisation
-capability-broker integration     daily PR-time coverage-regression signal
+semantic-delta extraction (problem A)   multi-language support
+GitHub App                              raw fetch / dynamic URL analysis
+multi-tenant SaaS runtime               wrapper and DI-indirection analysis
+automatic PR authoring                  compliance productisation
+provider→customer distribution          PR-time coverage-regression signal
+capability-broker integration
 ```
 
-Two of these carry their own recorded reasoning, so a later reader does not
-mistake deferral for absence of thought:
+Two carry recorded reasoning so deferral is not mistaken for absence of thought:
 
-- **Daily signal.** A blast-radius bot that fires once a quarter has no
-  retention. The durable form is a PR-time *coverage regression* signal —
-  reporting that a change converted resolved sites into opaque ones (dynamic
-  dispatch introduced, a covered wrapper bypassed, the SDK version moved without
-  an assurance run). That measures the degradation of a codebase's own
-  analyzability, which is a stronger idea than API linting, and it is still
-  deferred: it is meaningless before the analyzer's numbers exist.
-- **Compliance.** Not a vertical. It is the *packaging* of the assurance report
-  for change management: initiator, analyzed region, versions compared, findings,
+- **PR-time signal.** A blast-radius bot firing once a quarter has no retention.
+  The durable form is a *coverage regression* signal: a change converted resolved
+  occurrences into opaque ones — dynamic dispatch introduced, a covered wrapper
+  bypassed, the SDK version moved without an assurance run. That measures the
+  degradation of a codebase's own analyzability, which is a stronger idea than
+  API linting, and it is meaningless before the locator has numbers.
+- **Compliance.** Not a vertical; the *packaging* of the assurance report for
+  change management — initiator, analyzed universe, versions compared, findings,
   changes made, checks run, what stayed opaque, who accepted the residual risk,
   and the evidence digest bound to that acceptance. 007's ledger and `o7 replay`
-  already produce the substrate; no separate compliance platform is implied.
+  already produce the substrate.
 
-## 8. Non-goals
+Non-goals: no claim of completeness over arbitrary code; no "provably
+unaffected" verdict (the phrase is retired from this track); no universal
+API-change platform; no product runtime built on subscription-auth CLIs.
 
-No claim of completeness over arbitrary code. No "provably unaffected" verdict.
-No universal API-change platform. No analyzer implementation before the corpus
-gate. No product runtime built on subscription-auth CLIs (AMA's delivery layer,
-if it ever exists, has a different trust model than 007's local operator).
-
-## 9. Liability boundary (recorded, not solved)
+## 12. Liability boundary (recorded, not solved)
 
 A provider-authored bot opening PRs in customer repositories creates a
 responsibility chain — recommendation, authored code, approved merge, production
 failure — that an evidence pack can document but cannot allocate. Internal
-platform teams are the correct first buyer for three reasons that are not about
+platform teams are the right first buyer for three reasons that are not about
 distribution: one owner for both the API and its consumers, access to every
 repository and CI, and liability contained inside one organisation. They also
 make adjudication tractable, since they can confirm which services should have
 migrated.
 
-## 10. Unfreeze triggers
+## 13. Unfreeze triggers
 
 ```text
-analyzer implementation      after the corpus gate passes on pre-registered metrics
+locator implementation       after AMA-1 returns CONTINUE on pre-registered bounds
 wrapper / DI analysis        after the corpus shows resolved-only coverage is too small
-PR-time regression signal    after the analyzer has published numbers
+delta extraction (problem A) after localization qualifies on a fixed normalized input
+PR-time regression signal    after the locator has published per-family numbers
 delivery runtime             after a paying internal-platform design partner exists
-provider-side distribution   after the liability boundary of §9 is contractually settled
+provider-side distribution   after §12 is contractually settled
 ```
 
-Nothing is built now beyond the corpus and the evaluation protocol. This note
-exists so the narrow wedge does not mutate, three commits later, into a SaaS, a
-GitHub App, a cloud runtime, and an insurance policy.
+Nothing is built now beyond the corpus, the oracles, and AMA-1. This note exists
+so the narrow wedge does not mutate, three commits later, into a SaaS, a GitHub
+App, a cloud runtime, and an insurance policy.
