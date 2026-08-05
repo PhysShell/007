@@ -1,0 +1,120 @@
+{
+ "cutoff": "synthetic cutoff",
+ "fixture_id": "synthetic-eval",
+ "omitted": [
+  {
+   "observation_id": "obs-synthetic-dep-1",
+   "reason": "not relevant to this task (synthetic)"
+  },
+  {
+   "observation_id": "obs-synthetic-dep-2",
+   "reason": "not relevant to this task (synthetic)"
+  },
+  {
+   "observation_id": "obs-synthetic-e",
+   "reason": "not relevant to this task (synthetic)"
+  },
+  {
+   "observation_id": "obs-synthetic-stale",
+   "reason": "not relevant to this task (synthetic)"
+  }
+ ],
+ "relations": [
+  {
+   "from": "obs-synthetic-a",
+   "kind": "supersedes",
+   "to": "obs-synthetic-stale"
+  }
+ ],
+ "schema": "o7.b1.context/v0",
+ "selected": [
+  {
+   "authority": "repo_record",
+   "kind": "status",
+   "observation_id": "obs-synthetic-a",
+   "provenance": [
+    {
+     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "source_class": "repo_record",
+     "source_id": "src-synthetic-1"
+    }
+   ],
+   "selection_reason": "synthetic relevance",
+   "selection_score": 1.0,
+   "statement": "synthetic statement for obs-synthetic-a",
+   "status": "current",
+   "topics": [
+    "alpha"
+   ]
+  },
+  {
+   "authority": "repo_record",
+   "kind": "next_action",
+   "observation_id": "obs-synthetic-b",
+   "provenance": [
+    {
+     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "source_class": "repo_record",
+     "source_id": "src-synthetic-1"
+    }
+   ],
+   "selection_reason": "synthetic relevance",
+   "selection_score": 1.0,
+   "statement": "synthetic statement for obs-synthetic-b",
+   "status": "current",
+   "topics": [
+    "alpha"
+   ]
+  },
+  {
+   "authority": "repo_record",
+   "kind": "decision",
+   "observation_id": "obs-synthetic-c",
+   "provenance": [
+    {
+     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "source_class": "repo_record",
+     "source_id": "src-synthetic-1"
+    }
+   ],
+   "selection_reason": "synthetic relevance",
+   "selection_score": 1.0,
+   "statement": "synthetic statement for obs-synthetic-c",
+   "status": "current",
+   "topics": [
+    "beta"
+   ]
+  },
+  {
+   "authority": "repo_record",
+   "kind": "status",
+   "observation_id": "obs-synthetic-d",
+   "provenance": [
+    {
+     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "source_class": "repo_record",
+     "source_id": "src-synthetic-1"
+    }
+   ],
+   "selection_reason": "synthetic relevance",
+   "selection_score": 1.0,
+   "statement": "synthetic statement for obs-synthetic-d",
+   "status": "current",
+   "topics": [
+    "beta"
+   ]
+  }
+ ],
+ "selector": {
+  "selector_id": "o7.b1.selector/v0"
+ },
+ "selectors": {
+  "anchor_observation_ids": [],
+  "anchor_rationale": {},
+  "excluded_topics": [],
+  "preferred_topics": [],
+  "required_kinds": [],
+  "required_topics": []
+ },
+ "task_id": "t-alpha"
+}

@@ -1,0 +1,17 @@
+{
+ "fixture_id": "synthetic-eval",
+ "schema": "o7.b1.derived-manifest/v0",
+ "sessions": [
+  {
+   "derived_byte_length": 141,
+   "derived_digest": "sha256:f90a6e5eaf1d2bf6aa9f9b03716f606025909802dc26edec34da459325ebc13a",
+   "extractor_id": "o7-synthetic-extractor-v0",
+   "extractor_impl_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+   "extractor_version": "0",
+   "raw_source": "src-synthetic-1",
+   "raw_source_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+   "record_count": 3,
+   "session_id": "synthetic-session-1"
+  }
+ ]
+}

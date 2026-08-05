@@ -1,0 +1,7 @@
+questions:
+- id: qg1
+  required_observation_ids:
+  - obs-synthetic-a
+  text: '?'
+schema: o7.b1.questions/v0
+task_id: t-gamma

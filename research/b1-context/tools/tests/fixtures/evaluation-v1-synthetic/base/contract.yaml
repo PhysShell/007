@@ -1,0 +1,308 @@
+arm_semantics:
+  gold_state: oracle
+  missing_optional_arm: NOT_APPLICABLE
+  missing_required_arm: UNAVAILABLE
+  non_applicable_metrics: null
+  synthetic_negative_control: forbidden
+arms:
+  full_derived:
+    requirement: required
+  negative_control:
+    requirement: optional
+  projection:
+    requirement: required
+axis_requirements:
+  contract_input_consistency: required
+  negative_control_diagnostics: optional
+  projection_validity: required
+  question_observation_support: required
+  relation_support: required
+  source_compilation: required
+  stale_state_safety: required
+  task_dependence: required
+bound_inputs:
+  budget:
+    artifact_bytes_sha256: sha256:42fcfdcdc4c60630a71f05aea26d8c8a713004843f42ea39023ef89e338da40d
+    byte_length: 143
+    canonical_object_sha256: sha256:4b362d659bead9fd626ef10d970e4099b250c9738836269926118887563f2190
+    logical_id: budget-v0.yaml
+    visibility: public
+  derived_bodies_private:
+  - artifact_bytes_sha256: sha256:f90a6e5eaf1d2bf6aa9f9b03716f606025909802dc26edec34da459325ebc13a
+    byte_length: 141
+    record_count: 3
+    session_id: synthetic-session-1
+    visibility: private
+  fixture_manifest:
+    artifact_bytes_sha256: sha256:58e70278ccdbc2fa3db80c7b3d38aeda1c4ed38c8e47af6c3d1532059590fbec
+    byte_length: 217
+    canonical_object_sha256: sha256:44331666b5e8bf55c01da0b9b7ef851aec191859a058f8ca55eab36300d4a5ed
+    logical_id: manifest.yaml
+    visibility: public
+  gold_state:
+    artifact_bytes_sha256: sha256:f51365388371d81e7ffa933edf8755484b52d1cc9791e5b44e829c95442a592f
+    byte_length: 3933
+    canonical_object_sha256: sha256:f097d0ae4ee1b09b12125c50ba673ed3f427672b6c29c56a9559f4fbfdfdfcc0
+    logical_id: gold-state.json
+    visibility: public
+  question_files:
+    questions-alpha.yaml:
+      artifact_bytes_sha256: sha256:0b3391fe5e827b8748dbbb2a40d6288a4fb14518dafe54ed9589bd75a6c31ff6
+      byte_length: 195
+      canonical_object_sha256: sha256:6dd6e21783112894ad82181fd50bd6ffc017b9515cac6be26ff1beec6492ade0
+      visibility: public
+    questions-beta.yaml:
+      artifact_bytes_sha256: sha256:d8f5c406a3674ba63108bc08378a10da1a302ff74ac2d8a56d4ec12ac7ce33a0
+      byte_length: 124
+      canonical_object_sha256: sha256:9abf15e23742bbe7f3bed2a94b3b27827b954309dff4c52fff456299d80148fd
+      visibility: public
+    questions-gamma.yaml:
+      artifact_bytes_sha256: sha256:c981fbd9a2f4501fda90aeb05baad68bd8e967d449baafd1bf1bad8928bc2141
+      byte_length: 125
+      canonical_object_sha256: sha256:cd416296133fd8cd8144149e5e408bf9db7304e73284eda14c88fe8ff53d9c00
+      visibility: public
+  r3_1_derived_manifest:
+    artifact_bytes_sha256: sha256:f36a2b0353679936302773eae0beca996a2e055b8c6beac408a391ae5b3ea5d8
+    byte_length: 606
+    canonical_object_sha256: sha256:87b20e2b037b0654b2cbe06051ed178895bf6fd51702bc3494239dead7aff899
+    logical_id: derived-manifest.json
+    visibility: public
+  r3_1_projection_comparison:
+    artifact_bytes_sha256: sha256:aef5300d01b76827cd2f52c1b35d821920dee418835072e607d4192ed885022b
+    byte_length: 325
+    canonical_object_sha256: sha256:3f9ff0a89935d49cc357f96be109fe82da06bda88a54469f33ae384f98fb6c62
+    logical_id: projection-comparison.json
+    visibility: public
+  r3_1_report:
+    artifact_bytes_sha256: sha256:a24c41a1aaa18bce5b20585e707f899b73a792550146184506dbf03b14a50b5a
+    byte_length: 334
+    canonical_object_sha256: sha256:276ac77763295be2408aa3cddbe45a16ff3c755ca93d09af4bd791cb5ab1f23f
+    logical_id: report.json
+    visibility: public
+  source_selectors:
+    artifact_bytes_sha256: sha256:4bdb654fd9b5a6718c58704d68adcacd73c3e861d601f651cdbc966bdfbb03f5
+    byte_length: 150
+    canonical_object_sha256: sha256:3e92d1b17eda8113376a41a3dcbbb67ca9e67d34c4cf971a39540c6c23e5314d
+    logical_id: source-selectors.yaml
+    visibility: public
+  task_contexts:
+    t-alpha:
+      artifact_bytes_sha256: sha256:594e0ad1334ea95cb955b69fc65514e15ffb1b4498d080c5974e67e495b785d6
+      byte_length: 2880
+      canonical_object_sha256: sha256:78257bccd4bc314b799ec24f4690286545963771361f332bbbb59fa880441c58
+      visibility: public
+    t-beta:
+      artifact_bytes_sha256: sha256:180d8e6dd71c2cb3eb8140a7e6fcc94053c9bda7a6a2b1e18ffb159a6cc77b13
+      byte_length: 3360
+      canonical_object_sha256: sha256:68a6c21a13e0f00e70ee822ac039ccff732f53626817be31981768d30ad96e97
+      visibility: public
+    t-gamma:
+      artifact_bytes_sha256: sha256:75c3a3d7c0cf13d20bc82b85ec0cb18880cc05a3177b292ab1eb7b2c02f361fa
+      byte_length: 2012
+      canonical_object_sha256: sha256:e6c4b7d4f440d3ad1ef180635ef86d617e65bd4ba23b29101b51be300d92ddfb
+      visibility: public
+  task_files:
+    task-alpha.yaml:
+      artifact_bytes_sha256: sha256:7a316928ebb7824b8b623c147619d531de93a22740542f76f1398e4c741ba43f
+      byte_length: 276
+      canonical_object_sha256: sha256:13fa508dab84a64c271e7757414daf440f516bd871568220495c33b82f0bc2fc
+      visibility: public
+    task-beta.yaml:
+      artifact_bytes_sha256: sha256:61c20f3e97c5aef5aee9e614039ed18c56965787f08791e9ca191d680ef18401
+      byte_length: 274
+      canonical_object_sha256: sha256:410d0a7f99684a22da88b7e9d7dbc6b759ee7ccef0d278d2ec2b21b145e7b23b
+      visibility: public
+    task-gamma.yaml:
+      artifact_bytes_sha256: sha256:fdc9775077a620da46df075c10d2a57546af84f2890da50c653719f04b32e1fa
+      byte_length: 276
+      canonical_object_sha256: sha256:94c3e6867ddbb596598700aace793d03c54695e29cad46df8a02b86e5007a921
+      visibility: public
+  task_registry:
+    artifact_bytes_sha256: sha256:967ff17f2a33f4d3baacf71d1a3bfc7349ab4f3cda9383ea2b4c0de72d4f1629
+    byte_length: 267
+    canonical_object_sha256: sha256:51f36622239fb9d181ab258a2f813b5ff94b261e324db2116a4892a314781c08
+    logical_id: tasks.yaml
+    visibility: public
+budget:
+  artifact_bytes_sha256: sha256:42fcfdcdc4c60630a71f05aea26d8c8a713004843f42ea39023ef89e338da40d
+  authoritative_artifact: budget-v0.yaml
+  byte_budget: 20000
+  byte_length: 143
+  canonical_object_sha256: sha256:4b362d659bead9fd626ef10d970e4099b250c9738836269926118887563f2190
+  counted_representation:
+    definition: synthetic
+    gating: true
+    id: selector-v0-canonical-record-jsonl
+  diagnostics:
+    rendered_context_sizes:
+      gating: false
+  record_budget: 32
+  unit: utf8_bytes+records
+contract_id: o7.b1.evaluation-contract/v1
+contract_input_consistency_gates:
+- description: fixture identity agreement
+  id: gate-01
+- description: registry filename and digest agreement
+  id: gate-02
+- description: exact task-set agreement
+  id: gate-03
+- description: questions filename and dual-digest agreement
+  id: gate-04
+- description: referenced question existence
+  id: gate-05
+- description: every legacy relation path expanded
+  id: gate-06
+- description: no invented explicit relation requirement
+  id: gate-07
+- description: forbidden-stale set equality
+  id: gate-08
+- description: gold-derived targets recomputed exactly
+  id: gate-09
+- description: target-status agreement
+  id: gate-10
+- description: unknown identifiers or closed-vocabulary values rejected
+  id: gate-11
+contract_revision: 3
+digest_domains:
+  canonicalization:
+    definition: synthetic
+    id: o7-canonical-json-v0
+  gold_state_dual_binding:
+    artifact_bytes_sha256: sha256:f51365388371d81e7ffa933edf8755484b52d1cc9791e5b44e829c95442a592f
+    byte_length: 3933
+    canonical_object_sha256: sha256:f097d0ae4ee1b09b12125c50ba673ed3f427672b6c29c56a9559f4fbfdfdfcc0
+    logical_id: gold-state.json
+  policy: dual
+evaluator_implementation_identity:
+  manifest_digest_field: evaluator_implementation_manifest_digest
+  manifest_schema: o7.b1.evaluator-implementation-manifest/v0
+  note: synthetic
+  output_must_record:
+    evaluator_entrypoint_sha256: required
+    evaluator_module_sha256: required
+    execution_checkout_commit: required
+    execution_checkout_tree: required
+family_applicability:
+  negative_control_diagnostics:
+    negative_control: optional
+  projection_validity:
+    full_derived: NOT_APPLICABLE
+    negative_control: NOT_APPLICABLE
+    projection: required
+  question_observation_support:
+    full_derived: NOT_APPLICABLE
+    negative_control: NOT_APPLICABLE
+    projection: required
+  relation_support:
+    full_derived: NOT_APPLICABLE
+    negative_control: NOT_APPLICABLE
+    projection: required
+  source_compilation:
+    full_derived: required
+    negative_control: optional
+    projection: required
+  stale_state_safety:
+    full_derived: NOT_APPLICABLE
+    negative_control: NOT_APPLICABLE
+    projection: required
+full_derived_semantics: synthetic
+input_closure:
+  fail_closed: undeclared inputs refuse
+  negative_control_body: none
+  raw_source_bodies: frozen
+  required_private:
+  - synthetic-session-1
+  required_public_structured:
+  - task-alpha.yaml
+  - task-beta.yaml
+  - task-gamma.yaml
+outcome_axes:
+- contract_input_consistency
+- source_compilation
+- projection_validity
+- question_observation_support
+- relation_support
+- stale_state_safety
+- task_dependence
+- negative_control_diagnostics
+overall_rules:
+  PARTIAL: forbidden in evaluation v1
+  all_required_axes_PASS: overall PASS
+  any_required_axis_FAIL: overall FAIL
+  any_required_axis_UNAVAILABLE_without_FAIL: overall UNAVAILABLE
+  optional_diagnostics_cannot_upgrade_or_downgrade_required_gates: true
+provenance_role:
+  case_role: development
+  designed_after_observing_case_0002: true
+  generalization_claim_allowed: false
+  holdout_evidence: false
+schema: o7.b1.evaluation-contract/v1
+semantic_revision_from_r2: false
+shape_semantics:
+  incomparable: sets differ, neither subset
+  left_strict_superset: left contains every right item plus more
+  unknown_shape: fail closed
+source_compilation_requirements_full_derived:
+- session_matches_derived_manifest
+- derived_body_available
+- derived_byte_length_and_sha256_match
+- record_count_reproducible
+- extractor_identity_and_raw_binding_present
+supersedes:
+  artifact_bytes_sha256: sha256:3333333333333333333333333333333333333333333333333333333333333333
+  instance: evaluation-contract-v1-r2.yaml
+  r4a1_contract_commit: '0000000000000000000000000000000000000000'
+supersedes_contract_revision: 2
+task_dependence:
+  all_unordered_pairs: true
+  not_frozen: shapes are intent-level
+  pair_expectations:
+  - expected_shape: incomparable
+    left: t-alpha
+    rationale: synthetic
+    right: t-beta
+  - expected_shape: left_strict_superset
+    left: t-alpha
+    rationale: synthetic
+    right: t-gamma
+  - expected_shape: incomparable
+    left: t-beta
+    rationale: synthetic
+    right: t-gamma
+tasks:
+  t-alpha:
+    forbidden_stale_as_current:
+    - ids:
+      - obs-synthetic-stale
+      question: qa1
+    questions_file: questions-alpha.yaml
+    relation_requirements:
+    - depth: 1
+      direction: outgoing
+      endpoint_policy: edge_witness
+      from: obs-synthetic-a
+      gold_derived_targets:
+      - obs-synthetic-stale
+      kind: supersedes
+      match: all
+      question: qa1
+      target_status:
+      - superseded
+  t-beta:
+    questions_file: questions-beta.yaml
+    relation_requirements:
+    - depth: 1
+      direction: outgoing
+      endpoint_policy: all_current_targets_materialized
+      from: obs-synthetic-c
+      gold_derived_targets:
+      - obs-synthetic-dep-1
+      - obs-synthetic-dep-2
+      kind: depends_on
+      match: all
+      question: qb1
+      target_status:
+      - current
+  t-gamma:
+    questions_file: questions-gamma.yaml
+validation_revision: true

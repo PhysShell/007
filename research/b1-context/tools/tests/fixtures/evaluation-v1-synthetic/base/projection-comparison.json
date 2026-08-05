@@ -1,0 +1,17 @@
+{
+ "fixture_id": "synthetic-eval",
+ "registry_digest": "sha256:967ff17f2a33f4d3baacf71d1a3bfc7349ab4f3cda9383ea2b4c0de72d4f1629",
+ "registry_filename": "tasks.yaml",
+ "schema": "o7.b1.projection-comparison/v1",
+ "tasks": [
+  {
+   "task_id": "t-alpha"
+  },
+  {
+   "task_id": "t-beta"
+  },
+  {
+   "task_id": "t-gamma"
+  }
+ ]
+}

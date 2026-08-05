@@ -1,0 +1,7 @@
+fixture_id: synthetic-eval
+negative_control: []
+raw_sources:
+- digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  id: src-synthetic-1
+schema: o7.b1.fixture-manifest/v0
+status: synthetic

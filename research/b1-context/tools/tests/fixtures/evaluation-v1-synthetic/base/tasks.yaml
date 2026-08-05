@@ -1,0 +1,9 @@
+fixture_id: synthetic-eval
+schema: o7.b1.fixture-tasks/v0
+tasks:
+- questions_file: questions-alpha.yaml
+  task_file: task-alpha.yaml
+- questions_file: questions-beta.yaml
+  task_file: task-beta.yaml
+- questions_file: questions-gamma.yaml
+  task_file: task-gamma.yaml

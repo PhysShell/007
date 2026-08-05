@@ -1,0 +1,11 @@
+questions:
+- id: qa1
+  required_observation_ids:
+  - obs-synthetic-a
+  text: '?'
+- id: qa2
+  required_observation_ids:
+  - obs-synthetic-b
+  text: '?'
+schema: o7.b1.questions/v0
+task_id: t-alpha

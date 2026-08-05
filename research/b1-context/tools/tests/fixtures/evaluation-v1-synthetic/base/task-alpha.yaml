@@ -1,0 +1,12 @@
+cutoff: synthetic cutoff
+fixture_id: synthetic-eval
+schema: o7.b1.task/v0
+selectors:
+  anchor_observation_ids: []
+  anchor_rationale: {}
+  excluded_topics: []
+  preferred_topics: []
+  required_kinds: []
+  required_topics: []
+statement: synthetic task t-alpha
+task_id: t-alpha

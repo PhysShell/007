@@ -1,0 +1,169 @@
+{
+ "authority_vocabulary": [
+  "repo_record",
+  "agent_claim"
+ ],
+ "cutoff": "synthetic cutoff",
+ "fixture_id": "synthetic-eval",
+ "observations": [
+  {
+   "authority": "repo_record",
+   "kind": "status",
+   "observation_id": "obs-synthetic-a",
+   "provenance": [
+    {
+     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "source_class": "repo_record",
+     "source_id": "src-synthetic-1"
+    }
+   ],
+   "statement": "synthetic statement for obs-synthetic-a",
+   "status": "current",
+   "topics": [
+    "alpha"
+   ]
+  },
+  {
+   "authority": "repo_record",
+   "kind": "next_action",
+   "observation_id": "obs-synthetic-b",
+   "provenance": [
+    {
+     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "source_class": "repo_record",
+     "source_id": "src-synthetic-1"
+    }
+   ],
+   "statement": "synthetic statement for obs-synthetic-b",
+   "status": "current",
+   "topics": [
+    "alpha"
+   ]
+  },
+  {
+   "authority": "repo_record",
+   "kind": "decision",
+   "observation_id": "obs-synthetic-c",
+   "provenance": [
+    {
+     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "source_class": "repo_record",
+     "source_id": "src-synthetic-1"
+    }
+   ],
+   "statement": "synthetic statement for obs-synthetic-c",
+   "status": "current",
+   "topics": [
+    "beta"
+   ]
+  },
+  {
+   "authority": "repo_record",
+   "kind": "status",
+   "observation_id": "obs-synthetic-d",
+   "provenance": [
+    {
+     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "source_class": "repo_record",
+     "source_id": "src-synthetic-1"
+    }
+   ],
+   "statement": "synthetic statement for obs-synthetic-d",
+   "status": "current",
+   "topics": [
+    "beta"
+   ]
+  },
+  {
+   "authority": "repo_record",
+   "kind": "status",
+   "observation_id": "obs-synthetic-e",
+   "provenance": [
+    {
+     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "source_class": "repo_record",
+     "source_id": "src-synthetic-1"
+    }
+   ],
+   "statement": "synthetic statement for obs-synthetic-e",
+   "status": "current",
+   "topics": [
+    "beta"
+   ]
+  },
+  {
+   "authority": "repo_record",
+   "kind": "status",
+   "observation_id": "obs-synthetic-dep-1",
+   "provenance": [
+    {
+     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "source_class": "repo_record",
+     "source_id": "src-synthetic-1"
+    }
+   ],
+   "statement": "synthetic statement for obs-synthetic-dep-1",
+   "status": "current",
+   "topics": [
+    "beta"
+   ]
+  },
+  {
+   "authority": "repo_record",
+   "kind": "status",
+   "observation_id": "obs-synthetic-dep-2",
+   "provenance": [
+    {
+     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "source_class": "repo_record",
+     "source_id": "src-synthetic-1"
+    }
+   ],
+   "statement": "synthetic statement for obs-synthetic-dep-2",
+   "status": "current",
+   "topics": [
+    "beta"
+   ]
+  },
+  {
+   "authority": "agent_claim",
+   "kind": "status",
+   "observation_id": "obs-synthetic-stale",
+   "provenance": [
+    {
+     "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+     "source_class": "repo_record",
+     "source_id": "src-synthetic-1"
+    }
+   ],
+   "statement": "synthetic statement for obs-synthetic-stale",
+   "status": "superseded",
+   "superseded_by": "obs-synthetic-a",
+   "topics": [
+    "alpha"
+   ]
+  }
+ ],
+ "relations": [
+  {
+   "from": "obs-synthetic-a",
+   "kind": "supersedes",
+   "to": "obs-synthetic-stale"
+  },
+  {
+   "from": "obs-synthetic-c",
+   "kind": "depends_on",
+   "to": "obs-synthetic-dep-1"
+  },
+  {
+   "from": "obs-synthetic-c",
+   "kind": "depends_on",
+   "to": "obs-synthetic-dep-2"
+  }
+ ],
+ "schema": "o7.b1.state-observables/v0",
+ "topic_vocabulary": [
+  "alpha",
+  "beta"
+ ]
+}

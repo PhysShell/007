@@ -1,0 +1,6 @@
+fixture_id: synthetic-eval
+schema: o7.b1.source-selectors/v0
+sessions:
+- coverage: {}
+  raw_source: src-synthetic-1
+  session_id: synthetic-session-1

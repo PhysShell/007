@@ -1,0 +1,6 @@
+byte_budget: 20000
+fixture_id: synthetic-eval
+note: synthetic frozen budget
+record_budget: 32
+schema: o7.b1.budget/v0
+unit: utf8_bytes+records

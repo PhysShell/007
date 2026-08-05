@@ -119,6 +119,42 @@ Extractor, projection, schema and evaluation tests run on synthetic fixtures and
 do **not** require the private RAW blobs. One integration test runs the full
 pipeline only if the local CAS is present, and skips otherwise.
 
+## Standalone evaluation/v1 evaluator (`evaluate_v1.py`)
+
+`evaluate_v1.py` (module: `o7b1/evaluate_v1.py`) is a **contract-driven,
+deterministic, structural** evaluator for `o7.b1.evaluation/v1` (contract
+revision 3). It consumes already-frozen projection and source-compilation
+artifacts; it never reruns extraction or projection, never uses an LLM judge, and
+never touches `report.json` or evaluator v0. Every identifier and gate target
+comes from the supplied contract and inputs — the module contains no case literal.
+
+It validates the exact input closure (dual-digest structured inputs, artifact-bytes
++ JSONL bodies), runs contract-input consistency gates 01–11 plus the declared
+verifier-only constraints, computes the frozen structural gates (question support,
+relation edge-witness / all-current-materialized, projection validity with byte
+usage **recomputed** from the selected set, stale-state safety, all-pairs task
+dependence), and emits a canonical `evaluation-v1.json` that it validates against
+`evaluation-output-v1-r2.schema.json` before writing (atomic temp+rename).
+
+Operational vs evaluation result are distinct: a schema-valid artifact is exit 0
+regardless of whether `overall` is PASS / FAIL / UNAVAILABLE. Nonzero exit is
+reserved for an inability to emit a trustworthy artifact (bad contract schema,
+bad evaluator identity, malformed invocation, undeclared input access, output
+schema failure, internal exception). `--mode qualification|authoritative` refuses
+on a dirty worktree.
+
+```sh
+python3 evaluate_v1.py --contract CONTRACT.yaml \
+  --input gold_state:gold-state.json=PATH ... --input derived_body:SESSION=PATH \
+  --out evaluation-v1.json [--mode dev|qualification|authoritative]
+```
+
+Its synthetic qualification suite (`tests/test_evaluate_v1.py`,
+`tests/synth_eval_v1.py`, fixtures under
+`tests/fixtures/evaluation-v1-synthetic/`) reports each case as fixture →
+triggered oracle → observed output → pass/fail and never applies the evaluator to
+case-0002.
+
 ## Honest status
 
 - `development_result: PASS` means the pipeline ran end-to-end on this one golden
