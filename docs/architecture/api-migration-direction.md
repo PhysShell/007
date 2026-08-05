@@ -1,7 +1,8 @@
 # API migration assurance direction (AMA-0)
 
 Status: **accepted direction, exploration gated at the AMA-0.5 protocol-formation
-packet** · Track: **AMA** (this note is AMA-0) · Revision: **3**.
+packet, under a hard 48-maintainer-hour cap** · Track: **AMA** (this note is
+AMA-0) · Revision: **4**.
 
 Revision history, kept because the errors are load-bearing:
 
@@ -14,9 +15,14 @@ Revision history, kept because the errors are load-bearing:
   over-claimed what the mutation oracle can witness, and a single-axis
   construct family with an undefined trial unit could not support the bounds
   it was being asked to carry.
-- **rev 3** (this) — factorized claim cells, oracle fidelity, delta provenance,
-  the independent-cluster definition, the `N_qualify` / `N_publish` split,
-  adjudicator-independence limits, and the AMA-0.5 packet.
+- **rev 3** (`5c275d1`) — factorized claim cells, oracle fidelity, delta
+  provenance, the independent-cluster definition, the `N_qualify` / `N_publish`
+  split, adjudicator-independence limits, and the AMA-0.5 packet. One defect
+  survived: the protocol had learned to kill the product but had granted itself
+  diplomatic immunity — the only cost measurement sat after the codebook freeze,
+  and the packet carried no resource ceiling of its own.
+- **rev 4** (this) — the pre-freeze cost-floor probe, the numeric caps, the
+  banned `EXTEND` outcome, and external-only reopening after `STOP`.
 
 Scope: **subject definition, evaluation protocol, and pre-registered decision
 thresholds — not an implementation contract.**
@@ -538,19 +544,201 @@ secondary at this stage.
 
 The only work permitted after this note. Not a locator.
 
+This section applies the note's own kill discipline to the note. A protocol that
+can only kill the product, never itself, becomes an indefinite refinement loop in
+which every iteration is honest and justified — a very rigorous way never to
+start.
+
+### 10.1 Two cost measurements, deliberately different
+
+The post-freeze time-and-motion pilot is **not** moved earlier: disagreement rate
+measured before the codebook freeze conflates codebook immaturity with intrinsic
+case difficulty (§8.3). A separate, cruder probe runs *first*, because cost and
+agreement are different quantities and the second need not wait for the first.
+
+| Probe | Measures | May **not** claim |
+|---|---|---|
+| Pre-freeze cost-floor probe | a lower bound on real per-case cost | p90, disagreement rate, codebook maturity |
+| Post-freeze time-and-motion | the full adjudication cost distribution and disagreement | that building the taxonomy was worthwhile |
+
+The early probe is a **one-sided kill instrument**:
+
+> High cost may kill the direction. Low cost may not qualify it.
+
+Otherwise four convenient cases become a startup's financial model — accounting
+by the "these four Stripe examples were quick" method, which is already
+over-represented in the world.
+
+### 10.2 Pre-freeze cost-floor probe
+
 ```text
-1. empirical taxonomy discovery protocol (§8.1) executed on a discovery cohort
+cases:                    4
+total maintainer budget:  12 hours
+per-case censor:          3 hours
+```
+
+The four cases are chosen **before** work starts and must differ deliberately in
+expected cost driver. These are **not** claim cells — no codebook exists yet —
+they are cost-driver strata used only to force heterogeneity:
+
+```text
+1. provider artifacts clear + repository reproducible
+2. wrapper / alias indirection
+3. semantic control-flow dependence
+4. historically messy or reproduction-hostile
+```
+
+Measured: `T_provider_artifact_review`, `T_blind_normalization`,
+`T_repository_reproduction`, `T_primary_adjudication`, `T_evidence_packaging`.
+
+Excluded: `T_independent_secondary_pass`, `T_disagreement_resolution`. Where no
+second human exists, the result is declared a **lower bound** on the full
+`T_case`, not an approximation of it — which is more useful anyway: if the
+project dies at the lower bound, the rest of the reasoning is unnecessary.
+
+At three hours each case takes exactly one outcome — `accepted`, `excluded with
+reason`, or `right-censored at >3h`. Not "one more hour, it's nearly done". That
+is how methodology packets acquire permanent residency.
+
+### 10.3 The early arithmetic stopping rule
+
+The projection uses the hypothesis **most favourable to the project**: two claim
+cells at `N_publish = 29`, which corresponds only to a ~10% false-assurance
+ceiling at zero observed failures. If the economics fail even there, a serious
+assurance product certainly does not exist.
+
+```text
+B_floor = 2 × 29 × observed accepted-cluster cost floor
+```
+
+Censored cases enter at their censor value (`>3h`), never at zero and never at a
+mean.
+
+**Censoring precondition (binding).** With **≥2 of 4 cases right-censored**, the
+floor is uninformative and the probe's admissible outcomes are restricted to
+`NARROW` or `STOP`. Without this, three censored cases project
+`2 × 29 × 3 = 174h` and the literal rule returns "continue" — the most favourable
+verdict from the least informative probe, which is exactly backwards.
+
+```text
+B_floor > 400h                → STOP
+200h < B_floor ≤ 400h         → NARROW to the cheapest cells with historical delta supply
+B_floor ≤ 200h                → AMA-0.5 may continue   (requires ≤1 censored case)
+```
+
+Why 400 hours: roughly eight times the AMA-0.5 budget itself, before a single
+line of locator. If preparing a minimally publishable corpus already costs more,
+this is not a product wedge but a separate multi-year research programme.
+
+Two properties of this projection are deliberate and must not be "fixed" by a
+later reader:
+
+- **It is biased upward, on purpose.** The probe measures per-*case* cost while
+  `B_floor` multiplies by the number of *clusters*; one `repository × delta` case
+  usually spans several cells, across which reproduction and normalization
+  amortize. A one-sided kill instrument wants exactly this sign: a `STOP` from it
+  is trustworthy, a pass means nothing.
+- **`STOP` here is a verdict on the product, not on the research question.** The
+  economics are computed over `N_publish` — publishable assurance. A cheap
+  one-off comparison ("does specialised localization beat a strong agent at all?")
+  remains meaningful afterwards, but as separate one-time work, never as AMA
+  continuing under another name.
+
+### 10.4 Package cap
+
+```text
+AMA-0.5 total budget: 48 maintainer-hours
+  12h  pre-freeze cost-floor probe
+  36h  everything else
+
+per-case ceiling inside AMA-0.5: 6 maintainer-hours
+  → then: accepted / excluded / unresolved-cost failure
+```
+
+Agent runtime, compiler runtime, and CI waiting are recorded separately and do
+**not** substitute for maintainer-hours. Active reading, framing, checking,
+correcting, labelling, and deciding all count. Otherwise human cost is declared
+zero while an agent spends three weeks producing material that someone then
+spends three weeks verifying.
+
+The per-case ceiling does not assert that a case objectively needs no more than
+six hours. It asserts that no single case may eat the feasibility packet.
+
+### 10.5 Ordered packet
+
+```text
+0. pre-freeze cost-floor probe — 4 heterogeneous cases, 12h, 3h censor
+                                 (STOP / NARROW trigger only)
+1. empirical taxonomy discovery (§8.1) on the discovery cohort
 2. factorized claim-cell schema (§7.1)
 3. oracle-fidelity table, per (fact kind, mutation strategy) (§6.2)
 4. delta-provenance classification and per-cell supply survey (§6.3)
-5. independent-cluster definition incl. shared-ancestor collapsing (§7.2)
-6. adjudication time-and-motion pilot, post-freeze (§8.3, §8.4)
-7. N_qualify / N_publish split and total budget projection (§7.4, §8.4)
-8. frozen X, Y, N, and Δ thresholds
+5. independent-cluster and shared-ancestor collapsing rules (§7.2)
+6. freeze the codebook
+7. holdout classification validation (§8.1)
+8. post-freeze adjudication time-and-motion pilot (§8.3, §8.4)
+9. N_qualify / N_publish and total budget projection (§7.4, §8.4)
+10. freeze X, Y, N, Δ
+11. decision under the 48-hour cap
 ```
 
-Decision at the end of the packet: **FREEZE AMA-1 / NARROW taxonomy or scope /
-STOP before locator code.**
+### 10.6 Outcomes — and the one that does not exist
+
+```text
+FREEZE AMA-1  /  NARROW  /  STOP
+```
+
+**`EXTEND AMA-0.5` is prohibited.** Otherwise the timebox is decorative ribbon
+around an unbounded protocol.
+
+**FREEZE** requires every mandatory artifact of §8.2 complete within the cap —
+sampling frame, discovery manifest, frozen codebook, claim-cell construction
+rules, oracle-fidelity table, delta-provenance supply survey, cluster and
+collapsing rules, holdout result, post-freeze cost pilot, `N_qualify` /
+`N_publish`, `X` / `Y` / `Δ`, budget projection — and **no open question capable
+of changing** claim-cell membership, oracle fidelity, cluster identity, or
+threshold interpretation.
+
+**NARROW** applies when the full scope cannot be frozen but a smaller protocol
+can be formed **from data already collected**, without a further discovery round:
+
+```text
+was:  7 resolution constructs × 7 semantic dependences
+now:  direct access / local alias  ×  explicit value / omitted default / string key
+```
+
+**STOP** applies when the mandatory packet is incomplete; no admissible narrowing
+follows from the data already held; the cost probe or the supply survey kills the
+economics; the taxonomy remains unstable; or adjudication validity cannot be
+supported even in a reduced scope.
+
+"Insufficient data" at budget exhaustion means `STOP` or `NARROW` — never "a
+little more data". That sentence is the whole self-application.
+
+### 10.7 Reopening after STOP
+
+After `STOP`, AMA-0.5 does not reopen because a better methodological idea
+arrived. Those can be produced indefinitely, and models are trained to excel at
+precisely that.
+
+```text
+admissible:
+  - a design partner with access to real consumer repositories
+  - an independent second human adjudicator becomes available
+  - a substantial new source of historical deltas is found
+  - reproduction/adjudication cost drops materially due to an existing tool
+  - an external corpus already contains the required independent clusters
+
+inadmissible:
+  - "we thought of a more accurate classification"
+```
+
+The latter is simply revisions 5, 6, and 19, each impeccably justifying the next.
+
+These figures — 4 cases, 12h, 3h censor, 48h cap, 6h per case, 400h pre-locator
+ceiling — are not scientifically ideal constants. They are management boundaries,
+and their purpose is not to establish a law of nature but to stop an inquiry into
+provability from quietly becoming a multi-year inquiry into itself.
 
 ## 11. AMA-1 — Semantic Impact Localization Qualification
 
@@ -654,6 +842,7 @@ migrated.
 ## 14. Unfreeze triggers
 
 ```text
+AMA-0.5 after a STOP         only on an external trigger from §10.7
 AMA-1 qualification run      after AMA-0.5 returns FREEZE
 locator implementation       after AMA-1 returns CONTINUE on pre-registered bounds
 wrapper / DI analysis        after the corpus shows resolved-only coverage is too small
@@ -663,6 +852,8 @@ delivery runtime             after a paying internal-platform design partner exi
 provider-side distribution   after §13 is contractually settled
 ```
 
-Nothing is built now beyond the AMA-0.5 packet. This note exists so the narrow
-wedge does not mutate, three commits later, into a SaaS, a GitHub App, a cloud
-runtime, and an insurance policy.
+Nothing is built now beyond the AMA-0.5 packet, and that packet is capped at 48
+maintainer-hours with no `EXTEND` outcome. This note exists so the narrow wedge
+does not mutate, three commits later, into a SaaS, a GitHub App, a cloud runtime,
+and an insurance policy — nor, three revisions later, into a permanent seminar
+about how one would rigorously determine whether to begin.
