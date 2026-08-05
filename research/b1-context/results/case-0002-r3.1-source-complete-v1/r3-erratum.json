@@ -1,0 +1,16 @@
+{
+ "correction": "R3.1 materialized cas:sha256:8392de80\u2026 from the frozen gzip (verified 87564394 bytes) and replayed the identical command with the identical code identity.",
+ "do_not_edit": [
+  "results/case-0002-r3-actual-v1/*"
+ ],
+ "finding": "The frozen R3 report.json records coder-prefix status UNAVAILABLE and its derived manifest contains only the reviewer session. R3 therefore proves untuned projection survival and determinism, but NOT a complete source-backed compilation run.",
+ "original_r3_preserved_unchanged": true,
+ "reclassification_of_original_R3": {
+  "missing_source": "coder-prefix",
+  "projection_observation": "VALID",
+  "source_compilation": "PARTIAL"
+ },
+ "root_cause": "The durable CAS held the compressed coder gzip git blob (6d8a09a7) but no independently materialized object under the uncompressed extractor-input digest 8392de80\u2026 The manifest correctly names the uncompressed input; the object was simply absent.",
+ "schema": "o7.case0002.r3-erratum/v0",
+ "subject": "original R3 (artifact e7861f0c, receipt ec914b9a) \u2014 source-qualification correction"
+}

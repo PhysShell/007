@@ -1,0 +1,27 @@
+{
+ "all_three_ok": true,
+ "coder-prefix": {
+  "cas_resolvable": "OK",
+  "requested_bytes": 87564394,
+  "requested_digest": "sha256:8392de803d600b19ac8273a43b2b766951d2eaf9a9197e1d8d43e97f541fca1c",
+  "round_trip": true
+ },
+ "negative_control": "[] (empty by design; no negative-control corpus)",
+ "plane-record": {
+  "cas_resolvable": "OK",
+  "requested_bytes": 94084,
+  "requested_digest": "sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139",
+  "round_trip": true
+ },
+ "reviewer-export": {
+  "cas_resolvable": "OK",
+  "requested_bytes": 5963644,
+  "requested_digest": "sha256:ed518b334485ef5421aab0229a4e4a0dc9bc489cb78d1eba00b5eb50d286e7e8",
+  "round_trip": true
+ },
+ "schema": "o7.case0002.r3.1-availability/v0",
+ "source_selectors_sessions": [
+  "reviewer",
+  "coder"
+ ]
+}

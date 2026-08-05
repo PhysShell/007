@@ -1,0 +1,82 @@
+{
+ "files": [
+  {
+   "bytes": 2265,
+   "path": "derived-manifest.actual.json",
+   "sha256": "3bb04ee265bf6292d584428d01ed0827c0423bafb3922863d693bdf2fa128a56"
+  },
+  {
+   "bytes": 4237924,
+   "path": "derived/coder.jsonl",
+   "sha256": "56a294f8e8e83d46e8935ba5556d67d06b793e476ec906ed07786277a87f21a9"
+  },
+  {
+   "bytes": 1101185,
+   "path": "derived/reviewer.jsonl",
+   "sha256": "374bbac69d810ed034164d842050b28865f260ad8856f81ab550be5af01539ff"
+  },
+  {
+   "bytes": 15484,
+   "path": "projection-comparison.json",
+   "sha256": "160d145c9cb250e878d036d0c7892835af62d762461abe63d5843eb97a53c4c3"
+  },
+  {
+   "bytes": 10046,
+   "path": "report.json",
+   "sha256": "7f72133abc88ff88873c9d5dea1139535ff6583baee5e96b74ed7b0e4aeafba6"
+  },
+  {
+   "bytes": 4334,
+   "path": "report.md",
+   "sha256": "3631d7276038c852de1273b77ca902f4ba152e30b26fce535583a1bd0228c598"
+  },
+  {
+   "bytes": 10903,
+   "path": "tasks/case-0002-assess-change-impact-on-oracle-topology/context.json",
+   "sha256": "eec21faee941a2f086762148cb838e353c5c74861d327272b6f7bdf9fed2bdc8"
+  },
+  {
+   "bytes": 6820,
+   "path": "tasks/case-0002-assess-change-impact-on-oracle-topology/context.md",
+   "sha256": "2244806ac463708ffd604b57b4fadaa6f734720d81c7352f50ed61f7bb04ae6a"
+  },
+  {
+   "bytes": 1745,
+   "path": "tasks/case-0002-assess-change-impact-on-oracle-topology/context.meta.json",
+   "sha256": "02bfb0bd5e919c2e628013638cbf205a4eb9a4ada44227687e2aedebb385ab0d"
+  },
+  {
+   "bytes": 11675,
+   "path": "tasks/case-0002-audit-r21-evidence-provenance/context.json",
+   "sha256": "ba8b0e8f6d2732a3b1e86cff7c302b522291b0a73cf05b122c601d581b00718d"
+  },
+  {
+   "bytes": 7408,
+   "path": "tasks/case-0002-audit-r21-evidence-provenance/context.md",
+   "sha256": "55b97194bc4fae87374202a32cf0aff4963982459fd8e8da2ecb6784f5179467"
+  },
+  {
+   "bytes": 1737,
+   "path": "tasks/case-0002-audit-r21-evidence-provenance/context.meta.json",
+   "sha256": "6ec7b2ea375379c9f42ae33bf9360a59849dbca4b47f92267a2169febc5ae54d"
+  },
+  {
+   "bytes": 8520,
+   "path": "tasks/case-0002-resume-product-integration/context.json",
+   "sha256": "7c4003679e047e5f333ade9b905d9056ad42ba6bc5857dfe1a909d2ba5ef7fdf"
+  },
+  {
+   "bytes": 5376,
+   "path": "tasks/case-0002-resume-product-integration/context.md",
+   "sha256": "63cff6423a60a93116aedbcc0bd936af5fa82ae2002483a8b1f927b0b7cd4425"
+  },
+  {
+   "bytes": 1732,
+   "path": "tasks/case-0002-resume-product-integration/context.meta.json",
+   "sha256": "507208143f2bbee176cb4f70268b9dd4c7b8218e9c04dd40345f93be57843852"
+  }
+ ],
+ "note": "Complete Run 1 inventory incl both derived/*.jsonl digests (bodies are private CAS objects, not committed).",
+ "run": 1,
+ "schema": "o7.case0002.r3.1-output-tree-manifest/v0"
+}

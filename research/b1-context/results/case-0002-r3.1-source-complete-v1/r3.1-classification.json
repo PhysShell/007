@@ -1,0 +1,64 @@
+{
+ "axes": {
+  "determinism": "DETERMINISTIC",
+  "evaluation": "UNAVAILABLE_UNDER_V0",
+  "generation": "PASS",
+  "overall_observation": "UNTUNED_PROJECTION_SURVIVED__SOURCE_COMPILATION_PASS__EVALUATION_UNAVAILABLE",
+  "projection": "SURVIVED_UNTUNED",
+  "source_compilation": "PASS",
+  "task_dependence": "OBSERVED_UNDER_V0_TWO_TASK_LIMIT"
+ },
+ "derived_sessions": [
+  "reviewer",
+  "coder"
+ ],
+ "determinism": {
+  "all_corresponding_bytes_identical": true,
+  "file_count": 15,
+  "same_relative_file_set": true,
+  "verdict": "DETERMINISTIC"
+ },
+ "deterministic_compilation_pipeline": "PASS",
+ "development_result": "PARTIAL",
+ "fixture": "case-0002",
+ "input_digests": {
+  "coder-prefix": "OK",
+  "plane-record": "OK",
+  "reviewer-export": "OK"
+ },
+ "not_done": [
+  "no expectation",
+  "no remediation",
+  "no tool/schema/fixture/selector/evaluation change"
+ ],
+ "per_task": [
+  {
+   "evaluation_null": true,
+   "selected": 6,
+   "task_id": "case-0002-resume-product-integration",
+   "valid": true
+  },
+  {
+   "evaluation_null": true,
+   "selected": 10,
+   "task_id": "case-0002-audit-r21-evidence-provenance",
+   "valid": true
+  },
+  {
+   "evaluation_null": true,
+   "selected": 9,
+   "task_id": "case-0002-assess-change-impact-on-oracle-topology",
+   "valid": true
+  }
+ ],
+ "registry": "tasks-v1.yaml",
+ "schema": "o7.case0002.r3.1-classification/v0",
+ "static_v0_limitations_not_fixed": [
+  "first-two-summaries task-dependence",
+  "budget-v0.yaml unread",
+  "required_relation_paths unevaluated",
+  "forbidden_stale_as_current unevaluated",
+  "no negative-control arm"
+ ],
+ "task_dependence_v0_limit": "v0 compares only resume vs audit; the third task (assess-change-impact) is projected+valid but excluded and NOT generalized."
+}
