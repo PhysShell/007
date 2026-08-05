@@ -127,8 +127,11 @@ pub struct SandboxPolicy {
 `checks.<system>.sandbox-vm-preflight`: NixOS VM-тест, который **реально
 упражняет**, а не читает конфиг:
 
-- создание Landlock ruleset со ВСЕМИ access-битами, которые нужны Vertical B
-  (включая `TRUNCATE`, ABI ≥ 3, и net-биты ABI 4);
+- создание Landlock ruleset со всеми FILESYSTEM access-битами, которые нужны
+  Vertical B (включая `TRUNCATE`, т.е. ABI ≥ 3). Landlock network (ABI 4)
+  НЕ требуется и НЕ проверяется: нормативный механизм запрета IPv4/IPv6 в
+  SB-A1 — seccomp argument filter на `socket()`, работающий независимо от
+  Landlock net support;
 - установку seccomp-фильтра;
 - cgroup v2: create / move / `cgroup.kill` / drain / remove с delegated
   ownership;
@@ -155,7 +158,8 @@ pub struct SandboxPolicy {
 ## Definition of Done
 
 - `allow_read` в policy + digest + валидация + fixtures;
-- три RED-оракула соответствуют конвенции матрицы (конкретный errno + эффект);
+- оракулы §2 (два RED negative + один GREEN positive control) соответствуют
+  конвенции матрицы (конкретный errno + эффект);
 - canary не появляется ни в одном артефакте прогонов;
 - комментарии frame.rs/request.rs соответствуют реальной хореографии;
 - решения из §4 записаны в `sandboy-boundary.md`;

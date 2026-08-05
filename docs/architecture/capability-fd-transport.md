@@ -39,6 +39,16 @@ numbers*, never the parent's live descriptor numbers:
   deliberately absent. Optional capabilities, if a real consumer ever needs
   them, arrive as a future manifest version — not as improvised semantics
   during implementation.
+- **Entry↔descriptor correspondence is canonical, never positional guesswork.**
+  `name` is unique (as is `target_fd`), bounded in length and charset
+  (`[a-z0-9_.-]`, ≤ 64 bytes). The manifest is a set; its canonical order —
+  the order that enters the digest, the CAP_GRANT frame, and the SCM_RIGHTS
+  array — is **by `target_fd`, then by `name`**. The CAP_GRANT frame carries
+  the canonical ordered entry list; the *n*-th received fd corresponds to the
+  *n*-th entry. The receiver verifies the frame's entry list equals the
+  canonical manifest exactly — any deviation (order, count, names) fails
+  closed. Without this, two correct components can map `[fdA, fdB]` onto two
+  capabilities differently and grant the right descriptor to the wrong name.
 - An empty manifest selects the capability-free choreography (see Decision 3).
 
 ## Decision 2 — two SCM_RIGHTS hops; descriptors exist in the child only after verification
@@ -70,7 +80,7 @@ parent  ── LaunchRequest (manifest, no fds) ──▶ monitor ── fork �
 child   installs confinement, self-checks
 monitor ── SandboxReport ──▶ parent            parent verifies      [barrier 1]
 parent  ── CAP_GRANT + SCM_RIGHTS ──▶ monitor ── forward ──▶ child
-child   validates, stages, maps, scrubs, proves exact fd table, WAITS
+child   validates, stages, maps, scrubs, proves survivor set, WAITS
 monitor ── CapabilityEvidence ──▶ parent       parent verifies      [barrier 2]
 parent  ── EXEC ──▶ monitor ── forward ──▶ child ── closes rendezvous, execs target
 ```
@@ -108,6 +118,28 @@ automatic retry/downgrade v2→v1 → prohibited
 There is no "fallback" for a capability-bearing launch: a launch that declared
 capabilities either runs under v2 with every barrier intact, or does not run.
 
+**Version selection happens out-of-band, before the backend reads anything.**
+The socketpair's type must be chosen before the backend can parse a
+LaunchRequest, so the version cannot be discovered from the manifest alone.
+The binding is fixed as follows — one decision, not an implementation choice:
+
+```
+o7-worker:  selects the version from its local launch spec
+            creates the socketpair of the matching type
+            launches the backend with --protocol-version 1|2 on argv
+
+backend,    argv protocol version
+pre-fork,   SO_TYPE of the stdin socket (STREAM for v1, SEQPACKET for v2)
+verifies:   the version field of the first frame
+            manifest emptiness (empty ⇔ v1)
+
+any mismatch among the four → fail closed before fork
+```
+
+(A version number on argv does not violate Decision 3 of
+`sandboy-boundary.md` — that decision keeps *descriptor numbers and target
+argv/env* off `/proc`-visible argv; a public protocol version is neither.)
+
 **v2 transport is `AF_UNIX + SOCK_SEQPACKET + SOCK_CLOEXEC`** — on both the
 parent↔monitor control socket and the monitor↔child rendezvous socketpair.
 SOCK_STREAM preserves no message boundaries, so "a frame without its expected
@@ -130,7 +162,9 @@ kernel assigned at SCM_RIGHTS receipt. The mapping is contractual:
 2. **Scrub**: `close_range(3, ~0, CLOSE_RANGE_CLOEXEC)` marks everything;
 3. **Map**: `dup3(staged, target_fd, 0)` for each manifest entry — flags 0
    clears CLOEXEC on exactly the declared targets;
-4. staging descriptors stay CLOEXEC and die at exec (or are closed explicitly);
+4. every received/staging descriptor is **explicitly closed** after its
+   successful `dup3` — not left to die at exec. CLOEXEC remains the safety
+   net, not the mechanism;
 5. `exec`.
 
 Reserved ranges, disjoint by construction:
@@ -156,25 +190,51 @@ a distinct artifact with its own binding:
 CapabilityEvidence:
   manifest_digest        (must equal the manifest inside launch_spec_digest)
   granted                (name, target_fd, kind — as mapped, per entry)
-  fd_table_proof         (exact-set oracle, below)
+  fd_classification      (pre-EXEC survivor-set proof, Decision 6)
   scrub_status
 ```
 
 Conflating "filesystem: enforced" with "fd 3 was granted correctly" would weld
 two trust statements into one model; verifiers need to reject them independently.
 
-## Decision 6 — the fd-table oracle proves an exact set, not absence of known-bad
+## Decision 6 — two fd-table proofs: survivor set before EXEC, exact set inside the target
 
-After mapping and scrub (probed via `/proc/self/fd`, excluding the enumeration
-descriptor by identity, as the existing `fd_probe` already does):
+A single "exact set == {0,1,2} ∪ targets" proof *before* EXEC is physically
+impossible: at that moment the child must still hold the rendezvous fd (to
+receive EXEC) and is mid-conversation with the monitor. The proof is therefore
+split into two statements, each honest about what it can see:
+
+**Pre-EXEC (inside CapabilityEvidence)** — a *classification* proof over
+`/proc/self/fd` (excluding the enumeration descriptor by identity, as the
+existing `fd_probe` already does). Every open descriptor falls into exactly one
+class, and the classes are exhaustive:
+
+```
+survivor_fds     = all fds with FD_CLOEXEC cleared
+                 == {0, 1, 2} ∪ declared_target_fds
+internal_fds     = the exact known rendezvous/control descriptors,
+                   every one with FD_CLOEXEC set
+unclassified_fds = ∅
+```
+
+Received/staging descriptors do not appear here at all — Decision 4 closes
+them explicitly after mapping.
+
+**Post-exec (acceptance test, target side)** — the target-side `fd_probe`
+proves the actual table the target woke up with:
 
 ```
 actual_fds == {0, 1, 2} ∪ declared_target_fds
 ```
 
 Additionally: stdio present with expected types; every capability fd has
-FD_CLOEXEC **cleared** and the expected socket domain/type; nothing else exists.
-Extend `fd_probe` — do not write a third probe.
+FD_CLOEXEC **cleared** and the expected socket domain/type; nothing else
+exists. Extend `fd_probe` — do not write a third probe.
+
+The two proofs answer different questions — "will exactly the declared set
+survive exec?" (runtime evidence, verifiable by the parent before EXEC) and
+"did exactly the declared set survive exec?" (acceptance oracle). Both are
+required; neither substitutes for the other.
 
 ## Adversarial matrix (the implementing PR turns these into tests)
 
@@ -186,6 +246,11 @@ Extend `fd_probe` — do not write a third probe.
   datagrams (`MSG_TRUNC`/`MSG_CTRUNC`);
 - a non-empty manifest against a v1-only backend fails closed before launch;
   no v2→v1 downgrade path exists to exercise;
+- version-binding mismatches: argv `--protocol-version` vs stdin `SO_TYPE` vs
+  first-frame version vs manifest emptiness — each pairwise mismatch fails
+  closed before fork;
+- a CAP_GRANT entry list deviating from the canonical manifest order (or
+  count, or names) fails closed — no positional reinterpretation;
 - CAP_GRANT before sandbox authorization; duplicate CAP_GRANT; EXEC before
   CapabilityReady; duplicate EXEC; EOF at each barrier;
 - failure on the N-th mapping leaves no earlier capability reachable;

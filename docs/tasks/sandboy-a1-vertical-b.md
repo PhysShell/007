@@ -13,12 +13,13 @@ seccomp + cgroup v2), который переводит существующую
 GREEN. Не платформа, не gateway, не capability runtime.
 
 Пререквизит: этап SB-A0 (`docs/tasks/sandboy-a0-contract-red.md`) принят — policy
-содержит `allow_read`, read/exec-оракулы существуют и RED, VM preflight зелёный.
+содержит `allow_read`, read/exec-оракулы существуют (два RED negative + один
+GREEN positive control), VM preflight зелёный.
 
 Контекст, который ОБЯЗАТЕЛЬНО прочитать до изменений:
 
 - `docs/architecture/sandboy-boundary.md` — все шесть замороженных Decision +
-  дописанные в A0 решения; RED-контракт Vertical B;
+  дописанные в SB-A0 решения; RED-контракт Vertical B;
 - `crates/o7-sandbox-protocol/` — протокол, который backend обязан говорить;
 - `crates/o7-worker/` — seam, control-socket хореография, verify_report,
   fake backend (`sandboy_fake`), harness-бинари;
@@ -118,7 +119,11 @@ serde/serde_json. Без tokio (backend — маленький синхронн�
     уже заявлено в ADR);
 - `AF_UNIX` socket() остаётся разрешён;
 - неизвестное имя syscall в конфигурации — ошибка, не skip (конвенция спайка
-  для explicit-списков).
+  для explicit-списков);
+- **Landlock network (ABI 4) не используется и не требуется**: seccomp
+  argument filter — единственный нормативный механизм запрета inet-сокетов
+  в SB-A1. Landlock-net как второй слой defense-in-depth — возможное будущее
+  расширение, не часть этого этапа.
 
 ### 5. cgroup v2 + lifecycle
 
