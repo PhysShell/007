@@ -1,0 +1,136 @@
+schema: o7.b1.evaluation-contract/v1
+contract_id: o7.b1.evaluation-contract/v1
+fixture:
+  logical_id: case-0002
+  registry_filename: tasks-v1.yaml
+  gold_state_sha256: sha256:7e00505b25a7f0d815556ef6cc9db710b1ae0d3144e6f91a0c4eedcaa733c147
+  note: Relation targets below are derived from THIS frozen gold-state graph, never from any observed
+    projection output.
+provenance_role:
+  case_role: development
+  designed_after_observing_case_0002: true
+  holdout_evidence: false
+  generalization_claim_allowed: false
+arms:
+  full_derived:
+    requirement: required
+  projection:
+    requirement: required
+  negative_control:
+    requirement: optional
+arm_semantics:
+  missing_required_arm: UNAVAILABLE
+  missing_optional_arm: NOT_APPLICABLE
+  non_applicable_metrics: null (never zero)
+  synthetic_negative_control: forbidden
+  gold_state: oracle/reference, NOT an evaluated arm
+budget:
+  authoritative_artifact: budget-v0.yaml
+  budget_sha256: sha256:d293cdf19bb0be792bc962ea58f0d601cbd8a83832354171d6afc29eacceedf4
+  byte_budget: 20000
+  record_budget: 32
+  unit: utf8_bytes+records
+  counted_representation_UNRESOLVED: v0 selection counts per-record canonical-JSON bytes+1 (newline) for
+    the byte budget and record count = number of selected records; whether the byte budget should instead
+    count the rendered context.json total is an UNRESOLVED design issue carried to R4B, not invented here.
+tasks:
+  case-0002-audit-r21-evidence-provenance:
+    questions_file: questions-audit-v0.yaml
+    questions_sha256: sha256:e89769b6df78fd8fa1cfa52d3de7acfd6909d91df4da788b2d56c4fc19909501
+    relation_requirements:
+    - question: qa3-superseded
+      from: obs-round0-closed
+      kind: supersedes
+      direction: outgoing
+      depth: 1
+      match: all
+      endpoint_policy: edge_witness
+      gold_derived_targets:
+      - obs-plane-record-not-frozen-v6
+      target_status: superseded
+    - question: qa3-superseded
+      from: obs-reviewer-durability-resolved
+      kind: supersedes
+      direction: outgoing
+      depth: 1
+      match: all
+      endpoint_policy: edge_witness
+      gold_derived_targets:
+      - obs-reviewer-durability-unresolved-v6
+      target_status: superseded
+    - question: qa3-superseded
+      from: obs-profiler-fail-closed
+      kind: supersedes
+      direction: outgoing
+      depth: 1
+      match: all
+      endpoint_policy: edge_witness
+      gold_derived_targets:
+      - obs-profiler-prior-defect
+      target_status: superseded
+    forbidden_stale_as_current:
+    - question: qa4-wrong-agent-claims
+      ids:
+      - obs-reviewer-acceptance-claim
+      - obs-plane-record-not-frozen-v6
+      - obs-reviewer-durability-unresolved-v6
+  case-0002-assess-change-impact-on-oracle-topology:
+    questions_file: questions-impact-v0.yaml
+    questions_sha256: sha256:f41bdd036062165aefb6ec40b0b8afa18f7ac2f593730b0ee5a51e0db3869ebc
+    relation_requirements:
+    - question: qi1-dependencies
+      from: obs-oracle-topology-constraint
+      kind: depends_on
+      direction: outgoing
+      depth: 1
+      match: all
+      endpoint_policy: all_current_targets_materialized
+      gold_derived_targets:
+      - obs-output-path-dependence
+      - obs-repo-authority-04108e7
+      - obs-window-invariant
+      target_status: current
+  case-0002-resume-product-integration:
+    questions_file: questions-resume-v0.yaml
+    questions_sha256: sha256:0478856382b1a0ac7f4fbb78a532041e9a770d3d14337b3a790181c27a706936
+    relation_requirements: []
+    forbidden_stale_as_current:
+    - question: qr2-blocking
+      ids:
+      - obs-plane-record-not-frozen-v6
+task_dependence:
+  all_unordered_pairs: true
+  pair_expectations:
+    resume__audit:
+      expected_shape: materially_different
+      rationale: product-resumption and evidence-audit intents require different state
+    audit__impact:
+      expected_shape: left_strict_superset
+      left: case-0002-audit-r21-evidence-provenance
+      right: case-0002-assess-change-impact-on-oracle-topology
+      rationale: audit includes the oracle-impact core plus supersession/audit material
+    resume__impact:
+      expected_shape: materially_different
+      rationale: product state and oracle-impact analysis are distinct intents
+  not_frozen: exact selected IDs, exact counts and exact symmetric differences are NOT frozen (intent-level
+    shapes only)
+shape_semantics:
+  materially_different: selected sets differ and are not equal
+  left_strict_superset: left contains every right item and at least one additional item
+  unknown_shape: fail closed
+outcome_axes:
+- source_compilation
+- projection_validity
+- question_observation_support
+- relation_support
+- stale_state_safety
+- task_dependence
+- negative_control_diagnostics
+overall_rules:
+  PASS: every required family applicable and passes
+  FAIL: at least one applicable required gate fails
+  UNAVAILABLE: a required input or arm cannot be constructed
+  absent_optional_negative_control_does_not_prevent_PASS: true
+  optional_diagnostics_cannot_upgrade_a_failing_required_gate: true
+  generation_success_is_separate_from_evaluation_PASS: true
+  PARTIAL: NOT used in evaluation v1 (preserved only as a legacy report-v1 field)

@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://physshell.dev/007/research/b1-context/schema/evaluation-contract-v1.schema.json",
+  "title": "o7.b1.evaluation-contract/v1 (+ o7.b1.evaluation/v1 output)",
+  "description": "Design-only (R4A). Schematizes BOTH the per-fixture evaluation CONTRACT instance (o7.b1.evaluation-contract/v1) and the standalone evaluator OUTPUT (o7.b1.evaluation/v1). No evaluator code is defined here. Structural, deterministic evaluation only: never semantic answerability, never an LLM judge. Does not modify state-observables/v0 or selector/v0.",
+  "oneOf": [
+    {"$ref": "#/$defs/contract"},
+    {"$ref": "#/$defs/evaluation_output"}
+  ],
+  "$defs": {
+    "arm_requirement": {"type": "string", "enum": ["required", "optional"]},
+    "arm_availability": {
+      "type": "string",
+      "enum": ["AVAILABLE", "UNAVAILABLE", "NOT_APPLICABLE"],
+      "description": "AVAILABLE: arm constructed. UNAVAILABLE: a REQUIRED arm could not be constructed. NOT_APPLICABLE: an OPTIONAL arm's source is legitimately absent (never zero, never PARTIAL, never a ceremonial PASS)."
+    },
+    "endpoint_policy": {
+      "type": "string",
+      "enum": ["edge_witness", "all_current_targets_materialized"],
+      "description": "edge_witness: every matching EXACT gold edge must appear in the projected relation set; a stale/ineligible target may remain unselected but must exist in the gold state. all_current_targets_materialized: every matching CURRENT/PENDING target must both appear as an exact edge AND be selected as an observation. An edge absent from the gold state is fabricated -> fail closed. A relation-only reference to a stale observation does NOT count as presenting it as current. Depth is exactly 1; no transitive/multi-hop closure in v1."
+    },
+    "pair_shape": {
+      "type": "string",
+      "enum": ["materially_different", "left_strict_superset"],
+      "description": "materially_different: selected sets differ and are not equal. left_strict_superset: left contains every right item and at least one more. Unknown shape names fail closed."
+    },
+    "axis_value": {
+      "type": "string",
+      "enum": ["PASS", "FAIL", "UNAVAILABLE", "NOT_APPLICABLE"]
+    },
+    "overall": {
+      "type": "string",
+      "enum": ["PASS", "FAIL", "UNAVAILABLE"],
+      "description": "PARTIAL is intentionally NOT a value in evaluation v1."
+    },
+    "relation_requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question", "from", "kind", "direction", "depth", "match", "endpoint_policy", "gold_derived_targets"],
+      "properties": {
+        "question": {"type": "string"},
+        "from": {"type": "string", "pattern": "^obs-[a-z0-9-]+$"},
+        "kind": {"type": "string", "enum": ["supports", "derived_from", "supersedes", "contradicts", "blocks", "depends_on", "part_of"]},
+        "direction": {"const": "outgoing"},
+        "depth": {"const": 1},
+        "match": {"const": "all"},
+        "endpoint_policy": {"$ref": "#/$defs/endpoint_policy"},
+        "gold_derived_targets": {
+          "type": "array", "items": {"type": "string", "pattern": "^obs-[a-z0-9-]+$"},
+          "description": "Exact edge targets read from the FROZEN gold-state relation graph — never from any observed projection output."
+        },
+        "target_status": {"type": "string"}
+      }
+    },
+    "contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "contract_id", "fixture", "provenance_role", "arms", "arm_semantics", "budget", "tasks", "task_dependence", "shape_semantics", "outcome_axes", "overall_rules"],
+      "properties": {
+        "schema": {"const": "o7.b1.evaluation-contract/v1"},
+        "contract_id": {"const": "o7.b1.evaluation-contract/v1"},
+        "fixture": {"type": "object"},
+        "provenance_role": {
+          "type": "object",
+          "required": ["case_role", "designed_after_observing_case_0002", "holdout_evidence", "generalization_claim_allowed"],
+          "properties": {
+            "case_role": {"type": "string"},
+            "designed_after_observing_case_0002": {"type": "boolean"},
+            "holdout_evidence": {"const": false},
+            "generalization_claim_allowed": {"const": false}
+          }
+        },
+        "arms": {
+          "type": "object", "additionalProperties": false,
+          "required": ["full_derived", "projection", "negative_control"],
+          "properties": {
+            "full_derived": {"type": "object", "properties": {"requirement": {"const": "required"}}},
+            "projection": {"type": "object", "properties": {"requirement": {"const": "required"}}},
+            "negative_control": {"type": "object", "properties": {"requirement": {"const": "optional"}}}
+          }
+        },
+        "arm_semantics": {"type": "object"},
+        "budget": {"type": "object", "required": ["authoritative_artifact", "budget_sha256", "byte_budget", "record_budget", "unit"]},
+        "tasks": {"type": "object", "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "relation_requirements": {"type": "array", "items": {"$ref": "#/$defs/relation_requirement"}},
+            "forbidden_stale_as_current": {"type": "array", "items": {
+              "type": "object", "required": ["question", "ids"],
+              "properties": {"question": {"type": "string"}, "ids": {"type": "array", "items": {"type": "string"}}}}}
+          }
+        }},
+        "task_dependence": {"type": "object", "required": ["all_unordered_pairs", "pair_expectations"]},
+        "shape_semantics": {"type": "object"},
+        "outcome_axes": {"type": "array", "items": {"type": "string"}},
+        "overall_rules": {"type": "object"}
+      }
+    },
+    "evaluation_output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "contract_id", "contract_digest", "evaluator_impl_digest", "inputs", "arms", "source_compilation", "tasks", "task_dependence_matrix", "budget", "outcome_axes", "overall", "metric_semantics"],
+      "properties": {
+        "schema": {"const": "o7.b1.evaluation/v1"},
+        "contract_id": {"const": "o7.b1.evaluation-contract/v1"},
+        "contract_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "evaluator_impl_digest": {
+          "type": "string",
+          "description": "sha256 of the standalone evaluator implementation. PLACEHOLDER in R4A design; filled by R4B."
+        },
+        "inputs": {
+          "type": "object",
+          "description": "Exact digests of every frozen input consumed. Evaluation v1 is computable from these WITHOUT rerunning extraction or projection.",
+          "required": ["gold_state_digest", "report_digest", "projection_comparison_digest", "budget_digest"],
+          "properties": {
+            "gold_state_digest": {"type": "string"},
+            "report_digest": {"type": "string"},
+            "projection_comparison_digest": {"type": "string"},
+            "registry_digest": {"type": "string"},
+            "budget_digest": {"type": "string"}
+          }
+        },
+        "arms": {
+          "type": "object", "additionalProperties": false,
+          "required": ["full_derived", "projection", "negative_control"],
+          "properties": {
+            "full_derived": {"$ref": "#/$defs/arm_availability"},
+            "projection": {"$ref": "#/$defs/arm_availability"},
+            "negative_control": {"$ref": "#/$defs/arm_availability"}
+          }
+        },
+        "source_compilation": {
+          "type": "object",
+          "properties": {
+            "requested_source_availability": {"type": "object"},
+            "derived_session_completeness": {"type": "object"},
+            "extractor_identity": {"type": "object"},
+            "source_and_derived_digests": {"type": "object"}
+          }
+        },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["task_id", "question_observation_support", "relation_support", "projection_validity", "stale_state_checks"],
+            "properties": {
+              "task_id": {"type": "string"},
+              "question_observation_support": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["question_id", "required_observation_ids", "selected_required_ids", "missing_required_ids", "required_observation_coverage"],
+                  "properties": {
+                    "question_id": {"type": "string"},
+                    "required_observation_ids": {"type": "array"},
+                    "selected_required_ids": {"type": "array"},
+                    "missing_required_ids": {"type": "array"},
+                    "required_observation_coverage": {"type": "number", "minimum": 0, "maximum": 1},
+                    "fully_supported": {"type": "boolean"}
+                  }
+                }
+              },
+              "relation_support": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["question_id", "from", "kind", "endpoint_policy", "gold_edges", "present_edges", "satisfied"],
+                  "properties": {
+                    "question_id": {"type": "string"},
+                    "from": {"type": "string"},
+                    "kind": {"type": "string"},
+                    "endpoint_policy": {"$ref": "#/$defs/endpoint_policy"},
+                    "gold_edges": {"type": "array"},
+                    "present_edges": {"type": "array"},
+                    "fabricated_edges": {"type": "array"},
+                    "materialized_targets": {"type": "array"},
+                    "unmaterialized_current_targets": {"type": "array"},
+                    "satisfied": {"type": "boolean"}
+                  }
+                }
+              },
+              "projection_validity": {"type": "object"},
+              "stale_state_checks": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["forbidden_id", "classification"],
+                  "properties": {
+                    "forbidden_id": {"type": "string"},
+                    "classification": {
+                      "type": "string",
+                      "enum": ["absent", "stale_relation_endpoint_only", "selected_with_stale_status", "selected_as_current_or_pending"],
+                      "description": "Only selected_as_current_or_pending is a stale-state-safety FAILURE. A relation-only stale reference (stale_relation_endpoint_only) is allowed."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "task_dependence_matrix": {
+          "type": "array",
+          "description": "Every UNORDERED task pair (not only the first two).",
+          "items": {
+            "type": "object",
+            "required": ["pair", "set_equality", "symmetric_difference_count", "context_digest_equality", "difference_source", "expected_shape", "shape_satisfied"],
+            "properties": {
+              "pair": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 2},
+              "set_equality": {"type": "boolean"},
+              "left_superset_of_right": {"type": "boolean"},
+              "right_superset_of_left": {"type": "boolean"},
+              "symmetric_difference_count": {"type": "integer"},
+              "context_digest_equality": {"type": "boolean"},
+              "difference_source": {"type": "string", "enum": ["selector_relevance", "budget_only", "none"]},
+              "expected_shape": {"$ref": "#/$defs/pair_shape"},
+              "shape_satisfied": {"type": "boolean"}
+            }
+          }
+        },
+        "budget": {"type": "object", "required": ["budget_digest", "byte_budget", "record_budget", "unit"]},
+        "outcome_axes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source_compilation", "projection_validity", "question_observation_support", "relation_support", "stale_state_safety", "task_dependence", "negative_control_diagnostics"],
+          "properties": {
+            "source_compilation": {"$ref": "#/$defs/axis_value"},
+            "projection_validity": {"$ref": "#/$defs/axis_value"},
+            "question_observation_support": {"$ref": "#/$defs/axis_value"},
+            "relation_support": {"$ref": "#/$defs/axis_value"},
+            "stale_state_safety": {"$ref": "#/$defs/axis_value"},
+            "task_dependence": {"$ref": "#/$defs/axis_value"},
+            "negative_control_diagnostics": {"$ref": "#/$defs/axis_value"}
+          }
+        },
+        "overall": {"$ref": "#/$defs/overall"},
+        "metric_semantics": {
+          "type": "object",
+          "description": "Explicit prose for every metric. Structural metrics MUST be described as structural, never as semantic recall or answerability."
+        }
+      }
+    }
+  }
+}
