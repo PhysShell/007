@@ -1,0 +1,18 @@
+schema: o7.b1.task/v0
+task_id: case-0002-resume-product-integration
+fixture_id: case-0002
+statement: 'Resume product integration: restore the active state — what is done, what blocks, and the
+  next permitted step.'
+selectors:
+  required_topics:
+  - product-integration
+  preferred_topics:
+  - round-0
+  excluded_topics: []
+  required_kinds:
+  - status
+  - next_action
+  - decision
+  anchor_observation_ids: []
+  anchor_rationale: {}
+cutoff: case-0002 Round 0 CLOSED

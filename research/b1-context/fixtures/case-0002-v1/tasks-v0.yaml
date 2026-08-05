@@ -1,0 +1,9 @@
+schema: o7.b1.fixture-tasks/v0
+fixture_id: case-0002-v1
+tasks:
+- task_file: task-resume-v0.yaml
+  questions_file: questions-resume-v0.yaml
+- task_file: task-audit-v1.yaml
+  questions_file: questions-audit-v0.yaml
+- task_file: task-impact-v0.yaml
+  questions_file: questions-impact-v0.yaml

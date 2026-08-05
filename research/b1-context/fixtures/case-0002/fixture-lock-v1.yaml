@@ -1,0 +1,42 @@
+schema: o7.b1.fixture-lock/v1
+fixture_id: case-0002
+supersedes: fixture-lock-v0.yaml
+amendment_policy: v0 preserved immutable; v1 is a fixture-only correction. No tool/schema/selector change.
+adjudicator: vps-agent baseline-adjudication round (controller-directed 2026-08-05)
+exact_change:
+  file: task-audit-*.yaml
+  field: selectors.required_kinds
+  v0:
+  - evidence
+  - decision
+  - status
+  v1:
+  - evidence
+  - decision
+  reason: Case A / FIXTURE_ORACLE_DEFECT — no frozen audit question requires a status observation.
+superseded_v0_identities:
+  task-audit-v0.yaml: sha256:0008154f3ddb122d2ee71e95df9896821e3965ccb0ef9e82b2dab5ec50ad3f68
+  tasks-v0.yaml: sha256:6a24b04061d410f43b7a201f9c05d4e8768f48688a13b69458d7dc36cdab4c88
+  fixture-lock-v0.yaml: sha256:35f5c07013a8ae103c188e4d0e701fdd69e166ccd44bc9a5a90b53ea7f883f0e
+v1_artifacts:
+  task-audit-v1.yaml: sha256:2bb14a3149277e3da3a56e779d02e3ab8fadf43be588694eac20a9c14669c2a7
+  tasks-v1.yaml: sha256:067c1c868b7f192bdca14f5768c8f83893359b7bff90c8c7ceb811fcca60270a
+  adjudication-rules-v1.yaml: sha256:b6517e6c0af8c311d0d83c80a038d19115a05a3c5f7146b0f9b515dd7bf42cdc
+reused_v0_by_digest_unchanged:
+  gold-state-v0.json: sha256:7e00505b25a7f0d815556ef6cc9db710b1ae0d3144e6f91a0c4eedcaa733c147
+  manifest.yaml: sha256:c09f6f8337632f3c4dfb0db2bc12128156ce227ca9758a0d5c91c5300304586a
+  source-selectors.yaml: sha256:a7792d5c416a82a809391f06675de8803c38ac6378a2d21bca0db75965d0ccd0
+  task-resume-v0.yaml: sha256:a7ef0a7c9c0868f9bb4407f4b93c5f64e91521bdae73621065f93082418f4074
+  task-impact-v0.yaml: sha256:ed91f7b93794a1228f43404b642527e21c85a3514f6d596446f690bdf7863c40
+  questions-resume-v0.yaml: sha256:0478856382b1a0ac7f4fbb78a532041e9a770d3d14337b3a790181c27a706936
+  questions-audit-v0.yaml: sha256:e89769b6df78fd8fa1cfa52d3de7acfd6909d91df4da788b2d56c4fc19909501
+  questions-impact-v0.yaml: sha256:f41bdd036062165aefb6ec40b0b8afa18f7ac2f593730b0ee5a51e0db3869ebc
+runnable_fixture: fixtures/case-0002-v1/ (registry under the runner's hard-coded tasks-v0.yaml name, fixture_id
+  case-0002-v1; every other file byte-identical to v0 per digests above)
+confirmation_no_actual_output_used_as_answer_key: true
+implementation_unchanged:
+  commit: c8751223a3ccf970c8e3c3f3089be9748ae3d8e6
+  selector_blob: 42412fc2dd09c4f62388620cd025435957521cdb
+  pipeline_blob: 92f2d409ab2dc9f88fb9360b99a362b53b06bdb5
+  projector_blob: 24c4ffc6799a58cc2d5557da3a8104d5f6ff896e
+  project_case_blob: 576eb320561fce3deb730306ed9ca7cd10a11591

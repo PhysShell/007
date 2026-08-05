@@ -1,0 +1,156 @@
+{
+  "schema": "o7.b1.state-observables/v0",
+  "fixture_id": "case-0002",
+  "cutoff": {
+    "identity": "case-0002 Round 0 CLOSED — plane-record frozen 2026-08-05T08:52:33Z, bound to qodec metadata head 427b677",
+    "raw_source_id": "case-0002-round0-source-lock",
+    "raw_source_digest": "sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139"
+  },
+  "topic_vocabulary": [
+    "source-planes", "durability", "round-0", "measurement", "authority-model",
+    "supersession", "r21-evidence", "oracle-topology", "product-integration",
+    "reviewer-acceptance"
+  ],
+  "authority_vocabulary": [
+    "platform_capture", "deterministic_derivative", "human_confirmed",
+    "controller_or_repo_record", "agent_claim"
+  ],
+  "observations": [
+    {"observation_id": "obs-plane-coder", "kind": "evidence", "topics": ["source-planes", "measurement"],
+     "statement": "plane-coder is the Claude Code coder session, frozen by record-prefix through record 17111 (17112 records, sha256 8392de80...); the whole-file digest is unstable (append-only), so only the prefix digest is authoritative.",
+     "authority": "platform_capture", "status": "current",
+     "provenance": [{"source_id": "source-lock-v6", "source_class": "repo_record", "digest": "sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76", "source_pointer": "SOURCE-LOCK-v6.yaml#source_planes.plane-coder"}]},
+
+    {"observation_id": "obs-plane-reviewer", "kind": "evidence", "topics": ["source-planes"],
+     "statement": "plane-reviewer is the ChatGPT reviewer conversation (chatgpt-export.json, sha256 ed518b33..., conversation 6a6e220a, 2790 mapping nodes).",
+     "authority": "platform_capture", "status": "current",
+     "provenance": [{"source_id": "reviewer-export", "source_class": "raw_capture", "digest": "sha256:ed518b334485ef5421aab0229a4e4a0dc9bc489cb78d1eba00b5eb50d286e7e8"}]},
+
+    {"observation_id": "obs-source-data-origin", "kind": "evidence", "topics": ["source-planes"],
+     "statement": "The two gzip source blobs originate at qodec commit d4deceb / tree 7fbe15bd; that tree covers the two blobs and the first lock only.",
+     "authority": "controller_or_repo_record", "status": "current",
+     "provenance": [{"source_id": "source-lock-v6", "source_class": "repo_record", "digest": "sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76", "source_pointer": "SOURCE-LOCK-v6.yaml#identity.source_data_origin"}]},
+
+    {"observation_id": "obs-metadata-head", "kind": "decision", "topics": ["round-0"],
+     "statement": "The authoritative external metadata head is qodec 427b677 (tree 125f8c4, docs-only forward from 3973192); the authoritative lock at that head is SOURCE-LOCK-v6.yaml.",
+     "authority": "controller_or_repo_record", "status": "current",
+     "provenance": [{"source_id": "round0-manifest", "source_class": "fixture_metadata", "source_pointer": "case-0002-round0-source-lock.yaml#metadata_binding"}]},
+
+    {"observation_id": "obs-round0-closed", "kind": "status", "topics": ["round-0", "product-integration"],
+     "statement": "Round 0 is CLOSED: plane-coder, plane-reviewer and plane-record are all FROZEN.",
+     "authority": "controller_or_repo_record", "status": "current",
+     "provenance": [{"source_id": "round0-manifest", "source_class": "fixture_metadata", "source_pointer": "case-0002-round0-source-lock.yaml#completion_state", "digest": "sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139"}]},
+
+    {"observation_id": "obs-plane-record-frozen", "kind": "evidence", "topics": ["round-0", "product-integration"],
+     "statement": "The plane-record was frozen as one coherent qodec repository-state snapshot (cutoff 2026-08-05T08:52:33Z, 120 request/response envelopes, all HTTP 200, 90 raw CAS objects) and bound externally to metadata head 427b677.",
+     "authority": "controller_or_repo_record", "status": "current",
+     "provenance": [{"source_id": "plane-record", "source_class": "repo_record", "digest": "sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139"}]},
+
+    {"observation_id": "obs-plane-record-not-frozen-v6", "kind": "status", "topics": ["round-0", "supersession"],
+     "statement": "SOURCE-LOCK-v6 recorded plane-record as NOT YET FROZEN and named it the one substantive Round 0 blocker.",
+     "authority": "controller_or_repo_record", "status": "superseded", "superseded_by": "obs-round0-closed",
+     "provenance": [{"source_id": "source-lock-v6", "source_class": "repo_record", "digest": "sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76", "source_pointer": "SOURCE-LOCK-v6.yaml#source_planes.plane-record"}]},
+
+    {"observation_id": "obs-reviewer-durability-unresolved-v6", "kind": "risk", "topics": ["durability", "supersession"],
+     "statement": "SOURCE-LOCK-v6 recorded the reviewer export as having no durable object: the working CAS was an ephemeral container directory and the export had already vanished from it; a digest attests a future copy but does not conjure one.",
+     "authority": "controller_or_repo_record", "status": "superseded", "superseded_by": "obs-reviewer-durability-resolved",
+     "provenance": [{"source_id": "source-lock-v6", "source_class": "repo_record", "digest": "sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76", "source_pointer": "SOURCE-LOCK-v6.yaml#source_planes.plane-reviewer.durability"}]},
+
+    {"observation_id": "obs-reviewer-durability-resolved", "kind": "evidence", "topics": ["durability", "round-0"],
+     "statement": "Round 0 imported the reviewer export into the durable private CAS (cas:sha256:ed518b33, 5963644 bytes, stored 0444, round-trip verified, encrypted offsite in restic/R2), resolving the durability the frozen lock had left open.",
+     "authority": "controller_or_repo_record", "status": "current",
+     "provenance": [{"source_id": "round0-manifest", "source_class": "fixture_metadata", "source_pointer": "case-0002-round0-source-lock.yaml#reviewer_plane_source", "digest": "sha256:ed518b334485ef5421aab0229a4e4a0dc9bc489cb78d1eba00b5eb50d286e7e8"}]},
+
+    {"observation_id": "obs-authority-model", "kind": "decision", "topics": ["authority-model"],
+     "statement": "The closed authority vocabulary is platform_capture / deterministic_derivative / human_confirmed / controller_or_repo_record / agent_claim. A proposed human_relayed value was withdrawn because the selector rejects agent_claim, so a sibling value would have laundered relayed agent text into projection.",
+     "authority": "controller_or_repo_record", "status": "current",
+     "provenance": [{"source_id": "source-lock-v6", "source_class": "repo_record", "digest": "sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76", "source_pointer": "SOURCE-LOCK-v6.yaml#authority_vocabulary"}]},
+
+    {"observation_id": "obs-relay-rule", "kind": "constraint", "topics": ["authority-model"],
+     "statement": "Relayed agent text stays agent_claim regardless of who pasted it; the act of forwarding is a separate human_confirmed evidence observation whose authority attaches to the fact of forwarding and to nothing inside the forwarded text. Pasting is transport, not authorship.",
+     "authority": "controller_or_repo_record", "status": "current",
+     "provenance": [{"source_id": "source-lock-v6", "source_class": "repo_record", "digest": "sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76", "source_pointer": "SOURCE-LOCK-v6.yaml#authority_rules.relayed_agent_text"}]},
+
+    {"observation_id": "obs-window-invariant", "kind": "evidence", "topics": ["measurement"],
+     "statement": "window_invariant v0 computed (not asserted) that the window blob is exactly the anchored slice of the prefix blob: exit 0, byte_identical true, every check passed, output digest 881f1b3b...",
+     "authority": "deterministic_derivative", "status": "current",
+     "provenance": [{"source_id": "source-lock-v6", "source_class": "repo_record", "digest": "sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76", "source_pointer": "SOURCE-LOCK-v6.yaml#window_invariant.result"}]},
+
+    {"observation_id": "obs-profiler-fail-closed", "kind": "decision", "topics": ["measurement"],
+     "statement": "Both JSONL tools were hardened to fail closed on unreadable input; well-formed blobs reproduced every published count byte-for-byte, so the measurement contract is unchanged.",
+     "authority": "controller_or_repo_record", "status": "current",
+     "provenance": [{"source_id": "source-lock-v6", "source_class": "repo_record", "digest": "sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76", "source_pointer": "SOURCE-LOCK-v6.yaml#fail_closed_evidence"}]},
+
+    {"observation_id": "obs-profiler-prior-defect", "kind": "evidence", "topics": ["measurement", "supersession"],
+     "statement": "Prior profiler / window-invariant implementations skipped malformed lines and reported a deliberately corrupted blob pair as passing (extracted_records 526, byte_identical true, exit 0) — a check indistinguishable from its own absence.",
+     "authority": "controller_or_repo_record", "status": "superseded", "superseded_by": "obs-profiler-fail-closed",
+     "provenance": [{"source_id": "source-lock-v6", "source_class": "repo_record", "digest": "sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76", "source_pointer": "SOURCE-LOCK-v6.yaml#fail_closed_evidence.demonstration"}]},
+
+    {"observation_id": "obs-lock-supersession-chain", "kind": "decision", "topics": ["supersession"],
+     "statement": "SOURCE-LOCK v6 supersedes v5 (which mislabelled itself revision 4, left the reviewer digest disagreement open, and listed a publication decision among Round 0 blockers); v5 superseded v4 (whose reviewer run was recorded NOT RUN); v4 superseded v3 (which bound Round 0 to a tree that does not contain it, and whose parsers skipped malformed lines).",
+     "authority": "controller_or_repo_record", "status": "current",
+     "provenance": [{"source_id": "source-lock-v6", "source_class": "repo_record", "digest": "sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76", "source_pointer": "SOURCE-LOCK-v6.yaml#supersession"}]},
+
+    {"observation_id": "obs-v3-binding-error", "kind": "evidence", "topics": ["supersession", "round-0"],
+     "statement": "A prior claim (v3, MANIFEST and README) bound Round 0 to commit d4deceb and tree 7fbe15bd, which contains only the two blobs and the first lock — binding the data honestly and the metadata not at all. Retracted in v6.",
+     "authority": "controller_or_repo_record", "status": "rejected",
+     "provenance": [{"source_id": "source-lock-v6", "source_class": "repo_record", "digest": "sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76", "source_pointer": "SOURCE-LOCK-v6.yaml#identity.v3_error_retracted"}]},
+
+    {"observation_id": "obs-reviewer-digest-disagreement", "kind": "evidence", "topics": ["measurement"],
+     "statement": "The one value that did not reproduce was the reviewer profile digest; the exact cause is the literal input path serialised into the report ('/tmp/chatgpt-export.json' vs 'chatgpt-export.json', a five-byte diff on one field), with zero differing measured values. Status CLOSED.",
+     "authority": "deterministic_derivative", "status": "current",
+     "provenance": [{"source_id": "source-lock-v6", "source_class": "repo_record", "digest": "sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76", "source_pointer": "SOURCE-LOCK-v6.yaml#reviewer_digest_disagreement"}]},
+
+    {"observation_id": "obs-output-path-dependence", "kind": "risk", "topics": ["measurement", "oracle-topology"],
+     "statement": "The profiler output embeds the literal input path, so any recorded expectation must name the path argument, not only the corpus; canonical arguments are 'chatgpt-export.json' and 'claude-session.window-r21.jsonl'. Recorded rather than fixed in this revision.",
+     "authority": "controller_or_repo_record", "status": "current",
+     "provenance": [{"source_id": "source-lock-v6", "source_class": "repo_record", "digest": "sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76", "source_pointer": "SOURCE-LOCK-v6.yaml#output_identity"}]},
+
+    {"observation_id": "obs-reviewer-window", "kind": "evidence", "topics": ["r21-evidence", "reviewer-acceptance"],
+     "statement": "The reviewer window runs from node 264366ab (review at accepted head 3ba3a38, discovery that R21 is needed) to node d5b0a463 (exact-head acceptance of evidence head 04108e7): 258 nodes, reproduced independently by both parties.",
+     "authority": "deterministic_derivative", "status": "current",
+     "provenance": [{"source_id": "source-lock-v6", "source_class": "repo_record", "digest": "sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76", "source_pointer": "SOURCE-LOCK-v6.yaml#windows.reviewer"}]},
+
+    {"observation_id": "obs-reviewer-acceptance-claim", "kind": "evidence", "topics": ["reviewer-acceptance", "r21-evidence"],
+     "statement": "The reviewer agent recorded exact-head acceptance of evidence head 04108e7. This is a relayed agent conclusion (agent_claim): advisory, authoritative only via the repository record.",
+     "authority": "agent_claim", "status": "pending",
+     "provenance": [{"source_id": "reviewer-export", "source_class": "agent_reconstruction", "digest": "sha256:ed518b334485ef5421aab0229a4e4a0dc9bc489cb78d1eba00b5eb50d286e7e8", "source_pointer": "reviewer window end node d5b0a463"}]},
+
+    {"observation_id": "obs-repo-authority-04108e7", "kind": "decision", "topics": ["r21-evidence", "product-integration", "oracle-topology"],
+     "statement": "The authoritative record of R21 acceptance is the frozen plane-record — evidence head 04108e7 with its frozen CI and evidence artifacts and PR #16 state — not the reviewer's relayed acceptance. Product head is 940c7629; PR #16 is open, draft, unmerged.",
+     "authority": "controller_or_repo_record", "status": "current",
+     "provenance": [{"source_id": "plane-record", "source_class": "repo_record", "digest": "sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139", "source_pointer": "plane-record.json#PR16+evidence_head_04108e7"}]},
+
+    {"observation_id": "obs-evidence-head-ci-empty", "kind": "evidence", "topics": ["r21-evidence", "oracle-topology"],
+     "statement": "The evidence head 04108e7 carries no CI run: check-runs 0, workflow runs 0, combined status pending — a frozen-empty result recorded from the plane-record, not inferred. Baseline 3ba3a38 and product head 940c7629 each have 11 check-runs, combined status success, 3 workflow runs.",
+     "authority": "controller_or_repo_record", "status": "current",
+     "provenance": [{"source_id": "plane-record", "source_class": "repo_record", "digest": "sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139", "source_pointer": "plane-record.json#ci_frozen"}]},
+
+    {"observation_id": "obs-next-permitted-step", "kind": "next_action", "topics": ["product-integration", "round-0"],
+     "statement": "The next permitted step is a baseline application of the current B1 v0 design to case-0002 before any improvement; schema, selector and evaluation contracts remain unfrozen and no downstream (qodec-arm, holdout) is started.",
+     "authority": "controller_or_repo_record", "status": "current",
+     "provenance": [{"source_id": "round0-manifest", "source_class": "fixture_metadata", "source_pointer": "case-0002-round0-source-lock.yaml#not_started"}]},
+
+    {"observation_id": "obs-oracle-topology-constraint", "kind": "constraint", "topics": ["oracle-topology", "r21-evidence"],
+     "statement": "The chosen R21 constraint routes against what the oracle table targets, not against what it may target, with routing derived once and the ledger asked before the verdict. The evidence chain (16 commits 3ba3a38..04108e7) freezes the preservation run, its inputs, its allowed-outcomes envelope and its comparison.",
+     "authority": "controller_or_repo_record", "status": "current",
+     "provenance": [{"source_id": "plane-record", "source_class": "repo_record", "digest": "sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139", "source_pointer": "plane-record.json#r21_evidence_material + evidence-head-chain"}]}
+  ],
+  "relations": [
+    {"kind": "supersedes", "from": "obs-round0-closed", "to": "obs-plane-record-not-frozen-v6"},
+    {"kind": "supersedes", "from": "obs-reviewer-durability-resolved", "to": "obs-reviewer-durability-unresolved-v6"},
+    {"kind": "supersedes", "from": "obs-profiler-fail-closed", "to": "obs-profiler-prior-defect"},
+    {"kind": "derived_from", "from": "obs-reviewer-durability-resolved", "to": "obs-plane-reviewer"},
+    {"kind": "part_of", "from": "obs-plane-record-frozen", "to": "obs-round0-closed"},
+    {"kind": "supports", "from": "obs-evidence-head-ci-empty", "to": "obs-repo-authority-04108e7"},
+    {"kind": "supports", "from": "obs-reviewer-window", "to": "obs-reviewer-acceptance-claim"},
+    {"kind": "supersedes", "from": "obs-repo-authority-04108e7", "to": "obs-reviewer-acceptance-claim"},
+    {"kind": "depends_on", "from": "obs-oracle-topology-constraint", "to": "obs-repo-authority-04108e7"},
+    {"kind": "depends_on", "from": "obs-oracle-topology-constraint", "to": "obs-window-invariant"},
+    {"kind": "depends_on", "from": "obs-oracle-topology-constraint", "to": "obs-output-path-dependence"},
+    {"kind": "blocks", "from": "obs-output-path-dependence", "to": "obs-oracle-topology-constraint"},
+    {"kind": "derived_from", "from": "obs-lock-supersession-chain", "to": "obs-v3-binding-error"},
+    {"kind": "supports", "from": "obs-relay-rule", "to": "obs-authority-model"},
+    {"kind": "supports", "from": "obs-repo-authority-04108e7", "to": "obs-next-permitted-step"}
+  ]
+}

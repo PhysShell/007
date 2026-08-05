@@ -1,0 +1,36 @@
+schema: o7.b1.questions/v0
+task_id: case-0002-audit-r21-evidence-provenance
+questions:
+- id: qa1-why-active
+  text: Why is the current solution considered active?
+  required_observation_ids:
+  - obs-repo-authority-04108e7
+  - obs-oracle-topology-constraint
+- id: qa2-supporting
+  text: Which records support it?
+  required_observation_ids:
+  - obs-reviewer-window
+  - obs-evidence-head-ci-empty
+- id: qa3-superseded
+  text: What is superseded?
+  required_observation_ids:
+  - obs-lock-supersession-chain
+  required_relation_paths:
+  - from: obs-round0-closed
+    kind: supersedes
+  - from: obs-reviewer-durability-resolved
+    kind: supersedes
+  - from: obs-profiler-fail-closed
+    kind: supersedes
+- id: qa4-wrong-agent-claims
+  text: Which agent claims were wrong or are not authoritative?
+  required_observation_ids:
+  - obs-repo-authority-04108e7
+  forbidden_stale_as_current:
+  - obs-reviewer-acceptance-claim
+  - obs-plane-record-not-frozen-v6
+  - obs-reviewer-durability-unresolved-v6
+- id: qa5-repo-authority
+  text: Which repository outcome is the authority?
+  required_observation_ids:
+  - obs-repo-authority-04108e7

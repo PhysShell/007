@@ -1,0 +1,44 @@
+{
+ "additional_latent_admission_note": "Running v1 also surfaced that v0 binds fixture_id to the requested dir name and hard-codes the registry filename tasks-v0.yaml; recorded as admission-plumbing for a later R2 round, not a selector gap.",
+ "all_required_kinds_satisfied": true,
+ "anchors_used": 0,
+ "byte_identical_across_runs": true,
+ "command": "python3 research/b1-context/tools/project_case.py --fixture case-0002-v1 --out <staging>",
+ "exit_codes": [
+  0,
+  0
+ ],
+ "fixture": "case-0002-v1",
+ "implementation_commit": "c8751223a3ccf970c8e3c3f3089be9748ae3d8e6",
+ "note": "run_case (full CAS-backed vertical) was NOT re-run; the negative-control EVALUATION_CONTRACT_GAP is unaffected and out of scope for this fixture-only round.",
+ "projection_comparison_cas": "cas:sha256:b16477d0edf46ac8f57b9910b9fa6f1f3953669a94b61cbde919f08a19e9fd3c",
+ "runs": 2,
+ "schema": "o7.case0002.fixture-v1-projection-receipt/v0",
+ "tasks": [
+  {
+   "anchors": 0,
+   "selected": 6,
+   "task_id": "case-0002-resume-product-integration",
+   "valid": true
+  },
+  {
+   "anchors": 0,
+   "note": "the task that failed under v0 is now valid \u2014 status removed",
+   "selected": 10,
+   "task_id": "case-0002-audit-r21-evidence-provenance",
+   "valid": true
+  },
+  {
+   "anchors": 0,
+   "selected": 9,
+   "task_id": "case-0002-assess-change-impact-on-oracle-topology",
+   "valid": true
+  }
+ ],
+ "unchanged_impl_blobs": {
+  "pipeline.py": "92f2d409ab2dc9f88fb9360b99a362b53b06bdb5",
+  "project_case.py": "576eb320561fce3deb730306ed9ca7cd10a11591",
+  "projector.py": "24c4ffc6799a58cc2d5557da3a8104d5f6ff896e",
+  "selector.py": "42412fc2dd09c4f62388620cd025435957521cdb"
+ }
+}

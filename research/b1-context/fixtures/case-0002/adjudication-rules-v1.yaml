@@ -1,0 +1,13 @@
+schema: o7.b1.adjudication-rules/v1
+fixture_id: case-0002
+supersedes: adjudication-rules-v0.yaml
+adjudicator: vps-agent baseline-adjudication round (controller-directed)
+change: Audit task required_kinds dropped the unbacked 'status'. Fixture correction, NOT a tool/schema/selector
+  change.
+case: A
+classification: FIXTURE_ORACLE_DEFECT
+source_evidence: questions-audit-v0.yaml requires kinds {constraint,decision,evidence}; none is a status
+  observation. required_kinds:'status' had no support in the frozen contract.
+no_topic_retag: Observation topics were NOT changed.
+no_answer_key: No actual baseline output used as an answer key; correction derived from the frozen questions
+  + gold state only.

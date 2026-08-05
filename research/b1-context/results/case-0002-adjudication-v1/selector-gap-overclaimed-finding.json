@@ -1,0 +1,17 @@
+{
+ "adjudication": "Case A \u2014 status is not actually required. Original v0 failure reclassified: FIXTURE_ORACLE_DEFECT.",
+ "baseline_result_affected": "classification only",
+ "claim_reviewed": "The baseline classified the project_case projection failure primarily as SELECTOR_GAP.",
+ "finding": "SELECTOR_GAP_OVERCLAIMED",
+ "result": "FIXTURE_ORACLE_DEFECT_CONFIRMED \u2014 project_case exit 0, all three tasks valid (missing_required_kinds []), 0 anchors used, byte-identical across two runs.",
+ "reviewed_baseline_head": "415bfafceca08740f150b5ecfd60260ce4f1d5e9",
+ "schema": "o7.case0002.review-finding/v0",
+ "selector_v1_needed": false,
+ "test": "Removed 'status' from the audit task required_kinds in fixture v1 (nothing else changed; topics NOT retagged). Re-ran the UNCHANGED selector v0.",
+ "top_level_baseline_status": "BASELINE_ADMISSION_BLOCKED remains valid",
+ "why_not_established": [
+  "selector v0 already provides anchor_observation_ids: a justified, ratio-capped (<=34%) escape hatch for an eligible observation required despite no topic match; the audit task left it empty.",
+  "the audit task's FROZEN questions require kinds {constraint, decision, evidence} only; NO frozen question names a status observation among its required_observation_ids.",
+  "therefore required_kinds:'status' was not backed by the frozen contract."
+ ]
+}

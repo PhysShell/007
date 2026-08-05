@@ -1,0 +1,9 @@
+schema: o7.b1.source-selectors/v0
+fixture_id: case-0002
+sessions:
+- session_id: reviewer
+  raw_source: reviewer-export
+  coverage: ChatGPT reviewer conversation over R21 acceptance
+- session_id: coder
+  raw_source: coder-prefix
+  coverage: Claude Code coder session (record-prefix through 17111)
