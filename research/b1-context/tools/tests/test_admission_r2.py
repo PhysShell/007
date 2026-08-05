@@ -51,6 +51,24 @@ class ActualOnlyArgTest(unittest.TestCase):
         self.assertEqual(rg.REGISTRY_FILENAME, "tasks-v0.yaml")
 
 
+class ReproduceCommandTest(unittest.TestCase):
+    """Mode provenance is explicit and accurate (no CAS needed)."""
+
+    def test_actual_only_mode_appends_flag(self):
+        verify = run_case._canonical_reproduce_command("case-0002", "tasks-v1.yaml", "verify")
+        update = run_case._canonical_reproduce_command("case-0002", "tasks-v1.yaml", "update")
+        actual = run_case._canonical_reproduce_command("case-0002", "tasks-v1.yaml", "actual-only")
+        self.assertNotIn("--actual-only", verify)
+        self.assertEqual(verify, update)          # verify/update identical bytes
+        self.assertIn("--actual-only", actual)
+        self.assertIn("--registry tasks-v1.yaml", actual)
+
+    def test_default_registry_and_verify_mode_omit_flags(self):
+        d = run_case._canonical_reproduce_command("case-0001")
+        self.assertNotIn("--registry", d)
+        self.assertNotIn("--actual-only", d)
+
+
 class RegistryOverrideSafetyTest(unittest.TestCase):
     """Path-safety of --registry, on a synthetic temp fixture (no CAS)."""
 
@@ -103,15 +121,28 @@ class CasBackedR2Test(unittest.TestCase):
         with open(p, "rb") as fh:
             return fh.read()
 
-    def test_case0001_actual_only_matches_committed_report(self):
-        with tempfile.TemporaryDirectory() as td:
-            res = run_case.run_actual_only("case-0001", self.dr, td)
-            with open(os.path.join(td, "report.json"), "rb") as fh:
-                self.assertEqual(fh.read(), self._committed("report.json"))
+    def test_case0001_normal_identical_actual_only_differs_only_in_mode(self):
+        import json
+        with tempfile.TemporaryDirectory() as tn, tempfile.TemporaryDirectory() as ta:
+            run_case.run("case-0001", self.dr, tn)                 # normal (verify)
+            res = run_case.run_actual_only("case-0001", self.dr, ta)
+            with open(os.path.join(tn, "report.json"), "rb") as f:
+                normal = f.read()
+            with open(os.path.join(ta, "report.json"), "rb") as f:
+                actual = f.read()
+            # normal verification-mode report stays byte-identical to committed
+            self.assertEqual(normal, self._committed("report.json"))
+            # actual-only differs — but ONLY in the mode-provenance reproduce_command
+            self.assertNotEqual(normal, actual)
+            nj, aj = json.loads(normal), json.loads(actual)
+            self.assertIn("--actual-only", aj["reproduce_command"])
+            self.assertNotIn("--actual-only", nj["reproduce_command"])
+            del nj["reproduce_command"]
+            del aj["reproduce_command"]
+            self.assertEqual(nj, aj)
             self.assertEqual(res["development_result"], "PASS")
         # actual-only must not have created/changed a committed expectation
-        exp = os.path.join(self.fdir1, run_case.EXPECTED_REPORT_FILENAME)
-        self.assertTrue(os.path.isfile(exp))  # still the original committed one
+        self.assertTrue(os.path.isfile(os.path.join(self.fdir1, run_case.EXPECTED_REPORT_FILENAME)))
 
     def test_case0002_actual_only_partial_deterministic(self):
         with tempfile.TemporaryDirectory() as td1, tempfile.TemporaryDirectory() as td2:
@@ -121,6 +152,10 @@ class CasBackedR2Test(unittest.TestCase):
             self.assertTrue(all(t["evaluation"] is None for t in r1["report"]["tasks"]))
             self.assertEqual(len(r1["report"]["tasks"]), 3)
             self.assertEqual(r1["report"]["registry_filename"], "tasks-v1.yaml")
+            # reproduce_command must be actually runnable (actual-only + registry)
+            rc = r1["report"]["reproduce_command"]
+            self.assertIn("--actual-only", rc)
+            self.assertIn("--registry tasks-v1.yaml", rc)
             with open(os.path.join(td1, "report.json"), "rb") as f1, \
                  open(os.path.join(td2, "report.json"), "rb") as f2:
                 self.assertEqual(f1.read(), f2.read())

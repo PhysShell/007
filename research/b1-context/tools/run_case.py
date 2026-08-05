@@ -196,11 +196,17 @@ def _build_derived_manifest(fixture: str, per_session: list) -> dict:
 
 
 def _canonical_reproduce_command(fixture: str,
-                                 registry_filename: str = rg.REGISTRY_FILENAME) -> str:
+                                 registry_filename: str = rg.REGISTRY_FILENAME,
+                                 mode: str = "verify") -> str:
+    """Exact command that regenerates THIS report. `mode` is threaded explicitly
+    from the caller — never inferred from fixture contents or whether an
+    expectation happens to exist on disk. Only actual-only mode appends
+    --actual-only; verify and update produce identical bytes."""
     reg = "" if registry_filename == rg.REGISTRY_FILENAME else " --registry %s" % registry_filename
-    return ("python3 research/b1-context/tools/run_case.py --fixture %s%s "
+    ao = " --actual-only" if mode == "actual-only" else ""
+    return ("python3 research/b1-context/tools/run_case.py --fixture %s%s%s "
             "--data-root \"$HOME/.local/share/o7-research\" --out /tmp/o7-b1-%s"
-            % (fixture, reg, fixture))
+            % (fixture, reg, ao, fixture))
 
 
 def _guard_legacy_expectation(fdir: str) -> None:
@@ -234,10 +240,12 @@ def _negative_control_entry(manifest: dict) -> dict | None:
 
 
 def _generate(fixture: str, data_root: str, out_dir: str,
-              registry_filename: str = rg.REGISTRY_FILENAME) -> dict:
+              registry_filename: str = rg.REGISTRY_FILENAME,
+              mode: str = "verify") -> dict:
     """Full generation into out_dir. Writes every canonical artifact; does NOT
-    read, write or check the committed expectation. Returns the report bytes so a
-    caller can either verify or (transactionally) freeze them."""
+    read, write or check the committed expectation. `mode` (verify/update/
+    actual-only) is threaded from the caller and only affects the recorded
+    reproduce_command — never the evaluation, selection or status."""
     fdir = _fixture_dir(fixture)
     _guard_legacy_expectation(fdir)
     schema_path = default_schema_path()
@@ -327,7 +335,7 @@ def _generate(fixture: str, data_root: str, out_dir: str,
         "schema": "o7.b1.report/v1",
         "fixture_id": fixture,
         "cutoff_identity": gold["cutoff"]["identity"],
-        "reproduce_command": _canonical_reproduce_command(fixture, registry_filename),
+        "reproduce_command": _canonical_reproduce_command(fixture, registry_filename, mode),
         "registry_digest": registry_digest,
         "input_digests": input_digests,
         "derived": {
@@ -405,7 +413,7 @@ def _decide_result(all_available: bool, task_entries: list, comparison: dict) ->
 def run(fixture: str, data_root: str, out_dir: str,
         registry_filename: str = rg.REGISTRY_FILENAME) -> dict:
     """Non-update run: generate, then verify against the committed v1 expectation."""
-    g = _generate(fixture, data_root, out_dir, registry_filename)
+    g = _generate(fixture, data_root, out_dir, registry_filename, mode="verify")
     fdir = _fixture_dir(fixture)
     expected_path = os.path.join(fdir, EXPECTED_REPORT_FILENAME)
     if not os.path.isfile(expected_path):
@@ -430,10 +438,13 @@ def run_actual_only(fixture: str, data_root: str, out_dir: str,
                     registry_filename: str = rg.REGISTRY_FILENAME) -> dict:
     """Actual-only run: generate the honest report and write every ordinary
     artifact under --out, but NEVER read, write or verify a committed expectation.
-    Operational success (deterministic generation) is independent of the report's
-    development_result — the caller reports the two separately so an operational
-    exit 0 can never be mistaken for evaluation success."""
-    g = _generate(fixture, data_root, out_dir, registry_filename)
+    This performs exactly ONE generation: a successful return proves generation
+    completed, NOT that the outputs are deterministic. Determinism is established
+    only by an external two-run comparison (the R3 protocol). Generation success
+    is also independent of the report's development_result — the caller reports
+    the two separately so operational success can never be mistaken for evaluation
+    success."""
+    g = _generate(fixture, data_root, out_dir, registry_filename, mode="actual-only")
     return {"report": g["report"], "report_json_digest": g["report_json_digest"],
             "development_result": g["report"]["status"]["development_result"],
             "out_dir": out_dir}
@@ -499,7 +510,7 @@ def run_update(fixture: str, data_root: str, target_out_dir: str,
     for d in (tmp1, tmp2, bak):
         shutil.rmtree(d, ignore_errors=True)
     try:
-        g1 = _generate(fixture, data_root, tmp1, registry_filename)
+        g1 = _generate(fixture, data_root, tmp1, registry_filename, mode="update")
         if not g1["all_available"]:
             raise FailClosed("refusing to freeze from an incomplete run: the CAS did "
                              "not provide every input blob")
@@ -507,7 +518,7 @@ def run_update(fixture: str, data_root: str, target_out_dir: str,
             raise FailClosed("refusing to freeze a non-PASS report (%s)"
                              % g1["report"]["status"]["development_result"])
         # second independent generation, byte-identity gate
-        _generate(fixture, data_root, tmp2, registry_filename)
+        _generate(fixture, data_root, tmp2, registry_filename, mode="update")
         _assert_two_run_identity(tmp1, tmp2)
 
         # derived transcripts are external CAS blobs; never commit their bodies
@@ -548,10 +559,12 @@ def main(argv=None):
                          "was available and the report is PASS" % EXPECTED_REPORT_FILENAME)
     ap.add_argument("--actual-only", action="store_true",
                     help="generate the honest actual report without reading, writing "
-                         "or verifying any committed expectation; exits 0 on "
-                         "deterministic generation regardless of the report's "
-                         "development_result. Mutually exclusive with "
-                         "--update-expectations.")
+                         "or verifying any committed expectation; exits 0 when "
+                         "generation completes successfully, regardless of the "
+                         "report's development_result. Exit 0 means generation "
+                         "succeeded — NOT that the outputs are deterministic "
+                         "(determinism is an external two-run check, e.g. R3). "
+                         "Mutually exclusive with --update-expectations.")
     args = ap.parse_args(argv)
     if args.actual_only and args.update_expectations:
         sys.stderr.write("FAIL CLOSED: --actual-only and --update-expectations are "
@@ -563,7 +576,9 @@ def main(argv=None):
             st = result["report"]["status"]
             # operational success and evaluation status are reported SEPARATELY, so
             # an operational exit 0 can never be read as evaluation success.
-            sys.stderr.write("actual_only_generation: OK\n")
+            sys.stderr.write("actual_only_generation: OK  "
+                             "(generation completed; NOT a determinism claim — "
+                             "determinism needs an external two-run comparison)\n")
             sys.stderr.write("report_development_result: %s\n" % st["development_result"])
             sys.stderr.write("report.json: %s\n" % result["report_json_digest"])
             return 0

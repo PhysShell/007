@@ -41,9 +41,14 @@ imports it.
   its digest are recorded in the generated metadata.
 - `--actual-only`: generate the honest actual report and write every ordinary
   artifact under `--out`, but never read, write or verify a committed
-  expectation. Exits 0 on deterministic generation regardless of the report's
-  `development_result`; operational success and evaluation status are printed
-  separately. Mutually exclusive with `--update-expectations`.
+  expectation. It performs exactly ONE generation and exits 0 when generation
+  completes successfully, regardless of the report's `development_result`.
+  **Exit 0 means generation succeeded — it does NOT claim the outputs are
+  deterministic**; determinism is established only by an external two-run
+  comparison (the R3 protocol). Operational success and evaluation status are
+  printed separately. The report's `reproduce_command` records `--actual-only`
+  (and a non-default `--registry`) so it actually regenerates the report.
+  Mutually exclusive with `--update-expectations`.
 - Negative-control cardinality is fail-closed: `negative_control: []` runs with
   no negative-control arm (evaluations stay `null`, `development_result` PARTIAL);
   exactly one entry preserves the existing behaviour; more than one, a missing
