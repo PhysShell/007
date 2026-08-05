@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://physshell.dev/007/research/b1-context/schema/evaluator-implementation-manifest-v0-r2.schema.json",
+  "title": "o7.b1.evaluator-implementation-manifest/v0 (schema revision 2)",
+  "description": "Fail-closed closure manifest of the standalone evaluator implementation. VALIDATION revision (Finding 5): relative_path is constrained to a repository-relative, normalized, traversal-free form. JSON Schema draft 2020-12 cannot assert uniqueness by a single property, so path-uniqueness (no two entries with the same normalized relative_path) and entrypoint-presence (the entrypoint appears in files) remain evaluator/verifier consistency checks, frozen as required R4B implementation-consistency tests. schema_note records that limitation explicitly.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "files", "entrypoint", "python_version", "dependency_versions", "schema_note"],
+  "properties": {
+    "schema": {"const": "o7.b1.evaluator-implementation-manifest/v0"},
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relative_path", "artifact_bytes_sha256"],
+        "properties": {
+          "relative_path": {"$ref": "#/$defs/relative_path"},
+          "artifact_bytes_sha256": {"$ref": "#/$defs/sha256"}
+        }
+      }
+    },
+    "entrypoint": {"$ref": "#/$defs/relative_path"},
+    "python_version": {"type": "string", "minLength": 1},
+    "dependency_versions": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "schema_note": {"type": "string", "minLength": 1}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$",
+      "description": "artifact-bytes SHA-256 of a source file (digest domain: artifact_bytes)."},
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!(?:.*/)?\\.\\.(?:/|$))[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+      "description": "Repository-relative path. No leading slash (absolute rejected), no backslash, single '/' separators only (no empty segments, no '//', no trailing slash), and no '..' path segment (traversal rejected). Uniqueness by normalized relative_path is an evaluator consistency check."
+    }
+  }
+}

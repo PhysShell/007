@@ -1,0 +1,76 @@
+{
+  "fields_compared_verbatim_equal": {
+    "arm_semantics": "EQUAL",
+    "arms": "EQUAL",
+    "axis_requirements": "EQUAL",
+    "bound_inputs": "EQUAL",
+    "budget": "EQUAL",
+    "contract_id": "EQUAL",
+    "digest_domains": "EQUAL",
+    "family_applicability": "EQUAL",
+    "full_derived_semantics": "EQUAL",
+    "input_closure": "EQUAL",
+    "outcome_axes": "EQUAL",
+    "overall_rules": "EQUAL",
+    "provenance_role": "EQUAL",
+    "schema": "EQUAL",
+    "shape_semantics": "EQUAL",
+    "source_compilation_note": "EQUAL",
+    "tasks": "EQUAL"
+  },
+  "fields_excluded_nonnormative": {
+    "history_rationale": "declared non-normative; removed from the rev3 instance and forbidden by the rev3 schema (additionalProperties:false)"
+  },
+  "fields_excluded_versioning": [
+    "contract_revision",
+    "semantic_revision_from_r2",
+    "validation_revision",
+    "supersedes_contract_revision",
+    "supersedes"
+  ],
+  "fields_restructured_semantics_preserved": {
+    "contract_input_consistency_gates": {
+      "descriptions_equal": true,
+      "transform": "prose_string[] -> {id,description}[]; ids gate-01..gate-11 in order"
+    },
+    "evaluator_implementation_identity.output_must_record": {
+      "field_set_equal": true,
+      "transform": "string[] -> object{field:'required'} (additionalProperties false)"
+    },
+    "source_compilation_requirements_full_derived": {
+      "crosswalk": {
+        "derived_body_available": "every required derived body is available",
+        "derived_byte_length_and_sha256_match": "derived body byte length and SHA-256 match the derived manifest",
+        "extractor_identity_and_raw_binding_present": "extractor identities and raw-source bindings are present",
+        "record_count_reproducible": "record count is deterministically reproducible from the JSONL body",
+        "session_matches_derived_manifest": "every source-selector session has a matching derived-manifest entry"
+      },
+      "sets_equal_via_crosswalk": true,
+      "transform": "prose_string[] -> requirement_id[] via total order-preserving crosswalk"
+    },
+    "task_dependence.pair_expectations": {
+      "normalized_pair_semantics_equal": true,
+      "short_key_resolution": {
+        "audit": "case-0002-audit-r21-evidence-provenance",
+        "impact": "case-0002-assess-change-impact-on-oracle-topology",
+        "resume": "case-0002-resume-product-integration"
+      },
+      "transform": "dict{short_key:{...}} -> list[{left,right,expected_shape,rationale}] with explicit endpoints for every pair"
+    }
+  },
+  "generated_by": "r4a2_driver.py (deterministic, no Date/random)",
+  "left": {
+    "artifact_bytes_sha256": "sha256:b212463a40eb6f4660467394e7fd517d1da798c60480ea8607950586e29b5f54",
+    "contract_revision": 2,
+    "instance": "evaluation-contract-v1-r2.yaml"
+  },
+  "record": "o7.b1.r4a2-semantic-equivalence/v0",
+  "right": {
+    "artifact_bytes_sha256": "sha256:8f5060f0d68ec3a5796714322c7f0541ade58539c25bb0d535b2bb4c315c00e7",
+    "contract_revision": 3,
+    "instance": "evaluation-contract-v1-r3.yaml"
+  },
+  "semantic_equivalent": true,
+  "semantic_revision": false,
+  "validation_revision": true
+}

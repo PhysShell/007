@@ -1,0 +1,15 @@
+{
+ "dependency_versions": {
+  "PyYAML": "6.0.3"
+ },
+ "entrypoint": "eval_v1.py",
+ "files": [
+  {
+   "artifact_bytes_sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "relative_path": "/etc/passwd"
+  }
+ ],
+ "python_version": "3.14.6",
+ "schema": "o7.b1.evaluator-implementation-manifest/v0",
+ "schema_note": "Path-uniqueness by relative_path and entrypoint-presence-in-files are evaluator consistency checks, not expressible in JSON Schema draft 2020-12."
+}

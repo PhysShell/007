@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://physshell.dev/007/research/b1-context/schema/evaluation-output-v1-r2.schema.json",
+  "title": "o7.b1.evaluation/v1 output (schema revision 2)",
+  "description": "Fail-closed standalone evaluator output for contract revision 3. Deterministic, structural; never semantic answerability, never an LLM judge. VALIDATION revision of evaluation-output-v1.schema.json: (Finding 3) every input inventory record now declares artifact_kind and is required to carry the digests of its domain — structured artifacts require BOTH digests, bodies require artifact-bytes ONLY and forbid a canonical-object digest; (Finding 4) relation_support records must serialize the endpoint-policy-specific evidence fields.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "contract_id", "contract_revision", "contract_digest", "evaluator_implementation_manifest_digest", "evaluator_entrypoint_sha256", "evaluator_module_sha256", "execution_checkout_commit", "execution_checkout_tree", "inputs", "arms", "source_compilation", "tasks", "task_dependence_matrix", "budget", "outcome_axes", "overall", "metric_semantics"],
+  "properties": {
+    "schema": {"const": "o7.b1.evaluation/v1"},
+    "contract_id": {"const": "o7.b1.evaluation-contract/v1"},
+    "contract_revision": {"type": "integer", "minimum": 3},
+    "contract_digest": {"$ref": "#/$defs/dual_ref"},
+    "evaluator_implementation_manifest_digest": {"$ref": "#/$defs/sha256"},
+    "evaluator_entrypoint_sha256": {"$ref": "#/$defs/sha256"},
+    "evaluator_module_sha256": {"$ref": "#/$defs/sha256"},
+    "execution_checkout_commit": {"$ref": "#/$defs/gitsha"},
+    "execution_checkout_tree": {"$ref": "#/$defs/gitsha"},
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifacts"],
+      "properties": {
+        "artifacts": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/input_record"}
+        }
+      }
+    },
+    "arms": {
+      "type": "object", "additionalProperties": false,
+      "required": ["full_derived", "projection", "negative_control"],
+      "properties": {
+        "full_derived": {"$ref": "#/$defs/availability"},
+        "projection": {"$ref": "#/$defs/availability"},
+        "negative_control": {"$ref": "#/$defs/availability"}
+      }
+    },
+    "source_compilation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["axis", "requested_source_availability", "derived_session_completeness", "extractor_identity"],
+      "properties": {
+        "axis": {"$ref": "#/$defs/axis"},
+        "requested_source_availability": {
+          "type": "array",
+          "items": {"type": "object", "additionalProperties": false,
+            "required": ["id", "requested_digest", "requested_bytes", "cas_resolvable", "round_trip"],
+            "properties": {"id": {"type": "string"}, "requested_digest": {"$ref": "#/$defs/sha256"},
+              "requested_bytes": {"$ref": "#/$defs/nonneg"}, "cas_resolvable": {"enum": ["OK", "UNAVAILABLE", "MISMATCH"]},
+              "round_trip": {"type": "boolean"}}}
+        },
+        "derived_session_completeness": {
+          "type": "array",
+          "items": {"type": "object", "additionalProperties": false,
+            "required": ["session_id", "present", "byte_length_matches", "sha256_matches", "record_count_reproduced"],
+            "properties": {"session_id": {"type": "string"}, "present": {"type": "boolean"},
+              "byte_length_matches": {"type": "boolean"}, "sha256_matches": {"type": "boolean"},
+              "record_count_reproduced": {"type": "boolean"}}}
+        },
+        "extractor_identity": {"type": "object",
+          "additionalProperties": {"type": "object", "additionalProperties": false,
+            "required": ["extractor_id", "extractor_version", "extractor_impl_digest"],
+            "properties": {"extractor_id": {"type": "string"}, "extractor_version": {"type": "string"},
+              "extractor_impl_digest": {"$ref": "#/$defs/sha256"}}}}
+      }
+    },
+    "tasks": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["task_id", "question_observation_support", "relation_support", "projection_validity_axis", "stale_state_checks"],
+        "properties": {
+          "task_id": {"type": "string", "minLength": 1},
+          "question_observation_support": {
+            "type": "array",
+            "items": {"type": "object", "additionalProperties": false,
+              "required": ["question_id", "required_observation_ids", "selected_required_ids", "missing_required_ids", "required_observation_coverage", "fully_supported"],
+              "properties": {
+                "question_id": {"type": "string"},
+                "required_observation_ids": {"type": "array", "items": {"$ref": "#/$defs/obsid"}},
+                "selected_required_ids": {"type": "array", "items": {"$ref": "#/$defs/obsid"}},
+                "missing_required_ids": {"type": "array", "items": {"$ref": "#/$defs/obsid"}},
+                "required_observation_coverage": {"$ref": "#/$defs/unit_interval"},
+                "fully_supported": {"type": "boolean"}
+              }}
+          },
+          "relation_support": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/relation_support_record"}
+          },
+          "projection_validity_axis": {"$ref": "#/$defs/axis"},
+          "stale_state_checks": {
+            "type": "array",
+            "items": {"type": "object", "additionalProperties": false,
+              "required": ["forbidden_id", "classification"],
+              "properties": {"forbidden_id": {"$ref": "#/$defs/obsid"},
+                "classification": {"enum": ["absent", "stale_relation_endpoint_only", "selected_with_stale_status", "selected_as_current_or_pending"]}}}
+          }
+        }
+      }
+    },
+    "task_dependence_matrix": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "description": "Every UNORDERED task pair. pair is a 2-tuple with uniqueItems true, so a self-pair [T,T] is rejected (this is the schema oracle for duplicate task-pair endpoints). Combinatorial completeness (all N-choose-2 present) is enforced by the evaluator's contract_input_consistency axis, not expressible in JSON Schema alone.",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["pair", "set_equality", "left_superset_of_right", "right_superset_of_left", "symmetric_difference_count", "context_digest_equality", "difference_source", "expected_shape", "shape_satisfied"],
+        "properties": {
+          "pair": {"type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "set_equality": {"type": "boolean"},
+          "left_superset_of_right": {"type": "boolean"},
+          "right_superset_of_left": {"type": "boolean"},
+          "symmetric_difference_count": {"$ref": "#/$defs/nonneg"},
+          "context_digest_equality": {"type": "boolean"},
+          "difference_source": {"enum": ["selector_relevance", "budget_only", "none"]},
+          "expected_shape": {"$ref": "#/$defs/pair_shape"},
+          "shape_satisfied": {"type": "boolean"}
+        }
+      }
+    },
+    "budget": {
+      "type": "object", "additionalProperties": false,
+      "required": ["budget_digest", "byte_budget", "record_budget", "unit", "counted_representation_id"],
+      "properties": {
+        "budget_digest": {"$ref": "#/$defs/dual_ref"},
+        "byte_budget": {"$ref": "#/$defs/nonneg"},
+        "record_budget": {"$ref": "#/$defs/nonneg"},
+        "unit": {"const": "utf8_bytes+records"},
+        "counted_representation_id": {"const": "selector-v0-canonical-record-jsonl"}
+      }
+    },
+    "outcome_axes": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_input_consistency", "source_compilation", "projection_validity", "question_observation_support", "relation_support", "stale_state_safety", "task_dependence", "negative_control_diagnostics"],
+      "properties": {
+        "contract_input_consistency": {"$ref": "#/$defs/axis"},
+        "source_compilation": {"$ref": "#/$defs/axis"},
+        "projection_validity": {"$ref": "#/$defs/axis"},
+        "question_observation_support": {"$ref": "#/$defs/axis"},
+        "relation_support": {"$ref": "#/$defs/axis"},
+        "stale_state_safety": {"$ref": "#/$defs/axis"},
+        "task_dependence": {"$ref": "#/$defs/axis"},
+        "negative_control_diagnostics": {"$ref": "#/$defs/axis"}
+      }
+    },
+    "overall": {"enum": ["PASS", "FAIL", "UNAVAILABLE"]},
+    "metric_semantics": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "minLength": 1},
+      "description": "Explicit prose per metric. Structural metrics MUST be described as structural, never semantic recall/answerability. Metric-KEY completeness (every emitted metric has a semantics entry) is an evaluator consistency check, not expressible in JSON Schema alone."
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "gitsha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "nonneg": {"type": "integer", "minimum": 0},
+    "unit_interval": {"type": "number", "minimum": 0, "maximum": 1},
+    "obsid": {"type": "string", "pattern": "^obs-[a-z0-9-]+$"},
+    "availability": {"enum": ["AVAILABLE", "UNAVAILABLE", "NOT_APPLICABLE"]},
+    "axis": {"enum": ["PASS", "FAIL", "UNAVAILABLE", "NOT_APPLICABLE"]},
+    "pair_shape": {"enum": ["incomparable", "left_strict_superset"]},
+    "endpoint_policy": {"enum": ["edge_witness", "all_current_targets_materialized"]},
+    "relation_kind": {"enum": ["supports", "derived_from", "supersedes", "contradicts", "blocks", "depends_on", "part_of"]},
+    "input_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "logical_id", "visibility", "artifact_kind", "byte_length"],
+      "description": "Finding 3: digest identity is enforced per digest domain. artifact_kind selects the required digest set. No input can validate without the digests of its domain.",
+      "properties": {
+        "role": {"type": "string", "minLength": 1},
+        "logical_id": {"type": "string", "minLength": 1},
+        "visibility": {"enum": ["public", "private"]},
+        "artifact_kind": {"enum": ["structured", "body"]},
+        "artifact_bytes_sha256": {"$ref": "#/$defs/sha256"},
+        "canonical_object_sha256": {"$ref": "#/$defs/sha256"},
+        "byte_length": {"$ref": "#/$defs/nonneg"}
+      },
+      "oneOf": [
+        {"properties": {"artifact_kind": {"const": "structured"}},
+          "required": ["artifact_bytes_sha256", "canonical_object_sha256"]},
+        {"properties": {"artifact_kind": {"const": "body"},
+            "canonical_object_sha256": false},
+          "required": ["artifact_bytes_sha256"]}
+      ]
+    },
+    "relation_support_record": {
+      "type": "object", "additionalProperties": false,
+      "required": ["question_id", "from", "kind", "endpoint_policy", "gold_edges", "present_edges", "fabricated_edges", "satisfied"],
+      "description": "Finding 4: endpoint-policy-specific evidence fields are required by policy. edge_witness FORBIDS the materialization fields (absent); all_current_targets_materialized REQUIRES both materialization fields.",
+      "properties": {
+        "question_id": {"type": "string"},
+        "from": {"$ref": "#/$defs/obsid"},
+        "kind": {"$ref": "#/$defs/relation_kind"},
+        "endpoint_policy": {"$ref": "#/$defs/endpoint_policy"},
+        "gold_edges": {"type": "array", "items": {"$ref": "#/$defs/obsid"}},
+        "present_edges": {"type": "array", "items": {"$ref": "#/$defs/obsid"}},
+        "fabricated_edges": {"type": "array", "items": {"$ref": "#/$defs/obsid"}},
+        "materialized_targets": {"type": "array", "items": {"$ref": "#/$defs/obsid"}},
+        "unmaterialized_current_targets": {"type": "array", "items": {"$ref": "#/$defs/obsid"}},
+        "satisfied": {"type": "boolean"}
+      },
+      "allOf": [
+        {"if": {"properties": {"endpoint_policy": {"const": "edge_witness"}}, "required": ["endpoint_policy"]},
+         "then": {"not": {"anyOf": [{"required": ["materialized_targets"]}, {"required": ["unmaterialized_current_targets"]}]}}},
+        {"if": {"properties": {"endpoint_policy": {"const": "all_current_targets_materialized"}}, "required": ["endpoint_policy"]},
+         "then": {"required": ["materialized_targets", "unmaterialized_current_targets"]}}
+      ]
+    },
+    "dual_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["artifact_bytes_sha256", "canonical_object_sha256"],
+      "properties": {"artifact_bytes_sha256": {"$ref": "#/$defs/sha256"}, "canonical_object_sha256": {"$ref": "#/$defs/sha256"}}
+    }
+  }
+}

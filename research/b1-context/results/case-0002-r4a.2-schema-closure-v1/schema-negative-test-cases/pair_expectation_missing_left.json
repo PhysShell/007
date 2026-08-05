@@ -1,0 +1,477 @@
+{
+ "arm_semantics": {
+  "gold_state": "oracle_reference_not_an_arm",
+  "missing_optional_arm": "NOT_APPLICABLE",
+  "missing_required_arm": "UNAVAILABLE",
+  "non_applicable_metrics": null,
+  "synthetic_negative_control": "forbidden"
+ },
+ "arms": {
+  "full_derived": {
+   "requirement": "required"
+  },
+  "negative_control": {
+   "requirement": "optional"
+  },
+  "projection": {
+   "requirement": "required"
+  }
+ },
+ "axis_requirements": {
+  "contract_input_consistency": "required",
+  "negative_control_diagnostics": "optional",
+  "projection_validity": "required",
+  "question_observation_support": "required",
+  "relation_support": "required",
+  "source_compilation": "required",
+  "stale_state_safety": "required",
+  "task_dependence": "required"
+ },
+ "bound_inputs": {
+  "budget": {
+   "artifact_bytes_sha256": "sha256:d293cdf19bb0be792bc962ea58f0d601cbd8a83832354171d6afc29eacceedf4",
+   "byte_length": 362,
+   "canonical_object_sha256": "sha256:1a6fae45607415ebac91c592799f26d304e0ff1671d2d1a238cf8d8fd55aedc6",
+   "logical_id": "budget-v0.yaml",
+   "visibility": "public"
+  },
+  "derived_bodies_private": [
+   {
+    "artifact_bytes_sha256": "sha256:374bbac69d810ed034164d842050b28865f260ad8856f81ab550be5af01539ff",
+    "byte_length": 1101185,
+    "record_count": 303,
+    "session_id": "reviewer",
+    "visibility": "private"
+   },
+   {
+    "artifact_bytes_sha256": "sha256:56a294f8e8e83d46e8935ba5556d67d06b793e476ec906ed07786277a87f21a9",
+    "byte_length": 4237924,
+    "record_count": 2081,
+    "session_id": "coder",
+    "visibility": "private"
+   }
+  ],
+  "fixture_manifest": {
+   "artifact_bytes_sha256": "sha256:c09f6f8337632f3c4dfb0db2bc12128156ce227ca9758a0d5c91c5300304586a",
+   "byte_length": 1054,
+   "canonical_object_sha256": "sha256:bc14ab759fbcccd20f2489ac5803c1c8553a88fa39b31f13e6342c7778d4d81b",
+   "logical_id": "manifest.yaml",
+   "visibility": "public"
+  },
+  "gold_state": {
+   "artifact_bytes_sha256": "sha256:7e00505b25a7f0d815556ef6cc9db710b1ae0d3144e6f91a0c4eedcaa733c147",
+   "byte_length": 17904,
+   "canonical_object_sha256": "sha256:2589319a8094671c15bee9d9ff7839729e69fb6de410d3f3502b1e7dc073eaf4",
+   "logical_id": "gold-state-v0.json",
+   "visibility": "public"
+  },
+  "question_files": {
+   "questions-audit-v0.yaml": {
+    "artifact_bytes_sha256": "sha256:e89769b6df78fd8fa1cfa52d3de7acfd6909d91df4da788b2d56c4fc19909501",
+    "byte_length": 1128,
+    "canonical_object_sha256": "sha256:9f4165b89c9b98442ec669c350a39cd815b494a671c9a57d56e36990bca06d10",
+    "visibility": "public"
+   },
+   "questions-impact-v0.yaml": {
+    "artifact_bytes_sha256": "sha256:f41bdd036062165aefb6ec40b0b8afa18f7ac2f593730b0ee5a51e0db3869ebc",
+    "byte_length": 513,
+    "canonical_object_sha256": "sha256:f9b76e0bababb78a669cf5e10e98a1b14da51033be190e1bdadb0cc1aa892f3b",
+    "visibility": "public"
+   },
+   "questions-resume-v0.yaml": {
+    "artifact_bytes_sha256": "sha256:0478856382b1a0ac7f4fbb78a532041e9a770d3d14337b3a790181c27a706936",
+    "byte_length": 672,
+    "canonical_object_sha256": "sha256:441da0c830dab341fc9ae0d73bd65efd7253d2607add012313913c6e8dd89ad5",
+    "visibility": "public"
+   }
+  },
+  "r3_1_derived_manifest": {
+   "artifact_bytes_sha256": "sha256:3bb04ee265bf6292d584428d01ed0827c0423bafb3922863d693bdf2fa128a56",
+   "byte_length": 2265,
+   "canonical_object_sha256": "sha256:d68da84fdbd849bff416fe83db825a73810a458b31349204fae3ec4aaeb3c9e7",
+   "logical_id": "derived-manifest.actual.json",
+   "visibility": "public"
+  },
+  "r3_1_projection_comparison": {
+   "artifact_bytes_sha256": "sha256:160d145c9cb250e878d036d0c7892835af62d762461abe63d5843eb97a53c4c3",
+   "byte_length": 15484,
+   "canonical_object_sha256": "sha256:4533e0808476b91b190f410eae2c085cb1303928bca602089bb718bf345f4a85",
+   "logical_id": "projection-comparison.json",
+   "visibility": "public"
+  },
+  "r3_1_report": {
+   "artifact_bytes_sha256": "sha256:7f72133abc88ff88873c9d5dea1139535ff6583baee5e96b74ed7b0e4aeafba6",
+   "byte_length": 10046,
+   "canonical_object_sha256": "sha256:5a6367680da60dba0d49f9494b73e93b04f4d23977738d80436639fd52ac3520",
+   "logical_id": "report.json",
+   "visibility": "public"
+  },
+  "source_selectors": {
+   "artifact_bytes_sha256": "sha256:a7792d5c416a82a809391f06675de8803c38ac6378a2d21bca0db75965d0ccd0",
+   "byte_length": 296,
+   "canonical_object_sha256": "sha256:212c22cfaf63e6457c807a13041da128dc0366c101d12b1fff352b33560125bc",
+   "logical_id": "source-selectors.yaml",
+   "visibility": "public"
+  },
+  "task_contexts": {
+   "case-0002-assess-change-impact-on-oracle-topology": {
+    "artifact_bytes_sha256": "sha256:eec21faee941a2f086762148cb838e353c5c74861d327272b6f7bdf9fed2bdc8",
+    "byte_length": 10903,
+    "canonical_object_sha256": "sha256:0fae6ee27ec9fbf0549f89e8f36dfee11b2ae2c3e1c33c6d61bc572852f16b4a",
+    "visibility": "public"
+   },
+   "case-0002-audit-r21-evidence-provenance": {
+    "artifact_bytes_sha256": "sha256:ba8b0e8f6d2732a3b1e86cff7c302b522291b0a73cf05b122c601d581b00718d",
+    "byte_length": 11675,
+    "canonical_object_sha256": "sha256:d164de07a3ffb11c18ae8d456c5cba171a9e888490c85951e6faa062b2c2b23e",
+    "visibility": "public"
+   },
+   "case-0002-resume-product-integration": {
+    "artifact_bytes_sha256": "sha256:7c4003679e047e5f333ade9b905d9056ad42ba6bc5857dfe1a909d2ba5ef7fdf",
+    "byte_length": 8520,
+    "canonical_object_sha256": "sha256:2762d05d741d594148a122b506618711bac96b25cbebe7ee1745c25c30adf0e9",
+    "visibility": "public"
+   }
+  },
+  "task_files": {
+   "task-audit-v1.yaml": {
+    "artifact_bytes_sha256": "sha256:2bb14a3149277e3da3a56e779d02e3ab8fadf43be588694eac20a9c14669c2a7",
+    "byte_length": 808,
+    "canonical_object_sha256": "sha256:90beecebb7df443b96dce34f2961b8b0e44fbeb7dc247a285a2ed196747f01e9",
+    "visibility": "public"
+   },
+   "task-impact-v0.yaml": {
+    "artifact_bytes_sha256": "sha256:ed91f7b93794a1228f43404b642527e21c85a3514f6d596446f690bdf7863c40",
+    "byte_length": 554,
+    "canonical_object_sha256": "sha256:5cbd3883fce9ab2386d511a4c9a1450e3b1bc4340e7aaf670e7d8ec2d6ea53a0",
+    "visibility": "public"
+   },
+   "task-resume-v0.yaml": {
+    "artifact_bytes_sha256": "sha256:a7ef0a7c9c0868f9bb4407f4b93c5f64e91521bdae73621065f93082418f4074",
+    "byte_length": 469,
+    "canonical_object_sha256": "sha256:6c05ab67e525c204c6385d0bb6bbbc21565a6ec8d47d30024f7c3ff8aff70ff0",
+    "visibility": "public"
+   }
+  },
+  "task_registry": {
+   "artifact_bytes_sha256": "sha256:067c1c868b7f192bdca14f5768c8f83893359b7bff90c8c7ceb811fcca60270a",
+   "byte_length": 286,
+   "canonical_object_sha256": "sha256:9751fd41fd37481637291e81603dde418c671086b7adfa4da7ec467dd2a4b433",
+   "logical_id": "tasks-v1.yaml",
+   "visibility": "public"
+  }
+ },
+ "budget": {
+  "artifact_bytes_sha256": "sha256:d293cdf19bb0be792bc962ea58f0d601cbd8a83832354171d6afc29eacceedf4",
+  "authoritative_artifact": "budget-v0.yaml",
+  "byte_budget": 20000,
+  "byte_length": 362,
+  "canonical_object_sha256": "sha256:1a6fae45607415ebac91c592799f26d304e0ff1671d2d1a238cf8d8fd55aedc6",
+  "counted_representation": {
+   "definition": "Sum over every selected observation in canonical selector order of len(canonical_json_bytes(observation)) + 1 (LF). record_count = number of selected observations. This preserves selector-v0 gating semantics.",
+   "gating": true,
+   "id": "selector-v0-canonical-record-jsonl"
+  },
+  "diagnostics": {
+   "rendered_context_json_bytes": {
+    "gating": false
+   },
+   "rendered_context_markdown_bytes": {
+    "gating": false
+   }
+  },
+  "record_budget": 32,
+  "unit": "utf8_bytes+records"
+ },
+ "contract_id": "o7.b1.evaluation-contract/v1",
+ "contract_input_consistency_gates": [
+  {
+   "description": "1 contract fixture_id == gold/manifest/registry/report fixture_id",
+   "id": "gate-01"
+  },
+  {
+   "description": "2 contract registry filename+digest == selected registry",
+   "id": "gate-02"
+  },
+  {
+   "description": "3 contract task IDs == registry task IDs (exact set)",
+   "id": "gate-03"
+  },
+  {
+   "description": "4 each contract questions filename + BOTH digest identities == registered questions file",
+   "id": "gate-04"
+  },
+  {
+   "description": "5 every question ID named by a contract requirement exists in that task's questions file",
+   "id": "gate-05"
+  },
+  {
+   "description": "6 every legacy required_relation_paths entry is expanded by >=1 matching explicit v1 relation requirement",
+   "id": "gate-06"
+  },
+  {
+   "description": "7 no explicit v1 relation requirement lacks a corresponding question-level relation requirement",
+   "id": "gate-07"
+  },
+  {
+   "description": "8 every forbidden_stale_as_current set == the question entry after canonical set normalization",
+   "id": "gate-08"
+  },
+  {
+   "description": "9 every gold_derived_target recomputed from the frozen gold graph == the contract exactly",
+   "id": "gate-09"
+  },
+  {
+   "description": "10 every declared target_status == the gold observation status",
+   "id": "gate-10"
+  },
+  {
+   "description": "11 unknown task/question/observation/relation-kind/endpoint-policy/direction/depth/shape fails closed",
+   "id": "gate-11"
+  }
+ ],
+ "contract_revision": 3,
+ "digest_domains": {
+  "canonicalization": {
+   "definition": "json.dumps(obj, ensure_ascii=False, sort_keys=True, separators=(',',':')) encoded utf-8 (o7b1.canonical.canonical_bytes)",
+   "id": "o7-canonical-json-v0"
+  },
+  "gold_state_dual_binding": {
+   "artifact_bytes_sha256": "sha256:7e00505b25a7f0d815556ef6cc9db710b1ae0d3144e6f91a0c4eedcaa733c147",
+   "byte_length": 17904,
+   "canonical_object_sha256": "sha256:2589319a8094671c15bee9d9ff7839729e69fb6de410d3f3502b1e7dc073eaf4",
+   "logical_id": "gold-state-v0.json"
+  },
+  "policy": "Structured (parsed YAML/JSON) inputs carry BOTH artifact_bytes_sha256 and canonical_object_sha256. Text/binary bodies (e.g. derived JSONL) carry only artifact_bytes_sha256. Any field named merely 'sha256'/'digest' must state its domain in its schema description. The two domains are not competing values."
+ },
+ "evaluator_implementation_identity": {
+  "manifest_digest_field": "evaluator_implementation_manifest_digest (canonical_object_sha256 of the manifest)",
+  "manifest_schema": "o7.b1.evaluator-implementation-manifest/v0",
+  "note": "CLI + module both belong to the implementation closure.",
+  "output_must_record": {
+   "evaluator_entrypoint_sha256": "required",
+   "evaluator_module_sha256": "required",
+   "execution_checkout_commit": "required",
+   "execution_checkout_tree": "required"
+  }
+ },
+ "family_applicability": {
+  "negative_control_diagnostics": {
+   "negative_control": "optional"
+  },
+  "projection_validity": {
+   "full_derived": "NOT_APPLICABLE",
+   "negative_control": "NOT_APPLICABLE",
+   "projection": "required"
+  },
+  "question_observation_support": {
+   "full_derived": "NOT_APPLICABLE",
+   "negative_control": "NOT_APPLICABLE",
+   "projection": "required"
+  },
+  "relation_support": {
+   "full_derived": "NOT_APPLICABLE",
+   "negative_control": "NOT_APPLICABLE",
+   "projection": "required"
+  },
+  "source_compilation": {
+   "full_derived": "required",
+   "negative_control": "optional",
+   "projection": "required"
+  },
+  "stale_state_safety": {
+   "full_derived": "NOT_APPLICABLE",
+   "negative_control": "NOT_APPLICABLE",
+   "projection": "required"
+  }
+ },
+ "full_derived_semantics": "full_derived is NOT a compiled-observation arm. Evaluation v1 must not infer semantic answerability from raw transcript text and must not award compiled-observation/relation/stale-state/projection-validity support to it. Those task-level structural gates apply to the projection arm only.",
+ "input_closure": {
+  "fail_closed": "Every file opened by the evaluator MUST appear in the output input inventory; opening an undeclared file fails closed.",
+  "negative_control_body": "required ONLY when the optional negative-control arm is declared AVAILABLE",
+  "raw_source_bodies": "NOT evaluator inputs unless actually read; do not list unconsumed inputs for decoration",
+  "required_private": [
+   "every_derived_JSONL_body_named_by_derived_manifest (for the full_derived source-compilation arm)"
+  ],
+  "required_public_structured": [
+   "evaluation_contract",
+   "gold_state",
+   "fixture_manifest",
+   "source_selectors",
+   "task_registry",
+   "budget",
+   "r3_1_report",
+   "r3_1_projection_comparison",
+   "r3_1_derived_manifest",
+   "every_registered_task_file",
+   "every_registered_questions_file",
+   "every_projected_task_context_json"
+  ]
+ },
+ "outcome_axes": [
+  "contract_input_consistency",
+  "source_compilation",
+  "projection_validity",
+  "question_observation_support",
+  "relation_support",
+  "stale_state_safety",
+  "task_dependence",
+  "negative_control_diagnostics"
+ ],
+ "overall_rules": {
+  "PARTIAL": "forbidden in evaluation v1",
+  "all_required_axes_PASS": "overall PASS (regardless of an optional NOT_APPLICABLE)",
+  "any_required_axis_FAIL": "overall FAIL",
+  "any_required_axis_UNAVAILABLE_without_FAIL": "overall UNAVAILABLE",
+  "optional_diagnostics_cannot_upgrade_or_downgrade_required_gates": true
+ },
+ "provenance_role": {
+  "case_role": "development",
+  "designed_after_observing_case_0002": true,
+  "generalization_claim_allowed": false,
+  "holdout_evidence": false
+ },
+ "schema": "o7.b1.evaluation-contract/v1",
+ "semantic_revision_from_r2": false,
+ "shape_semantics": {
+  "incomparable": "selected sets differ, neither set is a subset of the other, and BOTH directional differences are non-empty",
+  "left_strict_superset": "left contains every right item and at least one additional item",
+  "unknown_shape": "fail closed"
+ },
+ "source_compilation_note": "Verifies FROZEN derived artifacts; does NOT rerun extraction and does NOT judge transcript semantics.",
+ "source_compilation_requirements_full_derived": [
+  "session_matches_derived_manifest",
+  "derived_body_available",
+  "derived_byte_length_and_sha256_match",
+  "record_count_reproducible",
+  "extractor_identity_and_raw_binding_present"
+ ],
+ "supersedes": {
+  "artifact_bytes_sha256": "sha256:b212463a40eb6f4660467394e7fd517d1da798c60480ea8607950586e29b5f54",
+  "instance": "evaluation-contract-v1-r2.yaml",
+  "r4a1_contract_commit": "f7e647f79fff7da37ca63c6bf7a36d0521816b6e"
+ },
+ "supersedes_contract_revision": 2,
+ "task_dependence": {
+  "all_unordered_pairs": true,
+  "not_frozen": "exact selected IDs, exact counts and exact symmetric differences are NOT frozen",
+  "pair_expectations": [
+   {
+    "expected_shape": "incomparable",
+    "rationale": "product-resumption and evidence-audit intents require different, non-nested state",
+    "right": "case-0002-audit-r21-evidence-provenance"
+   },
+   {
+    "expected_shape": "left_strict_superset",
+    "left": "case-0002-audit-r21-evidence-provenance",
+    "rationale": "audit includes the oracle-impact core plus supersession/audit material",
+    "right": "case-0002-assess-change-impact-on-oracle-topology"
+   },
+   {
+    "expected_shape": "incomparable",
+    "left": "case-0002-resume-product-integration",
+    "rationale": "product state and oracle-impact analysis are distinct, non-nested intents",
+    "right": "case-0002-assess-change-impact-on-oracle-topology"
+   }
+  ]
+ },
+ "tasks": {
+  "case-0002-assess-change-impact-on-oracle-topology": {
+   "questions_file": "questions-impact-v0.yaml",
+   "relation_requirements": [
+    {
+     "depth": 1,
+     "direction": "outgoing",
+     "endpoint_policy": "all_current_targets_materialized",
+     "from": "obs-oracle-topology-constraint",
+     "gold_derived_targets": [
+      "obs-output-path-dependence",
+      "obs-repo-authority-04108e7",
+      "obs-window-invariant"
+     ],
+     "kind": "depends_on",
+     "match": "all",
+     "question": "qi1-dependencies",
+     "target_status": [
+      "current",
+      "current",
+      "current"
+     ]
+    }
+   ]
+  },
+  "case-0002-audit-r21-evidence-provenance": {
+   "forbidden_stale_as_current": [
+    {
+     "ids": [
+      "obs-plane-record-not-frozen-v6",
+      "obs-reviewer-acceptance-claim",
+      "obs-reviewer-durability-unresolved-v6"
+     ],
+     "question": "qa4-wrong-agent-claims"
+    }
+   ],
+   "questions_file": "questions-audit-v0.yaml",
+   "relation_requirements": [
+    {
+     "depth": 1,
+     "direction": "outgoing",
+     "endpoint_policy": "edge_witness",
+     "from": "obs-round0-closed",
+     "gold_derived_targets": [
+      "obs-plane-record-not-frozen-v6"
+     ],
+     "kind": "supersedes",
+     "match": "all",
+     "question": "qa3-superseded",
+     "target_status": [
+      "superseded"
+     ]
+    },
+    {
+     "depth": 1,
+     "direction": "outgoing",
+     "endpoint_policy": "edge_witness",
+     "from": "obs-reviewer-durability-resolved",
+     "gold_derived_targets": [
+      "obs-reviewer-durability-unresolved-v6"
+     ],
+     "kind": "supersedes",
+     "match": "all",
+     "question": "qa3-superseded",
+     "target_status": [
+      "superseded"
+     ]
+    },
+    {
+     "depth": 1,
+     "direction": "outgoing",
+     "endpoint_policy": "edge_witness",
+     "from": "obs-profiler-fail-closed",
+     "gold_derived_targets": [
+      "obs-profiler-prior-defect"
+     ],
+     "kind": "supersedes",
+     "match": "all",
+     "question": "qa3-superseded",
+     "target_status": [
+      "superseded"
+     ]
+    }
+   ]
+  },
+  "case-0002-resume-product-integration": {
+   "forbidden_stale_as_current": [
+    {
+     "ids": [
+      "obs-plane-record-not-frozen-v6"
+     ],
+     "question": "qr2-blocking"
+    }
+   ],
+   "questions_file": "questions-resume-v0.yaml",
+   "relation_requirements": []
+  }
+ },
+ "validation_revision": true
+}
