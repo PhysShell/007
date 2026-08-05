@@ -397,11 +397,12 @@ fn run_arliai(a: &InvokeArgs) -> Result<()> {
              requested model (o7 itself pins none, consistent with the CLI engines)"
         );
     };
-    // The key lives in this one local binding on its way to the
-    // Authorization header. It is never stored in a struct, never formatted
-    // into any artifact/error text, and (via `strip_provider_api_keys`)
-    // never inherited by a claude/codex subprocess either — the fifth
-    // security boundary in docs/o7-invoke.md.
+    // The key lives in one function-local owned value; only a borrowed,
+    // trimmed view of it goes to the HTTP layer. The properties that
+    // matter: it is never stored in any struct, never formatted into any
+    // artifact/error text, and (via `strip_provider_api_keys`) never
+    // inherited by a claude/codex subprocess — the fifth security boundary
+    // in docs/o7-invoke.md.
     let api_key_raw = std::env::var("ARLIAI_API_KEY").unwrap_or_default();
     // Trimmed once here: a stray trailing newline (an `echo`-built env var)
     // would otherwise ride into the Authorization header as a malformed
@@ -502,9 +503,10 @@ fn run_arliai(a: &InvokeArgs) -> Result<()> {
 /// Terminal status for an arliai call — the code form of the normative
 /// classification matrix in `docs/o7-invoke.md`. Pure over the outcome +
 /// validator so the whole matrix is unit-testable without a socket. The
-/// "any other status" arm mirrors the CLI backends' `nonzero_exit`
-/// precedent: an unexplained failure is a FAIL, never silently absorbed
-/// into a BLOCKED_* bucket.
+/// FAIL/BLOCKED boundary is exact: FAIL_* only when the provider claimed
+/// success (2xx) and the payload was unusable; every non-2xx means no
+/// trustworthy answer was produced and classifies as a BLOCKED_* — an
+/// unknown cause does not turn ERROR into FAIL.
 fn classify_arli(
     outcome: &ArliOutcome,
     validator: &jsonschema::Validator,
@@ -530,20 +532,26 @@ fn classify_arli(
                 Ok(v) => classify_extracted(Some(v), validator),
                 Err(e) => (InvokeStatus::FailInvalidOutput, None, Some(e.error_kind())),
             },
+            // Every non-2xx arm below is a BLOCKED_*: the provider did not
+            // claim success, so no model output existed and there is nothing
+            // to FAIL on. FAIL_* is reserved for the 2xx path above, where
+            // the provider claimed success but the payload was unusable
+            // (docs/o7-invoke.md, "The FAIL/BLOCKED boundary").
             300..=399 => (InvokeStatus::BlockedProvider, None, Some("redirect")),
             401 | 403 => (InvokeStatus::BlockedAuth, None, Some("auth")),
-            429 => (InvokeStatus::BlockedUsage, None, Some("usage_limit")),
-            // Request rejected — the server states the request was NOT
-            // processed, so no model output ever existed. FAIL here would
-            // collapse "no trustworthy answer" into "ran and failed"
-            // (docs/o7-invoke.md, "On the 4xx split").
-            400 | 404 | 405 | 422 => (
+            402 | 429 => (InvokeStatus::BlockedUsage, None, Some("usage_limit")),
+            408 => (InvokeStatus::BlockedTimeout, None, Some("timeout")),
+            400..=499 => (
                 InvokeStatus::BlockedProvider,
                 None,
                 Some("http_request_rejected"),
             ),
             500..=599 => (InvokeStatus::BlockedProvider, None, Some("http_5xx")),
-            _ => (InvokeStatus::FailInvalidOutput, None, Some("http_status")),
+            _ => (
+                InvokeStatus::BlockedProvider,
+                None,
+                Some("http_status_unclassified"),
+            ),
         },
     }
 }
@@ -1495,13 +1503,18 @@ mod tests {
         );
         assert_eq!((s, k), (InvokeStatus::BlockedProvider, Some("redirect")));
 
-        // 401/403 -> BLOCKED_AUTH; 429 -> BLOCKED_USAGE.
+        // 401/403 -> BLOCKED_AUTH; 402/429 -> BLOCKED_USAGE; 408 (server-side
+        // request timeout) -> BLOCKED_TIMEOUT.
         for auth_status in [401, 403] {
             let (s, _, k) = classify_arli(&http(auth_status, Vec::new()), &validator);
             assert_eq!((s, k), (InvokeStatus::BlockedAuth, Some("auth")));
         }
-        let (s, _, k) = classify_arli(&http(429, Vec::new()), &validator);
-        assert_eq!((s, k), (InvokeStatus::BlockedUsage, Some("usage_limit")));
+        for usage_status in [402, 429] {
+            let (s, _, k) = classify_arli(&http(usage_status, Vec::new()), &validator);
+            assert_eq!((s, k), (InvokeStatus::BlockedUsage, Some("usage_limit")));
+        }
+        let (s, _, k) = classify_arli(&http(408, Vec::new()), &validator);
+        assert_eq!((s, k), (InvokeStatus::BlockedTimeout, Some("timeout")));
 
         // 5xx -> BLOCKED_PROVIDER / http_5xx.
         for server_err in [500, 502, 503] {
@@ -1509,9 +1522,10 @@ mod tests {
             assert_eq!((s, k), (InvokeStatus::BlockedProvider, Some("http_5xx")));
         }
 
-        // Request-rejection 4xx -> BLOCKED_PROVIDER: the server states the
-        // request was not processed, so no model output existed to FAIL on.
-        for rejected in [400, 404, 405, 422] {
+        // Every remaining 4xx -> BLOCKED_PROVIDER / http_request_rejected:
+        // the server states the request was not processed, so no model
+        // output existed to FAIL on.
+        for rejected in [400, 404, 405, 418, 422, 451] {
             let (s, _, k) = classify_arli(&http(rejected, Vec::new()), &validator);
             assert_eq!(
                 (s, k),
@@ -1519,13 +1533,16 @@ mod tests {
             );
         }
 
-        // Genuinely unclassifiable statuses -> FAIL, never silently
-        // absorbed into a named BLOCKED_* bucket.
-        for other in [402, 418] {
+        // Anything else non-2xx (1xx, non-standard codes) -> still BLOCKED,
+        // never FAIL: an unknown cause does not turn ERROR into FAIL.
+        for other in [100, 101, 999] {
             let (s, _, k) = classify_arli(&http(other, Vec::new()), &validator);
             assert_eq!(
                 (s, k),
-                (InvokeStatus::FailInvalidOutput, Some("http_status"))
+                (
+                    InvokeStatus::BlockedProvider,
+                    Some("http_status_unclassified")
+                )
             );
         }
 

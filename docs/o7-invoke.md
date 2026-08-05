@@ -213,11 +213,12 @@ Classification matrix (normative):
 | 2xx, content string is not JSON | `FAIL_INVALID_OUTPUT` | `invalid_json` |
 | 3xx (any) | `BLOCKED_PROVIDER` | `redirect` |
 | 401 / 403 | `BLOCKED_AUTH` | `auth` |
-| 429 | `BLOCKED_USAGE` | `usage_limit` |
-| 400 / 404 / 405 / 422 (request rejected — nothing was generated) | `BLOCKED_PROVIDER` | `http_request_rejected` |
+| 402 / 429 | `BLOCKED_USAGE` | `usage_limit` |
+| 408 (server-side request timeout) | `BLOCKED_TIMEOUT` | `timeout` |
+| any other 4xx (request rejected — nothing was generated) | `BLOCKED_PROVIDER` | `http_request_rejected` |
 | 5xx | `BLOCKED_PROVIDER` | `http_5xx` |
 | body exceeds `MAX_ARLIAI_RESPONSE_BYTES` | `BLOCKED_PROVIDER` | `response_too_large` |
-| any other status (e.g. 402, 418, 1xx) | `FAIL_INVALID_OUTPUT` | `http_status` |
+| any other non-2xx (1xx, non-standard codes) | `BLOCKED_PROVIDER` | `http_status_unclassified` |
 | DNS / TLS / connection refused / reset | `BLOCKED_PROVIDER` | `transport` |
 | timeout (`--timeout-secs`) | `BLOCKED_TIMEOUT` | `timeout` |
 
@@ -228,17 +229,19 @@ section below), so the shared-vocabulary invariant it checks is untouched.
 If Demand Radar ever grows an `arliai` path, its vocabulary must adopt
 `BLOCKED_PROVIDER` first.
 
-On the 4xx split (a review-round correction): a request-rejection status
-(400/404/405/422) is the server explicitly stating the request was **not
-processed** — no model output ever existed, so recording it as
-`FAIL_INVALID_OUTPUT` would claim the model produced bad output and
-collapse "no trustworthy answer" into "ran and failed" (the repo's
-FAIL/ERROR distinction). The CLI backends' `nonzero_exit` precedent does
-not transfer: a CLI that exits nonzero *ran*, and its output is genuinely
-ambiguous. The wildcard `FAIL_INVALID_OUTPUT` / `http_status` row stays
-only for statuses that are genuinely unclassifiable — an unexplained
-outcome still must not be silently absorbed into a named `BLOCKED_*`
-bucket.
+**The FAIL/BLOCKED boundary** (review-round corrections, rounds 5–6):
+`FAIL_*` is reserved for the 2xx path — the provider claimed success and
+the payload proved unusable (bad envelope, null content, non-JSON,
+schema violation). Every non-2xx response means no trustworthy answer was
+produced — the request was rejected, redirected, throttled, or failed
+upstream — and classifies as a `BLOCKED_*`, with `error_kind`
+distinguishing the cause; an *unknown* cause (`http_status_unclassified`)
+is still an absence of an answer, never a model failure. This is the
+repo's FAIL/ERROR distinction applied to HTTP: recording a non-2xx as
+`FAIL_INVALID_OUTPUT` would claim the model produced bad output when
+nothing ran. The CLI backends' `nonzero_exit` precedent does not
+transfer: a CLI that exits nonzero *ran*, and its output is genuinely
+ambiguous.
 
 ### Artifacts and `meta.json` mapping
 
@@ -266,11 +269,12 @@ provider subprocesses, no credential storage read, independent
 re-validation) gain a fifth for a backend that *does* hold a key in
 process memory:
 
-- `ARLIAI_API_KEY` is read once in `run`, lives only in a local variable,
-  and is passed by reference into the one function that sets the
-  `Authorization` header. It is **never stored in any struct**, never
-  formatted into any error/log/artifact string, and never reaches
-  `meta.json` or the run dir.
+- `ARLIAI_API_KEY` is read once in `run` into one function-local owned
+  value; only a borrowed, trimmed view of it is passed into the one
+  function that sets the `Authorization` header. The load-bearing
+  properties: it is **never stored in any struct**, never formatted into
+  any error/log/artifact string, and never reaches `meta.json` or the
+  run dir.
 - It is added to `strip_provider_api_keys`, so a `claude`/`codex`
   subprocess never inherits it either.
 - HTTP-client wire logging is the classic leak path for exactly this kind
