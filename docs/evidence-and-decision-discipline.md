@@ -29,9 +29,11 @@ pipeline exit code   ≠  proof of confinement
      never the gate verdict or a pipeline exit code)
 
 fd number 3          ≠  identity of a capability
-    (a closed fd number is reusable by the kernel; capability identity is the
-     bound session — cap_grant_nonce + manifest + socket-type check +
-     exact survivor-set oracle, per docs/architecture/capability-fd-transport.md)
+    (the capability is the transferred broker-session endpoint; the grant nonce
+     and canonical manifest bind the authorized grant, while descriptor-type and
+     exact-survivor-set oracles prove correct delivery — a closed fd number is
+     only a reusable process-local handle, per
+     docs/architecture/capability-fd-transport.md)
 
 HTTP 409             ≠  the epistemic status STALE
     (409 is overloaded across authorities; only a *typed* precondition mismatch
@@ -115,7 +117,10 @@ acting, and **atomically consumes it via a conditional authority operation**.
   disciplined checks for breakfast. Step 5 is load-bearing.
 - For merge, the authority already provides step 5: `PUT /repos/{o}/{r}/pulls/
   {n}/merge` accepts `sha` and returns **409 if the head moved** (verified
-  against GitHub's REST docs) — `merge(sha = accepted_head)` is the atomic
+  2026-08-05 against GitHub REST API version 2022-11-28, endpoint "Merge a pull
+  request"; an external artifact is not captured by this repo's commit, so it
+  carries its own version anchor per rule 4, and its selected-version contract
+  is re-verified at implementation) — `merge(sha = accepted_head)` is the atomic
   conditional mutation. This is exactly the exact-head admission of
   `docs/decision-and-admission-protocol.md`, generalized.
 - Where an authority offers no conditional mutation: lease, transaction,
