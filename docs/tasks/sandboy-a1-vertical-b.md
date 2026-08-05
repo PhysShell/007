@@ -41,7 +41,7 @@ GREEN positive control), VM preflight зелёный.
    устанавливает и доказывает МОНИТОР, child никогда сам не пишет в
    `cgroup.procs`, и confinement не начинается до доказанного членства:
 
-   ```
+   ```text
    fork
    → child немедленно ждёт на приватном pre-fork socketpair
    → monitor пишет PID child в cgroup.procs своего dedicated cgroup
@@ -76,7 +76,15 @@ GREEN positive control), VM preflight зелёный.
   Decision 3;
 - **`probe`**: диагностический host-capability отчёт (JSON, всегда exit 0),
   перенос и адаптация `probe` из спайка; тот же enforcement-код, что и боевой
-  путь, чтобы отчёт не мог разойтись с реальностью.
+  путь, чтобы отчёт не мог разойтись с реальностью. Конвенция exit-0
+  сохраняется («not enforced» — это данные, не сбой probe), но отчёт обязан
+  быть **machine-checkable**: фиксированная JSON-схема с обязательными полями
+  по каждой capability (Landlock ABI, seccomp, cgroup delegation, …), а
+  РЕШЕНИЕ принимает gate-сторона — VM preflight и CI-gate парсят JSON и
+  fail-closed отвергают `false`/`partial`-значения, отсутствующее обязательное
+  поле, malformed JSON и пустой вывод. Exit code probe НИКОГДА не является
+  сигналом пригодности хоста; хост без нужных возможностей не может пройти
+  gate зелёным (та же схема, что у S0: `run_gate.py` решает по JSON).
 
 Зависимости: `o7-sandbox-protocol`, `landlock`, `seccompiler`, `libc`/`nix`,
 serde/serde_json. Без tokio (backend — маленький синхронный процесс), без

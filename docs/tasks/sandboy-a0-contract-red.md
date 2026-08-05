@@ -66,6 +66,19 @@ pub struct SandboxPolicy {
 
 - валидация как у существующих полей: абсолютные пути, duplicates — ошибка
   (set-семантика, та же причина: одинаковый смысл ⇒ одинаковый digest);
+- **каноническая нормализация и порядок**: путь с `.`/`..`-компонентами или
+  trailing slash — ошибка валидации (лексическая нормализация ОТВЕРГАЕТСЯ, не
+  выполняется: разрешение symlink/`..` на этапе digest создало бы TOCTOU);
+  внутри digest-формулы v2 элементы `allow_read` и `allow_exec` входят в
+  байтово-лексикографическом порядке, чтобы одинаковые множества в разном
+  порядке давали одинаковый digest;
+- **overlap-семантика**: один и тот же путь одновременно в `allow_read` и
+  `allow_exec` — ошибка валидации (`allow_exec` уже включает read; дубль —
+  ошибка автора policy). Вложенные пути (родитель в одном списке, потомок в
+  другом, или пересечение с `worktree`) допустимы, и эффективные права —
+  union по Landlock-семантике (права по вложенным правилам складываются);
+  это документируется как контракт, а не оставляется поведению ядра «как
+  получится»;
 - `allow_read` входит в канонический `SandboxPolicy::digest()`, и формула
   получает **version bump domain-separation строки**:
   `o7-sandbox-policy\0v1\0` → `o7-sandbox-policy\0v2\0` (policy.rs:278).
@@ -76,10 +89,16 @@ pub struct SandboxPolicy {
 - **argv-контракт policy обновляется механически** (это НЕ kernel-enforcement
   и НЕ нарушение scope — без этого fake backend начнёт выдавать другой
   `policy_digest` и Vertical A развалится):
-  - `SandboyBoundary::policy_flags()` добавляет `--allow-read`;
-  - `sandboy_fake` парсит `--allow-read`;
+  - `SandboyBoundary::policy_flags()` добавляет `--allow-read` — **грамматика
+    идентична существующему `--allow-exec`**: флаг повторяется для каждого
+    пути (`--allow-read <path> --allow-read <path> …`), пустой `allow_read`
+    ⇒ флаг отсутствует, порядок флагов — канонический (лексикографический,
+    как в digest), значения передаются как `OsString` (argv на Unix — байты,
+    не-UTF-8 пути не ломаются и не перекодируются);
+  - `sandboy_fake` парсит `--allow-read` той же грамматикой;
   - `reconstructed_policy()` включает `allow_read`;
-  - contract-тесты проверяют argv и совпадение digest;
+  - contract-тесты проверяют argv и совпадение digest
+    (`original.digest == reconstructed.digest`), включая случай не-UTF-8 пути;
 - существующие смысловые oracle не ослаблять; механические правки конструкторов
   policy из-за нового поля допустимы. Compatibility-конструкторы «чтобы diff
   выглядел нетронутым» запрещены.
@@ -87,7 +106,13 @@ pub struct SandboxPolicy {
 ### 2. Оракулы read/exec в `sandbox_confinement.rs`: два RED + один GREEN control
 
 По конвенции существующей матрицы (конкретный errno, конкретный эффект, никакого
-`is_err()`). Точный статус каждого теста против замороженного fake backend:
+`is_err()`). **Каждый оракул обязан быть non-vacuous**: до confinement тест
+делает baseline-проверку вне sandbox — секрет-фикстура читается, исполняемая
+фикстура успешно запускается (статический ELF или фикстура с гарантированно
+доступными loader-зависимостями; permissions выставлены явно). Иначе `EACCES`
+может прийти от обычных file permissions, а `execve`-отказ — от
+`ENOEXEC`/`ENOENT`, и оракул «зеленеет» по причинам, не связанным с Landlock.
+Точный статус каждого теста против замороженного fake backend:
 
 1. **Секрет вне allow_read** — **RED** (fake backend не конфайнит, escape
    наблюдаем): файл с уникальным canary-содержимым вне
@@ -152,7 +177,11 @@ pub struct SandboxPolicy {
   передаётся argv-флагами; serde round-trip тут неприменим);
 - оракулы №1–3 из §2 (designated-runner suite, `#[ignore]` по существующей
   конвенции), со статусами точно как заявлено: 1–2 RED, 3 GREEN;
-- canary-скан как переиспользуемый helper, не копипаста по тестам;
+- canary-скан как переиспользуемый helper, не копипаста по тестам; множество
+  сканирования — stdout, stderr, marker artifacts, report, evidence И
+  канонический run record (`runs/<target>/<run-id>/`, если прогон его
+  создаёт) — canary не должен иметь места, куда можно «легально» утечь мимо
+  скана; layout run record при этом не меняется (backward compatibility);
 - `nix flake check` зелёный, включая новый preflight.
 
 ## Definition of Done
