@@ -182,6 +182,22 @@ pub struct SandboxPolicy {
   канонический run record (`runs/<target>/<run-id>/`, если прогон его
   создаёт) — canary не должен иметь места, куда можно «легально» утечь мимо
   скана; layout run record при этом не меняется (backward compatibility);
+- **canary-скан — обязательный pre-completion gate.** Если canonical run
+  record создаётся:
+  - run остаётся в существующем incomplete/failed состоянии до завершения
+    ВСЕХ проверок, включая canary-скан;
+  - success/complete публикуется только после успешного скана всех streams,
+    report, evidence, marker artifacts и всего `runs/<target>/<run-id>/`;
+  - canary, malformed evidence, partial enforcement или teardown failure
+    запрещают публикацию complete;
+  - ошибка не должна оставлять success marker/receipt от частично
+    завершённого запуска;
+  - существующая схема и layout run record не расширяются без отдельного
+    contract change.
+
+  Тесты: canary внутри canonical run record → scan failure; scan failure →
+  run не выглядит complete; partial/failed run → отсутствует success
+  marker/receipt;
 - `nix flake check` зелёный, включая новый preflight.
 
 ## Definition of Done
