@@ -1,0 +1,73 @@
+{
+  "arms": {
+    "full_derived": "AVAILABLE",
+    "negative_control": "NOT_APPLICABLE",
+    "projection": "AVAILABLE"
+  },
+  "baseline_classification": "BASELINE_EVALUATION_FAIL",
+  "evaluation_v1_sha256": "sha256:ab95f39e0c8d389f326f097ec177c5c22a751da016e173796a8dde645dd882df",
+  "failed_required_axes": [
+    "contract_input_consistency",
+    "relation_support"
+  ],
+  "failure_detail": {
+    "contract_input_consistency": {
+      "failing_gate": "consistency-forbidden-stale-grounded",
+      "note": "gates 06/07/08 (contract-vs-question) all PASS; this is the gold-grounding consistency gate added in R4B.1",
+      "problem": "case-0002-audit-r21-evidence-provenance forbids obs-reviewer-acceptance-claim as stale, but that observation is in-force (current) in the frozen gold state"
+    },
+    "relation_support": {
+      "note": "the R3.1 projection materialized 1 of 3 required supersession edges; 2 gold-required edges absent (no fabrication)",
+      "question": "qa3-superseded",
+      "satisfied_requirement": {
+        "from": "obs-profiler-fail-closed",
+        "kind": "supersedes",
+        "present_edges": [
+          "obs-profiler-prior-defect"
+        ]
+      },
+      "task": "case-0002-audit-r21-evidence-provenance",
+      "unsatisfied_edge_witness_requirements": [
+        {
+          "fabricated_edges": [],
+          "from": "obs-round0-closed",
+          "gold_edges": [
+            "obs-plane-record-not-frozen-v6"
+          ],
+          "kind": "supersedes",
+          "present_edges": []
+        },
+        {
+          "fabricated_edges": [],
+          "from": "obs-reviewer-durability-resolved",
+          "gold_edges": [
+            "obs-reviewer-durability-unresolved-v6"
+          ],
+          "kind": "supersedes",
+          "present_edges": []
+        }
+      ]
+    }
+  },
+  "follows": "evaluation-v1.json (measurement, not an expectation)",
+  "input_inventory_count": 19,
+  "interpretation": "A FAIL establishes the frozen R3.1 projection does NOT satisfy the frozen baseline structural contract v1 on two required axes. It is a measurement, not remediated. It does not prove or disprove Qodec benefit.",
+  "not_applicable_axes": [
+    "negative_control_diagnostics"
+  ],
+  "overall": "FAIL",
+  "passing_axes": [
+    "projection_validity",
+    "question_observation_support",
+    "source_compilation",
+    "stale_state_safety",
+    "task_dependence"
+  ],
+  "provenance": {
+    "case_role": "development",
+    "designed_after_observing_case_0002": true,
+    "generalization_claim_allowed": false,
+    "holdout_evidence": false
+  },
+  "record": "o7.b1.r4c-classification/v0"
+}

@@ -1,0 +1,31 @@
+{
+  "determinism": {
+    "evaluation_v1_bytes_identical": true,
+    "stderr_identical": true,
+    "stdout_identical": true
+  },
+  "mode": "authoritative",
+  "operational_exit": {
+    "run1": 0,
+    "run2": 0
+  },
+  "record": "o7.b1.r4c-run-comparison/v0",
+  "run1": {
+    "byte_length": 16030,
+    "evaluation_v1_sha256": "sha256:ab95f39e0c8d389f326f097ec177c5c22a751da016e173796a8dde645dd882df",
+    "exit": 0,
+    "output_schema_valid": true,
+    "stderr_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "run2": {
+    "byte_length": 16030,
+    "evaluation_v1_sha256": "sha256:ab95f39e0c8d389f326f097ec177c5c22a751da016e173796a8dde645dd882df",
+    "exit": 0,
+    "input_argument_order": "reversed",
+    "output_schema_valid": true,
+    "stderr_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "runs": 2
+}
