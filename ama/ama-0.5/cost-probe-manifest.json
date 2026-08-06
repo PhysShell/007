@@ -1,0 +1,114 @@
+{
+  "protocol_commit": "1d1e24d5548d227bf301854961205a5af8811dab",
+  "maintainer_budget_minutes": 540,
+  "per_case_censor_minutes": 180,
+  "reserve_activation_budget_minutes": 360,
+  "max_reserve_activations": 2,
+  "cases": [
+    {
+      "stratum": "provider-clear-repo-reproducible",
+      "primary": {
+        "case_id": "S1-P-documenso",
+        "repository": "documenso/documenso",
+        "commit": "f0ab7c112e3c39656b0153b67fbf25fd9616e96f",
+        "provider_artifacts": [
+          {
+            "identity": "Stripe changelog entry: 'Makes flexible billing mode the default for new subscriptions', API version 2025-09-30.clover",
+            "retrieved_from": "https://docs.stripe.com/changelog/clover/2025-09-30/billing-mode-default-flexible.md",
+            "representation": "markdown variant served by docs.stripe.com; the HTML representation of the same page was not pinned because two consecutive fetches produced different bytes",
+            "retrieved_at": "2026-08-06T07:38:23Z",
+            "digest": "sha256:5ba865f1bf9d7c394b29a8f0761b5e981a2c739f8acb9ae0878ad9dca4a83bd0",
+            "digest_stability_verified": true
+          }
+        ],
+        "notes": "Execution ordinal 1 of 3. Array order IS execution order. Delta D1. Expected cost driver: provider artifact is unambiguous and the repository reproduces cheaply — package-lock.json, npm 11.11.0, node >=22, TypeScript 5.6.2, 16 tsconfig files. Resolution construct is a re-exported singleton (@documenso/lib/server-only/stripe), one hop from the call site."
+      },
+      "reserve": {
+        "case_id": "S1-R-openstatus",
+        "repository": "openstatusHQ/openstatus",
+        "commit": "0a4c66174bcd8322862761c4efd843f36504f956",
+        "provider_artifacts": [
+          {
+            "identity": "Stripe changelog entry: 'Makes flexible billing mode the default for new subscriptions', API version 2025-09-30.clover",
+            "retrieved_from": "https://docs.stripe.com/changelog/clover/2025-09-30/billing-mode-default-flexible.md",
+            "representation": "markdown variant served by docs.stripe.com",
+            "retrieved_at": "2026-08-06T07:38:23Z",
+            "digest": "sha256:5ba865f1bf9d7c394b29a8f0761b5e981a2c739f8acb9ae0878ad9dca4a83bd0",
+            "digest_stability_verified": true
+          }
+        ],
+        "notes": "Run ONLY on an excluded_validity outcome of S1-P-documenso, and before moving to stratum 2. Exported singleton in packages/api/src/router/stripe/shared.ts; pnpm 11.2.1 with lockfile; the Stripe version is declared as \"catalog:\" and resolved to 13.11.0 in pnpm-workspace.yaml."
+      }
+    },
+    {
+      "stratum": "wrapper-alias-indirection",
+      "primary": {
+        "case_id": "S2-P-dub",
+        "repository": "dubinc/dub",
+        "commit": "a382432c8be076301242094f4a8a98765cf163bb",
+        "provider_artifacts": [
+          {
+            "identity": "Stripe changelog entry: 'Makes flexible billing mode the default for new subscriptions', API version 2025-09-30.clover",
+            "retrieved_from": "https://docs.stripe.com/changelog/clover/2025-09-30/billing-mode-default-flexible.md",
+            "representation": "markdown variant served by docs.stripe.com",
+            "retrieved_at": "2026-08-06T07:38:23Z",
+            "digest": "sha256:5ba865f1bf9d7c394b29a8f0761b5e981a2c739f8acb9ae0878ad9dca4a83bd0",
+            "digest_stability_verified": true
+          }
+        ],
+        "notes": "Execution ordinal 2 of 3. Delta D1. Expected cost driver: the client is reached through several indirections — a module singleton, a stripeAppClient({mode}) factory, and a separate package client — across three different pinned apiVersion strings, with conditional object spreads at the call sites. Two decoys present: an example in guides/stripe-checkout.md and a Playwright billing mock."
+      },
+      "reserve": {
+        "case_id": "S2-R-rallly",
+        "repository": "lukevella/rallly",
+        "commit": "65dd7369a35893c8e5207de3543258f2919c86a3",
+        "provider_artifacts": [
+          {
+            "identity": "Stripe changelog entry: 'Makes flexible billing mode the default for new subscriptions', API version 2025-09-30.clover",
+            "retrieved_from": "https://docs.stripe.com/changelog/clover/2025-09-30/billing-mode-default-flexible.md",
+            "representation": "markdown variant served by docs.stripe.com",
+            "retrieved_at": "2026-08-06T07:38:23Z",
+            "digest": "sha256:5ba865f1bf9d7c394b29a8f0761b5e981a2c739f8acb9ae0878ad9dca4a83bd0",
+            "digest_stability_verified": true
+          }
+        ],
+        "notes": "Run ONLY on an excluded_validity outcome of S2-P-dub, and before moving to stratum 4. Client arrives three ways: a createStripeClient() factory in packages/billing, the app's own getStripe(), and a type-only import from @rallly/billing. Contains an in-repository negative example: a third checkout.sessions.create with mode: \"payment\", which D1 does not reach."
+      }
+    },
+    {
+      "stratum": "historically-messy-or-reproduction-hostile",
+      "primary": {
+        "case_id": "S4-P-caldiy",
+        "repository": "calcom/cal.diy",
+        "commit": "b2c28a23ab5b53f2e3729657d23cccb50f64e18a",
+        "provider_artifacts": [
+          {
+            "identity": "Stripe changelog entry: 'Makes flexible billing mode the default for new subscriptions', API version 2025-09-30.clover",
+            "retrieved_from": "https://docs.stripe.com/changelog/clover/2025-09-30/billing-mode-default-flexible.md",
+            "representation": "markdown variant served by docs.stripe.com",
+            "retrieved_at": "2026-08-06T07:38:23Z",
+            "digest": "sha256:5ba865f1bf9d7c394b29a8f0761b5e981a2c739f8acb9ae0878ad9dca4a83bd0",
+            "digest_stability_verified": true
+          }
+        ],
+        "notes": "Execution ordinal 3 of 3. Delta D1. Expected cost driver: archaeology. Three Stripe versions in one monorepo, one of them the range ^9.0.0 || ^15.0.0 so the installed version is determined only by the lockfile; five client constructions pinned to apiVersion 2020-08-27; one call site passes its parameters as a variable rather than an inline literal; yarn 4.12.0, TypeScript 5.9.3. The repository is the former calcom/cal.com under its current canonical identity."
+      },
+      "reserve": {
+        "case_id": "S4-R-formbricks",
+        "repository": "formbricks/formbricks",
+        "commit": "4997f25372f23b9c9d691963b92f5017ecf87911",
+        "provider_artifacts": [
+          {
+            "identity": "Stripe changelog entry: 'Makes flexible billing mode the default for new subscriptions', API version 2025-09-30.clover",
+            "retrieved_from": "https://docs.stripe.com/changelog/clover/2025-09-30/billing-mode-default-flexible.md",
+            "representation": "markdown variant served by docs.stripe.com",
+            "retrieved_at": "2026-08-06T07:38:23Z",
+            "digest": "sha256:5ba865f1bf9d7c394b29a8f0761b5e981a2c739f8acb9ae0878ad9dca4a83bd0",
+            "digest_stability_verified": true
+          }
+        ],
+        "notes": "Run ONLY on an excluded_validity outcome of S4-P-caldiy. Five call sites across three affected operation kinds; STRIPE_API_VERSION = 2026-02-25.clover, which is past the flip, so exposure is realised rather than latent; three of four version-pin sites suppress the literal-union check with `as Stripe.LatestApiVersion` and the fourth does not."
+      }
+    }
+  ]
+}
