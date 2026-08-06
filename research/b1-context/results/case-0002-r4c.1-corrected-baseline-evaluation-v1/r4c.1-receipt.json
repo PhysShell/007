@@ -1,0 +1,64 @@
+{
+  "contract": {
+    "artifact_bytes_sha256": "sha256:8f5060f0d68ec3a5796714322c7f0541ade58539c25bb0d535b2bb4c315c00e7",
+    "canonical_object_sha256": "sha256:9784516db193e5987a2e6bf78713ee3f7affe58dc7864424eef59a131a95e081",
+    "revision": 3
+  },
+  "corrected_evaluator": {
+    "commit": "58a7a1113c8a649b6952f56b2782d01f887ff3ed",
+    "implementation_manifest_digest": "sha256:14abcb8378f89315e6cc92ec374c1905099628a230a495091a8ecfbe9e4a0a87",
+    "tree": "054dde669d118a5336177ea602653626961c0eee"
+  },
+  "forbidden_confirmed_not_taken": [
+    "no contract/schema change",
+    "no evaluator-v0 change",
+    "no extraction/projection rerun",
+    "no R3/R3.1 or original-R4C edit",
+    "no expected result",
+    "no run_case/report integration",
+    "private derived bodies not committed",
+    "qodec PR #16 untouched",
+    "no PR"
+  ],
+  "kind": "measurement_only",
+  "original_r4c": {
+    "artifact_commit": "b5ea8e8d82a4e27a0ba50c589db6c765532096ab",
+    "contract_input_consistency_FAIL": "INVALID_corrected_to_PASS",
+    "evaluation_v1_sha256": "sha256:ab95f39e0c8d389f326f097ec177c5c22a751da016e173796a8dde645dd882df"
+  },
+  "original_r4c_erratum_bound": true,
+  "provenance": {
+    "case_role": "development",
+    "designed_after_observing_case_0002": true,
+    "generalization_claim_allowed": false,
+    "holdout_evidence": false
+  },
+  "qodec_arm_started": false,
+  "r3_1": {
+    "report_sha256": "sha256:7f72133abc88ff88873c9d5dea1139535ff6583baee5e96b74ed7b0e4aeafba6"
+  },
+  "record": "o7.b1.r4c1-receipt/v0",
+  "result": {
+    "artifact_commit": "af6e69558298d75ba82a6e1665eede1a1872a93e",
+    "artifact_tree": "43810cd2d2933714acb4b6a6c21b384392b0ffe2",
+    "axes": {
+      "contract_input_consistency": "PASS",
+      "negative_control_diagnostics": "NOT_APPLICABLE",
+      "projection_validity": "PASS",
+      "question_observation_support": "PASS",
+      "relation_support": "FAIL",
+      "source_compilation": "PASS",
+      "stale_state_safety": "PASS",
+      "task_dependence": "PASS"
+    },
+    "baseline_classification": "BASELINE_EVALUATION_FAIL",
+    "byte_deterministic": true,
+    "cas_object": "cas:sha256:963edb459fb742359051e3a5386ce6b6f1026e1d01b5a8a951a9b0bf99541d76",
+    "evaluation_v1_sha256": "sha256:963edb459fb742359051e3a5386ce6b6f1026e1d01b5a8a951a9b0bf99541d76",
+    "input_inventory_count": 19,
+    "offsite_snapshot": "restic:cf002ed5",
+    "overall": "FAIL",
+    "single_failure_axis": "relation_support"
+  },
+  "round": "R4C.1"
+}
