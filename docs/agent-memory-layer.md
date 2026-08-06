@@ -2,6 +2,11 @@
 
 - **Status:** draft · Scope: `o7 memory` / `o7 context` (007 only; OwnAudit
   and Own.NET runs are data sources, not implementation targets).
+- **Companion evaluation:** `docs/deja-vu-memory-evaluation.md` — a second
+  prior-art study (deja-vu) with a measured negative-recall probe. It proposes
+  one added acceptance criterion (abstention) and one added non-goal (no
+  untyped recall reaches a planner); both are agent-authored and **pending
+  maintainer ratification**, so they are not folded into the phases below.
 
 ## Summary
 
@@ -134,6 +139,17 @@ Risky parts for "007":
 - depending on regex-only secret stripping as a complete security boundary.
 
 Conclusion: "agentmemory" is useful as a memory runtime, but "007" should wrap it behind its own artifact-derived adapter.
+
+## Prior art: deja-vu
+
+"vshulcz/deja-vu" is a zero-dependency local index over the transcript stores of
+~17 coding harnesses, with CLI/MCP/hook recall and no LLM or embeddings on the
+base search path. It is evaluated in full — including what it does better than
+this document proposes (typed non-conversational records, a decision lifecycle
+with tombstones, a deterministic rebuildable index) and the one thing that
+disqualifies it as an authority (it has no *no supported evidence* answer) — in
+`docs/deja-vu-memory-evaluation.md`. The measurement behind that last claim is
+in `evidence/deja-vu-negative-recall/`.
 
 ## Proposed architecture
 
@@ -1017,6 +1033,11 @@ Phase 2 is complete when:
 - context separates trusted facts from agent claims;
 - context includes provenance links;
 - context stays under a configured token/char budget.
+
+A fifth criterion — abstention: a negative-query set is part of the acceptance
+run, and no session is returned as evidence for a question the corpus cannot
+support — is proposed in `docs/deja-vu-memory-evaluation.md` and is **pending
+maintainer ratification** (rule 3), so it does not bind Phase 2 yet.
 
 Phase 3 is complete when:
 

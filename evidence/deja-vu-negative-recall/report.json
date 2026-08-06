@@ -1,0 +1,245 @@
+{
+  "corpus_sessions": 24,
+  "negative": [
+    {
+      "query": "what did we decide about the kafka consumer rebalance storm",
+      "hits": 4,
+      "tier": "relevance",
+      "dropped_terms": [],
+      "top": "protobuf schema migration broke the old consumers"
+    },
+    {
+      "query": "how did we fix the elasticsearch shard allocation failure",
+      "hits": 0,
+      "tier": "exact",
+      "dropped_terms": [],
+      "top": ""
+    },
+    {
+      "query": "why did we drop mongodb sharding for the audit log",
+      "hits": 0,
+      "tier": "exact",
+      "dropped_terms": [],
+      "top": ""
+    },
+    {
+      "query": "what was the conclusion on the rabbitmq quorum queue migration",
+      "hits": 0,
+      "tier": "exact",
+      "dropped_terms": [],
+      "top": ""
+    },
+    {
+      "query": "how did we handle the cassandra tombstone compaction runbook",
+      "hits": 0,
+      "tier": "exact",
+      "dropped_terms": [],
+      "top": ""
+    },
+    {
+      "query": "what did we change in the envoy mesh mtls rotation",
+      "hits": 2,
+      "tier": "relevance",
+      "dropped_terms": [],
+      "top": "jwt refresh token rotation broke mobile clients"
+    },
+    {
+      "query": "did we ever solve the android bluetooth pairing timeout",
+      "hits": 0,
+      "tier": "exact",
+      "dropped_terms": [],
+      "top": ""
+    },
+    {
+      "query": "what was the fix for the swift concurrency actor deadlock",
+      "hits": 0,
+      "tier": "exact",
+      "dropped_terms": [],
+      "top": ""
+    },
+    {
+      "query": "how did we tune the hadoop yarn scheduler queues",
+      "hits": 0,
+      "tier": "exact",
+      "dropped_terms": [],
+      "top": ""
+    },
+    {
+      "query": "what did we decide about the graphql federation gateway split",
+      "hits": 3,
+      "tier": "relevance",
+      "dropped_terms": [],
+      "top": "rust borrow checker fight in the segment merger"
+    },
+    {
+      "query": "why did the wasm runtime sandbox escape test fail",
+      "hits": 1,
+      "tier": "close",
+      "dropped_terms": [
+        "escape",
+        "runtime",
+        "sandbox",
+        "wasm",
+        "why"
+      ],
+      "top": "ci flake in the integration suite once every twenty runs"
+    },
+    {
+      "query": "how did we migrate the ldap directory to okta",
+      "hits": 0,
+      "tier": "exact",
+      "dropped_terms": [],
+      "top": ""
+    },
+    {
+      "query": "what was the outcome of the ipv6 dual stack rollout",
+      "hits": 0,
+      "tier": "exact",
+      "dropped_terms": [],
+      "top": ""
+    },
+    {
+      "query": "did we fix the printer driver spool corruption",
+      "hits": 0,
+      "tier": "exact",
+      "dropped_terms": [],
+      "top": ""
+    },
+    {
+      "query": "how did we configure the snowflake warehouse auto suspend",
+      "hits": 0,
+      "tier": "exact",
+      "dropped_terms": [],
+      "top": ""
+    },
+    {
+      "query": "what did we learn from the dns anycast failover drill",
+      "hits": 0,
+      "tier": "exact",
+      "dropped_terms": [],
+      "top": ""
+    },
+    {
+      "query": "how did we resolve the git lfs storage quota exhaustion",
+      "hits": 2,
+      "tier": "relevance",
+      "dropped_terms": [],
+      "top": "object storage bucket lifecycle deleted needed backups"
+    },
+    {
+      "query": "what happened with the arm64 cross compilation toolchain",
+      "hits": 0,
+      "tier": "exact",
+      "dropped_terms": [],
+      "top": ""
+    },
+    {
+      "query": "why did we revert the istio ambient mode upgrade",
+      "hits": 0,
+      "tier": "exact",
+      "dropped_terms": [],
+      "top": ""
+    },
+    {
+      "query": "what did we decide about the firebase push notification retry",
+      "hits": 3,
+      "tier": "relevance",
+      "dropped_terms": [],
+      "top": "stripe webhook retries double charged two customers"
+    }
+  ],
+  "positive": [
+    {
+      "query": "why was the postgres connection pool exhausted",
+      "hits": 1,
+      "tier": "close",
+      "dropped_terms": [
+        "why"
+      ],
+      "top": "postgres connection pool exhausted under load"
+    },
+    {
+      "query": "how did we fix the stripe webhook double charge",
+      "hits": 1,
+      "tier": "close",
+      "dropped_terms": [
+        "fix"
+      ],
+      "top": "stripe webhook retries double charged two customers"
+    },
+    {
+      "query": "what did we do about the ingress tls certificate renewal",
+      "hits": 1,
+      "tier": "close",
+      "dropped_terms": [
+        "about",
+        "renewal"
+      ],
+      "top": "kubernetes ingress tls certificate not renewing"
+    },
+    {
+      "query": "why did the tokenizer drop cyrillic text",
+      "hits": 1,
+      "tier": "close",
+      "dropped_terms": [
+        "why"
+      ],
+      "top": "tokenizer drops cyrillic text on the fold path"
+    },
+    {
+      "query": "what caused the webpack build to run out of memory",
+      "hits": 5,
+      "tier": "relevance",
+      "dropped_terms": [],
+      "top": "webpack build out of memory in ci"
+    },
+    {
+      "query": "how did we handle the protobuf field number reuse",
+      "hits": 1,
+      "tier": "close",
+      "dropped_terms": [
+        "handle",
+        "protobuf"
+      ],
+      "top": "protobuf schema migration broke the old consumers"
+    },
+    {
+      "query": "what was the parquet column pruning problem",
+      "hits": 1,
+      "tier": "close",
+      "dropped_terms": [
+        "problem"
+      ],
+      "top": "parquet column pruning not applied by the reader"
+    },
+    {
+      "query": "how did we stop the node autoscaler thrashing",
+      "hits": 1,
+      "tier": "close",
+      "dropped_terms": [
+        "stop"
+      ],
+      "top": "node autoscaler thrashing between two and six nodes"
+    },
+    {
+      "query": "what was the jwt refresh token rotation decision",
+      "hits": 6,
+      "tier": "relevance",
+      "dropped_terms": [],
+      "top": "jwt refresh token rotation broke mobile clients"
+    },
+    {
+      "query": "why did the airflow backfill duplicate rows",
+      "hits": 1,
+      "tier": "close",
+      "dropped_terms": [
+        "why"
+      ],
+      "top": "airflow dag backfill duplicated rows in the warehouse"
+    }
+  ],
+  "negative_answered": 6,
+  "negative_total": 20,
+  "positive_answered": 10,
+  "positive_total": 10
+}
