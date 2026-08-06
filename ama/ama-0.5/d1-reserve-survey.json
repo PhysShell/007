@@ -1,0 +1,82 @@
+{
+  "survey_id": "D1-reserve-survey-01",
+  "delta_id": "D1-stripe-billing-mode-default",
+  "purpose": "Select the two missing D1 reserves, for stratum 1 (provider-clear / reproducible) and stratum 2 (wrapper / alias indirection), after scope-decision-01.json narrowed the probe to three strata.",
+  "search_frame": {
+    "declared_before_search": true,
+    "max_repositories": 4,
+    "substitutions": "forbidden",
+    "slot_spent_when": "inspection begins",
+    "early_stop_condition": "two admissible reserves covering strata 1 and 2",
+    "repositories_in_declared_order": [
+      "mfts/papermark",
+      "lukevella/rallly",
+      "unkeyed/unkey",
+      "openstatusHQ/openstatus"
+    ]
+  },
+  "results": [
+    {
+      "slot": 1,
+      "repository": "mfts/papermark",
+      "commit": "a7926ed697cf778522b32e7984e120879dba5378",
+      "stripe": "^22.3.0",
+      "d1_call_sites": 0,
+      "decision": "rejected",
+      "rejection_reason": "Stripe is used heavily but only through subscriptions.update / retrieve / deleteDiscount. No subscription-CREATING operation exists, and D1 reaches only the creating ones. A useful negative example: a heavy integration with zero occurrences of the fact.",
+      "note": "Two clients (stripeOld, stripeNew), apiVersion 2024-06-20."
+    },
+    {
+      "slot": 2,
+      "repository": "lukevella/rallly",
+      "commit": "65dd7369a35893c8e5207de3543258f2919c86a3",
+      "stripe": "^13.2.0",
+      "lockfile": "pnpm-lock.yaml",
+      "api_version_pin": "2023-08-16 (pre-flip; exposure latent)",
+      "billing_mode_mentions": 0,
+      "d1_call_sites": 2,
+      "in_repo_negative_example": "a third checkout.sessions.create at apps/web/src/features/licensing/mutations.ts:179 uses mode: \"payment\" — D1 does NOT reach it. A locator keying on the method name over-reports by one third in this repository.",
+      "resolution_construct": "client obtained three different ways: createStripeClient() factory in packages/billing/src/lib/stripe.ts, getStripe() from the app's own billing service, and a type-only import from @rallly/billing",
+      "decision": "admissible",
+      "assigned_role": "stratum 2 reserve (wrapper / alias indirection)"
+    },
+    {
+      "slot": 3,
+      "repository": "unkeyed/unkey",
+      "commit": "1fee88d7df95f5ef74033cadaec02d510fcf2eb1",
+      "stripe": "14.23.0 and 22.3.0 (two versions in one repository)",
+      "lockfile": "web/pnpm-lock.yaml (none at root; mise and buf alongside)",
+      "billing_mode_mentions": 5,
+      "d1_call_sites": "6+, including sessionParams passed as a variable to checkout.sessions.create three times",
+      "decision": "admissible as a D1 case, NOT used",
+      "why_not_used": "Its cost profile is historically-messy / reproduction-hostile — two SDK versions, no root lockfile, several toolchains — and stratum 4 already has both a primary and a reserve. Using it would have meant reassigning a stratum after seeing results.",
+      "note": "The most valuable ground-truth specimen found in either survey, retained for the semantic-impact corpus (§5.2). Every subscription-creating site already carries the backward-compatible form billing_mode: { type: \"classic\" } — the exact remedy D1 prescribes — and the one call site without it is mode: \"setup\", which creates no subscription and is correctly outside D1. It therefore contains five true positives correctly remediated and one true negative that a naive method-name locator would flag, plus doc-comment decoys mentioning subscriptions.create."
+    },
+    {
+      "slot": 4,
+      "repository": "openstatusHQ/openstatus",
+      "commit": "0a4c66174bcd8322862761c4efd843f36504f956",
+      "stripe": "declared as \"catalog:\" in package.json; resolved to 13.11.0 in pnpm-workspace.yaml",
+      "lockfile": "pnpm-lock.yaml, pnpm@11.2.1 (deno.lock and devbox.lock also present)",
+      "api_version_pin": "2023-08-16 (pre-flip; exposure latent)",
+      "billing_mode_mentions": 0,
+      "d1_call_sites": 1,
+      "resolution_construct": "exported singleton in packages/api/src/router/stripe/shared.ts; one hop from the call site",
+      "decision": "admissible",
+      "assigned_role": "stratum 1 reserve (provider-clear / reproducible)",
+      "note": "The version is deterministic but not where a reader looks for it: package.json says \"catalog:\" and the number lives in pnpm-workspace.yaml. Recorded as a reproduction wrinkle, not a defect."
+    }
+  ],
+  "outcome": {
+    "admissible_reserves_found": 2,
+    "early_stop_condition_met": true,
+    "stratum_1_reserve": "openstatusHQ/openstatus @ 0a4c66174bcd8322862761c4efd843f36504f956",
+    "stratum_2_reserve": "lukevella/rallly @ 65dd7369a35893c8e5207de3543258f2919c86a3",
+    "manifest_completeness": "six case IDs now available for the narrowed three-stratum probe"
+  },
+  "cross_survey_observation": {
+    "statement": "Across the seven D1-bearing repositories inspected in both surveys, billing_mode is mentioned in exactly one — unkey, where it is set to classic at every affected site. The other six omit the field entirely at every subscription-creating call site.",
+    "caveat": "Six of the seven pin an apiVersion predating 2025-09-30.clover, so their exposure is latent rather than realised; formbricks pins 2026-02-25.clover and is already running under the new default. This is consumer-derived knowledge and stays out of D1, exactly like the apiVersion observation.",
+    "status": "observation from a convenience sample of selection work, not a measurement"
+  }
+}
