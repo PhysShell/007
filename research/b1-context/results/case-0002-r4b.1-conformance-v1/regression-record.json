@@ -1,0 +1,1 @@
+{"case_0001_cas_backed_verify":{"report_digest":"sha256:52f9d2bed7467ee4e7d466baf94c5240791edbafab6aa08d200912d4fefce6da","result":"PASS","returncode":0},"existing_plus_new_suite":{"ran":["Ran 127 tests in 40.988s"],"result":"OK","returncode":0},"record":"o7.b1.r4b1-regression/v0","worktree_clean_after_runs":true}
