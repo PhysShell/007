@@ -32,6 +32,11 @@ D1  Stripe    billing_mode.type default classic → flexible   (2025-09-30.clove
 D2  AWS JS    maxRetries → maxAttempts, equivalent = N + 1    (v2 → v3)
 ```
 
+D2's historical supply was surveyed under a predeclared five-repository frame and
+found insufficient for this probe — see `d2-supply-survey.json` for every
+candidate, admissible or not, and the hypothesis the result generated. D2 itself
+is retained and unchanged: it was not refuted, it ran out of consumers.
+
 Each records a **visibility hypothesis** — expected class and expected oracle
 fidelity — before any mutation is run, so the hypothesis cannot be retrofitted to
 the result. §3 still decides the class empirically.

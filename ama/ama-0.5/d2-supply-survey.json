@@ -1,0 +1,152 @@
+{
+  "survey_id": "D2-historical-supply-survey-01",
+  "delta_id": "D2-aws-sdk-js-max-attempts",
+  "purpose": "Establish whether D2 has enough admissible historical TypeScript cases to fill stratum 3 of the pre-freeze cost-floor probe (primary + reserve). Selection work, performed before the manifest and therefore outside the probe's 12-hour budget.",
+  "search_frame": {
+    "declared_before_search": true,
+    "max_repositories": 5,
+    "substitutions": "forbidden",
+    "extra_repositories_after_exhaustion": "forbidden",
+    "slot_spent_when": "history inspection begins (partial clone / commit search / pickaxe) — a fast rejection spends a slot too",
+    "early_stop_condition": "one admissible primary AND one admissible reserve",
+    "repositories_in_declared_order": [
+      "n8n-io/n8n",
+      "nocodb/nocodb",
+      "medusajs/medusa",
+      "directus/directus",
+      "payloadcms/payload"
+    ]
+  },
+  "admissibility_filter": [
+    "a real migration PR or commit exists",
+    "the pin is its parent / base",
+    "the occurrence is in .ts/.tsx, or proven to be in the pinned TypeScript program (allowJs/checkJs)",
+    "the old value is connected to a control-flow budget",
+    "the migration witness shows the value carried over or dropped",
+    "the pinned state reproduces well enough to adjudicate"
+  ],
+  "not_accepted_as_an_occurrence": [
+    "a local retry loop that is not AWS client configuration",
+    "maxRetries in tests, documentation, or dead code",
+    "retry configuration authored natively under v3",
+    "a .js file merely sitting next to TypeScript",
+    "a generic wrapper option without proven delivery to a v2 client",
+    "a migration commit that changes the SDK but does not let the value's fate be traced"
+  ],
+  "pre_frame_leads": [
+    {
+      "repository": "novuhq/novu",
+      "pin_examined": "7f166221d134569753af1d67a3450fab1c13cca8 (HEAD-era)",
+      "aws_sdk_v2_present": false,
+      "aws_sdk_v3_present": "@aws-sdk/* ^3.996.0",
+      "relevant_occurrence": false,
+      "decision": "rejected",
+      "rejection_reason": "The maxAttempts match is a local constant DELETE_MAX_ATTEMPTS = 3 used in a manual retry loop and in structured logging. None of the seven constructed AWS clients passes maxAttempts, maxRetries, or retryStrategy. No aws-sdk v2 anywhere, so there is no migration to localize."
+    },
+    {
+      "repository": "twentyhq/twenty",
+      "pin_examined": "c7f443662f87727458cab7bfb2d875ee99a5aeb4 (HEAD-era)",
+      "aws_sdk_v2_present": false,
+      "aws_sdk_v3_present": "@aws-sdk/* pinned 3.1001.0",
+      "relevant_occurrence": "genuine v3 retry config: new Lambda({ maxAttempts: LAMBDA_CLIENT_MAX_ATTEMPTS /* 8 */, retryMode: 'adaptive' })",
+      "decision": "rejected",
+      "rejection_reason": "The configuration is real but was authored natively under v3 — value 8 with adaptive retry mode, not a carried-over v2 number. No migration residue."
+    },
+    {
+      "repository": "SalesforceCommerceCloud/pwa-kit",
+      "migration_witness": "09703bb0c (2026-01-07, '@W-20452321: migrate aws-sdk from v2 to v3'); an earlier attempt 98b4c27cc (2025-12-31) shares the same parent and performs the same change WITHOUT the +1 comment",
+      "pre_migration_pin": "a800235cc84ea40af73635f164e35d982c5e8504",
+      "aws_sdk_v2_present": true,
+      "relevant_occurrence": "maxRetries: 0 -> maxAttempts: 1, with an in-diff comment stating 'The key maxRetries is renamed to maxAttempts. The value of maxAttempts needs to be maxRetries + 1.'",
+      "control_flow_budget_connection": true,
+      "typescript_program_proof": false,
+      "decision": "rejected",
+      "rejection_reason": "Filter 3. The occurrence lives in packages/pwa-kit-runtime/src/utils/ssr-server/metrics-sender.js. Verified AT THE PRE-MIGRATION PARENT, not at HEAD: packages/pwa-kit-runtime contains zero tsconfig files and zero .ts files at a800235cc. At HEAD four tsconfigs exist, all in other packages, with allowJs commented out in three of them. The temporal shape is exemplary and the language is wrong.",
+      "note": "Retained as the reference specimen of the temporal shape D2 requires."
+    },
+    {
+      "repository": "alertlogic/al-aws-collector-js",
+      "pre_migration_pin": "5348b26f9ce4e0d324013a5544edcf5aaeed1fd9",
+      "aws_sdk_v2_present": "aws-sdk ^2.1454.0",
+      "relevant_occurrence": "health_checks.js:36 maxRetries: 7; al_aws.js:23 maxRetries: 10",
+      "control_flow_budget_connection": true,
+      "typescript_program_proof": false,
+      "decision": "rejected",
+      "rejection_reason": "Filter 3. No tsconfig and no .ts files anywhere in the repository — a pure JavaScript project."
+    }
+  ],
+  "frame_results": [
+    {
+      "slot": 1,
+      "repository": "n8n-io/n8n",
+      "method": "partial clone (31,912 commits), package.json sampled at 2020-06, 2021-06, 2022-06, 2023-06, 2024-06",
+      "aws_sdk_v2_present": false,
+      "typescript_program": "yes, extensive",
+      "relevant_occurrence": false,
+      "migration_witness": null,
+      "pre_migration_pin": null,
+      "reproduction_status": "not reached",
+      "decision": "rejected",
+      "rejection_reason": "\"aws-sdk\" never appears in any package.json across five sampled years; n8n's AWS nodes never used the v2 SDK. No migration exists to localize."
+    },
+    {
+      "slot": 2,
+      "repository": "nocodb/nocodb",
+      "method": "partial clone (88,073 commits), sampled 2021-2025; depth-1 checkout at d8106ac2f8e3acda6a1677d44ab3611bdaf71b13 for full-tree grep",
+      "aws_sdk_v2_present": "yes — ^2.829.0 (2021-2023), ^2.1550.0 (2024), absent by 2025, so a migration event exists between those samples",
+      "typescript_program": "yes — aws-sdk imported in 8+ TypeScript plugin files (Backblaze.ts, Spaces.ts, Vultr.ts, SES.ts, LinodeObjectStorage.ts, ScalewayObjectStorage.ts, OvhCloud.ts, UpoCloud.ts)",
+      "relevant_occurrence": false,
+      "control_flow_budget_connection": false,
+      "reproduction_status": "not reached",
+      "decision": "rejected",
+      "rejection_reason": "Filter 4. The v2 x TypeScript intersection is genuinely present, but maxRetries/maxAttempts appears in zero .ts files: no retry count is configured anywhere, so the changed fact has no occurrence."
+    },
+    {
+      "slot": 3,
+      "repository": "medusajs/medusa",
+      "method": "partial clone (29,313 commits), sampled 2021-2025; depth-1 checkout at 69e7801add74902d62c876f55a5292378cc4fdb4",
+      "aws_sdk_v2_present": "yes — ^2.710.0 (2021) through ^2.983.0 (2023), absent by 2024",
+      "typescript_program": "yes — aws-sdk imported in medusa-file-s3/src/services/s3.ts and medusa-file-minio/src/services/minio.ts",
+      "relevant_occurrence": false,
+      "control_flow_budget_connection": false,
+      "reproduction_status": "not reached",
+      "decision": "rejected",
+      "rejection_reason": "Filter 4 plus the exclusion list. Clients are constructed as new aws.S3(config) and new aws.S3({accessKeyId, secretAccessKey, endpoint, s3ForcePathStyle}) with no retry configuration. Every maxRetries hit is one of the excluded categories: Medusa's own HTTP client (medusa-js/src/request.ts), ioredis maxRetriesPerRequest, or doc-comment examples."
+    },
+    {
+      "slot": 4,
+      "repository": "directus/directus",
+      "method": "partial clone (33,945 commits), sampled 2021-2025; depth-1 checkout at 5ef1391da8e0ccf2eeb93cd0b140c6fbc623f1ba",
+      "aws_sdk_v2_present": "yes — ^2.911.0 (2021), ^2.928.0 (2022), absent by 2023",
+      "typescript_program": "yes — aws-sdk used in packages/drive-s3/src/AmazonWebServicesS3Storage.ts and api/src/mailer.ts",
+      "relevant_occurrence": false,
+      "control_flow_budget_connection": false,
+      "reproduction_status": "not reached",
+      "decision": "rejected",
+      "rejection_reason": "Filter 4. Zero maxRetries/maxAttempts occurrences in any .ts file."
+    },
+    {
+      "slot": 5,
+      "repository": "payloadcms/payload",
+      "method": "partial clone (22,029 commits), package.json sampled 2021-2025",
+      "aws_sdk_v2_present": false,
+      "typescript_program": "yes",
+      "relevant_occurrence": false,
+      "reproduction_status": "not reached",
+      "decision": "rejected",
+      "rejection_reason": "\"aws-sdk\" never appears in any package.json across five sampled years — the project post-dates the v2 era, as anticipated when the frame was declared."
+    }
+  ],
+  "outcome": {
+    "admissible_primary": 0,
+    "admissible_reserve": 0,
+    "bounded_conclusion": "Within the predeclared five-repository search frame, D2 yielded fewer than two admissible historical TypeScript cases and therefore has insufficient historical supply for inclusion in this probe.",
+    "scope_effect": "Stratum 3 cannot be filled with D2. The manifest cannot reach eight case IDs on the current delta set."
+  },
+  "hypothesis": {
+    "statement": "The observed scarcity is NOT primarily a language boundary. Three of the five framed candidates carried aws-sdk v2 inside genuine TypeScript programs; what was absent in every one of them was any configured retry count. Consumers accept the SDK's default retry behaviour, so the fact D2 describes has no occurrence to localize.",
+    "supersedes": "The earlier guess that retry-configured v2 consumers are concentrated in JavaScript infrastructure code. The framed data partially refutes it: the v2 x TypeScript intersection is common; the v2 x TypeScript x configured-retry-count intersection is what is rare.",
+    "generalization_candidate": "Contract facts differ enormously in occurrence density. D1's fact — an omitted optional field on subscription-creating calls — occurs at every such call site, and four of four D1 candidates carried it. D2's fact — an explicitly configured retry count — is rare by construction, because the default is the common case. A claim cell built on a low-density fact may never reach N_publish at any budget, which makes occurrence density a selection criterion for claim cells, not merely an outcome. This belongs to the taxonomy work of AMA-0.5 step 1, not to any delta.",
+    "status": "hypothesis, generated by a five-repository frame; not established"
+  }
+}
