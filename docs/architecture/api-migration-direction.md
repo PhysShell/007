@@ -665,7 +665,7 @@ not money:
 ```text
 0 censored cases
   → AMA-0.5 may continue
-  → record only: B_floor ≤ 174h. This is NOT a qualification of the economics.
+  → no monetary projection is recorded at all  (see the note below)
 
 1 censored case
   → NARROW
@@ -676,9 +676,19 @@ not money:
   → STOP
 ```
 
-The four timings are recorded as inputs to the post-freeze gate. They are **not**
+The timings are recorded as inputs to the post-freeze gate. They are **not**
 aggregated into any early decision — there is no aggregator, because the decision
 no longer depends on one.
+
+> **Withdrawn by execution, not by revision.** An earlier form of this section
+> had the 0-censored branch record `B_floor ≤ 174h`. That figure was derived from
+> four cases under a soft two-cell hypothesis, not from a universal constant, and
+> it does not survive the probe's narrowing to three strata
+> (`ama/ama-0.5/scope-decision-01.json`, taken under this section's own `NARROW`
+> outcome after delta D2 yielded zero admissible cases in a frozen
+> five-repository supply frame). The early probe publishes no monetary
+> projection; economics stay a post-freeze question decided on `p90` over an
+> untruncated distribution (§8.4).
 
 Two properties of this design are deliberate and must not be "fixed" by a later
 reader:

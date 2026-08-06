@@ -1,0 +1,56 @@
+{
+  "decision_id": "AMA-0.5-scope-01",
+  "outcome": "NARROW",
+  "decided_from": "data already collected — d2-supply-survey.json; no further discovery round was run, which is what §10.6 requires of a NARROW",
+  "subject": "pre-freeze cost-floor probe scope",
+  "retained_strata": [
+    "provider-clear-repo-reproducible",
+    "wrapper-alias-indirection",
+    "historically-messy-or-reproduction-hostile"
+  ],
+  "excluded_stratum": {
+    "stratum": "semantic-control-flow-dependence",
+    "reason": "D2 produced 0 admissible cases in the frozen five-repository historical-supply frame; no primary+reserve pair can be selected.",
+    "delta_status": "D2 is retained unchanged and is NOT refuted — it ran out of consumers for this probe."
+  },
+  "validity_limit": "The pre-freeze cost probe makes no claim about the cost of semantic-control-flow-dependence cases. Control-flow dependence is excluded from THIS probe only, not from AMA. Later taxonomy discovery may find dense control-flow cells; they may not retroactively become a fourth early case.",
+  "rejected_alternative": {
+    "option": "author a new control-flow delta (D3) selected for high occurrence density",
+    "why_rejected": "It would be chosen after observing supply and specifically on a criterion the failed search generated. Even authored blind from provider artifacts, that is a new discovery round aimed at preserving a four-row table — EXTEND AMA-0.5 in a respectable shirt. §10.6 permits NARROW only from data already held.",
+    "ascertainment_bias_shape": [
+      "D2 yielded no occurrences",
+      "a high-density criterion was derived from that failure",
+      "a delta guaranteed to satisfy the criterion was selected",
+      "the probe was declared heterogeneous"
+    ]
+  },
+  "numeric_consequences": {
+    "primary_case_count": 3,
+    "primary_probe_budget_minutes": 540,
+    "per_case_censor_minutes": 180,
+    "reserve_activation_budget_minutes": 360,
+    "max_reserve_activations": 2,
+    "package_cap_minutes": 2880,
+    "budget_rationale": "Three primaries at three hours cannot physically spend more than nine. The freed three hours do not become a longer adjudication or a new permitted search — they are simply unspent. The package cap stays 48 hours and is counted as actually consumed.",
+    "withdrawn": {
+      "what": "the `B_floor ≤ 174h` figure recorded on a 0-censored outcome",
+      "why": "it was derived from four cases under a soft two-cell hypothesis, not a universal constant. After narrowing it no longer follows. The early probe now publishes no monetary projection at all; economics remain a post-freeze question decided on p90 over an untruncated distribution (§8.4)."
+    }
+  },
+  "outcome_rule_unchanged": {
+    "0_censored": "AMA-0.5 continues",
+    "1_censored": "NARROW or STOP",
+    "2_or_more_censored": "STOP"
+  },
+  "occurrence_density_disposition": {
+    "status": "hypothesis recorded in d2-supply-survey.json; NOT usable for selecting a delta for this probe",
+    "belongs_to": "AMA-0.5 step 1, taxonomy discovery",
+    "decomposition_to_measure_separately": {
+      "eligible_repository_density": "share of repositories where the fact is applicable at all",
+      "occurrence_density": "fact occurrences per eligible consumer",
+      "cluster_supply": "count of independent repository × delta × cell clusters",
+      "adjudication_yield": "accepted clusters per hour of selection and labelling"
+    },
+    "observed_so_far": "D1 appears high on the first three. D2 failed at eligible occurrence density — the fact is rare by construction, because accepting the SDK default is the common case. This is a result of the preparatory work, not an obstacle to it."
+  }
+}

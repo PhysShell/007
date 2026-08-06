@@ -21,8 +21,8 @@
     },
     "maintainer_budget_minutes": {
       "type": "integer",
-      "const": 720,
-      "description": "Total active maintainer minutes for the four PRIMARY cases (§10.2: 12 hours). Reserve activations do not draw on this budget."
+      "const": 540,
+      "description": "Total active maintainer minutes for the three PRIMARY cases (9 hours). Was 720 for four; the probe was NARROWed to three strata by scope-decision-01.json after D2 yielded no admissible cases. Three primaries at the 180-minute censor cannot physically spend more than 540, and the freed time does not become a longer adjudication or a new permitted search — it is simply unspent. Reserve activations do not draw on this budget."
     },
     "per_case_censor_minutes": {
       "type": "integer",
@@ -32,7 +32,7 @@
     "reserve_activation_budget_minutes": {
       "type": "integer",
       "const": 360,
-      "description": "Ceiling on active maintainer minutes for reserve activations, drawn from the AMA-0.5 package remainder (§10.4), not from maintainer_budget_minutes — four primaries censoring consume the 720-minute budget exactly, so reserves would otherwise be unfunded. Two activations at the same 180-minute censor are fully funded, with no mid-experiment 'give this one a bit longer'. This is a ceiling, not six hours already spent: only minutes actually used count against the 48-hour package cap, and the remainder stays with the package."
+      "description": "Ceiling on active maintainer minutes for reserve activations, drawn from the AMA-0.5 package remainder (§10.4), not from maintainer_budget_minutes — the primaries censoring consume that budget exactly (three at 180 = 540), so reserves would otherwise be unfunded. Two activations at the same 180-minute censor are fully funded, with no mid-experiment 'give this one a bit longer'. This is a ceiling, not six hours already spent: only minutes actually used count against the 48-hour package cap, and the remainder stays with the package."
     },
     "max_reserve_activations": {
       "type": "integer",
@@ -41,9 +41,9 @@
     },
     "cases": {
       "type": "array",
-      "minItems": 4,
-      "maxItems": 4,
-      "description": "Exactly four cost-driver strata, each with one primary and one reserve, all designated before any work starts. Strata are NOT claim cells — no codebook exists yet (§10.2).",
+      "minItems": 3,
+      "maxItems": 3,
+      "description": "Exactly three cost-driver strata, each with one primary and one reserve, all designated before any work starts. Strata are NOT claim cells — no codebook exists yet (§10.2). semantic-control-flow-dependence was removed by scope-decision-01.json; the probe therefore makes no claim about the cost of control-flow-dependence cases.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -53,10 +53,9 @@
             "enum": [
               "provider-clear-repo-reproducible",
               "wrapper-alias-indirection",
-              "semantic-control-flow-dependence",
               "historically-messy-or-reproduction-hostile"
             ],
-            "description": "Expected cost driver. The four strata differ deliberately, to force heterogeneity rather than to sample a population."
+            "description": "Expected cost driver. The strata differ deliberately, to force heterogeneity rather than to sample a population."
           },
           "primary": { "$ref": "#/$defs/case" },
           "reserve": {

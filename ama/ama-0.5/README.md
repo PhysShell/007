@@ -153,17 +153,46 @@ work not completed because of cost
 **The decision counts outcomes, not money.**
 
 ```text
-0 censored → AMA-0.5 may continue; record only B_floor ≤ 174h, which is
-             explicitly NOT a qualification of the economics
+0 censored → AMA-0.5 may continue
 1 censored → NARROW, excluding or isolating that stratum;
              STOP if the stratum is commercially mandatory
 ≥2 censored → STOP
 ```
 
-The four timings are inputs to the post-freeze economic gate (§8.4), where a
-`p90` over an untruncated distribution can legitimately cross the 200h/400h
-thresholds. No early aggregate exists, and none may be invented after the numbers
-are visible.
+**The early probe publishes no monetary projection at all.** The `B_floor ≤ 174h`
+figure previously recorded on a 0-censored outcome was derived from four cases
+under a soft two-cell hypothesis, not a universal constant, and does not survive
+the narrowing to three strata (`scope-decision-01.json`). The timings are inputs
+to the post-freeze economic gate (§8.4), where a `p90` over an untruncated
+distribution can legitimately cross the 200h/400h thresholds. No early aggregate
+exists, and none may be invented after the numbers are visible.
+
+## Narrowed scope
+
+```text
+retained   1. provider-clear / reproducible
+           2. wrapper / alias indirection
+           4. historically messy / reproduction-hostile
+excluded   3. semantic control-flow dependence
+```
+
+D2 produced zero admissible cases in its frozen five-repository supply frame, so
+stratum 3 cannot be filled. Numeric consequences: three primaries, 540 minutes of
+primary budget, the 180-minute censor and the reserve parameters unchanged, and
+the package cap still 48 hours counted as actually consumed. Nine hours is what
+three primaries can physically spend; the freed three do not become a longer
+adjudication or a new permitted search.
+
+**Validity limit:** this probe makes no claim about the cost of
+semantic-control-flow-dependence cases. Control-flow dependence is excluded from
+*this probe*, not from AMA. Later taxonomy discovery may find dense control-flow
+cells; they may not retroactively become a fourth early case.
+
+A replacement delta chosen for high occurrence density was considered and
+rejected: it would be selected after observing supply, on a criterion the failed
+search itself generated — a new discovery round aimed at preserving a four-row
+table, which is `EXTEND` in a respectable shirt. Full reasoning, including the
+four-step shape of the ascertainment bias, is in `scope-decision-01.json`.
 
 ## Reserve budget (ratified)
 
