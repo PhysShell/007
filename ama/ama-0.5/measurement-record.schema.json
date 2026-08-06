@@ -79,7 +79,7 @@
     },
     "outcome": {
       "enum": ["accepted", "excluded_validity", "excluded_cost_adjacent", "censored"],
-      "description": "excluded_cost_adjacent COUNTS AS CENSORED in the §10.3 tally — repository will not reproduce, toolchain unobtainable, artifacts unusable without disproportionate effort — because the exclusion is itself cost evidence. Only excluded_validity permits a reserve."
+      "description": "excluded_cost_adjacent COUNTS AS CENSORED in the §10.3 tally — repository will not reproduce, toolchain unobtainable, artifacts unusable without disproportionate effort — because the exclusion is itself cost evidence. Only excluded_validity permits a reserve. `accepted` includes a completed adjudication with zero confirmed occurrences: zero is evidence, not an exclusion and not a censor, and the time it consumed still counts."
     },
     "exclusion_reason": {
       "type": ["string", "null"],

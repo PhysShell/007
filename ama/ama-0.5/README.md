@@ -36,6 +36,54 @@ Each records a **visibility hypothesis** — expected class and expected oracle
 fidelity — before any mutation is run, so the hypothesis cannot be retrofitted to
 the result. §3 still decides the class empirically.
 
+## Temporal alignment: a migration-shaped delta needs a pre-migration consumer
+
+A delta that describes a transition — one major version of an SDK to the next —
+is not localizable at a consumer's HEAD, because an actively maintained consumer
+has already performed the transition. Pinning HEAD searches a repository that
+already did the work, and finds either nothing or a value chosen natively under
+the new semantics.
+
+Discovered the hard way while selecting for D2: two candidates whose indexes
+matched `maxAttempts` in real production TypeScript turned out to carry no
+`aws-sdk` v2 at all, and the one genuine retry configuration among them
+(`maxAttempts: 8, retryMode: 'adaptive'`) was authored under v3 from the start.
+Neither refuted D2. Both showed that HEAD is the wrong time coordinate for it.
+
+So a migration-shaped case is built from three parts, kept separate:
+
+```text
+provider artifact           defines the semantic delta, authored blind
+pre-migration consumer      the object of localization: the last relevant
+                            commit BEFORE the consumer's own migration
+historical migration commit consumer-side evidence for adjudication only
+```
+
+The migration commit never feeds the normalized delta and is never a source of
+normalization — it establishes ground truth for one case. And this rule is not
+written into `deltas/D2-*.json`: the requirement follows from the delta's own
+shape and is provider-derivable, but the amendment itself was prompted by
+consumer contact, and a blinding attestation cannot be re-issued after the fact.
+It lives here, in the selection procedure, for the same reason the Stripe
+`apiVersion` observation lives in case evidence.
+
+Selection filter for a migration-shaped case:
+
+```text
+1. a real migration PR or commit exists
+2. the pin is its parent / base
+3. the occurrence is in .ts/.tsx, or is PROVEN to be in the pinned TypeScript
+   program (allowJs/checkJs) — otherwise this is a silent widening of the
+   language scope at exactly the moment a convenient case was needed
+4. the old value is connected to a control-flow budget
+5. the migration witness shows that value carried over or dropped
+6. the pinned state reproduces at least well enough to adjudicate
+```
+
+If a bounded search yields no primary and no reserve, the honest outcome is not
+a more convenient delta. It is: **D2 has insufficient historical supply for this
+probe**, and the scope narrows.
+
 ## Pinning a provider artifact
 
 Fetch it **twice** and pin only a representation whose bytes reproduce. This is
@@ -82,6 +130,20 @@ censored in the §10.3 tally, because failing to reproduce a repository is cost
 evidence. Only `excluded_validity` — blinding unattestable, no provider artifact
 — permits the stratum's reserve. A cost-adjacent exclusion confers no right to
 reach for an easier case.
+
+**Zero is a result, not an absence of one.** `accepted` includes a completed
+adjudication with zero confirmed occurrences; zero is evidence, not an exclusion
+and not a censor, and all the time it consumed is recorded. Three situations must
+not be confused:
+
+```text
+temporal ineligibility known BEFORE the manifest
+  → the case is simply not selected; it never becomes a case at all
+search completed after the manifest, occurrences = 0
+  → accepted, confirmed_occurrences: 0, full time counted
+work not completed because of cost
+  → censored / excluded_cost_adjacent under the existing rules
+```
 
 **The decision counts outcomes, not money.**
 
