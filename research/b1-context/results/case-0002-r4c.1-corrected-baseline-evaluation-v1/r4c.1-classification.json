@@ -1,0 +1,72 @@
+{
+  "arms": {
+    "full_derived": "AVAILABLE",
+    "negative_control": "NOT_APPLICABLE",
+    "projection": "AVAILABLE"
+  },
+  "baseline_classification": "BASELINE_EVALUATION_FAIL",
+  "corrected_from_r4c": {
+    "contract_input_consistency": {
+      "r4c": "FAIL",
+      "r4c_1": "PASS",
+      "reason": "removed non-contract gate"
+    }
+  },
+  "evaluation_v1_sha256": "sha256:963edb459fb742359051e3a5386ce6b6f1026e1d01b5a8a951a9b0bf99541d76",
+  "failed_required_axes": [
+    "relation_support"
+  ],
+  "follows": "evaluation-v1.json (corrected measurement, not an expectation)",
+  "input_inventory_count": 19,
+  "not_applicable_axes": [
+    "negative_control_diagnostics"
+  ],
+  "overall": "FAIL",
+  "passing_axes": [
+    "contract_input_consistency",
+    "projection_validity",
+    "question_observation_support",
+    "source_compilation",
+    "stale_state_safety",
+    "task_dependence"
+  ],
+  "provenance": {
+    "case_role": "development",
+    "designed_after_observing_case_0002": true,
+    "generalization_claim_allowed": false,
+    "holdout_evidence": false
+  },
+  "record": "o7.b1.r4c1-classification/v0",
+  "single_failure_reason": {
+    "axis": "relation_support",
+    "question": "qa3-superseded",
+    "satisfied_requirement": {
+      "from": "obs-profiler-fail-closed",
+      "kind": "supersedes",
+      "present_edges": [
+        "obs-profiler-prior-defect"
+      ]
+    },
+    "task": "case-0002-audit-r21-evidence-provenance",
+    "unsatisfied_edge_witness_requirements": [
+      {
+        "fabricated_edges": [],
+        "from": "obs-round0-closed",
+        "gold_edges": [
+          "obs-plane-record-not-frozen-v6"
+        ],
+        "kind": "supersedes",
+        "present_edges": []
+      },
+      {
+        "fabricated_edges": [],
+        "from": "obs-reviewer-durability-resolved",
+        "gold_edges": [
+          "obs-reviewer-durability-unresolved-v6"
+        ],
+        "kind": "supersedes",
+        "present_edges": []
+      }
+    ]
+  }
+}

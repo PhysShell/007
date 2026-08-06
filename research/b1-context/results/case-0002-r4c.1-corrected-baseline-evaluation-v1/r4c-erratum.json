@@ -1,0 +1,19 @@
+{
+  "corrected_by": {
+    "r4b_2_commit": "58a7a1113c8a649b6952f56b2782d01f887ff3ed",
+    "r4c_1_evaluation_v1_sha256": "sha256:963edb459fb742359051e3a5386ce6b6f1026e1d01b5a8a951a9b0bf99541d76"
+  },
+  "erratum": {
+    "cause": "non-contract evaluator gate consistency-forbidden-stale-grounded (added in R4B.1, removed in R4B.2)",
+    "contract_input_consistency_FAIL": "INVALID",
+    "detail": "obs-reviewer-acceptance-claim is authority=agent_claim status=pending: in-force but non-authoritative, legitimately forbidden from authoritative projection; its pending gold status is not a contract inconsistency under frozen contract v1 rev3",
+    "original_overall_FAIL": "PRESERVED_BUT_REASON_SET_CORRECTED",
+    "relation_support_FAIL": "PRESERVED"
+  },
+  "original_r4c": {
+    "artifact_commit": "b5ea8e8d82a4e27a0ba50c589db6c765532096ab",
+    "evaluation_v1_sha256": "sha256:ab95f39e0c8d389f326f097ec177c5c22a751da016e173796a8dde645dd882df"
+  },
+  "original_r4c_files_unedited": true,
+  "record": "o7.b1.r4c-erratum/v0"
+}
