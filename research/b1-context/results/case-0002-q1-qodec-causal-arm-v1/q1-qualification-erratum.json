@@ -1,0 +1,30 @@
+{
+  "cargo_test_locked": {
+    "clean_rerun_after_disk_recovery": {
+      "background_execution_available": false,
+      "cause": "EXECUTION_WINDOW_EXCEEDED",
+      "detail": "full proptest suite exceeds the ~10-minute single-core per-call budget; background runs killed at turn boundaries",
+      "disk_space_sufficient": true,
+      "free_space_gb_approx": 15,
+      "result": "INCOMPLETE"
+    },
+    "completed": false,
+    "first_attempt": {
+      "cause": "DISK_FULL",
+      "result": "INTERRUPTED"
+    }
+  },
+  "corrects": "the committed Q1 receipt/report said cargo test --locked was interrupted by disk exhaustion with a clean rerun pending; the precise account is below",
+  "note": "does not edit the original Q1 report or receipt; forward-only metadata",
+  "original_receipt_commit": "f0188901daedba4f8420f32ab6e21f719abbe552",
+  "q1_causal_classification_changed": false,
+  "q1_properties_directly_qualified": {
+    "interface_match": "PASS",
+    "measured_cell_determinism": "PASS",
+    "measured_cell_roundtrip": "PASS",
+    "measured_cell_strict_token_win": "PASS",
+    "release_build_locked": "PASS"
+  },
+  "q1_result_changed": false,
+  "record": "o7.b1.q1-qualification-erratum/v0"
+}
