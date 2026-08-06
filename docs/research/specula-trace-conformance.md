@@ -249,7 +249,7 @@ dispatch / crash / missing receipt / ambiguity
       ↓  ← durable-write admission boundary
 canonical admitted event stream
                    ordered and digest-chained;
-                   completeness is established only by the applicable seal
+                   a fixed protocol verdict exists only after the applicable seal
       ↓
 deterministic reducer
 ```
@@ -259,8 +259,16 @@ checking earns its cost. Below it, removal or reordering inside an already recor
 by sequence and digest verification. Suffix loss may remain a valid unsealed prefix, and a
 semantically duplicate transition may remain chain-valid until event-identity or reducer rules reject
 it. The sufficient mechanism below the boundary is therefore chain verification plus seal
-classification plus deterministic reduction and replay, not the digest chain alone. **A1-M0 owns the
-crossing itself** — not the whole provider lifecycle, and not the reducer.
+classification plus deterministic reduction and replay, not the digest chain alone.
+
+The seal is a protocol-completion marker, not an external completeness anchor. If suffix loss removes
+`RunSealed`, full replay fails as `NotSealed` before consulting `meta.json`. For a sealed stream,
+`replay_verify` additionally compares the independently recomputed verdict with the stored
+`meta.json` verdict; this detects verdict-changing inconsistency, but not a consistently rewritten
+stream that preserves the same verdict. Detecting that stronger class requires an external anchor over
+`final_event_digest` or `normalized_state_digest`.
+
+**A1-M0 owns the crossing itself** — not the whole provider lifecycle, and not the reducer.
 
 **Audit result (this note's own finding).** The ten modelability properties that motivate A1-M0 were
 checked against the A1 authority-contract freeze — `docs/q-deck/a1-authority-contracts.md`, commit
