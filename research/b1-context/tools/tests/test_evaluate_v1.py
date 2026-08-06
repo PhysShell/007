@@ -135,8 +135,17 @@ def _write_nc(dest, digest_ok=True, length_ok=True):
 # --------------------------------------------------------------------------- mutations
 
 def m_positive(dest, info):
+    # Also proves the corrected forbidden-stale semantics (R4B.2): a pending
+    # non-authoritative agent claim and a superseded claim, both forbidden and both
+    # absent from projection, are "absent" with contract_input_consistency PASS.
     return info["input_args"], "dev", {"exit": 0, "overall": "PASS",
-                                       "q_support": ("t-alpha", "qa6", 1.0, True)}
+                                       "q_support": ("t-alpha", "qa6", 1.0, True),
+                                       "axes": {"contract_input_consistency": "PASS",
+                                                "stale_state_safety": "PASS"},
+                                       "stale_check": [
+                                           ("t-gamma", "obs-synthetic-pending-claim", "absent"),
+                                           ("t-gamma", "obs-synthetic-stale", "absent"),
+                                           ("t-alpha", "obs-synthetic-stale", "stale_relation_endpoint_only")]}
 
 
 def m_budget_record_boundary(dest, info):
@@ -308,17 +317,54 @@ def m_gate11(dest, info):
     return info["input_args"], "dev", {"exit": 0, "overall": "FAIL", "gate": {"gate-11": "FAIL"}}
 
 
-def m_consistency_forbidden_not_stale(dest, info):
-    # contract == question forbidden (gate-08 PASS) but the id is CURRENT in gold:
-    # only the separate consistency gate fires.
+def m_forbidden_pending_claim_in_force_is_consistent(dest, info):
+    # R4B.2 regression: contract == question forbidden of a pending, non-authoritative
+    # agent claim that is IN-FORCE in gold and ABSENT from projection. This is the
+    # exact situation the removed gate wrongly flagged. contract_input_consistency
+    # and stale_state_safety must both PASS; classification "absent".
     _patch_input(dest, "questions-alpha.yaml", lambda o: [
-        q.__setitem__("forbidden_stale_as_current", ["obs-synthetic-a"])
-        for q in o["questions"] if q["id"] == "qa1"])
+        q.__setitem__("forbidden_stale_as_current", ["obs-synthetic-pending-claim"])
+        for q in o["questions"] if q["id"] == "qa2"])
     _redual(dest, "question_files", "questions-alpha.yaml", "questions-alpha.yaml", keyed=True)
-    _patch_contract(dest, lambda c: c["tasks"]["t-alpha"]["forbidden_stale_as_current"][0]
-                    .__setitem__("ids", ["obs-synthetic-a"]))
+    _patch_contract(dest, lambda c: c["tasks"]["t-alpha"].setdefault("forbidden_stale_as_current", [])
+                    .append({"question": "qa2", "ids": ["obs-synthetic-pending-claim"]}))
+    return info["input_args"], "dev", {"exit": 0, "overall": "PASS",
+                                       "axes": {"contract_input_consistency": "PASS",
+                                                "stale_state_safety": "PASS"},
+                                       "gate": {"gate-08": "PASS", "gate-11": "PASS"},
+                                       "stale_check": [("t-alpha", "obs-synthetic-pending-claim", "absent")]}
+
+
+def m_ss_pending_claim_selected(dest, info):
+    # A pending agent claim SELECTED -> stale_state_safety FAIL and projection_validity
+    # FAIL (agent_claim). contract_input_consistency stays PASS.
+    def g(o):
+        by = {x["observation_id"]: x for x in
+              _load(os.path.join(dest, "gold-state.json"))["observations"]}
+        pc = dict(by["obs-synthetic-pending-claim"], selection_reason="synthetic", selection_score=1.0)
+        o["selected"].append(pc)
+        o["omitted"] = [x for x in o["omitted"] if x["observation_id"] != "obs-synthetic-pending-claim"]
+    _patch_input(dest, CTX["t-gamma"], g)
+    _redual(dest, "task_contexts", "t-gamma", CTX["t-gamma"])
     return info["input_args"], "dev", {"exit": 0, "overall": "FAIL",
-                                       "gate": {"gate-08": "PASS", "consistency-forbidden-stale-grounded": "FAIL"}}
+                                       "axes": {"stale_state_safety": "FAIL",
+                                                "projection_validity": "FAIL",
+                                                "contract_input_consistency": "PASS"},
+                                       "stale_check": [("t-gamma", "obs-synthetic-pending-claim",
+                                                        "selected_as_current_or_pending")]}
+
+
+def m_g11_unknown_forbidden(dest, info):
+    # An unknown forbidden observation id (in BOTH contract and question, so gate-08
+    # stays PASS) -> gate-11 FAIL.
+    _patch_input(dest, "questions-gamma.yaml", lambda o: [
+        q["forbidden_stale_as_current"].append("obs-not-in-gold")
+        for q in o["questions"] if q["id"] == "qg1"])
+    _redual(dest, "question_files", "questions-gamma.yaml", "questions-gamma.yaml", keyed=True)
+    _patch_contract(dest, lambda c: c["tasks"]["t-gamma"]["forbidden_stale_as_current"][0]["ids"]
+                    .append("obs-not-in-gold"))
+    return info["input_args"], "dev", {"exit": 0, "overall": "FAIL",
+                                       "gate": {"gate-11": "FAIL", "gate-08": "PASS"}}
 
 
 def m_consistency_extra_gold_edge(dest, info):
@@ -535,7 +581,9 @@ CASES = [
     ("g09_wrong_target", "contract_consistency", m_gate09),
     ("g10_wrong_target_status", "contract_consistency", m_gate10),
     ("g11_unknown_identifier", "contract_consistency", m_gate11),
-    ("c_forbidden_not_stale_grounded", "contract_consistency", m_consistency_forbidden_not_stale),
+    ("c_forbidden_pending_in_force_consistent", "contract_consistency", m_forbidden_pending_claim_in_force_is_consistent),
+    ("ss_pending_claim_selected", "stale_state_safety", m_ss_pending_claim_selected),
+    ("g11_unknown_forbidden_id", "contract_consistency", m_g11_unknown_forbidden),
     ("c_extra_gold_edge_gate09", "contract_consistency", m_consistency_extra_gold_edge),
     ("v_self_pair", "task_dependence", m_self_pair),
     ("v_missing_pair", "task_dependence", m_missing_pair),
@@ -626,6 +674,11 @@ def run_case(name, mutate, tmproot):
             q = next((x for x in task.get("question_observation_support", []) if x["question_id"] == qid), None)
             if not q or q["required_observation_coverage"] != cov or q["fully_supported"] != full:
                 ok = False; reasons.append("q_support %s/%s=%s" % (tid, qid, q))
+        for tid, fid, cls in expect.get("stale_check", []):
+            task = next((t for t in output["tasks"] if t["task_id"] == tid), {})
+            s = next((x for x in task.get("stale_state_checks", []) if x["forbidden_id"] == fid), None)
+            if not s or s["classification"] != cls:
+                ok = False; reasons.append("stale %s/%s=%s != %s" % (tid, fid, s and s["classification"], cls))
         if "gate" in expect:
             try:
                 gr = gate_results(info["contract"], args)

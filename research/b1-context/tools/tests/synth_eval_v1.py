@@ -62,6 +62,11 @@ def gold_state():
         _obs("obs-synthetic-dep-2", "current", "status", ["beta"]),
         _obs("obs-synthetic-stale", "superseded", "status", ["alpha"],
              authority="agent_claim", superseded_by="obs-synthetic-a"),
+        # In-force (pending) but NON-authoritative agent claim: legitimately
+        # forbidden from authoritative projection, yet NOT a contract inconsistency
+        # (this is the case the removed R4B.1 gate wrongly flagged).
+        _obs("obs-synthetic-pending-claim", "pending", "status", ["alpha"],
+             authority="agent_claim"),
     ]
     relations = [
         {"from": "obs-synthetic-a", "kind": "supersedes", "to": "obs-synthetic-stale"},
@@ -107,7 +112,11 @@ QUESTIONS = {
          "required_relation_paths": [{"from": "obs-synthetic-c", "kind": "depends_on"}]},
     ],
     "t-gamma": [
-        {"id": "qg1", "text": "?", "required_observation_ids": ["obs-synthetic-a"]},
+        # Forbids a pending non-authoritative agent claim AND a superseded claim;
+        # both are absent from gamma's projection -> classification "absent",
+        # stale-state PASS, and (post-R4B.2) contract_input_consistency PASS.
+        {"id": "qg1", "text": "?", "required_observation_ids": ["obs-synthetic-a"],
+         "forbidden_stale_as_current": ["obs-synthetic-pending-claim", "obs-synthetic-stale"]},
     ],
 }
 
@@ -132,7 +141,8 @@ RELATION_REQS = {
 # Contract-level forbidden mirrors the question-level forbidden exactly (gate-08).
 FORBIDDEN = {
     "t-alpha": [{"question": "qa1", "ids": ["obs-synthetic-stale"]}],
-    "t-beta": [], "t-gamma": [],
+    "t-beta": [],
+    "t-gamma": [{"question": "qg1", "ids": ["obs-synthetic-pending-claim", "obs-synthetic-stale"]}],
 }
 PAIRS = [
     {"left": "t-alpha", "right": "t-beta", "expected_shape": "incomparable", "rationale": "synthetic"},

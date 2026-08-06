@@ -11,6 +11,10 @@
    "reason": "not relevant to this task (synthetic)"
   },
   {
+   "observation_id": "obs-synthetic-pending-claim",
+   "reason": "not relevant to this task (synthetic)"
+  },
+  {
    "observation_id": "obs-synthetic-stale",
    "reason": "not relevant to this task (synthetic)"
   }

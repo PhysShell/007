@@ -1,5 +1,8 @@
 questions:
-- id: qg1
+- forbidden_stale_as_current:
+  - obs-synthetic-pending-claim
+  - obs-synthetic-stale
+  id: qg1
   required_observation_ids:
   - obs-synthetic-a
   text: '?'

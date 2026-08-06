@@ -699,24 +699,14 @@ def run_gates(contract: dict, loaded: dict, idx: dict) -> list[dict]:
                            "exact forbidden-stale set equality (contract == question)",
                            {"problems": problems}))
 
-    # Separate consistency gate (NOT gate-08): every contract-forbidden id exists in
-    # gold and is genuinely stale (not in-force). Preserves the gold-grounding check
-    # under an accurately named oracle.
-    if gold is None:
-        unavailable("consistency-forbidden-stale-grounded", "gold_state")
-    else:
-        fbad = []
-        for tid, tspec in contract["tasks"].items():
-            for fs in tspec.get("forbidden_stale_as_current", []):
-                for oid in fs["ids"]:
-                    st = _status_of(idx, oid)
-                    if st is None:
-                        fbad.append("%s forbidden %s absent from gold" % (tid, oid))
-                    elif st in IN_FORCE:
-                        fbad.append("%s forbidden %s is in-force in gold" % (tid, oid))
-        gates.append(_gate("consistency-forbidden-stale-grounded",
-                           "PASS" if not fbad else "FAIL",
-                           "contract-forbidden ids exist in gold and are stale", {"problems": fbad}))
+    # NOTE (R4B.2): the former "consistency-forbidden-stale-grounded" gate was
+    # REMOVED. It is NOT one of the frozen contract's eleven gates and contradicts
+    # the frozen stale-state semantics: a forbidden observation may legitimately be
+    # in-force in gold when it is non-authoritative (e.g. an agent_claim with status
+    # pending) — it must simply stay absent from authoritative projection, which is
+    # enforced by stale-state safety and projection validity, not by input
+    # consistency. gate-08 checks exact contract/question forbidden-set equality;
+    # gate-11 checks referenced-id existence. No replacement gate is added.
 
     # gate-11 unknown identifiers / closed-vocabulary rejection
     if gold is None or not q_files:
