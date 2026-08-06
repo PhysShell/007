@@ -85,6 +85,11 @@ SINGLETON_ROLES = {"gold_state", "fixture_manifest", "source_selectors",
 KEYED_ROLES = {"task_file", "questions_file", "task_context"}
 BODY_ROLES = {"derived_body"}
 STRUCTURED_ROLES = SINGLETON_ROLES | KEYED_ROLES
+# The negative-control body is declared by the fixture MANIFEST (negative_control[]),
+# not by bound_inputs, so it is handled outside the contract input closure and
+# validated against the manifest's declared NC identity.
+NC_ROLE = "negative_control"
+ALL_ROLES = set(CONTRACT_KEY_BY_ROLE) | {NC_ROLE}
 
 IN_FORCE = ("current", "pending")
 BUDGET_REASON_RE = re.compile(r"\bbudget\b", re.IGNORECASE)
@@ -273,7 +278,7 @@ def parse_input_arg(spec: str) -> tuple[str, str, str]:
     lhs, path = spec.split("=", 1)
     role, logical = lhs.split(":", 1)
     role, logical, path = role.strip(), logical.strip(), path.strip()
-    if role not in CONTRACT_KEY_BY_ROLE:
+    if role not in ALL_ROLES:
         raise Refusal("input_closure", "unknown input role: %r" % role)
     if not logical or not path:
         raise Refusal("input_closure", "empty logical id or path in %r" % spec)
@@ -320,8 +325,11 @@ def load_inputs(contract: dict, input_args: list[str]) -> dict:
     declared = _declared_closure(contract)
     supplied = {(r, l) for (r, l, _) in parsed_args}
 
-    # Extra (undeclared) mappings fail closed.
+    # Extra (undeclared) mappings fail closed. The negative-control body is declared
+    # by the fixture manifest, not bound_inputs, so it is exempt from this closure.
     for (r, l, _) in parsed_args:
+        if r == NC_ROLE:
+            continue
         if (r, l) not in declared:
             raise Refusal("input_closure", "undeclared input mapping: %s:%s" % (r, l))
 
@@ -330,7 +338,7 @@ def load_inputs(contract: dict, input_args: list[str]) -> dict:
     singleton = {}
     keyed = {"task_file": {}, "questions_file": {}, "task_context": {}}
     bodies = {}
-    role_visibility = {"derived_body": "private"}
+    nc_bodies = {}
 
     for (role, logical, path) in parsed_args:
         if not os.path.isfile(path):
@@ -338,18 +346,28 @@ def load_inputs(contract: dict, input_args: list[str]) -> dict:
         with open(path, "rb") as fh:
             raw = fh.read()
         opened_paths.add(os.path.abspath(path))
+        ab = _sha(raw)
+        byte_length = len(raw)
+
+        if role == NC_ROLE:
+            # Identity (digest/length) validated later against the fixture manifest's
+            # negative_control declaration; here we only record the supplied body.
+            nc_bodies[logical] = {"byte_length": byte_length, "artifact_bytes_sha256": ab}
+            inventory.append({"role": role, "logical_id": logical, "visibility": "private",
+                              "artifact_kind": "body", "artifact_bytes_sha256": ab,
+                              "byte_length": byte_length})
+            continue
+
         bound = _bound_entry(contract, role, logical)
         if bound is None:
             raise Refusal("input_closure",
                           "supplied %s:%s not bound by contract" % (role, logical))
-        ab = _sha(raw)
         if bound.get("artifact_bytes_sha256") != ab:
             # A present-but-contradictory artifact is a FAIL of the consuming axis,
             # not a refusal; but a wrong-bytes STRUCTURED contract input undermines
             # the whole closure. We surface it as an input-integrity failure that
             # the contract_input_consistency axis will read.
             _mark_integrity(inventory, role, logical, "artifact_bytes_mismatch")
-        byte_length = len(raw)
 
         if role in BODY_ROLES:
             _validate_jsonl(raw)  # fail-closed on blank/malformed lines
@@ -384,7 +402,7 @@ def load_inputs(contract: dict, input_args: list[str]) -> dict:
     # were explicitly handed. (Schemas / own source are implementation closure,
     # not evaluation inputs, and are never counted here.)
     return {
-        "singleton": singleton, "keyed": keyed, "bodies": bodies,
+        "singleton": singleton, "keyed": keyed, "bodies": bodies, "nc_bodies": nc_bodies,
         "inventory": inventory, "missing": missing, "opened_paths": opened_paths,
     }
 
@@ -509,10 +527,13 @@ def run_gates(contract: dict, loaded: dict, idx: dict) -> list[dict]:
             "budget": budget.get("fixture_id"), "report": report.get("fixture_id"),
             "projection_comparison": comparison.get("fixture_id"), "derived_manifest": dmanifest.get("fixture_id"),
         }
-        distinct = {v for v in fids.values() if v is not None}
-        gates.append(_gate("gate-01", "PASS" if len(distinct) == 1 else "FAIL",
-                           "fixture_id agreement" if len(distinct) == 1 else "fixture_id disagreement",
-                           fids))
+        missing = sorted(k for k, v in fids.items() if not v)  # None or empty string
+        distinct = set(fids.values())
+        ok = (not missing) and len(distinct) == 1
+        reason = ("fixture_id agreement" if ok else
+                  ("missing fixture_id: %s" % missing if missing else "fixture_id disagreement"))
+        gates.append(_gate("gate-01", "PASS" if ok else "FAIL", reason,
+                           dict(fids, _missing=missing)))
 
     # gate-02 registry filename and digest agreement
     if report is None or comparison is None or registry is None:
@@ -582,32 +603,45 @@ def run_gates(contract: dict, loaded: dict, idx: dict) -> list[dict]:
         gates.append(_gate("gate-05", "PASS" if not missing_q else "FAIL",
                            "referenced questions exist", {"missing": missing_q}))
 
-    # Requirement-vs-gold gates 06/07/09/10 share a scan.
-    if gold is None:
+    # Requirement gates. 06/07 compare the CONTRACT against the QUESTION FILES
+    # (the frozen source of truth: required_relation_paths). 09/10 compare the
+    # contract's declared targets/status against the gold graph.
+    if gold is None or not q_files:
         for gid in ("gate-06", "gate-07", "gate-09", "gate-10"):
-            unavailable(gid, "gold_state")
+            unavailable(gid, "gold_state/questions_files")
     else:
         reqs = []
         for tid, tspec in contract["tasks"].items():
             for rr in tspec.get("relation_requirements", []):
                 reqs.append((tid, rr))
-        governed = {(rr["from"], rr["kind"]) for _, rr in reqs}
-        # gate-07 no invented requirement identity (from,kind must exist in gold)
-        invented = sorted("%s/%s" % fk for fk in governed if not _gold_targets(idx, *fk)
-                          or fk[0] not in idx["obs"])
+        # explicit contract requirements as (task, question, from, kind), + shape
+        req_shape = {(tid, rr["question"], rr["from"], rr["kind"]): rr for tid, rr in reqs}
+        contract_reqset = set(req_shape.keys())
+        # legacy question-level required_relation_paths as (task, question, from, kind)
+        legacy = set()
+        for tid, tspec in contract["tasks"].items():
+            qobj = q_files.get(tspec["questions_file"], {})
+            for q in qobj.get("questions", []):
+                for rp in q.get("required_relation_paths", []) or []:
+                    legacy.add((tid, q["id"], rp["from"], rp["kind"]))
+        # gate-06: every legacy relation path has an explicit expansion of the exact
+        # frozen shape (outgoing, depth 1, match all).
+        unexpanded = []
+        for key in sorted(legacy):
+            rr = req_shape.get(key)
+            if rr is None:
+                unexpanded.append("%s/%s %s/%s (no explicit requirement)" % key)
+            elif not (rr.get("direction") == "outgoing" and rr.get("depth") == 1
+                      and rr.get("match") == "all"):
+                unexpanded.append("%s/%s %s/%s (wrong shape)" % key)
+        gates.append(_gate("gate-06", "PASS" if not unexpanded else "FAIL",
+                           "every legacy question relation path expanded (contract vs question)",
+                           {"legacy_paths": len(legacy), "unexpanded": unexpanded}))
+        # gate-07: no explicit contract requirement without a matching legacy path.
+        invented = sorted("%s/%s %s/%s" % k for k in (contract_reqset - legacy))
         gates.append(_gate("gate-07", "PASS" if not invented else "FAIL",
-                           "no invented relation requirement", {"invented": invented}))
-        # gate-06 completeness: every gold edge of a governed (from,kind) covered
-        covered = {}
-        for _, rr in reqs:
-            covered.setdefault((rr["from"], rr["kind"]), set()).update(rr["gold_derived_targets"])
-        dropped = []
-        for fk in governed:
-            gold_e = _gold_targets(idx, *fk)
-            if not gold_e <= covered.get(fk, set()):
-                dropped.append("%s/%s missing %s" % (fk[0], fk[1], sorted(gold_e - covered[fk])))
-        gates.append(_gate("gate-06", "PASS" if not dropped else "FAIL",
-                           "every governed gold relation path expanded", {"dropped": dropped}))
+                           "no invented explicit relation requirement (contract vs question)",
+                           {"invented": invented}))
         # gate-09 target exactness
         inexact = []
         for tid, rr in reqs:
@@ -633,9 +667,43 @@ def run_gates(contract: dict, loaded: dict, idx: dict) -> list[dict]:
         gates.append(_gate("gate-10", "PASS" if not status_bad else "FAIL",
                            "target-status agreement", {"problems": status_bad}))
 
-    # gate-08 forbidden-stale set equality (declared == gold-stale among declared)
+    # gate-08 EXACT forbidden-set equality: contract forbidden_stale_as_current per
+    # (task,question) must equal the question file's forbidden_stale_as_current.
+    # Staleness in gold is a SEPARATE consistency gate below, not a substitute.
+    if not q_files:
+        unavailable("gate-08", "questions_files")
+    else:
+        problems = []
+        for tid, tspec in contract["tasks"].items():
+            qobj = q_files.get(tspec["questions_file"], {})
+            qmap = {q["id"]: q for q in qobj.get("questions", [])}
+            contract_fb = {}
+            for fs in tspec.get("forbidden_stale_as_current", []):
+                ids = fs["ids"]
+                if len(ids) != len(set(ids)):
+                    problems.append("%s/%s duplicate contract forbidden id" % (tid, fs["question"]))
+                contract_fb[fs["question"]] = set(ids)
+            question_fb = {}
+            for qid, q in qmap.items():
+                fb = q.get("forbidden_stale_as_current")
+                if fb is not None:
+                    if len(fb) != len(set(fb)):
+                        problems.append("%s/%s duplicate question forbidden id" % (tid, qid))
+                    question_fb[qid] = set(fb)
+            for qid in sorted(set(contract_fb) | set(question_fb)):
+                cset, qset = contract_fb.get(qid, set()), question_fb.get(qid, set())
+                if cset != qset:
+                    problems.append("%s/%s contract=%s question=%s" % (
+                        tid, qid, sorted(cset), sorted(qset)))
+        gates.append(_gate("gate-08", "PASS" if not problems else "FAIL",
+                           "exact forbidden-stale set equality (contract == question)",
+                           {"problems": problems}))
+
+    # Separate consistency gate (NOT gate-08): every contract-forbidden id exists in
+    # gold and is genuinely stale (not in-force). Preserves the gold-grounding check
+    # under an accurately named oracle.
     if gold is None:
-        unavailable("gate-08", "gold_state")
+        unavailable("consistency-forbidden-stale-grounded", "gold_state")
     else:
         fbad = []
         for tid, tspec in contract["tasks"].items():
@@ -646,8 +714,9 @@ def run_gates(contract: dict, loaded: dict, idx: dict) -> list[dict]:
                         fbad.append("%s forbidden %s absent from gold" % (tid, oid))
                     elif st in IN_FORCE:
                         fbad.append("%s forbidden %s is in-force in gold" % (tid, oid))
-        gates.append(_gate("gate-08", "PASS" if not fbad else "FAIL",
-                           "forbidden-stale set equality", {"problems": fbad}))
+        gates.append(_gate("consistency-forbidden-stale-grounded",
+                           "PASS" if not fbad else "FAIL",
+                           "contract-forbidden ids exist in gold and are stale", {"problems": fbad}))
 
     # gate-11 unknown identifiers / closed-vocabulary rejection
     if gold is None or not q_files:
@@ -743,7 +812,10 @@ def question_support(task_spec: dict, qobj: dict, selected_ids: set) -> list[dic
             "selected_required_ids": sel_req,
             "missing_required_ids": missing,
             "required_observation_coverage": coverage,
-            "fully_supported": bool(req_set) and req_set <= selected_ids,
+            # Empty required set is VACUOUS structural support (coverage 1.0,
+            # fully_supported true) — e.g. a relation-only question. This is not a
+            # claim of semantic answerability.
+            "fully_supported": (not req_set) or (req_set <= selected_ids),
         })
     return out
 
@@ -903,59 +975,156 @@ def _axis_from_gates(gates: list[dict]) -> str:
     return "PASS"
 
 
-def source_compilation(selectors: dict, dmanifest: dict, bodies: dict) -> tuple[str, dict]:
-    if selectors is None or dmanifest is None:
-        return "UNAVAILABLE", {"reason": "missing source_selectors or derived_manifest"}
-    sessions_by_id = {sn["session_id"]: sn for sn in dmanifest.get("sessions", [])}
+def source_compilation(selectors: dict, dmanifest: dict, manifest: dict, report: dict,
+                       bodies: dict) -> tuple[str, dict, bool]:
+    """Structural source-compilation over the NAMED sources. `requested_*` come from
+    the fixture manifest's raw_sources (raw bytes/digest), availability from the
+    frozen report's input_digests. Derived-body evidence is kept separate and never
+    substituted for raw-source bytes. Returns (axis, detail, full_derived_available).
+
+    A raw source with no derived transcript session (e.g. a plane record) is valid:
+    it still needs fixture/report availability agreement but no body.
+    """
+    if selectors is None or dmanifest is None or manifest is None or report is None:
+        return "UNAVAILABLE", {"axis": "UNAVAILABLE",
+                               "requested_source_availability": [],
+                               "derived_session_completeness": [],
+                               "extractor_identity": {},
+                               "reason": "missing source_selectors/derived_manifest/manifest/report"}, False
+
+    raw_sources = {r["id"]: r for r in manifest.get("raw_sources", [])}
+    report_idg = report.get("input_digests", {}) or {}
+    sessions = dmanifest.get("sessions", [])
+    sessions_by_id = {sn["session_id"]: sn for sn in sessions}
+    sessions_by_raw = {}
+    for sn in sessions:
+        sessions_by_raw.setdefault(sn.get("raw_source"), []).append(sn)
+
+    contradictions = []
+    missing = []
+
+    # ---- requested raw-source availability (raw bytes/digest vs report) ----
     req_avail = []
+    for rid, raw in sorted(raw_sources.items()):
+        rentry = report_idg.get(rid)
+        digest_match = bool(rentry) and rentry.get("digest") == raw.get("digest")
+        length_match = bool(rentry) and rentry.get("byte_length") == raw.get("byte_length")
+        status_ok = bool(rentry) and rentry.get("status") == "OK"
+        if rentry is None:
+            cas = "UNAVAILABLE"
+            contradictions.append("raw %s requested but absent from report.input_digests" % rid)
+        elif not (digest_match and length_match):
+            cas = "MISMATCH"
+            contradictions.append("raw %s report digest/length disagree with fixture manifest" % rid)
+        elif not status_ok:
+            cas = "UNAVAILABLE"
+            contradictions.append("raw %s report status %r != OK" % (rid, rentry.get("status")))
+        else:
+            cas = "OK"
+        # derived sessions bound to this raw source
+        derived = sessions_by_raw.get(rid, [])
+        for sn in derived:
+            if sn.get("raw_source_digest") != raw.get("digest"):
+                contradictions.append("session %s raw_source_digest disagrees with fixture manifest for %s"
+                                      % (sn.get("session_id"), rid))
+        body_ok = True
+        for sn in derived:
+            b = bodies.get(sn["session_id"])
+            if b is None:
+                body_ok = False
+            elif not (sn.get("derived_byte_length") == b["byte_length"]
+                      and sn.get("derived_digest") == b["artifact_bytes_sha256"]
+                      and sn.get("record_count") == b["record_count"]):
+                body_ok = False
+        round_trip = (cas == "OK") and body_ok
+        req_avail.append({"id": rid, "requested_digest": raw.get("digest", "sha256:" + "0" * 64),
+                          "requested_bytes": raw.get("byte_length", 0),
+                          "cas_resolvable": cas, "round_trip": round_trip})
+
+    # every derived session's raw-source id must exist in the fixture manifest
+    for sn in sessions:
+        if sn.get("raw_source") not in raw_sources:
+            contradictions.append("derived session %s binds unknown raw_source %r"
+                                  % (sn.get("session_id"), sn.get("raw_source")))
+
+    # ---- per-selector-session derived completeness (bodies) ----
     completeness = []
     extractor_identity = {}
-    any_fail = False
-    any_missing = False
+    full_derived_available = True
     for sel in selectors.get("sessions", []):
         sid = sel["session_id"]
+        bound = sessions_by_raw.get(sel.get("raw_source"), [])
+        matching = [sn for sn in sessions if sn["session_id"] == sid]
         sn = sessions_by_id.get(sid)
+        if sn is None or len(matching) != 1:
+            missing.append("selector session %s has no unique derived-manifest session" % sid)
+            full_derived_available = False
+            completeness.append({"session_id": sid, "present": sn is not None,
+                                 "byte_length_matches": False, "sha256_matches": False,
+                                 "record_count_reproduced": False})
+            continue
         body = bodies.get(sid)
-        present = sn is not None
-        # A supplied body that disagrees is a hard FAIL; an absent session/body
-        # (missing required material) is UNAVAILABLE, never a flattering FAIL.
-        if sn is None or body is None:
-            any_missing = True
+        if body is None:
+            missing.append("derived body for selector session %s not supplied" % sid)
+            full_derived_available = False
             length_ok = digest_ok = rec_ok = False
         else:
             length_ok = sn.get("derived_byte_length") == body["byte_length"]
             digest_ok = sn.get("derived_digest") == body["artifact_bytes_sha256"]
             rec_ok = sn.get("record_count") == body["record_count"]
-            raw_ok = bool(sn.get("raw_source"))
             extractor_ok = all(sn.get(k) for k in
                                ("extractor_id", "extractor_version", "extractor_impl_digest"))
-            if not (length_ok and digest_ok and rec_ok and raw_ok and extractor_ok):
-                any_fail = True
-        completeness.append({"session_id": sid, "present": present,
+            if not (length_ok and digest_ok and rec_ok and extractor_ok):
+                contradictions.append("derived body / extractor identity mismatch for %s" % sid)
+                full_derived_available = False
+        completeness.append({"session_id": sid, "present": True,
                              "byte_length_matches": length_ok, "sha256_matches": digest_ok,
                              "record_count_reproduced": rec_ok})
-        req_avail.append({"id": sid,
-                          "requested_digest": (sn or {}).get("raw_source_digest", "sha256:" + "0" * 64),
-                          "requested_bytes": (sn or {}).get("derived_byte_length", 0),
-                          "cas_resolvable": "OK" if (sn and sn.get("raw_source")) else "UNAVAILABLE",
-                          "round_trip": digest_ok})
-        if sn:
-            extractor_identity[sid] = {
-                "extractor_id": sn.get("extractor_id", ""),
-                "extractor_version": str(sn.get("extractor_version", "")),
-                "extractor_impl_digest": sn.get("extractor_impl_digest", "sha256:" + "0" * 64),
-            }
+        extractor_identity[sid] = {
+            "extractor_id": sn.get("extractor_id", ""),
+            "extractor_version": str(sn.get("extractor_version", "")),
+            "extractor_impl_digest": sn.get("extractor_impl_digest", "sha256:" + "0" * 64)}
+
     if not selectors.get("sessions"):
         axis = "UNAVAILABLE"
-    elif any_fail:
+    elif contradictions:
         axis = "FAIL"
-    elif any_missing:
+        full_derived_available = False
+    elif missing:
         axis = "UNAVAILABLE"
     else:
         axis = "PASS"
-    return axis, {"requested_source_availability": req_avail,
-                  "derived_session_completeness": completeness,
-                  "extractor_identity": extractor_identity}
+    detail = {"axis": axis, "requested_source_availability": req_avail,
+              "derived_session_completeness": completeness, "extractor_identity": extractor_identity}
+    if contradictions:
+        detail["contradictions"] = contradictions
+    if missing:
+        detail["missing"] = missing
+    return axis, detail, (full_derived_available and axis == "PASS")
+
+
+def negative_control_identity(manifest: dict, nc_bodies: dict) -> tuple[str, str, dict]:
+    """Negative-control ARM availability from the fixture manifest + a supplied NC
+    body. No v0 diagnostic semantics are imported. Diagnostics stay UNAVAILABLE
+    until a contract defines them; NOT_APPLICABLE only when no NC is declared. The
+    optional-arm identity result never moves a required axis.
+    """
+    ncs = (manifest or {}).get("negative_control", []) or []
+    if not ncs:
+        return "NOT_APPLICABLE", "NOT_APPLICABLE", {"declared": 0}
+    if len(ncs) > 1:
+        return "UNAVAILABLE", "UNAVAILABLE", {"declared": len(ncs),
+                                              "identity_failure": "multiple negative controls declared (fail closed)"}
+    nc = ncs[0]
+    body = nc_bodies.get(nc.get("id"))
+    if body is None:
+        return "UNAVAILABLE", "UNAVAILABLE", {"declared": 1, "identity_failure": "body absent"}
+    digest_ok = nc.get("digest") == body["artifact_bytes_sha256"]
+    length_ok = nc.get("byte_length") == body["byte_length"]
+    if digest_ok and length_ok:
+        return "AVAILABLE", "UNAVAILABLE", {"declared": 1, "identity_valid": True}
+    return "UNAVAILABLE", "UNAVAILABLE", {"declared": 1, "identity_valid": False,
+                                          "identity_failure": "digest/length contradictory"}
 
 
 def compute_overall(axes: dict, axis_requirements: dict) -> str:
@@ -979,6 +1148,19 @@ METRIC_SEMANTICS = {
     "symmetric_difference_count": (
         "structural: number of observation IDs selected by exactly one task in a "
         "pair. A set-cardinality metric, not a quality score."),
+    "requested_source_availability.requested_bytes": (
+        "the RAW source byte length from the fixture manifest raw_sources[].byte_length "
+        "— NOT a derived-transcript length."),
+    "requested_source_availability.requested_digest": (
+        "the RAW source sha256 from the fixture manifest raw_sources[].digest."),
+    "requested_source_availability.cas_resolvable": (
+        "OK only when the frozen report records this raw source with status OK AND its "
+        "report digest and byte length match the fixture manifest; MISMATCH when present "
+        "but digest/length disagree; UNAVAILABLE when absent from the report or not OK."),
+    "requested_source_availability.round_trip": (
+        "true only when cas_resolvable is OK AND every derived session bound to this raw "
+        "source reproduces its body (digest, byte length, record count). A raw source "
+        "with no derived session round-trips on raw availability alone."),
 }
 
 
@@ -1003,13 +1185,25 @@ def assemble(contract: dict, loaded: dict, idx: dict, manifest: dict,
             "gate-input-integrity", "FAIL", "present-but-contradictory input artifact",
             {"failures": list(_INTEGRITY_FAILURES)})]
 
-    # arms availability
-    manifest_present = s.get("fixture_manifest") is not None
-    nc_list = (s.get("fixture_manifest") or {}).get("negative_control", []) if manifest_present else []
+    # source compilation (computed first: arm availability depends on it)
+    sc_axis, sc_detail, full_derived_available = source_compilation(
+        s.get("source_selectors"), s.get("derived_manifest"), s.get("fixture_manifest"),
+        s.get("report"), loaded["bodies"])
+
+    # negative-control arm identity (from the fixture manifest + supplied NC body)
+    nc_arm, nc_diag, nc_identity = negative_control_identity(
+        s.get("fixture_manifest"), loaded.get("nc_bodies", {}))
+
+    # projection arm: AVAILABLE only when every contract task has exactly one
+    # supplied, digest-valid task context (no integrity failure on it).
+    ctx_integrity_bad = {f["logical_id"] for f in _INTEGRITY_FAILURES if f["role"] == "task_context"}
+    all_tasks = set(contract["tasks"].keys())
+    projection_available = (bool(all_tasks) and set(contexts.keys()) == all_tasks
+                            and not (ctx_integrity_bad & all_tasks))
     arms = {
-        "full_derived": "AVAILABLE" if loaded["bodies"] else "UNAVAILABLE",
-        "projection": "AVAILABLE" if contexts else "UNAVAILABLE",
-        "negative_control": "AVAILABLE" if nc_list else "NOT_APPLICABLE",
+        "full_derived": "AVAILABLE" if full_derived_available else "UNAVAILABLE",
+        "projection": "AVAILABLE" if projection_available else "UNAVAILABLE",
+        "negative_control": nc_arm,
     }
 
     tasks_out = []
@@ -1045,10 +1239,6 @@ def assemble(contract: dict, loaded: dict, idx: dict, manifest: dict,
             rel_all.extend(rels)
             stale_all.extend(stale)
 
-    # source compilation axis
-    sc_axis, sc_detail = source_compilation(s.get("source_selectors"),
-                                            s.get("derived_manifest"), loaded["bodies"])
-
     # axis values
     axes = {}
     axes["contract_input_consistency"] = _axis_from_gates(consistency_gates)
@@ -1073,8 +1263,9 @@ def assemble(contract: dict, loaded: dict, idx: dict, manifest: dict,
         vmatrix_ok = all(g["status"] == "PASS" for g in vgates)
         shapes_ok = all(m["shape_satisfied"] for m in matrix)
         axes["task_dependence"] = "PASS" if (matrix and shapes_ok and vmatrix_ok) else "FAIL"
-    # negative control diagnostics: NOT_APPLICABLE if absent; UNAVAILABLE if present.
-    axes["negative_control_diagnostics"] = "NOT_APPLICABLE" if not nc_list else "UNAVAILABLE"
+    # negative control diagnostics: NOT_APPLICABLE if no NC declared; otherwise
+    # UNAVAILABLE (no v0 diagnostic semantics are imported as norm here).
+    axes["negative_control_diagnostics"] = nc_diag
 
     overall = compute_overall(axes, contract["axis_requirements"])
 
@@ -1099,7 +1290,10 @@ def assemble(contract: dict, loaded: dict, idx: dict, manifest: dict,
         "execution_checkout_tree": tree,
         "inputs": {"artifacts": _strip_inventory(loaded["inventory"])},
         "arms": arms,
-        "source_compilation": dict({"axis": sc_axis}, **sc_detail),
+        "source_compilation": {"axis": sc_axis,
+                               "requested_source_availability": sc_detail["requested_source_availability"],
+                               "derived_session_completeness": sc_detail["derived_session_completeness"],
+                               "extractor_identity": sc_detail["extractor_identity"]},
         "tasks": tasks_out if tasks_out else [_empty_task_placeholder()],
         "task_dependence_matrix": matrix if matrix else [_empty_pair_placeholder()],
         "budget": {

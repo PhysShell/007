@@ -28,15 +28,20 @@ bound_inputs:
     logical_id: budget-v0.yaml
     visibility: public
   derived_bodies_private:
-  - artifact_bytes_sha256: sha256:f90a6e5eaf1d2bf6aa9f9b03716f606025909802dc26edec34da459325ebc13a
-    byte_length: 141
+  - artifact_bytes_sha256: sha256:c7c416ff6531f5453cc99b1905bdc88f0082a02d933cb8af9247a69194018ba7
+    byte_length: 81
     record_count: 3
     session_id: synthetic-session-1
     visibility: private
+  - artifact_bytes_sha256: sha256:0327508df99db169b6ce32c01a46a99f76c31ecbe7ee10852ea933d929363d95
+    byte_length: 54
+    record_count: 2
+    session_id: synthetic-session-2
+    visibility: private
   fixture_manifest:
-    artifact_bytes_sha256: sha256:58e70278ccdbc2fa3db80c7b3d38aeda1c4ed38c8e47af6c3d1532059590fbec
-    byte_length: 217
-    canonical_object_sha256: sha256:44331666b5e8bf55c01da0b9b7ef851aec191859a058f8ca55eab36300d4a5ed
+    artifact_bytes_sha256: sha256:c08d03084fb6452915abe9db6c6ef15f73ec96fdd2134335a515b76bfee2e39a
+    byte_length: 568
+    canonical_object_sha256: sha256:4a28fc52d2614910ca4543e35a3979e343e64751e8033621d4db1fc1e14741da
     logical_id: manifest.yaml
     visibility: public
   gold_state:
@@ -47,14 +52,14 @@ bound_inputs:
     visibility: public
   question_files:
     questions-alpha.yaml:
-      artifact_bytes_sha256: sha256:0b3391fe5e827b8748dbbb2a40d6288a4fb14518dafe54ed9589bd75a6c31ff6
-      byte_length: 195
-      canonical_object_sha256: sha256:6dd6e21783112894ad82181fd50bd6ffc017b9515cac6be26ff1beec6492ade0
+      artifact_bytes_sha256: sha256:f7658aa23836d115cacf954ec870b46334bd105ab74c7a5a2b4f954289251daa
+      byte_length: 450
+      canonical_object_sha256: sha256:354ebb75ce186f67024a235c7ad196781ac803a76ba57bfa5f96b9ac03b7c0ae
       visibility: public
     questions-beta.yaml:
-      artifact_bytes_sha256: sha256:d8f5c406a3674ba63108bc08378a10da1a302ff74ac2d8a56d4ec12ac7ce33a0
-      byte_length: 124
-      canonical_object_sha256: sha256:9abf15e23742bbe7f3bed2a94b3b27827b954309dff4c52fff456299d80148fd
+      artifact_bytes_sha256: sha256:42d869ffb6cc84f5e9bffe24840a9a7b26c80f86191d88a9f3e221dafc3f6c3a
+      byte_length: 198
+      canonical_object_sha256: sha256:17cbc9fab2534b3bc5c3c975c1d20e79c830b72e9460a47872ac16338e18a1cb
       visibility: public
     questions-gamma.yaml:
       artifact_bytes_sha256: sha256:c981fbd9a2f4501fda90aeb05baad68bd8e967d449baafd1bf1bad8928bc2141
@@ -62,9 +67,9 @@ bound_inputs:
       canonical_object_sha256: sha256:cd416296133fd8cd8144149e5e408bf9db7304e73284eda14c88fe8ff53d9c00
       visibility: public
   r3_1_derived_manifest:
-    artifact_bytes_sha256: sha256:f36a2b0353679936302773eae0beca996a2e055b8c6beac408a391ae5b3ea5d8
-    byte_length: 606
-    canonical_object_sha256: sha256:87b20e2b037b0654b2cbe06051ed178895bf6fd51702bc3494239dead7aff899
+    artifact_bytes_sha256: sha256:62aeb4c3dc25efb1f113161ce80453f9a9dcb165c4560bce70adc4f08b5f905e
+    byte_length: 1116
+    canonical_object_sha256: sha256:64d47c1e4e89c1c14aea189153bc64a57ae188f500a5e6a0a789dbcf91a9873c
     logical_id: derived-manifest.json
     visibility: public
   r3_1_projection_comparison:
@@ -74,15 +79,15 @@ bound_inputs:
     logical_id: projection-comparison.json
     visibility: public
   r3_1_report:
-    artifact_bytes_sha256: sha256:a24c41a1aaa18bce5b20585e707f899b73a792550146184506dbf03b14a50b5a
-    byte_length: 334
-    canonical_object_sha256: sha256:276ac77763295be2408aa3cddbe45a16ff3c755ca93d09af4bd791cb5ab1f23f
+    artifact_bytes_sha256: sha256:ca8f0baef692cf365548b2942db04c55ceeb8e87e63bfa2d53db4b695bd9a952
+    byte_length: 833
+    canonical_object_sha256: sha256:933ddb00188f1479ad86dcba36e691f801948638ad56da992fd723dae91227f8
     logical_id: report.json
     visibility: public
   source_selectors:
-    artifact_bytes_sha256: sha256:4bdb654fd9b5a6718c58704d68adcacd73c3e861d601f651cdbc966bdfbb03f5
-    byte_length: 150
-    canonical_object_sha256: sha256:3e92d1b17eda8113376a41a3dcbbb67ca9e67d34c4cf971a39540c6c23e5314d
+    artifact_bytes_sha256: sha256:e58b6aaa0b43792c0033c4787e6c3a893cd59a0b2c4e625201200b037814cfb1
+    byte_length: 229
+    canonical_object_sha256: sha256:43f32696929c97c6b0f261fc301e143b1df1db6dc12a893ac6769dcecc90bc31
     logical_id: source-selectors.yaml
     visibility: public
   task_contexts:
@@ -212,6 +217,7 @@ input_closure:
   raw_source_bodies: frozen
   required_private:
   - synthetic-session-1
+  - synthetic-session-2
   required_public_structured:
   - task-alpha.yaml
   - task-beta.yaml
@@ -286,6 +292,17 @@ tasks:
       kind: supersedes
       match: all
       question: qa1
+      target_status:
+      - superseded
+    - depth: 1
+      direction: outgoing
+      endpoint_policy: edge_witness
+      from: obs-synthetic-a
+      gold_derived_targets:
+      - obs-synthetic-stale
+      kind: supersedes
+      match: all
+      question: qa6
       target_status:
       - superseded
   t-beta:

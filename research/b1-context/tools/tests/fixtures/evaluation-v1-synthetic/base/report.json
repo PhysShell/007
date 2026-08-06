@@ -1,5 +1,22 @@
 {
  "fixture_id": "synthetic-eval",
+ "input_digests": {
+  "plane-record-synth": {
+   "byte_length": 300,
+   "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+   "status": "OK"
+  },
+  "src-synthetic-1": {
+   "byte_length": 1000,
+   "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+   "status": "OK"
+  },
+  "src-synthetic-2": {
+   "byte_length": 2000,
+   "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+   "status": "OK"
+  }
+ },
  "registry_digest": "sha256:967ff17f2a33f4d3baacf71d1a3bfc7349ab4f3cda9383ea2b4c0de72d4f1629",
  "registry_filename": "tasks.yaml",
  "schema": "o7.b1.report/v1",

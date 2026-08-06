@@ -2,6 +2,9 @@ questions:
 - id: qb1
   required_observation_ids:
   - obs-synthetic-c
+  required_relation_paths:
+  - from: obs-synthetic-c
+    kind: depends_on
   text: '?'
 schema: o7.b1.questions/v0
 task_id: t-beta

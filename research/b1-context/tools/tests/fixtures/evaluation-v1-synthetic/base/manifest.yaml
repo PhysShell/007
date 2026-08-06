@@ -1,7 +1,17 @@
 fixture_id: synthetic-eval
 negative_control: []
 raw_sources:
-- digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+- byte_length: 1000
+  digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
   id: src-synthetic-1
+  source_system: synthetic
+- byte_length: 2000
+  digest: sha256:2222222222222222222222222222222222222222222222222222222222222222
+  id: src-synthetic-2
+  source_system: synthetic
+- byte_length: 300
+  digest: sha256:3333333333333333333333333333333333333333333333333333333333333333
+  id: plane-record-synth
+  source_system: synthetic
 schema: o7.b1.fixture-manifest/v0
 status: synthetic

@@ -1,11 +1,22 @@
 questions:
-- id: qa1
+- forbidden_stale_as_current:
+  - obs-synthetic-stale
+  id: qa1
   required_observation_ids:
   - obs-synthetic-a
+  required_relation_paths:
+  - from: obs-synthetic-a
+    kind: supersedes
   text: '?'
 - id: qa2
   required_observation_ids:
   - obs-synthetic-b
+  text: '?'
+- id: qa6
+  required_observation_ids: []
+  required_relation_paths:
+  - from: obs-synthetic-a
+    kind: supersedes
   text: '?'
 schema: o7.b1.questions/v0
 task_id: t-alpha

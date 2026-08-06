@@ -3,8 +3,8 @@
  "schema": "o7.b1.derived-manifest/v0",
  "sessions": [
   {
-   "derived_byte_length": 141,
-   "derived_digest": "sha256:f90a6e5eaf1d2bf6aa9f9b03716f606025909802dc26edec34da459325ebc13a",
+   "derived_byte_length": 81,
+   "derived_digest": "sha256:c7c416ff6531f5453cc99b1905bdc88f0082a02d933cb8af9247a69194018ba7",
    "extractor_id": "o7-synthetic-extractor-v0",
    "extractor_impl_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
    "extractor_version": "0",
@@ -12,6 +12,17 @@
    "raw_source_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
    "record_count": 3,
    "session_id": "synthetic-session-1"
+  },
+  {
+   "derived_byte_length": 54,
+   "derived_digest": "sha256:0327508df99db169b6ce32c01a46a99f76c31ecbe7ee10852ea933d929363d95",
+   "extractor_id": "o7-synthetic-extractor-v0",
+   "extractor_impl_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+   "extractor_version": "0",
+   "raw_source": "src-synthetic-2",
+   "raw_source_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+   "record_count": 2,
+   "session_id": "synthetic-session-2"
   }
  ]
 }

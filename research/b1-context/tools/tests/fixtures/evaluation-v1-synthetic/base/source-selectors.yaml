@@ -4,3 +4,6 @@ sessions:
 - coverage: {}
   raw_source: src-synthetic-1
   session_id: synthetic-session-1
+- coverage: {}
+  raw_source: src-synthetic-2
+  session_id: synthetic-session-2

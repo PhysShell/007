@@ -149,6 +149,17 @@ python3 evaluate_v1.py --contract CONTRACT.yaml \
   --out evaluation-v1.json [--mode dev|qualification|authoritative]
 ```
 
+Gates 06/07/08 are enforced **literally against the frozen contract**: the question
+files' `required_relation_paths` and question-level `forbidden_stale_as_current` are
+the source of truth, and the contract's explicit expansions must match them exactly
+(gold-graph grounding is a separate, accurately-named consistency gate). Source
+compilation reports the **raw** source bytes/digests from the fixture manifest and
+availability from the report's `input_digests` — never conflating derived-body
+evidence with raw-source bytes. The negative-control arm is `AVAILABLE` only with a
+supplied, identity-valid body; a metadata-only declaration is `UNAVAILABLE`. Arm
+availability requires the *whole* set (every session's body, every task's context),
+not just one.
+
 Its synthetic qualification suite (`tests/test_evaluate_v1.py`,
 `tests/synth_eval_v1.py`, fixtures under
 `tests/fixtures/evaluation-v1-synthetic/`) reports each case as fixture →
