@@ -1,0 +1,60 @@
+{
+  "contract": {
+    "artifact_bytes_sha256": "sha256:8f5060f0d68ec3a5796714322c7f0541ade58539c25bb0d535b2bb4c315c00e7",
+    "canonical_object_sha256": "sha256:9784516db193e5987a2e6bf78713ee3f7affe58dc7864424eef59a131a95e081",
+    "revision": 3
+  },
+  "execution": {
+    "implementation_commit": "8fc4d749b8aeaa4518e271a9ea53d3e41a040bf4",
+    "implementation_tree": "bd6aa0cb22b836d1ddf5e5d0a35da2bdb6cd31cd",
+    "mode": "authoritative",
+    "two_run_reversed_input_order": true
+  },
+  "forbidden_confirmed_not_taken": [
+    "no evaluator/contract/schema change",
+    "no extraction/projection rerun",
+    "no R3/R3.1 modification",
+    "no expected evaluation result",
+    "no selector/question/relation/budget/pair tuning",
+    "no run_case/report integration",
+    "private derived bodies not committed",
+    "qodec PR #16 untouched",
+    "no PR"
+  ],
+  "kind": "measurement_only",
+  "not_remediated": true,
+  "provenance": {
+    "case_role": "development",
+    "designed_after_observing_case_0002": true,
+    "generalization_claim_allowed": false,
+    "holdout_evidence": false
+  },
+  "qodec_arm_started": false,
+  "r3_1": {
+    "report_sha256": "sha256:7f72133abc88ff88873c9d5dea1139535ff6583baee5e96b74ed7b0e4aeafba6"
+  },
+  "r4d_started": false,
+  "record": "o7.b1.r4c-receipt/v0",
+  "result": {
+    "artifact_commit": "b5ea8e8d82a4e27a0ba50c589db6c765532096ab",
+    "artifact_tree": "aa490799c8b7436067bcec6c201a502d33624f5a",
+    "axes": {
+      "contract_input_consistency": "FAIL",
+      "negative_control_diagnostics": "NOT_APPLICABLE",
+      "projection_validity": "PASS",
+      "question_observation_support": "PASS",
+      "relation_support": "FAIL",
+      "source_compilation": "PASS",
+      "stale_state_safety": "PASS",
+      "task_dependence": "PASS"
+    },
+    "baseline_classification": "BASELINE_EVALUATION_FAIL",
+    "byte_deterministic": true,
+    "cas_object": "cas:sha256:ab95f39e0c8d389f326f097ec177c5c22a751da016e173796a8dde645dd882df",
+    "evaluation_v1_sha256": "sha256:ab95f39e0c8d389f326f097ec177c5c22a751da016e173796a8dde645dd882df",
+    "input_inventory_count": 19,
+    "offsite_snapshot": "restic:4e504424",
+    "overall": "FAIL"
+  },
+  "round": "R4C"
+}
