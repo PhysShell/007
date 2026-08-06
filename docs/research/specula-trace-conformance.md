@@ -2,8 +2,8 @@
 
 **Status: research note. The decision it proposes is autonomous, therefore PENDING** until the
 maintainer ratifies or rejects it (`docs/evidence-and-decision-discipline.md` rule 3). No code is
-introduced by this document. It fixes vocabulary and names one bounded transplant so a later slice
-does not re-derive it — or smuggle in the weaker form.
+introduced by this document. It proposes vocabulary and one bounded transplant so a later slice
+does not re-derive them — or smuggle in the weaker form.
 
 Scope: `crates/o7-run` (the canonical event protocol, the pure reducer, replay). Not the sandbox,
 not the ledger, not `o7 invoke`.
@@ -237,8 +237,8 @@ The transplant is 007-only. Recorded here so the question is closed rather than 
 
 A parallel line of analysis (interactive session, 2026-08-06) proposed formal modelling for the A1
 provider-invocation lifecycle rather than for the reducer. That is a different subject, both
-conclusions hold, and the line between them is worth freezing here so a later slice does not have to
-re-derive which note owns what.
+conclusions hold. The boundary is recorded here as a proposal for separate maintainer ratification so
+a later slice does not have to re-derive which subject each note owns.
 
 **The boundary is not a component name. It is the durable write.**
 
@@ -247,15 +247,20 @@ external world
       ↓          the external effect may have happened and be unrecorded
 dispatch / crash / missing receipt / ambiguity
       ↓  ← durable-write admission boundary
-canonical event stream        complete, totally ordered, digest-chained
+canonical admitted event stream
+                   ordered and digest-chained;
+                   completeness is established only by the applicable seal
       ↓
 deterministic reducer
 ```
 
-Above the boundary an event can fail to exist at all; that is where model checking earns its cost.
-Below it an event cannot be lost, duplicated, or reordered without the chain failing, and the reducer
-plus replay plus §4's exploration are sufficient. **A1-M0 owns the crossing itself** — not the whole
-provider lifecycle, and not the reducer.
+Above the boundary, an external effect may fail to produce any durable event; that is where model
+checking earns its cost. Below it, removal or reordering inside an already recorded chain is detected
+by sequence and digest verification. Suffix loss may remain a valid unsealed prefix, and a
+semantically duplicate transition may remain chain-valid until event-identity or reducer rules reject
+it. The sufficient mechanism below the boundary is therefore chain verification plus seal
+classification plus deterministic reduction and replay, not the digest chain alone. **A1-M0 owns the
+crossing itself** — not the whole provider lifecycle, and not the reducer.
 
 **Audit result (this note's own finding).** The ten modelability properties that motivate A1-M0 were
 checked against the A1 authority-contract freeze — `docs/q-deck/a1-authority-contracts.md`, commit
@@ -300,6 +305,11 @@ the transition it authorizes; this one authorizes **none**. Written down deliber
 unstated authority becomes a gate input eventually, and a green model check impersonating a fact about
 a running system is the exact failure `docs/evidence-and-decision-discipline.md` opens with.
 
+Until separately promoted, `FormalCheckReceipt` is an A1-M0 research artifact outside the A1-F
+envelope and FD-2 evidence graph. Any later use inside canonical A1 evidence requires a separate
+versioned decision assigning its rank, media type, reference rules, and migration semantics. This note
+neither assigns that rank nor modifies A1-F.
+
 The same disclaimer applies one level down. A counterexample is a sequence over *abstract* actions;
 turning it into a Rust regression test requires an abstract-action → concrete-event mapping that is
 itself unverified. Such a test is worth writing and must be described as pinning what someone
@@ -313,8 +323,8 @@ implementation is written while *looking at* it, and will reproduce its defects.
 would describe the code instead of the requirement. Parallel work is fine for the parts of A1-V0 that
 do not touch the boundary.
 
-Name, frozen so nobody later decides M stood for Migration: **A1-M0 — pre-implementation model
-checking of the provider-dispatch durability boundary.**
+Proposed name, to become frozen only through the separate A1-M0 ratification: **A1-M0 —
+pre-implementation model checking of the provider-dispatch durability boundary.**
 
 ---
 
