@@ -195,11 +195,12 @@ Stated so a later slice does not adopt the expensive half by default.
 1. **Do not generate a TLA+ specification of `o7-run`.** The reducer already is the model. A second
    model in TLA+ creates exactly the conformance-drift problem Specula spends most of its budget
    repairing — 007 would be paying that cost to acquire a duplicate of something it already has in a
-   language its CI already checks.
+   language its CI already checks. The claim is *not* that model checking could find nothing here: it
+   could in principle surface an unreachable branch or a liveness gap in the reducer's FSM. The claim
+   is that it does not buy enough to justify a second normative model of the same subject.
 2. **Do not run Specula against 007 as a target system.** Its 48-system evaluation is concurrent and
    distributed system code. The reducer is a pure fold. If a Specula-shaped effort ever pays here it
-   is at the `o7d`/worker concurrency boundary, not at the reducer — and that is a separate note, not
-   this one.
+   is at the durable-write boundary described in §8, not at the reducer.
 3. **Do not adopt LLM-in-the-loop specification repair.** The repair loop exists because the model was
    generated and is therefore untrusted. 007's model is hand-written, contract-frozen, and reviewed.
 4. **Do not treat "bugs found" as the acceptance metric.** The deliverable is the standing property,
@@ -232,15 +233,104 @@ The transplant is 007-only. Recorded here so the question is closed rather than 
 
 ---
 
-## 8. Disposition
+## 8. The other side of the durable-write boundary — A1-M0
+
+A parallel line of analysis (interactive session, 2026-08-06) proposed formal modelling for the A1
+provider-invocation lifecycle rather than for the reducer. That is a different subject, both
+conclusions hold, and the line between them is worth freezing here so a later slice does not have to
+re-derive which note owns what.
+
+**The boundary is not a component name. It is the durable write.**
+
+```text
+external world
+      ↓          the external effect may have happened and be unrecorded
+dispatch / crash / missing receipt / ambiguity
+      ↓  ← durable-write admission boundary
+canonical event stream        complete, totally ordered, digest-chained
+      ↓
+deterministic reducer
+```
+
+Above the boundary an event can fail to exist at all; that is where model checking earns its cost.
+Below it an event cannot be lost, duplicated, or reordered without the chain failing, and the reducer
+plus replay plus §4's exploration are sufficient. **A1-M0 owns the crossing itself** — not the whole
+provider lifecycle, and not the reducer.
+
+**Audit result (this note's own finding).** The ten modelability properties that motivate A1-M0 were
+checked against the A1 authority-contract freeze — `docs/q-deck/a1-authority-contracts.md`, commit
+`144ebf6`, unmerged at audit time, so this binds that head and is STALE if the accepted head differs.
+All ten are already satisfied: identity grains (FD-10), stale non-authority (FD-5), duplicate
+idempotency vs `IdConflict` (FD-6), replay without provider invocation (FD-8), unknown outcome as
+`dispatch_ambiguous` with no redrive and no mutation (FD-9), accepted-vs-untrusted separation (FD-4),
+rank monotonicity (FD-2), transition authority (FD-11), supersede without mutation, and closed typed
+transitions (FD-1.5). **A1-F requires no change for A1-M0 to be possible, and must carry no TLA+
+commitment.** A normative contract that promises a verification technique is a contract that has
+confused evidence with obligation.
+
+**First subject:** provider execution → dispatch → durable receipt or ambiguity → permitted recovery
+action. Explicitly in scope, because a missing reference is exactly what a crash produces:
+`EvidenceReferencesAreResolved` — whether an ACCEPTED state is reachable with an unresolved evidence
+reference. That is a reachability question over a campaign, not a per-artifact check.
+
+**Non-goals:** the reducer's own properties (duplicate sequence, event-after-seal, terminal
+monotonicity) and FD-2 rank monotonicity/acyclicity. The latter is checkable on a single artifact in
+isolation and needs no state-space search. Note the deliberate split from the line above — the
+evidence graph's *shape* is a non-goal; the *reachability* of an accepted state over an incomplete
+graph is not.
+
+**Tooling posture.** TLC runs out of band, revision-bound against the accepted A1-F head. It does not
+enter the mandatory cargo gate set AGENTS.md declares; adding a JVM toolchain to every ordinary pull
+request is a cost of ownership this note declines on A1-M0's behalf.
+
+**`FormalCheckReceipt` — evidence, with the authority stated.** A successful check should land as a
+typed artifact rather than a CI log:
+
+```text
+FormalCheckReceipt { schema_version, subject_contract_digest, subject_revision,
+                     spec_digest, model_config_digest, checker_identity, checker_version,
+                     explored_state_count, invariant_set_digest, result,
+                     counterexample_ref?, generated_at }
+```
+
+It attests: *under these bounds and abstractions, the checker found no violation of this invariant
+set.* It does **not** attest that the A1 implementation corresponds to the model — that needs runtime
+trace conformance, which does not exist yet. Under FD-11's own discipline every canonical object names
+the transition it authorizes; this one authorizes **none**. Written down deliberately, because an
+unstated authority becomes a gate input eventually, and a green model check impersonating a fact about
+a running system is the exact failure `docs/evidence-and-decision-discipline.md` opens with.
+
+The same disclaimer applies one level down. A counterexample is a sequence over *abstract* actions;
+turning it into a Rust regression test requires an abstract-action → concrete-event mapping that is
+itself unverified. Such a test is worth writing and must be described as pinning what someone
+*understood* the counterexample to mean — not as the model's finding enforced in code.
+
+**Trigger.** A1-M0's first invariant set closes **before** implementation of the A1-V0 dispatch
+boundary begins. Not "in parallel": a counterexample found after the shape is committed costs
+migrations rather than a document, and — the sharper hazard — a model written alongside the
+implementation is written while *looking at* it, and will reproduce its defects. That is SysMoBench's
+~46% conformance failure inverted: there the model described the textbook instead of the code, here it
+would describe the code instead of the requirement. Parallel work is fine for the parts of A1-V0 that
+do not touch the boundary.
+
+Name, frozen so nobody later decides M stood for Migration: **A1-M0 — pre-implementation model
+checking of the provider-dispatch durability boundary.**
+
+---
+
+## 9. Disposition
 
 ```text
 Invariants stated outside the reducer     PROPOSED — pending maintainer ratification
 Bounded exhaustive exploration            PROPOSED — pending maintainer ratification
 TLA+ model of o7-run                      REJECTED (§5.1)
-Specula run against 007                   REJECTED for the reducer; open at the o7d boundary (§5.2)
+Specula run against 007                   REJECTED for the reducer; open above the boundary (§5.2, §8)
 LLM specification repair                  REJECTED (§5.3)
 qodec transplant                          NOT APPLICABLE (§7)
+A1-F change for modelability              NOT REQUIRED — audit passes at 144ebf6 (§8)
+A1-M0 track                               PROPOSED — separate note, separate ratification (§8)
+TLC in the mandatory cargo gate           REJECTED (§8)
+FormalCheckReceipt authorizes a transition  NEVER — evidence only (§8)
 ```
 
 Per rule 3 this note is not normative authority and cannot be cited to justify the next autonomous
