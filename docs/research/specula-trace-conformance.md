@@ -150,11 +150,22 @@ INV-3  every captured sandbox-evidence key names a subject present in the contra
        (no orphan evidence; the typed-key injectivity claim, as a state property)
 INV-4  no protected subject is Started before every protecting policy is Allowed
        (today a transition guard; restated as a property of every reachable state)
-INV-5  folded sequence numbers are strictly monotone and the chain digest links
+INV-5  sequence numbers are strictly monotone and each event's prev-link matches its predecessor
+       — a TRANSITION predicate, not a state predicate: fn(&RunState, &RunState, &RunEvent)
 ```
 
 INV-4 and INV-5 duplicate existing guards on purpose. A property that restates a guard is exactly the
 one that catches the guard being deleted.
+
+**INV-5 cannot be a `fn(&RunState)` and the reason generalizes.** `RunState` retains only
+`last_sequence` and `last_event_digest`, and `reduce` overwrites both after accepting an event
+(`crates/o7-run/src/reduce.rs`, the tail of `reduce`). A stream whose prev-link was wrong therefore
+folds to a state observationally identical to one whose links were right — so a state-only predicate
+stays green even if `BrokenChain` validation is deleted, which is precisely the guard-deletion case
+INV-5 exists to catch. Any property about *how* a state was reached needs the pair
+`(previous state, event)`, not the state alone. INV-1 through INV-4 are genuine state properties;
+INV-5 is not, and mixing the two kinds under one signature is how an invariant set acquires a member
+that cannot fail.
 
 ### 4.2 Bounded exhaustive exploration
 
@@ -164,12 +175,17 @@ alphabet, folds each through `reduce`, and asserts that every *accepted* prefix 
 Breadth-first, matching the paper's finding that BFS located 93.5% of violations. Report the reachable
 state count so a later change that collapses the space is visible.
 
+Well-formed orderings are not the whole space. The envelope fields — `sequence`, `event_id`,
+`event_digest`, and the prev-link — must be perturbed too (repeated sequence, gap, wrong prev-link,
+reused event id), or the exploration only ever exercises the guards that reject *orderings* and never
+the ones that reject *malformed envelopes*. INV-5 is unreachable without those perturbations.
+
 The two-sided pressure, mapped concretely:
 
 ```text
 conformance direction   every events.jsonl a real `o7 run` emitted must be ACCEPTED by the reducer.
                         A rejection is either a genuine harness bug or an over-strict guard — both
-                        worth knowing. Corpus: the stored run records.
+                        worth knowing. Corpus: the stored run records that HAVE a stream.
                         (Specula's trace validation — 007 already has this via replay.)
 
 invariant  direction    every stream the reducer ACCEPTS must satisfy every INV.
@@ -180,6 +196,17 @@ invariant  direction    every stream the reducer ACCEPTS must satisfy every INV.
 Neither alone is sufficient, and the reason is worth writing down once: conformance alone is satisfied
 by a reducer that accepts everything; invariants alone are satisfied by a reducer that accepts nothing.
 Only the pair pins a specification in place.
+
+**The corpus is survivorship-biased, and the bias is not incidental.** On the no-ledger path
+(`src/main.rs`, `pending = None`) the agent and every gate run to completion first, the canonical
+stream is synthesized in one call afterwards, and `events.jsonl` is written last. A crash before that
+write leaves a created run directory with a task, stdout and diff but no stream at all. The conformance
+direction therefore establishes only that the reducer admits what the harness did *on runs that
+survived to the write* — not "everything the code did". Note where that lands: a run that produced
+real effects and no durable event is above the durable-write boundary of §8, which is the other
+note's subject, not this one's. The live `--ledger` path is different (per-event append with
+`sync_data`, verified by read-back) and is the one whose records are corpus-eligible for a stronger
+claim.
 
 This slots into `docs/verification.md`'s existing ladder as a fourth rung: proptest → cargo-fuzz →
 Kani → bounded reducer exploration. Kani is the wrong tool for this particular rung — `RunState` is
@@ -273,8 +300,12 @@ stream that preserves the same verdict. Detecting that stronger class requires a
 
 **Audit result (this note's own finding).** The ten modelability properties that motivate A1-M0 were
 checked against the A1 authority-contract freeze — `docs/q-deck/a1-authority-contracts.md`, commit
-`144ebf6`, unmerged at audit time, so this binds that head and is STALE if the accepted head differs.
-All ten are already satisfied: identity grains (FD-10), stale non-authority (FD-5), duplicate
+`144ebf6`, carried by branch `claude/a1-contract-freeze-dkrnnq` and **not merged**, so neither the
+file nor the commit is reachable from this note's own history. The audit is therefore **not
+independently verifiable from this revision**: a reviewer or ratifier must fetch that branch, and if
+A1-F is accepted at a different head the audit is STALE and must be re-run before it is relied on.
+Ratifying this note ratifies the *direction*, never the audit's conclusion as a standing fact. As
+observed at `144ebf6`, all ten are satisfied: identity grains (FD-10), stale non-authority (FD-5), duplicate
 idempotency vs `IdConflict` (FD-6), replay without provider invocation (FD-8), unknown outcome as
 `dispatch_ambiguous` with no redrive and no mutation (FD-9), accepted-vs-untrusted separation (FD-4),
 rank monotonicity (FD-2), transition authority (FD-11), supersede without mutation, and closed typed
@@ -346,7 +377,8 @@ TLA+ model of o7-run                      REJECTED (§5.1)
 Specula run against 007                   REJECTED for the reducer; open above the boundary (§5.2, §8)
 LLM specification repair                  REJECTED (§5.3)
 qodec transplant                          NOT APPLICABLE (§7)
-A1-F change for modelability              NOT REQUIRED — audit passes at 144ebf6 (§8)
+A1-F change for modelability              NOT REQUIRED — audit passes at 144ebf6, unmerged and
+                                          not independently verifiable from here (§8)
 A1-M0 track                               PROPOSED — separate note, separate ratification (§8)
 TLC in the mandatory cargo gate           REJECTED (§8)
 FormalCheckReceipt authorizes a transition  NEVER — evidence only (§8)
