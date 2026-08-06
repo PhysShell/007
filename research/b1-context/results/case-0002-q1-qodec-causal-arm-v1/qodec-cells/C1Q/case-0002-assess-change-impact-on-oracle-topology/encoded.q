@@ -1,0 +1,35 @@
+%q1 mine n=32
+码=","provenance":[{"digest":"sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76","source_class":"repo_record","source_id":"source-lock-v6","source_pointer":"SOURCE-LOCK-v6.yaml#
+引= share nothing with required oracle-topology or preferred measurement,r21-evidence"},{"observation_id":"obs-
+路=","provenance":[{"digest":"sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139","source_class":"repo_record","source_id":"plane-record","source_pointer":"plane-record.json#
+类=","reason":"not relevant to this task: topics
+函="observation_id":"obs-
+值="}],"selection_reason":"required topic(s) oracle-topology; preferred topic(s)
+错=.","status":"current","topics":["
+试="}],"selection_reason":"preferred topic(s) measurement; required kind evidence","selection_score":2,"statement":"
+件="},{"from":"obs-oracle-topology-constraint","kind":"depends_on","to":"obs-
+组={"authority":"controller_or_repo_record","kind":"
+标="]},{"authority":"deterministic_derivative","kind":"evidence",函
+记=","reason":"not eligible:
+链=repo-authority-04108e7
+表=r21-evidence
+层=","selection_score":
+块=类 product-integration,round-0引
+节=","kind":"supports","to":"obs-
+行=oracle-topology
+列=reviewer-
+键="},{"from":"obs-
+名=evidence head 04108e7
+数=,"statement":"The
+串=":"o7.b1.relation-closed-control/v0","
+图="}],"selection_reason":"preferred topic(s)
+树=","kind":"supersedes","to":"obs-
+点=记 superseded_by obs-
+边=output-path-dependence
+库=profiler-fail-closed
+包=表; required kind
+版=错measurement"
+构=chatgpt-export.json'
+建=列acceptance-claim
+%q1 body
+{"cutoff":{"identity":"case-0002 Round 0 CLOSED — plane-record frozen 2026-08-05T08:52:33Z, bound to qodec metadata head 427b677","raw_source_digest":"sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139","raw_source_id":"case-0002-round0-source-lock"},"fixture_id":"case-0002","omitted":[{函authority-model类 authority-model引lock-supersession-chain类 supersession引metadata-head类 round-0引next-permitted-step块plane-record-frozen块plane-record-not-frozen-v6点round0-closed"},{函plane-reviewer类 source-planes引profiler-prior-defect点库"},{函relay-rule类 authority-model引建记 authority agent_claim is never authoritative"},{函列durability-resolved类 durability,round-0引列durability-unresolved-v6点列durability-resolved"},{函round0-closed块source-data-origin类 source-planes引v3-binding-error记 status rejected not in force"}],"produced_by串relations":[{"from":"obs-库树profiler-prior-defect键evidence-head-ci-empty节链键列window节建键链树建件链件window-invariant件边键边","kind":"blocks","to":"obs-行-constraint键链节next-permitted-step"}],"schema":"o7.b1.context/v0","selected":[组evidence",函evidence-head-ci-empty路ci_frozen值 包 evidence层4数 名 carries no CI run: check-runs 0, workflow runs 0, combined status pending — a frozen-empty result recorded from the plane-record, not inferred. Baseline 3ba3a38 and product head 940c7629 each have 11 check-runs, combined status success, 3 workflow runs错行","表"]},组constraint",函行-constraint路r21_evidence_material + evidence-head-chain值 包 constraint层4数 chosen R21 constraint routes against what the oracle table targets, not against what it may target, with routing derived once and the ledger asked before the verdict. The evidence chain (16 commits 3ba3a38..04108e7) freezes the preservation run, its inputs, its allowed-outcomes envelope and its comparison错行","表"]},组risk",函边码output_identity值 measurement; required kind risk层4数 profiler output embeds the literal input path, so any recorded expectation must name the path argument, not only the corpus; canonical arguments are '构 and 'claude-session.window-r21.jsonl'. Recorded rather than fixed in this revision版,"行"]},组decision",函链路PR16+evidence_head_04108e7值 表层3数 authoritative record of R21 acceptance is the frozen plane-record — 名 with its frozen CI and evidence artifacts and PR #16 state — not the reviewer's relayed acceptance. Product head is 940c7629; PR #16 is open, draft, unmerged错行","product-integration","表"]},{"authority":"platform_capture","kind":"evidence",函plane-coder码source_planes.plane-coder试plane-coder is the Claude Code coder session, frozen by record-prefix through record 17111 (17112 records, sha256 8392de80...); the whole-file digest is unstable (append-only), so only the prefix digest is authoritative版,"source-planes标列digest-disagreement码reviewer_digest_disagreement试The one value that did not reproduce was the reviewer profile digest; the exact cause is the literal input path serialised into the report ('/tmp/构 vs '构, a five-byte diff on one field), with zero differing measured values. Status CLOSED错measurement标列window码windows.reviewer图 包 evidence层2数 reviewer window runs from node 264366ab (review at accepted head 3ba3a38, discovery that R21 is needed) to node d5b0a463 (exact-head acceptance of 名): 258 nodes, reproduced independently by both parties错表","列acceptance标window-invariant码window_invariant.result试window_invariant v0 computed (not asserted) that the window blob is exactly the anchored slice of the prefix blob: exit 0, byte_identical true, every check passed, output digest 881f1b3b..版]},组decision",函库码fail_closed_evidence图 measurement层1,"statement":"Both JSONL tools were hardened to fail closed on unreadable input; well-formed blobs reproduced every published count byte-for-byte, so the measurement contract is unchanged版]}],"selector":{"selector_id串selector_impl_digest":"sha256:47f356e1f7d685343773cf4775137c8649800d63580281a6033e93e9b435ef6a","selector_version":"0"},"selectors":{"anchor_observation_ids":[],"anchor_rationale":{},"excluded_topics":[],"preferred_topics":["measurement","表"],"required_kinds":["constraint","evidence","risk"],"required_topics":["行"]},"task_id":"case-0002-assess-change-impact-on-行"}

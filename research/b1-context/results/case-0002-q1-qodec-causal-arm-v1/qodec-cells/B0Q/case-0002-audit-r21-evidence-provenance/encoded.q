@@ -1,0 +1,33 @@
+%q1 mine n=30
+码=","provenance":[{"digest":"sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76","source_class":"repo_record","source_id":"source-lock-v6","source_pointer":"SOURCE-LOCK-v6.yaml#
+引= share nothing with required r21-evidence or preferred measurement,reviewer-acceptance,supersession"},{"observation_id":"obs-
+路=","provenance":[{"digest":"sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139","source_class":"repo_record","source_id":"plane-record","source_pointer":"plane-record.json#
+类=","reason":"not relevant to this task: topics
+函="observation_id":"obs-
+值=.","status":"current","topics":["
+错="]},{"authority":"controller_or_repo_record","kind":"
+试="}],"selection_reason":"preferred topic(s) measurement; required kind evidence","selection_score":2,"statement":"
+件="},{"from":"obs-oracle-topology-constraint","kind":"depends_on","to":"obs-
+组="}],"selection_reason":"required topic(s) r21-evidence
+标={"authority":"deterministic_derivative","kind":"evidence",函
+记=","reason":"not eligible:
+链=","selection_score":
+节=repo-authority-04108e7
+层="}],"selection_reason":"preferred topic(s)
+块=":"obs-
+表=reviewer-acceptance
+行=类 product-integration,round-0引
+列=,"statement":"
+键=","kind":"
+名=evidence head 04108e7
+数=oracle-topology
+串=r21-evidence
+图="},{"from块
+树=; required kind decision链
+点=supersession
+边=记 superseded_by obs-
+库=output-path-dependence
+包=reviewer-durability-
+版=profiler-fail-closed
+%q1 body
+{"cutoff":{"identity":"case-0002 Round 0 CLOSED — plane-record frozen 2026-08-05T08:52:33Z, bound to qodec metadata head 427b677","raw_source_digest":"sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139","raw_source_id":"case-0002-round0-source-lock"},"fixture_id":"case-0002","omitted":[{函authority-model类 authority-model引metadata-head类 round-0引next-permitted-step行plane-record-frozen行plane-record-not-frozen-v6边round0-closed"},{函plane-reviewer类 source-planes引profiler-prior-defect边版"},{函relay-rule类 authority-model引表-claim记 authority agent_claim is never authoritative"},{函包resolved类 durability,round-0引包unresolved-v6边包resolved"},{函round0-closed行source-data-origin类 source-planes引v3-binding-error记 status rejected not in force"}],"relations":[{"from块版键supersedes","to块profiler-prior-defect图evidence-head-ci-empty键supports","to块节图reviewer-window键supports","to块表-claim图节键supersedes","to块表-claim件节件window-invariant件库图库键blocks","to块数-constraint图lock-点-chain键derived_from","to块v3-binding-error图节键supports","to块next-permitted-step"}],"schema":"o7.b1.context/v0","selected":[标reviewer-window码windows.reviewer组; preferred topic(s) 表; required kind evidence链4列The reviewer window runs from node 264366ab (review at accepted head 3ba3a38, discovery that R21 is needed) to node d5b0a463 (exact-head acceptance of 名): 258 nodes, reproduced independently by both parties值串","表错decision",函节路PR16+evidence_head_04108e7组树3列The authoritative record of R21 acceptance is the frozen plane-record — 名 with its frozen CI and evidence artifacts and PR #16 state — not the reviewer's relayed acceptance. Product head is 940c7629; PR #16 is open, draft, unmerged值数","product-integration","串错evidence",函evidence-head-ci-empty路ci_frozen组; required kind evidence链3列The 名 carries no CI run: check-runs 0, workflow runs 0, combined status pending — a frozen-empty result recorded from the plane-record, not inferred. Baseline 3ba3a38 and product head 940c7629 each have 11 check-runs, combined status success, 3 workflow runs值数","串错decision",函lock-点-chain码点层 点树2列SOURCE-LOCK v6 supersedes v5 (which mislabelled itself revision 4, left the reviewer digest disagreement open, and listed a publication decision among Round 0 blockers); v5 superseded v4 (whose reviewer run was recorded NOT RUN); v4 superseded v3 (which bound Round 0 to a tree that does not contain it, and whose parsers skipped malformed lines)值点错decision",函版码fail_closed_evidence层 measurement树2列Both JSONL tools were hardened to fail closed on unreadable input; well-formed blobs reproduced every published count byte-for-byte, so the measurement contract is unchanged值measurement"]},{"authority":"platform_capture键evidence",函plane-coder码source_planes.plane-coder试plane-coder is the Claude Code coder session, frozen by record-prefix through record 17111 (17112 records, sha256 8392de80...); the whole-file digest is unstable (append-only), so only the prefix digest is authoritative值measurement","source-planes"]},标reviewer-digest-disagreement码reviewer_digest_disagreement试The one value that did not reproduce was the reviewer profile digest; the exact cause is the literal input path serialised into the report ('/tmp/chatgpt-export.json' vs 'chatgpt-export.json', a five-byte diff on one field), with zero differing measured values. Status CLOSED值measurement"]},标window-invariant码window_invariant.result试window_invariant v0 computed (not asserted) that the window blob is exactly the anchored slice of the prefix blob: exit 0, byte_identical true, every check passed, output digest 881f1b3b..值measurement错constraint",函数-constraint路r21_evidence_material + evidence-head-chain组链2列The chosen R21 constraint routes against what the oracle table targets, not against what it may target, with routing derived once and the ledger asked before the verdict. The evidence chain (16 commits 3ba3a38..04108e7) freezes the preservation run, its inputs, its allowed-outcomes envelope and its comparison值数","串错risk",函库码output_identity层 measurement链1列The profiler output embeds the literal input path, so any recorded expectation must name the path argument, not only the corpus; canonical arguments are 'chatgpt-export.json' and 'claude-session.window-r21.jsonl'. Recorded rather than fixed in this revision值measurement","数"]}],"selector":{"selector_id":"o7.b1.selector/v0","selector_impl_digest":"sha256:8e2dd816e6fdd82f6af4ec559e012e5f82484231ba36cc5f38f7e7759dacb029","selector_version":"0","selectors_digest":"sha256:22cb22c7fcd66f91806595a1312695b51c617a99e15c1be1423603f71e29a6e0"},"selectors":{"anchor_observation_ids":[],"anchor_rationale":{},"excluded_topics":[],"preferred_topics":["measurement","表","点"],"required_kinds":["decision","evidence"],"required_topics":["串"]},"task_id":"case-0002-audit-串-provenance"}
