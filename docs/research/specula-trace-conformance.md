@@ -77,7 +77,7 @@ cost of the transplant by orders of magnitude.
 
 | Specula stage | 007 equivalent at `2e74c51` |
 |---|---|
-| instrument the code to emit a trace | **already there** — `src/events.rs` records a digest-chained `events.jsonl` in every run record |
+| instrument the code to emit a trace | **already there** — `src/events.rs` records a digest-chained `events.jsonl` in every run record *that reached the stream write*; a run that crashed before it has a canonical directory and no stream (§4.2) |
 | a formal model of the implementation | **already there, hand-written** — `crates/o7-run/src/state.rs` (`RunState`, a versioned byte-stable normal form) + `crates/o7-run/src/reduce.rs` (the transition relation) |
 | replay a trace against the model | **already there** — `crates/o7-run/src/replay.rs` / `o7 replay <run-dir>`: chain continuity, per-event digests, artifact content digests, independent verdict recomputation |
 | model-check invariants over the state space | **absent** |
@@ -377,8 +377,9 @@ TLA+ model of o7-run                      REJECTED (§5.1)
 Specula run against 007                   REJECTED for the reducer; open above the boundary (§5.2, §8)
 LLM specification repair                  REJECTED (§5.3)
 qodec transplant                          NOT APPLICABLE (§7)
-A1-F change for modelability              NOT REQUIRED — audit passes at 144ebf6, unmerged and
-                                          not independently verifiable from here (§8)
+A1-F change for modelability              PENDING RE-AUDIT — no change indicated at 144ebf6, but that
+                                          head is unmerged and unverifiable from here; re-run against
+                                          the accepted A1-F head before relying on it (§8)
 A1-M0 track                               PROPOSED — separate note, separate ratification (§8)
 TLC in the mandatory cargo gate           REJECTED (§8)
 FormalCheckReceipt authorizes a transition  NEVER — evidence only (§8)
