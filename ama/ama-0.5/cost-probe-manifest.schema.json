@@ -105,7 +105,7 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["identity", "digest"],
+            "required": ["identity", "digest", "digest_stability_verified"],
             "properties": {
               "identity": {
                 "type": "string",
@@ -115,6 +115,10 @@
                 "type": "string",
                 "description": "Where the pinned copy came from. Provenance, not the binding."
               },
+              "representation": {
+                "type": "string",
+                "description": "Which serialization was pinned. A docs site may serve an unstable HTML shell and a stable markdown variant of the same page; pin the stable one."
+              },
               "retrieved_at": {
                 "type": "string",
                 "format": "date-time"
@@ -123,6 +127,11 @@
                 "type": "string",
                 "pattern": "^sha256:[0-9a-f]{64}$",
                 "description": "Digest of the retrieved bytes. This is the binding."
+              },
+              "digest_stability_verified": {
+                "type": "boolean",
+                "const": true,
+                "description": "The artifact was fetched at least twice and produced identical bytes. Verified empirically as necessary: the HTML representation of a Stripe changelog page yielded a different digest on two consecutive fetches (build nonces), which would report STALE on every re-check and make the binding worthless."
               }
             }
           }

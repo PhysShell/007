@@ -1,0 +1,47 @@
+{
+  "delta_id": "D2-aws-sdk-js-max-attempts",
+  "provider": "Amazon Web Services",
+  "sdk": {
+    "package": "aws-sdk (v2) -> @aws-sdk/client-* (v3)",
+    "old_version": "2.x",
+    "new_version": "3.x"
+  },
+  "fact_path": "client configuration: maxRetries -> maxAttempts (retry count semantics)",
+  "change_kind": "renamed_with_changed_semantics",
+  "old_semantics": "maxRetries = N means N retries performed IN ADDITION to the initial attempt.",
+  "new_semantics": "maxAttempts = N means N total attempts INCLUDING the initial one. The provider states the equivalent value is maxRetries + 1.",
+  "silent_failure_mode": "The rename itself raises a type error, so the compiler reliably locates the configuration site and the developer resolves it — typically by carrying the number across unchanged. `maxRetries: 5` becomes `maxAttempts: 5`, the program compiles cleanly, and the effective retry budget silently drops from six attempts to five. The compiler's diagnostic is therefore a source of FALSE confidence that the migration is complete: it witnesses the renamed symbol and is silent about the quantity that changed meaning.",
+  "backward_compatible_form": "Set maxAttempts to the previous maxRetries value plus one.",
+  "affected_operations": [
+    "Every v3 client constructor that carries a retry count forward from a v2 configuration",
+    "Any code reading or asserting on the configured retry count",
+    "Any control flow whose timing or failure budget depends on the number of attempts"
+  ],
+  "delta_provenance": "historical",
+  "visibility_hypothesis": {
+    "expected_class": "T-invisible",
+    "expected_oracle_fidelity": "conservative_proxy",
+    "rationale": "Locating and detecting come apart here. The rename is type-visible, so a declaration-surface mutation enumerates uses of the option symbol; the semantic fact — dependence on the old counting convention — is not witnessed by any mutation, since both old and new values are plain numbers. A mutation therefore yields a related set, not the same set: it finds every site that mentions the option, including those whose value was chosen fresh under the new semantics and are correct. Hypothesis only; §3 decides empirically.",
+    "note": "This delta is deliberately retained as the sharpest available illustration of the track's thesis: the compiler solves the locating problem for free and leaves the semantic problem entirely untouched, while producing a green build that reads as completion."
+  },
+  "provider_artifacts": [
+    {
+      "identity": "AWS SDK for JavaScript v3 developer guide, 'Client constructors' migration page, maxRetries entry",
+      "url": "https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/migrate-client-constructors.html",
+      "representation": "HTML as served; two consecutive fetches produced identical bytes",
+      "retrieved_at": "2026-08-06T07:38:23Z",
+      "digest": "sha256:8805b984940ca4f2a5845c4d62425a9b9a32eaf1679d1498dcb8b081618ed450",
+      "digest_stability_verified": true,
+      "size_bytes": 39380,
+      "normative_quote": "v2: The maximum amount of retries to perform for a service request. v3: Changed to `maxAttempts`. See more in v3 API reference for RetryInputConfig. Note that `maxAttempts` should be `maxRetries + 1`."
+    }
+  ],
+  "blinding": {
+    "authored_blind_to_consumer_repositories": true,
+    "consumer_repositories_inspected_before_authoring": [],
+    "authored_by": "agent session, from provider-side artifacts only",
+    "attested_at": "2026-08-06T07:38:23Z",
+    "method": "The delta was authored before any consumer repository was searched, opened, cloned, or code-searched. Only the provider artifact above was read."
+  },
+  "inference": "Rule 4 separation — the artifact SAYS the option was renamed and that maxAttempts should be maxRetries + 1. The INFERENCE is that a mechanically renamed configuration compiles cleanly while changing the effective attempt budget, so the compiler's diagnostic covers the rename and not the semantics. No DECISION about the visibility class follows here."
+}

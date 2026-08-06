@@ -7,12 +7,51 @@ Machine encodings for step 0 of the AMA-0.5 packet. The normative source is
 ```text
 cost-probe-manifest.schema.json   the immutable selection record
 measurement-record.schema.json    one record per case run
+normalized-delta.schema.json      the problem-A input AMA takes as given (§4)
+deltas/                           normalized deltas, authored blind
 ```
 
 No manifest is committed here yet. Selecting four repositories, four commits,
 four reserves, and their digest-pinned provider artifacts is the selection act
 itself — it cannot be synthesised, drafted with placeholders, or filled in later
 without destroying the pre-registration it exists to provide.
+
+## Deltas are authored before consumers are searched
+
+§4 requires the normalized delta to be written blind to the consumer repository.
+Blinding is only attestable if it is established *first*: once anyone has looked
+at consumer code, no later attestation can undo the knowledge, and the case is
+excluded rather than discounted. So the order is fixed — pin the provider
+artifacts, write the delta, commit it, and only then go looking for repositories
+that use the affected surface.
+
+Committed so far, both `delta_provenance: historical`:
+
+```text
+D1  Stripe    billing_mode.type default classic → flexible   (2025-09-30.clover)
+D2  AWS JS    maxRetries → maxAttempts, equivalent = N + 1    (v2 → v3)
+```
+
+Each records a **visibility hypothesis** — expected class and expected oracle
+fidelity — before any mutation is run, so the hypothesis cannot be retrofitted to
+the result. §3 still decides the class empirically.
+
+## Pinning a provider artifact
+
+Fetch it **twice** and pin only a representation whose bytes reproduce. This is
+not a formality: the HTML representation of the Stripe changelog page produced
+two different digests on two consecutive fetches (build nonces in the page
+shell), so pinning it would have reported STALE on every re-check and the binding
+would have meant nothing. The same page's markdown variant reproduced byte for
+byte, as did the AWS migration page's HTML.
+
+`digest_stability_verified` is `const: true` in both schemas: an artifact that
+cannot be pinned stably cannot be used, and the fix is to find a stable
+representation, not to relax the field.
+
+Retrieved copies are retained out-of-tree; the repository carries the digest, the
+URL, and the exact normative quotation the delta rests on, rather than a copy of
+third-party documentation.
 
 ## Execution rules that the schemas cannot express
 

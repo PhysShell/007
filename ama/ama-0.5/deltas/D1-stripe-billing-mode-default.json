@@ -1,0 +1,49 @@
+{
+  "delta_id": "D1-stripe-billing-mode-default",
+  "provider": "Stripe",
+  "sdk": {
+    "package": "stripe (stripe-node)",
+    "new_version": "19.1.0",
+    "api_version_new": "2025-09-30.clover"
+  },
+  "fact_path": "billing_mode.type (request parameter, optional)",
+  "change_kind": "default_value_changed",
+  "old_semantics": "Omitting billing_mode.type created the subscription in `classic` billing mode.",
+  "new_semantics": "Omitting billing_mode.type creates the subscription in `flexible` billing mode, which the provider states changes subscription behaviour and invoice calculations relative to `classic`.",
+  "silent_failure_mode": "Code that never mentions billing_mode compiles unchanged, type-checks unchanged, and silently switches billing mode on upgrade. The trigger is the ABSENCE of the field, so there is no symbol for a locator to key on and no diagnostic for the compiler to emit.",
+  "backward_compatible_form": "Explicitly pass billing_mode.type = \"classic\" at every affected call site.",
+  "affected_operations": [
+    "Create subscription",
+    "Invoice preview",
+    "Subscription schedule",
+    "Quote",
+    "Checkout Session",
+    "Payment Link"
+  ],
+  "delta_provenance": "historical",
+  "visibility_hypothesis": {
+    "expected_class": "T-invisible",
+    "expected_oracle_fidelity": "conservative_proxy",
+    "rationale": "The parameter is optional and the affected sites are those that OMIT it, so no declaration-surface mutation witnesses them directly. The nearest surrogate — temporarily making billing_mode required — yields the set of call sites that omit the field, which is a superset of the sites whose behaviour actually depends on the old default (some may be indifferent to billing mode). Hypothesis only: §3 decides the class empirically per (SDK, toolchain, tsconfig, code), and this record exists so the hypothesis cannot be retrofitted to the result."
+  },
+  "provider_artifacts": [
+    {
+      "identity": "Stripe changelog entry: 'Makes flexible billing mode the default for new subscriptions', API version 2025-09-30.clover",
+      "url": "https://docs.stripe.com/changelog/clover/2025-09-30/billing-mode-default-flexible.md",
+      "representation": "markdown variant served by docs.stripe.com; the HTML representation of the same page was NOT pinned because two consecutive fetches produced different bytes",
+      "retrieved_at": "2026-08-06T07:38:23Z",
+      "digest": "sha256:5ba865f1bf9d7c394b29a8f0761b5e981a2c739f8acb9ae0878ad9dca4a83bd0",
+      "digest_stability_verified": true,
+      "size_bytes": 10579,
+      "normative_quote": "Subscriptions you create through the API now default to flexible billing mode. To use `classic`, set the `billing_mode.type` parameter to `classic`."
+    }
+  ],
+  "blinding": {
+    "authored_blind_to_consumer_repositories": true,
+    "consumer_repositories_inspected_before_authoring": [],
+    "authored_by": "agent session, from provider-side artifacts only",
+    "attested_at": "2026-08-06T07:38:23Z",
+    "method": "The delta was authored before any consumer repository was searched, opened, cloned, or code-searched. Only the provider artifact above and Stripe's own versioning documentation were read."
+  },
+  "inference": "Rule 4 separation — the artifact SAYS the default moved from classic to flexible for subscriptions created through the API, and lists the operations it reaches. The INFERENCE is that the affected consumer sites are the ones omitting billing_mode.type, which makes absence rather than presence the search target. No DECISION about analyzability follows here; §3 settles that by experiment."
+}

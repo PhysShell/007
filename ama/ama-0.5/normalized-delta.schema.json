@@ -1,0 +1,137 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/PhysShell/007/ama/ama-0.5/normalized-delta.schema.json",
+  "title": "AMA normalized semantic delta",
+  "description": "Problem-A output taken as given input by AMA (docs/architecture/api-migration-direction.md §4): what changed, from what, to what. Authored from provider-side artifacts ONLY, blind to any consumer repository — a delta written after seeing consumer code has already performed part of the localization, and would make the experiment measure a task that does not exist in production. The visibility class is a HYPOTHESIS here, never a conclusion: §3 decides it empirically per (SDK, toolchain, tsconfig, code).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "delta_id",
+    "provider",
+    "sdk",
+    "fact_path",
+    "change_kind",
+    "old_semantics",
+    "new_semantics",
+    "affected_operations",
+    "delta_provenance",
+    "provider_artifacts",
+    "blinding",
+    "visibility_hypothesis"
+  ],
+  "properties": {
+    "delta_id": { "type": "string", "minLength": 1 },
+    "provider": { "type": "string" },
+    "sdk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package"],
+      "properties": {
+        "package": { "type": "string" },
+        "old_version": { "type": "string" },
+        "new_version": { "type": "string" },
+        "api_version_old": { "type": "string" },
+        "api_version_new": { "type": "string" }
+      }
+    },
+    "fact_path": {
+      "type": "string",
+      "description": "The changed contract fact, at field/argument granularity (§2) — not the method. One method may carry several independently changed facts."
+    },
+    "change_kind": {
+      "enum": [
+        "default_value_changed",
+        "field_semantics_changed",
+        "enum_value_added_or_removed",
+        "optionality_changed",
+        "error_or_retry_semantics_changed",
+        "pagination_semantics_changed",
+        "ordering_or_idempotency_changed",
+        "renamed_with_changed_semantics",
+        "deprecated_but_valid",
+        "version_bound_behaviour_changed",
+        "string_keyed_payload_changed"
+      ]
+    },
+    "old_semantics": { "type": "string" },
+    "new_semantics": { "type": "string" },
+    "silent_failure_mode": {
+      "type": "string",
+      "description": "What consumer code does differently while compiling cleanly and raising nothing. If this field cannot be written, the delta is probably not type-invisible and belongs to the negative control corpus (§5.1)."
+    },
+    "backward_compatible_form": {
+      "type": "string",
+      "description": "The explicit code that preserves old behaviour, if the provider offers one."
+    },
+    "affected_operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string" }
+    },
+    "delta_provenance": {
+      "enum": ["historical", "synthetic", "hybrid"],
+      "description": "§6.3. Only `historical` may support an assurance claim; `synthetic` is diagnostic only."
+    },
+    "visibility_hypothesis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected_class", "expected_oracle_fidelity", "rationale"],
+      "description": "A hypothesis to be tested by mutation per §3, recorded before testing so it cannot be retrofitted to the result.",
+      "properties": {
+        "expected_class": { "enum": ["T-visible", "T-invisible", "opaque"] },
+        "expected_oracle_fidelity": { "enum": ["exact", "conservative_proxy", "unavailable"] },
+        "rationale": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    },
+    "provider_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["identity", "url", "representation", "retrieved_at", "digest", "digest_stability_verified"],
+        "properties": {
+          "identity": { "type": "string" },
+          "url": { "type": "string", "format": "uri" },
+          "representation": {
+            "type": "string",
+            "description": "Which serialization was pinned. Prefer one whose bytes are reproducible: a docs site may serve an unstable HTML shell and a stable markdown variant of the same page."
+          },
+          "retrieved_at": { "type": "string", "format": "date-time" },
+          "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+          "digest_stability_verified": {
+            "type": "boolean",
+            "description": "True only if the artifact was fetched at least twice and produced identical bytes. An unstable representation (build nonces, per-request tokens) must not be pinned: it would report STALE on every re-check and the binding would be worthless."
+          },
+          "size_bytes": { "type": "integer", "minimum": 0 },
+          "normative_quote": {
+            "type": "string",
+            "description": "The exact sentence(s) the delta rests on. Rule 4: what the artifact SAYS, kept separate from any inference drawn on it."
+          }
+        }
+      }
+    },
+    "blinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["authored_blind_to_consumer_repositories", "consumer_repositories_inspected_before_authoring", "attested_at"],
+      "description": "§4. A delta whose blinding cannot be attested makes its case excluded, not discounted.",
+      "properties": {
+        "authored_blind_to_consumer_repositories": { "type": "boolean" },
+        "consumer_repositories_inspected_before_authoring": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Must be empty for the blinding to hold."
+        },
+        "authored_by": { "type": "string" },
+        "attested_at": { "type": "string", "format": "date-time" },
+        "method": { "type": "string" }
+      }
+    },
+    "inference": {
+      "type": "string",
+      "description": "Rule 4's second level, kept explicitly apart from the artifact's own words."
+    }
+  }
+}
