@@ -189,4 +189,63 @@ describe("RunPage", () => {
       expect(screen.queryByRole("button", { name: forbidden })).not.toBeInTheDocument();
     }
   });
+
+  // Q-Deck A0.5 (docs/q-deck/a0-candidate-state.md §9): a run fetched
+  // before the candidate-state fields existed on the wire — `goldenRun`'s
+  // own fixture never sets them — must still render cleanly. This is the
+  // "existing RunDto consumers remain compatible" proof: nothing about
+  // A0.5 requires every caller of `getRun` to already know about the three
+  // new optional fields.
+  it("renders the candidate-state section without error for a run predating A0.5's own fields", async () => {
+    const completed = goldenRun("pass");
+    vi.spyOn(api, "getRun").mockResolvedValue(completed);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents("pass")));
+
+    render(RunPage, { props: { runId: completed.run_id } });
+    await waitFor(() => expect(screen.getByText("completed")).toBeInTheDocument());
+    expect(screen.getByText("Candidate state")).toBeInTheDocument();
+    expect(screen.getByText("unavailable")).toBeInTheDocument();
+    expect(screen.getByText("No candidate-state data for this run.")).toBeInTheDocument();
+  });
+
+  // Q-Deck A0.5: run lineage (parent_run_id) is RunPage's own metadata row,
+  // deliberately separate from candidate-state provenance
+  // (candidate_source_run_id), which CandidateStateCard.svelte.test.ts
+  // covers on its own. This proves the two are independently displayed
+  // even when they point at DIFFERENT runs — never conflated or derived
+  // from one another.
+  it("shows a parent-run link, independent of and possibly different from the candidate source run", async () => {
+    const child = goldenRun("pass", {
+      run_id: "run-child",
+      parent_run_id: "run-parent",
+      candidate_source_run_id: "run-candidate-source",
+      candidate_tree_oid: "deadbeef",
+      materialization_status: "materialized",
+    });
+    vi.spyOn(api, "getRun").mockResolvedValue(child);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(
+      goldenEventPage(goldenEvents("pass").map((e) => ({ ...e, run_id: "run-child" }))),
+    );
+
+    render(RunPage, { props: { runId: "run-child" } });
+    await waitFor(() => expect(screen.getByText("completed")).toBeInTheDocument());
+
+    const parentLink = screen.getByRole("link", { name: "run-parent" });
+    expect(parentLink).toHaveAttribute("href", "/runs/run-parent");
+    const sourceLink = screen.getByRole("link", { name: "run-candidate-source" });
+    expect(sourceLink).toHaveAttribute("href", "/runs/run-candidate-source");
+    // Both are present, both distinct, neither hidden by the other.
+    expect(parentLink).not.toBe(sourceLink);
+  });
+
+  it("hides the parent-run row entirely for a top-level run, without hiding the candidate-state section", async () => {
+    const topLevel = goldenRun("pass", { parent_run_id: null });
+    vi.spyOn(api, "getRun").mockResolvedValue(topLevel);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents("pass")));
+
+    render(RunPage, { props: { runId: topLevel.run_id } });
+    await waitFor(() => expect(screen.getByText("completed")).toBeInTheDocument());
+    expect(screen.queryByText("parent run")).not.toBeInTheDocument();
+    expect(screen.getByText("Candidate state")).toBeInTheDocument();
+  });
 });

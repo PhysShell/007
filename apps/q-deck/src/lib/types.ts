@@ -26,6 +26,21 @@ export type RunStatus =
   | "blocked"
   | "error";
 
+/** Q-Deck A0.5 (`docs/q-deck/a0-candidate-state.md` §9). The four
+ * `materialization_status` values `crates/o7d/src/canonical.rs`'s
+ * `candidate_projection` currently produces. Kept as an OPEN union
+ * (`| (string & {})`) rather than a closed one deliberately: this is a
+ * server-computed value, not a client invariant, and a future server build
+ * adding a fifth value must render safely (see `materializationTone`/
+ * `materializationLabel` below) rather than the type system silently lying
+ * about exhaustiveness. */
+export type MaterializationStatus =
+  | "materialized"
+  | "not_applicable"
+  | "failed"
+  | "verification_failed"
+  | (string & {});
+
 export interface RunDto {
   schema_version: number;
   run_id: string;
@@ -36,6 +51,20 @@ export interface RunDto {
   status: RunStatus;
   created_at: number;
   finished_at: number | null;
+  /** Q-Deck A0.5: candidate-state provenance — the run this one's cumulative
+   * candidate state continues from. Deliberately a SEPARATE concept from
+   * `parent_run_id` above (run lineage): they commonly coincide but the
+   * backend makes no promise they always do, and neither field is derived
+   * from the other here.
+   *
+   * All three candidate-state fields below are
+   * `#[serde(skip_serializing_if = "Option::is_none")]` on the wire
+   * (`crates/o7d/src/dto.rs`) — ABSENT from the JSON object entirely when
+   * unset, never present as an explicit `null` the way `parent_run_id`/
+   * `finished_at` above are. Optional (`?`) models that absence correctly. */
+  candidate_source_run_id?: string | null;
+  candidate_tree_oid?: string | null;
+  materialization_status?: MaterializationStatus | null;
 }
 
 export interface EventDto {

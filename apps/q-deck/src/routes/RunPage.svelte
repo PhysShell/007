@@ -9,6 +9,7 @@
   import StatusBadge from "../components/StatusBadge.svelte";
   import ConnectionIndicator from "../components/ConnectionIndicator.svelte";
   import EventTimeline from "../components/EventTimeline.svelte";
+  import CandidateStateCard from "../components/CandidateStateCard.svelte";
 
   let { runId }: { runId: string } = $props();
 
@@ -115,8 +116,20 @@
           <dt>conversation</dt>
           <dd><Link to="/conversations/{run.conversation_id}">{run.conversation_id}</Link></dd>
         </div>
+        {#if run.parent_run_id}
+          <!-- Q-Deck A0.5: run lineage — the command-continuation parent this
+               run was dispatched from. A SEPARATE concept from candidate-state
+               provenance (CandidateStateCard below) — they commonly coincide
+               but neither is derived from the other. -->
+          <div>
+            <dt>parent run</dt>
+            <dd><Link to="/runs/{run.parent_run_id}">{run.parent_run_id}</Link></dd>
+          </div>
+        {/if}
       </dl>
     </header>
+
+    <CandidateStateCard {run} />
 
     <section>
       <div class="section-header">
