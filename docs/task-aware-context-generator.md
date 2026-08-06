@@ -522,6 +522,63 @@ sha256(
 
 If optional LLM compression is used, both pre-compression and post-compression forms must be retained.
 
+### Freshness is a separate property (proposed)
+
+The cache key above binds the repository commit, so a pack is reproducible *and*
+commit-keyed. That still does not establish **freshness**: that every span in
+the pack exists, unchanged, in the tree the agent is about to edit. Three ways a
+reproducible, commit-keyed pack can still describe code that is not there:
+
+- **Historical evidence is cross-revision by construction.** Selection step 4
+  pulls runs, regressions, rejected fixes, and prior findings from `o7 memory` /
+  Omnigraph. Those reference entities at *their* revisions, not this one. A
+  symbol named in a previous run's failure may have been renamed or deleted
+  since.
+- **`dirty-worktree status` is recorded, not gated.** A dirty tree means the
+  commit in the cache key does not describe the bytes on disk. Recording that
+  fact does not stop a stale span from rendering.
+- **Extractor output can outlive its input.** A cached index or analyzer
+  artifact keyed to the same commit can still have been produced before a
+  subsequent edit within a dirty tree.
+
+The ordering that closes this — an accelerator may only *propose*; the
+authoritative revision decides:
+
+```text
+recall stage  (extractors, typed edges, o7 memory, ranking)
+        │      may be stale, approximate, or heuristic
+        ▼
+candidate set
+        │      re-resolve each span against the revision the run
+        │      will actually execute against
+        ▼
+admitted entry
+        │  carries: source revision, content digest at that revision,
+        │           resolution outcome, which recall channel proposed it
+        ▼
+budget + render
+```
+
+Two constraints follow:
+
+- A candidate that fails re-resolution — file gone, span moved, digest mismatch
+  — is **dropped with a recorded reason**, reusing the existing `omitted
+  candidates and omission reasons` field. It is never silently rendered. A pack
+  that quietly ships a stale span is the context-layer form of the false green
+  that verdict soundness already killed for gate results.
+- Re-resolution must be **batched over the revision**, not one call per
+  candidate. Per-candidate filesystem read plus rehash would make verification
+  cost more than the recall it verifies.
+
+Delineation: `Determinism and reproducibility` above answers *"can this pack be
+rebuilt identically"*; this answers *"does this pack still describe the tree the
+agent will edit"*. Determinism under it, freshness over it — different layers.
+
+Status: **proposed, not ratified** (per `docs/evidence-and-decision-discipline.md`
+rule 3 — an autonomous design decision stays pending until a human ratifies it).
+Provenance and the alternative that was rejected with it:
+`docs/evokoa-transplant-map.md` §3.1.
+
 ## Non-goals
 
 This proposal does not attempt to:
