@@ -1,0 +1,88 @@
+{
+  "baseline_classification_confirmed": "BASELINE_EVALUATION_FAIL (B0); C1 repaired -> PASS",
+  "causal_conclusion": "SEMANTIC_REPAIR_IS_RELATION_CLOSURE_NOT_QODEC",
+  "cells": {
+    "B0": {
+      "evaluation_sha256": "sha256:963edb459fb742359051e3a5386ce6b6f1026e1d01b5a8a951a9b0bf99541d76",
+      "failed_axes": [
+        "relation_support"
+      ],
+      "name": "frozen_baseline_raw",
+      "overall": "FAIL",
+      "representation": "raw canonical context.json",
+      "semantics": "R4C.1 task contexts"
+    },
+    "B0Q": {
+      "decode_byte_exact_to_B0": true,
+      "name": "frozen_baseline_qodec",
+      "overall": "FAIL",
+      "representation": "Qodec deep",
+      "semantic_verdict": "unchanged from B0 (representation only)",
+      "semantics": "exact B0 (deep decode is byte-exact)"
+    },
+    "C1": {
+      "evaluation_sha256": "sha256:d8d1d5fb933dacdb1efcbd7db91c716cf678cd94b9cabc7ba60b5ff2973c2d3d",
+      "failed_axes": [],
+      "name": "relation_closed_plain_control",
+      "overall": "PASS",
+      "representation": "raw canonical context.json",
+      "semantics": "deterministic relation-closed projection"
+    },
+    "C1Q": {
+      "decode_byte_exact_to_C1": true,
+      "name": "relation_closed_qodec",
+      "overall": "PASS",
+      "representation": "Qodec deep",
+      "semantic_verdict": "unchanged from C1 (representation only)",
+      "semantics": "exact C1 (deep decode is byte-exact)"
+    },
+    "Q1R": {
+      "name": "qodec_relation_aware_projection_raw",
+      "reason": "requires a new generic `qodec project` runtime primitive on an experimental branch; scoped separately so a codec is not credited for a projection fix",
+      "status": "DEFERRED_TO_NEXT_SUBROUND"
+    },
+    "Q1RQ": {
+      "name": "qodec_relation_aware_projection_qodec",
+      "status": "DEFERRED_TO_NEXT_SUBROUND"
+    }
+  },
+  "cost_ceilings": {
+    "aggregate_cost_ceiling": 7988,
+    "audit_task_cost_ceiling": 3040
+  },
+  "cost_results": {
+    "aggregate": {
+      "B0_raw": 7988,
+      "C1Q_cold_bundle": 5549,
+      "C1Q_warm": 5288,
+      "C1_raw": 8250,
+      "notation": 261
+    },
+    "audit_C1Q_cold": 2400,
+    "audit_ceiling": 3040,
+    "plain_repair_raw_tokens_exceed_baseline": true,
+    "plain_repair_within_structural_budget": true,
+    "qodec_repair_at_or_below_baseline_cold": true,
+    "qodec_repair_at_or_below_baseline_warm": true,
+    "qodec_strict_token_reduction_vs_plain_repair": true
+  },
+  "interpretation": {
+    "generalization_claim_allowed": false,
+    "model_comprehension_evaluated": false,
+    "qodec_necessary_for_structural_admission": false,
+    "qodec_representation_gain": "carries the repaired (larger) payload below the baseline raw token cost, warm and cold; strict reduction vs plain repair",
+    "risk_used_as_gate": false,
+    "who_repaired": "relation closure (C1 raw PASSES with no Qodec); Qodec did NOT cause the semantic repair"
+  },
+  "plain_control_structural_budget": "PASS",
+  "provenance": {
+    "case_role": "development",
+    "designed_after_observing_case_0002": true,
+    "generalization_claim_allowed": false,
+    "holdout_evidence": false
+  },
+  "qodec_cost_result": "COLD_AT_OR_BELOW_BASELINE",
+  "qodec_roundtrip": "PASS",
+  "record": "o7.b1.q1-causal-classification/v0",
+  "semantic_repair": "PASS"
+}

@@ -1,0 +1,27 @@
+{
+  "determinism": {
+    "evaluation_v1_bytes_identical": true,
+    "stderr_identical": true,
+    "stdout_identical": true
+  },
+  "mode": "authoritative",
+  "operational_exit": {
+    "run1": 0,
+    "run2": 0
+  },
+  "record": "o7.b1.q1-run-comparison/v0",
+  "run1": {
+    "byte_length": 16141,
+    "evaluation_v1_sha256": "sha256:d8d1d5fb933dacdb1efcbd7db91c716cf678cd94b9cabc7ba60b5ff2973c2d3d",
+    "exit": 0,
+    "stderr_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stdout_sha256": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "run2": {
+    "byte_length": 16141,
+    "evaluation_v1_sha256": "sha256:d8d1d5fb933dacdb1efcbd7db91c716cf678cd94b9cabc7ba60b5ff2973c2d3d",
+    "exit": 0,
+    "input_argument_order": "reversed"
+  },
+  "runs": 2
+}
