@@ -262,7 +262,8 @@ it. The sufficient mechanism below the boundary is therefore chain verification 
 classification plus deterministic reduction and replay, not the digest chain alone.
 
 The seal is a protocol-completion marker, not an external completeness anchor. If suffix loss removes
-`RunSealed`, full replay fails as `NotSealed` before consulting `meta.json`. For a sealed stream,
+`RunSealed`, full replay fails as `NotSealed` before the `meta.json` verdict-consistency check. For a
+sealed stream,
 `replay_verify` additionally compares the independently recomputed verdict with the stored
 `meta.json` verdict; this detects verdict-changing inconsistency, but not a consistently rewritten
 stream that preserves the same verdict. Detecting that stronger class requires an external anchor over
