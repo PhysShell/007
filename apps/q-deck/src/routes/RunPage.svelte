@@ -2,7 +2,7 @@
   import { onDestroy } from "svelte";
   import { getRun } from "../lib/api";
   import type { RunDto } from "../lib/types";
-  import { isSealedRun } from "../lib/types";
+  import { isSealedRun, hasCandidateProjection, mergeRunProjection } from "../lib/types";
   import { ConversationEventStream } from "../lib/eventStream.svelte";
   import { relativeAge, duration, absoluteTime } from "../lib/format";
   import Link from "../components/Link.svelte";
@@ -33,10 +33,29 @@
   const REFRESH_INTERVAL_MS = 5000;
   let timer: ReturnType<typeof setInterval> | undefined;
 
+  // Q-Deck A0.5 corrective (fresh exact-head Codex P1): the candidate-state
+  // projection on `GET /api/v1/runs/:id` is itself best-effort — a poll can
+  // land exactly when the server's replay limiter is saturated and come
+  // back with NO candidate fields at all, indistinguishable on that one
+  // response from "exec unconfigured." Two failure modes this bounded retry
+  // + merge-don't-clobber logic closes: (1) the run is ALREADY sealed on
+  // the very first successful `getRun` and that first response happened to
+  // omit the projection — polling used to stop immediately, leaving this
+  // page permanently stuck on "unavailable" until a manual reload; (2) a
+  // later poll that first observes sealing also happens to omit the
+  // projection — this used to silently ERASE a correct projection an
+  // earlier poll had already displayed. `MAX_POST_SEAL_CANDIDATE_RETRIES`
+  // bounds how long this page keeps trying once sealed with no projection
+  // yet — indefinitely retrying a server with `exec` genuinely
+  // unconfigured would just be a different kind of bug.
+  const MAX_POST_SEAL_CANDIDATE_RETRIES = 3;
+  let postSealCandidateRetries = 0;
+
   $effect(() => {
     let cancelled = false;
     loadState = "loading";
     run = null;
+    postSealCandidateRetries = 0;
 
     // Deliberately NOT `stream?.close()` / `stream = null` / `clearInterval(timer)`
     // here at the top: reading `stream`/`timer` synchronously in this effect's
@@ -54,9 +73,21 @@
       try {
         const r = await getRun(runId);
         if (cancelled) return;
-        run = r;
-        if (isSealedRun(r.status)) {
-          clearInterval(timer);
+        const merged = mergeRunProjection(run, r);
+        run = merged;
+        if (isSealedRun(merged.status)) {
+          if (hasCandidateProjection(merged)) {
+            clearInterval(timer);
+          } else {
+            postSealCandidateRetries += 1;
+            if (postSealCandidateRetries >= MAX_POST_SEAL_CANDIDATE_RETRIES) {
+              // Budget exhausted — stop honestly. The card already shows
+              // "unavailable" (mergeRunProjection never fabricates a
+              // projection that was never once observed), and it stays
+              // that way rather than polling this run forever.
+              clearInterval(timer);
+            }
+          }
         }
       } catch {
         // A transient refresh failure doesn't blank an already-loaded run —
@@ -70,7 +101,10 @@
         run = r;
         loadState = "ready";
         stream = new ConversationEventStream(r.conversation_id);
-        if (!isSealedRun(r.status)) {
+        // Keep polling past a sealed status on this first load too, if it
+        // arrived with no candidate projection yet — the same bounded
+        // retry `refreshRun` above continues, not a separate mechanism.
+        if (!isSealedRun(r.status) || !hasCandidateProjection(r)) {
           timer = setInterval(() => void refreshRun(), REFRESH_INTERVAL_MS);
         }
       })

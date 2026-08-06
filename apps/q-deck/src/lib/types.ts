@@ -139,3 +139,43 @@ export function isSealedRun(status: RunStatus): boolean {
     status === "error"
   );
 }
+
+/** Q-Deck A0.5 corrective (fresh exact-head Codex P1): `get_run`'s
+ * candidate-state projection is itself best-effort — `crates/o7d/src/routes.rs`'s
+ * own doc comment says so explicitly. Under replay-limiter saturation, or if
+ * the blocking projection task panics, ONE response omits all three
+ * candidate fields entirely, exactly as if `exec` were unconfigured — even
+ * for a run whose candidate state genuinely IS captured or materialized.
+ *
+ * Checking KEY PRESENCE, never value truthiness, is what makes this safe:
+ * an ABSENT `materialization_status` (this poll got no projection at all —
+ * transient, say nothing), an explicit `null` (the real server never sends
+ * this today, only omits the key, but this is treated the same
+ * defensively), and the literal string `"not_applicable"` (a genuine,
+ * complete, trustworthy answer — no candidate contract for this run,
+ * settled, never retried) are three different meanings a plain truthiness
+ * check would wrongly collapse into one. */
+export function hasCandidateProjection(run: RunDto): boolean {
+  return (
+    "materialization_status" in run &&
+    run.materialization_status !== null &&
+    run.materialization_status !== undefined
+  );
+}
+
+/** Merges a freshly fetched `RunDto` over the previously displayed one:
+ * every field always comes from the fresh response EXCEPT the three
+ * candidate-state fields, which are preserved from `previous` when the
+ * fresh response carries no projection at all
+ * (`!hasCandidateProjection(next)`) — otherwise a single
+ * transiently-saturated poll would silently erase a candidate projection
+ * this page already correctly displayed from an earlier poll. */
+export function mergeRunProjection(previous: RunDto | null, next: RunDto): RunDto {
+  if (hasCandidateProjection(next) || !previous) return next;
+  return {
+    ...next,
+    candidate_source_run_id: previous.candidate_source_run_id,
+    candidate_tree_oid: previous.candidate_tree_oid,
+    materialization_status: previous.materialization_status,
+  };
+}

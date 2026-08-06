@@ -11,6 +11,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/svelte";
 import RunPage from "./RunPage.svelte";
 import * as api from "../lib/api";
+import type { RunDto } from "../lib/types";
 import {
   goldenEventPage,
   goldenEvents,
@@ -247,5 +248,90 @@ describe("RunPage", () => {
     await waitFor(() => expect(screen.getByText("completed")).toBeInTheDocument());
     expect(screen.queryByText("parent run")).not.toBeInTheDocument();
     expect(screen.getByText("Candidate state")).toBeInTheDocument();
+  });
+
+  // Q-Deck A0.5 corrective (fresh exact-head Codex P1, PR #110): `get_run`'s
+  // candidate projection is itself best-effort — a poll can land exactly
+  // when the server's replay limiter is saturated and omit all three
+  // candidate fields entirely, indistinguishable on that one response from
+  // "exec unconfigured." These three tests are the exact regression matrix
+  // the finding required.
+  function sealedNoProjection(overrides: Partial<RunDto> = {}): RunDto {
+    const run = goldenRun("pass", overrides);
+    delete run.candidate_source_run_id;
+    delete run.candidate_tree_oid;
+    delete run.materialization_status;
+    return run;
+  }
+
+  it("keeps polling a sealed run whose FIRST response had no projection, and shows it once a later poll provides one", async () => {
+    const withoutProjection = sealedNoProjection();
+    const withProjection = goldenRun("pass", {
+      candidate_source_run_id: "run-source",
+      candidate_tree_oid: "deadbeef",
+      materialization_status: "materialized",
+    });
+    vi.spyOn(api, "getRun")
+      .mockResolvedValueOnce(withoutProjection)
+      .mockResolvedValueOnce(withProjection);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents("pass")));
+
+    render(RunPage, { props: { runId: withoutProjection.run_id } });
+    // Sealed immediately, but no projection yet — must NOT be stuck here
+    // forever; the old behavior stopped polling right on this first response.
+    await waitFor(() => expect(screen.getByText("unavailable")).toBeInTheDocument());
+
+    await vi.advanceTimersByTimeAsync(5100);
+    await waitFor(() => expect(screen.getByText("materialized")).toBeInTheDocument());
+    expect(screen.getByText("run-source")).toBeInTheDocument();
+  });
+
+  it("never erases a candidate projection already shown, when a later poll transiently omits it (sealing arrives the same moment)", async () => {
+    const activeWithProjection = goldenRunActive({
+      candidate_source_run_id: "run-source",
+      candidate_tree_oid: "deadbeef",
+      materialization_status: "materialized",
+    });
+    const sealedButOmitted = sealedNoProjection();
+    vi.spyOn(api, "getRun")
+      .mockResolvedValueOnce(activeWithProjection)
+      .mockResolvedValueOnce(sealedButOmitted);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: activeWithProjection.run_id } });
+    await waitFor(() => expect(screen.getByText("materialized")).toBeInTheDocument());
+
+    await vi.advanceTimersByTimeAsync(5100);
+    // Lifecycle field updates normally (running -> completed)...
+    await waitFor(() => expect(screen.getByText("completed")).toBeInTheDocument());
+    // ...but the candidate projection this poll omitted must still be the
+    // one already on screen, not wiped back to "unavailable."
+    expect(screen.getByText("materialized")).toBeInTheDocument();
+    expect(screen.getByText("run-source")).toBeInTheDocument();
+    expect(screen.queryByText("unavailable")).not.toBeInTheDocument();
+  });
+
+  it("stops polling after a bounded number of post-seal retries when a projection never arrives, leaving an honest unavailable state", async () => {
+    const neverProjects = sealedNoProjection();
+    const getRunSpy = vi.spyOn(api, "getRun").mockResolvedValue(neverProjects);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents("pass")));
+
+    render(RunPage, { props: { runId: neverProjects.run_id } });
+    await waitFor(() => expect(screen.getByText("unavailable")).toBeInTheDocument());
+    expect(getRunSpy).toHaveBeenCalledTimes(1);
+
+    // Three bounded retries, each on the same 5s interval.
+    await vi.advanceTimersByTimeAsync(5100);
+    await vi.advanceTimersByTimeAsync(5100);
+    await vi.advanceTimersByTimeAsync(5100);
+    expect(getRunSpy).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
+
+    // Budget exhausted — one more interval tick must NOT produce a 5th
+    // call. If it did (retries never actually stopped), the mock would
+    // just resolve again rather than error, so this asserts on the call
+    // count directly rather than relying on a broken page.
+    await vi.advanceTimersByTimeAsync(5100);
+    expect(getRunSpy).toHaveBeenCalledTimes(4);
+    expect(screen.getByText("unavailable")).toBeInTheDocument();
   });
 });
