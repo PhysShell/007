@@ -1,0 +1,79 @@
+{
+  "007_base": {
+    "commit": "a9b51ea8a9fa0e30e4a51d55eaae41aa9ee14784"
+  },
+  "baseline": {
+    "evaluation_sha256": "sha256:963edb459fb742359051e3a5386ce6b6f1026e1d01b5a8a951a9b0bf99541d76",
+    "overall": "FAIL",
+    "single_failure_axis": "relation_support"
+  },
+  "commits": {
+    "A_producer": "30ca84d4133a48feb1476d03094abcd480607f3f",
+    "B_artifacts": "28f630771c7c60919b0ffe7037dbbe8d85b28409",
+    "C_evaluation": "a9dcb066840a324800a87817a18376f24b154301"
+  },
+  "deferred": {
+    "Q1R_Q1RQ_qodec_relation_aware_projection": "DEFERRED_TO_Q2",
+    "reason": "requires new generic `qodec project` runtime primitive on experimental branch"
+  },
+  "generalization_claim_allowed": false,
+  "holdout_started": false,
+  "kind": "product_causal_decomposition",
+  "live_model_used": false,
+  "model_comprehension_evaluated": false,
+  "producer": {
+    "commit": "30ca84d4133a48feb1476d03094abcd480607f3f",
+    "identity": "o7.b1.relation-closed-control/v0",
+    "implementation_digest": "sha256:47f356e1f7d685343773cf4775137c8649800d63580281a6033e93e9b435ef6a",
+    "tree": "bd879a19aeba68f16208a9514621f6fcd19ec220"
+  },
+  "provenance": {
+    "case_role": "development",
+    "designed_after_observing_case_0002": true,
+    "generalization_claim_allowed": false,
+    "holdout_evidence": false
+  },
+  "qodec": {
+    "binary_bytes": 16359800,
+    "binary_sha256": "sha256:bcc2ebb98aceb403907cfc24208772d6be16e17384413b6175ad9f9b3c01c9f7",
+    "cargo_lock_sha256": "sha256:c9342fe64cf720ecc609a1f8a42f9ac9f4989c84b3bcfc796f92a03a84fb6c28",
+    "cargo_test_locked": "INTERRUPTED_BY_DISK_FULL_MIDRUN (interface probe + release build + round-trip admissibility all passed; clean re-run pending)",
+    "commit": "57fc8660cf9303e0837ab68717e2ab74eb25b22b",
+    "meter": "o200k",
+    "notation_sha256": "sha256:9d11406e732e4725b1abf4d318187b19dba4319467819993dea4d68539e2b5b1",
+    "notation_tokens": 261,
+    "rustc_version": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "tree": "ede6847c9217479e67ea88604e03b078e68eda15",
+    "zero_profile": true
+  },
+  "qodec_pr_16_untouched": true,
+  "qodec_repository_modified": false,
+  "record": "o7.b1.q1-receipt/v0",
+  "result": {
+    "artifact_commit": "a9dcb066840a324800a87817a18376f24b154301",
+    "artifact_tree": "709d86a30e0940b01e67e26ee5ab676565728188",
+    "byte_deterministic": true,
+    "c1_overall": "PASS",
+    "cas_objects": [
+      "cas:sha256:d8d1d5fb933dacdb1efcbd7db91c716cf678cd94b9cabc7ba60b5ff2973c2d3d",
+      "cas:sha256:0823d9b7f26a199017fe089d93db0dda77098056cf182ceef974db1756f10bfb",
+      "cas:sha256:f9e65efb87f31a954597ad07f29b65c14cba0c27d2f0310d319a9fe3bbd9c563",
+      "cas:sha256:b080074647e8003247d336e2366cbbc3a5ecbc5de4e63591ab62831f8a21b0b3"
+    ],
+    "causal_conclusion": "SEMANTIC_REPAIR_IS_RELATION_CLOSURE_NOT_QODEC",
+    "cost_aggregate": {
+      "B0_raw": 7988,
+      "C1Q_cold_bundle": 5549,
+      "C1Q_warm": 5288,
+      "C1_raw": 8250,
+      "notation": 261
+    },
+    "evaluation_sha256": "sha256:d8d1d5fb933dacdb1efcbd7db91c716cf678cd94b9cabc7ba60b5ff2973c2d3d",
+    "offsite_snapshot": "restic:ba78350b",
+    "plain_control_structural_budget": "PASS",
+    "qodec_cost_result": "COLD_AT_OR_BELOW_BASELINE",
+    "qodec_roundtrip": "PASS",
+    "semantic_repair": "PASS"
+  },
+  "round": "Q1"
+}
