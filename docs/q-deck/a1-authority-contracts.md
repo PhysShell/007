@@ -2,27 +2,27 @@
 
 ## Status
 
-**PROPOSED FREEZE / REVIEW REQUIRED / NON-AUTHORITATIVE.**
+**ACCEPTED / CLOSED / FROZEN.**
 
-This document is the *proposed* normative source for the A1 slice named in
+This document is the normative source for the A1 slice named in
 `docs/autonomy-controller.md` ("A1 ReviewVerdict and CorrectiveDirective
-contracts"). It is a freeze **candidate**: nothing here is authoritative, and no
-A1 implementation may bind to it, until it is reviewed and merged. On
-acceptance this header becomes `ACCEPTED / CLOSED / FROZEN` and the supersede
-path (§7) begins to apply — not before. A draft that invokes supersede ceremony
-against itself is an efficient way to forbid fixing its own first mistakes.
+contracts"). It was accepted at exact head `b61540a`, after five corrective
+rounds and a final exact-head consistency pass; the commit that set this header
+is ceremony only and changes nothing normative. The supersede path (§7) now
+applies: from here, corrections are forward-only and versioned, exactly as they
+are for the artifacts this contract governs.
 
 Design input: issue #95 (`A1: coder/reviewer/human contracts (draft)`), which
 carries the rationale and discussion history. Where this document and that draft
-differ, this document is the proposal.
+differ, this document is authoritative.
 
-Corrective rounds R1–R4 are recorded in §9.
+Corrective rounds R1, R2, R3, R4, R5, and R5.1 are recorded in §9.
 
-What the freeze will cover, once accepted: the wire schema of every message
-kind — field names, types, required/optional status, null policy, bounds, and
-the authority that establishes each value — plus the digest, identity, evidence
-closure, and transition rules. Opaque id string forms and additive reason codes
-remain extensible under FD-1.6.
+What the freeze covers: the wire schema of every message kind — field names,
+types, required/optional status, null policy, bounds, and the authority that
+establishes each value — plus the digest, identity, evidence closure, and
+transition rules. Opaque id string forms and additive reason codes remain
+extensible under FD-1.6.
 
 ## Purpose
 
@@ -2014,7 +2014,8 @@ the existing consensus backlog.
 
 ## 5. A1-V0 — the first vertical, and what it must prove
 
-Implementation begins after this freeze is accepted.
+The contract is frozen; A1-V0 implementation begins once this document is
+merged to `main`.
 
 ### 5.1 Role assignment
 
@@ -2288,7 +2289,7 @@ Not cuttable — object identity, not ceremony:
   D3/D4 are not prerequisites; A1 correctness depends only on D0 (deterministic
   admission) and D2 (deterministic historical replay from recorded evidence).
 
-## 7. Supersede path (applies only after acceptance)
+## 7. Supersede path
 
 1. A superseding revision of this document, naming the exact decisions it
    replaces by FD number.
@@ -2306,8 +2307,9 @@ supersedes relation recorded (FD-5.1).
 ## 8. Order after this freeze
 
 ```text
-A1-F   this contract, reviewed and accepted        <- pending
+A1-F   this contract, accepted at b61540a          <- done
 A1-V0  the 11 kinds + receipt + FD-14 fold + one real corrective cycle (§5)
+                                                   <- next, after this merges
 SB-B   capability transport, with A1 actions as its concrete consumer
 A2     reducer extensions: progress frontier, NO_PROGRESS, terminal taxonomy,
        reconciliation, full incarnation taxonomy
@@ -2317,6 +2319,20 @@ A2     reducer extensions: progress frontier, NO_PROGRESS, terminal taxonomy,
 non-authoritative: it must not drive an A-series transition.
 
 ## 9. Revision history
+
+### Acceptance
+
+```text
+accepted exact head   b61540a   (after R5.1, following a final exact-head pass)
+status                ACCEPTED / CLOSED / FROZEN
+rounds                R1, R2, R3, R4, R5, R5.1 — every finding corrected
+                      forward; no round amended an earlier one in place
+next                  A1-V0 (§5), and not before this document merges
+```
+
+The rounds below are preserved in the order they happened. Each one is a record
+of what the contract got wrong before it was frozen, which is the part worth
+keeping: a freeze is only as trustworthy as the list of things it stopped being.
 
 ### R5.1 — consistency patch on the synced head (`6c92870`)
 
