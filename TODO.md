@@ -16,7 +16,7 @@ Current authoritative state:
   source: `docs/q-deck/a0-candidate-state.md`.
 - **A1-F contract freeze**: `PROPOSED FREEZE / REVIEW REQUIRED /
   NON-AUTHORITATIVE` — `docs/q-deck/a1-authority-contracts.md` (branch
-  `claude/a1-contract-freeze-dkrnnq`, corrective rounds R1–R3 applied). Fifteen
+  `claude/a1-contract-freeze-dkrnnq`, corrective rounds R1–R4 applied). Fifteen
   frozen decisions: artifact model / digests / per-object and closure bounds
   / versions (FD-1), acyclic evidence-graph rank rule with imported
   authority roots and resolver duties (FD-2), raw-vs-normalized evidence
@@ -31,8 +31,9 @@ Current authoritative state:
   binding with honest actor attestation (FD-15). Complete wire schemas for
   all eleven message kinds plus receipt, manifest, `ScopeContractV1`, and
   `CampaignStateV1`, plus `CampaignEventV1` — the reducer's own log entry, with
-  a digest chain, eleven payload schemas, per-kind guards, and a `seed`/`fold`
-  split so genesis is not a fold over the state it creates. `HumanAttentionRaised`
+  a digest chain, eleven payload schemas, per-kind guards, and an explicit
+  `verify` → `resolve_event` → `fold` boundary so the reducer is genuinely pure
+  and genesis is not a fold over the state it creates. `HumanAttentionRaised`
   is the sole entry to `HUMAN_REQUIRED`, and FD-14.7 freezes the exit rule so a
   late attention event can never un-cancel a campaign. Design input: issue #95. **A1 implementation
   begins only after this freeze is accepted** — then A1-V0 (§5): one real
