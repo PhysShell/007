@@ -896,7 +896,7 @@ An accepted artifact without its classifier; a ReviewVerdict without a
 resolved ReviewerReport; a HumanDecision without an authenticated actor;
 a CandidateAdmissionReceipt without a verified A0 receipt; a provider
 receipt before a terminal/ambiguous outcome. Canonical types have closed
-fields; construction only через checked constructors.
+fields; construction happens only through checked constructors.
 
 ### 15.3 RED tests (observable effect, never a stub)
 
@@ -935,8 +935,8 @@ runtime (`root_goal_id` is identity only); no A2 incarnation taxonomy or
 campaign reducer; no capability subsystem beyond registry-bound
 references; no constrained decoding; no `AUTHORIZE_MERGE` (post-v1; its
 shape is already prescribed by evidence-discipline rule 2:
-`merge(sha = accepted_candidate's external head)` as the conditional
-atomic mutation — an A3+ concern); no cross-family reviewer (existing
+`merge(sha = external_head_sha of the accepted candidate)` as the
+conditional atomic mutation — an A3+ concern); no cross-family reviewer (existing
 backlog); no webhooks (A3); no production campaign runtime before A2.
 
 ## 18. Freeze procedure and review checklist
