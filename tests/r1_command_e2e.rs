@@ -76,10 +76,14 @@ impl FakeClaude {
             r#"#!/bin/sh
 DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 N=$(( $(cat "$DIR/count" 2>/dev/null || echo 0) + 1 ))
-echo "$N" > "$DIR/count"
 printf '%s\0' "$@" > "$DIR/argv.$N"
 touch "$DIR/invoked.$N"
 echo "$$" > "$DIR/pid.$N"
+# `count` is the readiness barrier `wait_for_invocation` polls, so it is
+# published LAST — after every per-invocation file it advertises, and still
+# before the sleep, so a test may hold this invocation open. Bumping it first
+# lets `wait_for_invocation(N)` return while `pid.$N` does not exist yet.
+echo "$N" > "$DIR/count"
 S=$(cat "$DIR/sleep_seconds" 2>/dev/null || echo 0)
 sleep "$S"
 printf '{"result":"synthetic ok","session_id":"fixed-session-1","total_cost_usd":0.001}\n'
@@ -1763,9 +1767,10 @@ fn an_ordinary_error_after_attach_is_provider_outcome_ambiguous_never_rejected_n
         r#"#!/bin/sh
 DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 N=$(( $(cat "$DIR/count" 2>/dev/null || echo 0) + 1 ))
-echo "$N" > "$DIR/count"
 printf '%s\0' "$@" > "$DIR/argv.$N"
 touch "$DIR/invoked.$N"
+# Same barrier ordering as the fixture in `FakeClaude::new`.
+echo "$N" > "$DIR/count"
 printf '{"result":"synthetic ok","session_id":"fixed-session-1","total_cost_usd":0.001}\n'
 exit 0
 "#,
