@@ -37,7 +37,7 @@ v1     b9dcc548bdfd50fc471627097a3c778b1eab0cc5   SUPERSEDED
        engine whose resolution depends on a project manifest -- which, as
        measured on 2026-08-07, Gortex's does.
 
-v1.1   <this head>                                CURRENT
+v1.1   a23d4c7be520d3a657b7231a8fbdf7ecc49ff259   CURRENT
        change: measurement profiles only. No fixture source changed, and no
        oracle changed -- ground truth is identical under every profile.
 ```
