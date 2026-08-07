@@ -553,3 +553,46 @@ obligation (§7.1a). RED-матрица дополнена оракулами п
 Следующий шаг: **четвёртый, узко-скоуповый review** — только эти швы +
 §18-чеклист, без полного архитектурного раскопа. Types + construction
 API не начинаются до APPROVED FOR TYPES.
+
+---
+
+## Review round #4: A1 contract @ `8eb5ec3`
+
+**VERDICT: CHANGES_REQUESTED** (maintainer, 2026-08-07). Все шесть P1
+round #3 закрыты по существу; `correspondence_ref` подтверждён против
+`attest.rs`. Дизайн A1 больше НЕ считается открытым — остались три
+места, где текст не соответствовал уже принятому дизайну («уборка
+проводов после постройки электростанции»):
+
+```text
+P1-22  stale pre-P1-20 lookup path (§8.3 ссылался на
+       campaign_run_binding_ref, которого в Provider binding больше нет)
+P1-23  RESERVED не связывал криптографически свой construction seed
+       (splice/mutation seed'а между reservation и recovery)
+P1-24  ref_manifest/DAG: causation не входил в collection rule и не имел
+       cross-check; correspondence-blob классифицирован ext: вместо intra:
+```
+
+Исправления: §8.3 — путь доказательства `CoderReport →
+Provider.invocation_receipt_ref → ProviderInvocationReceipt →
+campaign_run_binding`; §11.2 — role в скобках объявлен classifier
+obligation через receipt, не полем binding'а; §4.6 — seed digest-bound и
+immutable с момента RESERVED, пересчёт `message_binding_digest` из
+resolved seed перед первой И перед recovery-сериализацией (mismatch —
+fail closed, reservation остаётся для investigation), unsupported
+`seed.writer_version` — fail closed без fallback на текущий writer;
+`message-payload-blob` добавлен в class-2 реестр (§11.1); §3 —
+collection rule = payload + producer binding + CausationV1, causation
+получил стандартный cross-check (resolved kind/id == carried claims,
+иначе непостроимо — §2.4 использует causation как lineage authority);
+§11.3 — correspondence-blob рёбра у WorkOrder/CampaignRunBinding
+переклассифицированы `intra:` (class-2 CAS-цель, не external wrapper);
+§7.3 — устаревший `input_candidate_binding` заменён на
+`InputStateBindingV1`. RED-матрица: оракулы на recompute-mismatch
+seed'а, unsupported writer_version и causation kind/id mismatch.
+
+По §18: новых архитектурных нарушений ревью не нашло; восемь проверок
+держатся.
+
+Следующий шаг: **узкая diff-verification** только изменённых абзацев +
+повторный прогон §18. Ожидаемый вердикт — **APPROVED FOR TYPES**.

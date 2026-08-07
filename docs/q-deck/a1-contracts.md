@@ -51,6 +51,23 @@ semantic identity, `HumanCommandRequestRefV1`, immutable attention,
 budget predicate, per-outcome output presence, derived `ref_manifest`.
 A FOURTH, narrowly-scoped review (these seams + the §18 checklist)
 precedes APPROVED FOR TYPES.
+`8eb5ec3` — CHANGES_REQUESTED, three narrow contract blockers, no new
+architecture ("wire cleanup after the power plant is built"): P1-22 a
+stale pre-P1-20 lookup path in §8.3 naming a Provider-binding field
+that no longer exists — replaced by the receipt-resolution path, and
+§11.2's role annotation defined as a classifier obligation through the
+receipt; P1-23 the reservation did not bind its construction seed —
+seed now digest-bound and immutable at RESERVED, binding digest
+recomputed from the resolved seed before first AND recovery
+serialization (mismatch fails closed), unsupported seed writer_version
+fails closed with no fallback, and `message-payload-blob` added to the
+class-2 registry; P1-24 the ref_manifest collection rule now includes
+`CausationV1`, `Artifact` causation gets the standard cross-object
+verification (resolved kind/id must equal carried claims), and the
+correspondence-blob edges reclassified `intra` (class-2 CAS target,
+not an external wrapper). Stale `input_candidate_binding` vocabulary
+removed from §7.3. Next: narrow diff-verification of these paragraphs
++ a §18 re-run — expected verdict APPROVED FOR TYPES.
 
 Inputs at pinned revisions: accepted A0
 (`docs/q-deck/a0-candidate-state.md`, contract-first `71800fc`, accepted
@@ -248,7 +265,9 @@ reference surface next to the payload's own refs lets two correct
 writers produce different binding digests, and lets the envelope list
 and the payload diverge). `ref_manifest` is the controller-derived EXACT
 manifest of ALL direct digest references of this artifact — collected
-mechanically from the typed payload AND the producer binding,
+mechanically from the typed payload, the producer binding, AND
+`CausationV1` (review round 8eb5ec3, P1-24: causation was declared a
+digest edge but omitted from the collection rule two paragraphs later),
 deduplicated, sorted by the total order `(edge kind tag, target digest
 bytes)` lexicographically. It is never writer-supplied; a manifest that
 does not equal the mechanical collection is not constructible. This
@@ -275,7 +294,14 @@ CausationV1 =
 
 `Artifact` causation IS a digest edge: it participates in
 `ref_manifest` and the §11 DAG as a `causal`-class edge whose target may
-be any envelope-bearing kind already committed.
+be any envelope-bearing kind already committed. And it gets the SAME
+cross-object verification every typed ref gets (P1-24 — otherwise
+`message_kind`/`message_id` are two independently valid claims standing
+next to the real blob identity, and §2.4 then uses the causation target
+as lineage authority): the checked constructor requires `blob_ref` to
+resolve to a COMMITTED canonical artifact whose envelope's
+`message_kind` equals the carried `message_kind` and whose `message_id`
+equals the carried `message_id` — mismatch is not constructible.
 
 ```text
 ProducerBindingV1:
@@ -473,6 +499,28 @@ under the seed's `writer_version` (§4.5). The seed is an idempotency-
 store record, not a canonical artifact: it does not enter the §11
 universe, and its production durability is A2's, like the rest of the
 store (C6).
+
+**Seed integrity** (review round 8eb5ec3, P1-23 — `message_binding_digest`
+is irreversible, so a reservation holding a binding digest NEXT TO a
+seed ref proves nothing about their marriage; a corrupted or swapped
+seed would let recovery serialize semantic input Y under a reservation
+made for X, the exact "two valid values standing together" failure this
+contract keeps killing). Three frozen requirements:
+
+1. `construction_seed_ref` binds the seed BY DIGEST
+   (content-addressed), and the seed bytes are immutable from the
+   moment the `RESERVED` transition commits;
+2. before the FIRST serialization and before EVERY recovery
+   serialization, the acceptor recomputes `message_binding_digest`
+   from the resolved seed and requires it to equal
+   `RESERVED.message_binding_digest` — mismatch fails closed, the
+   reservation is left for investigation, nothing is committed;
+3. an unsupported `seed.writer_version` at recovery fails closed —
+   NEVER a fallback to the current binary's writer.
+
+The seed's `payload blob ref` targets the closed CAS kind
+`message-payload-blob` (§11.1) — the exact payload bytes; no separate
+seed-store byte-object species is introduced.
 
 Acceptance flow:
 
@@ -688,7 +736,7 @@ Git tree OID and an external commit SHA are different things. Removed:
 `envelope.expected_input_head`, `WorkOrder.input.base_sha`,
 `ReviewRequest.base_sha`, `ReviewRequest.candidate_head`,
 `HumanCommand.expected_head`. Replacements are candidate-state refs
-(`input_candidate_binding`, `candidate_state_ref`,
+(`InputStateBindingV1`, `candidate_state_ref`,
 `expected_candidate_state_ref`). If a provider-facing prompt should show a
 base commit or tree OID, the controller renders it as a labeled projection
 from the A0 receipt. `external_head_sha` is reserved for A3
@@ -777,8 +825,15 @@ The candidate sealing boundary is consumed from A0 as a capability.
 `round_binding_ref` was a bare name with no type and no answer whether it
 meant the logical round or the run binding): it is the SOURCE CODER
 EXECUTION, typed as `CampaignRunBindingRefV1` (§2.1), and the checked
-constructor proves it EQUALS the `campaign_run_binding_ref` in the
-accepted CoderReport's own Provider producer binding. The logical round
+constructor proves it EQUALS the binding resolved through the accepted
+report's ONLY provider surface (review round 8eb5ec3, P1-22 — the
+pre-P1-20 wording named a `campaign_run_binding_ref` field the Provider
+binding no longer has):
+
+```text
+CoderReport -> Provider.invocation_receipt_ref
+            -> ProviderInvocationReceipt -> campaign_run_binding
+``` The logical round
 identity needs no new authority artifact — `round_id` already lives in
 the envelope and the canonical constructor context; a separate A1
 "RoundBinding" authority would be a shadow-A2 object and is deliberately
@@ -1188,7 +1243,9 @@ anything outside it cannot be referenced from canonical bytes:
    model-route-blob, gate-registry-snapshot-blob, gate-evidence-blob,
    diff-evidence-blob, authenticated-principal-record,
    worktree-correspondence-evidence-blob (§7.1a),
-   non-dispatch-classification-blob (below)
+   non-dispatch-classification-blob (below),
+   message-payload-blob (§4.6 — the exact payload bytes of a canonical
+   message, referenced by the construction seed)
 
 3. External wrappers (cross-universe refs into A0/R1 canonical
    records; TERMINAL from the A1 DAG's perspective — their targets are
@@ -1256,6 +1313,12 @@ Provider:   CoderReport (role=coder), ReviewerReport (role=reviewer)
 Human:      HumanCommandRequest
 ```
 
+The role in parentheses is NOT a Provider-binding field (P1-20/P1-22):
+it is the classifier obligation `Provider.invocation_receipt_ref ->
+ProviderInvocationReceipt -> campaign_run_binding.role == the role this
+message kind requires`. The proof path goes through the receipt — the
+kind table only names what that path must yield.
+
 `ProviderInvocationReceipt` is CONTROLLER-produced: it is the
 controller/adapter's evidence ABOUT a provider invocation. Its
 provider-side identities (execution id, model route) are payload
@@ -1283,9 +1346,10 @@ external-sink wrapper refs (class 3):
 ```text
 kind                        exact direct digest edges
 --------------------------  -------------------------------------------
-WorkOrder                -> intra: contract-blob;
-                            ext: InputStateBinding refs +
-                            worktree-correspondence blob (initial)
+WorkOrder                -> intra: contract-blob,
+                            worktree-correspondence-evidence-blob
+                            (initial — class-2 CAS, hence intra, P1-24);
+                            ext: InputStateBinding wrapper refs
 CoderReport (raw)        -> intra: ProviderInvocationReceipt [producer],
                             gate-evidence-blob, diff-evidence-blob
 CandidateAdmissionReceipt-> intra: CoderReport, CampaignRunBinding
@@ -1338,9 +1402,10 @@ AttentionSuperseded      -> intra: HumanAttentionRequest;
                             causal: HumanAttentionRequest [superseding]
 ArtifactImported         -> intra: CasObjectRef;
                             ext: RunArtifactSourceRef (§6)
-CampaignRunBinding       -> ext: InputStateBinding refs +
-                            worktree-correspondence blob (initial)
-                            (identities otherwise, no CAS edges)
+CampaignRunBinding       -> intra: worktree-correspondence-evidence-blob
+                            (initial — class-2 CAS, hence intra, P1-24);
+                            ext: InputStateBinding wrapper refs
+                            (identities otherwise)
 class 2 / class 5 blobs  -> (terminal, no outgoing edges)
 ```
 
@@ -1620,8 +1685,13 @@ source bytes (§6, P1-18); an `InitialMaterialization` with two valid
 same-run refs in the right order but a non-corresponding worktree —
 constructor reject (§7.1a, P1-21); a `RESERVED` reservation whose seed
 is missing or whose rebuild under the seed's `writer_version` does not
-reproduce the committed bytes (§4.6, P1-19). A newtype around `String`
-is not a semantic proof.
+reproduce the committed bytes (§4.6, P1-19); a seed whose RECOMPUTED
+`message_binding_digest` does not equal the reservation's — recovery
+must refuse to serialize Y under a reservation made for X (§4.6,
+P1-23); a recovery encountering an unsupported `seed.writer_version` —
+fail closed, no fallback writer (§4.6, P1-23); a causation ref whose
+resolved envelope `message_kind`/`message_id` differ from the carried
+claims (§3, P1-24). A newtype around `String` is not a semantic proof.
 
 ## 16. v1-lite cut and delivery honesty
 
