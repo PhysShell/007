@@ -16,7 +16,7 @@ Current authoritative state:
   source: `docs/q-deck/a0-candidate-state.md`.
 - **A1-F contract freeze**: `PROPOSED FREEZE / REVIEW REQUIRED /
   NON-AUTHORITATIVE` — `docs/q-deck/a1-authority-contracts.md` (branch
-  `claude/a1-contract-freeze-dkrnnq`, corrective round R1 applied). Fifteen
+  `claude/a1-contract-freeze-dkrnnq`, corrective rounds R1+R2 applied). Fifteen
   frozen decisions: artifact model / digests / per-object and closure bounds
   / versions (FD-1), acyclic evidence-graph rank rule with imported
   authority roots and resolver duties (FD-2), raw-vs-normalized evidence
@@ -30,8 +30,10 @@ Current authoritative state:
   + the pure V0 fold + the `state_version` rule (FD-14), and human command
   binding with honest actor attestation (FD-15). Complete wire schemas for
   all eleven message kinds plus receipt, manifest, `ScopeContractV1`, and
-  `CampaignStateV1`. Design input: issue #95. **A1 implementation begins only
-  after this freeze is accepted** — then A1-V0 (§5): one real
+  `CampaignStateV1`, plus `CampaignEventV1` — the reducer's own log entry, with
+  a digest chain, per-kind guards, and a `seed`/`fold` split so genesis is not a
+  fold over the state it creates. Design input: issue #95. **A1 implementation
+  begins only after this freeze is accepted** — then A1-V0 (§5): one real
   coder/reviewer/human corrective loop, coder on the claude CLI, reviewer on
   `--engine arliai` (read-only, no tool surface), merge manual.
 - **Post-A0 hardening**: separate follow-up issue; does not reopen A0.
