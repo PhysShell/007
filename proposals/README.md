@@ -46,6 +46,8 @@ coming back in six months wearing a different hat.
 
 ## How to add one
 
+By hand:
+
 ```bash
 cp proposals/TEMPLATE.md proposals/0007-my-idea.md   # next free number
 ```
@@ -53,6 +55,12 @@ cp proposals/TEMPLATE.md proposals/0007-my-idea.md   # next free number
 Fill in the header, write the idea, commit. Long enough to be understood next
 month, short enough that abandoning it costs nothing. If you find yourself
 writing acceptance criteria, it is not raw any more — promote it.
+
+Or hand it to an agent: **`/raw-proposal <link or idea>`**, or just paste a link
+and ask for a proposal. The procedure lives in
+[`.claude/skills/raw-proposal/SKILL.md`](../.claude/skills/raw-proposal/SKILL.md),
+which reads this file rather than restating it — so the conventions are edited
+here, in one place, and the skill follows.
 
 ## Promotion
 
