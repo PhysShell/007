@@ -97,13 +97,67 @@ def build_corpus(corpus, claude_root):
     return by_title
 
 
+WORK_MARKER = ".deja-probe-workdir"
+
+
+def prepare_work(path):
+    """Return a wiped workdir this probe is allowed to destroy.
+
+    The wipe is necessary — session ids are derived from the corpus, so a
+    bumped corpus id that drops a session would otherwise leave the previous
+    corpus's transcripts on disk and quietly test a ghost. But `--work /` would
+    then recursively delete /claude, /index and /home, and any shared directory
+    loses its same-named children. So only a directory this probe owns gets
+    wiped: one that does not exist yet, one that is empty, or one already
+    carrying the marker file.
+    """
+    work = pathlib.Path(path).expanduser().resolve()
+    if work == pathlib.Path(work.anchor):
+        raise SystemExit(f"--work {work} is a filesystem root; refusing.")
+    if work.exists() and not work.is_dir():
+        raise SystemExit(f"--work {work} exists and is not a directory; refusing.")
+    if work.is_dir() and any(work.iterdir()) and not (work / WORK_MARKER).exists():
+        raise SystemExit(
+            f"--work {work} is not empty and carries no {WORK_MARKER} marker, so "
+            "this probe does not own it and will not delete inside it.\n"
+            "Pass a fresh directory, or remove that one yourself first.")
+
+    work.mkdir(parents=True, exist_ok=True)
+    (work / WORK_MARKER).write_text(
+        "Created by evidence/deja-vu-negative-recall/probe.py.\n"
+        "This directory is wiped on every run.\n")
+    for sub in ("claude", "index", "home", "tmp"):
+        shutil.rmtree(work / sub, ignore_errors=True)
+        (work / sub).mkdir(parents=True, exist_ok=True)
+    return work
+
+
 def probe_env(work):
-    e = dict(os.environ)
-    e["DEJA_CLAUDE_ROOT"] = str(work / "claude")
-    e["DEJA_INDEX_DIR"] = str(work / "index")
-    e["HOME"] = str(work / "home")
-    e["XDG_CONFIG_HOME"] = str(work / "home" / ".config")
-    e["XDG_DATA_HOME"] = str(work / "home" / ".local" / "share")
+    """Build the child environment from nothing, never from os.environ.
+
+    deja is a third-party binary. Forwarding the ambient environment would hand
+    it whatever the operator's shell happens to hold — GITHUB_TOKEN,
+    ARLIAI_API_KEY, cloud credentials — and this probe writes a tracked
+    report.json out of that process's stdout. The repo's central claim is that
+    no credential is in the tree (AGENTS.md rule 1), and the same rule already
+    strips ARLIAI_API_KEY from provider subprocess environments; a research
+    harness does not get a discount on it.
+
+    Only what deja needs to run and to stay inside the throwaway workdir.
+    """
+    home = work / "home"
+    e = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),  # deja shells out to sqlite3
+        "LC_ALL": "C.UTF-8",                              # deterministic collation
+        "HOME": str(home),
+        "XDG_CONFIG_HOME": str(home / ".config"),
+        "XDG_DATA_HOME": str(home / ".local" / "share"),
+        "TMPDIR": str(work / "tmp"),
+        "DEJA_CLAUDE_ROOT": str(work / "claude"),
+        "DEJA_INDEX_DIR": str(work / "index"),
+    }
+    if "SystemRoot" in os.environ:  # Windows cannot exec without it
+        e["SystemRoot"] = os.environ["SystemRoot"]
     return e
 
 
@@ -116,14 +170,22 @@ def retrieve(deja, env, q):
     shorter question it invented".
     """
     p = subprocess.run([deja, "--json", q], env=env, capture_output=True, text=True, timeout=120)
+    # A failed query and a query with no matches are different facts, and this
+    # harness exists to keep exactly that pair apart. deja exits 0 on an empty
+    # result (checked at 7c4a294), so a nonzero status is a harness failure and
+    # must never be recorded as a retrieval miss — that would undercount false
+    # hits and recall alike while the report still looked complete.
+    if p.returncode != 0:
+        raise SystemExit(f"deja exited {p.returncode} on query {q!r}; refusing to "
+                         f"record it as zero hits.\nstderr: {p.stderr.strip()[:400]}")
     out = p.stdout.strip()
     if not out:
         return {"hits": 0, "tier": "", "dropped_terms": [], "returned_ids": [], "top_title": ""}
     try:
         data = json.loads(out)
     except json.JSONDecodeError:
-        return {"hits": 0, "tier": "unparsed", "dropped_terms": [], "returned_ids": [],
-                "top_title": "", "raw": out[:200]}
+        raise SystemExit(f"deja returned unparseable JSON on query {q!r}; refusing to "
+                         f"record it as a retrieval result.\nstdout: {out[:400]}")
     hits = data.get("hits") or []
     variants = data.get("variants") or {}
     ids, top = [], ""
@@ -153,20 +215,34 @@ def main():
 
     corpus = json.loads((HERE / "corpus.json").read_text())
     binary = identify_binary(args.deja, args.subject_commit, args.allow_unverified_binary)
-
-    # Wipe the throwaway workdir. Session ids are derived from the corpus, so a
-    # bumped corpus id that drops or renames a session would otherwise leave the
-    # previous corpus's transcripts on disk and quietly test a ghost.
-    work = pathlib.Path(args.work)
-    for sub in ("claude", "index", "home"):
-        shutil.rmtree(work / sub, ignore_errors=True)
-        (work / sub).mkdir(parents=True, exist_ok=True)
+    work = prepare_work(args.work)
 
     by_title = build_corpus(corpus, work / "claude")
     env = probe_env(work)
     idx = subprocess.run([args.deja, "index", "--rebuild"], env=env,
                          capture_output=True, text=True, timeout=300)
     print("index:", (idx.stdout or idx.stderr).strip()[:300])
+    if idx.returncode != 0:
+        raise SystemExit(f"deja index --rebuild exited {idx.returncode}; refusing to "
+                         f"measure a failed index.\nstderr: {idx.stderr.strip()[:400]}")
+
+    # Exit status alone does not prove the index holds the corpus: at 7c4a294 a
+    # deja run against an unusable index directory still exits 0. Without this
+    # check a harness failure would serialize as retrieval behaviour — zero hits
+    # everywhere, in a revision-bound report that looks complete. That is the
+    # exact confusion this whole document is about, so the harness may not
+    # commit it.
+    listed = subprocess.run([args.deja, "last", "1000", "--json"], env=env,
+                            capture_output=True, text=True, timeout=120)
+    indexed = -1
+    if listed.returncode == 0 and listed.stdout.strip():
+        try:
+            indexed = len(json.loads(listed.stdout).get("sessions", []))
+        except json.JSONDecodeError:
+            indexed = -1
+    if indexed != len(corpus["sessions"]):
+        raise SystemExit(f"index holds {indexed} sessions, corpus has "
+                         f"{len(corpus['sessions'])}; refusing to measure it.")
 
     rows = []
     for q in corpus["queries"]:
