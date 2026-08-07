@@ -204,6 +204,39 @@ AdmissionResult {
 invariant:  outcome == EVIDENCE_AVAILABLE  ⟺  evidence_objects is non-empty
 ```
 
+**Model verification state as a closed enum, not as nullable fields plus a
+boolean.** Recorded here as a design lesson for the admission layer, not as a
+change to anything in this PR. The probe harness in
+`evidence/deja-vu-negative-recall/` had to be corrected three times in review,
+each time for the same collapse:
+
+```text
+unknown  ≠  false
+absent   ≠  clean
+not observed  ≠  verified
+```
+
+No subject commit, no `vcs.revision` stamp, and no `vcs.modified` stamp each
+produced `unverified: false` — three distinct un-knowings flattened into a
+boolean that then read as a positive result. The shape that resists this is a
+closed sum type where every un-knowing has to be named and none can be spelled
+as the absence of a value:
+
+```text
+VERIFIED
+UNVERIFIED_MISSING_SUBJECT
+UNVERIFIED_MISSING_REVISION
+UNVERIFIED_REVISION_MISMATCH
+UNVERIFIED_MISSING_MODIFIED_STATE
+UNVERIFIED_DIRTY
+```
+
+This is the same argument the document makes about `RecallOutcome`, one storey
+down: a verdict must be a value with a name, never the absence of a signal.
+When admission is built, its inputs (the eight above) should carry per-input
+outcomes of this shape rather than optional booleans, so an unevaluated input
+cannot be mistaken for a satisfied one.
+
 Both empty paths therefore land in the same place, which is the point:
 
 ```text
