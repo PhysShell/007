@@ -6,17 +6,18 @@
 
 This document is the normative source for the A1 slice named in
 `docs/autonomy-controller.md` ("A1 ReviewVerdict and CorrectiveDirective
-contracts"). It was accepted at exact head `b61540a`, after five corrective
-rounds and a final exact-head consistency pass; the commit that set this header
-is ceremony only and changes nothing normative. The supersede path (§7) now
-applies: from here, corrections are forward-only and versioned, exactly as they
-are for the artifacts this contract governs.
+contracts"). It was accepted at exact head `b61540a` after five corrective
+rounds and a final exact-head consistency pass, then **amended once more before
+merge** by R5.2 (§9), which closed four P1 findings from external review on PR
+#123. The frozen baseline is the merged head of that PR. From there the
+supersede path (§7) applies: corrections are forward-only and versioned, exactly
+as they are for the artifacts this contract governs.
 
 Design input: issue #95 (`A1: coder/reviewer/human contracts (draft)`), which
 carries the rationale and discussion history. Where this document and that draft
 differ, this document is authoritative.
 
-Corrective rounds R1, R2, R3, R4, R5, and R5.1 are recorded in §9.
+Corrective rounds R1, R2, R3, R4, R5, R5.1, and R5.2 are recorded in §9.
 
 What the freeze covers: the wire schema of every message kind — field names,
 types, required/optional status, null policy, bounds, and the authority that
@@ -313,7 +314,9 @@ resolve_closure(root):
     bytes += ref.size              # the DECLARED size, accounted before any read
     if bytes   > effective(max_reachable_closure_bytes):   REJECT whole resolution
     if objects > effective(max_reachable_closure_objects): REJECT whole resolution
-    verify stored size == ref.size and digest(stored bytes) == ref.digest
+    verify the stored object(s) against the ref per FD-1.8 — for an
+      envelope-bearing artifact that is BOTH halves: envelope framing == ref.digest,
+      payload bytes == envelope.payload_digest, and the two sizes summing to ref.size
     if the slot expects a typed object (FD-2.5):
         parse it under that slot's schema
         enqueue every ArtifactRef-valued slot that schema declares
@@ -364,10 +367,33 @@ typed artifacts; evidence blobs carry their own concrete type
 part of every `ArtifactRef` and part of the envelope framing: the same bytes
 under a different declared type are a different reference (FD-2.5).
 
-**FD-1.8 Artifact refs.** `ArtifactRef = (kind, media_type, digest, size)` into
-007-owned CAS only. There is no path field and no URL field to populate. An
-agent-supplied path or URL appearing anywhere in a payload is inert text and is
-never dereferenced (FD-7).
+**FD-1.8 Artifact refs, and what they identify.** `ArtifactRef = (kind,
+media_type, digest, size)` into 007-owned CAS only. There is no path field and no
+URL field to populate. An agent-supplied path or URL appearing anywhere in a
+payload is inert text and is never dereferenced (FD-7).
+
+An envelope-bearing artifact is stored as **two** byte strings (FD-1.1), so a ref
+to one has to say which — otherwise `size` charges half the cost of what the
+resolver reads, and `digest` names an object nobody agreed on. Frozen:
+
+```text
+ref to an envelope-bearing artifact (the eleven message kinds):
+    digest = the envelope digest (FD-1.2), which commits to payload_digest
+    size   = stored envelope bytes + stored payload bytes, together
+
+ref to any other object (rank-0 blobs, the execution receipt, the interaction
+manifest, ScopeContractV1, a campaign event payload):
+    digest = that object's own content digest
+    size   = that object's own stored size
+```
+
+One ref therefore covers the whole artifact, and integrity stays provable in both
+halves: the stored envelope must reproduce `ref.digest` under FD-1.2 framing, and
+the payload bytes must hash to that envelope's `payload_digest` (FD-1.1). The
+size check is `envelope_bytes + payload_bytes == ref.size`, so FD-1.5 charges the
+true cost of a resolution before reading either half — 65 typed artifacts with
+small envelopes and 1 MiB payloads now cost 65 MiB against the budget, which is
+what they actually cost.
 
 **FD-1.9 `ArtifactKindV1` — the complete closed set.** `kind` is a digest input
 (FD-1.2) and every enum in A1 is closed (FD-1.6), so an incomplete list would
@@ -692,9 +718,24 @@ incarnation taxonomy (run/attempt/session/campaign incarnations) stays deferred
 to A2; what A1 freezes is that no recovery or retry code may be written without
 naming which grain it operates on.
 
-`producer_execution_id` in the envelope is the `provider_execution_id` of the
-execution that produced the artifact, or the controller's own execution identity
-for controller-derived artifacts.
+`producer_execution_id` in the envelope has exactly three cases, one per
+producer role — a mandatory field with an undefined case is a field an
+implementation has to invent:
+
+```text
+producer_role = coder | reviewer   the provider_execution_id of that execution
+producer_role = controller         the controller's own execution identity
+producer_role = human              the controller's INGRESS execution identity:
+                                   the identity of the ingress that accepted the
+                                   request bytes
+```
+
+The human case names who *accepted* the bytes, never who authored them. A human
+does not execute anything inside 007, so there is no execution of theirs to
+name; authorship remains the untrusted `claimed_actor_identity` on the request
+and the observed `authentication_strength` on the decision (FD-15.2). The
+artifact stays rank 3 and untrusted — an ingress identity is provenance for the
+acceptance, not an endorsement of the content.
 
 ### FD-11 — the receipt must prove *this* execution produced *this* artifact
 
@@ -998,6 +1039,32 @@ questions to escalate and raises an attention carrying their ids; that
 set. A question that
 was never escalated is never answerable — which is correct, since nobody was
 asked.
+
+**FD-14.7a An ambiguous execution keeps the dispatch slot.** FD-9 forbids
+redriving an execution whose dispatch outcome is unknown. That prohibition has to
+live in the *state*, not only in the prose, because the two events involved —
+`ProviderExecutionRecorded` and the `HumanAttentionRaised` that escalates it —
+are separate appends, and a crash between them is exactly the case the rule
+exists for. Frozen:
+
+```text
+ProviderExecutionRecorded(execution_outcome = dispatch_ambiguous)
+    marks active_execution.unresolved = true and does NOT clear it
+
+while active_execution is present, WorkOrderIssued / ReviewRequested /
+CorrectiveDirectiveIssued all fail their guard — so no new dispatch is
+admissible, and that block is durable across a restart
+
+no V1 event clears an unresolved execution
+```
+
+The only exits are `CANCEL` (→ `CANCEL_REQUESTED` → `CANCELLED`) and
+`CampaignSuperseded`, both of which end the campaign and clear the slot under
+terminal canonicalization (FD-14.2). A1 deliberately adds no automatic
+resolution path, mirroring R1's own choice for the same condition
+(`docs/q-deck/r1-command.md` §11.6: "this round adds no automatic path for that
+resolution"). A fresh identifier does not make a duplicate side effect safe, and
+neither does a fresh campaign phase.
 
 **FD-14.7 Leaving `HUMAN_REQUIRED`, and what a late attention event may not do.**
 The action table alone is not enough: an attention resolved after the campaign
@@ -1630,7 +1697,7 @@ of the FD-14 fold.
 | `contract_digest` | `Digest256` | yes | the campaign binding | reducer |
 | `scope_digest` | `Digest256` | yes | the `ScopeContractV1` digest | reducer |
 | `active_round_id` | `Id` | no | absent in terminal phases | reducer |
-| `active_execution` | `{role, provider_execution_id}` | no | absent when no execution is in flight | reducer |
+| `active_execution` | `{role, provider_execution_id, unresolved}` | no | absent when no execution is in flight; `unresolved = true` marks an execution whose dispatch outcome is ambiguous (FD-9) | reducer |
 | `attention` | `[AttentionEntry]` | yes (may be empty) | ≤ 256; sorted ascending by `attention_id` | reducer (FD-14.5) |
 | `budget_policy` | `{max_provider_turns, max_wall_time_seconds, evidence_budget_bytes, closure_object_budget}` | yes | from `CampaignCreated`; immutable for the campaign | seed (FD-1.5) |
 | `budget_policy_digest` | `Digest256` | yes | framed over the four values above (FD-1.5) | seed |
@@ -1752,7 +1819,7 @@ HumanAttentionRaised is the ONLY event that may set phase = HUMAN_REQUIRED.
 | `CampaignCreated` | A | — | seed only; `sequence = 0` | seeds state; `phase = BUILDING` |
 | `WorkOrderIssued` | A | `WorkOrder` (5) | `phase = BUILDING`; `active_execution` absent; `scope_ref` digest matches `state.scope_digest`; `budget_policy_digest` matches state | `phase = BUILDING`; new `active_round_id`; `active_execution = {coder, work_order.target_provider_execution_id}` |
 | `CoderReportReceived` | E | `CoderReport` (3) | an active coder execution exists | none |
-| `ProviderExecutionRecorded` | A | — | `active_execution` present and its `provider_execution_id` equals the payload's, which equals the receipt's | clears `active_execution` |
+| `ProviderExecutionRecorded` | A | — | `active_execution` present, not already `unresolved`, and its `provider_execution_id` equals the payload's, which equals the receipt's | `execution_outcome = dispatch_ambiguous` → `active_execution.unresolved := true`, **not cleared**; any other outcome → `active_execution` cleared |
 | `CandidateAccepted` | A | `CandidateReceipt` (4) | `phase = BUILDING`; `claim_check.claimed_head_matches`; receipt congruence passed (FD-11) | `current_candidate_head` := head; `required_gate_ids` := the receipt's `applicable_gate_ids`; `phase = GATING`; `last_gate_results`/`last_ci_results` cleared |
 | `GateResultsAccepted` | A | — | `phase = GATING`; `bound_head == current_candidate_head`; set equality and registry checks of §3.15.2 | `last_gate_results := {bound_head, all_required_passed}`; `phase = CI_WAIT` **iff** `all_required_passed`, otherwise **phase unchanged** (`GATING`) |
 | `CiResultsAccepted` | A | — | `phase = CI_WAIT`; `bound_head == current_candidate_head`; every `required_ci_check_id` present, no duplicates | `last_ci_results := {bound_head, conclusion}`; `phase = REVIEWING` **iff** `conclusion = passed`, otherwise **phase unchanged** (`CI_WAIT`) |
@@ -2214,6 +2281,14 @@ outcome.
 | resuming action while another attention is `OPEN` | that attention resolves; phase stays `HUMAN_REQUIRED`; target not applied (FD-14.7) |
 | exit from `HUMAN_REQUIRED` leaving `suspended_from_phase` set | contract violation; cleared in the same step (FD-14.7, §3.14) |
 | `ProviderExecutionRecorded` for an execution that is not `active_execution` | guard fails; `TransitionRejected` (§3.15.1) |
+| `ProviderExecutionRecorded` with `execution_outcome = dispatch_ambiguous` | `active_execution` **retained** and marked `unresolved`; not cleared (FD-14.7a) |
+| new `WorkOrder`/`ReviewRequest`/`CorrectiveDirective` after an ambiguous execution | guard fails — the dispatch slot is still held, durably across restart (FD-14.7a) |
+| crash between `ProviderExecutionRecorded(ambiguous)` and the attention event | replay reaches a state that still blocks dispatch (FD-14.7a) |
+| any V1 event clearing an `unresolved` execution short of a terminal transition | contract violation — only `CANCEL` or supersede end it (FD-14.7a) |
+| a `HumanCommandRequest` whose `producer_execution_id` names a provider execution | rejected — the human case is the controller's ingress identity (FD-10) |
+| an `ArtifactRef` to a message kind whose `size` covers only the envelope | rejected — `size` is envelope + payload together (FD-1.8) |
+| an `ArtifactRef` whose `digest` is the payload digest rather than the envelope digest | rejected (FD-1.8) |
+| a closure of small envelopes over large payloads sized by envelopes alone | rejected; the true cost is charged before reading (FD-1.5, FD-1.8) |
 | an event declaring itself authority-bearing against its kind | impossible — class is a function of `event_kind`, not a field (FD-14.3) |
 | `GateResultsAccepted` whose `bound_head` ≠ `current_candidate_head` | guard fails; `TransitionRejected`, neither counter advances (§3.15, FD-13) |
 | `ReviewVerdictAccepted` while `last_gate_results.bound_head` is a stale head | guard fails; no `READY_TO_MERGE` (§3.15) |
@@ -2252,7 +2327,8 @@ Safe to cut — the four autonomy properties survive:
 - no push notifications: feed + SSE, tier named honestly as **v1-lite** (timely
   only while the client is open; "operational v1" means background-capable
   delivery and is not claimed until it exists);
-- merge manual, triggered by the ready-to-merge attention request;
+- merge manual, triggered by the `ready_to_merge` feed item (§3.8) — not an
+  attention request, which the reducer would reject in that phase (§3.9);
 - reviewer = same provider family, different execution surface per §4;
 - reconciliation = polling only, no webhooks.
 
@@ -2324,8 +2400,10 @@ non-authoritative: it must not drive an A-series transition.
 
 ```text
 accepted exact head   b61540a   (after R5.1, following a final exact-head pass)
+amended pre-merge     R5.2       (four P1s from external review on PR #123)
+frozen baseline       the merged head of PR #123
 status                ACCEPTED / CLOSED / FROZEN
-rounds                R1, R2, R3, R4, R5, R5.1 — every finding corrected
+rounds                R1, R2, R3, R4, R5, R5.1, R5.2 — every finding corrected
                       forward; no round amended an earlier one in place
 next                  A1-V0 (§5), and not before this document merges
 ```
@@ -2333,6 +2411,42 @@ next                  A1-V0 (§5), and not before this document merges
 The rounds below are preserved in the order they happened. Each one is a record
 of what the contract got wrong before it was frozen, which is the part worth
 keeping: a freeze is only as trustworthy as the list of things it stopped being.
+
+### R5.2 — four P1s from external review, closed before merge (`3a92cea`)
+
+The status flip was not the last word: opening PR #123 ran the external review
+the freeze was waiting for, and it found four genuine defects. Each was checked
+against the text before being accepted — an automated reviewer is a claim, not a
+verdict (FD-4 applies to reviewers of this document too) — and all four held.
+
+1. **An ambiguous execution freed the dispatch slot.**
+   `ProviderExecutionRecorded` cleared `active_execution` unconditionally, so a
+   crash between it and the escalating attention left a state where
+   `WorkOrderIssued` passed its guard and redrove an execution FD-9 forbids
+   redriving. The prohibition now lives in the state: an ambiguous outcome keeps
+   `active_execution` and marks it `unresolved`, no V1 event clears it, and the
+   only exits are `CANCEL` or supersede — the same choice R1 §11.6 made for the
+   same condition. This was the serious one: without it, A1-V0 would have
+   implemented a duplicate-side-effect path the document spends a section
+   forbidding.
+2. **`producer_execution_id` had no defined value for human artifacts.** It is
+   mandatory on every envelope, while FD-10 covered only provider-produced and
+   controller-derived cases — so V0 could not envelope an ACK without inventing
+   an identity grain. Frozen as three cases, the human one being the
+   controller's **ingress** execution identity: who accepted the bytes, never
+   who authored them.
+3. **`ArtifactRef` did not say which of an artifact's two byte strings it
+   identified.** FD-1.1 stores envelope and payload separately, so a ref
+   charging one `size` undercounted every resolution: 65 small envelopes over
+   1 MiB payloads passed a 64 MiB budget while the resolver read past it. Frozen:
+   for an envelope-bearing artifact the ref's digest is the envelope digest and
+   its size is both halves together, with integrity provable in each half.
+4. **§5.5 still called the ready-to-merge handoff an attention request** — a
+   leftover from R4, contradicting §3.9 and §5.3, and one the reducer would have
+   rejected outright.
+
+That a freeze ceremony immediately preceded four real findings is worth leaving
+in the record rather than tidying away. The gate worked; the header was early.
 
 ### R5.1 — consistency patch on the synced head (`6c92870`)
 
