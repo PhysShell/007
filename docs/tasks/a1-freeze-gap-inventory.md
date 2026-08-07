@@ -435,3 +435,65 @@ frozen invariants с новым ratified invariant registry, если он к т
 
 Следующий шаг: повторный contract-only review. Types + construction API
 не начинаются до его прохождения.
+
+---
+
+## Review round #2: A1 contract @ `a5615b8`
+
+**VERDICT: CHANGES_REQUESTED** (maintainer, 2026-08-07). Предыдущие
+шесть P1 закрыты по существу; второй проход вскрыл девять P1 на стыках
+между секциями:
+
+```text
+P1-7   happy-path round нарушал собственную execution cardinality
+P1-8   opaque refs у InitialMaterialization + reviewer execution
+       не привязан к материализованному exact candidate
+P1-9   round_binding_ref не определён вовсе
+P1-10  DAG не был закрытым universe (открытые классы узлов,
+       неперечисленные producer/cause-рёбра, нет per-kind
+       producer mapping)
+P1-11  crash-окно между idempotency claim и blob store
+P1-12  transport session внутри semantic identity (дважды)
+P1-13  HumanDecision source binding противоречил §11
+P1-14  денормализованные antecedent-identity без equality proof
+P1-15  три открытые семантики: attention transitions,
+       budget predicate, per-outcome normalized_output
++      envelope artifact_refs как вторая writer-supplied
+       reference surface без canonical order
+```
+
+Исправления в `a1-contracts.md`: cardinality per role chain, ровно один
+usable terminal result на роль (§2.3); `RunContractCandidateStateRefV1`
+/ `WorktreeMaterializationRefV1` как точные wire-типы (в принятом A0
+obligation живёт внутри `RunStarted.contract.candidate_state`, evidence
+— через `WorktreeCreated`), `CampaignRunBindingV1.input_state_binding` c
+equality-проверкой против dispatching artifact для ОБЕИХ ролей
+(§2.1/§7.1/§8.4); `coder_run_binding_ref: CampaignRunBindingRefV1` с
+обязательным равенством producer binding'у CoderReport, логический
+round без нового authority artifact (§8.3); закрытый universe из пяти
+классов узлов + frozen per-kind producer mapping (receipt —
+Controller-produced, что растворяет self-reference) + исчерпывающие
+edge-sets с классами `intra`/`causal` и честной формулировкой
+ацикличности — intra-подграф сортируется топологически на kind-уровне,
+causal-рёбра instance-ацикличны по construction (create-before-reference
++ strictly-lower round_ordinal) (§11.1–11.4); двухфазный
+ABSENT→RESERVED→COMMITTED протокол с durable `accepted_at` до
+построения blob, fenced recovery и typed IN_PROGRESS для duplicate на
+RESERVED, граница C6 сохранена (§4.6);
+`AuthenticatedPrincipalV1`/`DeliveryObservationV1` split,
+`control_session_id` удалён из canonical payload и principal-записи,
+`message_id` переименован в logical/idempotency identity (§8.8);
+`HumanCommandRequestRefV1 {message_id, binding_digest, blob_ref}`
+(§8.8); удалены вторая coder_report-ссылка из ReviewRequest и
+денормализованный reviewer-блок из ReviewVerdict, общее правило
+«antecedent ref ИЛИ доказанное равенство» (§8.4); закрытые attention
+transitions с terminal monotonicity и reject-on-terminal (§8.7);
+детерминированный exhaustion predicate без «or» (§12.4); закрытый
+per-outcome маппинг `normalized_output_ref` (§8.6); `ref_manifest` —
+controller-derived exact manifest с defined dedupe/sort вместо
+writer-supplied `artifact_refs` (§3). RED-матрица расширена
+соответствующими оракулами.
+
+Следующий шаг: **третий contract-only review** — по оценке maintainer'а,
+после этих правок должна появиться реальная возможность дать APPROVED
+FOR TYPES. Types + construction API не начинаются до вердикта.
