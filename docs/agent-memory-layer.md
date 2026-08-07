@@ -7,8 +7,10 @@
   acceptance criterion (abstention, scored as a hard gate plus a separate
   recall metric), an added non-goal (no untyped recall reaches a planner), and
   the normative split between a **candidate observation** and an **evidence
-  object**. All are agent-authored and **pending maintainer ratification**, so
-  they are not folded into the phases below.
+  object**. Those three are agent-authored and **still pending**, so they are
+  not folded into the phases below. Its two dispositions **D1'** and **D2**
+  *were* ratified by the maintainer on 2026-08-07 and are normative; the
+  backend-selection deferral in this document follows from D1'.
 
 ## Summary
 
@@ -157,7 +159,8 @@ in `evidence/deja-vu-negative-recall/`, kept as a fixed corpus so it doubles as
 a cross-version instrument: it separates upstream retrieval drift from our own
 admission drift.
 
-The proposed position, in two parts, both pending maintainer ratification:
+The position, in two parts, **both maintainer-ratified on 2026-08-07** against
+the text of that document at `e938b2d`:
 
 - **D1' — evaluated reference, dependency decision deferred.** deja-vu is a
   verified source of criteria and a future backend candidate behind a stable
@@ -170,9 +173,10 @@ The proposed position, in two parts, both pending maintainer ratification:
   ourselves is bound by this too.
 
 The five properties worth having in a backend are stated there as evaluation
-criteria rather than as requirements copied from one implementation, with a
-single normative MUST: a backend passes the shared oracle fixture and has no
-path that bypasses 007 evidence admission.
+criteria rather than as requirements copied from one implementation. Their
+single MUST — a backend passes the shared oracle fixture and has no path that
+bypasses 007 evidence admission — is itself still pending, except for the
+no-bypass half, which is a restatement of ratified D2.
 
 ## Proposed architecture
 
@@ -644,8 +648,9 @@ Memory should help the agent produce a better plan, but O7Plan and gates decide 
 ## Backend options
 
 > **Backend selection is deferred** — see D1' in
-> `docs/deja-vu-memory-evaluation.md` (agent-authored, pending maintainer
-> ratification). The three options below are preserved as analysis, not as a
+> `docs/deja-vu-memory-evaluation.md`, **ratified by the maintainer on
+> 2026-08-07**, which makes this deferral normative rather than proposed. The
+> three options below are preserved as analysis, not as a
 > choice: **no backend is selected, and "first backend" below no longer names
 > one.** A backend is chosen when a real consumer exists, by evaluation against
 > the criteria in that document, whose single normative requirement is that a

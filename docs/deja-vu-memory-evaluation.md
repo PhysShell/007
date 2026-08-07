@@ -1,9 +1,17 @@
 # deja-vu as a memory source for 007 — evaluation
 
-- **Status:** evaluation · dispositions **pending maintainer ratification**
-  (`docs/evidence-and-decision-discipline.md` rule 3 — an agent-authored
-  architectural disposition is not normative until a human ratifies it, and
-  cannot be cited to justify the next one).
+- **Status:** evaluation · **D1' and D2 are maintainer-ratified**; everything
+  else in this document remains agent-authored and **pending**
+  (`docs/evidence-and-decision-discipline.md` rule 3).
+- **Ratification:** the maintainer ratified **D1' and D2, and only those**, on
+  2026-08-07, against the text of this document at commit `e938b2d` in PR #112.
+  Per rule 4 the ratification is bound to that revision: if D1' or D2 is
+  reworded, the new wording is not covered and returns to `pending`.
+  Consequences that follow directly from a ratified decision — such as the
+  backend-selection deferral note in `docs/agent-memory-layer.md`, which exists
+  only because D1' says so — are carried by it and need no separate
+  ratification (rule 3's own carve-out). Proposals that do **not** follow from
+  D1'/D2 stay pending and are listed below.
 - **Scope:** the memory layer proposed in `docs/agent-memory-layer.md`. No
   `o7` code follows from this document.
 - **Subject:** `github.com/vshulcz/deja-vu` (MIT), commit
@@ -15,11 +23,11 @@
   load-bearing objection: the earlier **D1** ("consume deja-vu as a pinned
   substrate") over-committed relative to its evidence. D1 is superseded by
   **D1'** — evaluated reference, dependency decision deferred — and **D2** is
-  restated by authority boundary rather than by repository ownership. Any
-  earlier APPROVE was given against the superseded text and does not carry
-  over; per rule 3 an agent review never lifts `pending` in any case.
-  **Maintainer ratification of D1'/D2 is outstanding**, and the changed
-  dispositions are due one independent review pass before it is sought.
+  restated by authority boundary rather than by repository ownership. Earlier
+  APPROVEs were given against the superseded text and did not carry over; the
+  rewritten dispositions then took their own review passes, the last of which
+  was clean, before ratification was sought. Per rule 3 no agent review lifted
+  `pending` at any point — the human maintainer did, in the entry above.
 
 Per rule 4, every factual claim below about deja-vu is bound to that commit and
 is stale the moment the upstream file changes. Claims are split into what the
@@ -58,7 +66,8 @@ promotes it to an assertion on its own authority. Nobody lied; a machine handed
 over "candidate, most discriminating terms discarded" and a model read it as
 "this is what happened."
 
-Proposed position, in two parts:
+Position, in two parts. **Both were ratified by the maintainer on 2026-08-07
+against this text**; they are normative, and the rest of this document is not.
 
 **D1' — evaluated reference; dependency decision deferred.** deja-vu is a
 verified source of architectural ideas and a workable reference retrieval
@@ -195,6 +204,11 @@ upstream, and cannot: it needs inputs (run-record membership, artifact drift,
 lifecycle) that a transcript indexer has no access to.
 
 ## Normative vocabulary
+
+> **Status: pending.** The maintainer ratified D1' and D2 only. The vocabulary
+> below, the admission policy, the metrics and the acceptance criteria are
+> agent-authored proposals and are not normative yet, however normatively they
+> are phrased.
 
 Fixed here so a later API cannot quietly erode it. The word **evidence** is
 reserved for what has passed admission. Nothing a retriever returns is evidence,
@@ -461,6 +475,11 @@ upstream semantics stops being a slogan and becomes a test.
 
 ## Backend evaluation criteria (proposed, pending ratification)
 
+> **Status: pending**, with one exception of provenance rather than of force —
+> the "no path that bypasses admission" half of the MUST below is a restatement
+> of ratified **D2**, not a new requirement. The oracle-passing half, and all
+> four capabilities, are proposals.
+
 An earlier revision listed these as "five transplants" — things to take from
 deja-vu. With the dependency decision deferred (D1'), they are better read as
 **what a future retrieval/ingestion backend should be evaluated against**,
@@ -543,7 +562,8 @@ Three additions are proposed, all small and all testable:
    is per query.
 
 All three are recorded here rather than edited into that document's numbered
-phases, because per rule 3 they are agent-authored and pending; the
+phases, because per rule 3 they are agent-authored and **still pending** — the
+2026-08-07 ratification covered D1' and D2 and nothing else. The
 cross-reference in `docs/agent-memory-layer.md` points here and says so.
 
 ## If the operator wants to run it locally
