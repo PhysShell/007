@@ -23,13 +23,24 @@ artifact **revision**, not merely a date. These are external artifacts, not
 captured by this repo's commit, so they carry their own anchors:
 
 ```text
-documentation prose   apioo/fusio-docs @ 0b369b7 (main, 2026-06-13)
+documentation prose   apioo/fusio-docs
+                      0b369b724b9dd687630bf8ced15be1221f49dbc2  (main, 2026-06-13)
                       — the docs site is generated from this repo; the source
                         .md is the immutable anchor, the rendered page is not
-distribution repo     apioo/fusio      @ 884c9c3 (master, 2026-07-30)
-core implementation   apioo/fusio-impl @ 6bffff4 (master, 2026-08-01)
-release               tag v7.1.0 = febf15d, atom <updated> 2026-07-18T16:52:24Z
+distribution repo     apioo/fusio
+                      884c9c3bd047a2f4b7ed81f0c08cae0ada9e5a67  (master, 2026-07-30)
+core implementation   apioo/fusio-impl
+                      6bffff4d24fa71e15180e631c6a40a5b1cf28fd9  (master, 2026-08-01)
+release               apioo/fusio tag v7.1.0 =
+                      febf15d39e1926e9a9011ef94081d19911fa1e59
+                      atom <updated> 2026-07-18T16:52:24Z
 ```
+
+These four full object IDs are the binding. Branch names and dates are context
+only — a branch moves, and a date records when someone looked. The seven-character
+forms used below (`0b369b7`, `884c9c3`, `6bffff4`, `febf15d`) abbreviate exactly
+these IDs and nothing else; resolve them here, not against whatever a future
+upstream `git rev-parse` makes of a prefix.
 
 Read on the rendered site 2026-08-06; **every quotation below was then
 re-derived verbatim from the source `.md` at `0b369b7` on 2026-08-07**, and two
