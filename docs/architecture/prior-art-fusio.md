@@ -18,26 +18,48 @@ accepted in §1.
 
 ## 1. Verified facts
 
-Per rule 4 of `docs/evidence-and-decision-discipline.md`, each claim is bound to
-its artifact and a verification date. These are external artifacts, not captured
-by this repo's commit, so they carry their own anchors. **All verified
-2026-08-06.**
+Per rule 4 of `docs/evidence-and-decision-discipline.md`, each claim binds an
+artifact **revision**, not merely a date. These are external artifacts, not
+captured by this repo's commit, so they carry their own anchors:
 
-| Claim | Artifact |
+```text
+documentation prose   apioo/fusio-docs @ 0b369b7 (main, 2026-06-13)
+                      — the docs site is generated from this repo; the source
+                        .md is the immutable anchor, the rendered page is not
+distribution repo     apioo/fusio      @ 884c9c3 (master, 2026-07-30)
+core implementation   apioo/fusio-impl @ 6bffff4 (master, 2026-08-01)
+release               tag v7.1.0 = febf15d, atom <updated> 2026-07-18T16:52:24Z
+```
+
+Read on the rendered site 2026-08-06; **every quotation below was then
+re-derived verbatim from the source `.md` at `0b369b7` on 2026-08-07**, and two
+were wrong on the first pass — the operation definition had lost its opening
+clause, and the multi-protocol sentence had been split into a separate sentence
+it is not. Both are corrected here. That is the argument for binding revisions
+rather than dates, made at our own expense: a rendered page read through a
+summarizer is not a quotable artifact.
+
+One claim below has no immutable anchor and is marked in place. Where a fact is
+about the rendered site rather than the source (the star count), it is stale by
+construction and load-bears nothing.
+
+| Claim | Artifact @ revision |
 | --- | --- |
-| "A functional unit of logic that can be invoked by a remote entity. Every operation is bound to a specific HTTP path and method." Defines a contract for query parameters, request payload, response payload. "They can also be triggered through an AI Agent, MCP, JSON-RPC, or GraphQL." | docs.fusio-project.org/docs/operation/ |
-| "An action contains the business logic of your API endpoint. At the core an Action is a PHP class that receives an incoming request and returns a response." | docs.fusio-project.org/docs/action/ |
-| "A connection enables Fusio to connect to other remote services." A connection's `getConnection()` "should return a fully configured object which can be used at an action"; credentials are collected in the connection's `configure()` form. The page states nothing about encryption at rest or key custody. | docs.fusio-project.org/docs/backend/api/connection/ |
-| "Define your data models once using TypeSchema. Fusio uses this metadata to enforce strict validation and automatically generate OpenAPI specifications and multi-language client SDKs." | docs.fusio-project.org/ |
-| OAuth2 with the Authorization Code, Resource Owner Password Credentials, Client Credentials and Refresh grants; the access token "has always an expire time and can be revoked"; scopes are an optional parameter of the app. No mention of capabilities, one-time grants, attenuation, approval gates or budgets. | docs.fusio-project.org/docs/security/authorization |
-| MCP: "By default, every operation is exposed, you can provide a user id as an argument to expose only specific tools." STDIO via `php bin/fusio mcp`. HTTP transport is **disabled by default**, enabled by setting `fusio_mcp`, and "currently experimental, use it with caution." "VSCode can currently handle only 128 tools and the Fusio MCP server provides all operations of Fusio" — tools must be deselected by hand. The worked example resolves a chat request to the `backend-operation-getAll` tool. | docs.fusio-project.org/docs/protocol/mcp |
-| Latest release **v7.1.0, 2026-07-18T16:52:24Z**; v7.0.0 2026-05-23. 7.0 added the agent concept, the `AgentCall` action, MCP server support and four built-in agents; 7.1 added a consumer agent, public agents, per-agent temperature and cost, and agents in deployment. | github.com/apioo/fusio releases (atom feed) |
-| Apache-2.0, ~2.1k stars as displayed. | github.com/apioo/fusio |
-| `apioo/fusio` master requires `php >=8.4` and `fusio/impl: ^8.0`; `apioo/fusio-impl` master requires `php >=8.4` and pulls ~20 `fusio/adapter-*` packages plus `mcp/sdk ^0.5`. | raw `composer.json` of each repo, master |
-| Authorship, measured on `--filter=blob:none` clones (`git log --format='%an' \| sort \| uniq -c`): `apioo/fusio` 1965 of 1969 commits by one author (HEAD `2026-07-30`, "update deps"); `apioo/fusio-impl` 2872 of 2877 (HEAD `2026-08-01`, "update ai adapter"). | the two repositories at those HEADs |
+| "An operation describes a functional unit of logic that can be invoked by a remote entity. Every operation is bound to a specific HTTP path and method but they can also be triggered through an [AI Agent], [MCP], [JSON-RPC], or [GraphQL]." Defines a strict contract for query parameters, request payload, response payload. | `docs/operation/index.md` @ `0b369b7` |
+| "An action contains the business logic of your API endpoint. At the core an Action is a PHP class that receives an incoming request and returns a response." | `docs/action/index.md` @ `0b369b7` |
+| "A connection enables Fusio to connect to other remote services. This can be i.e. a database or message queue service." — "In general a connection should return a fully configured object which can be used at an action." The page describes no encryption at rest and no key custody. | `docs/backend/api/connection/index.md` @ `0b369b7` |
+| "The Worker-Python executes the provided Python code at the remote worker", and the example handler obtains its client with `connector.get_connection('App')`. Sibling pages exist for Java, JavaScript and PHP. | `docs/backend/api/action/worker-python.md` @ `0b369b7` |
+| "Define your data models once using TypeSchema. Fusio uses this metadata to enforce strict validation and automatically generate OpenAPI specifications and multi-language client SDKs." | `src/components/HomepageFeatures/index.tsx` @ `0b369b7` |
+| OAuth2 with the Authorization Code, Resource Owner Password Credentials, Client Credentials and Refresh grants; the access token has "an expire time and can be revoked"; scopes are "Optional the scopes which are needed by your app". No capabilities, one-time grants, attenuation, approval gates or budgets appear on the page. | `docs/security/authorization.md` @ `0b369b7` |
+| MCP: "By default, every operation is exposed, you can provide a user id as an argument to expose only specific tools." STDIO via `php bin/fusio mcp`. "The HTTP transport is by default disabled. To activate it you need to set the `fusio_mcp` configuration to `true`. Note the HTTP transport is currently experimental, use it with caution." "VSCode can currently handle only 128 tools and the Fusio MCP server provides all operations of Fusio" — tools must be deselected by hand. The worked example: "you can ask to show all available operations that should trigger the `backend-operation-getAll` tool." | `docs/protocol/mcp.md` @ `0b369b7` |
+| Latest release **v7.1.0**, atom `<updated>` 2026-07-18T16:52:24Z; v7.0.0 2026-05-23. 7.0 added the agent concept, the `AgentCall` action, MCP server support and four built-in agents; 7.1 added a consumer agent, public agents, per-agent temperature and cost, and agents in deployment. | tag `v7.1.0` = `febf15d`; release notes on the releases feed |
+| `composer.json` requires `php >=8.4` and `fusio/impl: ^8.0`. Apache-2.0. | `apioo/fusio` @ `884c9c3` |
+| `composer.json` requires `php >=8.4`, ~20 `fusio/adapter-*` packages, and `mcp/sdk ^0.5`. | `apioo/fusio-impl` @ `6bffff4` |
+| Authorship (`git log --format='%an' \| sort \| uniq -c` on `--filter=blob:none` clones): 1965 of 1969 commits by one author; 2872 of 2877 in the core. | `884c9c3` and `6bffff4` respectively |
+| ~2.1k stars — **no immutable anchor**, a rendered counter read 2026-08-06; recorded for scale only and load-bearing on nothing. | github.com/apioo/fusio |
 
 **Inference** (marked as such, not as citation): the tagged distribution is 7.1.0
-while its master already requires core `^8.0`, and the substance lives in
+while `884c9c3` already requires core `^8.0`, and the substance lives in
 `fusio-impl` plus the adapter packages — so reading `apioo/fusio` is reading a
 composer manifest and a shell, not the system. Any real audit has to follow the
 dependency edge. Second inference: 99.8% single-author history in both
@@ -91,8 +113,10 @@ Recorded as things a later ABR slice may borrow, not as tasks:
 
 ## 4. Where it stops being a trust boundary
 
-Everything below is stated as *absence in the surveyed artifacts as of the
-verification date*, not as a defect claim about code we have not read.
+Everything below is stated as *absence in the artifacts pinned in §1, at those
+revisions*, not as a defect claim about code we have not read. Each is stale the
+moment its artifact moves — `0b369b7` is a June commit on a project releasing
+monthly, so treat the documentation claims as the shortest-lived here.
 
 - Authorization is OAuth2 + scopes + expiring, revocable tokens. That is
   ordinary API authorization. The surveyed pages describe no attenuation (a
@@ -102,8 +126,11 @@ verification date*, not as a defect claim about code we have not read.
   no provenance a third party could verify.
 - An action receives an already-configured client from the connection. From that
   point the secret's confinement is a property of the action's code — including
-  the `worker-*` actions, which run user-supplied PHP, JavaScript, Java or
-  Python. This is credential *injection into an execution platform*, which is a
+  the `worker-*` actions, whose own documentation says they execute "the provided
+  Python code at the remote worker" and whose example handler reaches the client
+  through `connector.get_connection('App')` (`worker-python.md` @ `0b369b7`;
+  Java, JavaScript and PHP siblings exist). Credential *injection into an
+  execution platform*, which is a
   strictly weaker thing than a capability machine, and it is precisely the
   property `AGENTS.md` rule 1 and `docs/security-layers.md` refuse to concede in
   007.
