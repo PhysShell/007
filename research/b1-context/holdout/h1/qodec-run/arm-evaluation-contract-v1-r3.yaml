@@ -1,0 +1,265 @@
+schema: o7.b1.evaluation-contract/v1
+contract_id: o7.b1.evaluation-contract/v1
+contract_revision: 3
+semantic_revision_from_r2: false
+validation_revision: true
+supersedes_contract_revision: 2
+supersedes:
+  instance: evaluation-contract-v1-r2.yaml
+  artifact_bytes_sha256: sha256:3333333333333333333333333333333333333333333333333333333333333333
+  r4a1_contract_commit: '0000000000000000000000000000000000000000'
+provenance_role:
+  case_role: development
+  designed_after_observing_case_0002: true
+  holdout_evidence: false
+  generalization_claim_allowed: false
+digest_domains:
+  canonicalization:
+    id: o7-canonical-json-v0
+    definition: holdout
+  policy: dual
+  gold_state_dual_binding:
+    logical_id: gold-state.json
+    artifact_bytes_sha256: sha256:89e3eb61de3b0ca9da8567b00ed07ed5c6919c2e0eb48ee7a78f117443928d45
+    canonical_object_sha256: sha256:de24cd3c8efcd4670bf7c158308ee294848d941d3c7e7fe02191d2085e65b220
+    byte_length: 2476
+arms:
+  full_derived:
+    requirement: required
+  projection:
+    requirement: required
+  negative_control:
+    requirement: optional
+arm_semantics:
+  missing_required_arm: UNAVAILABLE
+  missing_optional_arm: NOT_APPLICABLE
+  non_applicable_metrics: null
+  synthetic_negative_control: forbidden
+  gold_state: oracle
+family_applicability:
+  source_compilation:
+    full_derived: required
+    projection: required
+    negative_control: optional
+  projection_validity:
+    projection: required
+    full_derived: NOT_APPLICABLE
+    negative_control: NOT_APPLICABLE
+  question_observation_support:
+    projection: required
+    full_derived: NOT_APPLICABLE
+    negative_control: NOT_APPLICABLE
+  relation_support:
+    projection: required
+    full_derived: NOT_APPLICABLE
+    negative_control: NOT_APPLICABLE
+  stale_state_safety:
+    projection: required
+    full_derived: NOT_APPLICABLE
+    negative_control: NOT_APPLICABLE
+  negative_control_diagnostics:
+    negative_control: optional
+full_derived_semantics: holdout
+source_compilation_requirements_full_derived:
+- session_matches_derived_manifest
+- derived_body_available
+- derived_byte_length_and_sha256_match
+- record_count_reproducible
+- extractor_identity_and_raw_binding_present
+budget:
+  authoritative_artifact: budget-v0.yaml
+  artifact_bytes_sha256: sha256:0e69d6f8a13b130e4cc7ee59b88e82fd785fdd5c0bf2cdac4313c90a7b719f10
+  canonical_object_sha256: sha256:110f418b5291531375ea3c3f8f6ed36351e33c5e42ccb5826562f469f7c08d13
+  byte_length: 137
+  byte_budget: 20000
+  record_budget: 32
+  unit: utf8_bytes+records
+  counted_representation:
+    id: selector-v0-canonical-record-jsonl
+    definition: holdout
+    gating: true
+  diagnostics:
+    rendered_context_sizes:
+      gating: false
+input_closure:
+  required_public_structured:
+  - task-holdout-h1-operate.yaml
+  - task-holdout-h1-review.yaml
+  required_private:
+  - holdout-session
+  negative_control_body: none
+  raw_source_bodies: frozen
+  fail_closed: undeclared inputs refuse
+bound_inputs:
+  gold_state:
+    logical_id: gold-state.json
+    visibility: public
+    artifact_bytes_sha256: sha256:89e3eb61de3b0ca9da8567b00ed07ed5c6919c2e0eb48ee7a78f117443928d45
+    canonical_object_sha256: sha256:de24cd3c8efcd4670bf7c158308ee294848d941d3c7e7fe02191d2085e65b220
+    byte_length: 2476
+  fixture_manifest:
+    logical_id: manifest.yaml
+    visibility: public
+    artifact_bytes_sha256: sha256:2e8a17739a623c13f34cc567972bb1c8ec522e9775855e5c7c427aeb5828552d
+    canonical_object_sha256: sha256:a5fc5d1c784ba97e4a7c0c1eb29d6a3ba71f0d77bb4424667c4b5fa7e242fe0f
+    byte_length: 261
+  source_selectors:
+    logical_id: source-selectors.yaml
+    visibility: public
+    artifact_bytes_sha256: sha256:b5d098ce6536a0597577303ac844ee5e84455b973516db99e145b1af7bad3e04
+    canonical_object_sha256: sha256:e5a69f93212a208bb8878f9e53cbc60da7922973d53d6c7f39a35900139fd189
+    byte_length: 138
+  task_registry:
+    logical_id: tasks.yaml
+    visibility: public
+    artifact_bytes_sha256: sha256:ba7dda855edfce861d42ff2c5de0c379345858098aad12634ff8b14d4661d4aa
+    canonical_object_sha256: sha256:c1e89041781ffdc47c36de483dfbab8fdeef653a1dcc720f67267347f72dd1d0
+    byte_length: 247
+  budget:
+    logical_id: budget-v0.yaml
+    visibility: public
+    artifact_bytes_sha256: sha256:0e69d6f8a13b130e4cc7ee59b88e82fd785fdd5c0bf2cdac4313c90a7b719f10
+    canonical_object_sha256: sha256:110f418b5291531375ea3c3f8f6ed36351e33c5e42ccb5826562f469f7c08d13
+    byte_length: 137
+  r3_1_report:
+    logical_id: report.json
+    visibility: public
+    artifact_bytes_sha256: sha256:4ab51c97c565541f354b3fbfbf192fec9c027f8e3e23a03b196b410871fd6c2a
+    canonical_object_sha256: sha256:91b491093b124f1ed87bb20b0fe5f7707a80dfa7731c3130a5fe6cec67b68d38
+    byte_length: 1812
+  r3_1_projection_comparison:
+    logical_id: projection-comparison.json
+    visibility: public
+    artifact_bytes_sha256: sha256:a5c91b1b9cd0c4e30d96db6774ff5ebef63b6647235a2b49499b39a912b051ca
+    canonical_object_sha256: sha256:13d714495f7a474bcb73a9bacdeab5c646c8581f552b29983c4b62bd7d0b396f
+    byte_length: 1831
+  r3_1_derived_manifest:
+    logical_id: derived-manifest.json
+    visibility: public
+    artifact_bytes_sha256: sha256:b8cd336b0c9b43b27ec34c930af64ca3849fafc3c0735332ae559853dd9ba929
+    canonical_object_sha256: sha256:56ae7668e5f7c7c6761bee6658c0cd8bd0d8321b691af10be3d6e07923d499e2
+    byte_length: 528
+  task_files:
+    task-holdout-h1-operate.yaml:
+      visibility: public
+      artifact_bytes_sha256: sha256:f3bbf7794246065c3a30d9e584390d65e5f67944a6d1502b6bd3ae581d774603
+      canonical_object_sha256: sha256:f68f61d0e946fd0133c9491444e9a136d933b5312e737ba63a1b6ff44091f4da
+      byte_length: 288
+    task-holdout-h1-review.yaml:
+      visibility: public
+      artifact_bytes_sha256: sha256:f38076b0cd19905d0e023b44926f9d0a62f24f83147cc789816475a20e601515
+      canonical_object_sha256: sha256:bb197340080928c706b64cac68cbe308f006ecdd80b8903f46bf783197de13a8
+      byte_length: 289
+  question_files:
+    questions-holdout-h1-operate.yaml:
+      visibility: public
+      artifact_bytes_sha256: sha256:d75b6b8c789e41e93de550d388fa366a1521448b5769d6aa0ed39e24f9ea1e78
+      canonical_object_sha256: sha256:fea920b607798156a1b4fc80217a2bdebf8b5b5b33cd10c824179ca4df349eba
+      byte_length: 360
+    questions-holdout-h1-review.yaml:
+      visibility: public
+      artifact_bytes_sha256: sha256:53897fcf5ca2d880886a77d45e175668c1ae17d8e57846541412cf00b6fe9b62
+      canonical_object_sha256: sha256:32e7c7402019788c84a2916ff881afe75571a4d3a8219c81b333d1b0fc9cda31
+      byte_length: 138
+  task_contexts:
+    holdout-h1-operate:
+      visibility: public
+      artifact_bytes_sha256: sha256:77ddeee90f896b8ae3d5713f0d0b8c82c64be7ecf0c9d0fdee4b9b273ac1f52e
+      canonical_object_sha256: sha256:aad6c99b06431da8b923802de8f587ead46b8daa5bbd65c66e8dc31796cf3909
+      byte_length: 2795
+    holdout-h1-review:
+      visibility: public
+      artifact_bytes_sha256: sha256:75c2e69dd2b158d8c3f2893f1fa166ea017989d5460dfc28ad4fa134f4eb770e
+      canonical_object_sha256: sha256:cda41e07d75e69f528918ac28b8aa34cc1606e3b049beb9a761bf6d0971baed9
+      byte_length: 1722
+  derived_bodies_private:
+  - session_id: holdout-session
+    visibility: private
+    artifact_bytes_sha256: sha256:269ee2b02288fdc4be2652a75450bdbcf16810caee5ae9b0a415de757b207d69
+    byte_length: 39
+    record_count: 3
+tasks:
+  holdout-h1-operate:
+    questions_file: questions-holdout-h1-operate.yaml
+    relation_requirements:
+    - question: qh1-support
+      from: obs-h1-support-src
+      kind: supports
+      endpoint_policy: all_current_targets_materialized
+      gold_derived_targets:
+      - obs-h1-state
+      target_status:
+      - current
+      direction: outgoing
+      depth: 1
+      match: all
+  holdout-h1-review:
+    questions_file: questions-holdout-h1-review.yaml
+contract_input_consistency_gates:
+- id: gate-01
+  description: fixture identity agreement
+- id: gate-02
+  description: registry filename and digest agreement
+- id: gate-03
+  description: exact task-set agreement
+- id: gate-04
+  description: questions filename and dual-digest agreement
+- id: gate-05
+  description: referenced question existence
+- id: gate-06
+  description: every legacy relation path expanded
+- id: gate-07
+  description: no invented explicit relation requirement
+- id: gate-08
+  description: forbidden-stale set equality
+- id: gate-09
+  description: gold-derived targets recomputed exactly
+- id: gate-10
+  description: target-status agreement
+- id: gate-11
+  description: unknown identifiers or closed-vocabulary values rejected
+task_dependence:
+  all_unordered_pairs: true
+  pair_expectations:
+  - left: holdout-h1-operate
+    right: holdout-h1-review
+    expected_shape: incomparable
+    rationale: holdout
+  not_frozen: holdout
+shape_semantics:
+  incomparable: sets differ, neither subset
+  left_strict_superset: left contains every right item plus more
+  unknown_shape: fail closed
+evaluator_implementation_identity:
+  manifest_schema: o7.b1.evaluator-implementation-manifest/v0
+  manifest_digest_field: evaluator_implementation_manifest_digest
+  output_must_record:
+    evaluator_entrypoint_sha256: required
+    evaluator_module_sha256: required
+    execution_checkout_commit: required
+    execution_checkout_tree: required
+  note: holdout
+outcome_axes:
+- contract_input_consistency
+- source_compilation
+- projection_validity
+- question_observation_support
+- relation_support
+- stale_state_safety
+- task_dependence
+- negative_control_diagnostics
+axis_requirements:
+  contract_input_consistency: required
+  source_compilation: required
+  projection_validity: required
+  question_observation_support: required
+  relation_support: required
+  stale_state_safety: required
+  task_dependence: required
+  negative_control_diagnostics: optional
+overall_rules:
+  any_required_axis_FAIL: overall FAIL
+  any_required_axis_UNAVAILABLE_without_FAIL: overall UNAVAILABLE
+  all_required_axes_PASS: overall PASS
+  optional_diagnostics_cannot_upgrade_or_downgrade_required_gates: true
+  PARTIAL: forbidden in evaluation v1

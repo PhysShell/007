@@ -1,0 +1,225 @@
+{
+  "cases": {
+    "h1": {
+      "baseline_failed_axes": [],
+      "baseline_overall": "PASS",
+      "per_task": [
+        {
+          "baseline_selected": [
+            "obs-h1-decision",
+            "obs-h1-detail",
+            "obs-h1-next",
+            "obs-h1-state",
+            "obs-h1-support-src"
+          ],
+          "every_q1r_relation_gold_grounded": true,
+          "q1r_added": [],
+          "q1r_selected": [
+            "obs-h1-decision",
+            "obs-h1-detail",
+            "obs-h1-next",
+            "obs-h1-state",
+            "obs-h1-support-src"
+          ],
+          "selection_changed": false,
+          "task": "holdout-h1-operate"
+        },
+        {
+          "baseline_selected": [
+            "obs-h1-review-a",
+            "obs-h1-review-b"
+          ],
+          "every_q1r_relation_gold_grounded": true,
+          "q1r_added": [],
+          "q1r_selected": [
+            "obs-h1-review-a",
+            "obs-h1-review-b"
+          ],
+          "selection_changed": false,
+          "task": "holdout-h1-review"
+        }
+      ],
+      "q1r_axes": {
+        "contract_input_consistency": "PASS",
+        "negative_control_diagnostics": "NOT_APPLICABLE",
+        "projection_validity": "PASS",
+        "question_observation_support": "PASS",
+        "relation_support": "PASS",
+        "source_compilation": "PASS",
+        "stale_state_safety": "PASS",
+        "task_dependence": "PASS"
+      },
+      "q1r_failed_axes": [],
+      "q1r_overall": "PASS",
+      "qodec_project_operational": "OK",
+      "repaired": false,
+      "shape": "relation-light"
+    },
+    "h2": {
+      "baseline_failed_axes": [
+        "relation_support"
+      ],
+      "baseline_overall": "FAIL",
+      "per_task": [
+        {
+          "baseline_selected": [
+            "obs-h2-authority",
+            "obs-h2-current-a",
+            "obs-h2-current-b",
+            "obs-h2-derived",
+            "obs-h2-derived-src"
+          ],
+          "every_q1r_relation_gold_grounded": true,
+          "q1r_added": [
+            "obs-h2-super-src-1",
+            "obs-h2-super-src-2"
+          ],
+          "q1r_selected": [
+            "obs-h2-authority",
+            "obs-h2-current-a",
+            "obs-h2-current-b",
+            "obs-h2-derived",
+            "obs-h2-derived-src",
+            "obs-h2-super-src-1",
+            "obs-h2-super-src-2"
+          ],
+          "selection_changed": true,
+          "task": "holdout-h2-audit"
+        },
+        {
+          "baseline_selected": [
+            "obs-h2-super-src-1",
+            "obs-h2-super-src-2"
+          ],
+          "every_q1r_relation_gold_grounded": true,
+          "q1r_added": [],
+          "q1r_selected": [
+            "obs-h2-super-src-1",
+            "obs-h2-super-src-2"
+          ],
+          "selection_changed": false,
+          "task": "holdout-h2-history"
+        }
+      ],
+      "q1r_axes": {
+        "contract_input_consistency": "PASS",
+        "negative_control_diagnostics": "NOT_APPLICABLE",
+        "projection_validity": "PASS",
+        "question_observation_support": "PASS",
+        "relation_support": "PASS",
+        "source_compilation": "PASS",
+        "stale_state_safety": "PASS",
+        "task_dependence": "FAIL"
+      },
+      "q1r_failed_axes": [
+        "task_dependence"
+      ],
+      "q1r_overall": "FAIL",
+      "qodec_project_operational": "OK",
+      "repaired": false,
+      "shape": "relation-heavy"
+    },
+    "h3": {
+      "baseline_failed_axes": [
+        "relation_support"
+      ],
+      "baseline_overall": "FAIL",
+      "per_task": [
+        {
+          "baseline_selected": [
+            "obs-h3-01",
+            "obs-h3-02",
+            "obs-h3-03",
+            "obs-h3-04",
+            "obs-h3-05",
+            "obs-h3-06",
+            "obs-h3-07",
+            "obs-h3-08"
+          ],
+          "every_q1r_relation_gold_grounded": true,
+          "q1r_added": [
+            "obs-h3-super-src"
+          ],
+          "q1r_selected": [
+            "obs-h3-01",
+            "obs-h3-02",
+            "obs-h3-03",
+            "obs-h3-04",
+            "obs-h3-05",
+            "obs-h3-06",
+            "obs-h3-07",
+            "obs-h3-08",
+            "obs-h3-super-src"
+          ],
+          "selection_changed": true,
+          "task": "holdout-h3-load"
+        },
+        {
+          "baseline_selected": [
+            "obs-h3-meta-a",
+            "obs-h3-meta-b"
+          ],
+          "every_q1r_relation_gold_grounded": true,
+          "q1r_added": [],
+          "q1r_selected": [
+            "obs-h3-meta-a",
+            "obs-h3-meta-b"
+          ],
+          "selection_changed": false,
+          "task": "holdout-h3-meta"
+        }
+      ],
+      "q1r_axes": {
+        "contract_input_consistency": "PASS",
+        "negative_control_diagnostics": "NOT_APPLICABLE",
+        "projection_validity": "FAIL",
+        "question_observation_support": "PASS",
+        "relation_support": "PASS",
+        "source_compilation": "PASS",
+        "stale_state_safety": "PASS",
+        "task_dependence": "PASS"
+      },
+      "q1r_failed_axes": [
+        "projection_validity"
+      ],
+      "q1r_overall": "FAIL",
+      "qodec_project_operational": "OK",
+      "repaired": false,
+      "shape": "budget-pressure"
+    }
+  },
+  "discipline": "run AFTER freeze; frozen producer + adapter unchanged; C1 not used",
+  "producer": {
+    "adapter": "o7.b1.qodec-project-arm/v0",
+    "binary_sha256": "sha256:0a0996f3378fd1a3f9c1b637591507ca02d0491c55962a5d5ee291e752cf089b",
+    "qodec_commit": "6a5d40304d5997fd9ba6325521f3e212eba4aa75"
+  },
+  "record": "o7.b1.holdout-run-verdict/v0",
+  "summary": {
+    "c1_used_as_input": false,
+    "concrete_next_requirements": {
+      "methodology": "task_dependence pair_expectations must be projection-invariant (or holdout fixtures must not pin baseline-specific shapes) \u2014 surfaced by H2",
+      "qodec_project_v1": "constraint-aware selection under budget (budget-aware eviction) \u2014 required by H3"
+    },
+    "every_q1r_relation_gold_grounded": true,
+    "generalization": "NOT_ESTABLISHED: mixed results on 3 SYNTHETIC producer-holdout cases; a real-source holdout (charter rules 1-4) remains the only path to a generalization claim. What IS shown: the frozen producer repairs relation-evidence loss on new material (gold-grounded, no fabrication) and its limits are now concrete.",
+    "no_fabricated_edge": true,
+    "producer_frozen": "Qodec QA 6a5d4030 (binary 0a0996f3) + adapter f8fa87e3 \u2014 unchanged",
+    "provenance": {
+      "case_role": "development",
+      "generalization_claim_allowed": false,
+      "holdout_evidence": "synthetic producer-holdout only"
+    },
+    "relation_support_repair": {
+      "h1": "n/a (baseline passed)",
+      "h2": "REPAIRED (FAIL->PASS)",
+      "h3": "REPAIRED (FAIL->PASS)"
+    },
+    "run_after_freeze": true,
+    "verdict_by_case": {
+      "h1": "PASS->PASS: producer robust on relation-light; closure not needed (normal result)",
+      "h2": "relation_support REPAIRED, but task_dependence FAILS: the repaired selection shifts the audit<->history pair off the baseline-pinned 'incomparable' expectation. Methodology finding: task_dependence pair_expectations pinned to one projection are not invariant under an alternative valid projection.",
+      "h3": "relation_support REPAIRED, but projection_validity FAILS: the repaired load context is 9 records > the task's tight record_budget of 8. Budget-pressure finding: qodec project v0 (closure, no eviction, fed the contract's loose budget) overflows a tight budget."
+    }
+  }
+}
