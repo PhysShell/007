@@ -58,7 +58,7 @@ The implementation language is Dart (`pubspec.yaml` at the pinned revision).
 ```text
 artifact     docs/q-deck/a1-authority-contracts.md
 branch       claude/a1-contract-freeze-dkrnnq
-revision     3c3097482c86d1fc65ccf793e6b3b2ce1e60ef48
+revision     8009535d48675483ee2b5d4bc08115945110d5f6   (R4, re-pinned — §1.5)
 merged       NO — not reachable from origin/main at the time of this record
 status       as stated in its own header: PROPOSED FREEZE / REVIEW REQUIRED /
              NON-AUTHORITATIVE — a freeze *candidate*, to which "no A1
@@ -66,22 +66,50 @@ status       as stated in its own header: PROPOSED FREEZE / REVIEW REQUIRED /
 ```
 
 The stronger fact is the document's own status, not merely its merge state:
-A1-F is not an accepted freeze. It reached `3c30974` through three corrective
+A1-F is not an accepted freeze. It reached `8009535` through four corrective
 rounds after the commit that named itself a freeze (`144ebf6`, 1127 lines →
-`3c30974`, 2154 lines). A comparison stated against "the current freeze" without
+`8009535`, 2344 lines). A comparison stated against "the current freeze" without
 a head names nothing.
 
 ### 1.4 Staleness condition
 
 Either side moving invalidates this record:
 
-- the_grid at a revision other than `46d6d26` — §3 must be re-derived;
-- A1-F at a head other than `3c30974`, **including acceptance** — §4 and §5 must
-  be re-reviewed before being relied on.
+- the_grid at a revision other than `46d6d26` — §2 must be re-derived;
+- A1-F at a head other than `8009535`, **including acceptance** — §3, §4 and §5
+  must be re-reviewed before being relied on.
 
 This is the same discipline `docs/research/specula-trace-conformance.md` states
 for its own A1-F audit: a conclusion about a document that is still moving is
 `STALE`, not `ESTABLISHED`, once the document moves.
+
+### 1.5 Re-review log
+
+The condition above is not decorative. It has fired once already, before this
+record ever reached `main`.
+
+| Re-review | A1-F head | What was re-checked | Outcome |
+| --- | --- | --- | --- |
+| 2026-08-07, R4 | `3c30974` → `8009535` | §2 not affected (external artifact unmoved); §3's four load-bearing citations re-derived at the new head; §4's disposition re-tested | **Unchanged.** `NO A1-F CONTRACT CHANGE` holds at `8009535` |
+
+What was actually re-derived at `8009535`, rather than assumed from the round's
+summary:
+
+- the status header still reads `PROPOSED FREEZE / REVIEW REQUIRED /
+  NON-AUTHORITATIVE` — R4 is a corrective round, not an acceptance;
+- §0 still binds the durable dispatch boundary and fail-closed post-dispatch
+  ambiguity to `docs/q-deck/r1-command.md` §11.1–§11.2, unchanged by R4;
+- §6 still excludes external reconciliation from A1's scope;
+- the projection quote in §3 is byte-identical at the new head;
+- R4 introduced **no** line containing adoption, lease, liveness, orphan,
+  reconciliation, spawn, detach, or allocation vocabulary — the deferred notions
+  in §4 did not migrate into A1 while this record was unmerged.
+
+R4's own subject is the resolver boundary and reducer algebra: a `verify /
+resolve_event / fold` split with an in-memory resolved event, closed inside
+existing schemas with no new persistent message kind. That is orthogonal to
+every notion in §4, which is why the disposition survives — not because the two
+rounds looked similar.
 
 ## 2. Artifact says
 
