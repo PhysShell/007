@@ -75,15 +75,21 @@ impl FakeClaude {
             &script,
             r#"#!/bin/sh
 DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-N=$(( $(cat "$DIR/count" 2>/dev/null || echo 0) + 1 ))
+# Claim this invocation's number ATOMICALLY. `mkdir` fails if the name already
+# exists, so two concurrent providers can never take the same $N. A
+# read-then-write counter lets both read the same value, overwrite each other's
+# per-invocation files, and publish a single increment — which would hide a
+# duplicate dispatch behind a count that still looks correct, and the exact-count
+# assertions in this file exist precisely to catch that.
+N=1
+until mkdir "$DIR/seq.$N" 2>/dev/null; do N=$(( N + 1 )); done
 printf '%s\0' "$@" > "$DIR/argv.$N"
 touch "$DIR/invoked.$N"
 echo "$$" > "$DIR/pid.$N"
-# `count` is the readiness barrier `wait_for_invocation` polls, so it is
-# published LAST — after every per-invocation file it advertises, and still
-# before the sleep, so a test may hold this invocation open. Bumping it first
-# lets `wait_for_invocation(N)` return while `pid.$N` does not exist yet.
-echo "$N" > "$DIR/count"
+# Readiness is published LAST, one marker per invocation, so a marker exists
+# only once everything it advertises does — and still before the sleep, so a
+# test may hold this invocation open. `invocation_count` counts these markers.
+touch "$DIR/published.$N"
 S=$(cat "$DIR/sleep_seconds" 2>/dev/null || echo 0)
 sleep "$S"
 printf '{"result":"synthetic ok","session_id":"fixed-session-1","total_cost_usd":0.001}\n'
@@ -106,11 +112,23 @@ exit 0
         std::fs::write(self.dir.path().join("sleep_seconds"), secs.to_string()).unwrap();
     }
 
+    /// How many invocations are *fully recorded* — the number of readiness
+    /// markers, not a counter the fixture increments. Two concurrent providers
+    /// take two atomically-distinct numbers, so each stays separately
+    /// observable and a duplicate dispatch raises this count instead of being
+    /// absorbed into a lost update.
     fn invocation_count(&self) -> u64 {
-        std::fs::read_to_string(self.dir.path().join("count"))
-            .ok()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(0)
+        let Ok(entries) = std::fs::read_dir(self.dir.path()) else {
+            return 0;
+        };
+        entries
+            .filter_map(Result::ok)
+            .filter(|e| {
+                e.file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with("published."))
+            })
+            .count() as u64
     }
 
     /// Wait (bounded) until at least `n` invocations have been recorded.
@@ -1766,11 +1784,14 @@ fn an_ordinary_error_after_attach_is_provider_outcome_ambiguous_never_rejected_n
         &restored,
         r#"#!/bin/sh
 DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-N=$(( $(cat "$DIR/count" 2>/dev/null || echo 0) + 1 ))
+# Same atomic claim and readiness publication as the fixture in
+# `FakeClaude::new`; this script replaces it mid-test and must keep counting
+# into the same sequence.
+N=1
+until mkdir "$DIR/seq.$N" 2>/dev/null; do N=$(( N + 1 )); done
 printf '%s\0' "$@" > "$DIR/argv.$N"
 touch "$DIR/invoked.$N"
-# Same barrier ordering as the fixture in `FakeClaude::new`.
-echo "$N" > "$DIR/count"
+touch "$DIR/published.$N"
 printf '{"result":"synthetic ok","session_id":"fixed-session-1","total_cost_usd":0.001}\n'
 exit 0
 "#,
