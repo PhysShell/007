@@ -67,6 +67,10 @@ def identify_binary(deja, claimed_commit, allow_unverified=False):
     elif claimed_commit and not revision.startswith(claimed_commit[:12]):
         refusal = (f"--subject-commit {claimed_commit} but the binary is "
                    f"stamped vcs.revision={revision}")
+    elif claimed_commit and dirty is None:
+        refusal = ("the binary carries no vcs.modified stamp, so it cannot be "
+                   f"shown that {claimed_commit} is the *unmodified* source it "
+                   "was built from")
     elif claimed_commit and dirty:
         refusal = (f"the binary was built from a modified tree "
                    f"(vcs.modified=true), so {claimed_commit} does not "

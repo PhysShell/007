@@ -49,12 +49,16 @@ subject is a refusal rather than a shrug — including supplying no subject:
 no --subject-commit        → refuse
 revision mismatch          → refuse
 no vcs.revision stamp      → refuse
+no vcs.modified stamp      → refuse
 vcs.modified = true        → refuse
 ```
 
-The first was the worst of the four while it stood: with no commit claimed,
-nothing was checked and the report still recorded `binary_unverified: false`,
-which is a claim of verification for a binary nobody identified.
+Two of those five arrived by review, and both were the same shape: an
+unverifiable state recorded as verified. With no commit claimed, nothing was
+checked and the report still said `binary_unverified: false` — a claim of
+verification for a binary nobody identified. With `vcs.modified` absent rather
+than false, the source state was unknown and the report said the same thing.
+Clean must be shown, not inferred from silence.
 
 `--allow-unverified-binary` is the explicit escape hatch, and it is recorded in
 the report (`binary_unverified`, `binary_unverified_reason`) so a reader can
