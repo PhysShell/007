@@ -1,0 +1,54 @@
+{
+  "case": "case-0003-interface-dispatch",
+  "engine": "<scratch>/bin/gortex",
+  "engine_version": "v0.63.1",
+  "facts": [
+    {
+      "index": 0,
+      "note": "localization failure (S1); not scored as fidelity (S2)",
+      "outcome": "SEED_UNBOUND",
+      "relation": "implementations",
+      "seed": "seed-sink-accept",
+      "seed_bound": false
+    },
+    {
+      "index": 1,
+      "note": "localization failure (S1); not scored as fidelity (S2)",
+      "outcome": "SEED_UNBOUND",
+      "relation": "callers",
+      "seed": "seed-ledger-accept",
+      "seed_bound": false
+    }
+  ],
+  "profile": "manifested",
+  "seed_binding": [
+    {
+      "bound": false,
+      "gold": {
+        "line_range": [
+          4,
+          6
+        ],
+        "path": "source/adapters/ledger-sink.ts",
+        "symbol": "LedgerSink.accept"
+      },
+      "resolved_id": null,
+      "resolved_line": null,
+      "seed": "seed-ledger-accept"
+    },
+    {
+      "bound": false,
+      "gold": {
+        "line_range": [
+          2,
+          2
+        ],
+        "path": "source/ports/payment-sink.ts",
+        "symbol": "PaymentSink.accept"
+      },
+      "resolved_id": null,
+      "resolved_line": null,
+      "seed": "seed-sink-accept"
+    }
+  ]
+}

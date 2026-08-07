@@ -388,6 +388,43 @@ Package 1 is frozen by design once its three known defects are fixed. Seven
 cases cover the resolution failure modes worth distinguishing; further variants
 would grow a collection rather than the instrument.
 
+## Outcome of the first round (2026-08-07)
+
+```text
+resolution qualification   CLOSED    verdict: KEEP NARROW
+lifecycle qualification    UNKNOWN   deferred, not passed
+```
+
+Measured against gortex `v0.63.1` at corpus identity
+`5f68dd6e785b93d573325235cbe3f50ec30ea0a2`. Record, raw sweep and the
+materialised admission table:
+[`research/gortex-admissibility/results/resolution-v1.1/`](../research/gortex-admissibility/results/resolution-v1.1/).
+
+The finding that decided it was not the phantom edge or the missed caller —
+those landed in the tier that announces itself as unreliable, which is where
+they belong. What broke is a stronger claim:
+
+```text
+lsp_resolved  ≠  complete
+```
+
+Provenance describes how an observed edge was resolved. It is not a certificate
+that the fact space is closed. An `lsp_resolved` answer carrying no caveat is
+indistinguishable, from outside, between "this is everything" and "this is
+everything I model" — dynamic dispatch and non-code sources of truth are two
+different ways for the second to be true.
+
+`SOLE_OBSERVER_ALLOWED` therefore stays barred for irreversible and admission
+decisions. That was written into this document as a precaution before any
+measurement; it is now carried by one.
+
+**Lifecycle is UNKNOWN, not passed.** Until a lifecycle round runs, `o7` must
+not treat this observer as authority for invalidating evidence it has already
+consumed. Exact-head and current-identity checks remain `o7`'s own
+responsibility. Package 2 becomes a small targeted qualification round when a
+real consumer of staleness notification exists — not before, and not to earn
+the word COMPLETE.
+
 ## The decision this produces
 
 The harness exists to reach one of four verdicts, not to accumulate findings.

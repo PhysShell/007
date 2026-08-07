@@ -1,0 +1,72 @@
+{
+  "case": "case-0003-interface-dispatch",
+  "engine": "<scratch>/bin/gortex",
+  "engine_version": "v0.63.1",
+  "facts": [
+    {
+      "index": 0,
+      "note": "localization failure (S1); not scored as fidelity (S2)",
+      "outcome": "SEED_UNBOUND",
+      "relation": "implementations",
+      "seed": "seed-sink-accept",
+      "seed_bound": false
+    },
+    {
+      "caveat_class": null,
+      "confidence_label": [
+        "EXTRACTED"
+      ],
+      "expected_missing": [],
+      "forbidden_present": [],
+      "index": 1,
+      "observed": [
+        "settle"
+      ],
+      "oracle_may_claim_complete": false,
+      "oracle_required_caveats": [
+        "dynamic_dispatch"
+      ],
+      "origin": [
+        "lsp_resolved"
+      ],
+      "outcome": "FALSE_SAFE_OVERCLAIM",
+      "relation": "callers",
+      "seed": "seed-ledger-accept",
+      "seed_bound": true,
+      "tier": [
+        "lsp"
+      ]
+    }
+  ],
+  "profile": "manifested",
+  "seed_binding": [
+    {
+      "bound": true,
+      "gold": {
+        "line_range": [
+          4,
+          6
+        ],
+        "path": "source/adapters/ledger-sink.ts",
+        "symbol": "LedgerSink.accept"
+      },
+      "resolved_id": "case-0003-interface-dispatch--manifested/source/adapters/ledger-sink.ts::LedgerSink.accept",
+      "resolved_line": 4,
+      "seed": "seed-ledger-accept"
+    },
+    {
+      "bound": false,
+      "gold": {
+        "line_range": [
+          2,
+          2
+        ],
+        "path": "source/ports/payment-sink.ts",
+        "symbol": "PaymentSink.accept"
+      },
+      "resolved_id": null,
+      "resolved_line": null,
+      "seed": "seed-sink-accept"
+    }
+  ]
+}

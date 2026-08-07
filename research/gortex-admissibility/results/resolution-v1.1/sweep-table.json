@@ -1,0 +1,363 @@
+[
+  {
+    "case": "case-0001-sibling-same-name",
+    "profile": "bare",
+    "fact": 0,
+    "relation": "callers",
+    "origin": [
+      "text_matched"
+    ],
+    "confidence_label": [
+      "INFERRED"
+    ],
+    "caveat_class": "coverage_incomplete",
+    "outcome": "MISS_HONEST",
+    "expected_missing": [],
+    "forbidden_present": [
+      "dispatchMail"
+    ]
+  },
+  {
+    "case": "case-0001-sibling-same-name",
+    "profile": "bare",
+    "fact": 1,
+    "relation": "callers",
+    "origin": [],
+    "confidence_label": [],
+    "caveat_class": "coverage_incomplete",
+    "outcome": "EMPTY_CAVEATED",
+    "expected_missing": [
+      "dispatchMail"
+    ],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0001-sibling-same-name",
+    "profile": "manifested",
+    "fact": 0,
+    "relation": "callers",
+    "origin": [
+      "lsp_resolved"
+    ],
+    "confidence_label": [
+      "EXTRACTED"
+    ],
+    "caveat_class": null,
+    "outcome": "PASS",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0001-sibling-same-name",
+    "profile": "manifested",
+    "fact": 1,
+    "relation": "callers",
+    "origin": [
+      "lsp_resolved"
+    ],
+    "confidence_label": [
+      "EXTRACTED"
+    ],
+    "caveat_class": null,
+    "outcome": "PASS",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0002-alias-reexport",
+    "profile": "bare",
+    "fact": 0,
+    "relation": "callers",
+    "origin": [
+      "text_matched"
+    ],
+    "confidence_label": [
+      "INFERRED"
+    ],
+    "caveat_class": "coverage_incomplete",
+    "outcome": "MISS_HONEST",
+    "expected_missing": [
+      "renew"
+    ],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0002-alias-reexport",
+    "profile": "bare",
+    "fact": 1,
+    "relation": "references",
+    "origin": [
+      "ast_resolved",
+      "text_matched"
+    ],
+    "confidence_label": [
+      "EXTRACTED",
+      "INFERRED"
+    ],
+    "caveat_class": null,
+    "outcome": "PASS",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0002-alias-reexport",
+    "profile": "manifested",
+    "fact": 0,
+    "relation": "callers",
+    "origin": [
+      "lsp_resolved"
+    ],
+    "confidence_label": [
+      "EXTRACTED"
+    ],
+    "caveat_class": null,
+    "outcome": "PASS",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0002-alias-reexport",
+    "profile": "manifested",
+    "fact": 1,
+    "relation": "references",
+    "origin": [
+      "ast_resolved",
+      "lsp_resolved",
+      "text_matched"
+    ],
+    "confidence_label": [
+      "EXTRACTED",
+      "INFERRED"
+    ],
+    "caveat_class": null,
+    "outcome": "PASS",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0003-interface-dispatch",
+    "profile": "bare",
+    "fact": 0,
+    "relation": "implementations",
+    "origin": [],
+    "confidence_label": [],
+    "caveat_class": null,
+    "outcome": "SEED_UNBOUND",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0003-interface-dispatch",
+    "profile": "bare",
+    "fact": 1,
+    "relation": "callers",
+    "origin": [],
+    "confidence_label": [],
+    "caveat_class": "coverage_incomplete",
+    "outcome": "EMPTY_CAVEATED",
+    "expected_missing": [
+      "settle"
+    ],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0003-interface-dispatch",
+    "profile": "manifested",
+    "fact": 0,
+    "relation": "implementations",
+    "origin": [],
+    "confidence_label": [],
+    "caveat_class": null,
+    "outcome": "SEED_UNBOUND",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0003-interface-dispatch",
+    "profile": "manifested",
+    "fact": 1,
+    "relation": "callers",
+    "origin": [],
+    "confidence_label": [],
+    "caveat_class": null,
+    "outcome": "SEED_UNBOUND",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0004-cross-repo-same-name",
+    "profile": "bare",
+    "fact": 0,
+    "relation": "callers",
+    "origin": [
+      "text_matched"
+    ],
+    "confidence_label": [
+      "INFERRED"
+    ],
+    "caveat_class": "coverage_incomplete",
+    "outcome": "PASS",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0004-cross-repo-same-name",
+    "profile": "manifested",
+    "fact": 0,
+    "relation": "callers",
+    "origin": [
+      "lsp_resolved"
+    ],
+    "confidence_label": [
+      "EXTRACTED"
+    ],
+    "caveat_class": null,
+    "outcome": "PASS",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0005-overload-set",
+    "profile": "bare",
+    "fact": 0,
+    "relation": "callers",
+    "origin": [
+      "text_matched"
+    ],
+    "confidence_label": [
+      "INFERRED"
+    ],
+    "caveat_class": "coverage_incomplete",
+    "outcome": "PASS",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0005-overload-set",
+    "profile": "bare",
+    "fact": 1,
+    "relation": "callers",
+    "origin": [],
+    "confidence_label": [],
+    "caveat_class": null,
+    "outcome": "SEED_UNBOUND",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0005-overload-set",
+    "profile": "manifested",
+    "fact": 0,
+    "relation": "callers",
+    "origin": [
+      "lsp_resolved"
+    ],
+    "confidence_label": [
+      "EXTRACTED"
+    ],
+    "caveat_class": null,
+    "outcome": "PASS",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0005-overload-set",
+    "profile": "manifested",
+    "fact": 1,
+    "relation": "callers",
+    "origin": [],
+    "confidence_label": [],
+    "caveat_class": null,
+    "outcome": "SEED_UNBOUND",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0006-generated-members",
+    "profile": "bare",
+    "fact": 0,
+    "relation": "callers",
+    "origin": [
+      "text_matched"
+    ],
+    "confidence_label": [
+      "INFERRED"
+    ],
+    "caveat_class": "coverage_incomplete",
+    "outcome": "PASS",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0006-generated-members",
+    "profile": "bare",
+    "fact": 1,
+    "relation": "references",
+    "origin": [
+      "text_matched"
+    ],
+    "confidence_label": [
+      "INFERRED"
+    ],
+    "caveat_class": "coverage_incomplete",
+    "outcome": "PASS",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0006-generated-members",
+    "profile": "manifested",
+    "fact": 0,
+    "relation": "callers",
+    "origin": [
+      "lsp_resolved"
+    ],
+    "confidence_label": [
+      "EXTRACTED"
+    ],
+    "caveat_class": null,
+    "outcome": "PASS",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0006-generated-members",
+    "profile": "manifested",
+    "fact": 1,
+    "relation": "references",
+    "origin": [
+      "lsp_resolved"
+    ],
+    "confidence_label": [
+      "EXTRACTED"
+    ],
+    "caveat_class": null,
+    "outcome": "FALSE_SAFE_OVERCLAIM",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0007-sibling-same-name-lua",
+    "profile": "bare",
+    "fact": 0,
+    "relation": "callers",
+    "origin": [],
+    "confidence_label": [],
+    "caveat_class": "coverage_incomplete",
+    "outcome": "EMPTY_CAVEATED",
+    "expected_missing": [],
+    "forbidden_present": []
+  },
+  {
+    "case": "case-0007-sibling-same-name-lua",
+    "profile": "manifested",
+    "fact": 0,
+    "relation": "callers",
+    "origin": [],
+    "confidence_label": [],
+    "caveat_class": "coverage_incomplete",
+    "outcome": "EMPTY_CAVEATED",
+    "expected_missing": [],
+    "forbidden_present": []
+  }
+]

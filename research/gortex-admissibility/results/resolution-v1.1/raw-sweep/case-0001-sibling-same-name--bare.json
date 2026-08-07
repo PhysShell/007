@@ -1,0 +1,83 @@
+{
+  "case": "case-0001-sibling-same-name",
+  "engine": "<scratch>/bin/gortex",
+  "engine_version": "v0.63.1",
+  "facts": [
+    {
+      "caveat_class": "coverage_incomplete",
+      "confidence_label": [
+        "INFERRED"
+      ],
+      "expected_missing": [],
+      "forbidden_present": [
+        "dispatchMail"
+      ],
+      "index": 0,
+      "observed": [
+        "dispatchInvoice",
+        "dispatchMail"
+      ],
+      "oracle_may_claim_complete": true,
+      "oracle_required_caveats": [],
+      "origin": [
+        "text_matched"
+      ],
+      "outcome": "MISS_HONEST",
+      "relation": "callers",
+      "seed": "seed-invoice-send",
+      "seed_bound": true,
+      "tier": [
+        "heuristic"
+      ]
+    },
+    {
+      "caveat_class": "coverage_incomplete",
+      "confidence_label": [],
+      "expected_missing": [
+        "dispatchMail"
+      ],
+      "forbidden_present": [],
+      "index": 1,
+      "observed": [],
+      "oracle_may_claim_complete": true,
+      "oracle_required_caveats": [],
+      "origin": [],
+      "outcome": "EMPTY_CAVEATED",
+      "relation": "callers",
+      "seed": "seed-mail-send",
+      "seed_bound": true,
+      "tier": []
+    }
+  ],
+  "profile": "bare",
+  "seed_binding": [
+    {
+      "bound": true,
+      "gold": {
+        "line_range": [
+          5,
+          7
+        ],
+        "path": "source/billing/invoice.ts",
+        "symbol": "Invoice.send"
+      },
+      "resolved_id": "case-0001-sibling-same-name--bare/source/billing/invoice.ts::Invoice.send",
+      "resolved_line": 5,
+      "seed": "seed-invoice-send"
+    },
+    {
+      "bound": true,
+      "gold": {
+        "line_range": [
+          5,
+          7
+        ],
+        "path": "source/mail/message.ts",
+        "symbol": "MailMessage.send"
+      },
+      "resolved_id": "case-0001-sibling-same-name--bare/source/mail/message.ts::MailMessage.send",
+      "resolved_line": 5,
+      "seed": "seed-mail-send"
+    }
+  ]
+}
