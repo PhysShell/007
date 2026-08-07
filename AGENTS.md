@@ -97,6 +97,29 @@ when a change *adds an `#[allow(...)]`*; see rule 4.
 - `o7` is subprocess-bound (`docs/performance.md`). Micro-optimising code that
   is not on a subprocess boundary is not a finding.
 
+### Diagnosing is not repairing
+
+A run that was asked to explain a failure may not fix it in the same breath.
+The four lines below are one failure class each — a convenient partial signal
+being reported as a whole answer:
+
+```text
+diagnosing is not repairing             a diagnostic run may not mutate
+a likely boundary is not a root cause   name the evidence or say "unknown"
+missing evidence is not a passed check  an absent signal is not a negative result
+a first page is not the whole result    partial success is not success
+```
+
+Line 3 is the same failure the harness already refuses in code: a skipped
+required gate scores `BLOCKED`, never `PASS` (the `o7-run`
+`GateApplicability::Waived` doctrine — only a pre-declared `waive_reason`
+legitimises a skip). Line 4 is its pagination case. Stating them here closes
+the gap between what the harness enforces on itself and what a driven agent is
+told; the boundary itself is owned by the sandbox and the campaign machine
+(`docs/security-layers.md`, `docs/autonomy-controller.md`'s `HUMAN_REQUIRED`),
+not by this paragraph. Source of the contract and what was deliberately not
+taken with it: `docs/evokoa-transplant-map.md` §3.2.
+
 ### Grounding factual claims
 
 A claim about what the code or an existing mechanism already does — in a review,
