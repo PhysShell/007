@@ -332,10 +332,19 @@ def main():
         },
     }
     # Atomic publish: a torn write must never look like a complete measurement.
+    # The temp name must be unique, not fixed — two concurrent probes have
+    # separate run dirs but would share one `report.json.tmp`, and the loser
+    # could publish the winner's bytes under its own run identity. Same file
+    # system as the target, so os.replace is a real rename.
     out = HERE / "report.json"
-    tmp = out.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(report, indent=2) + "\n")
-    os.replace(tmp, out)
+    fd, tmp = tempfile.mkstemp(dir=HERE, prefix=".report-", suffix=".json.tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(json.dumps(report, indent=2) + "\n")
+        os.replace(tmp, out)
+    except BaseException:
+        pathlib.Path(tmp).unlink(missing_ok=True)
+        raise
 
     s = report["summary"]
     print(f"\nretrieval — unsupported queries answered: "
