@@ -245,11 +245,25 @@ and duplicating them would be the worse fix: two lists of one truth. So the
 bound is defined over the union:
 
 ```text
-immediate_refs(artifact) :=
-      envelope.artifact_refs
-    ∪ every ArtifactRef-valued slot declared by the payload's §3 schema
-    ∪ provider_execution_receipt_ref, when present
+immediate_refs(node) :=
+
+  node is an A1 artifact:
+        envelope.artifact_refs
+      ∪ every ArtifactRef-valued slot declared by the payload's §3 schema
+      ∪ provider_execution_receipt_ref, when present
+
+  node is a CampaignEventV1 (§3.15):
+        source_ref, when present
+      ∪ evidence_refs
+      ∪ every ArtifactRef-valued slot declared by its event payload's schema
 ```
+
+A campaign event is not envelope-bearing, but it reaches artifacts exactly like
+one does — `source_ref`, `evidence_refs`, and payload slots such as `scope_ref`,
+`receipt_ref`, gate `log_ref`s, and CI `observation_ref`s. **Every event is
+resolved under this same closure, with the same bounds, before it is folded**
+(FD-14.2). An admission path that resolves artifacts carefully and then walks
+event references freely would have moved the hole rather than closed it.
 
 Closure traversal is frozen as an algorithm, not as an intention:
 
@@ -687,7 +701,7 @@ reducer that enforces it is frozen in FD-14 and implemented in A1-V0.
 | `REVIEWING` → `READY_TO_MERGE` | `ReviewVerdict.verdict = accepted`, `reviewed_head == current_candidate_head`, no drift, required gates green | `ReviewerReport.verdict = accepted` |
 | `CORRECTING` → `BUILDING` | `CorrectiveDirective` derived from an accepted `ReviewVerdict`, same `scope_ref` digest | reviewer prose |
 | any → `HUMAN_REQUIRED` | `HumanAttentionRequest` (controller-raised); the phase left behind is stored as `suspended_from_phase` | an agent asking for a human |
-| `HUMAN_REQUIRED` → a **named** phase | `HumanDecision` bound to the exact head, contract digest, and `state_version` the human saw; the target comes from the frozen action table (FD-14.6), never from implementation policy | an acknowledged alert — ACK leaves the phase unchanged |
+| `HUMAN_REQUIRED` → a **named** phase | `HumanDecision` bound to the exact head, contract digest, and `state_version` the human saw; the target comes from the frozen action table (FD-14.6) and the exit rule of FD-14.7, never from implementation policy | an acknowledged alert — ACK leaves the phase unchanged |
 | any → `CANCEL_REQUESTED` | `HumanDecision` (CANCEL) | a UI flag |
 | `CANCEL_REQUESTED` → `CANCELLED` | the observed cancellation sequence completed (§3.10) | the request alone |
 | merge | **not authorized by A1.** Merge stays manual, outside the system | any artifact in this document |
@@ -760,18 +774,32 @@ authority-bearing (advance state_version by exactly 1):
   HumanDecisionRecorded
   AttentionResolved
   AttentionSuperseded
+  ProviderExecutionRecorded
   CampaignCancelled
   CampaignSuperseded
   CampaignTerminalError
 
-evidence-only (never advance state_version):
+evidence-only (never advance state_version, and never touch state at all):
   CoderReportReceived
   ReviewerReportReceived
-  ProviderExecutionRecorded
   HumanCommandRejected
   TransitionRejected
   CampaignFeedItemEmitted
 ```
+
+**Evidence-only means inert.** Frozen:
+
+```text
+an evidence-only event MUST NOT modify CampaignStateV1 in any field
+except last_accepted_sequence.
+```
+
+Otherwise two states could share one `state_version` while differing in
+substance, and a human's stale-command binding would stop meaning "the state you
+were looking at". `ProviderExecutionRecorded` clears `active_execution`, which is
+a real state change, so R3 moved it to the authority-bearing class rather than
+letting it mutate state under an evidence label. That is the simpler of the two
+honest repairs and it costs one `state_version` increment per execution.
 
 There is no separate `CancelRequested` event: the `HumanDecision` whose `effect`
 is `cancel_requested` *is* that transition, and minting a second event for one
@@ -817,7 +845,8 @@ AttentionSuperseded(A, superseded_by = B)           -> A: SUPERSEDED
 
 `ACKNOWLEDGED` never becomes `RESOLVED` by itself, and only the controller emits
 `AttentionResolved` — a human seeing a problem still does not make the problem
-leave.
+leave. What any of these events may do to `phase` is governed by FD-14.7, not by
+the attention transition alone.
 
 **FD-14.6 `HUMAN_REQUIRED` remembers where it came from, and every exit names its
 target.** `HUMAN_REQUIRED` is entered from `BUILDING`, `GATING`, `CI_WAIT`,
@@ -837,14 +866,44 @@ a new id — and each action's target phase is frozen:
 | action `retry_failed_step` | `suspended_from_phase` | that field is present |
 | action `cancel_campaign` | `CANCEL_REQUESTED` | — |
 | `ANSWER_QUESTION`, `declared_scope_effect = none` | `BUILDING` | question unsuperseded; controller finds no scope change |
-| `ANSWER_QUESTION`, `declared_scope_effect = revise_contract` | `SUPERSEDED` (terminal) | — |
+| `ANSWER_QUESTION`, `declared_scope_effect = revise_contract` | unchanged (`HUMAN_REQUIRED`); effect `contract_revision_requested`; no further autonomous work is dispatched | — |
 | `CANCEL` | `CANCEL_REQUESTED` | — |
 
 `accept_residual_risk` is not in the V1 set (§3.10). An option whose `action_id`
 is outside this table cannot be published by the controller or selected by a
 client.
 
-**FD-14.7 What A1 does not freeze here.** Progress frontier and `NO_PROGRESS`
+**FD-14.7 Leaving `HUMAN_REQUIRED`, and what a late attention event may not do.**
+The action table alone is not enough: an attention resolved after the campaign
+has already moved on could otherwise resurrect a phase nobody asked for. Frozen:
+
+```text
+1. Only HumanAttentionRaised may set phase = HUMAN_REQUIRED (§3.15.1).
+
+2. An event may restore suspended_from_phase ONLY when the current phase is
+   HUMAN_REQUIRED. In any other phase an attention event updates attention
+   state and leaves phase exactly as it is.
+
+3. The campaign leaves HUMAN_REQUIRED only when no attention remains OPEN or
+   ACKNOWLEDGED. A decision that names an action target resolves its own
+   attention in the same fold step; if others remain open, that attention still
+   becomes RESOLVED but the phase stays HUMAN_REQUIRED and the target is not
+   applied.
+
+4. On any actual exit from HUMAN_REQUIRED, suspended_from_phase is cleared in
+   the same step — the iff invariant of §3.14 never holds transiently false.
+
+5. CANCEL is exempt from (3) and unconditional: it sets CANCEL_REQUESTED
+   regardless of open attentions. Once the phase is CANCEL_REQUESTED, CANCELLED,
+   SUPERSEDED, or TERMINAL_ERROR, no attention event may change it — a late
+   AttentionResolved can never un-cancel a campaign.
+```
+
+Rule 5 is the one that stops the most embarrassing sequence: human cancels, a
+reconciler resolves a stale attention a second later, and the campaign
+cheerfully returns to `BUILDING`.
+
+**FD-14.8 What A1 does not freeze here.** Progress frontier and `NO_PROGRESS`
 semantics, terminal/escalation taxonomy beyond the phases listed, external
 reconciliation, cumulative per-campaign evidence accounting (FD-1.5), budget
 accounting beyond a stop condition, and the full incarnation taxonomy — all A2
@@ -1200,17 +1259,27 @@ those are observations, and a request cannot observe itself (FD-15.2).
 ```text
 declared none + controller finds no scope change -> delivered as clarification;
                                                     phase BUILDING (FD-14.6)
-declared revise_contract                         -> CampaignSuperseded:
-                                                    phase SUPERSEDED (terminal),
-                                                    reason CONTRACT_REVISION_REQUESTED
+declared revise_contract                         -> effect contract_revision_requested;
+                                                    phase stays HUMAN_REQUIRED;
+                                                    no further autonomous dispatch
 ambiguous                                        -> HUMAN_REQUIRED, explicit re-ask
 ```
 
-A contract revision never continues the same campaign. V1 has **no**
-`ContractRevisionProposal` artifact: the campaign reaches the terminal
-`SUPERSEDED` phase, a new contract is frozen out of band, and a new campaign is
-minted with an explicit `supersedes` relation (FD-5.1). Adding a
-revision-proposal artifact would be a new message kind under §7, not a footnote.
+A contract revision never continues the same campaign, and it also does not
+terminate it in the same breath. The old campaign cannot become `SUPERSEDED` at
+the moment of the answer, because the successor it would name does not exist yet
+— and `CampaignStateV1` requires `superseded_by` in that phase. So the sequence
+has one authority point per fact:
+
+```text
+HumanDecision(revise_contract)  -> contract_revision_requested, still HUMAN_REQUIRED
+out of band                     -> the new contract is frozen; a successor
+                                   campaign is minted with `supersedes`
+CampaignSuperseded{superseded_by}-> phase SUPERSEDED, superseded_by recorded
+```
+
+V1 has **no** `ContractRevisionProposal` artifact; adding one would be a new
+message kind under §7, not a footnote.
 
 **CANCEL is a process, not a flag:**
 
@@ -1241,7 +1310,7 @@ command, `APPROVE_RESIDUAL_RISK`, `REJECT_CANDIDATE`, `AUTHORIZE_MERGE`.
 | `actor.authentication_strength` | enum{`loopback_unauthenticated`,`authenticated`,`unattested`} | yes | `unattested` ⇒ refused; never read from the request | controller observation |
 | `actor.observed_transport` | enum{`loopback`,`non_loopback`} | yes | never read from the request | controller observation |
 | `actor.authenticator_id` | `Id` | iff `authenticated` | — | the authenticator |
-| `effect` | enum{`acknowledged`,`cancel_requested`,`answer_delivered`,`attention_action_selected`,`campaign_superseded`} | yes | closed | reducer (FD-14) |
+| `effect` | enum{`acknowledged`,`cancel_requested`,`answer_delivered`,`attention_action_selected`,`contract_revision_requested`} | yes | closed | reducer (FD-14) |
 | `applied_at_state_version` | u64 | yes | the version this decision advanced *to* | reducer |
 
 ### 3.12 ProviderExecutionReceiptV1 (rank 2, no envelope)
@@ -1406,18 +1475,33 @@ ceremony out of the word "protocol".
 | `campaign_protocol_version` | u32 | yes | `= 1`; equal to the campaign binding | protocol |
 | `campaign_id` | `Id` | yes | equal to the binding | controller |
 | `sequence` | u64 | yes | 0-based, contiguous, gapless | controller |
-| `previous_event_digest` | `Digest256` | yes | genesis value at `sequence = 0` | chain |
+| `previous_event_digest` | `Digest256` | yes | at `sequence = 0` it is exactly `Digest256::genesis()` — the all-zero canonical digest already frozen for run events (`crates/o7-run/src/event.rs:50–53`) | chain |
 | `event_digest` | `Digest256` | yes | framed digest of this event (below) | computed |
 | `event_kind` | enum (21 kinds, FD-14.3) | yes | closed; **class is a function of kind, never a field** | protocol |
 | `state_version_before` | u64 | yes | must equal the folded state | reducer, self-checking |
 | `state_version_after` | u64 | yes | `+1` for authority-bearing kinds, `+0` for evidence-only | reducer, self-checking |
-| `authority_ref` | `ArtifactRef` | per kind (table below) | rank 4 or 5; the artifact that authorizes the transition | controller |
+| `source_ref` | `ArtifactRef` | per kind (§3.15.1) | the expected `kind` and its allowed rank are fixed **per `event_kind`**, not globally | controller |
 | `evidence_refs` | `[ArtifactRef]` | yes (may be empty) | ≤ 256; rank ≤ 4 | controller |
-| `event_payload` | typed by `event_kind` | per kind | present only for kinds with no backing message kind | controller |
+| `event_payload_digest` | `Digest256` | iff the kind carries a payload (§3.15.2) | SHA-256 over the exact stored payload bytes, as for every other artifact (FD-1.1) | computed |
+
+The field is `source_ref`, not `authority_ref`, because the same slot carries the
+`CoderReport` of a `CoderReportReceived` — a rank-3 untrusted report that
+authorizes nothing (FD-4). Making the word "authority" cover that would be a
+small lie in a load-bearing place. So:
+
+```text
+authority-bearing event  ->  source_ref is the transition authority
+evidence-only event      ->  source_ref is provenance only, never authority
+```
 
 `state_version_before`/`_after` are stored, not merely computed, so a log
 tampered into a different transition count fails its own arithmetic before the
 reducer has to notice.
+
+**The payload is a separate stored object.** `CampaignEventPayloadV1` is stored
+as its own immutable byte string in CAS, exactly like an artifact payload
+(FD-1.1); the event carries only its digest. There is no inline payload field and
+therefore no second serialization anyone has to agree on.
 
 Event digest framing, same discipline as everything else (FD-1.2):
 
@@ -1428,40 +1512,68 @@ frame(campaign_id) frame(sequence.to_le_bytes())
 frame(previous_event_digest)
 frame(event_kind tag byte)
 frame(state_version_before.to_le_bytes()) frame(state_version_after.to_le_bytes())
-frame(authority_ref digest, or the empty string when absent)
-frame(evidence_refs count.to_le_bytes()), then each ref as in FD-1.2
+frame(source_ref present flag byte: 0 or 1), then when present the FULL ref:
+    frame(kind tag byte) frame(media_type) frame(digest) frame(size.to_le_bytes())
+frame(evidence_refs count.to_le_bytes()), then each ref framed identically
 frame(event_payload_digest, or the empty string when absent)
 ```
 
-#### Per-kind contract
+The `source_ref` is framed in full — `kind`, `media_type`, `digest`, `size` —
+not by digest alone. A ref whose declared kind or media type changed while its
+digest stayed the same is a different reference (FD-1.7, FD-2.5), and the event
+digest has to notice.
 
-`A` = authority-bearing, `E` = evidence-only. "Backing artifact" is what
-`authority_ref` must point at; a kind with `—` carries an `event_payload`
-instead, because it corresponds to no message kind.
+#### 3.15.1 Per-kind contract
 
-| `event_kind` | Class | Backing artifact | Guard (over the pre-state) | Effect on state |
+`A` = authority-bearing, `E` = evidence-only. `source_ref` names the expected
+artifact kind and its rank; `—` means the kind carries no `source_ref`.
+
+Two invariants hold for every row and are checked before the guard:
+
+```text
+evidence-only events MUST NOT modify CampaignStateV1 at all,
+  except last_accepted_sequence.
+HumanAttentionRaised is the ONLY event that may set phase = HUMAN_REQUIRED.
+```
+
+| `event_kind` | Class | `source_ref` | Guard (over the pre-state) | Effect on state |
 |---|---|---|---|---|
-| `CampaignCreated` | A | — (payload: `root_goal_id`, `task_id`, `contract_digest`, `scope_ref`, `budget_policy_digest`) | seed only; `sequence = 0` | seeds state; `phase = BUILDING` |
-| `WorkOrderIssued` | A | `WorkOrder` | `phase ∈ {BUILDING, CORRECTING}`; `scope_ref` digest matches | `phase = BUILDING`; new `active_round_id`; `active_execution = {coder, …}` |
-| `CoderReportReceived` | E | `CoderReport` | an active coder execution exists | none |
-| `ProviderExecutionRecorded` | E | — (payload: receipt ref, `execution_outcome`) | — | clears `active_execution` |
-| `CandidateAccepted` | A | `CandidateReceipt` | `phase = BUILDING`; `claim_check.claimed_head_matches`; receipt congruence passed (FD-11) | `current_candidate_head` := head; `phase = GATING`; `last_gate_results`/`last_ci_results` cleared |
-| `GateResultsAccepted` | A | — (payload: `bound_head`, `gate_ids`, `outcomes`, `log_refs`, `gate_registry_digest`) | `phase = GATING`; `bound_head == current_candidate_head`; every required gate id present | `last_gate_results` := …; `phase = CI_WAIT` if all required passed, else `HUMAN_REQUIRED` |
-| `CiResultsAccepted` | A | — (payload: `bound_head`, `check_ids`, `conclusion`, `observation_refs`) | `phase = CI_WAIT`; `bound_head == current_candidate_head` | `last_ci_results` := …; `phase = REVIEWING` on `passed`, else `HUMAN_REQUIRED` |
-| `ReviewRequested` | A | `ReviewRequest` | `phase = REVIEWING`; `candidate_head == current_candidate_head` | `active_execution = {reviewer, …}` |
-| `ReviewerReportReceived` | E | `ReviewerReport` | an active reviewer execution exists | none |
-| `ReviewVerdictAccepted` | A | `ReviewVerdict` | `phase = REVIEWING`; `reviewed_head == current_candidate_head`; gate and CI results bound to that head | `accepted` → `READY_TO_MERGE`; `changes_requested` → `CORRECTING`; `blocked` → `HUMAN_REQUIRED` |
-| `CorrectiveDirectiveIssued` | A | `CorrectiveDirective` | `phase = CORRECTING`; `scope_ref` digest unchanged; every `target_finding_id` in that verdict | `phase = BUILDING` |
-| `HumanAttentionRaised` | A | `HumanAttentionRequest` | `phase` non-terminal; `attention_id` unknown or `SUPERSEDED` | `attention += {id: OPEN}`; `suspended_from_phase := phase` **only if** `phase ≠ HUMAN_REQUIRED` (a second attention must not overwrite the way back with `HUMAN_REQUIRED` itself); `phase = HUMAN_REQUIRED` |
-| `HumanDecisionRecorded` | A | `HumanDecision` | binding checks passed (FD-15.1); `authentication_strength ≠ unattested` | per the FD-14.6 action table; ACK also sets that attention to `ACKNOWLEDGED` |
-| `AttentionResolved` | A | — (payload: `attention_id`, `resolution_code`) | that attention is `OPEN` or `ACKNOWLEDGED` | attention → `RESOLVED`; if no attention remains in `OPEN` or `ACKNOWLEDGED`, `phase := suspended_from_phase` and that field is cleared |
-| `AttentionSuperseded` | A | — (payload: `attention_id`, `superseded_by`) | both ids known; the successor is `OPEN` | attention → `SUPERSEDED` |
-| `HumanCommandRejected` | E | `HumanCommandRequest` | — | none |
-| `TransitionRejected` | E | — (payload: `attempted_event_kind`, `guard`, `reason`) | — | none |
-| `CampaignFeedItemEmitted` | E | `CampaignFeedItem` | — | none |
-| `CampaignCancelled` | A | — (payload: termination and worktree observation refs) | `phase = CANCEL_REQUESTED`; the §3.10 sequence observed | `phase = CANCELLED` |
-| `CampaignSuperseded` | A | — (payload: `superseded_by` campaign id, `reason_code`) | `phase` non-terminal | `phase = SUPERSEDED`; `superseded_by` := … |
-| `CampaignTerminalError` | A | — (payload: `reason_code`, `summary`, `evidence_refs`) | `phase` non-terminal | `phase = TERMINAL_ERROR` |
+| `CampaignCreated` | A | — | seed only; `sequence = 0` | seeds state; `phase = BUILDING` |
+| `WorkOrderIssued` | A | `WorkOrder` (5) | `phase ∈ {BUILDING, CORRECTING}`; `scope_ref` digest matches | `phase = BUILDING`; new `active_round_id`; `active_execution = {coder, …}` |
+| `CoderReportReceived` | E | `CoderReport` (3) | an active coder execution exists | none |
+| `ProviderExecutionRecorded` | A | — | `active_execution` present and matching `provider_execution_id` | clears `active_execution` |
+| `CandidateAccepted` | A | `CandidateReceipt` (4) | `phase = BUILDING`; `claim_check.claimed_head_matches`; receipt congruence passed (FD-11) | `current_candidate_head` := head; `phase = GATING`; `last_gate_results`/`last_ci_results` cleared |
+| `GateResultsAccepted` | A | — | `phase = GATING`; `bound_head == current_candidate_head`; every required gate id present exactly once | `last_gate_results := {bound_head, all_required_passed}`; `phase = CI_WAIT` **iff** `all_required_passed`, otherwise **phase unchanged** (`GATING`) |
+| `CiResultsAccepted` | A | — | `phase = CI_WAIT`; `bound_head == current_candidate_head` | `last_ci_results := {bound_head, conclusion}`; `phase = REVIEWING` **iff** `conclusion = passed`, otherwise **phase unchanged** (`CI_WAIT`) |
+| `ReviewRequested` | A | `ReviewRequest` (5) | `phase = REVIEWING`; `candidate_head == current_candidate_head` | `active_execution = {reviewer, …}` |
+| `ReviewerReportReceived` | E | `ReviewerReport` (3) | an active reviewer execution exists | none |
+| `ReviewVerdictAccepted` | A | `ReviewVerdict` (4) | `phase = REVIEWING`; `reviewed_head == current_candidate_head`; **and** `last_gate_results.bound_head == current_candidate_head` **and** `last_gate_results.all_required_passed` **and** `last_ci_results.bound_head == current_candidate_head` **and** `last_ci_results.conclusion = passed` | `accepted` → `READY_TO_MERGE`; `changes_requested` → `CORRECTING`; `blocked` → **phase unchanged** (`REVIEWING`) |
+| `CorrectiveDirectiveIssued` | A | `CorrectiveDirective` (5) | `phase = CORRECTING`; `scope_ref` digest unchanged; every `target_finding_id` in that verdict | `phase = BUILDING` |
+| `HumanAttentionRaised` | A | `HumanAttentionRequest` (5) | `phase` non-terminal and `≠ CANCEL_REQUESTED`; `attention_id` unknown or `SUPERSEDED` | `attention += {id: OPEN}`; `suspended_from_phase := phase` **only if** `phase ≠ HUMAN_REQUIRED`; `phase = HUMAN_REQUIRED` |
+| `HumanDecisionRecorded` | A | `HumanDecision` (4) | binding checks passed (FD-15.1); `authentication_strength ≠ unattested`; the referenced attention is `OPEN` or `ACKNOWLEDGED` | per the FD-14.6 table, under the exit rule of FD-14.7 |
+| `AttentionResolved` | A | — | that attention is `OPEN` or `ACKNOWLEDGED` | attention → `RESOLVED`; the phase effect is governed by FD-14.7 |
+| `AttentionSuperseded` | A | — | both ids known; the successor is `OPEN` | attention → `SUPERSEDED`; phase effect per FD-14.7 |
+| `HumanCommandRejected` | E | `HumanCommandRequest` (3) | — | none |
+| `TransitionRejected` | E | — | — | none |
+| `CampaignFeedItemEmitted` | E | `CampaignFeedItem` (5) | — | none |
+| `CampaignCancelled` | A | — | `phase = CANCEL_REQUESTED`; the §3.10 sequence observed | `phase = CANCELLED` |
+| `CampaignSuperseded` | A | — | `phase` non-terminal; the successor campaign exists | `phase = SUPERSEDED`; `superseded_by := payload.superseded_by` |
+| `CampaignTerminalError` | A | — | `phase` non-terminal | `phase = TERMINAL_ERROR` |
+
+Three rows changed shape in R3 and the reason is the same in all three:
+`GateResultsAccepted(failed)`, `CiResultsAccepted(failed)`, and
+`ReviewVerdictAccepted(blocked)` previously moved the campaign to
+`HUMAN_REQUIRED` directly, which set that phase without setting
+`suspended_from_phase` and without opening an attention — violating the state
+invariant of §3.14 and contradicting FD-12, which names
+`HumanAttentionRequest` as the authority for that transition. Now each records
+its result and leaves the phase alone; the controller then raises an attention,
+and *that* event performs the transition. FD-12's table is now literally true.
+
+`all_required_passed` and the aggregate CI `conclusion` are **derived by the
+reducer** from the payload's per-item results (§3.15.2), never carried as
+producer-authored summary fields. A summary a producer can author is a summary a
+producer can get wrong.
 
 Gate outcome values reuse the vocabulary already frozen for run events —
 `pass`, `fail`, `warn`, `blocked`, `not_applicable`
@@ -1471,6 +1583,110 @@ first.
 
 `CampaignCreated` is consumed by `seed`, never by `fold` (FD-14.2). Every other
 kind is a `fold` input.
+
+#### 3.15.2 Event payload schemas
+
+Eleven kinds carry a payload. Each is stored as its own immutable byte string under
+`event_payload_digest`, parses under FD-1.3 and FD-1.6 like every other typed
+object, and declares its `ArtifactRef` slots explicitly so FD-1.5 can account for
+them.
+
+`CampaignCreatedPayloadV1`
+
+| Field | Type | Req | Constraints |
+|---|---|---|---|
+| `root_goal_id` / `task_id` | `Id` | yes | the durable binding (FD-5.1) |
+| `contract_digest` | `Digest256` | yes | the campaign binding |
+| `scope_ref` | `ArtifactRef` | yes | `ScopeContractV1`, rank 0 |
+| `base_sha` | `CommitId` | yes | the A0 campaign base |
+| `budget_policy_digest` | `Digest256` | yes | commits to the §3.1 budget values |
+
+`ProviderExecutionRecordedPayloadV1`
+
+| Field | Type | Req | Constraints |
+|---|---|---|---|
+| `provider_execution_id` | `Id` | yes | must equal `active_execution.provider_execution_id` |
+| `receipt_ref` | `ArtifactRef` | yes | `ProviderExecutionReceiptV1`, rank 2 |
+| `execution_outcome` | enum as §3.12 | yes | closed; must equal the receipt's |
+
+`GateResultsAcceptedPayloadV1`
+
+| Field | Type | Req | Constraints |
+|---|---|---|---|
+| `bound_head` | `CommitId` | yes | FD-13 |
+| `gate_registry_digest` | `Digest256` | yes | — |
+| `results[].gate_id` | `Id` | yes | registry id; unique within the payload |
+| `results[].required` | bool | yes | from the registry, not from the runner |
+| `results[].outcome` | enum{`pass`,`fail`,`warn`,`blocked`,`not_applicable`} | yes | closed |
+| `results[].log_ref` | `ArtifactRef` | no | rank 0 |
+
+`CiResultsAcceptedPayloadV1`
+
+| Field | Type | Req | Constraints |
+|---|---|---|---|
+| `bound_head` | `CommitId` | yes | FD-13 |
+| `checks[].check_id` | `Id` | yes | unique within the payload |
+| `checks[].required` | bool | yes | from campaign policy |
+| `checks[].conclusion` | enum{`passed`,`failed`,`timed_out`,`unavailable`} | yes | closed |
+| `checks[].observation_ref` | `ArtifactRef` | no | rank 0 |
+
+Aggregate `conclusion = passed` iff every `required` check is `passed`; anything
+else is not `passed`, including `unavailable`. An unobtainable answer is not a
+green one — the same rule `ERROR ≠ FAIL ≠ PASS` already carries in `AGENTS.md`.
+
+`AttentionResolvedPayloadV1`
+
+| Field | Type | Req | Constraints |
+|---|---|---|---|
+| `attention_id` | `Id` | yes | must be `OPEN` or `ACKNOWLEDGED` |
+| `resolution_code` | enum{`condition_cleared`,`obsolete_head`,`resolved_by_decision`,`external_change_absorbed`} | yes | closed |
+| `summary` | `Text` | yes | ≤ 4096 bytes |
+
+`AttentionSupersededPayloadV1`
+
+| Field | Type | Req | Constraints |
+|---|---|---|---|
+| `attention_id` | `Id` | yes | the one being superseded |
+| `superseded_by` | `Id` | yes | an `OPEN` attention; must differ |
+
+`HumanCommandRejectedPayloadV1`
+
+| Field | Type | Req | Constraints |
+|---|---|---|---|
+| `rejection_code` | enum{`stale_state_version`,`stale_head`,`stale_contract`,`unknown_attention`,`action_not_offered`,`superseded_question`,`unattested_actor`,`id_conflict`} | yes | closed |
+| `detail` | `Text` | yes | ≤ 4096 bytes |
+
+`TransitionRejectedPayloadV1`
+
+| Field | Type | Req | Constraints |
+|---|---|---|---|
+| `attempted_event_kind` | enum as §3.15.1 | yes | closed |
+| `guard` | `Text` | yes | ≤ 512 bytes; names the guard clause that failed |
+| `reason_code` | enum{`phase_mismatch`,`head_mismatch`,`missing_evidence`,`scope_change`,`unknown_reference`,`invariant_violation`} | yes | closed |
+| `detail_ref` | `ArtifactRef` | no | rank 0 |
+
+`CampaignCancelledPayloadV1`
+
+| Field | Type | Req | Constraints |
+|---|---|---|---|
+| `termination_observation_refs` | `[ArtifactRef]` | yes | rank 0; ≤ 256 |
+| `worktree_disposition` | enum{`cleaned`,`preserved_for_forensics`} | yes | closed |
+
+`CampaignSupersededPayloadV1`
+
+| Field | Type | Req | Constraints |
+|---|---|---|---|
+| `superseded_by` | `Id` | yes | the successor campaign, which must already exist |
+| `reason_code` | enum{`contract_revision`,`terminal_failure_replacement`,`operator_replacement`} | yes | closed |
+
+`CampaignTerminalErrorPayloadV1`
+
+| Field | Type | Req | Constraints |
+|---|---|---|---|
+| `reason_code` | enum{`integrity_failure`,`id_conflict_unresolved`,`receipt_incongruent_unresolved`,`budget_exhausted`,`invariant_violation`} | yes | closed |
+| `summary` | `Text` | yes | ≤ 4096 bytes |
+| `evidence_refs` | `[ArtifactRef]` | yes (may be empty) | rank ≤ 4; ≤ 256 |
+
 
 ## 4. Reviewer independence (mechanically enforced)
 
@@ -1527,10 +1743,12 @@ work.
 
 ```text
 in scope:  the 11 message kinds; ProviderExecutionReceiptV1 + InteractionManifestV1
-           + ScopeContractV1; CampaignEventV1 with its digest chain;
-           seed/fold over CampaignStateV1 (FD-14); the FD-11 congruence check and
-           the §3.12 terminal-output binding; closure resolution over
-           immediate_refs with FD-1.5 bounds; one live corrective cycle
+           + ScopeContractV1; CampaignEventV1 with its digest chain and the ten
+           event payload schemas (eleven of them); seed/fold over CampaignStateV1 incl.
+           the HUMAN_REQUIRED exit rule; the FD-11 congruence check and the
+           §3.12 terminal-output binding; closure resolution over immediate_refs
+           for BOTH artifacts and events, with FD-1.5 bounds;
+           one live corrective cycle
 out:       progress frontier, NO_PROGRESS, reconciliation, webhooks,
            full incarnation taxonomy, cumulative per-campaign evidence
            accounting, budget accounting beyond a stop condition
@@ -1630,12 +1848,27 @@ outcome.
 | reviewer execution holding mutation credentials | refused before dispatch (§4) |
 | gate result whose bound head is not the current candidate head | diagnostic only, no transition (FD-13) |
 | transition attempted with an unsatisfied guard | `TransitionRejected`; neither counter advances (FD-14.4) |
-| evidence-only event (feed item, ACK, report received) | `last_accepted_sequence` advances, `state_version` does not (FD-14.3) |
+| evidence-only event (feed item, report received, rejected command) | `last_accepted_sequence` advances; `state_version` unchanged **and no other field changes** (FD-14.3) |
+| an evidence-only event that would mutate any other state field | contract violation; the kind belongs in the authority class (FD-14.3) |
 | replay of the same log twice | identical `CampaignStateV1`, zero provider calls (FD-8, FD-14.2) |
 | log whose `sequence` has a gap, or whose `event_digest` chain breaks | refused; never replayed "as far as it goes" (FD-14.2) |
 | log not beginning with `CampaignCreated` at `sequence = 0` | refused (FD-14.2) |
 | a second `CampaignCreated` later in the log | refused (FD-14.2) |
 | event whose `state_version_after` does not match its kind's class | refused before folding (§3.15) |
+| `previous_event_digest` at `sequence = 0` that is not `Digest256::genesis()` | refused (§3.15) |
+| a `source_ref` whose `kind`, `media_type`, or `size` changed while its digest did not | different `event_digest`; chain break detected (§3.15) |
+| `CoderReportReceived` carrying a rank-3 `source_ref` | accepted — `source_ref` is provenance for evidence kinds, and its expected rank is per-kind (§3.15) |
+| event payload bytes re-serialized differently | different `event_payload_digest`, different `event_digest` (§3.15) |
+| event whose payload or `evidence_refs` blow the closure bounds | rejected before folding (FD-1.5) |
+| `GateResultsAccepted` with a `fail` on a required gate | result stored, `phase` stays `GATING`; only `HumanAttentionRaised` may reach `HUMAN_REQUIRED` (§3.15.1) |
+| `CiResultsAccepted` whose required check is `unavailable` | aggregate `conclusion ≠ passed`; `phase` stays `CI_WAIT` (§3.15.2) |
+| `ReviewVerdictAccepted` while `last_ci_results.conclusion ≠ passed` | guard fails; `TransitionRejected` — a correct head does not make a red CI green (§3.15.1) |
+| `ReviewVerdict.verdict = blocked` | verdict stored, `phase` stays `REVIEWING`; escalation goes through an attention (§3.15.1) |
+| any event other than `HumanAttentionRaised` setting `phase = HUMAN_REQUIRED` | contract violation (FD-14.7) |
+| `AttentionResolved` arriving while `phase = CANCEL_REQUESTED` | attention state updates; phase unchanged — a late resolution never un-cancels (FD-14.7) |
+| resuming action while another attention is `OPEN` | that attention resolves; phase stays `HUMAN_REQUIRED`; target not applied (FD-14.7) |
+| exit from `HUMAN_REQUIRED` leaving `suspended_from_phase` set | contract violation; cleared in the same step (FD-14.7, §3.14) |
+| `ProviderExecutionRecorded` for an execution that is not `active_execution` | guard fails; `TransitionRejected` (§3.15.1) |
 | an event declaring itself authority-bearing against its kind | impossible — class is a function of `event_kind`, not a field (FD-14.3) |
 | `GateResultsAccepted` whose `bound_head` ≠ `current_candidate_head` | guard fails; `TransitionRejected`, neither counter advances (§3.15, FD-13) |
 | `ReviewVerdictAccepted` while `last_gate_results.bound_head` is a stale head | guard fails; no `READY_TO_MERGE` (§3.15) |
@@ -1652,7 +1885,8 @@ outcome.
 | loopback caller | recorded as `loopback_unauthenticated` + `claimed_identity`, never as an attested operator (FD-15.2) |
 | `unattested` actor | refused (FD-15.2) |
 | answer targeting a superseded `question_id` | not delivered to the coder (§3.10) |
-| answer declaring `revise_contract` | campaign superseded into `HUMAN_REQUIRED`; never continued (§3.10) |
+| answer declaring `revise_contract` | effect `contract_revision_requested`; phase stays `HUMAN_REQUIRED`; no autonomous dispatch; `SUPERSEDED` only later, via `CampaignSuperseded` naming an existing successor (§3.10, FD-14.6) |
+| `CampaignSuperseded` naming a successor that does not exist | guard fails; `TransitionRejected` (§3.15.1) |
 | attention action outside the server-provided set | rejected (§3.9) |
 | ACK on an open attention | one `HumanDecisionRecorded` (`state_version` +1); attention state `ACKNOWLEDGED`, never `RESOLVED`; `phase` unchanged (FD-14.5, FD-14.6) |
 | an attention artifact carrying a `lifecycle` field | rejected as an unknown field — lifecycle is derived state (FD-1.6, FD-14.5) |
@@ -1739,6 +1973,68 @@ A2     reducer extensions: progress frontier, NO_PROGRESS, terminal taxonomy,
 non-authoritative: it must not drive an A-series transition.
 
 ## 9. Revision history
+
+### R3 — third corrective round (review of `5e2f33c`)
+
+R2's blockers confirmed closed. The seven remaining findings all sat inside the
+new `CampaignEventV1` and the transition algebra — bugs in the arithmetic rather
+than in the prose, which is the better place to find them and a much better time.
+
+1. **The event had no unambiguous wire contract.** `event_payload_digest` was
+   framed but never declared; per-kind payloads were prose lists; `source_ref`
+   was committed by digest alone, so its `kind`/`media_type`/`size` could change
+   without changing `event_digest`; and the genesis link was "a genesis value".
+   Fixed without inventing canonical JSON: the payload is a separate stored byte
+   string with `event_payload_digest = SHA-256(exact stored bytes)` (FD-1.1
+   again), §3.15.2 gives all eleven payload kinds full field tables, the ref is
+   framed in full, and genesis is exactly `Digest256::genesis()` — the all-zero
+   digest already frozen for run events.
+2. **`authority_ref` was untypeable for evidence kinds.** It was declared rank
+   4–5 while `CoderReportReceived`, `ReviewerReportReceived`, and
+   `HumanCommandRejected` reference rank-3 objects, so a conforming
+   `CoderReportReceived` could not be encoded. Renamed to `source_ref`, with the
+   expected kind and rank fixed per `event_kind`: transition authority for
+   authority-bearing kinds, provenance for evidence kinds. The word "authority"
+   no longer has to pretend a `CoderReport` authorizes something.
+3. **Event references escaped closure accounting.** `immediate_refs` was defined
+   only for envelope-bearing artifacts, while events reach artifacts through
+   `source_ref`, `evidence_refs`, and payload slots. `immediate_refs` is now
+   defined over both node kinds, and every event is resolved under the same
+   bounds before it is folded.
+4. **An evidence-only event mutated canonical state.**
+   `ProviderExecutionRecorded` cleared `active_execution` without advancing
+   `state_version`, so two materially different states could share one version —
+   and a human's stale-command binding would have stopped meaning what it says.
+   Frozen: evidence-only events touch nothing but `last_accepted_sequence`, and
+   `ProviderExecutionRecorded` moves to the authority-bearing class.
+5. **Three transitions entered `HUMAN_REQUIRED` through the back door.**
+   `GateResultsAccepted(failed)`, `CiResultsAccepted(failed)`, and
+   `ReviewVerdictAccepted(blocked)` set that phase without setting
+   `suspended_from_phase` and without opening an attention — breaking the §3.14
+   invariant and contradicting FD-12. Each now records its result and leaves the
+   phase alone; `HumanAttentionRaised` is the sole entry to `HUMAN_REQUIRED`, and
+   FD-12's table is literally true.
+6. **`revise_contract` terminated the campaign twice, the first time
+   impossibly.** It moved to `SUPERSEDED`, which requires `superseded_by`, at a
+   moment when the successor campaign did not exist — and then blocked the very
+   `CampaignSuperseded` event that could have named it. Now the decision records
+   `contract_revision_requested` and stays `HUMAN_REQUIRED`; `CampaignSuperseded`
+   ends the campaign later, when the successor is a fact.
+7. **Leaving `HUMAN_REQUIRED` was not safe against late attention events.**
+   FD-14.7 freezes five rules: only `HumanAttentionRaised` may enter that phase;
+   `suspended_from_phase` may be restored only from it; exit requires no `OPEN`
+   or `ACKNOWLEDGED` attention remaining; the field is cleared atomically on
+   exit; and `CANCEL_REQUESTED` and every terminal phase are immune to attention
+   events — a stale resolution can never un-cancel a campaign.
+
+Cleanups: `ReviewVerdictAccepted` now requires `all_required_passed` and CI
+`conclusion = passed`, not merely results bound to the right head — a correct
+head does not turn a red CI green; aggregate gate/CI verdicts are derived by the
+reducer from per-item results rather than carried as producer-authored summaries;
+an `unavailable` required check is explicitly not `passed`; and the acceptance
+matrix rows that still described ACK as evidence-only and `revise_contract` as
+immediately superseding were corrected to match the single normative semantics.
+
 
 ### R2 — second corrective round (review of `d3dbca7`)
 
