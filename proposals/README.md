@@ -40,7 +40,10 @@ unbound claims sitting one promotion away from becoming citable.
 The practical form:
 
 - Bind a claim about this repo to a commit (`git rev-parse HEAD`), not to a date.
-  Dates are for when *you looked*; commits are what a reader can recover.
+  Dates are for when *you looked*; commits are what a reader can recover. Write
+  the **full object ID**, not a seven-character prefix — a prefix stops resolving
+  the moment another object shares it, which is precisely when someone is trying
+  to check an old claim.
 - Bind an external source to whatever immutable anchor it has — a tag, a commit,
   a content digest, a dated API version — plus the URL and the access date. Where
   the source is a mutable page with no such anchor, the verbatim quote is what is

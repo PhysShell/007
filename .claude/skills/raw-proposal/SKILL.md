@@ -59,7 +59,7 @@ facts"; it governs, this is the operational summary:
 
 - A claim about this repo's code binds a **commit** (`git rev-parse HEAD`, plus
   the blob hash if it is about one file), never a bare date, and keeps the
-  artifact-says / inference split.
+  artifact-says / inference split. Full object IDs, not prefixes.
 - An external source binds whatever immutable anchor it has — tag, commit,
   content digest, dated API version — plus the URL and the access date. For a
   mutable page with no anchor, the **verbatim quote** is what is bound; say so.

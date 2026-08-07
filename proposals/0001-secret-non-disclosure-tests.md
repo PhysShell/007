@@ -22,7 +22,9 @@ admits TRACE (`docs/o7-invoke.md`, "Key handling"; `AGENTS.md` rule 1).
 Every one of those properties is currently held by *how the code is written* and
 by a P0 review rule that says a change widening the key's reach is a finding.
 
-**Artifact says** — `src/invoke.rs` at commit `2e74c51` (blob `a84a4ee`), read
+**Artifact says** — `src/invoke.rs` at commit
+`2e74c5106821541296e7e4807811edff450bde67` (blob
+`a84a4ee1e6ee75d28f7038f4699b33eceb80149c`), read
 2026-08-07: the `#[cfg(test)]` module's test functions cover schema stripping,
 hashing, final-JSON extraction for both engines, usage/auth marker
 classification, codex argv isolation (`codex_command_is_ambient_isolated`
@@ -89,7 +91,9 @@ property (format the key into an error string on the 401 path, in a scratch
 commit that is never pushed) and confirm the test fails. A non-disclosure test
 that has never gone red is decoration.
 
-The grounding above binds `2e74c51`. Any later reader — promotion or not —
+The grounding above binds `2e74c5106821541296e7e4807811edff450bde67` in full,
+not a prefix: an abbreviation stops resolving the moment another object shares
+it. Any later reader — promotion or not —
 treats it as stale the moment `src/invoke.rs` moves, and re-reads before acting
 on it. That is rule 4's step 5, and it applies to this file as much as to
 anything in `docs/`.
