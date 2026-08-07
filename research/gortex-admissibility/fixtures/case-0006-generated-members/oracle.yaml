@@ -44,6 +44,13 @@ facts:
         persist. This is the case where correctness and safety come apart most
         sharply -- a perfect caller set still supports an unsafe action.
 
+        The impersistence is CONSTRUCTED, not narrated. tools/codegen.py renders
+        the generated file from contracts/api.yaml, and `--check` compares the
+        rendering against the committed file. Applying the rename this fact
+        forbids -- at the definition site, contract untouched -- makes that
+        check fail. The unsafety is therefore a property of the fixture that can
+        be executed, not an interpretation of a `@generated` comment.
+
   - seed: seed-fetch-invoice
     relation: references
     expected:

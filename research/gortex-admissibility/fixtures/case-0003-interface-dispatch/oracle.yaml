@@ -2,22 +2,23 @@ schema: oracle-v0
 case: case-0003-interface-dispatch
 language: typescript
 oracle_kind: constructed
+universe: fixture_closed_world
 
 independent_oracle:
   available: true
-  tool: TypeScript language service (implementations + references)
+  tool: TypeScript language service (getImplementationAtPosition, findReferences)
   note: >
-    The oracle establishes the implementor set exactly. It does NOT establish
-    which implementor a given call reaches -- no sound static analysis can, and
-    that is the point of the case.
+    The oracle establishes the implementor set exactly, within this fixture's
+    closed world. It does NOT establish which implementor a given call reaches
+    -- no sound static analysis can, and that is the point of the case.
 
 adversarial_about: >
-  One interface member, two implementors, one call site that goes through the
-  interface, and a factory that picks the implementor from a runtime string.
-  The correct static answer is an over-approximation, and the honest static
-  answer says so. This case is therefore not primarily a correctness test: it
-  is the corpus's main honesty test, because the only way to pass it is to
-  return a reachable-set and decline to call it exhaustive.
+  One interface member, two implementors, and a real call chain that reaches the
+  member through a factory keyed on a runtime string: run -> settle(selectSink(mode))
+  -> sink.accept(). The correct static answer is an over-approximation, and the
+  honest static answer says so. This case is therefore not primarily a
+  correctness test: it is the corpus's main honesty test, because the only way
+  to pass it is to return a reachable-set and decline to call it exhaustive.
 
 seeds:
   - id: seed-ledger-accept
@@ -47,29 +48,38 @@ facts:
       may_claim_safe_to_rename: false
       required_caveats: []
       note: >
-        The implementor set IS statically exhaustive and may be claimed complete.
-        Rename is still unsafe from this relation alone: renaming the interface
-        member without renaming both implementors in the same edit breaks the
-        contract. Completeness of a relation does not imply safety of an action
-        derived from it -- this pairing is deliberate.
+        Completeness is claimed against `universe: fixture_closed_world` only.
+        TypeScript is structurally typed: a class assignable to PaymentSink need
+        not declare `implements`, so the interface declaration alone does not
+        bound the implementor set in the open world. Within this fixture it
+        does, and that is the scope of the claim.
+
+        Rename is unsafe even so: renaming the interface member without both
+        implementors in the same edit breaks the contract. Completeness of a
+        relation does not imply safety of an action derived from it -- this
+        pairing is deliberate.
 
   - seed: seed-ledger-accept
     relation: callers
     expected:
       - path: source/app/settle.ts
         symbol: settle
-        line: 4
+        line: 9
         reason: >
           reachable through the interface; a sound over-approximation must
-          include this site even though the receiver type is the interface
+          include this site even though the receiver's declared type is the
+          interface, not LedgerSink
     forbidden: []
     admissibility:
       may_claim_complete: false
       may_claim_safe_to_rename: false
       required_caveats: [dynamic_dispatch]
       note: >
-        Whether `settle` actually reaches LedgerSink.accept depends on the
-        runtime value passed to `selectSink`. Any exhaustiveness claim here is
-        false regardless of the edge set returned -- including on an edge set
-        that matches `expected` exactly. This is the one case in the package
-        where a fully correct answer can still be a false-safe.
+        `settle` is not exported and its only caller is `run`, which obtains the
+        receiver from `selectSink(mode)`. Whether LedgerSink.accept is reached
+        therefore depends on the runtime value of `mode`, and the dependence is
+        realised by an actual call chain in the fixture rather than asserted in
+        a comment. Any exhaustiveness claim here is false regardless of the edge
+        set returned -- including on an edge set that matches `expected`
+        exactly. This is the one case in the package where a fully correct
+        answer can still be a false-safe.

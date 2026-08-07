@@ -20,6 +20,11 @@
       "enum": ["independent", "manual", "constructed", "unavailable"],
       "description": "How ground truth for this case was obtained. `constructed` means the fixture is authored so the answer holds by construction, which is what makes these cases usable where no compiler or language server exists."
     },
+    "universe": {
+      "enum": ["fixture_closed_world", "language_open_world"],
+      "default": "fixture_closed_world",
+      "description": "The scope any completeness claim in this case is made against. Set explicitly where the distinction bites -- e.g. TypeScript structural typing means an `implements` declaration does not bound an implementor set in the open world, so a completeness claim there holds only inside the fixture. Recording the scope stops 'statically exhaustive' from being read as a language-level guarantee it is not."
+    },
     "independent_oracle": {
       "type": "object",
       "description": "Present when a second, non-Gortex analyser can answer the same questions. Availability is a per-(language, relation) fact and must be recorded per case, never inferred from a tier.",

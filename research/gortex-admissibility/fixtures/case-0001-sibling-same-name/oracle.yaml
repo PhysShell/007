@@ -8,10 +8,16 @@ independent_oracle:
   tool: TypeScript language service (tsserver "find all references")
   command: npx tsc --noEmit -p . && npx tsserver
   note: >
-    Both an independent oracle and construction agree here. That redundancy is
-    deliberate for the control vertical: it lets the constructed-oracle method
-    itself be validated against a compiler before it is relied on for cases and
-    languages where no compiler is available.
+    Both an independent oracle and construction agree here, and the agreement is
+    executed rather than asserted: tools/check.sh step [C] drives findReferences
+    from this seed and compares the result against the sets below. The
+    redundancy is deliberate for the control vertical -- it validates the
+    constructed-oracle method against a real language service before that method
+    is relied on in case-0007, where no such service exists to appeal to.
+
+    Note that a type-check is NOT this validation. `tsc --noEmit` proves the
+    fixture is a valid program and says nothing about whose callers these are.
+    The two are reported as separate steps for that reason.
 
 adversarial_about: >
   Two unrelated classes each declare a method named `send`, and both are called

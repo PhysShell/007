@@ -46,10 +46,20 @@ facts:
       may_claim_safe_to_rename: false
       required_caveats: [overload_ambiguity]
       note: >
-        Every call reaches the implementation, so the set is exhaustive at this
-        seed. Rename is unsafe from this relation alone: renaming the
+        Every call reaches the implementation body, so the set is exhaustive at
+        this seed. Rename is unsafe from this relation alone: renaming the
         implementation signature without both overload signatures in the same
         edit does not compile.
+
+        The two seeds in this case ask genuinely different questions, and the
+        distinction is TypeScript's, not the corpus's. A call never SELECTS the
+        implementation signature -- getResolvedSignature returns an overload
+        signature at both call sites (verified: line 4 selects line 1, line 8
+        selects line 2). Seeding the implementation asks which calls REACH this
+        body, whose answer is every call to the symbol; seeding an overload
+        signature asks which calls select THAT signature. A tool that reports
+        the same set for both has collapsed the distinction, which is what the
+        `forbidden` entry on the next fact detects.
 
   - seed: seed-format-number-overload
     relation: callers

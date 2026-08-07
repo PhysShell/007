@@ -2,16 +2,34 @@
 # Self-check for the fixture corpus. Validates the instrument, not any tool
 # under test: no code-graph engine is invoked and none needs to be installed.
 #
-#   1. every oracle.yaml parses and matches oracle-v0's enums
-#   2. every path referenced by a seed or an edge exists
-#   3. every cited line number still points at the code it names
-#   4. every TypeScript case type-checks under --strict
+# Four checks, reported separately because they prove different things and a
+# missing toolchain must never read as a pass:
+#
+#   A. oracle integrity   -- parses, enums, paths, line references
+#   B. type validity      -- tsc --strict: the fixture is a valid program
+#   C. relation oracle    -- the language service agrees with the claimed
+#                            caller/reference/implementation sets
+#   D. codegen stability  -- case-0006's generated file is what its contract
+#                            generates
+#
+# B is NOT C. Type-checking proves the program compiles; it says nothing about
+# whether the caller set is the one the oracle claims. An earlier revision of
+# this corpus ran only B while its README claimed the constructed oracles had
+# been validated against TypeScript. They had not been.
+#
+# Unavailable toolchain => UNAVAILABLE, never PASS.
 #
 # Run from the corpus root:  tools/check.sh
-set -euo pipefail
+# Exit: 0 all available checks passed | 1 a check failed
+set -uo pipefail
 cd "$(dirname "$0")/.."
 
-python3 - <<'PY'
+status_a="UNAVAILABLE"; status_b="UNAVAILABLE"
+status_c="UNAVAILABLE"; status_d="UNAVAILABLE"
+rc=0
+
+echo "[A] oracle integrity"
+if python3 - <<'PY'
 import json, pathlib, sys
 import yaml
 
@@ -68,27 +86,66 @@ if problems:
     sys.exit(1)
 print("\n  oracles: parse clean, paths and line references resolve")
 PY
+then status_a="PASS"; else status_a="FAIL"; rc=1; fi
 
 TSC="$(command -v tsc || true)"
+NODE="$(command -v node || true)"
+
+echo
+echo "[B] type validity (tsc --strict)"
 if [ -z "$TSC" ]; then
-  echo "  typecheck: SKIPPED (no tsc on PATH)"
-  exit 0
+  echo "  SKIPPED -- no tsc on PATH; the fixtures are UNVERIFIED as programs"
+else
+  FLAGS=(--noEmit --strict --target es2020 --module esnext --moduleResolution bundler)
+  b_ok=0
+  for c in case-0001-sibling-same-name case-0002-alias-reexport \
+           case-0003-interface-dispatch case-0005-overload-set \
+           case-0006-generated-members; do
+    mapfile -t files < <(find "fixtures/$c/source" -name '*.ts')
+    "$TSC" "${FLAGS[@]}" "${files[@]}" || b_ok=1
+  done
+  # case-0004 is compiled once per repository root on purpose: a single project
+  # spanning both trees reproduces the cross-repo merge the case tests for, and
+  # would certify it as correct.
+  for r in repo-a repo-b; do
+    mapfile -t files < <(find "fixtures/case-0004-cross-repo-same-name/source/$r" -name '*.ts')
+    "$TSC" "${FLAGS[@]}" "${files[@]}" || b_ok=1
+  done
+  if [ $b_ok -eq 0 ]; then
+    status_b="PASS"; echo "  all TypeScript cases compile under --strict"
+  else
+    status_b="FAIL"; rc=1
+  fi
 fi
 
-FLAGS=(--noEmit --strict --target es2020 --module esnext --moduleResolution bundler)
-for c in case-0001-sibling-same-name case-0002-alias-reexport \
-         case-0003-interface-dispatch case-0005-overload-set \
-         case-0006-generated-members; do
-  mapfile -t files < <(find "fixtures/$c/source" -name '*.ts')
-  "$TSC" "${FLAGS[@]}" "${files[@]}"
-done
+echo
+echo "[C] independent relation oracle (TypeScript language service)"
+if [ -z "$NODE" ]; then
+  echo "  SKIPPED -- no node on PATH"
+  echo "  -> relation claims are UNPROVED. [B] passing does not cover this."
+else
+  "$NODE" tools/ts-reference-oracle.mjs
+  case $? in
+    0) status_c="PASS" ;;
+    3) status_c="UNAVAILABLE" ;;
+    *) status_c="FAIL"; rc=1 ;;
+  esac
+fi
 
-# case-0004 is compiled once per repository root on purpose: a single project
-# spanning both trees reproduces the cross-repo merge the case tests for, and
-# would certify it as correct.
-for r in repo-a repo-b; do
-  mapfile -t files < <(find "fixtures/case-0004-cross-repo-same-name/source/$r" -name '*.ts')
-  "$TSC" "${FLAGS[@]}" "${files[@]}"
-done
+echo
+echo "[D] codegen stability (case-0006)"
+if python3 fixtures/case-0006-generated-members/tools/codegen.py --check; then
+  status_d="PASS"
+else
+  status_d="FAIL"; rc=1
+fi
 
-echo "  typecheck: all TypeScript cases clean under --strict"
+echo
+echo "  [A] oracle integrity    $status_a"
+echo "  [B] type validity       $status_b"
+echo "  [C] relation oracle     $status_c"
+echo "  [D] codegen stability   $status_d"
+[ "$status_c" = "UNAVAILABLE" ] && echo "
+  NOTE: [C] did not run. The corpus is syntactically sound and type-valid, but
+  its caller/reference/implementation claims stand UNPROVED in this run."
+exit $rc

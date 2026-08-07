@@ -358,6 +358,36 @@ they exercise index lifecycle and invalidation rather than resolution, and need
 a mutation step the resolution cases do not. Mixing them into the first package
 would conflate two different failure modes under one score.
 
+Package 2 takes four states of one entity rather than two isolated cases —
+
+```text
+1  fresh indexed symbol
+2  file modified after observation
+3  symbol deleted after observation
+4  file or repository disappears after indexing
+```
+
+— and scores three properties that must not be collapsed:
+
+```text
+graph freshness          does the index catch up
+staleness signaling      is evidence already handed out marked STALE
+action admissibility     what may still be done with that evidence
+```
+
+**Freshness does not substitute for signaling.** If an agent obtained a fact at
+state A and a watcher rebuilt the graph to state B fifty milliseconds later, the
+fact the agent is still holding must lose admissibility. A system that reindexes
+quickly but never says "what you were told is no longer true" is not fresh; it
+is racing. This maps directly onto the `STALE` status in
+`docs/decision-and-admission-protocol.md`, which already refuses to count
+`STALE` as success for safety-sensitive guards — the measurement is whether an
+external observer supplies the signal that status depends on.
+
+Package 1 is frozen by design once its three known defects are fixed. Seven
+cases cover the resolution failure modes worth distinguishing; further variants
+would grow a collection rather than the instrument.
+
 This fixture set is buildable without installing Gortex at all, and is the
 cheapest available next step.
 

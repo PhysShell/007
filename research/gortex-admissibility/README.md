@@ -91,12 +91,38 @@ Same shape, same semantics, different admissible claim, because the language
 settles less. A tool reporting equal confidence on both has not connected what
 the source determines to what it is willing to assert.
 
+Package 1 is **frozen by design**. The seven cases cover ambiguity, aliases,
+dispatch, cross-repo, overloads, generated source-of-truth, and the calibration
+pair. Adding a twentieth variant would grow a collection, not the instrument.
+
 ## Package 2 — index lifecycle (not in this directory)
 
-The stale-file and deleted-symbol cases ship separately. They exercise index
-invalidation rather than resolution, need a mutation step the resolution cases
-do not, and interact with session working sets and staleness notification.
-Folding them in here would average two unrelated failure modes into one score.
+Four states of one entity, not merely "stale" and "deleted":
+
+```text
+1  fresh indexed symbol
+2  file modified after observation
+3  symbol deleted after observation
+4  file or repository disappears after indexing
+```
+
+measured on three properties kept separate:
+
+```text
+graph freshness          does the index catch up
+staleness signaling      is evidence already handed out marked STALE
+action admissibility     what may still be done with that evidence
+```
+
+The first does not substitute for the second, and conflating them is the failure
+this package exists to catch. If an agent obtained a fact at state A and a
+watcher rebuilt the graph to state B 50 ms later, the fact the agent holds must
+lose admissibility — a fast rebuild that never says "what you were told is no
+longer true" is a race, not freshness.
+
+These cases need a mutation step the resolution cases do not, and interact with
+per-session working sets and staleness notification. Folding them in here would
+average unrelated failure modes into one score.
 
 ## Deliberate non-assertions
 
@@ -132,16 +158,40 @@ measure our own leniency rather than the tool.
 tools/check.sh
 ```
 
-Parses every oracle, checks its enums against `oracle-v0`, confirms that every
-referenced path exists and every cited line still points at the code it names,
-and type-checks all TypeScript cases under `--strict`. No code-graph engine is
-invoked; the script validates the measuring instrument only.
+Four checks, reported separately because they prove different things:
 
-The type-check is not incidental. `case-0001` claims that construction and an
-independent oracle agree, and the control vertical is only usable as a control
-if that is true — so the constructed oracle is validated against `tsc` before it
-is relied on for `case-0007`, where no compiler exists to appeal to.
+| | Check | Proves |
+|---|---|---|
+| **A** | oracle integrity | oracles parse, enums are valid, every path and cited line resolves |
+| **B** | type validity (`tsc --strict`) | each fixture is a valid program |
+| **C** | relation oracle (language service) | the claimed caller / reference / implementation sets are the ones TypeScript computes |
+| **D** | codegen stability | `case-0006`'s generated file is what its contract generates |
 
-Status on this container: all seven oracles clean, all six TypeScript cases
-compile under `--strict`. The Lua case is unchecked — no Lua toolchain present,
-and none is required, since nothing in `case-0007` depends on the file executing.
+No code-graph engine is invoked by any of them; the script validates the
+measuring instrument only.
+
+**B is not C, and the distinction was a real defect here.** An earlier revision
+ran only `tsc --noEmit` while claiming the constructed oracles had been
+"validated against tsc". Type-checking proves a fixture compiles and says
+nothing about *whose* callers those are — the control vertical's whole claim.
+Step C closes that: it drives `findReferences`,
+`getImplementationAtPosition`, and — for overload attribution —
+`getResolvedSignature`, then compares against each `oracle.yaml`.
+
+A missing toolchain reports **UNAVAILABLE**, never PASS, and the summary says
+explicitly that the relation claims stand unproved in that run.
+
+Step C earned its place on first execution by failing: it rejected
+`case-0005` fact 0, and the disagreement was real. A call never *selects* an
+implementation signature — TypeScript resolves it to one of the overload
+signatures — so per-signature attribution must apply only when the seed is
+itself an overload signature. Seeding the implementation asks which calls reach
+that body, which is a different question with a different answer. The checker
+knew; the corpus did not, until C was run.
+
+Status on this container: A/B/C/D all PASS — seven oracles clean, six
+TypeScript cases compiling under `--strict`, eleven relation facts agreeing with
+the language service, one non-`.ts` expectation correctly reported as out of
+that oracle's reach rather than silently dropped. `case-0007` is skipped by C by
+construction: no Lua toolchain is present, and none is required, since nothing
+in that case depends on the file executing.
