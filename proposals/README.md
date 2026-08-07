@@ -21,6 +21,37 @@ Consequences worth stating plainly:
 - Contradicting an existing `docs/` decision is fine *here* — say so in the note
   and name what it would contradict, so promotion knows what it must re-open.
 
+## What is raw here is the proposal, not the facts
+
+There is **no evidentiary carve-out for this directory.** Rule 4 of the same
+document — and the "Grounding factual claims" rule in
+[`AGENTS.md`](../AGENTS.md), which names a *doc* as one of the places it binds —
+applies to every factual claim in this repository, including these files. A
+claim about what the code or an existing mechanism does names the artifact, the
+exact property, and a revision, and keeps the artifact-says / inference /
+decision split, here exactly as in `docs/`.
+
+What makes a note raw is that its **proposal** is unratified, not that its
+**facts** are cheaper. Non-citability comes from rule 3, not from a lower
+standard of evidence — and the two must not be confused, because a directory
+that relaxed grounding "since nobody may cite it anyway" would be a supply of
+unbound claims sitting one promotion away from becoming citable.
+
+The practical form:
+
+- Bind a claim about this repo to a commit (`git rev-parse HEAD`), not to a date.
+  Dates are for when *you looked*; commits are what a reader can recover.
+- Bind an external source to whatever immutable anchor it has — a tag, a commit,
+  a content digest, a dated API version — plus the URL and the access date. Where
+  the source is a mutable page with no such anchor, the verbatim quote is what is
+  bound; say so, and treat the claim as stale on any later reading.
+- A note is allowed to say "I did not verify this" — that is a bound statement.
+  What it may not do is state an unverified thing in the voice of a fact.
+
+Keeping the bar high is also what makes the notes cheap to promote: a promoted
+document inherits claims that are already grounded, instead of a pile that has
+to be re-derived.
+
 ## Layout
 
 ```text
@@ -70,10 +101,11 @@ already defines. Promotion means: a document lands in `docs/` (or a task in
 with a pointer to it. The raw note is not deleted — it is the record of where
 the thing came from and what it looked like before it was tidied.
 
-Any fact a promoted document asserts gets grounded properly at that point —
-artifact, revision, and the artifact-says / inference / decision split of rule 4.
-Raw notes are exempt from that discipline, which is exactly why they cannot be
-cited.
+Promotion does **not** introduce grounding — the claims were bound when they were
+written (see above). What promotion adds is ratification and the obligation to
+re-check: a bound claim is stale once its artifact moves, so a note promoted
+months later re-verifies against current `HEAD` before its facts carry any
+weight.
 
 ## Index
 

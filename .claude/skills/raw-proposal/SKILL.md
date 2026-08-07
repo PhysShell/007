@@ -51,18 +51,25 @@ Match the repo's register: dense, concrete, dry. No enthusiasm about
 
 ## Links and facts
 
-Raw notes are exempt from rule 4 grounding (`docs/evidence-and-decision-discipline.md`)
-— that is what makes them cheap, and it is also exactly why they cannot be
-cited. So:
+**Raw does not mean ungrounded.** Rule 4 of
+`docs/evidence-and-decision-discipline.md` and the grounding rule in `AGENTS.md`
+apply to these files like any other — what is unratified is the *proposal*, not
+the *facts*. See the README section "What is raw here is the proposal, not the
+facts"; it governs, this is the operational summary:
 
-- Record the **URL and the access date** in the note. That is what makes later
-  verification possible.
-- Do **not** launch a verification campaign. Checking a headline number or two
-  is fine; a full artifact-bound survey means the thing is not raw any more.
+- A claim about this repo's code binds a **commit** (`git rev-parse HEAD`, plus
+  the blob hash if it is about one file), never a bare date, and keeps the
+  artifact-says / inference split.
+- An external source binds whatever immutable anchor it has — tag, commit,
+  content digest, dated API version — plus the URL and the access date. For a
+  mutable page with no anchor, the **verbatim quote** is what is bound; say so.
+- Do **not** launch a verification campaign. Bind what you assert and check what
+  is load-bearing; a full artifact-bound survey of a whole external system means
+  the thing is not raw any more, it is a `docs/` prior-art record.
 - Never launder a source's marketing into a stated fact. "The page claims X" and
   "X" are different sentences, and the difference is the whole discipline.
-- If something is genuinely load-bearing and you *did* verify it, say how, in
-  one clause. If you did not, say that instead.
+- "I did not verify this" is an acceptable, bound sentence. Stating an unchecked
+  thing in the voice of a fact is not.
 
 ## Don'ts
 

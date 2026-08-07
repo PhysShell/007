@@ -20,12 +20,21 @@ subprocess environment, and dispatch refuses fail-closed when the `log` facade
 admits TRACE (`docs/o7-invoke.md`, "Key handling"; `AGENTS.md` rule 1).
 
 Every one of those properties is currently held by *how the code is written* and
-by a P0 review rule that says a change widening the key's reach is a finding. As
-of this note's date the test module in `src/invoke.rs` covers classification,
-parsing, argv isolation and the live smoke — none of it asserts absence of the
-key. So the strongest claim in the repository is the one with no failing test
-behind it. That is backwards: the property most expensive to lose is the one
-guarded only by a reviewer's attention span.
+by a P0 review rule that says a change widening the key's reach is a finding.
+
+**Artifact says** — `src/invoke.rs` at commit `2e74c51` (blob `a84a4ee`), read
+2026-08-07: the `#[cfg(test)]` module's test functions cover schema stripping,
+hashing, final-JSON extraction for both engines, usage/auth marker
+classification, codex argv isolation (`codex_command_is_ambient_isolated`
+asserts argv and cwd only), the arliai classification matrix, the backend
+parser, the blocked-provider label, timeout descendant-kill, and one
+`#[ignore]`d live smoke. No test function in that module asserts the absence of
+the key value from any output, and none asserts that `strip_provider_api_keys`
+leaves the variable unset in a spawned child.
+
+**Inference**: the strongest claim in the repository is therefore the one with
+no failing test behind it — the property most expensive to lose is guarded by a
+reviewer's attention span. That is backwards.
 
 ## Idea
 
@@ -80,6 +89,7 @@ property (format the key into an error string on the 401 path, in a scratch
 commit that is never pushed) and confirm the test fails. A non-disclosure test
 that has never gone red is decoration.
 
-If this is ever promoted, the claims above about what `src/invoke.rs` does and
-does not test must be re-verified against current `HEAD` and grounded per rule 4
-— they are a snapshot taken while writing a raw note, not evidence.
+The grounding above binds `2e74c51`. Any later reader — promotion or not —
+treats it as stale the moment `src/invoke.rs` moves, and re-reads before acting
+on it. That is rule 4's step 5, and it applies to this file as much as to
+anything in `docs/`.
