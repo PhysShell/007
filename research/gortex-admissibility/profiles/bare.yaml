@@ -1,0 +1,14 @@
+schema: profile-v0
+id: bare
+description: >
+  The fixture as committed: source only, no project manifests. This is the
+  degraded observer configuration. It is NOT a claim about the source -- the
+  ground truth in oracle.yaml is identical under every profile. It is a claim
+  about how much of that truth the observer can reach.
+overlay: null
+expectation:
+  note: >
+    No origin is required of the observer here. Whatever it emits, the scoring
+    rule is the same: a wrong or short answer is admissible as a MISS only if
+    the result is marked as unverified. Wrong output presented with a
+    high-confidence origin and no caveat is a false-safe.

@@ -1,0 +1,48 @@
+{
+  "case": "case-0004-cross-repo-same-name",
+  "engine": "<scratch>/bin/gortex",
+  "engine_version": "v0.63.1",
+  "facts": [
+    {
+      "caveat_class": null,
+      "confidence_label": [
+        "EXTRACTED"
+      ],
+      "expected_missing": [],
+      "forbidden_present": [],
+      "index": 0,
+      "observed": [
+        "bootA"
+      ],
+      "oracle_may_claim_complete": true,
+      "oracle_required_caveats": [],
+      "origin": [
+        "lsp_resolved"
+      ],
+      "outcome": "PASS",
+      "relation": "callers",
+      "seed": "seed-repo-a-config-load",
+      "seed_bound": true,
+      "tier": [
+        "lsp"
+      ]
+    }
+  ],
+  "profile": "manifested",
+  "seed_binding": [
+    {
+      "bound": true,
+      "gold": {
+        "line_range": [
+          3,
+          5
+        ],
+        "path": "source/repo-a/src/config.ts",
+        "symbol": "Config.load"
+      },
+      "resolved_id": "case-0004-cross-repo-same-name--manifested/source/repo-a/src/config.ts::Config.load",
+      "resolved_line": 3,
+      "seed": "seed-repo-a-config-load"
+    }
+  ]
+}

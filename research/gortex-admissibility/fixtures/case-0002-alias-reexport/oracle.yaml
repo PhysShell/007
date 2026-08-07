@@ -1,0 +1,68 @@
+schema: oracle-v0
+case: case-0002-alias-reexport
+language: typescript
+oracle_kind: constructed
+
+independent_oracle:
+  available: true
+  tool: TypeScript language service (tsserver "find all references")
+  note: >
+    tsserver follows the renaming re-export. A text or name-index matcher does
+    not, which is exactly the asymmetry this case measures.
+
+adversarial_about: >
+  A barrel file re-exports `refreshToken` under a different name, `renewToken`.
+  One caller imports the original name directly; the other imports only the
+  alias. The string "refreshToken" never appears in the aliased call site. A
+  resolver that indexes by identifier text finds one of the two callers and has
+  no signal that it missed the other -- the failure is silent, and the danger is
+  not the miss but a completeness claim laid on top of it.
+
+seeds:
+  - id: seed-refresh-token
+    gold_identity:
+      path: source/core/token.ts
+      symbol: refreshToken
+      line_range: [2, 4]
+
+facts:
+  - seed: seed-refresh-token
+    relation: callers
+    expected:
+      - path: source/app/bootstrap.ts
+        symbol: bootstrap
+        line: 4
+        reason: direct import of the original name; found by any method
+      - path: source/app/session.ts
+        symbol: renew
+        line: 4
+        reason: >
+          reachable only by following the renaming re-export in source/index.ts;
+          the identifier `refreshToken` does not occur in this file
+    forbidden: []
+    admissibility:
+      may_claim_complete: true
+      may_claim_safe_to_rename: true
+      required_caveats: []
+      note: >
+        Completeness is claimable in principle -- the language service resolves
+        this fully. The scoring rule is therefore conditional: returning only
+        `bootstrap` is a miss, and returning only `bootstrap` while claiming a
+        complete caller set is a false-safe. Contrast case-0003, where
+        completeness is not claimable at all.
+
+  - seed: seed-refresh-token
+    relation: references
+    expected:
+      - path: source/index.ts
+        symbol: renewToken
+        line: 1
+        reason: >
+          the re-export binding itself must be in the rename set; a rename that
+          rewrites the definition and both call sites but not this line leaves
+          the tree uncompilable
+    forbidden: []
+    admissibility:
+      may_claim_complete: true
+      may_claim_safe_to_rename: true
+      required_caveats: [alias_indirection]

@@ -1,0 +1,86 @@
+{
+  "case": "case-0001-sibling-same-name",
+  "engine": "<scratch>/bin/gortex",
+  "engine_version": "v0.63.1",
+  "facts": [
+    {
+      "caveat_class": null,
+      "confidence_label": [
+        "EXTRACTED"
+      ],
+      "expected_missing": [],
+      "forbidden_present": [],
+      "index": 0,
+      "observed": [
+        "dispatchInvoice"
+      ],
+      "oracle_may_claim_complete": true,
+      "oracle_required_caveats": [],
+      "origin": [
+        "lsp_resolved"
+      ],
+      "outcome": "PASS",
+      "relation": "callers",
+      "seed": "seed-invoice-send",
+      "seed_bound": true,
+      "tier": [
+        "lsp"
+      ]
+    },
+    {
+      "caveat_class": null,
+      "confidence_label": [
+        "EXTRACTED"
+      ],
+      "expected_missing": [],
+      "forbidden_present": [],
+      "index": 1,
+      "observed": [
+        "dispatchMail"
+      ],
+      "oracle_may_claim_complete": true,
+      "oracle_required_caveats": [],
+      "origin": [
+        "lsp_resolved"
+      ],
+      "outcome": "PASS",
+      "relation": "callers",
+      "seed": "seed-mail-send",
+      "seed_bound": true,
+      "tier": [
+        "lsp"
+      ]
+    }
+  ],
+  "profile": "manifested",
+  "seed_binding": [
+    {
+      "bound": true,
+      "gold": {
+        "line_range": [
+          5,
+          7
+        ],
+        "path": "source/billing/invoice.ts",
+        "symbol": "Invoice.send"
+      },
+      "resolved_id": "case-0001-sibling-same-name--manifested/source/billing/invoice.ts::Invoice.send",
+      "resolved_line": 5,
+      "seed": "seed-invoice-send"
+    },
+    {
+      "bound": true,
+      "gold": {
+        "line_range": [
+          5,
+          7
+        ],
+        "path": "source/mail/message.ts",
+        "symbol": "MailMessage.send"
+      },
+      "resolved_id": "case-0001-sibling-same-name--manifested/source/mail/message.ts::MailMessage.send",
+      "resolved_line": 5,
+      "seed": "seed-mail-send"
+    }
+  ]
+}

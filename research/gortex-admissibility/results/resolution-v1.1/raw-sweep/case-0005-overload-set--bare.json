@@ -1,0 +1,73 @@
+{
+  "case": "case-0005-overload-set",
+  "engine": "<scratch>/bin/gortex",
+  "engine_version": "v0.63.1",
+  "facts": [
+    {
+      "caveat_class": "coverage_incomplete",
+      "confidence_label": [
+        "INFERRED"
+      ],
+      "expected_missing": [],
+      "forbidden_present": [],
+      "index": 0,
+      "observed": [
+        "formatAmount",
+        "formatWhen"
+      ],
+      "oracle_may_claim_complete": true,
+      "oracle_required_caveats": [
+        "overload_ambiguity"
+      ],
+      "origin": [
+        "text_matched"
+      ],
+      "outcome": "PASS",
+      "relation": "callers",
+      "seed": "seed-format-impl",
+      "seed_bound": true,
+      "tier": [
+        "heuristic"
+      ]
+    },
+    {
+      "index": 1,
+      "note": "localization failure (S1); not scored as fidelity (S2)",
+      "outcome": "SEED_UNBOUND",
+      "relation": "callers",
+      "seed": "seed-format-number-overload",
+      "seed_bound": false
+    }
+  ],
+  "profile": "bare",
+  "seed_binding": [
+    {
+      "bound": true,
+      "gold": {
+        "line_range": [
+          3,
+          5
+        ],
+        "path": "source/format.ts",
+        "symbol": "format (implementation signature)"
+      },
+      "resolved_id": "case-0005-overload-set--bare/source/format.ts::format",
+      "resolved_line": 3,
+      "seed": "seed-format-impl"
+    },
+    {
+      "bound": false,
+      "gold": {
+        "line_range": [
+          1,
+          1
+        ],
+        "path": "source/format.ts",
+        "symbol": "format (number overload signature)"
+      },
+      "resolved_id": null,
+      "resolved_line": null,
+      "seed": "seed-format-number-overload"
+    }
+  ]
+}

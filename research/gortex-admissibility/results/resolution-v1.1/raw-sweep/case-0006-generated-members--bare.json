@@ -1,0 +1,76 @@
+{
+  "case": "case-0006-generated-members",
+  "engine": "<scratch>/bin/gortex",
+  "engine_version": "v0.63.1",
+  "facts": [
+    {
+      "caveat_class": "coverage_incomplete",
+      "confidence_label": [
+        "INFERRED"
+      ],
+      "expected_missing": [],
+      "forbidden_present": [],
+      "index": 0,
+      "observed": [
+        "loadInvoice"
+      ],
+      "oracle_may_claim_complete": true,
+      "oracle_required_caveats": [
+        "generated_code"
+      ],
+      "origin": [
+        "text_matched"
+      ],
+      "outcome": "PASS",
+      "relation": "callers",
+      "seed": "seed-fetch-invoice",
+      "seed_bound": true,
+      "tier": [
+        "heuristic"
+      ]
+    },
+    {
+      "caveat_class": "coverage_incomplete",
+      "confidence_label": [
+        "INFERRED"
+      ],
+      "expected_missing": [],
+      "forbidden_present": [],
+      "index": 1,
+      "observed": [
+        "loadInvoice"
+      ],
+      "oracle_may_claim_complete": false,
+      "oracle_required_caveats": [
+        "generated_code"
+      ],
+      "origin": [
+        "text_matched"
+      ],
+      "outcome": "PASS",
+      "relation": "references",
+      "seed": "seed-fetch-invoice",
+      "seed_bound": true,
+      "tier": [
+        "heuristic"
+      ]
+    }
+  ],
+  "profile": "bare",
+  "seed_binding": [
+    {
+      "bound": true,
+      "gold": {
+        "line_range": [
+          3,
+          5
+        ],
+        "path": "source/generated/api-client.ts",
+        "symbol": "ApiClient.fetchInvoice"
+      },
+      "resolved_id": "case-0006-generated-members--bare/source/generated/api-client.ts::ApiClient.fetchInvoice",
+      "resolved_line": 3,
+      "seed": "seed-fetch-invoice"
+    }
+  ]
+}

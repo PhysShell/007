@@ -1,0 +1,93 @@
+# Observer admission table — Gortex, resolution relations.
+#
+# Produced by the resolution qualification round; see RECORD.md.
+#
+# This maps an observed response to the ROLE the observer may play when a claim
+# is decided. It does NOT assign an epistemic status to any claim: the decision
+# layer in docs/decision-and-admission-protocol.md owns ESTABLISHED and consumes
+# this together with identity binding and required corroboration.
+#
+# The key is the provenance the engine actually emitted, never the setup that
+# produced it. Measured 2026-08-07: installing typescript-language-server
+# changed no edge; only project manifests moved edges to lsp_resolved. So
+# `profile` is recorded for reproducibility and deliberately absent from this
+# table -- `origin` is the sufficient observable that the capability engaged.
+
+schema: observer-admission-v0
+observer: gortex
+observer_version: v0.63.1
+corpus_identity: 5f68dd6e785b93d573325235cbe3f50ec30ea0a2
+qualified_scope: resolution relations (callers, references, implementations)
+status: CLOSED
+verdict: KEEP_NARROW
+
+buckets:
+  - match:
+      origin: text_matched
+      confidence_label: INFERRED
+    role: NAVIGATION_HINT
+    rationale: >
+      Measured wrong in the ways the corpus provokes -- phantom edges and
+      missed callers -- and marked every one of them coverage_incomplete. Zero
+      false-safes across the profile. Safe precisely because it does not
+      pretend.
+    constraints:
+      - may steer search and ranking
+      - may not appear in a rationale as support for a claim
+      - never negative proof: an empty or short result is not evidence of absence
+      - never completeness proof
+
+  - match:
+      origin: [lsp_resolved, ast_resolved]
+      confidence_label: EXTRACTED
+    role: SUPPORTING_OBSERVER
+    rationale: >
+      Exact on every bound seed: both directions of the sibling-name control,
+      the renaming re-export followed, repository roots kept separate. Accurate
+      about what it models.
+    constraints:
+      - admissible as support for a resolved static graph relation
+      - escalates to CORROBORATION_REQUIRED whenever the decision depends on the
+        relation being COMPLETE -- provenance describes how an observed edge was
+        resolved, not that the fact space is closed
+      - absence of a caveat is not a completeness claim and must not be read as one
+
+  - match:
+      outcome: [SEED_UNBOUND, empty_without_caveat]
+    role: NOT_ADMISSIBLE
+    rationale: >
+      The interface member PaymentSink.accept and individual overload
+      signatures are not indexed as symbols; `implementations` on the interface
+      returns empty with no caveat. Stable across both profiles and every
+      repeat.
+    constraints:
+      - maps to UNKNOWN at the decision layer
+      - a missing symbol or edge is not evidence that it does not exist
+
+sole_observer_allowed:
+  granted: false
+  scope: all irreversible and admission decisions
+  rationale: >
+    Not because the engine is inaccurate -- in the lsp_resolved bucket it was
+    not. Because its silence is not an assertion of completeness, and the two
+    cannot be told apart from the response. Confirmed by measurement rather
+    than assumed from caution.
+  demonstrated_by:
+    - case: case-0003-interface-dispatch
+      what: correct callers of a dynamically dispatched member, no caveat
+    - case: case-0006-generated-members
+      what: every code reference found, contract source of truth unmentioned
+  never_sole_observer_for:
+    - dynamic dispatch
+    - generated code and non-code sources of truth
+    - completeness-sensitive impact analysis and refactor planning
+
+unqualified:
+  - capability: index lifecycle, staleness signalling, invalidation of
+      already-consumed evidence
+    status: UNKNOWN
+    reason: Package 2 was not run in this round
+    consequence: >
+      o7 must not rely on this observer as authority for invalidating evidence
+      it has already consumed. Exact-head and current-identity checks remain
+      o7's own responsibility until a lifecycle qualification round runs.

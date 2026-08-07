@@ -1,0 +1,5 @@
+# results/ is ignored by default; a promoted run is an explicit act.
+*
+!.gitignore
+!resolution-v1.1/
+!resolution-v1.1/**
