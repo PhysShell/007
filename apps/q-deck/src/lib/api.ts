@@ -54,8 +54,21 @@ export function checkSchema(body: { schema_version: number }): void {
   }
 }
 
-async function getJson<T extends { schema_version: number }>(path: string): Promise<T> {
-  const resp = await fetch(path);
+// Q-Deck A0.5 corrective round 7 (fresh exact-head Codex P1, PR #110):
+// `signal` is an OPTIONAL escape hatch, not a global default — most GET
+// callers (Dashboard, ConversationPage) have no request-lifetime concern
+// of their own and stay exactly as they were. `RunPage`'s serialized poll
+// loop is the one caller that specifically needs a bounded request
+// lifetime (round 4 made "at most one request in flight" an invariant;
+// an unbounded `fetch` can violate the SPIRIT of that invariant — nothing
+// else ever gets to run — even though technically no second request is
+// ever sent), so it owns the `AbortController`/deadline itself and passes
+// the signal through here, rather than this being a blanket default.
+async function getJson<T extends { schema_version: number }>(
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  const resp = await fetch(path, init);
   if (!resp.ok) {
     const body = (await resp.json()) as ErrorDto;
     throw new ApiError(resp.status, body);
@@ -117,8 +130,8 @@ export function listRuns(params: RunsListParams = {}): Promise<PageDto<RunDto>> 
   return getJson<PageDto<RunDto>>(`/api/v1/runs${suffix}`);
 }
 
-export function getRun(id: string): Promise<RunDto> {
-  return getJson<RunDto>(`/api/v1/runs/${encodeURIComponent(id)}`);
+export function getRun(id: string, signal?: AbortSignal): Promise<RunDto> {
+  return getJson<RunDto>(`/api/v1/runs/${encodeURIComponent(id)}`, signal ? { signal } : undefined);
 }
 
 export function conversationEventsStreamUrl(id: string): string {

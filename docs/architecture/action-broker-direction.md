@@ -114,3 +114,10 @@ attenuable grants        at the first real multi-hop delegation chain
 Nothing is built now. This records where to go and keeps going where the stage
 chain already leads, rather than raising a handsome station on a railway that is
 not yet laid.
+
+## 7. Prior art (non-normative)
+
+`docs/architecture/prior-art-fusio.md` (ABR-1) surveys one external system that
+already implements the operation → action → connection inversion accepted in §1,
+and records where it stops being a trust boundary. It is a reference record: it
+adds no boundary, changes no deferred decision, and does not move the gate above.

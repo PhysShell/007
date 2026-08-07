@@ -11,6 +11,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/svelte";
 import RunPage from "./RunPage.svelte";
 import * as api from "../lib/api";
+import type { RunDto } from "../lib/types";
 import {
   goldenEventPage,
   goldenEvents,
@@ -188,5 +189,580 @@ describe("RunPage", () => {
     for (const forbidden of [/^stop$/i, /^cancel$/i, /^approve$/i, /^reject$/i, /^start$/i, /^retry$/i]) {
       expect(screen.queryByRole("button", { name: forbidden })).not.toBeInTheDocument();
     }
+  });
+
+  // Q-Deck A0.5 (docs/q-deck/a0-candidate-state.md §9): a run fetched
+  // before the candidate-state fields existed on the wire — `goldenRun`'s
+  // own fixture never sets them — must still render cleanly. This is the
+  // "existing RunDto consumers remain compatible" proof: nothing about
+  // A0.5 requires every caller of `getRun` to already know about the three
+  // new optional fields.
+  it("renders the candidate-state section without error for a run predating A0.5's own fields", async () => {
+    const completed = goldenRun("pass");
+    vi.spyOn(api, "getRun").mockResolvedValue(completed);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents("pass")));
+
+    render(RunPage, { props: { runId: completed.run_id } });
+    await waitFor(() => expect(screen.getByText("completed")).toBeInTheDocument());
+    expect(screen.getByText("Candidate state")).toBeInTheDocument();
+    expect(screen.getByText("unavailable")).toBeInTheDocument();
+    expect(screen.getByText("No candidate-state data for this run.")).toBeInTheDocument();
+  });
+
+  // Q-Deck A0.5: run lineage (parent_run_id) is RunPage's own metadata row,
+  // deliberately separate from candidate-state provenance
+  // (candidate_source_run_id), which CandidateStateCard.svelte.test.ts
+  // covers on its own. This proves the two are independently displayed
+  // even when they point at DIFFERENT runs — never conflated or derived
+  // from one another.
+  it("shows a parent-run link, independent of and possibly different from the candidate source run", async () => {
+    const child = goldenRun("pass", {
+      run_id: "run-child",
+      parent_run_id: "run-parent",
+      candidate_source_run_id: "run-candidate-source",
+      candidate_tree_oid: "deadbeef",
+      materialization_status: "materialized",
+    });
+    vi.spyOn(api, "getRun").mockResolvedValue(child);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(
+      goldenEventPage(goldenEvents("pass").map((e) => ({ ...e, run_id: "run-child" }))),
+    );
+
+    render(RunPage, { props: { runId: "run-child" } });
+    await waitFor(() => expect(screen.getByText("completed")).toBeInTheDocument());
+
+    const parentLink = screen.getByRole("link", { name: "run-parent" });
+    expect(parentLink).toHaveAttribute("href", "/runs/run-parent");
+    const sourceLink = screen.getByRole("link", { name: "run-candidate-source" });
+    expect(sourceLink).toHaveAttribute("href", "/runs/run-candidate-source");
+    // Both are present, both distinct, neither hidden by the other.
+    expect(parentLink).not.toBe(sourceLink);
+  });
+
+  it("hides the parent-run row entirely for a top-level run, without hiding the candidate-state section", async () => {
+    const topLevel = goldenRun("pass", { parent_run_id: null });
+    vi.spyOn(api, "getRun").mockResolvedValue(topLevel);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents("pass")));
+
+    render(RunPage, { props: { runId: topLevel.run_id } });
+    await waitFor(() => expect(screen.getByText("completed")).toBeInTheDocument());
+    expect(screen.queryByText("parent run")).not.toBeInTheDocument();
+    expect(screen.getByText("Candidate state")).toBeInTheDocument();
+  });
+
+  // Q-Deck A0.5 corrective (fresh exact-head Codex P1, PR #110): `get_run`'s
+  // candidate projection is itself best-effort — a poll can land exactly
+  // when the server's replay limiter is saturated and omit all three
+  // candidate fields entirely, indistinguishable on that one response from
+  // "exec unconfigured." These three tests are the exact regression matrix
+  // the finding required.
+  function sealedNoProjection(overrides: Partial<RunDto> = {}): RunDto {
+    const run = goldenRun("pass", overrides);
+    delete run.candidate_source_run_id;
+    delete run.candidate_tree_oid;
+    delete run.materialization_status;
+    return run;
+  }
+
+  it("keeps polling a sealed run whose FIRST response had no projection, and shows it once a later poll provides one", async () => {
+    const withoutProjection = sealedNoProjection();
+    const withProjection = goldenRun("pass", {
+      candidate_source_run_id: "run-source",
+      candidate_tree_oid: "deadbeef",
+      materialization_status: "materialized",
+    });
+    vi.spyOn(api, "getRun")
+      .mockResolvedValueOnce(withoutProjection)
+      .mockResolvedValueOnce(withProjection);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents("pass")));
+
+    render(RunPage, { props: { runId: withoutProjection.run_id } });
+    // Sealed immediately, but no projection yet — must NOT be stuck here
+    // forever; the old behavior stopped polling right on this first response.
+    await waitFor(() => expect(screen.getByText("unavailable")).toBeInTheDocument());
+
+    await vi.advanceTimersByTimeAsync(5100);
+    await waitFor(() => expect(screen.getByText("materialized")).toBeInTheDocument());
+    expect(screen.getByText("run-source")).toBeInTheDocument();
+  });
+
+  // Q-Deck A0.5 corrective (fresh exact-head Codex P1, PR #110 at
+  // c18e473): the stop/retry decision must read the FRESH response, never
+  // the merged DISPLAY state. A genuine intermediate "not_applicable"
+  // (polled between RunStarted and CandidateStateMaterialized) preserved
+  // across a later poll that omits its own projection (limiter saturated)
+  // must NOT be mistaken for a trustworthy final sealed answer — polling
+  // must continue until a real projection is fetched.
+  it("keeps retrying past sealing when the merged state shows a stale not_applicable from an earlier poll, until a real projection arrives", async () => {
+    const activeNotApplicable = goldenRunActive({ materialization_status: "not_applicable" });
+    const sealedOmitted = sealedNoProjection();
+    const sealedMaterialized = goldenRun("pass", {
+      candidate_source_run_id: "run-source",
+      candidate_tree_oid: "deadbeef",
+      materialization_status: "materialized",
+    });
+    const getRunSpy = vi
+      .spyOn(api, "getRun")
+      .mockResolvedValueOnce(activeNotApplicable)
+      .mockResolvedValueOnce(sealedOmitted)
+      .mockResolvedValueOnce(sealedMaterialized);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: activeNotApplicable.run_id } });
+    await waitFor(() => expect(screen.getByText("not applicable")).toBeInTheDocument());
+
+    // Sealing arrives, but this poll's own projection is omitted — the
+    // merged display still shows the earlier "not_applicable" (preserved,
+    // correctly, per the merge-don't-clobber fix), but that must NOT be
+    // read as a trustworthy final answer for this NEWLY sealed status.
+    await vi.advanceTimersByTimeAsync(5100);
+    await waitFor(() => expect(screen.getByText("completed")).toBeInTheDocument());
+    expect(screen.getByText("not applicable")).toBeInTheDocument();
+
+    // If the bug were present (deciding from the merged state), polling
+    // would have already stopped here and this third call would never
+    // happen — the badge would incorrectly stay "not applicable" forever.
+    await vi.advanceTimersByTimeAsync(5100);
+    await waitFor(() => expect(screen.getByText("materialized")).toBeInTheDocument());
+    expect(screen.getByText("run-source")).toBeInTheDocument();
+    expect(getRunSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("never erases a candidate projection already shown, when a later poll transiently omits it (sealing arrives the same moment)", async () => {
+    const activeWithProjection = goldenRunActive({
+      candidate_source_run_id: "run-source",
+      candidate_tree_oid: "deadbeef",
+      materialization_status: "materialized",
+    });
+    const sealedButOmitted = sealedNoProjection();
+    vi.spyOn(api, "getRun")
+      .mockResolvedValueOnce(activeWithProjection)
+      .mockResolvedValueOnce(sealedButOmitted);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: activeWithProjection.run_id } });
+    await waitFor(() => expect(screen.getByText("materialized")).toBeInTheDocument());
+
+    await vi.advanceTimersByTimeAsync(5100);
+    // Lifecycle field updates normally (running -> completed)...
+    await waitFor(() => expect(screen.getByText("completed")).toBeInTheDocument());
+    // ...but the candidate projection this poll omitted must still be the
+    // one already on screen, not wiped back to "unavailable."
+    expect(screen.getByText("materialized")).toBeInTheDocument();
+    expect(screen.getByText("run-source")).toBeInTheDocument();
+    expect(screen.queryByText("unavailable")).not.toBeInTheDocument();
+  });
+
+  // Q-Deck A0.5 corrective round 4 (fresh exact-head CodeRabbit Major +
+  // Codex P1, PR #110): the fixed 3-retry cutoff was itself the bug —
+  // the server-side contract makes "exec never configured" and "replay
+  // limiter transiently saturated" indistinguishable on any single
+  // response, and there is no bound on how long saturation can last. A
+  // fixed budget just turned that uncertainty into a permanently WRONG
+  // "unavailable". Retries are now unbounded (only unmounting stops
+  // them) but back off: 5s, 10s, 20s, capped at 30s.
+  it("keeps retrying indefinitely (never a fixed cutoff) through many consecutive omissions, backing off up to a 30s cap, until a real projection finally arrives", async () => {
+    const neverProjects = sealedNoProjection();
+    const getRunSpy = vi.spyOn(api, "getRun").mockResolvedValue(neverProjects);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents("pass")));
+
+    render(RunPage, { props: { runId: neverProjects.run_id } });
+    await waitFor(() => expect(screen.getByText("unavailable")).toBeInTheDocument());
+    expect(getRunSpy).toHaveBeenCalledTimes(1);
+
+    // Five consecutive omissions — well past the old 3-retry cutoff —
+    // must NOT stop polling. Backoff schedule: 5s, 10s, 20s, 30s, 30s.
+    const backoffScheduleMs = [5_000, 10_000, 20_000, 30_000, 30_000];
+    for (const [i, delay] of backoffScheduleMs.entries()) {
+      await vi.advanceTimersByTimeAsync(delay + 100);
+      expect(getRunSpy).toHaveBeenCalledTimes(i + 2);
+      expect(screen.getByText("unavailable")).toBeInTheDocument();
+    }
+
+    // A real projection finally arrives on the next poll (still on the
+    // capped 30s cadence) — accepted, and polling genuinely stops after
+    // it: one more full cap interval produces no further call.
+    getRunSpy.mockResolvedValue(
+      goldenRun("pass", {
+        candidate_source_run_id: "run-source",
+        candidate_tree_oid: "deadbeef",
+        materialization_status: "materialized",
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(30_100);
+    await waitFor(() => expect(screen.getByText("materialized")).toBeInTheDocument());
+    const callsAtMaterialization = getRunSpy.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(30_100);
+    expect(getRunSpy).toHaveBeenCalledTimes(callsAtMaterialization);
+  });
+
+  // Q-Deck A0.5 corrective round 4 (fresh exact-head CodeRabbit Major):
+  // the OLD `setInterval`-driven design could have two `refreshRun` calls
+  // in flight at once; if a NEWER request (correctly sealed +
+  // materialized) resolved and cleared the interval FIRST, a slower,
+  // now-stale OLDER request could still land afterward and silently
+  // overwrite that correct state with nothing left running to ever
+  // correct it again. The fix is structural, not a sequence-number
+  // patch: the next `getRun` is only ever scheduled after the previous
+  // one has fully resolved, so out-of-order completion is impossible by
+  // construction. This test proves the mechanism directly: no matter how
+  // long a request is left pending, no second request is ever issued
+  // until it resolves.
+  it("never has more than one getRun request in flight at a time — the next poll is only scheduled after the previous one resolves", async () => {
+    // The first poll (which establishes the polling mechanism itself,
+    // whether an interval or a self-reschedule) must resolve quickly and
+    // normally — the race this test targets is specifically between the
+    // SECOND poll (deliberately left pending) and whatever would-be THIRD
+    // poll an independently-ticking timer might fire regardless of the
+    // second one's own state. The old `setInterval`-based design didn't
+    // create its interval until the FIRST poll had already resolved, so
+    // stalling the first poll alone would never have caught this bug.
+    const active = goldenRunActive();
+    let resolveSecond: (value: RunDto) => void = () => {};
+    const secondResponse = new Promise<RunDto>((resolve) => {
+      resolveSecond = resolve;
+    });
+    const getRunSpy = vi
+      .spyOn(api, "getRun")
+      .mockResolvedValueOnce(active)
+      .mockReturnValueOnce(secondResponse)
+      .mockResolvedValue(active);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: active.run_id } });
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    expect(getRunSpy).toHaveBeenCalledTimes(1);
+
+    // The second poll fires on the normal 5s cadence and is left pending.
+    await vi.advanceTimersByTimeAsync(5100);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+    // Advance well past the normal 5s cadence again while the second
+    // request is still deliberately unresolved — if polling were driven
+    // by an independent interval timer (the old design), a third request
+    // would already have fired regardless of the second one's own state.
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+    // Only once the pending second request resolves does the third poll
+    // get scheduled — proving there is no concurrent, independently-
+    // ticking timer that could race ahead of an in-flight request.
+    resolveSecond(active);
+    await vi.advanceTimersByTimeAsync(5100);
+    expect(getRunSpy).toHaveBeenCalledTimes(3);
+  });
+
+  // Q-Deck A0.5 corrective round 5 (fresh exact-head Codex P1, PR #110):
+  // cleanup (unmount, or a new runId) sets `cancelled` and clears the
+  // CURRENT timer, but cannot cancel an HTTP request already in flight.
+  // If that request rejects AFTER cleanup ran, the catch block must NOT
+  // reschedule another poll — a page that no longer exists must never
+  // resurrect a background request loop, especially during a sustained
+  // outage where every stale rejection would otherwise keep
+  // rescheduling itself forever.
+  it("never reschedules a poll after unmount, even if the in-flight request that was pending at unmount time later rejects", async () => {
+    const active = goldenRunActive();
+    let rejectSecond: (err: unknown) => void = () => {};
+    const secondResponse = new Promise<RunDto>((_resolve, reject) => {
+      rejectSecond = reject;
+    });
+    const getRunSpy = vi
+      .spyOn(api, "getRun")
+      .mockResolvedValueOnce(active)
+      .mockReturnValueOnce(secondResponse);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    const { unmount } = render(RunPage, { props: { runId: active.run_id } });
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    expect(getRunSpy).toHaveBeenCalledTimes(1);
+
+    // The second poll fires on the normal cadence and is left pending —
+    // exactly the request that will still be in flight at unmount time.
+    await vi.advanceTimersByTimeAsync(5100);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+    // The user navigates away while that second request is still
+    // pending — this is what actually happens on a real route change.
+    unmount();
+
+    // The in-flight request finally settles — with a rejection, the
+    // realistic outcome of a sustained outage — well after cleanup ran.
+    rejectSecond(new Error("network blip after navigation"));
+    await Promise.resolve().then(() => Promise.resolve()); // let the rejection's catch block run
+
+    // No further request may ever be scheduled — the bug would show up
+    // as a THIRD call appearing here despite the component being gone.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+  });
+
+  // Q-Deck A0.5 corrective round 6 (fresh exact-head Codex P1, PR #110):
+  // `crates/o7d/src/canonical.rs`'s own `candidate_projection` maps every
+  // I/O error resolving the record directory or reading events.jsonl to
+  // `"failed"`, and every parse/replay error (including a transient
+  // ArtifactResolver I/O failure, not just genuine corruption) to
+  // `"verification_failed"` — neither is necessarily a PERMANENT
+  // materialization outcome the way `"materialized"`/`"not_applicable"`
+  // are. Treating a present-but-unrecognized-as-final status as done
+  // could permanently strand a sealed, genuinely-materializable run.
+  for (const transientStatus of ["failed", "verification_failed"] as const) {
+    it(`keeps polling past a sealed "${transientStatus}" projection (a possible transient I/O error, not necessarily final) until a real materialized answer arrives, then stops`, async () => {
+      const transient = goldenRun("pass", { materialization_status: transientStatus });
+      const materialized = goldenRun("pass", {
+        candidate_source_run_id: "run-source",
+        candidate_tree_oid: "deadbeef",
+        materialization_status: "materialized",
+      });
+      const getRunSpy = vi
+        .spyOn(api, "getRun")
+        .mockResolvedValueOnce(transient)
+        .mockResolvedValueOnce(materialized);
+      vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents("pass")));
+
+      render(RunPage, { props: { runId: transient.run_id } });
+      await waitFor(() =>
+        expect(screen.getByText(transientStatus === "failed" ? "failed" : "verification failed")).toBeInTheDocument(),
+      );
+      expect(getRunSpy).toHaveBeenCalledTimes(1);
+
+      // Must NOT have stopped here — the old (buggy) behavior would leave
+      // this exact status on screen forever with no further poll.
+      await vi.advanceTimersByTimeAsync(5100);
+      await waitFor(() => expect(screen.getByText("materialized")).toBeInTheDocument());
+      expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+      // Now that a genuinely final answer arrived, polling actually stops.
+      await vi.advanceTimersByTimeAsync(30_100);
+      expect(getRunSpy).toHaveBeenCalledTimes(2);
+    });
+  }
+
+  it("keeps retrying a persistent failure-like projection on the existing backoff schedule, and only unmounting stops it", async () => {
+    const persistentlyFailed = goldenRun("pass", { materialization_status: "failed" });
+    const getRunSpy = vi.spyOn(api, "getRun").mockResolvedValue(persistentlyFailed);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents("pass")));
+
+    const { unmount } = render(RunPage, { props: { runId: persistentlyFailed.run_id } });
+    await waitFor(() => expect(screen.getByText("failed")).toBeInTheDocument());
+    expect(getRunSpy).toHaveBeenCalledTimes(1);
+
+    // Same documented backoff as the omitted-projection case: 5s, 10s.
+    await vi.advanceTimersByTimeAsync(5_100);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(10_100);
+    expect(getRunSpy).toHaveBeenCalledTimes(3);
+
+    // Unmounting — the only thing that stops an unbounded retry — must
+    // genuinely stop it: no further call, no matter how much time passes.
+    unmount();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getRunSpy).toHaveBeenCalledTimes(3);
+  });
+
+  // Q-Deck A0.5 corrective round 7 (fresh exact-head Codex P1, PR #110):
+  // round 4 made "at most one request in flight" an invariant by only
+  // ever scheduling the next poll after the previous one settles — but a
+  // `fetch` with no deadline (a server sending headers and then never
+  // finishing the body, say) could itself never settle, permanently
+  // stalling the whole loop. A real `AbortController`/deadline per
+  // request closes this. `hangingGetRun` simulates exactly that: a
+  // promise that only ever settles (by rejecting, as a real aborted
+  // fetch would) if its own `AbortSignal` fires — otherwise it hangs
+  // forever, precisely modeling the bug this deadline exists to close.
+  function hangingGetRun(): (id: string, signal?: AbortSignal) => Promise<RunDto> {
+    return (_id, signal) =>
+      new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        });
+      });
+  }
+
+  it("keeps the one-request-in-flight invariant while a poll is hanging, well before its own request deadline", async () => {
+    const active = goldenRunActive();
+    const getRunSpy = vi
+      .spyOn(api, "getRun")
+      .mockResolvedValueOnce(active)
+      .mockImplementationOnce(hangingGetRun());
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: active.run_id } });
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    expect(getRunSpy).toHaveBeenCalledTimes(1);
+
+    // Poll 2 fires on the normal cadence and hangs.
+    await vi.advanceTimersByTimeAsync(5_100);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+    // Well before its own 15s deadline — no third request may appear
+    // yet; the serialization invariant round 4 established must still
+    // hold for a merely-slow-so-far request, not just an infinitely
+    // hung one.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+  });
+
+  // Q-Deck A0.5 corrective round 8 (fresh exact-head Codex P1, PR #110):
+  // round 7's own deadline unconditionally retried on timeout, exactly
+  // as if the timeout were an ordinary transient network failure. It is
+  // NOT — `crates/o7d/src/routes.rs`'s own doc comment on
+  // `run_behind_replay_limiter` is explicit that a dropped future has no
+  // effect on an already-spawned blocking closure or the shared
+  // replay-limiter permit it holds: the server-side replay work keeps
+  // running to completion regardless of what the client does.
+  // Retrying on a client-side timeout therefore dispatches ANOTHER real
+  // server-side replay rather than merely retrying a failed one — a
+  // slow-storage run repeatedly missing its deadline could accumulate
+  // multiple concurrently-running replays from one open tab, saturating
+  // the same limiter `POST /commands` admission depends on. A timeout is
+  // an AMBIGUOUS dispatch outcome and must never trigger an automatic
+  // redispatch — same principle this system already applies to provider
+  // dispatch elsewhere.
+  it("aborts a poll that exceeds its request deadline, but does NOT retry — the ambiguous server-side outcome must never trigger a redispatch", async () => {
+    const active = goldenRunActive();
+    const getRunSpy = vi
+      .spyOn(api, "getRun")
+      .mockResolvedValueOnce(active)
+      .mockImplementationOnce(hangingGetRun());
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: active.run_id } });
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    await vi.advanceTimersByTimeAsync(5_100); // poll 2 starts, hangs
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+    // The 15s deadline fires, aborting the client-side request — but the
+    // last successfully displayed state ("running") must be preserved,
+    // never reverted to any kind of "unavailable"/error, and NO further
+    // getRun call may ever happen, no matter how long real polling time
+    // passes afterward.
+    await vi.advanceTimersByTimeAsync(15_000 + 200);
+    expect(screen.getByText("running")).toBeInTheDocument();
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+    // Q-Deck A0.5 corrective round 9 (fresh exact-head CodeRabbit Major,
+    // PR #110): stopping silently left this page looking as if it were
+    // still being kept fresh — an explicit notice must appear instead.
+    expect(screen.getByText(/Run details refresh stopped/)).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("running")).toBeInTheDocument();
+  });
+
+  it("still retries normally on an ordinary transient failure that is NOT a deadline timeout", async () => {
+    const active = goldenRunActive();
+    const getRunSpy = vi
+      .spyOn(api, "getRun")
+      .mockResolvedValueOnce(active)
+      .mockRejectedValueOnce(new Error("ECONNRESET"))
+      .mockResolvedValue(active);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: active.run_id } });
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    await vi.advanceTimersByTimeAsync(5_100); // poll 2 fires, rejects immediately (not a timeout)
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+    // An ordinary rejection — never having reached the 15s deadline at
+    // all — keeps the existing retry-at-normal-cadence semantics
+    // unchanged; the new "no retry" branch must apply ONLY to a genuine
+    // deadline expiry, never to every catch-block entry generally.
+    await vi.advanceTimersByTimeAsync(5_100);
+    expect(getRunSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("aborts the in-flight request on unmount (a real AbortSignal actually fires), and no further poll is ever scheduled", async () => {
+    const active = goldenRunActive();
+    let capturedSignal: AbortSignal | undefined;
+    const getRunSpy = vi
+      .spyOn(api, "getRun")
+      .mockResolvedValueOnce(active)
+      .mockImplementationOnce((_id, signal) => {
+        capturedSignal = signal;
+        return new Promise<RunDto>(() => {}); // never settles on its own
+      });
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    const { unmount } = render(RunPage, { props: { runId: active.run_id } });
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    await vi.advanceTimersByTimeAsync(5_100); // poll 2 starts, hangs
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+    expect(capturedSignal?.aborted).toBe(false);
+
+    unmount();
+    // `activePollController?.abort()` runs synchronously in cleanup —
+    // proving this isn't merely "cancelled is set and we hope the fetch
+    // eventually resolves on its own," the actual signal fires.
+    expect(capturedSignal?.aborted).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("transitions a hung INITIAL load to the error state once its own deadline fires, rather than staying on Loading forever", async () => {
+    const active = goldenRunActive();
+    vi.spyOn(api, "getRun").mockImplementationOnce(hangingGetRun());
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: active.run_id } });
+    expect(screen.getByText("Loading run…")).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(15_100);
+    await waitFor(() =>
+      expect(screen.getByText("Run not found or o7d unreachable.")).toBeInTheDocument(),
+    );
+  });
+
+  // Q-Deck A0.5 corrective round 9 (fresh exact-head Codex P1, PR #110):
+  // the `isFirst` check inside round 8's `catch` was nested INSIDE the
+  // `deadlineExpired` branch, so an ordinary (non-deadline) failure on
+  // the very first request fell through to the unconditional reschedule
+  // at the bottom — `loadState` never left `"loading"`, even once that
+  // retry eventually succeeded (the `isFirst === false` success branch
+  // only merges `run`, it never sets `loadState` or creates `stream`).
+  it("shows the error state immediately on an ordinary (non-deadline) INITIAL load failure, and never silently retries it as a background poll", async () => {
+    const active = goldenRunActive();
+    const getRunSpy = vi.spyOn(api, "getRun").mockRejectedValueOnce(new Error("404 not found"));
+    const getEventsSpy = vi
+      .spyOn(api, "getConversationEvents")
+      .mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: active.run_id } });
+    await waitFor(() =>
+      expect(screen.getByText("Run not found or o7d unreachable.")).toBeInTheDocument(),
+    );
+    expect(getRunSpy).toHaveBeenCalledTimes(1);
+    expect(getEventsSpy).not.toHaveBeenCalled();
+
+    // Before this fix, this failure would have silently rescheduled a
+    // background poll(false) instead of surfacing the error — asserting
+    // no second call ever happens is exactly what proves that reschedule
+    // is gone, not merely that the visible error text stays put.
+    await vi.advanceTimersByTimeAsync(5_100);
+    expect(getRunSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Run not found or o7d unreachable.")).toBeInTheDocument();
+  });
+
+  it("resets the refresh-stopped notice when the page effect reruns for a new runId", async () => {
+    const firstRun = goldenRunActive();
+    const secondRun = goldenRun("pass");
+    vi.spyOn(api, "getRun")
+      .mockResolvedValueOnce(firstRun)
+      .mockImplementationOnce(hangingGetRun())
+      .mockResolvedValueOnce(secondRun);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    const { rerender } = render(RunPage, { props: { runId: firstRun.run_id } });
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    await vi.advanceTimersByTimeAsync(5_100); // poll 2 starts, hangs
+    await vi.advanceTimersByTimeAsync(15_100); // its deadline fires
+    await waitFor(() =>
+      expect(screen.getByText(/Run details refresh stopped/)).toBeInTheDocument(),
+    );
+
+    await rerender({ runId: secondRun.run_id });
+    await waitFor(() => expect(screen.getByText("completed")).toBeInTheDocument());
+    expect(screen.queryByText(/Run details refresh stopped/)).not.toBeInTheDocument();
   });
 });
