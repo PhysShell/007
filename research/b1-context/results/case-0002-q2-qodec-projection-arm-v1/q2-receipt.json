@@ -1,0 +1,78 @@
+{
+  "007_base": {
+    "commit": "297d4d32a06ab7c86e341a32b1104a7c62375303"
+  },
+  "commits": {
+    "o7_Q2A": "f8fa87e349c48de0678ccc4a4ba4be14463dfc85",
+    "o7_Q2B": "d0022044bb39be8a336ae39c6e7f0bcca778768d",
+    "o7_Q2C": "2cd72b0f7aee59c17f6a7017f56e1bbf37952344",
+    "qodec_QA": "6a5d40304d5997fd9ba6325521f3e212eba4aa75",
+    "qodec_QB": "f71871edc90737a0f939c43b3a6807d0570d5cc5"
+  },
+  "control": {
+    "q1_c1_evaluation_sha256": "sha256:d8d1d5fb933dacdb1efcbd7db91c716cf678cd94b9cabc7ba60b5ff2973c2d3d"
+  },
+  "generalization_claim_allowed": false,
+  "holdout_started": false,
+  "kind": "product_feature_projection",
+  "live_model_used": false,
+  "model_comprehension_evaluated": false,
+  "o7": {
+    "adapter_commit": "f8fa87e349c48de0678ccc4a4ba4be14463dfc85",
+    "adapter_implementation_digest": "sha256:3dd51b9f03854be87ee7682fd57a2451bf49f77ad4daca3a065fa4b1cbe2d2e0",
+    "adapter_tree": "29af3b8f5c06e7daf54b92b0ee43641714de8948",
+    "artifact_commit": "2cd72b0f7aee59c17f6a7017f56e1bbf37952344",
+    "artifact_tree": "7342c070bc65274713a2b3c7750fca9fd259fdcb",
+    "evaluation_sha256": "sha256:fc76d210277f328cc685e61b80df4214319f612333ea49c7e9126d51becce791"
+  },
+  "provenance": {
+    "case_role": "development",
+    "designed_after_observing_case_0002": true,
+    "generalization_claim_allowed": false,
+    "holdout_evidence": false
+  },
+  "qodec": {
+    "base_main": "57fc8660cf9303e0837ab68717e2ab74eb25b22b",
+    "binary_sha256": "sha256:0a0996f3378fd1a3f9c1b637591507ca02d0491c55962a5d5ee291e752cf089b",
+    "full_flake_check_conclusion": "success",
+    "full_qualification_result": "PASS",
+    "full_qualification_route": "A_GITHUB_ACTIONS",
+    "full_qualification_run_id": 31149037980,
+    "implementation_commit": "6a5d40304d5997fd9ba6325521f3e212eba4aa75",
+    "implementation_tree": "c5866a5f04c0be381f76756d60fa13158ac39079",
+    "meter": "o200k",
+    "project_module_impl_sha256": "sha256:657237a941679e27e709fba2a18d78c4693d8ddb89f7645761cc602c7a4984dc",
+    "protocol_schema_digests": {
+      "request": "sha256:a344dfb339536eedf44924b7c1bb4aa244194277722fbacc12d04ca9460abe3f",
+      "result": "sha256:0b9452680772c9f090e31eacfae1c1744689660db6f5293bf384e96d7c010b71"
+    },
+    "qodec_tests_conclusion": "success",
+    "qualification_receipt_commit": "f71871edc90737a0f939c43b3a6807d0570d5cc5",
+    "zero_profile": true
+  },
+  "qodec_modification_scope": "experimental branch experiment/project-v0 only; generic project primitive; no case literal; no 007 import",
+  "qodec_pr_16_untouched": true,
+  "qodec_repository_modified": true,
+  "record": "o7.b1.q2-receipt/v0",
+  "result": {
+    "byte_deterministic": true,
+    "cas_objects": [
+      "cas:sha256:fc76d210277f328cc685e61b80df4214319f612333ea49c7e9126d51becce791",
+      "cas:sha256:b97cf1fd3b2969d1d149a8ce195f4255036cbe0222a654fe9690d3ab4172c24a"
+    ],
+    "causal_conclusion": "QODEC_PROJECT_PASSES_WITH_DIFFERENT_VALID_PROJECTION",
+    "cost": {
+      "q1r_raw_tokens": 7482,
+      "q1rq_cold_bundle_tokens": 5020,
+      "q1rq_warm_tokens": 4759
+    },
+    "offsite_snapshot": "restic:bd4251f3",
+    "q1r_overall": "PASS",
+    "qodec_encoding_roundtrip": "PASS",
+    "qodec_project_result": "DIFFERENT_BUT_EVALUATION_PASS",
+    "qodec_project_semantic_repair": "PASS",
+    "relation_set_vs_C1": "different_all_gold_grounded",
+    "selected_set_vs_C1": "equal"
+  },
+  "round": "Q2"
+}
