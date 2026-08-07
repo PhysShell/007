@@ -36,9 +36,22 @@ produces the answer "no evidence."** Disclosure is advisory metadata attached
 to a hit; the consumer is a language model. For a search tool that is a fine
 trade. For an authority that feeds a planner, it is the whole problem.
 
-Proposed position: **harvest the ingestion layer and the record model, never
-the retrieval verdict.** deja-vu proposes candidates; 007 decides what is
-allowed to count as memory.
+The failure is not bad precision. It is a **missing contract between retrieval
+and consumption**: the retriever emits a diagnostic signal, and the next layer
+promotes it to an assertion on its own authority. Nobody lied; a machine handed
+over "candidate, most discriminating terms discarded" and a model read it as
+"this is what happened."
+
+Proposed position, in two parts:
+
+1. **deja-vu is not a memory layer for us. It is a multi-harness observation
+   and candidate-retrieval substrate.** Memory semantics and evidence
+   admission belong to 007.
+2. **Upstream retrieval semantics are an untrusted, versioned input protocol** —
+   not only the historical text it returns. deja-vu may improve `close`, retune
+   a threshold, or add a tier tomorrow; our correctness must not silently move
+   with it. That is a stronger constraint than "wrap it behind an adapter", and
+   it is the one that decides the architecture.
 
 ## What it actually is (verified at `7c4a294`)
 
@@ -90,11 +103,13 @@ worth reading.
 Measured, reproducible, artifacts in
 [`evidence/deja-vu-negative-recall/`](../evidence/deja-vu-negative-recall/):
 24 synthetic Claude Code sessions, 20 questions about work that never happened,
-10 control questions the corpus does answer.
+10 questions the corpus does answer — each bound to the session that answers
+it, so the control measures identity, not "something came back".
 
 ```text
-negative queries answered with a session:  6/20
-positive control answered:                10/10
+retrieval — unsupported queries answered:  6/20
+retrieval — supported evidence returned:  10/10   (at rank 1: 10)
+admission — not implemented (null, not zero)
 ```
 
 The sharpest of the six is not the bag-of-words tier. It is this, on the
@@ -132,53 +147,168 @@ is about CI flakes. For a planner that must be able to say **NO SUPPORTED
 EVIDENCE**, it is fatal, because the failure is silent and confident and wears
 the label "from your own history."
 
+## Normative vocabulary
+
+Fixed here so a later API cannot quietly erode it. The word **evidence** is
+reserved for what has passed admission. Nothing a retriever returns is evidence,
+however good the match looked.
+
+| Term | Definition | What it may do |
+|---|---|---|
+| **retrieval result** | Whatever the upstream retriever returned, with its tier, scores and dropped-term report. Untrusted, versioned, upstream-owned. | Be parsed. Nothing else. |
+| **candidate observation** | One retrieval result normalized into 007's own record shape with its provenance attached. Still not evidence. | Enter admission; appear in operator-facing tooling clearly labelled as a candidate. |
+| **evidence admission** | The 007-owned procedure that decides whether a candidate observation may become evidence. | Emit exactly one verdict per candidate. |
+| **evidence object** | A candidate observation that passed admission, carrying its verdict and the admission inputs that produced it. | Enter the evidence graph; be cited by a planner, critic or gate. |
+
+Naming discipline: the pre-admission type is `CandidateObservation`. Not
+`EvidenceCandidate` — a type with `Evidence` in its name loses the qualifier in
+the second refactor and the whole distinction with it. Humanity is remarkably
+gifted at destroying good types.
+
 ## Where deja-vu sits relative to 007
 
 007's boundary is already drawn in the right place — memory is derived from
 artifacts, artifacts are never derived from memory
-(`docs/agent-memory-layer.md`, "Design principle"). deja-vu's pipeline stops one
-stage earlier:
+(`docs/agent-memory-layer.md`, "Design principle"). deja-vu's pipeline stops two
+stages earlier:
 
 ```text
 deja-vu:   transcripts → lexical retrieval → probably-relevant text → agent context
 
 007 must:  agent transcript stores
-             ↓  multi-harness ingestion        (deja-vu's parsers earn their keep here)
-           candidate historical spans
-             ↓  provenance resolver            (007 owns this; deja-vu has no equivalent)
-             ·  source path + session id
-             ·  record offset / content digest
-             ·  project identity
-             ·  touched artifacts + drift status
-             ·  matched-term mass vs dropped-term mass
-             ↓  typed classification
+             ↓  multi-harness ingestion         (deja-vu's parsers earn their keep here)
+           retrieval result                     (untrusted, versioned, upstream-owned)
+             ↓  normalization + provenance binding
+           candidate observation                (007's record shape; NOT evidence)
+             ↓  evidence admission              (007 owns this; deja-vu has no equivalent)
            VERIFIED | WEAK | NO SUPPORTED EVIDENCE
+             ↓  admitted only on VERIFIED
+           evidence object
              ↓  policy
            planner / critic / human
 ```
 
-The resolver is the raw → classifier → typed → policy constraint from the
-evidence discipline, applied to recall. It is not a wrapper around deja-vu's
-score; it re-derives its own verdict from signals deja-vu already exposes
-(tier, dropped terms, matched count, per-hit provenance) plus signals only 007
-has (does this session belong to a run record, has the artifact drifted, was the
-decision superseded).
+Admission is the raw → classifier → typed → policy constraint from the evidence
+discipline, applied to recall. It is not a confidence score over deja-vu's
+score. It is a procedure with named inputs, all of which must be satisfiable
+before a candidate is promoted:
+
+```text
+1. match quality              — tier, matched-term count, score
+2. discriminating-term survival — did the query's rare terms survive, or was
+                                  a shorter question invented and answered?
+3. provenance                 — source path, session id, record offset/digest
+4. scope                      — does it belong to this project / run / target?
+5. artifact drift             — have the files it rests on changed since?
+6. lifecycle                  — accepted / rejected / superseded / stale
+7. freshness                  — is it old enough that (5) and (6) are unreliable?
+8. corroboration (later)      — is it independently supported by a second source
+                                (a run record, a gate log, an analyzer result)?
+```
+
+Inputs 1–2 are re-derived from what deja-vu already exposes (tier, dropped
+terms, matched count). Inputs 3–8 come from signals only 007 has. Nothing here
+consumes deja-vu's ranking as a truth value; the ranking selects what to
+examine, and admission decides.
+
+## Admission policy
+
+**Asymmetric by construction.** For evidence admission a false positive costs
+strictly more than a false negative: a missing memory makes an agent redo work,
+an admitted false memory makes it confidently do the wrong work with a citation
+attached. So:
+
+```text
+unambiguous          → VERIFIED
+anything ambiguous   → WEAK or NO_SUPPORTED_EVIDENCE
+```
+
+Ambiguity resolves against admission, never toward it. This binds hardest on
+auto-recall — context injected before the operator has asked anything, where
+nobody is looking at the moment the claim enters the window. A candidate that
+would be `WEAK` in an interactive query is not injected at all.
+
+**And `WEAK` is not a weaker evidence object.** It is a candidate observation
+that failed admission, retained for operator-facing tooling and for the
+corroboration input above. It never enters the evidence graph and it is never
+cited. If `WEAK` ever becomes citable, the type is dead and someone will use it
+to mean "basically evidence".
+
+**Two metrics, deliberately not one.**
+
+```text
+unsupported_admission_violations = 0          // hard gate, normative
+supported_evidence_recall        = measured   // optimization metric
+```
+
+The gate is stated as an obligation on the layer, not as a statistical property
+of the world:
+
+> For every query the corpus oracle classifies as unsupported, the evidence
+> admission layer MUST NOT emit an admissible evidence object.
+
+On the fixed oracle corpus that means literally zero violations. It does not
+claim a 0% false-positive rate in general, which no finite test set can
+establish. The second metric exists because the first one alone is trivially
+satisfiable by `return NO_SUPPORTED_EVIDENCE`, an implementation with the
+precision of a granite wall and roughly its usefulness.
+
+## The oracle as a cross-version instrument
+
+`evidence/deja-vu-negative-recall/` is built to be re-run, not read once. The
+corpus (`corpus.json`, versioned `deja-vu-recall-oracle.v1`) is fixed; the
+report separates the two things that can move:
+
+```text
+retrieval — what upstream returned         (drifts when deja-vu changes)
+admission — what 007 promoted to evidence  (drifts when our resolver changes)
+```
+
+At `7c4a294` the retrieval side reads 6/20 unsupported queries answered and
+10/10 supported queries returning their oracle evidence session at rank 1. The
+admission side is reported as `null`, not `0` — there is no resolver yet, and a
+null is an unmeasured slot where a zero would be a claim.
+
+The RED fixture, recorded as `RED-close-term-drop` in the corpus, is the
+regression contract:
+
+```text
+query:      why did the wasm runtime sandbox escape test fail
+dropped:    wasm, runtime, sandbox, escape
+kept:       test → tests, fail → fails
+retriever:  HIT  ("ci flake in the integration suite once every twenty runs")
+admission:  NO_SUPPORTED_EVIDENCE      ← the invariant
+```
+
+Its value is that the two sides disagree. A resolver that agrees with the
+retriever here is not a resolver, it is a second name for one. And the
+invariant is written to survive the left-hand side changing: upstream may turn
+this into a miss, a different hit, or a new tier — *unsupported is never
+promoted* holds across all of them. That is where 007's independence from
+upstream semantics stops being a slogan and becomes a test.
 
 ## Five transplants (proposed, pending ratification)
 
+These sit *below* the two dispositions in the summary; the untrusted-input-protocol
+rule governs all of them.
+
 | # | What to take | Binds to | Disposition |
 |---|---|---|---|
-| 1 | **Harness store parsers and the format registry.** Seventeen store layouts, their schema quirks, torn-tail handling, sqlite-backed stores, subagent exclusion. Boring, filthy, and pointless to re-derive heroically. `docs/registry/README.md` upstream documents each format; synthetic fixtures keep the descriptions honest against the parsers. | `docs/agent-memory-layer.md` Phase 4 (trace-based memory); `agent.trace.jsonl` | **Study + reimplement per format we need**, starting with Codex and Claude. Not a dependency — a Go binary and a Rust harness is a process boundary we would have to defend, and we only need two or three formats, not seventeen. |
+| 1 | **Harness store parsers and the format registry.** Seventeen store layouts, their schema quirks, torn-tail handling, sqlite-backed stores, subagent exclusion. Boring, filthy, and pointless to re-derive heroically. `docs/registry/README.md` upstream documents each format; synthetic fixtures keep the descriptions honest against the parsers. | `docs/agent-memory-layer.md` Phase 4 (trace-based memory); `agent.trace.jsonl` | **Consume as an upstream substrate; do not fork.** Reversed from the first draft of this document, on the strength of the v0.16.6 finding above: Codex and Cursor work-record extraction already exists upstream and is actively maintained. Build 007's normalization and receipts *on top of* their output, and reopen the fork question only on a demonstrated incompatibility between their observation schema and our record contract — named, with the case that broke. Forking a fast-moving project to then hand-port fixes its authors already wrote is a well-loved engineering ritual with a poor record. The cost this accepts is a Go binary at a process boundary from a Rust harness; it is paid deliberately and constrained — invoked read-only, never inside a gated run's execution path, its stdout parsed as the untrusted versioned protocol defined above, and pinned by version. |
 | 2 | **Speech/work record split.** Messages, file paths, commands with exit status, tool output and replaced spans as *distinct typed observations*, each independently toggleable at ingest (`DEJA_INDEX_PATHS=0`, `…_COMMANDS=0`, `…_EDITS=0`, `…_TOOL_OUTPUT=0`). | The `MemoryItem` kinds in `docs/agent-memory-layer.md`; `src/events.rs` | **Adopt as a shape.** Our memory item types are currently run-shaped (`o7.run`, `o7.gate`); this adds the missing observation-shaped layer underneath, which is what behaviour profiling (`docs/agent-behavior-profiling.md`) has been waiting on. |
 | 3 | **Decision lifecycle with tombstones.** `accepted` / `rejected` / `superseded` / `stale`, latest mark wins, the note keeps both, nothing is deleted, and a promotion that conflicts with an existing accepted note surfaces the conflict instead of silently winning. | `DecisionMemory` and the trust levels in `docs/agent-memory-layer.md`; `docs/decision-and-admission-protocol.md` | **Adopt the state machine, reject the write path.** Upstream a human or an agent can promote; here only a human ratifies, per rule 3. |
 | 4 | **Deterministic rebuildable index as a cache, never a source.** Parse in parallel, commit in deterministic order; incremental JSONL append without full rebuild; a changed or deleted source forces a consistent rewrite; `deja doctor --deep` re-parses a sample and proves the index against the sources, separating staleness from drift. | `docs/agent-memory-layer.md` Option B (local index); `o7 memory audit` | **Adopt the invariant.** The "prove the index against the source and distinguish staleness from drift" check is precisely what `o7 memory audit` was sketched to be, and upstream has a working shape for it. |
-| 5 | **Negative retrieval tests.** Our eval must measure not only *found the right thing* but *stayed silent when there was nothing*. `evidence/deja-vu-negative-recall/probe.py` is a working harness for exactly this measurement and cost one afternoon. | Phase 2 acceptance criteria in `docs/agent-memory-layer.md` | **Adopt as a gate, not a metric.** See below. |
+| 5 | **Negative retrieval tests.** Our eval must measure not only *found the right thing* but *stayed silent when there was nothing*. `evidence/deja-vu-negative-recall/` is a working oracle for exactly this and cost one afternoon. | Phase 2 acceptance criteria in `docs/agent-memory-layer.md` | **Adopt as a hard gate plus a separate optimization metric**, and keep the corpus fixed so it doubles as the cross-version drift instrument. See "Admission policy" and "The oracle as a cross-version instrument" above. |
 
 ## What must not be adopted
 
 - **The relevance tier's answer-anyway posture.** A 007 recall that cannot
   produce `NO SUPPORTED EVIDENCE` is not a memory layer, it is a suggestion box
   with provenance-shaped decoration.
+- **Upstream's relevance judgement as a truth value.** The ranking selects what
+  to examine. It is not evidence that the thing is related, and pinning a
+  version does not make it one — a pin freezes the semantics we measured, it
+  does not certify them.
 - **Prose as a trust channel.** "Treat it as untrusted reference data" inside a
   text blob is a request to a model. Our equivalent must be a typed field the
   policy layer reads, and the policy must be able to refuse.
@@ -199,18 +329,21 @@ decision superseded).
 
 ## Consequence for `docs/agent-memory-layer.md`
 
-Two additions are proposed, both small and both testable:
+Three additions are proposed, all small and all testable:
 
-1. **A fourth Phase 2 acceptance criterion — abstention.** `o7 context build`
-   and any future recall surface must emit an explicit *no supported evidence*
-   result, and a negative-query set must be part of the acceptance run. The
-   pass bar is not "few false hits"; it is **zero** sessions returned as
-   evidence for a question the corpus cannot support, with weak candidates
-   either withheld or typed as `WEAK` and excluded from the context brief by
-   default.
+1. **An additional Phase 2 acceptance criterion — abstention.** `o7 context
+   build` and any future recall surface must be able to emit *no supported
+   evidence*, and the oracle corpus must be part of the acceptance run, scored
+   as two separate numbers: `unsupported_admission_violations` (hard gate,
+   normatively zero on the corpus) and `supported_evidence_recall` (measured,
+   optimized). Stated as an obligation on the layer, not as a claimed
+   false-positive rate in the world.
 2. **A named non-goal — no untyped recall reaches a planner.** Every recall
-   result crossing into a task context carries a machine-readable
-   classification and its provenance, or it does not cross.
+   result crossing into a task context is an evidence object carrying its
+   verdict and provenance, or it does not cross. `WEAK` does not cross.
+3. **Normative vocabulary.** `candidate observation` before admission,
+   `evidence object` after; the pre-admission type is not named
+   `EvidenceCandidate`.
 
 Both are recorded here rather than edited into that document's numbered phases,
 because per rule 3 they are agent-authored and pending; the cross-reference in
@@ -251,8 +384,14 @@ has touched credentials.
 
 ## Final position
 
-Take the ingestion layer, the record model, the lifecycle states and the
-negative-eval discipline. Leave the retrieval verdict where it is.
+deja-vu is not a memory layer for 007 and should not be evaluated as one. It is
+a very good **multi-harness observation and candidate-retrieval substrate** —
+consume it as such, pinned and read-only, and treat both what it returns and
+*its judgement that the thing is relevant* as untrusted versioned input.
+
+Memory semantics and evidence admission belong to 007, and the line between
+them has a name now: a retrieval result becomes a candidate observation, and
+only admission makes it evidence.
 
 deja-vu answers *what did we talk about that resembles this*. 007 has to answer
 *what can be proven about what we did*, and be willing to answer *nothing* —

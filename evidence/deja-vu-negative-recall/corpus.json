@@ -1,0 +1,391 @@
+{
+  "schema": 1,
+  "id": "deja-vu-recall-oracle.v1",
+  "note": "Oracle for the cross-version drift check. Session titles are the stable identity inside this corpus; ids are derived from them at build time.",
+  "sessions": [
+    {
+      "project": "api-gateway",
+      "title": "postgres connection pool exhausted under load",
+      "turns": [
+        "the api gateway is timing out, pgbouncer says the pool is exhausted",
+        "raised max_connections to 200 and set pool_mode to transaction in the pgbouncer config",
+        "the leak was a missing defer rows.Close() in the orders repository, so connections were never returned",
+        "added a runbook note: watch pg_stat_activity idle in transaction before touching pool size"
+      ]
+    },
+    {
+      "project": "api-gateway",
+      "title": "jwt refresh token rotation broke mobile clients",
+      "turns": [
+        "mobile clients get 401 after the refresh token rotation deploy",
+        "the old refresh token was invalidated before the client stored the new one",
+        "decision: keep a 60 second grace window where the previous refresh token still validates",
+        "added a test that replays the previous token inside the grace window"
+      ]
+    },
+    {
+      "project": "api-gateway",
+      "title": "rate limiter leaks memory on unknown api keys",
+      "turns": [
+        "the rate limiter map grows without bound, one entry per unseen api key",
+        "switched to an lru with a 10 minute ttl instead of a plain map",
+        "memory flat at 300MB after the change, was climbing 1GB a day"
+      ]
+    },
+    {
+      "project": "api-gateway",
+      "title": "grpc deadline propagation lost across the proxy",
+      "turns": [
+        "downstream calls keep running after the client gave up",
+        "the proxy created a fresh context instead of forwarding the deadline",
+        "fixed by threading the incoming context through the handler chain"
+      ]
+    },
+    {
+      "project": "billing",
+      "title": "stripe webhook retries double charged two customers",
+      "turns": [
+        "two customers were charged twice after the webhook retry storm",
+        "the handler was not idempotent, we keyed on our own id instead of the stripe event id",
+        "decision: dedupe on stripe event id in a unique index, reject duplicates at the database",
+        "refunded both charges manually and wrote the incident runbook"
+      ]
+    },
+    {
+      "project": "billing",
+      "title": "invoice pdf generation timeout in the worker",
+      "turns": [
+        "invoice pdf jobs time out after 30 seconds on large accounts",
+        "the renderer was loading every line item into memory before writing",
+        "streamed the line items and cut peak memory by 80 percent"
+      ]
+    },
+    {
+      "project": "billing",
+      "title": "currency rounding mismatch between ledger and invoice",
+      "turns": [
+        "the ledger total and the invoice total differ by one cent on some orders",
+        "we rounded per line item in one place and on the sum in the other",
+        "decision: money is integer minor units everywhere, rounding happens once at presentation"
+      ]
+    },
+    {
+      "project": "billing",
+      "title": "proration logic wrong on mid cycle plan downgrade",
+      "turns": [
+        "downgrading mid cycle credits the customer too much",
+        "the proration used calendar days instead of the billing period length",
+        "added property tests over random period lengths"
+      ]
+    },
+    {
+      "project": "platform",
+      "title": "kubernetes ingress tls certificate not renewing",
+      "turns": [
+        "cert-manager stopped renewing the ingress certificate, expiry in four days",
+        "the http01 solver could not reach the challenge path because of the auth middleware",
+        "excluded /.well-known/acme-challenge from the middleware and the order completed",
+        "runbook: check certificate and certificaterequest status before touching the issuer"
+      ]
+    },
+    {
+      "project": "platform",
+      "title": "terraform state lock stuck after a cancelled apply",
+      "turns": [
+        "terraform plan fails with state blob already locked",
+        "a cancelled ci job left the dynamodb lock behind",
+        "force-unlock with the lock id from the error, then re-plan to confirm no drift"
+      ]
+    },
+    {
+      "project": "platform",
+      "title": "node autoscaler thrashing between two and six nodes",
+      "turns": [
+        "the cluster autoscaler scales up and back down every few minutes",
+        "requests were far below actual usage so the scheduler packed pods too tight",
+        "set realistic cpu requests from the p95 and the thrashing stopped"
+      ]
+    },
+    {
+      "project": "platform",
+      "title": "object storage bucket lifecycle deleted needed backups",
+      "turns": [
+        "the storage lifecycle rule expired objects we still needed for restore",
+        "the prefix filter was empty so the rule applied to the whole bucket",
+        "restored from versioning, then scoped the rule to the tmp/ prefix and enabled a legal hold on backups"
+      ]
+    },
+    {
+      "project": "indexer",
+      "title": "rust borrow checker fight in the segment merger",
+      "turns": [
+        "cannot borrow segments as mutable more than once in the merge loop",
+        "split the read phase from the write phase and passed indices instead of references",
+        "the merge is now single pass and about 20 percent faster"
+      ]
+    },
+    {
+      "project": "indexer",
+      "title": "tokenizer drops cyrillic text on the fold path",
+      "turns": [
+        "russian queries return nothing, the tokenizer treats the text as one term",
+        "the wordy rune check assumed anything above a codepoint threshold was a word",
+        "fixed with a unicode letter check and added a cyrillic regression test"
+      ]
+    },
+    {
+      "project": "indexer",
+      "title": "mmap index corruption after a partial write",
+      "turns": [
+        "the index file is truncated when the process is killed mid write",
+        "write to a temp file and rename, rename is atomic on the same filesystem",
+        "added a crash test that kills the writer at random offsets"
+      ]
+    },
+    {
+      "project": "indexer",
+      "title": "bm25 scoring favours very short documents",
+      "turns": [
+        "one line documents outrank real matches",
+        "the length normalisation constant was too aggressive at 0.2",
+        "tuned b to 0.75 and re-ran the retrieval regression set"
+      ]
+    },
+    {
+      "project": "web",
+      "title": "webpack build out of memory in ci",
+      "turns": [
+        "the ci build dies with javascript heap out of memory",
+        "source maps for the vendor bundle were the memory spike",
+        "disabled vendor source maps in ci and raised the node heap to 4096"
+      ]
+    },
+    {
+      "project": "web",
+      "title": "hydration mismatch on the dashboard chart",
+      "turns": [
+        "react warns about a hydration mismatch on the dashboard chart",
+        "the server rendered a locale formatted date, the client rendered another locale",
+        "decision: format dates on the client only, server sends the raw timestamp"
+      ]
+    },
+    {
+      "project": "web",
+      "title": "service worker serving a stale bundle after deploy",
+      "turns": [
+        "users keep the old bundle after a deploy until a hard refresh",
+        "the cache first strategy never revalidated the html entrypoint",
+        "switched the entrypoint to network first and kept cache first for hashed assets"
+      ]
+    },
+    {
+      "project": "data",
+      "title": "protobuf schema migration broke the old consumers",
+      "turns": [
+        "old consumers cannot parse the new event after the schema migration",
+        "a field number was reused for a different type",
+        "decision: field numbers are never reused, reserved is mandatory in the review checklist"
+      ]
+    },
+    {
+      "project": "data",
+      "title": "airflow dag backfill duplicated rows in the warehouse",
+      "turns": [
+        "the backfill wrote every row twice into the warehouse table",
+        "the task was not idempotent, insert instead of merge on the natural key",
+        "rewrote as a merge and deduped the affected partitions"
+      ]
+    },
+    {
+      "project": "data",
+      "title": "parquet column pruning not applied by the reader",
+      "turns": [
+        "the reader scans every column even when only two are selected",
+        "the projection was applied after the read instead of pushed down",
+        "pushed the projection into the scan and cut the query from 40s to 6s"
+      ]
+    },
+    {
+      "project": "data",
+      "title": "clickhouse merge falls behind during the nightly load",
+      "turns": [
+        "parts pile up during the nightly load and queries slow down",
+        "the insert batch size was far too small, thousands of tiny parts per minute",
+        "batched inserts to 100k rows and the merge caught up"
+      ]
+    },
+    {
+      "project": "infra",
+      "title": "ci flake in the integration suite once every twenty runs",
+      "turns": [
+        "the integration suite fails intermittently on the same test",
+        "a fixed port collided when two jobs ran on the same runner",
+        "bound to port zero and read the assigned port back"
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "id": "neg-01",
+      "oracle": "unsupported",
+      "text": "what did we decide about the kafka consumer rebalance storm"
+    },
+    {
+      "id": "neg-02",
+      "oracle": "unsupported",
+      "text": "how did we fix the elasticsearch shard allocation failure"
+    },
+    {
+      "id": "neg-03",
+      "oracle": "unsupported",
+      "text": "why did we drop mongodb sharding for the audit log"
+    },
+    {
+      "id": "neg-04",
+      "oracle": "unsupported",
+      "text": "what was the conclusion on the rabbitmq quorum queue migration"
+    },
+    {
+      "id": "neg-05",
+      "oracle": "unsupported",
+      "text": "how did we handle the cassandra tombstone compaction runbook"
+    },
+    {
+      "id": "neg-06",
+      "oracle": "unsupported",
+      "text": "what did we change in the envoy mesh mtls rotation"
+    },
+    {
+      "id": "neg-07",
+      "oracle": "unsupported",
+      "text": "did we ever solve the android bluetooth pairing timeout"
+    },
+    {
+      "id": "neg-08",
+      "oracle": "unsupported",
+      "text": "what was the fix for the swift concurrency actor deadlock"
+    },
+    {
+      "id": "neg-09",
+      "oracle": "unsupported",
+      "text": "how did we tune the hadoop yarn scheduler queues"
+    },
+    {
+      "id": "neg-10",
+      "oracle": "unsupported",
+      "text": "what did we decide about the graphql federation gateway split"
+    },
+    {
+      "id": "neg-11",
+      "oracle": "unsupported",
+      "text": "why did the wasm runtime sandbox escape test fail",
+      "fixture": "RED-close-term-drop",
+      "note": "every discriminating term is dropped by the close tier; the residue 'test fails' is answered. retriever HIT, admission MUST be NO_SUPPORTED_EVIDENCE."
+    },
+    {
+      "id": "neg-12",
+      "oracle": "unsupported",
+      "text": "how did we migrate the ldap directory to okta"
+    },
+    {
+      "id": "neg-13",
+      "oracle": "unsupported",
+      "text": "what was the outcome of the ipv6 dual stack rollout"
+    },
+    {
+      "id": "neg-14",
+      "oracle": "unsupported",
+      "text": "did we fix the printer driver spool corruption"
+    },
+    {
+      "id": "neg-15",
+      "oracle": "unsupported",
+      "text": "how did we configure the snowflake warehouse auto suspend"
+    },
+    {
+      "id": "neg-16",
+      "oracle": "unsupported",
+      "text": "what did we learn from the dns anycast failover drill"
+    },
+    {
+      "id": "neg-17",
+      "oracle": "unsupported",
+      "text": "how did we resolve the git lfs storage quota exhaustion"
+    },
+    {
+      "id": "neg-18",
+      "oracle": "unsupported",
+      "text": "what happened with the arm64 cross compilation toolchain"
+    },
+    {
+      "id": "neg-19",
+      "oracle": "unsupported",
+      "text": "why did we revert the istio ambient mode upgrade"
+    },
+    {
+      "id": "neg-20",
+      "oracle": "unsupported",
+      "text": "what did we decide about the firebase push notification retry"
+    },
+    {
+      "id": "pos-01",
+      "oracle": "supported",
+      "text": "why was the postgres connection pool exhausted",
+      "evidence_title": "postgres connection pool exhausted under load"
+    },
+    {
+      "id": "pos-02",
+      "oracle": "supported",
+      "text": "how did we fix the stripe webhook double charge",
+      "evidence_title": "stripe webhook retries double charged two customers"
+    },
+    {
+      "id": "pos-03",
+      "oracle": "supported",
+      "text": "what did we do about the ingress tls certificate renewal",
+      "evidence_title": "kubernetes ingress tls certificate not renewing"
+    },
+    {
+      "id": "pos-04",
+      "oracle": "supported",
+      "text": "why did the tokenizer drop cyrillic text",
+      "evidence_title": "tokenizer drops cyrillic text on the fold path"
+    },
+    {
+      "id": "pos-05",
+      "oracle": "supported",
+      "text": "what caused the webpack build to run out of memory",
+      "evidence_title": "webpack build out of memory in ci"
+    },
+    {
+      "id": "pos-06",
+      "oracle": "supported",
+      "text": "how did we handle the protobuf field number reuse",
+      "evidence_title": "protobuf schema migration broke the old consumers"
+    },
+    {
+      "id": "pos-07",
+      "oracle": "supported",
+      "text": "what was the parquet column pruning problem",
+      "evidence_title": "parquet column pruning not applied by the reader"
+    },
+    {
+      "id": "pos-08",
+      "oracle": "supported",
+      "text": "how did we stop the node autoscaler thrashing",
+      "evidence_title": "node autoscaler thrashing between two and six nodes"
+    },
+    {
+      "id": "pos-09",
+      "oracle": "supported",
+      "text": "what was the jwt refresh token rotation decision",
+      "evidence_title": "jwt refresh token rotation broke mobile clients"
+    },
+    {
+      "id": "pos-10",
+      "oracle": "supported",
+      "text": "why did the airflow backfill duplicate rows",
+      "evidence_title": "airflow dag backfill duplicated rows in the warehouse"
+    }
+  ]
+}

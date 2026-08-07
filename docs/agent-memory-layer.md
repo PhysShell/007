@@ -3,10 +3,12 @@
 - **Status:** draft · Scope: `o7 memory` / `o7 context` (007 only; OwnAudit
   and Own.NET runs are data sources, not implementation targets).
 - **Companion evaluation:** `docs/deja-vu-memory-evaluation.md` — a second
-  prior-art study (deja-vu) with a measured negative-recall probe. It proposes
-  one added acceptance criterion (abstention) and one added non-goal (no
-  untyped recall reaches a planner); both are agent-authored and **pending
-  maintainer ratification**, so they are not folded into the phases below.
+  prior-art study (deja-vu) with a measured recall oracle. It proposes an added
+  acceptance criterion (abstention, scored as a hard gate plus a separate
+  recall metric), an added non-goal (no untyped recall reaches a planner), and
+  the normative split between a **candidate observation** and an **evidence
+  object**. All are agent-authored and **pending maintainer ratification**, so
+  they are not folded into the phases below.
 
 ## Summary
 
@@ -149,7 +151,14 @@ this document proposes (typed non-conversational records, a decision lifecycle
 with tombstones, a deterministic rebuildable index) and the one thing that
 disqualifies it as an authority (it has no *no supported evidence* answer) — in
 `docs/deja-vu-memory-evaluation.md`. The measurement behind that last claim is
-in `evidence/deja-vu-negative-recall/`.
+in `evidence/deja-vu-negative-recall/`, kept as a fixed corpus so it doubles as
+a cross-version instrument: it separates upstream retrieval drift from our own
+admission drift.
+
+The proposed position is that deja-vu is **not** a memory layer for 007 but a
+multi-harness observation and candidate-retrieval substrate, and that its
+retrieval semantics — not merely the historical text it returns — are an
+untrusted, versioned input protocol.
 
 ## Proposed architecture
 
@@ -1034,10 +1043,12 @@ Phase 2 is complete when:
 - context includes provenance links;
 - context stays under a configured token/char budget.
 
-A fifth criterion — abstention: a negative-query set is part of the acceptance
-run, and no session is returned as evidence for a question the corpus cannot
-support — is proposed in `docs/deja-vu-memory-evaluation.md` and is **pending
-maintainer ratification** (rule 3), so it does not bind Phase 2 yet.
+An additional criterion — abstention — is proposed in
+`docs/deja-vu-memory-evaluation.md`: the oracle corpus is part of the
+acceptance run, scored as two separate numbers, a hard gate
+(`unsupported_admission_violations`, normatively zero on that corpus) and an
+optimization metric (`supported_evidence_recall`). It is **pending maintainer
+ratification** (rule 3), so it does not bind Phase 2 yet.
 
 Phase 3 is complete when:
 
