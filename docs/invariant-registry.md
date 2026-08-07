@@ -1,14 +1,14 @@
 # Invariant registry — named invariants and their executable witnesses
 
-Status: **proposal, pending maintainer ratification** (design questions resolved) ·
+Status: **ratified (maintainer, interactive session)** ·
+Ratified design revision: `1f17b49cd6530cad1fb22d8225e69af8d3aa5d88` ·
 Scope: 007 in v0, federated per-repo by design · Implementation: not started
 
-Per `docs/evidence-and-decision-discipline.md` rule 3, this was drafted
-autonomously and proposes a new **authoritative registry of invariant identities
-and enforcement/evidence bindings** — deliberately *not* a new source of truth for
-the invariants' semantics (see [Authority](#authority)). It stays pending until a
-maintainer ratifies or rejects it, and cannot be cited to justify a further
-autonomous decision.
+This design was ratified by the maintainer in an interactive session, under the
+carve-out in `docs/evidence-and-decision-discipline.md` rule 3. The ratification
+is bound to design revision `1f17b49cd6530cad1fb22d8225e69af8d3aa5d88`;
+later changes are not covered by that decision unless separately ratified when
+they cross the governance threshold.
 
 ## The gap
 
@@ -227,7 +227,7 @@ was narrowed accordingly.
 Recorded here because the alternative is a small semantic lie that becomes, four
 documents later, "the registry proves complete enforcement coverage."
 
-## Resolved dispositions (recommended for ratification)
+## Resolved dispositions (ratified)
 
 ```text
 1. Scope        v0 = 007 only; architecture federated per-repo;
@@ -242,8 +242,8 @@ documents later, "the registry proves complete enforcement coverage."
 6. Completeness no claim of detecting unregistered/orphan enforcement sites in v0
 ```
 
-Seed order once ratified, so the first version describes reality rather than
-aspiration: the compile/lint boundaries, the `o7-harness-policy` compile-fail
-probe, verdict semantics, then the parser fuzz/Kani/proptest witnesses.
+Seed order for v0, so the first version describes reality rather than aspiration:
+the compile/lint boundaries, the `o7-harness-policy` compile-fail probe, verdict
+semantics, then the parser fuzz/Kani/proptest witnesses.
 
 No code follows from this document.
