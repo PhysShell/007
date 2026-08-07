@@ -1,0 +1,39 @@
+{
+  "changed_pointers": [
+    {
+      "new_artifact": "sha256:0831d01be0b4c5956a1502e710cc58e2f221308ef8d0fbfc8a1a5500a182862b",
+      "old_artifact": "sha256:7f72133abc88ff88873c9d5dea1139535ff6583baee5e96b74ed7b0e4aeafba6",
+      "pointer": "bound_inputs.r3_1_report",
+      "reason": "input binding: arm-produced bytes"
+    },
+    {
+      "new_artifact": "sha256:50fad7cd3b791a4eb5bd0093b7b208461bfbfda28d5b0582355100dc8015cd01",
+      "old_artifact": "sha256:160d145c9cb250e878d036d0c7892835af62d762461abe63d5843eb97a53c4c3",
+      "pointer": "bound_inputs.r3_1_projection_comparison",
+      "reason": "input binding: arm-produced bytes"
+    },
+    {
+      "new_artifact": "sha256:ce84029962ba3b35d45736b39b22e84fdfe37fa826bce3394bc7a4a773c8c350",
+      "old_artifact": "sha256:7c4003679e047e5f333ade9b905d9056ad42ba6bc5857dfe1a909d2ba5ef7fdf",
+      "pointer": "bound_inputs.task_contexts.case-0002-resume-product-integration",
+      "reason": "input binding: arm-produced bytes"
+    },
+    {
+      "new_artifact": "sha256:79af64e570a92f63a4eb2d01e937475ce6684e5af599221b10041b2c1a78e656",
+      "old_artifact": "sha256:ba8b0e8f6d2732a3b1e86cff7c302b522291b0a73cf05b122c601d581b00718d",
+      "pointer": "bound_inputs.task_contexts.case-0002-audit-r21-evidence-provenance",
+      "reason": "input binding: arm-produced bytes"
+    },
+    {
+      "new_artifact": "sha256:91dbefb1bcc2dfc11179e12eda4068037fd987faccbaf7e23ba235638db7afba",
+      "old_artifact": "sha256:eec21faee941a2f086762148cb838e353c5c74861d327272b6f7bdf9fed2bdc8",
+      "pointer": "bound_inputs.task_contexts.case-0002-assess-change-impact-on-oracle-topology",
+      "reason": "input binding: arm-produced bytes"
+    }
+  ],
+  "contract_revision_unchanged": true,
+  "count_changed": 5,
+  "rebound_validates_rev3_schema": true,
+  "record": "o7.b1.q2-semantic-binding-equivalence/v0",
+  "semantic_sections_byte_equal_after_normalization": true
+}

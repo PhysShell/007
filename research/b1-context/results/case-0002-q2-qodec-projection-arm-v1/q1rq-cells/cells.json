@@ -1,0 +1,133 @@
+{
+  "cells": {
+    "case-0002-assess-change-impact-on-oracle-topology": {
+      "cells": [
+        {
+          "admissible": true,
+          "byte_equal": true,
+          "canonical_object_equal": true,
+          "codec": "deep",
+          "decode_exit": 0,
+          "encoded": true,
+          "envelope_codec": "mine",
+          "run1_run2_byte_identical": true,
+          "strict_win": true,
+          "tokens_in": 2534,
+          "tokens_out": 1498
+        },
+        {
+          "admissible": true,
+          "byte_equal": true,
+          "canonical_object_equal": true,
+          "codec": "squeeze",
+          "decode_exit": 0,
+          "encoded": true,
+          "envelope_codec": "mine",
+          "run1_run2_byte_identical": true,
+          "strict_win": true,
+          "tokens_in": 2534,
+          "tokens_out": 1508
+        }
+      ],
+      "selected": {
+        "admissible": true,
+        "byte_equal": true,
+        "canonical_object_equal": true,
+        "codec": "deep",
+        "decode_exit": 0,
+        "encoded": true,
+        "envelope_codec": "mine",
+        "run1_run2_byte_identical": true,
+        "strict_win": true,
+        "tokens_in": 2534,
+        "tokens_out": 1498
+      }
+    },
+    "case-0002-audit-r21-evidence-provenance": {
+      "cells": [
+        {
+          "admissible": true,
+          "byte_equal": true,
+          "canonical_object_equal": true,
+          "codec": "deep",
+          "decode_exit": 0,
+          "encoded": true,
+          "envelope_codec": "mine",
+          "run1_run2_byte_identical": true,
+          "strict_win": true,
+          "tokens_in": 3153,
+          "tokens_out": 2070
+        },
+        {
+          "admissible": true,
+          "byte_equal": true,
+          "canonical_object_equal": true,
+          "codec": "squeeze",
+          "decode_exit": 0,
+          "encoded": true,
+          "envelope_codec": "mine",
+          "run1_run2_byte_identical": true,
+          "strict_win": true,
+          "tokens_in": 3153,
+          "tokens_out": 2080
+        }
+      ],
+      "selected": {
+        "admissible": true,
+        "byte_equal": true,
+        "canonical_object_equal": true,
+        "codec": "deep",
+        "decode_exit": 0,
+        "encoded": true,
+        "envelope_codec": "mine",
+        "run1_run2_byte_identical": true,
+        "strict_win": true,
+        "tokens_in": 3153,
+        "tokens_out": 2070
+      }
+    },
+    "case-0002-resume-product-integration": {
+      "cells": [
+        {
+          "admissible": true,
+          "byte_equal": true,
+          "canonical_object_equal": true,
+          "codec": "deep",
+          "decode_exit": 0,
+          "encoded": true,
+          "envelope_codec": "mine",
+          "run1_run2_byte_identical": true,
+          "strict_win": true,
+          "tokens_in": 1795,
+          "tokens_out": 1191
+        },
+        {
+          "admissible": true,
+          "byte_equal": true,
+          "canonical_object_equal": true,
+          "codec": "squeeze",
+          "decode_exit": 0,
+          "encoded": true,
+          "envelope_codec": "mine",
+          "run1_run2_byte_identical": true,
+          "strict_win": true,
+          "tokens_in": 1795,
+          "tokens_out": 1201
+        }
+      ],
+      "selected": {
+        "admissible": true,
+        "byte_equal": true,
+        "canonical_object_equal": true,
+        "codec": "deep",
+        "decode_exit": 0,
+        "encoded": true,
+        "envelope_codec": "mine",
+        "run1_run2_byte_identical": true,
+        "strict_win": true,
+        "tokens_in": 1795,
+        "tokens_out": 1191
+      }
+    }
+  }
+}

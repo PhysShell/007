@@ -1,0 +1,35 @@
+{
+  "aggregate": {
+    "notation_tokens": 261,
+    "q1r_raw_tokens": 7482,
+    "q1rq_cold_bundle_tokens": 5020,
+    "q1rq_warm_tokens": 4759
+  },
+  "meter": "o200k",
+  "notation_tokens": 261,
+  "per_task": {
+    "case-0002-assess-change-impact-on-oracle-topology": {
+      "admissible": true,
+      "q1r_raw_tokens": 2534,
+      "q1rq_codec": "deep",
+      "q1rq_cold_tokens": 1759,
+      "q1rq_warm_tokens": 1498
+    },
+    "case-0002-audit-r21-evidence-provenance": {
+      "admissible": true,
+      "q1r_raw_tokens": 3153,
+      "q1rq_codec": "deep",
+      "q1rq_cold_tokens": 2331,
+      "q1rq_warm_tokens": 2070
+    },
+    "case-0002-resume-product-integration": {
+      "admissible": true,
+      "q1r_raw_tokens": 1795,
+      "q1rq_codec": "deep",
+      "q1rq_cold_tokens": 1452,
+      "q1rq_warm_tokens": 1191
+    }
+  },
+  "record": "o7.b1.q2-cost-matrix/v0",
+  "zero_profile": true
+}
