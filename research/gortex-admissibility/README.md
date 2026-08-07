@@ -27,9 +27,62 @@ tools/       check.sh -- validates the instrument, invokes no tool under test
 results/     measured results per case (git-ignored until a run is promoted)
 ```
 
-**Corpus v1 is frozen.** Eight cases: seven resolution, one lifecycle. No
-further fixtures before the first real measurement run. Growth from here is
-driven by defects that run surfaces, not by anticipation.
+## Corpus identity
+
+```text
+v1     b9dcc548bdfd50fc471627097a3c778b1eab0cc5   SUPERSEDED
+       reason: the TypeScript fixtures carried no project manifests, so a
+       default run exercised only the degraded observer configuration. A
+       single run against v1 would have systematically misclassified any
+       engine whose resolution depends on a project manifest -- which, as
+       measured on 2026-08-07, Gortex's does.
+
+v1.1   <this head>                                CURRENT
+       change: measurement profiles only. No fixture source changed, and no
+       oracle changed -- ground truth is identical under every profile.
+```
+
+v1 is not rewritten or disowned. It produced the most valuable result of the
+run so far: it exposed a hidden environmental variable that neither the spec
+nor the corpus had accounted for.
+
+Eight cases: seven resolution, one lifecycle. No further fixtures before a
+verdict. Growth from here is driven by defects a run surfaces, not by
+anticipation.
+
+## Measurement profiles
+
+A profile is a configuration of the **observer**, never a property of the world
+or of the ground truth. `oracle.yaml` is identical under every profile: the
+callers of `Invoice.send` do not change because a `tsconfig.json` appeared.
+What changes is how much of that truth the observer can reach.
+
+```text
+profiles/
+  bare.yaml              source only, as committed
+  manifested.yaml        + the manifests a real TypeScript repo carries
+  manifested/            the overlay itself, applied at measurement time
+```
+
+Keeping profiles out of the oracle is deliberate. Folding them in would repeat,
+one storey up, the confusion this whole harness exists to prevent: mistaking
+the capabilities of the measuring instrument for facts about the world.
+
+**A manifest is an input, never evidence.** Do not read `tsconfig.json` present
+as proof that a language server resolved anything. Measured 2026-08-07:
+installing `typescript-language-server` changed no edge on its own, and only
+adding the manifests moved edges from `text_matched` to `lsp_resolved`. The
+observable that counts is the `origin` the engine actually emits per edge.
+
+So the calibration key is effectively:
+
+```text
+(profile, origin, confidence, caveats)
+```
+
+and `profile` may well drop out of the production admission table entirely,
+if `origin == lsp_resolved` is already a sufficient observable that the
+capability really engaged. Trust the emitted provenance, not the setup.
 
 Each case:
 

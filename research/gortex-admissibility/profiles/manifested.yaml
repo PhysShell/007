@@ -1,0 +1,17 @@
+schema: profile-v0
+id: manifested
+description: >
+  The fixture plus the project manifests a real TypeScript repository carries.
+  Overlaid at measurement time, never committed into the fixture: the manifests
+  configure the observer, they are not part of the semantic world under test.
+overlay: profiles/manifested
+requires:
+  - typescript-language-server on PATH
+expectation:
+  note: >
+    A manifest is an INPUT, not evidence. Its presence must never be read as
+    proof that a language server actually resolved anything -- measured on
+    2026-08-07, installing typescript-language-server changed nothing on its
+    own, and only adding tsconfig.json/package.json moved edges from
+    text_matched to lsp_resolved. The observable that counts is the `origin`
+    the observer actually emits per edge. Score that; ignore the manifest.
