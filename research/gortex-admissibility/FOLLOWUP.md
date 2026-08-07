@@ -1,6 +1,31 @@
 # Gortex admissibility — follow-up work
 
-Status: planned R&D follow-up
+Status: RESOLUTION ROUND CLOSED (2026-08-07) — lifecycle still open
+
+```text
+1. Package 1 instrument defects        DONE
+2. Package 2 built                     DONE (self-checks; NOT run)
+3. Corpus frozen                       DONE as v1.1 (v1 superseded, recorded)
+4. Draft PR                            DONE  PhysShell/007#120
+5. First Gortex run                    DONE  resolution only
+   verdict                             KEEP NARROW
+   lifecycle                           UNKNOWN -- deferred, not passed
+```
+
+Record: `results/resolution-v1.1/` — measurement, raw sweep with its flake
+preserved, and `observer-admission.yaml`.
+
+Package 2 remains built and unrun on purpose. It becomes a small targeted
+qualification round when a real consumer of staleness notification exists.
+Until then `o7` does not treat this observer as authority for invalidating
+evidence it has already consumed; exact-head and current-identity checks stay
+`o7`'s own responsibility.
+
+GCX1 remains untouched under `PhysShell/qodec`.
+
+---
+
+Original plan, kept for the record:
 
 This note records the agreed execution order so the current evaluation work does not dissolve into unrelated side tracks.
 
