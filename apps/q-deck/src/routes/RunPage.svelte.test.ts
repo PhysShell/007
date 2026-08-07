@@ -496,4 +496,67 @@ describe("RunPage", () => {
     await vi.advanceTimersByTimeAsync(30_000);
     expect(getRunSpy).toHaveBeenCalledTimes(2);
   });
+
+  // Q-Deck A0.5 corrective round 6 (fresh exact-head Codex P1, PR #110):
+  // `crates/o7d/src/canonical.rs`'s own `candidate_projection` maps every
+  // I/O error resolving the record directory or reading events.jsonl to
+  // `"failed"`, and every parse/replay error (including a transient
+  // ArtifactResolver I/O failure, not just genuine corruption) to
+  // `"verification_failed"` — neither is necessarily a PERMANENT
+  // materialization outcome the way `"materialized"`/`"not_applicable"`
+  // are. Treating a present-but-unrecognized-as-final status as done
+  // could permanently strand a sealed, genuinely-materializable run.
+  for (const transientStatus of ["failed", "verification_failed"] as const) {
+    it(`keeps polling past a sealed "${transientStatus}" projection (a possible transient I/O error, not necessarily final) until a real materialized answer arrives, then stops`, async () => {
+      const transient = goldenRun("pass", { materialization_status: transientStatus });
+      const materialized = goldenRun("pass", {
+        candidate_source_run_id: "run-source",
+        candidate_tree_oid: "deadbeef",
+        materialization_status: "materialized",
+      });
+      const getRunSpy = vi
+        .spyOn(api, "getRun")
+        .mockResolvedValueOnce(transient)
+        .mockResolvedValueOnce(materialized);
+      vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents("pass")));
+
+      render(RunPage, { props: { runId: transient.run_id } });
+      await waitFor(() =>
+        expect(screen.getByText(transientStatus === "failed" ? "failed" : "verification failed")).toBeInTheDocument(),
+      );
+      expect(getRunSpy).toHaveBeenCalledTimes(1);
+
+      // Must NOT have stopped here — the old (buggy) behavior would leave
+      // this exact status on screen forever with no further poll.
+      await vi.advanceTimersByTimeAsync(5100);
+      await waitFor(() => expect(screen.getByText("materialized")).toBeInTheDocument());
+      expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+      // Now that a genuinely final answer arrived, polling actually stops.
+      await vi.advanceTimersByTimeAsync(30_100);
+      expect(getRunSpy).toHaveBeenCalledTimes(2);
+    });
+  }
+
+  it("keeps retrying a persistent failure-like projection on the existing backoff schedule, and only unmounting stops it", async () => {
+    const persistentlyFailed = goldenRun("pass", { materialization_status: "failed" });
+    const getRunSpy = vi.spyOn(api, "getRun").mockResolvedValue(persistentlyFailed);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents("pass")));
+
+    const { unmount } = render(RunPage, { props: { runId: persistentlyFailed.run_id } });
+    await waitFor(() => expect(screen.getByText("failed")).toBeInTheDocument());
+    expect(getRunSpy).toHaveBeenCalledTimes(1);
+
+    // Same documented backoff as the omitted-projection case: 5s, 10s.
+    await vi.advanceTimersByTimeAsync(5_100);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(10_100);
+    expect(getRunSpy).toHaveBeenCalledTimes(3);
+
+    // Unmounting — the only thing that stops an unbounded retry — must
+    // genuinely stop it: no further call, no matter how much time passes.
+    unmount();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getRunSpy).toHaveBeenCalledTimes(3);
+  });
 });

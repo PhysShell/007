@@ -179,3 +179,32 @@ export function mergeRunProjection(previous: RunDto | null, next: RunDto): RunDt
     materialization_status: previous.materialization_status,
   };
 }
+
+/** Q-Deck A0.5 corrective round 6 (fresh exact-head Codex P1, PR #110):
+ * a PRESENT `materialization_status` is not automatically a FINAL one.
+ * `crates/o7d/src/canonical.rs`'s own `candidate_projection` maps every
+ * I/O error resolving the record directory or reading `events.jsonl`
+ * (permission, descriptor exhaustion, a transient device hiccup — never
+ * distinguished from a permanent condition) to `"failed"`, and every
+ * parse/replay error — including an `ArtifactResolver` I/O failure
+ * inside `verify_prefix`, not just genuine tamper/corruption — to
+ * `"verification_failed"`. Treating either as a trustworthy final answer
+ * (the previous round's `hasCandidateProjection` check alone) meant a
+ * purely transient filesystem hiccup could permanently strand a sealed,
+ * genuinely-materializable run on "failed" forever, with no further poll
+ * ever attempted once the underlying condition cleared.
+ *
+ * Deliberately an ALLOWLIST (`materialized`/`not_applicable`), not a
+ * denylist (`!== "failed"`) — a denylist only ever closes the ONE
+ * specific status a given review pass happened to name, and silently
+ * keeps trusting every OTHER status (including a value this build has
+ * never seen) as final. An allowlist is closed by construction: only
+ * these two literal, server-documented TERMINAL outcomes ever stop
+ * polling; `"failed"`, `"verification_failed"`, and any future
+ * unrecognized value all keep retrying (on the same backed-off, bounded-
+ * only-by-page-lifetime schedule `hasCandidateProjection`'s own retry
+ * loop already uses) until either a final answer arrives or the page is
+ * left. */
+export function isFinalCandidateProjection(run: RunDto): boolean {
+  return run.materialization_status === "materialized" || run.materialization_status === "not_applicable";
+}

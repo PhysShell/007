@@ -2,7 +2,7 @@
   import { onDestroy } from "svelte";
   import { getRun } from "../lib/api";
   import type { RunDto } from "../lib/types";
-  import { isSealedRun, hasCandidateProjection, mergeRunProjection } from "../lib/types";
+  import { isSealedRun, mergeRunProjection, isFinalCandidateProjection } from "../lib/types";
   import { ConversationEventStream } from "../lib/eventStream.svelte";
   import { relativeAge, duration, absoluteTime } from "../lib/format";
   import Link from "../components/Link.svelte";
@@ -100,7 +100,14 @@
           // conflating them is exactly the bug.
           run = mergeRunProjection(run, r);
         }
-        if (isSealedRun(r.status) && hasCandidateProjection(r)) {
+        // Q-Deck A0.5 corrective round 6 (fresh exact-head Codex P1, PR
+        // #110): a PRESENT projection is not automatically a FINAL one —
+        // `"failed"`/`"verification_failed"` can themselves be the
+        // server's own transient I/O-error report, not a permanent
+        // materialization outcome. See `isFinalCandidateProjection`'s own
+        // doc comment for the full reasoning; only `materialized`/
+        // `not_applicable` ever stop this loop.
+        if (isSealedRun(r.status) && isFinalCandidateProjection(r)) {
           return; // done — a trustworthy final projection has arrived.
         }
         const delay = isSealedRun(r.status)
