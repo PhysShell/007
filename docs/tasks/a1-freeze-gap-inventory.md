@@ -497,3 +497,59 @@ writer-supplied `artifact_refs` (§3). RED-матрица расширена
 Следующий шаг: **третий contract-only review** — по оценке maintainer'а,
 после этих правок должна появиться реальная возможность дать APPROVED
 FOR TYPES. Types + construction API не начинаются до вердикта.
+
+---
+
+## Review round #3: A1 contract @ `4f51457`
+
+**VERDICT: CHANGES_REQUESTED** (maintainer, 2026-08-07). Оба
+сознательных решения round #2 (intra/causal split; Controller-produced
+receipt) ратифицированы и не откатываются. Шесть P1 — «последние места,
+где ref притворяется proof»:
+
+```text
+P1-16  round_ordinal без replayable canonical authority
+P1-17  ref_manifest / §11 всё ещё не exhaustive (causation не
+       определён; producer/cause-рёбра пропущены; [producer]-метка
+       на Controller-produced receipt; SafeRedrive evidence без типа;
+       edge tags не заморожены)
+P1-18  ArtifactImported противоречил §6/§11/checklist #3
+P1-19  RESERVED без durable construction seed; byte contract
+       (writer/recorded) не определён
+P1-20  ProviderBinding допускал provenance-splice с чужим receipt
+P1-21  InitialMaterialization доказывал сосуществование, не
+       contract↔worktree correspondence
+```
+
+Исправления в `a1-contracts.md`: inline-пара `round_id + round_ordinal`
+во всех round-scoped объектах и в binding digest, без RoundBinding
+artifact (§2.3, §2.1, §3); `CausationV1 = Artifact{kind, message_id,
+blob_ref} | CampaignGenesis` — causal-ребро в ref_manifest/DAG (§3);
+матрица §11.3 переписана с producer/cause/ext-рёбрами, `[payload]`
+вместо `[producer]` у receipt, глобальное causation-правило; закрытый
+реестр stable edge tags (дисциплина §4.2) — wire semantics; 
+`EstablishedNonDispatchEvidenceRefV1 {run_id, classification ∈ {absent,
+valid_unsealed_pre_dispatch}, classifier_version,
+classification_record_ref}` + новый CAS-kind (§11.1);
+`RunArtifactSourceRefV1` как class-3 wrapper + constructor-цепочка
+byte-equality для `ArtifactImportedV1` (§6); `CanonicalConstructionSeedV1`
+durable до/атомарно с RESERVED (kind/lineage/causation/producer/payload
+ref/ref_manifest/bindings/writer_version), seed — запись idempotency
+store, не canonical artifact (C6 сохранён); `CanonicalJsonV1` (sorted
+keys, no whitespace, fixed escaping, integers, ByteStringV1) +
+`RecordedMetadataV1` (accepted_at = ns since epoch UTC) +
+writer_version + known-answer corpus, recovery строит под writer_version
+из reservation (§4.5/§4.6); `ProviderBindingV1::Provider` схлопнут до
+`{invocation_receipt_ref}` — role/execution/binding/model/adapter/
+prompt/tool-policy разрешаются ЧЕРЕЗ receipt; `adapter_version`
+перенесён В receipt (adapter произвёл normalized bytes — provenance
+больше не задом наперёд) (§3/§8.6/§8.4); `correspondence_ref` —
+`worktree-correspondence-evidence-blob` от именованного verifier'а
+(rule-4 запись: принятая o7-worktree attestation доказывает filesystem
+identity/ownership — `attest.rs`, — а не семантическое соответствие;
+поэтому bridge, вариант 2 ревью) с equality-вердиктами repo/base против
+obligation (§7.1a). RED-матрица дополнена оракулами по всем шести.
+
+Следующий шаг: **четвёртый, узко-скоуповый review** — только эти швы +
+§18-чеклист, без полного архитектурного раскопа. Types + construction
+API не начинаются до APPROVED FOR TYPES.

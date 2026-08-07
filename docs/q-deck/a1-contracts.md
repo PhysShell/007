@@ -30,8 +30,27 @@ semantics: attention transitions, budget predicate, per-outcome
 normalized-output presence; plus the writer-supplied `artifact_refs`
 second reference surface) — all incorporated (§2.1/§2.3, §7.1/§7.1a,
 §8.3, §11.1–11.4, §4.6, §8.8, §8.4, §8.6/§8.7, §12.4, §3
-respectively). A third contract-only review is required before types
-begin.
+respectively). `4f51457` — CHANGES_REQUESTED, six P1 findings, now
+almost entirely about provability of already-correct abstractions
+(P1-16 `round_ordinal` had no replayable canonical authority; P1-17 the
+exact graph was still non-exhaustive — undefined `causation`, omitted
+producer/cause edges, a mislabeled `[producer]`, untyped SafeRedrive
+evidence, unfrozen edge tags; P1-18 `ArtifactImportedV1` contradicted
+§6/§11/checklist #3; P1-19 `RESERVED` lacked a durable construction
+seed and a single-representation byte contract; P1-20 the Provider
+binding could be provenance-spliced — collapsed to
+`{ invocation_receipt_ref }`, `adapter_version` moved into the receipt;
+P1-21 `InitialMaterialization` proved coexistence, not
+contract↔worktree correspondence — `correspondence_ref` evidence blob
+added, grounded in what `o7-worktree` attestation actually proves) —
+all incorporated (§2.1/§2.3, §3/§11.1–11.4, §6, §4.5/§4.6, §3/§8.6,
+§7.1a respectively). The review ratified as ACCEPTED: per-role chains,
+reviewer input binding, no RoundBinding authority, intra/causal split,
+Controller-produced receipt, RESERVED/COMMITTED+fencing, session ≠
+semantic identity, `HumanCommandRequestRefV1`, immutable attention,
+budget predicate, per-outcome output presence, derived `ref_manifest`.
+A FOURTH, narrowly-scoped review (these seams + the §18 checklist)
+precedes APPROVED FOR TYPES.
 
 Inputs at pinned revisions: accepted A0
 (`docs/q-deck/a0-candidate-state.md`, contract-first `71800fc`, accepted
@@ -92,6 +111,7 @@ coder continuation.
 CampaignRunBindingV1:
   campaign_id
   round_id
+  round_ordinal              # §2.3 — inline, replayable (P1-16)
   role                       # coder | reviewer
   provider_execution_id
   conversation_id
@@ -130,6 +150,7 @@ A reference to a binding is itself typed (needed by §8.3):
 CampaignRunBindingRefV1:
   campaign_id
   round_id
+  round_ordinal
   role
   provider_execution_id
   blob_ref                   # CasObjectRefV1 of the canonical binding
@@ -153,6 +174,17 @@ replacement execution mints a new `campaign_id` with an explicit
 RoundId:        opaque, controller-minted, unique within its namespace
 round_ordinal:  monotonic within a campaign, begins at 0
 ```
+
+**The pair travels together, canonically** (review round 4f51457,
+P1-16 — §11.4's strictly-lower-ordinal predicate was a check only a
+live controller context could make; "we knew the ordinal once" is not
+replayable evidence, and D2 forbids exactly that). `round_id` and
+`round_ordinal` appear as ONE inline identity pair in every round-scoped
+canonical object — the envelope core, `CampaignRunBindingV1`,
+`CampaignRunBindingRefV1` — and BOTH enter `message_binding_digest`.
+This is identity metadata, not reducer authority: no `RoundBinding`
+artifact exists, and historical replay re-proves every ordinal
+comparison from canonical bytes alone.
 
 A round is created before the first coder dispatch of that round and
 binds: `campaign_id`, `contract_digest`,
@@ -202,8 +234,9 @@ EnvelopeCoreV1:
   root_goal_id
   task_id
   campaign_id
-  round_id                   # where applicable to the kind (typed per kind)
-  causation                  # typed identity of the causing artifact
+  round_id + round_ordinal   # the §2.3 pair, where applicable to the
+                             # kind (typed per kind)
+  causation: CausationV1
   producer: ProducerBindingV1
   payload_digest
   ref_manifest               # controller-DERIVED, see rule below
@@ -223,6 +256,27 @@ manifest is what "typed artifact refs in canonical order" means in
 `message_binding_digest` (§4.3), and it is the input the §11 DAG check
 runs on.
 
+**`CausationV1`** (review round 4f51457, P1-17 — "typed identity of the
+causing artifact" was undefined: as a digest ref it bypassed the DAG, as
+anything else it was unspecified):
+
+```text
+CausationV1 =
+  Artifact {
+    message_kind
+    message_id
+    blob_ref: CasObjectRefV1
+  }
+| CampaignGenesis            # valid ONLY for the campaign's first
+                             # WorkOrder (round_ordinal 0); names no
+                             # artifact — the campaign lineage binding
+                             # is the cause
+```
+
+`Artifact` causation IS a digest edge: it participates in
+`ref_manifest` and the §11 DAG as a `causal`-class edge whose target may
+be any envelope-bearing kind already committed.
+
 ```text
 ProducerBindingV1:
   Controller {
@@ -230,14 +284,11 @@ ProducerBindingV1:
     policy_digest
   }
   Provider {
-    role                     # coder | reviewer
-    campaign_run_binding_ref
-    provider_execution_id
-    invocation_receipt_ref
-    adapter_version
-    model_route_ref
-    prompt_digest
-    tool_policy_digest
+    invocation_receipt_ref   # the ONLY field (P1-20): role, execution,
+                             # run binding, model route, adapter,
+                             # prompt/tool-policy digests all resolve
+                             # THROUGH the receipt and its canonical
+                             # request — no denormalized copy to splice
   }
   Human {
     authenticated_principal_ref      # AuthenticatedPrincipalV1, §8.8
@@ -318,9 +369,9 @@ request digest (the same key-vs-request-digest split the ledger's
 the binding digest.
 
 In `message_binding_digest`: envelope version; kind + kind version;
-`root_goal_id`; `task_id`; `campaign_id`; `round_id` where applicable;
-causation artifact identity; producer binding; contract binding where
-applicable; `InputStateBindingV1` — MANDATORY for every work-dispatching
+`root_goal_id`; `task_id`; `campaign_id`; the `round_id + round_ordinal`
+pair where applicable; `CausationV1`; producer binding; contract binding
+where applicable; `InputStateBindingV1` — MANDATORY for every work-dispatching
 kind (WorkOrder, CorrectiveDirective), never optional (§7.1a);
 `payload_digest`; the derived `ref_manifest` (§3 — deduplicated, sorted
 by `(edge kind tag, target digest bytes)`); provider
@@ -352,6 +403,23 @@ non-UTF-8 paths and patch bytes, and A1 must not undo that guarantee with
 a convenient `String`. No "semantically equal" comparisons outside parsed
 types.
 
+**One writable representation** (review round 4f51457, P1-19 — "recovery
+rebuilds the SAME bytes" is impossible while §4.5 only forbids bad JSON
+without defining the single good one). Canonical A1 bytes are produced
+by ONE frozen writer, `CanonicalJsonV1`: object keys sorted by byte
+order; no insignificant whitespace; a fixed minimal escaping table
+(escape only what JSON mandates, one form each); integers only, no
+floats (§ above); byte values via `ByteStringV1`. `recorded` has a
+frozen shape, `RecordedMetadataV1`: `accepted_at` as an unsigned integer
+count of nanoseconds since the Unix epoch, UTC (no string formats, no
+precision ambiguity), plus `writer_version`. The writer carries a
+version constant and a known-answer corpus (input model → exact bytes)
+maintained with the same discipline as the digest-context registry
+(§4.2); an upgrade that changes any byte for any corpus entry is a new
+`writer_version`, and recovery of a `RESERVED` reservation uses the
+reservation's recorded writer version — never the current binary's
+default.
+
 ### 4.6 Acceptance construction ordering — replay can never fork the blob
 
 "Replay returns stored bytes" (§4.4) is an intention; this ordering is
@@ -372,12 +440,39 @@ ABSENT
      message_id,
      message_binding_digest,
      accepted_at,             # assigned HERE, durable BEFORE the blob
-     fencing_generation       # is built — recovery must be able to
-   }                          # rebuild the SAME bytes
+     fencing_generation,      # is built
+     construction_seed_ref    # see below — recovery must be able to
+   }                          # rebuild the SAME bytes, not admire the
+                              # irreversible digest
 -> COMMITTED {
      canonical_blob_ref
    }
 ```
+
+**`CanonicalConstructionSeedV1`** (review round 4f51457, P1-19 — after a
+crash the payload, producer binding, causation, and ref_manifest may
+exist only in the dead process's memory; `message_binding_digest` is
+irreversible, and no recovery scan can reconstruct an artifact from it
+regardless of how convincingly the word "recovery" reads in Markdown):
+
+```text
+CanonicalConstructionSeedV1:
+  message kind + kind version
+  lineage (incl. the round pair) + causation
+  producer binding
+  payload blob ref             # the exact payload bytes, already in CAS
+  ref_manifest
+  action-specific bindings
+  writer_version               # §4.5 — the writer that must rebuild
+```
+
+The seed is durable BEFORE or atomically WITH the `RESERVED`
+transition. Recovery then holds every construction input — the seed plus
+the reservation's `accepted_at` — and rebuilds the byte-identical blob
+under the seed's `writer_version` (§4.5). The seed is an idempotency-
+store record, not a canonical artifact: it does not enter the §11
+universe, and its production durability is A2's, like the rest of the
+store (C6).
 
 Acceptance flow:
 
@@ -392,8 +487,10 @@ derive message_binding_digest
                                        bytes already exist
      ABSENT                         -> RESERVE (winner): durably record
                                        accepted_at + fencing_generation
--> winner serializes the canonical blob (deterministic from the
-   RESERVED record + payload — same inputs, same bytes)
+                                       + construction_seed_ref
+-> winner serializes the canonical blob (deterministic from the seed +
+   accepted_at under the seed's writer_version — same inputs, same
+   bytes)
 -> idempotent CAS put
 -> fenced RESERVED -> COMMITTED (only the fencing_generation owner)
 ```
@@ -461,14 +558,27 @@ CasObjectRefV1             global content-addressed object:
 
 These are different address models (run-relative artifact vs global CAS
 object). No typedef of one into the other. Importing a run artifact into
-CAS requires an explicit bridge receipt with proven byte/digest equality:
+CAS requires an explicit bridge receipt — and the run-relative source
+ref is itself wrapped (review round 4f51457, P1-18: a bare
+`o7_run::ArtifactRef` field both violated checklist #3 and carried a
+digest that §11 pretended "is not a digest edge" — a digest does not
+stop being a digest at a border crossing):
 
 ```text
+RunArtifactSourceRefV1:              # external-sink wrapper into R1/A0
+  source_run_id                      # canonical records, same class as
+  run_artifact_ref: o7_run::ArtifactRef   # the A0 wrappers (§11.1)
+
 ArtifactImportedV1:
-  source_run_id
-  source_run_artifact_ref
-  cas_object_ref
+  source: RunArtifactSourceRefV1
+  cas_object_ref: CasObjectRefV1
 ```
+
+The checked constructor of `ArtifactImportedV1` proves the chain, not
+the vibe: resolve the source bytes from the verified run record; the
+source `run_artifact_ref.digest` matches those bytes;
+`SHA-256(bytes) == cas_object_ref.digest`; the size, `content_kind`, and
+`media_type` rules of the target CAS kind are satisfied.
 
 CAS refs resolve only inside 007-owned storage; agent-composed paths and
 URLs are inert text. Resolvers follow the descriptor-based, no-follow,
@@ -510,8 +620,10 @@ once from base Y — exact task, no exact input state):
 ```text
 InputStateBindingV1 =
   InitialMaterialization {
-    run_contract_ref: RunContractCandidateStateRefV1
-    worktree_ref:     WorktreeMaterializationRefV1
+    run_contract_ref:   RunContractCandidateStateRefV1
+    worktree_ref:       WorktreeMaterializationRefV1
+    correspondence_ref: CasObjectRefV1   # worktree-correspondence-
+                                         # evidence-blob, §7.1a rule
   }
 | ContinuedCandidate {
     candidate_state_ref: CandidateStateReceiptRefV1
@@ -538,6 +650,28 @@ full `verify_prefix`); the named events have the right KINDS
 (`run_started` carrying a present `contract.candidate_state`,
 `worktree_created`) and the named event digests; and the A0 structural
 ordering holds (`RunStarted` precedes `WorktreeCreated` in that record).
+
+**Contract↔worktree correspondence** (review round 4f51457, P1-21 —
+same-run + ordering proves the two events coexisted in time, not that
+THIS worktree materializes THIS repository/base obligation; artifact
+says, per rule 4: the accepted `o7-worktree` attestation proves
+FILESYSTEM identity and ownership — `dev`/`ino`, uid, `0o700`,
+no-follow (`crates/o7-worktree/src/attest.rs`) — and no accepted A0
+verifier proves the semantic cross-object predicate). Therefore the
+binding carries `correspondence_ref`: a
+`worktree-correspondence-evidence-blob` (closed CAS kind, §11.1)
+recorded by a NAMED controller-owned verifier (gate-registry
+discipline: verifier id + version + policy digest inside the blob) that
+observed the attested worktree LIVE at materialization time and
+verified: its checked-out commit equals the obligation's base commit,
+and its repository identity equals the obligation's repository — stored
+as equality verdicts with the verifier's observations, evidence, not a
+re-declaration of A1-level identity fields. The constructor requires
+the blob to name the same `run_id` and both event digests, and its
+verdict to be `verified`. Two independently valid refs from one run
+with the right ordering but a non-corresponding worktree are NOT
+constructible — the RED oracle for exactly that case is in §15.3.
+
 A binding whose refs do not cross-verify is not constructible.
 
 ### 7.2 What A1 must not redefine (unchanged from #95, now with real names)
@@ -667,7 +801,9 @@ Reviewer independence is mechanical, not prompted: fresh provider session
 (no continuation of the coder session, enforced by the C5 binding rules —
 its own conversation in v1); no coder transcript; detached exact-candidate
 fresh attested worktree; no repository or GitHub mutation credentials;
-separate prompt/tool-policy identities (digests in the producer binding).
+separate prompt/tool-policy identities (digests bound by the invocation
+receipt's canonical request, resolved through the report's
+`Provider { invocation_receipt_ref }` binding — §3, P1-20).
 
 **Reviewer execution-input binding** (review round a5615b8, P1-8): the
 reviewer's `CampaignRunBindingV1.input_state_binding` must be
@@ -728,13 +864,13 @@ ExecutionCauseV1:
   Initial
   CorrectiveRound { prior_verdict_ref }
   SafeRedrive { prior_execution_id,
-                established_non_dispatch_evidence_ref }
+                evidence: EstablishedNonDispatchEvidenceRefV1 }  # §11.1
 
 DispatchCauseV1:
   Initial
   ToolContinuation { prior_dispatch_id, tool_result_ref }
   SafeRedrive { prior_dispatch_id,
-                established_non_dispatch_evidence_ref }
+                evidence: EstablishedNonDispatchEvidenceRefV1 }  # §11.1
 ```
 
 ToolContinuation is not a retry. A new session is not a retry. A
@@ -744,9 +880,16 @@ side effect safe. The full incarnation taxonomy stays A2; these two
 grains and causes freeze now because the receipt schema needs them.
 
 The receipt (per execution) binds: execution id + cause; the campaign run
-binding; `LogicalModelRouteV1` ref + `ModelResolutionEvidenceV1` (§9);
-canonical request ref (the exact provider-facing request after adapter
-construction); capture status (`exact_provider_events` /
+binding; **`adapter_version`** — moved INTO the receipt (review round
+4f51457, P1-20: the adapter is what produced `normalized_output_ref`, so
+adapter identity on a LATER report's producer binding was provenance
+turned backwards — the receipt must answer "which adapter produced these
+normalized bytes" even if no report is ever accepted);
+`LogicalModelRouteV1` ref + `ModelResolutionEvidenceV1` (§9); canonical
+request ref (the exact provider-facing request after adapter
+construction) with its `prompt_digest` / `tool_policy_digest` /
+`decoding_policy_digest` / `budget_policy_digest`; capture status
+(`exact_provider_events` /
 `adapter_observations` / `normalized_output_only`); interaction manifest
 ref; **`normalized_output_ref`** — the PRE-ENVELOPE adapter-normalized
 provider output blob, whose presence is fixed PER OUTCOME VARIANT
@@ -1043,13 +1186,17 @@ anything outside it cannot be referenced from canonical bytes:
 2. Typed CAS/support object kinds (closed content_kind registry):
    contract-blob, canonical-request-blob, normalized-output-blob,
    model-route-blob, gate-registry-snapshot-blob, gate-evidence-blob,
-   diff-evidence-blob, authenticated-principal-record
+   diff-evidence-blob, authenticated-principal-record,
+   worktree-correspondence-evidence-blob (§7.1a),
+   non-dispatch-classification-blob (below)
 
-3. A0 external wrappers (cross-universe refs into A0 canonical
+3. External wrappers (cross-universe refs into A0/R1 canonical
    records; TERMINAL from the A1 DAG's perspective — their targets are
-   verified by the A0 semantic layer, not addressed by CAS digests):
+   verified by the A0/R1 semantic layers, not addressed by CAS digests):
    CandidateStateReceiptRefV1, CandidateMaterializationRefV1,
-   RunContractCandidateStateRefV1, WorktreeMaterializationRefV1
+   RunContractCandidateStateRefV1, WorktreeMaterializationRefV1,
+   RunArtifactSourceRefV1 (§6),
+   EstablishedNonDispatchEvidenceRefV1 (below)
 
 4. A2-only transition record kinds (frozen here, appended in A2):
    AttentionAcknowledged, AttentionResolved, AttentionSuperseded
@@ -1059,6 +1206,39 @@ anything outside it cannot be referenced from canonical bytes:
 ```
 
 Extending any class is a contract change via the supersede path.
+
+**`EstablishedNonDispatchEvidenceRefV1`** (review round 4f51457, P1-17 —
+`SafeRedrive` carried `established_non_dispatch_evidence_ref` with no
+target type in the universe; `prior_execution_id`/`prior_dispatch_id`
+are IDs, not evidence, and a very convincing field name is not an
+authority):
+
+```text
+EstablishedNonDispatchEvidenceRefV1:
+  run_id
+  classification: absent | valid_unsealed_pre_dispatch
+                              # the ONLY two R1 classes that establish
+                              # non-dispatch; any other classification
+                              # is unconstructible here
+  classifier_version
+  classification_record_ref: CasObjectRefV1
+                              # non-dispatch-classification-blob — the
+                              # recorded classifier output
+```
+
+The checked constructor requires the blob to resolve, to name the same
+`run_id`, and to carry exactly the named classification under the named
+classifier version. This answers "which artifact proves established
+non-dispatch", not merely gestures at R1.
+
+**Stable edge tags** (P1-17 — `ref_manifest` sorts by `(edge kind tag,
+target digest)` and that manifest enters a protocol digest: the tags are
+WIRE SEMANTICS). Every edge in §11.3 carries a stable snake_case
+`edge_kind` tag equal to the field path that carries the reference; the
+tags form a closed compile-time registry in the protocol crate with a
+uniqueness test and a known-answer test, exactly the §4.2 discipline.
+Renaming a field that carries an edge is therefore a wire change and
+follows the supersede path.
 
 ### 11.2 Per-kind producer mapping (frozen)
 
@@ -1087,20 +1267,30 @@ Provider-bound receipt would create through its own mandatory
 
 The edge sets below are EXHAUSTIVE per kind and include the references
 carried by producer bindings and cause fields — an edge is an edge no
-matter which struct member carries it. Every edge is classed `intra`
-(within one round's derivation flow) or `causal` (crossing rounds,
-chains, or attention lineage):
+matter which struct member carries it (review round 4f51457, P1-17: the
+previous matrix omitted producer-binding edges, mislabeled the
+receipt's run-binding edge `[producer]` right after §11.2 froze the
+receipt as Controller-produced, and claimed HumanCommandRequest has
+"no digest edges" while its Human binding carries a principal ref).
+Additionally, EVERY envelope-bearing kind carries exactly one
+`causation` edge (`CausationV1::Artifact`, classed `causal`, target any
+already-committed envelope-bearing kind) or `CampaignGenesis` (first
+WorkOrder only, no edge) — not repeated per row below. Every edge is
+classed `intra` (within one round's derivation flow) or `causal`
+(crossing rounds, chains, or attention lineage); `ext:` marks
+external-sink wrapper refs (class 3):
 
 ```text
 kind                        exact direct digest edges
 --------------------------  -------------------------------------------
 WorkOrder                -> intra: contract-blob;
-                            terminal-A0: InputStateBinding refs
+                            ext: InputStateBinding refs +
+                            worktree-correspondence blob (initial)
 CoderReport (raw)        -> intra: ProviderInvocationReceipt [producer],
                             gate-evidence-blob, diff-evidence-blob
 CandidateAdmissionReceipt-> intra: CoderReport, CampaignRunBinding
                             [coder_run_binding_ref];
-                            terminal-A0: CandidateStateReceiptRef
+                            ext: CandidateStateReceiptRef
 ReviewRequest            -> intra: CandidateAdmissionReceipt,
                             contract-blob, gate-evidence-blob,
                             diff-evidence-blob
@@ -1108,18 +1298,23 @@ ReviewRequest            -> intra: CandidateAdmissionReceipt,
 ReviewerReport (raw)     -> intra: ProviderInvocationReceipt [producer],
                             gate-evidence-blob
 ReviewVerdict            -> intra: ReviewerReport, gate-evidence-blob;
-                            terminal-A0: CandidateStateReceiptRef
-CorrectiveDirective      -> causal: ReviewVerdict [prior round's];
-                            terminal-A0: InputStateBinding refs
+                            ext: CandidateStateReceiptRef
+CorrectiveDirective      -> causal: ReviewVerdict [prior round,
+                            strictly lower round_ordinal];
+                            ext: InputStateBinding refs
 ProviderInvocationReceipt-> intra: canonical-request-blob,
                             normalized-output-blob, InteractionManifest,
                             model-route-blob, CampaignRunBinding
-                            [producer];
+                            [payload — the receipt is
+                            Controller-produced, §11.2];
                             causal: ReviewVerdict
-                            [ExecutionCause::CorrectiveRound],
-                            ProviderInvocationReceipt
-                            [Execution/DispatchCause::SafeRedrive
-                             evidence, prior execution/dispatch]
+                            [ExecutionCause::CorrectiveRound, strictly
+                            lower round_ordinal],
+                            ProviderInvocationReceipt [prior execution/
+                            dispatch of the SAME chain];
+                            ext: EstablishedNonDispatchEvidenceRef
+                            [SafeRedrive] (+ intra:
+                            non-dispatch-classification-blob through it)
 InteractionManifest      -> intra: raw-provider-event-blob,
                             tool-argument-blob, tool-result-blob
 CampaignFeedItem         -> causal: any envelope-bearing kind already
@@ -1128,9 +1323,11 @@ HumanAttentionRequest    -> intra: ProviderInvocationReceipt,
                             gate-evidence-blob;
                             causal: CandidateAdmissionReceipt,
                             ReviewVerdict;
-                            terminal-A0: CandidateStateReceiptRef
-HumanCommandRequest (raw)-> (no digest edges; preconditions are
-                            identities and digests-as-values, not refs)
+                            ext: CandidateStateReceiptRef
+HumanCommandRequest (raw)-> intra: authenticated-principal-record
+                            [producer]; no payload digest edges
+                            (preconditions are identities and
+                            digests-as-values, not refs)
 HumanDecision            -> intra: HumanCommandRequest
                             [HumanCommandRequestRefV1.blob_ref],
                             authenticated-principal-record,
@@ -1139,9 +1336,10 @@ AttentionAcknowledged /
 AttentionResolved        -> intra: HumanAttentionRequest, HumanDecision
 AttentionSuperseded      -> intra: HumanAttentionRequest;
                             causal: HumanAttentionRequest [superseding]
-ArtifactImported         -> intra: CasObjectRef (the run-relative source
-                            identity is not a digest edge)
-CampaignRunBinding       -> terminal-A0: InputStateBinding refs
+ArtifactImported         -> intra: CasObjectRef;
+                            ext: RunArtifactSourceRef (§6)
+CampaignRunBinding       -> ext: InputStateBinding refs +
+                            worktree-correspondence blob (initial)
                             (identities otherwise, no CAS edges)
 class 2 / class 5 blobs  -> (terminal, no outgoing edges)
 ```
@@ -1163,9 +1361,13 @@ honestly:
    durably committed (§4.6 ordering; content addressing makes a forward
    reference unconstructible), and where a round ordinal applies
    (`CorrectiveRound`, CorrectiveDirective) the checked constructor
-   additionally requires the target's `round_ordinal` to be STRICTLY
-   lower. SafeRedrive targets must be prior executions/dispatches of the
-   SAME chain (§2.3).
+   requires the target's `round_ordinal` to be STRICTLY lower — a
+   comparison that historical replay re-proves from the CANONICAL
+   inline `round_id + round_ordinal` pair both sides carry (§2.3,
+   P1-16), never from a live controller context. SafeRedrive targets
+   must be prior executions/dispatches of the SAME chain (§2.3), with
+   non-dispatch established by `EstablishedNonDispatchEvidenceRefV1`
+   (§11.1).
 3. Any digest reference not present in §11.3 is a wire-type/constructor
    rejection.
 
@@ -1408,8 +1610,18 @@ payload digest does not match the receipt's `normalized_output_ref`
 (§8.7); a transition targeting an already-terminal attention (§8.7); a
 same-principal different-session replay classifying as conflict instead
 of replay (§8.8, P1-12); a `ref_manifest` that differs from the
-mechanical collection of the artifact's real refs (§3). A newtype around
-`String` is not a semantic proof.
+mechanical collection of the artifact's real refs (§3); an ordinal
+comparison that cannot be re-proven from canonical bytes alone during
+replay (§2.3, P1-16); a report producer binding spliced onto a receipt
+whose execution/binding/model differ while normalized bytes coincide —
+must be unconstructible now that the binding has one field (§3, P1-20);
+an `ArtifactImportedV1` whose CAS digest does not equal the resolved
+source bytes (§6, P1-18); an `InitialMaterialization` with two valid
+same-run refs in the right order but a non-corresponding worktree —
+constructor reject (§7.1a, P1-21); a `RESERVED` reservation whose seed
+is missing or whose rebuild under the seed's `writer_version` does not
+reproduce the committed bytes (§4.6, P1-19). A newtype around `String`
+is not a semantic proof.
 
 ## 16. v1-lite cut and delivery honesty
 
@@ -1455,7 +1667,8 @@ Review checklist for step 2 (each item is a grep-able discipline):
 2. no unqualified `head` — only `candidate_tree_*` or (A3-reserved)
    `external_head_*`;
 3. no generic `ArtifactRef` in A1 types — `o7_run::ArtifactRef` only
-   inside the A0 wrappers, `CasObjectRefV1` elsewhere;
+   inside the class-3 external wrappers (A0 wrappers and
+   `RunArtifactSourceRefV1`), `CasObjectRefV1` elsewhere;
 4. no generic `retry_of` — only `ExecutionCauseV1`/`DispatchCauseV1`;
 5. no authoritative caller-supplied actor, model, or lineage fields;
 6. every pair of refs called a "binding" has an explicit cross-object
