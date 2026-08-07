@@ -273,3 +273,25 @@ exists · callable · delegatable · agent-visible · externally-exposable
 
 — rather than one dispirited `enabled: true`. That distinction is the whole
 difference between a default-deny projection and an admin console.
+
+**These are five semantic properties, not five boolean fields.** Their arity is
+open, and MG-C is what settles it. `exists` is close to a property of the object;
+the rest look like relations over authority, context, and export surface:
+
+```text
+exists(operation)
+callable(operation, principal, context)
+delegatable(operation, principal, delegate, constraints)
+agent_visible(operation, agent, session)
+externally_exposable(operation, transport, policy)
+```
+
+Freezing them as five flags now would defeat `enabled: true` by replacing it with
+five slightly more aristocratic flags — human progress exactly as usually
+practised. The signatures above are a hypothesis to test against two real
+adapters, not a schema.
+
+Which is the whole point of the ordering. The informative part of MG-C is where
+the two adapters **disagree**; the shared part is worth having only because both
+forced it into existence. An abstraction that survives that collision is
+evidence, and one that merely survived being written down is decoration.
