@@ -197,6 +197,14 @@ Step C closes that: it drives `findReferences`,
 A missing toolchain reports **UNAVAILABLE**, never PASS, and the summary says
 explicitly that the relation claims stand unproved in that run.
 
+A TypeScript fact that step C *could not evaluate* — a seed that does not
+resolve to a declaration — is a **failure**, not a skip. Reported as `UNEVAL`.
+An unresolved seed is a corpus defect, and letting it pass would be the
+instrument committing the exact fault it exists to detect: reporting `PASS` for
+a check that did not run. Only a whole case in a language out of the oracle's
+reach (`case-0007`, Lua) skips benignly, and it skips at case level where it is
+visible.
+
 Step C earned its place on first execution by failing: it rejected
 `case-0005` fact 0, and the disagreement was real. A call never *selects* an
 implementation signature — TypeScript resolves it to one of the overload

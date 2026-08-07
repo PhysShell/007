@@ -7,8 +7,9 @@
  * themselves, then compares them against each `oracle.yaml`.
  *
  * Exit codes
- *   0  every checkable fact agrees with the independent oracle
- *   1  at least one disagreement -- the corpus is wrong, or TypeScript is
+ *   0  every TypeScript fact was evaluated and agrees with the oracle
+ *   1  a disagreement, OR a TypeScript fact this oracle could not evaluate --
+ *      an unresolved seed is a corpus defect and must not read as agreement
  *   3  TypeScript unavailable; nothing was proved (never a silent pass)
  *
  * Relations
@@ -252,6 +253,13 @@ const fixtures = require("node:fs")
 let failed = 0;
 let checked = 0;
 let skipped = 0;
+// A fact inside a TypeScript case that this oracle could not evaluate is a
+// corpus defect, not an absent toolchain: the seed names a declaration that is
+// not where the oracle says it is. Counting it as a benign skip would let the
+// run report PASS for a fact TypeScript never looked at -- "reports PASS for a
+// check that did not run", which is the exact failure this instrument exists to
+// catch, so it must not be committed by the instrument itself.
+let unevaluated = 0;
 
 for (const caseDir of fixtures) {
   const oracle = loadOracle(path.join(caseDir, "oracle.yaml"));
@@ -262,8 +270,8 @@ for (const caseDir of fixtures) {
   }
   for (const r of collect(caseDir, oracle)) {
     if (r.status === "SKIP") {
-      console.log(`  ${oracle.case} fact ${r.i}: SKIP -- ${r.why}`);
-      skipped++;
+      console.log(`  UNEVAL ${oracle.case} fact ${r.i} -- ${r.why}`);
+      unevaluated++;
       continue;
     }
     checked++;
@@ -314,8 +322,8 @@ for (const caseDir of require("node:fs")
   };
   for (const r of collect(caseDir, shim)) {
     if (r.status === "SKIP") {
-      console.log(`  ${lc.case} observation: SKIP -- ${r.why}`);
-      skipped++;
+      console.log(`  UNEVAL ${lc.case} observation -- ${r.why}`);
+      unevaluated++;
       continue;
     }
     checked++;
@@ -331,8 +339,17 @@ for (const caseDir of require("node:fs")
   }
 }
 
+const bad = failed + unevaluated;
 console.log(
-  `\n  independent relation oracle: ${failed ? "FAIL" : "PASS"} ` +
-    `(${checked} fact(s) checked, ${skipped} skipped, ${failed} disagreement(s))`,
+  `\n  independent relation oracle: ${bad ? "FAIL" : "PASS"} ` +
+    `(${checked} fact(s) checked, ${failed} disagreement(s), ` +
+    `${unevaluated} unevaluated TypeScript fact(s), ` +
+    `${skipped} case(s) skipped as out of reach)`,
 );
-process.exit(failed ? 1 : 0);
+if (unevaluated) {
+  console.log(
+    "  An unevaluated fact in a TypeScript case means its seed did not resolve.\n" +
+      "  That is a corpus defect and cannot be reported as agreement.",
+  );
+}
+process.exit(bad ? 1 : 0);
