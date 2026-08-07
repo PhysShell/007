@@ -58,26 +58,36 @@ The implementation language is Dart (`pubspec.yaml` at the pinned revision).
 ```text
 artifact     docs/q-deck/a1-authority-contracts.md
 branch       claude/a1-contract-freeze-dkrnnq
-revision     8009535d48675483ee2b5d4bc08115945110d5f6   (R4, re-pinned — §1.5)
+revision     3a92ceacc88762db14b7887f5bb7d6f7f0e9d14d   (re-pinned twice — §1.5)
+accepted at  b61540a — the head the document's own header names as accepted;
+             `3a92cea` sets the status line and is ceremony only
 merged       NO — not reachable from origin/main at the time of this record
-status       as stated in its own header: PROPOSED FREEZE / REVIEW REQUIRED /
-             NON-AUTHORITATIVE — a freeze *candidate*, to which "no A1
-             implementation may bind [...] until it is reviewed and merged"
+status       as stated in its own header: ACCEPTED / CLOSED / FROZEN, with the
+             supersede path of its §7 now in force: "corrections are
+             forward-only and versioned"
 ```
 
-The stronger fact is the document's own status, not merely its merge state:
-A1-F is not an accepted freeze. It reached `8009535` through four corrective
-rounds after the commit that named itself a freeze (`144ebf6`, 1127 lines →
-`8009535`, 2344 lines). A comparison stated against "the current freeze" without
-a head names nothing.
+Accepted and merged are different facts, and this record keeps them apart.
+A1-F is now an accepted freeze — it stopped being a candidate at `b61540a`,
+after five corrective rounds and a consistency pass from the commit that first
+named itself a freeze (`144ebf6`, 1127 lines → `3a92cea`, 2689 lines) — but it
+is still not reachable from `main`. A comparison stated against "the current
+freeze" without a head names nothing, and that was true while it moved and
+remains true now that it does not: acceptance fixes which head the name means,
+it does not make the name self-resolving.
 
 ### 1.4 Staleness condition
 
 Either side moving invalidates this record:
 
 - the_grid at a revision other than `46d6d26` — §2 must be re-derived;
-- A1-F at a head other than `8009535`, **including acceptance** — §3, §4 and §5
-  must be re-reviewed before being relied on.
+- A1-F at a head other than `3a92cea` — §3, §4 and §5 must be re-reviewed
+  before being relied on.
+
+Acceptance has already consumed the loudest case this condition was written
+for, so what remains is narrower but not gone: A1-F's §7 supersede path is now
+in force, and a superseding revision moves the head exactly like a corrective
+round did. The condition therefore stands unchanged in form.
 
 This is the same discipline `docs/research/specula-trace-conformance.md` states
 for its own A1-F audit: a conclusion about a document that is still moving is
@@ -85,31 +95,36 @@ for its own A1-F audit: a conclusion about a document that is still moving is
 
 ### 1.5 Re-review log
 
-The condition above is not decorative. It has fired once already, before this
-record ever reached `main`.
+The condition above is not decorative. It fired twice before this record ever
+reached `main`.
 
 | Re-review | A1-F head | What was re-checked | Outcome |
 | --- | --- | --- | --- |
-| 2026-08-07, R4 | `3c30974` → `8009535` | §2 not affected (external artifact unmoved); §3's four load-bearing citations re-derived at the new head; §4's disposition re-tested | **Unchanged.** `NO A1-F CONTRACT CHANGE` holds at `8009535` |
+| 2026-08-07, R4 | `3c30974` → `8009535` | §2 not affected (external artifact unmoved); §3's load-bearing citations re-derived at the new head; §4's disposition re-tested | **Unchanged.** `NO A1-F CONTRACT CHANGE` holds at `8009535` |
+| 2026-08-07, R5 + R5.1 + acceptance | `8009535` → `3a92cea` | the same four citations re-derived again; §1.3's status paragraph rewritten, since it asserted the opposite status | **Unchanged.** `NO A1-F CONTRACT CHANGE` holds at `3a92cea` |
 
-What was actually re-derived at `8009535`, rather than assumed from the round's
-summary:
+The same four load-bearing facts were re-derived at each head, from the file at
+that revision rather than from the round's own summary:
 
-- the status header still reads `PROPOSED FREEZE / REVIEW REQUIRED /
-  NON-AUTHORITATIVE` — R4 is a corrective round, not an acceptance;
+- the status header. At `8009535` it still read `PROPOSED FREEZE / REVIEW
+  REQUIRED / NON-AUTHORITATIVE`; at `3a92cea` it reads `ACCEPTED / CLOSED /
+  FROZEN`. This is the one fact that did change, and §1.3 was rewritten rather
+  than left to age quietly into a false claim;
 - §0 still binds the durable dispatch boundary and fail-closed post-dispatch
-  ambiguity to `docs/q-deck/r1-command.md` §11.1–§11.2, unchanged by R4;
+  ambiguity to `docs/q-deck/r1-command.md` §11.1–§11.2;
 - §6 still excludes external reconciliation from A1's scope;
-- the projection quote in §3 is byte-identical at the new head;
-- R4 introduced **no** line containing adoption, lease, liveness, orphan,
-  reconciliation, spawn, detach, or allocation vocabulary — the deferred notions
-  in §4 did not migrate into A1 while this record was unmerged.
+- the projection quote in §3 is byte-identical at both heads;
+- across R4, R5 and R5.1 together, **no** line containing adoption, lease,
+  liveness, orphan, reconciliation, spawn, detach, or allocation vocabulary
+  entered the document — the deferred notions in §4 never migrated into A1
+  while this record sat unmerged, through five corrective rounds and an
+  acceptance.
 
-R4's own subject is the resolver boundary and reducer algebra: a `verify /
-resolve_event / fold` split with an in-memory resolved event, closed inside
-existing schemas with no new persistent message kind. That is orthogonal to
-every notion in §4, which is why the disposition survives — not because the two
-rounds looked similar.
+The rounds' own subjects are orthogonal to every notion in §4 — R4 the resolver
+boundary and reducer algebra, R5 an implementation-readiness pass, R5.1 an
+exact-head consistency patch, none introducing a new persistent message kind.
+That is why the disposition survives. It survives by re-derivation, not because
+successive rounds looked similar to each other.
 
 ## 2. Artifact says
 
