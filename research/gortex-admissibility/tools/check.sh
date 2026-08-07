@@ -2,7 +2,7 @@
 # Self-check for the fixture corpus. Validates the instrument, not any tool
 # under test: no code-graph engine is invoked and none needs to be installed.
 #
-# Four checks, reported separately because they prove different things and a
+# Five checks, reported separately because they prove different things and a
 # missing toolchain must never read as a pass:
 #
 #   A. oracle integrity   -- parses, enums, paths, line references
@@ -11,6 +11,9 @@
 #                            caller/reference/implementation sets
 #   D. codegen stability  -- case-0006's generated file is what its contract
 #                            generates
+#   E. lifecycle package  -- lifecycle oracles are well-formed and every
+#                            mutation state applies, asserts its postcondition,
+#                            and resets
 #
 # B is NOT C. Type-checking proves the program compiles; it says nothing about
 # whether the caller set is the one the oracle claims. An earlier revision of
@@ -25,7 +28,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 status_a="UNAVAILABLE"; status_b="UNAVAILABLE"
-status_c="UNAVAILABLE"; status_d="UNAVAILABLE"
+status_c="UNAVAILABLE"; status_d="UNAVAILABLE"; status_e="UNAVAILABLE"
 rc=0
 
 echo "[A] oracle integrity"
@@ -100,7 +103,7 @@ else
   b_ok=0
   for c in case-0001-sibling-same-name case-0002-alias-reexport \
            case-0003-interface-dispatch case-0005-overload-set \
-           case-0006-generated-members; do
+           case-0006-generated-members case-0101-index-lifecycle; do
     mapfile -t files < <(find "fixtures/$c/source" -name '*.ts')
     "$TSC" "${FLAGS[@]}" "${files[@]}" || b_ok=1
   done
@@ -133,6 +136,71 @@ else
 fi
 
 echo
+echo "[E] lifecycle oracles + mutation steps (package 2)"
+if python3 - <<'PY2'
+import json, pathlib, sys
+import yaml
+
+schema = json.loads(pathlib.Path("schema/lifecycle-v0.schema.json").read_text())
+qprops = set(schema["$defs"]["questions"]["properties"])
+problems = []
+found = 0
+for p in sorted(pathlib.Path("fixtures").glob("*/lifecycle.yaml")):
+    base = p.parent
+    d = yaml.safe_load(p.read_text())
+    found += 1
+    if d["case"] != base.name:
+        problems.append(f"{p}: case '{d['case']}' != directory '{base.name}'")
+    ids = [st["id"] for st in d["states"]]
+    if d["observation"]["taken_at_state"] not in ids:
+        problems.append(f"{p}: observation taken at unknown state")
+    ent = d["entity"]
+    f = base / ent["path"]
+    if not f.exists():
+        problems.append(f"{p}: entity file missing: {ent['path']}")
+    else:
+        lines = f.read_text().splitlines()
+        lo, hi = ent["line_range"]
+        if not (1 <= lo <= hi <= len(lines)):
+            problems.append(f"{p}: entity line_range {lo}..{hi} out of range")
+    # every edge cited anywhere must resolve AT THE STATE THAT DEFINES IT;
+    # only the committed (fresh) state is on disk, so check that one only.
+    fresh = d["observation"]["taken_at_state"]
+    for e in d["observation"]["expected"]:
+        ef = base / e["path"]
+        if not ef.exists():
+            problems.append(f"{p}: observation edge path missing: {e['path']}")
+        elif "line" in e and e["line"] > len(ef.read_text().splitlines()):
+            problems.append(f"{p}: observation edge line out of range: {e['path']}:{e['line']}")
+    for st in d["states"]:
+        missing_q = qprops - set(st["questions"]) - {"note"}
+        req = set(schema["$defs"]["questions"]["required"])
+        if not req <= set(st["questions"]):
+            problems.append(f"{p}: state {st['id']}: missing {sorted(req - set(st['questions']))}")
+        if st["id"] != fresh and st["questions"]["action_admissible"]:
+            problems.append(f"{p}: state {st['id']}: action_admissible true after a mutation -- "
+                            "that is the alarm condition, not an expectation")
+    print(f"  {d['case']:30s} states={len(d['states'])} entity={d['entity']['symbol']}")
+
+if not found:
+    print("  no lifecycle fixtures found")
+if problems:
+    print("\nlifecycle problems:", file=sys.stderr)
+    for x in problems:
+        print(f"  {x}", file=sys.stderr)
+    sys.exit(1)
+PY2
+then
+  for c in fixtures/*/tools/mutate.py; do
+    [ -e "$c" ] || continue
+    python3 "$c" selfcheck || { status_e="FAIL"; rc=1; }
+  done
+  [ "${status_e:-}" = "FAIL" ] || status_e="PASS"
+else
+  status_e="FAIL"; rc=1
+fi
+
+echo
 echo "[D] codegen stability (case-0006)"
 if python3 fixtures/case-0006-generated-members/tools/codegen.py --check; then
   status_d="PASS"
@@ -145,6 +213,7 @@ echo "  [A] oracle integrity    $status_a"
 echo "  [B] type validity       $status_b"
 echo "  [C] relation oracle     $status_c"
 echo "  [D] codegen stability   $status_d"
+echo "  [E] lifecycle package   $status_e"
 [ "$status_c" = "UNAVAILABLE" ] && echo "
   NOTE: [C] did not run. The corpus is syntactically sound and type-valid, but
   its caller/reference/implementation claims stand UNPROVED in this run."

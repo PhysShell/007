@@ -21,19 +21,26 @@ instrument and is written against no particular tool.
 ## Structure
 
 ```text
-schema/      oracle-v0 JSON Schema for the per-case oracle files
-fixtures/    the cases; each is source/ + oracle.yaml + README.md
+schema/      oracle-v0 (resolution) and lifecycle-v0 (index lifecycle)
+fixtures/    case-000x resolution cases; case-010x lifecycle cases
 tools/       check.sh -- validates the instrument, invokes no tool under test
 results/     measured results per case (git-ignored until a run is promoted)
 ```
+
+**Corpus v1 is frozen.** Eight cases: seven resolution, one lifecycle. No
+further fixtures before the first real measurement run. Growth from here is
+driven by defects that run surfaces, not by anticipation.
 
 Each case:
 
 ```text
 <case>/
-  source/       the code under test
-  oracle.yaml   ground truth AND admissibility expectations
-  README.md     what the case is adversarial about
+  source/         the code under test
+  oracle.yaml     resolution cases: ground truth AND admissibility expectations
+  lifecycle.yaml  lifecycle cases: one entity, its states, four questions each
+  tools/          per-case executables where a claim must be constructed rather
+                  than asserted (codegen, mutation steps)
+  README.md       what the case is adversarial about
 ```
 
 ## The two blocks in `oracle.yaml`
@@ -95,34 +102,42 @@ Package 1 is **frozen by design**. The seven cases cover ambiguity, aliases,
 dispatch, cross-repo, overloads, generated source-of-truth, and the calibration
 pair. Adding a twentieth variant would grow a collection, not the instrument.
 
-## Package 2 — index lifecycle (not in this directory)
+## Package 2 — index lifecycle
 
-Four states of one entity, not merely "stale" and "deleted":
-
-```text
-1  fresh indexed symbol
-2  file modified after observation
-3  symbol deleted after observation
-4  file or repository disappears after indexing
-```
-
-measured on three properties kept separate:
+One case, `case-0101-index-lifecycle`: one entity followed through five states,
+scored on four questions per state, driven by scripted mutation rather than a
+snapshot pair.
 
 ```text
-graph freshness          does the index catch up
-staleness signaling      is evidence already handed out marked STALE
-action admissibility     what may still be done with that evidence
+s0-fresh            observation taken here
+s1-file-modified    old answer becomes short, not wrong
+s2-symbol-deleted   entity gone, tree valid
+s3a-file-removed    entity gone, import left dangling
+s3b-repo-removed    repository gone
 ```
 
-The first does not substitute for the second, and conflating them is the failure
-this package exists to catch. If an agent obtained a fact at state A and a
-watcher rebuilt the graph to state B 50 ms later, the fact the agent holds must
-lose admissibility — a fast rebuild that never says "what you were told is no
-longer true" is a race, not freshness.
+```text
+Q1  graph_current_correct    does a fresh query answer correctly now
+Q2  stale_signal_required    is the holder of the old answer told it expired
+Q3  old_observation_valid    does the fact handed out still hold
+Q4  action_admissible        may an action derived from it still proceed
+```
 
-These cases need a mutation step the resolution cases do not, and interact with
-per-session working sets and staleness notification. Folding them in here would
-average unrelated failure modes into one score.
+Q1 does not substitute for Q2, and conflating them is the failure this package
+exists to catch. An index that converges on state B fifty milliseconds after an
+agent was handed a fact at state A passes Q1 at every state here and can still
+fail Q2, Q3 and Q4 at all of them. Instantly correct about the present and
+silent about what it said in the past is not freshness — it is a race, and the
+consumer absorbs it.
+
+`s1` is the sharpest: the old observation is not contradicted, only **short**.
+Nothing about the cached answer looks wrong, and a rename driven by it edits one
+site of two.
+
+Package 2 is scoped to this one case on purpose. No symlink matrix, no
+`git reset`, no concurrent-watcher permutations. A new fixture gets added when a
+measurement run produces a defect that needs one — on evidence, not in
+anticipation.
 
 ## Deliberate non-assertions
 
@@ -158,7 +173,7 @@ measure our own leniency rather than the tool.
 tools/check.sh
 ```
 
-Four checks, reported separately because they prove different things:
+Five checks, reported separately because they prove different things:
 
 | | Check | Proves |
 |---|---|---|
@@ -166,6 +181,7 @@ Four checks, reported separately because they prove different things:
 | **B** | type validity (`tsc --strict`) | each fixture is a valid program |
 | **C** | relation oracle (language service) | the claimed caller / reference / implementation sets are the ones TypeScript computes |
 | **D** | codegen stability | `case-0006`'s generated file is what its contract generates |
+| **E** | lifecycle package | lifecycle oracles are well-formed and every mutation state applies, asserts its postcondition, and resets |
 
 No code-graph engine is invoked by any of them; the script validates the
 measuring instrument only.
@@ -189,9 +205,15 @@ itself an overload signature. Seeding the implementation asks which calls reach
 that body, which is a different question with a different answer. The checker
 knew; the corpus did not, until C was run.
 
-Status on this container: A/B/C/D all PASS — seven oracles clean, six
-TypeScript cases compiling under `--strict`, eleven relation facts agreeing with
-the language service, one non-`.ts` expectation correctly reported as out of
-that oracle's reach rather than silently dropped. `case-0007` is skipped by C by
+Step C covers package 2 as well: `case-0101`'s observation is taken at the
+committed fresh state, so it is computable by the same language service and is
+checked there. Leaving it asserted would have reproduced in package 2 exactly
+the defect package 1 was corrected for.
+
+Status on this container: A/B/C/D/E all PASS — eight oracles clean, seven
+TypeScript cases compiling under `--strict`, twelve relation facts agreeing with
+the language service, five mutation states applying and resetting cleanly, one
+non-`.ts` expectation correctly reported as out of that oracle's reach rather
+than silently dropped. `case-0007` is skipped by C by
 construction: no Lua toolchain is present, and none is required, since nothing
 in that case depends on the file executing.

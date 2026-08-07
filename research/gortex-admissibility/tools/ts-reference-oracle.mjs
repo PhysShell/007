@@ -283,6 +283,54 @@ for (const caseDir of fixtures) {
   }
 }
 
+// Lifecycle fixtures (package 2) carry their gold in lifecycle.yaml. The
+// observation is taken at the committed fresh state, which is the state on
+// disk, so it is checkable by exactly the same oracle -- and must be. Leaving
+// it unverified would repeat in package 2 the defect that package 1 was
+// corrected for: a gold set asserted rather than computed.
+for (const caseDir of require("node:fs")
+  .readdirSync(path.join(root, "fixtures"))
+  .sort()
+  .map((n) => path.join(root, "fixtures", n))
+  .filter((d) => existsSync(path.join(d, "lifecycle.yaml")))) {
+  const lc = loadOracle(path.join(caseDir, "lifecycle.yaml"));
+  if (lc.language !== "typescript") {
+    console.log(`  ${lc.case}: SKIP (language=${lc.language})`);
+    skipped++;
+    continue;
+  }
+  const shim = {
+    case: lc.case,
+    language: lc.language,
+    seeds: [{ id: "entity", gold_identity: lc.entity }],
+    facts: [
+      {
+        seed: "entity",
+        relation: lc.observation.relation,
+        expected: lc.observation.expected,
+        forbidden: [],
+      },
+    ],
+  };
+  for (const r of collect(caseDir, shim)) {
+    if (r.status === "SKIP") {
+      console.log(`  ${lc.case} observation: SKIP -- ${r.why}`);
+      skipped++;
+      continue;
+    }
+    checked++;
+    const label = `${lc.case} observation (${r.relation} @ ${lc.observation.taken_at_state})`;
+    if (r.status === "PASS") {
+      console.log(`  PASS  ${label}`);
+    } else {
+      failed++;
+      console.log(`  FAIL  ${label}`);
+      for (const m of r.missing) console.log(`          expected but absent: ${m.path}:${m.line} (${m.symbol})`);
+      console.log(`          observed: ${r.observed.map((o) => `${o.path}:${o.line}`).join(", ") || "(none)"}`);
+    }
+  }
+}
+
 console.log(
   `\n  independent relation oracle: ${failed ? "FAIL" : "PASS"} ` +
     `(${checked} fact(s) checked, ${skipped} skipped, ${failed} disagreement(s))`,

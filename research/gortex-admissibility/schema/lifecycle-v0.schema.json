@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://physshell.dev/007/research/gortex-admissibility/lifecycle-v0.schema.json",
+  "title": "Index-lifecycle fixture oracle, v0",
+  "description": "Ground truth for one entity observed at a fresh index and then followed through mutations of the indexed world. Package 1's oracle-v0 asks what a graph knows; this asks what happens to what it already said. The four per-state questions are kept separate on purpose: a fast reindex answers only the first of them.",
+  "type": "object",
+  "required": ["schema", "case", "language", "entity", "observation", "states"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "lifecycle-v0" },
+    "case": { "type": "string", "pattern": "^case-[0-9]{4}-[a-z0-9-]+$" },
+    "language": { "type": "string" },
+    "universe": {
+      "enum": ["fixture_closed_world", "language_open_world"],
+      "default": "fixture_closed_world"
+    },
+    "entity": {
+      "type": "object",
+      "description": "The single symbol followed across every state.",
+      "required": ["path", "symbol", "line_range"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string" },
+        "symbol": { "type": "string" },
+        "line_range": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "description": "The fact handed to the consumer at the fresh state. Every later state is scored against THIS, not against a re-query -- the point of the package is what happens to evidence already in a consumer's hands.",
+      "required": ["relation", "taken_at_state", "expected"],
+      "additionalProperties": false,
+      "properties": {
+        "relation": { "enum": ["callers", "callees", "implementations", "references"] },
+        "taken_at_state": { "type": "string" },
+        "expected": { "type": "array", "items": { "$ref": "#/$defs/edge" } }
+      }
+    },
+    "states": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["id", "mutation", "description", "questions"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "mutation": {
+            "type": ["string", "null"],
+            "description": "Command that produces this state from the committed baseline. Null for the fresh state. States are absolute, not incremental."
+          },
+          "description": { "type": "string" },
+          "graph_current": {
+            "type": "object",
+            "description": "What a FRESH query should return once the index has converged on this state. Omit when the entity no longer exists.",
+            "additionalProperties": false,
+            "properties": {
+              "entity_present": { "type": "boolean" },
+              "expected": { "type": "array", "items": { "$ref": "#/$defs/edge" } },
+              "forbidden": { "type": "array", "items": { "$ref": "#/$defs/edge" } }
+            }
+          },
+          "questions": { "$ref": "#/$defs/questions" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "edge": {
+      "type": "object",
+      "required": ["path", "symbol"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string" },
+        "symbol": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "reason": { "type": "string" }
+      }
+    },
+    "questions": {
+      "type": "object",
+      "description": "The four properties scored per state. They are recorded separately because a system can satisfy any one of them while failing the others, and because passing the first is routinely mistaken for passing the rest.",
+      "required": [
+        "graph_current_correct",
+        "stale_signal_required",
+        "old_observation_valid",
+        "action_admissible"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "graph_current_correct": {
+          "type": "boolean",
+          "description": "Q1 graph freshness. Should a fresh query at this state return the correct answer? Effectively always true once converged; recorded so that failing it is distinguishable from failing the rest."
+        },
+        "stale_signal_required": {
+          "type": "boolean",
+          "description": "Q2 staleness signaling. Must the consumer that took the observation be told it no longer holds? A rebuilt index that emits nothing fails here while passing Q1."
+        },
+        "old_observation_valid": {
+          "type": "boolean",
+          "description": "Q3 invalidation. Does the fact handed out at the fresh state still hold in this world?"
+        },
+        "action_admissible": {
+          "type": "boolean",
+          "description": "Q4 post-invalidation admissibility, and the alarm. May an action derived from the OLD observation still be presented as safe to take? Where this is false and a system says otherwise, the result is a false-safe of the most dangerous kind: the tool is not wrong about the world, it is wrong about what it told you earlier."
+        },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}

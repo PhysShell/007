@@ -388,6 +388,43 @@ Package 1 is frozen by design once its three known defects are fixed. Seven
 cases cover the resolution failure modes worth distinguishing; further variants
 would grow a collection rather than the instrument.
 
+## The decision this produces
+
+The harness exists to reach one of four verdicts, not to accumulate findings.
+
+| Measured | Verdict |
+|---|---|
+| Graph fidelity good, confidence and caveats calibrated, staleness signalled | **KEEP** — supporting code-graph observer |
+| Tier 1 / exact-anchor good, lower-tier or concept weak | **KEEP NARROW** — navigation plus expansion from a verified seed |
+| Graph sometimes wrong but marks its uncertainty honestly | **KEEP AS HINT** — `NAVIGATION_HINT` only, never evidence |
+| Wrong or incomplete output regularly presented as safe, or stale evidence stays admissible | **DROP** from the `o7` decision path |
+
+`DROP` is not a claim the tool is worthless — it may remain a perfectly good
+grep-on-steroids. It means `o7` does not build proofs on it.
+
+## Stop rules
+
+The measurement is bounded, and these end it rather than extend it:
+
+- **No new fixtures before the first run.** Corpus v1 is frozen at eight cases.
+  A fixture is added when a run surfaces a defect that needs one to
+  characterise — on evidence, not in anticipation.
+- **No patching the tool under test.** If producing a first result requires
+  patching Gortex, writing a substantial compatibility adapter, or growing the
+  corpus around each of its quirks, stop and decide on what has already been
+  seen. We are evaluating an external observer, not quietly signing on as its
+  second maintainer.
+- **No universal runner.** The first run reads eight cases. A runner
+  generalised over 257 languages is not a prerequisite for it and must not
+  become one.
+
+This track is bounded in the schedule too: one short research round (package 2,
+freeze) and one measurement round, then a verdict. The A-series does not wait on
+it. GCX1 stays recorded and untouched under `PhysShell/qodec` until this
+concludes — the failure mode being avoided is the familiar one where evaluating
+a library turns into building a benchmark framework, then a wire-format
+laboratory, while the original product quietly ages in the corner.
+
 This fixture set is buildable without installing Gortex at all, and is the
 cheapest available next step.
 
