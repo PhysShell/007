@@ -1,11 +1,17 @@
-# A1 contract freeze — gap inventory (review-документ, не нормативный)
+# A1 contract freeze — gap inventory (адьюдицировано)
 
-**Статус: REVIEW INPUT для A1 contract freeze.** Этот документ — первый
-артефакт фазы contract-review: перепись того, что в issue #95 уже решено,
-что решено-но-не-закодировано, что обязан выбрать именно freeze, что явно
-отложено, и где draft противоречит принятым входам. Он потребляется будущим
-нормативным A1-контрактом и после freeze теряет авторитет (может быть
-удалён или помечен historical). Реализация A1 до принятого freeze запрещена.
+**Статус: ADJUDICATED (ревью maintainer'а, 2026-08-07).** Исходная редакция
+этого документа была review input; интерактивный разбор maintainer'а
+адьюдицировал C1–C13 и E1–E8 и добавил два пропущенных блокера E9/E10 —
+решения **ратифицированы** (rule 3 carve-out: приняты в интерактивной
+сессии). Ниже — запись диспозиций; **нормативный текст решений живёт в
+`docs/q-deck/a1-contracts.md`** (NORMATIVE DRAFT до freeze), не здесь.
+После freeze этот документ — historical record адьюдикации. Реализация A1
+до принятого freeze запрещена.
+
+Ключевая поправка всей адьюдикации: **campaign — отдельная logical
+authority, а не новое имя для R1 conversation**; логическая и физическая
+lineage соединяются каноническим binding-receipt, не отождествлением.
 
 ## Входы и их ревизии (evidence-discipline rule 4)
 
@@ -117,103 +123,131 @@
 
 ---
 
-## C. Открытые выборы — решает именно freeze (нужна адьюдикация)
+## C. Открытые выборы — АДЬЮДИЦИРОВАНО (нормативный текст в `a1-contracts.md`)
 
-C1. **Canonical bytes.** Выбор: canonical-JSON/CBOR-кодек vs
-**digest-of-exact-stored-bytes**. Рекомендация: exact-stored-bytes —
-это уже действующий прецедент всего проекта (digest-chain `events.jsonl`,
-`ArtifactRef`, A0-receipts), не требует изобретать канонизацию и не
-создаёт «Byzantine whitespace». Вместе с ним зафиксировать:
-`deny_unknown_fields` для всех canonical-артефактов (прецедент A0);
-UTF-8-политика — byte-exact без нормализации, байтовые поля кодируются
-явно (прецедент `EnvEntry: Vec<u8>`); никаких «semantically equal»
-сравнений вне парсированных типов.
+C1. **Canonical bytes — ACCEPT WITH REVISION.** Не один универсальный
+ответ, а ДВА вида digest: `BlobDigest = SHA-256(exact stored bytes)` для
+CAS/refs (без нормализации и повторной сериализации) и protocol/semantic
+digests (`MessageBindingDigest`, `ContractDigest`, `RegistryDigest`,
+`PolicyDigest`) по явно фреймированным типизированным полям с domain
+separation. Canonical-артефакты: UTF-8 JSON, `deny_unknown_fields`,
+duplicate fields rejected, без Unicode-нормализации, без float-полей;
+OS-байты (`RepoPathBytes` и т.п.) — замороженный `ByteStringV1` =
+base64url без padding (гарантия A0 на не-UTF-8 не отменяется удобным
+`String`).
 
-C2. **Domain separation digests.** Схема префиксов для каждого
-digest-контекста (прецедент `o7-launch-spec\0v1\0`). Открыто: единый
-реестр контекст-строк в протокольном крейте.
+C2. **Domain separation — ACCEPT.** Compile-time registry контекстов в
+протокольном крейте, форма `o7-a1\0<purpose>\0v1\0`; только константы,
+purpose не переиспользуется, uniqueness-test + known-answer test на каждый
+контекст. Generic `BlobDigest` не domain-separated (адрес содержимого;
+типовая защита — в typed ref).
 
-C3. **Size/depth limits.** Константы per message_kind (прецеденты:
-1 MiB request-frame, 64 KiB report, 8/64/128 MiB bounded reads). Открыт
-только выбор чисел; принцип «cap + фактическое наблюдение сверх cap =
-reject» уже прецедентен.
+C3. **Limits — ACCEPT, v1-профиль заморожен сейчас** (не ждать
+telemetry). Таблица per-kind в контракте; превышение = reject, не
+truncation; потоковый reader останавливается на cap+1.
 
-C4. **Идентичность сообщения и покрытие digest.** Что именно покрывает
-`payload_digest`; входит ли envelope в digest; где живёт `created_at`
-(рекомендация: вне идентичности — он «observation, not ordering», и не
-должен делать два логически идентичных replay разными). Без этого правило
-«same message_id + different payload digest → conflict» не имеет точного
-предмета.
+C4. **Message identity — REVISE.** Три сущности: `payload_digest`
+(exact stored payload bytes, envelope excluded), `blob_digest` (exact
+complete stored artifact bytes), `message_binding_digest`
+(domain-separated framed semantic bindings). `message_id` =
+idempotency key, его request digest = `message_binding_digest`;
+`message_id` в binding digest НЕ входит. `created_at` УДАЛЁН
+(двусмысленный): есть недоверенный `producer_observed_at` внутри provider
+receipt и `accepted_at` от controller/ledger; ни один не задаёт порядок;
+replay возвращает сохранённые байты. `correlation_id` УДАЛЁН из canonical
+envelope (нет закрытой семантики; поле «на всякий случай» станет будущей
+authority).
 
-C5. **Сшивка identity-скелетов** (см. E3 — самое крупное). Envelope вводит
-`root_goal_id → task_id → campaign_id → round_id`, но не определяет
-отношение к УЖЕ существующим `conversation_id / CommandId / RunId /
-run_attempt`, которыми владеют R1/A0 и которые A1-роли фактически
-исполняют. Рекомендация к адьюдикации: v1 — campaign 1:1 привязан к одной
-R1-conversation при минтинге; каждый round ссылается на конкретные
-command/run canonical id; повторная реализация conversation-механики
-запрещена. Любой другой выбор тоже допустим — но он должен быть СДЕЛАН.
+C5. **Сшивка identity — REJECT рекомендации campaign 1:1 conversation.**
+1:1 ломается об reviewer independence (reviewer либо продолжит coder
+transcript, либо станет новым tail). Заморожен явный bridge
+`CampaignRunBindingV1` (campaign_id, round_id, role,
+provider_execution_id, conversation_id, command_id: Option, run_id,
+attempt_id): `campaign_id != conversation_id`; одна campaign может
+связывать несколько conversations; coder-lane может продолжать одну R1
+conversation; каждый reviewer execution — fresh session, отдельный
+binding, v1-default отдельная conversation; `producer_run_id` выводится
+controller'ом из binding, никогда из входящего envelope. Две оси
+(logical: root_goal→task→campaign→round; physical:
+round→binding→conversation/command/run/attempt), соединённые каноническим
+receipt.
 
-C6. **Storage authority A1-артефактов до A2.** A2 (durable campaign
-reducer) ещё не существует; A1-артефакты обязаны быть durable, typed,
-replayable уже сейчас. Варианты: (a) content-addressed artifact store +
-acceptance-записи в `o7-ledger` (расширение существующих таблиц);
-(b) campaign-level canonical event stream (фактически ранний кусок A2);
-(c) гибрид. Freeze обязан провести границу A1/A2 так, чтобы A1 не строил
-campaign-reducer втихую. Рекомендация: (a), с явной пометкой, что
-canonical campaign FSM приходит в A2 и НЕ будет выводиться из ledger-строк
-(ledger = projection, A.3).
+C6. **Storage до A2 — REJECT «CAS + authoritative acceptance rows в
+ledger».** CAS принят; shadow campaign authority в ledger — нет (это
+урезанный A2 под видом хранилища). Граница: A1 владеет schemas, canonical
+writer, typed refs, classifiers, CAS-интерфейсом, acceptance
+preconditions, RED matrix, test-only append sink; A2 владеет production
+authority (canonical campaign event append, atomic acceptance recording,
+campaign reducer, replay/resume). A1 реализуем как protocol/library
+layer и не заявляет работающий durable campaign runtime.
 
-C7. **Грань execution/dispatch.** Issue фиксирует split
-`provider_execution_id` vs `dispatch_id` как freeze-time check, но
-таксономию инкарнаций откладывает в A2. Развязка для freeze: СЛОВАРЬ и
-правило «каждый retry называет свою грань (whole execution / single
-dispatch / tool-loop continuation / new session)» замораживаются сейчас
-(иначе receipt-схему C5 нельзя закрыть); полная таксономия
-`producer_run_id` — A2, как и записано. Это надо проговорить явно, чтобы
-не читалось как противоречие.
+C7. **Execution/dispatch — ACCEPT WITH CLOSED VOCABULARY.**
+`ProviderExecutionId` (одно bounded role execution, весь tool loop) /
+`ProviderDispatchId` (один внешний запрос). Generic
+`retry_of_invocation_id` УДАЛЁН; вместо него закрытые `ExecutionCauseV1`
+(Initial / CorrectiveRound / SafeRedrive+evidence) и `DispatchCauseV1`
+(Initial / ToolContinuation / SafeRedrive+evidence). ToolContinuation,
+новая session и corrective round — не retry. Полная таксономия — A2.
 
-C8. **Ацикличность evidence-графа.** Механизм: только forward-refs
-(`CandidateReceipt.coder_report_ref`, `ReviewVerdict.reviewer_report_ref`)
-vs выделенное событие `ArtifactAcceptance`. Рекомендация: forward-refs,
-`ArtifactAcceptance` остаётся deferred с триггером «появился потребитель
-acceptance-как-события» (D8). Плюс кодифицированное правило направления:
-digest-ссылки текут только в направлении authority (evidence → report →
-accepted artifact), back-links живут в проекциях.
+C8. **Acyclicity — ACCEPT forward-only, направление формулировки
+исправлено.** Ребро A→B = «A непосредственно содержит digest-ref на B»;
+canonical refs идут от производного к antecedent evidence; заморожен
+rank (accepted derived > accepted raw report > receipt/manifest > raw
+blobs), каждая embedded reference — строго на меньший rank; back-links
+только в проекциях. `ArtifactAcceptance` не вводится (триггер сохранён).
 
-C9. **Закрытые transition-таблицы** для семи машин: campaign; provider
-invocation (outcome-словарь receipt); принятие CoderReport; принятие
-ReviewerReport; corrective round; human attention/decision; cancellation +
-budget + ambiguity. Проза и списки есть (A.3, B.7, B.9); freeze должен
-дать закрытые множества переходов и явные guard-требования по каждому
-ребру (форма — transition-authority таблица #93). Конкретные открытые
-рёбра: может ли CANCEL прервать `CI_WAIT`/`REVIEWING` немедленно или
-только на границе шага; provider-outcome ambiguity → `HUMAN_REQUIRED`
-кампании (рекомендация: да, всегда, как R1 manual-resolution) или
-допускает автономный переход; исчерпание бюджета в середине corrective
-round.
+C9. **Transition tables — REVISE постановку.** FSM/таблиц семь: campaign
+phase FSM; round FSM; provider execution FSM; provider dispatch FSM;
+human-attention lifecycle; cancellation/supersede control barrier;
+budget/ambiguity policy table. Три acceptance (CoderReport /
+ReviewerReport / HumanCommand) — НЕ машины, а чистые authority-specific
+classifiers `raw + context → Accepted | Rejected(reason)`. Спорные рёбра
+решены: CANCEL принимается из любого non-terminal немедленно, CANCELLED
+показывается только после dispatch-barrier + revocation + классификации
+side effects + forensic capture; `dispatch_ambiguous → HUMAN_REQUIRED`
+всегда (исключение — уже выданный CANCEL: ambiguity сохраняется как
+evidence, output не принимается); budget проверяется ДО ограничиваемого
+side effect, post-hoc overshoot — receipt как evidence, следующий
+progress-переход запрещён, safety-операции разрешены.
 
-C10. **Аутентификация human-lane в v1.** `actor_identity` /
-`authorization_context` без выбранного механизма — пустые слова. Открыто:
-минимальная v1-модель (single-operator, локальная authority o7d,
-Q-Deck-сессия?) либо явно записанное ограничение «v1 доверяет локальному
-оператору хоста; многопользовательская auth — post-v1 с триггером».
-Молча оставить поля нетипизированными нельзя: на них висит HumanDecision
-как canonical authority.
+C10. **Human-lane auth — ACCEPT single-principal v1, не «trust
+localhost».** Один configured maintainer principal; installation-scoped
+control capability ≥256 random bits; secret никогда в артефактах;
+credential_epoch (revoke/rotate); confidential+authenticated transport;
+caller не выбирает principal_id; authn до idempotency mutation и
+conditional consume. Controller выводит `AuthenticatedActorV1` в
+HumanDecision; `actor_identity`/`authorization_context` как
+authoritative-поля запроса не существуют.
 
-C11. **Gate/verifier registry.** Представление идентичности гейта
-(строка? typed id + версия?), версия реестра, связь с
-`verifier_policy_digest`, поведение на unknown gate id (fail closed —
-уже решено §10-матрицей; кодировать).
+C11. **Gate registry — ACCEPT typed ID + digest-bound registry.**
+`GateRequirementV1 {gate_id, gate_contract_digest}`;
+`GateRegistryRefV1 {registry_artifact_ref, registry_digest}`; gate result
+связывает candidate_state_ref + gate_id + contract/policy digests +
+outcome + evidence; unknown/duplicate/mismatch fail closed; никаких shell
+strings.
 
-C12. **`model_identity` normalization.** Схема нормализации
-(provider+family+alias?) и её связь со статусами resolution в receipt;
-запрет представлять alias как resolved identity уже принят (A.5).
+C12. **model_identity — ACCEPT split, никакой «нормализации family».**
+`LogicalModelRouteV1` (provider_id, route_id, requested_model,
+routing_config_digest) отдельно от `ModelResolutionEvidenceV1`
+(ProviderReported / FingerprintOnly / ProviderReportedWithFingerprint /
+Unavailable). Alias остаётся requested_model, никогда provider_model_id.
+У controller/human артефактов model-полей нет вовсе (tagged producer
+binding, E10).
 
-C13. **Что из негативной матрицы — свойство типов, а что — тест.**
-Рекомендация по прецеденту A0/`BoundaryEvidence`: непредставимость
-(receipt-до-outcome-класс ошибок; «accepted» из уст модели; lineage из
-envelope) — типами; остальное — RED-тесты.
+C13. **Types vs RED — ACCEPT, три уровня.** (1) Непредставимо wire-типом
+(unknown variant, invalid digest/ID form, provider artifact без provider
+binding и наоборот, alias как resolved identity, outcome-поля вне
+variant, raw report со статусом accepted, path/URL вместо typed ref,
+invalid producer binding); (2) непредставимо через construction API
+(accepted без classifier, verdict без resolved report, decision без
+authenticated actor, admission receipt без verified A0 receipt, receipt
+до terminal/ambiguous outcome) — закрытые поля, checked constructors;
+(3) RED-тесты (stale bindings, lineage mismatch, duplicate ID + другой
+digest, unknown registry IDs, scope escalation, resolver escape, reviewer
+mutation creds, claim mismatch, superseded question, unauthorized
+command, retry без non-dispatch proof, replay-вызывает-provider, digest
+cycle, budget/cancel спорные переходы). «Newtype вокруг String» — не
+доказательство семантики.
 
 ---
 
@@ -243,73 +277,114 @@ envelope) — типами; остальное — RED-тесты.
 
 ---
 
-## E. Противоречия и устаревшие формулировки — исправить ДО freeze
+## E. Противоречия — АДЬЮДИЦИРОВАНО (E1–E8) + два новых блокера (E9–E10)
 
-E1. **Near-duplicate candidate identity — главный риск draft'а.**
-`CandidateReceipt` (§3) декларирует `candidate_head`,
-`candidate_tree_identity`, `base_ancestry`, `repository_identity` —
-поля, почти совпадающие с принятыми A0 `candidate_tree_oid`,
-`base_commit`, `repository_id` из `CandidateStateReceiptV1`. Два почти
-одинаковых authority-типа отличаются местом будущей аварии. Freeze обязан
-переопределить `CandidateReceipt` как **ссылку на A0-receipt (ArtifactRef)
-+ строго controller-derived расширение** (changed_paths, file_modes,
-diff_scope, admission_profile, claim_check, coder_report_ref) — без
-повторного объявления ни одного identity-поля, которым владеет A0.
+E1. **Near-duplicate candidate identity — ACCEPT + переименование.**
+Тип называется **`CandidateAdmissionReceiptV1`** (не CandidateReceipt —
+слишком похоже на A0 candidate-state receipt): `candidate_state_ref` +
+round binding + coder_report_ref + observed_change_set + admission
+(profile, gate_requirements, classification_policy_digest) + optional
+claim_check. НЕ содержит candidate_head / candidate_tree_identity /
+base_ancestry / repository_identity / base_commit / candidate_tree_oid —
+всё это разрешается через accepted A0 receipt.
 
-E2. **Opaque-имена не существуют в принятом A0.** `CandidateRef` и
-`MaterializationAttestationRef` — имена draft'а; принятые типы называются
-иначе (B.12). До freeze — точный маппинг, иначе реализация «уточнит» сама.
+E2. **Opaque refs — ACCEPT с точными wrappers, не голый ArtifactRef.**
+`CandidateStateReceiptRefV1 {source_run_id, run_artifact_ref}` (kind
+обязан быть `ArtifactKind::CandidateState`);
+`CandidateMaterializationRefV1 {child_run_id, materialization_event_id,
+materialization_event_digest}`; WorkOrder получает
+`InputCandidateBindingV1 {candidate_state_ref, materialization_ref}` —
+доказательство, что конкретный run материализовал конкретный accepted
+candidate state до dispatch.
 
-E3. **Identity-скелеты не сшиты.** Envelope (`campaign_id`/`round_id`/…)
-нигде не упоминает `conversation_id`/`RunId`/`CommandId`, при этом §9
-v1-lite прямо зеркалит R1 single-in-flight, а исполнение ролей физически
-идёт через R1/A0 runs. Без явной сшивки (C5) появятся две параллельные
-линии lineage — ровно то, что lineage authority rule запрещает.
+E3. **Identity stitching — ACCEPT, закрыт C5** (`CampaignRunBindingV1`;
+никакого 1:1 campaign/conversation).
 
-E4. **Три «head-подобных» поля без иерархии authority.** Envelope
-`expected_input_head`, WorkOrder `input.base_sha`, candidate ref. По A0
-base наследуется от родительского receipt и никогда не re-derived; freeze
-обязан объявить `base_sha`/`expected_input_head` проекциями inherited
-obligation (проверяемыми, fail closed при расхождении), не независимыми
-входами.
+E4. **Head-поля — ACCEPT, усилено: слова `head` в canonical A1 нет
+вовсе.** Удалены `expected_input_head`, `WorkOrder.input.base_sha`,
+`ReviewRequest.base_sha`/`candidate_head`, `HumanCommand.expected_head`;
+замены — candidate-state refs. Git tree OID и внешний commit SHA — разные
+сущности; `head` зарезервировано для будущего `external_head_sha` (A3).
+Provider-facing prompt может показывать base/tree как помеченную
+projection из A0 receipt.
 
-E5. **Нормативная зависимость от ненормативного #94.** #95 применяет #94
-§1/§2/§4/§5, но #94 — «PLANNED / risk note … no schema freeze here».
-Контракт не может цитировать его как authority (rule 4 + rule 3):
-потребляемые фрагменты (dedupe-идемпотентность, external drift как
-attention-класс, три admission-profile-инварианта из D9, версии в
-envelope) должны быть ВНЕСЕНЫ в текст A1-контракта как его собственные
-нормы со ссылкой «происхождение — #94».
+E5. **#94 — ACCEPT.** В контракт внесены как собственные нормы:
+controller-derived dedupe; EXTERNAL_DRIFT как attention reason code
+(detection — A3); autonomous mutation ≥ STRICT; controller-derived risk
+classification; ambiguity → строгий профиль; schema versioning
+артефактов. НЕ внесены раньше времени: reducer version, campaign replay
+semantics, полная profile-таксономия, level-triggered reconciler (A2/A3).
 
-E6. **REVISE_CONTRACT vs «replacement mints new campaign».** §2 требует:
-замена исполнения минтит новый `campaign_id` + supersedes. §7 REVISE_CONTRACT
-говорит «new contract version → revalidation / replanning», не говоря,
-минтится ли новая кампания. Freeze должен закрыть: revised contract ⇒
-терминализация текущей кампании (superseded) + новая кампания с новым
-`contract_digest`, либо явно обоснованное исключение. Иначе «frozen
-acceptance criteria» и exact-head дисциплина охраняют не тот контракт.
+E6. **REVISE_CONTRACT — ACCEPT new-campaign rule.**
+`SupersedeRequested → block dispatches → quiesce/classify →
+CampaignSuperseded → atomically mint replacement` (новый campaign_id,
+новый contract_digest/version, explicit supersedes_campaign_id, тот же
+root_goal_id, обычно тот же task_id, новая round-sequence). Новая
+campaign не минтится до revocation capabilities старой и классификации
+её side effects.
 
-E7. **`claimed_state_digest` не определён.** Digest чего (A0 tree OID?
-patch? state-снимка?) — определить или удалить; недоопределённое поле в
-untrusted-отчёте станет свалкой.
+E7. **`claimed_state_digest` — DELETE.** Вместо него
+`claimed_candidate_tree_oid: Option<GitTreeOid>` только при
+candidate_produced; отсутствие допустимо; mismatch с controller-derived
+tree = rejection fail closed; никаких claims о repository/base identity.
 
-E8. **`round_id` не определён.** Кто минтит, что связывает (corrective
-round ↔ command/run?), терминальность round'а. Связано с C5/C9.
+E8. **`round_id` — DEFINE NOW.** Opaque controller-minted `RoundId` +
+монотонный `round_ordinal` (с 0); round создаётся до первого coder
+dispatch, связывает campaign_id + contract_digest + input_candidate_ref +
+work-order/directive ref; несколько execution IDs только при доказанном
+safe pre-dispatch redrive; максимум один accepted
+CandidateAdmissionReceipt; закрытый набор исходов (ACCEPTED /
+CHANGES_REQUESTED / BLOCKED / HUMAN_REQUIRED / BUDGET_EXHAUSTED /
+CANCELLED / SUPERSEDED / FAILED); CHANGES_REQUESTED минтит новый round.
+
+E9. **НОВЫЙ БЛОКЕР: два разных `ArtifactRef`.** A0 уже владеет
+`o7_run::ArtifactRef {kind, locator, digest}` (run-relative); draft A1
+использовал то же имя для `(digest, media_type, size)` — это другая
+address model (global CAS object). Имена разведены:
+`o7_run::ArtifactRef` не переименовывается; A1 вводит
+`CasObjectRefV1 {digest, size, media_type, content_kind}`. Никаких
+typedef'ов одного в другое; импорт run-артефакта в CAS — только через
+явный bridge `ArtifactImportedV1 {source_run_id, source_run_artifact_ref,
+cas_object_ref}` с доказанным равенством байтов/digest. (Ирония
+зафиксирована: draft, поймавший near-duplicate CandidateReceipt, сам
+почти создал near-duplicate ArtifactRef.)
+
+E10. **НОВЫЙ БЛОКЕР: envelope не был common — мешок условных полей.**
+`producer_adapter_version` / `model_identity` / `prompt_digest` /
+`tool_policy_digest` / `provider_invocation_receipt_ref` бессмысленны для
+HumanDecision и controller-derived артефактов; `authorization_context` —
+для model reports. Вместо nullable soup — **tagged `ProducerBindingV1`**:
+`Controller {component_version, policy_digest}` / `Provider {role,
+campaign_run_binding_ref, provider_execution_id, invocation_receipt_ref,
+adapter_version, model_route_ref, prompt_digest, tool_policy_digest}` /
+`Human {authenticated_actor_ref}`. Envelope core маленький
+(schema/kind/version, message_id, logical lineage, causation, producer
+binding, payload digest, artifact refs, recorded metadata);
+contract_digest / candidate preconditions / action bindings уходят в
+typed payload.
 
 ---
 
-## Порядок закрытия (предложение, соответствует объявленной фазе)
+## Порядок freeze (ратифицирован)
 
-1. Адьюдикация C1–C13 + исправления E1–E8 (интерактивно, порциями —
-   решения с maintainer'ом ратифицированы по rule 3 carve-out).
-2. Нормативный A1-контракт (dedicated contract commit, версионирован),
-   внёсший категорию B и результаты п.1; D-пункты — с триггерами.
-3. Типы + RED-матрица (§10 issue + C13-разбиение) — аналог SB-A0: красные
-   оракулы падают по наблюдаемому эффекту, не заглушкой.
-4. Review → FREEZE (issue #95 переводится из DRAFT; supersede-path §7
-   становится единственным способом изменений).
-5. Только затем — реализация A1.
+1. Inventory обновлён решениями C1–C13 — сделано (этот документ).
+2. E9/E10 добавлены — сделано.
+3. Нормативный A1-контракт (`docs/q-deck/a1-contracts.md`): compact
+   envelope core; tagged producer bindings; exact A0 wrappers;
+   campaign/run bridge; digest registry; limits table;
+   transition/classifier tables.
+4. Отдельный review контракта: нет повторно объявленных A0/R1 identities;
+   нет слова `head` без квалификатора `candidate_tree`/`external_head`;
+   нет generic `ArtifactRef`; нет generic `retry_of`; нет authoritative
+   caller-supplied actor/model/lineage.
+5. Types + construction API.
+6. RED matrix.
+7. Contract freeze (issue #95 из DRAFT; supersede-path — единственный
+   способ изменений).
+8. Реализация protocol/library layer A1.
+9. Production acceptance authority — только вместе с A2 canonical
+   campaign log, не через временный reducer в SQLite.
 
-Границы этапа (повторение мандата, не новое решение): никакого
-coder/reviewer runtime, provider adapters, action broker, MG-C, изменений
-A0, A2-инкарнаций, общего planner'а в этой ветке.
+Границы этапа (повторение мандата): никакого coder/reviewer runtime,
+provider adapters, action broker, MG-C, изменений A0, A2-инкарнаций,
+общего planner'а в этой ветке.
