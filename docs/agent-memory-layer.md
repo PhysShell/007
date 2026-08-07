@@ -2,6 +2,15 @@
 
 - **Status:** draft · Scope: `o7 memory` / `o7 context` (007 only; OwnAudit
   and Own.NET runs are data sources, not implementation targets).
+- **Companion evaluation:** `docs/deja-vu-memory-evaluation.md` — a second
+  prior-art study (deja-vu) with a measured recall oracle. It proposes an added
+  acceptance criterion (abstention, scored as a hard gate plus a separate
+  recall metric), an added non-goal (no untyped recall reaches a planner), and
+  the normative split between a **candidate observation** and an **evidence
+  object**. Those three are agent-authored and **still pending**, so they are
+  not folded into the phases below. Its two dispositions **D1'** and **D2**
+  *were* ratified by the maintainer on 2026-08-07 and are normative; the
+  backend-selection deferral in this document follows from D1'.
 
 ## Summary
 
@@ -133,7 +142,41 @@ Risky parts for "007":
 - mixing private subscription-auth details into shared memory;
 - depending on regex-only secret stripping as a complete security boundary.
 
-Conclusion: "agentmemory" is useful as a memory runtime, but "007" should wrap it behind its own artifact-derived adapter.
+Conclusion: "agentmemory" is a plausible memory runtime **candidate**, and any runtime 007 adopts must sit behind its own artifact-derived adapter. Which runtime — if any — is deferred; see the note under "Backend options".
+
+## Prior art: deja-vu
+
+"vshulcz/deja-vu" is a zero-dependency local index over the transcript stores of
+~17 coding harnesses, with CLI/MCP/hook recall and no LLM or embeddings on the
+base search path. It is evaluated in full — including what it does better than
+this document proposes (typed non-conversational records, a decision lifecycle
+with tombstones, a deterministic rebuildable index) and the one thing that
+disqualifies it as an authority: it returns empty results readily enough, but
+has no typed `NO_SUPPORTED_EVIDENCE` admission outcome, so nothing distinguishes
+*found nothing* and *found weak junk* from *this question has no support* — in
+`docs/deja-vu-memory-evaluation.md`. The measurement behind that last claim is
+in `evidence/deja-vu-negative-recall/`, kept as a fixed corpus so it doubles as
+a cross-version instrument: it separates upstream retrieval drift from our own
+admission drift.
+
+The position, in two parts, **both maintainer-ratified on 2026-08-07** against
+the text of that document at `e938b2d`:
+
+- **D1' — evaluated reference, dependency decision deferred.** deja-vu is a
+  verified source of criteria and a future backend candidate behind a stable
+  adapter boundary. 007 takes no dependency on it now; the backend choice waits
+  for a real consumer.
+- **D2 — retrieval semantics are untrusted, versioned inputs**, drawn by
+  authority boundary rather than repository ownership: rank, score, tier and
+  similarity from any component outside 007's evidence-admission authority are
+  candidate-selection signals, never evidence verdicts. A backend we write
+  ourselves is bound by this too.
+
+The five properties worth having in a backend are stated there as evaluation
+criteria rather than as requirements copied from one implementation. Their
+single MUST — a backend passes the shared oracle fixture and has no path that
+bypasses 007 evidence admission — is itself still pending, except for the
+no-bypass half, which is a restatement of ratified D2.
 
 ## Proposed architecture
 
@@ -153,8 +196,8 @@ Conclusion: "agentmemory" is useful as a memory runtime, but "007" should wrap i
                       |
                       v
 +------------------+       +----------------------+
-| agentmemory      |<----->|  007 Memory Adapter  |
-| or local store   |       |  provenance filter   |
+| memory backend   |<----->|  007 Memory Adapter  |
+| (not yet chosen) |       |  provenance filter   |
 +------------------+       +----------------------+
                       |
                       v
@@ -495,7 +538,7 @@ Example "context.meta.json":
     "gate:no-new-findings status:FAIL",
     "prompt_module:ownaudit.fix-own001"
   ],
-  "memory_backend": "agentmemory",
+  "memory_backend": "<selected-backend>",
   "token_budget": 2000,
   "result_count": 12
 }
@@ -604,9 +647,24 @@ Memory should help the agent produce a better plan, but O7Plan and gates decide 
 
 ## Backend options
 
+> **Backend selection is deferred** — see D1' in
+> `docs/deja-vu-memory-evaluation.md`, **ratified by the maintainer on
+> 2026-08-07**, which makes this deferral normative rather than proposed. The
+> three options below are preserved as analysis, not as a
+> choice: **no backend is selected, and "first backend" below no longer names
+> one.** A backend is chosen when a real consumer exists, by evaluation against
+> the criteria in that document, whose single normative requirement is that a
+> candidate passes the shared oracle fixture and has no path that bypasses 007
+> evidence admission.
+>
+> This note exists because the deferral was first written only about deja-vu
+> while this section still preselected `agentmemory` three sections down —
+> removing one commitment and leaving another standing is not a deferral.
+
 ### Option A: agentmemory
 
-Use "agentmemory" as the first backend.
+Written when this was the intended first backend; retained as evaluation
+material for a candidate, not as the selection.
 
 Pros:
 
@@ -625,7 +683,7 @@ Cons:
 - regex redaction is not enough as a hard security boundary;
 - direct MCP write access must be restricted.
 
-Recommended use:
+If selected, the shape would be:
 
 ```text
 007 -> REST/MCP adapter -> agentmemory
@@ -652,7 +710,7 @@ Cons:
 - no hybrid vector/graph search initially;
 - more implementation work.
 
-Recommended if "agentmemory" proves too broad or too leaky.
+A candidate in its own right, not a fallback — it was written as the alternative to Option A when Option A was the presumed default, which it no longer is.
 
 ### Option C: graph memory later
 
@@ -820,7 +878,11 @@ Mitigation:
 
 ### Phase 0: manual experiment
 
-Run "agentmemory" locally and verify:
+**Conditional on a backend having been selected** (deferred, see above); the
+`agentmemory` specifics below are an example of what a candidate evaluation
+looks like, not a step to execute now.
+
+Run the candidate locally and verify:
 
 - server starts;
 - viewer works;
@@ -842,8 +904,11 @@ o7 memory ingest-run <run-dir>
 Implement:
 
 - "MemoryBackend" trait;
-- "AgentMemoryBackend";
 - "NoopMemoryBackend";
+- one concrete backend implementation **once a backend is selected** — the
+  earlier draft named "AgentMemoryBackend" here, which preselects a dependency
+  the deferral above withholds. The trait and the noop are independent of that
+  choice and can be built first;
 - redaction pass;
 - JSON payload schema;
 - provenance validation.
@@ -955,7 +1020,7 @@ Rules:
     memory/
       mod.rs
       backend.rs
-      agentmemory.rs
+      <backend>.rs        # one file per selected backend; none exists yet
       item.rs
       query.rs
       ingest.rs
@@ -1017,6 +1082,13 @@ Phase 2 is complete when:
 - context separates trusted facts from agent claims;
 - context includes provenance links;
 - context stays under a configured token/char budget.
+
+An additional criterion — abstention — is proposed in
+`docs/deja-vu-memory-evaluation.md`: the oracle corpus is part of the
+acceptance run, scored as two separate numbers, a hard gate
+(`unsupported_admission_violations`, normatively zero on that corpus) and an
+optimization metric (`supported_evidence_recall`). It is **pending maintainer
+ratification** (rule 3), so it does not bind Phase 2 yet.
 
 Phase 3 is complete when:
 
