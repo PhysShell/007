@@ -18,10 +18,29 @@ in-memory, optional Neo4j) + an "Ontological Nucleus" of immutable axioms + a
 embeddings as a supplementary layer and a desktop-agent shell on top (NOEMA OS →
 SAMANTHA-OS).
 
-Extraction caveat, per rule 4: the PDF uses per-page subset fonts with private
-glyph orderings, so quoted figures below were re-derived from the document's own
-generation-summary table and cross-checked against the abstract's prose. Anything
-not independently re-extracted is **not** cited here.
+### Artifact identity
+
+This is an external artifact that no commit of this repository captures, so rule 4's
+revision binding cannot ride on git. It carries its own:
+
+```text
+sha256    390174db8a8632c5e8130ba2ea511a744003f4bdc734d9d3be11142a6bf7f2d3
+size      221003 bytes
+paper date 2026-07-24
+```
+
+Every quotation below is bound to **that digest**. A different PDF with the same
+title and author is a different artifact and re-opens every claim here.
+
+Reported alongside the submission, **not independently verified** and therefore not
+load-bearing: SSRN abstract id `7181919` (it appears in the uploaded filename; no
+lookup was performed).
+
+Extraction note: the PDF uses per-page subset fonts with private glyph orderings,
+so the text was recovered by reconstructing those mappings. Figures were re-derived
+from the document's own generation-summary table and cross-checked against the
+abstract's prose; each quotation below was located verbatim in that reconstruction.
+Anything not independently re-extracted is **not** cited here.
 
 ## Verdict
 
@@ -98,21 +117,37 @@ consumer picks it up.
 
 Cited, with its framing, in
 [`docs/evidence-and-decision-discipline.md`](evidence-and-decision-discipline.md).
-Summary of what the paper reports about its own Generation 1: axioms existed in
-natural language only, were *not computationally enforced*, and safety-violation
-coverage was **0 %** — while relation-type validation was never implemented, invalid
-edges could persist rather than be rejected, and one axiom's safety patterns were
-not checked at all. Its own summary table records axiom coverage climbing 0 % →
-28 % → 100 % across generations.
+The paper reports **two distinct failures**, and the second is the one that should
+worry a harness whose whole job is letting agents mutate repositories.
+
+*Generation 1 — the invariant was never executed.* Axioms existed in natural
+language only and were *"not computationally enforced"*; relation-type validation
+was *"never implemented computationally"*; invalid edges *"occasionally persisted
+rather than rejected"*; one axiom's safety patterns were *"not checked"* at all.
+Coverage of safety violations: **0 %**.
+
+*Generations 5–6 — the invariant was executed, then lost.* Verbatim: *"Gen 5-6
+experienced programmer agent divergence, causing loss of MKP seed nodes and axioms
+— regression to 0% safety coverage."* Generation 7 *"successfully restores full
+axiom compliance after Gen 5-6 regression."* So enforcement that genuinely existed
+was deleted by the agent maintaining the system, and the summary table's tidy
+0 % → 28 % → 100 % progression hides a round trip back to zero in between.
+
+*And the overreach that follows.* The paper describes its evidence as *"regression
+testing (19-vector test suite confirms axiom bypass impossible)"* — nineteen
+vectors are not an impossibility result.
 
 ```text
-declared invariant      ≠  executed invariant
+declared invariant      ≠  executed invariant       (Gen 1)
+executed invariant      ≠  durably enforced         (Gen 5-6)
 executed check          ≠  enforcement boundary
-passing regression set  ≠  safety proof
+passing regression set  ≠  safety proof             ("bypass impossible")
 ```
 
-That is an independent instance of the failure class 007's rules were derived
-against — evidence of recurrence, never authority for the rules.
+Independent instances of the failure class 007's rules were derived against —
+evidence of recurrence, never authority for the rules. The Gen 5–6 line is also the
+direct argument for `docs/invariant-registry.md`'s STALE-is-derived rule: a registry
+that only records what was once true reproduces this failure exactly.
 
 ## Disposition
 
