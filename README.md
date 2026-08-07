@@ -97,6 +97,11 @@ task-specific, evidence-backed agent context),
 `docs/CFR.md` (CFR/game-theoretic scheduling survey),
 `docs/fastcontext.md`, `docs/omnigraph.md`.
 
+External code-graph evidence — how to measure where Gortex's output may be
+consumed without independent verification (admission table over the epistemic
+statuses in `docs/decision-and-admission-protocol.md`, not a verdict on the
+tool): `docs/gortex-evaluation-harness.md`.
+
 QODEC (token-aware lossless codec lab) has moved to its own standalone
 repository: [`PhysShell/qodec`](https://github.com/PhysShell/qodec). See
 [`docs/qodec-migrated.md`](docs/qodec-migrated.md) for the migration record.
