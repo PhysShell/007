@@ -1,0 +1,459 @@
+{
+  "causal_conclusion": "QODEC_PROJECT_PASSES_WITH_DIFFERENT_VALID_PROJECTION",
+  "no_case_oracle": "request built from B0+gold+contract; C1 never used as qodec input",
+  "per_task": [
+    {
+      "c1_context_canonical_sha256": "sha256:da7d7350c1eda9e187de5a53d75351f506de9bb63ff5bfd83148eebab587b505",
+      "c1_relations": [
+        [
+          "obs-evidence-head-ci-empty",
+          "supports",
+          "obs-repo-authority-04108e7"
+        ],
+        [
+          "obs-oracle-topology-constraint",
+          "depends_on",
+          "obs-repo-authority-04108e7"
+        ],
+        [
+          "obs-plane-record-frozen",
+          "part_of",
+          "obs-round0-closed"
+        ],
+        [
+          "obs-repo-authority-04108e7",
+          "supersedes",
+          "obs-reviewer-acceptance-claim"
+        ],
+        [
+          "obs-repo-authority-04108e7",
+          "supports",
+          "obs-next-permitted-step"
+        ],
+        [
+          "obs-reviewer-durability-resolved",
+          "derived_from",
+          "obs-plane-reviewer"
+        ],
+        [
+          "obs-reviewer-durability-resolved",
+          "supersedes",
+          "obs-reviewer-durability-unresolved-v6"
+        ],
+        [
+          "obs-round0-closed",
+          "supersedes",
+          "obs-plane-record-not-frozen-v6"
+        ]
+      ],
+      "c1_selected_ids": [
+        "obs-metadata-head",
+        "obs-next-permitted-step",
+        "obs-plane-record-frozen",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-durability-resolved",
+        "obs-round0-closed"
+      ],
+      "context_byte_equal": false,
+      "difference_explanation": "same selection; relation set differs (C1=B0 incident edges+witness; Q1R=outgoing edges from selected) \u2014 all gold-grounded, no fabrication",
+      "q1r_context_canonical_sha256": "sha256:94fb8cd62b58a5823fb3c1a974177b5273c1ebc2800d499e0cab417bfac5a156",
+      "q1r_every_relation_gold_grounded": true,
+      "q1r_relations": [
+        [
+          "obs-plane-record-frozen",
+          "part_of",
+          "obs-round0-closed"
+        ],
+        [
+          "obs-repo-authority-04108e7",
+          "supersedes",
+          "obs-reviewer-acceptance-claim"
+        ],
+        [
+          "obs-repo-authority-04108e7",
+          "supports",
+          "obs-next-permitted-step"
+        ],
+        [
+          "obs-reviewer-durability-resolved",
+          "derived_from",
+          "obs-plane-reviewer"
+        ],
+        [
+          "obs-reviewer-durability-resolved",
+          "supersedes",
+          "obs-reviewer-durability-unresolved-v6"
+        ],
+        [
+          "obs-round0-closed",
+          "supersedes",
+          "obs-plane-record-not-frozen-v6"
+        ]
+      ],
+      "q1r_selected_ids": [
+        "obs-metadata-head",
+        "obs-next-permitted-step",
+        "obs-plane-record-frozen",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-durability-resolved",
+        "obs-round0-closed"
+      ],
+      "relation_set_equal": false,
+      "selected_set_equal": true,
+      "task_id": "case-0002-resume-product-integration"
+    },
+    {
+      "c1_context_canonical_sha256": "sha256:011bfebf7c4018b36dbf05ddc5055215b6c37122f48dc6ff00e0d57e14b1df4a",
+      "c1_relations": [
+        [
+          "obs-evidence-head-ci-empty",
+          "supports",
+          "obs-repo-authority-04108e7"
+        ],
+        [
+          "obs-lock-supersession-chain",
+          "derived_from",
+          "obs-v3-binding-error"
+        ],
+        [
+          "obs-oracle-topology-constraint",
+          "depends_on",
+          "obs-output-path-dependence"
+        ],
+        [
+          "obs-oracle-topology-constraint",
+          "depends_on",
+          "obs-repo-authority-04108e7"
+        ],
+        [
+          "obs-oracle-topology-constraint",
+          "depends_on",
+          "obs-window-invariant"
+        ],
+        [
+          "obs-output-path-dependence",
+          "blocks",
+          "obs-oracle-topology-constraint"
+        ],
+        [
+          "obs-profiler-fail-closed",
+          "supersedes",
+          "obs-profiler-prior-defect"
+        ],
+        [
+          "obs-repo-authority-04108e7",
+          "supersedes",
+          "obs-reviewer-acceptance-claim"
+        ],
+        [
+          "obs-repo-authority-04108e7",
+          "supports",
+          "obs-next-permitted-step"
+        ],
+        [
+          "obs-reviewer-durability-resolved",
+          "supersedes",
+          "obs-reviewer-durability-unresolved-v6"
+        ],
+        [
+          "obs-reviewer-window",
+          "supports",
+          "obs-reviewer-acceptance-claim"
+        ],
+        [
+          "obs-round0-closed",
+          "supersedes",
+          "obs-plane-record-not-frozen-v6"
+        ]
+      ],
+      "c1_selected_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-lock-supersession-chain",
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence",
+        "obs-plane-coder",
+        "obs-profiler-fail-closed",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-digest-disagreement",
+        "obs-reviewer-durability-resolved",
+        "obs-reviewer-window",
+        "obs-round0-closed",
+        "obs-window-invariant"
+      ],
+      "context_byte_equal": false,
+      "difference_explanation": "same selection; relation set differs (C1=B0 incident edges+witness; Q1R=outgoing edges from selected) \u2014 all gold-grounded, no fabrication",
+      "q1r_context_canonical_sha256": "sha256:3271cfa86d6a370762dfaf4e83342311a8934ca2629d76e6ca233d76d8553a91",
+      "q1r_every_relation_gold_grounded": true,
+      "q1r_relations": [
+        [
+          "obs-evidence-head-ci-empty",
+          "supports",
+          "obs-repo-authority-04108e7"
+        ],
+        [
+          "obs-lock-supersession-chain",
+          "derived_from",
+          "obs-v3-binding-error"
+        ],
+        [
+          "obs-oracle-topology-constraint",
+          "depends_on",
+          "obs-output-path-dependence"
+        ],
+        [
+          "obs-oracle-topology-constraint",
+          "depends_on",
+          "obs-repo-authority-04108e7"
+        ],
+        [
+          "obs-oracle-topology-constraint",
+          "depends_on",
+          "obs-window-invariant"
+        ],
+        [
+          "obs-output-path-dependence",
+          "blocks",
+          "obs-oracle-topology-constraint"
+        ],
+        [
+          "obs-profiler-fail-closed",
+          "supersedes",
+          "obs-profiler-prior-defect"
+        ],
+        [
+          "obs-repo-authority-04108e7",
+          "supersedes",
+          "obs-reviewer-acceptance-claim"
+        ],
+        [
+          "obs-repo-authority-04108e7",
+          "supports",
+          "obs-next-permitted-step"
+        ],
+        [
+          "obs-reviewer-durability-resolved",
+          "derived_from",
+          "obs-plane-reviewer"
+        ],
+        [
+          "obs-reviewer-durability-resolved",
+          "supersedes",
+          "obs-reviewer-durability-unresolved-v6"
+        ],
+        [
+          "obs-reviewer-window",
+          "supports",
+          "obs-reviewer-acceptance-claim"
+        ],
+        [
+          "obs-round0-closed",
+          "supersedes",
+          "obs-plane-record-not-frozen-v6"
+        ]
+      ],
+      "q1r_selected_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-lock-supersession-chain",
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence",
+        "obs-plane-coder",
+        "obs-profiler-fail-closed",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-digest-disagreement",
+        "obs-reviewer-durability-resolved",
+        "obs-reviewer-window",
+        "obs-round0-closed",
+        "obs-window-invariant"
+      ],
+      "relation_set_equal": false,
+      "selected_set_equal": true,
+      "task_id": "case-0002-audit-r21-evidence-provenance"
+    },
+    {
+      "c1_context_canonical_sha256": "sha256:02f00723745a2c09c9503badeb5339782d3120bd0a64296493b077cc51305ac1",
+      "c1_relations": [
+        [
+          "obs-evidence-head-ci-empty",
+          "supports",
+          "obs-repo-authority-04108e7"
+        ],
+        [
+          "obs-oracle-topology-constraint",
+          "depends_on",
+          "obs-output-path-dependence"
+        ],
+        [
+          "obs-oracle-topology-constraint",
+          "depends_on",
+          "obs-repo-authority-04108e7"
+        ],
+        [
+          "obs-oracle-topology-constraint",
+          "depends_on",
+          "obs-window-invariant"
+        ],
+        [
+          "obs-output-path-dependence",
+          "blocks",
+          "obs-oracle-topology-constraint"
+        ],
+        [
+          "obs-profiler-fail-closed",
+          "supersedes",
+          "obs-profiler-prior-defect"
+        ],
+        [
+          "obs-repo-authority-04108e7",
+          "supersedes",
+          "obs-reviewer-acceptance-claim"
+        ],
+        [
+          "obs-repo-authority-04108e7",
+          "supports",
+          "obs-next-permitted-step"
+        ],
+        [
+          "obs-reviewer-window",
+          "supports",
+          "obs-reviewer-acceptance-claim"
+        ]
+      ],
+      "c1_selected_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence",
+        "obs-plane-coder",
+        "obs-profiler-fail-closed",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-digest-disagreement",
+        "obs-reviewer-window",
+        "obs-window-invariant"
+      ],
+      "context_byte_equal": false,
+      "difference_explanation": "same selection; relation set differs (C1=B0 incident edges+witness; Q1R=outgoing edges from selected) \u2014 all gold-grounded, no fabrication",
+      "q1r_context_canonical_sha256": "sha256:7d74ae61a8daf4d3a812ba2b11b6275005c6e9398dd0c9abe070538d5618e35d",
+      "q1r_every_relation_gold_grounded": true,
+      "q1r_relations": [
+        [
+          "obs-evidence-head-ci-empty",
+          "supports",
+          "obs-repo-authority-04108e7"
+        ],
+        [
+          "obs-oracle-topology-constraint",
+          "depends_on",
+          "obs-output-path-dependence"
+        ],
+        [
+          "obs-oracle-topology-constraint",
+          "depends_on",
+          "obs-repo-authority-04108e7"
+        ],
+        [
+          "obs-oracle-topology-constraint",
+          "depends_on",
+          "obs-window-invariant"
+        ],
+        [
+          "obs-output-path-dependence",
+          "blocks",
+          "obs-oracle-topology-constraint"
+        ],
+        [
+          "obs-profiler-fail-closed",
+          "supersedes",
+          "obs-profiler-prior-defect"
+        ],
+        [
+          "obs-repo-authority-04108e7",
+          "supersedes",
+          "obs-reviewer-acceptance-claim"
+        ],
+        [
+          "obs-repo-authority-04108e7",
+          "supports",
+          "obs-next-permitted-step"
+        ],
+        [
+          "obs-reviewer-window",
+          "supports",
+          "obs-reviewer-acceptance-claim"
+        ]
+      ],
+      "q1r_selected_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence",
+        "obs-plane-coder",
+        "obs-profiler-fail-closed",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-digest-disagreement",
+        "obs-reviewer-window",
+        "obs-window-invariant"
+      ],
+      "relation_set_equal": true,
+      "selected_set_equal": true,
+      "task_id": "case-0002-assess-change-impact-on-oracle-topology"
+    }
+  ],
+  "projection_capability": {
+    "all_axes": {
+      "contract_input_consistency": "PASS",
+      "negative_control_diagnostics": "NOT_APPLICABLE",
+      "projection_validity": "PASS",
+      "question_observation_support": "PASS",
+      "relation_support": "PASS",
+      "source_compilation": "PASS",
+      "stale_state_safety": "PASS",
+      "task_dependence": "PASS"
+    },
+    "all_frozen_relation_requirements_pass": true,
+    "every_q1r_relation_gold_grounded": true,
+    "no_fabricated_edge": true,
+    "q1r_raw_structural_verdict": "PASS",
+    "relation_set_vs_C1": "different",
+    "selected_set_vs_C1": "equal"
+  },
+  "provenance": {
+    "case_role": "development",
+    "designed_after_observing_case_0002": true,
+    "generalization_claim_allowed": false,
+    "holdout_evidence": false
+  },
+  "qodec_encoding_roundtrip": "PASS",
+  "qodec_project_cost": {
+    "encoded_cold_tokens": 5020,
+    "encoded_warm_tokens": 4759,
+    "raw_tokens": 7482
+  },
+  "qodec_project_result": "DIFFERENT_BUT_EVALUATION_PASS",
+  "qodec_project_semantic_repair": "PASS",
+  "record": "o7.b1.q2-causal-classification/v0",
+  "representation_capability": {
+    "cost": {
+      "notation_tokens": 261,
+      "q1r_raw_tokens": 7482,
+      "q1rq_cold_bundle_tokens": 5020,
+      "q1rq_warm_tokens": 4759
+    },
+    "q1rq_roundtrip": "PASS"
+  },
+  "semantic_verdict": {
+    "B0": {
+      "evaluation_sha256": "sha256:963edb459fb742359051e3a5386ce6b6f1026e1d01b5a8a951a9b0bf99541d76",
+      "failed_axes": [
+        "relation_support"
+      ],
+      "overall": "FAIL"
+    },
+    "C1": {
+      "evaluation_sha256": "sha256:d8d1d5fb933dacdb1efcbd7db91c716cf678cd94b9cabc7ba60b5ff2973c2d3d",
+      "overall": "PASS"
+    },
+    "Q1R": {
+      "evaluation_sha256": "sha256:fc76d210277f328cc685e61b80df4214319f612333ea49c7e9126d51becce791",
+      "failed_axes": [],
+      "overall": "PASS"
+    }
+  }
+}
