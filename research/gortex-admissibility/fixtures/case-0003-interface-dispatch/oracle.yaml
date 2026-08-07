@@ -1,0 +1,75 @@
+schema: oracle-v0
+case: case-0003-interface-dispatch
+language: typescript
+oracle_kind: constructed
+
+independent_oracle:
+  available: true
+  tool: TypeScript language service (implementations + references)
+  note: >
+    The oracle establishes the implementor set exactly. It does NOT establish
+    which implementor a given call reaches -- no sound static analysis can, and
+    that is the point of the case.
+
+adversarial_about: >
+  One interface member, two implementors, one call site that goes through the
+  interface, and a factory that picks the implementor from a runtime string.
+  The correct static answer is an over-approximation, and the honest static
+  answer says so. This case is therefore not primarily a correctness test: it
+  is the corpus's main honesty test, because the only way to pass it is to
+  return a reachable-set and decline to call it exhaustive.
+
+seeds:
+  - id: seed-ledger-accept
+    gold_identity:
+      path: source/adapters/ledger-sink.ts
+      symbol: LedgerSink.accept
+      line_range: [4, 6]
+  - id: seed-sink-accept
+    gold_identity:
+      path: source/ports/payment-sink.ts
+      symbol: PaymentSink.accept
+      line_range: [2, 2]
+
+facts:
+  - seed: seed-sink-accept
+    relation: implementations
+    expected:
+      - path: source/adapters/ledger-sink.ts
+        symbol: LedgerSink.accept
+        line: 4
+      - path: source/adapters/audit-sink.ts
+        symbol: AuditSink.accept
+        line: 4
+    forbidden: []
+    admissibility:
+      may_claim_complete: true
+      may_claim_safe_to_rename: false
+      required_caveats: []
+      note: >
+        The implementor set IS statically exhaustive and may be claimed complete.
+        Rename is still unsafe from this relation alone: renaming the interface
+        member without renaming both implementors in the same edit breaks the
+        contract. Completeness of a relation does not imply safety of an action
+        derived from it -- this pairing is deliberate.
+
+  - seed: seed-ledger-accept
+    relation: callers
+    expected:
+      - path: source/app/settle.ts
+        symbol: settle
+        line: 4
+        reason: >
+          reachable through the interface; a sound over-approximation must
+          include this site even though the receiver type is the interface
+    forbidden: []
+    admissibility:
+      may_claim_complete: false
+      may_claim_safe_to_rename: false
+      required_caveats: [dynamic_dispatch]
+      note: >
+        Whether `settle` actually reaches LedgerSink.accept depends on the
+        runtime value passed to `selectSink`. Any exhaustiveness claim here is
+        false regardless of the edge set returned -- including on an edge set
+        that matches `expected` exactly. This is the one case in the package
+        where a fully correct answer can still be a false-safe.

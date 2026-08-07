@@ -98,9 +98,11 @@ task-specific, evidence-backed agent context),
 `docs/fastcontext.md`, `docs/omnigraph.md`.
 
 External code-graph evidence — how to measure where Gortex's output may be
-consumed without independent verification (admission table over the epistemic
-statuses in `docs/decision-and-admission-protocol.md`, not a verdict on the
-tool): `docs/gortex-evaluation-harness.md`.
+consumed without independent verification. Produces an *observer* admission
+table (what role the observer may play), which the decision layer in
+`docs/decision-and-admission-protocol.md` then consumes; not a verdict on the
+tool: `docs/gortex-evaluation-harness.md`. Fixture corpus:
+`research/gortex-admissibility/`.
 
 QODEC (token-aware lossless codec lab) has moved to its own standalone
 repository: [`PhysShell/qodec`](https://github.com/PhysShell/qodec). See

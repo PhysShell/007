@@ -1,0 +1,75 @@
+schema: oracle-v0
+case: case-0001-sibling-same-name
+language: typescript
+oracle_kind: constructed
+
+independent_oracle:
+  available: true
+  tool: TypeScript language service (tsserver "find all references")
+  command: npx tsc --noEmit -p . && npx tsserver
+  note: >
+    Both an independent oracle and construction agree here. That redundancy is
+    deliberate for the control vertical: it lets the constructed-oracle method
+    itself be validated against a compiler before it is relied on for cases and
+    languages where no compiler is available.
+
+adversarial_about: >
+  Two unrelated classes each declare a method named `send`, and both are called
+  from the same file. Any resolver that matches call edges by method name alone,
+  without binding the receiver to its declared type, will link each call site to
+  both declarations: one phantom edge and, from the other side, one caller set
+  that is silently twice its true size. This is the defect class of upstream
+  Gortex issue #461, reproduced without depending on GDScript or on that fix.
+
+seeds:
+  - id: seed-invoice-send
+    gold_identity:
+      path: source/billing/invoice.ts
+      symbol: Invoice.send
+      line_range: [5, 7]
+  - id: seed-mail-send
+    gold_identity:
+      path: source/mail/message.ts
+      symbol: MailMessage.send
+      line_range: [5, 7]
+
+facts:
+  - seed: seed-invoice-send
+    relation: callers
+    expected:
+      - path: source/app/dispatch.ts
+        symbol: dispatchInvoice
+        line: 5
+        reason: receiver `invoice` is declared `Invoice`
+    forbidden:
+      - path: source/app/dispatch.ts
+        symbol: dispatchMail
+        line: 9
+        reason: >
+          name-only resolution links `message.send()` here; the receiver is
+          declared `MailMessage` and this edge does not exist
+    admissibility:
+      may_claim_complete: true
+      may_claim_safe_to_rename: true
+      required_caveats: []
+      note: >
+        The control case. Both claims are legitimately available to a sound
+        analyser, so a wrong answer delivered without caveats is an unambiguous
+        false-safe rather than an arguable one.
+
+  - seed: seed-mail-send
+    relation: callers
+    expected:
+      - path: source/app/dispatch.ts
+        symbol: dispatchMail
+        line: 9
+        reason: receiver `message` is declared `MailMessage`
+    forbidden:
+      - path: source/app/dispatch.ts
+        symbol: dispatchInvoice
+        line: 5
+        reason: mirror of the phantom edge above, from the other direction
+    admissibility:
+      may_claim_complete: true
+      may_claim_safe_to_rename: true
+      required_caveats: []

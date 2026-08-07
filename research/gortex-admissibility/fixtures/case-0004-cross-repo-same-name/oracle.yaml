@@ -1,0 +1,51 @@
+schema: oracle-v0
+case: case-0004-cross-repo-same-name
+language: typescript
+oracle_kind: constructed
+
+independent_oracle:
+  available: true
+  tool: TypeScript language service, run per repository root
+  note: >
+    The oracle is only independent if it is run per repo. Pointing one project
+    at both trees creates the very conflation the case is testing for.
+
+adversarial_about: >
+  Two repositories in one indexed workspace each declare `Config.load`, with
+  identical shape and identical member names. Nothing distinguishes them but the
+  repository root. A workspace-wide symbol index keyed on qualified name alone
+  merges the two, and the merge is invisible in the output: the caller set for
+  repo-a's `Config.load` simply contains an extra entry from a repository that
+  never imports it.
+
+seeds:
+  - id: seed-repo-a-config-load
+    gold_identity:
+      path: source/repo-a/src/config.ts
+      symbol: Config.load
+      line_range: [3, 5]
+
+facts:
+  - seed: seed-repo-a-config-load
+    relation: callers
+    expected:
+      - path: source/repo-a/src/boot.ts
+        symbol: bootA
+        line: 4
+    forbidden:
+      - path: source/repo-b/src/boot.ts
+        symbol: bootB
+        line: 4
+        reason: >
+          repo-b imports its own Config from its own tree; this edge exists only
+          if the workspace index merges symbols across repository roots
+    admissibility:
+      may_claim_complete: true
+      may_claim_safe_to_rename: true
+      required_caveats: []
+      note: >
+        A rename confined to repo-a IS safe and complete -- the hazard runs the
+        other way. The failure this case detects is over-reach: a tool that
+        proposes edits in repo-b, or reports blast radius spanning both, has
+        merged two unrelated symbols. The `forbidden` set carries the whole
+        weight here; no caveat can excuse the phantom edge.

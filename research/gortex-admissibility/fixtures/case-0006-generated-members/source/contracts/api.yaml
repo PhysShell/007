@@ -1,0 +1,6 @@
+# Source of truth for the generated client. Renaming an operation here is the
+# only rename that survives the next codegen run.
+operations:
+  - id: fetchInvoice
+    method: GET
+    path: /invoices/{id}

@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://physshell.dev/007/research/gortex-admissibility/oracle-v0.schema.json",
+  "title": "Adversarial code-graph fixture oracle, v0",
+  "description": "Ground truth AND admissibility expectations for one adversarial fixture case. The `facts` block scores correctness (surface S2); the `admissibility` block scores honesty (surface S3). A case may fail on either independently.",
+  "type": "object",
+  "required": ["schema", "case", "language", "oracle_kind", "adversarial_about", "seeds", "facts"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "oracle-v0" },
+    "case": {
+      "type": "string",
+      "pattern": "^case-[0-9]{4}-[a-z0-9-]+$"
+    },
+    "language": {
+      "type": "string",
+      "description": "Source language of this case. NOT the Gortex extractor tier -- the tier is a property of the tool at measurement time and is recorded in the result, never asserted here."
+    },
+    "oracle_kind": {
+      "enum": ["independent", "manual", "constructed", "unavailable"],
+      "description": "How ground truth for this case was obtained. `constructed` means the fixture is authored so the answer holds by construction, which is what makes these cases usable where no compiler or language server exists."
+    },
+    "independent_oracle": {
+      "type": "object",
+      "description": "Present when a second, non-Gortex analyser can answer the same questions. Availability is a per-(language, relation) fact and must be recorded per case, never inferred from a tier.",
+      "required": ["available"],
+      "additionalProperties": false,
+      "properties": {
+        "available": { "type": "boolean" },
+        "tool": { "type": "string" },
+        "command": { "type": "string" },
+        "note": { "type": "string" }
+      }
+    },
+    "adversarial_about": {
+      "type": "string",
+      "description": "One paragraph: which resolution shortcut this case is built to provoke."
+    },
+    "seeds": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "gold_identity"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "gold_identity": {
+            "type": "object",
+            "description": "The anchor, bound to a fixture-held identity. A seed supplied to the tool under test must be checked against this before its expansion is scored -- otherwise a mis-identified seed turns a localization error into a fidelity result.",
+            "required": ["path", "symbol", "line_range"],
+            "additionalProperties": false,
+            "properties": {
+              "path": { "type": "string" },
+              "symbol": { "type": "string" },
+              "line_range": {
+                "type": "array",
+                "items": { "type": "integer", "minimum": 1 },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    "facts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["seed", "relation", "expected", "forbidden", "admissibility"],
+        "additionalProperties": false,
+        "properties": {
+          "seed": { "type": "string" },
+          "relation": {
+            "enum": ["callers", "callees", "implementations", "implementors", "references", "impact", "contracts"]
+          },
+          "expected": {
+            "type": "array",
+            "description": "Edges that must be present. Missing one is an incompleteness failure.",
+            "items": { "$ref": "#/$defs/edge" }
+          },
+          "forbidden": {
+            "type": "array",
+            "description": "Phantom edges this case is built to provoke. Returning one is a correctness failure.",
+            "items": { "$ref": "#/$defs/edge" }
+          },
+          "admissibility": { "$ref": "#/$defs/admissibility" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "edge": {
+      "type": "object",
+      "required": ["path", "symbol"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string" },
+        "symbol": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "reason": {
+          "type": "string",
+          "description": "For `forbidden`: which shortcut would produce this edge. For `expected`: why it is reachable only with real resolution."
+        }
+      }
+    },
+    "admissibility": {
+      "type": "object",
+      "description": "What the system under test is permitted to CLAIM about this fact, independently of whether it got the fact right. Scored separately: a wrong answer correctly caveated is a miss; a wrong answer presented as complete is a false-safe.",
+      "required": ["may_claim_complete", "may_claim_safe_to_rename"],
+      "additionalProperties": false,
+      "properties": {
+        "may_claim_complete": {
+          "type": "boolean",
+          "description": "False when no sound static analysis can enumerate this relation exhaustively for this case."
+        },
+        "may_claim_safe_to_rename": {
+          "type": "boolean",
+          "description": "False when a rename driven by this relation would miss sites or be overwritten downstream."
+        },
+        "required_caveats": {
+          "type": "array",
+          "items": {
+            "enum": ["coverage_incomplete", "dynamic_dispatch", "generated_code", "cross_repo", "alias_indirection", "overload_ambiguity"]
+          }
+        },
+        "note": { "type": "string" }
+      }
+    }
+  }
+}

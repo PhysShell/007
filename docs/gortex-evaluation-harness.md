@@ -18,9 +18,11 @@ good".** The question is:
 > verification, and which must be treated as `UNKNOWN` until a second observer
 > agrees?
 
-The deliverable is therefore not a score. It is an **admission table** mapping
-Gortex response metadata onto the epistemic statuses already defined in
-`docs/decision-and-admission-protocol.md`. A tool that fails most of this
+The deliverable is therefore not a score. It is an **observer admission table**:
+a mapping from Gortex response metadata to the role that observer is permitted
+to play when a claim is being decided. It does *not* assign epistemic statuses
+to claims — `docs/decision-and-admission-protocol.md` owns that, and S3 below
+explains why the distinction has to be enforced. A tool that fails most of this
 harness is still useful inside a narrow admitted band; a tool that scores well
 on average is still unsafe if its failures are indistinguishable from its
 successes.
@@ -43,15 +45,25 @@ They are self-reported, not independently replicated. That is not an accusation
 — it is the normal state of a four-month-old project — but it is why we run our
 own.
 
-The shape matters more than the magnitude. Gortex has good evidence for
-**anchor → context** and weak evidence for **intent → anchor**. Concretely:
+The shape matters more than the magnitude — but read the shape precisely,
+because it is easy to overclaim in Gortex's favour here.
 
-- given `FooService.RefreshToken`, find callers, implementations, contracts,
-  blast radius — this is the 96.8 % path;
-- given *"where is it decided whether a payment may be re-submitted?"*, find the
-  anchor first — this is the 25–30 % path.
+All four figures above measure **one operation**: `search_symbols` retrieval,
+i.e. locating an anchor. They stratify by how the query is phrased:
 
-These are different conditional probabilities and must be measured separately:
+- given the identifier `FooService.RefreshToken`, locate that symbol — this is
+  the 96.8 % exact tier;
+- given *"where is it decided whether a payment may be re-submitted?"*, locate
+  the anchor — this is the 25–30 % concept/multi-hop tier.
+
+**Exact-identifier localization has R@5 96.8 %. The fidelity of the subsequent
+graph expansion — callers, implementations, contracts, blast radius — is not
+established by that benchmark at all.** It measures finding the anchor, not
+what is returned once the anchor is held. Establishing the second leg
+independently is precisely the job of S2 below; until S2 runs, we have a
+published number for one leg and nothing for the other.
+
+So the two conditional probabilities to measure separately are:
 
 ```text
 P(useful context | correct seed)     anchor → context
@@ -121,42 +133,84 @@ retired.
 Correct symbol supplied up front; ask for callers, callees, implementations,
 impact, contracts. Precision/recall against an independent oracle.
 
-**Seed injection rule.** The seed must be supplied as a **resolved symbol ID
-from the graph**, never as a name string. A name string re-enters Gortex's own
-exact-tier resolver (96.8 %), which leaks S1 into S2 at precisely the point the
-two surfaces are meant to be separated.
+**Seed injection rule.** The seed must be supplied as a resolved symbol ID,
+never as a name string — a name string re-enters Gortex's own exact-tier
+resolver and leaks S1 into S2 at precisely the point the two surfaces are meant
+to be separated.
 
-**The oracle constraint — read before stratifying.** An independent oracle for
-callers and implementations means a compiler or an LSP. That exists for Tier 1.
-It does not exist for Tier 2/3 — which is *why* those languages are Tier 2/3.
-Correctness on the tiers we trust least is therefore unmeasurable by
-construction. Two honest routes, and the choice must be recorded:
+That is necessary but not sufficient. The ID must additionally be **bound to a
+gold identity** held by the fixture:
 
-1. **Hand-labelled sample.** 30–50 symbols in one Tier 3 language, ground truth
-   established manually. Expensive; the only route to real correctness numbers
-   below Tier 1.
-2. **Honesty-of-caveats instead of correctness.** Do not measure whether the
-   answer is right; measure whether Gortex marked it `heuristic` /
-   `coverage incomplete` in the cases where its own documentation says it cannot
-   know. This needs no oracle, because the predicate is about the system's
-   self-description rather than about the world.
+```text
+(repo commit, path, byte/line range, expected symbol)
+```
 
-Route 2 is cheaper and is arguably the better fit for this harness's stated
-goal, since the admission table consumes exactly that self-description. Route 1
-is the fallback if route 2 shows the self-description is unreliable.
+and the binding checked before the expansion query is scored. An ID taken on
+faith because Gortex returned it lets a mis-identified seed back in through the
+side door: the expansion would then be scored against the wrong anchor, and a
+localization error would be recorded as a fidelity result.
 
-### S3 — Confidence calibration and the admission table
+**Oracle availability is a per-(language, relation) fact, not a tier fact.**
+Gortex's tier describes *its own extractor*, not what independent analysis
+exists in the world. A lower-tier language may well have a compiler, a language
+server, or another static-analysis oracle that Gortex simply does not use.
+Deriving "no oracle" from "Tier 3" would let us declare part of the world
+unmeasurable by our own bookkeeping.
+
+The unit is therefore a matrix, filled in explicitly per fixture:
+
+```text
+(language, relation) -> independent | manual | constructed | unavailable
+
+independent    a compiler / LSP / analyser outside Gortex answers it
+manual         ground truth established by hand
+constructed    the fixture is authored so ground truth holds by construction
+unavailable    none of the above is obtainable at acceptable cost
+```
+
+Tier remains a *stratification of results* — we report per tier because we
+expect the answer to vary with it — but it does not determine whether ground
+truth is obtainable.
+
+**Route decision (settled).** Two measurement routes were considered: a
+hand-labelled sample, and honesty-of-caveats in place of correctness. The
+adopted plan takes the second first, backed by constructed oracles, and defers
+the first to escalation:
+
+```text
+Tier 1        independent compiler/LSP oracle
+              + adversarial constructed fixtures
+
+Tier 2/3      honesty-of-caveats broad survey
+              + adversarial constructed fixtures
+                        |
+                        v
+              if material ambiguity remains
+                        |
+                        v
+              hand-labelled sample (30-50 symbols, one language)
+```
+
+The rationale for the pairing: honesty-of-caveats answers the harness's central
+question — does the system report the boundary of its own knowledge truthfully
+— and needs no oracle. Constructed adversarial fixtures stop it from passing on
+good manners alone, since ground truth there holds by construction even where
+no compiler exists. Neither layer substitutes for the other; the hand-labelled
+sample is an escalation, not a prerequisite.
+
+### S3 — Confidence calibration and the observer admission table
 
 The centre of the harness.
 
 For every S1/S2 result, record the response metadata alongside the outcome:
 
 ```text
-tier          1 | 2 | 3
-origin        lsp_resolved | ast_resolved | inferred | text_matched
-confidence    scalar as reported
-caveats       coverage/incompleteness markers present or absent
-outcome       correct | incomplete | wrong
+tier              1 | 2 | 3
+origin            lsp_resolved | ast_resolved | inferred | text_matched
+confidence        scalar as reported
+caveats           coverage/incompleteness markers present or absent
+identity_binding  does the result name a commit/path/range we can pin
+outcome           correct | incomplete | wrong
 ```
 
 **Pre-registration is mandatory.** "Reliable enough to act on" is *our*
@@ -166,28 +220,62 @@ tool. The admission policy is therefore fixed and committed **before** the
 measurement run, and the run is scored against the committed version.
 
 **Do not reduce this to a scalar.** A single false-safe rate compresses away the
-information the admission table needs. Produce a reliability breakdown: bucket
+information the observer admission table needs. Produce a reliability breakdown: bucket
 by `(tier, origin, claimed confidence)` and report observed accuracy per bucket.
 What `o7` consumes is the inverse mapping — given a bucket, what is the
 empirical P(correct).
 
-`docs/decision-and-admission-protocol.md` already fixes the target vocabulary,
-including the constraint this harness must respect:
+#### The harness calibrates an observer; it does not establish facts
+
+This separation is load-bearing, and an earlier draft of this document got it
+wrong. `docs/decision-and-admission-protocol.md` defines `ESTABLISHED` as a
+*specific claim supported by current, identity-bound evidence*, and separately
+forbids turning a probability into a green check:
 
 > A scalar probability may later help scheduling or prioritization. It must not
 > silently turn an unproved merge precondition into a green check.
 
-Gortex emits a scalar plus an origin. `o7` admits categorical statuses. The
-harness output is the translation layer:
+A bucket with 99.9 % historical accuracy does not make today's `Foo → Bar`
+an established fact. It only says what role this observer is permitted to play
+when that fact is being decided. Emitting `ESTABLISHED` directly from a
+calibration bucket would be exactly the prohibited move, one layer lower down
+where it is harder to see.
+
+The harness output is therefore an **observer admission policy**, in its own
+vocabulary:
 
 ```text
-(tier, origin, confidence, caveats)  ->  ESTABLISHED | UNKNOWN | ...
+(tier, origin, confidence, caveats, identity_binding)
+    ->
+NOT_ADMISSIBLE            not usable as evidence for anything
+NAVIGATION_HINT           may steer search; may not appear in a rationale
+SUPPORTING_OBSERVER       may corroborate, never sufficient alone
+CORROBORATION_REQUIRED    admissible once a second observer agrees
+SOLE_OBSERVER_ALLOWED     admissible on its own
 ```
 
-with `UNKNOWN` as the default for every bucket not explicitly admitted, and
-`ESTABLISHED` granted only where the observed error rate justifies it. Buckets
-that never appear in the measurement run are not admitted — absence of evidence
-is `UNKNOWN`, not a pass.
+The canonical decision layer, unchanged and still the only thing that speaks
+the protocol's vocabulary, then decides per claim:
+
+```text
+current evidence
+  + observer admission policy
+  + exact identity binding
+  + required corroboration
+    ->
+ESTABLISHED | UNKNOWN | STALE | CONFLICTING | ...
+```
+
+Two standing constraints on the table this harness produces:
+
+- **`SOLE_OBSERVER_ALLOWED` is forbidden for irreversible and admission
+  decisions**, at any measured accuracy. For navigation and reversible planning
+  it is potentially available. For merge or admission, Gortex may be supporting
+  evidence but never the sole cause of a green state. This follows from the
+  existing reversible-first policy rather than adding to it.
+- **Unobserved buckets are `NOT_ADMISSIBLE`, not unclassified.** A bucket that
+  never appeared in the measurement run has no calibration behind it; absence of
+  evidence is not a pass.
 
 The frightening metric, reported per bucket rather than overall:
 
@@ -195,6 +283,11 @@ The frightening metric, reported per bucket rather than overall:
 false-safe rate = share of wrong or incomplete results that Gortex presented
                   as sufficient to act on, under the pre-registered policy
 ```
+
+"Sufficient to act on" is read against the pre-registered observer admission
+policy, not against Gortex's scalar. A wrong result that arrived marked
+`inferred` with a coverage caveat is a miss; the same wrong result arriving in
+a bucket we had pre-registered as `SOLE_OBSERVER_ALLOWED` is a false-safe.
 
 ### S4 — Token economy, conditional on correctness
 
@@ -223,9 +316,47 @@ cases that turn an approximately-correct graph into dangerous automation:
 - a stale file — indexed, then modified on disk;
 - a deleted symbol — removed in the working tree, still live in the index.
 
-The last two test the staleness model rather than the resolver, and are the ones
-most likely to interact with `notifications/stale_refs` and per-session working
-sets.
+Each case is a minimal triple:
+
+```text
+<case>/
+  source/       the code under test
+  oracle.yaml   ground truth AND admissibility expectations
+  README.md     what the case is adversarial about
+```
+
+`oracle.yaml` carries two blocks, and the second is the reason this corpus
+serves S2 and S3 at once:
+
+```yaml
+facts:
+  callers:
+    expected: [...]
+    forbidden: [...]      # phantom edges this case is built to provoke
+
+admissibility:
+  may_claim_complete: false
+  may_claim_safe_to_rename: false
+  required_caveats:
+    - coverage_incomplete
+```
+
+`facts` scores correctness. `admissibility` scores honesty: a system that
+returns an incomplete caller set is merely wrong; one that returns it while
+claiming completeness is unsafe, and only the second block distinguishes them.
+A case can therefore fail on fidelity, on honesty, or on both — and the third
+outcome, wrong-but-correctly-caveated, stops the corpus from being scored as a
+simple pass/fail.
+
+**Ordering.** The first control vertical is *same-named methods on sibling
+classes* — a minimal reproduction of the #461 defect class that does not depend
+on #461, GDScript, or any upstream fix. Then alias/re-export, interface
+dispatch, and cross-repo same-name.
+
+The stale-file and deleted-symbol cases ship as a **separate second package**:
+they exercise index lifecycle and invalidation rather than resolution, and need
+a mutation step the resolution cases do not. Mixing them into the first package
+would conflate two different failure modes under one score.
 
 This fixture set is buildable without installing Gortex at all, and is the
 cheapest available next step.
