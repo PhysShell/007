@@ -31,109 +31,110 @@
   // verdict; stopping on it would mean this page never notices a
   // subsequent resume back to `running`.
   const REFRESH_INTERVAL_MS = 5000;
-  let timer: ReturnType<typeof setInterval> | undefined;
-
-  // Q-Deck A0.5 corrective (fresh exact-head Codex P1): the candidate-state
-  // projection on `GET /api/v1/runs/:id` is itself best-effort — a poll can
-  // land exactly when the server's replay limiter is saturated and come
-  // back with NO candidate fields at all, indistinguishable on that one
-  // response from "exec unconfigured." Two failure modes this bounded retry
-  // + merge-don't-clobber logic closes: (1) the run is ALREADY sealed on
-  // the very first successful `getRun` and that first response happened to
-  // omit the projection — polling used to stop immediately, leaving this
-  // page permanently stuck on "unavailable" until a manual reload; (2) a
-  // later poll that first observes sealing also happens to omit the
-  // projection — this used to silently ERASE a correct projection an
-  // earlier poll had already displayed. `MAX_POST_SEAL_CANDIDATE_RETRIES`
-  // bounds how long this page keeps trying once sealed with no projection
-  // yet — indefinitely retrying a server with `exec` genuinely
-  // unconfigured would just be a different kind of bug.
-  const MAX_POST_SEAL_CANDIDATE_RETRIES = 3;
-  let postSealCandidateRetries = 0;
+  // Q-Deck A0.5 corrective round 4 (fresh exact-head CodeRabbit Major +
+  // Codex P1, PR #110): once sealed with no projection yet, retries
+  // continue INDEFINITELY (never a fixed cutoff — the server-side
+  // contract makes "exec never configured" indistinguishable from "replay
+  // limiter transiently saturated," and there is no bound on how long
+  // saturation can last; a fixed budget just turns that uncertainty into
+  // a permanently wrong "unavailable"), but at a BACKED-OFF frequency —
+  // 5s, 10s, 20s, capped at 30s — rather than hammering an already
+  // apparently-busy server forever at the same 5s cadence. Unmounting
+  // (navigating away) is what actually stops it, same as every other
+  // poll on this page.
+  const MAX_POST_SEAL_BACKOFF_MS = 30_000;
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
   $effect(() => {
     let cancelled = false;
     loadState = "loading";
     run = null;
-    postSealCandidateRetries = 0;
 
-    // Deliberately NOT `stream?.close()` / `stream = null` / `clearInterval(timer)`
+    // Deliberately NOT `stream?.close()` / `stream = null` / `clearTimeout(timer)`
     // here at the top: reading `stream`/`timer` synchronously in this effect's
     // own body — even just to tear them down — makes them tracked
     // dependencies of this SAME effect. `stream`/`timer` are then written
-    // asynchronously below (inside `getRun(...).then(...)`, after this
-    // function has already returned), so that later write would retrigger
-    // this very effect, which tears down and reopens the stream/timer again,
-    // forever — a real, previously-undetected infinite loop (no test had ever
-    // actually rendered this component before Q-Deck R0.5). The effect's own
+    // asynchronously below (inside `poll`, after this function has already
+    // returned), so that later write would retrigger this very effect,
+    // which tears down and reopens the stream/timer again, forever — a
+    // real, previously-undetected infinite loop (no test had ever actually
+    // rendered this component before Q-Deck R0.5). The effect's own
     // `return () => {...}` cleanup below already closes the PREVIOUS
     // stream/timer at exactly the right time (before this effect reruns for a
     // new `runId`, and on unmount) without reading them reactively here.
-    async function refreshRun(): Promise<void> {
+    let nextPostSealDelayMs = REFRESH_INTERVAL_MS;
+
+    // Q-Deck A0.5 corrective round 4 (fresh exact-head CodeRabbit Major,
+    // PR #110): a single self-rescheduling loop, never `setInterval` —
+    // the next `getRun` is only ever scheduled AFTER the previous one has
+    // fully resolved and been processed, so at most one request is ever
+    // in flight and responses can never complete out of order. The
+    // earlier `setInterval`-driven version could have two overlapping
+    // `refreshRun` calls in flight at once; if the NEWER one (correctly
+    // sealed + materialized) resolved and cleared the interval first, a
+    // SLOWER, now-stale OLDER response could still land afterward and
+    // silently overwrite that correct state with nothing left running to
+    // ever correct it again.
+    async function poll(isFirst: boolean): Promise<void> {
       try {
         const r = await getRun(runId);
         if (cancelled) return;
-        // Q-Deck A0.5 corrective (fresh exact-head Codex P1, PR #110): the
-        // stop/retry decision must read the FRESH response `r`, never the
-        // merged DISPLAY state — `mergeRunProjection` can legitimately
-        // preserve an earlier, genuinely-obtained "not_applicable" (e.g.
-        // polled between RunStarted and CandidateStateMaterialized being
-        // appended) across a LATER poll that omits its own projection
-        // because the replay limiter is saturated. Trusting the merged
-        // object here would treat that stale "not_applicable" as a
-        // trustworthy final sealed answer and stop polling — the page
-        // would then permanently under-report a run that later genuinely
-        // materialized. Preserving `run` for DISPLAY and deciding
-        // freshness from `r` alone are two different questions; conflating
-        // them is exactly the bug.
-        const freshHasProjection = hasCandidateProjection(r);
-        const merged = mergeRunProjection(run, r);
-        run = merged;
-        if (isSealedRun(r.status)) {
-          if (freshHasProjection) {
-            clearInterval(timer);
-          } else {
-            postSealCandidateRetries += 1;
-            if (postSealCandidateRetries >= MAX_POST_SEAL_CANDIDATE_RETRIES) {
-              // Budget exhausted — stop honestly. Whatever `run` displays
-              // now (preserved-old, or still "unavailable" if there was
-              // never anything to preserve) stays as-is rather than
-              // polling this run forever.
-              clearInterval(timer);
-            }
-          }
+        if (isFirst) {
+          run = r;
+          loadState = "ready";
+          stream = new ConversationEventStream(r.conversation_id);
+        } else {
+          // Q-Deck A0.5 corrective round 3 (fresh exact-head Codex P1, PR
+          // #110): the stop/retry decision must read the FRESH response
+          // `r`, never the merged DISPLAY state — `mergeRunProjection`
+          // can legitimately preserve an earlier, genuinely-obtained
+          // "not_applicable" (e.g. polled between RunStarted and
+          // CandidateStateMaterialized being appended) across a LATER
+          // poll that omits its own projection because the replay
+          // limiter is saturated. Trusting the merged object here would
+          // treat that stale "not_applicable" as a trustworthy final
+          // sealed answer and stop polling — the page would then
+          // permanently under-report a run that later genuinely
+          // materialized. Preserving `run` for DISPLAY and deciding
+          // freshness from `r` alone are two different questions;
+          // conflating them is exactly the bug.
+          run = mergeRunProjection(run, r);
         }
+        if (isSealedRun(r.status) && hasCandidateProjection(r)) {
+          return; // done — a trustworthy final projection has arrived.
+        }
+        const delay = isSealedRun(r.status)
+          ? ((): number => {
+              const d = nextPostSealDelayMs;
+              nextPostSealDelayMs = Math.min(nextPostSealDelayMs * 2, MAX_POST_SEAL_BACKOFF_MS);
+              return d;
+            })()
+          : REFRESH_INTERVAL_MS;
+        timer = setTimeout(() => void poll(false), delay);
       } catch {
-        // A transient refresh failure doesn't blank an already-loaded run —
-        // the next poll tries again; only the FIRST load surfaces an error.
+        if (isFirst) {
+          if (!cancelled) loadState = "error";
+          return;
+        }
+        // A transient refresh failure doesn't blank an already-loaded run
+        // — the next poll tries again at the normal cadence, regardless
+        // of whatever post-seal backoff state existed before this
+        // failure (a failure to even reach the server isn't evidence
+        // about the server's own replay-limiter saturation).
+        timer = setTimeout(() => void poll(false), REFRESH_INTERVAL_MS);
       }
     }
 
-    getRun(runId)
-      .then((r) => {
-        if (cancelled) return;
-        run = r;
-        loadState = "ready";
-        stream = new ConversationEventStream(r.conversation_id);
-        // Keep polling past a sealed status on this first load too, if it
-        // arrived with no candidate projection yet — the same bounded
-        // retry `refreshRun` above continues, not a separate mechanism.
-        if (!isSealedRun(r.status) || !hasCandidateProjection(r)) {
-          timer = setInterval(() => void refreshRun(), REFRESH_INTERVAL_MS);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) loadState = "error";
-      });
+    void poll(true);
 
     return () => {
       cancelled = true;
       stream?.close();
-      clearInterval(timer);
+      clearTimeout(timer);
     };
   });
 
-  onDestroy(() => clearInterval(timer));
+  onDestroy(() => clearTimeout(timer));
 
   // Only this run's own events — the conversation may hold other runs' too.
   let runEvents = $derived.by(() => {

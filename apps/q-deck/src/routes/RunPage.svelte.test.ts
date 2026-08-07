@@ -353,7 +353,15 @@ describe("RunPage", () => {
     expect(screen.queryByText("unavailable")).not.toBeInTheDocument();
   });
 
-  it("stops polling after a bounded number of post-seal retries when a projection never arrives, leaving an honest unavailable state", async () => {
+  // Q-Deck A0.5 corrective round 4 (fresh exact-head CodeRabbit Major +
+  // Codex P1, PR #110): the fixed 3-retry cutoff was itself the bug —
+  // the server-side contract makes "exec never configured" and "replay
+  // limiter transiently saturated" indistinguishable on any single
+  // response, and there is no bound on how long saturation can last. A
+  // fixed budget just turned that uncertainty into a permanently WRONG
+  // "unavailable". Retries are now unbounded (only unmounting stops
+  // them) but back off: 5s, 10s, 20s, capped at 30s.
+  it("keeps retrying indefinitely (never a fixed cutoff) through many consecutive omissions, backing off up to a 30s cap, until a real projection finally arrives", async () => {
     const neverProjects = sealedNoProjection();
     const getRunSpy = vi.spyOn(api, "getRun").mockResolvedValue(neverProjects);
     vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEvents("pass")));
@@ -362,18 +370,86 @@ describe("RunPage", () => {
     await waitFor(() => expect(screen.getByText("unavailable")).toBeInTheDocument());
     expect(getRunSpy).toHaveBeenCalledTimes(1);
 
-    // Three bounded retries, each on the same 5s interval.
-    await vi.advanceTimersByTimeAsync(5100);
-    await vi.advanceTimersByTimeAsync(5100);
-    await vi.advanceTimersByTimeAsync(5100);
-    expect(getRunSpy).toHaveBeenCalledTimes(4); // 1 initial + 3 retries
+    // Five consecutive omissions — well past the old 3-retry cutoff —
+    // must NOT stop polling. Backoff schedule: 5s, 10s, 20s, 30s, 30s.
+    const backoffScheduleMs = [5_000, 10_000, 20_000, 30_000, 30_000];
+    for (const [i, delay] of backoffScheduleMs.entries()) {
+      await vi.advanceTimersByTimeAsync(delay + 100);
+      expect(getRunSpy).toHaveBeenCalledTimes(i + 2);
+      expect(screen.getByText("unavailable")).toBeInTheDocument();
+    }
 
-    // Budget exhausted — one more interval tick must NOT produce a 5th
-    // call. If it did (retries never actually stopped), the mock would
-    // just resolve again rather than error, so this asserts on the call
-    // count directly rather than relying on a broken page.
+    // A real projection finally arrives on the next poll (still on the
+    // capped 30s cadence) — accepted, and polling genuinely stops after
+    // it: one more full cap interval produces no further call.
+    getRunSpy.mockResolvedValue(
+      goldenRun("pass", {
+        candidate_source_run_id: "run-source",
+        candidate_tree_oid: "deadbeef",
+        materialization_status: "materialized",
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(30_100);
+    await waitFor(() => expect(screen.getByText("materialized")).toBeInTheDocument());
+    const callsAtMaterialization = getRunSpy.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(30_100);
+    expect(getRunSpy).toHaveBeenCalledTimes(callsAtMaterialization);
+  });
+
+  // Q-Deck A0.5 corrective round 4 (fresh exact-head CodeRabbit Major):
+  // the OLD `setInterval`-driven design could have two `refreshRun` calls
+  // in flight at once; if a NEWER request (correctly sealed +
+  // materialized) resolved and cleared the interval FIRST, a slower,
+  // now-stale OLDER request could still land afterward and silently
+  // overwrite that correct state with nothing left running to ever
+  // correct it again. The fix is structural, not a sequence-number
+  // patch: the next `getRun` is only ever scheduled after the previous
+  // one has fully resolved, so out-of-order completion is impossible by
+  // construction. This test proves the mechanism directly: no matter how
+  // long a request is left pending, no second request is ever issued
+  // until it resolves.
+  it("never has more than one getRun request in flight at a time — the next poll is only scheduled after the previous one resolves", async () => {
+    // The first poll (which establishes the polling mechanism itself,
+    // whether an interval or a self-reschedule) must resolve quickly and
+    // normally — the race this test targets is specifically between the
+    // SECOND poll (deliberately left pending) and whatever would-be THIRD
+    // poll an independently-ticking timer might fire regardless of the
+    // second one's own state. The old `setInterval`-based design didn't
+    // create its interval until the FIRST poll had already resolved, so
+    // stalling the first poll alone would never have caught this bug.
+    const active = goldenRunActive();
+    let resolveSecond: (value: RunDto) => void = () => {};
+    const secondResponse = new Promise<RunDto>((resolve) => {
+      resolveSecond = resolve;
+    });
+    const getRunSpy = vi
+      .spyOn(api, "getRun")
+      .mockResolvedValueOnce(active)
+      .mockReturnValueOnce(secondResponse)
+      .mockResolvedValue(active);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: active.run_id } });
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    expect(getRunSpy).toHaveBeenCalledTimes(1);
+
+    // The second poll fires on the normal 5s cadence and is left pending.
     await vi.advanceTimersByTimeAsync(5100);
-    expect(getRunSpy).toHaveBeenCalledTimes(4);
-    expect(screen.getByText("unavailable")).toBeInTheDocument();
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+    // Advance well past the normal 5s cadence again while the second
+    // request is still deliberately unresolved — if polling were driven
+    // by an independent interval timer (the old design), a third request
+    // would already have fired regardless of the second one's own state.
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+    // Only once the pending second request resolves does the third poll
+    // get scheduled — proving there is no concurrent, independently-
+    // ticking timer that could race ahead of an in-flight request.
+    resolveSecond(active);
+    await vi.advanceTimersByTimeAsync(5100);
+    expect(getRunSpy).toHaveBeenCalledTimes(3);
   });
 });
