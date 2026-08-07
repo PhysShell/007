@@ -388,3 +388,50 @@ typed payload.
 Границы этапа (повторение мандата): никакого coder/reviewer runtime,
 provider adapters, action broker, MG-C, изменений A0, A2-инкарнаций,
 общего planner'а в этой ветке.
+
+---
+
+## Review round: A1 contract @ `f65b21f`
+
+**VERDICT: CHANGES_REQUESTED** (maintainer, 2026-08-07). Шесть
+P1-блокеров — все на связях между объектами, вне досягаемости
+лексического чек-листа («компилятор grep не доказывает протокол»):
+
+```text
+P1-1  initial/exact input-state binding incomplete
+P1-2  evidence DAG rank cannot represent legal controller→controller refs
+P1-3  HumanAttention lifecycle mutates an immutable canonical artifact
+P1-4  HumanCommand has duplicate idempotency identities
+P1-5  replay/accepted_at ordering permits canonical-blob fork
+P1-6  provider normalized-output provenance is not explicitly bound
+```
+
+Исправления внесены в `a1-contracts.md`: закрытый `InputStateBindingV1`
+(InitialMaterialization | ContinuedCandidate) с явным cross-object
+verification rule, всегда в `message_binding_digest` (§7.1a); rank
+заменён frozen per-kind allowed-edge matrix с machine-checked
+ацикличностью, rank — следствие топологической сортировки (§11);
+`HumanAttentionRequestV1` — immutable OPEN + frozen transition kinds
+(Acknowledged/Resolved/Superseded), production append — A2 (§8.7); одна
+idempotency-поверхность `message_id`, payload `command_id`/
+`idempotency_key` удалены (§8.8); заморожен acceptance construction
+ordering — только winner назначает `accepted_at`, replay возвращает
+существующие байты verbatim, race/crash-оракул в RED (§4.6);
+`normalized_output_ref` (pre-envelope blob) обязателен в receipt,
+classifier доказывает `report payload_digest == normalized_output_ref
+digest` (§8.6). В §18 добавлены семантические проверки 6–8 (binding ⇒
+cross-check rule; каждый digest-ref разрешён frozen DAG; никаких
+in-place lifecycle).
+
+**Provenance-пересверка ревью**: ветка отстаёт от main (~53 коммита), но
+governing inputs (A0, R1, autonomy-controller, decision-and-admission)
+имеют те же blob SHA на ветке и в текущем main;
+`evidence-and-decision-discipline.md` изменился аддитивно (внешний
+failure case; четыре правила и classifier-constraint не изменились).
+Rebase для ревью не требуется; **перед FREEZE обязательна пересверка и
+запись актуального main/blob identity** (rule 4), включая честную связку
+frozen invariants с новым ratified invariant registry, если он к тому
+моменту станет governing input.
+
+Следующий шаг: повторный contract-only review. Types + construction API
+не начинаются до его прохождения.
