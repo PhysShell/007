@@ -160,7 +160,7 @@ measurement when it is not one:
 |---|---|
 | The child environment is **built from nothing**, not copied from `os.environ`: `PATH`, `LC_ALL`, `TMPDIR`, `HOME`/XDG and the `DEJA_*` vars, all pointing inside `--work` | deja is a third-party binary and this harness serializes its stdout into a tracked file. Forwarding `GITHUB_TOKEN` or `ARLIAI_API_KEY` into it would be the indirect credential path `AGENTS.md` rule 1 names. The measurement reproduces byte-identically under the stripped environment, so deja needed none of it |
 | The workdir must be **owned**: non-existent, empty, or carrying a `.deja-probe-workdir` marker; filesystem roots are refused outright | the run wipes `claude/`, `index/`, `home/` and `tmp/` inside it. `--work /` must not mean `rm -rf /claude /index /home` |
-| A **failed index aborts**, and so does an index that does not hold exactly the corpus | at `7c4a294` deja exits 0 even against an unusable index directory, so the status alone proves nothing. Without the count check a harness failure serializes as retrieval behaviour: zeroes everywhere, in a report that looks complete |
+| A **failed index aborts**, and so does an index whose session ids are not exactly the corpus's | at `7c4a294` deja exits 0 even against an unusable index directory, so the status alone proves nothing. The check compares identity rather than arity — 24 sessions and 24 of the *right* sessions are different facts. Without it a harness failure serializes as retrieval behaviour: zeroes everywhere, in a report that looks complete |
 | A **failed query aborts** rather than recording zero hits | deja exits 0 on a genuinely empty result (checked at this commit), so a nonzero status is a harness failure. Recording it as a miss would undercount false hits and recall at once — the precise confusion this corpus exists to prevent |
 
 Each of the four was verified by making it fire: `--work /`, a non-owned
@@ -171,3 +171,8 @@ Comparing two runs: hold `corpus.json` fixed, change one variable at a time.
 A change in the `retrieval` rows with `admission` unchanged is upstream drift;
 a change in `admission` with `retrieval` unchanged is ours. If `corpus.json`
 changed, the comparison is void — bump its `id` instead of editing it in place.
+
+That last rule is machine-checkable rather than a matter of author discipline:
+each report records `corpus.sha256` over the corpus bytes, so two runs that
+claim to be comparable can be shown to be. At `deja-vu-recall-oracle.v1` it is
+`85cf8da4fbb32647454d0dc9f71a7e54d32ca7a06639f7afc5200cd70043c4cf`.

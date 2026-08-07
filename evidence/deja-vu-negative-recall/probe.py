@@ -213,7 +213,13 @@ def main():
                     help="record a report whose subject commit the binary does not confirm")
     args = ap.parse_args()
 
-    corpus = json.loads((HERE / "corpus.json").read_text())
+    # Hash the corpus bytes, not just its declared id. "Bump the id when you
+    # change the corpus" is otherwise a rule enforced by author discipline, and
+    # a cross-version comparison rests on the two runs having seen the same
+    # questions. The digest makes that identity machine-checkable.
+    corpus_bytes = (HERE / "corpus.json").read_bytes()
+    corpus = json.loads(corpus_bytes)
+    corpus_digest = hashlib.sha256(corpus_bytes).hexdigest()
     binary = identify_binary(args.deja, args.subject_commit, args.allow_unverified_binary)
     work = prepare_work(args.work)
 
@@ -232,17 +238,26 @@ def main():
     # everywhere, in a revision-bound report that looks complete. That is the
     # exact confusion this whole document is about, so the harness may not
     # commit it.
+    # Identity, not arity: 24 sessions and 24 of the *right* sessions are
+    # different facts, and a harness built to keep exactly that kind of pair
+    # apart does not get to compare lengths.
     listed = subprocess.run([args.deja, "last", "1000", "--json"], env=env,
                             capture_output=True, text=True, timeout=120)
-    indexed = -1
-    if listed.returncode == 0 and listed.stdout.strip():
-        try:
-            indexed = len(json.loads(listed.stdout).get("sessions", []))
-        except json.JSONDecodeError:
-            indexed = -1
-    if indexed != len(corpus["sessions"]):
-        raise SystemExit(f"index holds {indexed} sessions, corpus has "
-                         f"{len(corpus['sessions'])}; refusing to measure it.")
+    if listed.returncode != 0 or not listed.stdout.strip():
+        raise SystemExit(f"could not list the index to verify it "
+                         f"(exit {listed.returncode}); refusing to measure it."
+                         f"\nstderr: {listed.stderr.strip()[:400]}")
+    try:
+        indexed_ids = {s.get("id") for s in json.loads(listed.stdout).get("sessions", [])}
+    except json.JSONDecodeError:
+        raise SystemExit("deja last returned unparseable JSON; refusing to measure "
+                         "an index whose contents cannot be verified.")
+    expected_ids = set(by_title.values())
+    if indexed_ids != expected_ids:
+        missing = sorted(expected_ids - indexed_ids)
+        extra = sorted(indexed_ids - expected_ids)
+        raise SystemExit(f"indexed session identity mismatch; refusing to measure it."
+                         f"\nmissing={missing}\nextra={extra}")
 
     rows = []
     for q in corpus["queries"]:
@@ -261,7 +276,8 @@ def main():
     sup = [r for r in rows if r["oracle"] == "supported"]
     report = {
         "schema": 1,
-        "corpus": {"id": corpus["id"], "sessions": len(corpus["sessions"]),
+        "corpus": {"id": corpus["id"], "sha256": corpus_digest,
+                   "sessions": len(corpus["sessions"]),
                    "queries": len(corpus["queries"])},
         "subject": {"repo": "github.com/vshulcz/deja-vu",
                     "claimed_commit": args.subject_commit,

@@ -2,6 +2,7 @@
   "schema": 1,
   "corpus": {
     "id": "deja-vu-recall-oracle.v1",
+    "sha256": "85cf8da4fbb32647454d0dc9f71a7e54d32ca7a06639f7afc5200cd70043c4cf",
     "sessions": 24,
     "queries": 30
   },
