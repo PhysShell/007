@@ -10,12 +10,16 @@
   `7c4a294b3e2b5415ac4cc19f5fd40d4e61dd1884` — one commit past the `nightly`
   tag; latest release tag at that commit is `v0.16.7` (2026-08-03).
 - **Date:** 2026-08-06; revised 2026-08-07 after independent review.
-- **Review status:** an independent agent review of `3d51f9a` returned APPROVE
-  on both dispositions (D1 substrate-not-fork, D2 untrusted retrieval protocol)
-  and raised two semantic blockers, fixed in this revision. Per rule 3 that
-  review does **not** lift `pending`: an agent cannot ratify another agent's
-  decision, or the non-self-ratification mechanism launders itself on first
-  use. Maintainer ratification is outstanding.
+- **Review status:** independent review across several rounds raised two
+  semantic blockers and nine harness defects, all closed, and then found the
+  load-bearing objection: the earlier **D1** ("consume deja-vu as a pinned
+  substrate") over-committed relative to its evidence. D1 is superseded by
+  **D1'** — evaluated reference, dependency decision deferred — and **D2** is
+  restated by authority boundary rather than by repository ownership. Any
+  earlier APPROVE was given against the superseded text and does not carry
+  over; per rule 3 an agent review never lifts `pending` in any case.
+  **Maintainer ratification of D1'/D2 is outstanding**, and the changed
+  dispositions are due one independent review pass before it is sought.
 
 Per rule 4, every factual claim below about deja-vu is bound to that commit and
 is stale the moment the upstream file changes. Claims are split into what the
@@ -56,14 +60,36 @@ over "candidate, most discriminating terms discarded" and a model read it as
 
 Proposed position, in two parts:
 
-1. **deja-vu is not a memory layer for us. It is a multi-harness observation
-   and candidate-retrieval substrate.** Memory semantics and evidence
-   admission belong to 007.
-2. **Upstream retrieval semantics are an untrusted, versioned input protocol** —
-   not only the historical text it returns. deja-vu may improve `close`, retune
-   a threshold, or add a tier tomorrow; our correctness must not silently move
-   with it. That is a stronger constraint than "wrap it behind an adapter", and
-   it is the one that decides the architecture.
+**D1' — evaluated reference; dependency decision deferred.** deja-vu is a
+verified source of architectural ideas and a workable reference retrieval
+substrate. 007 takes **no dependency on it at this stage.** If multi-harness
+ingestion or retrieval is later needed, deja-vu is *one candidate* behind a
+stable adapter boundary, and forking its parser layer is admissible only on a
+demonstrated schema incompatibility with our record contract.
+
+> An earlier revision of this document said "consume deja-vu as a pinned
+> substrate; do not fork." That was a logical jump, and of exactly the kind this
+> document exists to catch. The finding was **negative** — v0.16.6 closed the
+> Codex work-record gap, so the *reason to fork* disappeared. "No reason to
+> fork" does not yield "reason to adopt as a dependency." The evidence base is
+> one 24-session synthetic probe, a code read and a changelog line: enough for
+> *do not fork now*, not for *this is our substrate*. The absence of an argument
+> was being serialized as a positive one — the same defect as `unverified:
+> false`, one storey up.
+
+**D2 — retrieval semantics are untrusted, versioned inputs.** Stated by
+authority boundary rather than by repository ownership:
+
+> Retrieval and ranking semantics from any component outside the 007
+> evidence-admission authority boundary are untrusted, versioned inputs. Rank,
+> score, tier, semantic similarity, and backend-specific relevance judgments are
+> candidate-selection signals, never evidence verdicts.
+
+The boundary is deliberately not "external" or "third-party". A retrieval
+backend we write ourselves sits outside the admission authority just the same,
+and authorship confers nothing: *we wrote it* does not make a ranking into
+proof. This also survives the backend choice deferred in D1' — it constrains
+whatever is eventually chosen, including our own code.
 
 ## What it actually is (verified at `7c4a294`)
 
@@ -251,18 +277,19 @@ retrieval returned five candidates, all refused
 
 007's boundary is already drawn in the right place — memory is derived from
 artifacts, artifacts are never derived from memory
-(`docs/agent-memory-layer.md`, "Design principle"). deja-vu's pipeline stops two
-stages earlier:
+(`docs/agent-memory-layer.md`, "Design principle"). Every retrieval pipeline we
+have looked at, deja-vu included, stops two stages earlier — and the stages it
+stops before are the ones 007 cannot delegate:
 
 ```text
 deja-vu:   transcripts → lexical retrieval → probably-relevant text → agent context
 
-007 must:  agent transcript stores
-             ↓  multi-harness ingestion         (deja-vu's parsers earn their keep here)
-           retrieval result                     (untrusted, versioned, upstream-owned)
+007 must:  agent transcript stores + artifact sources
+             ↓  ingestion adapter               (replaceable; deja-vu is one candidate)
+           retrieval result                     (untrusted, versioned, backend-owned)
              ↓  normalization + provenance binding
            candidate observation                (007's record shape; NOT evidence)
-             ↓  evidence admission              (007 owns this; deja-vu has no equivalent)
+             ↓  evidence admission              (007 owns this; no backend has an equivalent)
            per candidate: VERIFIED | WEAK       ┐
            per query:     EVIDENCE_AVAILABLE    ├ one AdmissionResult
                         | NO_SUPPORTED_EVIDENCE ┘
@@ -361,7 +388,16 @@ contain it.
 
 `evidence/deja-vu-negative-recall/` is built to be re-run, not read once. The
 corpus (`corpus.json`, versioned `deja-vu-recall-oracle.v1`) is fixed; the
-report separates the two things that can move:
+report separates the two things that can move.
+
+**What it is and is not.** It is a *backend-independent conformance fixture*:
+it applies to any retrieval backend, not only deja-vu, and it is the first such
+fixture we have. It is **not** a complete qualification for choosing a backend.
+Thirty authored queries over 24 synthetic sessions cannot decide procurement,
+and stating otherwise would let a small fixture quietly become a selection
+process — the failure this document keeps naming, in a new costume. Passing it
+is necessary, not sufficient; a candidate that fails it is disqualified, a
+candidate that passes it has cleared one bar.
 
 ```text
 retrieval — what upstream returned         (drifts when deja-vu changes)
@@ -395,18 +431,41 @@ this into a miss, a different hit, or a new tier — *unsupported is never
 promoted* holds across all of them. That is where 007's independence from
 upstream semantics stops being a slogan and becomes a test.
 
-## Five transplants (proposed, pending ratification)
+## Backend evaluation criteria (proposed, pending ratification)
 
-These sit *below* the two dispositions in the summary; the untrusted-input-protocol
-rule governs all of them.
+An earlier revision listed these as "five transplants" — things to take from
+deja-vu. With the dependency decision deferred (D1'), they are better read as
+**what a future retrieval/ingestion backend should be evaluated against**,
+deja-vu included but not privileged. The five properties are what one good
+reference implementation happens to have; serializing them as universal
+architecture would repeat, at the level of requirements, the jump D1' just
+undid.
 
-| # | What to take | Binds to | Disposition |
+So: one normative **MUST**, which is a property of the boundary rather than of
+any implementation, and four **desired capabilities** stated by outcome rather
+than by mechanism.
+
+### MUST — the boundary property
+
+> A retrieval backend passes the shared oracle fixture and has **no path that
+> bypasses 007 evidence admission.** Its output enters as candidate
+> observations or it does not enter.
+
+This one is normative because it is the thing D2 protects. Everything below is
+a selection criterion, and a candidate may satisfy any of them differently.
+
+### Desired capabilities
+
+| # | Capability | Stated as an outcome, not a mechanism | Reference in deja-vu at `7c4a294` |
 |---|---|---|---|
-| 1 | **Harness store parsers and the format registry.** Seventeen store layouts, their schema quirks, torn-tail handling, sqlite-backed stores, subagent exclusion. Boring, filthy, and pointless to re-derive heroically. `docs/registry/README.md` upstream documents each format; synthetic fixtures keep the descriptions honest against the parsers. | `docs/agent-memory-layer.md` Phase 4 (trace-based memory); `agent.trace.jsonl` | **Consume as an upstream substrate; do not fork.** Reversed from the first draft of this document, on the strength of the v0.16.6 finding above: Codex and Cursor work-record extraction already exists upstream and is actively maintained. Build 007's normalization and receipts *on top of* their output, and reopen the fork question only on a demonstrated incompatibility between their observation schema and our record contract — named, with the case that broke. Forking a fast-moving project to then hand-port fixes its authors already wrote is a well-loved engineering ritual with a poor record. The cost this accepts is a Go binary at a process boundary from a Rust harness; it is paid deliberately and constrained — invoked read-only, never inside a gated run's execution path, its stdout parsed as the untrusted versioned protocol defined above, and pinned by version. |
-| 2 | **Speech/work record split.** Messages, file paths, commands with exit status, tool output and replaced spans as *distinct typed observations*, each independently toggleable at ingest (`DEJA_INDEX_PATHS=0`, `…_COMMANDS=0`, `…_EDITS=0`, `…_TOOL_OUTPUT=0`). | The `MemoryItem` kinds in `docs/agent-memory-layer.md`; `src/events.rs` | **Adopt as a shape.** Our memory item types are currently run-shaped (`o7.run`, `o7.gate`); this adds the missing observation-shaped layer underneath, which is what behaviour profiling (`docs/agent-behavior-profiling.md`) has been waiting on. |
-| 3 | **Decision lifecycle with tombstones.** `accepted` / `rejected` / `superseded` / `stale`, latest mark wins, the note keeps both, nothing is deleted, and a promotion that conflicts with an existing accepted note surfaces the conflict instead of silently winning. | `DecisionMemory` and the trust levels in `docs/agent-memory-layer.md`; `docs/decision-and-admission-protocol.md` | **Adopt the state machine, reject the write path.** Upstream a human or an agent can promote; here only a human ratifies, per rule 3. |
-| 4 | **Deterministic rebuildable index as a cache, never a source.** Parse in parallel, commit in deterministic order; incremental JSONL append without full rebuild; a changed or deleted source forces a consistent rewrite; `deja doctor --deep` re-parses a sample and proves the index against the sources, separating staleness from drift. | `docs/agent-memory-layer.md` Option B (local index); `o7 memory audit` | **Adopt the invariant.** The "prove the index against the source and distinguish staleness from drift" check is precisely what `o7 memory audit` was sketched to be, and upstream has a working shape for it. |
-| 5 | **Negative retrieval tests.** Our eval must measure not only *found the right thing* but *stayed silent when there was nothing*. `evidence/deja-vu-negative-recall/` is a working oracle for exactly this and cost one afternoon. | Phase 2 acceptance criteria in `docs/agent-memory-layer.md` | **Adopt as a hard gate plus a separate optimization metric**, and keep the corpus fixed so it doubles as the cross-version drift instrument. See "Admission policy" and "The oracle as a cross-version instrument" above. |
+| 1 | **Extensible ingestion** | New harnesses can be added without redesigning the store; format descriptions are kept honest against the parsers by fixtures. It need *not* be a parser registry — that is one way. | ~17 store layouts, `docs/registry/README.md`, synthetic fixtures |
+| 2 | **Typed work records** | Where the source provides structure — file paths a turn named, commands and exit status, tool output, spans an edit replaced — that structure survives ingestion rather than being flattened into chat. Sources that provide none are not thereby disqualified. | `roleFiles` / `roleCommand` / `roleToolOutput` / `roleEdit`, per-kind ingest toggles |
+| 3 | **Explicit, checkable lifecycle and deletion semantics** | States, staleness and deletion are named and verifiable rather than implicit — whatever the state set. Ours additionally restricts *who* may promote (human ratification, rule 3). | `accepted`/`rejected`/`superseded`/`stale`, tombstones that survive reindex |
+| 4 | **Reproducible derived state** | The index is a cache that can be rebuilt from sources and proven against them, with staleness distinguishable from drift. Determinism is the obvious route; an equivalent reproducibility argument also qualifies. | parallel parse with deterministic commit order, `deja doctor --deep` |
+
+Binding targets in our own tree, unchanged: `docs/agent-memory-layer.md`
+(memory item kinds, Option B local index, `o7 memory audit`, Phase 4 trace
+memory), `docs/agent-behavior-profiling.md`, `src/events.rs`.
 
 ## What must not be adopted
 
@@ -495,9 +554,16 @@ has touched credentials.
 ## Final position
 
 deja-vu is not a memory layer for 007 and should not be evaluated as one. It is
-a very good **multi-harness observation and candidate-retrieval substrate** —
-consume it as such, pinned and read-only, and treat both what it returns and
-*its judgement that the thing is relevant* as untrusted versioned input.
+a very good multi-harness observation and candidate-retrieval implementation,
+and this study treats it as an **evaluated reference** — a source of criteria
+and a future backend candidate, with the dependency decision deferred until
+something in 007 actually needs one.
+
+What this study leaves behind is meant to outlive the subject: an admission
+boundary with named verdicts, a rule that binds any retrieval backend including
+our own, a conformance fixture that runs against any of them, and a list of
+capabilities to judge candidates by. If deja-vu is the eventual backend, all of
+that still applies. If it is not, none of it is wasted.
 
 Memory semantics and evidence admission belong to 007, and the line between
 them has a name now: a retrieval result becomes a candidate observation, and

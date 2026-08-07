@@ -157,10 +157,22 @@ in `evidence/deja-vu-negative-recall/`, kept as a fixed corpus so it doubles as
 a cross-version instrument: it separates upstream retrieval drift from our own
 admission drift.
 
-The proposed position is that deja-vu is **not** a memory layer for 007 but a
-multi-harness observation and candidate-retrieval substrate, and that its
-retrieval semantics — not merely the historical text it returns — are an
-untrusted, versioned input protocol.
+The proposed position, in two parts, both pending maintainer ratification:
+
+- **D1' — evaluated reference, dependency decision deferred.** deja-vu is a
+  verified source of criteria and a future backend candidate behind a stable
+  adapter boundary. 007 takes no dependency on it now; the backend choice waits
+  for a real consumer.
+- **D2 — retrieval semantics are untrusted, versioned inputs**, drawn by
+  authority boundary rather than repository ownership: rank, score, tier and
+  similarity from any component outside 007's evidence-admission authority are
+  candidate-selection signals, never evidence verdicts. A backend we write
+  ourselves is bound by this too.
+
+The five properties worth having in a backend are stated there as evaluation
+criteria rather than as requirements copied from one implementation, with a
+single normative MUST: a backend passes the shared oracle fixture and has no
+path that bypasses 007 evidence admission.
 
 ## Proposed architecture
 
