@@ -263,6 +263,34 @@ When admission is built, its inputs (the eight above) should carry per-input
 outcomes of this shape rather than optional booleans, so an unevaluated input
 cannot be mistaken for a satisfied one.
 
+**A deferral is not done until no downstream artifact still executes the
+decision.** Second design lesson, from three review rounds on D1', and again
+recorded rather than implemented. Deferring the backend choice took four
+attempts, each of which fixed exactly what the reviewer had named:
+
+```text
+round 1   removed the deja-vu commitment      → agentmemory was still the "first backend"
+round 2   fixed the three sites named         → diagram, metadata example and repo layout still chose one
+round 3   swept — but grepped for the name    → the sweep was anchored on the token I had been shown
+```
+
+The trap is that a dependency commitment does not look like a dependency. It
+looks like an architecture diagram with a product name in a box, a
+`"memory_backend": "agentmemory"` in a schema example, a filename in a
+suggested layout, a phase step that says *run it and verify*. None reads as a
+decision; each is executable by a contributor, and executing it makes the
+deferred choice for everyone.
+
+So the check after any deferral is not "did we remove X". It is:
+
+> Does any downstream artifact — diagram, phase, layout, schema example,
+> command, fixture — still let a reader carry out the deferred decision by
+> following it?
+
+Name-free by construction, because searching for the name you were last shown
+is how rounds 1 through 3 happened. Applicable to any future ADR or plan that
+defers something rather than deciding it.
+
 Both empty paths therefore land in the same place, which is the point:
 
 ```text
