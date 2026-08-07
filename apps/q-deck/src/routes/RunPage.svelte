@@ -112,8 +112,19 @@
           : REFRESH_INTERVAL_MS;
         timer = setTimeout(() => void poll(false), delay);
       } catch {
+        // Q-Deck A0.5 corrective round 5 (fresh exact-head Codex P1, PR
+        // #110): cleanup (unmount, or a new `runId`) sets `cancelled` and
+        // clears the CURRENT timer, but it cannot cancel an HTTP request
+        // already in flight. If that request rejects AFTER cleanup ran,
+        // this catch block used to reschedule itself unconditionally —
+        // resurrecting a poll loop for a page that no longer exists.
+        // During a sustained outage, every such stale rejection would
+        // keep rescheduling itself forever; repeated navigation during
+        // one outage could accumulate multiple permanent zombie loops.
+        // This check must come FIRST, before either branch below.
+        if (cancelled) return;
         if (isFirst) {
-          if (!cancelled) loadState = "error";
+          loadState = "error";
           return;
         }
         // A transient refresh failure doesn't blank an already-loaded run

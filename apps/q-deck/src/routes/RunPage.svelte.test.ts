@@ -452,4 +452,48 @@ describe("RunPage", () => {
     await vi.advanceTimersByTimeAsync(5100);
     expect(getRunSpy).toHaveBeenCalledTimes(3);
   });
+
+  // Q-Deck A0.5 corrective round 5 (fresh exact-head Codex P1, PR #110):
+  // cleanup (unmount, or a new runId) sets `cancelled` and clears the
+  // CURRENT timer, but cannot cancel an HTTP request already in flight.
+  // If that request rejects AFTER cleanup ran, the catch block must NOT
+  // reschedule another poll — a page that no longer exists must never
+  // resurrect a background request loop, especially during a sustained
+  // outage where every stale rejection would otherwise keep
+  // rescheduling itself forever.
+  it("never reschedules a poll after unmount, even if the in-flight request that was pending at unmount time later rejects", async () => {
+    const active = goldenRunActive();
+    let rejectSecond: (err: unknown) => void = () => {};
+    const secondResponse = new Promise<RunDto>((_resolve, reject) => {
+      rejectSecond = reject;
+    });
+    const getRunSpy = vi
+      .spyOn(api, "getRun")
+      .mockResolvedValueOnce(active)
+      .mockReturnValueOnce(secondResponse);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    const { unmount } = render(RunPage, { props: { runId: active.run_id } });
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    expect(getRunSpy).toHaveBeenCalledTimes(1);
+
+    // The second poll fires on the normal cadence and is left pending —
+    // exactly the request that will still be in flight at unmount time.
+    await vi.advanceTimersByTimeAsync(5100);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+    // The user navigates away while that second request is still
+    // pending — this is what actually happens on a real route change.
+    unmount();
+
+    // The in-flight request finally settles — with a rejection, the
+    // realistic outcome of a sustained outage — well after cleanup ran.
+    rejectSecond(new Error("network blip after navigation"));
+    await Promise.resolve().then(() => Promise.resolve()); // let the rejection's catch block run
+
+    // No further request may ever be scheduled — the bug would show up
+    // as a THIRD call appearing here despite the component being gone.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+  });
 });
