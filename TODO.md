@@ -14,19 +14,26 @@ Current authoritative state:
 - **A0 candidate-state continuity**: accepted at `52627c3`, merged as
   `f1ac458` (PR #92, eight forward-only corrective rounds). Normative
   source: `docs/q-deck/a0-candidate-state.md`.
-- **A1-F contract freeze**: proposed contract-first, awaiting review —
-  `docs/q-deck/a1-authority-contracts.md` (branch
-  `claude/a1-contract-freeze-dkrnnq`). Freezes the ten coder/reviewer/human
-  artifact kinds, the digest/limit/version rules (FD-1), the acyclic
-  evidence-graph rank rule (FD-2), the untrusted/accepted split (FD-4),
-  duplicate-id replay-vs-conflict (FD-6), no model-supplied executable
-  authority (FD-7), no-provider-call-on-replay (FD-8), fail-closed
-  post-dispatch ambiguity (FD-9), the `provider_execution_id`/`dispatch_id`
-  grain split (FD-10), and the transition-authority table (FD-11). Design
-  input: issue #95. **A1 implementation begins only after this freeze is
-  accepted** — then A1-V0 (§5 of that doc): one real coder/reviewer/human
-  corrective loop, coder on a CLI engine, reviewer on `--engine arliai`
-  (read-only, no tool surface), merge manual.
+- **A1-F contract freeze**: `PROPOSED FREEZE / REVIEW REQUIRED /
+  NON-AUTHORITATIVE` — `docs/q-deck/a1-authority-contracts.md` (branch
+  `claude/a1-contract-freeze-dkrnnq`, corrective round R1 applied). Fifteen
+  frozen decisions: artifact model / digests / per-object and closure bounds
+  / versions (FD-1), acyclic evidence-graph rank rule with imported
+  authority roots and resolver duties (FD-2), raw-vs-normalized evidence
+  (FD-3), untrusted/accepted split (FD-4), authority direction incl. the
+  `created_at`/`first_observed_at` rule (FD-5), duplicate-id
+  replay-vs-conflict (FD-6), no model-supplied executable authority (FD-7),
+  no-provider-call-on-replay (FD-8), fail-closed post-dispatch ambiguity
+  (FD-9), the `provider_execution_id`/`dispatch_id` grain split carried by
+  an execution-level receipt (FD-10), receipt/artifact congruence (FD-11),
+  transition authority (FD-12), head-bound evidence (FD-13), `CampaignStateV1`
+  + the pure V0 fold + the `state_version` rule (FD-14), and human command
+  binding with honest actor attestation (FD-15). Complete wire schemas for
+  all eleven message kinds plus receipt, manifest, `ScopeContractV1`, and
+  `CampaignStateV1`. Design input: issue #95. **A1 implementation begins only
+  after this freeze is accepted** — then A1-V0 (§5): one real
+  coder/reviewer/human corrective loop, coder on the claude CLI, reviewer on
+  `--engine arliai` (read-only, no tool surface), merge manual.
 - **Post-A0 hardening**: separate follow-up issue; does not reopen A0.
 - **B1** (`research/b1-context/`): parallel, read-only, non-authoritative.
 
