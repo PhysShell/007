@@ -192,3 +192,84 @@ created by this note, and the ABR gate remains MG-C.
 The bicycle exists; it has the usual brakes. The version 007 needs is the one for
 descending a mountain with a rider who is simultaneously blind, curious, and
 spending someone else's money.
+
+## 7. What this hands to MG-C, and then closes
+
+The survey is finished. Recorded per rule 3's carve-out (adjudicated
+interactively with the maintainer), therefore ratified as direction:
+
+- **Fusio enters no dependency** — not `fusio`, not `fusio-impl`, not its MCP
+  layer. Reference implementation, not foundation.
+- **Operation → Action → Connection is a conceptual decomposition, not an API
+  contract.** We know which entities will probably surface; that is not licence
+  to grow an `ActionInterface`, a `ConnectionRegistryFactoryProvider`, and the
+  rest of the architectural vegetation before two real adapters exist. ABR-0 §4's
+  two-adapter precondition governs the shape, not only the connector kit.
+- **The next informative step is MG-C's own implementation** — not ABR-2, and not
+  ten more API-management products. This note closes the Fusio question.
+
+The point of MG-C is not to prove we can write two adapters. It is to **discover
+the minimal common authority surface** — the part of the contract that is
+actually shared rather than the part we would like to be shared. The shape to
+test against:
+
+```text
+caller → capability/authority → operation → policy + constraints
+       → provider adapter → external system
+```
+
+and not:
+
+```text
+caller → generic provider abstraction factory manager
+       → forty interfaces → two adapters that differ anyway
+```
+
+The second is what growing an architecture from a photograph of Fusio produces:
+an enterprise framework arriving before the product.
+
+### Candidate probes (not requirements)
+
+Each must be either confirmed by the implementation or deliberately rejected. A
+probe quietly dropped is the failure this list exists to prevent.
+
+```text
+default deny                       a new adapter/action is never agent-reachable
+                                   by virtue of existing
+control/business-plane separation  administrative operations cannot land in an
+                                   agent or MCP projection by accident
+secret non-disclosure              the agent receives a right to act, never a
+                                   credential
+authority binding                  the same adapter cannot be invoked with
+                                   authority the calling principal lacks
+constraints before dispatch        model, budget, payload limits checked before
+                                   the provider is touched
+transport independence             REST/MCP/CLI do not each re-derive
+                                   authorization semantics
+auditability                       who → which right → which operation → which
+                                   adapter → which outcome, recoverable
+adapter substitutability           two providers share exactly the common part of
+                                   the contract, not the wished-for part
+```
+
+### The regression anti-example
+
+`backend-operation-getAll` (§4) is kept as a concrete anti-example rather than a
+remark. If a registry is ever projected into a tool surface automatically, a test
+must establish:
+
+```text
+control-plane capability  ×  agent projection  =  DENY
+```
+
+— membership in the registry does not by itself imply exportability.
+
+The generalization it forces is the useful part: an operation descriptor needs
+distinct notions —
+
+```text
+exists · callable · delegatable · agent-visible · externally-exposable
+```
+
+— rather than one dispirited `enabled: true`. That distinction is the whole
+difference between a default-deny projection and an admin console.
