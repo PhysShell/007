@@ -116,10 +116,16 @@ vertical (`docs/q-deck/r1-command.md` §11.1–§11.2, cited in A1-F §0 "What t
 contract binds to and may not redefine", and again at FD-9), and its §6 excludes
 external reconciliation from scope.
 
-On one point the two systems already agree, reached independently: A1-F fixes
-that "GitHub PR comments are a human-readable **projection** of these objects. No
-agent consumes a mutable PR comment as authoritative input" — the same
-projection ≠ authority separation ADR-0009 applies to live effect state.
+On one point the two systems land close together. A1-F fixes that "GitHub PR
+comments are a human-readable **projection** of these objects. No agent consumes
+a mutable PR comment as authoritative input". ADR-0009 draws a structurally
+similar line in its own domain: the effect owner "**holds NO writer** — it
+reports, the Host persists", so reported live state is not the thing that owns
+durable truth.
+
+The resemblance is structural only. ADR-0009 does **not** call live effect state
+a projection, and this record asserts neither a shared vocabulary nor a shared
+lineage between the two — see §5.
 
 Where the ADR-0009 notions land is therefore **below** A1-F's boundary, in the
 controller/lifecycle layer that does not yet exist. Nothing in §2 contradicts an
@@ -139,7 +145,7 @@ design, not as a work item, and not as a commitment to this ADR's model:
 - proof-before-adopt recovery — an identifier found after restart is not by
   itself evidence that it is the same execution;
 - explicit detach-vs-terminate semantics, rather than one verb carrying a flag;
-- live-state projection kept distinct from durable reduced state, such that a
+- observed live state kept distinct from durable reduced state, such that a
   durable `RUNNING` record plus a dead liveness proof is a contradiction rather
   than a green light;
 - a foreign work source read/mutated conditionally, without becoming the store
