@@ -94,7 +94,21 @@
     async function poll(isFirst: boolean): Promise<void> {
       const controller = new AbortController();
       activePollController = controller;
-      const deadline = setTimeout(() => controller.abort(), RUN_POLL_REQUEST_TIMEOUT_MS);
+      // Q-Deck A0.5 corrective round 8 (fresh exact-head Codex P1, PR
+      // #110): distinguishes WHY the request stopped waiting — aborting
+      // the browser's own `fetch` only ever stops the CLIENT side of the
+      // connection. `crates/o7d/src/routes.rs`'s own doc comment on
+      // `run_behind_replay_limiter` is explicit: a future dropped after
+      // the blocking closure has already been spawned has NO effect on
+      // that closure or the shared replay-limiter permit it holds — the
+      // server-side `candidate_projection` work keeps running to
+      // completion regardless of what the client does. See `catch`
+      // below for why this flag exists.
+      let deadlineExpired = false;
+      const deadline = setTimeout(() => {
+        deadlineExpired = true;
+        controller.abort();
+      }, RUN_POLL_REQUEST_TIMEOUT_MS);
       try {
         const r = await getRun(runId, controller.signal);
         if (cancelled) return;
@@ -149,9 +163,39 @@
         // one outage could accumulate multiple permanent zombie loops.
         // This check must come FIRST, before either branch below.
         if (cancelled) return;
-        if (isFirst) {
-          loadState = "error";
-          return;
+        // Q-Deck A0.5 corrective round 8 (fresh exact-head Codex P1, PR
+        // #110): round 7's own deadline unconditionally retried on
+        // timeout, exactly as if the timeout were an ordinary transient
+        // network failure. It is NOT — the server-side replay work is
+        // still genuinely running behind the shared replay-limiter
+        // permit (round 7's own finding on `run_behind_replay_limiter`),
+        // so dispatching another poll dispatches ANOTHER real replay
+        // rather than merely retrying a failed one. A slow-storage run
+        // that keeps missing its deadline could accumulate multiple
+        // concurrently-running server-side replays from ONE open tab,
+        // saturating the same limiter `POST /commands` admission also
+        // depends on — degrading a genuinely unrelated code path's
+        // availability in the name of this page's own liveness.
+        //
+        // A client-side timeout is an AMBIGUOUS dispatch outcome — the
+        // same principle this system already applies to provider
+        // dispatch elsewhere (losing the response never proves the
+        // action didn't happen) now applies to this GET too. The
+        // deadline still exists so the UI is never stuck awaiting one
+        // `Promise` forever, but expiring it must never trigger an
+        // automatic redispatch. Preserve whatever was last displayed —
+        // never revert an already-loaded run back to "unavailable" —
+        // and simply stop polling this run for the rest of this page's
+        // lifetime; only a real navigation/reload starts a fresh attempt.
+        // Safely retrying a deadline timeout requires server-side
+        // cancellation-awareness or replay deduplication, deliberately
+        // NOT added here to keep this round frontend-only (disclosed as
+        // a future backend consideration in the PR body).
+        if (deadlineExpired) {
+          if (isFirst) {
+            loadState = "error";
+          }
+          return; // no retry — see the reasoning above.
         }
         // A transient refresh failure doesn't blank an already-loaded run
         // — the next poll tries again at the normal cadence, regardless

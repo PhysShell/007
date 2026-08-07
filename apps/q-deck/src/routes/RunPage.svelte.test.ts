@@ -603,13 +603,28 @@ describe("RunPage", () => {
     expect(getRunSpy).toHaveBeenCalledTimes(2);
   });
 
-  it("aborts a poll that exceeds its request deadline, and the loop continues with the next poll afterward", async () => {
+  // Q-Deck A0.5 corrective round 8 (fresh exact-head Codex P1, PR #110):
+  // round 7's own deadline unconditionally retried on timeout, exactly
+  // as if the timeout were an ordinary transient network failure. It is
+  // NOT — `crates/o7d/src/routes.rs`'s own doc comment on
+  // `run_behind_replay_limiter` is explicit that a dropped future has no
+  // effect on an already-spawned blocking closure or the shared
+  // replay-limiter permit it holds: the server-side replay work keeps
+  // running to completion regardless of what the client does.
+  // Retrying on a client-side timeout therefore dispatches ANOTHER real
+  // server-side replay rather than merely retrying a failed one — a
+  // slow-storage run repeatedly missing its deadline could accumulate
+  // multiple concurrently-running replays from one open tab, saturating
+  // the same limiter `POST /commands` admission depends on. A timeout is
+  // an AMBIGUOUS dispatch outcome and must never trigger an automatic
+  // redispatch — same principle this system already applies to provider
+  // dispatch elsewhere.
+  it("aborts a poll that exceeds its request deadline, but does NOT retry — the ambiguous server-side outcome must never trigger a redispatch", async () => {
     const active = goldenRunActive();
     const getRunSpy = vi
       .spyOn(api, "getRun")
       .mockResolvedValueOnce(active)
-      .mockImplementationOnce(hangingGetRun())
-      .mockResolvedValue(active);
+      .mockImplementationOnce(hangingGetRun());
     vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
 
     render(RunPage, { props: { runId: active.run_id } });
@@ -617,12 +632,39 @@ describe("RunPage", () => {
     await vi.advanceTimersByTimeAsync(5_100); // poll 2 starts, hangs
     expect(getRunSpy).toHaveBeenCalledTimes(2);
 
-    // The 15s deadline fires, aborting the hung request; the resulting
-    // rejection is treated as an ordinary transient failure and
-    // reschedules at the normal 5s cadence — the loop is alive again. If
-    // the bug were present (no deadline at all), no third call ever
-    // happens no matter how long this advances.
-    await vi.advanceTimersByTimeAsync(15_000 + 5_000 + 200); // deadline + normal retry cadence + margin
+    // The 15s deadline fires, aborting the client-side request — but the
+    // last successfully displayed state ("running") must be preserved,
+    // never reverted to any kind of "unavailable"/error, and NO further
+    // getRun call may ever happen, no matter how long real polling time
+    // passes afterward.
+    await vi.advanceTimersByTimeAsync(15_000 + 200);
+    expect(screen.getByText("running")).toBeInTheDocument();
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("running")).toBeInTheDocument();
+  });
+
+  it("still retries normally on an ordinary transient failure that is NOT a deadline timeout", async () => {
+    const active = goldenRunActive();
+    const getRunSpy = vi
+      .spyOn(api, "getRun")
+      .mockResolvedValueOnce(active)
+      .mockRejectedValueOnce(new Error("ECONNRESET"))
+      .mockResolvedValue(active);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: active.run_id } });
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    await vi.advanceTimersByTimeAsync(5_100); // poll 2 fires, rejects immediately (not a timeout)
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+    // An ordinary rejection — never having reached the 15s deadline at
+    // all — keeps the existing retry-at-normal-cadence semantics
+    // unchanged; the new "no retry" branch must apply ONLY to a genuine
+    // deadline expiry, never to every catch-block entry generally.
+    await vi.advanceTimersByTimeAsync(5_100);
     expect(getRunSpy).toHaveBeenCalledTimes(3);
   });
 
