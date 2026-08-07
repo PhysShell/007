@@ -1,0 +1,35 @@
+[package]
+name = "o7-a1-protocol"
+version = "0.1.0"
+edition = "2021"
+description = "007 A1 protocol/library layer (docs/q-deck/a1-contracts.md, APPROVED FOR TYPES at f291cfc): canonical artifact types, digest-context and edge registries, canonical-bytes writer, CAS interface, and checked constructors. No runtime, no storage authority, no provider adapters — those are A2+."
+publish = false
+
+[lib]
+name = "o7_a1_protocol"
+path = "src/lib.rs"
+
+# Same doctrine as o7-run: the protocol layer depends on nothing heavy, so
+# contract truth is recomputable with serde + a hash. o7-run appears only for
+# the class-3 external wrappers that must name its ArtifactRef exactly
+# (a1-contracts.md §6/§11.1) — never re-declared, never typedef'd.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "1"
+o7-run = { path = "../o7-run", version = "0.1.0" }
+
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"

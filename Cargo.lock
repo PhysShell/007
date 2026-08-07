@@ -1016,6 +1016,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "o7-a1-protocol"
+version = "0.1.0"
+dependencies = [
+ "o7-run",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "o7-harness-policy"
 version = "0.1.0"
 dependencies = [
