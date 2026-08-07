@@ -559,4 +559,112 @@ describe("RunPage", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(getRunSpy).toHaveBeenCalledTimes(3);
   });
+
+  // Q-Deck A0.5 corrective round 7 (fresh exact-head Codex P1, PR #110):
+  // round 4 made "at most one request in flight" an invariant by only
+  // ever scheduling the next poll after the previous one settles — but a
+  // `fetch` with no deadline (a server sending headers and then never
+  // finishing the body, say) could itself never settle, permanently
+  // stalling the whole loop. A real `AbortController`/deadline per
+  // request closes this. `hangingGetRun` simulates exactly that: a
+  // promise that only ever settles (by rejecting, as a real aborted
+  // fetch would) if its own `AbortSignal` fires — otherwise it hangs
+  // forever, precisely modeling the bug this deadline exists to close.
+  function hangingGetRun(): (id: string, signal?: AbortSignal) => Promise<RunDto> {
+    return (_id, signal) =>
+      new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        });
+      });
+  }
+
+  it("keeps the one-request-in-flight invariant while a poll is hanging, well before its own request deadline", async () => {
+    const active = goldenRunActive();
+    const getRunSpy = vi
+      .spyOn(api, "getRun")
+      .mockResolvedValueOnce(active)
+      .mockImplementationOnce(hangingGetRun());
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: active.run_id } });
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    expect(getRunSpy).toHaveBeenCalledTimes(1);
+
+    // Poll 2 fires on the normal cadence and hangs.
+    await vi.advanceTimersByTimeAsync(5_100);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+    // Well before its own 15s deadline — no third request may appear
+    // yet; the serialization invariant round 4 established must still
+    // hold for a merely-slow-so-far request, not just an infinitely
+    // hung one.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("aborts a poll that exceeds its request deadline, and the loop continues with the next poll afterward", async () => {
+    const active = goldenRunActive();
+    const getRunSpy = vi
+      .spyOn(api, "getRun")
+      .mockResolvedValueOnce(active)
+      .mockImplementationOnce(hangingGetRun())
+      .mockResolvedValue(active);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: active.run_id } });
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    await vi.advanceTimersByTimeAsync(5_100); // poll 2 starts, hangs
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+
+    // The 15s deadline fires, aborting the hung request; the resulting
+    // rejection is treated as an ordinary transient failure and
+    // reschedules at the normal 5s cadence — the loop is alive again. If
+    // the bug were present (no deadline at all), no third call ever
+    // happens no matter how long this advances.
+    await vi.advanceTimersByTimeAsync(15_000 + 5_000 + 200); // deadline + normal retry cadence + margin
+    expect(getRunSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("aborts the in-flight request on unmount (a real AbortSignal actually fires), and no further poll is ever scheduled", async () => {
+    const active = goldenRunActive();
+    let capturedSignal: AbortSignal | undefined;
+    const getRunSpy = vi
+      .spyOn(api, "getRun")
+      .mockResolvedValueOnce(active)
+      .mockImplementationOnce((_id, signal) => {
+        capturedSignal = signal;
+        return new Promise<RunDto>(() => {}); // never settles on its own
+      });
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    const { unmount } = render(RunPage, { props: { runId: active.run_id } });
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    await vi.advanceTimersByTimeAsync(5_100); // poll 2 starts, hangs
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+    expect(capturedSignal?.aborted).toBe(false);
+
+    unmount();
+    // `activePollController?.abort()` runs synchronously in cleanup —
+    // proving this isn't merely "cancelled is set and we hope the fetch
+    // eventually resolves on its own," the actual signal fires.
+    expect(capturedSignal?.aborted).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getRunSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("transitions a hung INITIAL load to the error state once its own deadline fires, rather than staying on Loading forever", async () => {
+    const active = goldenRunActive();
+    vi.spyOn(api, "getRun").mockImplementationOnce(hangingGetRun());
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: active.run_id } });
+    expect(screen.getByText("Loading run…")).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(15_100);
+    await waitFor(() =>
+      expect(screen.getByText("Run not found or o7d unreachable.")).toBeInTheDocument(),
+    );
+  });
 });

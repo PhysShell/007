@@ -43,10 +43,26 @@
   // (navigating away) is what actually stops it, same as every other
   // poll on this page.
   const MAX_POST_SEAL_BACKOFF_MS = 30_000;
+  // Q-Deck A0.5 corrective round 7 (fresh exact-head Codex P1, PR #110):
+  // round 4 made "at most one request in flight" an invariant by only
+  // ever scheduling the next poll after the previous one settles — but an
+  // unbounded `fetch` (a server sending headers and then never finishing
+  // the body, say) meant that single request could itself never settle,
+  // permanently stalling the whole loop. A DEADLINE per request, not
+  // merely a `Promise.race` (which would stop WAITING on the fetch
+  // without stopping the fetch itself, still violating the one-real-
+  // request-in-flight invariant in spirit), via a real `AbortController`,
+  // closes this. 15s is generous for a local `o7d` — deliberately NOT
+  // tied to `REFRESH_INTERVAL_MS` (5s): one is "how often do we want a
+  // fresh sample," the other is "how long may any ONE sample attempt
+  // run," and conflating them would make the poll cadence itself a
+  // function of an unrelated timeout tuning decision.
+  const RUN_POLL_REQUEST_TIMEOUT_MS = 15_000;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   $effect(() => {
     let cancelled = false;
+    let activePollController: AbortController | undefined;
     loadState = "loading";
     run = null;
 
@@ -76,8 +92,11 @@
     // silently overwrite that correct state with nothing left running to
     // ever correct it again.
     async function poll(isFirst: boolean): Promise<void> {
+      const controller = new AbortController();
+      activePollController = controller;
+      const deadline = setTimeout(() => controller.abort(), RUN_POLL_REQUEST_TIMEOUT_MS);
       try {
-        const r = await getRun(runId);
+        const r = await getRun(runId, controller.signal);
         if (cancelled) return;
         if (isFirst) {
           run = r;
@@ -140,13 +159,25 @@
         // failure (a failure to even reach the server isn't evidence
         // about the server's own replay-limiter saturation).
         timer = setTimeout(() => void poll(false), REFRESH_INTERVAL_MS);
+      } finally {
+        clearTimeout(deadline);
+        if (activePollController === controller) {
+          activePollController = undefined;
+        }
       }
     }
 
     void poll(true);
 
     return () => {
+      // `cancelled = true` MUST happen before `activePollController?.abort()`
+      // — abort() rejects the pending fetch asynchronously, and by the
+      // time that rejection reaches `poll`'s own catch block, `cancelled`
+      // must already read true there (round 5's own fix) or the aborted
+      // request would incorrectly reschedule another poll for a page
+      // that's already gone.
       cancelled = true;
+      activePollController?.abort();
       stream?.close();
       clearTimeout(timer);
     };
