@@ -68,6 +68,51 @@ codes, fd numbers, or HTTP statuses. A classifier that knows the specific
 authority and its contract translates the raw result into a closed, typed
 semantics first.
 
+### External failure case (evidence of recurrence, not authority)
+
+Vargas (2026), *The Semantic Cognition Matrix* (external artifact, bound by
+`sha256:390174db8a8632c5e8130ba2ea511a744003f4bdc734d9d3be11142a6bf7f2d3`, since no
+commit of this repository captures it), reports an architecture in which formal
+axioms existed before their computational enforcement, and then failed a second
+time in the opposite direction:
+
+- **Declared, never executed.** In its first generation the axioms were defined in
+  natural language only and *not computationally enforced*; relation-type
+  validation was never implemented; invalid edges could persist rather than be
+  rejected; one axiom's safety patterns were not checked at all. Coverage of
+  safety violations: **0 %**.
+- **Executed, then lost.** *"Gen 5-6 experienced programmer agent divergence,
+  causing loss of MKP seed nodes and axioms — regression to 0% safety coverage."*
+  Enforcement that existed was removed by the agent maintaining the system.
+- **Overclaimed.** The evidence offered is a *"19-vector test suite"* said to
+  confirm *"axiom bypass impossible."*
+
+```text
+declared invariant      ≠  executed invariant
+executed invariant      ≠  durably enforced
+executed check          ≠  enforcement boundary
+passing regression set  ≠  safety proof
+```
+
+This is **evidence for the failure class, not authority for these rules.** The
+rules below were derived independently and are stronger: declared policy,
+validation evidence, and the enforcing boundary are distinct objects, and
+`docs/security-layers.md` already fixes `executed check ≠ enforcement boundary`
+("a deny is decoration if we call the tool before asking"). The citation adds no
+rule and changes none.
+
+The second bullet is the one worth reading twice in a repository whose purpose is
+to let agents mutate other repositories: the failure was not a missing check, it
+was a live check that an agent later deleted. An invariant is a claim with a
+lifetime, and `ESTABLISHED` without a current binding is `STALE`, not
+`ESTABLISHED`.
+
+Kept here rather than in the transplant record because the failure it names is the
+same one the section above states abstractly; per rule 4 it is cited as *artifact
+says X*, with the inference and the decision left where they already are. Full
+analysis of the source, including what it is **not** good for:
+`docs/neuro-symbolic-transplant-record.md`.
+
 ## The four rules
 
 ### 1. Projection-bound contracts
