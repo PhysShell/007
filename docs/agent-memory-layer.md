@@ -192,8 +192,8 @@ path that bypasses 007 evidence admission.
                       |
                       v
 +------------------+       +----------------------+
-| agentmemory      |<----->|  007 Memory Adapter  |
-| or local store   |       |  provenance filter   |
+| memory backend   |<----->|  007 Memory Adapter  |
+| (not yet chosen) |       |  provenance filter   |
 +------------------+       +----------------------+
                       |
                       v
@@ -534,7 +534,7 @@ Example "context.meta.json":
     "gate:no-new-findings status:FAIL",
     "prompt_module:ownaudit.fix-own001"
   ],
-  "memory_backend": "agentmemory",
+  "memory_backend": "<selected-backend>",
   "token_budget": 2000,
   "result_count": 12
 }
@@ -678,7 +678,7 @@ Cons:
 - regex redaction is not enough as a hard security boundary;
 - direct MCP write access must be restricted.
 
-Recommended use:
+If selected, the shape would be:
 
 ```text
 007 -> REST/MCP adapter -> agentmemory
@@ -705,7 +705,7 @@ Cons:
 - no hybrid vector/graph search initially;
 - more implementation work.
 
-Recommended if "agentmemory" proves too broad or too leaky.
+A candidate in its own right, not a fallback — it was written as the alternative to Option A when Option A was the presumed default, which it no longer is.
 
 ### Option C: graph memory later
 
@@ -1015,7 +1015,7 @@ Rules:
     memory/
       mod.rs
       backend.rs
-      agentmemory.rs
+      <backend>.rs        # one file per selected backend; none exists yet
       item.rs
       query.rs
       ingest.rs
