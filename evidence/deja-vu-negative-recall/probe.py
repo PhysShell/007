@@ -40,7 +40,14 @@ def identify_binary(deja, claimed_commit, allow_unverified=False):
     escape hatch, and it is recorded in the report so a reader can see it was
     used.
     """
-    path = shutil.which(deja) or deja
+    # Resolve to one absolute path and hand that same path to every later
+    # subprocess. Hashing what `which` finds while executing a bare name again
+    # leaves a gap: the two lookups need not land on the same file, and the
+    # report would then describe a binary that did not produce the numbers.
+    found = shutil.which(deja)
+    path = str(pathlib.Path(found or deja).resolve())
+    if not os.path.isfile(path) or not os.access(path, os.X_OK):
+        raise SystemExit(f"--deja {deja!r} does not resolve to an executable file")
     digest = hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
     revision, dirty = "", None
     try:
@@ -234,7 +241,7 @@ def main():
 
     by_title = build_corpus(corpus, work / "claude")
     env = probe_env(work)
-    idx = subprocess.run([args.deja, "index", "--rebuild"], env=env,
+    idx = subprocess.run([binary["path"], "index", "--rebuild"], env=env,
                          capture_output=True, text=True, timeout=300)
     print("index:", (idx.stdout or idx.stderr).strip()[:300])
     if idx.returncode != 0:
@@ -250,7 +257,7 @@ def main():
     # Identity, not arity: 24 sessions and 24 of the *right* sessions are
     # different facts, and a harness built to keep exactly that kind of pair
     # apart does not get to compare lengths.
-    listed = subprocess.run([args.deja, "last", "1000", "--json"], env=env,
+    listed = subprocess.run([binary["path"], "last", "1000", "--json"], env=env,
                             capture_output=True, text=True, timeout=120)
     if listed.returncode != 0 or not listed.stdout.strip():
         raise SystemExit(f"could not list the index to verify it "
@@ -270,7 +277,7 @@ def main():
 
     rows = []
     for q in corpus["queries"]:
-        r = retrieve(args.deja, env, q["text"])
+        r = retrieve(binary["path"], env, q["text"])
         row = {"query_id": q["id"], "oracle": q["oracle"], "query": q["text"], **r}
         if q.get("fixture"):
             row["fixture"] = q["fixture"]
@@ -285,6 +292,11 @@ def main():
     sup = [r for r in rows if r["oracle"] == "supported"]
     report = {
         "schema": 1,
+        # Which run produced this file. A failed run writes nothing, so without
+        # these a reader cannot tell a stale report from the run they just made.
+        "run": {"generated_at": datetime.datetime.now(datetime.timezone.utc)
+                                        .strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "run_dir": str(work)},
         "corpus": {"id": corpus["id"], "sha256": corpus_digest,
                    "sessions": len(corpus["sessions"]),
                    "queries": len(corpus["queries"])},
@@ -319,7 +331,11 @@ def main():
             "supported_evidence_recall": None,
         },
     }
-    (HERE / "report.json").write_text(json.dumps(report, indent=2) + "\n")
+    # Atomic publish: a torn write must never look like a complete measurement.
+    out = HERE / "report.json"
+    tmp = out.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(report, indent=2) + "\n")
+    os.replace(tmp, out)
 
     s = report["summary"]
     print(f"\nretrieval — unsupported queries answered: "

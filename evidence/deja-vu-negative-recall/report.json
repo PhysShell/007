@@ -1,5 +1,9 @@
 {
   "schema": 1,
+  "run": {
+    "generated_at": "2026-08-07T08:22:56Z",
+    "run_dir": "/tmp/claude-0/-home-user-007/cf22df47-424f-55c1-a758-7a9678effd3e/scratchpad/probe14/run-3kppmvnd"
+  },
   "corpus": {
     "id": "deja-vu-recall-oracle.v1",
     "sha256": "85cf8da4fbb32647454d0dc9f71a7e54d32ca7a06639f7afc5200cd70043c4cf",

@@ -71,7 +71,7 @@ artifact that is wrong, or merely hopeful, about its own revision.
 |---|---|
 | `corpus.json` | The oracle: 24 synthetic sessions, 20 `unsupported` queries, 10 `supported` queries each naming the session that answers it. Versioned as `deja-vu-recall-oracle.v1` — changing it invalidates cross-version comparison |
 | `probe.py` | The runner: builds the corpus as Claude Code transcripts, indexes it, queries, writes `report.json`. Records the subject commit it ran against |
-| `report.json` | Verbatim output of the run recorded above |
+| `report.json` | Verbatim output of the run recorded above. `report.run` names when it was generated and in which run directory, so a stale report cannot be mistaken for the run you just made; it is published atomically (temp file + rename) |
 
 ## Method
 
@@ -162,7 +162,7 @@ python3 probe.py --deja /tmp/deja --work /tmp/deja-probe \
 ### Harness invariants
 
 `probe.py` writes only under `--work` and never reads the operator's agent
-histories. Four rules keep it from producing a report that reads as a
+histories. Five rules keep it from producing a report that reads as a
 measurement when it is not one:
 
 | Rule | Why |
@@ -170,6 +170,7 @@ measurement when it is not one:
 | The child environment is **built from nothing**, not copied from `os.environ`: `PATH`, `LC_ALL`, `TMPDIR`, `HOME`/XDG and the `DEJA_*` vars, all pointing inside `--work` | deja is a third-party binary and this harness serializes its stdout into a tracked file. Forwarding `GITHUB_TOKEN` or `ARLIAI_API_KEY` into it would be the indirect credential path `AGENTS.md` rule 1 names. The measurement reproduces byte-identically under the stripped environment, so deja needed none of it |
 | **Nothing is ever deleted.** `--work` is a *parent*; each run creates a fresh `run-*` subdirectory inside it (filesystem roots still refused) | each run needs virgin ground, or a bumped corpus id leaves the previous corpus's transcripts behind and the probe tests a ghost. Reaching that by wiping the given directory needed an ownership guard, and a marker file inside the target cannot establish ownership — anyone who can write there can write the marker. Creating instead of deleting retires the question with the code |
 | A **failed index aborts**, and so does an index whose session ids are not exactly the corpus's | at `7c4a294` deja exits 0 even against an unusable index directory, so the status alone proves nothing. The check compares identity rather than arity — 24 sessions and 24 of the *right* sessions are different facts. Without it a harness failure serializes as retrieval behaviour: zeroes everywhere, in a report that looks complete |
+| The **hashed binary is the executed binary**: `--deja` is resolved to one absolute path, and that path is what indexing, listing and every query run | hashing what `which` finds while executing a bare name again leaves two lookups that need not land on the same file, and the report would describe a binary that did not produce the numbers |
 | A **failed query aborts** rather than recording zero hits | deja exits 0 on a genuinely empty result (checked at this commit), so a nonzero status is a harness failure. Recording it as a miss would undercount false hits and recall at once — the precise confusion this corpus exists to prevent |
 
 Every refusal above was verified by making it fire: a run with no
