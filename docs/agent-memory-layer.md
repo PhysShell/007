@@ -140,7 +140,7 @@ Risky parts for "007":
 - mixing private subscription-auth details into shared memory;
 - depending on regex-only secret stripping as a complete security boundary.
 
-Conclusion: "agentmemory" is useful as a memory runtime, but "007" should wrap it behind its own artifact-derived adapter.
+Conclusion: "agentmemory" is a plausible memory runtime **candidate**, and any runtime 007 adopts must sit behind its own artifact-derived adapter. Which runtime — if any — is deferred; see the note under "Backend options".
 
 ## Prior art: deja-vu
 
@@ -643,9 +643,23 @@ Memory should help the agent produce a better plan, but O7Plan and gates decide 
 
 ## Backend options
 
+> **Backend selection is deferred** — see D1' in
+> `docs/deja-vu-memory-evaluation.md` (agent-authored, pending maintainer
+> ratification). The three options below are preserved as analysis, not as a
+> choice: **no backend is selected, and "first backend" below no longer names
+> one.** A backend is chosen when a real consumer exists, by evaluation against
+> the criteria in that document, whose single normative requirement is that a
+> candidate passes the shared oracle fixture and has no path that bypasses 007
+> evidence admission.
+>
+> This note exists because the deferral was first written only about deja-vu
+> while this section still preselected `agentmemory` three sections down —
+> removing one commitment and leaving another standing is not a deferral.
+
 ### Option A: agentmemory
 
-Use "agentmemory" as the first backend.
+Written when this was the intended first backend; retained as evaluation
+material for a candidate, not as the selection.
 
 Pros:
 
@@ -859,7 +873,11 @@ Mitigation:
 
 ### Phase 0: manual experiment
 
-Run "agentmemory" locally and verify:
+**Conditional on a backend having been selected** (deferred, see above); the
+`agentmemory` specifics below are an example of what a candidate evaluation
+looks like, not a step to execute now.
+
+Run the candidate locally and verify:
 
 - server starts;
 - viewer works;
@@ -881,8 +899,11 @@ o7 memory ingest-run <run-dir>
 Implement:
 
 - "MemoryBackend" trait;
-- "AgentMemoryBackend";
 - "NoopMemoryBackend";
+- one concrete backend implementation **once a backend is selected** — the
+  earlier draft named "AgentMemoryBackend" here, which preselects a dependency
+  the deferral above withholds. The trait and the noop are independent of that
+  choice and can be built first;
 - redaction pass;
 - JSON payload schema;
 - provenance validation.
