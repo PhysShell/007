@@ -149,7 +149,9 @@ Conclusion: "agentmemory" is useful as a memory runtime, but "007" should wrap i
 base search path. It is evaluated in full — including what it does better than
 this document proposes (typed non-conversational records, a decision lifecycle
 with tombstones, a deterministic rebuildable index) and the one thing that
-disqualifies it as an authority (it has no *no supported evidence* answer) — in
+disqualifies it as an authority: it returns empty results readily enough, but
+has no typed `NO_SUPPORTED_EVIDENCE` admission outcome, so nothing distinguishes
+*found nothing* and *found weak junk* from *this question has no support* — in
 `docs/deja-vu-memory-evaluation.md`. The measurement behind that last claim is
 in `evidence/deja-vu-negative-recall/`, kept as a fixed corpus so it doubles as
 a cross-version instrument: it separates upstream retrieval drift from our own

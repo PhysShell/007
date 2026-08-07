@@ -19,9 +19,42 @@ Usage:
 
 Writes report.json next to corpus.json.
 """
-import argparse, json, os, pathlib, subprocess, sys, uuid, datetime
+import argparse, hashlib, json, os, pathlib, re, shutil, subprocess, sys, uuid, datetime
 
 HERE = pathlib.Path(__file__).resolve().parent
+
+
+def identify_binary(deja, claimed_commit):
+    """Bind the report to the binary that produced it, not to operator prose.
+
+    A --subject-commit copied into the report proves nothing on its own: run
+    the binary from commit B, claim A, and the artifact lies. So hash the
+    binary and read the VCS revision Go stamps into it. If both a claim and a
+    stamp exist and they disagree, refuse — a document written in a repo that
+    just adopted revision-bound grounding does not get to hand-wave this one.
+    """
+    path = shutil.which(deja) or deja
+    digest = hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+    revision, dirty = "", None
+    try:
+        info = subprocess.run(["go", "version", "-m", path],
+                              capture_output=True, text=True, timeout=60).stdout
+        m = re.search(r"^\s*build\s+vcs\.revision=(\S+)", info, re.M)
+        if m:
+            revision = m.group(1)
+        m = re.search(r"^\s*build\s+vcs\.modified=(\S+)", info, re.M)
+        if m:
+            dirty = m.group(1) == "true"
+    except (OSError, subprocess.SubprocessError):
+        pass  # no Go toolchain here; the hash still binds the artifact
+
+    if claimed_commit and revision and not revision.startswith(claimed_commit[:12]):
+        raise SystemExit(
+            f"refusing to write a report that would lie: --subject-commit "
+            f"{claimed_commit} but the binary is stamped vcs.revision={revision}")
+
+    return {"path": str(path), "sha256": digest,
+            "vcs_revision": revision, "vcs_modified": dirty}
 
 
 def build_corpus(corpus, claude_root):
@@ -102,8 +135,14 @@ def main():
     args = ap.parse_args()
 
     corpus = json.loads((HERE / "corpus.json").read_text())
+    binary = identify_binary(args.deja, args.subject_commit)
+
+    # Wipe the throwaway workdir. Session ids are derived from the corpus, so a
+    # bumped corpus id that drops or renames a session would otherwise leave the
+    # previous corpus's transcripts on disk and quietly test a ghost.
     work = pathlib.Path(args.work)
     for sub in ("claude", "index", "home"):
+        shutil.rmtree(work / sub, ignore_errors=True)
         (work / sub).mkdir(parents=True, exist_ok=True)
 
     by_title = build_corpus(corpus, work / "claude")
@@ -132,11 +171,20 @@ def main():
         "corpus": {"id": corpus["id"], "sessions": len(corpus["sessions"]),
                    "queries": len(corpus["queries"])},
         "subject": {"repo": "github.com/vshulcz/deja-vu",
-                    "commit": args.subject_commit, "version": args.subject_version},
+                    "claimed_commit": args.subject_commit,
+                    "claimed_version": args.subject_version,
+                    "binary_sha256": binary["sha256"],
+                    "binary_vcs_revision": binary["vcs_revision"],
+                    "binary_vcs_modified": binary["vcs_modified"]},
         # What the upstream retriever did. Drifts when deja changes.
         "retrieval": rows,
         # What 007's evidence-admission layer promoted. null = not implemented,
-        # which is not the same fact as "zero violations".
+        # which is not the same fact as "zero violations". When a resolver
+        # exists, each row is:
+        #   {"query_id", "evidence_object_ids": [...], "weak_candidate_ids": [...],
+        #    "outcome": "EVIDENCE_AVAILABLE" | "NO_SUPPORTED_EVIDENCE"}
+        # with the invariant outcome == EVIDENCE_AVAILABLE iff evidence is
+        # non-empty; a violation is an unsupported query where either half fails.
         "admission": None,
         "summary": {
             "unsupported_queries": len(unsup),

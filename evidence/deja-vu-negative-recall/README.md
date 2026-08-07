@@ -10,11 +10,23 @@ It answers two questions that must never be collapsed into one:
 | | Question | Owner | Drifts when |
 |---|---|---|---|
 | **retrieval** | what did the upstream retriever return for this query? | deja-vu | deja-vu changes a tier, a threshold, or adds one |
-| **admission** | what did 007's evidence-admission layer promote to an evidence object? | 007 | our resolver changes |
+| **admission** | what did 007's evidence-admission layer promote to an evidence object, and what `RecallOutcome` did the query get? | 007 | our resolver changes |
 
 Today `admission` is reported as `null`, not `0`. There is no resolver yet; a
 null is an unmeasured slot, a zero would be a claim. Keeping the two columns
 apart is what lets a later run say *which side moved*.
+
+The two verdict levels the admission column will carry
+(`docs/deja-vu-memory-evaluation.md`, "Normative vocabulary"):
+
+```text
+CandidateAdmission  (per candidate)   VERIFIED | WEAK
+RecallOutcome       (per query)       EVIDENCE_AVAILABLE | NO_SUPPORTED_EVIDENCE
+invariant           outcome == EVIDENCE_AVAILABLE  ⟺  evidence_objects non-empty
+```
+
+A violation on an unsupported oracle query is either half failing: a non-empty
+evidence set, or an outcome other than `NO_SUPPORTED_EVIDENCE`.
 
 ## Identities
 
@@ -23,10 +35,16 @@ apart is what lets a later run say *which side moved*.
 | Studied repo | `github.com/vshulcz/deja-vu` (MIT) |
 | Commit | `7c4a294b3e2b5415ac4cc19f5fd40d4e61dd1884` (`git describe`: `nightly-1-g7c4a294`) |
 | Latest release tag at that commit | `v0.16.7` (2026-08-03) |
-| Binary | built from source at that commit; `deja version` prints `deja dev` |
+| Binary vcs.revision (stamped, read back from the binary) | `7c4a294b3e2b5415ac4cc19f5fd40d4e61dd1884`, `vcs.modified=false` |
+| Binary sha256 | `7cd0702b11b86b339113460a7e8f5dd1cfb1a577f85c872a16280d12d0de152a` |
 | Toolchain | `go1.25.0` (module declares `go 1.25`; fetched via `GOTOOLCHAIN=auto`) |
-| Probe date | 2026-08-06 |
+| Probe date | 2026-08-06; re-run 2026-08-07 with binary identity recorded |
 | 007 branch | `claude/deja-vu-agent-memory-1jruez` |
+
+The commit is not taken on the operator's word. `probe.py` hashes the binary it
+runs and reads the `vcs.revision` Go stamped into it; if that disagrees with
+`--subject-commit`, it refuses to write a report rather than produce a
+revision-bound artifact that is wrong about its own revision.
 
 ## Files
 
@@ -67,9 +85,12 @@ retrieval — supported evidence returned:  10/10   (at rank 1: 10)
 admission — not implemented (null, not zero)
 ```
 
-Five of the six false hits come through the `relevance` tier (IDF-weighted
-bag-of-words, no term required). The sixth is the interesting one and is
-labelled in `corpus.json` as the canonical RED fixture:
+Five of the six false hits come through the `relevance` tier — IDF-weighted
+bag-of-words: two informative terms are required (`relevanceSearch` in
+`internal/index/retrieval.go`), but no *particular* discriminating term is,
+which is how a query about kafka is answered with a session about protobuf on
+the strength of `consumers` and `storm`. The sixth is the interesting one and
+is labelled in `corpus.json` as the canonical RED fixture:
 
 ```text
 fixture: RED-close-term-drop
@@ -79,8 +100,10 @@ kept:    test -> tests, fail -> fails
 tier:    close
 answer:  "ci flake in the integration suite once every twenty runs"
 
-contract:  retriever_result = HIT
-           admission_result = NO_SUPPORTED_EVIDENCE
+contract:  retriever_result  = HIT
+           candidate         = WEAK   (no discriminating term survived)
+           evidence_objects  = []
+           outcome           = NO_SUPPORTED_EVIDENCE
 ```
 
 That pair is the point. It is the test that proves the resolver is not just

@@ -9,7 +9,13 @@
 - **Subject:** `github.com/vshulcz/deja-vu` (MIT), commit
   `7c4a294b3e2b5415ac4cc19f5fd40d4e61dd1884` — one commit past the `nightly`
   tag; latest release tag at that commit is `v0.16.7` (2026-08-03).
-- **Date:** 2026-08-06.
+- **Date:** 2026-08-06; revised 2026-08-07 after independent review.
+- **Review status:** an independent agent review of `3d51f9a` returned APPROVE
+  on both dispositions (D1 substrate-not-fork, D2 untrusted retrieval protocol)
+  and raised two semantic blockers, fixed in this revision. Per rule 3 that
+  review does **not** lift `pending`: an agent cannot ratify another agent's
+  decision, or the non-self-ratification mechanism launders itself on first
+  use. Maintainer ratification is outstanding.
 
 Per rule 4, every factual claim below about deja-vu is bound to that commit and
 is stale the moment the upstream file changes. Claims are split into what the
@@ -31,10 +37,16 @@ the commands that ran, what they printed, and the exact span an edit replaced �
 and it can hand a replaced span back (`deja restore`).
 
 The disqualifying part for us is equally specific, and it is not sloppiness:
-deja-vu is scrupulous about disclosing how it got an answer, but **it never
-produces the answer "no evidence."** Disclosure is advisory metadata attached
-to a hit; the consumer is a language model. For a search tool that is a fine
-trade. For an authority that feeds a planner, it is the whole problem.
+deja-vu is scrupulous about disclosing how it got an answer, but **it has no
+typed `NO_SUPPORTED_EVIDENCE` admission outcome.** It returns zero hits often
+enough — 14 of the 20 unsupported oracle queries below get an empty result —
+and an empty result is not the same object as an authority stating that the
+question is unsupported. What is missing is the layer that distinguishes
+*retrieval found nothing*, *retrieval found weak junk*, and *this question has
+no support in the corpus*: the first two are transport facts, the third is a
+verdict, and nothing upstream emits it. Disclosure is advisory metadata
+attached to a hit; the consumer is a language model. For a search tool that is
+a fine trade. For an authority that feeds a planner, it is the whole problem.
 
 The failure is not bad precision. It is a **missing contract between retrieval
 and consumption**: the retriever emits a diagnostic signal, and the next layer
@@ -98,7 +110,7 @@ worth reading.
 
 ## The finding that decides this for 007
 
-**Absence of evidence never becomes a verdict.**
+**An empty or weak retrieval result never becomes a verdict.**
 
 Measured, reproducible, artifacts in
 [`evidence/deja-vu-negative-recall/`](../evidence/deja-vu-negative-recall/):
@@ -143,9 +155,18 @@ classifier is the language model reading the prose, under a strong prior that a
 returned result is a result.
 
 For a human at a terminal that is a mild annoyance — you read the hit and see it
-is about CI flakes. For a planner that must be able to say **NO SUPPORTED
-EVIDENCE**, it is fatal, because the failure is silent and confident and wears
-the label "from your own history."
+is about CI flakes. For a planner that must be able to say
+**`NO_SUPPORTED_EVIDENCE`**, it is fatal, because the failure is silent and
+confident and wears the label "from your own history."
+
+Note what the finding is *not*. On 14 of the 20 unsupported queries deja
+returned nothing at all, which is the behaviour we want and it arrived for free.
+The gap is that "nothing at all" and "four sessions matched on `storm` and
+`consumers`" leave the retriever as the same kind of object — a result set with
+diagnostics — and neither one is a statement about the corpus. The authority
+that turns either into `NO_SUPPORTED_EVIDENCE` is the piece that does not exist
+upstream, and cannot: it needs inputs (run-record membership, artifact drift,
+lifecycle) that a transcript indexer has no access to.
 
 ## Normative vocabulary
 
@@ -157,13 +178,41 @@ however good the match looked.
 |---|---|---|
 | **retrieval result** | Whatever the upstream retriever returned, with its tier, scores and dropped-term report. Untrusted, versioned, upstream-owned. | Be parsed. Nothing else. |
 | **candidate observation** | One retrieval result normalized into 007's own record shape with its provenance attached. Still not evidence. | Enter admission; appear in operator-facing tooling clearly labelled as a candidate. |
-| **evidence admission** | The 007-owned procedure that decides whether a candidate observation may become evidence. | Emit exactly one verdict per candidate. |
+| **evidence admission** | The 007-owned procedure that runs over the candidate set for one recall query. | Emit exactly one `CandidateAdmission` per candidate **and** exactly one `RecallOutcome` for the query. |
 | **evidence object** | A candidate observation that passed admission, carrying its verdict and the admission inputs that produced it. | Enter the evidence graph; be cited by a planner, critic or gate. |
 
 Naming discipline: the pre-admission type is `CandidateObservation`. Not
 `EvidenceCandidate` — a type with `Evidence` in its name loses the qualifier in
 the second refactor and the whole distinction with it. Humanity is remarkably
 gifted at destroying good types.
+
+**The two verdicts live at different levels**, and conflating them was a defect
+in the first draft of this document. `NO_SUPPORTED_EVIDENCE` cannot be a
+per-candidate verdict: when retrieval returns nothing there is no candidate to
+carry it. It is a property of the query.
+
+```text
+CandidateAdmission  (per candidate)   VERIFIED | WEAK
+RecallOutcome       (per query)       EVIDENCE_AVAILABLE | NO_SUPPORTED_EVIDENCE
+
+AdmissionResult {
+    evidence_objects: [EvidenceObject]        // candidates admitted VERIFIED
+    weak_candidates:  [CandidateObservation]  // examined and refused
+    outcome:          RecallOutcome
+}
+
+invariant:  outcome == EVIDENCE_AVAILABLE  ⟺  evidence_objects is non-empty
+```
+
+Both empty paths therefore land in the same place, which is the point:
+
+```text
+retrieval returned zero results
+  → no candidates → evidence_objects = [] → NO_SUPPORTED_EVIDENCE
+
+retrieval returned five candidates, all refused
+  → weak_candidates = 5 → evidence_objects = [] → NO_SUPPORTED_EVIDENCE
+```
 
 ## Where deja-vu sits relative to 007
 
@@ -181,7 +230,9 @@ deja-vu:   transcripts → lexical retrieval → probably-relevant text → agen
              ↓  normalization + provenance binding
            candidate observation                (007's record shape; NOT evidence)
              ↓  evidence admission              (007 owns this; deja-vu has no equivalent)
-           VERIFIED | WEAK | NO SUPPORTED EVIDENCE
+           per candidate: VERIFIED | WEAK       ┐
+           per query:     EVIDENCE_AVAILABLE    ├ one AdmissionResult
+                        | NO_SUPPORTED_EVIDENCE ┘
              ↓  admitted only on VERIFIED
            evidence object
              ↓  policy
@@ -190,8 +241,7 @@ deja-vu:   transcripts → lexical retrieval → probably-relevant text → agen
 
 Admission is the raw → classifier → typed → policy constraint from the evidence
 discipline, applied to recall. It is not a confidence score over deja-vu's
-score. It is a procedure with named inputs, all of which must be satisfiable
-before a candidate is promoted:
+score. It is a procedure over eight named inputs:
 
 ```text
 1. match quality              — tier, matched-term count, score
@@ -202,9 +252,19 @@ before a candidate is promoted:
 5. artifact drift             — have the files it rests on changed since?
 6. lifecycle                  — accepted / rejected / superseded / stale
 7. freshness                  — is it old enough that (5) and (6) are unreliable?
-8. corroboration (later)      — is it independently supported by a second source
+8. corroboration              — is it independently supported by a second source
                                 (a run record, a gate log, an analyzer result)?
 ```
+
+Inputs 1–7 are **mandatory where applicable** — an input that cannot be
+evaluated for a given candidate (no run record exists to check scope against,
+say) fails toward refusal, never toward admission. Input 8 is **initially
+optional and policy-gated**: it may be *required* for higher-risk admission
+classes, auto-recall first among them, and it is the natural lever to tighten
+later. The alternative reading — that no transcript-derived candidate is ever
+`VERIFIED` without independent corroboration — is a defensible and much
+stronger position, but it is a separate architectural decision and is not what
+this document proposes.
 
 Inputs 1–2 are re-derived from what deja-vu already exposes (tier, dropped
 terms, matched count). Inputs 3–8 come from signals only 007 has. Nothing here
@@ -219,8 +279,9 @@ an admitted false memory makes it confidently do the wrong work with a citation
 attached. So:
 
 ```text
-unambiguous          → VERIFIED
-anything ambiguous   → WEAK or NO_SUPPORTED_EVIDENCE
+candidate unambiguous          → VERIFIED
+candidate ambiguous            → WEAK
+no candidate admitted VERIFIED → outcome NO_SUPPORTED_EVIDENCE
 ```
 
 Ambiguity resolves against admission, never toward it. This binds hardest on
@@ -245,13 +306,23 @@ The gate is stated as an obligation on the layer, not as a statistical property
 of the world:
 
 > For every query the corpus oracle classifies as unsupported, the evidence
-> admission layer MUST NOT emit an admissible evidence object.
+> admission layer MUST produce `evidence_objects == []` and
+> `outcome == NO_SUPPORTED_EVIDENCE`.
 
-On the fixed oracle corpus that means literally zero violations. It does not
+Both halves are checked, because the invariant binds them: an implementation
+that emitted an empty evidence set with `EVIDENCE_AVAILABLE`, or vice versa, is
+broken in a way a single count would hide. A violation is any unsupported
+oracle query where either half fails; `unsupported_admission_violations` counts
+exactly that.
+
+On the fixed oracle corpus this means literally zero violations. It does not
 claim a 0% false-positive rate in general, which no finite test set can
 establish. The second metric exists because the first one alone is trivially
 satisfiable by `return NO_SUPPORTED_EVIDENCE`, an implementation with the
 precision of a granite wall and roughly its usefulness.
+`supported_evidence_recall` is measured against the oracle's named evidence
+session: the fraction of supported queries whose admitted `evidence_objects`
+contain it.
 
 ## The oracle as a cross-version instrument
 
@@ -277,7 +348,11 @@ query:      why did the wasm runtime sandbox escape test fail
 dropped:    wasm, runtime, sandbox, escape
 kept:       test → tests, fail → fails
 retriever:  HIT  ("ci flake in the integration suite once every twenty runs")
-admission:  NO_SUPPORTED_EVIDENCE      ← the invariant
+
+admission:  candidate  → WEAK                    (input 2: no discriminating
+                                                  term survived)
+            evidence_objects → []
+            outcome    → NO_SUPPORTED_EVIDENCE   ← the invariant
 ```
 
 Its value is that the two sides disagree. A resolver that agrees with the
@@ -332,22 +407,24 @@ rule governs all of them.
 Three additions are proposed, all small and all testable:
 
 1. **An additional Phase 2 acceptance criterion — abstention.** `o7 context
-   build` and any future recall surface must be able to emit *no supported
-   evidence*, and the oracle corpus must be part of the acceptance run, scored
-   as two separate numbers: `unsupported_admission_violations` (hard gate,
-   normatively zero on the corpus) and `supported_evidence_recall` (measured,
-   optimized). Stated as an obligation on the layer, not as a claimed
-   false-positive rate in the world.
+   build` and any future recall surface must return a `RecallOutcome`, and the
+   oracle corpus must be part of the acceptance run, scored as two separate
+   numbers: `unsupported_admission_violations` (hard gate, normatively zero on
+   the corpus) and `supported_evidence_recall` (measured, optimized). Stated as
+   an obligation on the layer, not as a claimed false-positive rate in the
+   world.
 2. **A named non-goal — no untyped recall reaches a planner.** Every recall
    result crossing into a task context is an evidence object carrying its
    verdict and provenance, or it does not cross. `WEAK` does not cross.
-3. **Normative vocabulary.** `candidate observation` before admission,
-   `evidence object` after; the pre-admission type is not named
-   `EvidenceCandidate`.
+3. **Normative vocabulary, at two levels.** `candidate observation` before
+   admission, `evidence object` after; the pre-admission type is not named
+   `EvidenceCandidate`; `CandidateAdmission` (`VERIFIED`/`WEAK`) is per
+   candidate and `RecallOutcome` (`EVIDENCE_AVAILABLE`/`NO_SUPPORTED_EVIDENCE`)
+   is per query.
 
-Both are recorded here rather than edited into that document's numbered phases,
-because per rule 3 they are agent-authored and pending; the cross-reference in
-`docs/agent-memory-layer.md` points here and says so.
+All three are recorded here rather than edited into that document's numbered
+phases, because per rule 3 they are agent-authored and pending; the
+cross-reference in `docs/agent-memory-layer.md` points here and says so.
 
 ## If the operator wants to run it locally
 
@@ -393,6 +470,7 @@ Memory semantics and evidence admission belong to 007, and the line between
 them has a name now: a retrieval result becomes a candidate observation, and
 only admission makes it evidence.
 
-deja-vu answers *what did we talk about that resembles this*. 007 has to answer
-*what can be proven about what we did*, and be willing to answer *nothing* —
-which is the one answer deja-vu, at `7c4a294`, cannot give.
+deja-vu answers *what did we talk about that resembles this*, and it answers it
+well. 007 has to answer *what can be proven about what we did*, including the
+typed verdict that nothing can — which is not a better search result, and is
+therefore not something a better retriever will ever hand us.

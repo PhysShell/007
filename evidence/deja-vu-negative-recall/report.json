@@ -7,8 +7,11 @@
   },
   "subject": {
     "repo": "github.com/vshulcz/deja-vu",
-    "commit": "7c4a294b3e2b5415ac4cc19f5fd40d4e61dd1884",
-    "version": "nightly-1-g7c4a294 (v0.16.7+1)"
+    "claimed_commit": "7c4a294b3e2b5415ac4cc19f5fd40d4e61dd1884",
+    "claimed_version": "nightly-1-g7c4a294 (v0.16.7+1)",
+    "binary_sha256": "7cd0702b11b86b339113460a7e8f5dd1cfb1a577f85c872a16280d12d0de152a",
+    "binary_vcs_revision": "7c4a294b3e2b5415ac4cc19f5fd40d4e61dd1884",
+    "binary_vcs_modified": false
   },
   "retrieval": [
     {
