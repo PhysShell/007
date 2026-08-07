@@ -3,6 +3,10 @@
 Status: design note · Scope: cross-repo (007 · Own.NET incl. `sandboy/` · OwnAudit) ·
 Source: [`VoltAgent/awesome-ai-agent-papers`](https://github.com/VoltAgent/awesome-ai-agent-papers)
 
+> Single-paper verdicts that do not come from this list live beside it, same
+> genre, one file each: [`docs/neuro-symbolic-transplant-record.md`](neuro-symbolic-transplant-record.md)
+> (Vargas, *Semantic Cognition Matrix*).
+
 > **Read this next to the landed design docs, not instead of them.** The security /
 > sandbox / policy slice of this analysis is *already* written:
 >

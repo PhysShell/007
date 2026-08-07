@@ -68,6 +68,35 @@ codes, fd numbers, or HTTP statuses. A classifier that knows the specific
 authority and its contract translates the raw result into a closed, typed
 semantics first.
 
+### External failure case (evidence of recurrence, not authority)
+
+Vargas (2026), *The Semantic Cognition Matrix*, reports an architecture in which
+formal axioms existed before their computational enforcement: in its first
+generation the axioms were defined in natural language only and *not
+computationally enforced*, relation-type validation was never implemented, invalid
+edges could persist rather than be rejected, one axiom's safety patterns were not
+checked at all, and the paper's own summary table records coverage of safety
+violations at **0 %** — climbing to 28 % and then 100 % only in later generations,
+as the axioms were made machine-executable.
+
+```text
+declared invariant      ≠  executed invariant
+executed check          ≠  enforcement boundary
+passing regression set  ≠  safety proof
+```
+
+This is **evidence for the failure class, not authority for these rules.** The
+rules below were derived independently and are stronger: declared policy,
+validation evidence, and the enforcing boundary are distinct objects, and
+`docs/security-layers.md` already fixes the second line ("a deny is decoration if
+we call the tool before asking"). The citation adds no rule and changes none.
+
+Kept here rather than in the transplant record because the failure it names is the
+same one the section above states abstractly; per rule 4 it is cited as *artifact
+says X*, with the inference and the decision left where they already are. Full
+analysis of the source, including what it is **not** good for:
+`docs/neuro-symbolic-transplant-record.md`.
+
 ## The four rules
 
 ### 1. Projection-bound contracts
