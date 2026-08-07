@@ -1,0 +1,27 @@
+questions:
+- id: qh2-active
+  required_observation_ids:
+  - obs-h2-current-a
+  text: '?'
+- id: qh2-support
+  required_observation_ids:
+  - obs-h2-current-b
+  text: '?'
+- id: qh2-superseded
+  required_observation_ids:
+  - obs-h2-authority
+  required_relation_paths:
+  - from: obs-h2-super-src-1
+    kind: supersedes
+  - from: obs-h2-super-src-2
+    kind: supersedes
+  text: '?'
+- forbidden_stale_as_current:
+  - obs-h2-stale-1
+  - obs-h2-claim
+  id: qh2-forbid
+  required_observation_ids:
+  - obs-h2-authority
+  text: '?'
+schema: o7.b1.questions/v0
+task_id: holdout-h2-audit

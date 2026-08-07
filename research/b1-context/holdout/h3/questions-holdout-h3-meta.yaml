@@ -1,0 +1,7 @@
+questions:
+- id: qh3m-a
+  required_observation_ids:
+  - obs-h3-meta-a
+  text: '?'
+schema: o7.b1.questions/v0
+task_id: holdout-h3-meta

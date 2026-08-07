@@ -1,0 +1,139 @@
+{
+  "cases": {
+    "h1": {
+      "baseline_axes": {
+        "contract_input_consistency": "PASS",
+        "negative_control_diagnostics": "NOT_APPLICABLE",
+        "projection_validity": "PASS",
+        "question_observation_support": "PASS",
+        "relation_support": "PASS",
+        "source_compilation": "PASS",
+        "stale_state_safety": "PASS",
+        "task_dependence": "PASS"
+      },
+      "baseline_failed_axes": [],
+      "baseline_overall": "PASS",
+      "baseline_producer": "o7.b1.selector/projector v0",
+      "budget": {
+        "byte_budget": 20000,
+        "record_budget": 32
+      },
+      "contract_canonical_object_sha256": "sha256:6b4e17e64bf230afb178c555ee63a3dbc91758ad717c210456cbd0b6197ac3a6",
+      "fixture_id": "holdout-h1",
+      "frozen_input_digests": {
+        "baseline/tasks/holdout-h1-operate/context.json": "sha256:f2613b7337ebc75150d33c2fb5a76c1d49aef197c6dd9e93b685f15b71ebab62",
+        "baseline/tasks/holdout-h1-review/context.json": "sha256:1d5e6965e7290b5987dc2a56a462b53c82f962a571e0b4e1a1e49a3ee99deada",
+        "budget-v0.yaml": "sha256:0e69d6f8a13b130e4cc7ee59b88e82fd785fdd5c0bf2cdac4313c90a7b719f10",
+        "derived-manifest.json": "sha256:b8cd336b0c9b43b27ec34c930af64ca3849fafc3c0735332ae559853dd9ba929",
+        "evaluation-contract-v1-r3.yaml": "sha256:d2956a91032037d28b24612ff23c838a37ff1e1f97fa92dd878b70a4c8acc342",
+        "gold-state.json": "sha256:89e3eb61de3b0ca9da8567b00ed07ed5c6919c2e0eb48ee7a78f117443928d45",
+        "manifest.yaml": "sha256:2e8a17739a623c13f34cc567972bb1c8ec522e9775855e5c7c427aeb5828552d",
+        "projection-comparison.json": "sha256:8097644818e9215a4f5b8b19ec57c6cc0cd41f5489d7d498f2fbcb4940ebdf4f",
+        "questions-holdout-h1-operate.yaml": "sha256:d75b6b8c789e41e93de550d388fa366a1521448b5769d6aa0ed39e24f9ea1e78",
+        "questions-holdout-h1-review.yaml": "sha256:53897fcf5ca2d880886a77d45e175668c1ae17d8e57846541412cf00b6fe9b62",
+        "report.json": "sha256:49574f72da4e91e20bdc464d0c7b02e0026486bc37922d7bbe9734300de5cb15",
+        "source-selectors.yaml": "sha256:b5d098ce6536a0597577303ac844ee5e84455b973516db99e145b1af7bad3e04",
+        "task-holdout-h1-operate.yaml": "sha256:f3bbf7794246065c3a30d9e584390d65e5f67944a6d1502b6bd3ae581d774603",
+        "task-holdout-h1-review.yaml": "sha256:f38076b0cd19905d0e023b44926f9d0a62f24f83147cc789816475a20e601515",
+        "tasks.yaml": "sha256:ba7dda855edfce861d42ff2c5de0c379345858098aad12634ff8b14d4661d4aa"
+      },
+      "shape": "relation-light",
+      "task_ids": [
+        "holdout-h1-operate",
+        "holdout-h1-review"
+      ]
+    },
+    "h2": {
+      "baseline_axes": {
+        "contract_input_consistency": "PASS",
+        "negative_control_diagnostics": "NOT_APPLICABLE",
+        "projection_validity": "PASS",
+        "question_observation_support": "PASS",
+        "relation_support": "FAIL",
+        "source_compilation": "PASS",
+        "stale_state_safety": "PASS",
+        "task_dependence": "PASS"
+      },
+      "baseline_failed_axes": [
+        "relation_support"
+      ],
+      "baseline_overall": "FAIL",
+      "baseline_producer": "o7.b1.selector/projector v0",
+      "budget": {
+        "byte_budget": 20000,
+        "record_budget": 32
+      },
+      "contract_canonical_object_sha256": "sha256:e024887b12f6110defedb96f024d84933567909d1ed69ddeab2e9eb31147073a",
+      "fixture_id": "holdout-h2",
+      "frozen_input_digests": {
+        "baseline/tasks/holdout-h2-audit/context.json": "sha256:c44a1ab09127c9c26d9e07f1769243fc6673d853f79d45bc1fef66b2fcaccdef",
+        "baseline/tasks/holdout-h2-history/context.json": "sha256:76967955c35415f43a3002df20623c632f2e540becf3d43dbbcff02ec19a6267",
+        "budget-v0.yaml": "sha256:1ce8bd07f757bc13c18ba3fedc1f81b93c8647e9cd2dab2efc8b10bfbeb5100a",
+        "derived-manifest.json": "sha256:f41d9b6fdd4949b37659182cffd832cfe53bf74d8654c710de48fe88c30c9a45",
+        "evaluation-contract-v1-r3.yaml": "sha256:69af075d5a3bc8c01fce55c8a52c7efd1590b5024cbf310202a41d47e69b3bcb",
+        "gold-state.json": "sha256:27d32ba7c8482f78df67e78c39a020c3a3e10a4250a8677b9d2e9c4fb865d21d",
+        "manifest.yaml": "sha256:6aae17c5805cfbd29e46d483a7b8c2132fec99d369deea59715e20eb9aeaa157",
+        "projection-comparison.json": "sha256:6599e782d893b7e3d3c880118420ababc73b98d088b76c65f06cf403ebd11eef",
+        "questions-holdout-h2-audit.yaml": "sha256:b073f354f90642eb8d97863182778b331209ec56aaac21b741a84676f25a7fde",
+        "questions-holdout-h2-history.yaml": "sha256:d45f8bf19ee7b24efa4ec5adfa83e1e90c4cb248d3d196c282253880cdbf151a",
+        "report.json": "sha256:fe24bd85e8befcacc550ebbe683658a7856922849496877e9b798e54ecaef8e5",
+        "source-selectors.yaml": "sha256:995b54fc490652a6c3b0f7696e2746bff119baf168830c525ebd97a733c322b9",
+        "task-holdout-h2-audit.yaml": "sha256:b74c67b5ca851e8522a4f2d8dc95c6ae8e1155d7a08c5c26cee6a9196bfdc17b",
+        "task-holdout-h2-history.yaml": "sha256:014d4b9ad21dadfc60b0a7e3446f85d97704e5e45c29ef3ceb01ec7eaeb14fca",
+        "tasks.yaml": "sha256:2cb42d126acb3b2f25f259b1890960a5e66b2bc118bc198445348a3a1b361908"
+      },
+      "shape": "relation-heavy",
+      "task_ids": [
+        "holdout-h2-audit",
+        "holdout-h2-history"
+      ]
+    },
+    "h3": {
+      "baseline_axes": {
+        "contract_input_consistency": "PASS",
+        "negative_control_diagnostics": "NOT_APPLICABLE",
+        "projection_validity": "PASS",
+        "question_observation_support": "PASS",
+        "relation_support": "FAIL",
+        "source_compilation": "PASS",
+        "stale_state_safety": "PASS",
+        "task_dependence": "PASS"
+      },
+      "baseline_failed_axes": [
+        "relation_support"
+      ],
+      "baseline_overall": "FAIL",
+      "baseline_producer": "o7.b1.selector/projector v0",
+      "budget": {
+        "byte_budget": 20000,
+        "record_budget": 8
+      },
+      "contract_canonical_object_sha256": "sha256:4768886004b19ee47a3cc9dcbcd502e10332e4cb716f3fe5ff49c875c11d0588",
+      "fixture_id": "holdout-h3",
+      "frozen_input_digests": {
+        "baseline/tasks/holdout-h3-load/context.json": "sha256:86781f2291a8988abbb471b54bedb67a985b7685e9bccdae1101ef0b73cf5646",
+        "baseline/tasks/holdout-h3-meta/context.json": "sha256:17a07f94df35461b461a05046a848778776c6b91d907a9180af9073597f3b2ac",
+        "budget-v0.yaml": "sha256:caa0ca1cbecbc9733265b49e656d5dd21735b826aa1d22f2cf51b61ccd5b86c1",
+        "derived-manifest.json": "sha256:33b31d9f7a97879c984595da139a2aaf21435a39ed9238ce0032a8562fe9754c",
+        "evaluation-contract-v1-r3.yaml": "sha256:63020fd995a474c41cdc5835a26fdcb0d413afca890b28da342ad2842c11ff06",
+        "gold-state.json": "sha256:358bb8015ef641b54208f4e1260886886add3f8e83c1b7ea869c56382616784b",
+        "manifest.yaml": "sha256:d74956f67d216d069007c3b785dcc47cc9d7fc16fb14e47b18046e01bfa7e619",
+        "projection-comparison.json": "sha256:6a3d3ed82c7c4cc2519ecfc66e7b8aa9d163ff610fd0d90ecc63074f23146576",
+        "questions-holdout-h3-load.yaml": "sha256:9b7a25fc61a53633455cd70c59dd51f6b1e7d1993f084f4ecfaab109d5940930",
+        "questions-holdout-h3-meta.yaml": "sha256:b931115257c994c6d23d9a873beff36f022a86b902aeb507b3a8a6b41ff907d5",
+        "report.json": "sha256:f6253bdd7e9b68afb5b132c506f64a09841dd6fc42d0205d5cd11a4f6d6d058d",
+        "source-selectors.yaml": "sha256:cbbfa9284dd99cdeb9d0924c7fd09befd9f872c28b06bf63e4f151397aea89df",
+        "task-holdout-h3-load.yaml": "sha256:c72cff9d572c4418d402c3c4e8fad57b629c6935b2ec216ca4b99604d1576fdc",
+        "task-holdout-h3-meta.yaml": "sha256:3651a632d8658d0ad5f41455e2810d0a85bf62474e05d8426e3da38b9f640d05",
+        "tasks.yaml": "sha256:332c6478d6efb4ae9ef29d42e316927ddf7672c8008a6c971d2ced9e6b26bf63"
+      },
+      "shape": "budget-pressure",
+      "task_ids": [
+        "holdout-h3-load",
+        "holdout-h3-meta"
+      ]
+    }
+  },
+  "discipline": "inputs authored + frozen BEFORE any Qodec run; producer QA 6a5d4030 + adapter f8fa87e3 unchanged; selector/projector v0 + evaluator + contract semantics unchanged",
+  "record": "o7.b1.holdout-batch-freeze/v0"
+}

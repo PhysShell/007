@@ -1,0 +1,13 @@
+cutoff: holdout
+fixture_id: holdout-h3
+schema: o7.b1.task/v0
+selectors:
+  anchor_observation_ids: []
+  anchor_rationale: {}
+  excluded_topics: []
+  preferred_topics: []
+  required_kinds: []
+  required_topics:
+  - load
+statement: holdout task holdout-h3-load
+task_id: holdout-h3-load

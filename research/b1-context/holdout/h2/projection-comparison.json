@@ -1,0 +1,1 @@
+{"fixture_id":"holdout-h2","registry_digest":"sha256:2cb42d126acb3b2f25f259b1890960a5e66b2bc118bc198445348a3a1b361908","registry_filename":"tasks.yaml","schema":"o7.b1.projection-comparison/v1","tasks":[{"task_id":"holdout-h2-audit"},{"task_id":"holdout-h2-history"}]}

@@ -1,0 +1,7 @@
+fixture_id: holdout-h1
+schema: o7.b1.fixture-tasks/v0
+tasks:
+- questions_file: questions-holdout-h1-operate.yaml
+  task_file: task-holdout-h1-operate.yaml
+- questions_file: questions-holdout-h1-review.yaml
+  task_file: task-holdout-h1-review.yaml

@@ -1,0 +1,9 @@
+fixture_id: holdout-h1
+negative_control: []
+raw_sources:
+- byte_length: 500
+  digest: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  id: src-holdout
+  source_system: holdout-synthetic
+schema: o7.b1.fixture-manifest/v0
+status: holdout

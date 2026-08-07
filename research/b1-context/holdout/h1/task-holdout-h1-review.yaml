@@ -1,0 +1,13 @@
+cutoff: holdout
+fixture_id: holdout-h1
+schema: o7.b1.task/v0
+selectors:
+  anchor_observation_ids: []
+  anchor_rationale: {}
+  excluded_topics: []
+  preferred_topics: []
+  required_kinds: []
+  required_topics:
+  - review
+statement: holdout task holdout-h1-review
+task_id: holdout-h1-review

@@ -1,0 +1,7 @@
+fixture_id: holdout-h3
+schema: o7.b1.fixture-tasks/v0
+tasks:
+- questions_file: questions-holdout-h3-load.yaml
+  task_file: task-holdout-h3-load.yaml
+- questions_file: questions-holdout-h3-meta.yaml
+  task_file: task-holdout-h3-meta.yaml

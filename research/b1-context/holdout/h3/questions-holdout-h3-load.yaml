@@ -1,0 +1,14 @@
+questions:
+- id: qh3-any
+  required_observation_ids:
+  - obs-h3-01
+  text: '?'
+- id: qh3-super
+  required_observation_ids:
+  - obs-h3-01
+  required_relation_paths:
+  - from: obs-h3-super-src
+    kind: supersedes
+  text: '?'
+schema: o7.b1.questions/v0
+task_id: holdout-h3-load

@@ -1,0 +1,7 @@
+questions:
+- id: qh2h-src
+  required_observation_ids:
+  - obs-h2-super-src-1
+  text: '?'
+schema: o7.b1.questions/v0
+task_id: holdout-h2-history

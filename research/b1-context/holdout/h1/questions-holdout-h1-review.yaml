@@ -1,0 +1,7 @@
+questions:
+- id: qh1r-a
+  required_observation_ids:
+  - obs-h1-review-a
+  text: '?'
+schema: o7.b1.questions/v0
+task_id: holdout-h1-review

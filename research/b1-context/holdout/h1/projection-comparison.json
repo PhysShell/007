@@ -1,0 +1,1 @@
+{"fixture_id":"holdout-h1","registry_digest":"sha256:ba7dda855edfce861d42ff2c5de0c379345858098aad12634ff8b14d4661d4aa","registry_filename":"tasks.yaml","schema":"o7.b1.projection-comparison/v1","tasks":[{"task_id":"holdout-h1-operate"},{"task_id":"holdout-h1-review"}]}

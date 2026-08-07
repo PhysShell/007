@@ -1,0 +1,6 @@
+fixture_id: holdout-h3
+schema: o7.b1.source-selectors/v0
+sessions:
+- coverage: {}
+  raw_source: src-holdout
+  session_id: holdout-session

@@ -1,0 +1,18 @@
+questions:
+- id: qh1-state
+  required_observation_ids:
+  - obs-h1-state
+  text: '?'
+- id: qh1-next
+  required_observation_ids:
+  - obs-h1-next
+  text: '?'
+- id: qh1-support
+  required_observation_ids:
+  - obs-h1-state
+  required_relation_paths:
+  - from: obs-h1-support-src
+    kind: supports
+  text: '?'
+schema: o7.b1.questions/v0
+task_id: holdout-h1-operate
