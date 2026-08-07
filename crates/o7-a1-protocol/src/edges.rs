@@ -1,15 +1,20 @@
 //! The closed reference universe and the frozen per-kind allowed-edge
-//! matrix (contract §11.1–§11.4). Edge tags are wire semantics: the
-//! `ref_manifest` sorts by `(edge kind tag, target digest)` into a
-//! protocol digest, so the tag registry carries uniqueness and
-//! known-answer tests, and renaming a carrying field is a supersede-path
-//! wire change.
+//! matrix (contract §11.1–§11.4). Review T3: targets are EXACT — a
+//! specific envelope kind, a specific CAS `ContentKind`, a specific
+//! external wrapper kind, a specific transition kind, or the one
+//! contract-sanctioned open target (`AnyCommittedEnvelope`, the
+//! CampaignFeedItem rule). The full registry is pinned by a literal
+//! known-answer digest, so ANY edit to any row is a visible
+//! supersede-path wire change.
 
 use serde::{Deserialize, Serialize};
+
+use crate::cas::ContentKind;
 
 /// The 15 envelope-bearing message kinds (contract §11.1 class 1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[allow(missing_docs)]
 pub enum MessageKind {
     WorkOrder,
     CoderReport,
@@ -28,51 +33,86 @@ pub enum MessageKind {
     ArtifactImported,
 }
 
-/// Node classes of the closed universe (contract §11.1).
+/// Class-3 external wrapper kinds (contract §11.1, into A0/R1 records).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[allow(missing_docs)]
+pub enum ExternalRefKind {
+    CandidateStateReceipt,
+    CandidateMaterialization,
+    RunContractCandidateState,
+    WorktreeMaterialization,
+    RunArtifactSource,
+    EstablishedNonDispatchEvidence,
+}
+
+/// Class-4 attention transition kinds (appended by A2; contract §8.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[allow(missing_docs)]
+pub enum TransitionKind {
+    AttentionAcknowledged,
+    AttentionResolved,
+    AttentionSuperseded,
+}
+
+/// An edge SOURCE: an envelope kind or a transition record kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Node {
-    /// Class 1 — envelope-bearing kind.
+pub enum EdgeSource {
+    /// Envelope-bearing kind.
     Kind(MessageKind),
-    /// Class 2/5 — a typed CAS blob (terminal; no outgoing edges).
-    CasBlob,
-    /// Class 3 — external wrapper into A0/R1 canonical records
-    /// (terminal from the A1 DAG's perspective).
-    ExternalWrapper,
-    /// Class 4 — A2-only attention transition records.
-    AttentionTransition,
+    /// Attention transition record.
+    Transition(TransitionKind),
+}
+
+/// An edge TARGET — exact, per review T3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum EdgeTarget {
+    /// A specific envelope-bearing kind.
+    Envelope(MessageKind),
+    /// A specific CAS content kind (terminal).
+    Cas(ContentKind),
+    /// A specific external wrapper kind (terminal for the A1 DAG).
+    External(ExternalRefKind),
+    /// The one sanctioned open target: any already-committed
+    /// envelope-bearing artifact (CampaignFeedItem §11.3; causation).
+    AnyCommittedEnvelope,
 }
 
 /// Edge classification (contract §11.3–§11.4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum EdgeClass {
-    /// Within one round's derivation flow — the subgraph that must
-    /// topologically sort at KIND level.
+    /// Within one round's derivation flow — must topologically sort at
+    /// KIND level.
     Intra,
     /// Crossing rounds/chains/attention lineage — instance-acyclic by
-    /// create-before-reference (+ strictly-lower `round_ordinal` where
-    /// one applies).
+    /// create-before-reference (+ strictly-lower ordinal where
+    /// applicable).
     Causal,
 }
 
-/// One frozen edge: `from` may directly carry a digest reference tagged
-/// `tag` to `to`.
+/// One frozen edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Edge {
-    /// Source node.
-    pub from: Node,
-    /// Stable snake_case tag — equal to the field path carrying the ref.
+    /// Source.
+    pub from: EdgeSource,
+    /// Stable snake_case tag equal to the carrying field path.
     pub tag: &'static str,
-    /// Target node.
-    pub to: Node,
+    /// Exact target.
+    pub to: EdgeTarget,
     /// Classification.
     pub class: EdgeClass,
 }
 
+use ContentKind as C;
 use EdgeClass::{Causal, Intra};
+use EdgeSource::{Kind, Transition};
+use EdgeTarget::{AnyCommittedEnvelope, Cas, Envelope, External};
+use ExternalRefKind as X;
 use MessageKind as K;
-use Node::{CasBlob, ExternalWrapper, Kind};
+use TransitionKind as T;
 
-const fn e(from: MessageKind, tag: &'static str, to: Node, class: EdgeClass) -> Edge {
+const fn e(from: MessageKind, tag: &'static str, to: EdgeTarget, class: EdgeClass) -> Edge {
     Edge {
         from: Kind(from),
         tag,
@@ -81,286 +121,428 @@ const fn e(from: MessageKind, tag: &'static str, to: Node, class: EdgeClass) -> 
     }
 }
 
-/// The frozen §11.3 matrix, EXHAUSTIVE per kind, including
-/// producer-binding and cause edges. The global causation rule (every
-/// envelope kind carries one `causation` edge, class `causal`, target
-/// any committed envelope kind) is represented by [`CAUSATION_TAG`] and
-/// enforced at the manifest layer, not repeated per row.
+const fn t(from: TransitionKind, tag: &'static str, to: EdgeTarget, class: EdgeClass) -> Edge {
+    Edge {
+        from: Transition(from),
+        tag,
+        to,
+        class,
+    }
+}
+
+/// The global causation edge (contract §3): every envelope kind carries
+/// exactly one, class `causal`, target [`EdgeTarget::AnyCommittedEnvelope`]
+/// (or `CampaignGenesis`, first WorkOrder only — no edge).
 pub const CAUSATION_TAG: &str = "causation.blob_ref";
 
-/// Every frozen non-causation edge.
+/// The frozen §11.3 matrix — EXHAUSTIVE, exact targets, including
+/// producer-binding, cause, and class-4 transition edges.
 pub const EDGES: &[Edge] = &[
     // WorkOrder
-    e(K::WorkOrder, "goal.contract_blob", CasBlob, Intra),
-    e(K::WorkOrder, "input.correspondence_ref", CasBlob, Intra),
-    e(K::WorkOrder, "input.state_refs", ExternalWrapper, Intra),
+    e(
+        K::WorkOrder,
+        "goal.contract_blob",
+        Cas(C::ContractBlob),
+        Intra,
+    ),
+    e(
+        K::WorkOrder,
+        "input.initial.correspondence_ref",
+        Cas(C::WorktreeCorrespondenceEvidenceBlob),
+        Intra,
+    ),
+    e(
+        K::WorkOrder,
+        "input.initial.run_contract_ref",
+        External(X::RunContractCandidateState),
+        Intra,
+    ),
+    e(
+        K::WorkOrder,
+        "input.initial.worktree_ref",
+        External(X::WorktreeMaterialization),
+        Intra,
+    ),
+    e(
+        K::WorkOrder,
+        "input.continued.candidate_state_ref",
+        External(X::CandidateStateReceipt),
+        Intra,
+    ),
+    e(
+        K::WorkOrder,
+        "input.continued.materialization_ref",
+        External(X::CandidateMaterialization),
+        Intra,
+    ),
     // CoderReport (raw)
     e(
         K::CoderReport,
         "producer.invocation_receipt_ref",
-        Kind(K::ProviderInvocationReceipt),
+        Envelope(K::ProviderInvocationReceipt),
         Intra,
     ),
-    e(K::CoderReport, "claims.evidence_refs.gate", CasBlob, Intra),
-    e(K::CoderReport, "claims.evidence_refs.diff", CasBlob, Intra),
+    e(
+        K::CoderReport,
+        "claims.evidence_refs.gate",
+        Cas(C::GateEvidenceBlob),
+        Intra,
+    ),
+    e(
+        K::CoderReport,
+        "claims.evidence_refs.diff",
+        Cas(C::DiffEvidenceBlob),
+        Intra,
+    ),
     // CandidateAdmissionReceipt
     e(
         K::CandidateAdmissionReceipt,
         "coder_report_ref",
-        Kind(K::CoderReport),
+        Envelope(K::CoderReport),
         Intra,
     ),
     e(
         K::CandidateAdmissionReceipt,
         "coder_run_binding_ref.blob_ref",
-        Kind(K::CampaignRunBinding),
+        Envelope(K::CampaignRunBinding),
         Intra,
     ),
     e(
         K::CandidateAdmissionReceipt,
         "candidate_state_ref",
-        ExternalWrapper,
+        External(X::CandidateStateReceipt),
         Intra,
     ),
     // ReviewRequest — NO separate CoderReport edge (§8.4)
     e(
         K::ReviewRequest,
         "admission_receipt_ref",
-        Kind(K::CandidateAdmissionReceipt),
+        Envelope(K::CandidateAdmissionReceipt),
         Intra,
     ),
-    e(K::ReviewRequest, "contract_blob", CasBlob, Intra),
-    e(K::ReviewRequest, "evidence_refs.gate", CasBlob, Intra),
-    e(K::ReviewRequest, "evidence_refs.diff", CasBlob, Intra),
+    e(
+        K::ReviewRequest,
+        "contract_blob",
+        Cas(C::ContractBlob),
+        Intra,
+    ),
+    e(
+        K::ReviewRequest,
+        "evidence_refs.gate",
+        Cas(C::GateEvidenceBlob),
+        Intra,
+    ),
+    e(
+        K::ReviewRequest,
+        "evidence_refs.diff",
+        Cas(C::DiffEvidenceBlob),
+        Intra,
+    ),
     // ReviewerReport (raw)
     e(
         K::ReviewerReport,
         "producer.invocation_receipt_ref",
-        Kind(K::ProviderInvocationReceipt),
+        Envelope(K::ProviderInvocationReceipt),
         Intra,
     ),
-    e(K::ReviewerReport, "evidence_refs.gate", CasBlob, Intra),
+    e(
+        K::ReviewerReport,
+        "evidence_refs.gate",
+        Cas(C::GateEvidenceBlob),
+        Intra,
+    ),
     // ReviewVerdict
     e(
         K::ReviewVerdict,
         "reviewer_report_ref",
-        Kind(K::ReviewerReport),
+        Envelope(K::ReviewerReport),
         Intra,
     ),
     e(
         K::ReviewVerdict,
         "findings.evidence_refs.gate",
-        CasBlob,
+        Cas(C::GateEvidenceBlob),
         Intra,
     ),
     e(
         K::ReviewVerdict,
         "reviewed_candidate_state_ref",
-        ExternalWrapper,
+        External(X::CandidateStateReceipt),
         Intra,
     ),
     // CorrectiveDirective
     e(
         K::CorrectiveDirective,
         "verdict_ref",
-        Kind(K::ReviewVerdict),
+        Envelope(K::ReviewVerdict),
         Causal,
     ),
     e(
         K::CorrectiveDirective,
-        "input.state_refs",
-        ExternalWrapper,
+        "input.continued.candidate_state_ref",
+        External(X::CandidateStateReceipt),
+        Intra,
+    ),
+    e(
+        K::CorrectiveDirective,
+        "input.continued.materialization_ref",
+        External(X::CandidateMaterialization),
         Intra,
     ),
     // ProviderInvocationReceipt (Controller-produced, §11.2)
     e(
         K::ProviderInvocationReceipt,
         "request.canonical_request_ref",
-        CasBlob,
+        Cas(C::CanonicalRequestBlob),
         Intra,
     ),
     e(
         K::ProviderInvocationReceipt,
         "outcome.normalized_output_ref",
-        CasBlob,
+        Cas(C::NormalizedOutputBlob),
         Intra,
     ),
     e(
         K::ProviderInvocationReceipt,
         "interaction_manifest_ref",
-        Kind(K::InteractionManifest),
+        Envelope(K::InteractionManifest),
         Intra,
     ),
     e(
         K::ProviderInvocationReceipt,
         "model_route_ref",
-        CasBlob,
+        Cas(C::ModelRouteBlob),
         Intra,
     ),
     e(
         K::ProviderInvocationReceipt,
         "campaign_run_binding_ref.blob_ref",
-        Kind(K::CampaignRunBinding),
+        Envelope(K::CampaignRunBinding),
         Intra,
     ),
     e(
         K::ProviderInvocationReceipt,
         "execution_cause.prior_verdict_ref",
-        Kind(K::ReviewVerdict),
+        Envelope(K::ReviewVerdict),
         Causal,
     ),
     e(
         K::ProviderInvocationReceipt,
         "cause.safe_redrive.prior_receipt_ref",
-        Kind(K::ProviderInvocationReceipt),
+        Envelope(K::ProviderInvocationReceipt),
         Causal,
     ),
     e(
         K::ProviderInvocationReceipt,
         "cause.safe_redrive.evidence",
-        ExternalWrapper,
+        External(X::EstablishedNonDispatchEvidence),
         Intra,
     ),
     e(
         K::ProviderInvocationReceipt,
         "cause.safe_redrive.evidence.classification_record_ref",
-        CasBlob,
+        Cas(C::NonDispatchClassificationBlob),
         Intra,
     ),
     // InteractionManifest
     e(
         K::InteractionManifest,
         "sequence.raw_provider_event_refs",
-        CasBlob,
+        Cas(C::RawProviderEventBlob),
         Intra,
     ),
     e(
         K::InteractionManifest,
         "sequence.tool_argument_refs",
-        CasBlob,
+        Cas(C::ToolArgumentBlob),
         Intra,
     ),
     e(
         K::InteractionManifest,
         "sequence.tool_result_refs",
-        CasBlob,
+        Cas(C::ToolResultBlob),
         Intra,
     ),
-    // CampaignFeedItem — informative projection feed
+    // CampaignFeedItem — the contract's own open rule, honestly typed
     e(
         K::CampaignFeedItem,
         "subject_refs",
-        Kind(K::WorkOrder),
-        Causal,
-    ),
-    e(
-        K::CampaignFeedItem,
-        "subject_refs.receipt",
-        Kind(K::ProviderInvocationReceipt),
-        Causal,
-    ),
-    e(
-        K::CampaignFeedItem,
-        "subject_refs.admission",
-        Kind(K::CandidateAdmissionReceipt),
-        Causal,
-    ),
-    e(
-        K::CampaignFeedItem,
-        "subject_refs.verdict",
-        Kind(K::ReviewVerdict),
-        Causal,
-    ),
-    e(
-        K::CampaignFeedItem,
-        "subject_refs.attention",
-        Kind(K::HumanAttentionRequest),
+        AnyCommittedEnvelope,
         Causal,
     ),
     // HumanAttentionRequest
     e(
         K::HumanAttentionRequest,
         "evidence_refs.receipt",
-        Kind(K::ProviderInvocationReceipt),
+        Envelope(K::ProviderInvocationReceipt),
         Intra,
     ),
     e(
         K::HumanAttentionRequest,
         "evidence_refs.gate",
-        CasBlob,
+        Cas(C::GateEvidenceBlob),
         Intra,
     ),
     e(
         K::HumanAttentionRequest,
         "evidence_refs.admission",
-        Kind(K::CandidateAdmissionReceipt),
+        Envelope(K::CandidateAdmissionReceipt),
         Causal,
     ),
     e(
         K::HumanAttentionRequest,
         "evidence_refs.verdict",
-        Kind(K::ReviewVerdict),
+        Envelope(K::ReviewVerdict),
         Causal,
     ),
     e(
         K::HumanAttentionRequest,
         "candidate_state_ref",
-        ExternalWrapper,
+        External(X::CandidateStateReceipt),
         Intra,
     ),
     // HumanCommandRequest (raw)
     e(
         K::HumanCommandRequest,
         "producer.authenticated_principal_ref",
-        CasBlob,
+        Cas(C::AuthenticatedPrincipalRecord),
         Intra,
     ),
     // HumanDecision
     e(
         K::HumanDecision,
         "source.blob_ref",
-        Kind(K::HumanCommandRequest),
+        Envelope(K::HumanCommandRequest),
         Intra,
     ),
     e(
         K::HumanDecision,
         "producer.authenticated_principal_ref",
-        CasBlob,
+        Cas(C::AuthenticatedPrincipalRecord),
         Intra,
     ),
     e(
         K::HumanDecision,
         "attention_ref",
-        Kind(K::HumanAttentionRequest),
+        Envelope(K::HumanAttentionRequest),
         Intra,
     ),
     // ArtifactImported
-    e(K::ArtifactImported, "cas_object_ref", CasBlob, Intra),
-    e(K::ArtifactImported, "source", ExternalWrapper, Intra),
+    e(
+        K::ArtifactImported,
+        "cas_object_ref",
+        Cas(C::MessagePayloadBlob),
+        Intra,
+    ),
+    e(
+        K::ArtifactImported,
+        "source",
+        External(X::RunArtifactSource),
+        Intra,
+    ),
     // CampaignRunBinding
     e(
         K::CampaignRunBinding,
-        "input.correspondence_ref",
-        CasBlob,
+        "input.initial.correspondence_ref",
+        Cas(C::WorktreeCorrespondenceEvidenceBlob),
         Intra,
     ),
     e(
         K::CampaignRunBinding,
-        "input.state_refs",
-        ExternalWrapper,
+        "input.initial.run_contract_ref",
+        External(X::RunContractCandidateState),
         Intra,
+    ),
+    e(
+        K::CampaignRunBinding,
+        "input.initial.worktree_ref",
+        External(X::WorktreeMaterialization),
+        Intra,
+    ),
+    e(
+        K::CampaignRunBinding,
+        "input.continued.candidate_state_ref",
+        External(X::CandidateStateReceipt),
+        Intra,
+    ),
+    e(
+        K::CampaignRunBinding,
+        "input.continued.materialization_ref",
+        External(X::CandidateMaterialization),
+        Intra,
+    ),
+    // Class-4 transitions (§8.7; appended by A2)
+    t(
+        T::AttentionAcknowledged,
+        "attention_ref",
+        Envelope(K::HumanAttentionRequest),
+        Intra,
+    ),
+    t(
+        T::AttentionAcknowledged,
+        "decision_ref",
+        Envelope(K::HumanDecision),
+        Intra,
+    ),
+    t(
+        T::AttentionResolved,
+        "attention_ref",
+        Envelope(K::HumanAttentionRequest),
+        Intra,
+    ),
+    t(
+        T::AttentionResolved,
+        "decision_ref",
+        Envelope(K::HumanDecision),
+        Intra,
+    ),
+    t(
+        T::AttentionSuperseded,
+        "attention_ref",
+        Envelope(K::HumanAttentionRequest),
+        Intra,
+    ),
+    t(
+        T::AttentionSuperseded,
+        "superseding_attention_ref",
+        Envelope(K::HumanAttentionRequest),
+        Causal,
     ),
 ];
 
-/// Attention transition records (class 4; appended by A2).
-pub const TRANSITION_EDGES: &[(&str, &str)] = &[
-    ("attention_acknowledged", "attention_ref+decision_ref"),
-    ("attention_resolved", "attention_ref+decision_ref"),
-    (
-        "attention_superseded",
-        "attention_ref+superseding_attention_ref",
-    ),
-];
+/// Producer class required per envelope kind (contract §11.2) — the
+/// wire-shape half of "invalid producer combination is unrepresentable"
+/// (review T4). `Provider` rows also name the role the receipt chain
+/// must yield (a classifier obligation, not a binding field).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProducerClass {
+    /// Controller-derived.
+    Controller,
+    /// Provider raw report; the receipt chain must yield this role.
+    Provider(&'static str),
+    /// Human raw command.
+    Human,
+}
+
+/// The frozen §11.2 mapping.
+#[must_use]
+pub fn required_producer(kind: MessageKind) -> ProducerClass {
+    match kind {
+        K::CoderReport => ProducerClass::Provider("coder"),
+        K::ReviewerReport => ProducerClass::Provider("reviewer"),
+        K::HumanCommandRequest => ProducerClass::Human,
+        _ => ProducerClass::Controller,
+    }
+}
+
+/// Whether the kind is round-scoped (must carry the §2.3 pair).
+#[must_use]
+pub fn is_round_scoped(kind: MessageKind) -> bool {
+    !matches!(
+        kind,
+        K::CampaignFeedItem | K::HumanCommandRequest | K::HumanDecision | K::ArtifactImported
+    )
+}
 
 #[cfg(test)]
 mod tests {
@@ -371,27 +553,53 @@ mod tests {
     use super::*;
     use std::collections::{BTreeMap, BTreeSet};
 
-    /// Contract §11.1: edge tags form a closed registry — unique per
-    /// (source, tag).
+    fn source_name(s: EdgeSource) -> String {
+        format!("{s:?}")
+    }
+
     #[test]
     fn edge_tags_are_unique_per_source() {
         let mut seen = BTreeSet::new();
         for edge in EDGES {
             assert!(
-                seen.insert((edge.from, edge.tag)),
+                seen.insert((source_name(edge.from), edge.tag)),
                 "duplicate edge tag {:?} on {:?}",
                 edge.tag,
                 edge.from
             );
-            assert_ne!(
-                edge.tag, CAUSATION_TAG,
-                "causation is the global rule, not a row"
-            );
+            assert_ne!(edge.tag, CAUSATION_TAG);
         }
     }
 
-    /// Contract §11.4 item 1: the `intra` subgraph over KINDS must
-    /// topologically sort; failure to sort is a build failure.
+    /// Review T3: the FULL registry — (source, tag, target, class) rows
+    /// plus the causation rule — is pinned by a literal digest. Any
+    /// edit to any row is a visible supersede-path wire change.
+    #[test]
+    fn full_registry_known_answer() {
+        let mut rows: Vec<String> = EDGES
+            .iter()
+            .map(|edge| {
+                format!(
+                    "{:?}|{}|{:?}|{:?}",
+                    edge.from, edge.tag, edge.to, edge.class
+                )
+            })
+            .collect();
+        rows.push(format!(
+            "GLOBAL|{CAUSATION_TAG}|AnyCommittedEnvelope|Causal"
+        ));
+        rows.sort();
+        let joined = rows.join("\n");
+        assert_eq!(
+            crate::ids::BlobDigest::of_bytes(joined.as_bytes()).as_str(),
+            REGISTRY_KAT,
+            "edge registry changed — this is a supersede-path wire change; \
+             re-pin ONLY alongside the contract amendment"
+        );
+    }
+
+    const REGISTRY_KAT: &str = "cc216eed944d07b58c2fac45e8222dc41028e0aa3fff47b1d2884b4c8e2da29f";
+
     #[test]
     fn intra_subgraph_topologically_sorts() {
         let mut adj: BTreeMap<MessageKind, Vec<MessageKind>> = BTreeMap::new();
@@ -400,8 +608,8 @@ mod tests {
             if edge.class != Intra {
                 continue;
             }
-            let (Kind(from), Kind(to)) = (edge.from, edge.to) else {
-                continue; // CAS/wrapper targets are terminal.
+            let (Kind(from), Envelope(to)) = (edge.from, edge.to) else {
+                continue; // terminal targets and transition sources
             };
             adj.entry(from).or_default().push(to);
             *indeg.entry(to).or_default() += 1;
@@ -426,67 +634,38 @@ mod tests {
         assert_eq!(sorted, indeg.len(), "intra kind-subgraph has a cycle");
     }
 
-    /// The causal edges that §11.4 exempts from the kind-level sort are
-    /// exactly the known set — a new causal edge is a supersede-path
-    /// contract change, so this test pins the list.
     #[test]
-    fn causal_edges_are_the_frozen_set() {
-        let causal: BTreeSet<(&str, &str)> = EDGES
-            .iter()
-            .filter(|edge| edge.class == Causal)
-            .map(|edge| {
-                let Kind(from) = edge.from else {
-                    panic!("causal edge from non-kind")
-                };
-                (kind_name(from), edge.tag)
-            })
-            .collect();
-        let expected: BTreeSet<(&str, &str)> = [
-            ("corrective_directive", "verdict_ref"),
-            (
-                "provider_invocation_receipt",
-                "execution_cause.prior_verdict_ref",
-            ),
-            (
-                "provider_invocation_receipt",
-                "cause.safe_redrive.prior_receipt_ref",
-            ),
-            ("campaign_feed_item", "subject_refs"),
-            ("campaign_feed_item", "subject_refs.receipt"),
-            ("campaign_feed_item", "subject_refs.admission"),
-            ("campaign_feed_item", "subject_refs.verdict"),
-            ("campaign_feed_item", "subject_refs.attention"),
-            ("human_attention_request", "evidence_refs.admission"),
-            ("human_attention_request", "evidence_refs.verdict"),
-        ]
-        .into_iter()
-        .collect();
-        assert_eq!(causal, expected);
-    }
-
-    fn kind_name(k: MessageKind) -> &'static str {
-        match k {
-            MessageKind::WorkOrder => "work_order",
-            MessageKind::CoderReport => "coder_report",
-            MessageKind::CandidateAdmissionReceipt => "candidate_admission_receipt",
-            MessageKind::ReviewRequest => "review_request",
-            MessageKind::ReviewerReport => "reviewer_report",
-            MessageKind::ReviewVerdict => "review_verdict",
-            MessageKind::CorrectiveDirective => "corrective_directive",
-            MessageKind::ProviderInvocationReceipt => "provider_invocation_receipt",
-            MessageKind::InteractionManifest => "interaction_manifest",
-            MessageKind::CampaignFeedItem => "campaign_feed_item",
-            MessageKind::HumanAttentionRequest => "human_attention_request",
-            MessageKind::HumanCommandRequest => "human_command_request",
-            MessageKind::HumanDecision => "human_decision",
-            MessageKind::CampaignRunBinding => "campaign_run_binding",
-            MessageKind::ArtifactImported => "artifact_imported",
+    fn any_committed_envelope_is_feed_and_causation_only() {
+        for edge in EDGES {
+            if edge.to == AnyCommittedEnvelope {
+                assert_eq!(edge.from, Kind(K::CampaignFeedItem), "open target leaked");
+                assert_eq!(edge.class, Causal);
+            }
         }
     }
 
-    /// Contract §5: every envelope kind with a byte ceiling appears in
-    /// the kind-limit table under its snake_case name (two registries
-    /// cannot drift apart silently).
+    #[test]
+    fn producer_mapping_and_round_scope_are_frozen() {
+        assert_eq!(
+            required_producer(K::CoderReport),
+            ProducerClass::Provider("coder")
+        );
+        assert_eq!(
+            required_producer(K::ProviderInvocationReceipt),
+            ProducerClass::Controller,
+            "the receipt is Controller-produced (§11.2) — a Provider \
+             receipt would eat its own tail"
+        );
+        assert_eq!(
+            required_producer(K::HumanCommandRequest),
+            ProducerClass::Human
+        );
+        assert!(is_round_scoped(K::WorkOrder));
+        assert!(!is_round_scoped(K::HumanCommandRequest));
+    }
+
+    /// Contract §5: every limit-bearing kind appears in the limits table
+    /// under its snake_case serde name.
     #[test]
     fn kind_limits_cover_the_limit_bearing_kinds() {
         let limited: BTreeSet<&str> = crate::limits::KIND_LIMITS.iter().map(|k| k.kind).collect();
@@ -505,10 +684,11 @@ mod tests {
             K::HumanCommandRequest,
             K::HumanDecision,
         ] {
-            assert!(
-                limited.contains(kind_name(kind)),
-                "no limit row for {kind:?}"
-            );
+            let name = serde_json::to_value(kind)
+                .ok()
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_default();
+            assert!(limited.contains(name.as_str()), "no limit row for {kind:?}");
         }
     }
 }

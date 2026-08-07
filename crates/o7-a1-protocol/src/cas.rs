@@ -12,7 +12,7 @@ use crate::limits::MAX_EVIDENCE_BLOB_BYTES;
 /// deliberately absent: an unknown kind fails at deserialization
 /// (wire-unrepresentable, contract §15.1). Extension is a contract
 /// change via the supersede path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ContentKind {
     /// Class 2 — typed support objects.

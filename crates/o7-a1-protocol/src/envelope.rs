@@ -68,11 +68,58 @@ pub enum ProducerBindingV1 {
 /// the mechanical collection of ALL direct digest refs — typed payload +
 /// producer binding + causation — deduplicated and sorted by
 /// `(edge kind tag, target digest bytes)`.
+/// A CLOSED edge tag — only strings present in the frozen §11.3
+/// registry (or the global causation tag) are constructible (review
+/// T4: an arbitrary `String` let `"completely_made_up_edge"` become a
+/// valid manifest row).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub struct EdgeTag(String);
+
+/// Rejected edge tag.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("edge tag is not in the frozen §11.3 registry")]
+pub struct UnknownEdgeTag;
+
+impl EdgeTag {
+    /// Admit a tag only if the registry knows it.
+    ///
+    /// # Errors
+    /// [`UnknownEdgeTag`] otherwise.
+    pub fn new(raw: impl Into<String>) -> Result<Self, UnknownEdgeTag> {
+        let raw = raw.into();
+        if raw == crate::edges::CAUSATION_TAG || crate::edges::EDGES.iter().any(|e| e.tag == raw) {
+            Ok(Self(raw))
+        } else {
+            Err(UnknownEdgeTag)
+        }
+    }
+
+    /// The tag string.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for EdgeTag {
+    type Error = UnknownEdgeTag;
+    fn try_from(raw: String) -> Result<Self, Self::Error> {
+        Self::new(raw)
+    }
+}
+
+impl From<EdgeTag> for String {
+    fn from(t: EdgeTag) -> Self {
+        t.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RefManifestEntry {
-    /// Stable edge tag from the frozen §11.3 registry.
-    pub edge_tag: String,
+    /// Closed edge tag from the frozen §11.3 registry.
+    pub edge_tag: EdgeTag,
     /// Target content identity.
     pub target: BlobDigest,
 }
@@ -133,12 +180,17 @@ impl From<RefManifest> for Vec<RefManifestEntry> {
     }
 }
 
-/// The envelope core (contract §3). `contract_digest`, candidate
+/// The RAW wire envelope core (contract §3). Review T4: this type is
+/// what serde admits from bytes — it deliberately CANNOT promise the
+/// per-kind invariants (§11.2 producer mapping, round scope, genesis
+/// rule); those are the acceptance boundary's job. The canonical form
+/// is [`AcceptedEnvelopeCoreV1`], constructible only through
+/// [`AcceptedEnvelopeCoreV1::try_accept`]. `contract_digest`, candidate
 /// preconditions, and action-specific bindings live in typed payloads,
 /// not here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct EnvelopeCoreV1 {
+pub struct WireEnvelopeCoreV1 {
     /// Envelope schema version.
     pub envelope_version: u32,
     /// Message kind.
@@ -170,6 +222,108 @@ pub struct EnvelopeCoreV1 {
     pub recorded: RecordedMetadataV1,
 }
 
+/// Why a wire envelope failed shape acceptance.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum EnvelopeShapeError {
+    /// Producer variant does not match the frozen §11.2 mapping.
+    #[error("producer binding variant is not the one §11.2 freezes for this kind")]
+    WrongProducer,
+    /// Round pair presence does not match the kind's round scope.
+    #[error("round pair presence does not match the kind's round scope")]
+    WrongRoundScope,
+    /// `CampaignGenesis` on anything but a round-0 WorkOrder.
+    #[error("campaign_genesis causation outside the first WorkOrder")]
+    GenesisOutsideFirstWorkOrder,
+    /// Causation claims mismatch the resolved artifact (P1-24 check —
+    /// requires the resolver context the caller supplies).
+    #[error("causation claims do not match the resolved artifact")]
+    CausationMismatch,
+}
+
+/// The CANONICAL envelope core: private inner, constructible only via
+/// [`Self::try_accept`] — the §15.2 construction boundary. Checks that
+/// need no external resolution run here (producer mapping, round scope,
+/// genesis rule); causation resolution takes the resolved facts as
+/// PROOF INPUTS so "two adjacent valid claims" cannot be built.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct AcceptedEnvelopeCoreV1(WireEnvelopeCoreV1);
+
+/// Resolved causation facts the acceptor supplies (from the committed
+/// target artifact's own envelope) — or `Genesis` when the wire carries
+/// `CampaignGenesis`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedCausation {
+    /// The resolved target's kind and logical identity.
+    Artifact {
+        /// Kind read from the RESOLVED committed artifact.
+        message_kind: MessageKind,
+        /// Logical id read from the RESOLVED committed artifact.
+        message_id: MessageId,
+    },
+    /// No artifact — genesis.
+    Genesis,
+}
+
+impl AcceptedEnvelopeCoreV1 {
+    /// Accept a wire envelope: §11.2 producer mapping, round scope,
+    /// genesis rule, and the P1-24 causation cross-check against the
+    /// RESOLVED facts.
+    ///
+    /// # Errors
+    /// [`EnvelopeShapeError`] on any violated frozen invariant.
+    pub fn try_accept(
+        wire: WireEnvelopeCoreV1,
+        resolved_causation: &ResolvedCausation,
+    ) -> Result<Self, EnvelopeShapeError> {
+        use crate::edges::{is_round_scoped, required_producer, ProducerClass};
+        let ok = matches!(
+            (required_producer(wire.message_kind), &wire.producer),
+            (
+                ProducerClass::Controller,
+                ProducerBindingV1::Controller { .. }
+            ) | (
+                ProducerClass::Provider(_),
+                ProducerBindingV1::Provider { .. }
+            ) | (ProducerClass::Human, ProducerBindingV1::Human { .. })
+        );
+        if !ok {
+            return Err(EnvelopeShapeError::WrongProducer);
+        }
+        if is_round_scoped(wire.message_kind) != wire.round.is_some() {
+            return Err(EnvelopeShapeError::WrongRoundScope);
+        }
+        match (&wire.causation, resolved_causation) {
+            (CausationV1::CampaignGenesis, ResolvedCausation::Genesis) => {
+                let first_work_order = wire.message_kind == MessageKind::WorkOrder
+                    && wire.round.as_ref().is_some_and(|r| r.round_ordinal.0 == 0);
+                if !first_work_order {
+                    return Err(EnvelopeShapeError::GenesisOutsideFirstWorkOrder);
+                }
+            }
+            (
+                CausationV1::Artifact {
+                    message_kind,
+                    message_id,
+                    ..
+                },
+                ResolvedCausation::Artifact {
+                    message_kind: got_kind,
+                    message_id: got_id,
+                },
+            ) if message_kind == got_kind && message_id == got_id => {}
+            _ => return Err(EnvelopeShapeError::CausationMismatch),
+        }
+        Ok(Self(wire))
+    }
+
+    /// Read access to the accepted core.
+    #[must_use]
+    pub fn as_wire(&self) -> &WireEnvelopeCoreV1 {
+        &self.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // Test-only panics operate on this module's own fixtures; a panic
@@ -185,11 +339,11 @@ mod tests {
     #[test]
     fn manifest_derive_sorts_and_dedups_and_serde_rejects_noncanonical() {
         let a = RefManifestEntry {
-            edge_tag: "b.tag".into(),
+            edge_tag: EdgeTag::new("verdict_ref").unwrap(),
             target: digest(1),
         };
         let b = RefManifestEntry {
-            edge_tag: "a.tag".into(),
+            edge_tag: EdgeTag::new("attention_ref").unwrap(),
             target: digest(2),
         };
         let m = RefManifest::derive(vec![a.clone(), b.clone(), a.clone()]).unwrap();
@@ -197,10 +351,21 @@ mod tests {
 
         // A writer-supplied unsorted manifest is rejected at deserialization.
         let unsorted = serde_json::json!([
-            {"edge_tag": "z.tag", "target": digest(1).as_str()},
-            {"edge_tag": "a.tag", "target": digest(2).as_str()},
+            {"edge_tag": "verdict_ref", "target": digest(1).as_str()},
+            {"edge_tag": "attention_ref", "target": digest(2).as_str()},
         ]);
         let bad: Result<RefManifest, _> = serde_json::from_value(unsorted);
+        assert!(bad.is_err());
+    }
+
+    /// Review T4: a fabricated edge tag is unrepresentable.
+    #[test]
+    fn made_up_edge_tags_are_unrepresentable() {
+        assert!(EdgeTag::new("completely_made_up_edge").is_err());
+        assert!(EdgeTag::new(crate::edges::CAUSATION_TAG).is_ok());
+        let bad: Result<RefManifestEntry, _> = serde_json::from_value(serde_json::json!(
+            {"edge_tag": "completely_made_up_edge", "target": digest(1).as_str()}
+        ));
         assert!(bad.is_err());
     }
 
