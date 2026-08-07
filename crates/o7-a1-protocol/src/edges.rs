@@ -77,6 +77,13 @@ pub enum EdgeTarget {
     /// The one sanctioned open target: any already-committed
     /// envelope-bearing artifact (CampaignFeedItem §11.3; causation).
     AnyCommittedEnvelope,
+    /// Any kind from the closed CAS registry — sanctioned for EXACTLY
+    /// one edge, `ArtifactImported.cas_object_ref` (re-review T3-R1:
+    /// the contract's constructor checks the rules of whatever
+    /// registered kind is being imported; pinning one kind here was
+    /// narrower than the contract, and a new imported-object kind
+    /// would have minted a needless identity category).
+    AnyRegisteredCas,
 }
 
 /// Edge classification (contract §11.3–§11.4).
@@ -107,7 +114,7 @@ pub struct Edge {
 use ContentKind as C;
 use EdgeClass::{Causal, Intra};
 use EdgeSource::{Kind, Transition};
-use EdgeTarget::{AnyCommittedEnvelope, Cas, Envelope, External};
+use EdgeTarget::{AnyCommittedEnvelope, AnyRegisteredCas, Cas, Envelope, External};
 use ExternalRefKind as X;
 use MessageKind as K;
 use TransitionKind as T;
@@ -328,8 +335,8 @@ pub const EDGES: &[Edge] = &[
     ),
     e(
         K::ProviderInvocationReceipt,
-        "cause.safe_redrive.prior_receipt_ref",
-        Envelope(K::ProviderInvocationReceipt),
+        "cause.safe_redrive.prior_run_binding_ref",
+        Envelope(K::CampaignRunBinding),
         Causal,
     ),
     e(
@@ -431,7 +438,7 @@ pub const EDGES: &[Edge] = &[
     e(
         K::ArtifactImported,
         "cas_object_ref",
-        Cas(C::MessagePayloadBlob),
+        AnyRegisteredCas,
         Intra,
     ),
     e(
@@ -598,7 +605,7 @@ mod tests {
         );
     }
 
-    const REGISTRY_KAT: &str = "cc216eed944d07b58c2fac45e8222dc41028e0aa3fff47b1d2884b4c8e2da29f";
+    const REGISTRY_KAT: &str = "08cd8f1642f726352c414e19c4e43abc1a26ea40c811c1dc89d5eba1bb7e5980";
 
     #[test]
     fn intra_subgraph_topologically_sorts() {
@@ -642,6 +649,18 @@ mod tests {
                 assert_eq!(edge.class, Causal);
             }
         }
+    }
+
+    /// Re-review T3-R1: the open-within-closed-registry CAS target is
+    /// sanctioned for exactly one edge and must never leak.
+    #[test]
+    fn any_registered_cas_is_artifact_import_only() {
+        let holders: Vec<_> = EDGES.iter().filter(|e| e.to == AnyRegisteredCas).collect();
+        assert_eq!(holders.len(), 1, "AnyRegisteredCas leaked");
+        let only = holders.first().unwrap();
+        assert_eq!(only.from, Kind(K::ArtifactImported));
+        assert_eq!(only.tag, "cas_object_ref");
+        assert_eq!(only.class, Intra);
     }
 
     #[test]

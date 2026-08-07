@@ -596,3 +596,48 @@ seed'а, unsupported writer_version и causation kind/id mismatch.
 
 Следующий шаг: **узкая diff-verification** только изменённых абзацев +
 повторный прогон §18. Ожидаемый вердикт — **APPROVED FOR TYPES**.
+
+---
+
+## Types foundation re-review @ `889925e`
+
+**T1 CLOSED, T2 CLOSED; T3/T4/T5 — CHANGES_REQUESTED** (maintainer,
+2026-08-07); wrappers slice остаётся BLOCKED до закрытия. KAT-литералы
+T2 дополнительно пересчитаны maintainer'ом независимо — совпали.
+
+- **T3-R1**: `ArtifactImported.cas_object_ref -> MessagePayloadBlob`
+  был уже, чем контракт (constructor проверяет правила ТОГО kind,
+  который импортируется). Введён `EdgeTarget::AnyRegisteredCas`,
+  разрешённый ровно одному ребру, с leak-тестом по образцу
+  `AnyCommittedEnvelope`; registry KAT перепинен.
+- **T4-R1**: `Accepted…` имя выдано авансом — тип переименован в
+  `ShapeCheckedEnvelopeCoreV1`, граница зафиксирована трёхступенчатой
+  (Wire → ShapeChecked → Accepted-в-resolver-slice);
+  `ResolvedCausation` помечен interim-входом, заменяемым
+  непостроимым-свободно `VerifiedCommittedCausationTarget`;
+  mechanical-manifest-equality и §2.4 lineage-derivation — обязательства
+  resolver-slice, записаны в doc типа.
+- **T4-R2**: `ENVELOPE_VERSION_V1`/`supported_kind_version` + fail-closed
+  проверки обеих версий в shape-checker, RED на 999.
+- **T5-R1 (re-adjudication, superseding первый T5)**: `prior_receipt_ref`
+  логически невозможен в safe-redrive состояниях — redrive требует
+  `absent|valid_unsealed_pre_dispatch`, receipt непостроим до
+  terminal/ambiguous; пересечение пусто. Нормативный текст §8.6
+  заменён: Execution SafeRedrive несёт `prior_run_binding_ref`
+  (`CampaignRunBindingV1` durable до dispatch) с cross-check
+  `binding.provider_execution_id == prior_execution_id` и
+  `binding.run_id == evidence.run_id`; **dispatch-level SafeRedrive
+  удалён из v1** (safe redrive всегда минтит fresh execution); триггер
+  реинтродукции: реальный consumer + durable pre-dispatch dispatch
+  binding. §11.3 и §12.3 согласованы; код-матрица и KAT обновлены.
+
+**Watch item (не блокер)**: `PolicyDigest` имеет контекст
+`verifier-policy`, но используется и как `Controller.policy_digest`.
+До gate/policy slice — отдельная адъюдикация: один ли это semantic
+purpose; если нет — `ControllerPolicyDigest` и `VerifierPolicyDigest`
+разводятся, иначе T2 вернётся через боковую дверь.
+
+Следующий шаг: diff-only re-review этих четырёх швов; затем wrappers +
+`InputStateBindingV1` + `CampaignRunBindingV1` (где
+`CampaignRunBindingRefV1` сразу нужен исправленному execution-redrive
+proof).

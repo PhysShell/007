@@ -919,29 +919,49 @@ ExecutionCauseV1:
   Initial
   CorrectiveRound { prior_verdict_ref }
   SafeRedrive { prior_execution_id,
-                prior_receipt_ref,   # adjudicated addition, see below
+                prior_run_binding_ref,   # re-adjudicated, see below
                 evidence: EstablishedNonDispatchEvidenceRefV1 }  # §11.1
 
 DispatchCauseV1:
   Initial
   ToolContinuation { prior_dispatch_id, tool_result_ref }
-  SafeRedrive { prior_dispatch_id,
-                prior_receipt_ref,   # adjudicated addition, see below
-                evidence: EstablishedNonDispatchEvidenceRefV1 }  # §11.1
+  # v1 has NO dispatch-level SafeRedrive — re-adjudicated below: a safe
+  # redrive always mints a fresh execution.
 ```
 
-**Adjudicated amendment (types-foundation review T5, option A).** The
-§11.3 matrix carries a digest edge
-`cause.safe_redrive.prior_receipt_ref -> ProviderInvocationReceipt`,
-but the frozen cause schema had no field to carry it — an
-implementation must not ratify that repair silently, so it is
-adjudicated here, pre-FREEZE: `SafeRedrive` carries `prior_receipt_ref`
-(the prior attempt's invocation receipt, by canonical bytes). The ID
-says WHO; the receipt ref proves WHICH canonical bytes of that who —
-the same evidence discipline as everywhere else. The checked
-constructor cross-verifies: the resolved receipt's execution id equals
-`prior_execution_id` (execution grain) / its dispatch record contains
-`prior_dispatch_id` (dispatch grain); mismatch is not constructible.
+**Re-adjudicated amendment (foundation re-review T5-R1, superseding the
+first T5 adjudication).** The first amendment chose `prior_receipt_ref`
+— an object that is logically IMPOSSIBLE in exactly the states where
+safe redrive is permitted: automatic redrive requires the prior
+attempt classified `absent` or `valid_unsealed_pre_dispatch`, while
+§15.2 makes a `ProviderInvocationReceipt` unconstructible before a
+terminal/ambiguous outcome — the intersection is empty. Worse, a
+dispatch-level `prior_receipt_ref` inside a still-running execution
+would be a §11-forbidden forward reference to a receipt that does not
+exist yet.
+
+The correct antecedent authority already exists: run/attempt allocation
+happens BEFORE provider dispatch, so `CampaignRunBindingV1` is durable
+in exactly the pre-dispatch states where redrive is legal. Frozen:
+
+```text
+ExecutionCauseV1::SafeRedrive:
+  prior_execution_id
+  prior_run_binding_ref        # CampaignRunBindingRefV1
+  evidence                     # EstablishedNonDispatchEvidenceRefV1
+
+checked-constructor cross-verification:
+  binding.provider_execution_id == prior_execution_id
+  binding.run_id               == evidence.run_id
+```
+
+Dispatch-level SafeRedrive is REMOVED from v1: a safe redrive always
+becomes a fresh execution (with `ExecutionCauseV1::SafeRedrive`).
+Reintroducing an in-execution dispatch redrive is a supersede-path
+change with a recorded trigger: a real consumer that needs it PLUS a
+durable pre-dispatch dispatch binding to serve as its antecedent
+authority — a sixteenth authority artifact is not minted for schema
+symmetry.
 
 ToolContinuation is not a retry. A new session is not a retry. A
 corrective round is not a retry. `SafeRedrive` requires evidence of
@@ -1389,8 +1409,10 @@ ProviderInvocationReceipt-> intra: canonical-request-blob,
                             causal: ReviewVerdict
                             [ExecutionCause::CorrectiveRound, strictly
                             lower round_ordinal],
-                            ProviderInvocationReceipt [prior execution/
-                            dispatch of the SAME chain];
+                            CampaignRunBinding
+                            [SafeRedrive.prior_run_binding_ref — the
+                            prior attempt's binding, durable
+                            pre-dispatch, T5-R1];
                             ext: EstablishedNonDispatchEvidenceRef
                             [SafeRedrive] (+ intra:
                             non-dispatch-classification-blob through it)
@@ -1496,7 +1518,9 @@ command discipline through the campaign run binding.
 Execution: `allocated → dispatched* → terminal(completed | refused |
 incomplete | failed_pre_dispatch) | dispatch_ambiguous`, where
 `dispatched*` is the dispatch sub-machine (ordered dispatches, each
-`Initial | ToolContinuation | SafeRedrive`). The R1 dispatch-boundary
+`Initial | ToolContinuation` — dispatch-level SafeRedrive is removed in
+v1, §8.6 re-adjudication: a safe redrive mints a fresh execution). The
+R1 dispatch-boundary
 protocol governs each dispatch: safe redrive only on established
 non-dispatch; once dispatch occurred or may have occurred, an unknown
 outcome is `dispatch_ambiguous` and fails closed. Replay, recovery,

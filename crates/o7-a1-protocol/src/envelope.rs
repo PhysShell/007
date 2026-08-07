@@ -180,12 +180,23 @@ impl From<RefManifest> for Vec<RefManifestEntry> {
     }
 }
 
-/// The RAW wire envelope core (contract §3). Review T4: this type is
-/// what serde admits from bytes — it deliberately CANNOT promise the
-/// per-kind invariants (§11.2 producer mapping, round scope, genesis
-/// rule); those are the acceptance boundary's job. The canonical form
-/// is [`AcceptedEnvelopeCoreV1`], constructible only through
-/// [`AcceptedEnvelopeCoreV1::try_accept`]. `contract_digest`, candidate
+/// The RAW wire envelope core (contract §3). Review T4/T4-R1: this
+/// type is what serde admits from bytes — it deliberately CANNOT
+/// promise the per-kind invariants. The boundary is three-stage:
+///
+/// ```text
+/// WireEnvelopeCoreV1
+///     ↓ syntactic/shape checks (versions, producer mapping, round
+///       scope, genesis rule)          — THIS slice
+/// ShapeCheckedEnvelopeCoreV1
+///     ↓ typed payload + campaign binding + resolver PROOFS
+///       (mechanical ref-manifest equality, §2.4 lineage derivation,
+///       committed-causation evidence) — the resolver slice
+/// AcceptedEnvelopeCoreV1
+/// ```
+///
+/// The name `Accepted…` is deliberately NOT handed out yet (re-review
+/// T4-R1): shape-valid is not authority. `contract_digest`, candidate
 /// preconditions, and action-specific bindings live in typed payloads,
 /// not here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -222,9 +233,25 @@ pub struct WireEnvelopeCoreV1 {
     pub recorded: RecordedMetadataV1,
 }
 
+/// The one supported envelope version (re-review T4-R2: unknown
+/// versions are rejected fail closed, never best-effort parsed).
+pub const ENVELOPE_VERSION_V1: u32 = 1;
+
+/// The supported kind version per message kind (all v1 today).
+#[must_use]
+pub fn supported_kind_version(_kind: MessageKind) -> u32 {
+    1
+}
+
 /// Why a wire envelope failed shape acceptance.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EnvelopeShapeError {
+    /// Unknown envelope version (T4-R2).
+    #[error("unsupported envelope_version")]
+    UnsupportedEnvelopeVersion,
+    /// Unknown kind version (T4-R2).
+    #[error("unsupported message_kind_version")]
+    UnsupportedMessageKindVersion,
     /// Producer variant does not match the frozen §11.2 mapping.
     #[error("producer binding variant is not the one §11.2 freezes for this kind")]
     WrongProducer,
@@ -241,17 +268,21 @@ pub enum EnvelopeShapeError {
 }
 
 /// The CANONICAL envelope core: private inner, constructible only via
-/// [`Self::try_accept`] — the §15.2 construction boundary. Checks that
+/// [`Self::try_shape_check`] — the §15.2 construction boundary. Checks that
 /// need no external resolution run here (producer mapping, round scope,
 /// genesis rule); causation resolution takes the resolved facts as
 /// PROOF INPUTS so "two adjacent valid claims" cannot be built.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
-pub struct AcceptedEnvelopeCoreV1(WireEnvelopeCoreV1);
+pub struct ShapeCheckedEnvelopeCoreV1(WireEnvelopeCoreV1);
 
-/// Resolved causation facts the acceptor supplies (from the committed
-/// target artifact's own envelope) — or `Genesis` when the wire carries
-/// `CampaignGenesis`.
+/// INTERIM shape-level causation input (re-review T4-R1): freely
+/// constructible, so it proves shape agreement only — NOT that the
+/// facts came from resolving `wire.causation.blob_ref` against a
+/// COMMITTED artifact. The resolver slice replaces this with a
+/// non-freely-constructible `VerifiedCommittedCausationTarget` bound to
+/// both the blob ref and the kind/id, and only that evidence type will
+/// mint `AcceptedEnvelopeCoreV1`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedCausation {
     /// The resolved target's kind and logical identity.
@@ -265,18 +296,24 @@ pub enum ResolvedCausation {
     Genesis,
 }
 
-impl AcceptedEnvelopeCoreV1 {
+impl ShapeCheckedEnvelopeCoreV1 {
     /// Accept a wire envelope: §11.2 producer mapping, round scope,
     /// genesis rule, and the P1-24 causation cross-check against the
     /// RESOLVED facts.
     ///
     /// # Errors
     /// [`EnvelopeShapeError`] on any violated frozen invariant.
-    pub fn try_accept(
+    pub fn try_shape_check(
         wire: WireEnvelopeCoreV1,
         resolved_causation: &ResolvedCausation,
     ) -> Result<Self, EnvelopeShapeError> {
         use crate::edges::{is_round_scoped, required_producer, ProducerClass};
+        if wire.envelope_version != ENVELOPE_VERSION_V1 {
+            return Err(EnvelopeShapeError::UnsupportedEnvelopeVersion);
+        }
+        if wire.message_kind_version != supported_kind_version(wire.message_kind) {
+            return Err(EnvelopeShapeError::UnsupportedMessageKindVersion);
+        }
         let ok = matches!(
             (required_producer(wire.message_kind), &wire.producer),
             (
@@ -356,6 +393,18 @@ mod tests {
         ]);
         let bad: Result<RefManifest, _> = serde_json::from_value(unsorted);
         assert!(bad.is_err());
+    }
+
+    /// Re-review T4-R2: unknown versions are rejected fail closed.
+    #[test]
+    fn unknown_versions_fail_closed() {
+        assert_eq!(supported_kind_version(MessageKind::WorkOrder), 1);
+        assert_eq!(ENVELOPE_VERSION_V1, 1);
+        // The shape checker is exercised end-to-end once payload types
+        // land; the constants and the error variants are the frozen
+        // surface here, and 999 must have no accepting path.
+        assert_ne!(999, ENVELOPE_VERSION_V1);
+        assert_ne!(999, supported_kind_version(MessageKind::CoderReport));
     }
 
     /// Review T4: a fabricated edge tag is unrepresentable.
