@@ -42,14 +42,19 @@ evidence set, or an outcome other than `NO_SUPPORTED_EVIDENCE`.
 | 007 branch | `claude/deja-vu-agent-memory-1jruez` |
 
 The commit is not taken on the operator's word. `probe.py` hashes the binary it
-runs and reads the `vcs.revision` Go stamped into it. Once `--subject-commit`
-is given, every way of failing to confirm it is a refusal rather than a shrug:
+runs and reads the `vcs.revision` Go stamped into it. Every way of failing to confirm the
+subject is a refusal rather than a shrug — including supplying no subject:
 
 ```text
+no --subject-commit        → refuse
 revision mismatch          → refuse
 no vcs.revision stamp      → refuse
 vcs.modified = true        → refuse
 ```
+
+The first was the worst of the four while it stood: with no commit claimed,
+nothing was checked and the report still recorded `binary_unverified: false`,
+which is a claim of verification for a binary nobody identified.
 
 `--allow-unverified-binary` is the explicit escape hatch, and it is recorded in
 the report (`binary_unverified`, `binary_unverified_reason`) so a reader can
@@ -159,13 +164,14 @@ measurement when it is not one:
 | Rule | Why |
 |---|---|
 | The child environment is **built from nothing**, not copied from `os.environ`: `PATH`, `LC_ALL`, `TMPDIR`, `HOME`/XDG and the `DEJA_*` vars, all pointing inside `--work` | deja is a third-party binary and this harness serializes its stdout into a tracked file. Forwarding `GITHUB_TOKEN` or `ARLIAI_API_KEY` into it would be the indirect credential path `AGENTS.md` rule 1 names. The measurement reproduces byte-identically under the stripped environment, so deja needed none of it |
-| The workdir must be **owned**: non-existent, empty, or carrying a `.deja-probe-workdir` marker; filesystem roots are refused outright | the run wipes `claude/`, `index/`, `home/` and `tmp/` inside it. `--work /` must not mean `rm -rf /claude /index /home` |
+| **Nothing is ever deleted.** `--work` is a *parent*; each run creates a fresh `run-*` subdirectory inside it (filesystem roots still refused) | each run needs virgin ground, or a bumped corpus id leaves the previous corpus's transcripts behind and the probe tests a ghost. Reaching that by wiping the given directory needed an ownership guard, and a marker file inside the target cannot establish ownership — anyone who can write there can write the marker. Creating instead of deleting retires the question with the code |
 | A **failed index aborts**, and so does an index whose session ids are not exactly the corpus's | at `7c4a294` deja exits 0 even against an unusable index directory, so the status alone proves nothing. The check compares identity rather than arity — 24 sessions and 24 of the *right* sessions are different facts. Without it a harness failure serializes as retrieval behaviour: zeroes everywhere, in a report that looks complete |
 | A **failed query aborts** rather than recording zero hits | deja exits 0 on a genuinely empty result (checked at this commit), so a nonzero status is a harness failure. Recording it as a miss would undercount false hits and recall at once — the precise confusion this corpus exists to prevent |
 
-Each of the four was verified by making it fire: `--work /`, a non-owned
-directory, a stub that indexes nothing, and a stub that fails only on the query
-path.
+Every refusal above was verified by making it fire: a run with no
+`--subject-commit`, one against an unstamped binary, `--work /`, a stub that
+indexes nothing, a stub returning the right count of wrong sessions, and a stub
+that fails only on the query path.
 
 Comparing two runs: hold `corpus.json` fixed, change one variable at a time.
 A change in the `retrieval` rows with `admission` unchanged is upstream drift;

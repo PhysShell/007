@@ -19,7 +19,7 @@ Usage:
 
 Writes report.json next to corpus.json.
 """
-import argparse, hashlib, json, os, pathlib, re, shutil, subprocess, sys, uuid, datetime
+import argparse, hashlib, json, os, pathlib, re, shutil, subprocess, sys, tempfile, uuid, datetime
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -31,17 +31,20 @@ def identify_binary(deja, claimed_commit, allow_unverified=False):
     the binary from commit B, claim A, and the artifact lies. So hash the
     binary and read the VCS revision Go stamps into it.
 
-    Once a commit is claimed, every way of *failing* to confirm it is a
-    refusal, not a shrug: a mismatch, an absent stamp, and a dirty tree all
-    mean the same thing — the report cannot honestly assert the revision it is
-    about to print. --allow-unverified-binary is the explicit escape hatch, and
-    it is recorded in the report so a reader can see it was used.
+    Every way of *failing* to confirm the subject is a refusal, not a shrug —
+    including supplying no subject at all. A mismatch, an absent stamp, a dirty
+    tree and a missing --subject-commit all mean the same thing: the report
+    cannot honestly assert which source produced it. Silence was the worst of
+    the four, because it recorded `unverified: false` — a claim of verification
+    for a binary nobody identified. --allow-unverified-binary is the explicit
+    escape hatch, and it is recorded in the report so a reader can see it was
+    used.
     """
     path = shutil.which(deja) or deja
     digest = hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
     revision, dirty = "", None
     try:
-        info = subprocess.run(["go", "version", "-m", path],
+        info = subprocess.run([shutil.which("go") or "go", "version", "-m", path],
                               capture_output=True, text=True, timeout=60).stdout
         m = re.search(r"^\s*build\s+vcs\.revision=(\S+)", info, re.M)
         if m:
@@ -53,7 +56,12 @@ def identify_binary(deja, claimed_commit, allow_unverified=False):
         pass  # no Go toolchain here; the hash still binds the artifact
 
     refusal = None
-    if claimed_commit and not revision:
+    if not claimed_commit:
+        refusal = ("no --subject-commit was supplied, so nothing identifies the "
+                   "source this measurement ran against"
+                   + (f" (the binary is stamped vcs.revision={revision}; pass it)"
+                      if revision else ""))
+    elif claimed_commit and not revision:
         refusal = ("the binary carries no vcs.revision stamp, so the claim "
                    f"--subject-commit {claimed_commit} cannot be confirmed")
     elif claimed_commit and not revision.startswith(claimed_commit[:12]):
@@ -97,38 +105,33 @@ def build_corpus(corpus, claude_root):
     return by_title
 
 
-WORK_MARKER = ".deja-probe-workdir"
+def make_run_dir(parent):
+    """Create a fresh directory for this run. Delete nothing, ever.
 
+    Each run needs virgin ground: session ids are derived from the corpus, so a
+    bumped corpus id that drops a session would leave the previous corpus's
+    transcripts behind and quietly test a ghost.
 
-def prepare_work(path):
-    """Return a wiped workdir this probe is allowed to destroy.
-
-    The wipe is necessary — session ids are derived from the corpus, so a
-    bumped corpus id that drops a session would otherwise leave the previous
-    corpus's transcripts on disk and quietly test a ghost. But `--work /` would
-    then recursively delete /claude, /index and /home, and any shared directory
-    loses its same-named children. So only a directory this probe owns gets
-    wiped: one that does not exist yet, one that is empty, or one already
-    carrying the marker file.
+    The earlier design got there by wiping the given directory, guarded by an
+    ownership marker inside it. Two reviews later that guard is gone, because
+    the requirement never actually needed deletion: a file sitting in the
+    target directory cannot prove who owns the directory (anyone who can write
+    there can write the marker), and a guard that must be trusted is worse than
+    no deletion at all. So `--work` is a *parent* the probe only ever creates
+    inside, and every run gets its own new subdirectory. No pre-existing path
+    is removed, which retires the whole question along with the code that
+    raised it.
     """
-    work = pathlib.Path(path).expanduser().resolve()
-    if work == pathlib.Path(work.anchor):
-        raise SystemExit(f"--work {work} is a filesystem root; refusing.")
-    if work.exists() and not work.is_dir():
-        raise SystemExit(f"--work {work} exists and is not a directory; refusing.")
-    if work.is_dir() and any(work.iterdir()) and not (work / WORK_MARKER).exists():
-        raise SystemExit(
-            f"--work {work} is not empty and carries no {WORK_MARKER} marker, so "
-            "this probe does not own it and will not delete inside it.\n"
-            "Pass a fresh directory, or remove that one yourself first.")
-
-    work.mkdir(parents=True, exist_ok=True)
-    (work / WORK_MARKER).write_text(
-        "Created by evidence/deja-vu-negative-recall/probe.py.\n"
-        "This directory is wiped on every run.\n")
+    parent = pathlib.Path(parent).expanduser().resolve()
+    if parent == pathlib.Path(parent.anchor):
+        raise SystemExit(f"--work {parent} is a filesystem root; refusing.")
+    if parent.exists() and not parent.is_dir():
+        raise SystemExit(f"--work {parent} exists and is not a directory; refusing.")
+    parent.mkdir(parents=True, exist_ok=True)
+    work = pathlib.Path(tempfile.mkdtemp(prefix="run-", dir=parent))
     for sub in ("claude", "index", "home", "tmp"):
-        shutil.rmtree(work / sub, ignore_errors=True)
-        (work / sub).mkdir(parents=True, exist_ok=True)
+        (work / sub).mkdir(parents=True)
+    print(f"run dir: {work}")
     return work
 
 
@@ -185,7 +188,7 @@ def retrieve(deja, env, q):
         data = json.loads(out)
     except json.JSONDecodeError:
         raise SystemExit(f"deja returned unparseable JSON on query {q!r}; refusing to "
-                         f"record it as a retrieval result.\nstdout: {out[:400]}")
+                         f"record it as a retrieval result.\nstdout: {out[:400]}") from None
     hits = data.get("hits") or []
     variants = data.get("variants") or {}
     ids, top = [], ""
@@ -206,7 +209,9 @@ def retrieve(deja, env, q):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--deja", default=os.environ.get("DEJA_BIN", "deja"))
-    ap.add_argument("--work", default=os.environ.get("DEJA_PROBE_WORK", "/tmp/deja-probe"))
+    ap.add_argument("--work", default=os.environ.get(
+        "DEJA_PROBE_WORK", os.path.join(tempfile.gettempdir(), "deja-probe")),
+        help="parent directory; each run creates a fresh subdirectory inside it")
     ap.add_argument("--subject-commit", default=os.environ.get("DEJA_SUBJECT_COMMIT", ""))
     ap.add_argument("--subject-version", default=os.environ.get("DEJA_SUBJECT_VERSION", ""))
     ap.add_argument("--allow-unverified-binary", action="store_true",
@@ -221,7 +226,7 @@ def main():
     corpus = json.loads(corpus_bytes)
     corpus_digest = hashlib.sha256(corpus_bytes).hexdigest()
     binary = identify_binary(args.deja, args.subject_commit, args.allow_unverified_binary)
-    work = prepare_work(args.work)
+    work = make_run_dir(args.work)
 
     by_title = build_corpus(corpus, work / "claude")
     env = probe_env(work)
@@ -251,7 +256,7 @@ def main():
         indexed_ids = {s.get("id") for s in json.loads(listed.stdout).get("sessions", [])}
     except json.JSONDecodeError:
         raise SystemExit("deja last returned unparseable JSON; refusing to measure "
-                         "an index whose contents cannot be verified.")
+                         "an index whose contents cannot be verified.") from None
     expected_ids = set(by_title.values())
     if indexed_ids != expected_ids:
         missing = sorted(expected_ids - indexed_ids)
