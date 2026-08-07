@@ -24,14 +24,18 @@ import argparse, hashlib, json, os, pathlib, re, shutil, subprocess, sys, uuid, 
 HERE = pathlib.Path(__file__).resolve().parent
 
 
-def identify_binary(deja, claimed_commit):
+def identify_binary(deja, claimed_commit, allow_unverified=False):
     """Bind the report to the binary that produced it, not to operator prose.
 
     A --subject-commit copied into the report proves nothing on its own: run
     the binary from commit B, claim A, and the artifact lies. So hash the
-    binary and read the VCS revision Go stamps into it. If both a claim and a
-    stamp exist and they disagree, refuse — a document written in a repo that
-    just adopted revision-bound grounding does not get to hand-wave this one.
+    binary and read the VCS revision Go stamps into it.
+
+    Once a commit is claimed, every way of *failing* to confirm it is a
+    refusal, not a shrug: a mismatch, an absent stamp, and a dirty tree all
+    mean the same thing — the report cannot honestly assert the revision it is
+    about to print. --allow-unverified-binary is the explicit escape hatch, and
+    it is recorded in the report so a reader can see it was used.
     """
     path = shutil.which(deja) or deja
     digest = hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
@@ -48,13 +52,24 @@ def identify_binary(deja, claimed_commit):
     except (OSError, subprocess.SubprocessError):
         pass  # no Go toolchain here; the hash still binds the artifact
 
-    if claimed_commit and revision and not revision.startswith(claimed_commit[:12]):
-        raise SystemExit(
-            f"refusing to write a report that would lie: --subject-commit "
-            f"{claimed_commit} but the binary is stamped vcs.revision={revision}")
+    refusal = None
+    if claimed_commit and not revision:
+        refusal = ("the binary carries no vcs.revision stamp, so the claim "
+                   f"--subject-commit {claimed_commit} cannot be confirmed")
+    elif claimed_commit and not revision.startswith(claimed_commit[:12]):
+        refusal = (f"--subject-commit {claimed_commit} but the binary is "
+                   f"stamped vcs.revision={revision}")
+    elif claimed_commit and dirty:
+        refusal = (f"the binary was built from a modified tree "
+                   f"(vcs.modified=true), so {claimed_commit} does not "
+                   "identify the source it ran")
+    if refusal and not allow_unverified:
+        raise SystemExit(f"refusing to write a report that would lie: {refusal}"
+                         "\n(pass --allow-unverified-binary to record it anyway)")
 
-    return {"path": str(path), "sha256": digest,
-            "vcs_revision": revision, "vcs_modified": dirty}
+    return {"path": str(path), "sha256": digest, "vcs_revision": revision,
+            "vcs_modified": dirty,
+            "unverified": bool(refusal), "unverified_reason": refusal}
 
 
 def build_corpus(corpus, claude_root):
@@ -132,10 +147,12 @@ def main():
     ap.add_argument("--work", default=os.environ.get("DEJA_PROBE_WORK", "/tmp/deja-probe"))
     ap.add_argument("--subject-commit", default=os.environ.get("DEJA_SUBJECT_COMMIT", ""))
     ap.add_argument("--subject-version", default=os.environ.get("DEJA_SUBJECT_VERSION", ""))
+    ap.add_argument("--allow-unverified-binary", action="store_true",
+                    help="record a report whose subject commit the binary does not confirm")
     args = ap.parse_args()
 
     corpus = json.loads((HERE / "corpus.json").read_text())
-    binary = identify_binary(args.deja, args.subject_commit)
+    binary = identify_binary(args.deja, args.subject_commit, args.allow_unverified_binary)
 
     # Wipe the throwaway workdir. Session ids are derived from the corpus, so a
     # bumped corpus id that drops or renames a session would otherwise leave the
@@ -175,7 +192,9 @@ def main():
                     "claimed_version": args.subject_version,
                     "binary_sha256": binary["sha256"],
                     "binary_vcs_revision": binary["vcs_revision"],
-                    "binary_vcs_modified": binary["vcs_modified"]},
+                    "binary_vcs_modified": binary["vcs_modified"],
+                    "binary_unverified": binary["unverified"],
+                    "binary_unverified_reason": binary["unverified_reason"]},
         # What the upstream retriever did. Drifts when deja changes.
         "retrieval": rows,
         # What 007's evidence-admission layer promoted. null = not implemented,

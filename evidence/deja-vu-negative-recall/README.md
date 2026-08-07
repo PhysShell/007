@@ -42,9 +42,19 @@ evidence set, or an outcome other than `NO_SUPPORTED_EVIDENCE`.
 | 007 branch | `claude/deja-vu-agent-memory-1jruez` |
 
 The commit is not taken on the operator's word. `probe.py` hashes the binary it
-runs and reads the `vcs.revision` Go stamped into it; if that disagrees with
-`--subject-commit`, it refuses to write a report rather than produce a
-revision-bound artifact that is wrong about its own revision.
+runs and reads the `vcs.revision` Go stamped into it. Once `--subject-commit`
+is given, every way of failing to confirm it is a refusal rather than a shrug:
+
+```text
+revision mismatch          → refuse
+no vcs.revision stamp      → refuse
+vcs.modified = true        → refuse
+```
+
+`--allow-unverified-binary` is the explicit escape hatch, and it is recorded in
+the report (`binary_unverified`, `binary_unverified_reason`) so a reader can
+see it was used. Without it the harness will not produce a revision-bound
+artifact that is wrong, or merely hopeful, about its own revision.
 
 ## Files
 
