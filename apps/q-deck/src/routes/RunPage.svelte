@@ -18,6 +18,16 @@
   let run: RunDto | null = $state(null);
   let loadState: LoadState = $state("loading");
   let stream: ConversationEventStream | null = $state(null);
+  // Q-Deck A0.5 corrective round 9 (fresh exact-head CodeRabbit Major, PR
+  // #110): round 8 correctly stops REST polling after a deadline timeout
+  // (see the `catch` block below), but for an already-loaded run it left
+  // no visible trace of that — the page kept showing the last-known
+  // `status`/`ConnectionIndicator` as if still being refreshed. This is
+  // ONLY about the `GET /runs/:id` poll; the SSE `stream` may still be
+  // genuinely live and useful for new timeline events, so it is
+  // deliberately NOT closed here — the two are separate surfaces with
+  // separate liveness.
+  let pollingStopped = $state(false);
 
   // The SSE stream only ever adds to the event timeline — it carries no
   // mechanism for updating the run's OWN fields (status, finished_at). A
@@ -65,6 +75,7 @@
     let activePollController: AbortController | undefined;
     loadState = "loading";
     run = null;
+    pollingStopped = false;
 
     // Deliberately NOT `stream?.close()` / `stream = null` / `clearTimeout(timer)`
     // here at the top: reading `stream`/`timer` synchronously in this effect's
@@ -163,6 +174,24 @@
         // one outage could accumulate multiple permanent zombie loops.
         // This check must come FIRST, before either branch below.
         if (cancelled) return;
+        // Q-Deck A0.5 corrective round 9 (fresh exact-head Codex P1, PR
+        // #110): this check must come BEFORE `deadlineExpired` below, not
+        // after. The initial load either succeeds completely (setting
+        // `run`/`loadState`/`stream` together, in the `try` branch above)
+        // or it fails completely — there is no legitimate way for a
+        // SUBSEQUENT `poll(false)` to perform first-load initialization.
+        // Round 8 only special-cased `isFirst` INSIDE the `deadlineExpired`
+        // branch, so an ordinary (non-deadline) failure on the very first
+        // request fell through to the unconditional reschedule below,
+        // leaving `loadState` stuck on `"loading"` forever — even once a
+        // later retry succeeded, the `isFirst === false` success branch
+        // only merges `run`, it never sets `loadState = "ready"` or
+        // creates `stream`. A fast-failing endpoint (a quick 404, a
+        // synchronous rejection) would silently strand the page.
+        if (isFirst) {
+          loadState = "error";
+          return;
+        }
         // Q-Deck A0.5 corrective round 8 (fresh exact-head Codex P1, PR
         // #110): round 7's own deadline unconditionally retried on
         // timeout, exactly as if the timeout were an ordinary transient
@@ -192,9 +221,11 @@
         // NOT added here to keep this round frontend-only (disclosed as
         // a future backend consideration in the PR body).
         if (deadlineExpired) {
-          if (isFirst) {
-            loadState = "error";
-          }
+          // Q-Deck A0.5 corrective round 9 (fresh exact-head CodeRabbit
+          // Major, PR #110): stopping silently left the page showing a
+          // stale `status`/`ConnectionIndicator` as if still being kept
+          // fresh — see `pollingStopped`'s own doc comment above.
+          pollingStopped = true;
           return; // no retry — see the reasoning above.
         }
         // A transient refresh failure doesn't blank an already-loaded run
@@ -271,6 +302,12 @@
       </dl>
     </header>
 
+    {#if pollingStopped}
+      <div class="state-message stale">
+        Run details refresh stopped after a request timeout. Reload to refresh this run.
+      </div>
+    {/if}
+
     <CandidateStateCard {run} />
 
     <section>
@@ -346,5 +383,11 @@
   }
   .state-message.error {
     color: var(--bad);
+  }
+  .state-message.stale {
+    padding: 0.5rem 0;
+    text-align: left;
+    color: var(--text-muted);
+    font-size: 0.8rem;
   }
 </style>

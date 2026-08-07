@@ -640,6 +640,10 @@ describe("RunPage", () => {
     await vi.advanceTimersByTimeAsync(15_000 + 200);
     expect(screen.getByText("running")).toBeInTheDocument();
     expect(getRunSpy).toHaveBeenCalledTimes(2);
+    // Q-Deck A0.5 corrective round 9 (fresh exact-head CodeRabbit Major,
+    // PR #110): stopping silently left this page looking as if it were
+    // still being kept fresh — an explicit notice must appear instead.
+    expect(screen.getByText(/Run details refresh stopped/)).toBeInTheDocument();
 
     await vi.advanceTimersByTimeAsync(120_000);
     expect(getRunSpy).toHaveBeenCalledTimes(2);
@@ -708,5 +712,57 @@ describe("RunPage", () => {
     await waitFor(() =>
       expect(screen.getByText("Run not found or o7d unreachable.")).toBeInTheDocument(),
     );
+  });
+
+  // Q-Deck A0.5 corrective round 9 (fresh exact-head Codex P1, PR #110):
+  // the `isFirst` check inside round 8's `catch` was nested INSIDE the
+  // `deadlineExpired` branch, so an ordinary (non-deadline) failure on
+  // the very first request fell through to the unconditional reschedule
+  // at the bottom — `loadState` never left `"loading"`, even once that
+  // retry eventually succeeded (the `isFirst === false` success branch
+  // only merges `run`, it never sets `loadState` or creates `stream`).
+  it("shows the error state immediately on an ordinary (non-deadline) INITIAL load failure, and never silently retries it as a background poll", async () => {
+    const active = goldenRunActive();
+    const getRunSpy = vi.spyOn(api, "getRun").mockRejectedValueOnce(new Error("404 not found"));
+    const getEventsSpy = vi
+      .spyOn(api, "getConversationEvents")
+      .mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: active.run_id } });
+    await waitFor(() =>
+      expect(screen.getByText("Run not found or o7d unreachable.")).toBeInTheDocument(),
+    );
+    expect(getRunSpy).toHaveBeenCalledTimes(1);
+    expect(getEventsSpy).not.toHaveBeenCalled();
+
+    // Before this fix, this failure would have silently rescheduled a
+    // background poll(false) instead of surfacing the error — asserting
+    // no second call ever happens is exactly what proves that reschedule
+    // is gone, not merely that the visible error text stays put.
+    await vi.advanceTimersByTimeAsync(5_100);
+    expect(getRunSpy).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Run not found or o7d unreachable.")).toBeInTheDocument();
+  });
+
+  it("resets the refresh-stopped notice when the page effect reruns for a new runId", async () => {
+    const firstRun = goldenRunActive();
+    const secondRun = goldenRun("pass");
+    vi.spyOn(api, "getRun")
+      .mockResolvedValueOnce(firstRun)
+      .mockImplementationOnce(hangingGetRun())
+      .mockResolvedValueOnce(secondRun);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    const { rerender } = render(RunPage, { props: { runId: firstRun.run_id } });
+    await waitFor(() => expect(screen.getByText("running")).toBeInTheDocument());
+    await vi.advanceTimersByTimeAsync(5_100); // poll 2 starts, hangs
+    await vi.advanceTimersByTimeAsync(15_100); // its deadline fires
+    await waitFor(() =>
+      expect(screen.getByText(/Run details refresh stopped/)).toBeInTheDocument(),
+    );
+
+    await rerender({ runId: secondRun.run_id });
+    await waitFor(() => expect(screen.getByText("completed")).toBeInTheDocument());
+    expect(screen.queryByText(/Run details refresh stopped/)).not.toBeInTheDocument();
   });
 });
