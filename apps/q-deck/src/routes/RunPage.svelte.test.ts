@@ -286,6 +286,48 @@ describe("RunPage", () => {
     expect(screen.getByText("run-source")).toBeInTheDocument();
   });
 
+  // Q-Deck A0.5 corrective (fresh exact-head Codex P1, PR #110 at
+  // c18e473): the stop/retry decision must read the FRESH response, never
+  // the merged DISPLAY state. A genuine intermediate "not_applicable"
+  // (polled between RunStarted and CandidateStateMaterialized) preserved
+  // across a later poll that omits its own projection (limiter saturated)
+  // must NOT be mistaken for a trustworthy final sealed answer — polling
+  // must continue until a real projection is fetched.
+  it("keeps retrying past sealing when the merged state shows a stale not_applicable from an earlier poll, until a real projection arrives", async () => {
+    const activeNotApplicable = goldenRunActive({ materialization_status: "not_applicable" });
+    const sealedOmitted = sealedNoProjection();
+    const sealedMaterialized = goldenRun("pass", {
+      candidate_source_run_id: "run-source",
+      candidate_tree_oid: "deadbeef",
+      materialization_status: "materialized",
+    });
+    const getRunSpy = vi
+      .spyOn(api, "getRun")
+      .mockResolvedValueOnce(activeNotApplicable)
+      .mockResolvedValueOnce(sealedOmitted)
+      .mockResolvedValueOnce(sealedMaterialized);
+    vi.spyOn(api, "getConversationEvents").mockResolvedValue(goldenEventPage(goldenEventsActive()));
+
+    render(RunPage, { props: { runId: activeNotApplicable.run_id } });
+    await waitFor(() => expect(screen.getByText("not applicable")).toBeInTheDocument());
+
+    // Sealing arrives, but this poll's own projection is omitted — the
+    // merged display still shows the earlier "not_applicable" (preserved,
+    // correctly, per the merge-don't-clobber fix), but that must NOT be
+    // read as a trustworthy final answer for this NEWLY sealed status.
+    await vi.advanceTimersByTimeAsync(5100);
+    await waitFor(() => expect(screen.getByText("completed")).toBeInTheDocument());
+    expect(screen.getByText("not applicable")).toBeInTheDocument();
+
+    // If the bug were present (deciding from the merged state), polling
+    // would have already stopped here and this third call would never
+    // happen — the badge would incorrectly stay "not applicable" forever.
+    await vi.advanceTimersByTimeAsync(5100);
+    await waitFor(() => expect(screen.getByText("materialized")).toBeInTheDocument());
+    expect(screen.getByText("run-source")).toBeInTheDocument();
+    expect(getRunSpy).toHaveBeenCalledTimes(3);
+  });
+
   it("never erases a candidate projection already shown, when a later poll transiently omits it (sealing arrives the same moment)", async () => {
     const activeWithProjection = goldenRunActive({
       candidate_source_run_id: "run-source",

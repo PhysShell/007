@@ -10,6 +10,7 @@
   // backend makes no promise they always do, so this component never reads
   // or infers anything from `run.parent_run_id`.
   import type { RunDto, MaterializationStatus } from "../lib/types";
+  import { hasCandidateProjection } from "../lib/types";
   import Link from "./Link.svelte";
 
   let { run }: { run: RunDto } = $props();
@@ -83,7 +84,16 @@
         </div>
       {/if}
     </dl>
-  {:else}
+  {:else if !hasCandidateProjection(run)}
+    <!-- Q-Deck A0.5 corrective (fresh CodeRabbit finding, PR #110):
+         materialization_status: "not_applicable" (no source run, no tree
+         OID — nothing else to show in the dl above) is itself a COMPLETE,
+         valid projection, not a missing one — the badge above already
+         says so. The empty-state copy belongs ONLY to the genuinely
+         missing case (hasCandidateProjection is false: no
+         materialization_status at all), never to a real "not_applicable"
+         answer that would otherwise look identical here without this
+         check. -->
     <p class="empty">No candidate-state data for this run.</p>
   {/if}
 </section>

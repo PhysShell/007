@@ -62,6 +62,24 @@ describe("CandidateStateCard", () => {
     expect(screen.getByText("No candidate-state data for this run.")).toBeInTheDocument();
   });
 
+  // Q-Deck A0.5 corrective (fresh CodeRabbit finding, PR #110):
+  // `materialization_status: "not_applicable"` with no source run or tree
+  // OID is a COMPLETE, valid projection (the badge already says so) — not
+  // the same thing as no projection at all. Must never show the
+  // "No candidate-state data" copy, which belongs only to the genuinely
+  // missing case.
+  it("shows the not_applicable badge alone, never the unavailable empty-state copy, for a status-only projection", () => {
+    const run = baseRun({
+      candidate_source_run_id: null,
+      candidate_tree_oid: null,
+      materialization_status: "not_applicable",
+    });
+    render(CandidateStateCard, { props: { run } });
+    expect(screen.getByText("not applicable")).toBeInTheDocument();
+    expect(screen.queryByText("No candidate-state data for this run.")).not.toBeInTheDocument();
+    expect(screen.queryByText("unavailable")).not.toBeInTheDocument();
+  });
+
   it("shows candidate-state provenance and run lineage as independently displayed, distinct fields", () => {
     // parent_run_id and candidate_source_run_id deliberately point at
     // DIFFERENT runs here — this component must never conflate them or

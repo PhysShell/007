@@ -73,18 +73,32 @@
       try {
         const r = await getRun(runId);
         if (cancelled) return;
+        // Q-Deck A0.5 corrective (fresh exact-head Codex P1, PR #110): the
+        // stop/retry decision must read the FRESH response `r`, never the
+        // merged DISPLAY state — `mergeRunProjection` can legitimately
+        // preserve an earlier, genuinely-obtained "not_applicable" (e.g.
+        // polled between RunStarted and CandidateStateMaterialized being
+        // appended) across a LATER poll that omits its own projection
+        // because the replay limiter is saturated. Trusting the merged
+        // object here would treat that stale "not_applicable" as a
+        // trustworthy final sealed answer and stop polling — the page
+        // would then permanently under-report a run that later genuinely
+        // materialized. Preserving `run` for DISPLAY and deciding
+        // freshness from `r` alone are two different questions; conflating
+        // them is exactly the bug.
+        const freshHasProjection = hasCandidateProjection(r);
         const merged = mergeRunProjection(run, r);
         run = merged;
-        if (isSealedRun(merged.status)) {
-          if (hasCandidateProjection(merged)) {
+        if (isSealedRun(r.status)) {
+          if (freshHasProjection) {
             clearInterval(timer);
           } else {
             postSealCandidateRetries += 1;
             if (postSealCandidateRetries >= MAX_POST_SEAL_CANDIDATE_RETRIES) {
-              // Budget exhausted — stop honestly. The card already shows
-              // "unavailable" (mergeRunProjection never fabricates a
-              // projection that was never once observed), and it stays
-              // that way rather than polling this run forever.
+              // Budget exhausted — stop honestly. Whatever `run` displays
+              // now (preserved-old, or still "unavailable" if there was
+              // never anything to preserve) stays as-is rather than
+              // polling this run forever.
               clearInterval(timer);
             }
           }
