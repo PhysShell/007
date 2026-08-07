@@ -160,12 +160,8 @@ string; they are never skipped, so "absent" and "empty" hash distinctly from
 **Enums are framed by name, not by tag byte.** Every `… name` in every framing
 in this document — here and in §3.15 — is the frozen `snake_case` ASCII name of
 the variant exactly as written in the §3 schemas — `work_order`, `coder_report`, `reviewer`, `review_verdict_accepted` —
-length-prefixed like any other field. `artifact_kind` is the same rule applied to
-`ArtifactRef.kind`: the `snake_case` spelling of the referenced object's type,
-`candidate_state` / `candidate_patch` / `provider_execution_receipt` /
-`interaction_manifest` / `scope_contract` / `campaign_event_payload` / `diff` /
-`gate_log` / `raw_provider_bytes` / `normalized_output` / `usage` / `cost`,
-matching the A0 `ArtifactKind` spellings where a kind already exists there. `o7-run`
+length-prefixed like any other field. `ArtifactRef.kind` follows the same rule
+over the closed set frozen in FD-1.9. `o7-run`
 assigns numeric tags (`ArtifactKind::Task => 1`, `Diff => 2`, …) and is right to:
 those bytes never leave one crate. A1 is a cross-implementation wire contract,
 where an unassigned "tag byte" means two conforming implementations can pick
@@ -372,6 +368,24 @@ under a different declared type are a different reference (FD-2.5).
 007-owned CAS only. There is no path field and no URL field to populate. An
 agent-supplied path or URL appearing anywhere in a payload is inert text and is
 never dereferenced (FD-7).
+
+**FD-1.9 `ArtifactKindV1` — the complete closed set.** `kind` is a digest input
+(FD-1.2) and every enum in A1 is closed (FD-1.6), so an incomplete list would
+put implementations back where the tag-byte problem left them: inventing
+spellings and computing different digests. Every `ArtifactRef` slot in §3 resolves
+to exactly one of these, and nothing else is a valid `kind`.
+
+| Group | `snake_case` spellings |
+|---|---|
+| the eleven A1 message kinds | `work_order`, `coder_report`, `candidate_receipt`, `review_request`, `reviewer_report`, `review_verdict`, `corrective_directive`, `campaign_feed_item`, `human_attention_request`, `human_command_request`, `human_decision` |
+| A1 typed non-envelope objects | `provider_execution_receipt`, `interaction_manifest`, `scope_contract`, `campaign_event_payload` |
+| imported A0 kinds — **spelled exactly as `o7_run::event::ArtifactKind` already serializes them** (`crates/o7-run/src/event.rs:113–155`, `#[serde(rename_all = "snake_case")]`) | `candidate_state` (an A0 `CandidateRef`), `candidate_patch`, `worktree` (the materialization attestation), `policy`, `task`, `diff`, `gate_log`, `sandbox_report`, `provider_session`, `command_binding` |
+| A1 evidence blobs | `contract_document`, `verifier_registry`, `canonical_provider_request`, `raw_provider_bytes`, `normalized_output`, `provider_message`, `tool_arguments`, `tool_result`, `usage_record`, `cost_record`, `diagnostic_log`, `ci_observation`, `termination_observation`, `detail_document` |
+
+Reusing A0's spellings verbatim rather than minting parallel ones means a
+`candidate_state` reference denotes the same object on both sides of the
+boundary — which is the entire point of importing a kind instead of redefining
+it (FD-2.4).
 
 ### FD-2 — the evidence graph is acyclic by construction
 
@@ -690,8 +704,9 @@ cryptographically tidy lie, and it is the worst genre of lie because it reads as
 an audit.
 
 For every artifact whose `producer_role` is `coder` or `reviewer`, acceptance
-requires **all ten congruence predicates** below — nine field equalities plus the
-completed-outcome requirement — checked before any other semantic validation:
+requires **all twelve congruence predicates** below — nine envelope/receipt field
+equalities, the completed-outcome requirement, and two campaign bindings —
+checked before any other semantic validation:
 
 ```text
 envelope.producer_execution_id      == receipt.provider_execution_id
@@ -704,7 +719,21 @@ envelope.payload_digest             == receipt.final_normalized_output_ref.diges
 envelope.campaign_id                == receipt.campaign_id
 envelope.round_id                   == receipt.round_id
 receipt.execution_outcome           == completed
+
+receipt.request.budget_policy_digest
+    == CampaignStateV1.budget_policy_digest
+
+receipt.provider_execution_id
+    == CampaignStateV1.active_execution.provider_execution_id
+       (which the initiating WorkOrder / ReviewRequest / CorrectiveDirective set
+        from its own target_provider_execution_id — §3.1)
 ```
+
+The last two arrived in R5.1, once budget policy became a canonical campaign
+fact and executions gained a canonical origin. Without them an execution could
+run under a different budget policy, or under an identity the campaign never
+authorized, and still satisfy every other predicate — a provenance chain that
+verifies beautifully and proves the wrong campaign.
 
 Any mismatch fails closed as `ReceiptIncongruent`, with no acceptance and no
 transition. The `payload_digest` equality is what makes the chain load-bearing:
@@ -780,7 +809,13 @@ verify_wire:   CampaignEventV1 x log  -> ok | ChainInvalid
                state-version arithmetic. No CAS, no parsing — everything here
                is decidable from the event header and the log.
 
-resolve_event: CampaignEventV1 x CAS x campaign policy x bound registries
+resolve_genesis: CampaignEventV1(CampaignCreated) x CAS x bound registries
+                                     -> ResolvedCampaignEventV1 x CampaignPolicy
+               the genesis payload is read under the PROTOCOL hard maximum
+               (1 MiB, FD-1.4) because the campaign policy is what it contains;
+               its own closure is then resolved under the policy it just yielded
+
+resolve_event: CampaignEventV1 x CAS x CampaignPolicy x bound registries
                                      -> ResolvedCampaignEventV1 | ResolutionFailed
                1. fetch the event payload (bounded by max_control_artifact_bytes)
                   and parse it under its §3.15.2 schema
@@ -794,8 +829,9 @@ seed:  ResolvedCampaignEventV1(CampaignCreated)       -> CampaignStateV1
 fold:  (CampaignStateV1, ResolvedCampaignEventV1)     -> CampaignStateV1
                                                        | TransitionRejected
 
-replay(log) := fold*( seed(resolve_event(verify_wire(log[0]))),
-                      map(resolve_event ∘ verify_wire, log[1..]) )
+replay(log) :=
+  let (g, policy) = resolve_genesis(verify_wire(log[0]))
+  fold*( seed(g), map(e -> resolve_event(verify_wire(e), policy), log[1..]) )
 ```
 
 Closure checking lives in `resolve_event`, not in `verify_wire`, for a reason
@@ -938,12 +974,12 @@ a new id — and each action's target phase is frozen:
 | Decision | Target phase | Guard | Also |
 |---|---|---|---|
 | `ACK` | unchanged (`HUMAN_REQUIRED`) | the attention is `OPEN` | attention → `ACKNOWLEDGED` |
-| `ANSWER_QUESTION`, `declared_scope_effect = none` | `BUILDING` | `question_id ∈ open_question_ids`; the attention's `required_decision_kind = answer_question`; controller finds no scope change | that id leaves `open_question_ids`; when none of the attention's questions remain open it is `RESOLVED` |
+| `ANSWER_QUESTION`, `declared_scope_effect = none` | `BUILDING` | the named `AttentionEntry` exists and is `OPEN`/`ACKNOWLEDGED`; its `required_decision_kind = answer_question`; `question_id ∈ entry.open_question_ids`; controller finds no scope change | that id leaves `entry.open_question_ids`; when the entry has none left it becomes `RESOLVED` |
 | `ANSWER_QUESTION`, `declared_scope_effect = revise_contract` | unchanged (`HUMAN_REQUIRED`); effect `contract_revision_requested`; no further autonomous dispatch | same membership guard | question closed; attention stays open |
 | action `gather_more_evidence` | `GATING` | `current_candidate_head` present | attention → `RESOLVED` |
 | action `retry_failed_step` | `suspended_from_phase` | that field is present | attention → `RESOLVED` |
 | action `cancel_campaign` | `CANCEL_REQUESTED` | — | unconditional (FD-14.7 rule 5) |
-| `CANCEL` | `CANCEL_REQUESTED` | — | unconditional |
+| `CANCEL` | `CANCEL_REQUESTED` | none — `CANCEL` carries no `attention_id`, and the attention guard does not apply to it | unconditional |
 
 Every phase target above is additionally subject to FD-14.7 rule 3: if another
 attention remains `OPEN` or `ACKNOWLEDGED`, the phase stays `HUMAN_REQUIRED`.
@@ -957,7 +993,9 @@ table cannot be published by the controller or selected by a client.
 **How a question becomes state.** `CoderReportReceived` is inert (FD-14.3), so a
 question in a report changes nothing by itself. The controller selects which
 questions to escalate and raises an attention carrying their ids; that
-`HumanAttentionRaised` is what adds them to `open_question_ids`. A question that
+`HumanAttentionRaised` is what puts them in that attention's own
+`AttentionEntry.open_question_ids` (§3.14) — there is no campaign-wide question
+set. A question that
 was never escalated is never answerable — which is correct, since nobody was
 asked.
 
@@ -1276,7 +1314,7 @@ improve a reviewer's findings on the way through.
 | `required_changes` | `[Text]` | yes | ≤ 256 entries, ≤ 8192 bytes each | derived from the verdict |
 | `required_evidence_gate_ids` | `[Id]` | yes | registry ids | gate registry |
 | `scope_ref` | `ArtifactRef` | yes | **digest identical** to the `WorkOrder`'s `scope_ref` | controller |
-| `budget_policy_digest` | `Digest256` | yes | unchanged from the `WorkOrder` | campaign policy |
+| `budget_policy_digest` | `Digest256` | yes | must equal `CampaignStateV1.budget_policy_digest`; the four values are **not** repeated here — the directive inherits the immutable campaign policy and restates only its digest | campaign policy |
 | `target_provider_execution_id` | `Id` | yes | the corrective coder execution's identity, minted before dispatch (§3.1) | controller |
 
 A `CorrectiveDirective` **starts the next coder execution directly**; it does not
@@ -1326,12 +1364,23 @@ transition (FD-14.3).
 | `reason.summary` | `Text` | yes | ≤ 4096 bytes | controller |
 | `severity` | enum{`info`,`attention`,`urgent`} | yes | closed | controller |
 | `required_decision_kind` | enum{`ack`,`choose_resolution`,`answer_question`} | yes | closed; there is no `none` — an attention nobody can act on is a feed item (§3.8) | controller |
-| `question_ids` | `[Id]` | iff `answer_question` | ≤ 256; every id from an accepted `CoderReport`'s `questions[]`, selected by the controller | controller |
-| `options[].action_id` | `Id` | iff `choose_resolution` | must be one of the closed V1 action set (FD-14.6); a client may only select, never compose | controller |
+| `question_ids` | `[Id]` | iff `answer_question` | **non-empty**, ≤ 256; every id from an accepted `CoderReport`'s `questions[]`, selected by the controller | controller |
+| `options[].action_id` | `Id` | iff `choose_resolution` | **at least one**; each from the closed V1 action set (FD-14.6); a client may only select, never compose | controller |
 | `options[].consequence` | `Text` | yes with the option | ≤ 4096 bytes | controller |
 | `evidence_refs` | `[ArtifactRef]` | yes | rank ≤ 4 | controller |
 | `suspended_from_phase` | Phase (§3.14) | yes | one of `BUILDING`,`GATING`,`CI_WAIT`,`REVIEWING`,`CORRECTING` — never `READY_TO_MERGE` or a terminal phase | reducer (FD-14.6) |
 | `raised_at_state_version` | u64 | yes | what the human is looking at | reducer (FD-14) |
+
+The decision surface must be actionable, which is now schema-enforced rather
+than merely asserted:
+
+```text
+answer_question    => question_ids non-empty, options absent
+choose_resolution  => options non-empty, question_ids absent
+ack                => neither questions nor options
+```
+
+An attention carrying neither is what §3.8 calls a feed item.
 
 There is **no `lifecycle` field**: this artifact is immutable like every other
 accepted artifact, and a status that walks from `OPEN` to `ACKNOWLEDGED` inside a
@@ -1712,7 +1761,7 @@ HumanAttentionRaised is the ONLY event that may set phase = HUMAN_REQUIRED.
 | `ReviewVerdictAccepted` | A | `ReviewVerdict` (4) | `phase = REVIEWING`; `reviewed_head == current_candidate_head`; **and** `last_gate_results.bound_head == current_candidate_head` **and** `last_gate_results.all_required_passed` **and** `last_ci_results.bound_head == current_candidate_head` **and** `last_ci_results.conclusion = passed` | `accepted` → `READY_TO_MERGE`; `changes_requested` → `CORRECTING`; `blocked` → **phase unchanged** (`REVIEWING`) |
 | `CorrectiveDirectiveIssued` | A | `CorrectiveDirective` (5) | `phase = CORRECTING`; `active_execution` absent; `scope_ref` digest unchanged; every `target_finding_id` in the referenced verdict | `phase = BUILDING`; new `active_round_id`; `active_execution = {coder, directive.target_provider_execution_id}` |
 | `HumanAttentionRaised` | A | `HumanAttentionRequest` (5) | `phase ∈ {BUILDING, GATING, CI_WAIT, REVIEWING, CORRECTING, HUMAN_REQUIRED}` — never `READY_TO_MERGE`, `CANCEL_REQUESTED`, or terminal; `attention_id` **unknown** to the state; no `question_id` already open in another active entry; congruence of §3.15.3 | `attention += AttentionEntry{OPEN, decision kind, offered actions, questions}`; `suspended_from_phase := phase` **only if** `phase ≠ HUMAN_REQUIRED`; `phase = HUMAN_REQUIRED` |
-| `HumanDecisionRecorded` | A | `HumanDecision` (4) | binding checks passed (FD-15.1); `authentication_strength ≠ unattested`; the referenced attention is `OPEN` or `ACKNOWLEDGED` | per the FD-14.6 table, under the exit rule of FD-14.7 |
+| `HumanDecisionRecorded` | A | `HumanDecision` (4) | binding checks passed (FD-15.1); `authentication_strength ≠ unattested`; **and, for `ACK` / `SELECT_ATTENTION_ACTION` / `ANSWER_QUESTION` only**, the named `AttentionEntry` is `OPEN` or `ACKNOWLEDGED` and satisfies that command's own guard (FD-14.6). `CANCEL` names no attention and requires none | per the FD-14.6 table, under the exit rule of FD-14.7 |
 | `AttentionResolved` | A | — | that attention is `OPEN` or `ACKNOWLEDGED` | attention → `RESOLVED`, its `open_question_ids` cleared; the phase effect is governed by FD-14.7 |
 | `AttentionSuperseded` | A | — | the superseded one is `OPEN` or `ACKNOWLEDGED`; the successor is known and `OPEN`; the two ids differ | attention → `SUPERSEDED`, its `open_question_ids` cleared; phase effect per FD-14.7 |
 | `HumanCommandRejected` | E | `HumanCommandRequest` (3) | — | none |
@@ -1778,11 +1827,15 @@ The four values are carried, not just their digest. A digest alone cannot tell a
 replaying reader that the campaign's budget was 64 MiB and 512 objects — and
 resolution needs the effective bound *before* the first `WorkOrder` exists, since
 `CampaignCreated`'s own closure must already be resolved under campaign policy.
-The genesis payload is therefore read under the protocol hard maximum for a
-control artifact (1 MiB, FD-1.4), which is enough to obtain the policy; every
-resolution after that uses `min(hard maximum, campaign policy)`. `seed` copies
-the policy into state, and every `WorkOrder`/`CorrectiveDirective` must repeat it
-exactly, digest included.
+That is why `resolve_genesis` is a separate function from `resolve_event`
+(FD-14.2) rather than the same one taking a policy it cannot yet have: the
+genesis payload is read under the protocol hard maximum for a control artifact
+(1 MiB, FD-1.4), which is enough to obtain the policy, and every resolution
+after that uses `min(hard maximum, campaign policy)`. `seed` copies the policy
+into state. A `WorkOrder` repeats the four values **and** the digest; a
+`CorrectiveDirective` inherits the immutable state policy and repeats only the
+digest — duplicating the numbers into every directive would be a fourth copy of
+one fact.
 
 `ProviderExecutionRecordedPayloadV1`
 
@@ -2120,8 +2173,9 @@ outcome.
 | `HumanAttentionRaised` reusing a `RESOLVED` or `SUPERSEDED` `attention_id` | guard fails — ids are unique for the campaign's lifetime (§3.9) |
 | `AttentionSuperseded` whose superseded attention is `RESOLVED` | guard fails (§3.15.1) |
 | terminal event leaving `active_round_id` or `active_execution` set | contract violation; terminal canonicalization is atomic (FD-14.2) |
-| `ANSWER_QUESTION` for a `question_id` not in `open_question_ids` | rejected — a question nobody escalated was never asked (FD-14.6) |
-| a `CoderReport` question that no attention escalated | never enters `open_question_ids`; unanswerable by construction (FD-14.6) |
+| `ANSWER_QUESTION` for a `question_id` not in the named entry's `open_question_ids` | rejected — a question nobody escalated was never asked (FD-14.6) |
+| `ANSWER_QUESTION` naming an entry whose `required_decision_kind ≠ answer_question` | rejected (FD-14.6) |
+| a `CoderReport` question that no attention escalated | never enters any entry; unanswerable by construction (FD-14.6) |
 | `GateResultsAccepted` omitting a required gate id | set-equality guard fails; no smaller denominator (§3.15.2) |
 | `GateResultsAccepted` carrying a producer-authored `required` flag | rejected as an unknown field; requiredness comes from state (§3.15.2) |
 | `GateResultsAccepted` with a duplicate `gate_id` | guard fails (§3.15.2) |
@@ -2142,6 +2196,15 @@ outcome.
 | the same `question_id` open in two active attentions | guard fails at raise time (§3.15.1) |
 | `AttentionResolved` leaving its questions open | contract violation; the entry's questions are cleared with it (§3.15.1) |
 | a `WorkOrder` whose `budget_policy_digest` ≠ the campaign policy | guard fails (§3.15.1) |
+| a receipt whose `request.budget_policy_digest` ≠ the campaign policy | `ReceiptIncongruent` (FD-11) |
+| a receipt whose `provider_execution_id` ≠ the campaign's `active_execution` | `ReceiptIncongruent` (FD-11) |
+| `CANCEL` carrying an `attention_id` | rejected by the schema (§3.10) |
+| `CANCEL` refused because no attention is open | contract violation — the attention guard does not apply to `CANCEL` (§3.15.1) |
+| an `ArtifactRef.kind` outside `ArtifactKindV1` | rejected; the set is closed (FD-1.9) |
+| an imported A0 ref spelled differently from `o7_run::event::ArtifactKind` | rejected — imported spellings are reused verbatim (FD-1.9) |
+| `required_decision_kind = answer_question` with empty `question_ids` | rejected (§3.9) |
+| `required_decision_kind = choose_resolution` with no options | rejected (§3.9) |
+| `resolve_event` called on `CampaignCreated` with a policy argument | contract violation — genesis uses `resolve_genesis` (FD-14.2) |
 | `budget_policy_digest` not recomputable from the four carried values | seed fails (FD-1.5, §3.15.2) |
 | replay that needs a value only present in a later `WorkOrder` | impossible — genesis carries the policy (§3.15.2) |
 | resolution failure (unparseable payload, slot-mismatched source) | `ResolutionFailed`; the event is never folded (FD-14.2) |
@@ -2254,6 +2317,48 @@ A2     reducer extensions: progress frontier, NO_PROGRESS, terminal taxonomy,
 non-authoritative: it must not drive an A-series transition.
 
 ## 9. Revision history
+
+### R5.1 — consistency patch on the synced head (`6c92870`)
+
+Not an exploratory round: five contradictions between sections that earlier
+rounds edited at different times, plus two schema tightenings.
+
+1. **FD-14.6 still spoke of a top-level `open_question_ids`** that §3.14 had
+   already deleted in favour of per-attention entries — one section requiring
+   `state.attention[A].open_question_ids` while another described
+   `state.open_question_ids`. The normative guard now names the entry, and the
+   acceptance rows follow.
+2. **`CANCEL` could not pass its own event guard.** The schema forbids
+   `attention_id` on `CANCEL` while `HumanDecisionRecorded` required a referenced
+   attention unconditionally, so the one command FD-14.6 calls unconditional
+   would have been rejected every time. The attention guard is now scoped to
+   `ACK` / `SELECT_ATTENTION_ACTION` / `ANSWER_QUESTION`.
+3. **`ArtifactKindV1` was a partial list.** R5 fixed enum framing but left the
+   `kind` set incomplete — `coder_report`, `candidate_receipt`, `review_verdict`
+   and the rest are all in frozen slots, so implementations would have had to
+   invent spellings for a digest input, reintroducing exactly the divergence R5
+   removed. FD-1.9 now freezes the complete closed set, reusing
+   `o7_run::event::ArtifactKind`'s own serialized spellings verbatim for imported
+   kinds.
+4. **The genesis signature contradicted the genesis prose.** `resolve_event` took
+   a campaign policy that, for `CampaignCreated`, lives inside the payload the
+   function has yet to read. Split into `resolve_genesis` (reads under the
+   protocol hard maximum, yields the policy) and `resolve_event` (takes it), with
+   `replay` rewritten accordingly.
+5. **The new canonical budget was not bound to provider executions.** FD-11
+   verified ten predicates and none compared `receipt.request.budget_policy_digest`
+   to the campaign's, so an execution could run under a foreign budget policy and
+   still pass. Two predicates added — budget policy, and
+   `receipt.provider_execution_id == active_execution.provider_execution_id`,
+   whose origin is the initiating artifact's `target_provider_execution_id`.
+   Twelve now, and the wording says so in both places.
+
+Tightenings: an attention's decision surface must be non-empty and single-kind
+(`answer_question` ⇒ questions, `choose_resolution` ⇒ options, `ack` ⇒ neither),
+which turns "an attention nobody can act on is a feed item" from a sentence into
+a schema; and `CorrectiveDirective` restates only the budget *digest* rather than
+re-carrying four numbers that are already immutable campaign state.
+
 
 ### R5 — fifth corrective round (review of `8009535`), plus the main sync
 
@@ -2505,15 +2610,16 @@ means "terminal in the reference graph", and parseability is decided per slot;
 reviewer provenance (`identity`, `model`, `prompt_version`) is removed from
 `ReviewerReportV1` and derived controller-side in `ReviewVerdictV1` from the
 receipt plus a prompt-registry lookup, because a model telling the controller
-which model it was is not evidence; and FD-11 now says "ten congruence
-predicates — nine field equalities plus the completed-outcome requirement"
-everywhere, so R3 does not open with an audit of English nouns.
+which model it was is not evidence; and FD-11's predicate count is stated
+uniformly everywhere rather than drifting between "equalities" and "checks", so
+R3 does not open with an audit of English nouns. (R2 counted ten; R5.1 added two
+campaign bindings and the count is twelve today — §9's R5.1 entry.)
 
 Also added in R2: `CampaignStateV1` carries `last_gate_results` and
 `last_ci_results` (head-bound), which `CandidateAccepted` clears — the guard for
 `READY_TO_MERGE` is stated over them, so a new head cannot leave a stale green in
 the guard's line of sight; a terminal `SUPERSEDED` phase for contract revision;
-and `open_question_ids` for the `provide_answer` guard.
+and per-attention question tracking for the answer guard.
 
 
 ### R1 — first corrective round (review of `144ebf6`)
