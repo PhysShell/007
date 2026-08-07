@@ -919,14 +919,29 @@ ExecutionCauseV1:
   Initial
   CorrectiveRound { prior_verdict_ref }
   SafeRedrive { prior_execution_id,
+                prior_receipt_ref,   # adjudicated addition, see below
                 evidence: EstablishedNonDispatchEvidenceRefV1 }  # §11.1
 
 DispatchCauseV1:
   Initial
   ToolContinuation { prior_dispatch_id, tool_result_ref }
   SafeRedrive { prior_dispatch_id,
+                prior_receipt_ref,   # adjudicated addition, see below
                 evidence: EstablishedNonDispatchEvidenceRefV1 }  # §11.1
 ```
+
+**Adjudicated amendment (types-foundation review T5, option A).** The
+§11.3 matrix carries a digest edge
+`cause.safe_redrive.prior_receipt_ref -> ProviderInvocationReceipt`,
+but the frozen cause schema had no field to carry it — an
+implementation must not ratify that repair silently, so it is
+adjudicated here, pre-FREEZE: `SafeRedrive` carries `prior_receipt_ref`
+(the prior attempt's invocation receipt, by canonical bytes). The ID
+says WHO; the receipt ref proves WHICH canonical bytes of that who —
+the same evidence discipline as everywhere else. The checked
+constructor cross-verifies: the resolved receipt's execution id equals
+`prior_execution_id` (execution grain) / its dispatch record contains
+`prior_dispatch_id` (dispatch grain); mismatch is not constructible.
 
 ToolContinuation is not a retry. A new session is not a retry. A
 corrective round is not a retry. `SafeRedrive` requires evidence of

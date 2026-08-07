@@ -43,8 +43,9 @@ pub enum ProducerBindingV1 {
     Controller {
         /// Controller component version.
         component_version: String,
-        /// Active policy digest.
-        policy_digest: BlobDigest,
+        /// Active policy digest — a PROTOCOL digest, never content
+        /// identity (review T2).
+        policy_digest: crate::digest::PolicyDigest,
     },
     /// Provider-produced raw report. The ONLY field (P1-20): role,
     /// execution, run binding, model route, adapter, prompt/tool-policy

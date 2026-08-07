@@ -1,51 +1,56 @@
 //! Domain-separated protocol digests (contract §4.1–§4.2): computed over
 //! explicitly framed, typed fields — never a hash of an arbitrary JSON
-//! serialization. The context registry is compile-time constants only,
-//! one purpose per type, uniqueness-tested, with a known-answer test per
-//! context. `BlobDigest` (content addressing) is deliberately NOT here.
+//! serialization, and NEVER conflated with `BlobDigest` content identity
+//! (review T2: the two digest families are distinct at the Rust type
+//! level; a shared 32-byte primitive is private, the public semantic
+//! surface is per-purpose newtypes). Each purpose owns exactly one
+//! context constant — pairing enforced by construction, so one purpose
+//! can never be reused for two types. Context known answers are pinned
+//! as LITERALS (a typo in a context constant fails the test instead of
+//! moving both sides of it).
 
-use crate::ids::BlobDigest;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 
-/// A frozen digest context. Constants only — never assembled from input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DigestContext(&'static str);
+use crate::ids::IdError;
 
-/// `message_binding_digest` framing (contract §4.3).
-pub const CTX_MESSAGE_BINDING: DigestContext = DigestContext("o7-a1\0message-binding\0v1\0");
-/// Contract digests.
-pub const CTX_CONTRACT: DigestContext = DigestContext("o7-a1\0contract\0v1\0");
-/// Gate-registry snapshot digests (contract §10).
-pub const CTX_GATE_REGISTRY: DigestContext = DigestContext("o7-a1\0gate-registry\0v1\0");
-/// Verifier policy digests (contract §10).
-pub const CTX_VERIFIER_POLICY: DigestContext = DigestContext("o7-a1\0verifier-policy\0v1\0");
-/// Logical model route digests (contract §9).
-pub const CTX_MODEL_ROUTE: DigestContext = DigestContext("o7-a1\0model-route\0v1\0");
+fn hex64(bytes: &[u8]) -> String {
+    let mut h = Sha256::new();
+    h.update(bytes);
+    let out = h.finalize();
+    let mut s = String::with_capacity(64);
+    for b in out {
+        use std::fmt::Write as _;
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
 
-/// Every frozen context, for the registry tests. Extending this list is
-/// a contract change via the supersede path.
-pub const ALL_CONTEXTS: &[DigestContext] = &[
-    CTX_MESSAGE_BINDING,
-    CTX_CONTRACT,
-    CTX_GATE_REGISTRY,
-    CTX_VERIFIER_POLICY,
-    CTX_MODEL_ROUTE,
-];
+fn validate_hex64(raw: &str) -> Result<(), IdError> {
+    if raw.len() == 64
+        && raw
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        Ok(())
+    } else {
+        Err(IdError::BadDigest)
+    }
+}
 
-/// Length-prefixed framed digest builder — the same explicit framing
-/// discipline as `LaunchRequest::spec_digest` (`o7-launch-spec\0v1\0`):
-/// every field is length-prefixed, sets are sorted by the caller before
-/// framing, and the context string opens the frame.
+/// Length-prefixed field framer (the `spec_digest` discipline): every
+/// field is length-prefixed; sets are sorted by the caller before
+/// framing. Only reachable through a purpose type's `compute`, so a
+/// frame always opens with that purpose's own context.
 #[derive(Debug)]
-pub struct FramedDigest {
+pub struct Framer {
     buf: Vec<u8>,
 }
 
-impl FramedDigest {
-    /// Open a frame under `ctx`.
-    #[must_use]
-    pub fn new(ctx: DigestContext) -> Self {
+impl Framer {
+    fn new(ctx: &'static str) -> Self {
         let mut buf = Vec::new();
-        buf.extend_from_slice(ctx.0.as_bytes());
+        buf.extend_from_slice(ctx.as_bytes());
         Self { buf }
     }
 
@@ -62,19 +67,102 @@ impl FramedDigest {
         self.push_bytes(s.as_bytes())
     }
 
-    /// Append a collection count (frame shape marker before repeated
-    /// fields, exactly like `spec_digest`'s `push_len`).
+    /// Append a collection count before repeated fields.
     pub fn push_count(&mut self, n: u64) -> &mut Self {
         self.buf.extend_from_slice(&n.to_be_bytes());
         self
     }
-
-    /// Close the frame into a digest.
-    #[must_use]
-    pub fn finish(self) -> BlobDigest {
-        BlobDigest::of_bytes(&self.buf)
-    }
 }
+
+macro_rules! protocol_digest {
+    ($(#[$doc:meta])* $name:ident, $ctx:literal) => {
+        $(#[$doc])*
+        #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[serde(try_from = "String", into = "String")]
+        pub struct $name(String);
+
+        impl $name {
+            /// This purpose's frozen domain-separation context.
+            pub const CONTEXT: &'static str = $ctx;
+
+            /// Frame typed fields under this purpose's own context and
+            /// close the digest. The ONLY way to mint a value of this
+            /// type from data.
+            #[must_use]
+            pub fn compute(fill: impl FnOnce(&mut Framer)) -> Self {
+                let mut f = Framer::new(Self::CONTEXT);
+                fill(&mut f);
+                Self(hex64(&f.buf))
+            }
+
+            /// Re-admit a stored hex form (validated shape only — the
+            /// semantic guarantee is that it was minted by `compute`).
+            ///
+            /// # Errors
+            /// [`IdError::BadDigest`] unless 64 lowercase hex chars.
+            pub fn parse(raw: impl Into<String>) -> Result<Self, IdError> {
+                let raw = raw.into();
+                validate_hex64(&raw)?;
+                Ok(Self(raw))
+            }
+
+            /// The hex form.
+            #[must_use]
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl TryFrom<String> for $name {
+            type Error = IdError;
+            fn try_from(raw: String) -> Result<Self, Self::Error> {
+                Self::parse(raw)
+            }
+        }
+
+        impl From<$name> for String {
+            fn from(d: $name) -> Self {
+                d.0
+            }
+        }
+    };
+}
+
+protocol_digest!(
+    /// `message_binding_digest` (contract §4.3).
+    MessageBindingDigest,
+    "o7-a1\0message-binding\0v1\0"
+);
+protocol_digest!(
+    /// Contract identity digests.
+    ContractDigest,
+    "o7-a1\0contract\0v1\0"
+);
+protocol_digest!(
+    /// Gate-registry snapshot digests (contract §10).
+    RegistryDigest,
+    "o7-a1\0gate-registry\0v1\0"
+);
+protocol_digest!(
+    /// Verifier/controller policy digests (contract §10, §3).
+    PolicyDigest,
+    "o7-a1\0verifier-policy\0v1\0"
+);
+protocol_digest!(
+    /// Logical model route digests (contract §9).
+    ModelRouteDigest,
+    "o7-a1\0model-route\0v1\0"
+);
+
+/// Every frozen context, for the registry tests. Extension is a
+/// supersede-path contract change.
+pub const ALL_CONTEXTS: &[&str] = &[
+    MessageBindingDigest::CONTEXT,
+    ContractDigest::CONTEXT,
+    RegistryDigest::CONTEXT,
+    PolicyDigest::CONTEXT,
+    ModelRouteDigest::CONTEXT,
+];
 
 #[cfg(test)]
 mod tests {
@@ -87,49 +175,62 @@ mod tests {
 
     #[test]
     fn registry_contexts_are_unique_and_well_formed() {
-        let set: BTreeSet<&str> = ALL_CONTEXTS.iter().map(|c| c.0).collect();
+        let set: BTreeSet<&str> = ALL_CONTEXTS.iter().copied().collect();
         assert_eq!(set.len(), ALL_CONTEXTS.len(), "duplicate digest context");
         for c in ALL_CONTEXTS {
-            assert!(c.0.starts_with("o7-a1\0"), "bad prefix: {:?}", c.0);
-            assert!(c.0.ends_with("\0v1\0"), "bad version suffix: {:?}", c.0);
+            assert!(c.starts_with("o7-a1\0"), "bad prefix: {c:?}");
+            assert!(c.ends_with("\0v1\0"), "bad version suffix: {c:?}");
         }
     }
 
-    /// Known-answer per context: empty frame digests are pinned. Any
-    /// change here is a wire change (supersede path).
+    /// Contract §4.2 known answers, pinned as LITERALS (review T2): the
+    /// empty-frame digest of each context. Independently recomputed
+    /// outside this codebase before pinning. A typo in a context
+    /// constant now fails here instead of moving both sides of the
+    /// comparison.
     #[test]
-    fn known_answers_per_context() {
-        let pinned = [
-            (
-                CTX_MESSAGE_BINDING,
-                BlobDigest::of_bytes(b"o7-a1\0message-binding\0v1\0"),
-            ),
-            (CTX_CONTRACT, BlobDigest::of_bytes(b"o7-a1\0contract\0v1\0")),
-            (
-                CTX_GATE_REGISTRY,
-                BlobDigest::of_bytes(b"o7-a1\0gate-registry\0v1\0"),
-            ),
-            (
-                CTX_VERIFIER_POLICY,
-                BlobDigest::of_bytes(b"o7-a1\0verifier-policy\0v1\0"),
-            ),
-            (
-                CTX_MODEL_ROUTE,
-                BlobDigest::of_bytes(b"o7-a1\0model-route\0v1\0"),
-            ),
-        ];
-        for (ctx, want) in pinned {
-            assert_eq!(FramedDigest::new(ctx).finish(), want);
-        }
+    fn known_answers_per_context_are_pinned_literals() {
+        assert_eq!(
+            MessageBindingDigest::compute(|_| {}).as_str(),
+            "a1b002012dea24011e655e8990a3832cc69a17b2bc312476ee46380eff31a068"
+        );
+        assert_eq!(
+            ContractDigest::compute(|_| {}).as_str(),
+            "e955c44932833ab2e6cdba97e9c9ad4b2f6ed69d013dc8aa100c86c643c34a3f"
+        );
+        assert_eq!(
+            RegistryDigest::compute(|_| {}).as_str(),
+            "824e727e3f0dcdba16d613bd538e772bec3d800d0a5d831ac37a8da7335a03bc"
+        );
+        assert_eq!(
+            PolicyDigest::compute(|_| {}).as_str(),
+            "c154f3a79e1460b892df3c291bbb6bbb4a723726b3ab24c981648378a313f468"
+        );
+        assert_eq!(
+            ModelRouteDigest::compute(|_| {}).as_str(),
+            "bc38d9785c9fb3a4a754e74c561f4a4522b827156edebcae49b6df9ecad16886"
+        );
     }
 
     #[test]
     fn framing_is_length_prefixed_not_concatenation() {
-        // ("ab","c") must differ from ("a","bc") — the classic ambiguity.
-        let mut d1 = FramedDigest::new(CTX_CONTRACT);
-        d1.push_str("ab").push_str("c");
-        let mut d2 = FramedDigest::new(CTX_CONTRACT);
-        d2.push_str("a").push_str("bc");
-        assert_ne!(d1.finish(), d2.finish());
+        let d1 = ContractDigest::compute(|f| {
+            f.push_str("ab").push_str("c");
+        });
+        let d2 = ContractDigest::compute(|f| {
+            f.push_str("a").push_str("bc");
+        });
+        assert_ne!(d1, d2);
+    }
+
+    #[test]
+    fn same_fields_different_purpose_different_digest() {
+        let a = ContractDigest::compute(|f| {
+            f.push_str("x");
+        });
+        let b = PolicyDigest::compute(|f| {
+            f.push_str("x");
+        });
+        assert_ne!(a.as_str(), b.as_str(), "domain separation is load-bearing");
     }
 }

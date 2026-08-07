@@ -44,6 +44,11 @@ pub enum ByteStringError {
     /// A length that no unpadded base64url encoding produces.
     #[error("byte string has an impossible unpadded base64url length")]
     BadLength,
+    /// Decodable, but not the ONE canonical encoding of its bytes —
+    /// non-zero unused pad bits in the final sextet (review T1: "AA" and
+    /// "AB" must not both mean `[0x00]`).
+    #[error("byte string is not the canonical unpadded base64url encoding")]
+    NonCanonical,
 }
 
 fn decode_char(c: u8) -> Result<u32, ByteStringError> {
@@ -90,6 +95,14 @@ pub fn decode(s: &str) -> Result<Vec<u8>, ByteStringError> {
             }
             _ => return Err(ByteStringError::BadLength),
         }
+    }
+    // ONE frozen representation (review T1): re-encoding the decoded
+    // bytes must reproduce the input exactly, otherwise the unused pad
+    // bits of the final sextet were non-zero and two distinct strings
+    // would decode to the same bytes. Round-trip equality is the whole
+    // rule — simple to review, hard to get wrong.
+    if encode(&out) != s {
+        return Err(ByteStringError::NonCanonical);
     }
     Ok(out)
 }
@@ -166,5 +179,15 @@ mod tests {
         assert_eq!(decode("Zm8="), Err(ByteStringError::BadChar));
         assert_eq!(decode("Zm+8"), Err(ByteStringError::BadChar));
         assert_eq!(decode("A"), Err(ByteStringError::BadLength));
+    }
+
+    /// Review T1 RED: non-zero unused pad bits are NOT a second spelling
+    /// of the same bytes — exactly one encoding per byte string.
+    #[test]
+    fn non_canonical_pad_bits_fail_closed() {
+        assert_eq!(decode("AA").unwrap(), vec![0x00]);
+        assert_eq!(decode("AB"), Err(ByteStringError::NonCanonical));
+        assert_eq!(decode("AAA").unwrap(), vec![0x00, 0x00]);
+        assert_eq!(decode("AAB"), Err(ByteStringError::NonCanonical));
     }
 }
