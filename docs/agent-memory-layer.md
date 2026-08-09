@@ -11,6 +11,12 @@
   not folded into the phases below. Its two dispositions **D1'** and **D2**
   *were* ratified by the maintainer on 2026-08-07 and are normative; the
   backend-selection deferral in this document follows from D1'.
+- **Companion record:** `docs/memory-plane-record.md` — the normative-obligation
+  half of the same problem (what an agent is *obliged* to know, versus what is
+  useful to recall). It proposes a lifecycle for failure knowledge on top of the
+  trust levels below, and the split between the planner projection and the
+  regression projection. Agent-authored and **pending** (rule 3); nothing from
+  it is folded into the phases here.
 
 ## Summary
 
