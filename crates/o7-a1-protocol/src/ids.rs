@@ -150,6 +150,25 @@ opaque_id!(
     GateId,
     "gate_id"
 );
+opaque_id!(
+    /// R1 conversation identity — a dependency-light MIRROR of the
+    /// ledger's id (the `RepositoryIdentity` precedent): the protocol
+    /// crate must not depend on the sqlite ledger. Never an authority
+    /// of its own; the ledger's row remains the source.
+    ConversationId,
+    "conversation_id"
+);
+opaque_id!(
+    /// R1 command identity — same mirroring rationale as
+    /// [`ConversationId`].
+    CommandId,
+    "command_id"
+);
+opaque_id!(
+    /// Run-attempt identity — same mirroring rationale.
+    AttemptId,
+    "attempt_id"
+);
 
 /// Monotonic round ordinal within a campaign, beginning at 0. Travels
 /// with `RoundId` as ONE inline identity pair in every round-scoped

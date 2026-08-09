@@ -29,14 +29,33 @@
 //! the envelope core (`CausationV1`, `ProducerBindingV1`,
 //! `RecordedMetadataV1`, `RefManifest`).
 //!
-//! NOT in this slice (next slices, in dependency order): the class-3
-//! external wrappers and `InputStateBindingV1` constructors; campaign
-//! run bindings; the provider receipt/manifest and cause types; gate
-//! registry types; the role artifact payloads; the human/attention
-//! lane; the ABSENT→RESERVED→COMMITTED idempotency machine and
-//! `CanonicalConstructionSeedV1`. Every one of those is contract-frozen
-//! in `a1-contracts.md` and none is redesigned here.
+//! Landed in the wrappers slice (APPROVED FOR NEXT SLICE @ ebc9b8f):
+//! the class-3 external wrappers with their field-level checked
+//! constructors; `InputStateBindingV1`; `CampaignRunBindingV1` +
+//! `CampaignRunBindingRefV1` (the antecedent authority for execution
+//! SafeRedrive); the §8.6 cause vocabulary with the T5-R1 cross-checks
+//! (dispatch-level SafeRedrive wire-unrepresentable).
+//!
+//! NOT landed yet (next slices, in dependency order): the resolver /
+//! proof layer (which alone mints `Accepted…` forms and replaces the
+//! interim `ResolvedCausation`-style proof inputs); the provider
+//! receipt/manifest payloads; gate registry types; the role artifact
+//! payloads; the human/attention lane; the ABSENT→RESERVED→COMMITTED
+//! idempotency machine and `CanonicalConstructionSeedV1`. Every one of
+//! those is contract-frozen in `a1-contracts.md` and none is redesigned
+//! here.
+//!
+//! OPEN mini-adjudication flagged for the next review (not silently
+//! decided): the `ContentKind` a `CasObjectRefV1` carries when its
+//! target is a COMMITTED ENVELOPE-BEARING ARTIFACT (causation
+//! `blob_ref`, `CampaignRunBindingRefV1::blob_ref`,
+//! `invocation_receipt_ref`, `HumanCommandRequestRefV1.blob_ref`). The
+//! closed class-2 registry has no canonical-message kind; this slice
+//! provisionally uses `message-payload-blob` for the binding ref and
+//! records the question instead of minting a registry entry (the T5
+//! lesson: implementations do not ratify contract changes silently).
 
+pub mod binding;
 pub mod bytes;
 pub mod canonical;
 pub mod cas;
@@ -45,3 +64,4 @@ pub mod edges;
 pub mod envelope;
 pub mod ids;
 pub mod limits;
+pub mod wrappers;
