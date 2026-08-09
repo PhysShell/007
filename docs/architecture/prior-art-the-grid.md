@@ -55,39 +55,56 @@ The implementation language is Dart (`pubspec.yaml` at the pinned revision).
 
 ### 1.3 007 artifact under review
 
+A1-F reached its frozen baseline while this record was open, so it is bound by
+**three separate identities** rather than one. They are different objects and
+answer different questions; collapsing them would be exactly the kind of
+almost-right citation §5 exists to prevent.
+
 ```text
-artifact     docs/q-deck/a1-authority-contracts.md
-branch       claude/a1-contract-freeze-dkrnnq
-revision     3a92ceacc88762db14b7887f5bb7d6f7f0e9d14d   (re-pinned twice — §1.5)
-accepted at  b61540a — the head the document's own header names as accepted;
-             `3a92cea` sets the status line and is ceremony only
-merged       NO — not reachable from origin/main at the time of this record
-status       as stated in its own header: ACCEPTED / CLOSED / FROZEN, with the
-             supersede path of its §7 now in force: "corrections are
-             forward-only and versioned"
+artifact  docs/q-deck/a1-authority-contracts.md
+
+H  merged head      8ee8666bee7be156b1b75a1c27c006b19763d06f
+                    the exact head of PR #123 that was accepted — what the
+                    document's own "the frozen baseline is the merged head of
+                    that PR" names. Verified as M's second parent, not assumed.
+
+B  artifact blob    7db92f1b3dc9d7040da074956a0b3f2f200174c8
+                    sha256:9d26ee3ffbe5cb680075526833bdfef297372c6897b0f40afc6986cd0c7def45
+                    2803 lines. Identical at H, at M, and at origin/main — the
+                    content this record actually compared against.
+
+M  incorporation    b84e9419e751179319925bbc57a434df3583a29a
+                    "Merge pull request #123" — what proves B is reachable from
+                    `main`. A merge commit is not the merged head; this is the
+                    only one of the three that establishes incorporation.
 ```
 
-Accepted and merged are different facts, and this record keeps them apart.
-A1-F is now an accepted freeze — it stopped being a candidate at `b61540a`,
-after five corrective rounds and a consistency pass from the commit that first
-named itself a freeze (`144ebf6`, 1127 lines → `3a92cea`, 2689 lines) — but it
-is still not reachable from `main`. A comparison stated against "the current
-freeze" without a head names nothing, and that was true while it moved and
-remains true now that it does not: acceptance fixes which head the name means,
-it does not make the name self-resolving.
+Accepted, merged, and incorporated are three facts, and this record keeps them
+apart. A1-F stopped being a candidate at `b61540a`, was amended once more after
+that ceremony by R5.2 (`a4a9f97`) when external review found four genuine P1s,
+and reached `main` at `M`. Its header at `H` reads `ACCEPTED / CLOSED / FROZEN`,
+with the supersede path of its §7 in force: "corrections are forward-only and
+versioned".
+
+The last commit before the merge, `8ee8666`, did not touch the contract at all —
+its blob is byte-identical to `a4a9f97`'s. It corrected `TODO.md`, which still
+named `b61540a` as the frozen head after R5.2 had superseded it. Recorded here
+because a head that moves without the artifact changing is precisely the case
+where citing the branch name instead of the blob quietly goes wrong.
 
 ### 1.4 Staleness condition
 
 Either side moving invalidates this record:
 
 - the_grid at a revision other than `46d6d26` — §2 must be re-derived;
-- A1-F at a head other than `3a92cea` — §3, §4 and §5 must be re-reviewed
-  before being relied on.
+- A1-F at a blob other than `B` — §3, §4 and §5 must be re-reviewed before
+  being relied on.
 
-Acceptance has already consumed the loudest case this condition was written
-for, so what remains is narrower but not gone: A1-F's §7 supersede path is now
-in force, and a superseding revision moves the head exactly like a corrective
-round did. The condition therefore stands unchanged in form.
+The A1-F side now binds the **blob**, not a branch head. That is the stable
+anchor after incorporation: `8ee8666` moved the head without changing the
+contract, and a condition keyed to head movement would have fired on it and
+learned nothing. A supersede under §7 changes the bytes, and the bytes are what
+§3 reads.
 
 This is the same discipline `docs/research/specula-trace-conformance.md` states
 for its own A1-F audit: a conclusion about a document that is still moving is
@@ -95,36 +112,53 @@ for its own A1-F audit: a conclusion about a document that is still moving is
 
 ### 1.5 Re-review log
 
-The condition above is not decorative. It fired twice before this record ever
-reached `main`.
+The condition above is not decorative. It fired three times before this record
+reached `main`, and the answer was re-derived each time rather than carried
+forward.
 
-| Re-review | A1-F head | What was re-checked | Outcome |
+| Re-review | A1-F moved | What was re-checked | Outcome |
 | --- | --- | --- | --- |
-| 2026-08-07, R4 | `3c30974` → `8009535` | §2 not affected (external artifact unmoved); §3's load-bearing citations re-derived at the new head; §4's disposition re-tested | **Unchanged.** `NO A1-F CONTRACT CHANGE` holds at `8009535` |
-| 2026-08-07, R5 + R5.1 + acceptance | `8009535` → `3a92cea` | the same four citations re-derived again; §1.3's status paragraph rewritten, since it asserted the opposite status | **Unchanged.** `NO A1-F CONTRACT CHANGE` holds at `3a92cea` |
+| R4 | `3c30974` → `8009535` | §2 not affected (external artifact unmoved); §3's load-bearing citations re-derived at the new head; §4's disposition re-tested | **Unchanged.** Re-pinned to `8009535` |
+| R5 + R5.1 + acceptance | `8009535` → `3a92cea` | the same four citations re-derived; §1.3's status paragraph rewritten, since it asserted the opposite status | **Unchanged.** Re-pinned to `3a92cea` |
+| R5.2, then merge | `3a92cea` → `a4a9f97` → `8ee8666` = `H` | the same four citations re-derived at `H`; §1.3 rebuilt on H/B/M; §1.4 re-keyed from head to blob | **Unchanged.** `NO A1-F CONTRACT CHANGE` holds at `B` |
+
+The third row was deliberately **not** re-pinned when it first moved. At
+`a4a9f97` the artifact's own header said the frozen baseline would be the merged
+head of PR #123 — a commit that did not exist yet. Pinning `a4a9f97` would have
+asserted a binding the source itself disowned, so the record held its previous
+pin, stale and visibly so, until the anchor the artifact named actually existed.
+A stale pin that admits it is stale is a smaller defect than a fresh pin that
+cites the wrong authority.
 
 The same four load-bearing facts were re-derived at each head, from the file at
 that revision rather than from the round's own summary:
 
 - the status header. At `8009535` it still read `PROPOSED FREEZE / REVIEW
-  REQUIRED / NON-AUTHORITATIVE`; at `3a92cea` it reads `ACCEPTED / CLOSED /
-  FROZEN`. This is the one fact that did change, and §1.3 was rewritten rather
-  than left to age quietly into a false claim;
+  REQUIRED / NON-AUTHORITATIVE`; from `3a92cea` onward it reads `ACCEPTED /
+  CLOSED / FROZEN`. This is the one fact that changed, and §1.3 was rewritten
+  each time rather than left to age quietly into a false claim;
 - §0 still binds the durable dispatch boundary and fail-closed post-dispatch
   ambiguity to `docs/q-deck/r1-command.md` §11.1–§11.2;
 - §6 still excludes external reconciliation from A1's scope;
-- the projection quote in §3 is byte-identical at both heads;
-- across R4, R5 and R5.1 together, **no** line containing adoption, lease,
+- the projection quote in §3 is byte-identical at every head checked;
+- across R4, R5, R5.1 and R5.2 together, **no** line containing adoption, lease,
   liveness, orphan, reconciliation, spawn, detach, or allocation vocabulary
   entered the document — the deferred notions in §4 never migrated into A1
-  while this record sat unmerged, through five corrective rounds and an
-  acceptance.
+  across six corrective rounds, an acceptance, a post-acceptance amendment, and
+  a merge.
 
 The rounds' own subjects are orthogonal to every notion in §4 — R4 the resolver
 boundary and reducer algebra, R5 an implementation-readiness pass, R5.1 an
-exact-head consistency patch, none introducing a new persistent message kind.
+exact-head consistency patch, R5.2 four P1s found by external review *after* the
+freeze ceremony had already run, none introducing a new persistent message kind.
 That is why the disposition survives. It survives by re-derivation, not because
 successive rounds looked similar to each other.
+
+R5.2 is worth one line beyond its content. The ceremony that set `ACCEPTED /
+CLOSED / FROZEN` ran first; external review then found four genuine defects; the
+header had been early. Nothing broke, because incorporation had not happened
+yet — which is the same separation this record keeps in §1.3 and the reason it
+waited for `M` instead of pinning the head that merely called itself frozen.
 
 ## 2. Artifact says
 
