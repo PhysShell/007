@@ -34,6 +34,18 @@
   failure class across two rounds is itself the finding — every fix that
   introduces a versioned component must be checked against the input tuples in
   §4.0 before it is called done.
+- **Review round 3 (2026-08-09), requirements-only:** §3 was reviewed *as a
+  ratification candidate* rather than as design. REQ-2, REQ-6 and REQ-10 stood
+  unchanged; the other eight were rewritten so that each survives §4 being
+  rejected — naming admission classes instead of `InclusionProof`, authority-
+  appropriate revision identity instead of "revision and digest", deterministic
+  stages instead of two named functions, advisory *signals* instead of
+  *semantic* retrieval, and derivation inputs instead of authoritative state
+  alone. REQ-1 now names failure-lifecycle state and is checked by recomputing
+  identities from imported records, since two matching receipts over two missing
+  stores also compare equal. No architecture changed in this round; §4 gained
+  only cross-references and the C-4 conflict against the frozen A1 digest
+  discipline.
 
 > **Red line, stated once and binding on everything below.**
 > **No implementation material in this document is derived from
@@ -303,36 +315,44 @@ already implies; REQ-9 … REQ-11 are the ones this round added, and they are
 **not** an appendix — 9 and 11 are what make 3 and 7 checkable rather than
 aspirational.
 
+Each requirement is stated so that it survives the architecture in §4 being
+rejected. Where a candidate mechanism satisfies one, the mechanism is named in
+§4 and not in the requirement — a requirement that names a data type ratifies
+that data type by the back door.
+
 | # | Requirement | Checkable by |
 |---|---|---|
-| REQ-1 | Normative facts (goals, decisions, invariants, evidence references) survive a session boundary **exactly**, not approximately | byte-level manifest equality across export/import, within one schema and canonicalization version (§4.8) |
+| REQ-1 | **All** normative state required to continue a unit of work survives a session boundary **exactly**, not approximately — goals, decisions, invariants, evidence bindings, and failure-lifecycle state | export → import → recompute the canonical normative identities **from the imported records** → equality with the source identities. Manifest-to-manifest byte equality alone is not sufficient: two identical receipts over two missing stores also compare equal |
 | REQ-2 | Context construction is **bounded** by a declared budget, and the bound is a property of the compiler, not of the caller's restraint | compiler refuses rather than exceeds |
-| REQ-3 | Every included entry carries a machine-readable reason for its inclusion | presence of an `InclusionProof` per entry |
-| REQ-4 | Evidence is **revision-bound**: it names the revision and digest it was established against | schema-level; no unbound evidence admitted |
-| REQ-5 | Stale knowledge is **detectable** and distinguishable by cause | typed `stale_reason` on every non-`VERIFIED` binding |
+| REQ-3 | Every item admitted to agent-visible context carries a machine-readable inclusion reason identifying its **admission class** and the rule or selection channel responsible for it | every admitted item has a reason record; admission class is one of the declared classes; no item is admitted without one |
+| REQ-4 | Evidence is bound to the authoritative artifact and to the exact **revision or content identity appropriate to that authority**, sufficient to invalidate the claim when the relevant artifact changes | schema-level; no unbound evidence admitted |
+| REQ-5 | A previously verified binding that ceases to be current carries a **typed invalidation cause**, and `STALE` / `UNRESOLVED` / `INVALID` remain distinguishable outcomes | mutate subject, recipe, environment and dependency independently; each produces its own typed cause, and an unresolvable subject does not masquerade as a stale one |
 | REQ-6 | Failure knowledge has a **lifecycle**, and state transitions require evidence | transition guards (§4.5) |
-| REQ-7 | Handoff acceptance is **deterministic**; stochastic checks may not gate it | acceptance predicate contains no model call |
-| REQ-8 | Semantic retrieval may **advise** but never **establish**: it cannot create a fact, satisfy an invariant, preserve a decision, authorize an action, or complete a handoff | trust-boundary test per consumer |
-| REQ-9 | Scope resolution and context compilation are **each** reproducible and **diffable** from their own complete, declared input tuple (§4.0) | re-run each stage → byte-identical output + comparable metadata |
+| REQ-7 | Handoff acceptance is a **deterministic function of a complete set of recorded inputs**: re-evaluating the same recorded input identities under the same acceptance-policy identity produces the same result. Stochastic or ambient observations may not gate acceptance | re-evaluation equality, plus negative fixtures — no model call, no clock read, no ambient network or filesystem fact. An artefact that cannot be read yields `UNAVAILABLE`, never a rejection |
+| REQ-8 | **Advisory retrieval or selection signals** may advise but never establish: they cannot create a fact, satisfy an invariant, preserve a decision, authorize an action, or complete a handoff | trust-boundary test per consumer, applied to every retrieval channel — lexical, structural and graph-based alike, not only embedding-based |
+| REQ-9 | Every deterministic derived stage on the context path declares a **complete, versioned input closure**. Given identical recorded input identities and the same stage/policy identity, its output is reproducible and diffable | re-run each stage → byte-identical output + comparable metadata; and a meta-test: **declared stage inputs == fields committed by the invocation manifest** |
 | REQ-10 | No component on the read path of normative state may depend on an external entitlement — licence, quota, remote availability, or token TTL | dependency audit of the read path |
-| REQ-11 | Every derived normative projection is **disposable**: deletable and rebuildable from authoritative state, digest-identical | `rm -rf` the derived tree, rebuild, compare digests |
+| REQ-11 | Every derived normative projection is **disposable**: deletable and rebuildable digest-identically from authoritative state **plus its complete recorded derivation inputs**, including generator/policy identities and parameters | delete the derived tree, rebuild from the recorded inputs, compare digests |
 
 Three notes that are load-bearing:
 
-- **REQ-9 is stronger than "deterministic".** Reproducibility alone lets you
-  rebuild a black box. The compilation result must therefore carry
-  `context_bytes`, `context_digest`, `included_entry_ids`, `inclusion_reason[]`,
-  `omitted_candidate_ids`, and `token_count` — so that two compilations can be
-  *compared*, not merely both regenerated. This extends, and must stay
-  compatible with, the `context.meta.json` field list in
-  `docs/task-aware-context-generator.md`.
-- **REQ-9 is stated over two stages on purpose.** An earlier revision of this
-  document named a single input tuple for compilation and omitted
-  `resolver_version` — which the architecture itself introduces as a versioned
-  component — so two runs agreeing on all four named inputs could still produce
-  different required sets. That is the document's own REQ-9 failing on the
-  document's own architecture. §4.0 fixes the input tuples; the requirement now
-  refers to them rather than restating one of them incompletely.
+- **REQ-9 is stronger than "deterministic", and it is stated over *stages*, not
+  over two named functions.** Reproducibility alone lets you rebuild a black
+  box; a stage's output must also be *comparable* — for a context compilation
+  that means carrying its bytes, its digest, the admitted ids, their inclusion
+  reasons, the omitted candidates and the token count, which extends and must
+  stay compatible with the `context.meta.json` field list in
+  `docs/task-aware-context-generator.md`. The requirement deliberately does not
+  say how many stages exist: §4's `R` and `C` are one way to satisfy it, and
+  ratifying REQ-9 must not ratify that decomposition.
+- **REQ-9 is the expensive one, and two review rounds argued for it rather than
+  against it.** Both rounds found the same defect class in this document's own
+  architecture — a versioned component that changed a result while sitting
+  outside the declared input closure. That is the normal state of an
+  engineering design unless something hunts for it, which is why the meta-test
+  in the `Checkable by` column matters more than the prose: declared inputs
+  compared against the fields the invocation actually commits, so the discipline
+  does not depend on the next reviewer's attention span.
 - **REQ-10 generalizes a lesson, it is not a swipe at a vendor.** The pattern it
   forbids is any arrangement where reading the project's own normative state can
   fail on a calendar, a quota, or someone else's key. §1.5's licence-gated
@@ -377,9 +397,14 @@ classes discussable before anything is built.
 
 ### 4.0 Two functions, two input tuples
 
-The plane has **two** deterministic stages, and each must close over its own
-inputs. Stating one tuple for both is how a versioned component drops out of a
-reproducibility claim without anyone noticing.
+*This section is how the **candidate** architecture satisfies REQ-9. REQ-9
+itself requires a complete versioned input closure per deterministic stage; it
+does not require that there be exactly two stages, nor that they be called `R`
+and `C`. Ratifying the requirement does not ratify this decomposition.*
+
+The candidate plane has **two** deterministic stages, and each must close over
+its own inputs. Stating one tuple for both is how a versioned component drops
+out of a reproducibility claim without anyone noticing.
 
 ```text
 ResolvedScope | ScopeExpansionFailure
@@ -442,6 +467,16 @@ The rule that generalizes all of them: **every input of `R` or `C` appears in
 the `HandoffManifest`, as a digest and — where useful for diffing — expanded.**
 If a value is an argument, it is recorded; if it is not recorded, it is not
 permitted to be an argument.
+
+> **`digest(canonical(…))` above is a placeholder, and a known conflict.**
+> 007 already froze a digest discipline that refuses exactly this phrasing:
+> `docs/q-deck/a1-authority-contracts.md` **FD-1.2** computes identities by
+> explicit length-prefixed field framing — `frame(x) = u64-le length || bytes`,
+> enums framed by name, absent optionals framed as the empty string — and states
+> that **"no canonical-JSON scheme is introduced"**, precisely so that two
+> serializers never have to agree on ordering or whitespace. Every digest in §4
+> must be re-expressed as an explicit framing before this architecture could be
+> adopted. Recorded as conflict **C-4** in §5.
 
 #### 4.0.1 Advisory inputs are frozen before they are compiled
 
@@ -535,6 +570,20 @@ goal G17
 REQ-3 is then satisfied by construction rather than by a later "explain why you
 recalled this" pass, which would be an advisory signal impersonating an audit
 trail.
+
+REQ-3 covers **everything** admitted to agent-visible context, so the advisory
+half needs its own reason record rather than borrowing this one:
+
+```text
+admission class     reason record
+normative           InclusionProof          rule + derivation path (§4.2)
+advisory            AdvisoryInclusionReason selection channel + rank + snapshot
+                                            identity (§4.0.1)
+```
+
+`provenance` answers *where an item came from*; an inclusion reason answers *why
+it is in this context*. Those are different questions, and only the second one
+makes a context auditable.
 
 #### 4.2.1 The witness must be as deterministic as the result
 
@@ -896,7 +945,8 @@ requirement.
 ### 4.9 The advisory plane, fenced
 
 ```text
-advisory signal (embeddings · similarity recall · drift · attractors)
+advisory signal — any retrieval or selection channel, not only the vector ones
+    (embeddings · lexical/BM25 · graph traversal · drift · attractors)
     cannot:
       - establish a fact
       - satisfy an invariant
@@ -967,7 +1017,8 @@ brochure.
    |---|---|---|---|
    | C-1 | `superseded` and `rejected` sit in the **trust levels** list, but they are dispositions, not statements about who vouched for an entry | `docs/agent-memory-layer.md` → "Trust levels" | Split the enum: trust (`agent-claimed` … `human-confirmed`) stays; `superseded` / `rejected` move to a status/lifecycle field aligned with §4.5. This is a **change** to the existing model, not an addition to it |
    | C-2 | IR requirements demand "a stable identity" per selected item; §4.6 here refuses to promise stable symbol identity and replaces it with a resolution ladder | `docs/task-aware-context-generator.md` → "IR requirements" | Replace the requirement with the `SymbolLocator` + `ResolutionResult` contract, so a degraded match is visible rather than assumed |
-   | C-3 | The existing cache key (commit, task hash, profile, extractor versions, ranking version, budget config) and REQ-9's two input tuples (§4.0) are different closures over overlapping inputs | `docs/task-aware-context-generator.md` → "Determinism and reproducibility" | Reconcile into one declared closure per stage; whichever survives must contain **every** versioned component it invokes |
+   | C-3 | The existing cache key (commit, task hash, profile, extractor versions, ranking version, budget config) and the candidate input closures (§4.0) are different closures over overlapping inputs | `docs/task-aware-context-generator.md` → "Determinism and reproducibility" | Reconcile into one declared closure per stage; whichever survives must contain **every** versioned component it invokes |
+   | C-4 | §4 writes identities as `digest(canonical(X))`; 007 has **frozen** the opposite discipline — identities by explicit length-prefixed field framing, with "no canonical-JSON scheme is introduced" | `docs/q-deck/a1-authority-contracts.md` → FD-1.2 (frozen) | Re-express every digest in §4 as an explicit framing over named fields in a fixed order, following FD-1.2. The frozen document wins; this is a defect in the candidate, not a tension between equals. Blocks adoption of §4, not ratification of §3 |
 
 ## 6. Non-normative evaluation of Semvec
 
@@ -1024,7 +1075,25 @@ Semvec evaluation (§6)                   NON-NORMATIVE, optional, fenced
 
 Per rule 3, everything marked `PROPOSED` or `CANDIDATE` above is agent-authored
 and stays `pending` until a human ratifies or rejects it, and may not be cited
-as authority for a further autonomous decision in the meantime. The suggested
-sequence is to ratify or reject §3 first — requirements are cheap to argue about
-and expensive to retrofit — and only then to decompose §4 into implementable
-slices.
+as authority for a further autonomous decision in the meantime.
+
+The order that keeps governance clean, and the reason for each step:
+
+```text
+1. ratify or reject REQ-1..11              requirements are cheap to argue
+                                           about and expensive to retrofit
+2. record the exact ratified revision      rule 4: a ratification binds a
+                                           revision, not a title
+3. C-1 / C-2 / C-3 consistency pass        only now may the two neighbouring
+                                           drafts be changed — before this,
+                                           editing them would import a pending
+                                           proposal into ratified surroundings
+4. C-4: re-express §4 digests as explicit  the frozen A1 discipline wins;
+   FD-1.2 framings                         §4 is what has to move
+5. only then consider adopting or          §4 stays CANDIDATE until 1–4 are
+   decomposing §4                          done
+```
+
+Steps 1 and 5 are the ones worth not blurring: ratifying requirements is not
+adopting an architecture, and §4 remains a candidate however many review rounds
+it survives.
