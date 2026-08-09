@@ -37,7 +37,8 @@ Current authoritative state:
   Complete wire schemas for all eleven message kinds, the provider execution
   receipt, interaction manifest, `ScopeContractV1`, `CampaignStateV1`, and
   `CampaignEventV1` with its eleven payload schemas. Design input: issue #95.
-- **Next: A1-V0** (§5 of that doc), and **not before the A1-F PR merges**: one
+- **Next: A1-V0** (§5 of that doc) — task: `docs/tasks/a1-v0.md`, bound to the
+  contract blob `7db92f1`, not to a branch head. The A1-F PR has merged. One
   real coder/reviewer/human corrective loop — coder on the claude CLI, reviewer
   on `--engine arliai` (read-only, no tool surface), controller sealing and
   folding, merge manual. Acceptance = one live corrective cycle + a full campaign
