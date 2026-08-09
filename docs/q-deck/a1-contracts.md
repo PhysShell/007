@@ -1280,7 +1280,9 @@ anything outside it cannot be referenced from canonical bytes:
    worktree-correspondence-evidence-blob (§7.1a),
    non-dispatch-classification-blob (below),
    message-payload-blob (§4.6 — the exact payload bytes of a canonical
-   message, referenced by the construction seed)
+   message, referenced by the construction seed),
+   canonical-message-blob (wrappers review W4 — the serialized COMPLETE
+   class-1 envelope-bearing artifact)
 
 3. External wrappers (cross-universe refs into A0/R1 canonical
    records; TERMINAL from the A1 DAG's perspective — their targets are
@@ -1298,6 +1300,24 @@ anything outside it cannot be referenced from canonical bytes:
 ```
 
 Extending any class is a contract change via the supersede path.
+
+**Storage kinds vs graph nodes (wrappers review W4, adjudicated).**
+`ContentKind` is a CAS STORAGE-kind registry, not a second node
+taxonomy: `canonical-message-blob` names the storage form of a complete
+class-1 artifact; class-2 kinds name support objects; class-5 kinds
+name opaque terminals. When a typed ref addresses a canonical message
+through CAS (causation `blob_ref`, `CampaignRunBindingRefV1.blob_ref`,
+`Provider.invocation_receipt_ref`, `HumanCommandRequestRefV1.blob_ref`),
+the GRAPH target stays `Envelope(MessageKind)` — never a Cas node; one
+artifact does not hold two passports. The resolver additionally proves
+the real `MessageKind`/message identity behind the blob.
+
+Consequently the §11.3 open CAS target is `AnyImportableCas`, NOT "any
+registered kind": `canonical-message-blob` is NON-IMPORTABLE — a
+canonical A1 message arises ONLY through canonical acceptance
+construction (§4.6), never through `ArtifactImported`, otherwise an
+import could declare an arbitrary run artifact a canonical message and
+bypass the whole acceptance/idempotency machine.
 
 **`EstablishedNonDispatchEvidenceRefV1`** (review round 4f51457, P1-17 —
 `SafeRedrive` carried `established_non_dispatch_evidence_ref` with no

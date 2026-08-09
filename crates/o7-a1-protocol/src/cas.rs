@@ -37,12 +37,26 @@ pub enum ContentKind {
     NonDispatchClassificationBlob,
     /// Exact payload bytes of a canonical message (§4.6 seed target).
     MessagePayloadBlob,
+    /// The serialized COMPLETE class-1 envelope-bearing artifact
+    /// (wrappers review W4). A STORAGE kind, not a graph node: a typed
+    /// ref addressing one keeps `EdgeTarget::Envelope(kind)`. NEVER
+    /// importable — canonical messages arise only through acceptance
+    /// construction (§4.6), or an import could bypass the whole
+    /// acceptance/idempotency machine.
+    CanonicalMessageBlob,
     /// Class 5 — terminal opaque blobs.
     RawProviderEventBlob,
     /// Tool-call arguments as observed.
     ToolArgumentBlob,
     /// Tool-call result as observed.
     ToolResultBlob,
+}
+
+/// Whether `ArtifactImportedV1` may target this kind (W4): everything
+/// except the canonical-message form.
+#[must_use]
+pub fn is_importable(kind: ContentKind) -> bool {
+    kind != ContentKind::CanonicalMessageBlob
 }
 
 /// A global content-addressed object reference (contract §6) — a
@@ -151,6 +165,13 @@ mod tests {
             store.get(&BlobDigest::of_bytes(b"other")),
             Err(CasError::NotFound)
         );
+    }
+
+    #[test]
+    fn canonical_message_blob_is_not_importable() {
+        assert!(!is_importable(ContentKind::CanonicalMessageBlob));
+        assert!(is_importable(ContentKind::MessagePayloadBlob));
+        assert!(is_importable(ContentKind::RawProviderEventBlob));
     }
 
     #[test]

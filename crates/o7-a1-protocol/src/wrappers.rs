@@ -1,17 +1,19 @@
 //! Class-3 external wrappers (contract §7.1/§6/§11.1) and
-//! `InputStateBindingV1` (§7.1a). These are the cross-universe refs into
-//! A0/R1 canonical records — they consume `o7_run` types EXACTLY
-//! (never re-declare, never typedef; E9), and their checked
-//! constructors enforce every cross-field rule that needs no external
-//! resolution. Rules that DO need resolution (full `verify_prefix`,
-//! event-kind/ordering checks, correspondence verdicts) take interim
-//! proof inputs documented like `ResolvedCausation` (T4-R1): freely
-//! constructible for now, replaced by resolver-minted evidence in the
-//! resolver slice — which alone will mint `Accepted…` forms.
+//! `InputStateBindingV1` (§7.1a), consuming `o7_run` types EXACTLY —
+//! including `o7_run::event::Digest256` for A0 EVENT digests (wrappers
+//! review W2: an event digest is domain-separated framed event
+//! semantics, not `BlobDigest` content identity; 64 shared hex chars do
+//! not make one entity).
+//!
+//! W1: every invariant a checked constructor enforces is ALSO enforced
+//! on the serde path — `#[serde(try_from = "Wire…")]` routes
+//! deserialization through the same checks, so JSON cannot construct
+//! what `new()` rejects. Cross-object rules that need RESOLUTION stay
+//! the resolver slice's proof obligation, stated per field.
 
 use serde::{Deserialize, Serialize};
 
-use o7_run::event::{ArtifactKind, ArtifactRef};
+use o7_run::event::{ArtifactKind, ArtifactRef, Digest256};
 use o7_run::ids::{RunEventId, RunId};
 
 use crate::cas::{CasObjectRefV1, ContentKind};
@@ -34,13 +36,27 @@ pub enum WrapperError {
 }
 
 /// §7.1: a candidate-state receipt in an A0 canonical record.
+/// Deserialization runs the same check as [`Self::new`] (W1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "WireCandidateStateReceiptRef")]
 pub struct CandidateStateReceiptRefV1 {
     /// The A0 run that captured the receipt.
     pub source_run_id: RunId,
-    /// The receipt artifact — `ArtifactKind::CandidateState`, enforced.
     run_artifact_ref: ArtifactRef,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireCandidateStateReceiptRef {
+    source_run_id: RunId,
+    run_artifact_ref: ArtifactRef,
+}
+
+impl TryFrom<WireCandidateStateReceiptRef> for CandidateStateReceiptRefV1 {
+    type Error = WrapperError;
+    fn try_from(w: WireCandidateStateReceiptRef) -> Result<Self, Self::Error> {
+        Self::new(w.source_run_id, w.run_artifact_ref)
+    }
 }
 
 impl CandidateStateReceiptRefV1 {
@@ -66,6 +82,8 @@ impl CandidateStateReceiptRefV1 {
 }
 
 /// §7.1: the `CandidateStateMaterialized` event in a child A0 record.
+/// Field-level: nothing local to check; event digests are A0
+/// [`Digest256`] (W2), never `BlobDigest`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CandidateMaterializationRefV1 {
@@ -73,13 +91,12 @@ pub struct CandidateMaterializationRefV1 {
     pub child_run_id: RunId,
     /// The materialization event.
     pub materialization_event_id: RunEventId,
-    /// Its recorded digest.
-    pub materialization_event_digest: crate::ids::BlobDigest,
+    /// Its recorded A0 event digest.
+    pub materialization_event_digest: Digest256,
 }
 
 /// §7.1 (P1-8): the obligation lives INSIDE
-/// `RunStarted.contract.candidate_state` in accepted A0 — this ref
-/// names that exact event.
+/// `RunStarted.contract.candidate_state` in accepted A0.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RunContractCandidateStateRefV1 {
@@ -87,8 +104,8 @@ pub struct RunContractCandidateStateRefV1 {
     pub run_id: RunId,
     /// The `run_started` event.
     pub run_started_event_id: RunEventId,
-    /// Its recorded digest.
-    pub run_started_event_digest: crate::ids::BlobDigest,
+    /// Its recorded A0 event digest.
+    pub run_started_event_digest: Digest256,
 }
 
 /// §7.1 (P1-8): materialization evidence enters A0 via
@@ -100,8 +117,8 @@ pub struct WorktreeMaterializationRefV1 {
     pub run_id: RunId,
     /// The `worktree_created` event.
     pub worktree_created_event_id: RunEventId,
-    /// Its recorded digest.
-    pub worktree_created_event_digest: crate::ids::BlobDigest,
+    /// Its recorded A0 event digest.
+    pub worktree_created_event_digest: Digest256,
 }
 
 /// §6 (P1-18): the run-relative source of a CAS import — the ONLY other
@@ -126,19 +143,38 @@ pub enum NonDispatchClassification {
 }
 
 /// §11.1: "which artifact proves established non-dispatch" — a typed
-/// answer, not a convincing field name.
+/// answer. Deserialization runs the same check as [`Self::new`] (W1).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "WireNonDispatchEvidenceRef")]
 pub struct EstablishedNonDispatchEvidenceRefV1 {
     /// The prior attempt's run.
     pub run_id: RunId,
-    /// One of the two pre-dispatch classes (any other classification is
-    /// unconstructible here by the enum).
+    /// One of the two pre-dispatch classes.
     pub classification: NonDispatchClassification,
     /// The classifier that produced the recorded output.
     pub classifier_version: String,
-    /// The recorded classifier output blob.
     classification_record_ref: CasObjectRefV1,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireNonDispatchEvidenceRef {
+    run_id: RunId,
+    classification: NonDispatchClassification,
+    classifier_version: String,
+    classification_record_ref: CasObjectRefV1,
+}
+
+impl TryFrom<WireNonDispatchEvidenceRef> for EstablishedNonDispatchEvidenceRefV1 {
+    type Error = WrapperError;
+    fn try_from(w: WireNonDispatchEvidenceRef) -> Result<Self, Self::Error> {
+        Self::new(
+            w.run_id,
+            w.classification,
+            w.classifier_version,
+            w.classification_record_ref,
+        )
+    }
 }
 
 impl EstablishedNonDispatchEvidenceRefV1 {
@@ -171,35 +207,108 @@ impl EstablishedNonDispatchEvidenceRefV1 {
     }
 }
 
-/// §7.1a: the exact input state of an execution — a CLOSED type, never
-/// an `Option` (P1-1).
+/// §7.1a: the exact input state — a CLOSED, OPAQUE type (P1-1, W1):
+/// the variant data is private, so neither direct construction nor
+/// serde can bypass [`Self::initial`]/[`Self::continued`]. Match via
+/// [`Self::view`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub enum InputStateBindingV1 {
-    /// First round of a fresh task: obligation + worktree + the P1-21
-    /// correspondence evidence.
-    InitialMaterialization {
-        /// The A0 obligation ref.
+#[serde(try_from = "WireInputState", into = "WireInputState")]
+pub struct InputStateBindingV1(InputStateInner);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum InputStateInner {
+    Initial {
         run_contract_ref: RunContractCandidateStateRefV1,
-        /// The worktree evidence ref.
         worktree_ref: WorktreeMaterializationRefV1,
-        /// `worktree-correspondence-evidence-blob` (kind enforced).
         correspondence_ref: CasObjectRefV1,
     },
-    /// Continuation: a specific accepted candidate, materialized.
-    ContinuedCandidate {
-        /// The parent's candidate-state receipt.
+    Continued {
         candidate_state_ref: CandidateStateReceiptRefV1,
-        /// The child's materialization of it.
         materialization_ref: CandidateMaterializationRefV1,
     },
 }
 
+/// The wire shape (also the serialized form).
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+enum WireInputState {
+    InitialMaterialization {
+        run_contract_ref: RunContractCandidateStateRefV1,
+        worktree_ref: WorktreeMaterializationRefV1,
+        correspondence_ref: CasObjectRefV1,
+    },
+    ContinuedCandidate {
+        candidate_state_ref: CandidateStateReceiptRefV1,
+        materialization_ref: CandidateMaterializationRefV1,
+    },
+}
+
+impl TryFrom<WireInputState> for InputStateBindingV1 {
+    type Error = WrapperError;
+    fn try_from(w: WireInputState) -> Result<Self, Self::Error> {
+        match w {
+            WireInputState::InitialMaterialization {
+                run_contract_ref,
+                worktree_ref,
+                correspondence_ref,
+            } => Self::initial(run_contract_ref, worktree_ref, correspondence_ref),
+            WireInputState::ContinuedCandidate {
+                candidate_state_ref,
+                materialization_ref,
+            } => Ok(Self::continued(candidate_state_ref, materialization_ref)),
+        }
+    }
+}
+
+impl From<InputStateBindingV1> for WireInputState {
+    fn from(b: InputStateBindingV1) -> Self {
+        match b.0 {
+            InputStateInner::Initial {
+                run_contract_ref,
+                worktree_ref,
+                correspondence_ref,
+            } => WireInputState::InitialMaterialization {
+                run_contract_ref,
+                worktree_ref,
+                correspondence_ref,
+            },
+            InputStateInner::Continued {
+                candidate_state_ref,
+                materialization_ref,
+            } => WireInputState::ContinuedCandidate {
+                candidate_state_ref,
+                materialization_ref,
+            },
+        }
+    }
+}
+
+/// Borrowed view for matching on a checked binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputStateViewV1<'a> {
+    /// First round of a fresh task.
+    InitialMaterialization {
+        /// The A0 obligation ref.
+        run_contract_ref: &'a RunContractCandidateStateRefV1,
+        /// The worktree evidence ref.
+        worktree_ref: &'a WorktreeMaterializationRefV1,
+        /// The P1-21 correspondence evidence blob.
+        correspondence_ref: &'a CasObjectRefV1,
+    },
+    /// Continuation of an accepted candidate.
+    ContinuedCandidate {
+        /// The parent's candidate-state receipt.
+        candidate_state_ref: &'a CandidateStateReceiptRefV1,
+        /// The child's materialization of it.
+        materialization_ref: &'a CandidateMaterializationRefV1,
+    },
+}
+
 impl InputStateBindingV1 {
-    /// Build the initial-materialization variant, enforcing the
-    /// field-level rules that need no resolution: one run across both
-    /// refs (P1-8's "ONE verified run" — the verified half is the
-    /// resolver slice's proof) and the correspondence blob kind.
+    /// Build the initial-materialization variant: one run across both
+    /// refs and the correspondence blob kind, enforced here AND on the
+    /// serde path. The verified-record half is the resolver slice's
+    /// proof obligation.
     ///
     /// # Errors
     /// [`WrapperError`] on a kind or same-run violation.
@@ -214,35 +323,63 @@ impl InputStateBindingV1 {
         if correspondence_ref.content_kind != ContentKind::WorktreeCorrespondenceEvidenceBlob {
             return Err(WrapperError::NotACorrespondenceBlob);
         }
-        Ok(Self::InitialMaterialization {
+        Ok(Self(InputStateInner::Initial {
             run_contract_ref,
             worktree_ref,
             correspondence_ref,
-        })
+        }))
     }
 
     /// Build the continued-candidate variant. The §7.1a cross-object
-    /// rule (the materialization event's copied source receipt is
-    /// byte/digest-identical to the referenced receipt, same
-    /// `source_run_id`) requires A0 record resolution — the resolver
-    /// slice's proof obligation, recorded here so the seam is explicit.
+    /// rule (copied source receipt byte/digest-identical to the
+    /// referenced receipt, same `source_run_id`) requires A0 record
+    /// resolution — the resolver slice's proof obligation.
     #[must_use]
     pub fn continued(
         candidate_state_ref: CandidateStateReceiptRefV1,
         materialization_ref: CandidateMaterializationRefV1,
     ) -> Self {
-        Self::ContinuedCandidate {
+        Self(InputStateInner::Continued {
             candidate_state_ref,
             materialization_ref,
+        })
+    }
+
+    /// Match on the checked contents.
+    #[must_use]
+    pub fn view(&self) -> InputStateViewV1<'_> {
+        match &self.0 {
+            InputStateInner::Initial {
+                run_contract_ref,
+                worktree_ref,
+                correspondence_ref,
+            } => InputStateViewV1::InitialMaterialization {
+                run_contract_ref,
+                worktree_ref,
+                correspondence_ref,
+            },
+            InputStateInner::Continued {
+                candidate_state_ref,
+                materialization_ref,
+            } => InputStateViewV1::ContinuedCandidate {
+                candidate_state_ref,
+                materialization_ref,
+            },
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    // Test-only panics operate on this module's own fixtures; a panic
-    // here is the test failing loudly (workspace test convention).
-    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    // Test-only panics and Value-indexing operate on this module's own
+    // constructed JSON fixtures; a panic here is the test failing
+    // loudly, never a production fault path (workspace test convention).
+    #![allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )]
 
     use super::*;
 
@@ -259,74 +396,110 @@ mod tests {
         ArtifactRef {
             kind,
             locator: "candidate_state_receipt.json".into(),
-            digest: o7_run::event::Digest256::of_bytes(b"y"),
+            digest: Digest256::of_bytes(b"y"),
+        }
+    }
+
+    fn contract_ref(run: &str) -> RunContractCandidateStateRefV1 {
+        RunContractCandidateStateRefV1 {
+            run_id: RunId::new(run).unwrap(),
+            run_started_event_id: RunEventId::new("e1").unwrap(),
+            run_started_event_digest: Digest256::of_bytes(b"a"),
+        }
+    }
+
+    fn worktree_ref(run: &str) -> WorktreeMaterializationRefV1 {
+        WorktreeMaterializationRefV1 {
+            run_id: RunId::new(run).unwrap(),
+            worktree_created_event_id: RunEventId::new("e2").unwrap(),
+            worktree_created_event_digest: Digest256::of_bytes(b"b"),
         }
     }
 
     #[test]
-    fn candidate_state_ref_enforces_artifact_kind() {
+    fn constructor_and_serde_agree_on_candidate_state_kind() {
         let run = RunId::new("r1").unwrap();
         assert!(
             CandidateStateReceiptRefV1::new(run.clone(), artifact(ArtifactKind::Diff)).is_err()
         );
-        assert!(
-            CandidateStateReceiptRefV1::new(run, artifact(ArtifactKind::CandidateState)).is_ok()
-        );
+        let good =
+            CandidateStateReceiptRefV1::new(run, artifact(ArtifactKind::CandidateState)).unwrap();
+        // W1 RED: the same violation through serde is rejected too.
+        let mut v = serde_json::to_value(&good).unwrap();
+        v["run_artifact_ref"]["kind"] = serde_json::json!("diff");
+        let bad: Result<CandidateStateReceiptRefV1, _> = serde_json::from_value(v);
+        assert!(bad.is_err(), "serde bypass closed");
+        // Round trip survives.
+        let back: CandidateStateReceiptRefV1 =
+            serde_json::from_value(serde_json::to_value(&good).unwrap()).unwrap();
+        assert_eq!(back, good);
     }
 
     #[test]
-    fn initial_binding_enforces_one_run_and_blob_kind() {
-        let contract = RunContractCandidateStateRefV1 {
-            run_id: RunId::new("r1").unwrap(),
-            run_started_event_id: RunEventId::new("e1").unwrap(),
-            run_started_event_digest: crate::ids::BlobDigest::of_bytes(b"a"),
-        };
-        let worktree_same = WorktreeMaterializationRefV1 {
-            run_id: RunId::new("r1").unwrap(),
-            worktree_created_event_id: RunEventId::new("e2").unwrap(),
-            worktree_created_event_digest: crate::ids::BlobDigest::of_bytes(b"b"),
-        };
-        let worktree_other = WorktreeMaterializationRefV1 {
-            run_id: RunId::new("r2").unwrap(),
-            ..worktree_same.clone()
-        };
+    fn initial_binding_rules_hold_on_both_paths() {
         assert_eq!(
             InputStateBindingV1::initial(
-                contract.clone(),
-                worktree_other,
+                contract_ref("r1"),
+                worktree_ref("r2"),
                 cas(ContentKind::WorktreeCorrespondenceEvidenceBlob)
             ),
             Err(WrapperError::TwoDifferentRuns)
         );
         assert_eq!(
             InputStateBindingV1::initial(
-                contract.clone(),
-                worktree_same.clone(),
+                contract_ref("r1"),
+                worktree_ref("r1"),
                 cas(ContentKind::ContractBlob)
             ),
             Err(WrapperError::NotACorrespondenceBlob)
         );
-        assert!(InputStateBindingV1::initial(
-            contract,
-            worktree_same,
-            cas(ContentKind::WorktreeCorrespondenceEvidenceBlob)
+        let good = InputStateBindingV1::initial(
+            contract_ref("r1"),
+            worktree_ref("r1"),
+            cas(ContentKind::WorktreeCorrespondenceEvidenceBlob),
         )
-        .is_ok());
+        .unwrap();
+        // W1 RED through serde: two different runs.
+        let mut v = serde_json::to_value(&good).unwrap();
+        v["initial_materialization"]["worktree_ref"]["run_id"] = serde_json::json!("r2");
+        let bad: Result<InputStateBindingV1, _> = serde_json::from_value(v);
+        assert!(bad.is_err(), "serde bypass closed");
+        // W1 RED through serde: wrong correspondence kind.
+        let mut v2 = serde_json::to_value(&good).unwrap();
+        v2["initial_materialization"]["correspondence_ref"]["content_kind"] =
+            serde_json::json!("contract-blob");
+        assert!(serde_json::from_value::<InputStateBindingV1>(v2).is_err());
+        let back: InputStateBindingV1 =
+            serde_json::from_value(serde_json::to_value(&good).unwrap()).unwrap();
+        assert_eq!(back, good);
     }
 
     #[test]
-    fn non_dispatch_evidence_enforces_blob_kind_and_closed_classes() {
-        let bad = EstablishedNonDispatchEvidenceRefV1::new(
+    fn non_dispatch_evidence_rules_hold_on_both_paths() {
+        assert_eq!(
+            EstablishedNonDispatchEvidenceRefV1::new(
+                RunId::new("r1").unwrap(),
+                NonDispatchClassification::Absent,
+                "clf-1".into(),
+                cas(ContentKind::GateEvidenceBlob),
+            ),
+            Err(WrapperError::NotAClassificationBlob)
+        );
+        let good = EstablishedNonDispatchEvidenceRefV1::new(
             RunId::new("r1").unwrap(),
             NonDispatchClassification::Absent,
             "clf-1".into(),
-            cas(ContentKind::GateEvidenceBlob),
+            cas(ContentKind::NonDispatchClassificationBlob),
+        )
+        .unwrap();
+        let mut v = serde_json::to_value(&good).unwrap();
+        v["classification_record_ref"]["content_kind"] = serde_json::json!("gate-evidence-blob");
+        assert!(
+            serde_json::from_value::<EstablishedNonDispatchEvidenceRefV1>(v).is_err(),
+            "serde bypass closed"
         );
-        assert_eq!(bad, Err(WrapperError::NotAClassificationBlob));
-        // dispatch_ambiguous is not even spellable here — the enum has
-        // two variants, wire-unrepresentable beyond them:
         let parsed: Result<NonDispatchClassification, _> =
             serde_json::from_str("\"dispatch_ambiguous\"");
-        assert!(parsed.is_err());
+        assert!(parsed.is_err(), "only the two pre-dispatch classes exist");
     }
 }

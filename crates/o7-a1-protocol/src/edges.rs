@@ -77,13 +77,13 @@ pub enum EdgeTarget {
     /// The one sanctioned open target: any already-committed
     /// envelope-bearing artifact (CampaignFeedItem §11.3; causation).
     AnyCommittedEnvelope,
-    /// Any kind from the closed CAS registry — sanctioned for EXACTLY
-    /// one edge, `ArtifactImported.cas_object_ref` (re-review T3-R1:
-    /// the contract's constructor checks the rules of whatever
-    /// registered kind is being imported; pinning one kind here was
-    /// narrower than the contract, and a new imported-object kind
-    /// would have minted a needless identity category).
-    AnyRegisteredCas,
+    /// Any IMPORTABLE kind from the closed CAS registry — sanctioned
+    /// for EXACTLY one edge, `ArtifactImported.cas_object_ref`
+    /// (T3-R1, narrowed by W4: `canonical-message-blob` is NOT
+    /// importable — a canonical message arises only through acceptance
+    /// construction, never import; `crate::cas::is_importable` is the
+    /// authority).
+    AnyImportableCas,
 }
 
 /// Edge classification (contract §11.3–§11.4).
@@ -114,7 +114,7 @@ pub struct Edge {
 use ContentKind as C;
 use EdgeClass::{Causal, Intra};
 use EdgeSource::{Kind, Transition};
-use EdgeTarget::{AnyCommittedEnvelope, AnyRegisteredCas, Cas, Envelope, External};
+use EdgeTarget::{AnyCommittedEnvelope, AnyImportableCas, Cas, Envelope, External};
 use ExternalRefKind as X;
 use MessageKind as K;
 use TransitionKind as T;
@@ -438,7 +438,7 @@ pub const EDGES: &[Edge] = &[
     e(
         K::ArtifactImported,
         "cas_object_ref",
-        AnyRegisteredCas,
+        AnyImportableCas,
         Intra,
     ),
     e(
@@ -605,7 +605,7 @@ mod tests {
         );
     }
 
-    const REGISTRY_KAT: &str = "08cd8f1642f726352c414e19c4e43abc1a26ea40c811c1dc89d5eba1bb7e5980";
+    const REGISTRY_KAT: &str = "53c074cc8e650751e3a95ff0badbf4b3e9d3b1391352ef94e227a15336a14ef7";
 
     #[test]
     fn intra_subgraph_topologically_sorts() {
@@ -651,12 +651,12 @@ mod tests {
         }
     }
 
-    /// Re-review T3-R1: the open-within-closed-registry CAS target is
-    /// sanctioned for exactly one edge and must never leak.
+    /// Re-review T3-R1/W4: the open-within-closed-registry CAS target
+    /// is sanctioned for exactly one edge and must never leak.
     #[test]
-    fn any_registered_cas_is_artifact_import_only() {
-        let holders: Vec<_> = EDGES.iter().filter(|e| e.to == AnyRegisteredCas).collect();
-        assert_eq!(holders.len(), 1, "AnyRegisteredCas leaked");
+    fn any_importable_cas_is_artifact_import_only() {
+        let holders: Vec<_> = EDGES.iter().filter(|e| e.to == AnyImportableCas).collect();
+        assert_eq!(holders.len(), 1, "AnyImportableCas leaked");
         let only = holders.first().unwrap();
         assert_eq!(only.from, Kind(K::ArtifactImported));
         assert_eq!(only.tag, "cas_object_ref");
