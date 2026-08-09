@@ -1466,10 +1466,11 @@ honestly:
    requires the target's `round_ordinal` to be STRICTLY lower — a
    comparison that historical replay re-proves from the CANONICAL
    inline `round_id + round_ordinal` pair both sides carry (§2.3,
-   P1-16), never from a live controller context. SafeRedrive targets
-   must be prior executions/dispatches of the SAME chain (§2.3), with
-   non-dispatch established by `EstablishedNonDispatchEvidenceRefV1`
-   (§11.1).
+   P1-16), never from a live controller context. Execution SafeRedrive
+   targets a prior EXECUTION of the SAME role chain (§2.3), bound by
+   `prior_run_binding_ref`, with non-dispatch established by
+   `EstablishedNonDispatchEvidenceRefV1` (§11.1). v1 has no
+   dispatch-level SafeRedrive (§8.6 re-adjudication).
 3. Any digest reference not present in §11.3 is a wire-type/constructor
    rejection.
 
@@ -1518,12 +1519,13 @@ command discipline through the campaign run binding.
 Execution: `allocated → dispatched* → terminal(completed | refused |
 incomplete | failed_pre_dispatch) | dispatch_ambiguous`, where
 `dispatched*` is the dispatch sub-machine (ordered dispatches, each
-`Initial | ToolContinuation` — dispatch-level SafeRedrive is removed in
-v1, §8.6 re-adjudication: a safe redrive mints a fresh execution). The
-R1 dispatch-boundary
-protocol governs each dispatch: safe redrive only on established
-non-dispatch; once dispatch occurred or may have occurred, an unknown
-outcome is `dispatch_ambiguous` and fails closed. Replay, recovery,
+`Initial | ToolContinuation` ONLY — dispatch-level SafeRedrive is
+removed in v1, §8.6 re-adjudication). A proven pre-dispatch retry is
+represented by minting a FRESH execution with
+`ExecutionCauseV1::SafeRedrive`, never by a new dispatch inside the old
+one. The R1 dispatch-boundary protocol governs each dispatch: once
+dispatch occurred or may have occurred, an unknown outcome is
+`dispatch_ambiguous` and fails closed. Replay, recovery,
 reconciliation, and historical verification never invoke the provider.
 A read-only role is still a side effect (repeating a reviewer can rewrite
 campaign history as effectively as repeating a coder).

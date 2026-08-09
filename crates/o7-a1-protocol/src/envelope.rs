@@ -267,7 +267,7 @@ pub enum EnvelopeShapeError {
     CausationMismatch,
 }
 
-/// The CANONICAL envelope core: private inner, constructible only via
+/// The SHAPE-CHECKED envelope core: private inner, constructible only via
 /// [`Self::try_shape_check`] — the §15.2 construction boundary. Checks that
 /// need no external resolution run here (producer mapping, round scope,
 /// genesis rule); causation resolution takes the resolved facts as
@@ -297,7 +297,8 @@ pub enum ResolvedCausation {
 }
 
 impl ShapeCheckedEnvelopeCoreV1 {
-    /// Accept a wire envelope: §11.2 producer mapping, round scope,
+    /// Shape-check a wire envelope: versions, §11.2 producer mapping,
+    /// round scope,
     /// genesis rule, and the P1-24 causation cross-check against the
     /// RESOLVED facts.
     ///
@@ -354,7 +355,7 @@ impl ShapeCheckedEnvelopeCoreV1 {
         Ok(Self(wire))
     }
 
-    /// Read access to the accepted core.
+    /// Read access to the shape-checked core.
     #[must_use]
     pub fn as_wire(&self) -> &WireEnvelopeCoreV1 {
         &self.0
@@ -395,16 +396,88 @@ mod tests {
         assert!(bad.is_err());
     }
 
-    /// Re-review T4-R2: unknown versions are rejected fail closed.
+    fn valid_work_order_wire() -> WireEnvelopeCoreV1 {
+        WireEnvelopeCoreV1 {
+            envelope_version: ENVELOPE_VERSION_V1,
+            message_kind: MessageKind::WorkOrder,
+            message_kind_version: supported_kind_version(MessageKind::WorkOrder),
+            message_id: MessageId::new("m-1").unwrap(),
+            root_goal_id: crate::ids::RootGoalId::new("g-1").unwrap(),
+            task_id: crate::ids::TaskId::new("t-1").unwrap(),
+            campaign_id: crate::ids::CampaignId::new("c-1").unwrap(),
+            round: Some(crate::ids::RoundRef {
+                round_id: crate::ids::RoundId::new("r-0").unwrap(),
+                round_ordinal: crate::ids::RoundOrdinal(0),
+            }),
+            causation: CausationV1::CampaignGenesis,
+            producer: ProducerBindingV1::Controller {
+                component_version: "0.1.0".into(),
+                policy_digest: crate::digest::PolicyDigest::compute(|_| {}),
+            },
+            payload_digest: digest(9),
+            ref_manifest: RefManifest::derive(vec![]).unwrap(),
+            recorded: RecordedMetadataV1 {
+                accepted_at_unix_ns: 1,
+                writer_version: crate::canonical::WRITER_VERSION,
+            },
+        }
+    }
+
+    /// Re-review T4-R2 + diff-review: REAL negative oracles through the
+    /// shape checker itself — an otherwise-valid WorkOrder with an
+    /// unknown version must be rejected by the checker, not by a
+    /// constant comparison.
     #[test]
-    fn unknown_versions_fail_closed() {
-        assert_eq!(supported_kind_version(MessageKind::WorkOrder), 1);
-        assert_eq!(ENVELOPE_VERSION_V1, 1);
-        // The shape checker is exercised end-to-end once payload types
-        // land; the constants and the error variants are the frozen
-        // surface here, and 999 must have no accepting path.
-        assert_ne!(999, ENVELOPE_VERSION_V1);
-        assert_ne!(999, supported_kind_version(MessageKind::CoderReport));
+    fn unknown_versions_fail_closed_through_the_shape_checker() {
+        // Positive control: the fixture passes as-is.
+        assert!(ShapeCheckedEnvelopeCoreV1::try_shape_check(
+            valid_work_order_wire(),
+            &ResolvedCausation::Genesis
+        )
+        .is_ok());
+
+        let mut bad_env = valid_work_order_wire();
+        bad_env.envelope_version = 999;
+        assert_eq!(
+            ShapeCheckedEnvelopeCoreV1::try_shape_check(bad_env, &ResolvedCausation::Genesis),
+            Err(EnvelopeShapeError::UnsupportedEnvelopeVersion)
+        );
+
+        let mut bad_kind = valid_work_order_wire();
+        bad_kind.message_kind_version = 999;
+        assert_eq!(
+            ShapeCheckedEnvelopeCoreV1::try_shape_check(bad_kind, &ResolvedCausation::Genesis),
+            Err(EnvelopeShapeError::UnsupportedMessageKindVersion)
+        );
+    }
+
+    /// The other shape invariants keep their own oracles: wrong
+    /// producer class and missing round pair are rejected.
+    #[test]
+    fn producer_and_round_shape_violations_fail_closed() {
+        let mut wrong_producer = valid_work_order_wire();
+        wrong_producer.producer = ProducerBindingV1::Human {
+            authenticated_principal_ref: CasObjectRefV1 {
+                digest: digest(3),
+                size: 1,
+                media_type: "application/json".into(),
+                content_kind: crate::cas::ContentKind::AuthenticatedPrincipalRecord,
+            },
+        };
+        assert_eq!(
+            ShapeCheckedEnvelopeCoreV1::try_shape_check(
+                wrong_producer,
+                &ResolvedCausation::Genesis
+            ),
+            Err(EnvelopeShapeError::WrongProducer)
+        );
+
+        let mut no_round = valid_work_order_wire();
+        no_round.round = None;
+        assert_eq!(
+            ShapeCheckedEnvelopeCoreV1::try_shape_check(no_round, &ResolvedCausation::Genesis),
+            Err(EnvelopeShapeError::WrongRoundScope)
+        );
     }
 
     /// Review T4: a fabricated edge tag is unrepresentable.
