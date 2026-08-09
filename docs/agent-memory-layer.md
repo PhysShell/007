@@ -11,6 +11,17 @@
   not folded into the phases below. Its two dispositions **D1'** and **D2**
   *were* ratified by the maintainer on 2026-08-07 and are normative; the
   backend-selection deferral in this document follows from D1'.
+- **Second companion evaluation:** `docs/tencentdb-agent-memory-evaluation.md` —
+  a prior-art study of TencentDB Agent Memory, dispositioned `REFERENCE ONLY`
+  (maintainer-adjudicated 2026-08-09, rule 3 carve-out). It is **not** a
+  proposal and changes nothing in the phases below. It retains three ideas
+  against this document: a common envelope over the record kinds in "Memory item
+  types"; an explicit `supersedes` **relation** to complement the `superseded`
+  **state** in "Trust levels"; and the hierarchy-independent restatement of this
+  document's provenance principle — *every derived memory record MUST retain a
+  machine-resolvable provenance path to the artifact(s) from which it was
+  derived*. Ownership, visibility and ACL from that subject are recorded as a
+  foreign problem and deferred; the backend deferral of D1' is unaffected.
 
 ## Summary
 
