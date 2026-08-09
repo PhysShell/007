@@ -13,6 +13,15 @@
 - **No code follows from this document.** It fixes vocabulary, requirements, and
   failure classes so that later work does not re-derive them or land the weaker
   forms by accident.
+- **Review round 1 (2026-08-09):** seven findings against the first revision,
+  all closed here — §4.0 (input closure), §4.1.1 (scope-key canonicalization),
+  §4.2.1 (witness determinism), §4.3 (`ScopeExpansionFailure` structure),
+  §4.5.1 (waiver expiry as an event), §4.8 (manifest completeness, v0 handoff
+  scope), §5.6 (named consistency conflicts), §6 (version binding). Two were
+  defects of this document against its **own** requirements: REQ-9 did not close
+  over `resolver_version`, and `WAIVED` had no return transition — which would
+  have made the attractor projection a clock read, the exact class REQ-11
+  forbids.
 
 > **Red line, stated once and binding on everything below.**
 > **No implementation material in this document is derived from
@@ -284,7 +293,7 @@ aspirational.
 
 | # | Requirement | Checkable by |
 |---|---|---|
-| REQ-1 | Normative facts (goals, decisions, invariants, evidence references) survive a session boundary **exactly**, not approximately | byte-level manifest equality across export/import |
+| REQ-1 | Normative facts (goals, decisions, invariants, evidence references) survive a session boundary **exactly**, not approximately | byte-level manifest equality across export/import, within one schema and canonicalization version (§4.8) |
 | REQ-2 | Context construction is **bounded** by a declared budget, and the bound is a property of the compiler, not of the caller's restraint | compiler refuses rather than exceeds |
 | REQ-3 | Every included entry carries a machine-readable reason for its inclusion | presence of an `InclusionProof` per entry |
 | REQ-4 | Evidence is **revision-bound**: it names the revision and digest it was established against | schema-level; no unbound evidence admitted |
@@ -292,7 +301,7 @@ aspirational.
 | REQ-6 | Failure knowledge has a **lifecycle**, and state transitions require evidence | transition guards (§4.5) |
 | REQ-7 | Handoff acceptance is **deterministic**; stochastic checks may not gate it | acceptance predicate contains no model call |
 | REQ-8 | Semantic retrieval may **advise** but never **establish**: it cannot create a fact, satisfy an invariant, preserve a decision, authorize an action, or complete a handoff | trust-boundary test per consumer |
-| REQ-9 | Every context compilation is reproducible **and diffable** from `(canonical_state_digest, scope_key, model_budget_profile, compiler_version)` | recompile → byte-identical output + comparable metadata |
+| REQ-9 | Scope resolution and context compilation are **each** reproducible and **diffable** from their own complete, declared input tuple (§4.0) | re-run each stage → byte-identical output + comparable metadata |
 | REQ-10 | No component on the read path of normative state may depend on an external entitlement — licence, quota, remote availability, or token TTL | dependency audit of the read path |
 | REQ-11 | Every derived normative projection is **disposable**: deletable and rebuildable from authoritative state, digest-identical | `rm -rf` the derived tree, rebuild, compare digests |
 
@@ -305,6 +314,13 @@ Three notes that are load-bearing:
   *compared*, not merely both regenerated. This extends, and must stay
   compatible with, the `context.meta.json` field list in
   `docs/task-aware-context-generator.md`.
+- **REQ-9 is stated over two stages on purpose.** An earlier revision of this
+  document named a single input tuple for compilation and omitted
+  `resolver_version` — which the architecture itself introduces as a versioned
+  component — so two runs agreeing on all four named inputs could still produce
+  different required sets. That is the document's own REQ-9 failing on the
+  document's own architecture. §4.0 fixes the input tuples; the requirement now
+  refers to them rather than restating one of them incompletely.
 - **REQ-10 generalizes a lesson, it is not a swipe at a vendor.** The pattern it
   forbids is any arrangement where reading the project's own normative state can
   fail on a calendar, a quota, or someone else's key. §1.5's licence-gated
@@ -344,6 +360,41 @@ classes discussable before anything is built.
                             Agent
 ```
 
+### 4.0 Two functions, two input tuples
+
+The plane has **two** deterministic stages, and each must close over its own
+inputs. Stating one tuple for both is how a versioned component drops out of a
+reproducibility claim without anyone noticing.
+
+```text
+ResolvedScope   = R( canonical_state_digest,
+                     canonical_scope_key,
+                     resolver_version )
+
+CompiledContext = C( canonical_state_digest,
+                     resolved_scope_digest,
+                     model_budget_profile_digest,
+                     compiler_version )
+```
+
+Naming, fixed here so that two names never drift into two concepts:
+
+- **`canonical_state_digest`** is the one name for the digest over the canonical
+  serialization of authoritative normative state — computed from the five
+  partition digests (goals, decisions, invariants, evidence, failure registry)
+  together with `canonicalization_version`. The manifest in §4.8 uses this name;
+  `exact_state_digest` was an alias in an earlier revision and is not used.
+- **`canonical_scope_key`** is a `ScopeKey` (§4.1) after the canonicalization
+  rule in §4.1.1. An un-canonicalized key is not an input to anything.
+- **`model_budget_profile_digest`** covers the budget profile *and* the
+  `tokenizer_id` / `output_reserve` it implies (§4.4). It is an input to `C`,
+  therefore it is a field of the manifest — a compilation cannot be re-derived
+  from a manifest that omits one of its own arguments.
+
+The rule that generalizes all three: **every input of `R` or `C` appears in the
+`HandoffManifest`.** If a field is an argument, it is recorded; if it is not
+recorded, it is not permitted to be an argument.
+
 ### 4.1 Normative Scope Resolver
 
 Named *normative* so that no later reader mistakes it for retrieval. Its input
@@ -372,6 +423,16 @@ ScopeCandidateSelected {
 non-deterministic input is not deterministic. Admitting NL inside the normative
 API would reproduce, one layer up, exactly the defect class §1.3 records.
 
+#### 4.1.1 Canonicalization of a ScopeKey
+
+`artifact_ids[]` and `contract_ids[]` are **sets, not sequences**. Before a
+`ScopeKey` is used as an input or digested it is canonicalized: deduplicated,
+sorted under a declared total order over identifiers, and stamped with
+`scope_key_canonicalization_version`. Two callers naming the same artifacts in a
+different order must produce the same `canonical_scope_key` and therefore the
+same `resolved_scope_digest`. A list whose order is an accident of iteration is
+an unversioned input in disguise.
+
 ### 4.2 Closure semantics
 
 `Required(scope)` is a transitive closure, and every element carries its
@@ -397,6 +458,32 @@ REQ-3 is then satisfied by construction rather than by a later "explain why you
 recalled this" pass, which would be an advisory signal impersonating an audit
 trail.
 
+#### 4.2.1 The witness must be as deterministic as the result
+
+In any real graph an invariant or an evidence node is reachable by **more than
+one** derivation path. If the resolver records whichever path its traversal
+reached first, then a change in iteration order — a different map
+implementation, an edge inserted elsewhere, a parallel expansion — leaves
+`Required(scope)` identical while `InclusionProof`, `resolved_scope_digest` and
+every diff built on them change. That is a determinism claim that covers the
+answer and not the explanation, which under REQ-9 is not a determinism claim at
+all.
+
+The resolver therefore declares a **witness rule**, versioned as
+`witness_rule_version`, and it is one of:
+
+```text
+ALL_MINIMAL     record every minimal inclusion reason, in canonical order
+SINGLE_TIEBREAK record one witness, selected by a declared total order over
+                (depth, rule_id, derivation_path) — never by traversal order
+```
+
+`ALL_MINIMAL` is the safer default: it is the only one under which "why is this
+here" survives the removal of a single edge without silently changing shape.
+`SINGLE_TIEBREAK` is admissible where proof size is a real cost, provided the
+tie-break is a declared function of the data. Traversal order is never a
+tie-break, and `witness_rule_version` participates in `resolved_scope_digest`.
+
 ### 4.3 Closure bounds, and two failures that must not be merged
 
 Depth alone does not bound anything — depth 3 with wide fan-out is still ten
@@ -421,6 +508,28 @@ first says the graph or the bounds are wrong, the second says the work item is
 too large. This is the same three-state discipline `AGENTS.md` already enforces
 for `PASS`/`FAIL`/`ERROR` — a state that means "the machine could not obtain an
 answer" must not be filed under a state that means "the answer is no".
+
+Since §5 rates closure blow-up as likely rather than hypothetical, the
+scope-side failure carries as much diagnostic structure as the budget-side one.
+A typed dead end is still a dead end:
+
+```text
+ScopeExpansionFailure {
+    canonical_scope_key
+    resolver_version
+    reached_depth
+    max_derivation_depth
+    required_entries_seen
+    max_required_entries
+    frontier[]                 unexpanded nodes at the cut, canonically ordered
+    triggering_rule_ids[]      the closure rules that produced the fan-out
+}
+```
+
+`frontier[]` and `triggering_rule_ids[]` are what make the outcome actionable:
+they say *where* the closure exploded and *which rule* did it, which is the
+difference between "tighten this contract-to-artifact binding" and "raise the
+limit until it stops complaining".
 
 ### 4.4 Budget failure is a typed outcome with a proposal, never a silent trim
 
@@ -456,12 +565,44 @@ Two constraints:
 ```text
 ACTIVE  ──▶ REMEDIATED    requires verification_record_id
         ──▶ SUPERSEDED    requires successor_failure_id
-        ──▶ WAIVED        requires decision_id + expires_at
+        ──▶ WAIVED        requires decision_id + expires_at + scope_binding
    *    ──▶ OBSOLETE      requires invalidation_reason
+
+WAIVED  ──▶ ACTIVE        via a recorded WaiverExpired event
 ```
 
 Transitions carry evidence or they are opinions with better typography. Two
-consequences worth stating explicitly:
+consequences need their own headings, because both are places where a plausible
+shortcut would silently break a requirement.
+
+#### 4.5.1 Expiry is an event, never a clock read
+
+A waiver with an `expires_at` and no return transition leaves exactly two
+possibilities, and both are defects. Either the waiver is effectively permanent,
+which is not what an expiry date means; or the projection compares `expires_at`
+against wall-clock time at read, in which case **one unchanged
+`failure_registry` yields different projections at different times** — REQ-9 and
+REQ-11 both fail, and they fail invisibly, because every individual read looks
+correct.
+
+So expiry is materialized:
+
+```text
+WAIVED --WaiverExpired--> ACTIVE      authoritative state changes
+                                      canonical_state_digest changes
+                                      the projection is reproducible again
+```
+
+The general rule this instance serves, and the one worth carrying to every other
+projection in the plane: **no derived normative projection may depend on a clock
+read.** Time may *cause* a state transition; it may never be an input to a
+projection.
+
+A waiver also carries `scope_binding`. A decision to tolerate one failure in one
+place is not a decision to switch that failure pattern off everywhere, and an
+unscoped waiver is the cheapest available way to silently disable a control.
+
+#### 4.5.2 Two projections, not one
 
 ```text
 planner_projection(F)  ≠  regression_projection(F)
@@ -483,7 +624,9 @@ is an acceptance property, not an implementation note.
 
 *Relationship to `docs/agent-memory-layer.md`:* `FailurePatternMemory` and the
 trust levels answer *who vouched for this entry*. This answers *is it still in
-force*. Both are needed; neither substitutes.
+force*. Both are needed; neither substitutes — but note that the existing trust
+enum already mixes the two, which is conflict **C-1** in §5, and closing it is a
+change to that document rather than an addition to it.
 
 ### 4.6 Evidence binding, without the word "stable"
 
@@ -556,8 +699,9 @@ truth verification    priced, recipe-driven, answers "is this still proved?"
 
 ```text
 HandoffManifest {
+    schema_version
     canonicalization_version
-    exact_state_digest
+    canonical_state_digest
 
     goal_state_digest
     decision_state_digest
@@ -565,17 +709,25 @@ HandoffManifest {
     evidence_state_digest
     failure_registry_digest
 
-    scope_key
+    canonical_scope_key
+    scope_key_canonicalization_version
     resolver_version
+    witness_rule_version
     resolved_scope_digest
 
+    model_budget_profile_digest
     compiler_version
     compiled_context_digest
 }
 ```
 
+Every field below `canonical_scope_key` is there because §4.0 requires it: each
+one is an argument of `R` or `C`, and a manifest that omits an argument cannot
+re-derive its own result.
+
 ```text
-HANDOFF_ACCEPTED  iff  schema_compatible
+HANDOFF_ACCEPTED  iff  schema_version_equal
+                   AND canonicalization_version_equal
                    AND exact_manifest_valid
                    AND required_goals_equal
                    AND active_invariants_equal
@@ -586,6 +738,30 @@ HANDOFF_ACCEPTED  iff  schema_compatible
 SemanticContinuityAssessment → PASS / WARN / INCONCLUSIVE
                                                        ← never gates
 ```
+
+**v0 is same-schema, same-canonicalization only, and says so.** REQ-1 is checked
+by byte-level manifest equality; the word *compatible* would quietly widen that
+into an undefined compatibility relation, which in a document this strict is a
+promise with no semantics behind it. A version mismatch in v0 is not a failed
+handoff — it is `HANDOFF_MIGRATION_REQUIRED`, a distinct outcome with no
+migration path implemented yet.
+
+When cross-version handoff is actually needed, it gets its own object rather
+than a loosening of the predicate:
+
+```text
+HandoffMigration {
+    from_schema_version / from_canonicalization_version
+    to_schema_version   / to_canonicalization_version
+    migration_recipe_id + version
+    pre_migration_digests[]
+    post_migration_digests[]
+}
+```
+
+with acceptance defined as equality of the **canonical normative records after
+migration**, not of the bytes before it. Until that exists, the honest surface
+is a refusal, not a comparison nobody has defined.
 
 - `decisions_preserved` is equality over a **canonical** serialization, with
   `canonicalization_version` in the manifest. Undefined ordering is the classic
@@ -675,10 +851,16 @@ brochure.
    guards is exactly the kind of thing that acquires ceremonial states nobody
    uses. Guard: if a state has no consumer that behaves differently because of
    it, delete the state.
-6. **This document overlaps two drafts that are themselves pending.**
-   `docs/agent-memory-layer.md` and `docs/task-aware-context-generator.md` both
-   carry unratified proposals. Nothing here should be treated as reconciling
-   them; if any of the three is ratified, the other two need a consistency pass.
+6. **This document overlaps two drafts that are themselves pending, and three of
+   the conflicts are already visible.** Nothing here reconciles them; ratifying
+   any of the three documents makes the following a required consistency pass,
+   named now so it is not rediscovered later:
+
+   | # | Conflict | Where | Proposed resolution |
+   |---|---|---|---|
+   | C-1 | `superseded` and `rejected` sit in the **trust levels** list, but they are dispositions, not statements about who vouched for an entry | `docs/agent-memory-layer.md` → "Trust levels" | Split the enum: trust (`agent-claimed` … `human-confirmed`) stays; `superseded` / `rejected` move to a status/lifecycle field aligned with §4.5. This is a **change** to the existing model, not an addition to it |
+   | C-2 | IR requirements demand "a stable identity" per selected item; §4.6 here refuses to promise stable symbol identity and replaces it with a resolution ladder | `docs/task-aware-context-generator.md` → "IR requirements" | Replace the requirement with the `SymbolLocator` + `ResolutionResult` contract, so a degraded match is visible rather than assumed |
+   | C-3 | The existing cache key (commit, task hash, profile, extractor versions, ranking version, budget config) and REQ-9's two input tuples (§4.0) are different closures over overlapping inputs | `docs/task-aware-context-generator.md` → "Determinism and reproducibility" | Reconcile into one declared closure per stage; whichever survives must contain **every** versioned component it invokes |
 
 ## 6. Non-normative evaluation of Semvec
 
@@ -687,8 +869,22 @@ Fenced deliberately, so that no later reader can convert "we evaluated it" into
 
 - **Out of the Memory Plane implementation plan.** If run at all, this is a
   black-box comparison producing a written verdict, not a dependency.
-- **Pin `>= 0.8.5`.** Every earlier version, including the 0.7.0 the article
-  used, carries the documented restore and boundedness defects in §1.3.
+- **Two version facts, not one.** `>= 0.8.5` is a **minimum admissible
+  version**, not a pin — every earlier version, including the 0.7.0 the article
+  used, carries the documented restore and boundedness defects in §1.3. A range
+  is not a revision binding: an evaluation whose dependency can float to a
+  release nobody assessed would break rule 4 inside an exercise about rule 4.
+  So any run also records an **exact run identity**:
+
+  ```text
+  minimum_admissible_version   >= 0.8.5          (admission policy)
+  run_identity                 exact version
+                             + wheel sha256
+                             + platform tag
+                             + python identity   (what was actually executed)
+  ```
+
+  Findings are bound to `run_identity`, never to the range.
 - **Community tier only**, whose documented use cases explicitly include
   evaluation and prototyping — and note the 5 QPS ceiling shapes what can be
   measured.
