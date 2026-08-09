@@ -14,8 +14,34 @@ Current authoritative state:
 - **A0 candidate-state continuity**: accepted at `52627c3`, merged as
   `f1ac458` (PR #92, eight forward-only corrective rounds). Normative
   source: `docs/q-deck/a0-candidate-state.md`.
-- **Next: A1 contract freeze** (issue #95 — A0.0 precondition satisfied);
-  A1 implementation only after the freeze.
+- **A1-F contract freeze**: **ACCEPTED / CLOSED / FROZEN**. Accepted at
+  `b61540a` after six corrective rounds (R1–R5.1), then **amended pre-merge by
+  R5.2** (`a4a9f97`), which closed four P1s from external review on PR #123 —
+  including one that let an ambiguous provider execution free the dispatch slot,
+  and one that charged only half an artifact's bytes against the closure budget.
+  **The frozen baseline is the merged head of PR #123, not `b61540a`**: an
+  implementation built against `b61540a` would be building the pre-R5.2 contract.
+  Normative source: `docs/q-deck/a1-authority-contracts.md` (§9 carries all seven
+  rounds). Fifteen frozen decisions — artifact model / digests / per-object and closure bounds /
+  versions / the complete `ArtifactKindV1` set (FD-1), acyclic evidence-graph
+  rank rule with imported authority roots and resolver duties (FD-2),
+  raw-vs-normalized evidence (FD-3), untrusted/accepted split (FD-4), authority
+  direction (FD-5), duplicate-id replay-vs-conflict (FD-6), no model-supplied
+  executable authority (FD-7), no-provider-call-on-replay (FD-8), fail-closed
+  post-dispatch ambiguity (FD-9), the `provider_execution_id`/`dispatch_id`
+  grain split on an execution-level receipt (FD-10), twelve receipt/artifact
+  congruence predicates (FD-11), transition authority (FD-12), head-bound
+  evidence (FD-13), `CampaignStateV1` + `verify_wire`/`resolve_genesis`/
+  `resolve_event`/`fold` + the `state_version` rule + the `HUMAN_REQUIRED` exit
+  rule (FD-14), and human command binding with honest actor attestation (FD-15).
+  Complete wire schemas for all eleven message kinds, the provider execution
+  receipt, interaction manifest, `ScopeContractV1`, `CampaignStateV1`, and
+  `CampaignEventV1` with its eleven payload schemas. Design input: issue #95.
+- **Next: A1-V0** (§5 of that doc), and **not before the A1-F PR merges**: one
+  real coder/reviewer/human corrective loop — coder on the claude CLI, reviewer
+  on `--engine arliai` (read-only, no tool surface), controller sealing and
+  folding, merge manual. Acceptance = one live corrective cycle + a full campaign
+  replay with zero provider invocations + the negative matrix of §5.4.
 - **Post-A0 hardening**: separate follow-up issue; does not reopen A0.
 - **B1** (`research/b1-context/`): parallel, read-only, non-authoritative.
 
