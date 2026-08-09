@@ -14,10 +14,15 @@ Current authoritative state:
 - **A0 candidate-state continuity**: accepted at `52627c3`, merged as
   `f1ac458` (PR #92, eight forward-only corrective rounds). Normative
   source: `docs/q-deck/a0-candidate-state.md`.
-- **A1-F contract freeze**: **ACCEPTED / CLOSED / FROZEN** at exact head
-  `b61540a` (branch `claude/a1-contract-freeze-dkrnnq`, six corrective rounds
-  R1–R5.1). Normative source: `docs/q-deck/a1-authority-contracts.md`. Fifteen
-  frozen decisions — artifact model / digests / per-object and closure bounds /
+- **A1-F contract freeze**: **ACCEPTED / CLOSED / FROZEN**. Accepted at
+  `b61540a` after six corrective rounds (R1–R5.1), then **amended pre-merge by
+  R5.2** (`a4a9f97`), which closed four P1s from external review on PR #123 —
+  including one that let an ambiguous provider execution free the dispatch slot,
+  and one that charged only half an artifact's bytes against the closure budget.
+  **The frozen baseline is the merged head of PR #123, not `b61540a`**: an
+  implementation built against `b61540a` would be building the pre-R5.2 contract.
+  Normative source: `docs/q-deck/a1-authority-contracts.md` (§9 carries all seven
+  rounds). Fifteen frozen decisions — artifact model / digests / per-object and closure bounds /
   versions / the complete `ArtifactKindV1` set (FD-1), acyclic evidence-graph
   rank rule with imported authority roots and resolver duties (FD-2),
   raw-vs-normalized evidence (FD-3), untrusted/accepted split (FD-4), authority
