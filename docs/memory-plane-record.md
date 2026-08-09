@@ -22,6 +22,18 @@
   over `resolver_version`, and `WAIVED` had no return transition — which would
   have made the attractor projection a clock read, the exact class REQ-11
   forbids.
+- **Review round 2 (2026-08-09):** four findings, all closed here. Two were
+  again input-closure defects, one level below the round-1 fix: `R` did not
+  close over the witness rule, the closure rule set, or the closure bounds
+  (§4.0, `ResolverPolicy`), and `C` did not close over its advisory half at all,
+  since semantic recall is by construction outside authoritative state (§4.0.1,
+  `AdvisoryInputSnapshot`). The other two removed hidden inputs of the same
+  kind: `schema_version` now sits inside state identity rather than only inside
+  the handoff predicate, and the attractor rebuild property names the embedding
+  model and indexer it actually depends on (§4.5.2). The recurrence of one
+  failure class across two rounds is itself the finding — every fix that
+  introduces a versioned component must be checked against the input tuples in
+  §4.0 before it is called done.
 
 > **Red line, stated once and binding on everything below.**
 > **No implementation material in this document is derived from
@@ -351,6 +363,9 @@ classes discussable before anything is built.
       goals · invariants ·              semantic memories ·
       decisions · evidence              historical failures ·
                                         neighbouring code
+                                              │
+                                    freeze → AdvisoryInputSnapshot
+                                              │  (§4.0.1)
               └───────────────┬───────────────┘
                               ▼
                       Context Compiler
@@ -367,33 +382,96 @@ inputs. Stating one tuple for both is how a versioned component drops out of a
 reproducibility claim without anyone noticing.
 
 ```text
-ResolvedScope   = R( canonical_state_digest,
+ResolvedScope | ScopeExpansionFailure
+                = R( canonical_state_digest,
                      canonical_scope_key,
-                     resolver_version )
+                     resolver_policy_digest )
 
 CompiledContext = C( canonical_state_digest,
                      resolved_scope_digest,
+                     advisory_input_snapshot_digest,
                      model_budget_profile_digest,
                      compiler_version )
 ```
 
-Naming, fixed here so that two names never drift into two concepts:
+Every behavioural parameter of a stage is folded into exactly one digested
+policy object rather than added to the signature one at a time — a signature
+that grows a parameter per feature is a signature people stop reading.
 
-- **`canonical_state_digest`** is the one name for the digest over the canonical
-  serialization of authoritative normative state — computed from the five
-  partition digests (goals, decisions, invariants, evidence, failure registry)
-  together with `canonicalization_version`. The manifest in §4.8 uses this name;
+```text
+CanonicalStateEnvelope {           ResolverPolicy {
+    schema_version                     resolver_version
+    canonicalization_version           witness_rule_version
+                                       closure_rule_set_version
+    goal_state_digest                  max_derivation_depth
+    decision_state_digest              max_required_entries
+    invariant_state_digest         }
+    evidence_state_digest
+    failure_registry_digest        resolver_policy_digest =
+}                                      digest(canonical(ResolverPolicy))
+
+canonical_state_digest =
+    sha256(canonical(CanonicalStateEnvelope))
+```
+
+Naming and closure, fixed here so that two names never drift into two concepts:
+
+- **`canonical_state_digest`** is the one name for the identity of authoritative
+  normative state. It covers the five partition digests **and**
+  `schema_version` alongside `canonicalization_version`: the same canonical
+  bytes may mean different things under two schema versions, so schema identity
+  belongs inside state identity rather than only inside the handoff predicate.
   `exact_state_digest` was an alias in an earlier revision and is not used.
 - **`canonical_scope_key`** is a `ScopeKey` (§4.1) after the canonicalization
   rule in §4.1.1. An un-canonicalized key is not an input to anything.
+- **`resolver_policy_digest`** carries everything that changes what `R` returns:
+  the witness rule (§4.2.1), the closure rule set, and both closure bounds
+  (§4.3). The bounds are inputs, not configuration — they decide whether `R`
+  returns a scope or a `ScopeExpansionFailure`, which makes them as
+  result-determining as the graph itself. `closure_rule_set_version` is separate
+  from `resolver_version` on purpose: changing the transitive-closure rules
+  changes the function even when the executing code reports the same version.
+- **`advisory_input_snapshot_digest`** is §4.0.1. Without it, `C` is not closed:
+  the optional half of its input (semantic memories, historical failures,
+  neighbouring code) is by construction *not* part of authoritative state, so
+  two compilations can agree on every other argument and still differ.
 - **`model_budget_profile_digest`** covers the budget profile *and* the
-  `tokenizer_id` / `output_reserve` it implies (§4.4). It is an input to `C`,
-  therefore it is a field of the manifest — a compilation cannot be re-derived
-  from a manifest that omits one of its own arguments.
+  `tokenizer_id` / `output_reserve` it implies (§4.4).
 
-The rule that generalizes all three: **every input of `R` or `C` appears in the
-`HandoffManifest`.** If a field is an argument, it is recorded; if it is not
-recorded, it is not permitted to be an argument.
+The rule that generalizes all of them: **every input of `R` or `C` appears in
+the `HandoffManifest`, as a digest and — where useful for diffing — expanded.**
+If a value is an argument, it is recorded; if it is not recorded, it is not
+permitted to be an argument.
+
+#### 4.0.1 Advisory inputs are frozen before they are compiled
+
+Making semantic retrieval part of normative state would buy determinism by
+destroying the trust boundary §4.9 exists to hold. The alternative is to leave
+retrieval advisory *and* non-deterministic, and to materialize its result before
+the deterministic stage consumes it:
+
+```text
+AdvisoryInputSnapshot {
+    items[]                canonically ordered
+    provenance[]           which channel proposed each item
+    retrieval_identity     retriever + version + embedding model identity
+    snapshot_digest
+}
+```
+
+```text
+retrieve                 may vary between runs
+        ▼
+freeze advisory snapshot recorded, digested, provenance-carrying
+        ▼
+compile                  MUST NOT vary
+```
+
+The snapshot is still advisory — nothing in it can establish a fact, satisfy an
+invariant, or complete a handoff (REQ-8). It is merely *fixed*, which is what
+REQ-9 needs. **Trust and determinism are independent axes**, and conflating them
+is how a system ends up either trusting its retrieval or being unable to
+reproduce anything that touched it.
 
 ### 4.1 Normative Scope Resolver
 
@@ -482,7 +560,9 @@ SINGLE_TIEBREAK record one witness, selected by a declared total order over
 here" survives the removal of a single edge without silently changing shape.
 `SINGLE_TIEBREAK` is admissible where proof size is a real cost, provided the
 tie-break is a declared function of the data. Traversal order is never a
-tie-break, and `witness_rule_version` participates in `resolved_scope_digest`.
+tie-break, and `witness_rule_version` is part of `ResolverPolicy` (§4.0) — it
+changes what `R` returns, so it is one of `R`'s inputs and not a setting applied
+somewhere alongside it.
 
 ### 4.3 Closure bounds, and two failures that must not be merged
 
@@ -515,21 +595,26 @@ A typed dead end is still a dead end:
 
 ```text
 ScopeExpansionFailure {
-    canonical_scope_key
-    resolver_version
-    reached_depth
-    max_derivation_depth
-    required_entries_seen
-    max_required_entries
+    canonical_state_digest     ─┐ the full input tuple of R (§4.0):
+    canonical_scope_key         │ a failure that cannot be replayed
+    resolver_policy_digest     ─┘ is an anecdote
+
+    reached_depth              ─┐ expanded from the policy for diffing,
+    max_derivation_depth        │ not a second source of the same values
+    required_entries_seen       │
+    max_required_entries       ─┘
+
     frontier[]                 unexpanded nodes at the cut, canonically ordered
     triggering_rule_ids[]      the closure rules that produced the fan-out
 }
 ```
 
-`frontier[]` and `triggering_rule_ids[]` are what make the outcome actionable:
-they say *where* the closure exploded and *which rule* did it, which is the
-difference between "tighten this contract-to-artifact binding" and "raise the
-limit until it stops complaining".
+A failure is an output of `R`, so it records the same inputs a success would —
+otherwise the one outcome most worth reproducing is the one that cannot be.
+`frontier[]` and `triggering_rule_ids[]` are what make it actionable: they say
+*where* the closure exploded and *which rule* did it, which is the difference
+between "tighten this contract-to-artifact binding" and "raise the limit until
+it stops complaining".
 
 ### 4.4 Budget failure is a typed outcome with a proposal, never a silent trim
 
@@ -617,10 +702,21 @@ The semantic attractor set is a **projection of `ACTIVE` entries only**, and
 under REQ-11:
 
 ```text
-attractor_index == build_attractor_index(failure_registry)
+attractor_index == build_attractor_index(
+                       failure_registry,
+                       embedding_model_identity,
+                       attractor_indexer_version )
 ```
 
 is an acceptance property, not an implementation note.
+
+The index is semantic, so its bytes depend on the embedding model and the
+indexer as much as on the registry — the same hidden-input problem §4.9 already
+records for drift observations. Naming those inputs keeps the rebuild property
+true instead of aspirational. This does **not** promote the index: it stays
+advisory under REQ-8. Trust and determinism are independent axes (§4.0.1), and
+an advisory artifact that is reproducible from recorded inputs is strictly
+better than one that is merely advisory.
 
 *Relationship to `docs/agent-memory-layer.md`:* `FailurePatternMemory` and the
 trust levels answer *who vouched for this entry*. This answers *is it still in
@@ -699,31 +795,42 @@ truth verification    priced, recipe-driven, answers "is this still proved?"
 
 ```text
 HandoffManifest {
+    // state identity — the envelope of §4.0
     schema_version
     canonicalization_version
     canonical_state_digest
-
     goal_state_digest
     decision_state_digest
     invariant_state_digest
     evidence_state_digest
     failure_registry_digest
 
+    // inputs of R
     canonical_scope_key
     scope_key_canonicalization_version
-    resolver_version
-    witness_rule_version
-    resolved_scope_digest
+    resolver_policy_digest
+    resolver_version              ─┐ expansion of the policy,
+    witness_rule_version           │ for diffing and debugging;
+    closure_rule_set_version       │ the digest above is the
+    max_derivation_depth           │ authoritative input
+    max_required_entries          ─┘
 
+    // inputs of C
+    resolved_scope_digest
+    advisory_input_snapshot_digest
     model_budget_profile_digest
     compiler_version
+
+    // outputs
     compiled_context_digest
 }
 ```
 
-Every field below `canonical_scope_key` is there because §4.0 requires it: each
-one is an argument of `R` or `C`, and a manifest that omits an argument cannot
-re-derive its own result.
+The grouping is the point: every argument of `R` and `C` in §4.0 appears here,
+and the expanded policy fields are a *view* of `resolver_policy_digest`, never a
+second place to set the same value. A manifest that omits an argument cannot
+re-derive its own result; a manifest that carries two independently-settable
+copies of one argument is worse.
 
 ```text
 HANDOFF_ACCEPTED  iff  schema_version_equal
