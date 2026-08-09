@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# o7-cas — a minimal content-addressed store (sha256), no server, just discipline.
+#   Objects live at  $CAS_ROOT/sha256/<aa>/<rest>  (sharded by first 2 hex),
+#   stored read-only (0444). The object's address is sha256 of its bytes.
+#
+# Usage:
+#   o7-cas put <file>            # ingest a file; prints  cas:sha256:<digest>
+#   o7-cas has <digest>          # exit 0 if present, 1 if not
+#   o7-cas path <digest>         # print the on-disk path (must exist)
+#   o7-cas get <digest> [dest]   # copy object to dest (or cat to stdout)
+#   o7-cas verify <digest>       # recompute digest of stored object vs its address
+#   o7-cas verify --all          # verify every object in the store
+#   o7-cas ls                    # list all objects: <digest> <bytes>
+#
+# Env: CAS_ROOT (default ~/.local/share/o7-research/cas)
+set -euo pipefail
+CAS_ROOT="${CAS_ROOT:-$HOME/.local/share/o7-research/cas}"
+SHA_DIR="$CAS_ROOT/sha256"
+
+die(){ echo "o7-cas: $*" >&2; exit 1; }
+_digest_of(){ sha256sum "$1" | awk '{print $1}'; }
+_norm(){ local d="${1#cas:}"; d="${d#sha256:}"; printf '%s' "$d"; }   # strip cas:/sha256: prefixes
+_path_for(){ local d; d="$(_norm "$1")"; printf '%s/%s/%s' "$SHA_DIR" "${d:0:2}" "${d:2}"; }
+
+cmd_put(){
+  [ $# -eq 1 ] || die "put needs exactly one <file>"
+  local src="$1"; [ -f "$src" ] || die "no such file: $src"
+  local d dst; d="$(_digest_of "$src")"; dst="$(_path_for "$d")"
+  if [ -f "$dst" ]; then
+    local have; have="$(_digest_of "$dst")"
+    [ "$have" = "$d" ] || die "CORRUPT existing object at $dst"
+    echo "cas:sha256:$d"; return 0            # idempotent: already stored, verified
+  fi
+  install -Dm0444 "$src" "$dst"
+  local back; back="$(_digest_of "$dst")"
+  [ "$back" = "$d" ] || { rm -f "$dst"; die "post-store verify FAILED for $src"; }
+  echo "cas:sha256:$d"
+}
+cmd_has(){ [ $# -eq 1 ] || die "has needs <digest>"; [ -f "$(_path_for "$1")" ]; }
+cmd_path(){ [ $# -eq 1 ] || die "path needs <digest>"; local p; p="$(_path_for "$1")"; [ -f "$p" ] || die "not present: $(_norm "$1")"; printf '%s\n' "$p"; }
+cmd_get(){
+  [ $# -ge 1 ] || die "get needs <digest> [dest]"; local p; p="$(_path_for "$1")"; [ -f "$p" ] || die "not present: $(_norm "$1")"
+  if [ $# -ge 2 ]; then install -m0444 "$p" "$2"; echo "$2"; else cat "$p"; fi
+}
+cmd_verify_one(){
+  local d p have; d="$(_norm "$1")"; p="$(_path_for "$d")"
+  if [ ! -f "$p" ]; then printf 'MISSING  %s\n' "$d"; return 2; fi
+  have="$(_digest_of "$p")"
+  if [ "$have" = "$d" ]; then printf 'OK       %s  (%s bytes)\n' "$d" "$(stat -c%s "$p")"; return 0
+  else printf 'CORRUPT  %s  -> %s\n' "$d" "$have"; return 1; fi
+}
+cmd_verify(){
+  [ $# -ge 1 ] || die "verify needs <digest> | --all"
+  if [ "$1" = "--all" ]; then
+    local rc=0
+    [ -d "$SHA_DIR" ] || { echo "(store empty)"; return 0; }
+    while IFS= read -r p; do
+      local d; d="$(basename "$(dirname "$p")")$(basename "$p")"
+      cmd_verify_one "$d" || rc=1
+    done < <(find "$SHA_DIR" -type f | sort)
+    return $rc
+  fi
+  local rc=0; for a in "$@"; do cmd_verify_one "$a" || rc=1; done; return $rc
+}
+cmd_ls(){
+  [ -d "$SHA_DIR" ] || { echo "(store empty)"; return 0; }
+  find "$SHA_DIR" -type f | sort | while IFS= read -r p; do
+    printf '%s%s  %s\n' "$(basename "$(dirname "$p")")" "$(basename "$p")" "$(stat -c%s "$p")"
+  done
+}
+[ $# -ge 1 ] || die "usage: put|has|path|get|verify|ls  (see header)"
+sub="$1"; shift
+case "$sub" in
+  put) cmd_put "$@";; has) cmd_has "$@";; path) cmd_path "$@";;
+  get) cmd_get "$@";; verify) cmd_verify "$@";; ls) cmd_ls "$@";;
+  *) die "unknown subcommand: $sub";;
+esac

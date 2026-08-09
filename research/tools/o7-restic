@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# restic to R2 with R2 keys pulled from the o7-secret vault at call time
+# (never plaintext in env/history/chat). Non-secret config below; keys via vault.
+set -euo pipefail
+CFG="$HOME/.config/o7-research"
+export RESTIC_REPOSITORY="s3:https://e4e53966b87587d64db1b49393bb6f0a.r2.cloudflarestorage.com/o7-cas/restic"
+export RESTIC_PASSWORD_FILE="$CFG/restic-password"
+export AWS_DEFAULT_REGION="auto"
+export TMPDIR="$HOME/.cache/o7-restic-tmp"; mkdir -p "$TMPDIR"
+exec o7-secret run AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY -- restic "$@"
