@@ -265,6 +265,8 @@ On startup the controller:
 
 External mutable systems are observations to reconcile, not canonical campaign history.
 
+Prior art for step 4, recorded and deliberately not adopted: `docs/architecture/prior-art-the-grid.md`. It is a non-normative comparison record — it selects no design, adds no requirement here, and is read only when a concrete controller-lifecycle consumer exists.
+
 ## Budgets and stop policy
 
 Every campaign must have explicit finite limits, for example:
