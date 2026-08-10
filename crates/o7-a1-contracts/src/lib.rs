@@ -65,6 +65,6 @@ pub use json::{parse_artifact, ParseError, WireArtifact};
 pub use kind::{ArtifactKindV1, MessageKindV1, ProducerRole};
 pub use refs::{typed_media_type, ArtifactRef, RefError};
 pub use scalars::{
-    AdapterVersion, BoundedText, BoundedVec, CommitId, Digest256, FrozenVersion, Id, ModelIdentity,
-    Optional, ScalarError, Text, Timestamp, WireDigest,
+    AdapterVersion, BoundedText, BoundedVec, CommitId, FrozenVersion, Id, ModelIdentity, Optional,
+    ScalarError, Text, Timestamp, WireDigest,
 };

@@ -72,7 +72,16 @@ macro_rules! refuse_text {
     };
 }
 
-pub use o7_run::event::{Digest256, DigestFormatError};
+/// **Crate-internal on purpose.** `Digest256` is the type FD-1.1 names, and
+/// this crate holds it inside [`WireDigest`] — but its own `Deserialize`
+/// forwards `DigestFormatError`, whose `Display` quotes the rejected string.
+/// Re-exporting it publicly would republish that reject path as part of the A1
+/// contract API, which is precisely the leak `WireDigest` exists to close.
+///
+/// That was the state for ten rounds: the wrapper was added in round 4 and the
+/// re-export beside it was left alone, so the fix covered every wire field and
+/// none of the direct route.
+pub(crate) use o7_run::event::Digest256;
 
 /// A generous outer bound on a `Timestamp` string, so an over-long value is
 /// refused before it is examined. The shape and component ranges are checked
@@ -414,9 +423,11 @@ impl<'de> Deserialize<'de> for Timestamp {
 /// which is the distinction FD-2.4 draws when it imports a kind rather than
 /// redefining it.
 ///
-/// Note that `o7-run`'s own `DigestFormatError` still carries the rejected value
-/// for its own callers; narrowing that is a change to another crate's public
-/// error type and belongs to its own slice, not to this one.
+/// `o7-run`'s own `DigestFormatError` still carries the rejected value for its
+/// own callers, and `o7-run` re-exports both types from its root. Narrowing that
+/// is a change to another crate's public error type, so it belongs to its own
+/// slice — but it is a real instance of the same P0 class and is recorded on
+/// this PR rather than left to be rediscovered.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 #[serde(transparent)]
 pub struct WireDigest(Digest256);
