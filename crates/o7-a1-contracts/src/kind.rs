@@ -117,6 +117,43 @@ impl MessageKindV1 {
         }
     }
 
+    /// §3.1–§3.11 — the one producer role authorised to author this kind.
+    ///
+    /// Every §3 heading fixes a direction — `### 3.1 WorkOrderV1 (Controller →
+    /// Coder, rank 5)` — so the author of each kind is frozen contract text and
+    /// not a policy this implementation gets to choose. A `WorkOrder` whose
+    /// `producer_role` is `coder` is a **malformed envelope**, in exactly the
+    /// sense FD-1.6 gives an unknown field: not a doubtful combination for a
+    /// later layer to resolve, but one the wire seed refuses.
+    ///
+    /// The mapping is a total function, and that is the contract's shape rather
+    /// than a simplification: each of the eleven kinds names exactly one author.
+    /// So `producer_role` on an *admitted* envelope carries no information the
+    /// kind did not already carry — which is why it can be checked here at all.
+    ///
+    /// Exhaustive by construction: no wildcard arm, so a twelfth kind fails to
+    /// compile until its author is stated.
+    ///
+    /// Crate-private on purpose. It observes no admitted state and is not a
+    /// boundary anyone crosses — it is one half of a rule whose other half is
+    /// [`crate::EnvelopeV1`]'s validator, and a public copy of the question
+    /// would be a way to ask it without being subject to the answer.
+    pub(crate) fn authorized_producer_role(self) -> ProducerRole {
+        match self {
+            Self::WorkOrder => ProducerRole::Controller,
+            Self::CoderReport => ProducerRole::Coder,
+            Self::CandidateReceipt => ProducerRole::Controller,
+            Self::ReviewRequest => ProducerRole::Controller,
+            Self::ReviewerReport => ProducerRole::Reviewer,
+            Self::ReviewVerdict => ProducerRole::Controller,
+            Self::CorrectiveDirective => ProducerRole::Controller,
+            Self::CampaignFeedItem => ProducerRole::Controller,
+            Self::HumanAttentionRequest => ProducerRole::Controller,
+            Self::HumanCommandRequest => ProducerRole::Human,
+            Self::HumanDecision => ProducerRole::Controller,
+        }
+    }
+
     /// Every kind, in §3 order — for exhaustiveness tests and registries.
     pub const ALL: [Self; 11] = [
         Self::WorkOrder,
@@ -457,6 +494,26 @@ mod tests {
         assert!(serde_json::from_str::<MessageKindV1>("\"future_kind\"").is_err());
         assert!(serde_json::from_str::<ArtifactKindV1>("\"future_kind\"").is_err());
         assert!(serde_json::from_str::<ProducerRole>("\"architect\"").is_err());
+    }
+
+    /// The direction table and [`ProducerRole::is_provider_role`] are defined
+    /// independently, and §3 makes them agree: a provider role authors exactly
+    /// the two untrusted report kinds (§3.2, §3.5) and nothing else.
+    ///
+    /// Not a restatement of either — it is the one claim that would break if
+    /// the two drifted, which is what makes it worth asserting here. The
+    /// mapping's *values* are checked where they are enforced, against the
+    /// §3 headings transcribed in `tests/fd1_wire_seed.rs`: a table tested
+    /// against the function it was copied from proves only that copying
+    /// worked.
+    #[test]
+    fn the_provider_roles_are_exactly_the_authors_of_the_untrusted_reports() {
+        let by_provider: Vec<&str> = MessageKindV1::ALL
+            .into_iter()
+            .filter(|k| k.authorized_producer_role().is_provider_role())
+            .map(MessageKindV1::name)
+            .collect();
+        assert_eq!(by_provider, ["coder_report", "reviewer_report"]);
     }
 
     #[test]

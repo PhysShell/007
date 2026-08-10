@@ -114,6 +114,25 @@ fn coder_envelope() -> EnvelopeV1 {
     EnvelopeV1::new(coder_fields()).expect("the coder fixture must be admissible")
 }
 
+/// The checked producer encoding — the only route from an admitted envelope to
+/// bytes, and therefore the only honest place for a wire test to start.
+fn wire_bytes(env: &EnvelopeV1) -> Vec<u8> {
+    env.to_wire_bytes()
+        .expect("an admitted envelope encodes under its own ceiling")
+}
+
+/// Those bytes as a document, so a negative test can vary **the input** — one
+/// member of an otherwise conforming envelope — rather than relax a bound or
+/// reach the wire by a route no production producer has.
+///
+/// Six times on this PR a test reached the layer under test through a weaker
+/// route and recorded the bypass instead of closing it. The rule this helper
+/// exists to keep: however a regression test arrives at the state before the
+/// check, it arrives the way a producer would.
+fn wire_document(env: &EnvelopeV1) -> serde_json::Value {
+    serde_json::from_slice(&wire_bytes(env)).expect("the producer encoding is a JSON document")
+}
+
 // ---------------------------------------------------------------------------
 // Row: unsupported envelope_version / message_kind_version
 //      "refused, never best-effort parsed (FD-1.6)"
@@ -139,7 +158,7 @@ fn an_unsupported_message_kind_version_is_refused() {
 
 /// A serialized controller envelope with one member replaced.
 fn envelope_json_with(key: &str, value: serde_json::Value) -> Vec<u8> {
-    let mut v = serde_json::to_value(controller_envelope()).expect("fixture must serialize");
+    let mut v = wire_document(&controller_envelope());
     if let Some(map) = v.as_object_mut() {
         map.insert(key.to_owned(), value);
     }
@@ -152,7 +171,7 @@ fn envelope_json_with(key: &str, value: serde_json::Value) -> Vec<u8> {
 
 #[test]
 fn an_unknown_envelope_field_is_rejected_at_parse_time() {
-    let mut value = serde_json::to_value(controller_envelope()).expect("fixture must serialize");
+    let mut value = wire_document(&controller_envelope());
     if let Some(map) = value.as_object_mut() {
         map.insert("shadow_authority".to_owned(), serde_json::json!(true));
     }
@@ -167,7 +186,7 @@ fn an_unknown_envelope_field_is_rejected_at_parse_time() {
 fn an_unrecognised_enum_variant_fails_closed() {
     // FD-1.6: no `#[serde(other)]` catch-all anywhere, so a future kind is
     // refused rather than absorbed into a "we did not understand this" variant.
-    let mut value = serde_json::to_value(controller_envelope()).expect("fixture must serialize");
+    let mut value = wire_document(&controller_envelope());
     if let Some(map) = value.as_object_mut() {
         map.insert("message_kind".to_owned(), serde_json::json!("future_kind"));
     }
@@ -183,7 +202,7 @@ fn an_unrecognised_enum_variant_fails_closed() {
 fn an_explicit_null_in_an_optional_field_is_rejected() {
     // The field is genuinely optional — absent parses fine — so this is the
     // null itself being refused, not a missing required value.
-    let mut value = serde_json::to_value(controller_envelope()).expect("fixture must serialize");
+    let mut value = wire_document(&controller_envelope());
     if let Some(map) = value.as_object_mut() {
         map.insert("causation_id".to_owned(), serde_json::Value::Null);
     }
@@ -197,7 +216,7 @@ fn an_explicit_null_in_an_optional_field_is_rejected() {
 #[test]
 fn the_same_optional_field_absent_is_accepted() {
     let env = controller_envelope();
-    let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
+    let bytes = wire_bytes(&env);
     assert!(!String::from_utf8_lossy(&bytes).contains("causation_id"));
     let parsed: EnvelopeV1 = parse_artifact(&bytes).expect("absent optional must parse");
     assert_eq!(parsed, env);
@@ -228,7 +247,7 @@ fn a_malformed_payload_is_rejected() {
 fn a_leading_bom_is_refused_rather_than_stripped() {
     // Stripping would mean the payload digest names bytes nobody parsed.
     let mut bytes = "\u{feff}".as_bytes().to_vec();
-    bytes.extend(serde_json::to_vec(&controller_envelope()).expect("fixture must serialize"));
+    bytes.extend(wire_bytes(&controller_envelope()));
     assert_eq!(
         parse_artifact::<EnvelopeV1>(&bytes),
         Err(ParseError::LeadingBom)
@@ -281,7 +300,7 @@ fn too_many_artifact_refs_are_rejected() {
     assert!(ArtifactRefs::new(within).is_ok());
 
     // ...and it is refused on the wire, including through the direct door.
-    let mut value = serde_json::to_value(env).expect("fixture must serialize");
+    let mut value = wire_document(&env);
     if let Some(map) = value.as_object_mut() {
         map.insert(
             "artifact_refs".to_owned(),
@@ -406,14 +425,35 @@ fn every_framed_field_changes_the_identity() {
     let base = controller_envelope();
     let d = base.framed_digest();
 
-    let kind = rebuilt(&base, |f| f.message_kind = MessageKindV1::CoderReport);
+    // Another kind the controller also authors (§3.4), so this varies the kind
+    // and nothing else.
+    let kind = rebuilt(&base, |f| f.message_kind = MessageKindV1::ReviewRequest);
     assert_ne!(d, kind.framed_digest(), "message_kind");
 
     let msg = rebuilt(&base, |f| f.message_id = id("msg-2"));
     assert_ne!(d, msg.framed_digest(), "message_id");
 
-    let role = rebuilt(&base, |f| f.producer_role = ProducerRole::Human);
-    assert_ne!(d, role.framed_digest(), "producer_role");
+    // `producer_role` is framed too, and it is no longer independently variable
+    // on an admitted envelope: §3.1–§3.11 give each kind exactly one author, so
+    // the pair moves together or the envelope does not exist. A role-only edit
+    // is therefore asserted as *inadmissible* rather than as a different
+    // identity — the direction rule's own test covers the whole class.
+    assert!(matches!(
+        EnvelopeV1::new(EnvelopeFieldsV1 {
+            producer_role: ProducerRole::Human,
+            ..base.to_fields()
+        }),
+        Err(EnvelopeError::WrongProducerRole { .. })
+    ));
+    let authored = rebuilt(&base, |f| {
+        f.message_kind = MessageKindV1::CoderReport;
+        f.producer_role = ProducerRole::Coder;
+        f.model_identity = Optional::present(model("claude-opus-5"));
+        f.prompt_digest = Optional::present(digest("prompt"));
+        f.tool_policy_digest = Optional::present(digest("tool-policy"));
+        f.provider_execution_receipt_ref = Optional::present(receipt_ref());
+    });
+    assert_ne!(d, authored.framed_digest(), "message_kind + producer_role");
 
     let payload = rebuilt(&base, |f| f.payload_digest = WireDigest::of_bytes(b"other"));
     assert_ne!(d, payload.framed_digest(), "payload_digest");
@@ -493,7 +533,7 @@ fn the_admission_path_enforces_cross_field_rules() {
     // point of `EnvelopeV1::new`. So the *document* is built instead, by
     // removing the receipt ref from an admissible one, which is what a
     // non-conforming peer would actually send.
-    let mut value = serde_json::to_value(coder_envelope()).expect("fixture must serialize");
+    let mut value = wire_document(&coder_envelope());
     if let Some(map) = value.as_object_mut() {
         map.remove("provider_execution_receipt_ref");
     }
@@ -508,10 +548,7 @@ fn the_admission_path_enforces_cross_field_rules() {
     // The same envelope with its receipt ref restored is admissible, so the
     // rejection above is the cross-field rule and not some unrelated defect in
     // the fixture.
-    assert!(parse_artifact::<EnvelopeV1>(
-        &serde_json::to_vec(&coder_envelope()).expect("fixture must serialize")
-    )
-    .is_ok());
+    assert!(parse_artifact::<EnvelopeV1>(&wire_bytes(&coder_envelope())).is_ok());
 }
 
 /// Reaching the typed schema through a different door must not weaken it.
@@ -536,7 +573,7 @@ fn raw_deserialization_cannot_bypass_the_per_field_rules() {
     assert!(parse_artifact::<EnvelopeV1>(&long_adapter).is_err());
 
     // And model_identity at 256.
-    let mut provider = serde_json::to_value(coder_envelope()).expect("fixture must serialize");
+    let mut provider = wire_document(&coder_envelope());
     if let Some(map) = provider.as_object_mut() {
         map.insert(
             "model_identity".to_owned(),
@@ -605,7 +642,7 @@ fn a_typed_non_envelope_ref_is_bounded_as_a_control_artifact() {
 
     // And the same over-bound receipt on the wire is refused by the envelope's
     // own cross-field pass, which is the route a peer actually takes.
-    let mut value = serde_json::to_value(coder_envelope()).expect("fixture must serialize");
+    let mut value = wire_document(&coder_envelope());
     if let Some(map) = value.as_object_mut() {
         map.insert(
             "provider_execution_receipt_ref".to_owned(),
@@ -679,7 +716,7 @@ fn a_typed_ref_must_declare_its_frozen_media_type() {
     )
     .is_err());
     let with_ref = |media: String| {
-        let mut v = serde_json::to_value(controller_envelope()).expect("fixture must serialize");
+        let mut v = wire_document(&controller_envelope());
         if let Some(map) = v.as_object_mut() {
             map.insert(
                 "artifact_refs".to_owned(),
@@ -713,7 +750,7 @@ fn a_typed_ref_must_declare_its_frozen_media_type() {
         .expect("an evidence blob keeps its own concrete type")])
         .expect("one ref is within the bound");
     });
-    let bytes = serde_json::to_vec(&blob).expect("fixture must serialize");
+    let bytes = wire_bytes(&blob);
     assert!(parse_artifact::<EnvelopeV1>(&bytes).is_ok());
 }
 
@@ -727,7 +764,7 @@ fn a_typed_ref_must_declare_its_frozen_media_type() {
 #[test]
 fn the_public_and_wire_envelope_forms_do_not_drift() {
     for env in [controller_envelope(), coder_envelope()] {
-        let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
+        let bytes = wire_bytes(&env);
         let back: EnvelopeV1 =
             parse_artifact(&bytes).expect("a serialized envelope must be admissible");
         assert_eq!(back, env);
@@ -749,7 +786,7 @@ fn the_only_admission_route_rejects_a_provider_envelope_without_its_receipt() {
     // point of `EnvelopeV1::new`. So the *document* is built instead, by
     // removing the receipt ref from an admissible one, which is what a
     // non-conforming peer would actually send.
-    let mut value = serde_json::to_value(coder_envelope()).expect("fixture must serialize");
+    let mut value = wire_document(&coder_envelope());
     if let Some(map) = value.as_object_mut() {
         map.remove("provider_execution_receipt_ref");
     }
@@ -759,7 +796,7 @@ fn the_only_admission_route_rejects_a_provider_envelope_without_its_receipt() {
 
     // The same envelope with its receipt restored is admissible, so the
     // rejection is the cross-field rule and not a broken fixture.
-    let good = serde_json::to_vec(&coder_envelope()).expect("fixture must serialize");
+    let good = wire_bytes(&coder_envelope());
     assert!(parse_artifact::<EnvelopeV1>(&good).is_ok());
 }
 
@@ -801,7 +838,7 @@ fn an_interaction_manifest_is_typed_for_media_type_and_large_for_size() {
 #[test]
 fn a_reference_cannot_reach_an_envelope_past_its_own_rules() {
     let with_ref = |r: serde_json::Value| {
-        let mut v = serde_json::to_value(controller_envelope()).expect("fixture must serialize");
+        let mut v = wire_document(&controller_envelope());
         if let Some(map) = v.as_object_mut() {
             map.insert("artifact_refs".to_owned(), serde_json::json!([r]));
         }
@@ -841,7 +878,7 @@ fn a_reference_cannot_reach_an_envelope_past_its_own_rules() {
 /// An envelope carrying a raw `artifact_refs` array, so the array rules can be
 /// exercised on the only route that exists.
 fn envelope_with_raw_refs(refs_json: &str) -> Vec<u8> {
-    let v = serde_json::to_value(controller_envelope()).expect("fixture must serialize");
+    let v = wire_document(&controller_envelope());
     let mut text = v.to_string();
     let marker = r#""artifact_refs":[]"#;
     let at = text
@@ -977,7 +1014,7 @@ fn an_oversized_but_otherwise_valid_envelope_is_refused_by_the_byte_bound() {
     ));
 
     // The same document on the wire is refused by the admission path.
-    let mut value = serde_json::to_value(controller_envelope()).expect("fixture must serialize");
+    let mut value = wire_document(&controller_envelope());
     let one = serde_json::json!({
         "kind": "diff",
         "media_type": format!("text/x-diff;p={}", "a".repeat(60_000)),
@@ -1010,7 +1047,7 @@ fn an_oversized_but_otherwise_valid_envelope_is_refused_by_the_byte_bound() {
         .expect("admissible")])
         .expect("one ref");
     });
-    let small = serde_json::to_vec(&small).expect("fixture must serialize");
+    let small = wire_bytes(&small);
     assert!(parse_artifact::<EnvelopeV1>(&small).is_ok());
 }
 
@@ -1109,4 +1146,380 @@ fn no_edit_can_turn_an_admitted_envelope_into_an_invalid_one() {
         ..controller.to_fields()
     })
     .is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// Regressions for the seventh review round, on b339d54. Two P1s, both of the
+// same family: a rule held on one route and not on another.
+// ---------------------------------------------------------------------------
+
+/// §3.1–§3.11, transcribed from the section headings rather than from the
+/// implementation.
+///
+/// Each heading fixes a direction — `### 3.1 WorkOrderV1 (Controller → Coder,
+/// rank 5)`, `### 3.5 ReviewerReportV1 (Reviewer → Controller, untrusted,
+/// rank 3)`, `### 3.3 CandidateReceiptV1 (controller-derived, ...)` — and the
+/// author is the left-hand side. This is the crate's expectation of the
+/// contract, held at the boundary where the rule is enforced; the crate's own
+/// mapping is private and is never consulted to build it.
+const SECTION_3_AUTHORS: [(MessageKindV1, ProducerRole); 11] = [
+    (MessageKindV1::WorkOrder, ProducerRole::Controller), // §3.1 Controller → Coder
+    (MessageKindV1::CoderReport, ProducerRole::Coder),    // §3.2 Coder → Controller
+    (MessageKindV1::CandidateReceipt, ProducerRole::Controller), // §3.3 controller-derived
+    (MessageKindV1::ReviewRequest, ProducerRole::Controller), // §3.4 Controller → Reviewer
+    (MessageKindV1::ReviewerReport, ProducerRole::Reviewer), // §3.5 Reviewer → Controller
+    (MessageKindV1::ReviewVerdict, ProducerRole::Controller), // §3.6 controller-accepted
+    (MessageKindV1::CorrectiveDirective, ProducerRole::Controller), // §3.7 Controller → Coder
+    (MessageKindV1::CampaignFeedItem, ProducerRole::Controller), // §3.8 Controller → Human
+    (
+        MessageKindV1::HumanAttentionRequest,
+        ProducerRole::Controller,
+    ), // §3.9 Controller → Human
+    (MessageKindV1::HumanCommandRequest, ProducerRole::Human), // §3.10 Human → Controller
+    (MessageKindV1::HumanDecision, ProducerRole::Controller), // §3.11 controller-accepted
+];
+
+/// Fields claiming `kind`, authored by `role`, **correct in every other
+/// respect**.
+///
+/// The provider evidence follows the stated `role`, not the fixture it came
+/// from: present for a provider role (§3.0 requires it), absent otherwise
+/// (§3.0 forbids it). Without that, a wrong-role case would be refused by the
+/// neighbouring provider-evidence rule and would prove nothing about the
+/// direction — the exact way a test on this PR has already recorded a bypass
+/// instead of closing one.
+fn fields_claiming(kind: MessageKindV1, role: ProducerRole) -> EnvelopeFieldsV1 {
+    let provider = role.is_provider_role();
+    EnvelopeFieldsV1 {
+        message_kind: kind,
+        producer_role: role,
+        producer_execution_id: id("exec-1"),
+        model_identity: provider
+            .then(|| model("claude-opus-5"))
+            .map_or_else(Optional::absent, Optional::present),
+        prompt_digest: provider
+            .then(|| digest("prompt"))
+            .map_or_else(Optional::absent, Optional::present),
+        tool_policy_digest: provider
+            .then(|| digest("tool-policy"))
+            .map_or_else(Optional::absent, Optional::present),
+        provider_execution_receipt_ref: provider
+            .then(receipt_ref)
+            .map_or_else(Optional::absent, Optional::present),
+        ..controller_fields()
+    }
+}
+
+/// The same claim as a document, reached the way a peer would reach it.
+///
+/// The base is the envelope §3 *does* authorise for `kind`, encoded through
+/// `to_wire_bytes` — so the bytes start conforming and one thing varies: the
+/// author, with the evidence that author is required to carry. No bound is
+/// relaxed and no member is written that a producer could not write.
+fn document_claiming(kind: MessageKindV1, role: ProducerRole, authorised: ProducerRole) -> Vec<u8> {
+    let base = EnvelopeV1::new(fields_claiming(kind, authorised))
+        .expect("the authorised shape of every kind is admissible");
+    let mut value = wire_document(&base);
+    let provider = role.is_provider_role();
+    if let Some(map) = value.as_object_mut() {
+        map.insert(
+            "producer_role".to_owned(),
+            serde_json::json!(match role {
+                ProducerRole::Controller => "controller",
+                ProducerRole::Coder => "coder",
+                ProducerRole::Reviewer => "reviewer",
+                ProducerRole::Human => "human",
+            }),
+        );
+        for (field, value_when_present) in [
+            ("model_identity", serde_json::json!("claude-opus-5")),
+            (
+                "prompt_digest",
+                serde_json::json!(digest("prompt").as_str()),
+            ),
+            (
+                "tool_policy_digest",
+                serde_json::json!(digest("tool-policy").as_str()),
+            ),
+            (
+                "provider_execution_receipt_ref",
+                serde_json::json!({
+                    "kind": "provider_execution_receipt",
+                    "media_type": typed_media_type(ArtifactKindV1::ProviderExecutionReceipt, 1),
+                    "digest": digest("receipt").as_str(),
+                    "size": 512,
+                }),
+            ),
+        ] {
+            if provider {
+                map.insert(field.to_owned(), value_when_present);
+            } else {
+                map.remove(field);
+            }
+        }
+    }
+    value.to_string().into_bytes()
+}
+
+/// P1 №1, as a class rather than as one witness.
+///
+/// For every one of the eleven kinds: the role §3 names admits, and each of the
+/// other three is refused — on the producer route and on the inbound route
+/// alike, because both run one invariant. Every wrong-role case carries the
+/// provider evidence its *claimed* role requires, so the only rule left to
+/// refuse it is the direction itself, and the assertions pin that specific
+/// refusal rather than "an error happened".
+#[test]
+fn every_kind_admits_exactly_the_producer_role_section_3_authorises() {
+    assert_eq!(
+        SECTION_3_AUTHORS.len(),
+        MessageKindV1::ALL.len(),
+        "every kind needs an author"
+    );
+
+    for kind in MessageKindV1::ALL {
+        let (_, authorised) = SECTION_3_AUTHORS
+            .into_iter()
+            .find(|(k, _)| *k == kind)
+            .expect("§3 names an author for every kind");
+
+        let mut admitted = Vec::new();
+        for role in ProducerRole::ALL {
+            let by_new = EnvelopeV1::new(fields_claiming(kind, role));
+            let bytes = document_claiming(kind, role, authorised);
+            let inbound = parse_artifact::<EnvelopeV1>(&bytes);
+
+            if role == authorised {
+                let env = by_new.expect("the authorised author must be admitted");
+                assert_eq!(env.message_kind(), kind);
+                assert_eq!(env.producer_role(), role);
+                let inbound = inbound.expect("and admitted from bytes too");
+                assert_eq!(inbound, env, "both routes admit the same envelope");
+                admitted.push(role.name());
+            } else {
+                assert!(
+                    matches!(
+                        by_new,
+                        Err(EnvelopeError::WrongProducerRole {
+                            expected,
+                            actual,
+                            ..
+                        }) if expected == authorised.name() && actual == role.name()
+                    ),
+                    "{} authored by {} must be refused as a direction violation, got {by_new:?}",
+                    kind.name(),
+                    role.name()
+                );
+                let reason = inbound.expect_err("the same document must be refused inbound");
+                assert!(
+                    matches!(&reason, ParseError::Invalid { reason } if reason.contains("is authored by")),
+                    "{} authored by {} must be refused inbound by the direction rule, got {reason:?}",
+                    kind.name(),
+                    role.name()
+                );
+            }
+        }
+        assert_eq!(
+            admitted,
+            [authorised.name()],
+            "exactly one role may author {}",
+            kind.name()
+        );
+    }
+}
+
+/// Falsification 2. `EnvelopeV1` does not implement `Serialize`, so
+/// `to_wire_bytes` is the only route from an admitted envelope to bytes.
+///
+/// Autoref specialisation: the inherent method applies only when the bound
+/// holds, and an inherent method wins over a trait method when it applies. So
+/// what this reports is whether the impl *exists*, which is not otherwise
+/// observable at runtime. The two neighbours are probed as well — a `Serialize`
+/// on the fields or on the private wire form would restore the second route by
+/// another name.
+#[test]
+fn an_admitted_envelope_has_no_second_route_to_bytes() {
+    use std::marker::PhantomData;
+
+    struct Probe<T>(PhantomData<T>);
+    trait NotSerialize {
+        fn is_serialize(&self) -> bool {
+            false
+        }
+    }
+    impl<T> NotSerialize for Probe<T> {}
+    impl<T: serde::Serialize> Probe<T> {
+        fn is_serialize(&self) -> bool {
+            true
+        }
+    }
+
+    assert!(
+        !Probe::<EnvelopeV1>(PhantomData).is_serialize(),
+        "EnvelopeV1 must not be publicly Serialize: that was P1 №2"
+    );
+    assert!(
+        !Probe::<EnvelopeFieldsV1>(PhantomData).is_serialize(),
+        "the producer-side fields must not carry an emission route either"
+    );
+    // The probe reports the bound honestly rather than always saying `false`:
+    // a type that *is* Serialize must come back true.
+    assert!(Probe::<ArtifactRef>(PhantomData).is_serialize());
+}
+
+/// Falsification 3. An admitted envelope's own encoder can always emit it
+/// under the FD-1.4 ceiling.
+///
+/// The sweep walks the document across the 1 MiB boundary — each extra
+/// `media_type` byte costs `MAX_ARTIFACT_REFS` bytes — and asserts the
+/// implication on both sides of it: `new` returns `Ok` only for fields whose
+/// encoding fits, and those bytes are then admitted by `parse_artifact`. This
+/// is the inverse of the defect: previously a length existed for which `new`
+/// succeeded and an emission route produced bytes a peer had to refuse.
+#[test]
+fn no_admitted_envelope_can_emit_bytes_its_own_ceiling_refuses() {
+    let with_media_len = |len: usize| {
+        let media = "x".repeat(len);
+        let refs: Vec<ArtifactRef> = (0..MAX_ARTIFACT_REFS)
+            .map(|i| {
+                ArtifactRef::new(
+                    ArtifactKindV1::Diff,
+                    media.clone(),
+                    digest(&format!("blob-{i}")),
+                    1,
+                )
+                .expect("each ref is individually admissible")
+            })
+            .collect();
+        EnvelopeFieldsV1 {
+            artifact_refs: ArtifactRefs::new(refs).expect("exactly at the ref-count bound"),
+            ..controller_fields()
+        }
+    };
+
+    let crossing = (1..=4096)
+        .rev()
+        .find(|len| EnvelopeV1::new(with_media_len(*len)).is_ok())
+        .expect("some filler length is admissible");
+    assert!(
+        matches!(
+            EnvelopeV1::new(with_media_len(crossing + 1)),
+            Err(EnvelopeError::AboveByteCeiling { .. })
+        ),
+        "one byte past the crossing must be refused by the byte bound"
+    );
+
+    let mut admitted = 0_usize;
+    let mut refused = 0_usize;
+    for len in crossing.saturating_sub(2)..=crossing + 3 {
+        match EnvelopeV1::new(with_media_len(len)) {
+            Ok(env) => {
+                admitted += 1;
+                let bytes = env
+                    .to_wire_bytes()
+                    .expect("an admitted envelope must encode");
+                assert!(
+                    bytes.len() as u64 <= MAX_CONTROL_ARTIFACT_BYTES,
+                    "emitted {} bytes over the ceiling",
+                    bytes.len()
+                );
+                assert!(
+                    parse_artifact::<EnvelopeV1>(&bytes).is_ok(),
+                    "a conforming peer must admit what this producer emits"
+                );
+            }
+            Err(EnvelopeError::AboveByteCeiling { .. }) => refused += 1,
+            Err(other) => panic!("unexpected refusal at media_type length {len}: {other}"),
+        }
+    }
+    assert!(
+        admitted > 0 && refused > 0,
+        "the sweep must straddle the ceiling ({admitted} admitted, {refused} refused)"
+    );
+}
+
+/// Falsification 4. `to_wire_bytes` → `parse_artifact` is the identity on
+/// admitted envelopes.
+///
+/// This is also what keeps the private encoder from drifting from the private
+/// wire form: a field the encoder omits fails here as a missing field, and one
+/// it spells differently fails as an unknown field against
+/// `deny_unknown_fields`.
+#[test]
+fn the_producer_encoding_reads_back_as_the_same_envelope() {
+    for env in [controller_envelope(), coder_envelope()] {
+        let bytes = wire_bytes(&env);
+        let back: EnvelopeV1 =
+            parse_artifact(&bytes).expect("the producer encoding must be admissible");
+        assert_eq!(back, env);
+        assert_eq!(back.framed_digest(), env.framed_digest());
+        // And emission is deterministic, so "the bytes" is a well-defined thing
+        // to say about an admitted envelope.
+        assert_eq!(wire_bytes(&back), bytes);
+    }
+}
+
+/// Falsification 5. No canonical JSON was introduced.
+///
+/// FD-1.2: "No canonical-JSON scheme is introduced." So a conforming peer that
+/// spells the same envelope with different whitespace, or emits its members in
+/// a different order, must still be admitted — and must yield the same
+/// `EnvelopeV1` and the same framed identity, because identity is computed
+/// from fields and not from bytes. If admission had started comparing against
+/// a re-serialization, these would be refused.
+#[test]
+fn a_differently_spelled_but_conforming_document_is_still_admitted() {
+    let env = coder_envelope();
+    let document = wire_document(&env);
+    let members = document
+        .as_object()
+        .expect("the encoding is a JSON object")
+        .clone();
+
+    // Whitespace: the same document, indented.
+    let pretty = serde_json::to_vec_pretty(&document).expect("a Value re-serializes");
+    assert_ne!(
+        pretty,
+        wire_bytes(&env),
+        "the spelling must actually differ"
+    );
+
+    // Member order: reversed relative to whatever order the encoder used.
+    let reversed = {
+        let mut parts: Vec<String> = members
+            .iter()
+            .map(|(k, v)| {
+                format!(
+                    "{}:{}",
+                    serde_json::to_string(k).expect("a key is a string"),
+                    v
+                )
+            })
+            .collect();
+        parts.reverse();
+        format!("{{{}}}", parts.join(",")).into_bytes()
+    };
+
+    for (label, bytes) in [("indented", pretty), ("reordered", reversed)] {
+        let back: EnvelopeV1 = parse_artifact(&bytes)
+            .unwrap_or_else(|e| panic!("a conforming {label} document must be admitted: {e}"));
+        assert_eq!(back, env, "{label}");
+        assert_eq!(back.framed_digest(), env.framed_digest(), "{label}");
+    }
+
+    // The ceiling still applies to whatever spelling arrives: a document that
+    // conforms in shape but not in size is refused, so accepting other
+    // spellings is not accepting other sizes.
+    let padded = format!(
+        "{{{}, \"pad\":\"{}\"}}",
+        String::from_utf8(wire_bytes(&env))
+            .expect("utf-8")
+            .trim_matches(|c| c == '{' || c == '}')
+            .to_owned(),
+        "x".repeat(MAX_CONTROL_ARTIFACT_BYTES as usize)
+    );
+    assert!(matches!(
+        parse_artifact::<EnvelopeV1>(padded.as_bytes()),
+        Err(ParseError::PayloadTooLarge { .. })
+    ));
 }

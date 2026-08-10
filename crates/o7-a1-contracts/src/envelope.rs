@@ -13,12 +13,40 @@
 //! the frozen versions, the closed enums, the scalar bounds, and explicit
 //! `null`. What remains for [`EnvelopeV1::validate`] is only what relates two
 //! fields to each other — provider evidence required iff the producer is a
-//! provider role — plus the collection bounds.
+//! provider role, and the §3 direction that fixes which role may author which
+//! kind — plus the collection bounds.
 //!
 //! `EnvelopeV1` deliberately does **not** implement `Deserialize`. Bytes become
 //! an envelope only through [`crate::parse_artifact`], which owns the two rules
 //! no value-level type can enforce: the caller-supplied byte bound, and the
 //! cross-field rules. A public `Deserialize` was tried and lost both.
+//!
+//! # One way in, and one way out
+//!
+//! It does not implement `Serialize` either, for the mirror-image reason. The
+//! FD-1.4 ceiling is a property of a *byte string*, so it is only ever true of
+//! one encoding — and a public `Serialize` let a producer pick a different one.
+//! `EnvelopeV1::new` checked `serde_json::to_vec`; `serde_json::to_vec_pretty`
+//! on the very same admitted value produced a document over 1 MiB, which every
+//! conforming peer must refuse. The producer would hold it as valid until
+//! somebody else said no.
+//!
+//! ```text
+//! EnvelopeFieldsV1 --validate--> --encode--> bytes <= MAX_BYTES --> EnvelopeV1
+//!                                    ^                                  |
+//!                                    +----------- to_wire_bytes --------+
+//! ```
+//!
+//! The same private encoder runs on both arrows, so "admitted" cannot depend on
+//! which door the bytes came out of, any more than on which door they came in.
+//!
+//! **This introduces no canonical JSON, and must not** (FD-1.2: "No
+//! canonical-JSON scheme is introduced"). [`EnvelopeV1::to_wire_bytes`] is one
+//! implementation's encoder, not a normative spelling. Inbound is a different
+//! question with a different answer: [`crate::parse_artifact`] admits *any*
+//! conforming document under the ceiling, whatever its whitespace or key order,
+//! and it never re-serializes to compare — that would smuggle in exactly the
+//! normalization the contract refuses.
 
 use serde::{Deserialize, Serialize};
 
@@ -61,6 +89,12 @@ pub enum EnvelopeError {
     ForbiddenProviderField {
         field: &'static str,
         role: &'static str,
+    },
+    #[error("message_kind {kind} is authored by producer_role {expected}, not {actual}")]
+    WrongProducerRole {
+        kind: &'static str,
+        expected: &'static str,
+        actual: &'static str,
     },
     #[error("artifact_refs[{index}] is invalid: {source}")]
     BadRef {
@@ -171,8 +205,10 @@ impl TryFrom<EnvelopeWireV1> for EnvelopeFieldsV1 {
 /// recorded on the acceptance record (FD-5.4). Neither is anything the payload
 /// owns — "payloads never restate an envelope-owned field" (FD-5.3), and the
 /// converse holds too.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(deny_unknown_fields)]
+///
+/// No `Serialize`: emission goes through [`Self::to_wire_bytes`], which is the
+/// checked encoder — see the module note.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvelopeV1 {
     envelope_version: EnvelopeVersion,
     message_kind: MessageKindV1,
@@ -181,28 +217,105 @@ pub struct EnvelopeV1 {
     root_goal_id: Id,
     task_id: Id,
     campaign_id: Id,
-    #[serde(default, skip_serializing_if = "Optional::is_absent")]
     round_id: Optional<Id>,
-    #[serde(default, skip_serializing_if = "Optional::is_absent")]
     causation_id: Optional<Id>,
     correlation_id: Id,
     producer_role: ProducerRole,
     producer_execution_id: Id,
     producer_adapter_version: AdapterVersion,
-    #[serde(default, skip_serializing_if = "Optional::is_absent")]
     model_identity: Optional<ModelIdentity>,
-    #[serde(default, skip_serializing_if = "Optional::is_absent")]
     prompt_digest: Optional<WireDigest>,
-    #[serde(default, skip_serializing_if = "Optional::is_absent")]
     tool_policy_digest: Optional<WireDigest>,
     contract_digest: WireDigest,
-    #[serde(default, skip_serializing_if = "Optional::is_absent")]
     expected_input_head: Optional<CommitId>,
     payload_digest: WireDigest,
     artifact_refs: ArtifactRefs,
-    #[serde(default, skip_serializing_if = "Optional::is_absent")]
     provider_execution_receipt_ref: Optional<ArtifactRef>,
     created_at: Timestamp,
+}
+
+/// The producer-side encoding of an envelope: **private**, and the only thing
+/// serde ever serializes.
+///
+/// It borrows rather than clones, so encoding an envelope costs one document
+/// and no copy of its fields. Its shape is the field order and the
+/// omit-when-absent policy of §3.0 — an absent optional is omitted, never
+/// written as null (FD-1.3), which is why the crate can read back what it
+/// writes.
+///
+/// A third mirror of the same field list is the price of having exactly one
+/// emission route, and it is not left to inspection: [`EnvelopeV1::to_wire_bytes`]
+/// feeding [`crate::parse_artifact`] must reproduce the same `EnvelopeV1`, so a
+/// field missing here fails as a missing field and a field spelled differently
+/// fails as an unknown one, both against `EnvelopeWireV1`'s
+/// `deny_unknown_fields`.
+#[derive(Serialize)]
+struct EnvelopeEncodeV1<'a> {
+    envelope_version: &'a EnvelopeVersion,
+    message_kind: &'a MessageKindV1,
+    message_kind_version: &'a MessageKindVersion,
+    message_id: &'a Id,
+    root_goal_id: &'a Id,
+    task_id: &'a Id,
+    campaign_id: &'a Id,
+    #[serde(skip_serializing_if = "optional_is_absent")]
+    round_id: &'a Optional<Id>,
+    #[serde(skip_serializing_if = "optional_is_absent")]
+    causation_id: &'a Optional<Id>,
+    correlation_id: &'a Id,
+    producer_role: &'a ProducerRole,
+    producer_execution_id: &'a Id,
+    producer_adapter_version: &'a AdapterVersion,
+    #[serde(skip_serializing_if = "optional_is_absent")]
+    model_identity: &'a Optional<ModelIdentity>,
+    #[serde(skip_serializing_if = "optional_is_absent")]
+    prompt_digest: &'a Optional<WireDigest>,
+    #[serde(skip_serializing_if = "optional_is_absent")]
+    tool_policy_digest: &'a Optional<WireDigest>,
+    contract_digest: &'a WireDigest,
+    #[serde(skip_serializing_if = "optional_is_absent")]
+    expected_input_head: &'a Optional<CommitId>,
+    payload_digest: &'a WireDigest,
+    artifact_refs: &'a ArtifactRefs,
+    #[serde(skip_serializing_if = "optional_is_absent")]
+    provider_execution_receipt_ref: &'a Optional<ArtifactRef>,
+    created_at: &'a Timestamp,
+}
+
+/// `skip_serializing_if` is handed a reference to the field, and every field of
+/// the encoder is already one — so this is `Optional::is_absent` with the extra
+/// layer peeled off.
+fn optional_is_absent<T>(v: &&Optional<T>) -> bool {
+    v.is_absent()
+}
+
+impl<'a> From<&'a EnvelopeV1> for EnvelopeEncodeV1<'a> {
+    fn from(e: &'a EnvelopeV1) -> Self {
+        Self {
+            envelope_version: &e.envelope_version,
+            message_kind: &e.message_kind,
+            message_kind_version: &e.message_kind_version,
+            message_id: &e.message_id,
+            root_goal_id: &e.root_goal_id,
+            task_id: &e.task_id,
+            campaign_id: &e.campaign_id,
+            round_id: &e.round_id,
+            causation_id: &e.causation_id,
+            correlation_id: &e.correlation_id,
+            producer_role: &e.producer_role,
+            producer_execution_id: &e.producer_execution_id,
+            producer_adapter_version: &e.producer_adapter_version,
+            model_identity: &e.model_identity,
+            prompt_digest: &e.prompt_digest,
+            tool_policy_digest: &e.tool_policy_digest,
+            contract_digest: &e.contract_digest,
+            expected_input_head: &e.expected_input_head,
+            payload_digest: &e.payload_digest,
+            artifact_refs: &e.artifact_refs,
+            provider_execution_receipt_ref: &e.provider_execution_receipt_ref,
+            created_at: &e.created_at,
+        }
+    }
 }
 
 /// The producer-side input to [`EnvelopeV1::new`] — **not** an admitted
@@ -245,8 +358,9 @@ impl EnvelopeV1 {
     ///
     /// # Errors
     /// [`EnvelopeError`] if the fields are individually admissible but jointly
-    /// are not — provider evidence against the producer role, or an
-    /// inadmissible reference.
+    /// are not — provider evidence against the producer role, a kind authored
+    /// by a role §3 does not permit, an inadmissible reference, or fields whose
+    /// own encoding would not fit under the FD-1.4 ceiling.
     pub fn new(f: EnvelopeFieldsV1) -> Result<Self, EnvelopeError> {
         let candidate = Self {
             envelope_version: f.envelope_version,
@@ -279,17 +393,57 @@ impl EnvelopeV1 {
         // an envelope that a conforming peer must reject, and the producer
         // would hold it as valid until someone else refused it.
         //
-        // The cost is one serialization per construction. An envelope is
-        // bounded at 1 MiB, and the alternative is a type whose invariant is
-        // weaker than the one its own admission path enforces.
-        let encoded = serde_json::to_vec(&candidate).map_err(|_| EnvelopeError::Unserializable)?;
+        // What is checked is the encoding this crate will actually emit, from
+        // the same private encoder `to_wire_bytes` uses — not a representation
+        // that merely happens to be small. The earlier version checked
+        // `serde_json::to_vec(&candidate)` while `EnvelopeV1` was publicly
+        // `Serialize`, so `to_vec_pretty` on the admitted value produced a
+        // document over the ceiling: the check proved a property of a
+        // representation nobody was obliged to use.
+        //
+        // The cost is one encoding per construction. An envelope is bounded at
+        // 1 MiB, and the alternative is a type whose invariant is weaker than
+        // the one its own admission path enforces.
+        candidate.encode()?;
+        Ok(candidate)
+    }
+
+    /// FD-1.4 — this envelope's wire bytes, from the encoder that admitted it.
+    ///
+    /// The single producer emission route. Every admitted `EnvelopeV1` has
+    /// conforming bytes by construction — [`Self::new`] does not return until
+    /// this encoder has produced them under the ceiling — so in practice this
+    /// cannot fail. It still returns a `Result`, and re-runs the bound rather
+    /// than trusting that it ran earlier: the guarantee then belongs to the
+    /// emission path itself instead of resting on a fact about some other
+    /// function, which is the property that was missing when the ceiling was
+    /// checked in one place and the bytes produced in another.
+    ///
+    /// This is **not** a canonicalization. FD-1.2 introduces no canonical-JSON
+    /// scheme, and identity here is the framed digest ([`Self::framed_digest`]),
+    /// which is computed from fields and is indifferent to whitespace and key
+    /// order. A peer that encodes the same envelope differently is conforming,
+    /// and [`crate::parse_artifact`] admits its document.
+    ///
+    /// # Errors
+    /// [`EnvelopeError::AboveByteCeiling`] if the encoding exceeds the FD-1.4
+    /// maximum, [`EnvelopeError::Unserializable`] if it cannot be produced.
+    pub fn to_wire_bytes(&self) -> Result<Vec<u8>, EnvelopeError> {
+        self.encode()
+    }
+
+    /// The one encoder. Private, so there is no second spelling of it and no
+    /// route to the bytes that skips the bound.
+    fn encode(&self) -> Result<Vec<u8>, EnvelopeError> {
+        let encoded = serde_json::to_vec(&EnvelopeEncodeV1::from(self))
+            .map_err(|_| EnvelopeError::Unserializable)?;
         if encoded.len() as u64 > <Self as WireArtifact>::MAX_BYTES {
             return Err(EnvelopeError::AboveByteCeiling {
                 actual: encoded.len(),
                 max: <Self as WireArtifact>::MAX_BYTES,
             });
         }
-        Ok(candidate)
+        Ok(encoded)
     }
 
     /// Copy this envelope's values out as editable, **unauthorised** fields.
@@ -486,9 +640,17 @@ impl EnvelopeV1 {
 
     /// §3.0 cross-field validation: the rules no single field can see.
     ///
+    /// The one semantic invariant, and both routes run it. [`Self::new`] calls
+    /// it before an envelope exists; [`crate::parse_artifact`] reaches it twice
+    /// over — once through `new` inside `from_document`, once through
+    /// [`WireArtifact::validate_wire`] — because there is a single
+    /// implementation to reach rather than a producer-side copy and an
+    /// inbound-side copy that can disagree.
+    ///
     /// # Errors
     /// [`EnvelopeError`] for provider-only evidence on a non-provider role (or
-    /// missing on a provider role), too many refs, or a bad ref.
+    /// missing on a provider role), a kind authored by a role §3 does not
+    /// permit, too many refs, or a bad ref.
     fn validate(&self) -> Result<(), EnvelopeError> {
         let role = self.producer_role;
         let provider = role.is_provider_role();
@@ -516,6 +678,25 @@ impl EnvelopeV1 {
                 }
                 _ => {}
             }
+        }
+
+        // §3.1–§3.11 fix the direction of every kind in its section heading, so
+        // the author of a kind is contract text: a `WorkOrder` whose
+        // `producer_role` is `coder` is a malformed envelope, not a doubtful
+        // combination for a later layer to weigh.
+        //
+        // Checked after the provider-evidence rules deliberately. The two are
+        // independent — an envelope can break either alone — and this order
+        // keeps the more local complaint first: "this role must not carry that
+        // field" is about the role's own consistency, while this one is about
+        // the role against the kind.
+        let expected = self.message_kind.authorized_producer_role();
+        if role != expected {
+            return Err(EnvelopeError::WrongProducerRole {
+                kind: self.message_kind.name(),
+                expected: expected.name(),
+                actual: role.name(),
+            });
         }
 
         // The count itself is bounded by `ArtifactRefs` at deserialization
