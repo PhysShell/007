@@ -1,15 +1,17 @@
 # A1-F v2 — Phase G: graph adjudication
 
-**Status: DECIDED (revision G-R6) — AWAITING RE-REVIEW.**
+**Status: DECIDED (revision G-R7) — AWAITING RE-REVIEW.**
 
-Six review rounds. G-R1 moved the count from 13 to 11; G-R2 corrected the
+Seven review rounds. G-R1 moved the count from 13 to 11; G-R2 corrected the
 binding lifecycle and the rank domain; G-R3 attempted the exact edge universe
 and measured it against the wrong baseline; G-R4 rebuilt it on the frozen
 contract but stopped at node *classes*; G-R5 added the missing layer, a semantic
-edge registry; G-R6 fixes that registry's four defects — incompleteness at the
-open surfaces, a source grain too coarse to reject what it must, one edge in the
-wrong class, and a merge of two terminal kinds. The registry is now 63 exact
-semantic edges (§4.2). Field-path spelling remains owed to the v2 draft. See §9.
+edge registry; G-R6 made that registry exact enough to reject; G-R7 fixes the
+three things an exact registry could finally expose — a flat extractor that
+never saw a nested schema, a bound external contract this document had quietly
+redefined, and an open target miscounted as a closure terminal. The registry is
+now 69 exact semantic edges over a 41-slot frozen baseline (§4.2). Field-path
+spelling remains owed to the v2 draft. See §9.
 
 Phase G is one decision, written and reviewed on its own, before any v2 drafting.
 The node set determines ranks, edges, imported roots, closure and digest domains;
@@ -104,6 +106,17 @@ specific V0 consumer in-degree(X) :=
   "retained" is defined exactly by the V0 edge ledger of §4.1.
 ```
 
+**Read this table as historical evidence, not as the retained V0 projection
+(G-R7).** It was derived at `37502e3` and it is what drove §3's adjudications,
+which is why it stays. But the sentence above — *"retained" is defined exactly
+by the V0 edge ledger of §4.1* — stopped being true when §4.2.4 became the edge
+authority, and several counts are now prototype-era: `ProviderInvocationReceipt`
+is shown with `HumanAttentionRequest` as a consumer, an evidence target G-R6
+removed. Regenerating the table from §4.2.4 would be circular, since the
+registry is downstream of the decisions this evidence supported. So the numbers
+below are labelled for what they are, and the post-decision in-degrees are
+published separately at the end of this section.
+
 The definition was rewritten in G-R3. Until then it said "envelope-source edges",
 which stopped being derivable the moment G-R1/G-R2 retyped three sources to
 support: the numbers in the table were right, but they no longer followed from
@@ -145,6 +158,38 @@ counted without the V0 exclusions so that POST-V0 references stay visible:
 `RunArtifactSource` 1 (from `ArtifactImported` alone),
 `EstablishedNonDispatchEvidence` 1 (from the SafeRedrive cause alone — a POST-V0
 reference, which is exactly why this column is not the V0 metric).
+
+**Post-decision in-degrees, derived from §4.2.4 (G-R7).** These are the numbers
+that now hold; the table above is what the decision was made *on*. Event-kind
+sources are excluded from the "referencing kinds" column, since every message is
+referenced by its own event.
+
+| Kind | out | **in** | referencing kinds (non-event) |
+|---|---:|---:|---|
+| `WorkOrder` | 3 | 1 | — |
+| `CoderReport` | 2 | 3 | `CandidateReceipt`, `ReviewRequest` |
+| `CandidateReceipt` | 3 | 2 | `ReviewRequest` |
+| `ReviewRequest` | 6 | 1 | — |
+| `ReviewerReport` | 4 | 2 | `ReviewVerdict` |
+| `ReviewVerdict` | 4 | 2 | `CorrectiveDirective` |
+| `CorrectiveDirective` | 2 | 1 | — |
+| **`ProviderExecutionReceipt`** | 7 | **3** | `CoderReport`, `ReviewerReport`, `ProviderExecutionRecordedPayload` |
+| **`InteractionManifest`** | 3 | **1** | `ProviderExecutionReceipt` |
+| **`CampaignRunBinding`** | 5 | **2** | `CandidateReceipt`, `ProviderExecutionReceipt` |
+| `ScopeContract` | 0 | 4 | `WorkOrder`, `ReviewRequest`, `CorrectiveDirective`, `CampaignCreatedPayload` |
+| `CampaignFeedItem` | 1 | 1 | — |
+| `HumanAttentionRequest` | 0 | 1 | — |
+| `HumanCommandRequest` | 0 | 2 | `HumanDecision` |
+| `HumanDecision` | 1 | 1 | — |
+
+The three support decisions of §3 survive the regeneration unchanged, which is
+the point of publishing it: `ProviderExecutionReceipt` still has in-degree 3 from
+distinct consumers, `InteractionManifest` 1, `CampaignRunBinding` 2 — the exact
+pair §3.1's argument rests on. The one substantive movement is that the receipt's
+third consumer is now `ProviderExecutionRecordedPayload` rather than
+`HumanAttentionRequest`, which strengthens §3.2 rather than weakening it: a
+reducer payload is a more specific V0 consumer than an attention's evidence list
+ever was.
 
 ## 3. Q1 + Q2 — node universe, and the envelope/support boundary
 
@@ -483,23 +528,58 @@ Two further consequences of the same error:
 
 #### 4.1.1 The baseline: the frozen v1 reference inventory
 
-Extracted mechanically from blob `7db92f1b` — every schema row whose type is
-`ArtifactRef` or `[ArtifactRef]`, across §3.0–§3.15.2.
+Extracted mechanically from blob `7db92f1b` across §3.0–§3.15.2: every schema
+row whose type is `ArtifactRef` or `[ArtifactRef]`, **plus every such row reached
+by transitively expanding a cross-schema type reference**.
 
 ```text
-frozen ArtifactRef-valued slots                        40
+frozen ArtifactRef-valued slots                        41
   message payloads                                     18
   typed support objects                                11
   event payload schemas                                 7
-  common envelope                                       2
-  campaign event log root                               2
+  common envelope                                        2
+  campaign event log root                                2
+  reachable only through a referenced sub-schema         1
 ```
 
-A first extraction pass returned 34 and a completeness check found six more,
-carried in combined table rows (`usage_ref` / `cost_ref`, and the two
-`interaction_sequence[]` pairs). The number is 40, and the miss is recorded
-because an inventory whose own derivation was not checked is the failure mode
-this track has now hit three times.
+Two extraction misses are recorded here, because an inventory whose own
+derivation goes unchecked is the failure mode this track has now hit four times.
+
+**Miss 1 — combined rows.** A first pass returned 34; a completeness check found
+six more carried in combined table rows (`usage_ref` / `cost_ref`, and the two
+`interaction_sequence[]` pairs). That gave 40.
+
+**Miss 2 — the extractor was flat, not recursive (G-R7).** 40 counted only rows
+whose *own* type cell reads `ArtifactRef` or `[ArtifactRef]`. Frozen §3.6 types
+`ReviewVerdictV1.findings` as **`as §3.5, validated`**, and §3.5's finding
+structure contains `findings[].evidence_refs | [ArtifactRef]`. The verdict
+therefore carries a reference surface reachable only by expanding a referenced
+sub-schema — and frozen §3.6's acceptance predicate proves it is live: *"every
+evidence_ref resolvable, rank rule and closure bounds satisfied"* is one of the
+conditions for accepting a `ReviewVerdict`.
+
+G-R6 half-knew this: §4.2.3 discussed the prototype's
+`ReviewVerdict.findings[].evidence_refs` edge while §4.2.1's open-surface list
+had no frozen counterpart for it. A document arguing with itself across two
+subsections is the shape this failure takes.
+
+**The fix is the extractor, not the number.** Every type cell is now expanded
+transitively. Running that over the normative body finds 37 direct rows (→ 40
+slots after the combined-row expansion) and exactly **five** cross-schema type
+references:
+
+```text
+3.6   findings                                  as §3.5, validated   -> +1 slot
+3.6   properties_checked/_preserved/residual...  as §3.5             -> [Text], 0
+3.11  command                                    enum as §3.10       -> enum,   0
+3.15.2 execution_outcome                         enum as §3.12       -> enum,   0
+3.15.2 attempted_event_kind                      enum as §3.15.1     -> enum,   0
+```
+
+So the total is **41**, and — this is the part the number alone does not say —
+there is no *second* hidden slot. The four remaining cross-references expand to
+scalars. Without the recursive pass that would have been a hope; with it, it is
+a result.
 
 | # | owner | owner class | frozen field path | V0 disposition |
 |---:|---|---|---|---|
@@ -543,6 +623,7 @@ this track has now hit three times.
 | 38 | `InteractionManifestV1` | typed support | `interaction_sequence[].output_ref` | KEEP |
 | 39 | `InteractionManifestV1` | typed support | `interaction_sequence[].arguments_ref` | KEEP |
 | 40 | `InteractionManifestV1` | typed support | `interaction_sequence[].result_ref` | KEEP |
+| 41 | `ReviewVerdictV1` | message | `findings[].evidence_refs` *(via `as §3.5`)* | KEEP |
 
 **Disposition.** Every frozen slot is `KEEP` under §1's default: no adjudication
 in §3 removes a v1 reference surface. What §3 changed is the *node* set, and its
@@ -682,7 +763,7 @@ without denying it: edge *meaning* now, field *spelling* later.
 
 #### 4.2.1 The frozen surfaces split two ways
 
-The 40-slot inventory of §4.1.1 is not 40 semantic edges. Eight of those slots
+The 41-slot inventory of §4.1.1 is not 41 semantic edges. Nine of those slots
 are **open reference surfaces** — they name no target kind, and something other
 than the field itself decides what may appear there:
 
@@ -690,6 +771,7 @@ than the field itself decides what may appear there:
 envelope.artifact_refs                        FD-2.1 rank rule, fully generic
 CoderReport.claims[].evidence_refs            rank <= 2
 ReviewerReport.findings[].evidence_refs       rank <= 2
+ReviewVerdict.findings[].evidence_refs        rank <= 2, via `as §3.5`
 CampaignFeedItem.subject_refs                 rank <= 4
 HumanAttentionRequest.evidence_refs           rank <= 4
 CampaignEventV1.evidence_refs                 rank <= 4
@@ -700,17 +782,17 @@ ReviewRequest.evidence_refs                   no rank bound at all; the only
 ```
 
 The last one is the sharpest case and was missed on this section's first pass.
-Seven are governed by rank; `ReviewRequestV1.evidence_refs` is governed by
+Eight are governed by rank; `ReviewRequestV1.evidence_refs` is governed by
 nothing but an ordering rule, so in v1 it admits *any* resolvable artifact. It
 is the reviewer's entire input surface, and it is the widest hole in the frozen
 graph.
 
 G-R4 marked all 40 `KEEP`, which conflated keeping a *field* with keeping a
-*graph relation*. None of these eight can be kept semantically unchanged. For
-seven, what admits their targets is the rank rule — and §4 already demoted rank
+*graph relation*. None of these nine can be kept semantically unchanged. For
+eight, what admits their targets is the rank rule — and §4 already demoted rank
 from authority to derived property, so keeping them as written would let rank
 become the admission authority again through the one door the registry does not
-watch. For the eighth, there is not even a rank bound to demote.
+watch. For the ninth, there is not even a rank bound to demote.
 
 **Frozen for v2:**
 
@@ -720,7 +802,7 @@ A field may realize only semantic edges admitted by the registry of §4.2.4.
 Rank admits nothing; it is computed from the registry and checked against it.
 ```
 
-So the eight surfaces survive as *surfaces* — the v2 draft may keep, narrow or
+So the nine surfaces survive as *surfaces* — the v2 draft may keep, narrow or
 drop each one — while every target they may carry has to appear in the registry
 on its own account. `KEEP_SURFACE` and `KEEP_EXACT` are different dispositions,
 and only the second is a Phase G decision.
@@ -729,18 +811,19 @@ and only the second is a Phase G decision.
 from a surface does not delete the references V0 actually needs across it; it
 moves them from "admitted by a rule" to "admitted by name, or not at all". G-R5
 did the stripping and stopped, which silently *narrowed* the graph. Each of the
-eight is therefore walked here, and each disposition is stated:
+nine is walked here, and each disposition is stated:
 
 | Open surface | V0 disposition |
 |---|---|
-| `ReviewRequest.evidence_refs` | **NARROWED — three targets admitted.** See §4.2.3. |
+| `ReviewRequest.evidence_refs` | **NARROWED — three targets admitted** (§4.2.3). |
+| `ReviewerReport.findings[].evidence_refs` | **NARROWED — three targets admitted** (§4.2.3). |
+| `ReviewVerdict.findings[].evidence_refs` | **NARROWED — three targets admitted** (§4.2.3). |
+| `CampaignFeedItem.subject_refs` | **Sanctioned OPEN target** — `AnyCommittedEnvelope`, adopted in §4 for feed causation. It appears in the registry as a row, so the sanction is visible rather than implied, and §4.2.5 treats it as a meta-target rather than a terminal. |
 | `envelope.artifact_refs` | **No admitted target.** Fully generic and producer-populated; no frozen text names a required target. v2 must narrow it or justify each target it keeps. |
-| `CoderReport.claims[].evidence_refs` | **No admitted target.** Frozen authority column: *advisory*. No controller decision in V0 reads it. |
-| `ReviewerReport.findings[].evidence_refs` | **No admitted target.** Frozen authority column: **claim**. The `ReviewVerdict` is the controller's re-derivation; FD-4 forbids the claim being the authority. |
+| `CoderReport.claims[].evidence_refs` | **No admitted target.** Frozen authority column: *advisory*. No V0 controller acceptance path reads it — `CandidateReceipt` acceptance turns on the A0 seal and claim-check, not on a claim's citations. |
 | `HumanAttentionRequest.evidence_refs` | **No admitted target.** The V0 need was not shown (§4.2.3). This leaves the object isolated in the `Intra` subgraph, which is the visible price of the rule. |
 | `CampaignEventV1.evidence_refs` | **No admitted target.** Generic across all 21 event kinds; unlike `source_ref`, frozen §3.15.1 fixes nothing per kind. |
 | `CampaignTerminalErrorPayload.evidence_refs` | **No admitted target.** Rank ≤ 4 was the whole admission rule, and this is the row that broke G-R4's class table. |
-| `CampaignFeedItem.subject_refs` | **Sanctioned OPEN target** — `AnyCommittedEnvelope`, adopted in §4 for feed causation. It appears in the registry as a row, so the sanction is visible rather than implied. |
 
 "No admitted target" is a real V0 restriction, not a deferral in disguise: a v2
 field over one of those surfaces has nothing to realize, so it cannot be drafted
@@ -802,7 +885,7 @@ reference target kind*, independent of what the field is called.
 
 G-R5 then wrote that "the remaining 34 rows are field-path proposals over
 already-admitted relations", and that sentence is false under G-R5's own new
-rule. **Eleven** of the 53 prototype rows originate on one of the eight open
+rule. **Eleven** of the 53 prototype rows originate on one of the nine open
 surfaces — four on `HumanAttentionRequest.evidence_refs`, two each on
 `CoderReport.claims[].evidence_refs` and `ReviewRequest.evidence_refs`, one each
 on `ReviewerReport`, `ReviewVerdict.findings[]`, and
@@ -850,7 +933,66 @@ neither needs a second path into the reviewer's input.
 | `CorrectiveDirective → CandidateStateReceiptRef` / `CandidateMaterializationRef` | **REJECT for V0 — `KEEP_V1_MODEL`** (reverses G-R5) | See below. |
 | `HumanAttentionRequest → CandidateStateReceiptRef` | **REJECT for V0** | v1 carries `candidate_head` as a `CommitId`. No V0 need for a typed A0 reference was shown; the v2 draft may propose it again with one. |
 | `HumanCommandRequest` / `HumanDecision → AuthenticatedPrincipal` | **REJECT for V0** | FD-15.2 deliberately records attestation as controller *observations*, not as a referenced object. A principal node is a new authority object, and §3 adjudicated none. |
-| `CoderReport` / `ReviewerReport` / `ReviewVerdict → GateLog`, `Diff` | **REJECT for V0** | Report evidence is *claim*-authority (frozen authority columns) and the controller re-derives; FD-4 forbids the claim being the authority. The verdict's own authority is `reviewer_report_ref`, already admitted. |
+| `ReviewerReport → ContractDocument` / `Diff` / `GateLog` | **ACCEPT** | See *review evidence*, below. |
+| `ReviewVerdict → ContractDocument` / `Diff` / `GateLog` | **ACCEPT** | Same; frozen §3.6 types `findings` as `as §3.5, validated` and validates every `evidence_ref` before accepting the verdict. |
+| `CoderReport.claims[] → GateLog` / `Diff` | **REJECT for V0** | Frozen authority column: *advisory*. No V0 controller acceptance path reads a claim's citations — `CandidateReceipt` acceptance turns on the A0 seal and the claim-check, not on what the coder cited. |
+
+**Review evidence, re-adjudicated (G-R7).** G-R6 gave `ReviewerReport` and the
+verdict's inherited surface *no admitted target*, on the argument that report
+evidence is claim-authority and the controller re-derives. That conflates two
+questions which FD-4 keeps apart:
+
+```text
+does reviewer evidence AUTHORIZE a transition?    no
+may a reviewer canonically REFERENCE evidence?    yes
+```
+
+FD-4 answers the first. It says nothing about the second, and frozen §3.6
+answers it in the affirmative twice over: `every evidence_ref resolvable, rank
+rule and closure bounds satisfied` is one of the seven conditions for *accepting*
+a `ReviewVerdict`, and `findings` is typed `as §3.5, validated` — a required
+field. Evidence references are validated content of the accepted artifact, not
+decoration on an untrusted one.
+
+The decisive point is external to this document. §0 of the frozen contract binds
+A1 to `docs/autonomy-controller.md` (accepted `c5b3ae0b`, PR #93) for "the
+`ReviewVerdict` minimum", which A1 *consumes, never redefines*. That minimum
+reads, at `autonomy-controller.md:151–163`:
+
+```text
+A future ReviewVerdict should at minimum bind:
+    reviewed candidate head
+    verdict: accepted | changes_requested | blocked
+    finding identities and severities
+    property or invariant affected
+    evidence references          <-- this line
+    ...
+```
+
+Zeroing both surfaces leaves no canonical review-evidence path anywhere in the
+graph, and `reviewer_report_ref` cannot rescue it if the report is itself
+forbidden to reference evidence. That is not Phase G narrowing a v1 surface; it
+is Phase G redefining a bound contract it declared it would not touch.
+
+**The admitted set is the reviewer's own input.** A reviewer can canonically cite
+only what it was canonically given, which §4.2.3 has just closed at three kinds:
+
+```text
+ReviewerReport.findings[].evidence_refs -> ContractDocument | Diff | GateLog
+ReviewVerdict.findings[].evidence_refs  -> ContractDocument | Diff | GateLog
+```
+
+Both surfaces are frozen at `rank <= 2`, and all three targets are rank 0, so the
+narrowing is strictly inside the frozen bound rather than an extension of it.
+
+The alternative — the verdict binding evidence only transitively through
+`reviewer_report_ref`, with no direct refs of its own — is defensible and would
+remove three rows. It is **not** taken here, because it requires dropping
+`evidence_refs` from a projection frozen as `findings: as §3.5`, and that is a
+supersede of §3.6 needing its own argument. §1's default is `KEEP_V1_MODEL`. If
+v2 wants the transitive-only model it must say so on the record; what it may not
+do is arrive at it by way of "claims are not authority", which is an answer to a
+different question.
 
 **Why the directive edges come back out.** G-R5 accepted them on this chain:
 
@@ -888,10 +1030,11 @@ an argument, not a side effect of introducing the binding.
 
 #### 4.2.4 The registry
 
-63 semantic edges: 50 `Intra`, 13 `Causal`. Sources are exact — discriminated by
+69 semantic edges: 56 `Intra`, 13 `Causal`. Sources are exact — discriminated by
 event kind and payload variant per §4.2.2 — and there is no wildcard source and
-no class row. Exactly one **sanctioned open target** appears, `AnyCommittedEnvelope`
-(§4), and it appears as a row so the sanction is visible rather than implied.
+no class row. Exactly one **sanctioned open target** appears,
+`AnyCommittedEnvelope` (§4); it is a meta-target rather than a node, and §4.2.5
+says what that costs.
 
 Slot numbers in the origin column are the frozen inventory rows of §4.1.1.
 
@@ -911,55 +1054,61 @@ Slot numbers in the origin column are the frozen inventory rows of §4.1.1.
 | 12 | `ReviewRequest` | `Diff` | Intra | §4.2.3 ACCEPT (slot 12) |
 | 13 | `ReviewRequest` | `GateLog` | Intra | §4.2.3 ACCEPT (slot 12) |
 | 14 | `ReviewerReport` | `ProviderExecutionReceipt` | Intra | frozen slot 2 (role=reviewer) |
-| 15 | `ReviewVerdict` | `ReviewerReport` | Intra | frozen slot 15 |
-| 16 | `CorrectiveDirective` | `ReviewVerdict` | Causal | frozen slot 16 |
-| 17 | `CorrectiveDirective` | `ScopeContract` | Intra | frozen slot 17 |
-| 18 | `HumanDecision` | `HumanCommandRequest` | Intra | frozen slot 20 |
-| 19 | `ProviderExecutionReceipt` | `InteractionManifest` | Intra | frozen slot 21 |
-| 20 | `ProviderExecutionReceipt` | `NormalizedOutput` | Intra | frozen slot 22, 25 |
-| 21 | `ProviderExecutionReceipt` | `CanonicalRequest` | Intra | frozen slot 23 |
-| 22 | `ProviderExecutionReceipt` | `RawProviderBytes` | Intra | frozen slot 24 |
-| 23 | `ProviderExecutionReceipt` | `UsageRecord` | Intra | frozen slot 35 |
-| 24 | `ProviderExecutionReceipt` | `CostRecord` | Intra | frozen slot 36 |
-| 25 | `InteractionManifest` | `ProviderMessage` | Intra | frozen slot 37, 38 |
-| 26 | `InteractionManifest` | `ToolArguments` | Intra | frozen slot 39 |
-| 27 | `InteractionManifest` | `ToolResult` | Intra | frozen slot 40 |
-| 28 | `CandidateReceipt` | `CampaignRunBinding` | Intra | §3.1 new object |
-| 29 | `ProviderExecutionReceipt` | `CampaignRunBinding` | Intra | §3.1 new object |
-| 30 | `CampaignRunBinding` | `CandidateStateReceiptRef` | Intra | §3.1 new object |
-| 31 | `CampaignRunBinding` | `CandidateMaterializationRef` | Intra | §3.1 new object |
-| 32 | `CampaignRunBinding` | `RunContractCandidateStateRef` | Intra | §3.1 new object |
-| 33 | `CampaignRunBinding` | `WorktreeMaterializationRef` | Intra | §3.1 new object |
-| 34 | `CampaignRunBinding` | `WorktreeCorrespondence` | Intra | §3.1 new object |
-| 35 | `CampaignCreatedPayload` | `ScopeContract` | Intra | frozen slot 28 |
-| 36 | `ProviderExecutionRecordedPayload` | `ProviderExecutionReceipt` | Intra | frozen slot 29 |
-| 37 | `GateResultsAcceptedPayload` | `GateLog` | Intra | frozen slot 30 |
-| 38 | `CiResultsAcceptedPayload` | `CiObservation` | Intra | frozen slot 31 |
-| 39 | `TransitionRejectedPayload` | `DetailDocument` | Intra | frozen slot 32 |
-| 40 | `CampaignCancelledPayload` | `TerminationObservation` | Intra | frozen slot 33 |
-| 41 | `CampaignEvent(WorkOrderIssued)` | `WorkOrder` | Causal | frozen §3.15.1 |
-| 42 | `CampaignEvent(CoderReportReceived)` | `CoderReport` | Causal | frozen §3.15.1 |
-| 43 | `CampaignEvent(CandidateAccepted)` | `CandidateReceipt` | Causal | frozen §3.15.1 |
-| 44 | `CampaignEvent(ReviewRequested)` | `ReviewRequest` | Causal | frozen §3.15.1 |
-| 45 | `CampaignEvent(ReviewerReportReceived)` | `ReviewerReport` | Causal | frozen §3.15.1 |
-| 46 | `CampaignEvent(ReviewVerdictAccepted)` | `ReviewVerdict` | Causal | frozen §3.15.1 |
-| 47 | `CampaignEvent(CorrectiveDirectiveIssued)` | `CorrectiveDirective` | Causal | frozen §3.15.1 |
-| 48 | `CampaignEvent(HumanAttentionRaised)` | `HumanAttentionRequest` | Causal | frozen §3.15.1 |
-| 49 | `CampaignEvent(HumanDecisionRecorded)` | `HumanDecision` | Causal | frozen §3.15.1 |
-| 50 | `CampaignEvent(HumanCommandRejected)` | `HumanCommandRequest` | Causal | frozen §3.15.1 |
-| 51 | `CampaignEvent(CampaignFeedItemEmitted)` | `CampaignFeedItem` | Causal | frozen §3.15.1 |
-| 52 | `CampaignEvent(CampaignCreated)` | `CampaignCreatedPayload` | Intra | frozen structure §3.15.2 |
-| 53 | `CampaignEvent(ProviderExecutionRecorded)` | `ProviderExecutionRecordedPayload` | Intra | frozen structure §3.15.2 |
-| 54 | `CampaignEvent(GateResultsAccepted)` | `GateResultsAcceptedPayload` | Intra | frozen structure §3.15.2 |
-| 55 | `CampaignEvent(CiResultsAccepted)` | `CiResultsAcceptedPayload` | Intra | frozen structure §3.15.2 |
-| 56 | `CampaignEvent(AttentionResolved)` | `AttentionResolvedPayload` | Intra | frozen structure §3.15.2 |
-| 57 | `CampaignEvent(AttentionSuperseded)` | `AttentionSupersededPayload` | Intra | frozen structure §3.15.2 |
-| 58 | `CampaignEvent(HumanCommandRejected)` | `HumanCommandRejectedPayload` | Intra | frozen structure §3.15.2 |
-| 59 | `CampaignEvent(TransitionRejected)` | `TransitionRejectedPayload` | Intra | frozen structure §3.15.2 |
-| 60 | `CampaignEvent(CampaignCancelled)` | `CampaignCancelledPayload` | Intra | frozen structure §3.15.2 |
-| 61 | `CampaignEvent(CampaignSuperseded)` | `CampaignSupersededPayload` | Intra | frozen structure §3.15.2 |
-| 62 | `CampaignEvent(CampaignTerminalError)` | `CampaignTerminalErrorPayload` | Intra | frozen structure §3.15.2 |
-| 63 | `CampaignFeedItem` | `AnyCommittedEnvelope` | Causal | §4 sanctioned open target |
+| 15 | `ReviewerReport` | `ContractDocument` | Intra | §4.2.3 ACCEPT (slot 14) |
+| 16 | `ReviewerReport` | `Diff` | Intra | §4.2.3 ACCEPT (slot 14) |
+| 17 | `ReviewerReport` | `GateLog` | Intra | §4.2.3 ACCEPT (slot 14) |
+| 18 | `ReviewVerdict` | `ReviewerReport` | Intra | frozen slot 15 |
+| 19 | `ReviewVerdict` | `ContractDocument` | Intra | §4.2.3 ACCEPT (slot 41) |
+| 20 | `ReviewVerdict` | `Diff` | Intra | §4.2.3 ACCEPT (slot 41) |
+| 21 | `ReviewVerdict` | `GateLog` | Intra | §4.2.3 ACCEPT (slot 41) |
+| 22 | `CorrectiveDirective` | `ReviewVerdict` | Causal | frozen slot 16 |
+| 23 | `CorrectiveDirective` | `ScopeContract` | Intra | frozen slot 17 |
+| 24 | `HumanDecision` | `HumanCommandRequest` | Intra | frozen slot 20 |
+| 25 | `ProviderExecutionReceipt` | `InteractionManifest` | Intra | frozen slot 21 |
+| 26 | `ProviderExecutionReceipt` | `NormalizedOutput` | Intra | frozen slot 22, 25 |
+| 27 | `ProviderExecutionReceipt` | `CanonicalRequest` | Intra | frozen slot 23 |
+| 28 | `ProviderExecutionReceipt` | `RawProviderBytes` | Intra | frozen slot 24 |
+| 29 | `ProviderExecutionReceipt` | `UsageRecord` | Intra | frozen slot 35 |
+| 30 | `ProviderExecutionReceipt` | `CostRecord` | Intra | frozen slot 36 |
+| 31 | `InteractionManifest` | `ProviderMessage` | Intra | frozen slot 37, 38 |
+| 32 | `InteractionManifest` | `ToolArguments` | Intra | frozen slot 39 |
+| 33 | `InteractionManifest` | `ToolResult` | Intra | frozen slot 40 |
+| 34 | `CandidateReceipt` | `CampaignRunBinding` | Intra | §3.1 new object |
+| 35 | `ProviderExecutionReceipt` | `CampaignRunBinding` | Intra | §3.1 new object |
+| 36 | `CampaignRunBinding` | `CandidateStateReceiptRef` | Intra | §3.1 new object |
+| 37 | `CampaignRunBinding` | `CandidateMaterializationRef` | Intra | §3.1 new object |
+| 38 | `CampaignRunBinding` | `RunContractCandidateStateRef` | Intra | §3.1 new object |
+| 39 | `CampaignRunBinding` | `WorktreeMaterializationRef` | Intra | §3.1 new object |
+| 40 | `CampaignRunBinding` | `WorktreeCorrespondence` | Intra | §3.1 new object |
+| 41 | `CampaignCreatedPayload` | `ScopeContract` | Intra | frozen slot 28 |
+| 42 | `ProviderExecutionRecordedPayload` | `ProviderExecutionReceipt` | Intra | frozen slot 29 |
+| 43 | `GateResultsAcceptedPayload` | `GateLog` | Intra | frozen slot 30 |
+| 44 | `CiResultsAcceptedPayload` | `CiObservation` | Intra | frozen slot 31 |
+| 45 | `TransitionRejectedPayload` | `DetailDocument` | Intra | frozen slot 32 |
+| 46 | `CampaignCancelledPayload` | `TerminationObservation` | Intra | frozen slot 33 |
+| 47 | `CampaignEvent(WorkOrderIssued)` | `WorkOrder` | Causal | frozen §3.15.1 |
+| 48 | `CampaignEvent(CoderReportReceived)` | `CoderReport` | Causal | frozen §3.15.1 |
+| 49 | `CampaignEvent(CandidateAccepted)` | `CandidateReceipt` | Causal | frozen §3.15.1 |
+| 50 | `CampaignEvent(ReviewRequested)` | `ReviewRequest` | Causal | frozen §3.15.1 |
+| 51 | `CampaignEvent(ReviewerReportReceived)` | `ReviewerReport` | Causal | frozen §3.15.1 |
+| 52 | `CampaignEvent(ReviewVerdictAccepted)` | `ReviewVerdict` | Causal | frozen §3.15.1 |
+| 53 | `CampaignEvent(CorrectiveDirectiveIssued)` | `CorrectiveDirective` | Causal | frozen §3.15.1 |
+| 54 | `CampaignEvent(HumanAttentionRaised)` | `HumanAttentionRequest` | Causal | frozen §3.15.1 |
+| 55 | `CampaignEvent(HumanDecisionRecorded)` | `HumanDecision` | Causal | frozen §3.15.1 |
+| 56 | `CampaignEvent(HumanCommandRejected)` | `HumanCommandRequest` | Causal | frozen §3.15.1 |
+| 57 | `CampaignEvent(CampaignFeedItemEmitted)` | `CampaignFeedItem` | Causal | frozen §3.15.1 |
+| 58 | `CampaignEvent(CampaignCreated)` | `CampaignCreatedPayload` | Intra | frozen structure §3.15.2 |
+| 59 | `CampaignEvent(ProviderExecutionRecorded)` | `ProviderExecutionRecordedPayload` | Intra | frozen structure §3.15.2 |
+| 60 | `CampaignEvent(GateResultsAccepted)` | `GateResultsAcceptedPayload` | Intra | frozen structure §3.15.2 |
+| 61 | `CampaignEvent(CiResultsAccepted)` | `CiResultsAcceptedPayload` | Intra | frozen structure §3.15.2 |
+| 62 | `CampaignEvent(AttentionResolved)` | `AttentionResolvedPayload` | Intra | frozen structure §3.15.2 |
+| 63 | `CampaignEvent(AttentionSuperseded)` | `AttentionSupersededPayload` | Intra | frozen structure §3.15.2 |
+| 64 | `CampaignEvent(HumanCommandRejected)` | `HumanCommandRejectedPayload` | Intra | frozen structure §3.15.2 |
+| 65 | `CampaignEvent(TransitionRejected)` | `TransitionRejectedPayload` | Intra | frozen structure §3.15.2 |
+| 66 | `CampaignEvent(CampaignCancelled)` | `CampaignCancelledPayload` | Intra | frozen structure §3.15.2 |
+| 67 | `CampaignEvent(CampaignSuperseded)` | `CampaignSupersededPayload` | Intra | frozen structure §3.15.2 |
+| 68 | `CampaignEvent(CampaignTerminalError)` | `CampaignTerminalErrorPayload` | Intra | frozen structure §3.15.2 |
+| 69 | `CampaignFeedItem` | `AnyCommittedEnvelope` | Causal | §4 sanctioned open target |
 
 **Reconciliation against §4.1.1.** Every row traces to one of five origins, and
 every exact frozen slot is accounted for:
@@ -968,20 +1117,20 @@ every exact frozen slot is accounted for:
 32 exact frozen slots
   -> 26 slots        one row each
   -> slot 2          envelope.provider_execution_receipt_ref is one slot and two
-                     rows: it is required iff role in {coder, reviewer}, so
-                     exactly two message kinds carry it
+                     rows: required iff role in {coder, reviewer}, so exactly
+                     two message kinds carry it
   -> slots 22, 25    two slots onto one target kind (NormalizedOutput)
   -> slots 37, 38    two slots onto one target kind (ProviderMessage)
   -> slot 26         CampaignEventV1.source_ref is one slot and ELEVEN rows,
                      per frozen 3.15.1 (4.2.2)
                      26 + 1 + 2 + 2 + 1 = 32 slots -> 30 + 11 = 41 rows
 
-8 open surfaces
-  -> slot 12         ReviewRequest.evidence_refs, NARROWED to three admitted
-                     targets (4.2.3) -> 3 rows
-  -> slot 18         CampaignFeedItem.subject_refs, the sanctioned open target
-                     -> 1 row
-  -> the other six   no admitted target -> 0 rows
+9 open surfaces
+  -> slot 12         ReviewRequest.evidence_refs        NARROWED  -> 3 rows
+  -> slot 14         ReviewerReport.findings[].evi...   NARROWED  -> 3 rows
+  -> slot 41         ReviewVerdict.findings[].evi...    NARROWED  -> 3 rows
+  -> slot 18         CampaignFeedItem.subject_refs      SANCTIONED-> 1 row
+  -> the other five  no admitted target                           -> 0 rows
 
 rows not backed by a frozen ArtifactRef slot
   7 rows             CampaignRunBinding, the one new object 3.1 admits:
@@ -990,27 +1139,59 @@ rows not backed by a frozen ArtifactRef slot
                      (3.15.2), committed by event_payload_digest rather than by
                      an ArtifactRef
 
-41 + 3 + 1 + 7 + 11 = 63
+41 + 3 + 3 + 3 + 1 + 7 + 11 = 69
 ```
 
 A row with none of those five origins is a defect, and so is an exact frozen
 slot with no row.
 
-#### 4.2.5 Acyclicity, proved
+#### 4.2.5 Acyclicity, proved — and what is *not* a terminal
 
 The `Intra` acyclicity obligation binds the typed-node subgraph. After §4.2.2's
 discrimination that is **47** nodes: the eleven message kinds, four typed
 supports (`ProviderExecutionReceipt`, `InteractionManifest`, `ScopeContract`,
 `CampaignRunBinding`), eleven payload variants and all twenty-one event kinds.
-The remaining nodes the registry mentions are graph-terminal — CAS blobs, the
-four A0/R1 wrappers of §5.1, and the one sanctioned open target — and have no
-outgoing edges by construction.
 
-Machine check over the 63 rows above, by Kahn's algorithm:
+**The sanctioned open target is a meta-target, not a terminal (G-R7).** G-R6
+counted `AnyCommittedEnvelope` among 21 "graph-terminal" nodes alongside CAS
+blobs and the four A0/R1 wrappers. That is false, and falsely in the expensive
+direction. A stored `CampaignFeedItem.subject_refs` entry carries a *concrete*
+kind — `work_order`, say — and FD-2.5 makes the resolver check the stored object
+against the slot's expectation and parse it when the slot expects a typed
+object. The concrete target is an ordinary typed message whose own
+`ArtifactRef` slots are enqueued recursively, exactly like any other typed
+reference.
+
+Calling it terminal would stop that traversal, which under-traverses the graph
+and — the part that matters — **under-accounts the closure**. A feed item would
+become an elegant way to carry an entire `WorkOrder` subtree past the FD-1.5
+evidence budget, on an observability surface. Frozen for v2:
 
 ```text
-edges: 63   Intra: 50   Causal: 13
-nodes: 68   typed: 47   terminal/open: 21
+AnyCommittedEnvelope
+    IS      a sanctioned meta-target: a named union of admissible concrete kinds
+    IS NOT  a graph node, and IS NOT terminal
+
+resolution
+    check the concrete ref.kind is in the sanctioned set     (FD-2.5, fail closed)
+    resolve that concrete message as a normal typed target
+    continue traversal through its own admitted edges
+    charge it, and its closure, against the FD-1.5 budget
+```
+
+The bookkeeping therefore reads **20 terminal kinds + 1 open meta-target**, not
+21 terminals. The `Intra` proof is unaffected — this edge is `Causal` and was
+never in that subgraph — which is precisely why the error survived a passing
+proof. An acyclicity check cannot see a closure-accounting bug.
+
+The 20 real terminals are the CAS evidence blobs, the four A0/R1 wrappers of
+§5.1, and `WorktreeCorrespondence`; they have no outgoing edges by construction.
+
+Machine check over the 69 rows above, by Kahn's algorithm:
+
+```text
+edges: 69   Intra: 56   Causal: 13
+nodes: 68   typed: 47   terminal kinds: 20   open meta-targets: 1
 Intra typed -> typed edges: 26
 Kahn: 47/47   sorted: True
 non-typed sources: none
@@ -1113,6 +1294,12 @@ It never follows the foreign authority's own internal references.
 Accounting charges the wrapper, not the foreign object graph behind it.
 ```
 
+One thing this rule does **not** cover, and G-R6 wrongly assumed it did: a
+sanctioned open target is not a wrapper. `AnyCommittedEnvelope` resolves to an
+ordinary A1 typed message, so traversal continues through it and the closure is
+charged for its whole subtree (§4.2.5). "Terminal" is earned by being a foreign
+authority or opaque bytes — never by the referencing slot being generic.
+
 The FD-1.5 bounds, the deduplication key `(kind, digest)`, declared-size-before-read
 accounting and all-or-nothing rejection are untouched by Phase G.
 
@@ -1162,54 +1349,152 @@ the failure this phase exists to prevent.
 - whether the import mechanism of §3.4 exists as a controller procedure — only
   that it does not exist as a node.
 
-## 8. For the independent reviewer (revision G-R6)
+## 8. For the independent reviewer (revision G-R7)
 
-Approved and unchanged: the node universe, the count of eleven, the
-support/message boundary, `CampaignRunBinding`'s existence and pre-dispatch
-admission, the 40-slot frozen extraction, the 32/8 split, the field-path
-deferral, the source-only event root, and the derived-rank model. G-R6 touches
-only §4.2 and the §5.1 wrapper set. Attack these:
+Approved and unchanged, and not reopened here: the node universe and the count
+of eleven, the support/message boundary, `CampaignRunBinding`'s existence and
+pre-dispatch admission, the wrapper split, event/payload source discrimination,
+the `Intra`/`Causal` classification, the directive retraction, and the
+`ci_observation` exclusion from the reviewer's input. G-R7 touches §2's labelling,
+§4.1.1, §4.2.1, §4.2.3, §4.2.4, §4.2.5 and §5.2. Attack these:
 
-1. **The eight open-surface dispositions (§4.2.1).** Seven now read "no admitted
-   target", which is a real V0 restriction, not a deferral. Each needs a
-   counterexample of the same shape as the `ReviewRequest` one: a V0 flow in
-   which a controller decision reads a reference across that surface. The two
-   most likely to fall are `HumanAttentionRequest.evidence_refs` — a human
-   deciding an attention with no admitted evidence path — and
-   `CampaignTerminalErrorPayload.evidence_refs`, whose whole point is to carry
-   the evidence of why a campaign died.
-2. **The three `ReviewRequest` acceptances (§4.2.3).** They rest on frozen §3.4's
-   normative ordering naming *contract, diff, deterministic evidence*. Two
-   attacks: is `contract_document` really distinct from `ScopeContractV1` in V0,
-   or is the scope contract what "contract" meant all along; and is `gate_log`
-   the whole deterministic-evidence set, or does excluding `ci_observation`
-   leave the reviewer unable to see a CI state the verdict guard depends on?
-   Frozen §3.15.1 makes `ReviewVerdictAccepted` guard on `last_ci_results`.
-3. **The directive retraction (§4.2.3).** G-R6 argues the binding carries input
-   state so the directive need not. The counter to look for is a V0 invariant
-   requiring the *instruction* to independently commit to the exact
-   materialization — for instance if binding admission can legitimately happen
-   after the directive is committed, so the directive alone does not determine
-   what the coder will run against.
-4. **Discrimination (§4.2.2), and its cost.** 47 typed nodes where G-R5 had 17.
-   Is `CampaignEvent(k)` the right source identity, or is the true source the
-   *payload variant* alone, with the event kind derivable from it? If the latter,
-   21 nodes collapse and the eleven containment rows change shape.
-5. **The `Causal` reclassification (§4.2.5).** `CorrectiveDirective →
-   ReviewVerdict` moved to `Causal` on frozen §3.7 plus §3.15.1's new
-   `active_round_id`. Check the neighbours by the same test: `ReviewRequest →
-   CandidateReceipt` and `ReviewVerdict → ReviewerReport` are filed `Intra` — do
-   they stay inside one round under the same definition?
-6. **The §5.1 wrapper split.** Four distinct wrappers, in-degrees now derived
-   from the registry (3 / 2 / 1 / 1) rather than measured on the prototype.
-   Verify both the distinctness and the numbers; a wrong in-degree here is a
-   wrong closure-accounting assumption downstream.
-7. **The reconciliation arithmetic (end of §4.2.4).** `26 + 1 + 2 + 2 + 1 = 32`
-   slots → `30 + 11 = 41` rows, then `41 + 3 + 1 + 7 + 11 = 63`. G-R5 published
-   this same line with 28 where 26 belongs. Re-derive it; if it does not balance,
-   a row is unaccounted for.
+1. **The recursive extraction (§4.1.1).** 41 slots, and the claim that there is
+   no *second* hidden one rests on exactly five cross-schema type references
+   existing in the normative body, four of which expand to scalars. Re-derive
+   both halves from blob `7db92f1b`. A sixth cross-reference, or a nested
+   structure reached some other way than an `as §X.Y` type cell, breaks the
+   inventory again.
+2. **The review-evidence set (§4.2.3).** Three targets on each of
+   `ReviewerReport` and `ReviewVerdict`, chosen as "what the reviewer was
+   canonically given". Two attacks: is that the right closure principle at all —
+   a reviewer might legitimately cite the `ProviderExecutionReceipt` of its own
+   execution, which `rank <= 2` permits and this set excludes; and does keeping
+   direct verdict edges rather than binding transitively through
+   `reviewer_report_ref` duplicate authority in a way FD-4 should forbid?
+3. **The transitive-only alternative, explicitly not taken.** §4.2.3 declines it
+   because dropping `evidence_refs` from a projection frozen as `findings: as
+   §3.5` is a supersede needing its own argument. If that argument is actually
+   available, this is the round to make it — three rows come out.
+4. **The meta-target model (§4.2.5, §5.2).** `AnyCommittedEnvelope` now resolves
+   through to a concrete typed message and charges its whole closure. Check the
+   consequence that is easy to miss: FD-1.5's per-campaign budget is finite, so a
+   feed item carrying a `WorkOrder` can now legitimately *exhaust* it. Is
+   fail-closed rejection of an over-budget feed item the right V0 behaviour, or
+   does an observability surface need its own bound?
+5. **The sanctioned set itself.** `AnyCommittedEnvelope` is named but its members
+   are not enumerated anywhere. Under §4.2.1's own rule that a generic field
+   creates no authority, is a *named but unenumerated* union meaningfully
+   different from the rank rule this layer replaced?
+6. **§2's post-decision table.** Fifteen kinds, derived from §4.2.4. Re-derive
+   it. The load-bearing claim is that `ProviderExecutionReceipt` still has three
+   distinct consumers and `CampaignRunBinding` two, so §3.1–§3.2 survive; if
+   either number moved, a support decision moved with it.
+7. **The reconciliation (end of §4.2.4).** `26 + 1 + 2 + 2 + 1 = 32` slots →
+   `30 + 11 = 41` rows, then `41 + 3 + 3 + 3 + 1 + 7 + 11 = 69`. This line has
+   been wrong once (28 for 26). Re-derive it.
 
 ## 9. Revision record
+
+### G-R7 — seventh independent review, three P1s
+
+`CHANGES_REQUESTED`, narrow. The reviewer independently reconstructed the
+committed registry — 63 edges, 50/13, 47 typed nodes, 26 `Intra` typed→typed,
+Kahn 47/47 — and confirmed all of it, then found three defects the arithmetic
+could not see. Nothing in §3 was reopened. Four G-R6 decisions were explicitly
+upheld on re-examination: the `ci_observation` exclusion (frozen transition
+authority already requires CI to have passed before `REVIEWING`, and
+`ReviewVerdictAccepted` guards on canonical CI state, so the reviewer is not
+another CI authority), the directive retraction, the event/payload
+discrimination, and the `Causal` neighbour test — `CandidateReceipt →
+ReviewRequest → ReviewerReport → ReviewVerdict` stays inside one round.
+
+**P1-16 — the frozen extractor was flat, not recursive.** The 40-slot baseline
+counted only rows whose own type cell reads `ArtifactRef`. Frozen §3.6 types
+`ReviewVerdictV1.findings` as `as §3.5, validated`, and §3.5's finding structure
+carries `findings[].evidence_refs | [ArtifactRef]` — a live surface, since
+frozen §3.6's acceptance predicate requires *"every evidence_ref resolvable,
+rank rule and closure bounds satisfied"* before a verdict may be accepted.
+
+G-R6 incriminated itself here: §4.2.3 discussed the prototype's
+`ReviewVerdict.findings[]` evidence edge while §4.2.1's surface list had no
+frozen counterpart for it, and §8 said "seven surfaces with no admitted target"
+where §4.2.1's table listed six. A document arguing with itself across two
+subsections is what this failure looks like from inside.
+
+The fix is the extractor. Every type cell is now expanded transitively, which
+also discharges the reviewer's "barring another recursively hidden slot" caveat:
+the normative body contains exactly **five** cross-schema type references, and
+four expand to scalars (`enum as §3.10`, `enum as §3.12`, `enum as §3.15.1`, and
+`[Text]` via the second `as §3.5`). There is no second hidden slot — a result
+rather than a hope. Baseline: **41 slots, 32 exact, 9 open**.
+
+**P1-17 — "claim, therefore no evidence edge" redefined a bound contract.** G-R6
+gave `ReviewerReport.findings[].evidence_refs` and the verdict's inherited
+surface no admitted target, reasoning that report evidence is claim-authority.
+That conflates *does reviewer evidence authorize a transition* (no — FD-4) with
+*may a reviewer canonically reference evidence* (yes), and FD-4 answers only the
+first.
+
+The decisive evidence is external. Frozen §0 binds A1 to
+`docs/autonomy-controller.md` (accepted `c5b3ae0b`, PR #93) for "the
+`ReviewVerdict` minimum", which A1 **consumes, never redefines**; that minimum,
+at `autonomy-controller.md:151–163`, lists **`evidence references`** among the
+things a `ReviewVerdict` must bind. Zeroing both surfaces left no canonical
+review-evidence path in the graph at all, and `reviewer_report_ref` cannot
+rescue one if the report is itself forbidden to reference evidence. Phase G was
+not narrowing a v1 surface; it was rewriting a contract it had declared
+off-limits.
+
+Both surfaces are **NARROWED** rather than zeroed, to the three kinds the
+reviewer is canonically given: `ContractDocument`, `Diff`, `GateLog`. Both are
+frozen at `rank <= 2` and all three targets are rank 0, so the narrowing sits
+strictly inside the frozen bound. The transitive-only alternative — verdict
+evidence bound solely through `reviewer_report_ref` — is recorded as available
+and **not taken**, because it requires dropping `evidence_refs` from a
+projection frozen as `findings: as §3.5`, which is a supersede of §3.6 needing
+its own argument rather than a consequence of FD-4.
+
+`CoderReport.claims[].evidence_refs` keeps its no-target disposition; the
+reviewer agreed, and no V0 controller acceptance path reads a coder claim's
+citations.
+
+**P1-18 — the sanctioned open target was miscounted as a closure terminal.**
+§4.2.5 filed `AnyCommittedEnvelope` among 21 graph-terminal nodes with the CAS
+blobs and the A0/R1 wrappers. But a stored `subject_refs` entry carries a
+*concrete* kind, and FD-2.5 has the resolver check the stored object against the
+slot's expectation and parse it when the slot expects a typed object. The
+concrete target is an ordinary typed message whose own slots are enqueued
+recursively.
+
+Declaring it terminal stops that traversal — which under-traverses the graph
+and, the expensive half, **under-accounts the closure**: a feed item becomes a
+way to carry a whole `WorkOrder` subtree past the FD-1.5 evidence budget, on an
+observability surface. Now modelled as a meta-target: a named union of
+admissible concrete kinds, never a node and never terminal, resolved through to
+the concrete message and charged for its closure. Bookkeeping reads **20
+terminal kinds + 1 open meta-target**.
+
+The `Intra` proof does not move, because the edge is `Causal` and was never in
+that subgraph — which is exactly why a passing proof did not catch it. An
+acyclicity check cannot see a closure-accounting bug, and that is worth stating
+next to the proof rather than discovering again.
+
+**Two P2s.** §2's metric said *"retained" is defined exactly by the V0 edge
+ledger of §4.1*, which stopped being true when §4.2.4 became the edge authority;
+its counts are prototype-era, still showing `HumanAttentionRequest` as a
+receipt consumer. Regenerating it from §4.2.4 would be circular — the registry
+is downstream of the decisions that table supported — so it is labelled
+historical evidence and a post-decision in-degree table is published beside it.
+The three support decisions survive that regeneration unchanged
+(`ProviderExecutionReceipt` in-degree 3, `InteractionManifest` 1,
+`CampaignRunBinding` 2), with the receipt's third consumer now
+`ProviderExecutionRecordedPayload` rather than `HumanAttentionRequest` — which
+strengthens §3.2, a reducer payload being a more specific V0 consumer than an
+attention's evidence list. The §8 six-versus-seven discrepancy resolved itself
+through P1-16 rather than by editing the noun, as predicted.
+
+Registry after this round: **69 edges, 56 `Intra` / 13 `Causal`**, 47 typed
+nodes, 26 `Intra` typed→typed, Kahn 47/47.
 
 ### G-R6 — sixth independent review, four P1s
 

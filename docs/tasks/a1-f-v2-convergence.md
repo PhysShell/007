@@ -502,7 +502,7 @@ determines ranks, edges, imported roots, closure and digest domains.
 ```yaml
 phase_g:
   document: docs/tasks/a1-f-v2-phase-g.md
-  status:   DECIDED (revision G-R6), awaiting re-review
+  status:   DECIDED (revision G-R7), awaiting re-review
   review_1: CHANGES_REQUESTED — four P1s, all accepted; the central
             conclusion changed from 13 envelope kinds to 11
   review_2: CHANGES_REQUESTED — two P1s, both accepted; the count was not
@@ -535,6 +535,23 @@ phase_g:
             (d) two distinct A0 wrapper kinds were merged, and the directive's
             input-state edges were unearned since CampaignRunBinding is
             already the execution-to-input-state authority
+  review_7: CHANGES_REQUESTED — three P1s, all accepted; §3 untouched and four
+            G-R6 decisions upheld on re-examination (CI exclusion, directive
+            retraction, event/payload discrimination, Causal classification).
+            (a) the frozen extractor was FLAT: ReviewVerdictV1.findings is typed
+            "as §3.5, validated" and §3.5 carries findings[].evidence_refs, so
+            the baseline is 41 slots / 32 exact / 9 open, and extraction is now
+            recursive — exactly five cross-schema type refs exist, four scalar,
+            so there is no second hidden slot; (b) zeroing reviewer AND verdict
+            evidence redefined a BOUND contract — docs/autonomy-controller.md
+            (accepted c5b3ae0b, PR #93), which frozen §0 says A1 consumes and
+            never redefines, lists "evidence references" in the ReviewVerdict
+            minimum; both surfaces NARROWED to ContractDocument/Diff/GateLog,
+            with the transitive-only alternative recorded as available and not
+            taken; (c) AnyCommittedEnvelope is a META-TARGET, not a terminal —
+            it resolves to a concrete typed message whose closure must be
+            traversed and charged, and calling it terminal under-accounted the
+            FD-1.5 budget. Bookkeeping: 20 terminal kinds + 1 meta-target
   evidence: 37502e3 edge registry — 59 entries (53 envelope-source + 6 A2
             transition) plus a global AnyCommittedEnvelope causation rule;
             metric is "specific V0 consumer in-degree" with an explicit
@@ -555,13 +572,16 @@ phase_g:
                       a controller obligation, not a promotion argument, and
                       not an entry in the edge registry
     exact_edge_universe: baseline is the FROZEN contract, not the prototype —
-                      40 ArtifactRef slots extracted from blob 7db92f1b; the 59
+                      41 ArtifactRef slots extracted from blob 7db92f1b by a
+                      RECURSIVE extractor (a flat one missed
+                      ReviewVerdictV1.findings[].evidence_refs, reachable only
+                      through "as §3.5"); the 59
                       prototype rows are evidence (15 match a frozen slot by
-                      name, 38 do not). The 40 slots split 32 EXACT / 8 OPEN,
+                      name, 38 do not). The 41 slots split 32 EXACT / 9 OPEN,
                       and only the exact ones become semantic edges: a generic
                       ArtifactRef-valued field creates no graph authority
-    semantic_registry: 63 edges, exact source kind -> exact target kind + class
-                      (50 Intra / 13 Causal). Sources are DISCRIMINATED: the
+    semantic_registry: 69 edges, exact source kind -> exact target kind + class
+                      (56 Intra / 13 Causal). Sources are DISCRIMINATED: the
                       registry is keyed on CampaignEvent(<event_kind>) and on
                       <PayloadVariant>, never on the log root or "the payload",
                       because frozen 3.15.1/3.15.2 fix targets per variant. All
@@ -574,13 +594,13 @@ phase_g:
                       field-path spelling, and every field must realize exactly
                       one admitted edge — adding an unlisted relation reopens or
                       supersedes Phase G
-    open_surfaces:    8 of the 40 frozen slots name no target kind. Each now has
-                      a disposition: ReviewRequest.evidence_refs NARROWED to
-                      three admitted targets (ContractDocument, Diff, GateLog —
-                      forced by frozen 3.4's required field and normative
-                      ordering); CampaignFeedItem.subject_refs SANCTIONED OPEN;
-                      the other six have NO admitted target, which is a real V0
-                      restriction rather than a deferral
+    open_surfaces:    9 of the 41 frozen slots name no target kind. Each now has
+                      a disposition: ReviewRequest.evidence_refs, ReviewerReport
+                      .findings[].evidence_refs and ReviewVerdict.findings[]
+                      .evidence_refs each NARROWED to ContractDocument, Diff,
+                      GateLog; CampaignFeedItem.subject_refs SANCTIONED OPEN as
+                      a meta-target; the other five have NO admitted target,
+                      which is a real V0 restriction rather than a deferral
     campaign_event:   source-only log root, never an ArtifactRef target; its
                       payload is a legitimate target and is traversed by the
                       closure resolver under artifact-closure bounds
