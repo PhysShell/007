@@ -171,7 +171,8 @@ impl<'a> Scanner<'a> {
             // string field"; the current admission has always applied that to
             // values, and widening it to keys here would be a bound this
             // implementation invented rather than one the contract states.
-            self.string_unbounded()?;
+            // A member name is measured but not bounded (see below).
+            self.scan_string()?;
             self.skip_whitespace();
             if self.peek() != Some(b':') {
                 return Err(self.syntax());
@@ -236,7 +237,7 @@ impl<'a> Scanner<'a> {
 
     /// A string value, bounded by FD-1.4.
     fn string(&mut self) -> Result<usize, ParseError> {
-        let len = self.string_unbounded()?;
+        let len = self.scan_string()?;
         if len > MAX_STRING_BYTES && self.mode == Mode::Admit {
             return Err(ParseError::StringTooLong {
                 path: self.path(),
@@ -246,41 +247,57 @@ impl<'a> Scanner<'a> {
         Ok(len)
     }
 
-    /// Scan a JSON string and return its byte length, without retaining it.
+    /// Scan a JSON string without retaining it, returning its **decoded** UTF-8
+    /// byte length.
     ///
-    /// The length counts the encoded bytes between the quotes, which is what
-    /// the previous `Value`-based walk measured for an unescaped string and the
-    /// closest honest equivalent for an escaped one — and it is an upper bound
-    /// on the decoded length, so it never admits something the bound refuses.
-    fn string_unbounded(&mut self) -> Result<usize, ParseError> {
+    /// The unit matters, and getting it wrong is not a rounding error. FD-1.4
+    /// bounds "any single string field" at 65536 **bytes**, and the walk this
+    /// replaced measured `Value::String::len()` — the decoded UTF-8 value. A
+    /// first version of this scanner measured the *spelling* between the quotes
+    /// instead, which agrees for unescaped ASCII and diverges badly otherwise:
+    /// `\u0061` repeated 11000 times is 11000 decoded bytes and 66000 spelled
+    /// ones, so a valid document was refused. An accept/reject change is
+    /// precisely what this slice promised not to make.
+    ///
+    /// So the decoded length is counted as the scan goes, and nothing is built:
+    ///
+    /// ```text
+    /// literal UTF-8 byte              1   (encoded and decoded agree per byte)
+    /// \" \\ \/ \b \f \n \r \t          1
+    /// \u0000..\u007f                  1
+    /// \u0080..\u07ff                  2
+    /// \u0800..\uffff                  3
+    /// valid surrogate pair            4
+    /// ```
+    ///
+    /// A lone surrogate is counted as 3 and not refused here. That is
+    /// deliberate: serde refuses the document a moment later, so the pipeline's
+    /// verdict is unchanged, and this scanner is not trying to become a second
+    /// authority on Unicode. Its job is to traverse safely and to measure what
+    /// FD-1.4 measures.
+    fn scan_string(&mut self) -> Result<usize, ParseError> {
         self.bump(); // opening quote
-        let start = self.at;
+        let mut decoded: usize = 0;
         loop {
             match self.peek() {
                 None => return Err(self.syntax()),
                 Some(b'"') => {
-                    let len = self.at - start;
                     self.bump();
-                    return Ok(len);
+                    return Ok(decoded);
                 }
                 Some(b'\\') => {
                     self.bump();
                     // RFC 8259 fixes the escape set. Accepting anything after a
                     // backslash would let this layer admit a string serde then
-                    // refuses, which splits the verdict across two layers —
-                    // the failure mode the equivalence tests exist to catch.
+                    // refuses, which splits the verdict across two layers.
                     match self.peek() {
                         Some(b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't') => {
                             self.bump();
+                            decoded += 1;
                         }
                         Some(b'u') => {
                             self.bump();
-                            for _ in 0..4 {
-                                match self.peek() {
-                                    Some(c) if c.is_ascii_hexdigit() => self.bump(),
-                                    _ => return Err(self.syntax()),
-                                }
-                            }
+                            decoded += self.escape_sequence()?;
                         }
                         _ => return Err(self.syntax()),
                     }
@@ -288,9 +305,57 @@ impl<'a> Scanner<'a> {
                 // A raw control byte is invalid JSON; serde refuses it and so
                 // does this, so the two agree on what a string is.
                 Some(c) if c < 0x20 => return Err(self.syntax()),
-                Some(_) => self.bump(),
+                Some(_) => {
+                    self.bump();
+                    decoded += 1;
+                }
             }
         }
+    }
+
+    /// One `\uXXXX` escape, already past the `u`, returning its decoded UTF-8
+    /// byte count and consuming a trailing low surrogate when there is one.
+    fn escape_sequence(&mut self) -> Result<usize, ParseError> {
+        let high = self.hex4_at(self.at).ok_or_else(|| self.syntax())?;
+        for _ in 0..4 {
+            self.bump();
+        }
+        if (0xD800..=0xDBFF).contains(&high) {
+            // A surrogate pair encodes one scalar value in four UTF-8 bytes.
+            // Counting the halves separately would charge six and refuse
+            // emoji-heavy strings the contract admits.
+            let paired = self.peek() == Some(b'\\')
+                && self.input.get(self.at + 1) == Some(&b'u')
+                && self
+                    .hex4_at(self.at + 2)
+                    .is_some_and(|low| (0xDC00..=0xDFFF).contains(&low));
+            if paired {
+                for _ in 0..6 {
+                    self.bump();
+                }
+                return Ok(4);
+            }
+            // Lone surrogate: serde refuses the document, so the pipeline
+            // verdict stands. Counted as the three bytes a replacement would
+            // occupy rather than guessed at.
+            return Ok(3);
+        }
+        Ok(match high {
+            0x0000..=0x007f => 1,
+            0x0080..=0x07ff => 2,
+            _ => 3,
+        })
+    }
+
+    /// Four hex digits at `at`, without consuming anything.
+    fn hex4_at(&self, at: usize) -> Option<u32> {
+        let mut value = 0u32;
+        for offset in 0..4 {
+            let byte = *self.input.get(at + offset)?;
+            let digit = char::from(byte).to_digit(16)?;
+            value = value * 16 + digit;
+        }
+        Some(value)
     }
 
     fn number(&mut self) -> Result<(), ParseError> {

@@ -701,6 +701,115 @@ mod tests {
         }
     }
 
+    /// FD-1.4 bounds "any single string field" at 65536 **bytes**, and the
+    /// unit is the decoded UTF-8 value — which is what the walk this replaced
+    /// measured. The first version of this scanner measured the *spelling*
+    /// between the quotes instead: identical for unescaped ASCII, badly
+    /// divergent otherwise, so a valid document was refused.
+    ///
+    /// The witnesses come in pairs at the edge, in both spellings, because a
+    /// decoder that handles `\u0061` but not surrogate pairs is almost a
+    /// Unicode decoder — it just omits the part of Unicode that is difficult.
+    #[test]
+    fn a_string_is_bounded_by_its_decoded_length_not_its_spelling() {
+        // Each `\u0061` spells six bytes and decodes to one.
+        let ascii_escape = |count: usize| format!(r#"{{"x":"{}"}}"#, r"\u0061".repeat(count));
+        // Each pair spells twelve bytes and decodes to four: one emoji.
+        let pair = |count: usize| format!(r#"{{"x":"{}"}}"#, r"\uD83D\uDE00".repeat(count));
+
+        for (label, document, admissible) in [
+            (
+                "ascii escapes at the bound",
+                ascii_escape(MAX_STRING_BYTES),
+                true,
+            ),
+            (
+                "ascii escapes one over",
+                ascii_escape(MAX_STRING_BYTES + 1),
+                false,
+            ),
+            (
+                "surrogate pairs at the bound",
+                pair(MAX_STRING_BYTES / 4),
+                true,
+            ),
+            (
+                "surrogate pairs one over",
+                pair(MAX_STRING_BYTES / 4 + 1),
+                false,
+            ),
+        ] {
+            let scanned = check(&document);
+            assert_eq!(
+                scanned.is_ok(),
+                admissible,
+                "{label}: scanner said {scanned:?}"
+            );
+            if !admissible {
+                assert!(
+                    matches!(scanned, Err(ParseError::StringTooLong { .. })),
+                    "{label}: must be refused by the string bound, got {scanned:?}"
+                );
+            }
+            // And the boundary this slice must not have moved: whatever the
+            // spelling, the walk it replaced reaches the same verdict.
+            agree(&document);
+        }
+
+        // The reported witness, kept as itself: 11 000 decoded bytes spelled as
+        // 66 000, comfortably inside the bound and previously refused.
+        agree(&ascii_escape(11_000));
+    }
+
+    /// The boundary family, enumerated rather than sampled.
+    ///
+    /// Random generation is the wrong instrument for this defect and would have
+    /// gone on missing it: finding it by chance needs an escape-heavy spelling
+    /// *and* a decoded length within a byte or two of 65536 at the same time.
+    /// Four spellings times three positions at the edge is twelve documents and
+    /// finds it every run.
+    ///
+    /// Each family carries a different ratio of spelled to decoded bytes — 1:1,
+    /// 2:1, 6:1 and 3:1 — so any implementation measuring the wrong unit fails
+    /// on at least one of them regardless of which wrong unit it picked.
+    #[test]
+    fn the_string_bound_is_exact_in_every_spelling() {
+        /// A JSON string spelled in `family` whose decoded length is exactly
+        /// `target` bytes, padded with literal ASCII when the unit does not
+        /// divide.
+        fn spelled(family: &str, target: usize) -> String {
+            let (unit, decoded_per_unit) = match family {
+                "literal" => ("a", 1),
+                "simple escape" => (r"\n", 1),
+                "ascii \\u escape" => (r"\u0061", 1),
+                _ => (r"\uD83D\uDE00", 4),
+            };
+            let units = target / decoded_per_unit;
+            let padding = target - units * decoded_per_unit;
+            format!(r#"{{"x":"{}{}"}}"#, unit.repeat(units), "a".repeat(padding))
+        }
+
+        for family in [
+            "literal",
+            "simple escape",
+            "ascii \\u escape",
+            "surrogate pair",
+        ] {
+            for (offset, admissible) in [(-1_i64, true), (0, true), (1, false)] {
+                let target = (MAX_STRING_BYTES as i64 + offset) as usize;
+                let document = spelled(family, target);
+                let scanned = check(&document);
+                assert_eq!(
+                    scanned.is_ok(),
+                    admissible,
+                    "{family} at {target} decoded bytes: {scanned:?}"
+                );
+                // The walk this replaced is the authority on where the edge is.
+                agree(&document);
+            }
+        }
+    }
+
     /// FD-1.4 asks for a parse-time rejection. The witness that this one *is*
     /// one: everything after the offending point is garbage, so a scanner that
     /// reached it would report a syntax error instead.
