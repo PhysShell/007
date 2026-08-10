@@ -681,15 +681,39 @@ compiled_context_digest             domain b"o7-memory-compiled-context\0v1\0"
     frame(context_bytes)
     frame(included entries count as u64-le), each in the order the entry
         appears in the context — presentation order is semantic here — and
-        for each, id and reason framed together as ONE record:
+        for each, id and reason framed together as ONE record, with
+        admission_class serving as the union discriminator:
         frame(entry_id)
         frame(admission_class name)
-        frame(reason proofs count as u64-le), each in witness order (§4.2.1):
-            frame(rule_id) frame(depth as u32-le)
+        if admission_class = normative:            — InclusionProof (§4.2)
+            frame(proofs count as u64-le), each in witness order (§4.2.1):
+                frame(rule_id) frame(depth as u32-le)
+                frame(derivation_path hop count as u64-le), each hop in
+                    path order
+        if admission_class = advisory:             — AdvisoryInclusionReason
+            frame(selection_channel name)
+            frame(rank as u32-le)
+            frame(advisory_input_snapshot_digest)
     frame(omitted_candidate_ids count as u64-le), each in ascending
         bytewise order — an omission set has no natural order
     frame(token_count as u64-le)
 ```
+
+**Why the reason is a tagged union.** §4.2 declares two admission classes with
+two different reason records — `normative` carries an `InclusionProof`
+(`rule_id`, `derivation_path[]`, `depth`), `advisory` carries an
+`AdvisoryInclusionReason` (selection channel, rank, snapshot identity). One
+flat shape cannot hold both, and C-4.1's attempt to do so failed in both
+directions at once: it dropped `derivation_path` from the normative case — so
+two proofs differing only in the path they took collided, even though
+`resolved_scope_digest` frames that path correctly — and it left the advisory
+case unrepresentable, since after `admission_class = advisory` the format still
+demanded proofs.
+
+`admission_class` is therefore the discriminator as well as a recorded fact.
+Framing it before the variant is what keeps the preimage unambiguous: a reader
+knows which arm follows before it has to parse the arm, and no byte sequence is
+valid under both.
 
 **Why the inclusion reason is inside the entry record.** The comparison surface
 above lists `inclusion_reason[]` as part of what a compilation emits, so REQ-3
