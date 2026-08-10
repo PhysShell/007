@@ -18,7 +18,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use o7_a1_contracts::bounds::{
-    MAX_ARTIFACT_REFS, MAX_CONTROL_ARTIFACT_BYTES, MAX_REACHABLE_CLOSURE_BYTES,
+    MAX_ARTIFACT_REFS, MAX_CONTROL_ARTIFACT_BYTES, MAX_EVIDENCE_BLOB_BYTES,
+    MAX_REACHABLE_CLOSURE_BYTES,
 };
 use o7_a1_contracts::{
     parse_artifact, typed_media_type, validate_document, AdapterVersion, ArtifactKindV1,
@@ -694,15 +695,23 @@ fn an_interaction_manifest_is_typed_for_media_type_and_large_for_size() {
     };
     assert!(wrong.validate().is_err());
 
-    let right = ArtifactRef {
+    let manifest_of = |size| ArtifactRef {
         kind: ArtifactKindV1::InteractionManifest,
         media_type: typed_media_type(ArtifactKindV1::InteractionManifest, 1),
         digest: digest("manifest"),
-        // Larger than a control artifact, which is the point of the separate
-        // size classification.
-        size: MAX_CONTROL_ARTIFACT_BYTES * 4,
+        size,
     };
-    assert!(right.validate().is_ok());
+
+    // Larger than a control artifact, which is the point of the separate size
+    // classification.
+    assert!(manifest_of(MAX_CONTROL_ARTIFACT_BYTES * 4)
+        .validate()
+        .is_ok());
+
+    // S1 fixed the exact edge, so the edge is what gets asserted. Before the
+    // supersede this pair would have pinned a reading rather than the contract.
+    assert!(manifest_of(MAX_EVIDENCE_BLOB_BYTES).validate().is_ok());
+    assert!(manifest_of(MAX_EVIDENCE_BLOB_BYTES + 1).validate().is_err());
 }
 
 /// `ArtifactRef` had the same shape of hole `EnvelopeV1` did: its rules relate

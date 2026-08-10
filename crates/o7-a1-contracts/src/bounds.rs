@@ -14,9 +14,13 @@
 use crate::framing::Preimage;
 use crate::scalars::Digest256;
 
-/// FD-1.4 — any typed A1 payload.
+/// FD-1.4 — any typed A1 payload **except `InteractionManifestV1`**, which S1
+/// (§7 supersede, §9) bounds at [`MAX_EVIDENCE_BLOB_BYTES`] while leaving it a
+/// typed object for every other purpose. The exception is carried by
+/// [`crate::ArtifactKindV1::has_control_size_bound`], not by this constant.
 pub const MAX_CONTROL_ARTIFACT_BYTES: u64 = 1 << 20; // 1 MiB
-/// FD-1.4 — a single evidence blob (diff, raw provider bytes, gate log, …).
+/// FD-1.4 — a single evidence blob (diff, raw provider bytes, gate log, …), and
+/// since S1 the bound for `InteractionManifestV1` as well.
 pub const MAX_EVIDENCE_BLOB_BYTES: u64 = 64 << 20; // 64 MiB
 /// FD-1.4 — JSON nesting depth.
 pub const MAX_JSON_DEPTH: usize = 32;
