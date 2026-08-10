@@ -1,0 +1,46 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qr1-current-state",
+      "answer": "Round 0 is CLOSED, and the plane-coder, plane-reviewer, and plane-record are all FROZEN.",
+      "cited_observation_ids": [
+        "obs-round0-closed"
+      ],
+      "current_state_observation_ids": [
+        "obs-round0-closed"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qr2-blocking",
+      "answer": "The provided context does not specify any current blockers to progress.",
+      "cited_observation_ids": [],
+      "current_state_observation_ids": [],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qr3-next-step",
+      "answer": "The next permitted step is a baseline application of the current B1 v0 design to case-0002 before any improvement; schema, selector and evaluation contracts remain unfrozen and no downstream (qodec-arm, holdout) is started.",
+      "cited_observation_ids": [
+        "obs-next-permitted-step"
+      ],
+      "current_state_observation_ids": [
+        "obs-next-permitted-step"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qr4-authority",
+      "answer": "The authoritative record of R21 acceptance is the frozen plane-record, specifically evidence head 04108e7 with its frozen CI, evidence artifacts, and PR #16 state.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "cited_relations": []
+    }
+  ]
+}
+```

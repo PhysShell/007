@@ -1,0 +1,76 @@
+==== gemma (Gemma-4-31B-it) ====
+[gemma   ] resume-product-integration rep0 RAW_VALID     http=completed    lat=6.958s correct=2/4
+[gemma   ] resume-product-integration rep0 JSTRUCT_VALID http=completed    lat=24.028s correct=2/4
+[gemma   ] resume-product-integration rep1 JSTRUCT_VALID http=completed    lat=5.164s correct=2/4
+[gemma   ] resume-product-integration rep1 RAW_VALID     http=completed    lat=3.756s correct=2/4
+[gemma   ] resume-product-integration rep2 RAW_VALID     http=completed    lat=3.999s correct=2/4
+[gemma   ] resume-product-integration rep2 JSTRUCT_VALID http=completed    lat=3.612s correct=2/4
+[gemma   ] audit-r21-evidence-provena rep0 JSTRUCT_VALID http=completed    lat=9.927s correct=2/5
+[gemma   ] audit-r21-evidence-provena rep0 RAW_VALID     http=completed    lat=10.647s correct=3/5
+[gemma   ] audit-r21-evidence-provena rep1 RAW_VALID     http=completed    lat=7.151s correct=3/5
+[gemma   ] audit-r21-evidence-provena rep1 JSTRUCT_VALID http=completed    lat=82.754s correct=2/5
+[gemma   ] audit-r21-evidence-provena rep2 JSTRUCT_VALID http=completed    lat=21.721s correct=2/5
+[gemma   ] audit-r21-evidence-provena rep2 RAW_VALID     http=completed    lat=14.32s correct=2/5
+[gemma   ] assess-change-impact-on-or rep0 RAW_VALID     http=completed    lat=6.357s correct=0/2
+[gemma   ] assess-change-impact-on-or rep0 JSTRUCT_VALID http=completed    lat=6.224s correct=0/2
+[gemma   ] assess-change-impact-on-or rep1 JSTRUCT_VALID http=completed    lat=3.572s correct=1/2
+[gemma   ] assess-change-impact-on-or rep1 RAW_VALID     http=completed    lat=6.04s correct=0/2
+[gemma   ] assess-change-impact-on-or rep2 RAW_VALID     http=completed    lat=4.155s correct=0/2
+[gemma   ] assess-change-impact-on-or rep2 JSTRUCT_VALID http=completed    lat=4.049s correct=1/2
+==== glm47 (GLM-4.7) ====
+[glm47   ] resume-product-integration rep0 RAW_VALID     http=completed    lat=34.282s correct=2/4
+[glm47   ] resume-product-integration rep0 JSTRUCT_VALID http=completed    lat=22.774s correct=2/4
+[glm47   ] resume-product-integration rep1 JSTRUCT_VALID http=completed    lat=22.305s correct=2/4
+[glm47   ] resume-product-integration rep1 RAW_VALID     http=completed    lat=22.753s correct=2/4
+[glm47   ] resume-product-integration rep2 RAW_VALID     http=completed    lat=20.741s correct=2/4
+[glm47   ] resume-product-integration rep2 JSTRUCT_VALID http=completed    lat=24.985s correct=2/4
+[glm47   ] audit-r21-evidence-provena rep0 JSTRUCT_VALID http=completed    lat=59.567s correct=3/5
+[glm47   ] audit-r21-evidence-provena rep0 RAW_VALID     http=completed    lat=52.867s correct=3/5
+[glm47   ] audit-r21-evidence-provena rep1 RAW_VALID     http=completed    lat=49.074s correct=4/5
+[glm47   ] audit-r21-evidence-provena rep1 JSTRUCT_VALID http=completed    lat=62.828s correct=4/5
+[glm47   ] audit-r21-evidence-provena rep2 JSTRUCT_VALID http=completed    lat=46.18s correct=4/5
+[glm47   ] audit-r21-evidence-provena rep2 RAW_VALID     http=completed    lat=49.385s correct=3/5
+[glm47   ] assess-change-impact-on-or rep0 RAW_VALID     http=completed    lat=20.466s correct=0/2
+[glm47   ] assess-change-impact-on-or rep0 JSTRUCT_VALID http=completed    lat=14.374s correct=0/2
+[glm47   ] assess-change-impact-on-or rep1 JSTRUCT_VALID http=completed    lat=16.64s correct=0/2
+[glm47   ] assess-change-impact-on-or rep1 RAW_VALID     http=completed    lat=11.767s correct=0/2
+[glm47   ] assess-change-impact-on-or rep2 RAW_VALID     http=completed    lat=11.251s correct=1/2
+[glm47   ] assess-change-impact-on-or rep2 JSTRUCT_VALID http=completed    lat=8.99s correct=0/2
+==== deepseek (DeepSeek-V4-Flash-0731) ====
+[deepseek] resume-product-integration rep0 RAW_VALID     http=completed    lat=6.402s correct=3/4
+[deepseek] resume-product-integration rep0 JSTRUCT_VALID http=completed    lat=6.97s correct=3/4
+[deepseek] resume-product-integration rep1 JSTRUCT_VALID http=completed    lat=6.107s correct=3/4
+[deepseek] resume-product-integration rep1 RAW_VALID     http=completed    lat=7.462s correct=3/4
+[deepseek] resume-product-integration rep2 RAW_VALID     http=completed    lat=5.791s correct=3/4
+[deepseek] resume-product-integration rep2 JSTRUCT_VALID http=completed    lat=6.959s correct=3/4
+[deepseek] audit-r21-evidence-provena rep0 JSTRUCT_VALID http=completed    lat=8.73s correct=2/5
+[deepseek] audit-r21-evidence-provena rep0 RAW_VALID     http=completed    lat=8.624s correct=3/5
+[deepseek] audit-r21-evidence-provena rep1 RAW_VALID     http=completed    lat=11.168s correct=3/5
+[deepseek] audit-r21-evidence-provena rep1 JSTRUCT_VALID http=completed    lat=10.33s correct=2/5
+[deepseek] audit-r21-evidence-provena rep2 JSTRUCT_VALID http=completed    lat=13.85s correct=2/5
+[deepseek] audit-r21-evidence-provena rep2 RAW_VALID     http=completed    lat=45.878s correct=3/5
+[deepseek] assess-change-impact-on-or rep0 RAW_VALID     http=completed    lat=34.387s correct=1/2
+[deepseek] assess-change-impact-on-or rep0 JSTRUCT_VALID http=completed    lat=8.717s correct=0/2
+[deepseek] assess-change-impact-on-or rep1 JSTRUCT_VALID http=completed    lat=6.55s correct=0/2
+[deepseek] assess-change-impact-on-or rep1 RAW_VALID     http=completed    lat=8.1s correct=1/2
+[deepseek] assess-change-impact-on-or rep2 RAW_VALID     http=completed    lat=9.93s correct=1/2
+[deepseek] assess-change-impact-on-or rep2 JSTRUCT_VALID http=completed    lat=19.373s correct=0/2
+==== qwen (Qwen3.5-27B-Anko) ====
+[qwen    ] resume-product-integration rep0 RAW_VALID     http=completed    lat=19.566s correct=3/4
+[qwen    ] resume-product-integration rep0 JSTRUCT_VALID http=completed    lat=32.193s correct=3/4
+[qwen    ] resume-product-integration rep1 JSTRUCT_VALID http=completed    lat=17.674s correct=3/4
+[qwen    ] resume-product-integration rep1 RAW_VALID     http=completed    lat=24.977s correct=3/4
+[qwen    ] resume-product-integration rep2 RAW_VALID     http=completed    lat=25.431s correct=3/4
+[qwen    ] resume-product-integration rep2 JSTRUCT_VALID http=completed    lat=22.186s correct=3/4
+[qwen    ] audit-r21-evidence-provena rep0 JSTRUCT_VALID http=completed    lat=25.582s correct=3/5
+[qwen    ] audit-r21-evidence-provena rep0 RAW_VALID     http=completed    lat=26.618s correct=3/5
+[qwen    ] audit-r21-evidence-provena rep1 RAW_VALID     http=completed    lat=17.846s correct=3/5
+[qwen    ] audit-r21-evidence-provena rep1 JSTRUCT_VALID http=completed    lat=13.353s correct=3/5
+[qwen    ] audit-r21-evidence-provena rep2 JSTRUCT_VALID http=completed    lat=14.049s correct=3/5
+[qwen    ] audit-r21-evidence-provena rep2 RAW_VALID     http=completed    lat=19.153s correct=0/5
+[qwen    ] assess-change-impact-on-or rep0 RAW_VALID     http=completed    lat=10.233s correct=1/2
+[qwen    ] assess-change-impact-on-or rep0 JSTRUCT_VALID http=completed    lat=10.625s correct=1/2
+[qwen    ] assess-change-impact-on-or rep1 JSTRUCT_VALID http=completed    lat=11.977s correct=1/2
+[qwen    ] assess-change-impact-on-or rep1 RAW_VALID     http=completed    lat=13.538s correct=1/2
+[qwen    ] assess-change-impact-on-or rep2 RAW_VALID     http=completed    lat=11.854s correct=1/2
+[qwen    ] assess-change-impact-on-or rep2 JSTRUCT_VALID http=completed    lat=8.275s correct=0/2

@@ -1,0 +1,29 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qi1-dependencies",
+      "answer": "Nothing in the provided context depends on the chosen constraint (obs-oracle-topology-constraint); rather, the constraint itself depends on the output path dependence, the repo authority, and the window invariant.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-oracle-topology-constraint",
+          "kind": "depends_on"
+        }
+      ]
+    },
+    {
+      "question_id": "qi2-rereview",
+      "answer": "The provided context does not specify what must be re-reviewed if the constraint changes, only that the constraint depends on other observations.",
+      "cited_observation_ids": [],
+      "current_state_observation_ids": [],
+      "cited_relations": []
+    }
+  ]
+}
+```

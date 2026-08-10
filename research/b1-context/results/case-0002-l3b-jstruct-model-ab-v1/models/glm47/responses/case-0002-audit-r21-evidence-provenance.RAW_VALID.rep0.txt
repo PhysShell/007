@@ -1,0 +1,100 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qa1-why-active",
+      "answer": "The current solution is considered active because Round 0 is CLOSED, with the plane-coder, plane-reviewer, and plane-record all FROZEN, establishing a stable state.",
+      "cited_observation_ids": [
+        "obs-round0-closed"
+      ],
+      "current_state_observation_ids": [
+        "obs-round0-closed"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qa2-supporting",
+      "answer": "The solution is supported by the evidence head CI status, the repo authority record, and the reviewer window, which collectively validate the R21 acceptance and evidence chain.",
+      "cited_observation_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-window"
+      ],
+      "current_state_observation_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-window"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-evidence-head-ci-empty",
+          "kind": "supports"
+        },
+        {
+          "from": "obs-reviewer-window",
+          "kind": "supports"
+        }
+      ]
+    },
+    {
+      "question_id": "qa3-superseded",
+      "answer": "SOURCE-LOCK v6 supersedes v5, v4, and v3; the profiler fail-closed decision supersedes a prior defect; the repo authority supersedes the reviewer acceptance claim; and Round 0 closure supersedes the non-frozen plane record.",
+      "cited_observation_ids": [
+        "obs-lock-supersession-chain",
+        "obs-profiler-fail-closed",
+        "obs-repo-authority-04108e7",
+        "obs-round0-closed"
+      ],
+      "current_state_observation_ids": [
+        "obs-lock-supersession-chain",
+        "obs-profiler-fail-closed",
+        "obs-repo-authority-04108e7",
+        "obs-round0-closed"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-profiler-fail-closed",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-repo-authority-04108e7",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-round0-closed",
+          "kind": "supersedes"
+        }
+      ]
+    },
+    {
+      "question_id": "qa4-wrong-agent-claims",
+      "answer": "The reviewer's relayed acceptance claim is not authoritative, and the prior reviewer profile digest disagreement was resolved as a non-issue caused by a literal input path difference.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-digest-disagreement"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-digest-disagreement"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-repo-authority-04108e7",
+          "kind": "supersedes"
+        }
+      ]
+    },
+    {
+      "question_id": "qa5-repo-authority",
+      "answer": "The authoritative repository outcome is the frozen plane-record at evidence head 04108e7, which includes frozen CI and evidence artifacts, rather than the product head or the reviewer's relayed acceptance.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "cited_relations": []
+    }
+  ]
+}
+```

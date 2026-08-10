@@ -1,0 +1,370 @@
+{
+  "all_models_noninferior": false,
+  "case_role": "development",
+  "caveats": [
+    "DECODING: reasoning disabled at the provider key level for every model and both arms, identically, as in L1 and L2. This measures direct legibility without a deliberation subsidy.",
+    "SCALE: development experiment -- 3 tasks, 11 questions, N=3, 33 paired cells per model per arm, 132 pooled per arm. A development signal, not a significance test. Its force comes from the failure being one axis in four independent families, and from agreeing with L1 and L2.",
+    "PROVIDER IDENTITY: routing identity verified by the qualified boundary (requested == reported on every attempt, no substitution), but underlying community-hosted weights were not independently attested; model self-identification was inconsistent across runs and is treated as non-authoritative output. A limit of provider identity assurance, not a substitution failure.",
+    "PROMPT NEUTRALITY: both arms used identical scaffolding with neither representation named and no reading tutorial for either, so RAW was re-run fresh rather than inherited from L1/L2. The token accounting was recomputed from the final prompts (10.92%), not carried over from L3A (9.61%).",
+    "STRUCTURAL: jstruct is byte-lossless (exact roundtrip verified through the real decoder on all three contexts before any call). The difference measured is comprehension, not fidelity."
+  ],
+  "finding": "Removing the dictionary entirely did not remove the reading cost. jstruct is byte-lossless, carries no legend, keeps every identifier literal, needs no notation block, and saves 10.92% cold -- and still no model reached non-inferiority. Pooled correctness fell 70 -> 66 and the only axis that moved against it is missing_required_witness (60 -> 65); all 13 paired hard regressions, across all four families, are that same axis. Taken with L1 (aliasing corrupts references and costs thoroughness) and L2 (protecting identifiers removes the corruption but not the thoroughness cost), the boundary is now located: for this evidence-heavy JSON workload, restructuring the context at all -- even into a legible, literal, dictionary-free table -- costs the model evidence it would otherwise have cited. The JSON structure is itself part of the reading interface.",
+  "freeze_manifest_sha256": "sha256:f1c4858033db0ec8ee459984a3a292d61823e8fe752c01202e756b16a31e4ad3",
+  "frozen": {
+    "adapter": "f8fa87e349c48de0678ccc4a4ba4be14463dfc85",
+    "l1_007_commit": "40edf6dc4ad6e96ecc81e7a71ce1b0765c369a3b",
+    "provider_boundary": "fa93d63636bf53892edbd02fec01ab619ffc1071",
+    "q1r_producer_qodec_qa": "6a5d40304d5997fd9ba6325521f3e212eba4aa75",
+    "qodec_commit": "0d5097a7142ae8e617c28aadc9dc6de70b1627f1",
+    "qodec_tree": "e5ec86fa7178dec668a29c4072945c95eca23a90",
+    "qualification_result": "PASS",
+    "qualification_run": 31415814840
+  },
+  "generalization_claim_allowed": false,
+  "hard_regression_axis_breakdown": {
+    "by_axis": {
+      "missing_required_witness": 13,
+      "stale_as_current_error": 0,
+      "unsupported_or_fabricated_claim": 0
+    },
+    "note": "every hard regression in every model is the same axis. The representation does not corrupt references -- it costs reading thoroughness.",
+    "total": 13
+  },
+  "harness_sha256": "sha256:8bde5e0058e789f3f7297754acfc43e275d7434c4bcd42ccdf8ec583f8ca1f67",
+  "holdout_evidence": false,
+  "integrity_axes_note": "JSTRUCT is not dirtier than RAW on any integrity axis and is cleaner on two: fabricated claims 1 -> 0 and malformed output 5 -> 0 (all five RAW malformed responses were Qwen). Required-relation evidence is identical at 126/132 in both arms. The deficit is confined to witnesses the model failed to cite.",
+  "next_step_per_protocol": "Any model failing non-inferiority closes the reader-facing representation line for this B1 workload. Do not invent another codec in response. The surviving product direction is qodec project / semantic projection plus raw JSON as the reader representation, with savings pursued through selection, omission, retrieval, caching and budget-aware projection rather than further reader syntax. The real-source holdout is not opened by this result, and qodec project v1 is not motivated by it.",
+  "panel_success_requires_all_four": true,
+  "per_model": {
+    "deepseek": {
+      "JSTRUCT_VALID": {
+        "answer_correct": 15,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 18,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_evidence_used": 15,
+        "required_relation_evidence_used": 33,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "RAW_VALID": {
+        "answer_correct": 21,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 12,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_evidence_used": 21,
+        "required_relation_evidence_used": 33,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "family": "DeepSeek",
+      "hard_regression_cells": [
+        {
+          "axes": [
+            "missing_required_witness"
+          ],
+          "cell": [
+            "case-0002-audit-r21-evidence-provenance",
+            "qa2-supporting",
+            0
+          ]
+        },
+        {
+          "axes": [
+            "missing_required_witness"
+          ],
+          "cell": [
+            "case-0002-audit-r21-evidence-provenance",
+            "qa2-supporting",
+            1
+          ]
+        },
+        {
+          "axes": [
+            "missing_required_witness"
+          ],
+          "cell": [
+            "case-0002-audit-r21-evidence-provenance",
+            "qa2-supporting",
+            2
+          ]
+        },
+        {
+          "axes": [
+            "missing_required_witness"
+          ],
+          "cell": [
+            "case-0002-assess-change-impact-on-oracle-topology",
+            "qi1-dependencies",
+            0
+          ]
+        },
+        {
+          "axes": [
+            "missing_required_witness"
+          ],
+          "cell": [
+            "case-0002-assess-change-impact-on-oracle-topology",
+            "qi1-dependencies",
+            1
+          ]
+        },
+        {
+          "axes": [
+            "missing_required_witness"
+          ],
+          "cell": [
+            "case-0002-assess-change-impact-on-oracle-topology",
+            "qi1-dependencies",
+            2
+          ]
+        }
+      ],
+      "model": "DeepSeek-V4-Flash-0731",
+      "noninferior": false,
+      "paired_hard_regressions": 6
+    },
+    "gemma": {
+      "JSTRUCT_VALID": {
+        "answer_correct": 14,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 19,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_evidence_used": 14,
+        "required_relation_evidence_used": 30,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "RAW_VALID": {
+        "answer_correct": 14,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 18,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_evidence_used": 15,
+        "required_relation_evidence_used": 32,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 1
+      },
+      "family": "Google",
+      "hard_regression_cells": [
+        {
+          "axes": [
+            "missing_required_witness"
+          ],
+          "cell": [
+            "case-0002-audit-r21-evidence-provenance",
+            "qa3-superseded",
+            0
+          ]
+        },
+        {
+          "axes": [
+            "missing_required_witness"
+          ],
+          "cell": [
+            "case-0002-audit-r21-evidence-provenance",
+            "qa3-superseded",
+            1
+          ]
+        },
+        {
+          "axes": [
+            "missing_required_witness"
+          ],
+          "cell": [
+            "case-0002-audit-r21-evidence-provenance",
+            "qa3-superseded",
+            2
+          ]
+        }
+      ],
+      "model": "Gemma-4-31B-it",
+      "noninferior": false,
+      "paired_hard_regressions": 3
+    },
+    "glm47": {
+      "JSTRUCT_VALID": {
+        "answer_correct": 17,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 16,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_evidence_used": 17,
+        "required_relation_evidence_used": 33,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "RAW_VALID": {
+        "answer_correct": 17,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 15,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_evidence_used": 18,
+        "required_relation_evidence_used": 29,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "family": "Zhipu",
+      "hard_regression_cells": [
+        {
+          "axes": [
+            "missing_required_witness"
+          ],
+          "cell": [
+            "case-0002-audit-r21-evidence-provenance",
+            "qa3-superseded",
+            0
+          ]
+        },
+        {
+          "axes": [
+            "missing_required_witness"
+          ],
+          "cell": [
+            "case-0002-assess-change-impact-on-oracle-topology",
+            "qi1-dependencies",
+            2
+          ]
+        }
+      ],
+      "model": "GLM-4.7",
+      "noninferior": false,
+      "paired_hard_regressions": 2
+    },
+    "qwen": {
+      "JSTRUCT_VALID": {
+        "answer_correct": 20,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 12,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_evidence_used": 21,
+        "required_relation_evidence_used": 30,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "RAW_VALID": {
+        "answer_correct": 18,
+        "contradicts_gold": 0,
+        "malformed_output": 5,
+        "missing_required_witness": 15,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_evidence_used": 18,
+        "required_relation_evidence_used": 32,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "family": "Qwen",
+      "hard_regression_cells": [
+        {
+          "axes": [
+            "missing_required_witness"
+          ],
+          "cell": [
+            "case-0002-assess-change-impact-on-oracle-topology",
+            "qi1-dependencies",
+            0
+          ]
+        },
+        {
+          "axes": [
+            "missing_required_witness"
+          ],
+          "cell": [
+            "case-0002-assess-change-impact-on-oracle-topology",
+            "qi1-dependencies",
+            1
+          ]
+        }
+      ],
+      "model": "Qwen3.5-27B-Anko",
+      "noninferior": false,
+      "paired_hard_regressions": 2
+    }
+  },
+  "pooled": {
+    "JSTRUCT_VALID": {
+      "answer_correct": 66,
+      "contradicts_gold": 0,
+      "malformed_output": 0,
+      "missing_required_witness": 65,
+      "refusal": 0,
+      "representation_parse_failure": 0,
+      "required_evidence_used": 67,
+      "required_relation_evidence_used": 126,
+      "stale_as_current_error": 0,
+      "unsupported_or_fabricated_claim": 0
+    },
+    "RAW_VALID": {
+      "answer_correct": 70,
+      "contradicts_gold": 0,
+      "malformed_output": 5,
+      "missing_required_witness": 60,
+      "refusal": 0,
+      "representation_parse_failure": 0,
+      "required_evidence_used": 72,
+      "required_relation_evidence_used": 126,
+      "stale_as_current_error": 0,
+      "unsupported_or_fabricated_claim": 1
+    },
+    "cells_per_arm": {
+      "JSTRUCT_VALID": 132,
+      "RAW_VALID": 132
+    }
+  },
+  "pooled_correct_delta_diagnostic": -4,
+  "principal_classification": "JSTRUCT_REGRESSION_WITH_TOKEN_WIN",
+  "provider_integrity": {
+    "any_substitution": false
+  },
+  "qodec": {
+    "binary_sha256": "sha256:6611c706a546d7736dfa7c1072e4aa7367d6303763eb2ebb50c37ae6d0941378",
+    "codec": "jstruct",
+    "commit": "0d5097a7142ae8e617c28aadc9dc6de70b1627f1",
+    "qualification_result": "PASS",
+    "qualification_run": 31415814840,
+    "tree": "e5ec86fa7178dec668a29c4072945c95eca23a90"
+  },
+  "qwen_paired_rule_illustration": "Qwen improved on every aggregate: correct 18 -> 20, missing witnesses 15 -> 12, malformed 5 -> 0 -- and still carries 2 paired hard regressions, because individual cells newly lost a witness even as other cells gained one. This is the rule behaving exactly as specified, and is why a pooled gain does not excuse a per-model failure.",
+  "record": "o7.b1.l3b-jstruct-model-ab-receipt/v1",
+  "residual_axis_of_interest": {
+    "JSTRUCT": 65,
+    "RAW": 60,
+    "axis": "missing_required_witness",
+    "note": "L2 localized the surviving compression penalty here"
+  },
+  "surviving_capabilities": {
+    "jstruct_dictionary_free_structural_codec": "qualified and lossless, but not adopted as a reader representation for this workload",
+    "percent_q1_deep_reader_representation": "rejected (L1)",
+    "protected_spans_referential_integrity_primitive": "alive, qualified (L2, qodec 89d06be4)",
+    "qodec_project_relation_aware_projection": "alive (Q1/Q2)"
+  },
+  "token_economics": {
+    "JSTRUCT_cold": 7613,
+    "RAW_cold": 8546,
+    "l3a_model_free_reference": 0.0961,
+    "saving_fraction": 0.1092,
+    "token_win_cold": true
+  }
+}

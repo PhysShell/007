@@ -1,0 +1,54 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qi1-dependencies",
+      "answer": "The chosen constraint (obs-oracle-topology-constraint) depends on the repo authority, the window invariant, and the output path dependence. Conversely, the output path dependence blocks the constraint.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-repo-authority-04108e7",
+        "obs-window-invariant",
+        "obs-output-path-dependence"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-repo-authority-04108e7",
+        "obs-window-invariant",
+        "obs-output-path-dependence"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-oracle-topology-constraint",
+          "kind": "depends_on"
+        },
+        {
+          "from": "obs-output-path-dependence",
+          "kind": "blocks"
+        }
+      ]
+    },
+    {
+      "question_id": "qi2-rereview",
+      "answer": "If the constraint changes, the repo authority (obs-repo-authority-04108e7) must be re-reviewed because it supports the next permitted step and is supported by the evidence head.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7",
+        "obs-evidence-head-ci-empty"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7",
+        "obs-evidence-head-ci-empty"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-repo-authority-04108e7",
+          "kind": "supports"
+        },
+        {
+          "from": "obs-evidence-head-ci-empty",
+          "kind": "supports"
+        }
+      ]
+    }
+  ]
+}
+```

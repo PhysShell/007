@@ -1,0 +1,47 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qi1-dependencies",
+      "answer": "The chosen constraint (obs-oracle-topology-constraint) has no explicit dependents in the provided relations, though it depends on obs-output-path-dependence, obs-repo-authority-04108e7, and obs-window-invariant.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qi2-rereview",
+      "answer": "If the constraint changes, the evidence head (obs-evidence-head-ci-empty) and the reviewer window (obs-reviewer-window) must be re-reviewed because they support the repo authority and acceptance claims that the constraint depends on.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-repo-authority-04108e7",
+        "obs-evidence-head-ci-empty",
+        "obs-reviewer-window"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-repo-authority-04108e7",
+        "obs-evidence-head-ci-empty",
+        "obs-reviewer-window"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-oracle-topology-constraint",
+          "kind": "depends_on"
+        },
+        {
+          "from": "obs-evidence-head-ci-empty",
+          "kind": "supports"
+        },
+        {
+          "from": "obs-reviewer-window",
+          "kind": "supports"
+        }
+      ]
+    }
+  ]
+}
+```

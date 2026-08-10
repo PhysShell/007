@@ -1,0 +1,50 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qi1-dependencies",
+      "answer": "The chosen constraint depends on the output path dependence risk, the repo authority evidence, and the window invariant evidence.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence",
+        "obs-repo-authority-04108e7",
+        "obs-window-invariant"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-oracle-topology-constraint",
+          "kind": "depends_on"
+        },
+        {
+          "from": "obs-oracle-topology-constraint",
+          "kind": "depends_on"
+        },
+        {
+          "from": "obs-oracle-topology-constraint",
+          "kind": "depends_on"
+        }
+      ]
+    },
+    {
+      "question_id": "qi2-rereview",
+      "answer": "If the constraint changes, the output path dependence risk must be re-reviewed because it blocks the constraint.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-output-path-dependence",
+          "kind": "blocks"
+        }
+      ]
+    }
+  ]
+}
+```
