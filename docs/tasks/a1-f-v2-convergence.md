@@ -502,7 +502,7 @@ determines ranks, edges, imported roots, closure and digest domains.
 ```yaml
 phase_g:
   document: docs/tasks/a1-f-v2-phase-g.md
-  status:   DECIDED (revision G-R2), awaiting re-review
+  status:   DECIDED (revision G-R5), awaiting re-review
   review_1: CHANGES_REQUESTED — four P1s, all accepted; the central
             conclusion changed from 13 envelope kinds to 11
   review_2: CHANGES_REQUESTED — two P1s, both accepted; the count was not
@@ -513,6 +513,16 @@ phase_g:
             against the prototype instead of the frozen contract. Node
             universe, count, support boundary, binding lifecycle, wrapper
             boundary and rank model all APPROVED and unchanged
+  review_5: CHANGES_REQUESTED — two P1s, both accepted. The field-path
+            deferral was APPROVED, but the rebuilt ledger stopped at node
+            CLASSES (near-cartesian, and not even a superset — it had no
+            event-payload -> message row while frozen
+            CampaignTerminalErrorPayloadV1.evidence_refs carries rank <= 4),
+            and its 40 KEEP dispositions conflated a reference SURFACE with a
+            semantic relation. Closed by a new layer: the semantic edge
+            registry, 50 exact edges (39 Intra / 11 Causal), acyclicity
+            machine-checked over the 17 typed nodes, field paths still owed
+            to the v2 draft
   evidence: 37502e3 edge registry — 59 entries (53 envelope-source + 6 A2
             transition) plus a global AnyCommittedEnvelope causation rule;
             metric is "specific V0 consumer in-degree" with an explicit
@@ -533,11 +543,19 @@ phase_g:
                       a controller obligation, not a promotion argument, and
                       not an entry in the edge registry
     exact_edge_universe: baseline is the FROZEN contract, not the prototype —
-                      40 ArtifactRef slots extracted from blob 7db92f1b, all
-                      KEEP; the 59 prototype rows are evidence (15 match a
-                      frozen slot by name, 38 do not). Phase G closes the
-                      admissible node-pair universe; field-path spelling and
-                      the 38 unmatched proposals are owed by the v2 draft
+                      40 ArtifactRef slots extracted from blob 7db92f1b; the 59
+                      prototype rows are evidence (15 match a frozen slot by
+                      name, 38 do not). The 40 slots split 32 EXACT / 8 OPEN,
+                      and only the exact ones become semantic edges: a generic
+                      ArtifactRef-valued field creates no graph authority
+    semantic_registry: 50 edges, exact source kind -> exact target kind + class
+                      (39 Intra / 11 Causal), no wildcard and no class row.
+                      CampaignEventV1.source_ref is one field and eleven
+                      semantic edges, per frozen 3.15.1. Acyclicity checked by
+                      machine over the 17 typed nodes. Phase G closes edge
+                      MEANING; the v2 draft owes the field-path spelling, and
+                      every field must realize exactly one admitted edge —
+                      adding an unlisted relation reopens or supersedes Phase G
     campaign_event:   source-only log root, never an ArtifactRef target; its
                       payload is a legitimate target and is traversed by the
                       closure resolver under artifact-closure bounds

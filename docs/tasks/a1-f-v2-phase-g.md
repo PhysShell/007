@@ -1,11 +1,13 @@
 # A1-F v2 — Phase G: graph adjudication
 
-**Status: DECIDED (revision G-R4) — AWAITING RE-REVIEW.**
+**Status: DECIDED (revision G-R5) — AWAITING RE-REVIEW.**
 
-Four review rounds. G-R1 moved the count from 13 to 11; G-R2 corrected the
+Five review rounds. G-R1 moved the count from 13 to 11; G-R2 corrected the
 binding lifecycle and the rank domain; G-R3 attempted the exact edge universe
-and measured it against the wrong baseline; G-R4 rebuilds it on the frozen
-contract. See §9.
+and measured it against the wrong baseline; G-R4 rebuilt it on the frozen
+contract but stopped at node *classes*; G-R5 adds the layer that was missing —
+a closed registry of 50 exact semantic edges (§4.2), with field-path spelling
+still owed to the v2 draft. See §9.
 
 Phase G is one decision, written and reviewed on its own, before any v2 drafting.
 The node set determines ranks, edges, imported roots, closure and digest domains;
@@ -584,34 +586,31 @@ So the registry closes at the level that actually determines what Phase G owns �
 acyclicity, the rank domain, and closure traversal — and no further:
 
 ```text
-CLOSED by Phase G — the admissible node-pair universe
+CLOSED by Phase G — the semantic edge registry (§4.2)
 
-  message        -> message | typed support | external wrapper | CAS
-  typed support  -> message | typed support | external wrapper | CAS
-  event log root -> message | typed support | event payload | CAS
-  event payload  -> typed support | external wrapper | CAS
-  external wrapper, CAS                        terminal, no outgoing A1 edges
+  semantic edge := exact source kind -> exact target kind + edge class
+  field path    := the wire realization of an admitted semantic edge,
+                   decided by the v2 draft
 
-  edge classes   Intra (kind-level topological sort)
-                 Causal (per-instance create-before-reference)
+OWED to the v2 draft — an obligation, not a hope
 
-  the 40 frozen slots above are the V0 edge set, plus exactly the edges
-  §3.1's new object requires and nothing else
-
-OWED to the v2 draft — and owed as an obligation, not a hope
-
-  the field-path spelling of every slot, including CampaignRunBinding's own
-  each of the 38 unmatched prototype rows adjudicated REPLACEMENT / NEW / REJECT
-  the resulting registry re-checked against this node-pair universe
+  the field-path spelling of every admitted semantic edge
+  a proof that each field realizes exactly ONE admitted edge and adds none
 ```
 
-`typed support -> message` is in the list on evidence, not symmetry: frozen
-`ProviderExecutionReceiptV1` has no such slot, but §3.1's own argument used
-`ProviderInvocationReceipt.execution_cause.prior_verdict_ref → ReviewVerdict`,
-and if v2 adopts that proposal the pair must already be admissible. It is the
-one pair whose admission comes from a proposal rather than from the frozen
-inventory, and it is flagged so the v2 draft cannot treat it as settled by
-silence.
+G-R4 stopped one layer short of this and published a table of node *classes*
+instead — `message -> message | typed support | external | CAS` and three more
+rows like it. That is very nearly the cartesian product of the class set, and it
+cannot prove an `Intra` DAG: it says a message may reference a message, not
+which messages, so a two-cycle between two message kinds is not excluded by
+anything in it.
+
+It was also not even a superset of the graph it claimed to retain. Frozen
+`CampaignTerminalErrorPayloadV1.evidence_refs` carries `rank ≤ 4`, so an event
+payload may reference rank-3 and rank-4 objects — messages — while G-R4's table
+had no `event payload -> message` row at all. A class universe that forbids a
+frozen retained edge is not a widening of the model; it is a different model
+that happens to be vaguer.
 
 #### 4.1.4 `CampaignEventV1` is a source-only log root
 
@@ -654,6 +653,226 @@ if v2 adopts the prototype names   an explicit supersede of FD-1.9, with the
 ```
 
 Phase G does not decide it. Phase G refuses to let it happen by accident.
+
+### 4.2 The semantic edge registry
+
+**What this layer is.** Between "exact field path" and "four boxes of node
+classes" sits the layer that actually carries the graph:
+
+```text
+semantic edge := exact source semantic kind
+              -> exact target semantic kind (or a sanctioned open target)
+               + edge class (Intra | Causal)
+
+field path    := which field of which payload carries that relation
+```
+
+Phase G owns the first and not the second. That resolves G-R4's circularity
+without denying it: edge *meaning* now, field *spelling* later.
+
+#### 4.2.1 The frozen surfaces split two ways
+
+The 40-slot inventory of §4.1.1 is not 40 semantic edges. Eight of those slots
+are **open reference surfaces** — they name no target kind, and something other
+than the field itself decides what may appear there:
+
+```text
+envelope.artifact_refs                        FD-2.1 rank rule, fully generic
+CoderReport.claims[].evidence_refs            rank <= 2
+ReviewerReport.findings[].evidence_refs       rank <= 2
+CampaignFeedItem.subject_refs                 rank <= 4
+HumanAttentionRequest.evidence_refs           rank <= 4
+CampaignEventV1.evidence_refs                 rank <= 4
+CampaignTerminalErrorPayload.evidence_refs    rank <= 4
+ReviewRequest.evidence_refs                   no rank bound at all; the only
+                                              constraint is ordering — "contract,
+                                              diff, deterministic evidence first"
+```
+
+The last one is the sharpest case and was missed on this section's first pass.
+Seven are governed by rank; `ReviewRequestV1.evidence_refs` is governed by
+nothing but an ordering rule, so in v1 it admits *any* resolvable artifact. It
+is the reviewer's entire input surface, and it is the widest hole in the frozen
+graph.
+
+G-R4 marked all 40 `KEEP`, which conflated keeping a *field* with keeping a
+*graph relation*. None of these eight can be kept semantically unchanged. For
+seven, what admits their targets is the rank rule — and §4 already demoted rank
+from authority to derived property, so keeping them as written would let rank
+become the admission authority again through the one door the registry does not
+watch. For the eighth, there is not even a rank bound to demote.
+
+**Frozen for v2:**
+
+```text
+A generic ArtifactRef-valued field creates no graph authority.
+A field may realize only semantic edges admitted by the registry of §4.2.4.
+Rank admits nothing; it is computed from the registry and checked against it.
+```
+
+So the eight surfaces survive as *surfaces* — the v2 draft may keep, narrow or
+drop each one — while every target they may carry has to appear in the registry
+on its own account. `KEEP_SURFACE` and `KEEP_EXACT` are different dispositions,
+and only the second is a Phase G decision.
+
+That leaves **32 exact frozen slots**, and those are what §4.2.4 must account
+for, row by row.
+
+#### 4.2.2 The event log's per-event relations
+
+Frozen §3.15.1 already fixes, per `event_kind`, which artifact kind `source_ref`
+points at: `WorkOrderIssued → WorkOrder`, `CandidateAccepted → CandidateReceipt`,
+`ReviewVerdictAccepted → ReviewVerdict`, and so on for the eleven kinds that
+carry one. One field path, eleven distinct semantic edges — which is precisely
+why the semantic layer is the right one to freeze. They are `Causal`: the log
+references artifacts created before the entry, and create-before-reference is
+their acyclicity argument.
+
+#### 4.2.3 The 38 prototype rows, reduced to semantic proposals
+
+Each unmatched prototype row reduces to a claim of the form *source kind may
+reference target kind*, independent of what the field is called. Most are
+realizations of relations v1 already admits. Four are genuinely new relations,
+and under §1's default they are adjudicated here rather than passed on as
+spelling questions:
+
+| Semantic proposal | Disposition | Reason |
+|---|---|---|
+| `CorrectiveDirective → CandidateStateReceipt` / `MaterializationAttestation` | **ACCEPT** | v1's own R5.1 decided that a directive *starts* the coder execution rather than handing off to a fresh `WorkOrder`. An execution needs its input state, and only the `WorkOrder` carried one. The relation is required by a frozen decision, not by the prototype. |
+| `HumanAttentionRequest → CandidateStateReceipt` | **REJECT for V0** | v1 carries `candidate_head` as a `CommitId` plus rank-governed evidence. No V0 need for a typed A0 reference was shown; the v2 draft may propose it again with one. |
+| `HumanCommandRequest` / `HumanDecision → AuthenticatedPrincipal` | **REJECT for V0** | FD-15.2 deliberately records attestation as controller *observations*, not as a referenced object. A principal node is a new authority object, and §3 adjudicated none. |
+| `ReviewRequest → ContractBlob` (replacing `ScopeContract`) | **REJECT for V0** | `KEEP_V1_MODEL`. The frozen surface is `scope_ref → ScopeContractV1` with contract identity in the envelope digest; no argument for a second contract-bearing target was offered. |
+
+The remaining 34 rows are field-path proposals over already-admitted relations
+and go to the v2 draft untouched.
+
+#### 4.2.4 The registry
+
+50 semantic edges: 39 `Intra`, 11 `Causal`. Every edge is `exact source kind →
+exact target kind`; there is no wildcard row and no class row.
+
+| # | source semantic kind | target semantic kind | edge | origin |
+|---:|---|---|---|---|
+| 1 | `WorkOrder` | `CandidateStateReceipt` | Intra | frozen v1 |
+| 2 | `WorkOrder` | `MaterializationAttestation` | Intra | frozen v1 |
+| 3 | `WorkOrder` | `ScopeContract` | Intra | frozen v1 |
+| 4 | `CoderReport` | `ProviderExecutionReceipt` | Intra | frozen v1 |
+| 5 | `CoderReport` | `DiagnosticLog` | Intra | frozen v1 |
+| 6 | `CandidateReceipt` | `CandidateStateReceipt` | Intra | frozen v1 |
+| 7 | `CandidateReceipt` | `CoderReport` | Intra | frozen v1 |
+| 8 | `ReviewRequest` | `CandidateReceipt` | Intra | frozen v1 |
+| 9 | `ReviewRequest` | `ScopeContract` | Intra | frozen v1 |
+| 10 | `ReviewRequest` | `CoderReport` | Intra | frozen v1 |
+| 11 | `ReviewerReport` | `ProviderExecutionReceipt` | Intra | frozen v1 |
+| 12 | `ReviewVerdict` | `ReviewerReport` | Intra | frozen v1 |
+| 13 | `CorrectiveDirective` | `ReviewVerdict` | Intra | frozen v1 |
+| 14 | `CorrectiveDirective` | `ScopeContract` | Intra | frozen v1 |
+| 15 | `HumanDecision` | `HumanCommandRequest` | Intra | frozen v1 |
+| 16 | `ProviderExecutionReceipt` | `InteractionManifest` | Intra | frozen v1 |
+| 17 | `ProviderExecutionReceipt` | `NormalizedOutput` | Intra | frozen v1 |
+| 18 | `ProviderExecutionReceipt` | `CanonicalRequest` | Intra | frozen v1 |
+| 19 | `ProviderExecutionReceipt` | `RawProviderBytes` | Intra | frozen v1 |
+| 20 | `ProviderExecutionReceipt` | `UsageRecord` | Intra | frozen v1 |
+| 21 | `ProviderExecutionReceipt` | `CostRecord` | Intra | frozen v1 |
+| 22 | `InteractionManifest` | `ProviderMessage` | Intra | frozen v1 |
+| 23 | `InteractionManifest` | `ToolArguments` | Intra | frozen v1 |
+| 24 | `InteractionManifest` | `ToolResult` | Intra | frozen v1 |
+| 25 | `CampaignEventPayload` | `ScopeContract` | Intra | frozen v1 |
+| 26 | `CampaignEventPayload` | `ProviderExecutionReceipt` | Intra | frozen v1 |
+| 27 | `CampaignEventPayload` | `GateLog` | Intra | frozen v1 |
+| 28 | `CampaignEventPayload` | `CiObservation` | Intra | frozen v1 |
+| 29 | `CampaignEventPayload` | `DetailDocument` | Intra | frozen v1 |
+| 30 | `CampaignEventPayload` | `TerminationObservation` | Intra | frozen v1 |
+| 31 | `CampaignEventLog` | `WorkOrder` | Causal | frozen v1 |
+| 32 | `CampaignEventLog` | `CoderReport` | Causal | frozen v1 |
+| 33 | `CampaignEventLog` | `CandidateReceipt` | Causal | frozen v1 |
+| 34 | `CampaignEventLog` | `ReviewRequest` | Causal | frozen v1 |
+| 35 | `CampaignEventLog` | `ReviewerReport` | Causal | frozen v1 |
+| 36 | `CampaignEventLog` | `ReviewVerdict` | Causal | frozen v1 |
+| 37 | `CampaignEventLog` | `CorrectiveDirective` | Causal | frozen v1 |
+| 38 | `CampaignEventLog` | `HumanAttentionRequest` | Causal | frozen v1 |
+| 39 | `CampaignEventLog` | `HumanDecision` | Causal | frozen v1 |
+| 40 | `CampaignEventLog` | `HumanCommandRequest` | Causal | frozen v1 |
+| 41 | `CampaignEventLog` | `CampaignFeedItem` | Causal | frozen v1 |
+| 42 | `CampaignEventLog` | `CampaignEventPayload` | Intra | frozen structure (§4.1.4) |
+| 43 | `CandidateReceipt` | `CampaignRunBinding` | Intra | §3.1 new object |
+| 44 | `ProviderExecutionReceipt` | `CampaignRunBinding` | Intra | §3.1 new object |
+| 45 | `CampaignRunBinding` | `CandidateStateReceipt` | Intra | §3.1 new object |
+| 46 | `CampaignRunBinding` | `MaterializationAttestation` | Intra | §3.1 new object |
+| 47 | `CampaignRunBinding` | `RunContractCandidateState` | Intra | §3.1 new object |
+| 48 | `CampaignRunBinding` | `WorktreeCorrespondence` | Intra | §3.1 new object |
+| 49 | `CorrectiveDirective` | `CandidateStateReceipt` | Intra | accepted proposal (§4.2.3) |
+| 50 | `CorrectiveDirective` | `MaterializationAttestation` | Intra | accepted proposal (§4.2.3) |
+
+**Reconciliation against §4.1.1.** The registry is not a fresh list; it must
+account for every one of the 32 exact frozen slots and add nothing silently.
+Slot-to-row, with the four places the mapping is not one-to-one:
+
+```text
+32 exact frozen slots
+  -> rows 1-30      28 slots, one row each
+  -> rows 4, 11     envelope.provider_execution_receipt_ref is one slot but is
+                    required iff role in {coder, reviewer} — exactly two kinds
+                    carry it, so one slot, two edges
+  -> row 17         PER.final_normalized_output_ref and PER.normalized_output_ref
+                    are two slots onto one target kind
+  -> row 22         IM interaction_sequence[].input_ref and .output_ref, likewise
+  -> rows 31-41     CampaignEventV1.source_ref is one slot and eleven edges,
+                    per frozen 3.15.1 (4.2.2)
+
+8 open surfaces     no rows, by the rule above
+
+rows not backed by a frozen slot
+  42                the payload's containment in its event — frozen structure,
+                    not an ArtifactRef slot (4.1.4)
+  43-48             CampaignRunBinding, the one new object 3.1 admits
+  49-50             the one accepted proposal of 4.2.3
+```
+
+Every row is therefore traceable to a frozen slot, a frozen structural relation,
+a §3 adjudication, or a §4.2.3 acceptance. There is no fourth origin, and a row
+without one of those four is a defect.
+
+#### 4.2.5 Acyclicity, proved
+
+The `Intra` acyclicity obligation binds the typed-node subgraph: the eleven
+message kinds, the five typed supports (`ProviderExecutionReceipt`,
+`InteractionManifest`, `ScopeContract`, `CampaignRunBinding`,
+`CampaignEventPayload`) and the log root — 17 nodes. The other 17 nodes the
+registry mentions are graph-terminal (CAS blobs, A0/R1 wrappers, the external
+observations of §5.1) and have no outgoing edges by construction.
+
+Machine check over the 50 rows above, by Kahn's algorithm rather than by
+inspection:
+
+```text
+total edges: 50   Intra: 39   Causal: 11
+typed nodes: 17
+Intra edges among typed nodes: 17
+topologically sorted: True   ordered: 17 / 17
+distinct nodes: 34   typed: 17   terminal: 17
+```
+
+`Causal` edges are excluded from that subgraph by construction — all eleven
+issue from the log root, which is never a target (§4.1.4) — and carry their own
+per-instance create-before-reference argument (§4).
+
+Two typed nodes are isolated in the `Intra` subgraph: `HumanAttentionRequest`
+and `CampaignFeedItem` reach other artifacts only through the rank-governed open
+surfaces of §4.2.1, and those surfaces confer no edges. That is the rule of
+§4.2.1 doing visible work: if the v2 draft wants either object to reference
+anything in particular, it has to come back here and say which.
+
+#### 4.2.6 The obligation this places on the v2 draft
+
+```text
+Every ArtifactRef-valued field in v2 must realize exactly one semantic edge
+admitted by §4.2.4.
+
+A field that would realize an unlisted relation is not a drafting choice.
+It reopens Phase G, or it supersedes it — and either way it is a decision
+somebody makes on the record, not a slot somebody adds to a struct.
+```
 
 ## 5. Q4 + Q5 — imported roots, closure, and the typed external boundary
 
@@ -752,44 +971,137 @@ the failure this phase exists to prevent.
 - whether the import mechanism of §3.4 exists as a controller procedure — only
   that it does not exist as a node.
 
-## 8. For the independent reviewer (revision G-R4)
+## 8. For the independent reviewer (revision G-R5)
 
-Node universe, the count of eleven, the support boundary, the binding lifecycle
-class, the wrapper boundary and the rank model have all been approved. What is
-left is §4.1. Attack these, in order:
+The node universe, the count of eleven, the support boundary, the binding
+lifecycle class, the wrapper boundary, the rank model, the 40-slot frozen
+inventory and the field-path deferral have all been reviewed and approved. What
+is new and unreviewed is **§4.2, the semantic edge registry**. Attack it, in
+order:
 
-0. **§4.1.1, the frozen inventory.** 40 slots, derived from blob `7db92f1b`, and
-   the derivation was wrong once already (34, then six more found in combined
-   rows). Re-derive it independently. If the count differs, everything built on
-   it differs.
-1. **§4.1.3, the boundary claim.** Phase G closes the node-pair universe and
-   hands field-path spelling to the v2 draft, arguing that an exact registry is
-   keyed by field path and field paths are payload schema. Is that a real
-   circularity or a second deferral wearing an argument? The strongest attack is
-   to show a field path Phase G *could* have fixed without deciding a payload.
-2. **§4.1.3's `typed support -> message` pair.** It is admitted on the strength
-   of a prototype proposal rather than a frozen slot. Should an unadopted
-   proposal be able to widen the admissible universe at all?
-
-1. **§3.1, `CampaignRunBinding` as support rather than message.** The negative is
-   the load-bearing claim: *no* V0 invariant needs a `message_id`, envelope
-   causation and an acceptance lifecycle here. One counterexample overturns it.
-   G-R2 already found the near miss — binding uniqueness had been placed after
-   dispatch — and repaired it as a controller obligation rather than a promotion.
-   Is that repair sufficient, or does durable pre-dispatch admission smuggle in a
-   message lifecycle under another name?
-2. **§3.2, `ProviderInvocationReceipt` staying a support object.** Same shape: is
-   there an envelope-specific invariant that neither pass has looked for?
-3. **§2, the metric.** `specific V0 consumer in-degree` now has an explicit
-   exclusion rule. Re-derive it independently and check the numbers — that is
-   what the previous round's exclusions were missing.
-4. **§3.4, `ArtifactImported` as NOT PROVEN.** Zero specific-consumer degree is
-   strong, but the design input is a prototype: is there a real V0 import
-   consumer merely unwired, which would make this premature?
-5. **§4, derived rank over the Intra subgraph only.** Does anything need a rank
-   across Causal edges, which by construction cannot have one?
+1. **The 32/8 split, and the reconciliation at the end of §4.2.4.** The split of
+   the 40 slots into 32 exact and 8 open is the load-bearing move, and it was
+   wrong once already inside this very revision — the first pass listed seven
+   and missed `ReviewRequestV1.evidence_refs`, which has no rank bound at all.
+   Re-derive it from blob `7db92f1b`. Then check the reconciliation both ways: a
+   frozen exact slot with no row is a silently dropped relation; a row with no
+   frozen slot, no §3 adjudication and no §4.2.3 acceptance is a silently added
+   one.
+2. **§4.2.1, the rule that a generic `ArtifactRef` field creates no graph
+   authority.** It leaves `HumanAttentionRequest` and `CampaignFeedItem`
+   isolated in the `Intra` subgraph, and it puts the reviewer's whole input
+   surface — `ReviewRequest.evidence_refs`, ordered but unbounded — outside the
+   registry. Is that a correct reading of v1, or has Phase G narrowed the graph
+   while calling it a boundary? The strongest attack is a V0 flow that needs one
+   of those references *specifically* and can no longer state it. The reviewer
+   dispatch is the place to look.
+3. **§4.2.3, the four adjudicated proposals.** The one `ACCEPT` rests on R5.1:
+   a `CorrectiveDirective` starts a coder execution, so it needs an input
+   state. Does that argument actually require a *typed reference*, or would the
+   frozen `candidate_head` `CommitId` carry it? If the latter, edges 49–50 are
+   an unforced widening.
+4. **§4.2.5, the acyclicity proof.** It binds only the 17 typed nodes. Verify
+   the classification, not just the sort — a node wrongly called terminal is a
+   cycle the check cannot see. `CampaignEventPayload` is the one to press: it is
+   both a target of the log root and a source of six edges.
+5. **The eleven `Causal` rows against frozen §3.15.1.** Eleven of the twenty-one
+   `event_kind` entries carry a `source_ref` target. Confirm the count and the
+   pairing; a missing pair is a relation the closure resolver would traverse
+   with nothing admitting it.
+6. **§4.2.6's obligation.** Is "exactly one admitted semantic edge per field"
+   checkable at v2 drafting time, or does it need a machine artefact (a table
+   the draft is diffed against) to be more than an intention?
 
 ## 9. Revision record
+
+### G-R5 — fifth independent review, two P1s
+
+`CHANGES_REQUESTED`. The review accepted the field-path deferral of §4.1.3 as a
+real circularity rather than a dodge — and then showed that G-R4 had retreated
+one layer further than the circularity forced.
+
+**P1-10 — the class table is not a registry, and was not even a superset.**
+G-R4 published `message -> message | typed support | external | CAS` and three
+sibling rows. That is very nearly the cartesian product of the class set, and it
+cannot discharge the acyclicity obligation: it says a message may reference a
+message, not *which* messages, so nothing in it excludes a two-cycle between two
+message kinds. Verified against the frozen blob, it was also not a widening of
+the retained graph but a different one. Line 2019 of blob `7db92f1b`:
+
+```text
+| `evidence_refs` | `[ArtifactRef]` | yes (may be empty) | rank <= 4; <= 256 |
+```
+
+That is `CampaignTerminalErrorPayloadV1` — an event payload admitting rank-3 and
+rank-4 targets, i.e. messages. G-R4's table carried no `event payload ->
+message` row at all. A class universe that forbids a frozen retained edge is not
+a coarser model of the same graph.
+
+**P1-11 — 40 `KEEP` conflated a surface with a semantic relation.** §4.1.1's
+inventory is 40 `ArtifactRef`-valued *slots*, and G-R4 marked every one `KEEP`.
+Eight of them are not exact relations at all but open surfaces:
+`envelope.artifact_refs`, the two report `evidence_refs`,
+`CampaignFeedItem.subject_refs`, `HumanAttentionRequest.evidence_refs`,
+`CampaignEventV1.evidence_refs`, the terminal-error payload above — all admitted
+by the rank rule — and `ReviewRequestV1.evidence_refs`, which carries no rank
+bound at all and is constrained only by an ordering requirement. Keeping the
+first seven "unchanged" keeps rank as the admission authority, through the one
+door the registry does not watch, after §4 demoted rank to a derived property.
+Keeping the eighth unchanged keeps an unbounded surface on the reviewer's input.
+`KEEP_SURFACE` and `KEEP_EXACT` are now distinct dispositions, and only the
+second is a Phase G decision; the split is 8 open, 32 exact.
+
+**What G-R5 adds.** One new layer between the §4.1.1 inventory and the wire
+obligations, not a fifth rebuild of the document:
+
+- **§4.2** — the semantic edge layer: `exact source kind -> exact target kind
+  (or a sanctioned open target) + edge class`. Field paths stay with the v2
+  draft; edge *meaning* is closed here.
+- **§4.2.1** — the eight open surfaces are separated from the 32 exact slots,
+  under a frozen rule: *a generic `ArtifactRef`-valued field creates no graph
+  authority; a field may realize only semantic edges admitted by §4.2.4; rank
+  admits nothing and is checked against the registry rather than consulted by
+  it.*
+- **§4.2.2** — the event log's per-event relations are enumerated from frozen
+  §3.15.1 rather than treated as one generic `source_ref`: eleven of the
+  twenty-one `event_kind` entries carry a target, so one field path is eleven
+  semantic edges, all `Causal`.
+- **§4.2.3** — the 38 unmatched prototype rows are reduced to semantic
+  proposals. Four are genuinely new relations and are adjudicated here under
+  §1's default rather than passed on as spelling: `CorrectiveDirective ->
+  CandidateStateReceipt` / `MaterializationAttestation` **ACCEPT** (R5.1 made
+  the directive start an execution, and an execution needs its input state);
+  `HumanAttentionRequest -> CandidateStateReceipt`, `Human* ->
+  AuthenticatedPrincipal`, and `ReviewRequest -> ContractBlob` all **REJECT for
+  V0**. The remaining 34 are field-path proposals over already-admitted
+  relations.
+- **§4.2.4** — the registry: 50 edges, 39 `Intra` and 11 `Causal`, no wildcard
+  and no class row, closed with a reconciliation that traces every row to one of
+  exactly four origins.
+- **§4.2.5** — acyclicity by machine rather than by inspection. Kahn over the
+  17 typed nodes and the 17 `Intra` edges among them sorts completely; the other
+  17 nodes the registry mentions are graph-terminal by construction.
+
+**Two drafting errors caught inside this revision**, before commit, and recorded
+rather than quietly fixed — the whole point of this layer is that a relation
+nobody argued for cannot enter the graph, and both of these were exactly that:
+
+1. The first §4.2.4 table closed at 49 rows with `ProviderExecutionReceipt ->
+   ReviewVerdict` marked `Causal` and sourced to "accepted proposal" — a
+   relation §4.2.3 never proposed — while the two edges it did accept were
+   missing. Corrected to 50 rows.
+2. §4.2.1 first listed seven open surfaces and called them all rank-governed.
+   `ReviewRequestV1.evidence_refs` is an eighth, and it is the one with no rank
+   bound at all: frozen §3.4 constrains it only by ordering. Found by requiring
+   the registry to reconcile slot-by-slot against §4.1.1 instead of asserting a
+   count — 32 exact + 8 open = 40 balances; 33 + 7 did not.
+
+Both were self-caught by the reconciliation now published at the end of §4.2.4,
+which is the check the reviewer should run first (§8.1).
+
+**P2 carried out of this round.** `docs/tasks/a1-f-v2-convergence.md` still
+described itself as `status: DECIDED (revision G-R2), awaiting re-review` while
+listing `review_3` and `review_4`. Corrected in this commit.
 
 ### G-R4 — fourth independent review, one P1
 
