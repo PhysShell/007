@@ -294,7 +294,7 @@ Illustrative shape:
 
 Every selected item must have:
 
-- a stable identity;
+- a **re-resolvable identity** (see below);
 - repository commit;
 - source location or artifact pointer;
 - producing extractor and version;
@@ -302,6 +302,32 @@ Every selected item must have:
 - plain-language selection reasons;
 - trust level;
 - content hash where practical.
+
+#### Identity is re-resolvable, not stable
+
+An earlier version of this list required "a stable identity". Nothing in a
+repository provides one: symbols are renamed, files move, spans shift, and a
+field named for a guarantee it cannot keep invites callers to trust it. The
+requirement is therefore stated as a *resolution contract*:
+
+- an item's identity must be **re-resolvable** against a later revision by a
+  declared procedure;
+- the outcome of that procedure is explicit and distinguishes at least
+  **resolved**, **resolved-degraded** (matched by a weaker means than the
+  primary one), and **unresolved**;
+- a degraded or unresolved outcome is recorded and visible to the consumer — it
+  is never silently upgraded into a match.
+
+A rename must be able to produce *unresolved*. That is the point: an item that
+cannot be resolved is a question for a human or an explicit re-binding decision,
+whereas a clever near-match quietly attaches a claim to the wrong code.
+
+Required by **REQ-4** and **REQ-5** in `docs/memory-plane-record.md` §3
+(ratified 2026-08-10, bound to design revision `219953e`): authority-appropriate
+identity, and invalidation causes that keep *stale*, *unresolved* and *invalid*
+distinguishable. The concrete locator and resolution-result types sketched in
+that document's §4 are candidate architecture and are **not** imported here —
+this section constrains the semantics, not the struct.
 
 The IR must distinguish:
 
