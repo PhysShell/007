@@ -1,0 +1,33 @@
+[package]
+name = "o7-a1-contracts"
+version = "0.1.0"
+edition = "2021"
+description = "007 A1 wire contract seed: the frozen envelope, artifact refs, closed kind enums, framing digests, and the parse policy that refuses an artifact rather than understanding it partially."
+publish = false
+
+[lib]
+name = "o7_a1_contracts"
+path = "src/lib.rs"
+
+# Same discipline as o7-run, and for the same reason: this crate is a wire
+# contract, not a runtime. It depends on nothing heavy so that a second
+# implementation could be checked against it without inheriting a process model.
+[dependencies]
+o7-run = { path = "../o7-run" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
