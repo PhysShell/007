@@ -276,15 +276,34 @@ impl ArtifactKindV1 {
         Self::DetailDocument,
     ];
 
-    /// Whether this kind names a **typed A1 payload** that carries no envelope
-    /// of its own — the execution receipt (§3.12), the scope contract (§3.13),
-    /// and a campaign event payload (§3.15).
+    /// Whether this kind names a **typed A1 artifact** — the eleven message
+    /// kinds plus the four typed non-envelope objects of FD-1.9.
     ///
-    /// These are bounded by FD-1.4's control-artifact maximum, not by the
-    /// evidence-blob maximum. `interaction_manifest` is excluded: FD-1.4 names
-    /// "manifest" in its evidence-blob line.
+    /// This is the classification FD-1.7 uses: a typed artifact's media type is
+    /// fixed by its kind and version. Evidence blobs and imported A0 objects
+    /// "carry their own concrete type" and are not constrained.
     #[must_use]
-    pub fn is_typed_payload(self) -> bool {
+    pub fn is_typed_artifact(self) -> bool {
+        self.is_envelope_bearing()
+            || matches!(
+                self,
+                Self::ProviderExecutionReceipt
+                    | Self::InteractionManifest
+                    | Self::ScopeContract
+                    | Self::CampaignEventPayload
+            )
+    }
+
+    /// Whether FD-1.4's **control-artifact** size bound applies, rather than the
+    /// evidence-blob one.
+    ///
+    /// Deliberately *not* the same set as [`Self::is_typed_artifact`]:
+    /// `interaction_manifest` is a typed artifact for FD-1.7 media-type
+    /// purposes, but FD-1.4 names "manifest" in its evidence-blob line, so it
+    /// keeps the larger size bound. Two questions, two classifications —
+    /// collapsing them is what let a manifest ref declare any media type at all.
+    #[must_use]
+    pub fn has_control_size_bound(self) -> bool {
         matches!(
             self,
             Self::ProviderExecutionReceipt | Self::ScopeContract | Self::CampaignEventPayload

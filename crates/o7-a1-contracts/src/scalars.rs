@@ -25,7 +25,7 @@ use std::marker::PhantomData;
 
 use serde::{Deserialize, Serialize, Serializer};
 
-use crate::bounds::{MAX_ID_BYTES, MAX_STRING_BYTES};
+use crate::bounds::{MAX_ARRAY_LEN, MAX_ID_BYTES, MAX_STRING_BYTES};
 
 pub use o7_run::event::{Digest256, DigestFormatError};
 
@@ -52,6 +52,8 @@ pub enum ScalarError {
     NonHexCommitId { offset: usize },
     #[error("a Digest256 must be exactly 64 lowercase hex chars, got a {actual}-byte string")]
     MalformedDigest { actual: usize },
+    #[error("a bounded collection must have <= {max} entries, got {actual}")]
+    TooManyEntries { actual: usize, max: usize },
 }
 
 /// §3 — "opaque non-empty UTF-8 string, never parsed for meaning", ≤ 256 bytes.
@@ -336,6 +338,93 @@ impl<'de, const V: u32> Deserialize<'de> for FrozenVersion<V> {
                 "unsupported version {raw}, expected {V}: refused rather than parsed as well as we can (FD-1.6)"
             )))
         }
+    }
+}
+
+/// A collection bounded by `MAX` entries, enforced at deserialization.
+///
+/// A container bound is neither a byte-level rule nor a cross-field rule, so it
+/// belongs in neither the admission path nor `validate()`: it is a property of
+/// the field itself, and a field's properties are enforced by its type. Before
+/// this existed, `serde_json::from_slice::<EnvelopeV1>` could build an envelope
+/// with more `artifact_refs` than FD-1.4 permits, because the count was checked
+/// only by a validator that path never reaches.
+///
+/// The bound is also capped by the global FD-1.4 array maximum, so no schema can
+/// widen it by choosing a larger `MAX`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct BoundedVec<T, const MAX: usize>(Vec<T>);
+
+impl<T, const MAX: usize> BoundedVec<T, MAX> {
+    /// # Errors
+    /// [`ScalarError::TooManyEntries`] above `MAX` (or above the global FD-1.4
+    /// array bound, whichever is smaller).
+    pub fn new(items: Vec<T>) -> Result<Self, ScalarError> {
+        let max = if MAX < MAX_ARRAY_LEN {
+            MAX
+        } else {
+            MAX_ARRAY_LEN
+        };
+        if items.len() > max {
+            return Err(ScalarError::TooManyEntries {
+                actual: items.len(),
+                max,
+            });
+        }
+        Ok(Self(items))
+    }
+
+    /// An empty collection — always admissible.
+    #[must_use]
+    pub fn empty() -> Self {
+        Self(Vec::new())
+    }
+
+    #[must_use]
+    pub fn as_slice(&self) -> &[T] {
+        &self.0
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<'_, T> {
+        self.0.iter()
+    }
+}
+
+impl<'a, T, const MAX: usize> IntoIterator for &'a BoundedVec<T, MAX> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl<T, const MAX: usize> TryFrom<Vec<T>> for BoundedVec<T, MAX> {
+    type Error = ScalarError;
+
+    fn try_from(items: Vec<T>) -> Result<Self, Self::Error> {
+        Self::new(items)
+    }
+}
+
+impl<'de, T: Deserialize<'de>, const MAX: usize> Deserialize<'de> for BoundedVec<T, MAX> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let items = Vec::<T>::deserialize(deserializer)?;
+        Self::new(items).map_err(serde::de::Error::custom)
     }
 }
 

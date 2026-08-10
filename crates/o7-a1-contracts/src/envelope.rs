@@ -25,9 +25,13 @@ use crate::json::WireArtifact;
 use crate::kind::{MessageKindV1, ProducerRole};
 use crate::refs::{ArtifactRef, RefError};
 use crate::scalars::{
-    AdapterVersion, CommitId, Digest256, FrozenVersion, Id, ModelIdentity, Optional, Timestamp,
-    WireDigest,
+    AdapterVersion, BoundedVec, CommitId, Digest256, FrozenVersion, Id, ModelIdentity, Optional,
+    Timestamp, WireDigest,
 };
+
+/// `artifact_refs`, bounded by FD-1.4 at deserialization rather than by a
+/// validator a direct `serde_json::from_slice` never reaches.
+pub type ArtifactRefs = BoundedVec<ArtifactRef, MAX_ARTIFACT_REFS>;
 
 /// FD-1.6 — the frozen envelope framing and field set.
 pub const ENVELOPE_VERSION_V1: u32 = 1;
@@ -55,8 +59,6 @@ pub enum EnvelopeError {
         field: &'static str,
         role: &'static str,
     },
-    #[error("artifact_refs has {actual} entries, exceeding {MAX_ARTIFACT_REFS}")]
-    TooManyRefs { actual: usize },
     #[error("artifact_refs[{index}] is invalid: {source}")]
     BadRef {
         index: usize,
@@ -76,7 +78,93 @@ pub enum EnvelopeError {
 /// recorded on the acceptance record (FD-5.4). Neither is anything the payload
 /// owns — "payloads never restate an envelope-owned field" (FD-5.3), and the
 /// converse holds too.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// The wire form of [`EnvelopeV1`]: identical fields, no cross-field rules.
+///
+/// Private, and the only thing serde ever deserializes. `EnvelopeV1`'s own
+/// `Deserialize` goes through it and then runs [`EnvelopeV1::validate`], so
+/// **every** route from bytes to an `EnvelopeV1` enforces the cross-field rules
+/// — including `serde_json::from_slice`, which no admission function can
+/// intercept.
+///
+/// The duplication is the price of that guarantee. `From` below is written
+/// field by field, so a field added to one struct and not the other fails to
+/// compile, and a round-trip test catches a field that exists only on the
+/// public type.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnvelopeWireV1 {
+    envelope_version: EnvelopeVersion,
+    message_kind: MessageKindV1,
+    message_kind_version: MessageKindVersion,
+    message_id: Id,
+    root_goal_id: Id,
+    task_id: Id,
+    campaign_id: Id,
+    #[serde(default)]
+    round_id: Optional<Id>,
+    #[serde(default)]
+    causation_id: Optional<Id>,
+    correlation_id: Id,
+    producer_role: ProducerRole,
+    producer_execution_id: Id,
+    producer_adapter_version: AdapterVersion,
+    #[serde(default)]
+    model_identity: Optional<ModelIdentity>,
+    #[serde(default)]
+    prompt_digest: Optional<WireDigest>,
+    #[serde(default)]
+    tool_policy_digest: Optional<WireDigest>,
+    contract_digest: WireDigest,
+    #[serde(default)]
+    expected_input_head: Optional<CommitId>,
+    payload_digest: WireDigest,
+    artifact_refs: ArtifactRefs,
+    #[serde(default)]
+    provider_execution_receipt_ref: Optional<ArtifactRef>,
+    created_at: Timestamp,
+}
+
+impl From<EnvelopeWireV1> for EnvelopeV1 {
+    fn from(w: EnvelopeWireV1) -> Self {
+        Self {
+            envelope_version: w.envelope_version,
+            message_kind: w.message_kind,
+            message_kind_version: w.message_kind_version,
+            message_id: w.message_id,
+            root_goal_id: w.root_goal_id,
+            task_id: w.task_id,
+            campaign_id: w.campaign_id,
+            round_id: w.round_id,
+            causation_id: w.causation_id,
+            correlation_id: w.correlation_id,
+            producer_role: w.producer_role,
+            producer_execution_id: w.producer_execution_id,
+            producer_adapter_version: w.producer_adapter_version,
+            model_identity: w.model_identity,
+            prompt_digest: w.prompt_digest,
+            tool_policy_digest: w.tool_policy_digest,
+            contract_digest: w.contract_digest,
+            expected_input_head: w.expected_input_head,
+            payload_digest: w.payload_digest,
+            artifact_refs: w.artifact_refs,
+            provider_execution_receipt_ref: w.provider_execution_receipt_ref,
+            created_at: w.created_at,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for EnvelopeV1 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let envelope = Self::from(EnvelopeWireV1::deserialize(deserializer)?);
+        envelope.validate().map_err(serde::de::Error::custom)?;
+        Ok(envelope)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnvelopeV1 {
     pub envelope_version: EnvelopeVersion,
@@ -104,7 +192,7 @@ pub struct EnvelopeV1 {
     #[serde(default, skip_serializing_if = "Optional::is_absent")]
     pub expected_input_head: Optional<CommitId>,
     pub payload_digest: WireDigest,
-    pub artifact_refs: Vec<ArtifactRef>,
+    pub artifact_refs: ArtifactRefs,
     #[serde(default, skip_serializing_if = "Optional::is_absent")]
     pub provider_execution_receipt_ref: Optional<ArtifactRef>,
     pub created_at: Timestamp,
@@ -188,11 +276,8 @@ impl EnvelopeV1 {
             }
         }
 
-        if self.artifact_refs.len() > MAX_ARTIFACT_REFS {
-            return Err(EnvelopeError::TooManyRefs {
-                actual: self.artifact_refs.len(),
-            });
-        }
+        // The count itself is bounded by `ArtifactRefs` at deserialization
+        // (FD-1.4), so what remains here is each entry's own admissibility.
         for (index, r) in self.artifact_refs.iter().enumerate() {
             r.validate()
                 .map_err(|source| EnvelopeError::BadRef { index, source })?;

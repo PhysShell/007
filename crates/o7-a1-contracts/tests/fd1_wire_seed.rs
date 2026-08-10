@@ -22,9 +22,9 @@ use o7_a1_contracts::bounds::{
 };
 use o7_a1_contracts::{
     parse_artifact, typed_media_type, validate_document, AdapterVersion, ArtifactKindV1,
-    ArtifactRef, BudgetPolicy, BudgetPolicyError, CommitId, EnvelopeError, EnvelopeV1,
-    EnvelopeVersion, Id, MessageKindV1, MessageKindVersion, ModelIdentity, Optional, ParseError,
-    ProducerRole, Timestamp, WireDigest,
+    ArtifactRef, ArtifactRefs, BudgetPolicy, BudgetPolicyError, CommitId, EnvelopeError,
+    EnvelopeV1, EnvelopeVersion, Id, MessageKindV1, MessageKindVersion, ModelIdentity, Optional,
+    ParseError, ProducerRole, Timestamp, WireDigest,
 };
 
 fn id(s: &str) -> Id {
@@ -74,7 +74,7 @@ fn controller_envelope() -> EnvelopeV1 {
         contract_digest: digest("contract"),
         expected_input_head: CommitId::parse(&"a".repeat(40)).ok().into(),
         payload_digest: WireDigest::of_bytes(b"{}"),
-        artifact_refs: vec![],
+        artifact_refs: ArtifactRefs::empty(),
         provider_execution_receipt_ref: Optional::absent(),
         created_at: Timestamp::parse("2026-08-09T20:00:00Z").expect("fixture timestamp"),
     }
@@ -233,8 +233,8 @@ fn a_payload_over_its_bound_is_rejected_not_truncated() {
 
 #[test]
 fn too_many_artifact_refs_are_rejected() {
-    let mut env = controller_envelope();
-    env.artifact_refs = (0..=MAX_ARTIFACT_REFS)
+    let env = controller_envelope();
+    let too_many: Vec<ArtifactRef> = (0..=MAX_ARTIFACT_REFS)
         .map(|i| ArtifactRef {
             kind: ArtifactKindV1::Diff,
             media_type: "text/x-diff".to_owned(),
@@ -242,10 +242,22 @@ fn too_many_artifact_refs_are_rejected() {
             size: 1,
         })
         .collect();
-    assert!(matches!(
-        env.validate(),
-        Err(EnvelopeError::TooManyRefs { .. })
-    ));
+    // The bound is on the type, so an over-long list cannot even be built.
+    assert!(ArtifactRefs::new(too_many.clone()).is_err());
+    let within: Vec<ArtifactRef> = too_many.iter().take(MAX_ARTIFACT_REFS).cloned().collect();
+    assert!(ArtifactRefs::new(within).is_ok());
+
+    // ...and it is refused on the wire, including through the direct door.
+    let mut value = serde_json::to_value(env).expect("fixture must serialize");
+    if let Some(map) = value.as_object_mut() {
+        map.insert(
+            "artifact_refs".to_owned(),
+            serde_json::to_value(&too_many).expect("refs must serialize"),
+        );
+    }
+    let bytes = value.to_string().into_bytes();
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(serde_json::from_slice::<EnvelopeV1>(&bytes).is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -376,12 +388,13 @@ fn every_framed_field_changes_the_identity() {
     assert_ne!(d, round.framed_digest(), "round_id absent vs present");
 
     let mut refs = base.clone();
-    refs.artifact_refs = vec![ArtifactRef {
+    refs.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
         kind: ArtifactKindV1::Diff,
         media_type: "text/x-diff".to_owned(),
         digest: digest("blob"),
         size: 10,
-    }];
+    }])
+    .expect("one ref is within the bound");
     assert_ne!(d, refs.framed_digest(), "artifact_refs");
 }
 
@@ -390,16 +403,21 @@ fn a_ref_under_a_different_declared_media_type_is_a_different_reference() {
     // FD-1.7 / FD-2.5: "the same bytes under a different declared type are a
     // different reference".
     let mut a = controller_envelope();
-    a.artifact_refs = vec![ArtifactRef {
+    a.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
         kind: ArtifactKindV1::Diff,
         media_type: "text/x-diff".to_owned(),
         digest: digest("blob"),
         size: 10,
-    }];
+    }])
+    .expect("one ref is within the bound");
     let mut b = a.clone();
-    if let Some(first) = b.artifact_refs.first_mut() {
-        first.media_type = "application/octet-stream".to_owned();
-    }
+    b.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
+        kind: ArtifactKindV1::Diff,
+        media_type: "application/octet-stream".to_owned(),
+        digest: digest("blob"),
+        size: 10,
+    }])
+    .expect("one ref is within the bound");
     assert_ne!(a.framed_digest(), b.framed_digest());
 }
 
@@ -437,10 +455,11 @@ fn the_admission_path_enforces_cross_field_rules() {
     env.provider_execution_receipt_ref = Optional::absent();
     let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
 
-    assert!(matches!(
-        parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES),
-        Err(ParseError::Invalid { .. })
-    ));
+    // The cross-field rule now runs *inside* deserialization, so it surfaces as
+    // a schema mismatch rather than a separate post-parse verdict — earlier,
+    // and on every route rather than only this one.
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(serde_json::from_slice::<EnvelopeV1>(&bytes).is_err());
 
     // The same envelope with its receipt ref restored is admissible, so the
     // rejection above is the cross-field rule and not some unrelated defect in
@@ -595,36 +614,93 @@ fn a_malformed_digest_never_quotes_itself_on_any_path() {
 #[test]
 fn a_typed_ref_must_declare_its_frozen_media_type() {
     let mut env = controller_envelope();
-    env.artifact_refs = vec![ArtifactRef {
+    env.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
         kind: ArtifactKindV1::WorkOrder,
         media_type: "text/x-diff".to_owned(),
         digest: digest("order"),
         size: 10,
-    }];
+    }])
+    .expect("one ref is within the bound");
     let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
-    assert!(matches!(
-        parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES),
-        Err(ParseError::Invalid { .. })
-    ));
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(serde_json::from_slice::<EnvelopeV1>(&bytes).is_err());
 
     // The same ref with its frozen media type is admissible.
-    env.artifact_refs = vec![ArtifactRef {
+    env.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
         kind: ArtifactKindV1::WorkOrder,
         media_type: typed_media_type(ArtifactKindV1::WorkOrder, 1),
         digest: digest("order"),
         size: 10,
-    }];
+    }])
+    .expect("one ref is within the bound");
     let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
     assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_ok());
 
     // An evidence blob keeps its own concrete type: FD-1.7 constrains typed A1
     // artifacts, not blobs.
-    env.artifact_refs = vec![ArtifactRef {
+    env.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
         kind: ArtifactKindV1::Diff,
         media_type: "text/x-diff".to_owned(),
         digest: digest("blob"),
         size: 10,
-    }];
+    }])
+    .expect("one ref is within the bound");
     let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
     assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_ok());
+}
+
+/// The private wire form must stay field-identical to the public one.
+///
+/// A field on `EnvelopeV1` but not on `EnvelopeWireV1` fails here as a missing
+/// field; a field on the wire form but not the public one fails as an unknown
+/// field, because both carry `deny_unknown_fields`. Drift between the two is the
+/// standing risk of splitting a struct in half to get a validating
+/// `Deserialize`, so it is tested rather than trusted.
+#[test]
+fn the_public_and_wire_envelope_forms_do_not_drift() {
+    for env in [controller_envelope(), coder_envelope()] {
+        let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
+        let back: EnvelopeV1 =
+            serde_json::from_slice(&bytes).expect("a serialized envelope must deserialize");
+        assert_eq!(back, env);
+        assert_eq!(back.framed_digest(), env.framed_digest());
+    }
+}
+
+/// Every route from bytes to an `EnvelopeV1` enforces the cross-field rules —
+/// including the two serde entry points no admission function can intercept.
+#[test]
+fn no_deserialization_route_admits_a_provider_envelope_without_its_receipt() {
+    let mut env = coder_envelope();
+    env.provider_execution_receipt_ref = Optional::absent();
+    let value = serde_json::to_value(&env).expect("fixture must serialize");
+    let bytes = value.to_string().into_bytes();
+
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(serde_json::from_slice::<EnvelopeV1>(&bytes).is_err());
+    assert!(serde_json::from_value::<EnvelopeV1>(value).is_err());
+}
+
+/// FD-1.9 classifies `interaction_manifest` as a typed non-envelope object, so
+/// FD-1.7 fixes its media type. Its 64 MiB size classification is a separate
+/// question and does not make it an evidence blob.
+#[test]
+fn an_interaction_manifest_is_typed_for_media_type_and_large_for_size() {
+    let wrong = ArtifactRef {
+        kind: ArtifactKindV1::InteractionManifest,
+        media_type: "application/octet-stream".to_owned(),
+        digest: digest("manifest"),
+        size: 1,
+    };
+    assert!(wrong.validate().is_err());
+
+    let right = ArtifactRef {
+        kind: ArtifactKindV1::InteractionManifest,
+        media_type: typed_media_type(ArtifactKindV1::InteractionManifest, 1),
+        digest: digest("manifest"),
+        // Larger than a control artifact, which is the point of the separate
+        // size classification.
+        size: MAX_CONTROL_ARTIFACT_BYTES * 4,
+    };
+    assert!(right.validate().is_ok());
 }

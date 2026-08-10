@@ -82,7 +82,7 @@ impl ArtifactRef {
         // than the artifact it claims to point at (FD-2.5). Evidence blobs and
         // imported A0 objects "carry their own concrete type" and are not
         // constrained here.
-        if self.kind.is_envelope_bearing() || self.kind.is_typed_payload() {
+        if self.kind.is_typed_artifact() {
             let expected = typed_media_type(self.kind, crate::envelope::MESSAGE_KIND_VERSION_V1);
             if self.media_type != expected {
                 return Err(RefError::WrongMediaType {
@@ -121,16 +121,25 @@ impl ArtifactRef {
     ///   what the contract permits for a typed object;
     /// - **everything else** — evidence blobs and imported A0 objects.
     ///
-    /// `interaction_manifest` is deliberately in the last group: FD-1.4 names
-    /// "manifest" explicitly in its evidence-blob line, and its 4096 permitted
-    /// `interaction_sequence` entries would sit uncomfortably against a 1 MiB
-    /// ceiling. That reading is worth re-checking against the contract if the
-    /// manifest schema ever grows a tighter obligation.
+    /// `interaction_manifest` is deliberately in the last group **for size
+    /// only**: FD-1.4 names "manifest" explicitly in its evidence-blob line, and
+    /// its 4096 permitted `interaction_sequence` entries would sit uncomfortably
+    /// against a 1 MiB ceiling. It remains a typed artifact for FD-1.7, so its
+    /// media type is still fixed — the size bound and the media type are
+    /// different questions and use different classifications
+    /// ([`ArtifactKindV1::has_control_size_bound`] and
+    /// [`ArtifactKindV1::is_typed_artifact`]).
+    ///
+    /// The FD-1.4 text is internally ambiguous here — the same section calls any
+    /// typed A1 payload a control artifact while listing "manifest" as an
+    /// evidence blob — so this reading is recorded rather than assumed, and is a
+    /// candidate for a §7 clarification before closure resolution charges bytes
+    /// against it.
     #[must_use]
     fn max_size(&self) -> u64 {
         if self.kind.is_envelope_bearing() {
             MAX_CONTROL_ARTIFACT_BYTES.saturating_mul(2)
-        } else if self.kind.is_typed_payload() {
+        } else if self.kind.has_control_size_bound() {
             MAX_CONTROL_ARTIFACT_BYTES
         } else {
             MAX_EVIDENCE_BLOB_BYTES
