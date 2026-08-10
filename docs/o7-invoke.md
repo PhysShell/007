@@ -247,12 +247,61 @@ ambiguous.
 
 Same run-dir contract (`--out` absent-or-empty, refused otherwise):
 
-- `stdout.raw` — the **raw HTTP response body**, byte-for-byte, whatever
-  the status, for every response within the `MAX_ARLIAI_RESPONSE_BYTES`
-  bound. The analogue of a CLI backend's raw stdout: the unmodified
-  provider evidence. Two outcomes leave it empty: transport failures (no
-  body existed) and an over-limit response (the body is deliberately not
-  persisted; the size message goes to `stderr.log`).
+- `stdout.raw` — the **raw HTTP response body**, byte-for-byte, for a **2xx**
+  response within the `MAX_ARLIAI_RESPONSE_BYTES` bound. The analogue of a CLI
+  backend's raw stdout: the unmodified provider evidence, and the input the
+  local schema re-validation judges. It is empty for transport failures (no
+  body existed), for an over-limit response (the body is deliberately not
+  persisted; the size message goes to `stderr.log`), and — see the amendment
+  below — for every **non-2xx** response.
+
+#### Amendment: a non-2xx body is not canonical run evidence
+
+**Status: contract amended; the implementation does not yet match — see
+"Divergence" below.**
+
+The rule above previously read "whatever the status". It does not any more, and
+the reason is the credential boundary rather than tidiness.
+
+A non-2xx body is the provider's **diagnostic channel**, and diagnostics are
+where servers echo request context back at the caller. That is not speculative
+for this endpoint: the request-shape arbitration recorded above observed a
+`400` whose body echoed the request's own field path (`{'loc': ('body',
+'response_format',…,'json_schema','name'), 'msg': 'Field required'}`). A
+diagnostic that echoes request headers rather than request fields is the same
+mechanism, and this backend sends `Authorization` on every call.
+
+Meanwhile nothing needs that body. The classification matrix above decides
+every non-2xx case from the **status code alone** — `401`/`403` → `BLOCKED_AUTH`,
+`402`/`429` → `BLOCKED_USAGE`, `408` → `BLOCKED_TIMEOUT`, other `4xx` →
+`http_request_rejected`, `5xx` → `http_5xx`. `extract_content` is never reached.
+So persisting the diagnostic body bought convenience while widening the set of
+places an echoed credential could land — and `AGENTS.md` rule 1 counts the
+indirect path (writing provider output into a run record without considering
+what it may have echoed) as a P0, not as a lesser concern.
+
+The amended contract:
+
+```text
+2xx      stdout.raw = the exact provider body      (canonical evidence)
+non-2xx  stdout.raw is empty
+         status + error_kind remain the evidence   (meta.json)
+         the diagnostic body is not persisted
+```
+
+`stderr.log` may carry a bounded, non-body detail for non-2xx (the status and
+its classification), never the body itself.
+
+**Divergence (open, tracked).** At the time of this amendment `run_arliai`
+still writes `ArliOutcome::Http { body, .. }` to `stdout.raw` for every in-bound
+status, including non-2xx. The contract is amended first, deliberately: the
+implementation change is a separate slice, and until it lands the direct
+`--engine arliai` path retains the diagnostic-body surface described here. Do
+not read this section as describing current behaviour.
+
+First consumer of the amended rule: `docs/tasks/mg-c-model-gate.md` (stage
+MG-C), which inherits it rather than defining a second, divergent evidence
+semantics for gate-brokered calls.
 - `stderr.log` — transport/timeout/over-limit detail; empty on an
   in-bound HTTP response.
 - `result.json` — the extracted (normalized) content value, written only
