@@ -1,8 +1,15 @@
 # A1-F v2 — Phase G: graph adjudication
 
-**Status: DECIDED (revision G-R12) — AWAITING RE-REVIEW.**
+**Status: APPROVED / CLOSED — FD-v2-GRAPH complete.**
 
-Twelve review rounds. G-R1 moved the count from 13 to 11; G-R2 corrected the
+Closed at `b853a2e` after twelve corrective rounds, against current v1 authority
+blob `3b26849c` (§0). This commit is **ceremony only**: it flips the status and
+records the verdict. No adjudication, no registry row, no node, no disposition
+and no argument changes here — closure that edited its own content would not be
+closure of the thing that was reviewed.
+
+Twelve review rounds, every finding corrected forward. G-R1 moved the count from
+13 to 11; G-R2 corrected the
 binding lifecycle and the rank domain; G-R3 attempted the exact edge universe
 and measured it against the wrong baseline; G-R4 rebuilt it on the frozen
 contract but stopped at node *classes*; G-R5 added the missing layer, a semantic
@@ -1861,6 +1868,61 @@ these:
    sentence still arguing against a position no longer stated.
 
 ## 9. Revision record
+
+### CLOSURE — APPROVED, FD-v2-GRAPH complete
+
+Independent verdict on `b853a2e`, delivered against the diff, the current Phase G
+text, the convergence ledger, and freshness relative to `origin/main`. No
+blocker remains, and no G-R13 is required for any substantive correction.
+
+**The frozen result.**
+
+```text
+semantic edge registry              69 edges, 56 Intra / 13 Causal
+typed-node universe                 47 nodes, 26 Intra typed -> typed
+acyclicity                          Kahn 47/47, machine-checked
+frozen ArtifactRef inventory        41 slots, 32 exact / 9 open
+graph-terminal universe             20 terminal kinds + 1 open meta-target
+envelope-bearing message kinds      11 — KEEP_V1_MODEL
+new support authority               CampaignRunBinding, pre-dispatch admission
+uniqueness                          per-field occurrence; global (source,target)
+                                    REJECTED as an invariant; 69/69 is a V0 fact
+Causal witness                      COMMITTED over the accepted canonical
+                                    log prefix, replay-checkable
+registry <-> wire joint             one machine-checked realization ledger:
+                                    event-kind universe equality, then the
+                                    11/10 presence map, then carrier coverage
+current authority                   blob 3b26849c; S1 graph delta NONE
+```
+
+**Why the closing argument holds, in the reviewer's own terms.** The
+`accepted canonical log prefix` survives the test that killed its two
+predecessors because it is not a new semantic state at all — it is durable
+history that already exists before an append, and FD-4 and FD-5.4 already make
+canonical append order the ordering primitive. Two implementations may diverge
+earlier, in the open reducer seam, about whether some evidence-only candidate
+enters the log; then they have *different canonical histories*. They cannot
+disagree about `COMMITTED` on the same history, which is the only thing Phase G
+needed.
+
+Append-time and replay checks cannot diverge in the dangerous direction either.
+A conformingly appended feed item had its witness earlier in the same chain, so
+replay recomputes `E.sequence < Feed.sequence`. Later CAS loss makes replay
+fail closed; producing a *safe* history from an unsafe one would require
+inserting a witness ahead of an already-written feed event and rewriting the
+sequence and digest chain — which is a different history, not a different verdict.
+
+The event-kind universe gate is Phase G's to freeze because G-R6 made variant
+part of *edge meaning*, not wire decoration: all 21 kinds carry admitted
+relations (11 `source_ref` + 11 containment, less `HumanCommandRejected` in
+both). Removing a kind removes at least one §4.2.4 relation; adding a
+twenty-second creates a semantic source node. The A2 attention transitions are
+not a counterexample — at `37502e3` they are six separate `t(...)` relations the
+prototype itself marks as appended by A2, and they were never in the frozen
+`CampaignEventV1` kind set.
+
+**What closes with it.** `FD-v2-GRAPH` is complete. The next substantive
+convergence step is **Envelope v2**.
 
 ### G-R12 — twelfth independent review, two P1s
 

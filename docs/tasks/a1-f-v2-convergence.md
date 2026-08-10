@@ -1,6 +1,11 @@
 # A1-F v2 convergence ledger
 
-**Status: INVENTORY ADMITTED — PHASE G AUTHORIZED, NO ADJUDICATION YET.**
+**Status: INVENTORY ADMITTED — PHASE G CLOSED, DISPOSITIONS STILL OPEN.**
+
+`FD-v2-GRAPH` is complete: Phase G was APPROVED and CLOSED at `b853a2e` after
+twelve corrective rounds (`docs/tasks/a1-f-v2-phase-g.md`). The disposition
+columns below remain empty — that work is still owed, and the next substantive
+convergence step is **Envelope v2**.
 
 This document is not normative and never will be. It is a migration checklist
 with one job: make sure nothing frozen in A1-F v1 disappears silently between
@@ -517,7 +522,7 @@ determines ranks, edges, imported roots, closure and digest domains.
 ```yaml
 phase_g:
   document: docs/tasks/a1-f-v2-phase-g.md
-  status:   DECIDED (revision G-R12), awaiting re-review
+  status:   APPROVED / CLOSED at b853a2e — FD-v2-GRAPH complete
   review_1: CHANGES_REQUESTED — four P1s, all accepted; the central
             conclusion changed from 13 envelope kinds to 11
   review_2: CHANGES_REQUESTED — two P1s, both accepted; the count was not
@@ -668,6 +673,17 @@ phase_g:
             universe, so this is not a second registry. P2: §6's 64 MiB baseline
             re-sourced away from KEEP_V1_MODEL (whose §1 framing is about
             classifications, not numbers) to plain inherited authority
+  closure:  APPROVED — no blocker remains. Frozen result: 69 semantic edges
+            (56 Intra / 13 Causal) over 47 typed nodes, 26 Intra typed->typed,
+            Kahn 47/47; 41 frozen ArtifactRef slots split 32 exact / 9 open;
+            20 terminal kinds + 1 open meta-target; 11 envelope-bearing message
+            kinds (KEEP_V1_MODEL); CampaignRunBinding as typed support authority
+            with pre-dispatch admission; per-field occurrence uniqueness, global
+            (source,target) uniqueness REJECTED as an invariant; the Causal
+            witness COMMITTED over the accepted canonical log prefix; and one
+            machine-checked wire realization ledger as the registry<->wire joint.
+            Verified against current authority blob 3b26849c, S1 graph delta NONE
+  next:     Envelope v2
   evidence: 37502e3 edge registry — 59 entries (53 envelope-source + 6 A2
             transition) plus a global AnyCommittedEnvelope causation rule;
             metric is "specific V0 consumer in-degree" with an explicit
