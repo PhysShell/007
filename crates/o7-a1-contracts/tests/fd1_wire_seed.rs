@@ -741,3 +741,34 @@ fn an_oversized_reference_array_is_refused_without_materialising_it() {
     assert!(serde_json::from_str::<ArtifactRefs>(&json).is_err());
     assert!(ArtifactRefs::new(Vec::new()).is_ok());
 }
+
+/// The overflow element must cost nothing to refuse.
+///
+/// The earlier version deserialized the 257th entry as a full `ArtifactRef`
+/// before comparing against the cap, so a single oversized `media_type` on that
+/// entry was allocated anyway. A bound that allocates what it is about to reject
+/// is not a bound.
+#[test]
+fn the_element_past_the_cap_is_never_materialised() {
+    let valid = format!(
+        r#"{{"kind":"diff","media_type":"text/x-diff","digest":"{}","size":1}}"#,
+        digest("blob").as_str()
+    );
+    let mut entries = vec![valid; MAX_ARTIFACT_REFS];
+    // The overflowing entry carries a large string and is also individually
+    // invalid; neither should be reached.
+    entries.push(format!(
+        r#"{{"kind":"diff","media_type":"{}","digest":"{}","size":0}}"#,
+        "x".repeat(60_000),
+        digest("blob").as_str()
+    ));
+    let json = format!("[{}]", entries.join(","));
+
+    assert!(serde_json::from_str::<ArtifactRefs>(&json).is_err());
+
+    // Exactly at the cap is still admissible, so the rejection above is the
+    // overflow and not the batch size.
+    let at_cap_entries: Vec<String> = entries.iter().take(MAX_ARTIFACT_REFS).cloned().collect();
+    let at_cap = format!("[{}]", at_cap_entries.join(","));
+    assert!(serde_json::from_str::<ArtifactRefs>(&at_cap).is_ok());
+}

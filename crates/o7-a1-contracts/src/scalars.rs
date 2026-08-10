@@ -462,13 +462,24 @@ impl<'de, T: Deserialize<'de>, const MAX: usize> Deserialize<'de> for BoundedVec
                 let cap = BoundedVec::<T, MAX>::cap();
                 let hint = seq.size_hint().unwrap_or(0);
                 let mut items: Vec<T> = Vec::with_capacity(if hint < cap { hint } else { cap });
-                while let Some(item) = seq.next_element::<T>()? {
-                    if items.len() >= cap {
-                        return Err(serde::de::Error::custom(format!(
-                            "a bounded collection must have <= {cap} entries"
-                        )));
+
+                while items.len() < cap {
+                    match seq.next_element::<T>()? {
+                        Some(item) => items.push(item),
+                        None => return Ok(BoundedVec(items)),
                     }
-                    items.push(item);
+                }
+
+                // At the cap. `SeqAccess` cannot tell "another element" from
+                // "end of sequence" without consuming input, so the overflow is
+                // read as `IgnoredAny`: the deserializer walks past the value
+                // without building it, so a 257th entry carrying a megabyte of
+                // string costs nothing to refuse. Deserializing it as `T` first
+                // would allocate exactly what the bound exists to prevent.
+                if seq.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                    return Err(serde::de::Error::custom(format!(
+                        "a bounded collection must have <= {cap} entries"
+                    )));
                 }
                 Ok(BoundedVec(items))
             }
