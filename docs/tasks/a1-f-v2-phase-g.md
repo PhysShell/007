@@ -75,14 +75,37 @@ projection, the wrapper shapes, and the counterexample that rejected global
 `(source, target)` uniqueness all lose their cited source.
 
 ```text
-OBLIGATION — the design-input evidence MUST be preserved at an immutable ref
-             before claude/a1-contract-freeze may be deleted.
+OBLIGATION — the design-input evidence MUST remain reachable through a STABLE
+             PRESERVATION REF whose exact target commit is recorded here and is
+             mechanically verifiable, before claude/a1-contract-freeze may be
+             deleted.
 
-A lightweight tag over 37502e3 is sufficient and is the intended mechanism;
-this document then cites the tag rather than a deletable branch head.
+  intended ref:    refs/tags/a1-f-v2-phase-g-design-input-v1
+  intended target: 37502e3ce5c397a7437445aafb88c13d84ba4ac0
+  precedent:       refs/tags/n2d0-durable-evidence-v1 (same mechanism)
+
+  status: OPEN — the ref is NOT yet created. This session's push scope
+          returns HTTP 403 on refs/tags/*, and no tag-creation operation is
+          available to it. The ref must be pushed by a maintainer, after
+          which this block becomes SATISFIED in a one-line record commit.
 ```
 
-Recording it here rather than silently retargeting the citation, because the
+**Two precision notes, both deliberate.**
+
+*The ref is "stable", not "immutable".* The repository has no rulesets today, so
+GitHub does not technically forbid deleting or moving a tag. What is immutable
+here is the **commit identity** `37502e3...`; the tag supplies durable, stable
+*reachability* to it. That is the property this obligation needs, and claiming
+tag immutability would be asserting a guarantee no configuration currently
+provides — which is the exact species of overclaim this document exists to
+prevent.
+
+*The status says OPEN because the ref does not exist.* Recording it as satisfied
+before the push would put a false fact into a frozen document to make a review
+thread look closed. Twelve rounds went into making that impossible; the thirteenth
+is not the place to start.
+
+Recorded here rather than silently retargeting the citation, because the
 citation is not wrong — the reachability guarantee behind it is simply weaker
 than a frozen document should rest on.
 
