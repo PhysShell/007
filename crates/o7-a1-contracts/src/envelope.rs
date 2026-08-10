@@ -309,6 +309,13 @@ impl FromDocument for EnvelopeV1 {
 }
 
 impl WireArtifact for EnvelopeV1 {
+    /// FD-1.4 — an envelope is a typed A1 JSON object, and the payload it binds
+    /// is a *separate* byte string (FD-1.1), so this ceiling covers the
+    /// envelope document alone. The doubled allowance in
+    /// [`crate::ArtifactRef`] answers a different question: how many bytes a
+    /// ref charges when it names both halves at once.
+    const MAX_BYTES: u64 = crate::bounds::MAX_CONTROL_ARTIFACT_BYTES;
+
     fn validate_wire(&self) -> Result<(), String> {
         // `EnvelopeError` names field names and roles, both of which are frozen
         // protocol vocabulary rather than payload content.

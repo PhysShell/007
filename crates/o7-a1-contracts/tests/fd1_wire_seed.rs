@@ -106,16 +106,16 @@ fn coder_envelope() -> EnvelopeV1 {
 #[test]
 fn an_unsupported_envelope_version_is_refused() {
     let bytes = envelope_json_with("envelope_version", serde_json::json!(2));
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
     // ...and through every other door as well.
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
 }
 
 #[test]
 fn an_unsupported_message_kind_version_is_refused() {
     let bytes = envelope_json_with("message_kind_version", serde_json::json!(7));
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
 }
 
 /// A serialized controller envelope with one member replaced.
@@ -139,7 +139,7 @@ fn an_unknown_envelope_field_is_rejected_at_parse_time() {
     }
     let bytes = value.to_string().into_bytes();
     assert!(matches!(
-        parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES),
+        parse_artifact::<EnvelopeV1>(&bytes),
         Err(ParseError::SchemaMismatch { .. })
     ));
 }
@@ -153,7 +153,7 @@ fn an_unrecognised_enum_variant_fails_closed() {
         map.insert("message_kind".to_owned(), serde_json::json!("future_kind"));
     }
     let bytes = value.to_string().into_bytes();
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +170,7 @@ fn an_explicit_null_in_an_optional_field_is_rejected() {
     }
     let bytes = value.to_string().into_bytes();
     assert!(matches!(
-        parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES),
+        parse_artifact::<EnvelopeV1>(&bytes),
         Err(ParseError::ExplicitNull { .. })
     ));
 }
@@ -180,8 +180,7 @@ fn the_same_optional_field_absent_is_accepted() {
     let env = controller_envelope();
     let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
     assert!(!String::from_utf8_lossy(&bytes).contains("causation_id"));
-    let parsed: EnvelopeV1 =
-        parse_artifact(&bytes, MAX_CONTROL_ARTIFACT_BYTES).expect("absent optional must parse");
+    let parsed: EnvelopeV1 = parse_artifact(&bytes).expect("absent optional must parse");
     assert_eq!(parsed, env);
 }
 
@@ -257,8 +256,8 @@ fn too_many_artifact_refs_are_rejected() {
         );
     }
     let bytes = value.to_string().into_bytes();
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -459,15 +458,14 @@ fn the_admission_path_enforces_cross_field_rules() {
     // The cross-field rule now runs *inside* deserialization, so it surfaces as
     // a schema mismatch rather than a separate post-parse verdict — earlier,
     // and on every route rather than only this one.
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
 
     // The same envelope with its receipt ref restored is admissible, so the
     // rejection above is the cross-field rule and not some unrelated defect in
     // the fixture.
     assert!(parse_artifact::<EnvelopeV1>(
-        &serde_json::to_vec(&coder_envelope()).expect("fixture must serialize"),
-        MAX_CONTROL_ARTIFACT_BYTES
+        &serde_json::to_vec(&coder_envelope()).expect("fixture must serialize")
     )
     .is_ok());
 }
@@ -479,11 +477,11 @@ fn the_admission_path_enforces_cross_field_rules() {
 fn raw_deserialization_cannot_bypass_the_per_field_rules() {
     // Explicit null in a genuinely optional field.
     let nulled = envelope_json_with("causation_id", serde_json::Value::Null);
-    assert!(parse_artifact::<EnvelopeV1>(&nulled, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&nulled).is_err());
 
     // A version the contract froze.
     let versioned = envelope_json_with("envelope_version", serde_json::json!(2));
-    assert!(parse_artifact::<EnvelopeV1>(&versioned, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&versioned).is_err());
 
     // A schema-specific text bound: §3.0 caps producer_adapter_version at 128
     // bytes, well under the global 65536-byte string bound.
@@ -491,7 +489,7 @@ fn raw_deserialization_cannot_bypass_the_per_field_rules() {
         "producer_adapter_version",
         serde_json::json!("x".repeat(129)),
     );
-    assert!(parse_artifact::<EnvelopeV1>(&long_adapter, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&long_adapter).is_err());
 
     // And model_identity at 256.
     let mut provider = serde_json::to_value(coder_envelope()).expect("fixture must serialize");
@@ -501,17 +499,13 @@ fn raw_deserialization_cannot_bypass_the_per_field_rules() {
             serde_json::json!("x".repeat(257)),
         );
     }
-    assert!(parse_artifact::<EnvelopeV1>(
-        provider.to_string().as_bytes(),
-        MAX_CONTROL_ARTIFACT_BYTES
-    )
-    .is_err());
+    assert!(parse_artifact::<EnvelopeV1>(provider.to_string().as_bytes()).is_err());
 
     // An unknown field, and an unrecognised enum variant.
     let unknown = envelope_json_with("shadow_authority", serde_json::json!(true));
-    assert!(parse_artifact::<EnvelopeV1>(&unknown, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&unknown).is_err());
     let future = envelope_json_with("message_kind", serde_json::json!("future_kind"));
-    assert!(parse_artifact::<EnvelopeV1>(&future, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&future).is_err());
 }
 
 /// A rejected artifact is untrusted input. AGENTS.md makes credential leakage a
@@ -523,17 +517,17 @@ fn a_rejected_artifact_never_appears_in_the_error() {
     let mut messages: Vec<String> = Vec::new();
 
     let unknown_field = envelope_json_with(SECRET, serde_json::json!(SECRET));
-    if let Err(e) = parse_artifact::<EnvelopeV1>(&unknown_field, MAX_CONTROL_ARTIFACT_BYTES) {
+    if let Err(e) = parse_artifact::<EnvelopeV1>(&unknown_field) {
         messages.push(e.to_string());
     }
 
     let bad_variant = envelope_json_with("message_kind", serde_json::json!(SECRET));
-    if let Err(e) = parse_artifact::<EnvelopeV1>(&bad_variant, MAX_CONTROL_ARTIFACT_BYTES) {
+    if let Err(e) = parse_artifact::<EnvelopeV1>(&bad_variant) {
         messages.push(e.to_string());
     }
 
     let bad_scalar = envelope_json_with("message_id", serde_json::json!(SECRET.repeat(20)));
-    if let Err(e) = parse_artifact::<EnvelopeV1>(&bad_scalar, MAX_CONTROL_ARTIFACT_BYTES) {
+    if let Err(e) = parse_artifact::<EnvelopeV1>(&bad_scalar) {
         messages.push(e.to_string());
     }
 
@@ -582,7 +576,7 @@ fn a_malformed_digest_never_quotes_itself_on_any_path() {
 
     let bytes = envelope_json_with("contract_digest", serde_json::json!(SECRET));
 
-    let admitted = parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES)
+    let admitted = parse_artifact::<EnvelopeV1>(&bytes)
         .err()
         .map(|e| e.to_string())
         .unwrap_or_default();
@@ -593,7 +587,7 @@ fn a_malformed_digest_never_quotes_itself_on_any_path() {
     );
 
     // The direct door is the one that was leaking.
-    let direct = parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES)
+    let direct = parse_artifact::<EnvelopeV1>(&bytes)
         .err()
         .map(|e| e.to_string())
         .unwrap_or_default();
@@ -609,7 +603,7 @@ fn a_malformed_digest_never_quotes_itself_on_any_path() {
         "contract_digest",
         serde_json::json!(WireDigest::of_bytes(b"contract").as_str()),
     );
-    assert!(parse_artifact::<EnvelopeV1>(&good, MAX_CONTROL_ARTIFACT_BYTES).is_ok());
+    assert!(parse_artifact::<EnvelopeV1>(&good).is_ok());
 }
 
 /// FD-1.7: a typed A1 artifact's media type is fixed by its kind and version,
@@ -627,8 +621,8 @@ fn a_typed_ref_must_declare_its_frozen_media_type() {
     }])
     .expect("one ref is within the bound");
     let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
 
     // The same ref with its frozen media type is admissible.
     env.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
@@ -639,7 +633,7 @@ fn a_typed_ref_must_declare_its_frozen_media_type() {
     }])
     .expect("one ref is within the bound");
     let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_ok());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes).is_ok());
 
     // An evidence blob keeps its own concrete type: FD-1.7 constrains typed A1
     // artifacts, not blobs.
@@ -651,7 +645,7 @@ fn a_typed_ref_must_declare_its_frozen_media_type() {
     }])
     .expect("one ref is within the bound");
     let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_ok());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes).is_ok());
 }
 
 /// The private wire form must stay field-identical to the public one.
@@ -665,8 +659,8 @@ fn a_typed_ref_must_declare_its_frozen_media_type() {
 fn the_public_and_wire_envelope_forms_do_not_drift() {
     for env in [controller_envelope(), coder_envelope()] {
         let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
-        let back: EnvelopeV1 = parse_artifact(&bytes, MAX_CONTROL_ARTIFACT_BYTES)
-            .expect("a serialized envelope must be admissible");
+        let back: EnvelopeV1 =
+            parse_artifact(&bytes).expect("a serialized envelope must be admissible");
         assert_eq!(back, env);
         assert_eq!(back.framed_digest(), env.framed_digest());
     }
@@ -686,12 +680,12 @@ fn the_only_admission_route_rejects_a_provider_envelope_without_its_receipt() {
     env.provider_execution_receipt_ref = Optional::absent();
     let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
 
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
 
     // The same envelope with its receipt restored is admissible, so the
     // rejection is the cross-field rule and not a broken fixture.
     let good = serde_json::to_vec(&coder_envelope()).expect("fixture must serialize");
-    assert!(parse_artifact::<EnvelopeV1>(&good, MAX_CONTROL_ARTIFACT_BYTES).is_ok());
+    assert!(parse_artifact::<EnvelopeV1>(&good).is_ok());
 }
 
 /// FD-1.9 classifies `interaction_manifest` as a typed non-envelope object, so
@@ -746,7 +740,7 @@ fn a_reference_cannot_reach_an_envelope_past_its_own_rules() {
         "digest": digest("order").as_str(),
         "size": 1
     }));
-    assert!(parse_artifact::<EnvelopeV1>(&wrong_media, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&wrong_media).is_err());
 
     // An unknown member on the ref itself.
     let unknown = with_ref(serde_json::json!({
@@ -756,7 +750,7 @@ fn a_reference_cannot_reach_an_envelope_past_its_own_rules() {
         "size": 1,
         "path": "/etc/passwd"
     }));
-    assert!(parse_artifact::<EnvelopeV1>(&unknown, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&unknown).is_err());
 
     // And the well-formed one is admitted, including at size 0 — FD-1.8 states
     // no lower bound, and an empty diff is a real object with a real digest.
@@ -766,7 +760,7 @@ fn a_reference_cannot_reach_an_envelope_past_its_own_rules() {
         "digest": digest("empty").as_str(),
         "size": 0
     }));
-    assert!(parse_artifact::<EnvelopeV1>(&ok, MAX_CONTROL_ARTIFACT_BYTES).is_ok());
+    assert!(parse_artifact::<EnvelopeV1>(&ok).is_ok());
 }
 
 /// An envelope carrying a raw `artifact_refs` array, so the array rules can be
@@ -796,16 +790,25 @@ fn one_ref_json() -> String {
 /// is spent: an oversized array must not be fully materialised before its cap is
 /// checked.
 ///
-/// 50,000 entries is past the **global** FD-1.4 array bound as well, so the
-/// document walk refuses it before any typed schema is reached. That ordering is
-/// the point: the cheapest layer that can refuse it does.
+/// Two layers can refuse this, and the cheapest one does. Through an envelope
+/// the byte ceiling fires first — 50,000 refs is far past 1 MiB — so the array
+/// rule is exercised where it is actually reachable: on a document admitted
+/// under a larger ceiling, which is what an evidence blob gets.
 #[test]
 fn an_oversized_reference_array_is_refused_without_materialising_it() {
     let many = vec![one_ref_json(); 50_000].join(",");
     let bytes = envelope_with_raw_refs(&format!("[{many}]"));
 
+    // As an envelope: refused on bytes, before the JSON is even parsed.
     assert!(matches!(
-        parse_artifact::<EnvelopeV1>(&bytes, MAX_EVIDENCE_BLOB_BYTES),
+        parse_artifact::<EnvelopeV1>(&bytes),
+        Err(ParseError::PayloadTooLarge { .. })
+    ));
+
+    // As a document under the evidence ceiling: refused on the global FD-1.4
+    // array bound, which applies to *any* array in *any* A1 document.
+    assert!(matches!(
+        validate_document(&bytes, MAX_EVIDENCE_BLOB_BYTES),
         Err(ParseError::ArrayTooLong { .. })
     ));
 }
@@ -832,7 +835,7 @@ fn the_element_past_the_cap_is_never_materialised() {
     ));
     let over = envelope_with_raw_refs(&format!("[{}]", entries.join(",")));
     assert!(matches!(
-        parse_artifact::<EnvelopeV1>(&over, MAX_EVIDENCE_BLOB_BYTES),
+        parse_artifact::<EnvelopeV1>(&over),
         Err(ParseError::SchemaMismatch { .. })
     ));
 
@@ -847,7 +850,7 @@ fn the_element_past_the_cap_is_never_materialised() {
             .collect::<Vec<_>>()
             .join(",")
     ));
-    assert!(parse_artifact::<EnvelopeV1>(&at_cap, MAX_EVIDENCE_BLOB_BYTES).is_ok());
+    assert!(parse_artifact::<EnvelopeV1>(&at_cap).is_ok());
 }
 
 /// Regression for the two findings that shared a door.
@@ -883,12 +886,19 @@ fn an_oversized_but_otherwise_valid_envelope_is_refused_by_the_byte_bound() {
     assert!(bytes.len() as u64 > MAX_CONTROL_ARTIFACT_BYTES * 14);
 
     assert!(matches!(
-        parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES),
+        parse_artifact::<EnvelopeV1>(&bytes),
         Err(ParseError::PayloadTooLarge { .. })
     ));
 
-    // And it is refused *before* the document is walked or any ref is built:
-    // raising the bound past the document admits the very same bytes, so the
-    // rejection above is the byte bound and nothing else.
-    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_EVIDENCE_BLOB_BYTES).is_ok());
+    // The rejection is the byte bound and not some other rule: the same
+    // document passes every *other* layer when handed to `validate_document`
+    // under a ceiling that admits it.
+    assert!(validate_document(&bytes, MAX_EVIDENCE_BLOB_BYTES).is_ok());
+
+    // What is deliberately absent here is the assertion this test used to
+    // carry — that `parse_artifact` with a raised bound admits the envelope.
+    // There is no such bound to raise any more: the ceiling comes from
+    // `EnvelopeV1::MAX_BYTES`, not from the caller. That assertion isolated
+    // which layer rejected the document and, in doing so, demonstrated that a
+    // caller could choose to admit it.
 }

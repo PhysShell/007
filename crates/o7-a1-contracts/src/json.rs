@@ -102,10 +102,61 @@ pub enum ParseError {
 /// crate, so no downstream crate can implement `WireArtifact`, and — the part
 /// that matters — none can *call* the unchecked constructor either.
 pub trait WireArtifact: sealed::FromDocument {
+    /// The FD-1.4 per-object hard maximum for **this** artifact type.
+    ///
+    /// It is an associated const rather than a `parse_artifact` argument
+    /// because FD-1.4 calls these "protocol hard maxima" and this crate's own
+    /// `bounds` module calls them "a compile-time constant, never
+    /// configurable". A caller-supplied ceiling makes a protocol constant into
+    /// an operational parameter, and a resolver that passes the evidence-blob
+    /// maximum to a control artifact then admits an object sixty-four times
+    /// over its bound.
+    ///
+    /// That was not hypothetical: the regression test proving the byte bound
+    /// fires also asserted that raising the bound admits the same 15 MB
+    /// envelope. It was written to isolate *which* rule rejected the document
+    /// and it documented a bypass instead — the fourth time on this PR that one
+    /// of my own tests recorded a hole rather than closing it.
+    const MAX_BYTES: u64;
+
+    /// Compile-time guard: this type's ceiling must be one the document parser
+    /// can safely materialize. See [`MATERIALISING_PARSER_SAFE_MAX`].
+    ///
+    /// Evaluated inside [`parse_artifact`], so it fires for any type actually
+    /// admitted rather than for any type merely defined.
+    const CEILING_IS_PARSEABLE: () = assert!(
+        Self::MAX_BYTES <= MATERIALISING_PARSER_SAFE_MAX,
+        "this artifact's FD-1.4 ceiling exceeds what validate_document can \
+         materialize safely; the document layer needs a bounded parser before \
+         an artifact type this large can be admitted"
+    );
+
     /// # Errors
     /// A human-readable reason. Implementations must not quote payload content.
     fn validate_wire(&self) -> Result<(), String>;
 }
+
+/// The largest document ceiling [`validate_document`] may be pointed at.
+///
+/// `validate_document` builds a complete `serde_json::Value` and *then* walks it
+/// for the FD-1.4 depth, array-length and string-length bounds. A `Value` costs
+/// several times its input in allocations, so "reject at parse time" is
+/// currently true of the byte bound and only true after the fact of the
+/// structural bounds — a document full of small array elements is materialized
+/// before `ArrayTooLong` fires.
+///
+/// At 1 MiB that overshoot is bounded and unremarkable. At the 64 MiB manifest
+/// ceiling it would not be, and this crate has already ruled on that shape of
+/// defect once, in `BoundedVec`: a bound that allocates what it is about to
+/// reject is not a bound.
+///
+/// The fix is a bounded visitor that refuses mid-parse, and it belongs with the
+/// artifact type that actually carries a 64 MiB ceiling — none exists yet;
+/// `EnvelopeV1` is the only [`WireArtifact`] and FD-1.4 caps it at 1 MiB. So
+/// rather than leave that as a note somebody has to remember, the constraint is
+/// a compile error: adding an artifact type above this ceiling fails to build
+/// until the parser is replaced.
+pub const MATERIALISING_PARSER_SAFE_MAX: u64 = crate::bounds::MAX_CONTROL_ARTIFACT_BYTES;
 
 /// The unchecked half of admission, behind a seal.
 ///
@@ -182,10 +233,17 @@ pub fn validate_document(bytes: &[u8], max_bytes: u64) -> Result<Value, ParseErr
 /// The full admission path: document rules, then the typed schema, then the
 /// artifact's cross-field rules.
 ///
+/// The byte ceiling comes from `T`, not from the caller — see
+/// [`WireArtifact::MAX_BYTES`]. There is no parameter by which a resolver can
+/// widen a protocol hard maximum.
+///
 /// # Errors
 /// [`ParseError`] from any of the three layers.
-pub fn parse_artifact<T: WireArtifact>(bytes: &[u8], max_bytes: u64) -> Result<T, ParseError> {
-    let value = validate_document(bytes, max_bytes)?;
+pub fn parse_artifact<T: WireArtifact>(bytes: &[u8]) -> Result<T, ParseError> {
+    // Forces evaluation of the const assertion; a `T` whose ceiling the
+    // document parser cannot safely materialize fails to compile here.
+    let () = T::CEILING_IS_PARSEABLE;
+    let value = validate_document(bytes, T::MAX_BYTES)?;
     let parsed = T::from_document(value)?;
     parsed
         .validate_wire()
@@ -391,12 +449,14 @@ mod tests {
             }
         }
         impl WireArtifact for Strict {
+            const MAX_BYTES: u64 = MAX_CONTROL_ARTIFACT_BYTES;
+
             fn validate_wire(&self) -> Result<(), String> {
                 Ok(())
             }
         }
         let unknown_field = format!(r#"{{"known":1,"{SECRET_KEY}":"{SECRET_VALUE}"}}"#);
-        let err = parse_artifact::<Strict>(unknown_field.as_bytes(), MAX_CONTROL_ARTIFACT_BYTES)
+        let err = parse_artifact::<Strict>(unknown_field.as_bytes())
             .err()
             .map(|e| e.to_string())
             .unwrap_or_default();
