@@ -4,6 +4,7 @@
 # `fuzz/` is excluded so cargo-fuzz keeps managing it independently.
 [workspace]
 members = [
+    "crates/o7-a1-contracts",
     "crates/o7-ledger",
     "crates/o7-worker",
     "crates/o7-worktree",
