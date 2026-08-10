@@ -354,11 +354,43 @@ F   the next commit, touching §9 only       — the human freeze record
 nothing but this section relative to `C`, is the provenance of the freeze.
 
 ```text
-FROZEN CONTENT REVISION:   <full SHA of C>
-FROZEN BY:                 <maintainer>
-DATE:                      <date>
+FROZEN CONTENT REVISION:   153684fd27e7d55992015cc33cb03ec23df03c1d
+FROZEN BY:                 PhysShell <mouse.kcsource@gmail.com>
+DATE:                      2026-08-10
 ```
 
-Empty. Nothing above is binding until this block is filled by the maintainer in
-a commit that changes **only this section** relative to `C`. No classification of
-§2 and no inspection of §5 may begin before it is.
+**How this record was made, stated plainly.** The maintainer approved the freeze
+explicitly in session and instructed the assistant to write this block; the
+assistant authored the commit. So the approving act is the maintainer's and the
+transcription is not — an auditor should read `FROZEN BY` as the human who took
+responsibility, and the commit's git author as who typed it. These are different
+facts and this document is the wrong place to blur them.
+
+**Status: FROZEN.** §§0–8 are binding as of `153684f`. Changes go through a new
+revision that says what changed and why, never a silent edit — and any change
+made after results are known must say so in the same breath.
+
+Classification of §2 and inspection of §5 may now begin, under §4 and under the
+role separation in §2.1 and §5.
+
+### Verifying this freeze
+
+The claim is not "F is a small diff" but "F left §§0–8 byte-identical". Those are
+different assertions, and only the third check below establishes the second one:
+
+```bash
+set -euo pipefail
+
+C=153684fd27e7d55992015cc33cb03ec23df03c1d
+F=<this commit>
+
+test "$(git rev-parse "${F}^")" = "$C"                       # F descends from C
+test "$(git diff --name-only "$C" "$F")" = \
+  "research/b2-t/preregistration.md"                          # one file only
+diff \
+  <(git show "$C":research/b2-t/preregistration.md | sed '/^## 9\./,$d') \
+  <(git show "$F":research/b2-t/preregistration.md | sed '/^## 9\./,$d')
+                                                              # §§0-8 identical
+```
+
+Exit 0 on all three, or the freeze does not hold.
