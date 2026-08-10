@@ -5,6 +5,14 @@
 - **Static-analysis provider:** Own.NET
 - **Audit/risk-profile provider:** OwnAudit
 - **Related docs:** [agent memory layer](agent-memory-layer.md), [FastContext](fastcontext.md), [Omnigraph](omnigraph.md), [agent output budgeter](agents-outputs-budgeter.md)
+- **Companion record:** [memory plane record](memory-plane-record.md) — the
+  *required* half of selection. Its status is split: **§3, REQ-1 … REQ-11, is
+  maintainer-ratified and normative** (2026-08-10); **§4 remains candidate and
+  `pending`** under `docs/evidence-and-decision-discipline.md` rule 3, and §6 is
+  non-normative. The identity contract in "IR requirements" follows from ratified
+  **REQ-4/REQ-5**, and the per-stage input closure and comparison surface in
+  "Determinism and reproducibility" from ratified **REQ-9**. The candidate types
+  and stage decomposition of its §4 are deliberately not imported.
 
 ## Summary
 
@@ -289,7 +297,7 @@ Illustrative shape:
 
 Every selected item must have:
 
-- a stable identity;
+- a **re-resolvable identity** (see below);
 - repository commit;
 - source location or artifact pointer;
 - producing extractor and version;
@@ -297,6 +305,32 @@ Every selected item must have:
 - plain-language selection reasons;
 - trust level;
 - content hash where practical.
+
+#### Identity is re-resolvable, not stable
+
+An earlier version of this list required "a stable identity". Nothing in a
+repository provides one: symbols are renamed, files move, spans shift, and a
+field named for a guarantee it cannot keep invites callers to trust it. The
+requirement is therefore stated as a *resolution contract*:
+
+- an item's identity must be **re-resolvable** against a later revision by a
+  declared procedure;
+- the outcome of that procedure is explicit and distinguishes at least
+  **resolved**, **resolved-degraded** (matched by a weaker means than the
+  primary one), and **unresolved**;
+- a degraded or unresolved outcome is recorded and visible to the consumer — it
+  is never silently upgraded into a match.
+
+A rename must be able to produce *unresolved*. That is the point: an item that
+cannot be resolved is a question for a human or an explicit re-binding decision,
+whereas a clever near-match quietly attaches a claim to the wrong code.
+
+Required by **REQ-4** and **REQ-5** in `docs/memory-plane-record.md` §3
+(ratified 2026-08-10, bound to design revision `219953e`): authority-appropriate
+identity, and invalidation causes that keep *stale*, *unresolved* and *invalid*
+distinguishable. The concrete locator and resolution-result types sketched in
+that document's §4 are candidate architecture and are **not** imported here —
+this section constrains the semantics, not the struct.
 
 The IR must distinguish:
 
@@ -494,7 +528,45 @@ Fix the high-confidence `OWN001` event-subscription leak in `CustomerViewModel` 
 
 The same inputs must produce the same Context IR and the same ranking unless an explicitly versioned ranking implementation changes.
 
-Cache key:
+**Each deterministic stage declares two contracts, and only two.** This is
+required by **REQ-9** in `docs/memory-plane-record.md` §3 (ratified 2026-08-10,
+bound to design revision `219953e`): a complete versioned input closure per
+stage, and an output description that makes two runs comparable rather than
+merely both rebuildable.
+
+```text
+per stage:
+
+  INPUT CLOSURE        every value that can change the stage's output,
+                       including the identity and version of every
+                       component the stage invokes
+
+  COMPARISON SURFACE   a machine-readable description of the output,
+                       sufficient to identify it exactly and to explain
+                       what was admitted and what was omitted
+```
+
+Two consequences that are easy to lose:
+
+- **A parameter that changes the output is an input, not configuration.** Budget
+  limits, ranking thresholds, traversal or tie-break policies and closure bounds
+  all decide what comes out, so they belong inside the closure. Anything
+  versioned that the stage calls belongs there too — a component whose version
+  can change the result while sitting outside the declared closure is the
+  standard way a reproducibility claim goes quietly false.
+- **The closure is checkable, not merely declared.** REQ-9's oracle is
+  `declared stage inputs == the inputs the invocation actually commits`, which
+  is a test rather than a review habit.
+
+REQ-9 is authority for *these two properties per stage*. It is not authority for
+any particular decomposition into stages: the two-function shape sketched in
+`docs/memory-plane-record.md` §4 is candidate architecture and is not imported
+here.
+
+The cache key below is this document's current, single-stage instance of the
+input closure, and it is **not yet complete** in REQ-9's sense — reconciling it,
+and settling how many stages this pipeline actually has, is implementation work
+that follows the contract above rather than a settled answer:
 
 ```text
 sha256(
@@ -507,7 +579,7 @@ sha256(
 )
 ```
 
-`context.meta.json` should record:
+`context.meta.json` is the comparison surface, and should record:
 
 - repository and commit;
 - dirty-worktree status;
@@ -516,9 +588,15 @@ sha256(
 - extractor versions;
 - ranking version;
 - per-category budgets and actual use;
+- admitted item ids and their inclusion reasons;
 - omitted candidates and omission reasons;
 - optional summarizer model/prompt/version;
 - hashes of all emitted artifacts.
+
+One comparison surface per stage, not two descriptions of the same output in two
+documents: any other field list proposed elsewhere for this pipeline's output is
+a proposal against *this* one, and the two are reconciled here rather than
+maintained in parallel.
 
 If optional LLM compression is used, both pre-compression and post-compression forms must be retained.
 
