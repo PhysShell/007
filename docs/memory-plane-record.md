@@ -27,7 +27,12 @@
                        branch, which is what makes the ratification checkable
                        without resolving H at all.
 
-    M  incorporation   recorded when this lands on main
+    M  incorporation   a76b83c9bac945ac32806573470704ead2ee47ff
+                       "Merge pull request #125" — what proves `H` is reachable
+                       from `main`. Second parent `71bae80`; `H` verified as an
+                       ancestor of `main`, and `S` on `main` is unchanged. A
+                       merge commit is not the merged head: this is the only one
+                       of the four that establishes incorporation.
     ```
 
     Per rule 4 the ratification is bound to that text: if any requirement is
