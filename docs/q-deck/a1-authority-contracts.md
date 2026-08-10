@@ -19,6 +19,14 @@ differ, this document is authoritative.
 
 Corrective rounds R1, R2, R3, R4, R5, R5.1, and R5.2 are recorded in §9.
 
+**Superseded once since incorporation: S1 (§9), which corrects FD-1.4 and
+nothing else.** S1 is the first application of §7 after the merge, as distinct
+from the R-rounds, which were pre-incorporation corrections. It changes this
+document's blob and therefore its `contract_digest`; it changes no
+`envelope_version`, no `message_kind_version`, and no
+`campaign_protocol_version`, because no payload shape, envelope, rank, or
+reducer semantics moved (§7.2).
+
 What the freeze covers: the wire schema of every message kind — field names,
 types, required/optional status, null policy, bounds, and the authority that
 establishes each value — plus the digest, identity, evidence closure, and
@@ -200,18 +208,35 @@ that distinction has never once been worth what it costs.
 **FD-1.4 Per-object bounds (protocol hard maxima).**
 
 ```text
-control artifact payload (any typed A1 payload)   <=    1 MiB
-single evidence blob (diff, raw provider bytes,
-  gate log, patch, manifest)                      <=   64 MiB
-JSON nesting depth                                <=     32
-array length, any array                           <=   4096
-string length, any single string field            <=  65536 bytes
-opaque id length                                  <=    256 bytes
-artifact_refs per envelope                        <=    256
-interaction_sequence entries per manifest         <=   4096
-dispatches per execution receipt                  <=    256
-findings per ReviewerReport / ReviewVerdict       <=    256
+typed A1 JSON object, except the one below       <=      1 MiB
+InteractionManifestV1                            <=     64 MiB
+opaque evidence blob (diff, raw provider bytes,
+  gate log, patch)                               <=     64 MiB
+JSON nesting depth                               <=     32
+array length, any array                          <=   4096
+string length, any single string field           <=  65536 bytes
+opaque id length                                 <=    256 bytes
+artifact_refs per envelope                       <=    256
+interaction_sequence entries per manifest        <=   4096
+dispatches per execution receipt                 <=    256
+findings per ReviewerReport / ReviewVerdict      <=    256
 ```
+
+`InteractionManifestV1` is a typed A1 object and keeps every rule that follows
+from that — FD-1.7 fixes its media type, FD-2 gives it its own rank — but its
+size bound is the evidence one.
+
+The reason is its grain. There is **one manifest per execution**, not per
+dispatch: §3.12 nests every dispatch record inside a single receipt per
+`provider_execution_id` and gives that receipt one `interaction_manifest_ref`,
+and §3.12.1 binds the manifest to the same execution id. So a single manifest
+indexes up to 256 dispatches with up to 4096 `interaction_sequence` entries
+**in total**, each carrying refs and ids. That is an index of an execution's
+whole externally observable history, which is not the shape the 1 MiB
+typed-object ceiling was written for.
+
+**Size and typedness are separate questions**, and this is the one object where
+they answer differently.
 
 Exceeding any bound is a parse-time rejection, never a truncation. A truncated
 artifact that still parses is the failure mode these bounds exist to forbid.
@@ -2402,11 +2427,50 @@ non-authoritative: it must not drive an A-series transition.
 accepted exact head   b61540a   (after R5.1, following a final exact-head pass)
 amended pre-merge     R5.2       (four P1s from external review on PR #123)
 frozen baseline       the merged head of PR #123
+superseded            S1 — FD-1.4 only, the first §7 application after merge
 status                ACCEPTED / CLOSED / FROZEN
 rounds                R1, R2, R3, R4, R5, R5.1, R5.2 — every finding corrected
                       forward; no round amended an earlier one in place
 next                  A1-V0 (§5), and not before this document merges
 ```
+
+### S1 — FD-1.4 classified `InteractionManifestV1` under two bounds at once
+
+The first supersede under §7, and the first correction made *after* the contract
+was incorporated rather than before. Numbered S-, not R5.3: the R-rounds were
+review of an unmerged document, and collapsing the two would erase the
+distinction between "corrected before it became authority" and "corrected while
+it was".
+
+```text
+replaces      FD-1.4 only
+reason        the original text simultaneously classified InteractionManifestV1
+              under the 1 MiB typed-object bound ("any typed A1 payload") and
+              under the 64 MiB bound whose examples name "manifest"
+decision      InteractionManifestV1 uses the 64 MiB hard maximum; it remains a
+              typed A1 object for every other purpose, notably FD-1.7 media
+              types and its own FD-2 rank. The grain is per EXECUTION, not per
+              dispatch (§3.12, §3.12.1): one manifest indexes up to 256
+              dispatches and up to 4096 interaction_sequence entries in total
+no change to  envelope_version, message_kind_version, campaign_protocol_version
+              — no payload shape, envelope, rank or reducer semantics moved
+effect        this document's blob changes, so contract_digest changes; there is
+              no in-flight campaign to migrate (§7)
+```
+
+**How it surfaced.** An implementation had to pick a bound and could not, because
+both readings were literally present. It chose 64 MiB, recorded the choice as a
+reading rather than a fact, and said so — which is the behaviour the contract
+wants from an implementer who finds an ambiguity: resolve it visibly, do not
+resolve it silently. Two independent reviewers then confirmed the text was
+self-contradictory rather than merely unclear. FD-1.4 now says what was meant.
+
+**What made the original text wrong rather than terse.** One predicate was
+answering two questions. "Typed A1 payload" decides the media type (FD-1.7), the
+rank (FD-2), and the size bound — and for `InteractionManifestV1` the first two
+answers are *yes* while the third is *no*. A classification used for more than
+one purpose is correct only until the purposes disagree, and this is where they
+did.
 
 The rounds below are preserved in the order they happened. Each one is a record
 of what the contract got wrong before it was frozen, which is the part worth
