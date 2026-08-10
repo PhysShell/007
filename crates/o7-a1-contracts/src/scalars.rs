@@ -31,6 +31,47 @@ use serde::{Deserialize, Serialize, Serializer};
 
 use crate::bounds::{MAX_ARRAY_LEN, MAX_ID_BYTES, MAX_STRING_BYTES};
 
+/// Refuse text input with a constant message.
+///
+/// A `Visitor` that does not implement a `visit_*` method falls back to serde's
+/// default, which is `Err(Error::invalid_type(Unexpected::Str(v), &self))` —
+/// and that **quotes the string**. For a type expecting a number or a sequence,
+/// the string branch is exactly where a credential arrives, so the default is a
+/// leak (AGENTS.md P0) in the one case that matters.
+///
+/// Numeric and boolean branches are left to serde: those defaults quote the
+/// value too, but an integer or a `true` is not a secret, and the alternative
+/// is an error that cannot say what shape it wanted.
+///
+/// A visitor carrying this must be entered through `deserialize_any`. Asking
+/// `serde_json` for `deserialize_u64` or `deserialize_seq` makes *it* reject a
+/// string token before any `visit_*` method runs, and its error quotes the
+/// string — the leak survives the visitor entirely. A1 is JSON (FD-1.3), so
+/// the self-describing requirement of `deserialize_any` is always met.
+macro_rules! refuse_text {
+    ($reason:literal) => {
+        fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<Self::Value, E> {
+            Err(E::custom($reason))
+        }
+
+        fn visit_borrowed_str<E: serde::de::Error>(self, _: &'de str) -> Result<Self::Value, E> {
+            Err(E::custom($reason))
+        }
+
+        fn visit_string<E: serde::de::Error>(self, _: String) -> Result<Self::Value, E> {
+            Err(E::custom($reason))
+        }
+
+        fn visit_bytes<E: serde::de::Error>(self, _: &[u8]) -> Result<Self::Value, E> {
+            Err(E::custom($reason))
+        }
+
+        fn visit_byte_buf<E: serde::de::Error>(self, _: Vec<u8>) -> Result<Self::Value, E> {
+            Err(E::custom($reason))
+        }
+    };
+}
+
 pub use o7_run::event::{Digest256, DigestFormatError};
 
 /// A generous outer bound on a `Timestamp` string, so an over-long value is
@@ -454,16 +495,40 @@ impl<'de, const V: u32> Deserialize<'de> for FrozenVersion<V> {
     where
         D: serde::Deserializer<'de>,
     {
-        let raw = u32::deserialize(deserializer)?;
-        if raw == V {
-            Ok(Self)
-        } else {
-            // The number is the peer's own version claim, not payload content:
-            // safe to name, and useless to withhold.
-            Err(serde::de::Error::custom(format!(
-                "unsupported version {raw}, expected {V}: refused rather than parsed as well as we can (FD-1.6)"
-            )))
+        struct Version<const V: u32>;
+
+        impl<'de, const V: u32> serde::de::Visitor<'de> for Version<V> {
+            type Value = FrozenVersion<V>;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "the frozen version number {V}")
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, raw: u64) -> Result<Self::Value, E> {
+                if raw == u64::from(V) {
+                    Ok(FrozenVersion)
+                } else {
+                    // The number is the peer's own version claim, not payload
+                    // content: safe to name, and useless to withhold.
+                    Err(E::custom(format!(
+                        "unsupported version {raw}, expected {V}: refused rather than parsed as well as we can (FD-1.6)"
+                    )))
+                }
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, raw: i64) -> Result<Self::Value, E> {
+                u64::try_from(raw)
+                    .map_err(|_| E::custom("a version must be a non-negative integer"))
+                    .and_then(|raw| self.visit_u64(raw))
+            }
+
+            // A version is a number, so a *string* here is a type error — and
+            // the string is where a credential would be. Serde's default for
+            // that branch quotes it.
+            refuse_text!("a version must be a number");
         }
+
+        deserializer.deserialize_any(Version::<V>)
     }
 }
 
@@ -589,6 +654,8 @@ impl<'de, T: Deserialize<'de>, const MAX: usize> Deserialize<'de> for BoundedVec
                 )
             }
 
+            refuse_text!("a bounded collection must be a sequence");
+
             fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
             where
                 A: serde::de::SeqAccess<'de>,
@@ -619,7 +686,7 @@ impl<'de, T: Deserialize<'de>, const MAX: usize> Deserialize<'de> for BoundedVec
             }
         }
 
-        deserializer.deserialize_seq(BoundedSeq::<T, MAX>(PhantomData))
+        deserializer.deserialize_any(BoundedSeq::<T, MAX>(PhantomData))
     }
 }
 
@@ -755,6 +822,50 @@ mod tests {
 
     // AGENTS.md P0: nothing that may carry a secret reaches an error string. A
     // rejected value is untrusted input, so the error names shape only.
+    #[test]
+    fn no_public_type_names_a_rejected_string() {
+        // The general form of the round-4 `Digest256` leak and the round-13
+        // enum leak: every public `Deserialize` is a reject path, and the
+        // string branch is the one a credential arrives on. Asserted on the
+        // direct route, because that is the route that leaked.
+        const SECRET: &str = "ghp_0123456789abcdefghijklmnopqrstuvwxyz";
+        let quoted = format!("\"{SECRET}\"");
+
+        let mut messages = Vec::new();
+        if let Err(e) = serde_json::from_str::<FrozenVersion<1>>(&quoted) {
+            messages.push(e.to_string());
+        }
+        if let Err(e) = serde_json::from_str::<BoundedVec<Id, 4>>(&quoted) {
+            messages.push(e.to_string());
+        }
+        if let Err(e) = serde_json::from_str::<WireDigest>(&quoted) {
+            messages.push(e.to_string());
+        }
+        if let Err(e) = serde_json::from_str::<Id>(&format!("\"{}\"", SECRET.repeat(20))) {
+            messages.push(e.to_string());
+        }
+        if let Err(e) = serde_json::from_str::<Timestamp>(&quoted) {
+            messages.push(e.to_string());
+        }
+        if let Err(e) = serde_json::from_str::<CommitId>(&quoted) {
+            messages.push(e.to_string());
+        }
+        if let Err(e) = serde_json::from_str::<Optional<Id>>(&format!("\"{}\"", SECRET.repeat(20)))
+        {
+            messages.push(e.to_string());
+        }
+
+        assert_eq!(messages.len(), 7, "every case must actually be rejected");
+        for message in messages {
+            assert!(!message.contains("ghp_"), "error leaked content: {message}");
+        }
+
+        // The happy paths still work, so the refusals above are the rejected
+        // values and not deserializers that refuse everything.
+        assert!(serde_json::from_str::<FrozenVersion<1>>("1").is_ok());
+        assert!(serde_json::from_str::<BoundedVec<Id, 4>>(r#"["a"]"#).is_ok());
+    }
+
     #[test]
     fn a_scalar_error_never_quotes_the_rejected_value() {
         let secret = "ghp_totally_a_secret_value_that_must_not_be_logged";
