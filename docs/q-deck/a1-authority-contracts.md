@@ -224,10 +224,19 @@ findings per ReviewerReport / ReviewVerdict      <=    256
 
 `InteractionManifestV1` is a typed A1 object and keeps every rule that follows
 from that — FD-1.7 fixes its media type, FD-2 gives it its own rank — but its
-size bound is the evidence one. It is a per-dispatch index of up to 4096
-`interaction_sequence` entries (FD-1.4 above, §3.12.1), which is a shape the
-1 MiB typed-object ceiling was not written for. **Size and typedness are
-separate questions**, and this is the one object where they answer differently.
+size bound is the evidence one.
+
+The reason is its grain. There is **one manifest per execution**, not per
+dispatch: §3.12 nests every dispatch record inside a single receipt per
+`provider_execution_id` and gives that receipt one `interaction_manifest_ref`,
+and §3.12.1 binds the manifest to the same execution id. So a single manifest
+indexes up to 256 dispatches with up to 4096 `interaction_sequence` entries
+**in total**, each carrying refs and ids. That is an index of an execution's
+whole externally observable history, which is not the shape the 1 MiB
+typed-object ceiling was written for.
+
+**Size and typedness are separate questions**, and this is the one object where
+they answer differently.
 
 Exceeding any bound is a parse-time rejection, never a truncation. A truncated
 artifact that still parses is the failure mode these bounds exist to forbid.
@@ -2440,7 +2449,9 @@ reason        the original text simultaneously classified InteractionManifestV1
               under the 64 MiB bound whose examples name "manifest"
 decision      InteractionManifestV1 uses the 64 MiB hard maximum; it remains a
               typed A1 object for every other purpose, notably FD-1.7 media
-              types and its own FD-2 rank
+              types and its own FD-2 rank. The grain is per EXECUTION, not per
+              dispatch (§3.12, §3.12.1): one manifest indexes up to 256
+              dispatches and up to 4096 interaction_sequence entries in total
 no change to  envelope_version, message_kind_version, campaign_protocol_version
               — no payload shape, envelope, rank or reducer semantics moved
 effect        this document's blob changes, so contract_digest changes; there is
