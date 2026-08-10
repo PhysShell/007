@@ -1,0 +1,364 @@
+{
+  "candidate_count": 29,
+  "candidate_inventory": [
+    {
+      "artifact_bytes_sha256": "sha256:02bfb0bd5e919c2e628013638cbf205a4eb9a4ada44227687e2aedebb385ab0d",
+      "byte_length": 1745,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:02bfb0bd5e919c2e628013638cbf205a4eb9a4ada44227687e2aedebb385ab0d",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:0823d9b7f26a199017fe089d93db0dda77098056cf182ceef974db1756f10bfb",
+      "byte_length": 7307,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:0823d9b7f26a199017fe089d93db0dda77098056cf182ceef974db1756f10bfb",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:1169e2b420fff48266aafcb2902166ae052d7dc690c44ce6c69add96d67592f7",
+      "byte_length": 11355,
+      "eligible": false,
+      "events": 9,
+      "exclusion": "not_substantive",
+      "locator": "/home/tandem/.claude/projects/-home-tandem/375ffa0b-a7a2-4297-8725-a149200a1a0b.jsonl",
+      "native_session_id": "375ffa0b-a7a2-4297-8725-a149200a1a0b",
+      "previously_used_for_development": false,
+      "source_class": "claude-code-session"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:160d145c9cb250e878d036d0c7892835af62d762461abe63d5843eb97a53c4c3",
+      "byte_length": 15484,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:160d145c9cb250e878d036d0c7892835af62d762461abe63d5843eb97a53c4c3",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:27679e3554efe15d51be6dde38bb3b2189d66454cd32610b137c61f16421c147",
+      "byte_length": 57099926,
+      "eligible": false,
+      "events": 25804,
+      "exclusion": "development_session",
+      "locator": "/home/tandem/.claude/projects/-home-tandem/be909b9c-a365-400f-aafd-058b173f9f58.jsonl",
+      "native_session_id": "be909b9c-a365-400f-aafd-058b173f9f58",
+      "previously_used_for_development": true,
+      "source_class": "claude-code-session"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:374bbac69d810ed034164d842050b28865f260ad8856f81ab550be5af01539ff",
+      "byte_length": 1101185,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:374bbac69d810ed034164d842050b28865f260ad8856f81ab550be5af01539ff",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:3bb04ee265bf6292d584428d01ed0827c0423bafb3922863d693bdf2fa128a56",
+      "byte_length": 2265,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:3bb04ee265bf6292d584428d01ed0827c0423bafb3922863d693bdf2fa128a56",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:4eac30055b0ff67c0fdd6e96903be9f70c2d734398744307bb6df8bbdced52c7",
+      "byte_length": 76141,
+      "eligible": false,
+      "exclusion": "used_case_0001",
+      "locator": "cas:sha256:4eac30055b0ff67c0fdd6e96903be9f70c2d734398744307bb6df8bbdced52c7",
+      "mapping_nodes": 8,
+      "native_conversation_id": "6a6f73b9-d1b0-83eb-a6cb-99064d7cc6cf",
+      "previously_used_for_development": true,
+      "source_class": "chatgpt-export",
+      "used_by": [
+        "fixtures/case-0001/derived-manifest.yaml",
+        "fixtures/case-0001/expected-report-v1.json",
+        "fixtures/case-0001/gold-state-v0.json",
+        "fixtures/case-0001/manifest.yaml",
+        "results/case-0001-v0/derived-manifest.actual.json",
+        "results/case-0001-v0/report.json"
+      ]
+    },
+    {
+      "artifact_bytes_sha256": "sha256:507208143f2bbee176cb4f70268b9dd4c7b8218e9c04dd40345f93be57843852",
+      "byte_length": 1732,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:507208143f2bbee176cb4f70268b9dd4c7b8218e9c04dd40345f93be57843852",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:56a294f8e8e83d46e8935ba5556d67d06b793e476ec906ed07786277a87f21a9",
+      "byte_length": 4237924,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:56a294f8e8e83d46e8935ba5556d67d06b793e476ec906ed07786277a87f21a9",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:6ec7b2ea375379c9f42ae33bf9360a59849dbca4b47f92267a2169febc5ae54d",
+      "byte_length": 1737,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:6ec7b2ea375379c9f42ae33bf9360a59849dbca4b47f92267a2169febc5ae54d",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:7c4003679e047e5f333ade9b905d9056ad42ba6bc5857dfe1a909d2ba5ef7fdf",
+      "byte_length": 8520,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:7c4003679e047e5f333ade9b905d9056ad42ba6bc5857dfe1a909d2ba5ef7fdf",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:7f72133abc88ff88873c9d5dea1139535ff6583baee5e96b74ed7b0e4aeafba6",
+      "byte_length": 10046,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:7f72133abc88ff88873c9d5dea1139535ff6583baee5e96b74ed7b0e4aeafba6",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:963edb459fb742359051e3a5386ce6b6f1026e1d01b5a8a951a9b0bf99541d76",
+      "byte_length": 16030,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:963edb459fb742359051e3a5386ce6b6f1026e1d01b5a8a951a9b0bf99541d76",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:98696798b440138653318657f2546adc0c141f5910b058e13d98ff81cc18f398",
+      "byte_length": 18655,
+      "eligible": false,
+      "events": 12,
+      "exclusion": "not_substantive",
+      "locator": "/home/tandem/.claude/projects/-tmp-claude-1001--home-tandem-8c45c2b8-778e-480e-b5db-da2af34a82c1-scratchpad-r8-manual-wt-repo-1785831828-106922/d32dd2ac-65a6-4d26-8dd4-538755c9a245.jsonl",
+      "native_session_id": "d32dd2ac-65a6-4d26-8dd4-538755c9a245",
+      "previously_used_for_development": false,
+      "source_class": "claude-code-session"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:9b4cd434d1dac50a0789650d8a55e919e570a7840cb4e2f327804f9f948ebfa2",
+      "byte_length": 9102,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:9b4cd434d1dac50a0789650d8a55e919e570a7840cb4e2f327804f9f948ebfa2",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:a700ed8be579094adba6c217f4ca4659750004dded1a5e10ce7ee1684dd3eb2f",
+      "byte_length": 86606884,
+      "development_mentions": {
+        "b1-context": 1,
+        "case-0002": 8,
+        "qodec": 16
+      },
+      "eligible": false,
+      "events": 47858,
+      "exclusion": "development_adjacent",
+      "locator": "/home/tandem/.claude/projects/-home-tandem/8c45c2b8-778e-480e-b5db-da2af34a82c1.jsonl",
+      "native_session_id": "8c45c2b8-778e-480e-b5db-da2af34a82c1",
+      "previously_used_for_development": true,
+      "source_class": "claude-code-session"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:ab95f39e0c8d389f326f097ec177c5c22a751da016e173796a8dde645dd882df",
+      "byte_length": 16030,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:ab95f39e0c8d389f326f097ec177c5c22a751da016e173796a8dde645dd882df",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:b16477d0edf46ac8f57b9910b9fa6f1f3953669a94b61cbde919f08a19e9fd3c",
+      "byte_length": 15451,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:b16477d0edf46ac8f57b9910b9fa6f1f3953669a94b61cbde919f08a19e9fd3c",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:b39073a275d1a2f832cbbd139a71b8a74c44e48c51a6d887a3eaf1322e0ae216",
+      "byte_length": 398326,
+      "eligible": false,
+      "exclusion": "used_case_0001",
+      "locator": "cas:sha256:b39073a275d1a2f832cbbd139a71b8a74c44e48c51a6d887a3eaf1322e0ae216",
+      "mapping_nodes": 109,
+      "native_conversation_id": "6a6b171a-c104-83eb-b8b0-c2c2b67704bb",
+      "previously_used_for_development": true,
+      "source_class": "chatgpt-export",
+      "used_by": [
+        "fixtures/case-0001/derived-manifest.yaml",
+        "fixtures/case-0001/expected-report-v1.json",
+        "fixtures/case-0001/manifest.yaml",
+        "results/case-0001-v0/derived-manifest.actual.json",
+        "results/case-0001-v0/report.json"
+      ]
+    },
+    {
+      "artifact_bytes_sha256": "sha256:ba04dd06be16491e324f7eb0b1ccd1fc42d8a468f25c3e7125f42e19dfb65d75",
+      "byte_length": 14895956,
+      "development_mentions": {
+        "b1-context": 0,
+        "case-0002": 0,
+        "qodec": 0
+      },
+      "eligible": true,
+      "events": 7981,
+      "exclusion": null,
+      "locator": "/home/tandem/.claude/projects/-home-tandem-griff/071e061f-9079-4d2f-90df-6d118c1887f2.jsonl",
+      "native_session_id": "071e061f-9079-4d2f-90df-6d118c1887f2",
+      "previously_used_for_development": false,
+      "source_class": "claude-code-session"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:ba8b0e8f6d2732a3b1e86cff7c302b522291b0a73cf05b122c601d581b00718d",
+      "byte_length": 11675,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:ba8b0e8f6d2732a3b1e86cff7c302b522291b0a73cf05b122c601d581b00718d",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:c161997708752b16e58f2a98f30faacd38b2eecb69e24b6e430b9c7f88ab64c1",
+      "byte_length": 1333,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:c161997708752b16e58f2a98f30faacd38b2eecb69e24b6e430b9c7f88ab64c1",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:d34c4b9ab2eb90885e270d14199110989cb65eaae17de341db647af49f11cfb4",
+      "byte_length": 3352173,
+      "eligible": false,
+      "exclusion": "used_case_0001",
+      "locator": "cas:sha256:d34c4b9ab2eb90885e270d14199110989cb65eaae17de341db647af49f11cfb4",
+      "mapping_nodes": 334,
+      "native_conversation_id": "6a6b6230-cb8c-83eb-ad3d-456c0d0c8ce3",
+      "previously_used_for_development": true,
+      "source_class": "chatgpt-export",
+      "used_by": [
+        "fixtures/case-0001/derived-manifest.yaml",
+        "fixtures/case-0001/expected-report-v1.json",
+        "fixtures/case-0001/gold-state-v0.json",
+        "fixtures/case-0001/manifest.yaml",
+        "results/case-0001-v0/derived-manifest.actual.json",
+        "results/case-0001-v0/report.json"
+      ]
+    },
+    {
+      "artifact_bytes_sha256": "sha256:d8d1d5fb933dacdb1efcbd7db91c716cf678cd94b9cabc7ba60b5ff2973c2d3d",
+      "byte_length": 16141,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:d8d1d5fb933dacdb1efcbd7db91c716cf678cd94b9cabc7ba60b5ff2973c2d3d",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:ed518b334485ef5421aab0229a4e4a0dc9bc489cb78d1eba00b5eb50d286e7e8",
+      "byte_length": 5963644,
+      "eligible": false,
+      "exclusion": "used_case_0002",
+      "locator": "cas:sha256:ed518b334485ef5421aab0229a4e4a0dc9bc489cb78d1eba00b5eb50d286e7e8",
+      "mapping_nodes": 2790,
+      "native_conversation_id": "6a6e220a-a154-83eb-9917-54e9a3cac8e5",
+      "previously_used_for_development": true,
+      "source_class": "chatgpt-export",
+      "used_by": [
+        "fixtures/case-0002-v1/gold-state-v0.json",
+        "fixtures/case-0002-v1/manifest.yaml",
+        "fixtures/case-0002/fixture-lock-v0.yaml",
+        "fixtures/case-0002/gold-state-v0.json",
+        "fixtures/case-0002/manifest.yaml",
+        "results/case-0002-adjudication-v1/projection/tasks/case-0002-resume-product-integration/context.json"
+      ]
+    },
+    {
+      "artifact_bytes_sha256": "sha256:eec21faee941a2f086762148cb838e353c5c74861d327272b6f7bdf9fed2bdc8",
+      "byte_length": 10903,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:eec21faee941a2f086762148cb838e353c5c74861d327272b6f7bdf9fed2bdc8",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:f9e65efb87f31a954597ad07f29b65c14cba0c27d2f0310d319a9fe3bbd9c563",
+      "byte_length": 1085,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:f9e65efb87f31a954597ad07f29b65c14cba0c27d2f0310d319a9fe3bbd9c563",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    },
+    {
+      "artifact_bytes_sha256": "sha256:fc76d210277f328cc685e61b80df4214319f612333ea49c7e9126d51becce791",
+      "byte_length": 16141,
+      "eligible": false,
+      "exclusion": "b1_derived_artifact",
+      "locator": "cas:sha256:fc76d210277f328cc685e61b80df4214319f612333ea49c7e9126d51becce791",
+      "previously_used_for_development": true,
+      "source_class": "b1-derived-artifact"
+    }
+  ],
+  "digest_function": "sha256 over raw file bytes (not a git object id)",
+  "eligibility_criteria": {
+    "e1_real_capture": "the object is a raw platform capture, not an artifact derived by B1",
+    "e2_parseable_by_frozen_compiler": "parses as the capture format the frozen compiler accepts",
+    "e3_substantive": "carries enough events to support gold observations with relations and status transitions; a handful of events cannot",
+    "e4_not_previously_used": "its digest or native conversation id appears in no case-0001 / case-0002 fixture, result, or manifest",
+    "e5_independent_of_development": "the capture does not itself discuss B1/Qodec development; a transcript of the work being tested is not a holdout for it"
+  },
+  "eligible": [
+    {
+      "artifact_bytes_sha256": "sha256:ba04dd06be16491e324f7eb0b1ccd1fc42d8a468f25c3e7125f42e19dfb65d75",
+      "byte_length": 14895956,
+      "events": 7981,
+      "locator": "/home/tandem/.claude/projects/-home-tandem-griff/071e061f-9079-4d2f-90df-6d118c1887f2.jsonl",
+      "native_session_id": "071e061f-9079-4d2f-90df-6d118c1887f2",
+      "source_class": "claude-code-session"
+    }
+  ],
+  "eligible_count": 1,
+  "exclusion_reasons": {
+    "b1_derived_artifact": "produced by the B1 pipeline; not a raw source",
+    "development_adjacent": "the capture discusses B1/Qodec development, so it is not independent",
+    "development_session": "this is the session in which B1/Qodec development is being conducted",
+    "not_substantive": "too few events to carry gold observations, relations and status transitions",
+    "used_case_0001": "bound as a source of the case-0001 development fixture",
+    "used_case_0002": "bound by the case-0002 round-0 source lock"
+  },
+  "fallback_rule": "candidates are ordered by ascending sha256 of their bytes; if a selected source cannot be processed by the frozen compiler, it is dropped with its refusal recorded and the next candidate in that order is taken. The order is fixed before any processing so the fallback cannot be steered.",
+  "inventory_locations": [
+    "/home/tandem/.local/share/o7-research/cas/sha256",
+    "/home/tandem/.local/share/o7-research/case-0002",
+    "/home/tandem/.claude/projects"
+  ],
+  "record": "o7.b1.real-source-holdout-preselection/v1",
+  "required_fixture_count": 3,
+  "stable_ordering": "ascending artifact_bytes_sha256",
+  "sufficient_for_holdout": false,
+  "verdict": "REAL_SOURCE_HOLDOUT_MATERIAL_INSUFFICIENT",
+  "written_before": "any fixture curation, any projector run, any model call"
+}
