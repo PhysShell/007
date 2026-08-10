@@ -761,6 +761,51 @@ mod tests {
         agree(&ascii_escape(11_000));
     }
 
+    /// The lone-surrogate split, pinned across the two layers that share it.
+    ///
+    /// [`crate::scan`] deliberately does not adjudicate Unicode: it counts an
+    /// unpaired surrogate as three bytes and moves on, because serde refuses
+    /// the document immediately afterwards. That is a *cross-layer agreement* —
+    /// "we skip this here because the next layer is guaranteed to catch it" —
+    /// and #124 spent eight rounds establishing that such agreements belong in
+    /// a test rather than in a comment. A later change to either layer that
+    /// broke the pairing would otherwise turn a documented division of labour
+    /// into a hole neither side is watching.
+    ///
+    /// So both halves are asserted: the scan traverses these without claiming
+    /// authority, and the pipeline refuses them.
+    #[test]
+    fn a_lone_surrogate_is_refused_by_the_pipeline_though_not_by_the_scan() {
+        for (label, document) in [
+            ("lone high", r#"{"x":"\uD83D"}"#),
+            ("lone low", r#"{"x":"\uDE00"}"#),
+            ("high then a plain escape", r#"{"x":"\uD83D\n"}"#),
+            (
+                "high then a non-surrogate escape",
+                r#"{"x":"\uD83D\u0061"}"#,
+            ),
+            ("reversed pair", r#"{"x":"\uDE00\uD83D"}"#),
+        ] {
+            assert!(
+                check(document).is_ok(),
+                "{label}: the scan traverses it without claiming Unicode authority"
+            );
+            assert!(
+                pipeline(document).is_err(),
+                "{label}: the pipeline must refuse it — the scan is relying on that"
+            );
+            // And the verdict is the one the walk this replaced reached.
+            agree(document);
+        }
+
+        // A well-formed pair is admitted by both, so the refusals above are the
+        // pairing rule and not a layer that refuses every surrogate.
+        let paired = r#"{"x":"\uD83D\uDE00"}"#;
+        assert!(check(paired).is_ok());
+        assert!(pipeline(paired).is_ok());
+        agree(paired);
+    }
+
     /// The boundary family, enumerated rather than sampled.
     ///
     /// Random generation is the wrong instrument for this defect and would have

@@ -8,7 +8,7 @@
 //! everything.
 //!
 //! The compile-time half lives in `compile_fail` doctests on
-//! [`o7_a1_cas::ResolvedArtifact`], because "this does not compile" is not
+//! [`o7_a1_cas::ResolvedOpaque`], because "this does not compile" is not
 //! expressible as a runtime assertion.
 
 // Fixtures are valid by construction; one that is not should fail loudly.
@@ -17,12 +17,13 @@
 use std::marker::PhantomData;
 
 use o7_a1_cas::{
-    BackingStore, MemoryStore, OpaqueSlot, RawObject, ResolutionSession, ResolveError,
-    ResolvedArtifact,
+    BackingStore, EnvelopeSlot, MemoryStore, OpaqueSlot, RawObject, ResolutionSession,
+    ResolveError, ResolvedArtifact, ResolvedEnvelope, ResolvedOpaque,
 };
 use o7_a1_contracts::{
-    typed_media_type, ArtifactKindV1, ArtifactRef, BudgetPolicy, WireDigest,
-    MAX_REACHABLE_CLOSURE_OBJECTS,
+    typed_media_type, AdapterVersion, ArtifactKindV1, ArtifactRef, ArtifactRefs, BudgetPolicy,
+    CommitId, EnvelopeFieldsV1, EnvelopeV1, EnvelopeVersion, Id, MessageKindV1, MessageKindVersion,
+    Optional, ProducerRole, Timestamp, WireDigest, MAX_REACHABLE_CLOSURE_OBJECTS,
 };
 
 fn policy() -> BudgetPolicy {
@@ -32,6 +33,14 @@ fn policy() -> BudgetPolicy {
         evidence_budget_bytes: 4096,
         closure_object_budget: 8,
     }
+}
+
+fn id(s: &str) -> Id {
+    Id::parse(s).expect("fixture id")
+}
+
+fn digest(seed: &str) -> WireDigest {
+    WireDigest::of_bytes(seed.as_bytes())
 }
 
 fn diff_slot() -> OpaqueSlot {
@@ -51,7 +60,7 @@ fn honest_ref(kind: ArtifactKindV1, media: &str, bytes: &[u8]) -> ArtifactRef {
 /// This is the whole hostile-fixture story, and it is deliberately *not* a
 /// back door into the write path: it implements the read trait, so the worst it
 /// can do is hand the resolver bad input. It has no way to return a
-/// `ResolvedArtifact` — nothing outside the session can mint one.
+/// `ResolvedOpaque` — nothing outside the session can mint one.
 struct HostileStore(Vec<u8>);
 
 impl BackingStore for HostileStore {
@@ -115,21 +124,21 @@ impl<A, B: From<A>> Convert<A, B> {
     }
 }
 
-/// Property 2, mechanised: `ArtifactRef` is not `ResolvedArtifact`, and there is
+/// Property 2, mechanised: `ArtifactRef` is not `ResolvedOpaque`, and there is
 /// no conversion that quietly says otherwise.
 ///
-/// `From<ArtifactRef> for ResolvedArtifact` is the most tempting API on this
+/// `From<ArtifactRef> for ResolvedOpaque` is the most tempting API on this
 /// step — it looks natural and the compiler is content — and it is an admitted
 /// envelope with its producer role reassigned after admission, in a new
 /// costume. So its absence is asserted, not trusted.
 #[test]
 fn a_reference_does_not_convert_into_a_resolution() {
     assert!(
-        !Convert::<ArtifactRef, ResolvedArtifact<'static>>(PhantomData).holds(),
-        "From<ArtifactRef> for ResolvedArtifact must not exist"
+        !Convert::<ArtifactRef, ResolvedOpaque<'static>>(PhantomData).holds(),
+        "From<ArtifactRef> for ResolvedOpaque must not exist"
     );
     assert!(
-        !Convert::<RawObject, ResolvedArtifact<'static>>(PhantomData).holds(),
+        !Convert::<RawObject, ResolvedOpaque<'static>>(PhantomData).holds(),
         "untrusted store bytes must not convert into evidence either"
     );
     // The probe reports the bound honestly rather than always saying false.
@@ -153,10 +162,22 @@ fn a_reference_does_not_convert_into_a_resolution() {
 /// so the absence is asserted now rather than defended later.
 #[test]
 fn resolution_evidence_has_no_transportable_form() {
-    assert!(
-        !Probe::<ResolvedArtifact<'static>>(PhantomData).holds(),
-        "ResolvedArtifact must not be Serialize"
-    );
+    for (label, holds) in [
+        (
+            "ResolvedOpaque",
+            Probe::<ResolvedOpaque<'static>>(PhantomData).holds(),
+        ),
+        (
+            "ResolvedEnvelope",
+            Probe::<ResolvedEnvelope<'static>>(PhantomData).holds(),
+        ),
+        (
+            "ResolvedArtifact",
+            Probe::<ResolvedArtifact<'static>>(PhantomData).holds(),
+        ),
+    ] {
+        assert!(!holds, "{label} must not be Serialize");
+    }
     assert!(
         Probe::<String>(PhantomData).holds(),
         "the probe must report an implemented bound as true"
@@ -175,22 +196,41 @@ fn resolution_evidence_has_no_transportable_form() {
 #[test]
 fn nothing_outside_the_resolver_can_mint_evidence() {
     assert!(
-        !Convert::<ArtifactRef, ResolvedArtifact<'static>>(PhantomData).holds(),
+        !Convert::<ArtifactRef, ResolvedOpaque<'static>>(PhantomData).holds(),
         "a claim must not convert into a proof"
     );
     assert!(
-        !Convert::<RawObject, ResolvedArtifact<'static>>(PhantomData).holds(),
+        !Convert::<RawObject, ResolvedOpaque<'static>>(PhantomData).holds(),
         "untrusted store bytes must not convert into a proof"
     );
     assert!(
-        !Convert::<Vec<u8>, ResolvedArtifact<'static>>(PhantomData).holds(),
+        !Convert::<Vec<u8>, ResolvedOpaque<'static>>(PhantomData).holds(),
         "nor may raw bytes"
+    );
+    assert!(
+        !Convert::<ArtifactRef, ResolvedEnvelope<'static>>(PhantomData).holds(),
+        "and none of it for the envelope class either"
+    );
+    assert!(
+        !Convert::<EnvelopeV1, ResolvedEnvelope<'static>>(PhantomData).holds(),
+        "an admitted envelope is still not a resolved one: admission is step 1's \
+         proof, resolution is this session's"
+    );
+    // Unifying the result must not unify the proof: the enum is reachable from
+    // either class, and neither class is reachable from the other.
+    assert!(
+        !Convert::<ResolvedOpaque<'static>, ResolvedEnvelope<'static>>(PhantomData).holds(),
+        "an opaque resolution must not become an envelope one"
+    );
+    assert!(
+        !Convert::<ResolvedEnvelope<'static>, ResolvedOpaque<'static>>(PhantomData).holds(),
+        "nor the reverse"
     );
     // `Default` is the quietest constructor of all: it takes no arguments, so
     // it can never have checked anything.
     assert!(
-        !DefaultProbe::<ResolvedArtifact<'static>>(PhantomData).holds(),
-        "ResolvedArtifact must not be Default"
+        !DefaultProbe::<ResolvedOpaque<'static>>(PhantomData).holds(),
+        "ResolvedOpaque must not be Default"
     );
     assert!(DefaultProbe::<Vec<u8>>(PhantomData).holds());
 }
@@ -481,4 +521,345 @@ fn a_policy_above_the_hard_maximum_never_opens_a_session() {
         ..policy()
     };
     assert!(ResolutionSession::enter(&bad, |_| ()).is_err());
+}
+
+// ---------------------------------------------------------------------------
+// Envelope-bearing resolution: FD-1.8's two byte strings, both checked
+// ---------------------------------------------------------------------------
+
+const PAYLOAD: &[u8] = br#"{"status":"candidate_produced"}"#;
+
+/// A controller envelope binding `PAYLOAD`, built through step 1's checked
+/// constructor. Nothing here is a shortcut: the fixture is an admitted
+/// envelope, exactly what a producer would hold.
+fn work_order(kind: MessageKindV1) -> EnvelopeV1 {
+    EnvelopeV1::new(EnvelopeFieldsV1 {
+        envelope_version: EnvelopeVersion::default(),
+        message_kind: kind,
+        message_kind_version: MessageKindVersion::default(),
+        message_id: id("msg-1"),
+        root_goal_id: id("goal-1"),
+        task_id: id("task-1"),
+        campaign_id: id("camp-1"),
+        round_id: Optional::present(id("round-1")),
+        causation_id: Optional::absent(),
+        correlation_id: id("corr-1"),
+        producer_role: ProducerRole::Controller,
+        producer_execution_id: id("exec-1"),
+        producer_adapter_version: AdapterVersion::parse("o7-controller/0.1.0").unwrap(),
+        model_identity: Optional::absent(),
+        prompt_digest: Optional::absent(),
+        tool_policy_digest: Optional::absent(),
+        contract_digest: digest("contract"),
+        expected_input_head: CommitId::parse(&"a".repeat(40)).ok().into(),
+        payload_digest: WireDigest::of_bytes(PAYLOAD),
+        artifact_refs: ArtifactRefs::empty(),
+        provider_execution_receipt_ref: Optional::absent(),
+        created_at: Timestamp::parse("2026-08-09T20:00:00Z").unwrap(),
+    })
+    .expect("the envelope fixture must be admissible")
+}
+
+fn work_order_slot() -> EnvelopeSlot {
+    EnvelopeSlot::new(
+        ArtifactKindV1::WorkOrder,
+        typed_media_type(ArtifactKindV1::WorkOrder, 1),
+    )
+}
+
+#[test]
+fn an_envelope_bearing_artifact_resolves_both_of_its_halves() {
+    let mut store = MemoryStore::new();
+    let envelope = work_order(MessageKindV1::WorkOrder);
+    let (framed, size) = store
+        .put_envelope(&envelope, PAYLOAD.to_vec())
+        .expect("the fixture encodes under its ceiling");
+    let reference = ArtifactRef::new(
+        ArtifactKindV1::WorkOrder,
+        typed_media_type(ArtifactKindV1::WorkOrder, 1),
+        framed.clone(),
+        size,
+    )
+    .unwrap();
+
+    ResolutionSession::enter(&policy(), |session| {
+        let resolved = session
+            .resolve_envelope(&work_order_slot(), &reference, &store)
+            .expect("an honest envelope reference must resolve");
+        assert_eq!(resolved.envelope(), &envelope);
+        assert_eq!(resolved.framed_digest(), &framed);
+        assert_eq!(resolved.payload(), PAYLOAD);
+        // FD-1.8: the declared size is both halves, and resolution proved it.
+        assert_eq!(resolved.stored_size(), size);
+        assert!(size > PAYLOAD.len() as u64, "the envelope half must count");
+        // The unified surface reports what is common, and nothing else.
+        let unified = ResolvedArtifact::Envelope(Box::new(resolved));
+        assert_eq!(
+            unified.identity(),
+            (ArtifactKindV1::WorkOrder, framed.as_str())
+        );
+        assert_eq!(unified.stored_size(), size);
+    })
+    .unwrap();
+}
+
+/// FD-2.5, all three sides. The slot's expectation, the reference's claim and
+/// the admitted bytes must agree, or a peer has bytes admitted under one schema
+/// and handed back as authority under another kind.
+#[test]
+fn the_kind_must_agree_with_the_slot_the_reference_and_the_bytes() {
+    let mut store = MemoryStore::new();
+    // The stored artifact really is a ReviewRequest. Another kind the
+    // controller also authors (§3.4), so step 1's direction rule is satisfied
+    // and cannot be what refuses this.
+    let envelope = work_order(MessageKindV1::ReviewRequest);
+    let (framed, size) = store.put_envelope(&envelope, PAYLOAD.to_vec()).unwrap();
+
+    // ...but the reference claims a WorkOrder, and the slot expects one, so
+    // only the bytes can catch it. Both the slot and the ref agree with each
+    // other; the disagreement is with reality.
+    let lying = ArtifactRef::new(
+        ArtifactKindV1::WorkOrder,
+        typed_media_type(ArtifactKindV1::WorkOrder, 1),
+        framed,
+        size,
+    )
+    .unwrap();
+
+    ResolutionSession::enter(&policy(), |session| {
+        assert!(
+            matches!(
+                session.resolve_envelope(&work_order_slot(), &lying, &store),
+                Err(ResolveError::EnvelopeKindMismatch {
+                    expected: "work_order",
+                    actual: "review_request",
+                })
+            ),
+            "the bytes are the third side of the comparison"
+        );
+    })
+    .unwrap();
+}
+
+/// The digest a reference names for this class is the **framed** identity
+/// (FD-1.2), not the hash of the envelope bytes — so a reference pointing at a
+/// stored object that frames to something else is refused.
+#[test]
+fn the_stored_envelope_must_frame_to_the_referenced_digest() {
+    let mut store = MemoryStore::new();
+    let envelope = work_order(MessageKindV1::WorkOrder);
+    let (framed, size) = store.put_envelope(&envelope, PAYLOAD.to_vec()).unwrap();
+
+    // A second, different envelope stored alongside. Its bytes are perfectly
+    // admissible; they simply are not the artifact this reference names.
+    let other = EnvelopeV1::new(EnvelopeFieldsV1 {
+        message_id: id("msg-2"),
+        ..envelope.to_fields()
+    })
+    .unwrap();
+    let (other_framed, _) = store.put_envelope(&other, PAYLOAD.to_vec()).unwrap();
+    assert_ne!(framed, other_framed);
+
+    struct Swapped(Vec<u8>, Vec<u8>);
+    impl BackingStore for Swapped {
+        fn get(&self, digest: &WireDigest) -> Option<RawObject> {
+            // Hand back the *other* envelope whatever is asked for, except for
+            // the payload, so the only failing check is the framed identity.
+            if digest.as_str() == WireDigest::of_bytes(PAYLOAD).as_str() {
+                Some(RawObject::from_backing_store(self.1.clone()))
+            } else {
+                Some(RawObject::from_backing_store(self.0.clone()))
+            }
+        }
+    }
+    let swapped = Swapped(other.to_wire_bytes().unwrap(), PAYLOAD.to_vec());
+
+    let reference = ArtifactRef::new(
+        ArtifactKindV1::WorkOrder,
+        typed_media_type(ArtifactKindV1::WorkOrder, 1),
+        framed,
+        size,
+    )
+    .unwrap();
+    ResolutionSession::enter(&policy(), |session| {
+        assert!(matches!(
+            session.resolve_envelope(&work_order_slot(), &reference, &swapped),
+            Err(ResolveError::FramedDigestMismatch)
+        ));
+    })
+    .unwrap();
+}
+
+/// FD-1.1 — the payload half. Verifying the envelope and stopping would leave
+/// the payload unbound while the value looks resolved.
+#[test]
+fn the_payload_half_is_verified_too() {
+    let mut store = MemoryStore::new();
+    let envelope = work_order(MessageKindV1::WorkOrder);
+    let (framed, size) = store.put_envelope(&envelope, PAYLOAD.to_vec()).unwrap();
+    let reference = ArtifactRef::new(
+        ArtifactKindV1::WorkOrder,
+        typed_media_type(ArtifactKindV1::WorkOrder, 1),
+        framed.clone(),
+        size,
+    )
+    .unwrap();
+
+    struct CorruptPayload {
+        envelope_bytes: Vec<u8>,
+        framed: String,
+    }
+    impl BackingStore for CorruptPayload {
+        fn get(&self, digest: &WireDigest) -> Option<RawObject> {
+            if digest.as_str() == self.framed {
+                Some(RawObject::from_backing_store(self.envelope_bytes.clone()))
+            } else {
+                // Same length, different bytes: only the digest can catch it.
+                Some(RawObject::from_backing_store(
+                    br#"{"status":"CANDIDATE_produced"}"#.to_vec(),
+                ))
+            }
+        }
+    }
+    let corrupt = CorruptPayload {
+        envelope_bytes: envelope.to_wire_bytes().unwrap(),
+        framed: framed.as_str().to_owned(),
+    };
+
+    ResolutionSession::enter(&policy(), |session| {
+        assert!(matches!(
+            session.resolve_envelope(&work_order_slot(), &reference, &corrupt),
+            Err(ResolveError::PayloadDigestMismatch)
+        ));
+    })
+    .unwrap();
+
+    // An absent payload is its own refusal, not an envelope resolved alone.
+    struct EnvelopeOnly {
+        envelope_bytes: Vec<u8>,
+        framed: String,
+    }
+    impl BackingStore for EnvelopeOnly {
+        fn get(&self, digest: &WireDigest) -> Option<RawObject> {
+            (digest.as_str() == self.framed)
+                .then(|| RawObject::from_backing_store(self.envelope_bytes.clone()))
+        }
+    }
+    ResolutionSession::enter(&policy(), |session| {
+        assert!(matches!(
+            session.resolve_envelope(
+                &work_order_slot(),
+                &reference,
+                &EnvelopeOnly {
+                    envelope_bytes: envelope.to_wire_bytes().unwrap(),
+                    framed: framed.as_str().to_owned(),
+                }
+            ),
+            Err(ResolveError::PayloadMissing)
+        ));
+    })
+    .unwrap();
+}
+
+/// FD-1.8 — "the size check is `envelope_bytes + payload_bytes == ref.size`".
+/// Checking one half against the declared size would let a reference
+/// under-declare what a closure will actually read.
+#[test]
+fn the_declared_size_must_equal_both_halves_together() {
+    let mut store = MemoryStore::new();
+    let envelope = work_order(MessageKindV1::WorkOrder);
+    let (framed, size) = store.put_envelope(&envelope, PAYLOAD.to_vec()).unwrap();
+
+    // Declaring only the payload half: the number a resolver that forgot the
+    // envelope would have computed.
+    let under = ArtifactRef::new(
+        ArtifactKindV1::WorkOrder,
+        typed_media_type(ArtifactKindV1::WorkOrder, 1),
+        framed,
+        PAYLOAD.len() as u64,
+    )
+    .unwrap();
+
+    ResolutionSession::enter(&policy(), |session| {
+        assert!(matches!(
+            session.resolve_envelope(&work_order_slot(), &under, &store),
+            Err(ResolveError::HalvesSizeMismatch { declared, stored })
+                if declared == PAYLOAD.len() as u64 && stored == size
+        ));
+    })
+    .unwrap();
+}
+
+/// There is no typed shortcut: the envelope goes through `parse_artifact`, so
+/// everything step 1 refuses is refused here without this crate holding a
+/// second opinion about what an envelope is.
+#[test]
+fn the_envelope_half_goes_through_the_one_admission_path() {
+    let envelope = work_order(MessageKindV1::WorkOrder);
+    let framed = envelope.framed_digest();
+
+    // A document that is structurally fine and violates a cross-field rule:
+    // a controller envelope carrying provider evidence (§3.0). Only the
+    // admission path knows that, and this crate never re-implements it.
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&envelope.to_wire_bytes().unwrap()).unwrap();
+    if let Some(map) = document.as_object_mut() {
+        map.insert(
+            "model_identity".to_owned(),
+            serde_json::json!("claude-opus-5"),
+        );
+    }
+    let doctored = document.to_string().into_bytes();
+
+    struct Fixed(Vec<u8>, Vec<u8>, String);
+    impl BackingStore for Fixed {
+        fn get(&self, digest: &WireDigest) -> Option<RawObject> {
+            if digest.as_str() == self.2 {
+                Some(RawObject::from_backing_store(self.0.clone()))
+            } else {
+                Some(RawObject::from_backing_store(self.1.clone()))
+            }
+        }
+    }
+    let store = Fixed(
+        doctored.clone(),
+        PAYLOAD.to_vec(),
+        framed.as_str().to_owned(),
+    );
+    let reference = ArtifactRef::new(
+        ArtifactKindV1::WorkOrder,
+        typed_media_type(ArtifactKindV1::WorkOrder, 1),
+        framed,
+        doctored.len() as u64 + PAYLOAD.len() as u64,
+    )
+    .unwrap();
+
+    ResolutionSession::enter(&policy(), |session| {
+        assert!(
+            matches!(
+                session.resolve_envelope(&work_order_slot(), &reference, &store),
+                Err(ResolveError::EnvelopeInadmissible { .. })
+            ),
+            "a cross-field violation must be refused by step 1's admission path"
+        );
+    })
+    .unwrap();
+}
+
+/// The two slot types do not overlap: an opaque slot refuses a typed artifact
+/// (already covered) and an envelope slot refuses a rank-0 kind.
+#[test]
+fn an_envelope_slot_refuses_a_kind_that_bears_no_envelope() {
+    let mut store = MemoryStore::new();
+    store.put(b"diff".to_vec());
+    let slot = EnvelopeSlot::new(ArtifactKindV1::Diff, "text/x-diff");
+    let reference = honest_ref(ArtifactKindV1::Diff, "text/x-diff", b"diff");
+
+    ResolutionSession::enter(&policy(), |session| {
+        assert!(matches!(
+            session.resolve_envelope(&slot, &reference, &store),
+            Err(ResolveError::NotEnvelopeBearing { kind: "diff" })
+        ));
+    })
+    .unwrap();
 }

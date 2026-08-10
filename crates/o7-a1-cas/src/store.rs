@@ -16,7 +16,7 @@
 
 use std::collections::HashMap;
 
-use o7_a1_contracts::WireDigest;
+use o7_a1_contracts::{EnvelopeError, EnvelopeV1, WireDigest};
 
 /// Bytes as a backing store handed them over: **untrusted**.
 ///
@@ -90,6 +90,41 @@ impl MemoryStore {
         let digest = WireDigest::of_bytes(&bytes);
         self.objects.insert(digest.as_str().to_owned(), bytes);
         digest
+    }
+
+    /// Admit an envelope-bearing artifact: both halves, each under the key a
+    /// reference will name.
+    ///
+    /// The asymmetry is FD-1.8's, not a convenience. A payload is keyed by its
+    /// content digest; an **envelope is keyed by its framed digest** (FD-1.2),
+    /// because that is what `ArtifactRef.digest` means for this class. A
+    /// content-addressed `put` is therefore the wrong write path for an
+    /// envelope, and offering only that would have quietly made every
+    /// envelope-bearing reference unresolvable.
+    ///
+    /// The bytes come from [`o7_a1_contracts::EnvelopeV1::to_wire_bytes`] —
+    /// step 1's single checked producer encoder. This crate does not get a
+    /// second opinion about how an envelope is spelled.
+    ///
+    /// Returns the reference this artifact must be named by: its framed digest
+    /// and the size of both halves together.
+    ///
+    /// # Errors
+    /// [`o7_a1_contracts::EnvelopeError`] if the envelope cannot be encoded
+    /// under its own FD-1.4 ceiling.
+    pub fn put_envelope(
+        &mut self,
+        envelope: &EnvelopeV1,
+        payload: Vec<u8>,
+    ) -> Result<(WireDigest, u64), EnvelopeError> {
+        let envelope_bytes = envelope.to_wire_bytes()?;
+        let framed = envelope.framed_digest();
+        let size = EnvelopeV1::ref_size(envelope_bytes.len() as u64, payload.len() as u64);
+        self.objects
+            .insert(envelope.payload_digest().as_str().to_owned(), payload);
+        self.objects
+            .insert(framed.as_str().to_owned(), envelope_bytes);
+        Ok((framed, size))
     }
 
     /// How many objects this store holds.

@@ -65,10 +65,12 @@
 //! purpose: a traversal written first would spend a while returning unverified
 //! values, and the first test to cover it would record that as the norm.
 
+mod envelope;
 mod resolved;
 mod session;
 mod store;
 
-pub use resolved::ResolvedArtifact;
-pub use session::{EffectiveLimits, OpaqueSlot, ResolutionSession, ResolveError};
+pub use envelope::ResolvedEnvelope;
+pub use resolved::{ResolvedArtifact, ResolvedOpaque};
+pub use session::{EffectiveLimits, EnvelopeSlot, OpaqueSlot, ResolutionSession, ResolveError};
 pub use store::{BackingStore, MemoryStore, RawObject};

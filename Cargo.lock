@@ -1035,6 +1035,7 @@ version = "0.1.0"
 dependencies = [
  "o7-a1-contracts",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 

@@ -34,3 +34,4 @@ indexing_slicing = "deny"
 # NOT implement `Serialize`, which needs the trait in scope to ask about.
 [dev-dependencies]
 serde = "1"
+serde_json = "1"
