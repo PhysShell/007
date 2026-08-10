@@ -581,14 +581,35 @@ h.update(b"o7-memory-<family>\0v1\0")     domain separator, one per family
 frame(field), … in a fixed order that never changes
 
 frame(x)         = u64-le length prefix || bytes        (identical to FD-1.2)
-scalars          integers as little-endian fixed width; strings as UTF-8
+strings          UTF-8 bytes
 enums            framed by their stable snake_case name, never by tag byte
-absent optional  framed as the empty string — never skipped, so "absent",
-                 "empty" and "some value" hash distinctly
-collections      frame(count.to_le_bytes()) then each element in the order
+collections      frame(count as u64-le) then each element in the order
                  defined for that field
 child digest     framed as its raw digest bytes
 ```
+
+**Every integer names its width.** "Little-endian fixed width" is not a width,
+and `x.to_le_bytes()` takes its width from a Rust type the document does not
+fix — so an implementation with a `u32` count and one with a `u64` count could
+both claim conformance and compute different digests. That is precisely the
+class of ambiguity FD-1.2 exists to remove, so the widths are frozen per field
+class and no bare `.to_le_bytes()` appears in any framing below:
+
+```text
+u32-le   schema_version · canonicalization_version ·
+         scope_key_canonicalization_version · depth · rank ·
+         max_derivation_depth · max_required_entries
+u64-le   every collection count · token_count · total_budget · output_reserve
+```
+
+**Optionals.** An absent optional framed as the empty string hashes *identically*
+to a present empty value — the two are one preimage, and no framing may pretend
+otherwise. An earlier revision of this subsection claimed all three of "absent",
+"empty" and "some value" hash distinctly; only the third is separated by this
+rule. No framing in this section currently carries an optional field. Any future
+one that must distinguish absent from present-empty carries an explicit presence
+discriminator framed ahead of the value; it does not get the distinction for
+free.
 
 **No canonical-JSON scheme is introduced, here or anywhere below.** Nothing in
 this section requires two serializers to agree on key order or whitespace.
@@ -614,8 +635,8 @@ over.
 
 ```text
 canonical_state_digest              domain b"o7-memory-state\0v1\0"
-    frame(schema_version.to_le_bytes())
-    frame(canonicalization_version.to_le_bytes())
+    frame(schema_version as u32-le)
+    frame(canonicalization_version as u32-le)
     frame(goal_state_digest) frame(decision_state_digest)
     frame(invariant_state_digest) frame(evidence_state_digest)
     frame(failure_registry_digest)
@@ -623,42 +644,61 @@ canonical_state_digest              domain b"o7-memory-state\0v1\0"
 resolver_policy_digest              domain b"o7-memory-resolver-policy\0v1\0"
     frame(resolver_version) frame(witness_rule_version name)
     frame(closure_rule_set_version)
-    frame(max_derivation_depth.to_le_bytes())
-    frame(max_required_entries.to_le_bytes())
+    frame(max_derivation_depth as u32-le)
+    frame(max_required_entries as u32-le)
 
 canonical_scope_key digest          domain b"o7-memory-scope-key\0v1\0"
-    frame(scope_key_canonicalization_version.to_le_bytes())
+    frame(scope_key_canonicalization_version as u32-le)
     frame(goal_node_id)
-    frame(artifact_ids count.to_le_bytes()), each in §4.1.1 order
-    frame(contract_ids count.to_le_bytes()), each in §4.1.1 order
+    frame(artifact_ids count as u64-le), each in §4.1.1 order
+    frame(contract_ids count as u64-le), each in §4.1.1 order
 
 resolved_scope_digest               domain b"o7-memory-resolved-scope\0v1\0"
     frame(canonical_scope_key digest) frame(resolver_policy_digest)
-    frame(required entries count.to_le_bytes()), each entry in ascending
-        bytewise order of entry_id, and for each:
-        frame(entry_id) frame(rule_id) frame(depth.to_le_bytes())
-        frame(derivation_path count.to_le_bytes()), each hop in path order
-            — a derivation path is a sequence and keeps its order
+    frame(required entries count as u64-le), each entry in ascending bytewise
+        order of entry_id, and for each:
+        frame(entry_id)
+        frame(proofs count as u64-le), each proof in witness order (§4.2.1),
+            and for each proof:
+            frame(rule_id) frame(depth as u32-le)
+            frame(derivation_path hop count as u64-le), each hop in path
+                order — a derivation path is a sequence and keeps its order
 
 advisory_input_snapshot_digest      domain b"o7-memory-advisory-snapshot\0v1\0"
-    frame(retrieval_identity) frame(items count.to_le_bytes()), each in the
-        order the retrieval emitted them, and for each:
-        frame(item_id) frame(provenance channel name) frame(rank.to_le_bytes())
+    frame(retriever_id) frame(retriever_version)
+    frame(embedding_model_identity)      — foreign bytes, framed as they arrive
+    frame(items count as u64-le), each in the order the retrieval emitted
+        them, and for each:
+        frame(item_id) frame(provenance channel name) frame(rank as u32-le)
 
 model_budget_profile_digest         domain b"o7-memory-budget-profile\0v1\0"
-    frame(tokenizer_id) frame(total_budget.to_le_bytes())
-    frame(output_reserve.to_le_bytes())
+    frame(tokenizer_id) frame(total_budget as u64-le)
+    frame(output_reserve as u64-le)
 
 compiled_context_digest             domain b"o7-memory-compiled-context\0v1\0"
     — the `context_digest` of the comparison surface above is this value; one
       identity, not two names
     frame(context_bytes)
-    frame(included_entry_ids count.to_le_bytes()), each in the order the entry
-        appears in the context — presentation order is semantic here
-    frame(omitted_candidate_ids count.to_le_bytes()), each in ascending
+    frame(included entries count as u64-le), each in the order the entry
+        appears in the context — presentation order is semantic here — and
+        for each, id and reason framed together as ONE record:
+        frame(entry_id)
+        frame(admission_class name)
+        frame(reason proofs count as u64-le), each in witness order (§4.2.1):
+            frame(rule_id) frame(depth as u32-le)
+    frame(omitted_candidate_ids count as u64-le), each in ascending
         bytewise order — an omission set has no natural order
-    frame(token_count.to_le_bytes())
+    frame(token_count as u64-le)
 ```
+
+**Why the inclusion reason is inside the entry record.** The comparison surface
+above lists `inclusion_reason[]` as part of what a compilation emits, so REQ-3
+and C-3 make the reason part of the machine-comparable result — and an identity
+that omitted it would give one digest to two compilations that admitted the same
+text for different reasons, which is the failure the requirement names. It is
+framed *within* each entry's record rather than as a parallel array, because two
+parallel arrays are a pair of things that can fall out of step, and a digest that
+commits both independently would not notice.
 
 **Ordering is declared per field, never assumed.** Where a collection is a
 sequence — a derivation path, the items of a snapshot, the entries as they
@@ -761,10 +801,27 @@ The resolver therefore declares a **witness rule**, versioned as
 `witness_rule_version`, and it is one of:
 
 ```text
-ALL_MINIMAL     record every minimal inclusion reason, in canonical order
+ALL_MINIMAL     record every minimal inclusion reason, in witness order
 SINGLE_TIEBREAK record one witness, selected by a declared total order over
                 (depth, rule_id, derivation_path) — never by traversal order
 ```
+
+**Witness order** is that same total order, and it is stated once here because
+both rules need it: ascending by `depth` (u32), then by `rule_id` (ascending
+bytewise over its UTF-8 encoding), then by `derivation_path` (element-wise
+ascending bytewise, shorter path first on a common prefix). `SINGLE_TIEBREAK`
+takes the first element under it; `ALL_MINIMAL` frames all of them in it
+(§4.0.2). An earlier revision said "canonical order" for `ALL_MINIMAL` and left
+it at that, which names an intention rather than an order — and a witness rule
+whose own ordering is undeclared reintroduces exactly the non-determinism this
+subsection exists to remove.
+
+An entry with more than one minimal proof is therefore representable: under
+`ALL_MINIMAL` `resolved_scope_digest` frames a proof *count* per entry and then
+each proof, so two entries differing only in how many ways they were reachable
+have different identities. The earlier framing carried one `rule_id` and one
+path per `entry_id`, under which the second proof either could not be
+represented or was silently dropped at deduplication.
 
 `ALL_MINIMAL` is the safer default: it is the only one under which "why is this
 here" survives the removal of a single edge without silently changing shape.
@@ -1096,9 +1153,14 @@ with acceptance defined as equality of the **canonical normative records after
 migration**, not of the bytes before it. Until that exists, the honest surface
 is a refusal, not a comparison nobody has defined.
 
-- `decisions_preserved` is equality over a **canonical** serialization, with
-  `canonicalization_version` in the manifest. Undefined ordering is the classic
-  source of both false diffs and false passes.
+- There is no `decisions_preserved` predicate. An earlier revision defined one as
+  "equality over a canonical serialization", which C-3 removed from
+  `HANDOFF_ACCEPTED` and C-4 forbids outright (§4.0.2 admits no canonical-JSON
+  scheme). What gates instead is above and is already exact: each recomputed
+  partition digest equals its manifest value, alongside
+  `canonicalization_version_equal`. Decisions are covered by
+  `recomputed.decision_state_digest == manifest.decision_state_digest`, not by a
+  serialization anybody has to agree on twice.
 - A probe may be promoted to blocking **only if it is itself deterministic** — a
   structural API call with an exact expected output qualifies; anything with a
   model in the loop does not.
