@@ -286,7 +286,16 @@ fn is_rfc3339_utc(s: &str) -> bool {
     if !(1..=12).contains(&month) || !(1..=days_in_month(year, month)).contains(&day) {
         return false;
     }
-    if hour > 23 || minute > 59 || second > 60 {
+    if hour > 23 || minute > 59 {
+        return false;
+    }
+    // A leap second exists at exactly one clock position. Since the only
+    // offsets accepted here are zero, that position is `23:59:60` UTC — so
+    // `second == 60` anywhere else names no instant, and permitting it
+    // everywhere was reading "00-60" out of the ABNF while ignoring the
+    // "based on leap second rules" that qualifies it.
+    let leap_position = hour == 23 && minute == 59;
+    if second > 59 && !(second == 60 && leap_position) {
         return false;
     }
     // An optional fraction, which RFC 3339 requires to have at least one digit.
@@ -769,9 +778,10 @@ mod tests {
             "2026-08-09t20:00:00z",
             "2026-08-09T20:00:00.123456Z",
             "2026-08-09T20:00:00+00:00",
-            // RFC 3339 permits the leap second; refusing it would be another
-            // invented bound.
+            // RFC 3339 permits the leap second, at the one clock position it
+            // occurs: 23:59:60 UTC.
             "2016-12-31T23:59:60Z",
+            "2026-08-09T23:59:60Z",
             "2024-02-29T00:00:00Z",
         ] {
             assert!(Timestamp::parse(ok).is_ok(), "{ok} must be admissible");
@@ -796,6 +806,12 @@ mod tests {
             "2026-08-09T24:00:00Z",
             "2026-08-09T20:60:00Z",
             "2026-08-09T20:00:61Z",
+            // A leap second away from the end of the UTC day. The ABNF's
+            // "00-60" is qualified by "based on leap second rules", and those
+            // rules put it at 23:59:60 and nowhere else.
+            "2026-08-09T20:00:60Z",
+            "2026-08-09T23:58:60Z",
+            "2026-08-09T22:59:60Z",
         ] {
             assert_eq!(
                 Timestamp::parse(bad),
