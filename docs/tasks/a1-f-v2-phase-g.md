@@ -1,10 +1,11 @@
 # A1-F v2 — Phase G: graph adjudication
 
-**Status: DECIDED (revision G-R3) — AWAITING RE-REVIEW.**
+**Status: DECIDED (revision G-R4) — AWAITING RE-REVIEW.**
 
-Three review rounds. G-R1 corrected four P1s and moved the count from 13 to 11;
-G-R2 corrected two more; G-R3 closes the exact edge universe, which the mandate
-asked for and the previous revisions deferred. See §9.
+Four review rounds. G-R1 moved the count from 13 to 11; G-R2 corrected the
+binding lifecycle and the rank domain; G-R3 attempted the exact edge universe
+and measured it against the wrong baseline; G-R4 rebuilds it on the frozen
+contract. See §9.
 
 Phase G is one decision, written and reviewed on its own, before any v2 drafting.
 The node set determines ranks, edges, imported roots, closure and digest domains;
@@ -432,110 +433,227 @@ leaves with `ArtifactImported` (§3.4).
 
 ### 4.1 The exact V0 edge universe
 
-The convergence mandate asks Phase G for the *exact registry*, and G-R1 and G-R2
-answered with a model while leaving the registry itself to v2 drafting. That does
-not close the question. After three objects were retyped and one left V0, the
-prototype registry cannot be the v2 registry even mechanically, so a draft
-inheriting it would be deciding the graph again under a different name.
+**G-R3's ledger measured against the wrong side, and this subsection replaces
+it.** It enumerated all 59 rows of the prototype registry and labelled them
+`KEEP` / `RETYPE` / `POST_V0` / `REMOVE` / `A2`. Every one of those labels is
+relative to `37502e3`, so `KEEP` meant *unchanged relative to the prototype* —
+while §0 of this document says the prototype is evidence and never authority,
+and §1 makes `KEEP_V1_MODEL` the default. The registry, of all things, was
+derived from the one input that has no authority.
 
-Derived mechanically from `37502e3` and classified by the adjudications above.
-Per-edge status: `KEEP` unchanged; `RETYPE` retained with a changed source or
-target class; `POST_V0` deferred with its feature; `REMOVE` gone with its object;
-`A2` outside V0 entirely.
+The scale is not marginal. Matching every prototype tag against the frozen
+schemas by name:
 
 ```text
-registry at 37502e3                       59 entries
-  KEEP                                    30
-  RETYPE                                  18
-  POST_V0                                  3   SafeRedrive path (3.5)
-  REMOVE                                   2   ArtifactImported's own edges (3.4)
-  A2                                       6   attention transitions
-                                          --
-  retained V0 edge universe               48
+prototype envelope-source rows                         53
+  with a frozen v1 slot of the same name               15
+  with NO frozen counterpart                           38
 ```
 
-Two facts the classification surfaced that the prose had not:
+So 30 rows were labelled `KEEP` when the frozen contract does not contain them
+at all. The clearest single case: `WorkOrder.goal.contract_blob → ContractBlob`
+was `KEEP`, and the string `contract_blob` appears **zero** times in blob
+`7db92f1b`. Frozen `WorkOrderV1` carries `scope_ref → ScopeContractV1` instead.
+That is not an unchanged edge; it is a v1 surface removed and a prototype
+surface proposed in its place, and the two need different words.
 
-- The SafeRedrive path is **three** edges, not the one the earlier revisions
-  discussed: `cause.safe_redrive.prior_run_binding_ref`,
-  `cause.safe_redrive.evidence`, and
-  `cause.safe_redrive.evidence.classification_record_ref`.
-- `ProviderInvocationReceipt.execution_cause.prior_verdict_ref` targets
-  `ReviewVerdict` — a **typed support node referencing a message**. It is the
-  clearest single argument for §4's rank domain: a ladder over messages alone
-  could not contain this edge at all.
+Two further consequences of the same error:
 
-Open-target status, restated as edge facts: `AnyImportableCas` leaves with
-`ArtifactImported`; `AnyCommittedEnvelope` survives for `CampaignFeedItem`
-causation and now denotes exactly the closed set of **11** message kinds.
+- `ProviderInvocationReceipt → CampaignRunBinding` was labelled `RETYPE`, but
+  `CampaignRunBinding` does not exist in v1 at all. It cannot be a retyping of
+  something that was never there; §3.1 argued its existence precisely because it
+  is **new**.
+- The prototype branch never implemented the reducer, so its registry has zero
+  rows for `CampaignEventV1` and its payloads — while §4 of this document lists
+  `CampaignEventPayload` among the typed nodes participating in the graph. A
+  registry claiming to be closed while missing an entire declared node class is
+  not closed.
 
-The pre-dispatch binding admission relation of §3.1 is a controller-owned durable
-relation, **not** an entry in this registry. If the v2 draft chooses to express it
-as a reference edge, that edge is new and must be added here explicitly rather
-than appearing as a side effect — the whole point of a closed registry being that
-nothing joins it quietly.
+#### 4.1.1 The baseline: the frozen v1 reference inventory
 
-| # | source | source class | field-path tag | target | target class | edge | V0 status |
-|---:|---|---|---|---|---|---|---|
-| 1 | `WorkOrder` | Message | `goal.contract_blob` | `ContractBlob` | CAS | Intra | KEEP |
-| 2 | `WorkOrder` | Message | `input.initial.correspondence_ref` | `WorktreeCorrespondenceEvidenceBlob` | CAS | Intra | KEEP |
-| 3 | `WorkOrder` | Message | `input.initial.run_contract_ref` | `RunContractCandidateState` | External | Intra | KEEP |
-| 4 | `WorkOrder` | Message | `input.initial.worktree_ref` | `WorktreeMaterialization` | External | Intra | KEEP |
-| 5 | `WorkOrder` | Message | `input.continued.candidate_state_ref` | `CandidateStateReceipt` | External | Intra | KEEP |
-| 6 | `WorkOrder` | Message | `input.continued.materialization_ref` | `CandidateMaterialization` | External | Intra | KEEP |
-| 7 | `CoderReport` | Message | `producer.invocation_receipt_ref` | `ProviderInvocationReceipt` | Support | Intra | **RETYPE** |
-| 8 | `CoderReport` | Message | `claims.evidence_refs.gate` | `GateEvidenceBlob` | CAS | Intra | KEEP |
-| 9 | `CoderReport` | Message | `claims.evidence_refs.diff` | `DiffEvidenceBlob` | CAS | Intra | KEEP |
-| 10 | `CandidateAdmissionReceipt` | Message | `coder_report_ref` | `CoderReport` | Message | Intra | KEEP |
-| 11 | `CandidateAdmissionReceipt` | Message | `coder_run_binding_ref.blob_ref` | `CampaignRunBinding` | Support | Intra | **RETYPE** |
-| 12 | `CandidateAdmissionReceipt` | Message | `candidate_state_ref` | `CandidateStateReceipt` | External | Intra | KEEP |
-| 13 | `ReviewRequest` | Message | `admission_receipt_ref` | `CandidateAdmissionReceipt` | Message | Intra | KEEP |
-| 14 | `ReviewRequest` | Message | `contract_blob` | `ContractBlob` | CAS | Intra | KEEP |
-| 15 | `ReviewRequest` | Message | `evidence_refs.gate` | `GateEvidenceBlob` | CAS | Intra | KEEP |
-| 16 | `ReviewRequest` | Message | `evidence_refs.diff` | `DiffEvidenceBlob` | CAS | Intra | KEEP |
-| 17 | `ReviewerReport` | Message | `producer.invocation_receipt_ref` | `ProviderInvocationReceipt` | Support | Intra | **RETYPE** |
-| 18 | `ReviewerReport` | Message | `evidence_refs.gate` | `GateEvidenceBlob` | CAS | Intra | KEEP |
-| 19 | `ReviewVerdict` | Message | `reviewer_report_ref` | `ReviewerReport` | Message | Intra | KEEP |
-| 20 | `ReviewVerdict` | Message | `findings.evidence_refs.gate` | `GateEvidenceBlob` | CAS | Intra | KEEP |
-| 21 | `ReviewVerdict` | Message | `reviewed_candidate_state_ref` | `CandidateStateReceipt` | External | Intra | KEEP |
-| 22 | `CorrectiveDirective` | Message | `verdict_ref` | `ReviewVerdict` | Message | Causal | KEEP |
-| 23 | `CorrectiveDirective` | Message | `input.continued.candidate_state_ref` | `CandidateStateReceipt` | External | Intra | KEEP |
-| 24 | `CorrectiveDirective` | Message | `input.continued.materialization_ref` | `CandidateMaterialization` | External | Intra | KEEP |
-| 25 | `ProviderInvocationReceipt` | Support | `request.canonical_request_ref` | `CanonicalRequestBlob` | CAS | Intra | **RETYPE** |
-| 26 | `ProviderInvocationReceipt` | Support | `outcome.normalized_output_ref` | `NormalizedOutputBlob` | CAS | Intra | **RETYPE** |
-| 27 | `ProviderInvocationReceipt` | Support | `interaction_manifest_ref` | `InteractionManifest` | Support | Intra | **RETYPE** |
-| 28 | `ProviderInvocationReceipt` | Support | `model_route_ref` | `ModelRouteBlob` | CAS | Intra | **RETYPE** |
-| 29 | `ProviderInvocationReceipt` | Support | `campaign_run_binding_ref.blob_ref` | `CampaignRunBinding` | Support | Intra | **RETYPE** |
-| 30 | `ProviderInvocationReceipt` | Support | `execution_cause.prior_verdict_ref` | `ReviewVerdict` | Message | Causal | **RETYPE** |
-| 31 | `ProviderInvocationReceipt` | Support | `cause.safe_redrive.prior_run_binding_ref` | `CampaignRunBinding` | Support | Causal | **POST_V0** |
-| 32 | `ProviderInvocationReceipt` | Support | `cause.safe_redrive.evidence` | `EstablishedNonDispatchEvidence` | External | Intra | **POST_V0** |
-| 33 | `ProviderInvocationReceipt` | Support | `cause.safe_redrive.evidence.classification_record_ref` | `NonDispatchClassificationBlob` | CAS | Intra | **POST_V0** |
-| 34 | `InteractionManifest` | Support | `sequence.raw_provider_event_refs` | `RawProviderEventBlob` | CAS | Intra | **RETYPE** |
-| 35 | `InteractionManifest` | Support | `sequence.tool_argument_refs` | `ToolArgumentBlob` | CAS | Intra | **RETYPE** |
-| 36 | `InteractionManifest` | Support | `sequence.tool_result_refs` | `ToolResultBlob` | CAS | Intra | **RETYPE** |
-| 37 | `CampaignFeedItem` | Message | `subject_refs` | `AnyCommittedEnvelope` | Open | Causal | KEEP |
-| 38 | `HumanAttentionRequest` | Message | `evidence_refs.receipt` | `ProviderInvocationReceipt` | Support | Intra | **RETYPE** |
-| 39 | `HumanAttentionRequest` | Message | `evidence_refs.gate` | `GateEvidenceBlob` | CAS | Intra | KEEP |
-| 40 | `HumanAttentionRequest` | Message | `evidence_refs.admission` | `CandidateAdmissionReceipt` | Message | Causal | KEEP |
-| 41 | `HumanAttentionRequest` | Message | `evidence_refs.verdict` | `ReviewVerdict` | Message | Causal | KEEP |
-| 42 | `HumanAttentionRequest` | Message | `candidate_state_ref` | `CandidateStateReceipt` | External | Intra | KEEP |
-| 43 | `HumanCommandRequest` | Message | `producer.authenticated_principal_ref` | `AuthenticatedPrincipalRecord` | CAS | Intra | KEEP |
-| 44 | `HumanDecision` | Message | `source.blob_ref` | `HumanCommandRequest` | Message | Intra | KEEP |
-| 45 | `HumanDecision` | Message | `producer.authenticated_principal_ref` | `AuthenticatedPrincipalRecord` | CAS | Intra | KEEP |
-| 46 | `HumanDecision` | Message | `attention_ref` | `HumanAttentionRequest` | Message | Intra | KEEP |
-| 47 | `ArtifactImported` | out | `cas_object_ref` | `AnyImportableCas` | Open | Intra | **REMOVE** |
-| 48 | `ArtifactImported` | out | `source` | `RunArtifactSource` | External | Intra | **REMOVE** |
-| 49 | `CampaignRunBinding` | Support | `input.initial.correspondence_ref` | `WorktreeCorrespondenceEvidenceBlob` | CAS | Intra | **RETYPE** |
-| 50 | `CampaignRunBinding` | Support | `input.initial.run_contract_ref` | `RunContractCandidateState` | External | Intra | **RETYPE** |
-| 51 | `CampaignRunBinding` | Support | `input.initial.worktree_ref` | `WorktreeMaterialization` | External | Intra | **RETYPE** |
-| 52 | `CampaignRunBinding` | Support | `input.continued.candidate_state_ref` | `CandidateStateReceipt` | External | Intra | **RETYPE** |
-| 53 | `CampaignRunBinding` | Support | `input.continued.materialization_ref` | `CandidateMaterialization` | External | Intra | **RETYPE** |
-| 54 | `AttentionAcknowledged` | A2 | `attention_ref` | `HumanAttentionRequest` | Message | Intra | **A2** |
-| 55 | `AttentionAcknowledged` | A2 | `decision_ref` | `HumanDecision` | Message | Intra | **A2** |
-| 56 | `AttentionResolved` | A2 | `attention_ref` | `HumanAttentionRequest` | Message | Intra | **A2** |
-| 57 | `AttentionResolved` | A2 | `decision_ref` | `HumanDecision` | Message | Intra | **A2** |
-| 58 | `AttentionSuperseded` | A2 | `attention_ref` | `HumanAttentionRequest` | Message | Intra | **A2** |
-| 59 | `AttentionSuperseded` | A2 | `superseding_attention_ref` | `HumanAttentionRequest` | Message | Causal | **A2** |
+Extracted mechanically from blob `7db92f1b` — every schema row whose type is
+`ArtifactRef` or `[ArtifactRef]`, across §3.0–§3.15.2.
+
+```text
+frozen ArtifactRef-valued slots                        40
+  message payloads                                     18
+  typed support objects                                11
+  event payload schemas                                 7
+  common envelope                                       2
+  campaign event log root                               2
+```
+
+A first extraction pass returned 34 and a completeness check found six more,
+carried in combined table rows (`usage_ref` / `cost_ref`, and the two
+`interaction_sequence[]` pairs). The number is 40, and the miss is recorded
+because an inventory whose own derivation was not checked is the failure mode
+this track has now hit three times.
+
+| # | owner | owner class | frozen field path | V0 disposition |
+|---:|---|---|---|---|
+| 1 | `Common envelope v1` | envelope | `artifact_refs` | KEEP |
+| 2 | `Common envelope v1` | envelope | `provider_execution_receipt_ref` | KEEP |
+| 3 | `WorkOrderV1` | message | `input.candidate_ref` | KEEP |
+| 4 | `WorkOrderV1` | message | `input.materialization_attestation_ref` | KEEP |
+| 5 | `WorkOrderV1` | message | `scope_ref` | KEEP |
+| 6 | `CoderReportV1` | message | `claims[].evidence_refs` | KEEP |
+| 7 | `CoderReportV1` | message | `diagnostic_runs[].artifact_ref` | KEEP |
+| 8 | `CandidateReceiptV1` | message | `candidate_ref` | KEEP |
+| 9 | `CandidateReceiptV1` | message | `coder_report_ref` | KEEP |
+| 10 | `ReviewRequestV1` | message | `candidate_receipt_ref` | KEEP |
+| 11 | `ReviewRequestV1` | message | `scope_ref` | KEEP |
+| 12 | `ReviewRequestV1` | message | `evidence_refs` | KEEP |
+| 13 | `ReviewRequestV1` | message | `coder_report_ref` | KEEP |
+| 14 | `ReviewerReportV1` | message | `findings[].evidence_refs` | KEEP |
+| 15 | `ReviewVerdictV1` | message | `reviewer_report_ref` | KEEP |
+| 16 | `CorrectiveDirectiveV1` | message | `review_verdict_ref` | KEEP |
+| 17 | `CorrectiveDirectiveV1` | message | `scope_ref` | KEEP |
+| 18 | `CampaignFeedItemV1` | message | `subject_refs` | KEEP |
+| 19 | `HumanAttentionRequestV1` | message | `evidence_refs` | KEEP |
+| 20 | `HumanDecisionV1` | message | `command_request_ref` | KEEP |
+| 21 | `ProviderExecutionReceiptV1` | typed support | `interaction_manifest_ref` | KEEP |
+| 22 | `ProviderExecutionReceiptV1` | typed support | `final_normalized_output_ref` | KEEP |
+| 23 | `ProviderExecutionReceiptV1` | typed support | `canonical_request_ref` | KEEP |
+| 24 | `ProviderExecutionReceiptV1` | typed support | `raw_provider_event_ref` | KEEP |
+| 25 | `ProviderExecutionReceiptV1` | typed support | `normalized_output_ref` | KEEP |
+| 26 | `CampaignEventV1` | event log root | `source_ref` | KEEP |
+| 27 | `CampaignEventV1` | event log root | `evidence_refs` | KEEP |
+| 28 | `Event payload schemas` | event payload | `scope_ref` | KEEP |
+| 29 | `Event payload schemas` | event payload | `receipt_ref` | KEEP |
+| 30 | `Event payload schemas` | event payload | `results[].log_ref` | KEEP |
+| 31 | `Event payload schemas` | event payload | `checks[].observation_ref` | KEEP |
+| 32 | `Event payload schemas` | event payload | `detail_ref` | KEEP |
+| 33 | `Event payload schemas` | event payload | `termination_observation_refs` | KEEP |
+| 34 | `Event payload schemas` | event payload | `evidence_refs` | KEEP |
+| 35 | `ProviderExecutionReceiptV1` | typed support | `dispatches[].usage_ref` | KEEP |
+| 36 | `ProviderExecutionReceiptV1` | typed support | `dispatches[].cost_ref` | KEEP |
+| 37 | `InteractionManifestV1` | typed support | `interaction_sequence[].input_ref` | KEEP |
+| 38 | `InteractionManifestV1` | typed support | `interaction_sequence[].output_ref` | KEEP |
+| 39 | `InteractionManifestV1` | typed support | `interaction_sequence[].arguments_ref` | KEEP |
+| 40 | `InteractionManifestV1` | typed support | `interaction_sequence[].result_ref` | KEEP |
+
+**Disposition.** Every frozen slot is `KEEP` under §1's default: no adjudication
+in §3 removes a v1 reference surface. What §3 changed is the *node* set, and its
+effect on this inventory is narrower than G-R3 implied:
+
+```text
+ProviderExecutionReceipt, InteractionManifest
+    already typed support in v1 -> the retypings of G-R3 restore v1's own
+    classification rather than change it, so their slots are unaffected
+
+CampaignRunBinding
+    new in v2 (§3.1) -> adds edges, removes none
+
+ArtifactImported, RunArtifactSource, EstablishedNonDispatchEvidence
+    absent from v1 -> nothing to remove from this inventory; the prototype rows
+    that carried them are proposals that are not adopted (§4.1.2)
+```
+
+#### 4.1.2 The prototype rows, demoted to evidence
+
+The 59 rows keep their value as evidence — they are how §3's in-degree arguments
+were made — but they are classified against the baseline, not as the baseline:
+
+```text
+MATCHES_V1              15   a frozen slot exists with the same name
+PROPOSED_REPLACEMENT         a prototype surface offered for a frozen one
+PROPOSED_NEW                 a surface with no frozen counterpart
+POST_V0                  3   the SafeRedrive path (§3.5)
+REJECTED                 2   ArtifactImported's own edges (§3.4)
+A2                       6   attention transitions, outside V0
+```
+
+The middle two classes together hold the 38 unmatched rows, and splitting them
+row by row is **not a Phase G decision**. A `PROPOSED_REPLACEMENT` is a claim
+about what a v2 payload should carry — `contract_blob` versus `scope_ref`,
+whether `CorrectiveDirective` carries its own input state, whether
+`HumanCommandRequest` gains an authenticated-principal reference. Those are
+payload-schema questions, and §7 of this document already says payload shapes
+are v2 drafting output.
+
+#### 4.1.3 What Phase G closes, and the boundary it cannot cross
+
+There is a real circularity in "close the exact registry": an exact registry is
+keyed by field path, field paths are payload schema, and payload schemas are the
+v2 draft. Phase G cannot write field paths for objects whose payloads it does
+not decide without either adopting the prototype's schemas wholesale — which is
+the authority inversion this subsection just corrected — or inventing v2 schemas
+under the heading of graph adjudication.
+
+So the registry closes at the level that actually determines what Phase G owns —
+acyclicity, the rank domain, and closure traversal — and no further:
+
+```text
+CLOSED by Phase G — the admissible node-pair universe
+
+  message        -> message | typed support | external wrapper | CAS
+  typed support  -> message | typed support | external wrapper | CAS
+  event log root -> message | typed support | event payload | CAS
+  event payload  -> typed support | external wrapper | CAS
+  external wrapper, CAS                        terminal, no outgoing A1 edges
+
+  edge classes   Intra (kind-level topological sort)
+                 Causal (per-instance create-before-reference)
+
+  the 40 frozen slots above are the V0 edge set, plus exactly the edges
+  §3.1's new object requires and nothing else
+
+OWED to the v2 draft — and owed as an obligation, not a hope
+
+  the field-path spelling of every slot, including CampaignRunBinding's own
+  each of the 38 unmatched prototype rows adjudicated REPLACEMENT / NEW / REJECT
+  the resulting registry re-checked against this node-pair universe
+```
+
+`typed support -> message` is in the list on evidence, not symmetry: frozen
+`ProviderExecutionReceiptV1` has no such slot, but §3.1's own argument used
+`ProviderInvocationReceipt.execution_cause.prior_verdict_ref → ReviewVerdict`,
+and if v2 adopts that proposal the pair must already be admissible. It is the
+one pair whose admission comes from a proposal rather than from the frozen
+inventory, and it is flagged so the v2 draft cannot treat it as settled by
+silence.
+
+#### 4.1.4 `CampaignEventV1` is a source-only log root
+
+The frozen contract does not make the campaign event an `ArtifactRef` target,
+and nothing should. Frozen:
+
+```text
+CampaignEventV1     persisted log entry; source of source_ref and evidence_refs;
+                    identified by its own framed digest and its chain position;
+                    NEVER the target of an ArtifactRef
+
+CampaignEventPayload  typed stored object; its own outgoing ref slots are the
+                    seven in §4.1.1; a legitimate ArtifactRef target
+```
+
+This is a Phase G question rather than a drafting one because it decides whether
+the closure resolver walks event references at all. It does: FD-14.2's
+`resolve_event` enumerates `immediate_refs` over `source_ref`, `evidence_refs`
+and the payload's declared slots, under the same bounds as artifact closure.
+Event references are traversed exactly as deterministically as artifact
+references, and the log root's exclusion from target position is what keeps that
+traversal a DAG rather than a cycle through the log.
+
+#### 4.1.5 The renamings are a supersede decision, not a script artefact
+
+`CandidateReceipt` versus `CandidateAdmissionReceipt`, and
+`ProviderExecutionReceipt` versus `ProviderInvocationReceipt`, are different
+spellings of the same object, and FD-1.9 closes `ArtifactKindV1` spellings as a
+digest input. G-R3 used the prototype's names throughout its ledger without
+noticing that it was thereby proposing a wire change.
+
+Phase G records the choice as open and owed:
+
+```text
+if v2 keeps the frozen spellings   no version consequence
+if v2 adopts the prototype names   an explicit supersede of FD-1.9, with the
+                                   envelope_version bump that already applies,
+                                   recorded as a decision rather than inherited
+                                   from whichever branch a script read
+```
+
+Phase G does not decide it. Phase G refuses to let it happen by accident.
 
 ## 5. Q4 + Q5 — imported roots, closure, and the typed external boundary
 
@@ -634,15 +752,24 @@ the failure this phase exists to prevent.
 - whether the import mechanism of §3.4 exists as a controller procedure — only
   that it does not exist as a node.
 
-## 8. For the independent reviewer (revision G-R3)
+## 8. For the independent reviewer (revision G-R4)
 
-The node universe and the count survived two reviews. G-R3 closes the last open
-mandate clause. Attack these, in order:
+Node universe, the count of eleven, the support boundary, the binding lifecycle
+class, the wrapper boundary and the rank model have all been approved. What is
+left is §4.1. Attack these, in order:
 
-0. **§4.1, the exact V0 edge universe.** 59 classified into 48 retained. Re-derive
-   it from `37502e3` and check the classification of every non-`KEEP` row — the
-   18 `RETYPE` rows especially, since a wrong class there silently changes what
-   the acyclicity proof ranges over.
+0. **§4.1.1, the frozen inventory.** 40 slots, derived from blob `7db92f1b`, and
+   the derivation was wrong once already (34, then six more found in combined
+   rows). Re-derive it independently. If the count differs, everything built on
+   it differs.
+1. **§4.1.3, the boundary claim.** Phase G closes the node-pair universe and
+   hands field-path spelling to the v2 draft, arguing that an exact registry is
+   keyed by field path and field paths are payload schema. Is that a real
+   circularity or a second deferral wearing an argument? The strongest attack is
+   to show a field path Phase G *could* have fixed without deciding a payload.
+2. **§4.1.3's `typed support -> message` pair.** It is admitted on the strength
+   of a prototype proposal rather than a frozen slot. Should an unadopted
+   proposal be able to widen the admissible universe at all?
 
 1. **§3.1, `CampaignRunBinding` as support rather than message.** The negative is
    the load-bearing claim: *no* V0 invariant needs a `message_id`, envelope
@@ -663,6 +790,61 @@ mandate clause. Attack these, in order:
    across Causal edges, which by construction cannot have one?
 
 ## 9. Revision record
+
+### G-R4 — fourth independent review, one P1
+
+`CHANGES_REQUESTED` on a single finding, and it landed on the one place where
+this document had stopped applying its own rule.
+
+**§4.1 used the prototype as baseline.** G-R3 enumerated all 59 prototype rows
+and labelled them `KEEP` / `RETYPE` / `POST_V0` / `REMOVE` / `A2` — every label
+relative to `37502e3`. So `KEEP` meant "unchanged relative to the prototype",
+while §0 calls the prototype evidence and never authority and §1 makes
+`KEEP_V1_MODEL` the default. Three rounds spent defending that principle, and
+then the registry — the most exact artefact in the document — was derived
+entirely from the input with no authority.
+
+Quantified during the fix: of 53 prototype envelope-source rows, **15** have a
+frozen slot of the same name and **38** have none. Thirty rows were labelled
+`KEEP` for edges the frozen contract does not contain. `WorkOrder.goal
+.contract_blob` is the plainest: `contract_blob` occurs zero times in blob
+`7db92f1b`, where the frozen `WorkOrderV1` carries `scope_ref → ScopeContractV1`.
+`ProviderInvocationReceipt → CampaignRunBinding` was `RETYPE` for an object that
+did not exist in v1 to be retyped. And the prototype branch never implemented
+the reducer, so its registry has no rows at all for `CampaignEventV1` and its
+payloads, which §4 simultaneously lists among the participating typed nodes.
+
+Rebuilt in G-R4:
+
+- **§4.1.1** — the baseline is now the frozen reference inventory: 40
+  `ArtifactRef`-valued slots extracted from blob `7db92f1b`. The first pass
+  returned 34; a completeness check found six more in combined table rows. The
+  miss is recorded, since an inventory whose own derivation went unchecked is a
+  failure this track has now hit three times.
+- **§4.1.2** — the 59 prototype rows are demoted to evidence with their own
+  classes, and the 38 unmatched rows are explicitly *not* adjudicated here:
+  `contract_blob` versus `scope_ref` is a payload-schema question, and §7
+  already assigns payload shapes to v2 drafting.
+- **§4.1.3** — the boundary is stated rather than deferred. An exact registry is
+  keyed by field path; field paths are payload schema; Phase G does not decide
+  payload schemas. So G closes the admissible **node-pair universe** — which is
+  what actually determines acyclicity, the rank domain and closure traversal —
+  and records the field-path spelling as an obligation owed by the v2 draft,
+  with the 38 unmatched rows named as its input.
+- **§4.1.4** — `CampaignEventV1` is frozen as a source-only log root, never an
+  `ArtifactRef` target, with its payload as a legitimate target. This is a Phase
+  G question because it decides whether the closure resolver walks event
+  references, and it does, under the same bounds as artifact closure.
+- **§4.1.5** — `CandidateReceipt` versus `CandidateAdmissionReceipt` and
+  `ProviderExecutionReceipt` versus `ProviderInvocationReceipt` are recorded as
+  an open supersede decision. FD-1.9 closes `ArtifactKindV1` spellings as a
+  digest input, so G-R3's silent use of the prototype's names was proposing a
+  wire change by transcription. Phase G does not choose the names; it refuses to
+  let them be chosen by which branch a script happened to read.
+
+Nothing in §3 moved. The node universe, the count of eleven,
+`CampaignRunBinding` as typed support authority, and the rank model are all as
+G-R2 left them and as the third review approved them.
 
 ### G-R3 — third independent review, two P1s
 

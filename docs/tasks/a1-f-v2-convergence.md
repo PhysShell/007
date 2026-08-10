@@ -509,6 +509,10 @@ phase_g:
             challenged and did not move
   review_3: CHANGES_REQUESTED — two P1s, both accepted; node universe, the
             count of 11, and CampaignRunBinding-as-support all APPROVED
+  review_4: CHANGES_REQUESTED — one P1: the edge ledger had been measured
+            against the prototype instead of the frozen contract. Node
+            universe, count, support boundary, binding lifecycle, wrapper
+            boundary and rank model all APPROVED and unchanged
   evidence: 37502e3 edge registry — 59 entries (53 envelope-source + 6 A2
             transition) plus a global AnyCommittedEnvelope causation rule;
             metric is "specific V0 consumer in-degree" with an explicit
@@ -528,9 +532,19 @@ phase_g:
                       identity established durably before the first dispatch;
                       a controller obligation, not a promotion argument, and
                       not an entry in the edge registry
-    exact_edge_universe: 59 prototype entries classified -> 48 retained V0
-                      edges (30 KEEP, 18 RETYPE, 3 POST_V0, 2 REMOVE, 6 A2);
-                      full ledger in phase-g section 4.1
+    exact_edge_universe: baseline is the FROZEN contract, not the prototype —
+                      40 ArtifactRef slots extracted from blob 7db92f1b, all
+                      KEEP; the 59 prototype rows are evidence (15 match a
+                      frozen slot by name, 38 do not). Phase G closes the
+                      admissible node-pair universe; field-path spelling and
+                      the 38 unmatched proposals are owed by the v2 draft
+    campaign_event:   source-only log root, never an ArtifactRef target; its
+                      payload is a legitimate target and is traversed by the
+                      closure resolver under artifact-closure bounds
+    naming:           CandidateReceipt vs CandidateAdmissionReceipt and
+                      ProviderExecutionReceipt vs ProviderInvocationReceipt are
+                      an OPEN supersede decision under FD-1.9, not a transcription
+                      side effect
     wrapper_boundary: PARSED_BUT_GRAPH_TERMINAL
     e_v0_4:           class only (manifest = typed support object); ALL
                       numeric bounds deferred to the v2 wire/bounds draft
