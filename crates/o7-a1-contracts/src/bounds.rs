@@ -12,7 +12,7 @@
 //! will eventually walk a graph.
 
 use crate::framing::Preimage;
-use crate::scalars::Digest256;
+use crate::scalars::WireDigest;
 
 /// FD-1.4 — any typed A1 payload **except `InteractionManifestV1`**, which S1
 /// (§7 supersede, §9) bounds at [`MAX_EVIDENCE_BLOB_BYTES`] while leaving it a
@@ -104,7 +104,7 @@ impl BudgetPolicy {
     /// `budget_policy_digest`, framed over exactly the four values in exactly
     /// this order (FD-1.5), "so two implementations cannot disagree about what
     /// the campaign's policy was".
-    pub fn digest(&self) -> Digest256 {
+    pub fn digest(&self) -> WireDigest {
         let mut p = Preimage::new(b"o7-a1-budget-policy\0v1\0");
         p.frame_u32(self.max_provider_turns)
             .frame_u32(self.max_wall_time_seconds)

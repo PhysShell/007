@@ -18,7 +18,7 @@
 //! Framed preimages are small: an envelope's is a few hundred bytes plus its
 //! refs, bounded by FD-1.4 at 256 refs.
 
-use crate::scalars::Digest256;
+use crate::scalars::{Digest256, WireDigest};
 
 /// A framed digest preimage under one domain separator.
 #[derive(Debug, Clone)]
@@ -84,8 +84,8 @@ impl Preimage {
 
     /// Hash the accumulated preimage.
     #[must_use]
-    pub fn digest(&self) -> Digest256 {
-        Digest256::of_bytes(&self.buf)
+    pub fn digest(&self) -> WireDigest {
+        WireDigest::from(Digest256::of_bytes(&self.buf))
     }
 }
 

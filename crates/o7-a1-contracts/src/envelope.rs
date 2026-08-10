@@ -198,7 +198,7 @@ impl EnvelopeV1 {
     /// excluded (FD-5.4): an artifact must not change identity because a clock
     /// disagreed.
     #[must_use]
-    pub fn framed_digest(&self) -> Digest256 {
+    pub fn framed_digest(&self) -> WireDigest {
         let mut p = Preimage::new(b"o7-a1-envelope\0v1\0");
         p.frame_u32(self.envelope_version.get())
             .frame_str(self.message_kind.name())
