@@ -30,8 +30,8 @@ use std::collections::HashSet;
 use std::marker::PhantomData;
 
 use o7_a1_contracts::{
-    ArtifactKindV1, ArtifactRef, BudgetPolicy, BudgetPolicyError, EnvelopeV1, ParseError,
-    WireDigest,
+    typed_media_type, ArtifactKindV1, ArtifactRef, BudgetPolicy, BudgetPolicyError, EnvelopeV1,
+    MessageKindV1, ParseError, WireDigest, MESSAGE_KIND_VERSION_V1,
 };
 
 use crate::envelope::{admit_envelope, ResolvedEnvelope};
@@ -78,28 +78,56 @@ impl OpaqueSlot {
 /// A reference slot that expects an **envelope-bearing** artifact: one of the
 /// eleven message kinds, stored as two byte strings (FD-1.8).
 ///
-/// Carries the same thing an [`OpaqueSlot`] does — the consuming schema's
-/// expectation — and is a separate type because the two resolve differently and
-/// prove different things. A slot is not a hint; it is the side of the
-/// comparison that is not untrusted.
+/// # The expectation is derived, not supplied
+///
+/// A slot is the side of the FD-2.5 comparison that is *not* untrusted, so
+/// anything a caller can choose about it is authority a caller has been handed.
+/// The media type is therefore not a parameter: FD-1.7 fixes it as
+/// `application/vnd.o7.a1.<kind>+json; v=<version>`, so it is computed from the
+/// kind and the frozen message-kind version. Passing it in would have let a
+/// caller name a kind and then declare whatever media type made a reference
+/// match.
+///
+/// The kind itself is still chosen at the call site, and that is a **known
+/// remaining gap**, recorded rather than glossed: FD-2.5 says "every reference
+/// slot has one expected `kind` and expected media type, fixed by the schemas
+/// in §3", so the kind should arrive from the parent payload's schema, not from
+/// whoever is calling. No payload schema exists yet to derive it from, and
+/// inventing a slot registry before the schemas that populate it would be
+/// decoration. What must not happen is this surviving into a traversal: once a
+/// parent schema can hand out its own slots, a caller-authored slot becomes the
+/// weaker of two routes to one authority-relevant answer, and the weaker route
+/// is the one that decides.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnvelopeSlot {
-    kind: ArtifactKindV1,
+    kind: MessageKindV1,
     media_type: String,
 }
 
 impl EnvelopeSlot {
+    /// The slot a consuming schema declares for `kind`.
+    ///
+    /// Takes [`MessageKindV1`] rather than [`ArtifactKindV1`]: only the eleven
+    /// envelope-bearing kinds can occupy an envelope slot, and a type that
+    /// cannot name the other twenty-eight is a better statement of that than a
+    /// runtime refusal.
     #[must_use]
-    pub fn new(kind: ArtifactKindV1, media_type: impl Into<String>) -> Self {
+    pub fn new(kind: MessageKindV1) -> Self {
         Self {
             kind,
-            media_type: media_type.into(),
+            // FD-1.7, computed once here so no call site can disagree with it.
+            media_type: typed_media_type(kind.artifact_kind(), MESSAGE_KIND_VERSION_V1),
         }
     }
 
     #[must_use]
-    pub fn kind(&self) -> ArtifactKindV1 {
+    pub fn message_kind(&self) -> MessageKindV1 {
         self.kind
+    }
+
+    #[must_use]
+    pub fn kind(&self) -> ArtifactKindV1 {
+        self.kind.artifact_kind()
     }
 
     #[must_use]
@@ -132,8 +160,6 @@ pub enum ResolveError {
     ClosureBytesExceeded { actual: u64, max: u64 },
     #[error("the closure would reach {actual} objects, exceeding the effective bound {max}")]
     ClosureObjectsExceeded { actual: u32, max: u32 },
-    #[error("{kind} is not envelope-bearing; an envelope slot must not resolve one")]
-    NotEnvelopeBearing { kind: &'static str },
     #[error("the stored envelope is not admissible: {reason}")]
     EnvelopeInadmissible { reason: ParseError },
     #[error("the stored envelope does not frame to the referenced digest")]
@@ -357,12 +383,6 @@ impl<'brand> ResolutionSession<'brand> {
                 kind: slot.kind().name(),
             });
         }
-        if !slot.kind().is_envelope_bearing() {
-            return Err(ResolveError::NotEnvelopeBearing {
-                kind: slot.kind().name(),
-            });
-        }
-
         self.charge(reference)?;
 
         // An envelope is keyed by its framed identity, because that is what a

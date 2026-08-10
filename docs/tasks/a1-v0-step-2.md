@@ -69,7 +69,9 @@ accounting authority, при которой было получено. Отсю�
 проверили, зачем платить дважды» звучит совершенно разумно. Поэтому она стоит
 первым пунктом falsification-списка, а не сноской в конце.
 
-## Build prerequisite
+## Build prerequisite — снят в 2A (`c9335ac`)
+
+Он формулировался так:
 
 ```text
 Before InteractionManifestV1 can implement WireArtifact at 64 MiB,
@@ -77,11 +79,26 @@ replace the materialising document parser with bounded-during-parse admission.
 The existing const gate must remain red until that is true.
 ```
 
-Это уже не памятка. `WireArtifact::CEILING_IS_PARSEABLE` — const-assert,
-вычисляемый внутри `parse_artifact`, а `MATERIALISING_PARSER_SAFE_MAX` равен
-control-artifact максимуму. Тип с потолком выше **не компилируется**. Шаг 2 не
-может забыть это условие; он может только выполнить его или быть им
-заблокирован.
+**Выполнено, и именно в этом порядке.** `crates/o7-a1-contracts/src/scan.rs`
+отказывает во время разбора и держит O(depth); `MATERIALISING_PARSER_SAFE_MAX`
+и его tripwire **удалены** вместе с ограничением, которое они описывали.
+`WireArtifact::CEILING_IS_PARSEABLE` теперь утверждает контрактную границу —
+потолок типа не выше самого большого per-object bound из FD-1.4, — а не то, что
+мог себе позволить прежний парсер.
+
+Константу не подняли, чтобы разблокировать тип: сменился парсер, и вместе с ним
+сменился гейт. Обратное направление осталось закрытым — расширить safe maximum
+в сторону evidence ceiling больше нечем, потому что этой константы нет.
+
+Действующий инвариант вместо прежнего prerequisite:
+
+```text
+scan refuses during the parse, allocating O(depth)
+    -> a type at MAX_EVIDENCE_BLOB_BYTES compiles and parses
+    -> structural bounds do not scale with the byte ceiling
+```
+
+Все три проверяются тестами в `json.rs`, а не утверждаются здесь.
 
 ## Порядок срезов
 
@@ -122,6 +139,19 @@ control-artifact максимуму. Тип с потолком выше **не 
    реальный размер которого расходится с объявленным (FD-1.5, FD-1.8)?
 7. Возможен ли частично принятый closure — «принято, но доказательства не
    хватает»?
+
+8. Может ли caller **сам сочинить** slot expectation? FD-2.5 фиксирует
+   `kind` и media type слота схемами §3, то есть доверенная сторона сравнения
+   не должна приезжать из вызова. Media type уже выводится (FD-1.7); `kind`
+   пока выбирается на месте вызова — **known gap, закрыть до 2E**. Как только
+   parent schema сможет выдавать свои слоты, caller-authored slot станет
+   слабейшим из двух маршрутов к одному authority-relevant ответу.
+
+9. Создаёт ли **write path** состояние, которое resolver обязан считать
+   повреждённым? `put_envelope` однажды уже писал payload под
+   `envelope.payload_digest()` без проверки — `insert(caller_chosen_digest,
+   bytes)` через поле admitted-объекта. Проверять надо не только отказ, но и
+   отсутствие побочных эффектов при отказе.
 
 **`From<ArtifactRef> for ResolvedArtifact` вынесен в список отдельно.** Это будет
 самый соблазнительный API на всём шаге: выглядит естественно, компилятор

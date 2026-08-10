@@ -561,10 +561,7 @@ fn work_order(kind: MessageKindV1) -> EnvelopeV1 {
 }
 
 fn work_order_slot() -> EnvelopeSlot {
-    EnvelopeSlot::new(
-        ArtifactKindV1::WorkOrder,
-        typed_media_type(ArtifactKindV1::WorkOrder, 1),
-    )
+    EnvelopeSlot::new(MessageKindV1::WorkOrder)
 }
 
 #[test]
@@ -846,20 +843,29 @@ fn the_envelope_half_goes_through_the_one_admission_path() {
     .unwrap();
 }
 
-/// The two slot types do not overlap: an opaque slot refuses a typed artifact
-/// (already covered) and an envelope slot refuses a rank-0 kind.
+/// The envelope slot cannot name a kind that bears no envelope, and that is
+/// now a *type* statement rather than a runtime refusal: `EnvelopeSlot::new`
+/// takes `MessageKindV1`, so the other twenty-eight `ArtifactKindV1` variants
+/// are unnameable here. `ResolveError::NotEnvelopeBearing` was deleted with the
+/// check it guarded — a refusal that cannot be reached is not a safeguard, it
+/// is a comment with a match arm.
+///
+/// The media type is derived too (FD-1.7), so a slot cannot name one kind and
+/// declare a media type belonging to another.
 #[test]
-fn an_envelope_slot_refuses_a_kind_that_bears_no_envelope() {
-    let mut store = MemoryStore::new();
-    store.put(b"diff".to_vec());
-    let slot = EnvelopeSlot::new(ArtifactKindV1::Diff, "text/x-diff");
-    let reference = honest_ref(ArtifactKindV1::Diff, "text/x-diff", b"diff");
-
-    ResolutionSession::enter(&policy(), |session| {
-        assert!(matches!(
-            session.resolve_envelope(&slot, &reference, &store),
-            Err(ResolveError::NotEnvelopeBearing { kind: "diff" })
-        ));
-    })
-    .unwrap();
+fn an_envelope_slot_expectation_is_derived_rather_than_supplied() {
+    for kind in [
+        MessageKindV1::WorkOrder,
+        MessageKindV1::CoderReport,
+        MessageKindV1::HumanDecision,
+    ] {
+        let slot = EnvelopeSlot::new(kind);
+        assert_eq!(slot.kind(), kind.artifact_kind());
+        assert_eq!(
+            slot.media_type(),
+            typed_media_type(kind.artifact_kind(), 1),
+            "the slot's media type is FD-1.7's, not a call site's"
+        );
+        assert!(slot.kind().is_envelope_bearing());
+    }
 }

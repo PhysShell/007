@@ -73,4 +73,4 @@ mod store;
 pub use envelope::ResolvedEnvelope;
 pub use resolved::{ResolvedArtifact, ResolvedOpaque};
 pub use session::{EffectiveLimits, EnvelopeSlot, OpaqueSlot, ResolutionSession, ResolveError};
-pub use store::{BackingStore, MemoryStore, RawObject};
+pub use store::{BackingStore, MemoryStore, PutError, RawObject};
