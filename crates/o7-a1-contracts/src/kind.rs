@@ -11,11 +11,25 @@
 //! removes the coordination problem instead of adding numbering tables to
 //! maintain — and a renamed variant becomes a different digest, "which is the
 //! desired alarm, not a bug".
+//!
+//! # Why these enums do not derive `Deserialize`
+//!
+//! A derived enum deserializer refuses an unrecognised value with serde's own
+//! error, and its `Display` quotes the value: `unknown variant \`ghp_...\`,
+//! expected one of ...`. A rejected artifact is untrusted input, and AGENTS.md
+//! makes credential leakage a P0 — so an enum that names the thing it refused
+//! is a channel for moving a secret into a log.
+//!
+//! `parse_artifact` never propagates serde text, but these types are public, so
+//! the derived impl was reachable directly. Each enum therefore parses by name
+//! through a visitor that reports the *field* it failed to recognise and never
+//! the value. Same correction as `WireDigest`, which exists because
+//! `Digest256`'s error quotes the rejected digest.
 
 use serde::{Deserialize, Serialize};
 
 /// §3.0 — the producer role that authored an envelope.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ProducerRole {
     Controller,
@@ -43,10 +57,13 @@ impl ProducerRole {
     pub fn is_provider_role(self) -> bool {
         matches!(self, Self::Coder | Self::Reviewer)
     }
+
+    /// Every role — for exhaustiveness tests and for the by-name deserializer.
+    pub const ALL: [Self; 4] = [Self::Controller, Self::Coder, Self::Reviewer, Self::Human];
 }
 
 /// The eleven envelope-bearing message kinds (§3.1–§3.11).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum MessageKindV1 {
     WorkOrder,
@@ -125,7 +142,7 @@ impl MessageKindV1 {
 /// already serializes them, so a `candidate_state` reference denotes the same
 /// object on both sides of the boundary — the entire point of importing a kind
 /// instead of redefining it (FD-2.4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub enum ArtifactKindV1 {
     // The eleven A1 message kinds.
@@ -449,4 +466,98 @@ mod tests {
         assert!(!ProducerRole::Controller.is_provider_role());
         assert!(!ProducerRole::Human.is_provider_role());
     }
+
+    /// Every closed enum is publicly deserializable on its own, so each one is
+    /// its own reject path — and a reject path that names what it refused is
+    /// how a credential reaches a log (AGENTS.md P0).
+    ///
+    /// The derived impl produced ``unknown variant `ghp_...`, expected one of
+    /// ...``. This is asserted on the direct route deliberately: going through
+    /// `parse_artifact` would prove only that *its* redaction works, which was
+    /// never in doubt and is not where the leak was.
+    #[test]
+    fn an_unrecognised_variant_is_refused_without_quoting_itself() {
+        const SECRET: &str = "ghp_0123456789abcdefghijklmnopqrstuvwxyz";
+        let quoted = format!("\"{SECRET}\"");
+
+        let mut messages = Vec::new();
+        if let Err(e) = serde_json::from_str::<ProducerRole>(&quoted) {
+            messages.push(e.to_string());
+        }
+        if let Err(e) = serde_json::from_str::<MessageKindV1>(&quoted) {
+            messages.push(e.to_string());
+        }
+        if let Err(e) = serde_json::from_str::<ArtifactKindV1>(&quoted) {
+            messages.push(e.to_string());
+        }
+
+        assert_eq!(messages.len(), 3, "every enum must actually refuse it");
+        for message in messages {
+            assert!(!message.contains("ghp_"), "error leaked content: {message}");
+        }
+
+        // And the frozen names still parse, so the refusal above is the
+        // unrecognised value and not a deserializer that refuses everything.
+        for role in ProducerRole::ALL {
+            let json = format!("\"{}\"", role.name());
+            assert_eq!(serde_json::from_str::<ProducerRole>(&json).ok(), Some(role));
+        }
+        for kind in ArtifactKindV1::ALL {
+            let json = format!("\"{}\"", kind.name());
+            assert_eq!(
+                serde_json::from_str::<ArtifactKindV1>(&json).ok(),
+                Some(kind)
+            );
+        }
+        for kind in MessageKindV1::ALL {
+            let json = format!("\"{}\"", kind.name());
+            assert_eq!(
+                serde_json::from_str::<MessageKindV1>(&json).ok(),
+                Some(kind)
+            );
+        }
+    }
 }
+
+/// Parse a closed enum by its frozen `snake_case` name, refusing anything else
+/// **without quoting it**.
+///
+/// The macro exists so the three enums cannot drift apart in this respect: a
+/// fourth closed enum gets the redacting behaviour by using it, rather than by
+/// its author remembering that the derive leaks.
+macro_rules! deserialize_by_name {
+    ($ty:ty, $field:literal) => {
+        impl<'de> Deserialize<'de> for $ty {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                struct ByName;
+
+                impl serde::de::Visitor<'_> for ByName {
+                    type Value = $ty;
+
+                    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        // No variant list: the expectation is public in the
+                        // contract, and echoing it here would only make the
+                        // error longer, not more useful.
+                        write!(f, "a frozen {} name", $field)
+                    }
+
+                    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<$ty, E> {
+                        <$ty>::ALL
+                            .into_iter()
+                            .find(|candidate| candidate.name() == v)
+                            .ok_or_else(|| E::custom(concat!("unrecognised ", $field)))
+                    }
+                }
+
+                deserializer.deserialize_str(ByName)
+            }
+        }
+    };
+}
+
+deserialize_by_name!(ProducerRole, "producer_role");
+deserialize_by_name!(MessageKindV1, "message_kind");
+deserialize_by_name!(ArtifactKindV1, "artifact kind");
