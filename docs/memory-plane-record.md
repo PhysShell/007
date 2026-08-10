@@ -487,12 +487,12 @@ CanonicalStateEnvelope {           ResolverPolicy {
     decision_state_digest              max_required_entries
     invariant_state_digest         }
     evidence_state_digest
-    failure_registry_digest        resolver_policy_digest =
-}                                      digest(canonical(ResolverPolicy))
-
-canonical_state_digest =
-    sha256(canonical(CanonicalStateEnvelope))
+    failure_registry_digest
+}
 ```
+
+Their identities are computed by explicit field framing — **§4.0.2**, not by
+serializing either structure.
 
 Naming and closure, fixed here so that two names never drift into two concepts:
 
@@ -535,16 +535,6 @@ Reconciling these with the `context.meta.json` field list in
 `docs/task-aware-context-generator.md` is C-3 in §5, and belongs to the
 consistency pass after ratification — not to §3.
 
-> **`digest(canonical(…))` above is a placeholder, and a known conflict.**
-> 007 already froze a digest discipline that refuses exactly this phrasing:
-> `docs/q-deck/a1-authority-contracts.md` **FD-1.2** computes identities by
-> explicit length-prefixed field framing — `frame(x) = u64-le length || bytes`,
-> enums framed by name, absent optionals framed as the empty string — and states
-> that **"no canonical-JSON scheme is introduced"**, precisely so that two
-> serializers never have to agree on ordering or whitespace. Every digest in §4
-> must be re-expressed as an explicit framing before this architecture could be
-> adopted. Recorded as conflict **C-4** in §5.
-
 #### 4.0.1 Advisory inputs are frozen before they are compiled
 
 Making semantic retrieval part of normative state would buy determinism by
@@ -554,10 +544,11 @@ the deterministic stage consumes it:
 
 ```text
 AdvisoryInputSnapshot {
-    items[]                canonically ordered
+    items[]                a sequence — the order the retrieval emitted them
+                           is kept, and is framed in that order (§4.0.2)
     provenance[]           which channel proposed each item
     retrieval_identity     retriever + version + embedding model identity
-    snapshot_digest
+    snapshot_digest        framed per §4.0.2, never a serialization
 }
 ```
 
@@ -574,6 +565,108 @@ invariant, or complete a handoff (REQ-8). It is merely *fixed*, which is what
 REQ-9 needs. **Trust and determinism are independent axes**, and conflating them
 is how a system ends up either trusting its retrieval or being unable to
 reproduce anything that touched it.
+
+#### 4.0.2 Identity framing
+
+Every identity this section owns is computed by **explicit length-prefixed field
+framing**, following the discipline frozen in
+`docs/q-deck/a1-authority-contracts.md` **FD-1.2**. An earlier revision of this
+document wrote `digest(canonical(X))`, which is precisely the phrasing FD-1.2
+refuses; that was conflict **C-4**, and this subsection closes it. The frozen
+contract wins — the candidate moved.
+
+```text
+h = SHA-256
+h.update(b"o7-memory-<family>\0v1\0")     domain separator, one per family
+frame(field), … in a fixed order that never changes
+
+frame(x)         = u64-le length prefix || bytes        (identical to FD-1.2)
+scalars          integers as little-endian fixed width; strings as UTF-8
+enums            framed by their stable snake_case name, never by tag byte
+absent optional  framed as the empty string — never skipped, so "absent",
+                 "empty" and "some value" hash distinctly
+collections      frame(count.to_le_bytes()) then each element in the order
+                 defined for that field
+child digest     framed as its raw digest bytes
+```
+
+**No canonical-JSON scheme is introduced, here or anywhere below.** Nothing in
+this section requires two serializers to agree on key order or whitespace.
+
+**Owned versus foreign.** This section defines a preimage only for the
+identities it owns. A digest that belongs to another object is framed as bytes
+and its discipline is left where it lives — capturing someone else's identity
+rules is how two incompatible definitions of the same digest appear.
+
+```text
+owned here      state envelope · resolver policy · scope key · resolved scope ·
+                advisory input snapshot · budget profile · compiled context
+
+foreign         the five partition digests (goals, decisions, invariants,
+                evidence, failure registry) · artifact and evidence digests ·
+                environment_digest · tokenizer and embedding-model identities
+```
+
+The five partition digests are an **open dependency**: their framing belongs to
+the partition stores, which do not exist yet. Until they do, `canonical_state_
+digest` is well-defined *given* them and no further — stated rather than papered
+over.
+
+```text
+canonical_state_digest              domain b"o7-memory-state\0v1\0"
+    frame(schema_version.to_le_bytes())
+    frame(canonicalization_version.to_le_bytes())
+    frame(goal_state_digest) frame(decision_state_digest)
+    frame(invariant_state_digest) frame(evidence_state_digest)
+    frame(failure_registry_digest)
+
+resolver_policy_digest              domain b"o7-memory-resolver-policy\0v1\0"
+    frame(resolver_version) frame(witness_rule_version name)
+    frame(closure_rule_set_version)
+    frame(max_derivation_depth.to_le_bytes())
+    frame(max_required_entries.to_le_bytes())
+
+canonical_scope_key digest          domain b"o7-memory-scope-key\0v1\0"
+    frame(scope_key_canonicalization_version.to_le_bytes())
+    frame(goal_node_id)
+    frame(artifact_ids count.to_le_bytes()), each in §4.1.1 order
+    frame(contract_ids count.to_le_bytes()), each in §4.1.1 order
+
+resolved_scope_digest               domain b"o7-memory-resolved-scope\0v1\0"
+    frame(canonical_scope_key digest) frame(resolver_policy_digest)
+    frame(required entries count.to_le_bytes()), each entry in ascending
+        bytewise order of entry_id, and for each:
+        frame(entry_id) frame(rule_id) frame(depth.to_le_bytes())
+        frame(derivation_path count.to_le_bytes()), each hop in path order
+            — a derivation path is a sequence and keeps its order
+
+advisory_input_snapshot_digest      domain b"o7-memory-advisory-snapshot\0v1\0"
+    frame(retrieval_identity) frame(items count.to_le_bytes()), each in the
+        order the retrieval emitted them, and for each:
+        frame(item_id) frame(provenance channel name) frame(rank.to_le_bytes())
+
+model_budget_profile_digest         domain b"o7-memory-budget-profile\0v1\0"
+    frame(tokenizer_id) frame(total_budget.to_le_bytes())
+    frame(output_reserve.to_le_bytes())
+
+compiled_context_digest             domain b"o7-memory-compiled-context\0v1\0"
+    — the `context_digest` of the comparison surface above is this value; one
+      identity, not two names
+    frame(context_bytes)
+    frame(included_entry_ids count.to_le_bytes()), each in the order the entry
+        appears in the context — presentation order is semantic here
+    frame(omitted_candidate_ids count.to_le_bytes()), each in ascending
+        bytewise order — an omission set has no natural order
+    frame(token_count.to_le_bytes())
+```
+
+**Ordering is declared per field, never assumed.** Where a collection is a
+sequence — a derivation path, the items of a snapshot, the entries as they
+appear in a rendered context — its order is semantic and is preserved. Where it
+is a set — artifact ids, contract ids, required entries, omitted candidates —
+the order is *defined*: ascending bytewise comparison over the UTF-8 encoding of
+the identifier, after deduplication. "Sorted" without a key and an encoding is
+canonicalization wearing a false moustache, and it is not admitted here.
 
 ### 4.1 Normative Scope Resolver
 
@@ -607,11 +700,12 @@ API would reproduce, one layer up, exactly the defect class §1.3 records.
 
 `artifact_ids[]` and `contract_ids[]` are **sets, not sequences**. Before a
 `ScopeKey` is used as an input or digested it is canonicalized: deduplicated,
-sorted under a declared total order over identifiers, and stamped with
-`scope_key_canonicalization_version`. Two callers naming the same artifacts in a
-different order must produce the same `canonical_scope_key` and therefore the
-same `resolved_scope_digest`. A list whose order is an accident of iteration is
-an unversioned input in disguise.
+ordered by **ascending bytewise comparison over the UTF-8 encoding of the
+identifier** — the set rule of §4.0.2, named here rather than left as "sorted" —
+and stamped with `scope_key_canonicalization_version`. Two callers naming the
+same artifacts in a different order must produce the same `canonical_scope_key`
+and therefore the same `resolved_scope_digest`. A list whose order is an
+accident of iteration is an unversioned input in disguise.
 
 ### 4.2 Closure semantics
 
@@ -1096,19 +1190,20 @@ brochure.
    and resolved after it, in that order — the pass could not run earlier without
    importing a pending proposal into ratified surroundings.
 
-   **Status: C-1, C-2 and C-3 are closed** by `a92a707`, `1257669` and `4f746b6`
-   on this branch, each a single-purpose commit. Each fix carries the ratified
-   requirement that compels it and explicitly declines to import the candidate
-   types from §4. **C-4 remains open** and is deliberately not in that series:
-   it changes §4 itself rather than the neighbouring drafts, so it belongs to a
-   later branch.
+   **Status: all four are closed.** C-1, C-2 and C-3 by `a92a707`, `1257669` and
+   `4f746b6`, each a single-purpose commit, each carrying the ratified
+   requirement that compels it and each explicitly declining to import the
+   candidate types from §4. C-4 came later and on its own branch, because it
+   changes §4 itself rather than the neighbouring drafts — a notarial record, a
+   consistency fix and an architectural edit have different reasons to be
+   reverted and do not belong in one commit.
 
    | # | Conflict | Where | Proposed resolution |
    |---|---|---|---|
    | C-1 | `superseded` and `rejected` sit in the **trust levels** list, but they are dispositions, not statements about who vouched for an entry | `docs/agent-memory-layer.md` → "Trust levels" | Split the enum: trust (`agent-claimed` … `human-confirmed`) stays; `superseded` / `rejected` move to a status/lifecycle field aligned with §4.5. This is a **change** to the existing model, not an addition to it |
    | C-2 | IR requirements demand "a stable identity" per selected item; §4.6 here refuses to promise stable symbol identity and replaces it with a resolution ladder | `docs/task-aware-context-generator.md` → "IR requirements" | Replace the requirement with the `SymbolLocator` + `ResolutionResult` contract, so a degraded match is visible rather than assumed |
    | C-3 | The existing cache key (commit, task hash, profile, extractor versions, ranking version, budget config) and the candidate input closures (§4.0) are different closures over overlapping inputs; separately, the existing `context.meta.json` field list and the candidate comparison surface (§4.0) describe the same output twice | `docs/task-aware-context-generator.md` → "Determinism and reproducibility" | Reconcile into one declared closure per stage — whichever survives must contain **every** versioned component it invokes — and into one comparison surface, rather than two field lists that drift |
-   | C-4 | §4 writes identities as `digest(canonical(X))`; 007 has **frozen** the opposite discipline — identities by explicit length-prefixed field framing, with "no canonical-JSON scheme is introduced" | `docs/q-deck/a1-authority-contracts.md` → FD-1.2 (frozen) | Re-express every digest in §4 as an explicit framing over named fields in a fixed order, following FD-1.2. The frozen document wins; this is a defect in the candidate, not a tension between equals. Blocks adoption of §4, not ratification of §3 |
+   | C-4 | **Closed.** §4 wrote identities as `digest(canonical(X))`; 007 had **frozen** the opposite discipline — identities by explicit length-prefixed field framing, with "no canonical-JSON scheme is introduced" | `docs/q-deck/a1-authority-contracts.md` → FD-1.2 (frozen) | Done in §4.0.2: a domain separator and a fixed-order framing for each of the seven identities §4 owns, foreign digests framed as bytes with their discipline left where it lives, and set-versus-sequence ordering declared per field. The frozen document won; the candidate moved. §4 remains **candidate** — closing C-4 fixes a defect, it does not adopt the architecture |
 
 ## 6. Non-normative evaluation of Semvec
 
@@ -1183,7 +1278,7 @@ The order that keeps governance clean, and the reason for each step:
                                            editing them would import a pending
                                            proposal into ratified surroundings
 4. C-4: re-express §4 digests as explicit  the frozen A1 discipline wins;
-   FD-1.2 framings                         §4 is what has to move
+   FD-1.2 framings — DONE, §4.0.2           §4 is what has to move
 5. only then consider adopting or          §4 stays CANDIDATE until 1–4 are
    decomposing §4                          done
 ```
