@@ -88,6 +88,29 @@ OBLIGATION — the design-input evidence MUST remain reachable through a STABLE
           returns HTTP 403 on refs/tags/*, and no tag-creation operation is
           available to it. The ref must be pushed by a maintainer, after
           which this block becomes SATISFIED in a one-line record commit.
+
+GUARD, in force while the status above is OPEN:
+
+  Until refs/tags/a1-f-v2-phase-g-design-input-v1 exists and is verified to
+  target 37502e3ce5c397a7437445aafb88c13d84ba4ac0, claude/a1-contract-freeze
+  MUST NOT be deleted or included in automated branch cleanup.
+```
+
+The guard is a temporary condition, not a process reminder. Evidence
+reachability currently *depends* on that branch existing, so deleting it would
+destroy the reproducibility of an already-closed decision — which makes routine
+branch garbage collection, briefly, a load-bearing part of this contract's
+provenance. When the ref lands and verifies, the guard becomes a historically
+discharged condition and the status becomes SATISFIED; the branch is then no
+longer required for evidence reachability.
+
+Verification, when the ref appears:
+
+```text
+1. the ref exists on origin
+2. its exact target == 37502e3ce5c397a7437445aafb88c13d84ba4ac0
+3. crates/o7-a1-protocol/src/edges.rs resolves through that ref
+=> preservation: SATISFIED; the side branch is no longer required
 ```
 
 **Two precision notes, both deliberate.**
