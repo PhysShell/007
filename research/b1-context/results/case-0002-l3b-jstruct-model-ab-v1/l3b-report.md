@@ -66,10 +66,18 @@ L3B  remove the dictionary     -> integrity clean, no legend, literal ids
                                   -> evidence STILL missed, and it is the ONLY failure
 ```
 
-The boundary is located. For this evidence-heavy JSON workload, **restructuring the context
-at all — even into a legible, literal, dictionary-free table — costs reading thoroughness.**
-The JSON structure is itself part of the reading interface, not incidental packaging around
-it.
+The boundary is located, and the precise claim is narrower than "compression is hard":
+
+> For this evidence-heavy context, changing the structural presentation of otherwise
+> equivalent JSON changes **witness-retrieval behaviour** across the tested model families.
+> Canonical JSON is therefore part of the effective model-facing evidence interface, not
+> merely a serialization detail.
+
+jstruct was not unintelligible. It was intelligible enough to preserve identifiers,
+relations and output integrity — and cleaner than RAW on two integrity axes — while still
+changing which witnesses the model noticed. The failure is evidence navigation, not decoder
+correctness. Scope: case-0002, four community-hosted families, N=3, reasoning off;
+reproducible within that domain across L1/L2/L3B, which is why no L4 follows.
 
 ## Caveats
 
@@ -96,7 +104,10 @@ savings from: selection, omission, retrieval, caching, budget-aware projection
 ```
 
 The real-source holdout is **not** opened by this result, and `qodec project v1` is **not**
-motivated by it.
+motivated by it. "The representation line closed, so build v1" would be the wrong inference —
+a different causal branch. H3 independently showed a mandatory-closure overflow (9 records
+against a budget of 8), so budget-aware selection remains evidence-backed future work on its
+own footing.
 
 ## Surviving capabilities
 

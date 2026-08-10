@@ -8,6 +8,12 @@
     "PROMPT NEUTRALITY: both arms used identical scaffolding with neither representation named and no reading tutorial for either, so RAW was re-run fresh rather than inherited from L1/L2. The token accounting was recomputed from the final prompts (10.92%), not carried over from L3A (9.61%).",
     "STRUCTURAL: jstruct is byte-lossless (exact roundtrip verified through the real decoder on all three contexts before any call). The difference measured is comprehension, not fidelity."
   ],
+  "development_finding": {
+    "scope": "case-0002 only; four community-hosted model families; N=3; reasoning off. Reproducible within that domain across L1, L2 and L3B -- which is why no L4 representation experiment follows.",
+    "statement": "For this evidence-heavy context, changing the structural presentation of otherwise equivalent JSON changes witness-retrieval behaviour across the tested model families. Canonical JSON is therefore part of the effective model-facing evidence interface, not merely a serialization detail.",
+    "supersedes_looser_wording": "'the JSON structure is part of the reading interface'"
+  },
+  "failure_is_not_decoder_correctness": "jstruct was not unintelligible. It was intelligible enough to preserve identifiers, relations and output integrity -- and cleaner than RAW on two integrity axes -- while still changing which witnesses the model noticed and cited. The problem is evidence navigation, not decoding.",
   "finding": "Removing the dictionary entirely did not remove the reading cost. jstruct is byte-lossless, carries no legend, keeps every identifier literal, needs no notation block, and saves 10.92% cold -- and still no model reached non-inferiority. Pooled correctness fell 70 -> 66 and the only axis that moved against it is missing_required_witness (60 -> 65); all 13 paired hard regressions, across all four families, are that same axis. Taken with L1 (aliasing corrupts references and costs thoroughness) and L2 (protecting identifiers removes the corruption but not the thoroughness cost), the boundary is now located: for this evidence-heavy JSON workload, restructuring the context at all -- even into a legible, literal, dictionary-free table -- costs the model evidence it would otherwise have cited. The JSON structure is itself part of the reading interface.",
   "freeze_manifest_sha256": "sha256:f1c4858033db0ec8ee459984a3a292d61823e8fe752c01202e756b16a31e4ad3",
   "frozen": {
@@ -335,6 +341,7 @@
   },
   "pooled_correct_delta_diagnostic": -4,
   "principal_classification": "JSTRUCT_REGRESSION_WITH_TOKEN_WIN",
+  "project_v1_causal_note": "L3B does not motivate qodec project v1, and 'the representation line closed, so build v1' would be the wrong inference -- a different causal branch. H3 independently showed a mandatory-closure overflow (9 records against a budget of 8), so budget-aware selection remains evidence-backed future work on its own footing.",
   "provider_integrity": {
     "any_substitution": false
   },
