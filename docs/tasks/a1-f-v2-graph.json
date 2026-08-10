@@ -1,0 +1,606 @@
+{
+  "_comment": "Frozen graph of FD-v2-GRAPH. Generated from docs/tasks/a1-f-v2-phase-g.md as merged on main; do not hand-edit.",
+  "source_document": "docs/tasks/a1-f-v2-phase-g.md",
+  "source_commit": "6301881",
+  "status": "APPROVED / CLOSED",
+  "message_kinds": [
+    "WorkOrder",
+    "CoderReport",
+    "CandidateReceipt",
+    "ReviewRequest",
+    "ReviewerReport",
+    "ReviewVerdict",
+    "CorrectiveDirective",
+    "CampaignFeedItem",
+    "HumanAttentionRequest",
+    "HumanCommandRequest",
+    "HumanDecision"
+  ],
+  "typed_supports": [
+    "ProviderExecutionReceipt",
+    "InteractionManifest",
+    "ScopeContract",
+    "CampaignRunBinding"
+  ],
+  "event_kinds": [
+    "AttentionResolved",
+    "AttentionSuperseded",
+    "CampaignCancelled",
+    "CampaignCreated",
+    "CampaignFeedItemEmitted",
+    "CampaignSuperseded",
+    "CampaignTerminalError",
+    "CandidateAccepted",
+    "CiResultsAccepted",
+    "CoderReportReceived",
+    "CorrectiveDirectiveIssued",
+    "GateResultsAccepted",
+    "HumanAttentionRaised",
+    "HumanCommandRejected",
+    "HumanDecisionRecorded",
+    "ProviderExecutionRecorded",
+    "ReviewRequested",
+    "ReviewVerdictAccepted",
+    "ReviewerReportReceived",
+    "TransitionRejected",
+    "WorkOrderIssued"
+  ],
+  "payload_variants": [
+    "AttentionResolved",
+    "AttentionSuperseded",
+    "CampaignCancelled",
+    "CampaignCreated",
+    "CampaignSuperseded",
+    "CampaignTerminalError",
+    "CiResultsAccepted",
+    "GateResultsAccepted",
+    "HumanCommandRejected",
+    "ProviderExecutionRecorded",
+    "TransitionRejected"
+  ],
+  "expected_payload": {
+    "AttentionResolved": "AttentionResolvedPayload",
+    "AttentionSuperseded": "AttentionSupersededPayload",
+    "CampaignCancelled": "CampaignCancelledPayload",
+    "CampaignCreated": "CampaignCreatedPayload",
+    "CampaignFeedItemEmitted": null,
+    "CampaignSuperseded": "CampaignSupersededPayload",
+    "CampaignTerminalError": "CampaignTerminalErrorPayload",
+    "CandidateAccepted": null,
+    "CiResultsAccepted": "CiResultsAcceptedPayload",
+    "CoderReportReceived": null,
+    "CorrectiveDirectiveIssued": null,
+    "GateResultsAccepted": "GateResultsAcceptedPayload",
+    "HumanAttentionRaised": null,
+    "HumanCommandRejected": "HumanCommandRejectedPayload",
+    "HumanDecisionRecorded": null,
+    "ProviderExecutionRecorded": "ProviderExecutionRecordedPayload",
+    "ReviewRequested": null,
+    "ReviewVerdictAccepted": null,
+    "ReviewerReportReceived": null,
+    "TransitionRejected": "TransitionRejectedPayload",
+    "WorkOrderIssued": null
+  },
+  "meta_targets": {
+    "AnyCommittedEnvelope": [
+      "WorkOrder",
+      "CoderReport",
+      "CandidateReceipt",
+      "ReviewRequest",
+      "ReviewerReport",
+      "ReviewVerdict",
+      "CorrectiveDirective",
+      "CampaignFeedItem",
+      "HumanAttentionRequest",
+      "HumanCommandRequest",
+      "HumanDecision"
+    ]
+  },
+  "terminal_kinds": [
+    "CandidateMaterializationRef",
+    "CandidateStateReceiptRef",
+    "CanonicalRequest",
+    "CiObservation",
+    "ContractDocument",
+    "CostRecord",
+    "DetailDocument",
+    "DiagnosticLog",
+    "Diff",
+    "GateLog",
+    "NormalizedOutput",
+    "ProviderMessage",
+    "RawProviderBytes",
+    "RunContractCandidateStateRef",
+    "TerminationObservation",
+    "ToolArguments",
+    "ToolResult",
+    "UsageRecord",
+    "WorktreeCorrespondence",
+    "WorktreeMaterializationRef"
+  ],
+  "edges": [
+    {
+      "n": 1,
+      "source": "WorkOrder",
+      "target": "CandidateStateReceiptRef",
+      "class": "Intra",
+      "origin": "frozen slot 3"
+    },
+    {
+      "n": 2,
+      "source": "WorkOrder",
+      "target": "CandidateMaterializationRef",
+      "class": "Intra",
+      "origin": "frozen slot 4"
+    },
+    {
+      "n": 3,
+      "source": "WorkOrder",
+      "target": "ScopeContract",
+      "class": "Intra",
+      "origin": "frozen slot 5"
+    },
+    {
+      "n": 4,
+      "source": "CoderReport",
+      "target": "ProviderExecutionReceipt",
+      "class": "Intra",
+      "origin": "frozen slot 2 (role=coder)"
+    },
+    {
+      "n": 5,
+      "source": "CoderReport",
+      "target": "DiagnosticLog",
+      "class": "Intra",
+      "origin": "frozen slot 7"
+    },
+    {
+      "n": 6,
+      "source": "CandidateReceipt",
+      "target": "CandidateStateReceiptRef",
+      "class": "Intra",
+      "origin": "frozen slot 8"
+    },
+    {
+      "n": 7,
+      "source": "CandidateReceipt",
+      "target": "CoderReport",
+      "class": "Intra",
+      "origin": "frozen slot 9"
+    },
+    {
+      "n": 8,
+      "source": "ReviewRequest",
+      "target": "CandidateReceipt",
+      "class": "Intra",
+      "origin": "frozen slot 10"
+    },
+    {
+      "n": 9,
+      "source": "ReviewRequest",
+      "target": "ScopeContract",
+      "class": "Intra",
+      "origin": "frozen slot 11"
+    },
+    {
+      "n": 10,
+      "source": "ReviewRequest",
+      "target": "CoderReport",
+      "class": "Intra",
+      "origin": "frozen slot 13"
+    },
+    {
+      "n": 11,
+      "source": "ReviewRequest",
+      "target": "ContractDocument",
+      "class": "Intra",
+      "origin": "\u00a74.2.3 ACCEPT (slot 12)"
+    },
+    {
+      "n": 12,
+      "source": "ReviewRequest",
+      "target": "Diff",
+      "class": "Intra",
+      "origin": "\u00a74.2.3 ACCEPT (slot 12)"
+    },
+    {
+      "n": 13,
+      "source": "ReviewRequest",
+      "target": "GateLog",
+      "class": "Intra",
+      "origin": "\u00a74.2.3 ACCEPT (slot 12)"
+    },
+    {
+      "n": 14,
+      "source": "ReviewerReport",
+      "target": "ProviderExecutionReceipt",
+      "class": "Intra",
+      "origin": "frozen slot 2 (role=reviewer)"
+    },
+    {
+      "n": 15,
+      "source": "ReviewerReport",
+      "target": "ContractDocument",
+      "class": "Intra",
+      "origin": "\u00a74.2.3 ACCEPT (slot 14)"
+    },
+    {
+      "n": 16,
+      "source": "ReviewerReport",
+      "target": "Diff",
+      "class": "Intra",
+      "origin": "\u00a74.2.3 ACCEPT (slot 14)"
+    },
+    {
+      "n": 17,
+      "source": "ReviewerReport",
+      "target": "GateLog",
+      "class": "Intra",
+      "origin": "\u00a74.2.3 ACCEPT (slot 14)"
+    },
+    {
+      "n": 18,
+      "source": "ReviewVerdict",
+      "target": "ReviewerReport",
+      "class": "Intra",
+      "origin": "frozen slot 15"
+    },
+    {
+      "n": 19,
+      "source": "ReviewVerdict",
+      "target": "ContractDocument",
+      "class": "Intra",
+      "origin": "\u00a74.2.3 ACCEPT (slot 41)"
+    },
+    {
+      "n": 20,
+      "source": "ReviewVerdict",
+      "target": "Diff",
+      "class": "Intra",
+      "origin": "\u00a74.2.3 ACCEPT (slot 41)"
+    },
+    {
+      "n": 21,
+      "source": "ReviewVerdict",
+      "target": "GateLog",
+      "class": "Intra",
+      "origin": "\u00a74.2.3 ACCEPT (slot 41)"
+    },
+    {
+      "n": 22,
+      "source": "CorrectiveDirective",
+      "target": "ReviewVerdict",
+      "class": "Causal",
+      "origin": "frozen slot 16"
+    },
+    {
+      "n": 23,
+      "source": "CorrectiveDirective",
+      "target": "ScopeContract",
+      "class": "Intra",
+      "origin": "frozen slot 17"
+    },
+    {
+      "n": 24,
+      "source": "HumanDecision",
+      "target": "HumanCommandRequest",
+      "class": "Intra",
+      "origin": "frozen slot 20"
+    },
+    {
+      "n": 25,
+      "source": "ProviderExecutionReceipt",
+      "target": "InteractionManifest",
+      "class": "Intra",
+      "origin": "frozen slot 21"
+    },
+    {
+      "n": 26,
+      "source": "ProviderExecutionReceipt",
+      "target": "NormalizedOutput",
+      "class": "Intra",
+      "origin": "frozen slot 22, 25"
+    },
+    {
+      "n": 27,
+      "source": "ProviderExecutionReceipt",
+      "target": "CanonicalRequest",
+      "class": "Intra",
+      "origin": "frozen slot 23"
+    },
+    {
+      "n": 28,
+      "source": "ProviderExecutionReceipt",
+      "target": "RawProviderBytes",
+      "class": "Intra",
+      "origin": "frozen slot 24"
+    },
+    {
+      "n": 29,
+      "source": "ProviderExecutionReceipt",
+      "target": "UsageRecord",
+      "class": "Intra",
+      "origin": "frozen slot 35"
+    },
+    {
+      "n": 30,
+      "source": "ProviderExecutionReceipt",
+      "target": "CostRecord",
+      "class": "Intra",
+      "origin": "frozen slot 36"
+    },
+    {
+      "n": 31,
+      "source": "InteractionManifest",
+      "target": "ProviderMessage",
+      "class": "Intra",
+      "origin": "frozen slot 37, 38"
+    },
+    {
+      "n": 32,
+      "source": "InteractionManifest",
+      "target": "ToolArguments",
+      "class": "Intra",
+      "origin": "frozen slot 39"
+    },
+    {
+      "n": 33,
+      "source": "InteractionManifest",
+      "target": "ToolResult",
+      "class": "Intra",
+      "origin": "frozen slot 40"
+    },
+    {
+      "n": 34,
+      "source": "CandidateReceipt",
+      "target": "CampaignRunBinding",
+      "class": "Intra",
+      "origin": "\u00a73.1 new object"
+    },
+    {
+      "n": 35,
+      "source": "ProviderExecutionReceipt",
+      "target": "CampaignRunBinding",
+      "class": "Intra",
+      "origin": "\u00a73.1 new object"
+    },
+    {
+      "n": 36,
+      "source": "CampaignRunBinding",
+      "target": "CandidateStateReceiptRef",
+      "class": "Intra",
+      "origin": "\u00a73.1 new object"
+    },
+    {
+      "n": 37,
+      "source": "CampaignRunBinding",
+      "target": "CandidateMaterializationRef",
+      "class": "Intra",
+      "origin": "\u00a73.1 new object"
+    },
+    {
+      "n": 38,
+      "source": "CampaignRunBinding",
+      "target": "RunContractCandidateStateRef",
+      "class": "Intra",
+      "origin": "\u00a73.1 new object"
+    },
+    {
+      "n": 39,
+      "source": "CampaignRunBinding",
+      "target": "WorktreeMaterializationRef",
+      "class": "Intra",
+      "origin": "\u00a73.1 new object"
+    },
+    {
+      "n": 40,
+      "source": "CampaignRunBinding",
+      "target": "WorktreeCorrespondence",
+      "class": "Intra",
+      "origin": "\u00a73.1 new object"
+    },
+    {
+      "n": 41,
+      "source": "CampaignCreatedPayload",
+      "target": "ScopeContract",
+      "class": "Intra",
+      "origin": "frozen slot 28"
+    },
+    {
+      "n": 42,
+      "source": "ProviderExecutionRecordedPayload",
+      "target": "ProviderExecutionReceipt",
+      "class": "Intra",
+      "origin": "frozen slot 29"
+    },
+    {
+      "n": 43,
+      "source": "GateResultsAcceptedPayload",
+      "target": "GateLog",
+      "class": "Intra",
+      "origin": "frozen slot 30"
+    },
+    {
+      "n": 44,
+      "source": "CiResultsAcceptedPayload",
+      "target": "CiObservation",
+      "class": "Intra",
+      "origin": "frozen slot 31"
+    },
+    {
+      "n": 45,
+      "source": "TransitionRejectedPayload",
+      "target": "DetailDocument",
+      "class": "Intra",
+      "origin": "frozen slot 32"
+    },
+    {
+      "n": 46,
+      "source": "CampaignCancelledPayload",
+      "target": "TerminationObservation",
+      "class": "Intra",
+      "origin": "frozen slot 33"
+    },
+    {
+      "n": 47,
+      "source": "CampaignEvent(WorkOrderIssued)",
+      "target": "WorkOrder",
+      "class": "Causal",
+      "origin": "frozen \u00a73.15.1"
+    },
+    {
+      "n": 48,
+      "source": "CampaignEvent(CoderReportReceived)",
+      "target": "CoderReport",
+      "class": "Causal",
+      "origin": "frozen \u00a73.15.1"
+    },
+    {
+      "n": 49,
+      "source": "CampaignEvent(CandidateAccepted)",
+      "target": "CandidateReceipt",
+      "class": "Causal",
+      "origin": "frozen \u00a73.15.1"
+    },
+    {
+      "n": 50,
+      "source": "CampaignEvent(ReviewRequested)",
+      "target": "ReviewRequest",
+      "class": "Causal",
+      "origin": "frozen \u00a73.15.1"
+    },
+    {
+      "n": 51,
+      "source": "CampaignEvent(ReviewerReportReceived)",
+      "target": "ReviewerReport",
+      "class": "Causal",
+      "origin": "frozen \u00a73.15.1"
+    },
+    {
+      "n": 52,
+      "source": "CampaignEvent(ReviewVerdictAccepted)",
+      "target": "ReviewVerdict",
+      "class": "Causal",
+      "origin": "frozen \u00a73.15.1"
+    },
+    {
+      "n": 53,
+      "source": "CampaignEvent(CorrectiveDirectiveIssued)",
+      "target": "CorrectiveDirective",
+      "class": "Causal",
+      "origin": "frozen \u00a73.15.1"
+    },
+    {
+      "n": 54,
+      "source": "CampaignEvent(HumanAttentionRaised)",
+      "target": "HumanAttentionRequest",
+      "class": "Causal",
+      "origin": "frozen \u00a73.15.1"
+    },
+    {
+      "n": 55,
+      "source": "CampaignEvent(HumanDecisionRecorded)",
+      "target": "HumanDecision",
+      "class": "Causal",
+      "origin": "frozen \u00a73.15.1"
+    },
+    {
+      "n": 56,
+      "source": "CampaignEvent(HumanCommandRejected)",
+      "target": "HumanCommandRequest",
+      "class": "Causal",
+      "origin": "frozen \u00a73.15.1"
+    },
+    {
+      "n": 57,
+      "source": "CampaignEvent(CampaignFeedItemEmitted)",
+      "target": "CampaignFeedItem",
+      "class": "Causal",
+      "origin": "frozen \u00a73.15.1"
+    },
+    {
+      "n": 58,
+      "source": "CampaignEvent(CampaignCreated)",
+      "target": "CampaignCreatedPayload",
+      "class": "Intra",
+      "origin": "frozen structure \u00a73.15.2"
+    },
+    {
+      "n": 59,
+      "source": "CampaignEvent(ProviderExecutionRecorded)",
+      "target": "ProviderExecutionRecordedPayload",
+      "class": "Intra",
+      "origin": "frozen structure \u00a73.15.2"
+    },
+    {
+      "n": 60,
+      "source": "CampaignEvent(GateResultsAccepted)",
+      "target": "GateResultsAcceptedPayload",
+      "class": "Intra",
+      "origin": "frozen structure \u00a73.15.2"
+    },
+    {
+      "n": 61,
+      "source": "CampaignEvent(CiResultsAccepted)",
+      "target": "CiResultsAcceptedPayload",
+      "class": "Intra",
+      "origin": "frozen structure \u00a73.15.2"
+    },
+    {
+      "n": 62,
+      "source": "CampaignEvent(AttentionResolved)",
+      "target": "AttentionResolvedPayload",
+      "class": "Intra",
+      "origin": "frozen structure \u00a73.15.2"
+    },
+    {
+      "n": 63,
+      "source": "CampaignEvent(AttentionSuperseded)",
+      "target": "AttentionSupersededPayload",
+      "class": "Intra",
+      "origin": "frozen structure \u00a73.15.2"
+    },
+    {
+      "n": 64,
+      "source": "CampaignEvent(HumanCommandRejected)",
+      "target": "HumanCommandRejectedPayload",
+      "class": "Intra",
+      "origin": "frozen structure \u00a73.15.2"
+    },
+    {
+      "n": 65,
+      "source": "CampaignEvent(TransitionRejected)",
+      "target": "TransitionRejectedPayload",
+      "class": "Intra",
+      "origin": "frozen structure \u00a73.15.2"
+    },
+    {
+      "n": 66,
+      "source": "CampaignEvent(CampaignCancelled)",
+      "target": "CampaignCancelledPayload",
+      "class": "Intra",
+      "origin": "frozen structure \u00a73.15.2"
+    },
+    {
+      "n": 67,
+      "source": "CampaignEvent(CampaignSuperseded)",
+      "target": "CampaignSupersededPayload",
+      "class": "Intra",
+      "origin": "frozen structure \u00a73.15.2"
+    },
+    {
+      "n": 68,
+      "source": "CampaignEvent(CampaignTerminalError)",
+      "target": "CampaignTerminalErrorPayload",
+      "class": "Intra",
+      "origin": "frozen structure \u00a73.15.2"
+    },
+    {
+      "n": 69,
+      "source": "CampaignFeedItem",
+      "target": "AnyCommittedEnvelope",
+      "class": "Causal",
+      "origin": "\u00a74 sanctioned open target"
+    }
+  ]
+}
