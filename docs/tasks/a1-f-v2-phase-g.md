@@ -1,9 +1,10 @@
 # A1-F v2 — Phase G: graph adjudication
 
-**Status: DECIDED (revision G-R2) — AWAITING RE-REVIEW.**
+**Status: DECIDED (revision G-R3) — AWAITING RE-REVIEW.**
 
-Two review rounds. G-R1 corrected four P1s and moved the count from 13 to 11;
-G-R2 corrected two more, neither of which moved it. See §9.
+Three review rounds. G-R1 corrected four P1s and moved the count from 13 to 11;
+G-R2 corrected two more; G-R3 closes the exact edge universe, which the mandate
+asked for and the previous revisions deferred. See §9.
 
 Phase G is one decision, written and reviewed on its own, before any v2 drafting.
 The node set determines ranks, edges, imported roots, closure and digest domains;
@@ -50,9 +51,21 @@ Does it independently require:
 Insufficient answers -> it remains a support object.
 ```
 
-The decisive evidence is **in-degree**: which other objects reference it, from
-how many distinct kinds, and across what edge class. An object nothing references
-does not need an identity, whatever its schema looks like.
+The leading evidence is **in-degree**: which other objects reference it, from how
+many distinct kinds, and across what edge class.
+
+It is not sufficient evidence, and this document's own table shows why:
+`WorkOrder` has in-degree 0 and is unambiguously a message — it is a round's
+entry point, with its own lifecycle and identity. So zero degree establishes only
+
+```text
+no downstream reference-driven evidence for independent graph identity
+```
+
+and never "no identity needed". Where in-degree is zero, the second half of the
+test — an independent lifecycle, acceptance or producer-authority requirement —
+has to be answered on its own, not skipped because the first half came out
+empty.
 
 ## 2. Evidence: the reference graph of the design input
 
@@ -69,15 +82,27 @@ plus, in the registry KAT, one global rule:
   GLOBAL | causation.blob_ref | AnyCommittedEnvelope | Causal
 
 specific V0 consumer in-degree(X) :=
-  count of envelope-source edges whose target is exactly Envelope(K::X)
+  count of RETAINED V0 typed-node edges whose target is exactly X
+
+  where a typed-node source is
+    - an envelope-bearing message kind, OR
+    - a typed support object / authority participating in the graph
 
   EXCLUDING
     - the 6 A2 transition-source edges          (not V0)
-    - the global AnyCommittedEnvelope causation rule and any open target
-      (AnyCommittedEnvelope, AnyImportableCas) — generic reachability is
-      not evidence that a specific consumer needs this object
-    - edges whose only consumer is a POST-V0 feature (see §3.1)
+    - any open/generic target (AnyCommittedEnvelope, AnyImportableCas) —
+      generic reachability is not evidence that a specific consumer needs
+      this object
+    - edges retained only for a POST-V0 feature (§3.5)
+    - edges of objects that leave V0 (§3.4)
+
+  "retained" is defined exactly by the V0 edge ledger of §4.1.
 ```
+
+The definition was rewritten in G-R3. Until then it said "envelope-source edges",
+which stopped being derivable the moment G-R1/G-R2 retyped three sources to
+support: the numbers in the table were right, but they no longer followed from
+the definition above them.
 
 The open-target exclusion matters for honesty, not only for arithmetic: as a
 prototype envelope kind, `ArtifactImported` is formally reachable through the
@@ -85,25 +110,28 @@ global causation rule, so its raw in-degree is not zero. Its *specific consumer*
 in-degree is. The conclusion in §3.4 is unchanged, but it now rests on a metric
 that says what it counts.
 
-The table below is specific V0 consumer in-degree.
+The table gives three separate quantities, because conflating them is how the
+previous revision ended up with one table holding two projections and no labels.
+`V0 out` and `V0 in` are over the retained V0 edge set (§4.1); `raw out` is the
+prototype's own out-degree at `37502e3`, shown only where it differs.
 
-| Candidate kind | out | **in** | referencing kinds |
-|---|---:|---:|---|
-| `WorkOrder` | 6 | 0 | — (round entry point) |
-| `CoderReport` | 3 | 1 | CandidateAdmissionReceipt |
-| `CandidateAdmissionReceipt` | 3 | 2 | ReviewRequest, … |
-| `ReviewRequest` | 4 | 0 | — |
-| `ReviewerReport` | 2 | 1 | ReviewVerdict |
-| `ReviewVerdict` | 3 | 3 | — |
-| `CorrectiveDirective` | 3 | 0 | — |
-| **`ProviderInvocationReceipt`** | 9 | **3** | CoderReport, ReviewerReport, HumanAttentionRequest |
-| **`InteractionManifest`** | 3 | **1** | ProviderInvocationReceipt only |
-| `CampaignFeedItem` | 1 | 0 | — |
-| `HumanAttentionRequest` | 5 | 1 | — |
-| `HumanCommandRequest` | 1 | 1 | HumanDecision |
-| `HumanDecision` | 3 | 0 | — |
-| **`CampaignRunBinding`** | 5 | **2** | CandidateAdmissionReceipt, ProviderInvocationReceipt — both `Intra`, both controller-produced. A third raw in-edge, `safe_redrive.prior_run_binding_ref` (`Causal`), is excluded: its only consumer is POST-V0 (§3.1) |
-| **`ArtifactImported`** | 2 | **0** | **no specific consumer** (formally reachable only through the global open-target causation rule, which the metric excludes) |
+| Candidate kind | V0 out | **V0 in** | raw out | referencing kinds |
+|---|---:|---:|---:|---|
+| `WorkOrder` | 6 | 0 | 6 | — (entry point; see §1 on why this is not evidence against message status) |
+| `CoderReport` | 3 | 1 | 3 | CandidateAdmissionReceipt |
+| `CandidateAdmissionReceipt` | 3 | 2 | 3 | ReviewRequest, … |
+| `ReviewRequest` | 4 | 0 | 4 | — |
+| `ReviewerReport` | 2 | 1 | 2 | ReviewVerdict |
+| `ReviewVerdict` | 3 | 3 | 3 | incl. `ProviderInvocationReceipt` — a support node referencing a message |
+| `CorrectiveDirective` | 3 | 0 | 3 | — |
+| **`ProviderInvocationReceipt`** *(typed support)* | 6 | **3** | 9 | CoderReport, ReviewerReport, HumanAttentionRequest. Raw 9 includes the three SafeRedrive edges that §3.5 sends POST-V0 |
+| **`InteractionManifest`** *(typed support)* | 3 | **1** | 3 | ProviderInvocationReceipt only |
+| `CampaignFeedItem` | 1 | 0 | 1 | — |
+| `HumanAttentionRequest` | 5 | 1 | 5 | — |
+| `HumanCommandRequest` | 1 | 1 | 1 | HumanDecision |
+| `HumanDecision` | 3 | 0 | 3 | — |
+| **`CampaignRunBinding`** *(typed support)* | 5 | **2** | 5 | CandidateAdmissionReceipt, ProviderInvocationReceipt — both `Intra`, both controller-produced. A third raw in-edge, `safe_redrive.prior_run_binding_ref` (`Causal`), is excluded: its only consumer is POST-V0 (§3.1) |
+| **`ArtifactImported`** *(leaves V0)* | — | **0** | 2 | **no specific consumer** (formally reachable only through the global open-target causation rule, which the metric excludes) |
 
 External wrapper **raw explicit in-degree** — a deliberately different metric,
 counted without the V0 exclusions so that POST-V0 references stay visible:
@@ -269,7 +297,18 @@ v1's refusal of `ArtifactAcceptance` (FD-2.3) is worth remembering here as a
 **caution against speculative nodes**, and not as proof: the two objects do the
 same thing to a graph but not the same thing to a system, and treating the
 resemblance as identity would import a conclusion instead of an argument. The
-disposition rests on the absent consumer alone, which is sufficient.
+disposition rests on two findings together, since §1 establishes that the first
+alone is not sufficient:
+
+```text
+specific V0 consumer in-degree = 0
+AND no independent V0 message identity, lifecycle, acceptance or producer
+    invariant has been demonstrated for it
+=> node / message status NOT PROVEN
+```
+
+The second conjunct is what separates this from `WorkOrder`, which also has
+in-degree 0 and is a message on the strength of exactly that second test.
 
 Consequence: `RunArtifactSource`, whose only in-edge comes from
 `ArtifactImported`, leaves the V0 wrapper set with it.
@@ -370,8 +409,8 @@ and `ProviderExecutionReceiptV1` at 2, beneath the reports — a ladder over the
 whole typed reference graph, not over envelopes.
 
 Consequence for the registry: a typed support object must be admissible as an
-edge **source**, not only as a target. The concrete shape of that is v2 drafting,
-not Phase G.
+edge **source**, not only as a target. §4.1 discharges that, and closes the
+mandate's "exact registry" clause.
 
 Deciding an object is not a message does not make it stop being a node. Naming
 the two classes separately is what makes that mistake visible instead of
@@ -390,6 +429,113 @@ obligations. (G-R1's earlier justification, that §3.1's promotion turned on a
 One open target is sanctioned, unchanged from the design input's rationale:
 `AnyCommittedEnvelope`, for `CampaignFeedItem` causation. `AnyImportableCas`
 leaves with `ArtifactImported` (§3.4).
+
+### 4.1 The exact V0 edge universe
+
+The convergence mandate asks Phase G for the *exact registry*, and G-R1 and G-R2
+answered with a model while leaving the registry itself to v2 drafting. That does
+not close the question. After three objects were retyped and one left V0, the
+prototype registry cannot be the v2 registry even mechanically, so a draft
+inheriting it would be deciding the graph again under a different name.
+
+Derived mechanically from `37502e3` and classified by the adjudications above.
+Per-edge status: `KEEP` unchanged; `RETYPE` retained with a changed source or
+target class; `POST_V0` deferred with its feature; `REMOVE` gone with its object;
+`A2` outside V0 entirely.
+
+```text
+registry at 37502e3                       59 entries
+  KEEP                                    30
+  RETYPE                                  18
+  POST_V0                                  3   SafeRedrive path (3.5)
+  REMOVE                                   2   ArtifactImported's own edges (3.4)
+  A2                                       6   attention transitions
+                                          --
+  retained V0 edge universe               48
+```
+
+Two facts the classification surfaced that the prose had not:
+
+- The SafeRedrive path is **three** edges, not the one the earlier revisions
+  discussed: `cause.safe_redrive.prior_run_binding_ref`,
+  `cause.safe_redrive.evidence`, and
+  `cause.safe_redrive.evidence.classification_record_ref`.
+- `ProviderInvocationReceipt.execution_cause.prior_verdict_ref` targets
+  `ReviewVerdict` — a **typed support node referencing a message**. It is the
+  clearest single argument for §4's rank domain: a ladder over messages alone
+  could not contain this edge at all.
+
+Open-target status, restated as edge facts: `AnyImportableCas` leaves with
+`ArtifactImported`; `AnyCommittedEnvelope` survives for `CampaignFeedItem`
+causation and now denotes exactly the closed set of **11** message kinds.
+
+The pre-dispatch binding admission relation of §3.1 is a controller-owned durable
+relation, **not** an entry in this registry. If the v2 draft chooses to express it
+as a reference edge, that edge is new and must be added here explicitly rather
+than appearing as a side effect — the whole point of a closed registry being that
+nothing joins it quietly.
+
+| # | source | source class | field-path tag | target | target class | edge | V0 status |
+|---:|---|---|---|---|---|---|---|
+| 1 | `WorkOrder` | Message | `goal.contract_blob` | `ContractBlob` | CAS | Intra | KEEP |
+| 2 | `WorkOrder` | Message | `input.initial.correspondence_ref` | `WorktreeCorrespondenceEvidenceBlob` | CAS | Intra | KEEP |
+| 3 | `WorkOrder` | Message | `input.initial.run_contract_ref` | `RunContractCandidateState` | External | Intra | KEEP |
+| 4 | `WorkOrder` | Message | `input.initial.worktree_ref` | `WorktreeMaterialization` | External | Intra | KEEP |
+| 5 | `WorkOrder` | Message | `input.continued.candidate_state_ref` | `CandidateStateReceipt` | External | Intra | KEEP |
+| 6 | `WorkOrder` | Message | `input.continued.materialization_ref` | `CandidateMaterialization` | External | Intra | KEEP |
+| 7 | `CoderReport` | Message | `producer.invocation_receipt_ref` | `ProviderInvocationReceipt` | Support | Intra | **RETYPE** |
+| 8 | `CoderReport` | Message | `claims.evidence_refs.gate` | `GateEvidenceBlob` | CAS | Intra | KEEP |
+| 9 | `CoderReport` | Message | `claims.evidence_refs.diff` | `DiffEvidenceBlob` | CAS | Intra | KEEP |
+| 10 | `CandidateAdmissionReceipt` | Message | `coder_report_ref` | `CoderReport` | Message | Intra | KEEP |
+| 11 | `CandidateAdmissionReceipt` | Message | `coder_run_binding_ref.blob_ref` | `CampaignRunBinding` | Support | Intra | **RETYPE** |
+| 12 | `CandidateAdmissionReceipt` | Message | `candidate_state_ref` | `CandidateStateReceipt` | External | Intra | KEEP |
+| 13 | `ReviewRequest` | Message | `admission_receipt_ref` | `CandidateAdmissionReceipt` | Message | Intra | KEEP |
+| 14 | `ReviewRequest` | Message | `contract_blob` | `ContractBlob` | CAS | Intra | KEEP |
+| 15 | `ReviewRequest` | Message | `evidence_refs.gate` | `GateEvidenceBlob` | CAS | Intra | KEEP |
+| 16 | `ReviewRequest` | Message | `evidence_refs.diff` | `DiffEvidenceBlob` | CAS | Intra | KEEP |
+| 17 | `ReviewerReport` | Message | `producer.invocation_receipt_ref` | `ProviderInvocationReceipt` | Support | Intra | **RETYPE** |
+| 18 | `ReviewerReport` | Message | `evidence_refs.gate` | `GateEvidenceBlob` | CAS | Intra | KEEP |
+| 19 | `ReviewVerdict` | Message | `reviewer_report_ref` | `ReviewerReport` | Message | Intra | KEEP |
+| 20 | `ReviewVerdict` | Message | `findings.evidence_refs.gate` | `GateEvidenceBlob` | CAS | Intra | KEEP |
+| 21 | `ReviewVerdict` | Message | `reviewed_candidate_state_ref` | `CandidateStateReceipt` | External | Intra | KEEP |
+| 22 | `CorrectiveDirective` | Message | `verdict_ref` | `ReviewVerdict` | Message | Causal | KEEP |
+| 23 | `CorrectiveDirective` | Message | `input.continued.candidate_state_ref` | `CandidateStateReceipt` | External | Intra | KEEP |
+| 24 | `CorrectiveDirective` | Message | `input.continued.materialization_ref` | `CandidateMaterialization` | External | Intra | KEEP |
+| 25 | `ProviderInvocationReceipt` | Support | `request.canonical_request_ref` | `CanonicalRequestBlob` | CAS | Intra | **RETYPE** |
+| 26 | `ProviderInvocationReceipt` | Support | `outcome.normalized_output_ref` | `NormalizedOutputBlob` | CAS | Intra | **RETYPE** |
+| 27 | `ProviderInvocationReceipt` | Support | `interaction_manifest_ref` | `InteractionManifest` | Support | Intra | **RETYPE** |
+| 28 | `ProviderInvocationReceipt` | Support | `model_route_ref` | `ModelRouteBlob` | CAS | Intra | **RETYPE** |
+| 29 | `ProviderInvocationReceipt` | Support | `campaign_run_binding_ref.blob_ref` | `CampaignRunBinding` | Support | Intra | **RETYPE** |
+| 30 | `ProviderInvocationReceipt` | Support | `execution_cause.prior_verdict_ref` | `ReviewVerdict` | Message | Causal | **RETYPE** |
+| 31 | `ProviderInvocationReceipt` | Support | `cause.safe_redrive.prior_run_binding_ref` | `CampaignRunBinding` | Support | Causal | **POST_V0** |
+| 32 | `ProviderInvocationReceipt` | Support | `cause.safe_redrive.evidence` | `EstablishedNonDispatchEvidence` | External | Intra | **POST_V0** |
+| 33 | `ProviderInvocationReceipt` | Support | `cause.safe_redrive.evidence.classification_record_ref` | `NonDispatchClassificationBlob` | CAS | Intra | **POST_V0** |
+| 34 | `InteractionManifest` | Support | `sequence.raw_provider_event_refs` | `RawProviderEventBlob` | CAS | Intra | **RETYPE** |
+| 35 | `InteractionManifest` | Support | `sequence.tool_argument_refs` | `ToolArgumentBlob` | CAS | Intra | **RETYPE** |
+| 36 | `InteractionManifest` | Support | `sequence.tool_result_refs` | `ToolResultBlob` | CAS | Intra | **RETYPE** |
+| 37 | `CampaignFeedItem` | Message | `subject_refs` | `AnyCommittedEnvelope` | Open | Causal | KEEP |
+| 38 | `HumanAttentionRequest` | Message | `evidence_refs.receipt` | `ProviderInvocationReceipt` | Support | Intra | **RETYPE** |
+| 39 | `HumanAttentionRequest` | Message | `evidence_refs.gate` | `GateEvidenceBlob` | CAS | Intra | KEEP |
+| 40 | `HumanAttentionRequest` | Message | `evidence_refs.admission` | `CandidateAdmissionReceipt` | Message | Causal | KEEP |
+| 41 | `HumanAttentionRequest` | Message | `evidence_refs.verdict` | `ReviewVerdict` | Message | Causal | KEEP |
+| 42 | `HumanAttentionRequest` | Message | `candidate_state_ref` | `CandidateStateReceipt` | External | Intra | KEEP |
+| 43 | `HumanCommandRequest` | Message | `producer.authenticated_principal_ref` | `AuthenticatedPrincipalRecord` | CAS | Intra | KEEP |
+| 44 | `HumanDecision` | Message | `source.blob_ref` | `HumanCommandRequest` | Message | Intra | KEEP |
+| 45 | `HumanDecision` | Message | `producer.authenticated_principal_ref` | `AuthenticatedPrincipalRecord` | CAS | Intra | KEEP |
+| 46 | `HumanDecision` | Message | `attention_ref` | `HumanAttentionRequest` | Message | Intra | KEEP |
+| 47 | `ArtifactImported` | out | `cas_object_ref` | `AnyImportableCas` | Open | Intra | **REMOVE** |
+| 48 | `ArtifactImported` | out | `source` | `RunArtifactSource` | External | Intra | **REMOVE** |
+| 49 | `CampaignRunBinding` | Support | `input.initial.correspondence_ref` | `WorktreeCorrespondenceEvidenceBlob` | CAS | Intra | **RETYPE** |
+| 50 | `CampaignRunBinding` | Support | `input.initial.run_contract_ref` | `RunContractCandidateState` | External | Intra | **RETYPE** |
+| 51 | `CampaignRunBinding` | Support | `input.initial.worktree_ref` | `WorktreeMaterialization` | External | Intra | **RETYPE** |
+| 52 | `CampaignRunBinding` | Support | `input.continued.candidate_state_ref` | `CandidateStateReceipt` | External | Intra | **RETYPE** |
+| 53 | `CampaignRunBinding` | Support | `input.continued.materialization_ref` | `CandidateMaterialization` | External | Intra | **RETYPE** |
+| 54 | `AttentionAcknowledged` | A2 | `attention_ref` | `HumanAttentionRequest` | Message | Intra | **A2** |
+| 55 | `AttentionAcknowledged` | A2 | `decision_ref` | `HumanDecision` | Message | Intra | **A2** |
+| 56 | `AttentionResolved` | A2 | `attention_ref` | `HumanAttentionRequest` | Message | Intra | **A2** |
+| 57 | `AttentionResolved` | A2 | `decision_ref` | `HumanDecision` | Message | Intra | **A2** |
+| 58 | `AttentionSuperseded` | A2 | `attention_ref` | `HumanAttentionRequest` | Message | Intra | **A2** |
+| 59 | `AttentionSuperseded` | A2 | `superseding_attention_ref` | `HumanAttentionRequest` | Message | Causal | **A2** |
 
 ## 5. Q4 + Q5 — imported roots, closure, and the typed external boundary
 
@@ -488,9 +634,15 @@ the failure this phase exists to prevent.
 - whether the import mechanism of §3.4 exists as a controller procedure — only
   that it does not exist as a node.
 
-## 8. For the independent reviewer (revision G-R2)
+## 8. For the independent reviewer (revision G-R3)
 
-The count survived the second review. Attack these, in order:
+The node universe and the count survived two reviews. G-R3 closes the last open
+mandate clause. Attack these, in order:
+
+0. **§4.1, the exact V0 edge universe.** 59 classified into 48 retained. Re-derive
+   it from `37502e3` and check the classification of every non-`KEEP` row — the
+   18 `RETYPE` rows especially, since a wrong class there silently changes what
+   the acyclicity proof ranges over.
 
 1. **§3.1, `CampaignRunBinding` as support rather than message.** The negative is
    the load-bearing claim: *no* V0 invariant needs a `message_id`, envelope
@@ -511,6 +663,46 @@ The count survived the second review. Attack these, in order:
    across Causal edges, which by construction cannot have one?
 
 ## 9. Revision record
+
+### G-R3 — third independent review, two P1s
+
+`CHANGES_REQUESTED`; the node universe, the count of eleven, and
+`CampaignRunBinding` as a typed support authority were all accepted, as was the
+finding that pre-dispatch admission does not smuggle in a message lifecycle.
+Both remaining findings accepted.
+
+1. **Phase G had not closed its own Q3.** The mandate asks for the *exact
+   registry*; G-R1 and G-R2 supplied a model and deferred the registry to v2
+   drafting. That is not a small gap: after three retypings and one removal the
+   prototype registry cannot serve as the v2 registry even mechanically, so the
+   draft would have inherited the right to decide the graph under the heading
+   "concrete shape". §4.1 now carries all 59 entries classified `KEEP` /
+   `RETYPE` / `POST_V0` / `REMOVE` / `A2`, giving a retained V0 universe of 48.
+
+   Deriving it surfaced two things the prose had missed: the SafeRedrive path is
+   three edges rather than one, and
+   `ProviderInvocationReceipt.execution_cause.prior_verdict_ref → ReviewVerdict`
+   is a support node referencing a message — which is the sharpest available
+   argument for G-R2's own rank domain.
+
+2. **The consumer-degree metric had drifted from the ontology.** It still read
+   "envelope-source edges", which stopped being derivable the moment G-R1/G-R2
+   retyped three sources to support. The numbers were right; they no longer
+   followed from the definition printed above them. Rewritten over retained
+   typed-node edges, with `V0 out`, `V0 in` and `raw out` as three labelled
+   columns instead of one table quietly holding two projections.
+
+Tail, and the sharpest of the round: §1 claimed "an object nothing references
+does not need an identity", and the table one page later refutes it —
+`WorkOrder` has in-degree 0 and is plainly a message. Zero degree establishes
+only the absence of reference-driven evidence; the lifecycle half of the test
+still has to be answered. `ArtifactImported` now rests on both conjuncts
+explicitly, which is what actually distinguishes it from `WorkOrder`.
+
+Note carried to the v2 draft, not a Phase G decision: do not identify the
+abstract binding identity `B` with a blob digest in advance. Phase G left digest
+domains open deliberately, and a canonical-writer version change can make byte
+identity and semantic binding identity separate questions.
 
 ### G-R2 — second independent review, two P1s
 
