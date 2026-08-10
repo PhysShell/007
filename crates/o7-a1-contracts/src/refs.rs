@@ -140,9 +140,10 @@ impl ArtifactRef {
 
     /// The FD-1.4 per-object maximum that applies to this ref's target.
     ///
-    /// FD-1.4 bounds "control artifact payload (any typed A1 payload)" at 1 MiB
-    /// and "single evidence blob" at 64 MiB, so which bound applies is decided
-    /// by what the referenced object *is*:
+    /// FD-1.4 names three size classes — "typed A1 JSON object, except the one
+    /// below" at 1 MiB, `InteractionManifestV1` at 64 MiB, and "opaque evidence
+    /// blob" at 64 MiB — so which one applies is decided by what the referenced
+    /// object *is*:
     ///
     /// - **envelope-bearing** — the ref's `size` covers envelope **and** payload
     ///   (FD-1.8) and both halves are typed A1 payloads, so the bound is twice
@@ -150,20 +151,24 @@ impl ArtifactRef {
     ///   written as a literal: an allowance that happens to equal 1 MiB today
     ///   because some unrelated constant does is not a bound, it is a
     ///   coincidence;
-    /// - **typed non-envelope A1 payload** — the execution receipt, the scope
-    ///   contract and a campaign event payload are typed A1 payloads and get the
-    ///   control-artifact maximum. Without this they would inherit 64 MiB and a
-    ///   closure resolution could be charged, and then read, sixty-four times
+    /// - **typed non-envelope A1 payload, the manifest excepted** — the
+    ///   execution receipt, the scope contract and a campaign event payload get
+    ///   the control-artifact maximum. Without this they would inherit 64 MiB and
+    ///   a closure resolution could be charged, and then read, sixty-four times
     ///   what the contract permits for a typed object;
+    /// - **`interaction_manifest`** — the exception FD-1.4 states by name. It
+    ///   remains a typed A1 object for every other purpose (FD-1.7 fixes its
+    ///   media type, FD-2 gives it its own rank) and takes the evidence maximum
+    ///   for size alone. The reason is its grain: one manifest covers a whole
+    ///   execution, indexing up to 256 dispatches and 4096 `interaction_sequence`
+    ///   entries in total (§3.12, §3.12.1), which is not the shape the
+    ///   typed-object ceiling was written for;
     /// - **everything else** — evidence blobs and imported A0 objects.
     ///
-    /// `interaction_manifest` is in the last group **for size only**, and that is
-    /// now normative rather than a reading: FD-1.4 originally classified it under
-    /// both bounds at once, and **S1** — the first §7 supersede — resolved it to
-    /// 64 MiB while keeping it a typed A1 object for FD-1.7 and FD-2. One
-    /// manifest covers a whole execution, indexing up to 256 dispatches and 4096
-    /// `interaction_sequence` entries in total (§3.12, §3.12.1), which is not the
-    /// shape the typed-object ceiling was written for.
+    /// The third class is normative text rather than an implementer's reading,
+    /// but only since **S1**, the first §7 supersede: the original FD-1.4
+    /// classified the manifest under both bounds at once, and this comment
+    /// previously recorded which one it had picked.
     ///
     /// Hence two predicates and not one: the size bound and the media type are
     /// different questions ([`ArtifactKindV1::has_control_size_bound`] and
@@ -283,13 +288,22 @@ mod tests {
 
     #[test]
     fn an_interaction_manifest_keeps_the_evidence_bound() {
-        // FD-1.4 names "manifest" in its evidence-blob line; recorded as a test
-        // so the reading is visible rather than implied by an absent branch.
+        // FD-1.4 gives `InteractionManifestV1` the evidence maximum by name
+        // (S1). Asserted on both sides, because a one-sided assertion pins that
+        // the bound is *large* without pinning where it stops.
         assert!(
             ref_of(ArtifactKindV1::InteractionManifest, MAX_EVIDENCE_BLOB_BYTES)
                 .validate()
                 .is_ok()
         );
+        assert!(matches!(
+            ref_of(
+                ArtifactKindV1::InteractionManifest,
+                MAX_EVIDENCE_BLOB_BYTES + 1
+            )
+            .validate(),
+            Err(RefError::SizeAboveBound { .. })
+        ));
     }
 
     #[test]

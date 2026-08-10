@@ -294,8 +294,10 @@ impl ArtifactKindV1 {
             )
     }
 
-    /// Whether FD-1.4's **control-artifact** size bound applies, rather than the
-    /// evidence-blob one.
+    /// Whether the 1 MiB **typed-object** bound of FD-1.4 applies, rather than
+    /// the 64 MiB one. ("Control artifact" is §5's name for the same class and
+    /// the one [`crate::bounds::MAX_CONTROL_ARTIFACT_BYTES`] carries; FD-1.4
+    /// itself says "typed A1 JSON object, except the one below".)
     ///
     /// Deliberately *not* the same set as [`Self::is_typed_artifact`]:
     /// `interaction_manifest` is a typed artifact for FD-1.7 media-type purposes
