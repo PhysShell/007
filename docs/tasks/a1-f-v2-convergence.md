@@ -1,6 +1,6 @@
 # A1-F v2 convergence ledger
 
-**Status: INVENTORY ONLY — NO ADJUDICATION YET.**
+**Status: INVENTORY ADMITTED — PHASE G AUTHORIZED, NO ADJUDICATION YET.**
 
 This document is not normative and never will be. It is a migration checklist
 with one job: make sure nothing frozen in A1-F v1 disappears silently between
@@ -448,11 +448,50 @@ producer_inventory:
     - revision-history prose produced a false FD-14.6 match; the body was bounded
 
 independent_inventory:
-  status: NOT SUPPLIED
+  status: ADMITTED
+  reviewer_method: independent enumeration from exact frozen blob
+  baseline_blob: 7db92f1b3dc9d7040da074956a0b3f2f200174c8
+  fds: 15 top-level + 32 sub
+  rows: 141
+  groups:
+    encoding_bounds_identity: 16    # lines 2159-2174
+    provenance: 16                  # lines 2180-2195
+    graph_and_references: 7         # lines 2201-2207
+    authority_and_transitions: 83   # lines 2213-2295
+    human_lane: 19                  # lines 2301-2319
+  fd_14_7a_rows: 4                  # V1-N111 .. V1-N114, source lines 2284-2287
 
 reconciliation:
-  status: UNREVIEWED
+  status: ADMITTED
+  discrepancies: 0
+  matched:
+    - row count
+    - row boundaries
+    - source-line mapping
+    - source case text
+    - expected outcome text
+    - FD attribution
+    - category boundaries
+    - duplicate detection and contiguity (V1-N001 .. V1-N141)
+    - FD inventory (15 top-level + 32 sub)
+
+baseline_recheck:
+  at_commit: 69ccef5db148b21f5e671d68761fce383a34b407
+  document_blob: 7db92f1b3dc9d7040da074956a0b3f2f200174c8   # unchanged
+  relation_to_baseline: ahead_by 8, behind_by 0, merge-base b84e9419
+  contract_touched: no
 ```
+
+**Reviewer evidence note.** The independent reviewer derived the inventory from
+the frozen baseline *before* consulting this ledger, and used `f67c1de` only at
+the reconciliation step. Reconciliation found no mismatch in count, boundaries,
+source text, expected outcome, FD attribution, or duplicate detection.
+
+Doing it the other way round — read the answer, then confirm the answer — would
+have been a magnificent independent verification of nothing at all.
+
+**INVENTORY ADMITTED. Phase G is authorized.** Dispositions remain empty; the
+next content work is the graph adjudication of section 7 and nothing else.
 
 ## 7. Phase G — graph adjudication
 
