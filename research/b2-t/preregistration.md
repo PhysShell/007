@@ -25,10 +25,12 @@ material in §5.
 
 ## 1. The question
 
-Five to six times over the preceding weeks, a defect in this project turned out
-to be one of two things called by one name. The hypothesis is that this is a
-*class*, frequent enough to be worth catching structurally rather than by
-attention.
+Repeatedly over the preceding weeks, a defect in this project turned out to be
+one of two things called by one name. The hypothesis is that this is a *class*,
+frequent enough to be worth catching structurally rather than by attention.
+Deliberately no count here: measuring that share is what this document is for,
+and a motivating number with no selector or provenance is the failure mode under
+study.
 
 The question is deliberately **not** "can we express our mechanisms in a common
 schema" — that question invites a schema. It is:
@@ -131,19 +133,30 @@ different axis and is not evidence for either category.
 
 ```
 finding_ref            round + number, e.g. "R5.1 #2"
-primary_root_cause     free text, exactly one
-r_broad                yes / no        (primary cause only)
-r_obs                  yes / no        (primary cause only)
+classification_status  classified | compound | unclear
+primary_root_cause     free text, exactly one   — iff status = classified
+r_broad                yes | no                 — iff status = classified
+r_obs                  yes | no                 — iff status = classified
 secondary_tags[]       zero or more, reported separately
-compound               yes / no        two genuinely distinct root causes
-unclear                yes / no        insufficient text to classify
 confidence             low / medium / high
 evidence               one sentence, quoting the finding
 ```
 
+- `classified` — one primary root cause could be named. `primary_root_cause` is
+  present; `r_broad` and `r_obs` are answered.
+- `compound` — two genuinely distinct root causes, neither subordinate.
+- `unclear` — the recorded text is insufficient to classify.
+
+For `compound` and `unclear`, `primary_root_cause` is **absent** and `r_broad` /
+`r_obs` are **n/a**. They are never coerced to `no`: "could not be classified" and
+"classified as not this" are different facts, and collapsing them is the defect
+this study is about.
+
+**Constraint:** `r_obs = yes` ⇒ `r_broad = yes`. `R_obs` is a subset test; an
+observation-binding defect is by construction an identity defect.
+
 The headline rates use **primary cause only**. Secondary tags are reported
-alongside and never folded into the headline. `compound` and `unclear` are
-reported as their own counts, never silently assigned to a category.
+alongside and never folded into the headline.
 
 ## 4. Analysis protocol
 
@@ -152,10 +165,23 @@ reported as their own counts, never silently assigned to a category.
    noticing — in shuffled order, with no round labels, no reviewer provenance,
    no chronology, no hypothesis, and no access to the discussion that produced
    this document.
-2. **Unblind metadata after classification.** Compute `R_broad` and `R_obs` over
-   N=41. Report the internal (R1–R5.1, n=37) vs external (R5.2, n=4) split as a
-   **descriptive stratification only** — n=4 cannot support a detection-rate
-   claim, and must not be reported as one.
+2. **Unblind metadata after classification.** Report the internal (R1–R5.1,
+   n=37) vs external (R5.2, n=4) split as a **descriptive stratification only**
+   — n=4 cannot support a detection-rate claim, and must not be reported as one.
+
+   N=41 is the size of the corpus, **not automatically the denominator of a
+   point estimate.** Always publish `classified_n / 41`, `compound_n` and
+   `unclear_n` alongside any rate. And because dropping the unresolved rows is
+   the cheapest way to get a convenient number, each rate is reported as a
+   **sensitivity interval over the full population**:
+
+   ```
+   lower bound  =  yes                              / 41
+   upper bound  = (yes + compound_n + unclear_n)    / 41
+   ```
+
+   If the decision in §1 changes across that interval, the outcome is
+   INCONCLUSIVE by the branch below — not a choice between the ends.
 3. **Interpretation** per §1, bounded by §2.2.
 
 ### Inconclusive branch, defined before results
@@ -181,8 +207,16 @@ corpus**, held closed.
 > (the branch merge-base) whose subject line begins with `A1-V0:`.
 
 Mechanically evaluable from subject lines alone: **17** of the 26 non-merge
-commits in the PR. The rule is recorded now precisely so it cannot be chosen
-later to suit a result.
+commits in the PR.
+
+**What this freeze does and does not buy.** The rule is frozen before any
+classification, but **not** before its authors saw the commit subjects — it was
+written by reading them. Freezing prevents further selection drift; it does not
+make #124 a blinded holdout, and a later blinded corpus-builder cannot undo it.
+Therefore:
+
+> **#124 is secondary retrospective robustness evidence only.** It may never be
+> promoted to independent confirmation, in any later revision, on any result.
 
 Constraints on any future use:
 
@@ -196,9 +230,12 @@ Constraints on any future use:
 - Corpus-builder and classifier are **different people/agents**. The builder
   applies the eligibility rule above without knowing the hypothesis; otherwise
   selection bias merely relocates into "is this commit corrective?".
-- **Known contamination:** the assistant that drafted this document has already
-  seen these commits' subject lines. It must be neither the corpus-builder nor
-  the classifier for this corpus.
+- **Known contamination — both parties.** Both participants in the discussion
+  that produced this document have already seen these commits' subject lines:
+  the assistant that drafted it, and the maintainer who reviewed the draft.
+  Neither may be the corpus-builder or the classifier for this corpus. (For §2
+  the assistant is disqualified on the separate ground that it helped form the
+  taxonomy.)
 
 No commitment is made to analyse it at all. Freezing the rule is free today and
 impossible tomorrow; running the analysis is a separate decision.
@@ -272,11 +309,23 @@ undercount as the operational consequence. It belongs in the positives.
 
 ## 9. Freeze record
 
+The freeze is a **two-commit ceremony**, because a commit cannot contain its own
+hash:
+
 ```text
-FROZEN AT:   <revision>
-FROZEN BY:   <maintainer>
-DATE:        <date>
+C   the last commit that touches §§0-8      — the frozen content
+F   the next commit, touching §9 only       — the human freeze record
 ```
 
-Empty. Nothing above is binding until this block is filled by the maintainer.
-No classification of §2 and no inspection of §5 may begin before it is.
+`F` does not name itself. Its existence in history, and the fact that it changes
+nothing but this section relative to `C`, is the provenance of the freeze.
+
+```text
+FROZEN CONTENT REVISION:   <full SHA of C>
+FROZEN BY:                 <maintainer>
+DATE:                      <date>
+```
+
+Empty. Nothing above is binding until this block is filled by the maintainer in
+a commit that changes **only this section** relative to `C`. No classification of
+§2 and no inspection of §5 may begin before it is.
