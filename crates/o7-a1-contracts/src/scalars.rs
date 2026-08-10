@@ -33,8 +33,9 @@ use crate::bounds::{MAX_ARRAY_LEN, MAX_ID_BYTES, MAX_STRING_BYTES};
 
 pub use o7_run::event::{Digest256, DigestFormatError};
 
-/// §3 — RFC 3339 timestamps are metadata only; this is a generous shape bound,
-/// not a calendar check (FD-5.4).
+/// A generous outer bound on a `Timestamp` string, so an over-long value is
+/// refused before it is examined. The shape and component ranges are checked
+/// separately (§3: "RFC 3339 UTC").
 pub const MAX_TIMESTAMP_BYTES: usize = 64;
 
 /// A scalar that violates its §3 constraint.
@@ -241,12 +242,20 @@ impl Timestamp {
     }
 }
 
-/// `YYYY-MM-DDTHH:MM:SS`, an optional fractional part, then a UTC designator.
+/// `YYYY-MM-DDTHH:MM:SS`, an optional fractional part, then a UTC designator —
+/// **and every component in range**.
+///
+/// The shape alone is not the rule. `2026-99-99T99:99:99Z` matches the grammar
+/// digit-for-digit and names no instant, so a shape-only check would admit an
+/// artifact conforming peers reject — the same interoperability defect as the
+/// length-only check it replaced, one layer in.
 ///
 /// RFC 3339 permits `t`/`z` in lower case and allows a numeric offset; "UTC"
 /// narrows the offset to zero. `-00:00` is accepted by the grammar but RFC 3339
 /// gives it the meaning "offset unknown", which is not the same claim as UTC, so
-/// it is refused here rather than silently read as `+00:00`.
+/// it is refused here rather than silently read as `+00:00`. A `60` second is
+/// *not* refused: RFC 3339 permits the leap second, and rejecting it would be
+/// this implementation inventing a bound again.
 fn is_rfc3339_utc(s: &str) -> bool {
     /// `d` is any ASCII digit, `T` is the date/time separator in either case,
     /// every other byte matches itself.
@@ -263,6 +272,23 @@ fn is_rfc3339_utc(s: &str) -> bool {
     if !shaped {
         return false;
     }
+    let field = |r: std::ops::Range<usize>| s.get(r).and_then(|t| t.parse::<u32>().ok());
+    let (Some(year), Some(month), Some(day), Some(hour), Some(minute), Some(second)) = (
+        field(0..4),
+        field(5..7),
+        field(8..10),
+        field(11..13),
+        field(14..16),
+        field(17..19),
+    ) else {
+        return false;
+    };
+    if !(1..=12).contains(&month) || !(1..=days_in_month(year, month)).contains(&day) {
+        return false;
+    }
+    if hour > 23 || minute > 59 || second > 60 {
+        return false;
+    }
     // An optional fraction, which RFC 3339 requires to have at least one digit.
     let rest = match rest.strip_prefix(b".") {
         Some(frac) => {
@@ -275,6 +301,19 @@ fn is_rfc3339_utc(s: &str) -> bool {
         None => rest,
     };
     matches!(rest, [b'Z'] | [b'z'] | [b'+', b'0', b'0', b':', b'0', b'0'])
+}
+
+/// Proleptic Gregorian, which is what RFC 3339 dates are.
+fn days_in_month(year: u32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400)) => {
+            29
+        }
+        2 => 28,
+        _ => 0,
+    }
 }
 
 impl<'de> Deserialize<'de> for Timestamp {
@@ -730,6 +769,10 @@ mod tests {
             "2026-08-09t20:00:00z",
             "2026-08-09T20:00:00.123456Z",
             "2026-08-09T20:00:00+00:00",
+            // RFC 3339 permits the leap second; refusing it would be another
+            // invented bound.
+            "2016-12-31T23:59:60Z",
+            "2024-02-29T00:00:00Z",
         ] {
             assert!(Timestamp::parse(ok).is_ok(), "{ok} must be admissible");
         }
@@ -743,6 +786,16 @@ mod tests {
             // "offset unknown", which is a different claim than zero offset.
             "2026-08-09T20:00:00+02:00",
             "2026-08-09T20:00:00-00:00",
+            // Shape-valid, instant-invalid: a digit-only matcher admits all of
+            // these, and every conforming peer rejects them.
+            "2026-99-99T99:99:99Z",
+            "2026-13-01T00:00:00Z",
+            "2026-00-01T00:00:00Z",
+            "2026-02-30T00:00:00Z",
+            "2026-02-29T00:00:00Z",
+            "2026-08-09T24:00:00Z",
+            "2026-08-09T20:60:00Z",
+            "2026-08-09T20:00:61Z",
         ] {
             assert_eq!(
                 Timestamp::parse(bad),

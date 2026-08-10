@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bounds::MAX_ARTIFACT_REFS;
 use crate::framing::Preimage;
-use crate::json::WireArtifact;
+use crate::json::{FromDocument, WireArtifact};
 use crate::kind::{MessageKindV1, ProducerRole};
 use crate::refs::{ArtifactRef, ArtifactRefWire, RefError};
 use crate::scalars::{
@@ -298,7 +298,7 @@ impl EnvelopeV1 {
     }
 }
 
-impl WireArtifact for EnvelopeV1 {
+impl FromDocument for EnvelopeV1 {
     fn from_document(value: serde_json::Value) -> Result<Self, crate::json::ParseError> {
         let wire: EnvelopeWireV1 =
             serde_json::from_value(value).map_err(|e| crate::json::ParseError::SchemaMismatch {
@@ -306,7 +306,9 @@ impl WireArtifact for EnvelopeV1 {
             })?;
         Ok(Self::from(wire))
     }
+}
 
+impl WireArtifact for EnvelopeV1 {
     fn validate_wire(&self) -> Result<(), String> {
         // `EnvelopeError` names field names and roles, both of which are frozen
         // protocol vocabulary rather than payload content.

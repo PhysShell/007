@@ -31,17 +31,17 @@
 //!
 //! **There is no second door.** No A1 wire artifact implements `Deserialize`, so
 //! `serde_json::from_slice::<EnvelopeV1>` does not compile; the wire mirrors that
-//! do implement it are private. That is stronger than it first looks, because
-//! two of the three layers cannot be enforced by a value's own type:
-//! `max_bytes` is a property of the byte string, not of the value, and the
-//! cross-field rules relate fields no single field can see.
+//! do implement it are private, and the trait carrying the unchecked
+//! constructor is sealed, so it cannot be called or implemented downstream.
+//! That matters because two of the three layers cannot be enforced by a value's
+//! own type: `max_bytes` is a property of the byte string, not of the value, and
+//! the cross-field rules relate fields no single field can see.
 //!
-//! An earlier revision kept a public `Deserialize` and relied on every per-field
-//! rule living in the field's own type. That closed the per-field axis and left
-//! two others open: a 15 MiB envelope deserialized fine because no field knows
-//! the document's size, and the returned `serde_json::Error` quoted the
-//! offending field name and enum value in its `Display`. Two reviewers found the
-//! two holes independently, on the same door.
+//! Three revisions of this module got that wrong in the same shape, each time
+//! leaving a route open with a note explaining why the other one was preferable:
+//! a public `parse_payload`, then a public `Deserialize`, then a
+//! `#[doc(hidden)]` trait method. A convention is not an admission boundary, and
+//! `#[doc(hidden)]` is a convention with better formatting.
 //!
 //! # Errors never carry payload content
 //!
@@ -97,30 +97,53 @@ pub enum ParseError {
 /// cross-field obligations" instead of leaving it to be inferred from a missing
 /// impl. Requiring the trait is what lets [`parse_artifact`] be the single
 /// public entry point.
-pub trait WireArtifact: Sized {
-    /// Build the artifact from an already document-validated JSON value.
-    ///
-    /// This exists so that no A1 wire artifact implements [`Deserialize`]
-    /// itself. A public `Deserialize` is a second entry point, and a second
-    /// entry point is a bypass: it skips the caller-supplied byte bound (which
-    /// no value-level type can know) and it returns `serde_json`'s own error,
-    /// whose `Display` quotes the unknown field name and the unrecognised enum
-    /// value verbatim — a credential arriving as either is then copied into an
-    /// error string, which AGENTS.md P0 forbids. Both were found on this PR, by
-    /// two reviewers, on the same door.
-    ///
-    /// Implementations deserialize their **private** wire mirror and convert.
-    ///
-    /// # Errors
-    /// [`ParseError::SchemaMismatch`], carrying the serde error *category* and
-    /// never its text.
-    #[doc(hidden)]
-    fn from_document(value: Value) -> Result<Self, ParseError>;
-
+///
+/// The trait is **sealed**: [`sealed::FromDocument`] is unnameable outside this
+/// crate, so no downstream crate can implement `WireArtifact`, and — the part
+/// that matters — none can *call* the unchecked constructor either.
+pub trait WireArtifact: sealed::FromDocument {
     /// # Errors
     /// A human-readable reason. Implementations must not quote payload content.
     fn validate_wire(&self) -> Result<(), String>;
 }
+
+/// The unchecked half of admission, behind a seal.
+///
+/// `from_document` deserializes and nothing else: no byte bound, no
+/// cross-field rules. That is correct for a step *inside* [`parse_artifact`]
+/// and wrong for anything else, so it must not be reachable from outside.
+///
+/// It lived on the public trait behind `#[doc(hidden)]` for exactly one review
+/// round. `#[doc(hidden)]` suppresses documentation; it does not affect
+/// visibility, so `<EnvelopeV1 as WireArtifact>::from_document(value)` compiled
+/// fine for any downstream crate and returned an unvalidated envelope. That is
+/// the third time on this PR that a door was left open with a note on it, and
+/// the note was mistaken for a lock — the same shape as the `parse_payload`
+/// helper in round 2 and the public `Deserialize` in round 7.
+///
+/// A private module with a public trait inside it is the standard sealed-trait
+/// pattern: nameable here, unnameable and therefore uncallable anywhere else.
+mod sealed {
+    use serde_json::Value;
+
+    use super::ParseError;
+
+    pub trait FromDocument: Sized {
+        /// Build the artifact from an already document-validated JSON value.
+        ///
+        /// Implementations deserialize their **private** wire mirror and
+        /// convert.
+        ///
+        /// # Errors
+        /// [`ParseError::SchemaMismatch`], carrying the serde error *category*
+        /// and never its text — `serde_json`'s own `Display` quotes the unknown
+        /// field name and the unrecognised enum value verbatim, and a
+        /// credential can arrive as either (AGENTS.md P0).
+        fn from_document(value: Value) -> Result<Self, ParseError>;
+    }
+}
+
+pub(crate) use sealed::FromDocument;
 
 /// Validate stored payload bytes as an A1 JSON document, without yet knowing
 /// which schema they claim to satisfy.
@@ -360,12 +383,14 @@ mod tests {
             #[allow(dead_code)]
             known: u32,
         }
-        impl WireArtifact for Strict {
+        impl FromDocument for Strict {
             fn from_document(value: Value) -> Result<Self, ParseError> {
                 serde_json::from_value(value).map_err(|e| ParseError::SchemaMismatch {
                     category: classify(&e),
                 })
             }
+        }
+        impl WireArtifact for Strict {
             fn validate_wire(&self) -> Result<(), String> {
                 Ok(())
             }
