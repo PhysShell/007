@@ -1,6 +1,6 @@
 # A1-F v2 — Phase G: graph adjudication
 
-**Status: DECIDED (revision G-R7) — AWAITING RE-REVIEW.**
+**Status: DECIDED (revision G-R8) — AWAITING RE-REVIEW.**
 
 Seven review rounds. G-R1 moved the count from 13 to 11; G-R2 corrected the
 binding lifecycle and the rank domain; G-R3 attempted the exact edge universe
@@ -9,9 +9,11 @@ contract but stopped at node *classes*; G-R5 added the missing layer, a semantic
 edge registry; G-R6 made that registry exact enough to reject; G-R7 fixes the
 three things an exact registry could finally expose — a flat extractor that
 never saw a nested schema, a bound external contract this document had quietly
-redefined, and an open target miscounted as a closure terminal. The registry is
-now 69 exact semantic edges over a 41-slot frozen baseline (§4.2). Field-path
-spelling remains owed to the v2 draft. See §9.
+redefined, and an open target miscounted as a closure terminal; G-R8 closes the
+two specification holes left between the graph and any implementation of it: the
+field↔edge realization contract, and the meta-target's membership. The registry
+is 69 exact semantic edges over a 41-slot frozen baseline (§4.2), unchanged by
+G-R8 — no row moved. Field-path spelling remains owed to the v2 draft. See §9.
 
 Phase G is one decision, written and reviewed on its own, before any v2 drafting.
 The node set determines ranks, edges, imported roots, closure and digest domains;
@@ -106,16 +108,19 @@ specific V0 consumer in-degree(X) :=
   "retained" is defined exactly by the V0 edge ledger of §4.1.
 ```
 
-**Read this table as historical evidence, not as the retained V0 projection
-(G-R7).** It was derived at `37502e3` and it is what drove §3's adjudications,
-which is why it stays. But the sentence above — *"retained" is defined exactly
-by the V0 edge ledger of §4.1* — stopped being true when §4.2.4 became the edge
-authority, and several counts are now prototype-era: `ProviderInvocationReceipt`
-is shown with `HumanAttentionRequest` as a consumer, an evidence target G-R6
-removed. Regenerating the table from §4.2.4 would be circular, since the
-registry is downstream of the decisions this evidence supported. So the numbers
-below are labelled for what they are, and the post-decision in-degrees are
-published separately at the end of this section.
+**This is the historical prototype projection @ `37502e3`, not the retained V0
+edge set (G-R7, renamed in G-R8).** The formula above is preserved as the
+definition that *was* used, including its now-false closing line — "retained is
+defined exactly by the V0 edge ledger of §4.1" — because reproducing the numbers
+requires the definition that produced them. It is not a live metric, and §4.2.4
+is the edge authority.
+
+It stays because it is what drove §3's adjudications. Several counts are
+prototype-era — `ProviderInvocationReceipt` is shown with `HumanAttentionRequest`
+as a consumer, an evidence target G-R6 removed — and regenerating the table from
+§4.2.4 would be circular, since the registry is downstream of the decisions this
+evidence supported. The post-decision in-degrees are published separately at the
+end of this section.
 
 The definition was rewritten in G-R3. Until then it said "envelope-source edges",
 which stopped being derivable the moment G-R1/G-R2 retyped three sources to
@@ -974,8 +979,43 @@ graph, and `reviewer_report_ref` cannot rescue it if the report is itself
 forbidden to reference evidence. That is not Phase G narrowing a v1 surface; it
 is Phase G redefining a bound contract it declared it would not touch.
 
-**The admitted set is the reviewer's own input.** A reviewer can canonically cite
-only what it was canonically given, which §4.2.3 has just closed at three kinds:
+**The admitted set, and why it stops where it does.** G-R7 justified it as "what
+the reviewer was canonically given", which is too loose to carry the weight: the
+previous coder execution's receipt is formally reachable along `ReviewRequest →
+CoderReport → ProviderExecutionReceipt`, so *given* does not by itself exclude
+anything. Two tighter reasons, in order:
+
+```text
+1. V0 finding evidence is narrowed to the three canonical review-evidence
+   classes frozen for the reviewer task: ContractDocument, Diff, GateLog.
+   No additional V0 finding-evidence consumer has been demonstrated.
+
+2. The reviewer's OWN execution receipt is additionally IMPOSSIBLE as a
+   payload citation, not merely unneeded.
+```
+
+The second is worth stating because it is structural rather than a judgement
+call. FD-11 requires
+
+```text
+envelope.payload_digest == receipt.final_normalized_output_ref.digest
+```
+
+so the receipt already commits to the exact report payload bytes. A payload that
+cited its own execution's receipt would close a content-address cycle:
+
+```text
+report payload digest -> receipt digest -> final_normalized_output_ref
+                      -> report payload digest
+```
+
+The frozen receipt architecture runs deliberately the other way: the receipt
+proves the provenance of normalized-output bytes that already exist, and only
+then does the report's *envelope* reference the receipt. `ProviderExecutionReceipt`
+is therefore excluded from both evidence surfaces on an argument that does not
+depend on what "given" means.
+
+The three admitted kinds are:
 
 ```text
 ReviewerReport.findings[].evidence_refs -> ContractDocument | Diff | GateLog
@@ -1172,12 +1212,38 @@ AnyCommittedEnvelope
     IS      a sanctioned meta-target: a named union of admissible concrete kinds
     IS NOT  a graph node, and IS NOT terminal
 
+members := exactly the eleven envelope-bearing message kinds of FD-1.9
+
+    work_order            coder_report          candidate_receipt
+    review_request        reviewer_report       review_verdict
+    corrective_directive  campaign_feed_item    human_attention_request
+    human_command_request human_decision
+
 resolution
-    check the concrete ref.kind is in the sanctioned set     (FD-2.5, fail closed)
+    check the concrete ref.kind is a member                  (FD-2.5, fail closed)
+    check the referenced artifact is already canonically COMMITTED
+        before the CampaignFeedItem is accepted
     resolve that concrete message as a normal typed target
     continue traversal through its own admitted edges
     charge it, and its closure, against the FD-1.5 budget
 ```
+
+**The membership had to be enumerated, not named (G-R8).** G-R7 defined the
+meta-target's *semantics* and left its *extension* undefined, which §4.2.1's own
+rule cannot survive: a named union of unknown composition differs from the rank
+rule mainly in having acquired a business card. No new decision was needed —
+Phase G had already fixed the set twice over. FD-1.9 enumerates the eleven A1
+message kinds as a closed group, and §3 decided `KEEP_V1_MODEL` for the envelope
+boundary, so "committed envelope" *is* those eleven. The enumeration lives in the
+generated dataset beside the registry, so the published table and this list
+cannot drift apart.
+
+Two things follow that prose alone would not have given. The `COMMITTED`
+precondition turns this `Causal` edge's create-before-reference argument into a
+**machine-checkable witness** rather than an appeal to ordering. And a future
+promotion of a support object to envelope-bearing now has to revisit this union
+explicitly, instead of silently widening it by widening the meaning of the word
+*envelope* — which is exactly the failure mode §4.2.1 exists to prevent.
 
 The bookkeeping therefore reads **20 terminal kinds + 1 open meta-target**, not
 21 terminals. The `Intra` proof is unaffected — this edge is `Causal` and was
@@ -1199,9 +1265,19 @@ event kinds appearing: 21 of 21
 ```
 
 `Causal` edges are excluded from that subgraph by construction and carry their
-own per-instance create-before-reference argument (§4). Twelve issue from event
-kinds, which are never targets (§4.1.4); the thirteenth is
-`CorrectiveDirective → ReviewVerdict`.
+own per-instance create-before-reference argument (§4). The thirteen break down
+as follows — G-R7 wrote "twelve from event kinds", which was wrong and, worse,
+dropped the feed edge from its own accounting:
+
+```text
+11   event-source: CampaignEvent(k) -> its source_ref target   (rows 47-57)
+ 1   cross-round:  CorrectiveDirective -> ReviewVerdict        (row 22)
+ 1   feed causation: CampaignFeedItem -> AnyCommittedEnvelope  (row 69)
+13
+```
+
+Event kinds are never targets (§4.1.4); the other two carry the create-before-
+reference arguments given in this subsection and in §4.2.5's membership rule.
 
 **That thirteenth is a correction, not an addition.** G-R5 filed it `Intra`.
 §4 defines `Intra` as *within one round's derivation flow* and `Causal` as
@@ -1217,16 +1293,48 @@ plainly: the proof was not wrong, it was answering the question about a slightly
 wrong graph. A cross-round obligation sitting in the kind-level proof domain is
 a proof that succeeds for the wrong reason.
 
-#### 4.2.6 The obligation this places on the v2 draft
+#### 4.2.6 The realization contract the v2 draft inherits
+
+G-R5 through G-R7 wrote this obligation as *every `ArtifactRef`-valued field must
+realize **exactly one** semantic edge*, and §4.2.4 has since made that
+unsatisfiable in both directions. `ReviewRequest.evidence_refs` realizes three
+edges by frozen ordering; the two review-evidence surfaces realize three each by
+§4.2.3; `CampaignFeedItem.subject_refs` realizes a union. And the reverse fails
+too — frozen `final_normalized_output_ref` and `dispatches[].normalized_output_ref`
+are two fields on one edge, which the reconciliation already states in writing.
+
+The relation is many-to-many. Uniqueness is real, but it lives one level down, on
+the **occurrence** rather than the field:
 
 ```text
-Every ArtifactRef-valued field in v2 must realize exactly one semantic edge
-admitted by §4.2.4.
+FROZEN — the realization contract
 
-A field that would realize an unlisted relation is not a drafting choice.
-It reopens Phase G, or it supersedes it — and either way it is a decision
-somebody makes on the record, not a slot somebody adds to a struct.
+1. For every ArtifactRef-valued field, the v2 draft MUST declare the complete
+   set of semantic edges that field may realize.
+
+2. For every concrete ArtifactRef occurrence, the pair
+       (source semantic kind, concrete target semantic kind)
+   MUST select exactly one admitted edge from that field's declared set.
+
+3. A field MAY realize several admitted edges.
+   Several fields MAY realize the same admitted edge.
+
+4. No field and no occurrence may introduce a relation absent from §4.2.4.
+   A field whose declared set is not a subset of §4.2.4 is not a drafting
+   choice: it reopens Phase G, or it supersedes it.
+
+5. AnyCommittedEnvelope is declared ONCE as a meta-target expansion, never as
+   eleven separate edges (§4.2.5).
 ```
+
+Clause 2 is the one that has to be *true*, not merely desirable, and it is: over
+the 69 rows there are 69 distinct `(source, target)` pairs, so the selection is a
+total function and no occurrence can be ambiguous. Expanding the meta-target to
+its eleven members introduces no clash either. That was checked, not assumed —
+had any pair appeared twice under two classes, an occurrence would have had two
+admissible readings and clause 2 would have been a wish.
+
+What changed here is the quantifier, not the graph. No registry row moves.
 
 ## 5. Q4 + Q5 — imported roots, closure, and the typed external boundary
 
@@ -1349,51 +1457,107 @@ the failure this phase exists to prevent.
 - whether the import mechanism of §3.4 exists as a controller procedure — only
   that it does not exist as a node.
 
-## 8. For the independent reviewer (revision G-R7)
+## 8. For the independent reviewer (revision G-R8)
 
-Approved and unchanged, and not reopened here: the node universe and the count
-of eleven, the support/message boundary, `CampaignRunBinding`'s existence and
-pre-dispatch admission, the wrapper split, event/payload source discrimination,
-the `Intra`/`Causal` classification, the directive retraction, and the
-`ci_observation` exclusion from the reviewer's input. G-R7 touches §2's labelling,
-§4.1.1, §4.2.1, §4.2.3, §4.2.4, §4.2.5 and §5.2. Attack these:
+G-R8 changed no semantic edge. Everything in §2–§5 that a previous round
+approved stays approved; the two changes are specification-level, in §4.2.5
+(meta-target membership) and §4.2.6 (the realization contract), plus three
+consistency repairs. Attack these:
 
-1. **The recursive extraction (§4.1.1).** 41 slots, and the claim that there is
-   no *second* hidden one rests on exactly five cross-schema type references
-   existing in the normative body, four of which expand to scalars. Re-derive
-   both halves from blob `7db92f1b`. A sixth cross-reference, or a nested
-   structure reached some other way than an `as §X.Y` type cell, breaks the
-   inventory again.
-2. **The review-evidence set (§4.2.3).** Three targets on each of
-   `ReviewerReport` and `ReviewVerdict`, chosen as "what the reviewer was
-   canonically given". Two attacks: is that the right closure principle at all —
-   a reviewer might legitimately cite the `ProviderExecutionReceipt` of its own
-   execution, which `rank <= 2` permits and this set excludes; and does keeping
-   direct verdict edges rather than binding transitively through
-   `reviewer_report_ref` duplicate authority in a way FD-4 should forbid?
-3. **The transitive-only alternative, explicitly not taken.** §4.2.3 declines it
-   because dropping `evidence_refs` from a projection frozen as `findings: as
-   §3.5` is a supersede needing its own argument. If that argument is actually
-   available, this is the round to make it — three rows come out.
-4. **The meta-target model (§4.2.5, §5.2).** `AnyCommittedEnvelope` now resolves
-   through to a concrete typed message and charges its whole closure. Check the
-   consequence that is easy to miss: FD-1.5's per-campaign budget is finite, so a
-   feed item carrying a `WorkOrder` can now legitimately *exhaust* it. Is
-   fail-closed rejection of an over-budget feed item the right V0 behaviour, or
-   does an observability surface need its own bound?
-5. **The sanctioned set itself.** `AnyCommittedEnvelope` is named but its members
-   are not enumerated anywhere. Under §4.2.1's own rule that a generic field
-   creates no authority, is a *named but unenumerated* union meaningfully
-   different from the rank rule this layer replaced?
-6. **§2's post-decision table.** Fifteen kinds, derived from §4.2.4. Re-derive
-   it. The load-bearing claim is that `ProviderExecutionReceipt` still has three
-   distinct consumers and `CampaignRunBinding` two, so §3.1–§3.2 survive; if
-   either number moved, a support decision moved with it.
-7. **The reconciliation (end of §4.2.4).** `26 + 1 + 2 + 2 + 1 = 32` slots →
-   `30 + 11 = 41` rows, then `41 + 3 + 3 + 3 + 1 + 7 + 11 = 69`. This line has
-   been wrong once (28 for 26). Re-derive it.
+1. **Clause 2 of the realization contract (§4.2.6).** It requires
+   `(source, concrete target)` to select exactly one admitted edge, which holds
+   today because the 69 rows have 69 distinct pairs. That is a property of the
+   *current* registry, not a theorem about registries. Is it an invariant Phase G
+   should freeze — no two edges may share a `(source, target)` pair, differing
+   only in class — or does some legitimate future relation need both classes
+   between the same two kinds?
+2. **Clause 1 and who checks it.** A field must *declare* its complete edge set.
+   Nothing yet says where that declaration lives or what validates it against
+   §4.2.4. Is a drafting-time obligation with no artefact enough, or does this
+   need a machine-checked table the v2 draft is diffed against?
+3. **The meta-target membership (§4.2.5).** Eleven members, taken from FD-1.9's
+   closed message group plus §3's `KEEP_V1_MODEL` on the envelope boundary.
+   Check both halves: that FD-1.9's group is exactly those eleven, and that
+   "committed envelope" is the right reading of it — `HumanCommandRequest` is
+   untrusted rank 3, and a feed item referencing one is admitted by this list.
+4. **The `COMMITTED` precondition.** It is stated as a resolution-time check,
+   which makes the `Causal` witness machine-checkable. But "canonically
+   committed" is not defined here, and the obvious candidate — present in the
+   event log at a lower sequence — is a reducer property this document has been
+   careful not to draft. Is the precondition checkable at V0 as written?
+5. **The FD-11 cycle argument (§4.2.3).** It excludes the reviewer's *own*
+   receipt structurally. It does not exclude a *prior* execution's receipt, which
+   reason 1 excludes only on "no V0 consumer demonstrated". If a V0 finding
+   legitimately cites the coder's execution receipt, reason 1 is the whole
+   defence and it is weaker than it looks.
+6. **The Causal breakdown (§4.2.5).** 11 + 1 + 1 = 13, rows 47–57, 22, 69.
+   G-R7 published 12 + 1 and lost the feed edge. Re-derive from the table.
 
 ## 9. Revision record
+
+### G-R8 — eighth independent review, two P1s
+
+`CHANGES_REQUESTED`, and narrow by design: both findings are specification
+holes between the approved graph and any unambiguous implementation of it, and
+**no registry row changed**. The reviewer re-verified the 69-row table
+(56 `Intra` / 13 `Causal`), confirmed that the six new review-evidence edges
+target only rank-0 terminals so the typed→typed subgraph is untouched and 47/47
+still holds, and approved the recursive inventory, the review-evidence
+restoration, the receipt exclusion and the meta-target traversal model.
+
+**P1-19 — §4.2.6 demanded a cardinality §4.2.4 forbids.** The obligation read
+*every `ArtifactRef`-valued field must realize **exactly one** semantic edge*,
+while the approved table has `ReviewRequest.evidence_refs` realizing three by
+frozen ordering, both review-evidence surfaces realizing three each, and
+`CampaignFeedItem.subject_refs` realizing a union. The reverse direction fails
+too: frozen `final_normalized_output_ref` and `dispatches[].normalized_output_ref`
+are two fields on one edge — which this document's own reconciliation had been
+stating in writing for two rounds while the obligation above it said otherwise.
+
+The relation is many-to-many; uniqueness lives on the **occurrence**. §4.2.6 is
+reframed accordingly: a field declares the complete set of edges it may realize,
+and every concrete occurrence's `(source, concrete target)` pair selects exactly
+one edge from that set. Clause 2 was checked rather than asserted — the 69 rows
+carry 69 distinct `(source, target)` pairs, so selection is a total function and
+no occurrence is ambiguous; expanding the meta-target to its eleven members adds
+no clash. Had a pair appeared twice under two classes, the clause would have
+been a wish. The quantifier moved to the object where it is true; the graph did
+not move at all.
+
+**P1-20 — the meta-target had semantics but no extension.** G-R7 defined how
+`AnyCommittedEnvelope` resolves and left its membership undefined, which
+§4.2.1's own rule cannot survive: a named union of unknown composition differs
+from the rank rule mainly in having acquired a business card. No new decision
+was required — FD-1.9 enumerates the eleven A1 message kinds as a closed group
+and §3 decided `KEEP_V1_MODEL` for the envelope boundary, so *committed
+envelope* is exactly those eleven. Enumerated now in the generated dataset
+beside the registry, with a `COMMITTED`-before-acceptance precondition that
+turns this `Causal` edge's create-before-reference argument into a
+machine-checkable witness, and that forces any future support→message promotion
+to revisit the union explicitly instead of widening it by widening the meaning
+of a word.
+
+**The receipt-exclusion rationale, strengthened.** G-R7 justified the admitted
+evidence set as "what the reviewer was canonically given", which the reviewer
+correctly called too loose — the prior coder execution's receipt is formally
+reachable along `ReviewRequest → CoderReport → ProviderExecutionReceipt`, so
+*given* excludes nothing by itself. Replaced with two reasons, the second
+structural: FD-11 requires `envelope.payload_digest ==
+receipt.final_normalized_output_ref.digest`, so a payload citing its own
+execution's receipt closes a content-address cycle. The frozen architecture runs
+the other way — the receipt proves provenance of bytes that already exist, and
+only then does the report's *envelope* reference it. That argument does not
+depend on what "given" means.
+
+**Two P2s.** §4.2.5 said twelve `Causal` edges issue from event kinds; the table
+says eleven (rows 47–57), the remaining two being `CorrectiveDirective →
+ReviewVerdict` (row 22) and `CampaignFeedItem → AnyCommittedEnvelope` (row 69).
+G-R7's accounting had dropped the very edge G-R7 introduced, which is a small
+demonstration of why the breakdown is now published as arithmetic rather than
+prose. And §2's metric is retitled *historical prototype projection @ `37502e3`*
+rather than keeping a normative-looking formula next to its own death
+certificate; the formula stays verbatim, because reproducing the numbers
+requires the definition that produced them.
 
 ### G-R7 — seventh independent review, three P1s
 

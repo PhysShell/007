@@ -502,7 +502,7 @@ determines ranks, edges, imported roots, closure and digest domains.
 ```yaml
 phase_g:
   document: docs/tasks/a1-f-v2-phase-g.md
-  status:   DECIDED (revision G-R7), awaiting re-review
+  status:   DECIDED (revision G-R8), awaiting re-review
   review_1: CHANGES_REQUESTED — four P1s, all accepted; the central
             conclusion changed from 13 envelope kinds to 11
   review_2: CHANGES_REQUESTED — two P1s, both accepted; the count was not
@@ -552,6 +552,23 @@ phase_g:
             it resolves to a concrete typed message whose closure must be
             traversed and charged, and calling it terminal under-accounted the
             FD-1.5 budget. Bookkeeping: 20 terminal kinds + 1 meta-target
+  review_8: CHANGES_REQUESTED — two P1s, both accepted, NO registry row changed;
+            both were specification holes between the approved graph and any
+            unambiguous implementation. (a) the drafting obligation demanded
+            "every field realizes exactly ONE semantic edge" while the approved
+            table has one field realizing three (ReviewRequest.evidence_refs and
+            both review-evidence surfaces) and two fields realizing one
+            (final_normalized_output_ref / dispatches[].normalized_output_ref);
+            the relation is many-to-many and uniqueness lives on the OCCURRENCE
+            — a field declares its complete admitted set, and each concrete
+            (source, target) pair selects exactly one edge from it, which holds
+            because the 69 rows carry 69 distinct pairs; (b) AnyCommittedEnvelope
+            had traversal semantics but no defined membership — now enumerated as
+            exactly the eleven envelope-bearing kinds of FD-1.9, with a COMMITTED
+            precondition making the Causal create-before-reference witness
+            machine-checkable. Also: the receipt exclusion now rests on FD-11's
+            payload_digest == final_normalized_output_ref.digest, which makes a
+            self-citation a content-address CYCLE rather than merely unneeded
   evidence: 37502e3 edge registry — 59 entries (53 envelope-source + 6 A2
             transition) plus a global AnyCommittedEnvelope causation rule;
             metric is "specific V0 consumer in-degree" with an explicit
@@ -592,8 +609,12 @@ phase_g:
                       over the 47 typed nodes (26 Intra typed->typed edges).
                       Phase G closes edge MEANING; the v2 draft owes the
                       field-path spelling, and every field must realize exactly
-                      one admitted edge — adding an unlisted relation reopens or
-                      supersedes Phase G
+                      one admitted edge FROM THAT FIELD'S DECLARED SET (the
+                      cardinality is many-to-many; uniqueness is per occurrence,
+                      not per field) — adding an unlisted relation reopens or
+                      supersedes Phase G. AnyCommittedEnvelope's members are the
+                      eleven envelope kinds of FD-1.9, declared once as a
+                      meta-target expansion
     open_surfaces:    9 of the 41 frozen slots name no target kind. Each now has
                       a disposition: ReviewRequest.evidence_refs, ReviewerReport
                       .findings[].evidence_refs and ReviewVerdict.findings[]
