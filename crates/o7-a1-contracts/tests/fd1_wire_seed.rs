@@ -18,14 +18,14 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use o7_a1_contracts::bounds::{
-    MAX_ARTIFACT_REFS, MAX_CONTROL_ARTIFACT_BYTES, MAX_EVIDENCE_BLOB_BYTES,
+    MAX_ARRAY_LEN, MAX_ARTIFACT_REFS, MAX_CONTROL_ARTIFACT_BYTES, MAX_EVIDENCE_BLOB_BYTES,
     MAX_REACHABLE_CLOSURE_BYTES,
 };
 use o7_a1_contracts::{
-    parse_artifact, typed_media_type, validate_document, AdapterVersion, ArtifactKindV1,
-    ArtifactRef, ArtifactRefs, BudgetPolicy, BudgetPolicyError, CommitId, EnvelopeError,
-    EnvelopeV1, EnvelopeVersion, Id, MessageKindV1, MessageKindVersion, ModelIdentity, Optional,
-    ParseError, ProducerRole, Timestamp, WireDigest,
+    parse_artifact, typed_media_type, AdapterVersion, ArtifactKindV1, ArtifactRef, ArtifactRefs,
+    BudgetPolicy, BudgetPolicyError, CommitId, EnvelopeError, EnvelopeV1, EnvelopeVersion, Id,
+    MessageKindV1, MessageKindVersion, ModelIdentity, Optional, ParseError, ProducerRole,
+    Timestamp, WireDigest,
 };
 
 fn id(s: &str) -> Id {
@@ -199,7 +199,7 @@ fn a_malformed_payload_is_rejected() {
         &[0xff, 0xfe][..],
     ] {
         assert!(
-            validate_document(bad, MAX_CONTROL_ARTIFACT_BYTES).is_err(),
+            parse_artifact::<EnvelopeV1>(bad).is_err(),
             "expected rejection for {bad:?}"
         );
     }
@@ -208,8 +208,10 @@ fn a_malformed_payload_is_rejected() {
 #[test]
 fn a_leading_bom_is_refused_rather_than_stripped() {
     // Stripping would mean the payload digest names bytes nobody parsed.
+    let mut bytes = "\u{feff}".as_bytes().to_vec();
+    bytes.extend(serde_json::to_vec(&controller_envelope()).expect("fixture must serialize"));
     assert_eq!(
-        validate_document("\u{feff}{}".as_bytes(), MAX_CONTROL_ARTIFACT_BYTES),
+        parse_artifact::<EnvelopeV1>(&bytes),
         Err(ParseError::LeadingBom)
     );
 }
@@ -221,11 +223,20 @@ fn a_leading_bom_is_refused_rather_than_stripped() {
 
 #[test]
 fn a_payload_over_its_bound_is_rejected_not_truncated() {
-    let oversized = format!(r#"{{"a":"{}"}}"#, "x".repeat(64)).into_bytes();
-    let err = validate_document(&oversized, 16);
+    // The ceiling is `EnvelopeV1::MAX_BYTES`, not a caller's argument, so the
+    // document has to actually exceed the protocol maximum.
+    let oversized = format!(
+        r#"{{"a":"{}"}}"#,
+        "x".repeat(MAX_CONTROL_ARTIFACT_BYTES as usize + 1)
+    )
+    .into_bytes();
+    let err = parse_artifact::<EnvelopeV1>(&oversized);
     assert!(matches!(
         err,
-        Err(ParseError::PayloadTooLarge { max: 16, .. })
+        Err(ParseError::PayloadTooLarge {
+            max: MAX_CONTROL_ARTIFACT_BYTES,
+            ..
+        })
     ));
     // Nothing partial came back: the failure carries no value at all.
     assert!(err.is_err());
@@ -471,7 +482,7 @@ fn the_admission_path_enforces_cross_field_rules() {
 }
 
 /// Reaching the typed schema through a different door must not weaken it.
-/// `serde_json::from_str` bypasses `validate_document` by construction, so every
+/// `serde_json::from_str` bypasses the admission path by construction, so every
 /// per-field rule has to live in the field's own type.
 #[test]
 fn raw_deserialization_cannot_bypass_the_per_field_rules() {
@@ -532,7 +543,7 @@ fn a_rejected_artifact_never_appears_in_the_error() {
     }
 
     let nulled_under_secret_key = format!(r#"{{"{SECRET}":null}}"#).into_bytes();
-    if let Err(e) = validate_document(&nulled_under_secret_key, MAX_CONTROL_ARTIFACT_BYTES) {
+    if let Err(e) = parse_artifact::<EnvelopeV1>(&nulled_under_secret_key) {
         messages.push(e.to_string());
     }
 
@@ -790,26 +801,28 @@ fn one_ref_json() -> String {
 /// is spent: an oversized array must not be fully materialised before its cap is
 /// checked.
 ///
-/// Two layers can refuse this, and the cheapest one does. Through an envelope
-/// the byte ceiling fires first — 50,000 refs is far past 1 MiB — so the array
-/// rule is exercised where it is actually reachable: on a document admitted
-/// under a larger ceiling, which is what an evidence blob gets.
+/// Two layers can refuse an over-long array, and each is exercised where it is
+/// the one that fires.
 #[test]
 fn an_oversized_reference_array_is_refused_without_materialising_it() {
-    let many = vec![one_ref_json(); 50_000].join(",");
-    let bytes = envelope_with_raw_refs(&format!("[{many}]"));
-
-    // As an envelope: refused on bytes, before the JSON is even parsed.
+    // The global FD-1.4 array bound applies to *any* array. 4097 tiny values
+    // is ~20 KB, well inside the 1 MiB ceiling, so the document walk is what
+    // refuses it — before the typed schema sees a single field.
+    let tiny = (0..=MAX_ARRAY_LEN)
+        .map(|_| "0")
+        .collect::<Vec<_>>()
+        .join(",");
     assert!(matches!(
-        parse_artifact::<EnvelopeV1>(&bytes),
-        Err(ParseError::PayloadTooLarge { .. })
+        parse_artifact::<EnvelopeV1>(&envelope_with_raw_refs(&format!("[{tiny}]"))),
+        Err(ParseError::ArrayTooLong { .. })
     ));
 
-    // As a document under the evidence ceiling: refused on the global FD-1.4
-    // array bound, which applies to *any* array in *any* A1 document.
+    // 50,000 real refs is past the byte ceiling as well, and *that* fires
+    // first: the cheapest layer that can refuse a document does.
+    let many = vec![one_ref_json(); 50_000].join(",");
     assert!(matches!(
-        validate_document(&bytes, MAX_EVIDENCE_BLOB_BYTES),
-        Err(ParseError::ArrayTooLong { .. })
+        parse_artifact::<EnvelopeV1>(&envelope_with_raw_refs(&format!("[{many}]"))),
+        Err(ParseError::PayloadTooLarge { .. })
     ));
 }
 
@@ -891,14 +904,20 @@ fn an_oversized_but_otherwise_valid_envelope_is_refused_by_the_byte_bound() {
     ));
 
     // The rejection is the byte bound and not some other rule: the same
-    // document passes every *other* layer when handed to `validate_document`
-    // under a ceiling that admits it.
-    assert!(validate_document(&bytes, MAX_EVIDENCE_BLOB_BYTES).is_ok());
+    // construction with few enough refs to fit under the ceiling is admitted.
+    let mut small = controller_envelope();
+    small.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
+        kind: ArtifactKindV1::Diff,
+        media_type: format!("text/x-diff;p={}", "a".repeat(60_000)),
+        digest: digest("blob-0"),
+        size: 1,
+    }])
+    .expect("one ref");
+    let small = serde_json::to_vec(&small).expect("fixture must serialize");
+    assert!(parse_artifact::<EnvelopeV1>(&small).is_ok());
 
-    // What is deliberately absent here is the assertion this test used to
-    // carry — that `parse_artifact` with a raised bound admits the envelope.
-    // There is no such bound to raise any more: the ceiling comes from
-    // `EnvelopeV1::MAX_BYTES`, not from the caller. That assertion isolated
-    // which layer rejected the document and, in doing so, demonstrated that a
-    // caller could choose to admit it.
+    // Two assertions this test used to carry are deliberately gone, and both
+    // for the same reason: each isolated the rejecting layer by pointing a
+    // caller-supplied ceiling at the document, and a ceiling a caller can
+    // choose is the defect, not the instrument for measuring it.
 }

@@ -203,9 +203,16 @@ pub(crate) use sealed::FromDocument;
 /// trailing data, top-level object, then a single walk enforcing nesting depth,
 /// array length and string length.
 ///
+/// **Crate-private, and that is load-bearing.** It takes a caller-supplied
+/// ceiling, so exposing it would put back the protocol maximum that
+/// [`WireArtifact::MAX_BYTES`] just took away — and it would sit outside the
+/// [`WireArtifact::CEILING_IS_PARSEABLE`] guard, since that is evaluated in
+/// [`parse_artifact`]. A public entry point pointed at the 64 MiB ceiling is
+/// exactly the case the guard exists to make impossible.
+///
 /// # Errors
 /// [`ParseError`] for the first violation found.
-pub fn validate_document(bytes: &[u8], max_bytes: u64) -> Result<Value, ParseError> {
+pub(crate) fn validate_document(bytes: &[u8], max_bytes: u64) -> Result<Value, ParseError> {
     if bytes.len() as u64 > max_bytes {
         return Err(ParseError::PayloadTooLarge {
             actual: bytes.len(),
