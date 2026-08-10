@@ -437,29 +437,48 @@ Represents human-confirmed decisions.
 }
 ```
 
-## Trust levels
+## Trust levels and entry status
 
-Memory entries should have explicit trust levels.
+Memory entries carry **two independent fields**, because they answer two
+different questions:
 
 ```text
-agent-claimed
-artifact-derived
-gate-derived
-analyzer-derived
-human-confirmed
-superseded
-rejected
+trust      who vouched for this entry, and on the strength of what
+status     is this entry still in force
 ```
 
-Rules:
+```text
+trust                       status
+agent-claimed               current
+artifact-derived            superseded
+gate-derived                rejected
+analyzer-derived
+human-confirmed
+```
+
+Trust rules:
 
 - "agent-claimed" must not be injected as authoritative context.
 - "artifact-derived" can be used as background context.
 - "gate-derived" can be used for fix/failure history.
 - "analyzer-derived" can be used for finding context.
 - "human-confirmed" can be used as durable project guidance.
+
+Status rules:
+
 - "superseded" must be hidden by default.
 - "rejected" can be used only as a negative example.
+
+`superseded` and `rejected` were previously listed as trust levels. They are
+not: a `gate-derived` entry that has since been superseded is still
+`gate-derived`, and collapsing the two axes makes "how well is this supported"
+unanswerable the moment an entry stops being current. The split is required by
+**REQ-6** in `docs/memory-plane-record.md` §3 (ratified 2026-08-10, bound to
+design revision `219953e`), which makes lifecycle a first-class property with
+evidence-backed transitions. The *vocabulary* of that lifecycle beyond
+`current` / `superseded` / `rejected` is not settled here — the richer state set
+sketched in that document's §4 is candidate architecture and is deliberately not
+imported.
 
 ## Commands
 
@@ -865,6 +884,7 @@ Mitigation:
   - prompt module;
   - verdict;
   - trust level;
+  - entry status;
 - context builder must cap result count;
 - context brief must include provenance.
 
