@@ -53,6 +53,12 @@ H2 is not established by "several codebases apply a similar principle" — that 
 H1 with three implementations. H2 requires that one record be *produced* by one
 authority/domain boundary and *consumed* by another.
 
+**The calibration in §2 does not adjudicate this table.** The words "low" and
+"material" above have no frozen threshold, and inventing one today would be as
+arbitrary as inventing one after the result. This table describes the outcome
+space of the research line; §4.3 says what calibration is actually allowed to
+produce, and it is not a verdict.
+
 ## 2. Calibration corpus
 
 **`docs/q-deck/a1-authority-contracts.md` §9 — the A1-F corrective rounds.**
@@ -170,29 +176,56 @@ alongside and never folded into the headline.
    — n=4 cannot support a detection-rate claim, and must not be reported as one.
 
    N=41 is the size of the corpus, **not automatically the denominator of a
-   point estimate.** Always publish `classified_n / 41`, `compound_n` and
-   `unclear_n` alongside any rate. And because dropping the unresolved rows is
-   the cheapest way to get a convenient number, each rate is reported as a
-   **sensitivity interval over the full population**:
+   point estimate.** Both denominators are fixed here, before any of `yes`,
+   `compound_n` or `unclear_n` exists:
 
    ```
-   lower bound  =  yes                              / 41
-   upper bound  = (yes + compound_n + unclear_n)    / 41
+   point estimate       R_broad = r_broad_yes / classified_n
+                        R_obs   = r_obs_yes   / classified_n
+
+   sensitivity interval over the full population, per rate:
+     lower bound  =  yes                           / 41
+     upper bound  = (yes + compound_n + unclear_n) / 41
    ```
 
-   If the decision in §1 changes across that interval, the outcome is
-   INCONCLUSIVE by the branch below — not a choice between the ends.
-3. **Interpretation** per §1, bounded by §2.2.
+   The point estimate is never published alone: every rate appears with its
+   interval and with `classified_n / 41`, `compound_n`, `unclear_n`. Dropping
+   the unresolved rows is the cheapest route to a convenient number, and the
+   interval is what makes that visible.
+### 4.3 What calibration is allowed to produce
 
-### Inconclusive branch, defined before results
+**Calibration issues no H0/H1/H2 verdict.** It answers one question — *what is
+the base rate under the frozen definitions?* — and asking it to also adjudicate
+§1 would require a threshold that does not exist, which is exactly the gap
+through which "material" gets defined after the number is known.
 
-If the estimate is too imprecise to distinguish "rare" from "material" in
-practical terms, the outcome is **INCONCLUSIVE**. No H0/H1/H2 verdict is issued.
-The only permitted next action is corpus extension — memory-plane findings once
-their atomic units are reconstructed and frozen, or Own.NET review records —
-**not** interpretation of the existing interval. No percentage threshold is set
-here; a threshold invented today would be as arbitrary as one invented after the
-result.
+Frozen outputs, and nothing else:
+
+```
+classified_n / 41 , compound_n , unclear_n
+R_broad  point estimate + full-population sensitivity interval
+R_obs    point estimate + full-population sensitivity interval
+reviewer-provenance split, descriptive only (internal n=37 / external n=4)
+```
+
+Any reading of those numbers against §1 is **post-calibration interpretation**
+and must be labelled as such. It may never be reported as preregistered
+confirmation, and §2.1 already bars this corpus from confirming anything.
+
+### Inconclusive, defined before results
+
+**INCONCLUSIVE is a state of the engineering decision, not a statistical
+label.** It obtains when the observed result leaves a concrete choice — build
+shared machinery, or don't — genuinely unresolved.
+
+If it obtains, the only permitted next action is corpus extension: memory-plane
+findings once their atomic units are reconstructed and frozen, or Own.NET review
+records. And before that next corpus is opened, **the specific decision and its
+criterion must be written down** — a threshold justified by the cost of the
+machinery under consideration, not by the aesthetics of a percentage.
+
+If the result is plainly uninteresting, the line dies here without ceremony.
+That is a permitted and expected ending.
 
 ## 5. Preserved option: the A1-V0 corpus (PR #124)
 
