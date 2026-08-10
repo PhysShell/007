@@ -676,7 +676,9 @@ resolved_scope_digest               domain b"o7-memory-resolved-scope\0v1\0"
             and for each proof:
             frame(rule_id) frame(depth as u32-le)
             frame(derivation_path hop count as u64-le), each hop in path
-                order — a derivation path is a sequence and keeps its order
+                order — a derivation path is a sequence and keeps its order —
+                and for each hop:
+                frame(edge_kind name) frame(target_node_id)
 
 advisory_input_snapshot_digest      domain b"o7-memory-advisory-snapshot\0v1\0"
     frame(retriever_id) frame(retriever_version)
@@ -706,7 +708,8 @@ compiled_context_digest             domain b"o7-memory-compiled-context\0v1\0"
             frame(proofs count as u64-le), each in witness order (§4.2.1):
                 frame(rule_id) frame(depth as u32-le)
                 frame(derivation_path hop count as u64-le), each hop in
-                    path order
+                    path order, and for each hop:
+                    frame(edge_kind name) frame(target_node_id)
         if admission_class = advisory:             — AdvisoryInclusionReason
             frame(selection_channel name)
             frame(rank as u32-le)
@@ -797,16 +800,25 @@ derivation:
 InclusionProof {
     entry_id
     rule_id
-    derivation_path[]
+    derivation_path[]     a sequence of DerivationHop, in path order
     depth
 }
 
-goal G17
-  -> touches artifact A4
-  -> governed_by contract C2
-  -> requires invariant I8
+DerivationHop {
+    edge_kind             the relation traversed, a closed enum
+    target_node_id        the node the hop lands on
+}
+
+goal G17                                    ← the path's origin; it is the
+  -> touches artifact A4                       scope key's goal_node_id and is
+  -> governed_by contract C2                   already committed there, so a
+  -> requires invariant I8                     hop never repeats it
   -> derived_from decision D3
   -> justified_by evidence E19
+
+each arrow is one DerivationHop: (edge_kind, target_node_id)
+    touches/A4 · governed_by/C2 · requires/I8 · derived_from/D3 ·
+    justified_by/E19
 ```
 
 REQ-3 is then satisfied by construction rather than by a later "explain why you
@@ -849,8 +861,13 @@ SINGLE_TIEBREAK record one witness, selected by a declared total order over
 
 **Witness order** is that same total order, and it is stated once here because
 both rules need it: ascending by `depth` (u32), then by `rule_id` (ascending
-bytewise over its UTF-8 encoding), then by `derivation_path` (element-wise
-ascending bytewise, shorter path first on a common prefix). `SINGLE_TIEBREAK`
+bytewise over its UTF-8 encoding), then by `derivation_path` — compared
+element-wise over `DerivationHop`s (§4.2), each hop by `edge_kind` name and then
+`target_node_id`, both ascending bytewise over their UTF-8 encodings, with the
+shorter path first on a common prefix. Comparing a path required saying what one
+element *is*: a hop count alone leaves both this order and the framing in §4.0.2
+undefined, so two runs over identical graphs could pick different witnesses or
+digest the same witness differently. `SINGLE_TIEBREAK`
 takes the first element under it; `ALL_MINIMAL` frames all of them in it
 (§4.0.2). An earlier revision said "canonical order" for `ALL_MINIMAL` and left
 it at that, which names an intention rather than an order — and a witness rule
