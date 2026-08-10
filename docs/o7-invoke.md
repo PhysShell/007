@@ -257,8 +257,7 @@ Same run-dir contract (`--out` absent-or-empty, refused otherwise):
 
 #### Amendment: a non-2xx body is not canonical run evidence
 
-**Status: contract amended; the implementation does not yet match — see
-"Divergence" below.**
+**Status: contract amended and implemented.**
 
 The rule above previously read "whatever the status". It does not any more, and
 the reason is the credential boundary rather than tidiness.
@@ -292,12 +291,12 @@ non-2xx  stdout.raw is empty
 `stderr.log` may carry a bounded, non-body detail for non-2xx (the status and
 its classification), never the body itself.
 
-**Divergence (open, tracked).** At the time of this amendment `run_arliai`
-still writes `ArliOutcome::Http { body, .. }` to `stdout.raw` for every in-bound
-status, including non-2xx. The contract is amended first, deliberately: the
-implementation change is a separate slice, and until it lands the direct
-`--engine arliai` path retains the diagnostic-body surface described here. Do
-not read this section as describing current behaviour.
+**Implementation.** `arli_run_dir_evidence` (`src/invoke.rs`) owns the split
+and is pure over the outcome, so both halves are unit-tested without a socket:
+a 2xx body is persisted byte-for-byte, and every non-2xx case asserts that no
+byte of the diagnostic reaches `stdout.raw` *or* `stderr.log` — the second half
+matters because a detail string quoting the body would reopen the same surface
+through the other artifact.
 
 First consumer of the amended rule: `docs/tasks/mg-c-model-gate.md` (stage
 MG-C), which inherits it rather than defining a second, divergent evidence
@@ -322,8 +321,34 @@ process memory:
   value; only a borrowed, trimmed view of it is passed into the one
   function that sets the `Authorization` header. The load-bearing
   properties: it is **never stored in any struct**, never formatted into
-  any error/log/artifact string, and never reaches `meta.json` or the
-  run dir.
+  any error/log/artifact string, and never reaches `meta.json`.
+- **Scope of "never reaches the run dir".** The claim holds without
+  qualification for everything *this code writes*: `meta.json`,
+  `stderr.log`, `result.json`, error strings, and the whole prompt path.
+  It cannot hold unconditionally for `stdout.raw`, which is the provider's
+  own bytes rather than ours — a 2xx body is relayed verbatim because that
+  is what the schema re-validation judges, and nothing here decodes it. So
+  the honest statement is:
+
+  ```text
+  artifacts this code composes      the key is never placed there — structural
+  stdout.raw (2xx provider body)    verbatim provider bytes; a provider that
+                                    echoed the credential back would land it
+                                    here, and this layer does not detect it
+  stdout.raw (non-2xx)              empty — the diagnostic channel, where such
+                                    an echo realistically occurs, is not
+                                    persisted at all (amendment above)
+  ```
+
+  The realistic accident — a validator echoing request context into an
+  error body — is closed by the amendment. What remains is a provider
+  deliberately or accidentally embedding the credential in a *successful*
+  completion body, which no scan can settle in general: base64, hex, or a
+  per-character split all defeat a byte comparison, and this backend is
+  not the place for a DLP engine. That residual is a property of trusting
+  the provider with a bearer token at all, and it is stated rather than
+  argued away. `docs/tasks/mg-c-model-gate.md` §8.6 carries the same
+  boundary for the brokered path.
 - It is added to `strip_provider_api_keys`, so a `claude`/`codex`
   subprocess never inherits it either.
 - HTTP-client wire logging is the classic leak path for exactly this kind
