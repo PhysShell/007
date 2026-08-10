@@ -1,0 +1,65 @@
+{
+  "ablation_purity": {
+    "meaning": "PROTECTED vs FULL_ALIAS isolates protection alone; no codec-version confound",
+    "new_binary_empty_protection_vs_frozen_L1_full_alias": "BYTE-IDENTICAL on all 3 tasks",
+    "notation_identical_to_L1": true,
+    "notation_sha256": "sha256:9d11406e732e4725b1abf4d318187b19dba4319467819993dea4d68539e2b5b1"
+  },
+  "boundary": {
+    "asserted_by": "tests/protect.rs::no_caller_vocabulary_reaches_the_codec",
+    "qodec_knows_no_b1_semantics": true
+  },
+  "local_focused_tests": {
+    "clippy": "clean",
+    "covers": [
+      "empty protection set reproduces ordinary deep byte-for-byte",
+      "one protected span",
+      "repeated protected value at multiple positions",
+      "adjacent spans",
+      "reversed span order gives identical output",
+      "overlapping spans refused",
+      "out-of-range and inverted spans refused",
+      "wrong input digest refused",
+      "mid-character span refused",
+      "protected contents literal in encoded representation",
+      "protected contents survive exact decode",
+      "unprotected regions still compress",
+      "deterministic encode twice",
+      "exact decode roundtrip",
+      "malformed/foreign sidecar refusal",
+      "no partial output on refusal (CLI)",
+      "source scan: no caller vocabulary in codec"
+    ],
+    "failed": 0,
+    "fmt": "clean",
+    "passed": 14,
+    "suite": "tests/protect.rs"
+  },
+  "mechanism_check": {
+    "identifiers_literal_plain_deep": "0/24",
+    "identifiers_literal_protected": "24/24",
+    "roundtrip": "EXACT on all 3 tasks"
+  },
+  "phase": "L2 Phase C \u2014 producer qualification (route A, external CI on exact head)",
+  "producer": {
+    "binary_sha256": "sha256:6813953ebc525aa6ef7569320f710aabaf362239934f0d837753f9e5dd737465",
+    "branch": "experiment/deep-protected-spans-v0",
+    "branched_from": "57fc8660cf9303e0837ab68717e2ab74eb25b22b",
+    "capability": "qodec-protected-spans-v0 sidecar + --protected-spans (mine/deep)",
+    "exact_head": "89d06be445877df5a10d6c48f5586796125a0c79",
+    "exact_tree": "c2c4d461bd44965c55e1ebede72bb77486025a28",
+    "not_based_on": "PR #16 (provider boundary) \u2014 deliberately independent",
+    "repo": "PhysShell/qodec"
+  },
+  "qualification": {
+    "build_and_smoke": "PASS",
+    "contract_job": "PASS",
+    "full_flake_check": "PASS",
+    "qodec_tests": "PASS",
+    "route": "A (external CI, exact head)",
+    "url": "https://github.com/PhysShell/qodec/actions/runs/31407935615",
+    "workflow": "qodec-v2",
+    "workflow_run": 31407935615
+  },
+  "record": "o7.qodec.protected-spans-qualification-receipt/v0"
+}

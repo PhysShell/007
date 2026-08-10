@@ -1,0 +1,45 @@
+The payload is encoded as a `%q1` container. Format: first line
+`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`
+(each alias is a short stand-in for that exact phrase), then a
+`%q1 body` line, then the body. `%q1 xN` after a line means that line
+occurs N times in total. A `toon` body is a table: first line is a JSON
+array of keys, each following line is one object, cells are JSON values
+joined by the separator named in the header. A `grep` body is grouped
+matcher output: a marker line names a file path and the lines after it
+are `line:text` hits in that file (a bare marker starts verbatim
+lines). A `diag` body line starting with an alias expands to: the head
+after the alias, then that alias's legend template with each slot
+placeholder filled by the sep-joined values in order. A `tmpl` body
+line starting with an alias is its legend template with the slot
+placeholders filled by the sep-joined values that follow the alias.
+Mentally decode the body via the legend before answering; never emit
+alias characters in answers.
+
+CONTEXT (Qodec %q1 encoded -- decode it via the legend before answering):
+%q1 mine n=11
+码="}],"selection_reason":"qodec-project: base_selected","selection_score":1.0,"statement":"
+引=","reason":"not_selected"},{"observation_id":"
+路="source_class":"fixture_metadata","source_id":"round0-manifest","source_pointer":"case-0002-round0-source-lock.yaml#
+类=","provenance":[{"digest":"sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139",
+函={"authority":"controller_or_repo_record","kind":"
+值=","reason":"ineligible"},{"observation_id":"
+错=.","status":"current","topics":["
+试=","observation_id":"
+件=2026-08-05T08:52:33Z,
+组=类"source_class":"repo_record","source_id":"plane-record
+标=product-integration"
+%q1 body
+{"cutoff":{"identity":"case-0002 Round 0 CLOSED — plane-record frozen 件 bound to qodec metadata head 427b677","raw_source_digest":"sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139","raw_source_id":"case-0002-round0-source-lock"},"fixture_id":"case-0002","omitted":[{"observation_id":"obs-authority-model引obs-evidence-head-ci-empty引obs-lock-supersession-chain引obs-oracle-topology-constraint引obs-output-path-dependence引obs-plane-coder引obs-plane-record-not-frozen-v6值obs-plane-reviewer引obs-profiler-fail-closed引obs-profiler-prior-defect值obs-relay-rule引obs-reviewer-acceptance-claim值obs-reviewer-digest-disagreement引obs-reviewer-durability-unresolved-v6值obs-reviewer-window引obs-source-data-origin引obs-v3-binding-error值obs-window-invariant","reason":"not_selected"}],"produced_by":"o7.b1.qodec-project-arm/v0","relations":[{"from":"obs-plane-record-frozen","kind":"part_of","to":"obs-round0-closed"},{"from":"obs-repo-authority-04108e7","kind":"supersedes","to":"obs-reviewer-acceptance-claim"},{"from":"obs-repo-authority-04108e7","kind":"supports","to":"obs-next-permitted-step"},{"from":"obs-reviewer-durability-resolved","kind":"derived_from","to":"obs-plane-reviewer"},{"from":"obs-reviewer-durability-resolved","kind":"supersedes","to":"obs-reviewer-durability-unresolved-v6"},{"from":"obs-round0-closed","kind":"supersedes","to":"obs-plane-record-not-frozen-v6"}],"schema":"o7.b1.context/v0","selected":[函decision试obs-metadata-head","provenance":[{路metadata_binding码The authoritative external metadata head is qodec 427b677 (tree 125f8c4, docs-only forward from 3973192); the authoritative lock at that head is SOURCE-LOCK-v6.yaml错round-0"]},函next_action试obs-next-permitted-step","provenance":[{路not_started码The next permitted step is a baseline application of the current B1 v0 design to case-0002 before any improvement; schema, selector and evaluation contracts remain unfrozen and no downstream (qodec-arm, holdout) is started错标,"round-0"]},函evidence试obs-plane-record-frozen组码The plane-record was frozen as one coherent qodec repository-state snapshot (cutoff 件 120 request/response envelopes, all HTTP 200, 90 raw CAS objects) and bound externally to metadata head 427b677错round-0","标]},函decision试obs-repo-authority-04108e7组","source_pointer":"plane-record.json#PR16+evidence_head_04108e7码The authoritative record of R21 acceptance is the frozen plane-record — evidence head 04108e7 with its frozen CI and evidence artifacts and PR #16 state — not the reviewer's relayed acceptance. Product head is 940c7629; PR #16 is open, draft, unmerged错r21-evidence","标,"oracle-topology"]},函evidence试obs-reviewer-durability-resolved","provenance":[{"digest":"sha256:ed518b334485ef5421aab0229a4e4a0dc9bc489cb78d1eba00b5eb50d286e7e8",路reviewer_plane_source码Round 0 imported the reviewer export into the durable private CAS (cas:sha256:ed518b33, 5963644 bytes, stored 0444, round-trip verified, encrypted offsite in restic/R2), resolving the durability the frozen lock had left open错durability","round-0"]},函status试obs-round0-closed类路completion_state码Round 0 is CLOSED: plane-coder, plane-reviewer and plane-record are all FROZEN错round-0","标]}],"selector":{"adapter_impl_digest":"sha256:3dd51b9f03854be87ee7682fd57a2451bf49f77ad4daca3a065fa4b1cbe2d2e0","qodec_implementation_sha256":"sha256:657237a941679e27e709fba2a18d78c4693d8ddb89f7645761cc602c7a4984dc","qodec_project_version":"qodec.project/v0","selector_id":"o7.b1.qodec-project-arm/v0"},"selectors":{"anchor_observation_ids":[],"anchor_rationale":{},"excluded_topics":[],"preferred_topics":["round-0"],"required_kinds":["decision","next_action","status"],"required_topics":["标]},"task_id":"case-0002-resume-标}
+
+QUESTIONS:
+- question_id: qr1-current-state
+  text: What is the current active state?
+- question_id: qr2-blocking
+  text: What blocks progress right now?
+- question_id: qr3-next-step
+  text: What is the next permitted step?
+- question_id: qr4-authority
+  text: Which repository outcome is the authority for the accepted state?
+
+OUTPUT SHAPE:
+{"answers":[{"question_id":"<id>","answer":"<one or two sentences>","cited_observation_ids":["obs-..."],"current_state_observation_ids":["obs-..."],"cited_relations":[{"from":"obs-...","kind":"..."}]}]}

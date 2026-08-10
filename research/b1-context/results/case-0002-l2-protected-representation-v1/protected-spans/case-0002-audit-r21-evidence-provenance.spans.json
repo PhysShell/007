@@ -1,0 +1,256 @@
+{
+  "input_sha256": "sha256:3271cfa86d6a370762dfaf4e83342311a8934ca2629d76e6ca233d76d8553a91",
+  "schema": "qodec-protected-spans-v0",
+  "spans": [
+    {
+      "class": "opaque",
+      "end": 348,
+      "start": 329
+    },
+    {
+      "class": "opaque",
+      "end": 411,
+      "start": 394
+    },
+    {
+      "class": "opaque",
+      "end": 480,
+      "start": 457
+    },
+    {
+      "class": "opaque",
+      "end": 549,
+      "start": 526
+    },
+    {
+      "class": "opaque",
+      "end": 625,
+      "start": 595
+    },
+    {
+      "class": "opaque",
+      "end": 697,
+      "start": 679
+    },
+    {
+      "class": "opaque",
+      "end": 768,
+      "start": 743
+    },
+    {
+      "class": "opaque",
+      "end": 836,
+      "start": 822
+    },
+    {
+      "class": "opaque",
+      "end": 911,
+      "start": 882
+    },
+    {
+      "class": "opaque",
+      "end": 992,
+      "start": 955
+    },
+    {
+      "class": "opaque",
+      "end": 1068,
+      "start": 1046
+    },
+    {
+      "class": "opaque",
+      "end": 1134,
+      "start": 1114
+    },
+    {
+      "class": "opaque",
+      "end": 1251,
+      "start": 1225
+    },
+    {
+      "class": "opaque",
+      "end": 1303,
+      "start": 1277
+    },
+    {
+      "class": "opaque",
+      "end": 1342,
+      "start": 1315
+    },
+    {
+      "class": "opaque",
+      "end": 1392,
+      "start": 1372
+    },
+    {
+      "class": "opaque",
+      "end": 1434,
+      "start": 1404
+    },
+    {
+      "class": "opaque",
+      "end": 1488,
+      "start": 1462
+    },
+    {
+      "class": "opaque",
+      "end": 1530,
+      "start": 1500
+    },
+    {
+      "class": "opaque",
+      "end": 1584,
+      "start": 1558
+    },
+    {
+      "class": "opaque",
+      "end": 1626,
+      "start": 1596
+    },
+    {
+      "class": "opaque",
+      "end": 1674,
+      "start": 1654
+    },
+    {
+      "class": "opaque",
+      "end": 1712,
+      "start": 1686
+    },
+    {
+      "class": "opaque",
+      "end": 1766,
+      "start": 1736
+    },
+    {
+      "class": "opaque",
+      "end": 1802,
+      "start": 1778
+    },
+    {
+      "class": "opaque",
+      "end": 1855,
+      "start": 1830
+    },
+    {
+      "class": "opaque",
+      "end": 1893,
+      "start": 1867
+    },
+    {
+      "class": "opaque",
+      "end": 1950,
+      "start": 1921
+    },
+    {
+      "class": "opaque",
+      "end": 1988,
+      "start": 1962
+    },
+    {
+      "class": "opaque",
+      "end": 2037,
+      "start": 2014
+    },
+    {
+      "class": "opaque",
+      "end": 2081,
+      "start": 2049
+    },
+    {
+      "class": "opaque",
+      "end": 2129,
+      "start": 2111
+    },
+    {
+      "class": "opaque",
+      "end": 2173,
+      "start": 2141
+    },
+    {
+      "class": "opaque",
+      "end": 2238,
+      "start": 2201
+    },
+    {
+      "class": "opaque",
+      "end": 2269,
+      "start": 2250
+    },
+    {
+      "class": "opaque",
+      "end": 2324,
+      "start": 2295
+    },
+    {
+      "class": "opaque",
+      "end": 2353,
+      "start": 2336
+    },
+    {
+      "class": "opaque",
+      "end": 2411,
+      "start": 2381
+    },
+    {
+      "class": "opaque",
+      "end": 2558,
+      "start": 2532
+    },
+    {
+      "class": "opaque",
+      "end": 3299,
+      "start": 3272
+    },
+    {
+      "class": "opaque",
+      "end": 4100,
+      "start": 4070
+    },
+    {
+      "class": "opaque",
+      "end": 4900,
+      "start": 4874
+    },
+    {
+      "class": "opaque",
+      "end": 5606,
+      "start": 5591
+    },
+    {
+      "class": "opaque",
+      "end": 6300,
+      "start": 6276
+    },
+    {
+      "class": "opaque",
+      "end": 6949,
+      "start": 6923
+    },
+    {
+      "class": "opaque",
+      "end": 7708,
+      "start": 7676
+    },
+    {
+      "class": "opaque",
+      "end": 8453,
+      "start": 8421
+    },
+    {
+      "class": "opaque",
+      "end": 9161,
+      "start": 9142
+    },
+    {
+      "class": "opaque",
+      "end": 9851,
+      "start": 9834
+    },
+    {
+      "class": "opaque",
+      "end": 10418,
+      "start": 10398
+    }
+  ]
+}

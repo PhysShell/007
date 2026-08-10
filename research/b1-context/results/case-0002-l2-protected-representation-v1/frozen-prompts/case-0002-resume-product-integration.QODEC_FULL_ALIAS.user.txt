@@ -1,0 +1,59 @@
+The payload is encoded as a `%q1` container. Format: first line
+`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`
+(each alias is a short stand-in for that exact phrase), then a
+`%q1 body` line, then the body. `%q1 xN` after a line means that line
+occurs N times in total. A `toon` body is a table: first line is a JSON
+array of keys, each following line is one object, cells are JSON values
+joined by the separator named in the header. A `grep` body is grouped
+matcher output: a marker line names a file path and the lines after it
+are `line:text` hits in that file (a bare marker starts verbatim
+lines). A `diag` body line starting with an alias expands to: the head
+after the alias, then that alias's legend template with each slot
+placeholder filled by the sep-joined values in order. A `tmpl` body
+line starting with an alias is its legend template with the slot
+placeholders filled by the sep-joined values that follow the alias.
+Mentally decode the body via the legend before answering; never emit
+alias characters in answers.
+
+CONTEXT (Qodec %q1 encoded -- decode it via the legend before answering):
+%q1 mine n=25
+码=","reason":"not_selected"},{"observation_id":"obs-
+引="}],"selection_reason":"qodec-project: base_selected","selection_score":1.0,"statement":"
+路="source_class":"fixture_metadata","source_id":"round0-manifest","source_pointer":"case-0002-round0-source-lock.yaml#
+类=","provenance":[{"digest":"sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139",
+函="observation_id":"obs-
+值={"authority":"controller_or_repo_record","kind":"
+错=.","status":"current","topics":["
+试=","reason":"ineligible"},{函
+件=2026-08-05T08:52:33Z,
+组="},{"from":"obs-reviewer-durability-resolved","kind":"
+标=类"source_class":"repo_record","source_id":"plane-record
+记="},{"from":"obs-repo-authority-04108e7","kind":"
+链=product-integration"
+节=","to":"obs-
+层=reviewer-
+块=":"o7.b1.qodec-project-arm/v0"
+表=","provenance":[{
+行=plane-record
+列=round-0"
+键=":"case-0002
+名=层durability-unresolved-v6
+数= metadata head 427b677
+串=":"sha256:
+图=supersedes节
+点=round0-closed
+%q1 body
+{"cutoff":{"identity键 Round 0 CLOSED — 行 frozen 件 bound to qodec数","raw_source_digest串3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139","raw_source_id键-round0-source-lock"},"fixture_id键","omitted":[{函authority-model码evidence-head-ci-empty码lock-supersession-chain码oracle-topology-constraint码output-path-dependence码plane-coder码行-not-frozen-v6试plane-reviewer码profiler-fail-closed码profiler-prior-defect试relay-rule码层acceptance-claim试层digest-disagreement码名试层window码source-data-origin码v3-binding-error试window-invariant","reason":"not_selected"}],"produced_by块,"relations":[{"from":"obs-行-frozen","kind":"part_of节点记图层acceptance-claim记supports节next-permitted-step组derived_from节plane-reviewer组图名"},{"from":"obs-点","kind":"图行-not-frozen-v6"}],"schema":"o7.b1.context/v0","selected":[值decision",函metadata-head表路metadata_binding引The authoritative external metadata head is qodec 427b677 (tree 125f8c4, docs-only forward from 3973192); the authoritative lock at that head is SOURCE-LOCK-v6.yaml错列]},值next_action",函next-permitted-step表路not_started引The next permitted step is a baseline application of the current B1 v0 design to case-0002 before any improvement; schema, selector and evaluation contracts remain unfrozen and no downstream (qodec-arm, holdout) is started错链,"列]},值evidence",函行-frozen标引The 行 was frozen as one coherent qodec repository-state snapshot (cutoff 件 120 request/response envelopes, all HTTP 200, 90 raw CAS objects) and bound externally to数错列,"链]},值decision",函repo-authority-04108e7标","source_pointer":"行.json#PR16+evidence_head_04108e7引The authoritative record of R21 acceptance is the frozen 行 — evidence head 04108e7 with its frozen CI and evidence artifacts and PR #16 state — not the reviewer's relayed acceptance. Product head is 940c7629; PR #16 is open, draft, unmerged错r21-evidence","链,"oracle-topology"]},值evidence",函层durability-resolved表"digest串ed518b334485ef5421aab0229a4e4a0dc9bc489cb78d1eba00b5eb50d286e7e8",路reviewer_plane_source引Round 0 imported the reviewer export into the durable private CAS (cas:sha256:ed518b33, 5963644 bytes, stored 0444, round-trip verified, encrypted offsite in restic/R2), resolving the durability the frozen lock had left open错durability","列]},值status",函点类路completion_state引Round 0 is CLOSED: plane-coder, plane-reviewer and 行 are all FROZEN错列,"链]}],"selector":{"adapter_impl_digest串3dd51b9f03854be87ee7682fd57a2451bf49f77ad4daca3a065fa4b1cbe2d2e0","qodec_implementation_sha256串657237a941679e27e709fba2a18d78c4693d8ddb89f7645761cc602c7a4984dc","qodec_project_version":"qodec.project/v0","selector_id块},"selectors":{"anchor_observation_ids":[],"anchor_rationale":{},"excluded_topics":[],"preferred_topics":["列],"required_kinds":["decision","next_action","status"],"required_topics":["链]},"task_id键-resume-链}
+
+QUESTIONS:
+- question_id: qr1-current-state
+  text: What is the current active state?
+- question_id: qr2-blocking
+  text: What blocks progress right now?
+- question_id: qr3-next-step
+  text: What is the next permitted step?
+- question_id: qr4-authority
+  text: Which repository outcome is the authority for the accepted state?
+
+OUTPUT SHAPE:
+{"answers":[{"question_id":"<id>","answer":"<one or two sentences>","cited_observation_ids":["obs-..."],"current_state_observation_ids":["obs-..."],"cited_relations":[{"from":"obs-...","kind":"..."}]}]}

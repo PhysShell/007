@@ -1,0 +1,323 @@
+{
+  "acceptance_rule": {
+    "quality_noninferior": {
+      "hard_regression_count_vs_RAW": 0,
+      "note": "the exact L1 rule; no relaxation for a rescue experiment",
+      "qodec_correct_gte_raw": true
+    }
+  },
+  "arm_order_schedule": {
+    "case-0002-assess-change-impact-on-oracle-topology|rep0": [
+      "QODEC_LITERAL_IDENTIFIERS",
+      "RAW_VALID",
+      "QODEC_FULL_ALIAS"
+    ],
+    "case-0002-assess-change-impact-on-oracle-topology|rep1": [
+      "RAW_VALID",
+      "QODEC_FULL_ALIAS",
+      "QODEC_LITERAL_IDENTIFIERS"
+    ],
+    "case-0002-assess-change-impact-on-oracle-topology|rep2": [
+      "QODEC_FULL_ALIAS",
+      "QODEC_LITERAL_IDENTIFIERS",
+      "RAW_VALID"
+    ],
+    "case-0002-audit-r21-evidence-provenance|rep0": [
+      "QODEC_FULL_ALIAS",
+      "QODEC_LITERAL_IDENTIFIERS",
+      "RAW_VALID"
+    ],
+    "case-0002-audit-r21-evidence-provenance|rep1": [
+      "QODEC_LITERAL_IDENTIFIERS",
+      "RAW_VALID",
+      "QODEC_FULL_ALIAS"
+    ],
+    "case-0002-audit-r21-evidence-provenance|rep2": [
+      "RAW_VALID",
+      "QODEC_FULL_ALIAS",
+      "QODEC_LITERAL_IDENTIFIERS"
+    ],
+    "case-0002-resume-product-integration|rep0": [
+      "RAW_VALID",
+      "QODEC_FULL_ALIAS",
+      "QODEC_LITERAL_IDENTIFIERS"
+    ],
+    "case-0002-resume-product-integration|rep1": [
+      "QODEC_FULL_ALIAS",
+      "QODEC_LITERAL_IDENTIFIERS",
+      "RAW_VALID"
+    ],
+    "case-0002-resume-product-integration|rep2": [
+      "QODEC_LITERAL_IDENTIFIERS",
+      "RAW_VALID",
+      "QODEC_FULL_ALIAS"
+    ]
+  },
+  "arms": [
+    "RAW_VALID",
+    "QODEC_FULL_ALIAS",
+    "QODEC_LITERAL_IDENTIFIERS"
+  ],
+  "case_role": "development",
+  "frozen": {
+    "adapter": "f8fa87e349c48de0678ccc4a4ba4be14463dfc85",
+    "l1_007_commit": "40edf6dc4ad6e96ecc81e7a71ce1b0765c369a3b",
+    "l1_classification": "MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS",
+    "notation_sha256": "sha256:9d11406e732e4725b1abf4d318187b19dba4319467819993dea4d68539e2b5b1",
+    "provider_boundary": "fa93d63636bf53892edbd02fec01ab619ffc1071",
+    "q1r_authoritative_eval": "sha256:fc76d210277f328cc685e61b80df4214319f612333ea49c7e9126d51becce791",
+    "q1r_producer_qodec_qa": "6a5d40304d5997fd9ba6325521f3e212eba4aa75"
+  },
+  "generalization_claim_allowed": false,
+  "holdout_evidence": false,
+  "notation": {
+    "identical_to_l1": true,
+    "sha256": "sha256:9d11406e732e4725b1abf4d318187b19dba4319467819993dea4d68539e2b5b1",
+    "tokens_o200k": 261
+  },
+  "panel": [
+    {
+      "family": "Google",
+      "key_file": "/home/tandem/.config/o7-research/arli-gemma.key",
+      "model": "Gemma-4-31B-it",
+      "name": "gemma",
+      "principal": true
+    },
+    {
+      "family": "Zhipu",
+      "key_file": "/home/tandem/.config/o7-research/arli-glm47.key",
+      "model": "GLM-4.7",
+      "name": "glm47"
+    },
+    {
+      "family": "DeepSeek",
+      "key_file": "/home/tandem/.config/o7-research/arli-deepseek.key",
+      "model": "DeepSeek-V4-Flash-0731",
+      "name": "deepseek"
+    },
+    {
+      "family": "Qwen",
+      "key_file": "/home/tandem/.config/o7-research/arli-qwen.key",
+      "model": "Qwen3.5-27B-Anko",
+      "name": "qwen"
+    }
+  ],
+  "producer": {
+    "binary_sha256": "sha256:6813953ebc525aa6ef7569320f710aabaf362239934f0d837753f9e5dd737465",
+    "protected_span_producer_branch": "experiment/deep-protected-spans-v0",
+    "spans_manifest": {
+      "identity_keys": [
+        "observation_id",
+        "from",
+        "to"
+      ],
+      "record": "o7.b1.l2-protected-spans-manifest/v0",
+      "rule": "every observation identity exposed by the context schema is machine-significant and is preserved uniformly; derived from selected[].observation_id, omitted[].observation_id, relations[].from, relations[].to -- never from required_observation_ids, expected answers, or L1 failures",
+      "tasks": {
+        "case-0002-assess-change-impact-on-oracle-topology": {
+          "input_bytes": 9329,
+          "input_sha256": "sha256:7d74ae61a8daf4d3a812ba2b11b6275005c6e9398dd0c9abe070538d5618e35d",
+          "protected_fraction_of_input": 0.1117,
+          "protected_manifest_sha256": "sha256:3bdadb8c36de460133c436648032704d65ec8b03b71924c3ac96aceaf12e2c08",
+          "protected_source_bytes": 1042,
+          "protected_span_count": 42,
+          "protected_unique_values": 24
+        },
+        "case-0002-audit-r21-evidence-provenance": {
+          "input_bytes": 11547,
+          "input_sha256": "sha256:3271cfa86d6a370762dfaf4e83342311a8934ca2629d76e6ca233d76d8553a91",
+          "protected_fraction_of_input": 0.1087,
+          "protected_manifest_sha256": "sha256:c662f2c5dc75eef6efded2c033cbb972aaea23b507854c89ed774c6fab82918b",
+          "protected_source_bytes": 1255,
+          "protected_span_count": 50,
+          "protected_unique_values": 24
+        },
+        "case-0002-resume-product-integration": {
+          "input_bytes": 6583,
+          "input_sha256": "sha256:94fb8cd62b58a5823fb3c1a974177b5273c1ebc2800d499e0cab417bfac5a156",
+          "protected_fraction_of_input": 0.1338,
+          "protected_manifest_sha256": "sha256:1b3564e21934381d56a5f621ebdbfbfe1bd0a04d049af5f9de8631042f4bc9a2",
+          "protected_source_bytes": 881,
+          "protected_span_count": 36,
+          "protected_unique_values": 24
+        }
+      }
+    }
+  },
+  "provider_surfaces": {
+    "api_style": "openai-chat",
+    "endpoint_authority": "https://api.arliai.com/v1/chat/completions",
+    "l2_note": "identical to L1: temperature 0, reasoning disabled at key level, one key pinned per model, requested==reported enforced, N=3",
+    "max_tokens": 8000,
+    "provider": "arliai",
+    "qualification_identity": "fa93d63636bf53892edbd02fec01ab619ffc1071",
+    "repetitions": 3,
+    "retry_policy": "at most 1 transport retry on before-response failure; after-headers loss is not retried",
+    "seed": null,
+    "substitution_check": "each key is pinned to one model; model_requested set to the pinned model; verified reported==requested, rlen==0",
+    "temperature": 0,
+    "thinking_disabled_at_key_level": true,
+    "timeout_s": 200.0,
+    "transport": "provider_matrix.send_json @ L0-qualified head fa93d63 (https-only, no-redirect, bounded read, credential-safe)"
+  },
+  "purpose": "Test whether preserving machine-significant identifiers verbatim recovers the referential fidelity that L1 found the %q1 deep representation destroys, and at what share of the token win.",
+  "record": "o7.b1.l2-protected-ablation-freeze/v1",
+  "scorer": {
+    "alias_glyphs_union": [
+      "\u4e32",
+      "\u4ef6",
+      "\u503c",
+      "\u51fd",
+      "\u5217",
+      "\u540d",
+      "\u56fe",
+      "\u5757",
+      "\u5c42",
+      "\u5f15",
+      "\u6570",
+      "\u6807",
+      "\u6811",
+      "\u70b9",
+      "\u7801",
+      "\u7c7b",
+      "\u7ec4",
+      "\u8282",
+      "\u884c",
+      "\u8868",
+      "\u8bb0",
+      "\u8bd5",
+      "\u8def",
+      "\u94fe",
+      "\u9519",
+      "\u952e"
+    ],
+    "reused_from": "l1_ab.score_question (imported, not restated)",
+    "version": "o7.l1.deterministic-scorer/v1"
+  },
+  "system_prompt_sha256": "sha256:4d3117da21f517c03e1bfb687fcd31a36f11a1ff60142aeb26f426db5a4d3765",
+  "tasks": [
+    {
+      "arms": {
+        "QODEC_FULL_ALIAS": {
+          "context_bytes": 4016,
+          "context_only_tokens": 1191,
+          "context_sha256": "sha256:d5686474c594f10b77ab01043446bdd47df67272d024aa7c4b1649c3eaf57d84",
+          "user_prompt_sha256": "sha256:8cfeb621370a2328b262bb87416a1ec228108c84274108c3b2af8f44d786ed20"
+        },
+        "QODEC_LITERAL_IDENTIFIERS": {
+          "context_bytes": 4472,
+          "context_only_tokens": 1306,
+          "context_sha256": "sha256:da2196c89b9e9e0f9a5fe48d5c525f351c837b3188d0286a8333caa146a14086",
+          "user_prompt_sha256": "sha256:f03e1cfbf09fc684fa11cd6ddb2de76320fa46656f0f8cbee79c182d207ace07"
+        },
+        "RAW_VALID": {
+          "context_bytes": 6584,
+          "context_only_tokens": 1795,
+          "context_sha256": "sha256:ce84029962ba3b35d45736b39b22e84fdfe37fa826bce3394bc7a4a773c8c350",
+          "user_prompt_sha256": "sha256:48e9e16456d1107cf6d2b9f22f4dcae98af43fb840c9bd54a16ef5fc31a4dc80"
+        }
+      },
+      "n_questions": 4,
+      "task_id": "case-0002-resume-product-integration",
+      "tokens_o200k": {
+        "QODEC_FULL_ALIAS": {
+          "cold": 1826,
+          "warm": 1565
+        },
+        "QODEC_LITERAL_IDENTIFIERS": {
+          "cold": 1941,
+          "warm": 1680
+        },
+        "RAW_VALID": {
+          "cold": 2156,
+          "warm": 2156
+        }
+      }
+    },
+    {
+      "arms": {
+        "QODEC_FULL_ALIAS": {
+          "context_bytes": 7582,
+          "context_only_tokens": 2070,
+          "context_sha256": "sha256:14b3d4bb89d4c94f175389dc0bce39fa3c589d543a898951888035c0059d787a",
+          "user_prompt_sha256": "sha256:7b4ad250eded0299ea1e3c32bffb9bba3c96aaa4d18114c4eb1534a03a3bdfa1"
+        },
+        "QODEC_LITERAL_IDENTIFIERS": {
+          "context_bytes": 7904,
+          "context_only_tokens": 2153,
+          "context_sha256": "sha256:313faa00e93d1fa9214d2b224a4e66310a127e94e86dbf3c3e5b5355d95fe3f9",
+          "user_prompt_sha256": "sha256:4c5250ff222a5ceb0f96e774474f7ed08a692b2ddbe6165637183c90897352f5"
+        },
+        "RAW_VALID": {
+          "context_bytes": 11548,
+          "context_only_tokens": 3153,
+          "context_sha256": "sha256:79af64e570a92f63a4eb2d01e937475ce6684e5af599221b10041b2c1a78e656",
+          "user_prompt_sha256": "sha256:8dad7f0d89f211ef46107eb4deb4c859a3a09cc819c089282797e0d3d6b32c3a"
+        }
+      },
+      "n_questions": 5,
+      "task_id": "case-0002-audit-r21-evidence-provenance",
+      "tokens_o200k": {
+        "QODEC_FULL_ALIAS": {
+          "cold": 2729,
+          "warm": 2468
+        },
+        "QODEC_LITERAL_IDENTIFIERS": {
+          "cold": 2812,
+          "warm": 2551
+        },
+        "RAW_VALID": {
+          "cold": 3538,
+          "warm": 3538
+        }
+      }
+    },
+    {
+      "arms": {
+        "QODEC_FULL_ALIAS": {
+          "context_bytes": 5466,
+          "context_only_tokens": 1498,
+          "context_sha256": "sha256:47d93b9abb5c08278bf09b9ab82bc93f6ec64ef73f4dfc121ecd7bf23422e123",
+          "user_prompt_sha256": "sha256:01ed55e680935a46e264ef68cd384d5d397059de1d48bb3439e642a4d1cf1b94"
+        },
+        "QODEC_LITERAL_IDENTIFIERS": {
+          "context_bytes": 6525,
+          "context_only_tokens": 1746,
+          "context_sha256": "sha256:cd28ead2d38c884731377e804377cb299eea54b15124a56ee61f78562dc19261",
+          "user_prompt_sha256": "sha256:dcad8926f9f82d945fb1674c7d75d6dcc49a38a74bff92de2ded7f7237b0ff97"
+        },
+        "RAW_VALID": {
+          "context_bytes": 9330,
+          "context_only_tokens": 2534,
+          "context_sha256": "sha256:91dbefb1bcc2dfc11179e12eda4068037fd987faccbaf7e23ba235638db7afba",
+          "user_prompt_sha256": "sha256:f6d3b4676a2b36b0ccafa12cf8baabfe6e471e7d04a06b46db87750ba4ca9e1f"
+        }
+      },
+      "n_questions": 2,
+      "task_id": "case-0002-assess-change-impact-on-oracle-topology",
+      "tokens_o200k": {
+        "QODEC_FULL_ALIAS": {
+          "cold": 2096,
+          "warm": 1835
+        },
+        "QODEC_LITERAL_IDENTIFIERS": {
+          "cold": 2344,
+          "warm": 2083
+        },
+        "RAW_VALID": {
+          "cold": 2858,
+          "warm": 2858
+        }
+      }
+    }
+  ],
+  "token_economics": {
+    "FULL_ALIAS_cold": 6651,
+    "PROTECTED_cold": 7097,
+    "RAW_cold": 8552,
+    "full_alias_saving": 1901,
+    "reading": "~1.0 protection keeps almost all compression gain; ~0.5 half survives; ~0 identifier protection consumes the gain; <0 protected is dearer than RAW",
+    "residual_cold_saving": 1455,
+    "retained_saving_fraction": 0.7654
+  }
+}

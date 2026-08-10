@@ -1,0 +1,38 @@
+{
+  "identity_keys": [
+    "observation_id",
+    "from",
+    "to"
+  ],
+  "record": "o7.b1.l2-protected-spans-manifest/v0",
+  "rule": "every observation identity exposed by the context schema is machine-significant and is preserved uniformly; derived from selected[].observation_id, omitted[].observation_id, relations[].from, relations[].to -- never from required_observation_ids, expected answers, or L1 failures",
+  "tasks": {
+    "case-0002-assess-change-impact-on-oracle-topology": {
+      "input_bytes": 9329,
+      "input_sha256": "sha256:7d74ae61a8daf4d3a812ba2b11b6275005c6e9398dd0c9abe070538d5618e35d",
+      "protected_fraction_of_input": 0.1117,
+      "protected_manifest_sha256": "sha256:3bdadb8c36de460133c436648032704d65ec8b03b71924c3ac96aceaf12e2c08",
+      "protected_source_bytes": 1042,
+      "protected_span_count": 42,
+      "protected_unique_values": 24
+    },
+    "case-0002-audit-r21-evidence-provenance": {
+      "input_bytes": 11547,
+      "input_sha256": "sha256:3271cfa86d6a370762dfaf4e83342311a8934ca2629d76e6ca233d76d8553a91",
+      "protected_fraction_of_input": 0.1087,
+      "protected_manifest_sha256": "sha256:c662f2c5dc75eef6efded2c033cbb972aaea23b507854c89ed774c6fab82918b",
+      "protected_source_bytes": 1255,
+      "protected_span_count": 50,
+      "protected_unique_values": 24
+    },
+    "case-0002-resume-product-integration": {
+      "input_bytes": 6583,
+      "input_sha256": "sha256:94fb8cd62b58a5823fb3c1a974177b5273c1ebc2800d499e0cab417bfac5a156",
+      "protected_fraction_of_input": 0.1338,
+      "protected_manifest_sha256": "sha256:1b3564e21934381d56a5f621ebdbfbfe1bd0a04d049af5f9de8631042f4bc9a2",
+      "protected_source_bytes": 881,
+      "protected_span_count": 36,
+      "protected_unique_values": 24
+    }
+  }
+}
