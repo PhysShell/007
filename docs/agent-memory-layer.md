@@ -13,10 +13,12 @@
   backend-selection deferral in this document follows from D1'.
 - **Companion record:** `docs/memory-plane-record.md` — the normative-obligation
   half of the same problem (what an agent is *obliged* to know, versus what is
-  useful to recall). It proposes a lifecycle for failure knowledge on top of the
-  trust levels below, and the split between the planner projection and the
-  regression projection. Agent-authored and **pending** (rule 3); nothing from
-  it is folded into the phases here.
+  useful to recall). Its status is split: **§3, REQ-1 … REQ-11, is
+  maintainer-ratified and normative** (2026-08-10); **§4 remains candidate and
+  `pending`** under rule 3, and §6 is non-normative. The trust/status split
+  below follows from ratified **REQ-6**. Nothing else from that document is
+  folded into the phases here, and the candidate lifecycle vocabulary and types
+  of its §4 are deliberately not imported.
 
 ## Summary
 

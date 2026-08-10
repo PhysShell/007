@@ -5,11 +5,14 @@
 - **Static-analysis provider:** Own.NET
 - **Audit/risk-profile provider:** OwnAudit
 - **Related docs:** [agent memory layer](agent-memory-layer.md), [FastContext](fastcontext.md), [Omnigraph](omnigraph.md), [agent output budgeter](agents-outputs-budgeter.md)
-- **Companion record:** [memory plane record](memory-plane-record.md) — proposes
-  the *required* half of selection (normative scope closure, a typed outcome when
-  the required set does not fit the budget, and a diffable compilation result
-  extending the `context.meta.json` fields below). Agent-authored and **pending**
-  per `docs/evidence-and-decision-discipline.md` rule 3.
+- **Companion record:** [memory plane record](memory-plane-record.md) — the
+  *required* half of selection. Its status is split: **§3, REQ-1 … REQ-11, is
+  maintainer-ratified and normative** (2026-08-10); **§4 remains candidate and
+  `pending`** under `docs/evidence-and-decision-discipline.md` rule 3, and §6 is
+  non-normative. The identity contract in "IR requirements" follows from ratified
+  **REQ-4/REQ-5**, and the per-stage input closure and comparison surface in
+  "Determinism and reproducibility" from ratified **REQ-9**. The candidate types
+  and stage decomposition of its §4 are deliberately not imported.
 
 ## Summary
 
