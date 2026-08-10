@@ -17,15 +17,15 @@
 // as `crates/o7-worktree/tests/stateroot_temp.rs`.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use o7_a1_contracts::bounds::{
-    MAX_ARRAY_LEN, MAX_ARTIFACT_REFS, MAX_CONTROL_ARTIFACT_BYTES, MAX_EVIDENCE_BLOB_BYTES,
-    MAX_REACHABLE_CLOSURE_BYTES,
-};
 use o7_a1_contracts::{
     parse_artifact, typed_media_type, AdapterVersion, ArtifactKindV1, ArtifactRef, ArtifactRefs,
     BudgetPolicy, BudgetPolicyError, CommitId, EnvelopeError, EnvelopeV1, EnvelopeVersion, Id,
     MessageKindV1, MessageKindVersion, ModelIdentity, Optional, ParseError, ProducerRole,
     Timestamp, WireDigest,
+};
+use o7_a1_contracts::{
+    MAX_ARRAY_LEN, MAX_ARTIFACT_REFS, MAX_CONTROL_ARTIFACT_BYTES, MAX_EVIDENCE_BLOB_BYTES,
+    MAX_REACHABLE_CLOSURE_BYTES,
 };
 
 fn id(s: &str) -> Id {

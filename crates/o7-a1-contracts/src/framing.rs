@@ -22,7 +22,7 @@ use crate::scalars::{Digest256, WireDigest};
 
 /// A framed digest preimage under one domain separator.
 #[derive(Debug, Clone)]
-pub struct Preimage {
+pub(crate) struct Preimage {
     buf: Vec<u8>,
 }
 
@@ -32,14 +32,14 @@ impl Preimage {
     /// The separator is written raw, exactly as the contract spells it — it is
     /// not itself framed.
     #[must_use]
-    pub fn new(domain: &[u8]) -> Self {
+    pub(crate) fn new(domain: &[u8]) -> Self {
         Self {
             buf: domain.to_vec(),
         }
     }
 
     /// `frame(x)` — a `u64`-le length prefix followed by the bytes.
-    pub fn frame(&mut self, bytes: &[u8]) -> &mut Self {
+    pub(crate) fn frame(&mut self, bytes: &[u8]) -> &mut Self {
         self.buf
             .extend_from_slice(&(bytes.len() as u64).to_le_bytes());
         self.buf.extend_from_slice(bytes);
@@ -47,7 +47,7 @@ impl Preimage {
     }
 
     /// Frame a string field.
-    pub fn frame_str(&mut self, s: &str) -> &mut Self {
+    pub(crate) fn frame_str(&mut self, s: &str) -> &mut Self {
         self.frame(s.as_bytes())
     }
 
@@ -60,31 +60,32 @@ impl Preimage {
     /// Note that this makes absent and present-but-empty hash *identically*,
     /// which is exactly why FD-1.3 refuses explicit `null` and why no A1 field
     /// is allowed to mean something different when empty than when absent.
-    pub fn frame_optional_str(&mut self, s: Option<&str>) -> &mut Self {
+    pub(crate) fn frame_optional_str(&mut self, s: Option<&str>) -> &mut Self {
         self.frame(s.unwrap_or("").as_bytes())
     }
 
     /// Frame a `u32` in little-endian form, as every `…​.to_le_bytes()` in the
     /// contract's framings does.
-    pub fn frame_u32(&mut self, v: u32) -> &mut Self {
+    pub(crate) fn frame_u32(&mut self, v: u32) -> &mut Self {
         self.frame(&v.to_le_bytes())
     }
 
     /// Frame a `u64` in little-endian form.
-    pub fn frame_u64(&mut self, v: u64) -> &mut Self {
+    pub(crate) fn frame_u64(&mut self, v: u64) -> &mut Self {
         self.frame(&v.to_le_bytes())
     }
 
     /// The framed bytes, for tests and for callers that need to prove what was
     /// hashed rather than only the result.
     #[must_use]
-    pub fn as_bytes(&self) -> &[u8] {
+    #[cfg(test)]
+    pub(crate) fn as_bytes(&self) -> &[u8] {
         &self.buf
     }
 
     /// Hash the accumulated preimage.
     #[must_use]
-    pub fn digest(&self) -> WireDigest {
+    pub(crate) fn digest(&self) -> WireDigest {
         WireDigest::from(Digest256::of_bytes(&self.buf))
     }
 }

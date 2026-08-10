@@ -28,8 +28,8 @@ use crate::json::{FromDocument, WireArtifact};
 use crate::kind::{MessageKindV1, ProducerRole};
 use crate::refs::{ArtifactRef, ArtifactRefWire, RefError};
 use crate::scalars::{
-    AdapterVersion, BoundedVec, CommitId, Digest256, FrozenVersion, Id, ModelIdentity, Optional,
-    Timestamp, WireDigest,
+    AdapterVersion, BoundedVec, CommitId, FrozenVersion, Id, ModelIdentity, Optional, Timestamp,
+    WireDigest,
 };
 
 /// `artifact_refs`, bounded by FD-1.4 in the field's own type rather than by a

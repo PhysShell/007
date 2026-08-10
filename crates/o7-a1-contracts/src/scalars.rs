@@ -452,18 +452,6 @@ impl WireDigest {
     pub fn as_str(&self) -> &str {
         self.0.as_str()
     }
-
-    /// The underlying `o7-run` digest, for code that already speaks that type.
-    #[must_use]
-    /// **Crate-internal.** Handing out a `&Digest256` publishes the type by
-    /// inference even when it is not re-exported: a downstream generic
-    /// `fn f<T: DeserializeOwned>(_: &T, s: &str)` fed this reference infers
-    /// `T = Digest256` and reaches its leaking `Deserialize` without ever
-    /// naming it. Making the import `pub(crate)` closed the path a caller can
-    /// *write*; it did not close the one the compiler can *infer*.
-    pub(crate) fn inner(&self) -> &Digest256 {
-        &self.0
-    }
 }
 
 impl From<Digest256> for WireDigest {

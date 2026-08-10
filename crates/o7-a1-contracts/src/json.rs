@@ -156,7 +156,7 @@ pub trait WireArtifact: sealed::FromDocument {
 /// rather than leave that as a note somebody has to remember, the constraint is
 /// a compile error: adding an artifact type above this ceiling fails to build
 /// until the parser is replaced.
-pub const MATERIALISING_PARSER_SAFE_MAX: u64 = crate::bounds::MAX_CONTROL_ARTIFACT_BYTES;
+pub(crate) const MATERIALISING_PARSER_SAFE_MAX: u64 = crate::bounds::MAX_CONTROL_ARTIFACT_BYTES;
 
 /// The unchecked half of admission, behind a seal.
 ///

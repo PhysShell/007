@@ -47,24 +47,29 @@
 //! *admissible* — well-formed, bounded, versioned, identified. It never decides
 //! that anything is true.
 
-pub mod bounds;
-pub mod envelope;
-pub mod framing;
-pub mod json;
-pub mod kind;
-pub mod refs;
-pub mod scalars;
+mod bounds;
+mod envelope;
+mod framing;
+mod json;
+mod kind;
+mod refs;
+mod scalars;
 
-pub use bounds::{BudgetPolicy, BudgetPolicyError};
+pub use bounds::{
+    BudgetPolicy, BudgetPolicyError, MAX_ARRAY_LEN, MAX_ARTIFACT_REFS, MAX_CONTROL_ARTIFACT_BYTES,
+    MAX_DIRECT_REFERENCED_BYTES, MAX_DISPATCHES_PER_RECEIPT, MAX_EVIDENCE_BLOB_BYTES, MAX_FINDINGS,
+    MAX_ID_BYTES, MAX_INTERACTION_SEQUENCE, MAX_JSON_DEPTH, MAX_REACHABLE_CLOSURE_BYTES,
+    MAX_REACHABLE_CLOSURE_OBJECTS, MAX_REFS_PER_EXECUTION, MAX_STRING_BYTES,
+    V0_DEFAULT_CLOSURE_OBJECT_BUDGET, V0_DEFAULT_EVIDENCE_BUDGET_BYTES,
+};
 pub use envelope::{
     ArtifactRefs, EnvelopeError, EnvelopeV1, EnvelopeVersion, MessageKindVersion,
     CAMPAIGN_PROTOCOL_VERSION_V1, ENVELOPE_VERSION_V1, MESSAGE_KIND_VERSION_V1,
 };
-pub use framing::Preimage;
 pub use json::{parse_artifact, ParseError, WireArtifact};
 pub use kind::{ArtifactKindV1, MessageKindV1, ProducerRole};
 pub use refs::{typed_media_type, ArtifactRef, RefError};
 pub use scalars::{
     AdapterVersion, BoundedText, BoundedVec, CommitId, FrozenVersion, Id, ModelIdentity, Optional,
-    ScalarError, Text, Timestamp, WireDigest,
+    ScalarError, Text, Timestamp, WireDigest, MAX_TIMESTAMP_BYTES,
 };
