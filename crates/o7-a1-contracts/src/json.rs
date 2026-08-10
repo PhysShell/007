@@ -158,6 +158,21 @@ pub trait WireArtifact: sealed::FromDocument {
 /// until the parser is replaced.
 pub(crate) const MATERIALISING_PARSER_SAFE_MAX: u64 = crate::bounds::MAX_CONTROL_ARTIFACT_BYTES;
 
+// The step-2 build prerequisite, as a tripwire rather than a note.
+//
+// `CEILING_IS_PARSEABLE` blocks any artifact type above the safe maximum, and
+// the first type that will want one is `InteractionManifestV1` at the FD-1.4
+// evidence ceiling. But that gate is only load-bearing while the safe maximum
+// is genuinely below the evidence maximum: raising this constant would silence
+// the error and lose the property, which is the cheapest wrong way to unblock
+// the manifest.
+//
+// So the relationship itself is asserted. Widening the safe maximum toward the
+// evidence ceiling fails to compile; the legitimate route is to replace the
+// materialising walk with a parser that refuses mid-parse, after which this
+// constant can rise because it will finally be true.
+const _: () = assert!(MATERIALISING_PARSER_SAFE_MAX < crate::bounds::MAX_EVIDENCE_BLOB_BYTES);
+
 /// The unchecked half of admission, behind a seal.
 ///
 /// `from_document` deserializes and nothing else: no byte bound, no

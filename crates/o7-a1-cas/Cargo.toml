@@ -1,0 +1,36 @@
+[package]
+name = "o7-a1-cas"
+version = "0.1.0"
+edition = "2021"
+description = "007 A1 step 2: the owned CAS read boundary and the resolution proof boundary. An ArtifactRef is a claim; a ResolvedArtifact is a claim this session paid to verify."
+publish = false
+
+[lib]
+name = "o7_a1_cas"
+path = "src/lib.rs"
+
+# Same discipline as o7-a1-contracts, and for the same reason: this crate is
+# half of a wire contract's admission path, not a runtime. It depends on the
+# contract seed and on nothing heavy.
+[dependencies]
+o7-a1-contracts = { path = "../o7-a1-contracts" }
+thiserror = "1"
+
+[lints.rust]
+unsafe_code = "forbid"
+unreachable_pub = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
+
+# Test-only: the negative-space probes assert that the proof-bearing type does
+# NOT implement `Serialize`, which needs the trait in scope to ask about.
+[dev-dependencies]
+serde = "1"
