@@ -63,7 +63,7 @@ pub use bounds::{
     V0_DEFAULT_CLOSURE_OBJECT_BUDGET, V0_DEFAULT_EVIDENCE_BUDGET_BYTES,
 };
 pub use envelope::{
-    ArtifactRefs, EnvelopeError, EnvelopeV1, EnvelopeVersion, MessageKindVersion,
+    ArtifactRefs, EnvelopeError, EnvelopeFieldsV1, EnvelopeV1, EnvelopeVersion, MessageKindVersion,
     CAMPAIGN_PROTOCOL_VERSION_V1, ENVELOPE_VERSION_V1, MESSAGE_KIND_VERSION_V1,
 };
 pub use json::{parse_artifact, ParseError, WireArtifact};

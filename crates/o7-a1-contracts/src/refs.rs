@@ -52,10 +52,61 @@ pub fn typed_media_type(kind: ArtifactKindV1, version: u32) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ArtifactRef {
-    pub kind: ArtifactKindV1,
-    pub media_type: String,
-    pub digest: WireDigest,
-    pub size: u64,
+    kind: ArtifactKindV1,
+    media_type: String,
+    digest: WireDigest,
+    size: u64,
+}
+
+impl ArtifactRef {
+    /// The only public way to build a reference.
+    ///
+    /// Fields are private and there is no infallible public conversion: a
+    /// value of this type has passed [`Self::validate`], and no later
+    /// assignment can revoke that, because there is no assignment.
+    ///
+    /// # Errors
+    /// [`RefError`] if the media type, size, or their relationship to `kind`
+    /// violates FD-1.7 / FD-1.8.
+    pub fn new(
+        kind: ArtifactKindV1,
+        media_type: impl Into<String>,
+        digest: WireDigest,
+        size: u64,
+    ) -> Result<Self, RefError> {
+        let candidate = Self {
+            kind,
+            media_type: media_type.into(),
+            digest,
+            size,
+        };
+        candidate.validate()?;
+        Ok(candidate)
+    }
+
+    /// FD-1.8 — the kind of object referenced.
+    #[must_use]
+    pub fn kind(&self) -> ArtifactKindV1 {
+        self.kind
+    }
+
+    /// FD-1.7 — the declared media type, part of the reference's identity.
+    #[must_use]
+    pub fn media_type(&self) -> &str {
+        &self.media_type
+    }
+
+    /// FD-1.8 — the referenced object's content digest.
+    #[must_use]
+    pub fn digest(&self) -> &WireDigest {
+        &self.digest
+    }
+
+    /// FD-1.8 — the referenced object's stored size.
+    #[must_use]
+    pub fn size(&self) -> u64 {
+        self.size
+    }
 }
 
 /// The wire form of [`ArtifactRef`], and the only form that deserializes.
@@ -73,14 +124,15 @@ pub(crate) struct ArtifactRefWire {
     size: u64,
 }
 
-impl From<ArtifactRefWire> for ArtifactRef {
-    fn from(w: ArtifactRefWire) -> Self {
-        Self {
-            kind: w.kind,
-            media_type: w.media_type,
-            digest: w.digest,
-            size: w.size,
-        }
+/// Fallible on purpose: there is no conversion anywhere, public or private,
+/// that produces an `ArtifactRef` without checking it. An unvalidated value of
+/// this type never exists, not even for the statement between construction and
+/// a validator.
+impl TryFrom<ArtifactRefWire> for ArtifactRef {
+    type Error = RefError;
+
+    fn try_from(w: ArtifactRefWire) -> Result<Self, RefError> {
+        Self::new(w.kind, w.media_type, w.digest, w.size)
     }
 }
 
@@ -88,7 +140,7 @@ impl ArtifactRef {
     /// # Errors
     /// [`RefError`] if the media type is empty or over-long, or the declared
     /// size is zero or above the FD-1.4 maximum for this kind of object.
-    pub fn validate(&self) -> Result<(), RefError> {
+    pub(crate) fn validate(&self) -> Result<(), RefError> {
         if self.media_type.is_empty() {
             return Err(RefError::EmptyMediaType);
         }

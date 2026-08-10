@@ -19,9 +19,9 @@
 
 use o7_a1_contracts::{
     parse_artifact, typed_media_type, AdapterVersion, ArtifactKindV1, ArtifactRef, ArtifactRefs,
-    BudgetPolicy, BudgetPolicyError, CommitId, EnvelopeError, EnvelopeV1, EnvelopeVersion, Id,
-    MessageKindV1, MessageKindVersion, ModelIdentity, Optional, ParseError, ProducerRole,
-    Timestamp, WireDigest,
+    BudgetPolicy, BudgetPolicyError, CommitId, EnvelopeError, EnvelopeFieldsV1, EnvelopeV1,
+    EnvelopeVersion, Id, MessageKindV1, MessageKindVersion, ModelIdentity, Optional, ParseError,
+    ProducerRole, RefError, Timestamp, WireDigest,
 };
 use o7_a1_contracts::{
     MAX_ARRAY_LEN, MAX_ARTIFACT_REFS, MAX_CONTROL_ARTIFACT_BYTES, MAX_EVIDENCE_BLOB_BYTES,
@@ -45,17 +45,18 @@ fn model(s: &str) -> ModelIdentity {
 }
 
 fn receipt_ref() -> ArtifactRef {
-    ArtifactRef {
-        kind: ArtifactKindV1::ProviderExecutionReceipt,
-        media_type: typed_media_type(ArtifactKindV1::ProviderExecutionReceipt, 1),
-        digest: digest("receipt"),
-        size: 512,
-    }
+    ArtifactRef::new(
+        ArtifactKindV1::ProviderExecutionReceipt,
+        typed_media_type(ArtifactKindV1::ProviderExecutionReceipt, 1),
+        digest("receipt"),
+        512,
+    )
+    .expect("the receipt-ref fixture must be admissible")
 }
 
-/// A controller-produced envelope: no provider fields, no receipt ref.
-fn controller_envelope() -> EnvelopeV1 {
-    EnvelopeV1 {
+/// The controller shape as editable, unauthorised fields.
+fn controller_fields() -> EnvelopeFieldsV1 {
+    EnvelopeFieldsV1 {
         envelope_version: EnvelopeVersion::default(),
         message_kind: MessageKindV1::WorkOrder,
         message_kind_version: MessageKindVersion::default(),
@@ -81,9 +82,14 @@ fn controller_envelope() -> EnvelopeV1 {
     }
 }
 
-/// A coder-produced envelope: provider fields and a receipt ref, per §3.0.
-fn coder_envelope() -> EnvelopeV1 {
-    EnvelopeV1 {
+/// A controller-produced envelope: no provider fields, no receipt ref.
+fn controller_envelope() -> EnvelopeV1 {
+    EnvelopeV1::new(controller_fields()).expect("the controller fixture must be admissible")
+}
+
+/// The coder shape as editable, unauthorised fields.
+fn coder_fields() -> EnvelopeFieldsV1 {
+    EnvelopeFieldsV1 {
         message_kind: MessageKindV1::CoderReport,
         producer_role: ProducerRole::Coder,
         producer_execution_id: id("exec-coder-1"),
@@ -91,8 +97,21 @@ fn coder_envelope() -> EnvelopeV1 {
         prompt_digest: Optional::present(digest("prompt")),
         tool_policy_digest: Optional::present(digest("tool-policy")),
         provider_execution_receipt_ref: Optional::present(receipt_ref()),
-        ..controller_envelope()
+        ..controller_fields()
     }
+}
+
+/// Edit an admitted envelope the only way there is: take its fields, change
+/// them, and construct again. The result is admitted or it does not exist.
+fn rebuilt(base: &EnvelopeV1, edit: impl FnOnce(&mut EnvelopeFieldsV1)) -> EnvelopeV1 {
+    let mut fields = base.to_fields();
+    edit(&mut fields);
+    EnvelopeV1::new(fields).expect("this edit must keep the envelope admissible")
+}
+
+/// A coder-produced envelope: provider fields and a receipt ref, per §3.0.
+fn coder_envelope() -> EnvelopeV1 {
+    EnvelopeV1::new(coder_fields()).expect("the coder fixture must be admissible")
 }
 
 // ---------------------------------------------------------------------------
@@ -246,11 +265,14 @@ fn a_payload_over_its_bound_is_rejected_not_truncated() {
 fn too_many_artifact_refs_are_rejected() {
     let env = controller_envelope();
     let too_many: Vec<ArtifactRef> = (0..=MAX_ARTIFACT_REFS)
-        .map(|i| ArtifactRef {
-            kind: ArtifactKindV1::Diff,
-            media_type: "text/x-diff".to_owned(),
-            digest: digest(&format!("blob-{i}")),
-            size: 1,
+        .map(|i| {
+            ArtifactRef::new(
+                ArtifactKindV1::Diff,
+                "text/x-diff",
+                digest(&format!("blob-{i}")),
+                1,
+            )
+            .expect("each ref is individually admissible")
         })
         .collect();
     // The bound is on the type, so an over-long list cannot even be built.
@@ -297,10 +319,12 @@ fn a_campaign_budget_above_the_hard_maximum_is_refused() {
 
 #[test]
 fn a_provider_artifact_without_a_receipt_ref_is_rejected() {
-    let mut env = coder_envelope();
-    env.provider_execution_receipt_ref = Optional::absent();
+    let fields = EnvelopeFieldsV1 {
+        provider_execution_receipt_ref: Optional::absent(),
+        ..coder_fields()
+    };
     assert!(matches!(
-        env.validate(),
+        EnvelopeV1::new(fields),
         Err(EnvelopeError::MissingProviderField {
             field: "provider_execution_receipt_ref",
             ..
@@ -310,10 +334,12 @@ fn a_provider_artifact_without_a_receipt_ref_is_rejected() {
 
 #[test]
 fn a_controller_artifact_carrying_a_receipt_ref_is_rejected() {
-    let mut env = controller_envelope();
-    env.provider_execution_receipt_ref = Optional::present(receipt_ref());
+    let fields = EnvelopeFieldsV1 {
+        provider_execution_receipt_ref: Optional::present(receipt_ref()),
+        ..controller_fields()
+    };
     assert!(matches!(
-        env.validate(),
+        EnvelopeV1::new(fields),
         Err(EnvelopeError::ForbiddenProviderField {
             field: "provider_execution_receipt_ref",
             ..
@@ -323,10 +349,12 @@ fn a_controller_artifact_carrying_a_receipt_ref_is_rejected() {
 
 #[test]
 fn a_controller_artifact_carrying_provider_evidence_is_rejected() {
-    let mut env = controller_envelope();
-    env.model_identity = Optional::present(model("claude-opus-5"));
+    let fields = EnvelopeFieldsV1 {
+        model_identity: Optional::present(model("claude-opus-5")),
+        ..controller_fields()
+    };
     assert!(matches!(
-        env.validate(),
+        EnvelopeV1::new(fields),
         Err(EnvelopeError::ForbiddenProviderField {
             field: "model_identity",
             ..
@@ -336,8 +364,8 @@ fn a_controller_artifact_carrying_provider_evidence_is_rejected() {
 
 #[test]
 fn well_formed_envelopes_of_both_shapes_validate() {
-    assert_eq!(controller_envelope().validate(), Ok(()));
-    assert_eq!(coder_envelope().validate(), Ok(()));
+    assert!(EnvelopeV1::new(controller_fields()).is_ok());
+    assert!(EnvelopeV1::new(coder_fields()).is_ok());
 }
 
 // ---------------------------------------------------------------------------
@@ -350,8 +378,11 @@ fn well_formed_envelopes_of_both_shapes_validate() {
 fn the_framed_digest_is_stable_and_excludes_created_at() {
     let env = controller_envelope();
     let before = env.framed_digest();
-    let mut redelivered = env.clone();
-    redelivered.created_at = Timestamp::parse("2099-01-01T00:00:00Z").expect("fixture timestamp");
+    let redelivered = EnvelopeV1::new(EnvelopeFieldsV1 {
+        created_at: Timestamp::parse("2099-01-01T00:00:00Z").expect("fixture timestamp"),
+        ..env.to_fields()
+    })
+    .expect("a different created_at is still admissible");
     // §5.4: "redelivery with a different created_at | replay". A clock
     // disagreeing must not change what an artifact *is*.
     assert_eq!(before, redelivered.framed_digest());
@@ -363,9 +394,10 @@ fn a_different_expected_input_head_is_a_different_identity() {
     // not a replay". The reducer decides that; the digest has to make it
     // *possible* to decide.
     let env = controller_envelope();
-    let mut moved = env.clone();
-    moved.expected_input_head = CommitId::parse(&"b".repeat(40)).ok().into();
-    assert_eq!(env.payload_digest, moved.payload_digest);
+    let moved = rebuilt(&env, |f| {
+        f.expected_input_head = CommitId::parse(&"b".repeat(40)).ok().into();
+    });
+    assert_eq!(env.payload_digest(), moved.payload_digest());
     assert_ne!(env.framed_digest(), moved.framed_digest());
 }
 
@@ -374,38 +406,34 @@ fn every_framed_field_changes_the_identity() {
     let base = controller_envelope();
     let d = base.framed_digest();
 
-    let mut kind = base.clone();
-    kind.message_kind = MessageKindV1::CoderReport;
+    let kind = rebuilt(&base, |f| f.message_kind = MessageKindV1::CoderReport);
     assert_ne!(d, kind.framed_digest(), "message_kind");
 
-    let mut msg = base.clone();
-    msg.message_id = id("msg-2");
+    let msg = rebuilt(&base, |f| f.message_id = id("msg-2"));
     assert_ne!(d, msg.framed_digest(), "message_id");
 
-    let mut role = base.clone();
-    role.producer_role = ProducerRole::Human;
+    let role = rebuilt(&base, |f| f.producer_role = ProducerRole::Human);
     assert_ne!(d, role.framed_digest(), "producer_role");
 
-    let mut payload = base.clone();
-    payload.payload_digest = WireDigest::of_bytes(b"other");
+    let payload = rebuilt(&base, |f| f.payload_digest = WireDigest::of_bytes(b"other"));
     assert_ne!(d, payload.framed_digest(), "payload_digest");
 
-    let mut contract = base.clone();
-    contract.contract_digest = digest("other-contract");
+    let contract = rebuilt(&base, |f| f.contract_digest = digest("other-contract"));
     assert_ne!(d, contract.framed_digest(), "contract_digest");
 
-    let mut round = base.clone();
-    round.round_id = Optional::absent();
+    let round = rebuilt(&base, |f| f.round_id = Optional::absent());
     assert_ne!(d, round.framed_digest(), "round_id absent vs present");
 
-    let mut refs = base.clone();
-    refs.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
-        kind: ArtifactKindV1::Diff,
-        media_type: "text/x-diff".to_owned(),
-        digest: digest("blob"),
-        size: 10,
-    }])
-    .expect("one ref is within the bound");
+    let refs = rebuilt(&base, |f| {
+        f.artifact_refs = ArtifactRefs::new(vec![ArtifactRef::new(
+            ArtifactKindV1::Diff,
+            "text/x-diff",
+            digest("blob"),
+            10,
+        )
+        .expect("admissible")])
+        .expect("one ref is within the bound");
+    });
     assert_ne!(d, refs.framed_digest(), "artifact_refs");
 }
 
@@ -413,29 +441,28 @@ fn every_framed_field_changes_the_identity() {
 fn a_ref_under_a_different_declared_media_type_is_a_different_reference() {
     // FD-1.7 / FD-2.5: "the same bytes under a different declared type are a
     // different reference".
-    let mut a = controller_envelope();
-    a.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
-        kind: ArtifactKindV1::Diff,
-        media_type: "text/x-diff".to_owned(),
-        digest: digest("blob"),
-        size: 10,
-    }])
-    .expect("one ref is within the bound");
-    let mut b = a.clone();
-    b.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
-        kind: ArtifactKindV1::Diff,
-        media_type: "application/octet-stream".to_owned(),
-        digest: digest("blob"),
-        size: 10,
-    }])
-    .expect("one ref is within the bound");
+    let with_media = |m: &str| {
+        rebuilt(&controller_envelope(), |f| {
+            f.artifact_refs = ArtifactRefs::new(vec![ArtifactRef::new(
+                ArtifactKindV1::Diff,
+                m,
+                digest("blob"),
+                10,
+            )
+            .expect("a well-formed evidence ref")])
+            .expect("one ref is within the bound");
+        })
+    };
+    let a = with_media("text/x-diff");
+    let b = with_media("application/octet-stream");
     assert_ne!(a.framed_digest(), b.framed_digest());
 }
 
 #[test]
 fn the_envelope_binds_the_exact_stored_payload_bytes() {
-    let mut env = controller_envelope();
-    env.payload_digest = WireDigest::of_bytes(br#"{"status":"candidate_produced"}"#);
+    let env = rebuilt(&controller_envelope(), |f| {
+        f.payload_digest = WireDigest::of_bytes(br#"{"status":"candidate_produced"}"#);
+    });
     assert!(env.binds_payload(br#"{"status":"candidate_produced"}"#));
     // FD-1.1: bytes are the artifact. A re-serialized payload with different
     // whitespace is a *different* payload, not an equivalent one.
@@ -462,9 +489,15 @@ fn a_ref_to_an_envelope_bearing_artifact_charges_both_halves() {
 /// a comment recommending the safer sibling is not an admission boundary.
 #[test]
 fn the_admission_path_enforces_cross_field_rules() {
-    let mut env = coder_envelope();
-    env.provider_execution_receipt_ref = Optional::absent();
-    let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
+    // The invalid envelope cannot be built as a value any more — that is the
+    // point of `EnvelopeV1::new`. So the *document* is built instead, by
+    // removing the receipt ref from an admissible one, which is what a
+    // non-conforming peer would actually send.
+    let mut value = serde_json::to_value(coder_envelope()).expect("fixture must serialize");
+    if let Some(map) = value.as_object_mut() {
+        map.remove("provider_execution_receipt_ref");
+    }
+    let bytes = value.to_string().into_bytes();
 
     // The cross-field rule now runs *inside* deserialization, so it surfaces as
     // a schema mismatch rather than a separate post-parse verdict — earlier,
@@ -558,20 +591,33 @@ fn a_rejected_artifact_never_appears_in_the_error() {
 /// pass validation.
 #[test]
 fn a_typed_non_envelope_ref_is_bounded_as_a_control_artifact() {
-    let oversized = ArtifactRef {
-        kind: ArtifactKindV1::ProviderExecutionReceipt,
-        media_type: typed_media_type(ArtifactKindV1::ProviderExecutionReceipt, 1),
-        digest: digest("receipt"),
-        size: MAX_CONTROL_ARTIFACT_BYTES + 1,
-    };
-    assert!(oversized.validate().is_err());
-
-    let mut env = coder_envelope();
-    env.provider_execution_receipt_ref = Optional::present(oversized);
+    // The ref itself is now unconstructible above its bound, which is a
+    // stronger statement than "a validator rejects it".
     assert!(matches!(
-        env.validate(),
-        Err(EnvelopeError::BadReceiptRef { .. })
+        ArtifactRef::new(
+            ArtifactKindV1::ProviderExecutionReceipt,
+            typed_media_type(ArtifactKindV1::ProviderExecutionReceipt, 1),
+            digest("receipt"),
+            MAX_CONTROL_ARTIFACT_BYTES + 1,
+        ),
+        Err(RefError::SizeAboveBound { .. })
     ));
+
+    // And the same over-bound receipt on the wire is refused by the envelope's
+    // own cross-field pass, which is the route a peer actually takes.
+    let mut value = serde_json::to_value(coder_envelope()).expect("fixture must serialize");
+    if let Some(map) = value.as_object_mut() {
+        map.insert(
+            "provider_execution_receipt_ref".to_owned(),
+            serde_json::json!({
+                "kind": "provider_execution_receipt",
+                "media_type": typed_media_type(ArtifactKindV1::ProviderExecutionReceipt, 1),
+                "digest": digest("receipt").as_str(),
+                "size": MAX_CONTROL_ARTIFACT_BYTES + 1,
+            }),
+        );
+    }
+    assert!(parse_artifact::<EnvelopeV1>(&value.to_string().into_bytes()).is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -623,39 +669,51 @@ fn a_malformed_digest_never_quotes_itself_on_any_path() {
 /// artifact it claims to point at.
 #[test]
 fn a_typed_ref_must_declare_its_frozen_media_type() {
-    let mut env = controller_envelope();
-    env.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
-        kind: ArtifactKindV1::WorkOrder,
-        media_type: "text/x-diff".to_owned(),
-        digest: digest("order"),
-        size: 10,
-    }])
-    .expect("one ref is within the bound");
-    let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
+    // A typed ref under the wrong media type is unconstructible, so the
+    // document is built directly — the shape a non-conforming peer sends.
+    assert!(ArtifactRef::new(
+        ArtifactKindV1::WorkOrder,
+        "text/x-diff",
+        digest("order"),
+        10
+    )
+    .is_err());
+    let with_ref = |media: String| {
+        let mut v = serde_json::to_value(controller_envelope()).expect("fixture must serialize");
+        if let Some(map) = v.as_object_mut() {
+            map.insert(
+                "artifact_refs".to_owned(),
+                serde_json::json!([{
+                    "kind": "work_order",
+                    "media_type": media,
+                    "digest": digest("order").as_str(),
+                    "size": 10,
+                }]),
+            );
+        }
+        v.to_string().into_bytes()
+    };
+    let bytes = with_ref("text/x-diff".to_owned());
     assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
     assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
 
     // The same ref with its frozen media type is admissible.
-    env.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
-        kind: ArtifactKindV1::WorkOrder,
-        media_type: typed_media_type(ArtifactKindV1::WorkOrder, 1),
-        digest: digest("order"),
-        size: 10,
-    }])
-    .expect("one ref is within the bound");
-    let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
+    let bytes = with_ref(typed_media_type(ArtifactKindV1::WorkOrder, 1));
     assert!(parse_artifact::<EnvelopeV1>(&bytes).is_ok());
 
     // An evidence blob keeps its own concrete type: FD-1.7 constrains typed A1
     // artifacts, not blobs.
-    env.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
-        kind: ArtifactKindV1::Diff,
-        media_type: "text/x-diff".to_owned(),
-        digest: digest("blob"),
-        size: 10,
-    }])
-    .expect("one ref is within the bound");
-    let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
+    let blob = rebuilt(&controller_envelope(), |f| {
+        f.artifact_refs = ArtifactRefs::new(vec![ArtifactRef::new(
+            ArtifactKindV1::Diff,
+            "text/x-diff",
+            digest("blob"),
+            10,
+        )
+        .expect("an evidence blob keeps its own concrete type")])
+        .expect("one ref is within the bound");
+    });
+    let bytes = serde_json::to_vec(&blob).expect("fixture must serialize");
     assert!(parse_artifact::<EnvelopeV1>(&bytes).is_ok());
 }
 
@@ -687,9 +745,15 @@ fn the_public_and_wire_envelope_forms_do_not_drift() {
 /// to keep it true, which is why this one now only has to check the rule.
 #[test]
 fn the_only_admission_route_rejects_a_provider_envelope_without_its_receipt() {
-    let mut env = coder_envelope();
-    env.provider_execution_receipt_ref = Optional::absent();
-    let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
+    // The invalid envelope cannot be built as a value any more — that is the
+    // point of `EnvelopeV1::new`. So the *document* is built instead, by
+    // removing the receipt ref from an admissible one, which is what a
+    // non-conforming peer would actually send.
+    let mut value = serde_json::to_value(coder_envelope()).expect("fixture must serialize");
+    if let Some(map) = value.as_object_mut() {
+        map.remove("provider_execution_receipt_ref");
+    }
+    let bytes = value.to_string().into_bytes();
 
     assert!(parse_artifact::<EnvelopeV1>(&bytes).is_err());
 
@@ -704,31 +768,31 @@ fn the_only_admission_route_rejects_a_provider_envelope_without_its_receipt() {
 /// question and does not make it an evidence blob.
 #[test]
 fn an_interaction_manifest_is_typed_for_media_type_and_large_for_size() {
-    let wrong = ArtifactRef {
-        kind: ArtifactKindV1::InteractionManifest,
-        media_type: "application/octet-stream".to_owned(),
-        digest: digest("manifest"),
-        size: 1,
-    };
-    assert!(wrong.validate().is_err());
+    assert!(ArtifactRef::new(
+        ArtifactKindV1::InteractionManifest,
+        "application/octet-stream",
+        digest("manifest"),
+        1,
+    )
+    .is_err());
 
-    let manifest_of = |size| ArtifactRef {
-        kind: ArtifactKindV1::InteractionManifest,
-        media_type: typed_media_type(ArtifactKindV1::InteractionManifest, 1),
-        digest: digest("manifest"),
-        size,
+    let manifest_of = |size| {
+        ArtifactRef::new(
+            ArtifactKindV1::InteractionManifest,
+            typed_media_type(ArtifactKindV1::InteractionManifest, 1),
+            digest("manifest"),
+            size,
+        )
     };
 
     // Larger than a control artifact, which is the point of the separate size
     // classification.
-    assert!(manifest_of(MAX_CONTROL_ARTIFACT_BYTES * 4)
-        .validate()
-        .is_ok());
+    assert!(manifest_of(MAX_CONTROL_ARTIFACT_BYTES * 4).is_ok());
 
     // S1 fixed the exact edge, so the edge is what gets asserted. Before the
     // supersede this pair would have pinned a reading rather than the contract.
-    assert!(manifest_of(MAX_EVIDENCE_BLOB_BYTES).validate().is_ok());
-    assert!(manifest_of(MAX_EVIDENCE_BLOB_BYTES + 1).validate().is_err());
+    assert!(manifest_of(MAX_EVIDENCE_BLOB_BYTES).is_ok());
+    assert!(manifest_of(MAX_EVIDENCE_BLOB_BYTES + 1).is_err());
 }
 
 /// `ArtifactRef` had the same shape of hole `EnvelopeV1` did, and it is closed
@@ -885,16 +949,20 @@ fn the_element_past_the_cap_is_never_materialised() {
 /// pins is the rule the door was bypassing.
 #[test]
 fn an_oversized_but_otherwise_valid_envelope_is_refused_by_the_byte_bound() {
-    let mut env = controller_envelope();
     let refs: Vec<ArtifactRef> = (0..MAX_ARTIFACT_REFS)
-        .map(|i| ArtifactRef {
-            kind: ArtifactKindV1::Diff,
-            media_type: format!("text/x-diff;p={}", "a".repeat(60_000)),
-            digest: digest(&format!("blob-{i}")),
-            size: 1,
+        .map(|i| {
+            ArtifactRef::new(
+                ArtifactKindV1::Diff,
+                format!("text/x-diff;p={}", "a".repeat(60_000)),
+                digest(&format!("blob-{i}")),
+                1,
+            )
+            .expect("each ref is individually admissible")
         })
         .collect();
-    env.artifact_refs = ArtifactRefs::new(refs).expect("exactly at the ref-count bound");
+    let env = rebuilt(&controller_envelope(), |f| {
+        f.artifact_refs = ArtifactRefs::new(refs).expect("exactly at the ref-count bound");
+    });
     let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
     assert!(bytes.len() as u64 > MAX_CONTROL_ARTIFACT_BYTES * 14);
 
@@ -905,14 +973,16 @@ fn an_oversized_but_otherwise_valid_envelope_is_refused_by_the_byte_bound() {
 
     // The rejection is the byte bound and not some other rule: the same
     // construction with few enough refs to fit under the ceiling is admitted.
-    let mut small = controller_envelope();
-    small.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
-        kind: ArtifactKindV1::Diff,
-        media_type: format!("text/x-diff;p={}", "a".repeat(60_000)),
-        digest: digest("blob-0"),
-        size: 1,
-    }])
-    .expect("one ref");
+    let small = rebuilt(&controller_envelope(), |f| {
+        f.artifact_refs = ArtifactRefs::new(vec![ArtifactRef::new(
+            ArtifactKindV1::Diff,
+            format!("text/x-diff;p={}", "a".repeat(60_000)),
+            digest("blob-0"),
+            1,
+        )
+        .expect("admissible")])
+        .expect("one ref");
+    });
     let small = serde_json::to_vec(&small).expect("fixture must serialize");
     assert!(parse_artifact::<EnvelopeV1>(&small).is_ok());
 
@@ -920,4 +990,101 @@ fn an_oversized_but_otherwise_valid_envelope_is_refused_by_the_byte_bound() {
     // for the same reason: each isolated the rejecting layer by pointing a
     // caller-supplied ceiling at the document, and a ceiling a caller can
     // choose is the defect, not the instrument for measuring it.
+}
+
+/// Admission is a **postcondition**, and it survives editing.
+///
+/// The defect this closes: `EnvelopeV1` had public fields, so
+/// `env.producer_role = Coder` on an envelope that had just been admitted
+/// produced an admitted-typed value violating its own cross-field contract.
+/// Admission was closed at the front and open at the back.
+///
+/// The role flip is the reported case, and it is deliberately not the only one
+/// here. Every field the cross-field rule reads is exercised in both
+/// directions, because a fix aimed at the one witness in hand is how the same
+/// defect came back three times on this PR.
+#[test]
+fn no_edit_can_turn_an_admitted_envelope_into_an_invalid_one() {
+    let controller = controller_envelope();
+    let coder = coder_envelope();
+
+    // The reported witness: an admitted controller envelope re-roled to a
+    // provider without acquiring any provider evidence.
+    assert!(matches!(
+        EnvelopeV1::new(EnvelopeFieldsV1 {
+            producer_role: ProducerRole::Coder,
+            ..controller.to_fields()
+        }),
+        Err(EnvelopeError::MissingProviderField { .. })
+    ));
+
+    // ...and the mirror: a provider envelope re-roled to controller while
+    // keeping the evidence that only a provider may carry.
+    assert!(matches!(
+        EnvelopeV1::new(EnvelopeFieldsV1 {
+            producer_role: ProducerRole::Controller,
+            ..coder.to_fields()
+        }),
+        Err(EnvelopeError::ForbiddenProviderField { .. })
+    ));
+
+    // Each provider-only field, added to a controller envelope one at a time.
+    type Edit = (&'static str, fn(&mut EnvelopeFieldsV1));
+    let additions: [Edit; 4] = [
+        ("model_identity", |f| {
+            f.model_identity = Optional::present(model("claude-opus-5"));
+        }),
+        ("prompt_digest", |f| {
+            f.prompt_digest = Optional::present(digest("prompt"));
+        }),
+        ("tool_policy_digest", |f| {
+            f.tool_policy_digest = Optional::present(digest("tool-policy"));
+        }),
+        ("provider_execution_receipt_ref", |f| {
+            f.provider_execution_receipt_ref = Optional::present(receipt_ref());
+        }),
+    ];
+    for (name, add) in additions {
+        let mut fields = controller.to_fields();
+        add(&mut fields);
+        assert!(
+            matches!(
+                EnvelopeV1::new(fields),
+                Err(EnvelopeError::ForbiddenProviderField { .. })
+            ),
+            "a controller envelope must not acquire {name}"
+        );
+    }
+
+    // Each provider-only field, removed from a provider envelope one at a time.
+    let removals: [Edit; 4] = [
+        ("model_identity", |f| f.model_identity = Optional::absent()),
+        ("prompt_digest", |f| f.prompt_digest = Optional::absent()),
+        ("tool_policy_digest", |f| {
+            f.tool_policy_digest = Optional::absent();
+        }),
+        ("provider_execution_receipt_ref", |f| {
+            f.provider_execution_receipt_ref = Optional::absent();
+        }),
+    ];
+    for (name, remove) in removals {
+        let mut fields = coder.to_fields();
+        remove(&mut fields);
+        assert!(
+            matches!(
+                EnvelopeV1::new(fields),
+                Err(EnvelopeError::MissingProviderField { .. })
+            ),
+            "a provider envelope must not lose {name}"
+        );
+    }
+
+    // An edit that keeps the contract satisfied still succeeds, so the rule
+    // above is the cross-field check and not a constructor that refuses
+    // everything.
+    assert!(EnvelopeV1::new(EnvelopeFieldsV1 {
+        message_id: id("msg-edited"),
+        ..controller.to_fields()
+    })
+    .is_ok());
 }

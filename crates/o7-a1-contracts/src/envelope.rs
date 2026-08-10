@@ -121,9 +121,14 @@ struct EnvelopeWireV1 {
     created_at: Timestamp,
 }
 
-impl From<EnvelopeWireV1> for EnvelopeV1 {
-    fn from(w: EnvelopeWireV1) -> Self {
-        Self {
+/// The wire form converts to **fields**, never straight to an envelope: fields
+/// carry no authority, so an infallible conversion into them is honest. The
+/// step from fields to `EnvelopeV1` is [`EnvelopeV1::new`], and it checks.
+impl TryFrom<EnvelopeWireV1> for EnvelopeFieldsV1 {
+    type Error = EnvelopeError;
+
+    fn try_from(w: EnvelopeWireV1) -> Result<Self, EnvelopeError> {
+        Ok(Self {
             envelope_version: w.envelope_version,
             message_kind: w.message_kind,
             message_kind_version: w.message_kind_version,
@@ -143,10 +148,16 @@ impl From<EnvelopeWireV1> for EnvelopeV1 {
             contract_digest: w.contract_digest,
             expected_input_head: w.expected_input_head,
             payload_digest: w.payload_digest,
-            artifact_refs: w.artifact_refs.map_into(),
-            provider_execution_receipt_ref: w.provider_execution_receipt_ref.map_into(),
+            artifact_refs: w
+                .artifact_refs
+                .try_map_into()
+                .map_err(|(index, source)| EnvelopeError::BadRef { index, source })?,
+            provider_execution_receipt_ref: w
+                .provider_execution_receipt_ref
+                .try_map_into()
+                .map_err(|source| EnvelopeError::BadReceiptRef { source })?,
             created_at: w.created_at,
-        }
+        })
     }
 }
 
@@ -159,6 +170,48 @@ impl From<EnvelopeWireV1> for EnvelopeV1 {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnvelopeV1 {
+    envelope_version: EnvelopeVersion,
+    message_kind: MessageKindV1,
+    message_kind_version: MessageKindVersion,
+    message_id: Id,
+    root_goal_id: Id,
+    task_id: Id,
+    campaign_id: Id,
+    #[serde(default, skip_serializing_if = "Optional::is_absent")]
+    round_id: Optional<Id>,
+    #[serde(default, skip_serializing_if = "Optional::is_absent")]
+    causation_id: Optional<Id>,
+    correlation_id: Id,
+    producer_role: ProducerRole,
+    producer_execution_id: Id,
+    producer_adapter_version: AdapterVersion,
+    #[serde(default, skip_serializing_if = "Optional::is_absent")]
+    model_identity: Optional<ModelIdentity>,
+    #[serde(default, skip_serializing_if = "Optional::is_absent")]
+    prompt_digest: Optional<WireDigest>,
+    #[serde(default, skip_serializing_if = "Optional::is_absent")]
+    tool_policy_digest: Optional<WireDigest>,
+    contract_digest: WireDigest,
+    #[serde(default, skip_serializing_if = "Optional::is_absent")]
+    expected_input_head: Optional<CommitId>,
+    payload_digest: WireDigest,
+    artifact_refs: ArtifactRefs,
+    #[serde(default, skip_serializing_if = "Optional::is_absent")]
+    provider_execution_receipt_ref: Optional<ArtifactRef>,
+    created_at: Timestamp,
+}
+
+/// The producer-side input to [`EnvelopeV1::new`] — **not** an admitted
+/// artifact.
+///
+/// Its fields are public and freely mutable on purpose: a caller may turn a
+/// reviewer into a controller and back three times, because nothing here
+/// carries authority. Authority appears only after checked construction, and
+/// `EnvelopeFieldsV1` deliberately does not implement `Deserialize`: a public
+/// `bytes -> partially-validated aggregate` route is exactly what the admission
+/// path exists to not have.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvelopeFieldsV1 {
     pub envelope_version: EnvelopeVersion,
     pub message_kind: MessageKindV1,
     pub message_kind_version: MessageKindVersion,
@@ -166,28 +219,205 @@ pub struct EnvelopeV1 {
     pub root_goal_id: Id,
     pub task_id: Id,
     pub campaign_id: Id,
-    #[serde(default, skip_serializing_if = "Optional::is_absent")]
     pub round_id: Optional<Id>,
-    #[serde(default, skip_serializing_if = "Optional::is_absent")]
     pub causation_id: Optional<Id>,
     pub correlation_id: Id,
     pub producer_role: ProducerRole,
     pub producer_execution_id: Id,
     pub producer_adapter_version: AdapterVersion,
-    #[serde(default, skip_serializing_if = "Optional::is_absent")]
     pub model_identity: Optional<ModelIdentity>,
-    #[serde(default, skip_serializing_if = "Optional::is_absent")]
     pub prompt_digest: Optional<WireDigest>,
-    #[serde(default, skip_serializing_if = "Optional::is_absent")]
     pub tool_policy_digest: Optional<WireDigest>,
     pub contract_digest: WireDigest,
-    #[serde(default, skip_serializing_if = "Optional::is_absent")]
     pub expected_input_head: Optional<CommitId>,
     pub payload_digest: WireDigest,
     pub artifact_refs: ArtifactRefs,
-    #[serde(default, skip_serializing_if = "Optional::is_absent")]
     pub provider_execution_receipt_ref: Optional<ArtifactRef>,
     pub created_at: Timestamp,
+}
+
+impl EnvelopeV1 {
+    /// The only public way to build an envelope.
+    ///
+    /// # Errors
+    /// [`EnvelopeError`] if the fields are individually admissible but jointly
+    /// are not — provider evidence against the producer role, or an
+    /// inadmissible reference.
+    pub fn new(f: EnvelopeFieldsV1) -> Result<Self, EnvelopeError> {
+        let candidate = Self {
+            envelope_version: f.envelope_version,
+            message_kind: f.message_kind,
+            message_kind_version: f.message_kind_version,
+            message_id: f.message_id,
+            root_goal_id: f.root_goal_id,
+            task_id: f.task_id,
+            campaign_id: f.campaign_id,
+            round_id: f.round_id,
+            causation_id: f.causation_id,
+            correlation_id: f.correlation_id,
+            producer_role: f.producer_role,
+            producer_execution_id: f.producer_execution_id,
+            producer_adapter_version: f.producer_adapter_version,
+            model_identity: f.model_identity,
+            prompt_digest: f.prompt_digest,
+            tool_policy_digest: f.tool_policy_digest,
+            contract_digest: f.contract_digest,
+            expected_input_head: f.expected_input_head,
+            payload_digest: f.payload_digest,
+            artifact_refs: f.artifact_refs,
+            provider_execution_receipt_ref: f.provider_execution_receipt_ref,
+            created_at: f.created_at,
+        };
+        candidate.validate()?;
+        Ok(candidate)
+    }
+
+    /// Copy this envelope's values out as editable, **unauthorised** fields.
+    ///
+    /// This is the whole of "rebuild": edit the fields, call [`Self::new`].
+    /// There is deliberately no in-place `rebuild(&mut self)` — an admitted
+    /// object is never mutated and then checked, because between those two
+    /// statements it is an admitted-typed value that violates its own
+    /// invariant, and anything reading it there (a panic handler, a log, a
+    /// concurrent borrow) sees a state the type claims cannot exist.
+    #[must_use]
+    pub fn to_fields(&self) -> EnvelopeFieldsV1 {
+        EnvelopeFieldsV1 {
+            envelope_version: self.envelope_version,
+            message_kind: self.message_kind,
+            message_kind_version: self.message_kind_version,
+            message_id: self.message_id.clone(),
+            root_goal_id: self.root_goal_id.clone(),
+            task_id: self.task_id.clone(),
+            campaign_id: self.campaign_id.clone(),
+            round_id: self.round_id.clone(),
+            causation_id: self.causation_id.clone(),
+            correlation_id: self.correlation_id.clone(),
+            producer_role: self.producer_role,
+            producer_execution_id: self.producer_execution_id.clone(),
+            producer_adapter_version: self.producer_adapter_version.clone(),
+            model_identity: self.model_identity.clone(),
+            prompt_digest: self.prompt_digest.clone(),
+            tool_policy_digest: self.tool_policy_digest.clone(),
+            contract_digest: self.contract_digest.clone(),
+            expected_input_head: self.expected_input_head.clone(),
+            payload_digest: self.payload_digest.clone(),
+            artifact_refs: self.artifact_refs.clone(),
+            provider_execution_receipt_ref: self.provider_execution_receipt_ref.clone(),
+            created_at: self.created_at.clone(),
+        }
+    }
+
+    /// §3.0 — `envelope_version`, frozen by FD-1.6.
+    #[must_use]
+    pub fn envelope_version(&self) -> u32 {
+        self.envelope_version.get()
+    }
+    /// §3.0 — `message_kind`.
+    #[must_use]
+    pub fn message_kind(&self) -> MessageKindV1 {
+        self.message_kind
+    }
+    /// §3.0 — `message_kind_version`, frozen by FD-1.6.
+    #[must_use]
+    pub fn message_kind_version(&self) -> u32 {
+        self.message_kind_version.get()
+    }
+    /// §3.0 — `message_id`.
+    #[must_use]
+    pub fn message_id(&self) -> &Id {
+        &self.message_id
+    }
+    /// §3.0 — `root_goal_id`.
+    #[must_use]
+    pub fn root_goal_id(&self) -> &Id {
+        &self.root_goal_id
+    }
+    /// §3.0 — `task_id`.
+    #[must_use]
+    pub fn task_id(&self) -> &Id {
+        &self.task_id
+    }
+    /// §3.0 — `campaign_id`.
+    #[must_use]
+    pub fn campaign_id(&self) -> &Id {
+        &self.campaign_id
+    }
+    /// §3.0 — `round_id`.
+    #[must_use]
+    pub fn round_id(&self) -> &Optional<Id> {
+        &self.round_id
+    }
+    /// §3.0 — `causation_id`.
+    #[must_use]
+    pub fn causation_id(&self) -> &Optional<Id> {
+        &self.causation_id
+    }
+    /// §3.0 — `correlation_id`.
+    #[must_use]
+    pub fn correlation_id(&self) -> &Id {
+        &self.correlation_id
+    }
+    /// §3.0 — `producer_role`.
+    #[must_use]
+    pub fn producer_role(&self) -> ProducerRole {
+        self.producer_role
+    }
+    /// §3.0 — `producer_execution_id`.
+    #[must_use]
+    pub fn producer_execution_id(&self) -> &Id {
+        &self.producer_execution_id
+    }
+    /// §3.0 — `producer_adapter_version`.
+    #[must_use]
+    pub fn producer_adapter_version(&self) -> &AdapterVersion {
+        &self.producer_adapter_version
+    }
+    /// §3.0 — `model_identity`.
+    #[must_use]
+    pub fn model_identity(&self) -> &Optional<ModelIdentity> {
+        &self.model_identity
+    }
+    /// §3.0 — `prompt_digest`.
+    #[must_use]
+    pub fn prompt_digest(&self) -> &Optional<WireDigest> {
+        &self.prompt_digest
+    }
+    /// §3.0 — `tool_policy_digest`.
+    #[must_use]
+    pub fn tool_policy_digest(&self) -> &Optional<WireDigest> {
+        &self.tool_policy_digest
+    }
+    /// §3.0 — `contract_digest`.
+    #[must_use]
+    pub fn contract_digest(&self) -> &WireDigest {
+        &self.contract_digest
+    }
+    /// §3.0 — `expected_input_head`.
+    #[must_use]
+    pub fn expected_input_head(&self) -> &Optional<CommitId> {
+        &self.expected_input_head
+    }
+    /// §3.0 — `payload_digest`.
+    #[must_use]
+    pub fn payload_digest(&self) -> &WireDigest {
+        &self.payload_digest
+    }
+    /// §3.0 — `artifact_refs`.
+    #[must_use]
+    pub fn artifact_refs(&self) -> &ArtifactRefs {
+        &self.artifact_refs
+    }
+    /// §3.0 — `provider_execution_receipt_ref`.
+    #[must_use]
+    pub fn provider_execution_receipt_ref(&self) -> &Optional<ArtifactRef> {
+        &self.provider_execution_receipt_ref
+    }
+    /// §3.0 — `created_at`.
+    #[must_use]
+    pub fn created_at(&self) -> &Timestamp {
+        &self.created_at
+    }
 }
 
 impl EnvelopeV1 {
@@ -222,14 +452,14 @@ impl EnvelopeV1 {
             .frame_optional_str(
                 self.provider_execution_receipt_ref
                     .as_ref()
-                    .map(|r| r.digest.as_str()),
+                    .map(|r| r.digest().as_str()),
             )
             .frame_u64(self.artifact_refs.len() as u64);
         for r in &self.artifact_refs {
-            p.frame_str(r.kind.name())
-                .frame_str(&r.media_type)
-                .frame_str(r.digest.as_str())
-                .frame_u64(r.size);
+            p.frame_str(r.kind().name())
+                .frame_str(r.media_type())
+                .frame_str(r.digest().as_str())
+                .frame_u64(r.size());
         }
         p.digest()
     }
@@ -239,7 +469,7 @@ impl EnvelopeV1 {
     /// # Errors
     /// [`EnvelopeError`] for provider-only evidence on a non-provider role (or
     /// missing on a provider role), too many refs, or a bad ref.
-    pub fn validate(&self) -> Result<(), EnvelopeError> {
+    fn validate(&self) -> Result<(), EnvelopeError> {
         let role = self.producer_role;
         let provider = role.is_provider_role();
         for (field, present) in [
@@ -304,7 +534,15 @@ impl FromDocument for EnvelopeV1 {
             serde_json::from_value(value).map_err(|e| crate::json::ParseError::SchemaMismatch {
                 category: crate::json::classify(&e),
             })?;
-        Ok(Self::from(wire))
+        // Wire -> fields -> checked construction. There is no route, on any
+        // side of the boundary, that yields an `EnvelopeV1` without validation.
+        let fields =
+            EnvelopeFieldsV1::try_from(wire).map_err(|e| crate::json::ParseError::Invalid {
+                reason: e.to_string(),
+            })?;
+        Self::new(fields).map_err(|e| crate::json::ParseError::Invalid {
+            reason: e.to_string(),
+        })
     }
 }
 

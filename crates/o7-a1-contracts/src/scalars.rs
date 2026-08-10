@@ -553,12 +553,17 @@ impl<'de, const V: u32> Deserialize<'de> for FrozenVersion<V> {
 pub struct BoundedVec<T, const MAX: usize>(Vec<T>);
 
 impl<T, const MAX: usize> BoundedVec<T, MAX> {
-    /// Convert every element into `U`, preserving the bound.
-    ///
-    /// Infallible by construction: the length is unchanged and was already
-    /// within the cap, so nothing is re-checked and nothing is skipped.
-    pub(crate) fn map_into<U: From<T>>(self) -> BoundedVec<U, MAX> {
-        BoundedVec(self.0.into_iter().map(U::from).collect())
+    /// Fallible [`Self::map_into`], for an element type whose construction is
+    /// checked. The bound is preserved for the same reason.
+    pub(crate) fn try_map_into<U, E>(self) -> Result<BoundedVec<U, MAX>, (usize, E)>
+    where
+        U: TryFrom<T, Error = E>,
+    {
+        let mut out = Vec::with_capacity(self.0.len());
+        for (index, item) in self.0.into_iter().enumerate() {
+            out.push(U::try_from(item).map_err(|e| (index, e))?);
+        }
+        Ok(BoundedVec(out))
     }
 
     /// # Errors
@@ -745,9 +750,15 @@ impl<T> Optional<T> {
         self.0.as_ref()
     }
 
-    /// Convert a present value into `U`, preserving absence.
-    pub(crate) fn map_into<U: From<T>>(self) -> Optional<U> {
-        Optional(self.0.map(U::from), PhantomData)
+    /// Fallible [`Self::map_into`].
+    pub(crate) fn try_map_into<U, E>(self) -> Result<Optional<U>, E>
+    where
+        U: TryFrom<T, Error = E>,
+    {
+        match self.0 {
+            Some(v) => Ok(Optional(Some(U::try_from(v)?), PhantomData)),
+            None => Ok(Optional(None, PhantomData)),
+        }
     }
 }
 
