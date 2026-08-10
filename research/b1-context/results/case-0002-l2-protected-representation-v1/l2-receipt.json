@@ -10,12 +10,20 @@
   "case_role": "development",
   "caveats": [
     "DECODING: reasoning disabled at the provider key level for every model and every arm, identically, exactly as in L1. The question asked is therefore whether the representation is directly legible without a deliberation subsidy; a large reasoning budget was not tested and was operationally infeasible (it produced provider gateway 502s in L1).",
-    "SCALE: development ablation -- 3 tasks, 11 questions, N=3, 132 paired cells per arm per family. A development signal, not a significance test; strength comes from the consistent direction across four independent families and from the mechanism axes going to exactly zero.",
+    "SCALE: development ablation -- 3 tasks, 11 questions, N=3, 33 paired cells per model per arm, 132 pooled per arm. A development signal, not a significance test; strength comes from the consistent direction across four independent families and from the mechanism axes going to exactly zero.",
     "PROVIDER IDENTITY: provider routing identity was verified by the qualified boundary (requested == reported on every attempt, no substitution), but underlying community-hosted weights were not independently attested; model self-identification was inconsistent and is treated as non-authoritative output. This is a limit of provider identity assurance, not a substitution failure.",
     "STRUCTURAL: both Qodec arms are byte-lossless (exact decode roundtrip verified on all three protected encodings). Every difference measured here is model comprehension, not fidelity.",
     "ABSOLUTE BASELINE: RAW correctness is modest (12-22 of 33) because these are small/mid open models with reasoning off. The load-bearing quantities are within-model relative differences."
   ],
-  "finding": "Identifier protection eliminated referential corruption completely and did not restore parity. Across 4 model families x 132 paired cells per arm, protecting every observation identity drove fabricated/garbled identifiers from 19 to 0 and leaked legend glyphs from 23 to 0 -- exactly the RAW baseline of zero on both axes -- and recovered most of the correctness gap (FULL_ALIAS 48 -> PROTECTED 64, RAW 70). But no model reached zero paired hard regressions, so non-inferiority fails everywhere, and the residual deficit sits almost entirely in missing_required_witness (RAW 57, PROTECTED 68, FULL_ALIAS 75): the model still reads the compressed grammar less thoroughly than raw JSON even when every identifier is literal. GLM-4.7 is the decisive witness that the residual is NOT about identifiers -- its FULL_ALIAS arm had zero fabrications and zero glyph leaks yet still lost 17 -> 14, and protection moved it only to 15 with hard regressions unchanged at 6.",
+  "cell_accounting": {
+    "cells_per_arm_pooled": 132,
+    "cells_per_model_per_arm": 33,
+    "models": 4,
+    "note": "corrected wording; no numeric result changed",
+    "questions_total": 11,
+    "replicates": 3
+  },
+  "finding": "Identifier protection eliminated referential corruption completely and did not restore parity. Across 4 model families, 33 paired cells per model per arm (132 pooled per arm), protecting every observation identity drove fabricated/garbled identifiers from 19 to 0 and leaked legend glyphs from 23 to 0 -- exactly the RAW baseline of zero on both axes -- and recovered most of the correctness gap (FULL_ALIAS 48 -> PROTECTED 64, RAW 70). But no model reached zero paired hard regressions, so non-inferiority fails everywhere, and the residual deficit sits almost entirely in missing_required_witness (RAW 57, PROTECTED 68, FULL_ALIAS 75): the model still reads the compressed grammar less thoroughly than raw JSON even when every identifier is literal. GLM-4.7 is the decisive witness that the residual is NOT about identifiers -- its FULL_ALIAS arm had zero fabrications and zero glyph leaks yet still lost 17 -> 14, and protection moved it only to 15 with hard regressions unchanged at 6.",
   "freeze_manifest_sha256": "sha256:affaa897baed7cb21640c867d1f8652ead0c65e63c8e4a9a45367bc330aa9928",
   "frozen": {
     "adapter": "f8fa87e349c48de0678ccc4a4ba4be14463dfc85",

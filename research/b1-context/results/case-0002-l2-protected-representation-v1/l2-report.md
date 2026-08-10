@@ -26,7 +26,7 @@ from **no** `required_observation_ids`, no expected answers, no L1 failure list.
 
 ## Result — corruption eliminated, parity not reached
 
-Pooled over 4 model families, 132 paired cells per arm:
+Pooled over 4 model families — 33 paired cells per model per arm, **132 pooled per arm**:
 
 | axis | RAW_VALID | QODEC_FULL_ALIAS | QODEC_LITERAL_IDENTIFIERS |
 |---|---|---|---|
@@ -91,7 +91,7 @@ protection keeps a substantial, real token win.
 1. **No reasoning**, identically in every arm and model (as in L1). This measures direct
    legibility without a deliberation subsidy; a large reasoning budget was untested and was
    operationally infeasible (provider gateway 502s in L1).
-2. **Development scale** — 3 tasks, 11 questions, N=3, 132 paired cells/arm/family. Strength
+2. **Development scale** — 3 tasks, 11 questions, N=3, 33 cells/model/arm, 132 pooled per arm. Strength
    comes from the consistent direction across four families and from two axes going to
    exactly zero, not from sample size.
 3. **Provider identity**: routing identity verified by the qualified boundary
