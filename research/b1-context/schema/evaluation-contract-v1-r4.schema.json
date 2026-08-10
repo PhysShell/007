@@ -1,0 +1,1109 @@
+{
+  "$defs": {
+    "dual_id": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_bytes_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "byte_length": {
+          "$ref": "#/$defs/nonneg"
+        },
+        "canonical_object_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "logical_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "logical_id",
+        "artifact_bytes_sha256",
+        "canonical_object_sha256",
+        "byte_length"
+      ],
+      "type": "object"
+    },
+    "gate_id": {
+      "pattern": "^gate-(0[1-9]|1[01])$",
+      "type": "string"
+    },
+    "gitsha": {
+      "pattern": "^[0-9a-f]{40}$",
+      "type": "string"
+    },
+    "nonneg": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "obsid": {
+      "pattern": "^obs-[a-z0-9-]+$",
+      "type": "string"
+    },
+    "pair_shape": {
+      "enum": [
+        "incomparable",
+        "left_strict_superset"
+      ]
+    },
+    "private_body": {
+      "additionalProperties": false,
+      "description": "Private derived body: artifact-bytes digest ONLY (bodies carry no canonical-object digest). session_id uniqueness is an evaluator consistency check.",
+      "properties": {
+        "artifact_bytes_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "byte_length": {
+          "$ref": "#/$defs/nonneg"
+        },
+        "record_count": {
+          "$ref": "#/$defs/nonneg"
+        },
+        "session_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "visibility": {
+          "const": "private"
+        }
+      },
+      "required": [
+        "session_id",
+        "visibility",
+        "artifact_bytes_sha256",
+        "byte_length",
+        "record_count"
+      ],
+      "type": "object"
+    },
+    "projection_only_family": {
+      "additionalProperties": false,
+      "properties": {
+        "full_derived": {
+          "const": "NOT_APPLICABLE"
+        },
+        "negative_control": {
+          "const": "NOT_APPLICABLE"
+        },
+        "projection": {
+          "const": "required"
+        }
+      },
+      "required": [
+        "projection",
+        "full_derived",
+        "negative_control"
+      ],
+      "type": "object"
+    },
+    "public_structured_keyed_map": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_bytes_sha256": {
+            "$ref": "#/$defs/sha256"
+          },
+          "byte_length": {
+            "$ref": "#/$defs/nonneg"
+          },
+          "canonical_object_sha256": {
+            "$ref": "#/$defs/sha256"
+          },
+          "visibility": {
+            "const": "public"
+          }
+        },
+        "required": [
+          "visibility",
+          "artifact_bytes_sha256",
+          "canonical_object_sha256",
+          "byte_length"
+        ],
+        "type": "object"
+      },
+      "description": "Logical id is the mapping KEY (not a field). Each value is a public structured input carrying both digest domains and byte length.",
+      "minProperties": 1,
+      "type": "object"
+    },
+    "public_structured_named": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_bytes_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "byte_length": {
+          "$ref": "#/$defs/nonneg"
+        },
+        "canonical_object_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "logical_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "visibility": {
+          "const": "public"
+        }
+      },
+      "required": [
+        "logical_id",
+        "visibility",
+        "artifact_bytes_sha256",
+        "canonical_object_sha256",
+        "byte_length"
+      ],
+      "type": "object"
+    },
+    "relation_requirement": {
+      "additionalProperties": false,
+      "properties": {
+        "depth": {
+          "const": 1
+        },
+        "direction": {
+          "const": "outgoing"
+        },
+        "endpoint_policy": {
+          "enum": [
+            "edge_witness",
+            "all_current_targets_materialized"
+          ]
+        },
+        "from": {
+          "$ref": "#/$defs/obsid"
+        },
+        "gold_derived_targets": {
+          "items": {
+            "$ref": "#/$defs/obsid"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "supports",
+            "derived_from",
+            "supersedes",
+            "contradicts",
+            "blocks",
+            "depends_on",
+            "part_of"
+          ]
+        },
+        "match": {
+          "const": "all"
+        },
+        "question": {
+          "type": "string"
+        },
+        "target_status": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "question",
+        "from",
+        "kind",
+        "direction",
+        "depth",
+        "match",
+        "endpoint_policy",
+        "gold_derived_targets",
+        "target_status"
+      ],
+      "type": "object"
+    },
+    "required_arm": {
+      "additionalProperties": false,
+      "properties": {
+        "requirement": {
+          "const": "required"
+        }
+      },
+      "required": [
+        "requirement"
+      ],
+      "type": "object"
+    },
+    "sha256": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    }
+  },
+  "$id": "https://physshell.dev/007/research/b1-context/schema/evaluation-contract-v1-r3.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A projection-validity verdict may not depend on incidental membership of optional, semantically admissible records unless the contract independently declares that membership normative. Selected-set topology is therefore not a gating oracle.",
+  "properties": {
+    "arm_semantics": {
+      "additionalProperties": false,
+      "properties": {
+        "gold_state": {
+          "type": "string"
+        },
+        "missing_optional_arm": {
+          "const": "NOT_APPLICABLE"
+        },
+        "missing_required_arm": {
+          "const": "UNAVAILABLE"
+        },
+        "non_applicable_metrics": {
+          "type": "null"
+        },
+        "synthetic_negative_control": {
+          "const": "forbidden"
+        }
+      },
+      "required": [
+        "missing_required_arm",
+        "missing_optional_arm",
+        "non_applicable_metrics",
+        "synthetic_negative_control",
+        "gold_state"
+      ],
+      "type": "object"
+    },
+    "arms": {
+      "additionalProperties": false,
+      "properties": {
+        "full_derived": {
+          "$ref": "#/$defs/required_arm"
+        },
+        "negative_control": {
+          "additionalProperties": false,
+          "properties": {
+            "requirement": {
+              "const": "optional"
+            }
+          },
+          "required": [
+            "requirement"
+          ],
+          "type": "object"
+        },
+        "projection": {
+          "$ref": "#/$defs/required_arm"
+        }
+      },
+      "required": [
+        "full_derived",
+        "projection",
+        "negative_control"
+      ],
+      "type": "object"
+    },
+    "axis_requirements": {
+      "additionalProperties": false,
+      "properties": {
+        "contract_input_consistency": {
+          "const": "required"
+        },
+        "negative_control_diagnostics": {
+          "const": "optional"
+        },
+        "projection_validity": {
+          "const": "required"
+        },
+        "question_observation_support": {
+          "const": "required"
+        },
+        "relation_support": {
+          "const": "required"
+        },
+        "source_compilation": {
+          "const": "required"
+        },
+        "stale_state_safety": {
+          "const": "required"
+        },
+        "task_dependence": {
+          "const": "diagnostic"
+        }
+      },
+      "required": [
+        "contract_input_consistency",
+        "source_compilation",
+        "projection_validity",
+        "question_observation_support",
+        "relation_support",
+        "stale_state_safety",
+        "task_dependence",
+        "negative_control_diagnostics"
+      ],
+      "type": "object"
+    },
+    "bound_inputs": {
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/public_structured_named"
+        },
+        "derived_bodies_private": {
+          "items": {
+            "$ref": "#/$defs/private_body"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "fixture_manifest": {
+          "$ref": "#/$defs/public_structured_named"
+        },
+        "gold_state": {
+          "$ref": "#/$defs/public_structured_named"
+        },
+        "question_files": {
+          "$ref": "#/$defs/public_structured_keyed_map"
+        },
+        "r3_1_derived_manifest": {
+          "$ref": "#/$defs/public_structured_named"
+        },
+        "r3_1_projection_comparison": {
+          "$ref": "#/$defs/public_structured_named"
+        },
+        "r3_1_report": {
+          "$ref": "#/$defs/public_structured_named"
+        },
+        "source_selectors": {
+          "$ref": "#/$defs/public_structured_named"
+        },
+        "task_contexts": {
+          "$ref": "#/$defs/public_structured_keyed_map"
+        },
+        "task_files": {
+          "$ref": "#/$defs/public_structured_keyed_map"
+        },
+        "task_registry": {
+          "$ref": "#/$defs/public_structured_named"
+        }
+      },
+      "required": [
+        "gold_state",
+        "fixture_manifest",
+        "source_selectors",
+        "task_registry",
+        "budget",
+        "r3_1_report",
+        "r3_1_projection_comparison",
+        "r3_1_derived_manifest",
+        "task_files",
+        "question_files",
+        "task_contexts",
+        "derived_bodies_private"
+      ],
+      "type": "object"
+    },
+    "budget": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_bytes_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "authoritative_artifact": {
+          "const": "budget-v0.yaml"
+        },
+        "byte_budget": {
+          "const": 20000
+        },
+        "byte_length": {
+          "$ref": "#/$defs/nonneg"
+        },
+        "canonical_object_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "counted_representation": {
+          "additionalProperties": false,
+          "properties": {
+            "definition": {
+              "type": "string"
+            },
+            "gating": {
+              "const": true
+            },
+            "id": {
+              "const": "selector-v0-canonical-record-jsonl"
+            }
+          },
+          "required": [
+            "id",
+            "definition",
+            "gating"
+          ],
+          "type": "object"
+        },
+        "diagnostics": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "gating": {
+                "const": false
+              }
+            },
+            "required": [
+              "gating"
+            ],
+            "type": "object"
+          },
+          "minProperties": 1,
+          "type": "object"
+        },
+        "record_budget": {
+          "const": 32
+        },
+        "unit": {
+          "const": "utf8_bytes+records"
+        }
+      },
+      "required": [
+        "authoritative_artifact",
+        "artifact_bytes_sha256",
+        "canonical_object_sha256",
+        "byte_length",
+        "byte_budget",
+        "record_budget",
+        "unit",
+        "counted_representation",
+        "diagnostics"
+      ],
+      "type": "object"
+    },
+    "contract_id": {
+      "const": "o7.b1.evaluation-contract/v1"
+    },
+    "contract_input_consistency_gates": {
+      "allOf": [
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": "gate-01"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": "gate-02"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": "gate-03"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": "gate-04"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": "gate-05"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": "gate-06"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": "gate-07"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": "gate-08"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": "gate-09"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": "gate-10"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        },
+        {
+          "contains": {
+            "properties": {
+              "id": {
+                "const": "gate-11"
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        }
+      ],
+      "description": "Exactly the eleven declared gate IDs, each present once, with a description. Set-completeness is enforced by the eleven contains clauses below; each gate's SEMANTIC recomputation is an evaluator consistency check at R4B.",
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/$defs/gate_id"
+          }
+        },
+        "required": [
+          "id",
+          "description"
+        ],
+        "type": "object"
+      },
+      "maxItems": 11,
+      "minItems": 11,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "contract_revision": {
+      "const": 4
+    },
+    "digest_domains": {
+      "additionalProperties": false,
+      "properties": {
+        "canonicalization": {
+          "additionalProperties": false,
+          "properties": {
+            "definition": {
+              "type": "string"
+            },
+            "id": {
+              "const": "o7-canonical-json-v0"
+            }
+          },
+          "required": [
+            "id",
+            "definition"
+          ],
+          "type": "object"
+        },
+        "gold_state_dual_binding": {
+          "$ref": "#/$defs/dual_id"
+        },
+        "policy": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "canonicalization",
+        "policy",
+        "gold_state_dual_binding"
+      ],
+      "type": "object"
+    },
+    "evaluator_implementation_identity": {
+      "additionalProperties": false,
+      "properties": {
+        "manifest_digest_field": {
+          "type": "string"
+        },
+        "manifest_schema": {
+          "const": "o7.b1.evaluator-implementation-manifest/v0"
+        },
+        "note": {
+          "type": "string"
+        },
+        "output_must_record": {
+          "additionalProperties": false,
+          "properties": {
+            "evaluator_entrypoint_sha256": {
+              "const": "required"
+            },
+            "evaluator_module_sha256": {
+              "const": "required"
+            },
+            "execution_checkout_commit": {
+              "const": "required"
+            },
+            "execution_checkout_tree": {
+              "const": "required"
+            }
+          },
+          "required": [
+            "evaluator_entrypoint_sha256",
+            "evaluator_module_sha256",
+            "execution_checkout_commit",
+            "execution_checkout_tree"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "manifest_schema",
+        "manifest_digest_field",
+        "output_must_record"
+      ],
+      "type": "object"
+    },
+    "family_applicability": {
+      "additionalProperties": false,
+      "properties": {
+        "negative_control_diagnostics": {
+          "additionalProperties": false,
+          "properties": {
+            "negative_control": {
+              "const": "optional"
+            }
+          },
+          "required": [
+            "negative_control"
+          ],
+          "type": "object"
+        },
+        "projection_validity": {
+          "$ref": "#/$defs/projection_only_family"
+        },
+        "question_observation_support": {
+          "$ref": "#/$defs/projection_only_family"
+        },
+        "relation_support": {
+          "$ref": "#/$defs/projection_only_family"
+        },
+        "source_compilation": {
+          "additionalProperties": false,
+          "properties": {
+            "full_derived": {
+              "const": "required"
+            },
+            "negative_control": {
+              "const": "optional"
+            },
+            "projection": {
+              "const": "required"
+            }
+          },
+          "required": [
+            "full_derived",
+            "projection",
+            "negative_control"
+          ],
+          "type": "object"
+        },
+        "stale_state_safety": {
+          "$ref": "#/$defs/projection_only_family"
+        }
+      },
+      "required": [
+        "source_compilation",
+        "projection_validity",
+        "question_observation_support",
+        "relation_support",
+        "stale_state_safety",
+        "negative_control_diagnostics"
+      ],
+      "type": "object"
+    },
+    "full_derived_semantics": {
+      "type": "string"
+    },
+    "input_closure": {
+      "additionalProperties": false,
+      "properties": {
+        "fail_closed": {
+          "type": "string"
+        },
+        "negative_control_body": {
+          "type": "string"
+        },
+        "raw_source_bodies": {
+          "type": "string"
+        },
+        "required_private": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "required_public_structured": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "required_public_structured",
+        "required_private",
+        "negative_control_body",
+        "raw_source_bodies",
+        "fail_closed"
+      ],
+      "type": "object"
+    },
+    "outcome_axes": {
+      "items": {
+        "enum": [
+          "contract_input_consistency",
+          "source_compilation",
+          "projection_validity",
+          "question_observation_support",
+          "relation_support",
+          "stale_state_safety",
+          "task_dependence",
+          "negative_control_diagnostics"
+        ]
+      },
+      "minItems": 8,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "overall_rules": {
+      "additionalProperties": false,
+      "properties": {
+        "PARTIAL": {
+          "const": "forbidden in evaluation v1"
+        },
+        "all_required_axes_PASS": {
+          "type": "string"
+        },
+        "any_required_axis_FAIL": {
+          "const": "overall FAIL"
+        },
+        "any_required_axis_UNAVAILABLE_without_FAIL": {
+          "const": "overall UNAVAILABLE"
+        },
+        "diagnostic_axes_cannot_gate": {
+          "const": true
+        },
+        "optional_diagnostics_cannot_upgrade_or_downgrade_required_gates": {
+          "const": true
+        }
+      },
+      "required": [
+        "any_required_axis_FAIL",
+        "any_required_axis_UNAVAILABLE_without_FAIL",
+        "all_required_axes_PASS",
+        "optional_diagnostics_cannot_upgrade_or_downgrade_required_gates",
+        "PARTIAL"
+      ],
+      "type": "object"
+    },
+    "provenance_role": {
+      "additionalProperties": false,
+      "properties": {
+        "case_role": {
+          "const": "development"
+        },
+        "designed_after_observing_case_0002": {
+          "const": true
+        },
+        "generalization_claim_allowed": {
+          "const": false
+        },
+        "holdout_evidence": {
+          "const": false
+        }
+      },
+      "required": [
+        "case_role",
+        "designed_after_observing_case_0002",
+        "holdout_evidence",
+        "generalization_claim_allowed"
+      ],
+      "type": "object"
+    },
+    "r4_schema_artifact_sha256": {
+      "type": "string"
+    },
+    "rev3_supersedes_block": {
+      "type": "object"
+    },
+    "schema": {
+      "const": "o7.b1.evaluation-contract/v1"
+    },
+    "semantic_revision_from_r2": {
+      "const": false
+    },
+    "semantic_revision_from_r3": {
+      "const": true
+    },
+    "shape_semantics": {
+      "additionalProperties": false,
+      "properties": {
+        "incomparable": {
+          "type": "string"
+        },
+        "left_strict_superset": {
+          "type": "string"
+        },
+        "unknown_shape": {
+          "const": "fail closed"
+        }
+      },
+      "required": [
+        "incomparable",
+        "left_strict_superset",
+        "unknown_shape"
+      ],
+      "type": "object"
+    },
+    "source_compilation_note": {
+      "type": "string"
+    },
+    "source_compilation_requirements_full_derived": {
+      "items": {
+        "enum": [
+          "session_matches_derived_manifest",
+          "derived_body_available",
+          "derived_byte_length_and_sha256_match",
+          "record_count_reproducible",
+          "extractor_identity_and_raw_binding_present"
+        ]
+      },
+      "maxItems": 5,
+      "minItems": 5,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "supersedes": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_bytes_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "instance": {
+          "const": "evaluation-contract-v1-r3.yaml"
+        },
+        "note": {
+          "type": "string"
+        },
+        "r4a1_contract_commit": {
+          "$ref": "#/$defs/gitsha"
+        }
+      },
+      "required": [
+        "instance",
+        "artifact_bytes_sha256"
+      ],
+      "type": "object"
+    },
+    "supersedes_contract_revision": {
+      "const": 3
+    },
+    "task_dependence": {
+      "additionalProperties": false,
+      "properties": {
+        "all_unordered_pairs": {
+          "const": true
+        },
+        "gating": {
+          "const": false
+        },
+        "non_normative_statement": {
+          "type": "string"
+        },
+        "not_frozen": {
+          "type": "string"
+        },
+        "pair_expectations": {
+          "description": "One entry per unordered task pair, each carrying its explicit left and right task IDs. Endpoint distinctness (left != right) and pair completeness (all N-choose-2) are evaluator consistency checks \u2014 not expressible as a value comparison in JSON Schema draft 2020-12; the restructuring to an explicit list removes the string-key/endpoint disagreement class by construction.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "expected_shape": {
+                "$ref": "#/$defs/pair_shape"
+              },
+              "left": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "rationale": {
+                "type": "string"
+              },
+              "right": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "left",
+              "right",
+              "expected_shape"
+            ],
+            "type": "object"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "pair_expectations_are_historical_only": {
+          "const": true
+        },
+        "reported_topology_values": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "retirement_rationale": {
+          "type": "object"
+        },
+        "status": {
+          "const": "diagnostic"
+        }
+      },
+      "required": [
+        "all_unordered_pairs",
+        "gating",
+        "not_frozen",
+        "pair_expectations",
+        "status"
+      ],
+      "type": "object"
+    },
+    "tasks": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "forbidden_stale_as_current": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "ids": {
+                  "items": {
+                    "$ref": "#/$defs/obsid"
+                  },
+                  "type": "array"
+                },
+                "question": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "question",
+                "ids"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "questions_file": {
+            "type": "string"
+          },
+          "relation_requirements": {
+            "items": {
+              "$ref": "#/$defs/relation_requirement"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "questions_file"
+        ],
+        "type": "object"
+      },
+      "minProperties": 1,
+      "type": "object"
+    },
+    "validation_revision": {
+      "const": true
+    }
+  },
+  "required": [
+    "arm_semantics",
+    "arms",
+    "axis_requirements",
+    "bound_inputs",
+    "budget",
+    "contract_id",
+    "contract_input_consistency_gates",
+    "contract_revision",
+    "digest_domains",
+    "evaluator_implementation_identity",
+    "family_applicability",
+    "full_derived_semantics",
+    "input_closure",
+    "outcome_axes",
+    "overall_rules",
+    "provenance_role",
+    "schema",
+    "semantic_revision_from_r2",
+    "semantic_revision_from_r3",
+    "shape_semantics",
+    "source_compilation_requirements_full_derived",
+    "supersedes",
+    "supersedes_contract_revision",
+    "task_dependence",
+    "tasks",
+    "validation_revision"
+  ],
+  "title": "o7.b1 evaluation contract v1 revision 4 (forward-only from r3)",
+  "type": "object"
+}

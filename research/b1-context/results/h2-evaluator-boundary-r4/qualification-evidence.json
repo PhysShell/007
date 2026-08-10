@@ -1,0 +1,159 @@
+{
+  "checks": {
+    "contract_schema_validation": {
+      "case-0002": "PASS",
+      "h1": "PASS",
+      "h2": "PASS",
+      "h3": "PASS"
+    },
+    "historical_witnesses": {
+      "h1": {
+        "rev3_failed_axes": [],
+        "rev3_overall": "PASS",
+        "rev4_failed_gating_axes": [],
+        "rev4_overall": "PASS",
+        "rev4_topology": [
+          "incomparable"
+        ]
+      },
+      "h2": {
+        "rev3_failed_axes": [
+          "task_dependence"
+        ],
+        "rev3_overall": "FAIL",
+        "rev4_failed_gating_axes": [],
+        "rev4_overall": "PASS",
+        "rev4_topology": [
+          "left_strict_superset"
+        ]
+      },
+      "h3": {
+        "rev3_failed_axes": [
+          "projection_validity"
+        ],
+        "rev3_overall": "FAIL",
+        "rev4_failed_gating_axes": [
+          "projection_validity"
+        ],
+        "rev4_overall": "FAIL",
+        "rev4_topology": [
+          "incomparable"
+        ]
+      }
+    },
+    "metamorphic_projection_invariance": {
+      "note": "topology varies across the class while the rev4 verdict does not; that is the repair, stated as a measurement",
+      "rev4_invariant": true,
+      "rev4_overall_values": [
+        "PASS"
+      ],
+      "rows": {
+        "BASE": {
+          "all_gating_pass": true,
+          "rev3_overall": "FAIL",
+          "rev4_overall": "PASS",
+          "topology": [
+            "left_strict_superset"
+          ]
+        },
+        "M1_add_optional_left": {
+          "all_gating_pass": true,
+          "rev3_overall": "FAIL",
+          "rev4_overall": "PASS",
+          "topology": [
+            "left_strict_superset"
+          ]
+        },
+        "M2_add_optional_right": {
+          "all_gating_pass": true,
+          "rev3_overall": "FAIL",
+          "rev4_overall": "PASS",
+          "topology": [
+            "left_strict_superset"
+          ]
+        },
+        "M3_drop_optional_left": {
+          "all_gating_pass": true,
+          "rev3_overall": "FAIL",
+          "rev4_overall": "PASS",
+          "topology": [
+            "left_strict_superset"
+          ]
+        },
+        "M4_reorder_both": {
+          "all_gating_pass": true,
+          "rev3_overall": "FAIL",
+          "rev4_overall": "PASS",
+          "topology": [
+            "left_strict_superset"
+          ]
+        },
+        "M5_saturate_both": {
+          "all_gating_pass": true,
+          "rev3_overall": "FAIL",
+          "rev4_overall": "PASS",
+          "topology": [
+            "equal"
+          ]
+        }
+      },
+      "topologies_observed": [
+        "equal",
+        "left_strict_superset"
+      ]
+    },
+    "negative_controls": {
+      "NC1_required_observation_removed": {
+        "expected_axis": "question_observation_support",
+        "failed_gating_axes": [
+          "question_observation_support"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC2_relation_witnesses_removed": {
+        "expected_axis": "relation_support",
+        "failed_gating_axes": [
+          "relation_support"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC3_stale_presented_as_current": {
+        "expected_axis": "stale_state_safety",
+        "failed_gating_axes": [
+          "projection_validity",
+          "stale_state_safety"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC4_ineligible_record_included": {
+        "expected_axis": "projection_validity",
+        "failed_gating_axes": [
+          "projection_validity",
+          "stale_state_safety"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC5_fabricated_relation": {
+        "expected_axis": "projection_validity",
+        "failed_gating_axes": [
+          "projection_validity"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC6_record_budget_exceeded": {
+        "expected_axis": "projection_validity",
+        "failed_gating_axes": [
+          "projection_validity"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      }
+    }
+  },
+  "record": "o7.b1.h2-evaluator-boundary-qualification/v1"
+}

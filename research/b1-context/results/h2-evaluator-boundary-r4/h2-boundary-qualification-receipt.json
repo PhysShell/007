@@ -1,0 +1,154 @@
+{
+  "backward_compatibility": {
+    "existing_reports_receipts_h1h2h3_l1l2l3": "unmodified",
+    "historical_statement": "under rev3, H2 task_dependence = FAIL (stands)",
+    "new_statement": "under rev4, that rev3 failure is classified as a non-projection-invariant measurement artifact",
+    "not_contradictory_because": "evaluator semantics changed explicitly and forward-only",
+    "rev3_contract": "unmodified",
+    "rev3_evaluator_58a7a111": "unmodified and executed as-is to reproduce historical verdicts"
+  },
+  "boundary_closed": true,
+  "classification": "TASK_DEPENDENCE_RETIRED_AS_NON_NORMATIVE_SHAPE_METRIC",
+  "gap_discovered_and_closed": {
+    "closed_by": "projection_validity, which owns whether a context asserts things the evidence supports; the property is projection-invariant",
+    "evidence": "negative control NC5 fabricates an edge to an observation that does not exist. Under rev3 no axis objected to it; that run's overall FAIL came from task_dependence, which was already failing for an unrelated reason.",
+    "pre_existing": true,
+    "what": "relation groundedness was not owned by any axis",
+    "why_it_surfaced_now": "removing the shape gate takes away the accidental cover that made the hole look guarded"
+  },
+  "identity": {
+    "commit": "d60ede621a0d6dd228c694e8efa0b0d74b36e45c",
+    "evaluator_module": "research/b1-context/tools/o7b1/evaluate_v2.py",
+    "evaluator_module_sha256": "sha256:9341a890b7828fc603fdfd70825ab1111e321fb04fb4a40653865663e35e581b",
+    "r4_contract_artifact_sha256": {
+      "case-0002": "sha256:9a32cecfc030c8dac8743498bf4257edad69373cf33cc48eaea36ab8dd1d3267",
+      "h1": "sha256:cb021bd484b0b708646fd61fe3fca5d96377808878e2746986c195c751c3d447",
+      "h2": "sha256:e47fbf5c2bc7e467d654537e54d171b0f37f00593da6a1360e4c148813c9a9f1",
+      "h3": "sha256:06c04911c2296a0230dbd31695bb3bebfaf73d394062df3471698246ef96aa6e"
+    },
+    "r4_schema_artifact_sha256": "sha256:ccba78e0e2799ae40c22aba64dc56901c0e9d82cf645be2b996fa0703d69a07b",
+    "reuses_unmodified_evaluator": {
+      "module": "research/b1-context/tools/o7b1/evaluate_v1.py",
+      "sha256": "sha256:d5e8bc06e90f81db8574bd7111c9a19865cb0f37d801e689aaaa35a6f2c523a0"
+    },
+    "tree": "83c8606c8099da827e69fe6ac2c74d0f79222a3b"
+  },
+  "next_gate": "with the boundary closed, the real-source holdout may be considered \u2014 separately authorized, not opened by this receipt",
+  "phase_h2a_determination": {
+    "answer": "no",
+    "candidates_examined": {
+      "'context size within budget'": "duplicate of projection_validity (this is what H3 fails on)",
+      "'each task's required observations present'": "duplicate of question_observation_support",
+      "'no stale material presented as current'": "duplicate of stale_state_safety",
+      "'required relation witnesses present'": "duplicate of relation_support",
+      "'the two selected sets are not identical'": "NOT invariant: saturating both contexts with optional admissible records makes them identical while all other required axes still pass",
+      "selected_set_shape (rev3 rule)": "NOT invariant: varies over ['equal', 'left_strict_superset'] across the metamorphic class while every other required axis passes"
+    },
+    "conclusion": "Task obligations are normative and already owned. Which additional admissible records a valid projector chooses is realization, and the shape of the resulting sets is a property of that realization. Cost is owned by the budget condition. Nothing normative is left for a shape gate to measure.",
+    "question": "does task_dependence have a core that is projection-invariant and not already owned by another axis?"
+  },
+  "qualification": {
+    "C1_Q1R_detail": {
+      "honest_scope": "case-0002's private derived body is not in-repo, so C1/Q1R were not re-run end to end here. Their rev3 overall verdicts are the recorded PASS from Q1/Q2, and the single gating property rev4 adds -- relation groundedness -- was verified directly against gold for both arms. The divergent-topology witness is carried by H2, where the two projections genuinely differ in shape.",
+      "relation_groundedness": {
+        "C1": "PASS (0 ungrounded)",
+        "Q1R": "PASS (0 ungrounded)"
+      },
+      "selected_sets_identical_per_task": true,
+      "topology": [
+        "right_strict_superset",
+        "incomparable",
+        "incomparable"
+      ]
+    },
+    "C1_semantic_verdict": "PASS",
+    "H1_pass_preserved": true,
+    "H2_false_shape_failure_removed": true,
+    "H3_budget_failure_preserved": true,
+    "Q1R_semantic_verdict": "PASS",
+    "contract_schema_validation": "PASS",
+    "contract_schema_validation_detail": {
+      "case-0002": "PASS",
+      "h1": "PASS",
+      "h2": "PASS",
+      "h3": "PASS"
+    },
+    "historical_rev3_reproduction": "PASS (rev3 evaluator executed unmodified)",
+    "metamorphic_detail": {
+      "class_size": 6,
+      "mutations": "add optional admissible records to either side, drop an optional record, reorder selected/relations, saturate both sides",
+      "reading": "topology varies across the class while the rev4 verdict does not; under rev3 the same class was decided by the topology",
+      "rev4_overall_values": [
+        "PASS"
+      ],
+      "topologies_observed": [
+        "equal",
+        "left_strict_superset"
+      ]
+    },
+    "metamorphic_projection_invariance": "PASS",
+    "negative_controls": "PASS",
+    "negative_controls_detail": {
+      "NC1_required_observation_removed": {
+        "failed_gating_axes": [
+          "question_observation_support"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC2_relation_witnesses_removed": {
+        "failed_gating_axes": [
+          "relation_support"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC3_stale_presented_as_current": {
+        "failed_gating_axes": [
+          "projection_validity",
+          "stale_state_safety"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC4_ineligible_record_included": {
+        "failed_gating_axes": [
+          "projection_validity",
+          "stale_state_safety"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC5_fabricated_relation": {
+        "failed_gating_axes": [
+          "projection_validity"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC6_record_budget_exceeded": {
+        "failed_gating_axes": [
+          "projection_validity"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      }
+    },
+    "stale_safety_semantics_preserved": true,
+    "synthetic_suite": "PASS (141 tests, o7b1 tools/tests)",
+    "synthetic_suite_test_count": 141
+  },
+  "record": "o7.b1.h2-evaluator-boundary-qualification-receipt/v1",
+  "revision": {
+    "contract_revision": 4,
+    "semantic_revision_from_r3": true,
+    "statement": "A projection-validity verdict may not depend on incidental membership of optional, semantically admissible records unless the contract independently declares that membership normative.",
+    "supersedes_contract_revision": 3,
+    "task_dependence": {
+      "gating": false,
+      "reported_as": "descriptive selected-set topology",
+      "status": "diagnostic"
+    }
+  },
+  "scope": "evaluator methodology only"
+}

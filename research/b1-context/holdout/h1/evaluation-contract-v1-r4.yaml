@@ -1,0 +1,299 @@
+schema: o7.b1.evaluation-contract/v1
+contract_id: o7.b1.evaluation-contract/v1
+contract_revision: 4
+semantic_revision_from_r2: false
+validation_revision: true
+supersedes_contract_revision: 3
+supersedes:
+  instance: evaluation-contract-v1-r3.yaml
+  artifact_bytes_sha256: sha256:d2956a91032037d28b24612ff23c838a37ff1e1f97fa92dd878b70a4c8acc342
+  r4a1_contract_commit: '0000000000000000000000000000000000000000'
+  note: rev3 is retained byte-intact; no historical verdict is rewritten
+provenance_role:
+  case_role: development
+  designed_after_observing_case_0002: true
+  holdout_evidence: false
+  generalization_claim_allowed: false
+digest_domains:
+  canonicalization:
+    id: o7-canonical-json-v0
+    definition: holdout
+  policy: dual
+  gold_state_dual_binding:
+    logical_id: gold-state.json
+    artifact_bytes_sha256: sha256:89e3eb61de3b0ca9da8567b00ed07ed5c6919c2e0eb48ee7a78f117443928d45
+    canonical_object_sha256: sha256:de24cd3c8efcd4670bf7c158308ee294848d941d3c7e7fe02191d2085e65b220
+    byte_length: 2476
+arms:
+  full_derived:
+    requirement: required
+  projection:
+    requirement: required
+  negative_control:
+    requirement: optional
+arm_semantics:
+  missing_required_arm: UNAVAILABLE
+  missing_optional_arm: NOT_APPLICABLE
+  non_applicable_metrics: null
+  synthetic_negative_control: forbidden
+  gold_state: oracle
+family_applicability:
+  source_compilation:
+    full_derived: required
+    projection: required
+    negative_control: optional
+  projection_validity:
+    projection: required
+    full_derived: NOT_APPLICABLE
+    negative_control: NOT_APPLICABLE
+  question_observation_support:
+    projection: required
+    full_derived: NOT_APPLICABLE
+    negative_control: NOT_APPLICABLE
+  relation_support:
+    projection: required
+    full_derived: NOT_APPLICABLE
+    negative_control: NOT_APPLICABLE
+  stale_state_safety:
+    projection: required
+    full_derived: NOT_APPLICABLE
+    negative_control: NOT_APPLICABLE
+  negative_control_diagnostics:
+    negative_control: optional
+full_derived_semantics: holdout
+source_compilation_requirements_full_derived:
+- session_matches_derived_manifest
+- derived_body_available
+- derived_byte_length_and_sha256_match
+- record_count_reproducible
+- extractor_identity_and_raw_binding_present
+budget:
+  authoritative_artifact: budget-v0.yaml
+  artifact_bytes_sha256: sha256:0e69d6f8a13b130e4cc7ee59b88e82fd785fdd5c0bf2cdac4313c90a7b719f10
+  canonical_object_sha256: sha256:110f418b5291531375ea3c3f8f6ed36351e33c5e42ccb5826562f469f7c08d13
+  byte_length: 137
+  byte_budget: 20000
+  record_budget: 32
+  unit: utf8_bytes+records
+  counted_representation:
+    id: selector-v0-canonical-record-jsonl
+    definition: holdout
+    gating: true
+  diagnostics:
+    rendered_context_sizes:
+      gating: false
+input_closure:
+  required_public_structured:
+  - task-holdout-h1-operate.yaml
+  - task-holdout-h1-review.yaml
+  required_private:
+  - holdout-session
+  negative_control_body: none
+  raw_source_bodies: frozen
+  fail_closed: undeclared inputs refuse
+bound_inputs:
+  gold_state:
+    logical_id: gold-state.json
+    visibility: public
+    artifact_bytes_sha256: sha256:89e3eb61de3b0ca9da8567b00ed07ed5c6919c2e0eb48ee7a78f117443928d45
+    canonical_object_sha256: sha256:de24cd3c8efcd4670bf7c158308ee294848d941d3c7e7fe02191d2085e65b220
+    byte_length: 2476
+  fixture_manifest:
+    logical_id: manifest.yaml
+    visibility: public
+    artifact_bytes_sha256: sha256:2e8a17739a623c13f34cc567972bb1c8ec522e9775855e5c7c427aeb5828552d
+    canonical_object_sha256: sha256:a5fc5d1c784ba97e4a7c0c1eb29d6a3ba71f0d77bb4424667c4b5fa7e242fe0f
+    byte_length: 261
+  source_selectors:
+    logical_id: source-selectors.yaml
+    visibility: public
+    artifact_bytes_sha256: sha256:b5d098ce6536a0597577303ac844ee5e84455b973516db99e145b1af7bad3e04
+    canonical_object_sha256: sha256:e5a69f93212a208bb8878f9e53cbc60da7922973d53d6c7f39a35900139fd189
+    byte_length: 138
+  task_registry:
+    logical_id: tasks.yaml
+    visibility: public
+    artifact_bytes_sha256: sha256:ba7dda855edfce861d42ff2c5de0c379345858098aad12634ff8b14d4661d4aa
+    canonical_object_sha256: sha256:c1e89041781ffdc47c36de483dfbab8fdeef653a1dcc720f67267347f72dd1d0
+    byte_length: 247
+  budget:
+    logical_id: budget-v0.yaml
+    visibility: public
+    artifact_bytes_sha256: sha256:0e69d6f8a13b130e4cc7ee59b88e82fd785fdd5c0bf2cdac4313c90a7b719f10
+    canonical_object_sha256: sha256:110f418b5291531375ea3c3f8f6ed36351e33c5e42ccb5826562f469f7c08d13
+    byte_length: 137
+  r3_1_report:
+    logical_id: report.json
+    visibility: public
+    artifact_bytes_sha256: sha256:49574f72da4e91e20bdc464d0c7b02e0026486bc37922d7bbe9734300de5cb15
+    canonical_object_sha256: sha256:024980fb6097ef0975ad5f184880de0fcc23efadbc0bddada7f73b857794d352
+    byte_length: 423
+  r3_1_projection_comparison:
+    logical_id: projection-comparison.json
+    visibility: public
+    artifact_bytes_sha256: sha256:8097644818e9215a4f5b8b19ec57c6cc0cd41f5489d7d498f2fbcb4940ebdf4f
+    canonical_object_sha256: sha256:0df7e9d942471f2d5e154364adb7bd72ce9b6a6deae8e3791569164e16e0e1ab
+    byte_length: 270
+  r3_1_derived_manifest:
+    logical_id: derived-manifest.json
+    visibility: public
+    artifact_bytes_sha256: sha256:b8cd336b0c9b43b27ec34c930af64ca3849fafc3c0735332ae559853dd9ba929
+    canonical_object_sha256: sha256:56ae7668e5f7c7c6761bee6658c0cd8bd0d8321b691af10be3d6e07923d499e2
+    byte_length: 528
+  task_files:
+    task-holdout-h1-operate.yaml:
+      visibility: public
+      artifact_bytes_sha256: sha256:f3bbf7794246065c3a30d9e584390d65e5f67944a6d1502b6bd3ae581d774603
+      canonical_object_sha256: sha256:f68f61d0e946fd0133c9491444e9a136d933b5312e737ba63a1b6ff44091f4da
+      byte_length: 288
+    task-holdout-h1-review.yaml:
+      visibility: public
+      artifact_bytes_sha256: sha256:f38076b0cd19905d0e023b44926f9d0a62f24f83147cc789816475a20e601515
+      canonical_object_sha256: sha256:bb197340080928c706b64cac68cbe308f006ecdd80b8903f46bf783197de13a8
+      byte_length: 289
+  question_files:
+    questions-holdout-h1-operate.yaml:
+      visibility: public
+      artifact_bytes_sha256: sha256:d75b6b8c789e41e93de550d388fa366a1521448b5769d6aa0ed39e24f9ea1e78
+      canonical_object_sha256: sha256:fea920b607798156a1b4fc80217a2bdebf8b5b5b33cd10c824179ca4df349eba
+      byte_length: 360
+    questions-holdout-h1-review.yaml:
+      visibility: public
+      artifact_bytes_sha256: sha256:53897fcf5ca2d880886a77d45e175668c1ae17d8e57846541412cf00b6fe9b62
+      canonical_object_sha256: sha256:32e7c7402019788c84a2916ff881afe75571a4d3a8219c81b333d1b0fc9cda31
+      byte_length: 138
+  task_contexts:
+    holdout-h1-operate:
+      visibility: public
+      artifact_bytes_sha256: sha256:f2613b7337ebc75150d33c2fb5a76c1d49aef197c6dd9e93b685f15b71ebab62
+      canonical_object_sha256: sha256:04f6a451afdd179e48d97f55cba424fa0e8cdeea4dea2ec47368911799e9cf7f
+      byte_length: 2780
+    holdout-h1-review:
+      visibility: public
+      artifact_bytes_sha256: sha256:1d5e6965e7290b5987dc2a56a462b53c82f962a571e0b4e1a1e49a3ee99deada
+      canonical_object_sha256: sha256:801ed8ef5bea2ca3982df77a5ebbc74acad1b71473988da0b9755bb2db3ef548
+      byte_length: 2003
+  derived_bodies_private:
+  - session_id: holdout-session
+    visibility: private
+    artifact_bytes_sha256: sha256:269ee2b02288fdc4be2652a75450bdbcf16810caee5ae9b0a415de757b207d69
+    byte_length: 39
+    record_count: 3
+tasks:
+  holdout-h1-operate:
+    questions_file: questions-holdout-h1-operate.yaml
+    relation_requirements:
+    - question: qh1-support
+      from: obs-h1-support-src
+      kind: supports
+      endpoint_policy: all_current_targets_materialized
+      gold_derived_targets:
+      - obs-h1-state
+      target_status:
+      - current
+      direction: outgoing
+      depth: 1
+      match: all
+  holdout-h1-review:
+    questions_file: questions-holdout-h1-review.yaml
+contract_input_consistency_gates:
+- id: gate-01
+  description: fixture identity agreement
+- id: gate-02
+  description: registry filename and digest agreement
+- id: gate-03
+  description: exact task-set agreement
+- id: gate-04
+  description: questions filename and dual-digest agreement
+- id: gate-05
+  description: referenced question existence
+- id: gate-06
+  description: every legacy relation path expanded
+- id: gate-07
+  description: no invented explicit relation requirement
+- id: gate-08
+  description: forbidden-stale set equality
+- id: gate-09
+  description: gold-derived targets recomputed exactly
+- id: gate-10
+  description: target-status agreement
+- id: gate-11
+  description: unknown identifiers or closed-vocabulary values rejected
+task_dependence:
+  all_unordered_pairs: true
+  pair_expectations:
+  - left: holdout-h1-operate
+    right: holdout-h1-review
+    expected_shape: incomparable
+    rationale: holdout
+  not_frozen: holdout
+  gating: false
+  status: diagnostic
+  non_normative_statement: A projection-validity verdict may not depend on incidental membership of optional, semantically
+    admissible records unless the contract independently declares that membership normative. Selected-set topology is therefore
+    not a gating oracle.
+  retirement_rationale:
+    classification: TASK_DEPENDENCE_RETIRED_AS_NON_NORMATIVE_SHAPE_METRIC
+    why: 'Under rev3 the axis gated on whether two tasks'' selected sets stood in a contract-pinned relationship. That relationship
+      is a property of the projector''s realization, not of the tasks'' obligations: a valid projection whose relation-aware
+      closure legitimately admits an optional record can change the shape without violating anything the contract declares
+      mandatory.'
+    search_for_a_replacement: Every candidate predicate examined either failed metamorphic projection-invariance over mutations
+      the contract does not declare mandatory, or collapsed into an axis that already owns the property.
+    ownership_after_retirement:
+      task obligations (required observations): question_observation_support
+      required relation witnesses: relation_support
+      stale material presented as current: stale_state_safety
+      eligibility, admissibility and budget/cost: projection_validity
+    future_reopening: Projection topology may become normative again only if a future contract supplies an independent normative
+      selection or minimality objective. Until then it is descriptive.
+  reported_topology_values:
+  - equal
+  - left_strict_superset
+  - right_strict_superset
+  - incomparable
+  pair_expectations_are_historical_only: true
+shape_semantics:
+  incomparable: sets differ, neither subset
+  left_strict_superset: left contains every right item plus more
+  unknown_shape: fail closed
+evaluator_implementation_identity:
+  manifest_schema: o7.b1.evaluator-implementation-manifest/v0
+  manifest_digest_field: evaluator_implementation_manifest_digest
+  output_must_record:
+    evaluator_entrypoint_sha256: required
+    evaluator_module_sha256: required
+    execution_checkout_commit: required
+    execution_checkout_tree: required
+  note: holdout
+outcome_axes:
+- contract_input_consistency
+- source_compilation
+- projection_validity
+- question_observation_support
+- relation_support
+- stale_state_safety
+- task_dependence
+- negative_control_diagnostics
+axis_requirements:
+  contract_input_consistency: required
+  source_compilation: required
+  projection_validity: required
+  question_observation_support: required
+  relation_support: required
+  stale_state_safety: required
+  task_dependence: diagnostic
+  negative_control_diagnostics: optional
+overall_rules:
+  any_required_axis_FAIL: overall FAIL
+  any_required_axis_UNAVAILABLE_without_FAIL: overall UNAVAILABLE
+  all_required_axes_PASS: overall PASS
+  optional_diagnostics_cannot_upgrade_or_downgrade_required_gates: true
+  PARTIAL: forbidden in evaluation v1
+  diagnostic_axes_cannot_gate: true
+semantic_revision_from_r3: true
+rev3_supersedes_block:
+  instance: evaluation-contract-v1-r2.yaml
+  artifact_bytes_sha256: sha256:3333333333333333333333333333333333333333333333333333333333333333
+  r4a1_contract_commit: '0000000000000000000000000000000000000000'
+r4_schema_artifact_sha256: sha256:ccba78e0e2799ae40c22aba64dc56901c0e9d82cf645be2b996fa0703d69a07b
