@@ -1,0 +1,198 @@
+{
+  "case_role": "development",
+  "family": "Qwen",
+  "freeze_manifest_sha256": "sha256:1c512c50664cb22f2bd0dc3203d0234c9ed68bd5911b53199cfd3126988133db",
+  "frozen_producers": {
+    "adapter": "f8fa87e349c48de0678ccc4a4ba4be14463dfc85",
+    "evaluator": "58a7a111",
+    "l0_qualified_head": "fa93d63636bf53892edbd02fec01ab619ffc1071",
+    "q1r_authoritative_eval": "sha256:fc76d210277f328cc685e61b80df4214319f612333ea49c7e9126d51becce791",
+    "qodec_qa": "6a5d40304d5997fd9ba6325521f3e212eba4aa75"
+  },
+  "generalization_claim_allowed": false,
+  "harness_sha256": "sha256:17b553280b66e9d87f57463bc77fb8dfe8a67d89dc7d151c40feff4c8eeb179d",
+  "holdout_evidence": false,
+  "interpretation_allowed_if_supported": null,
+  "is_principal_model": false,
+  "model_facing": {
+    "quality_noninferiority": "FAIL",
+    "representation_comprehension": "PASS",
+    "token_result": "QODEC_CHEAPER_COLD"
+  },
+  "principal_classification": "MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS",
+  "prohibited_claims": [
+    "Qodec improves LLMs generally",
+    "Qodec generalizes to unseen real projects",
+    "qodec project v0 is sufficient under arbitrary budgets"
+  ],
+  "provider_integrity": {
+    "any_substitution": false,
+    "attempts_completed": 18,
+    "attempts_total": 18,
+    "models_reported": [
+      "Qwen3.5-27B-Anko"
+    ]
+  },
+  "provider_surfaces": {
+    "api_style": "openai-chat",
+    "endpoint_authority": "https://api.arliai.com/v1/chat/completions",
+    "max_tokens": 8000,
+    "provider": "arliai",
+    "qualification_identity": "fa93d63636bf53892edbd02fec01ab619ffc1071",
+    "repetitions": 3,
+    "retry_policy": "at most 1 transport retry on before-response failure; after-headers loss is not retried",
+    "seed": null,
+    "substitution_check": "each key is pinned to one model; model_requested set to the pinned model; verified reported==requested, rlen==0",
+    "temperature": 0,
+    "thinking_disabled_at_key_level": true,
+    "timeout_s": 200.0,
+    "transport": "provider_matrix.send_json @ L0-qualified head fa93d63 (https-only, no-redirect, bounded read, credential-safe)"
+  },
+  "provider_surfaces_model": "Qwen3.5-27B-Anko",
+  "record": "o7.l1.representation-ab-receipt/v1",
+  "result": {
+    "QODEC_VALID": {
+      "cold_input_tokens_o200k": 19953,
+      "completion_tokens": 4288,
+      "provider_prompt_tokens": 22092,
+      "quality_answer_correct": 17,
+      "quality_rate": 0.5152,
+      "representation_parse_failure_rate": 0.0,
+      "warm_input_tokens_o200k": 17604
+    },
+    "RAW_VALID": {
+      "cold_input_tokens_o200k": 25656,
+      "completion_tokens": 4806,
+      "provider_prompt_tokens": 28695,
+      "quality_answer_correct": 23,
+      "quality_rate": 0.697
+    },
+    "cold": {
+      "notation_charged": true
+    },
+    "hard_regression_count": 11,
+    "hard_regressions": [
+      {
+        "cell": [
+          "case-0002-resume-product-integration",
+          "qr1-current-state",
+          0
+        ],
+        "new_fabricated": false,
+        "new_missing_witness": true,
+        "new_stale": false
+      },
+      {
+        "cell": [
+          "case-0002-resume-product-integration",
+          "qr1-current-state",
+          1
+        ],
+        "new_fabricated": false,
+        "new_missing_witness": true,
+        "new_stale": false
+      },
+      {
+        "cell": [
+          "case-0002-resume-product-integration",
+          "qr1-current-state",
+          2
+        ],
+        "new_fabricated": false,
+        "new_missing_witness": true,
+        "new_stale": false
+      },
+      {
+        "cell": [
+          "case-0002-audit-r21-evidence-provenance",
+          "qa2-supporting",
+          1
+        ],
+        "new_fabricated": false,
+        "new_missing_witness": true,
+        "new_stale": false
+      },
+      {
+        "cell": [
+          "case-0002-audit-r21-evidence-provenance",
+          "qa3-superseded",
+          2
+        ],
+        "new_fabricated": false,
+        "new_missing_witness": true,
+        "new_stale": false
+      },
+      {
+        "cell": [
+          "case-0002-assess-change-impact-on-oracle-topology",
+          "qi1-dependencies",
+          0
+        ],
+        "new_fabricated": true,
+        "new_missing_witness": true,
+        "new_stale": false
+      },
+      {
+        "cell": [
+          "case-0002-assess-change-impact-on-oracle-topology",
+          "qi2-rereview",
+          0
+        ],
+        "new_fabricated": true,
+        "new_missing_witness": false,
+        "new_stale": false
+      },
+      {
+        "cell": [
+          "case-0002-assess-change-impact-on-oracle-topology",
+          "qi1-dependencies",
+          1
+        ],
+        "new_fabricated": true,
+        "new_missing_witness": true,
+        "new_stale": false
+      },
+      {
+        "cell": [
+          "case-0002-assess-change-impact-on-oracle-topology",
+          "qi2-rereview",
+          1
+        ],
+        "new_fabricated": true,
+        "new_missing_witness": false,
+        "new_stale": false
+      },
+      {
+        "cell": [
+          "case-0002-assess-change-impact-on-oracle-topology",
+          "qi1-dependencies",
+          2
+        ],
+        "new_fabricated": true,
+        "new_missing_witness": true,
+        "new_stale": false
+      },
+      {
+        "cell": [
+          "case-0002-assess-change-impact-on-oracle-topology",
+          "qi2-rereview",
+          2
+        ],
+        "new_fabricated": true,
+        "new_missing_witness": true,
+        "new_stale": false
+      }
+    ],
+    "n_cells_per_arm": 33,
+    "quality_noninferior": false,
+    "token_win_cold": true,
+    "warm": {
+      "notation_amortized": true
+    }
+  },
+  "structural": {
+    "Q1R": "PASS",
+    "Q1RQ_roundtrip": "PASS",
+    "note": "structural verdicts inherited from Q2 (frozen); not re-run here"
+  }
+}

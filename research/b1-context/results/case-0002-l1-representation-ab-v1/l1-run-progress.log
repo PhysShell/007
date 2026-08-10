@@ -1,0 +1,76 @@
+==== model gemma (Gemma-4-31B-it, Google) ====
+[gemma   ] resume-product-integration     rep0 RAW_VALID    http=completed        reported=Gemma-4-31B-it       lat=15.509s ptok=2597 ctok=481 correct=2/4
+[gemma   ] resume-product-integration     rep0 QODEC_VALID  http=completed        reported=Gemma-4-31B-it       lat=9.821s ptok=2114 ctok=474 correct=1/4
+[gemma   ] resume-product-integration     rep1 QODEC_VALID  http=completed        reported=Gemma-4-31B-it       lat=8.825s ptok=2114 ctok=475 correct=1/4
+[gemma   ] resume-product-integration     rep1 RAW_VALID    http=completed        reported=Gemma-4-31B-it       lat=8.721s ptok=2597 ctok=489 correct=2/4
+[gemma   ] resume-product-integration     rep2 RAW_VALID    http=completed        reported=Gemma-4-31B-it       lat=3.934s ptok=2597 ctok=489 correct=2/4
+[gemma   ] resume-product-integration     rep2 QODEC_VALID  http=completed        reported=Gemma-4-31B-it       lat=3.841s ptok=2114 ctok=475 correct=1/4
+[gemma   ] audit-r21-evidence-provenance  rep0 QODEC_VALID  http=completed        reported=Gemma-4-31B-it       lat=7.919s ptok=3141 ctok=894 correct=3/5
+[gemma   ] audit-r21-evidence-provenance  rep0 RAW_VALID    http=completed        reported=Gemma-4-31B-it       lat=9.149s ptok=4256 ctok=903 correct=2/5
+[gemma   ] audit-r21-evidence-provenance  rep1 RAW_VALID    http=completed        reported=Gemma-4-31B-it       lat=14.067s ptok=4256 ctok=990 correct=2/5
+[gemma   ] audit-r21-evidence-provenance  rep1 QODEC_VALID  http=completed        reported=Gemma-4-31B-it       lat=11.612s ptok=3141 ctok=987 correct=3/5
+[gemma   ] audit-r21-evidence-provenance  rep2 QODEC_VALID  http=completed        reported=Gemma-4-31B-it       lat=7.344s ptok=3141 ctok=987 correct=3/5
+[gemma   ] audit-r21-evidence-provenance  rep2 RAW_VALID    http=completed        reported=Gemma-4-31B-it       lat=11.079s ptok=4256 ctok=990 correct=2/5
+[gemma   ] assess-change-impact-on-oracle-topology rep0 RAW_VALID    http=completed        reported=Gemma-4-31B-it       lat=22.046s ptok=3453 ctok=249 correct=0/2
+[gemma   ] assess-change-impact-on-oracle-topology rep0 QODEC_VALID  http=completed        reported=Gemma-4-31B-it       lat=15.918s ptok=2411 ctok=815 correct=0/2
+[gemma   ] assess-change-impact-on-oracle-topology rep1 QODEC_VALID  http=completed        reported=Gemma-4-31B-it       lat=6.284s ptok=2411 ctok=346 correct=0/2
+[gemma   ] assess-change-impact-on-oracle-topology rep1 RAW_VALID    http=completed        reported=Gemma-4-31B-it       lat=3.168s ptok=3453 ctok=249 correct=0/2
+[gemma   ] assess-change-impact-on-oracle-topology rep2 RAW_VALID    http=completed        reported=Gemma-4-31B-it       lat=3.519s ptok=3453 ctok=249 correct=0/2
+[gemma   ] assess-change-impact-on-oracle-topology rep2 QODEC_VALID  http=completed        reported=Gemma-4-31B-it       lat=3.384s ptok=2411 ctok=346 correct=0/2
+==== model glm47 (GLM-4.7, Zhipu) ====
+[glm47   ] resume-product-integration     rep0 RAW_VALID    http=completed        reported=GLM-4.7              lat=20.602s ptok=2186 ctok=475 correct=3/4
+[glm47   ] resume-product-integration     rep0 QODEC_VALID  http=completed        reported=GLM-4.7              lat=24.961s ptok=1870 ctok=452 correct=2/4
+[glm47   ] resume-product-integration     rep1 QODEC_VALID  http=completed        reported=GLM-4.7              lat=22.909s ptok=1870 ctok=428 correct=2/4
+[glm47   ] resume-product-integration     rep1 RAW_VALID    http=completed        reported=GLM-4.7              lat=23.878s ptok=2186 ctok=421 correct=2/4
+[glm47   ] resume-product-integration     rep2 RAW_VALID    http=completed        reported=GLM-4.7              lat=22.649s ptok=2186 ctok=421 correct=2/4
+[glm47   ] resume-product-integration     rep2 QODEC_VALID  http=completed        reported=GLM-4.7              lat=23.981s ptok=1870 ctok=448 correct=2/4
+[glm47   ] audit-r21-evidence-provenance  rep0 QODEC_VALID  http=completed        reported=GLM-4.7              lat=50.442s ptok=2787 ctok=876 correct=2/5
+[glm47   ] audit-r21-evidence-provenance  rep0 RAW_VALID    http=completed        reported=GLM-4.7              lat=31.663s ptok=3610 ctok=834 correct=3/5
+[glm47   ] audit-r21-evidence-provenance  rep1 RAW_VALID    http=completed        reported=GLM-4.7              lat=25.062s ptok=3610 ctok=827 correct=3/5
+[glm47   ] audit-r21-evidence-provenance  rep1 QODEC_VALID  http=completed        reported=GLM-4.7              lat=19.513s ptok=2787 ctok=766 correct=2/5
+[glm47   ] audit-r21-evidence-provenance  rep2 QODEC_VALID  http=completed        reported=GLM-4.7              lat=22.763s ptok=2787 ctok=772 correct=2/5
+[glm47   ] audit-r21-evidence-provenance  rep2 RAW_VALID    http=completed        reported=GLM-4.7              lat=27.688s ptok=3610 ctok=838 correct=4/5
+[glm47   ] assess-change-impact-on-oracle-topology rep0 RAW_VALID    http=completed        reported=GLM-4.7              lat=8.903s ptok=2914 ctok=173 correct=0/2
+[glm47   ] assess-change-impact-on-oracle-topology rep0 QODEC_VALID  http=completed        reported=GLM-4.7              lat=15.741s ptok=2135 ctok=274 correct=0/2
+[glm47   ] assess-change-impact-on-oracle-topology rep1 QODEC_VALID  http=completed        reported=GLM-4.7              lat=13.752s ptok=2135 ctok=276 correct=0/2
+[glm47   ] assess-change-impact-on-oracle-topology rep1 RAW_VALID    http=completed        reported=GLM-4.7              lat=6.575s ptok=2914 ctok=230 correct=0/2
+[glm47   ] assess-change-impact-on-oracle-topology rep2 RAW_VALID    http=completed        reported=GLM-4.7              lat=6.5s ptok=2914 ctok=230 correct=0/2
+[glm47   ] assess-change-impact-on-oracle-topology rep2 QODEC_VALID  http=completed        reported=GLM-4.7              lat=7.629s ptok=2135 ctok=276 correct=0/2
+==== model deepseek (DeepSeek-V4-Flash-0731, DeepSeek) ====
+[deepseek] resume-product-integration     rep0 RAW_VALID    http=completed        reported=DeepSeek-V4-Flash-07 lat=15.429s ptok=2274 ctok=475 correct=3/4
+[deepseek] resume-product-integration     rep0 QODEC_VALID  http=completed        reported=DeepSeek-V4-Flash-07 lat=29.162s ptok=1908 ctok=311 correct=1/4
+[deepseek] resume-product-integration     rep1 QODEC_VALID  http=completed        reported=DeepSeek-V4-Flash-07 lat=102.773s ptok=1908 ctok=352 correct=1/4
+[deepseek] resume-product-integration     rep1 RAW_VALID    http=completed        reported=DeepSeek-V4-Flash-07 lat=53.3s ptok=2274 ctok=485 correct=3/4
+[deepseek] resume-product-integration     rep2 RAW_VALID    http=completed        reported=DeepSeek-V4-Flash-07 lat=37.394s ptok=2274 ctok=486 correct=3/4
+[deepseek] resume-product-integration     rep2 QODEC_VALID  http=completed        reported=DeepSeek-V4-Flash-07 lat=38.054s ptok=1908 ctok=335 correct=0/4
+[deepseek] audit-r21-evidence-provenance  rep0 QODEC_VALID  http=completed        reported=DeepSeek-V4-Flash-07 lat=14.06s ptok=2858 ctok=765 correct=3/5
+[deepseek] audit-r21-evidence-provenance  rep0 RAW_VALID    http=completed        reported=DeepSeek-V4-Flash-07 lat=55.234s ptok=3754 ctok=871 correct=0/5
+[deepseek] audit-r21-evidence-provenance  rep1 RAW_VALID    http=completed        reported=DeepSeek-V4-Flash-07 lat=12.695s ptok=3754 ctok=785 correct=0/5
+[deepseek] audit-r21-evidence-provenance  rep1 QODEC_VALID  http=completed        reported=DeepSeek-V4-Flash-07 lat=73.184s ptok=2858 ctok=769 correct=2/5
+[deepseek] audit-r21-evidence-provenance  rep2 QODEC_VALID  http=completed        reported=DeepSeek-V4-Flash-07 lat=38.059s ptok=2858 ctok=802 correct=3/5
+[deepseek] audit-r21-evidence-provenance  rep2 RAW_VALID    http=completed        reported=DeepSeek-V4-Flash-07 lat=25.953s ptok=3754 ctok=747 correct=3/5
+[deepseek] assess-change-impact-on-oracle-topology rep0 RAW_VALID    http=completed        reported=DeepSeek-V4-Flash-07 lat=24.066s ptok=3033 ctok=335 correct=1/2
+[deepseek] assess-change-impact-on-oracle-topology rep0 QODEC_VALID  http=completed        reported=DeepSeek-V4-Flash-07 lat=6.38s ptok=2200 ctok=336 correct=0/2
+[deepseek] assess-change-impact-on-oracle-topology rep1 QODEC_VALID  http=completed        reported=DeepSeek-V4-Flash-07 lat=41.081s ptok=2200 ctok=258 correct=0/2
+[deepseek] assess-change-impact-on-oracle-topology rep1 RAW_VALID    http=completed        reported=DeepSeek-V4-Flash-07 lat=33.015s ptok=3033 ctok=318 correct=1/2
+[deepseek] assess-change-impact-on-oracle-topology rep2 RAW_VALID    http=completed        reported=DeepSeek-V4-Flash-07 lat=6.356s ptok=3033 ctok=297 correct=0/2
+[deepseek] assess-change-impact-on-oracle-topology rep2 QODEC_VALID  http=completed        reported=DeepSeek-V4-Flash-07 lat=9.445s ptok=2200 ctok=261 correct=0/2
+==== model qwen (Qwen3.5-27B-Anko, Qwen) ====
+[qwen    ] resume-product-integration     rep0 RAW_VALID    http=completed        reported=Qwen3.5-27B-Anko     lat=9.506s ptok=2389 ctok=460 correct=3/4
+[qwen    ] resume-product-integration     rep0 QODEC_VALID  http=completed        reported=Qwen3.5-27B-Anko     lat=6.158s ptok=2030 ctok=305 correct=2/4
+[qwen    ] resume-product-integration     rep1 QODEC_VALID  http=completed        reported=Qwen3.5-27B-Anko     lat=6.657s ptok=2030 ctok=310 correct=2/4
+[qwen    ] resume-product-integration     rep1 RAW_VALID    http=completed        reported=Qwen3.5-27B-Anko     lat=7.926s ptok=2389 ctok=410 correct=3/4
+[qwen    ] resume-product-integration     rep2 RAW_VALID    http=completed        reported=Qwen3.5-27B-Anko     lat=10.381s ptok=2389 ctok=493 correct=3/4
+[qwen    ] resume-product-integration     rep2 QODEC_VALID  http=completed        reported=Qwen3.5-27B-Anko     lat=7.25s ptok=2030 ctok=305 correct=2/4
+[qwen    ] audit-r21-evidence-provenance  rep0 QODEC_VALID  http=completed        reported=Qwen3.5-27B-Anko     lat=18.54s ptok=3018 ctok=800 correct=4/5
+[qwen    ] audit-r21-evidence-provenance  rep0 RAW_VALID    http=completed        reported=Qwen3.5-27B-Anko     lat=19.526s ptok=3966 ctok=824 correct=3/5
+[qwen    ] audit-r21-evidence-provenance  rep1 RAW_VALID    http=completed        reported=Qwen3.5-27B-Anko     lat=17.098s ptok=3966 ctok=728 correct=3/5
+[qwen    ] audit-r21-evidence-provenance  rep1 QODEC_VALID  http=completed        reported=Qwen3.5-27B-Anko     lat=23.991s ptok=3018 ctok=955 correct=3/5
+[qwen    ] audit-r21-evidence-provenance  rep2 QODEC_VALID  http=completed        reported=Qwen3.5-27B-Anko     lat=21.624s ptok=3018 ctok=1044 correct=4/5
+[qwen    ] audit-r21-evidence-provenance  rep2 RAW_VALID    http=completed        reported=Qwen3.5-27B-Anko     lat=16.201s ptok=3966 ctok=798 correct=4/5
+[qwen    ] assess-change-impact-on-oracle-topology rep0 RAW_VALID    http=completed        reported=Qwen3.5-27B-Anko     lat=7.334s ptok=3210 ctok=335 correct=1/2
+[qwen    ] assess-change-impact-on-oracle-topology rep0 QODEC_VALID  http=completed        reported=Qwen3.5-27B-Anko     lat=5.096s ptok=2316 ctok=192 correct=0/2
+[qwen    ] assess-change-impact-on-oracle-topology rep1 QODEC_VALID  http=completed        reported=Qwen3.5-27B-Anko     lat=5.058s ptok=2316 ctok=193 correct=0/2
+[qwen    ] assess-change-impact-on-oracle-topology rep1 RAW_VALID    http=completed        reported=Qwen3.5-27B-Anko     lat=8.101s ptok=3210 ctok=329 correct=1/2
+[qwen    ] assess-change-impact-on-oracle-topology rep2 RAW_VALID    http=completed        reported=Qwen3.5-27B-Anko     lat=9.84s ptok=3210 ctok=429 correct=2/2
+[qwen    ] assess-change-impact-on-oracle-topology rep2 QODEC_VALID  http=completed        reported=Qwen3.5-27B-Anko     lat=5.455s ptok=2316 ctok=184 correct=0/2

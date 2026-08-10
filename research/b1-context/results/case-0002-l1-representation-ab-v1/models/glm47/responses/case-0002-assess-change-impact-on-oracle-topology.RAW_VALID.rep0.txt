@@ -1,0 +1,24 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qi1-dependencies",
+      "answer": "Nothing depends on the chosen constraint; the context shows it depends on other observations but lists no dependents.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qi2-rereview",
+      "answer": "The context does not specify what must be re-reviewed if the constraint changes, as no re-review requirements are described.",
+      "cited_observation_ids": [],
+      "current_state_observation_ids": [],
+      "cited_relations": []
+    }
+  ]
+}
+```

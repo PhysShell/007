@@ -1,0 +1,25 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qi1-dependencies",
+      "answer": "Nothing depends on the chosen constraint in the provided context.",
+      "cited_observation_ids": ["obs-oracle-topology-constraint"],
+      "current_state_observation_ids": ["obs-oracle-topology-constraint"],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qi2-rereview",
+      "answer": "The constraint depends on the repo authority, the output path, and the window invariant, so changes to those dependencies might necessitate a re-review.",
+      "cited_observation_ids": ["obs-oracle-topology-constraint"],
+      "current_state_observation_ids": ["obs-oracle-topology-constraint", "obs-repo-authority-04108e7", "obs-output-path-dependence", "obs-window-invariant"],
+      "cited_relations": [
+        {
+          "from": "obs-oracle-topology-constraint",
+          "kind": "depends_on"
+        }
+      ]
+    }
+  ]
+}
+```

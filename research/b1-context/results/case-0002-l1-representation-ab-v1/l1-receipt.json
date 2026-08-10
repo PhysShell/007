@@ -1,0 +1,221 @@
+{
+  "case_role": "development",
+  "caveats": [
+    "DECODING: Model Thinking was DISABLED at the provider key level for every model (verified rlen==0), because with reasoning enabled the QODEC decode exceeded the provider's gateway limit (repeated HTTP 502) and was operationally infeasible. Reasoning-off is applied IDENTICALLY to both arms, so the within-model RAW-vs-QODEC comparison is controlled; but decoding a compressed legend plausibly benefits more from deliberation than reading raw JSON, so the regression is established UNDER GREEDY/NO-COT DECODING and may not hold with a large reasoning budget.",
+    "SCALE: development scale (N=3 replicates, 11 questions, single case case-0002, 33 cells/arm/model). Per the protocol this is a development signal, not a significance test; strength comes from the consistent direction across 4 independent model families, not from sample size.",
+    "ABSOLUTE BASELINE: RAW correctness is itself modest (36-70% across models) because these are small/mid open models with reasoning off; the load-bearing result is the WITHIN-MODEL relative regression, not the absolute rate.",
+    "PROVIDER: Arli AI community hosting; each key pinned to one model, reported==requested on every attempt (no substitution). Gemma-4-31B-it / GLM-4.7 / DeepSeek-V4-Flash-0731 reported official family names; Qwen3.5-27B-Anko is a community variant. These are the served weights.",
+    "STRUCTURAL: Q1RQ is byte-lossless (roundtrip PASS, inherited from Q2). The regression is in MODEL comprehension of the representation, not in the encoding's fidelity."
+  ],
+  "cross_family_panel": {
+    "deepseek": {
+      "QODEC_cold_tokens": 19953,
+      "QODEC_correct": 10,
+      "RAW_cold_tokens": 25656,
+      "RAW_correct": 14,
+      "any_substitution": false,
+      "family": "DeepSeek",
+      "hard_regression_count": 14,
+      "model": "DeepSeek-V4-Flash-0731",
+      "n_cells": 33,
+      "principal_classification": "MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS",
+      "qodec_parse_failure_rate": 0.303,
+      "token_win_cold": true
+    },
+    "gemma": {
+      "QODEC_cold_tokens": 19953,
+      "QODEC_correct": 12,
+      "RAW_cold_tokens": 25656,
+      "RAW_correct": 12,
+      "any_substitution": false,
+      "family": "Google",
+      "hard_regression_count": 4,
+      "model": "Gemma-4-31B-it",
+      "n_cells": 33,
+      "principal_classification": "MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS",
+      "qodec_parse_failure_rate": 0.1818,
+      "token_win_cold": true
+    },
+    "glm47": {
+      "QODEC_cold_tokens": 19953,
+      "QODEC_correct": 12,
+      "RAW_cold_tokens": 25656,
+      "RAW_correct": 17,
+      "any_substitution": false,
+      "family": "Zhipu",
+      "hard_regression_count": 5,
+      "model": "GLM-4.7",
+      "n_cells": 33,
+      "principal_classification": "MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS",
+      "qodec_parse_failure_rate": 0.0,
+      "token_win_cold": true
+    },
+    "qwen": {
+      "QODEC_cold_tokens": 19953,
+      "QODEC_correct": 17,
+      "RAW_cold_tokens": 25656,
+      "RAW_correct": 23,
+      "any_substitution": false,
+      "family": "Qwen",
+      "hard_regression_count": 11,
+      "model": "Qwen3.5-27B-Anko",
+      "n_cells": 33,
+      "principal_classification": "MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS",
+      "qodec_parse_failure_rate": 0.0,
+      "token_win_cold": true
+    }
+  },
+  "family": "Google",
+  "finding": "Across all four model families, each qualified model answered the RAW valid context better than its byte-equivalent QODEC encoding, under identical no-reasoning decoding. The QODEC representation causes a consistent quality regression -- driven mainly by fabricated/garbled observation identifiers (RAW 3 -> QODEC 21 cells), leaked undecoded legend glyphs (0 -> 16), and more missing required witnesses (64 -> 75) -- despite QODEC being byte-lossless and ~22% cheaper in input tokens. Principal (Gemma-4-31B-it): equal correct count (12/12) but 4 hard regressions -> not non-inferior.",
+  "freeze_manifest_sha256": "sha256:1c512c50664cb22f2bd0dc3203d0234c9ed68bd5911b53199cfd3126988133db",
+  "frozen_producers": {
+    "adapter": "f8fa87e349c48de0678ccc4a4ba4be14463dfc85",
+    "evaluator": "58a7a111",
+    "l0_qualified_head": "fa93d63636bf53892edbd02fec01ab619ffc1071",
+    "q1r_authoritative_eval": "sha256:fc76d210277f328cc685e61b80df4214319f612333ea49c7e9126d51becce791",
+    "qodec_qa": "6a5d40304d5997fd9ba6325521f3e212eba4aa75"
+  },
+  "generalization_claim_allowed": false,
+  "harness_sha256": "sha256:17b553280b66e9d87f57463bc77fb8dfe8a67d89dc7d151c40feff4c8eeb179d",
+  "holdout_evidence": false,
+  "interpretation_allowed_if_supported": null,
+  "is_principal_model": true,
+  "model_facing": {
+    "quality_noninferiority": "FAIL",
+    "representation_comprehension": "PASS",
+    "token_result": "QODEC_CHEAPER_COLD"
+  },
+  "next_step_per_protocol": "MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS -> stop generalization work; do NOT build qodec project v1 and do NOT start the real-source holdout. Investigate the representation/instruction boundary first: the failure is specifically accurate identifier extraction from the %q1 legend. No notation tuning was done after seeing outputs (L1 prohibition respected).",
+  "pooled_failure_modes_over_4_models": {
+    "QODEC_VALID": {
+      "answer_correct": 51,
+      "malformed_output": 6,
+      "missing_required_witness": 75,
+      "refusal": 0,
+      "representation_parse_failure": 16,
+      "required_relation_evidence_used": 115,
+      "stale_as_current_error": 2,
+      "unsupported_or_fabricated_claim": 21
+    },
+    "RAW_VALID": {
+      "answer_correct": 66,
+      "malformed_output": 0,
+      "missing_required_witness": 64,
+      "refusal": 0,
+      "representation_parse_failure": 0,
+      "required_relation_evidence_used": 125,
+      "stale_as_current_error": 0,
+      "unsupported_or_fabricated_claim": 3
+    },
+    "cells_per_arm": {
+      "QODEC_VALID": 132,
+      "RAW_VALID": 132
+    }
+  },
+  "principal_classification": "MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS",
+  "prohibited_claims": [
+    "Qodec improves LLMs generally",
+    "Qodec generalizes to unseen real projects",
+    "qodec project v0 is sufficient under arbitrary budgets"
+  ],
+  "provider_integrity": {
+    "any_substitution": false,
+    "attempts_completed": 18,
+    "attempts_total": 18,
+    "models_reported": [
+      "Gemma-4-31B-it"
+    ]
+  },
+  "provider_surfaces": {
+    "api_style": "openai-chat",
+    "endpoint_authority": "https://api.arliai.com/v1/chat/completions",
+    "max_tokens": 8000,
+    "provider": "arliai",
+    "qualification_identity": "fa93d63636bf53892edbd02fec01ab619ffc1071",
+    "repetitions": 3,
+    "retry_policy": "at most 1 transport retry on before-response failure; after-headers loss is not retried",
+    "seed": null,
+    "substitution_check": "each key is pinned to one model; model_requested set to the pinned model; verified reported==requested, rlen==0",
+    "temperature": 0,
+    "thinking_disabled_at_key_level": true,
+    "timeout_s": 200.0,
+    "transport": "provider_matrix.send_json @ L0-qualified head fa93d63 (https-only, no-redirect, bounded read, credential-safe)"
+  },
+  "provider_surfaces_model": "Gemma-4-31B-it",
+  "record": "o7.l1.representation-ab-receipt/v1",
+  "result": {
+    "QODEC_VALID": {
+      "cold_input_tokens_o200k": 19953,
+      "completion_tokens": 5799,
+      "provider_prompt_tokens": 22998,
+      "quality_answer_correct": 12,
+      "quality_rate": 0.3636,
+      "representation_parse_failure_rate": 0.1818,
+      "warm_input_tokens_o200k": 17604
+    },
+    "RAW_VALID": {
+      "cold_input_tokens_o200k": 25656,
+      "completion_tokens": 5089,
+      "provider_prompt_tokens": 30918,
+      "quality_answer_correct": 12,
+      "quality_rate": 0.3636
+    },
+    "cold": {
+      "notation_charged": true
+    },
+    "hard_regression_count": 4,
+    "hard_regressions": [
+      {
+        "cell": [
+          "case-0002-resume-product-integration",
+          "qr1-current-state",
+          0
+        ],
+        "new_fabricated": true,
+        "new_missing_witness": false,
+        "new_stale": false
+      },
+      {
+        "cell": [
+          "case-0002-resume-product-integration",
+          "qr4-authority",
+          0
+        ],
+        "new_fabricated": true,
+        "new_missing_witness": true,
+        "new_stale": false
+      },
+      {
+        "cell": [
+          "case-0002-resume-product-integration",
+          "qr4-authority",
+          1
+        ],
+        "new_fabricated": true,
+        "new_missing_witness": true,
+        "new_stale": false
+      },
+      {
+        "cell": [
+          "case-0002-resume-product-integration",
+          "qr4-authority",
+          2
+        ],
+        "new_fabricated": true,
+        "new_missing_witness": true,
+        "new_stale": false
+      }
+    ],
+    "n_cells_per_arm": 33,
+    "quality_noninferior": false,
+    "token_win_cold": true,
+    "warm": {
+      "notation_amortized": true
+    }
+  },
+  "structural": {
+    "Q1R": "PASS",
+    "Q1RQ_roundtrip": "PASS",
+    "note": "structural verdicts inherited from Q2 (frozen); not re-run here"
+  }
+}

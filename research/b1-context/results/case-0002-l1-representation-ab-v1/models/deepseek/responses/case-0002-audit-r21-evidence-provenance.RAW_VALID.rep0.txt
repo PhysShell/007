@@ -1,0 +1,54 @@
+{
+  "answers": [
+    {
+      "question_id": "qa1-why-active",
+      "answer": "The current solution is active because the frozen plane-record (obs-plane-record-frozen) is the authoritative current state, and the evidence head 04108e7 is the current evidence head with a current status, while the superseded v6 lock is not current.",
+      "cited_observation_ids": ["obs-plane-record-frozen", "obs-evidence-head-04108e7"],
+      "current_state_observation_ids": ["obs-plane-record-frozen", "obs-evidence-head-04108e7"],
+      "cited_relations": [
+        {"from": "obs-plane-record-frozen", "kind": "supersedes"},
+        {"from": "obs-evidence-head-04108e7", "kind": "supersedes"}
+      ]
+    },
+    {
+      "question_id": "qa2-supporting",
+      "answer": "The supporting records are the frozen plane-record (obs-plane-record-frozen) and the evidence head 04108e7 (obs-evidence-head-04108e7), which together establish the current state and supersede the v6 lock.",
+      "cited_observation_ids": ["obs-plane-record-frozen", "obs-evidence-head-04108e7"],
+      "current_state_observation_ids": ["obs-plane-record-frozen", "obs-evidence-head-04108e7"],
+      "cited_relations": [
+        {"from": "obs-plane-record-frozen", "kind": "supersedes"},
+        {"from": "obs-evidence-head-04108e7", "kind": "supersedes"}
+      ]
+    },
+    {
+      "question_id": "qa3-superseded",
+      "answer": "The superseded items are the v6 lock (obs-lock-supersession-chain) and the v6 binding error (obs-v3-binding-error), which are superseded by the current plane-record and evidence head.",
+      "cited_observation_ids": ["obs-lock-supersession-chain", "obs-v3-binding-error"],
+      "current_state_observation_ids": ["obs-plane-record-frozen", "obs-evidence-head-04108e7"],
+      "cited_relations": [
+        {"from": "obs-plane-record-frozen", "kind": "supersedes"},
+        {"from": "obs-evidence-head-04108e7", "kind": "supersedes"}
+      ]
+    },
+    {
+      "question_id": "qa4-wrong-agent-claims",
+      "answer": "The wrong agent claims are the reviewer acceptance claim (obs-reviewer-acceptance-claim) and the reviewer durability unresolved v6 (obs-reviewer-durability-unresolved-v6), which are superseded by the current evidence head and plane-record.",
+      "cited_observation_ids": ["obs-reviewer-acceptance-claim", "obs-reviewer-durability-unresolved-v6"],
+      "current_state_observation_ids": ["obs-plane-record-frozen", "obs-evidence-head-04108e7"],
+      "cited_relations": [
+        {"from": "obs-plane-record-frozen", "kind": "supersedes"},
+        {"from": "obs-evidence-head-04108e7", "kind": "supersedes"}
+      ]
+    },
+    {
+      "question_id": "qa5-repo-authority",
+      "answer": "The repository authority is the frozen plane-record (obs-plane-record-frozen) and the evidence head 04108e7 (obs-evidence-head-04108e7), which are the current authoritative records.",
+      "cited_observation_ids": ["obs-plane-record-frozen", "obs-evidence-head-04108e7"],
+      "current_state_observation_ids": ["obs-plane-record-frozen", "obs-evidence-head-04108e7"],
+      "cited_relations": [
+        {"from": "obs-plane-record-frozen", "kind": "supersedes"},
+        {"from": "obs-evidence-head-04108e7", "kind": "supersedes"}
+      ]
+    }
+  ]
+}

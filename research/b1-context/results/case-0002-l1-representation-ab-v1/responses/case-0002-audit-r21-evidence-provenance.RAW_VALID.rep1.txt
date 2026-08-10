@@ -1,0 +1,105 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qa1-why-active",
+      "answer": "The current solution is active because Round 0 is closed and the plane-coder, plane-reviewer, and plane-record are all frozen, establishing the authoritative record of R21 acceptance.",
+      "cited_observation_ids": [
+        "obs-round0-closed",
+        "obs-repo-authority-04108e7"
+      ],
+      "current_state_observation_ids": [
+        "obs-round0-closed",
+        "obs-repo-authority-04108e7"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qa2-supporting",
+      "answer": "The evidence head 04108e7 supports the repository authority, and the reviewer window supports the acceptance claim.",
+      "cited_observation_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-window"
+      ],
+      "current_state_observation_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-window"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-evidence-head-ci-empty",
+          "kind": "supports"
+        },
+        {
+          "from": "obs-reviewer-window",
+          "kind": "supports"
+        }
+      ]
+    },
+    {
+      "question_id": "qa3-superseded",
+      "answer": "Superseded items include the reviewer acceptance claim, the prior profiler defect, the unresolved durability issue, the non-frozen plane record, and previous lock versions v5, v4, and v3.",
+      "cited_observation_ids": [
+        "obs-lock-supersession-chain",
+        "obs-profiler-fail-closed",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-durability-resolved",
+        "obs-round0-closed"
+      ],
+      "current_state_observation_ids": [
+        "obs-lock-supersession-chain",
+        "obs-profiler-fail-closed",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-durability-resolved",
+        "obs-round0-closed"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-profiler-fail-closed",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-repo-authority-04108e7",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-reviewer-durability-resolved",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-round0-closed",
+          "kind": "supersedes"
+        }
+      ]
+    },
+    {
+      "question_id": "qa4-wrong-agent-claims",
+      "answer": "The reviewer's relayed acceptance is not authoritative, the v5 lock mislabelled itself, and the reviewer profile digest did not reproduce.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7",
+        "obs-lock-supersession-chain",
+        "obs-reviewer-digest-disagreement"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7",
+        "obs-lock-supersession-chain",
+        "obs-reviewer-digest-disagreement"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qa5-repo-authority",
+      "answer": "The frozen plane-record, specifically evidence head 04108e7, is the authoritative record of R21 acceptance.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "cited_relations": []
+    }
+  ]
+}
+```

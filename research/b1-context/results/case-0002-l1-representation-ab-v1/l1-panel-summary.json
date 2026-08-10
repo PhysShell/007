@@ -1,0 +1,68 @@
+{
+  "case_role": "development",
+  "freeze_manifest_sha256": "sha256:1c512c50664cb22f2bd0dc3203d0234c9ed68bd5911b53199cfd3126988133db",
+  "generalization_claim_allowed": false,
+  "harness_sha256": "sha256:17b553280b66e9d87f57463bc77fb8dfe8a67d89dc7d151c40feff4c8eeb179d",
+  "holdout_evidence": false,
+  "per_model": {
+    "deepseek": {
+      "QODEC_cold_tokens": 19953,
+      "QODEC_correct": 10,
+      "RAW_cold_tokens": 25656,
+      "RAW_correct": 14,
+      "any_substitution": false,
+      "family": "DeepSeek",
+      "hard_regression_count": 14,
+      "model": "DeepSeek-V4-Flash-0731",
+      "n_cells": 33,
+      "principal_classification": "MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS",
+      "qodec_parse_failure_rate": 0.303,
+      "token_win_cold": true
+    },
+    "gemma": {
+      "QODEC_cold_tokens": 19953,
+      "QODEC_correct": 12,
+      "RAW_cold_tokens": 25656,
+      "RAW_correct": 12,
+      "any_substitution": false,
+      "family": "Google",
+      "hard_regression_count": 4,
+      "model": "Gemma-4-31B-it",
+      "n_cells": 33,
+      "principal_classification": "MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS",
+      "qodec_parse_failure_rate": 0.1818,
+      "token_win_cold": true
+    },
+    "glm47": {
+      "QODEC_cold_tokens": 19953,
+      "QODEC_correct": 12,
+      "RAW_cold_tokens": 25656,
+      "RAW_correct": 17,
+      "any_substitution": false,
+      "family": "Zhipu",
+      "hard_regression_count": 5,
+      "model": "GLM-4.7",
+      "n_cells": 33,
+      "principal_classification": "MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS",
+      "qodec_parse_failure_rate": 0.0,
+      "token_win_cold": true
+    },
+    "qwen": {
+      "QODEC_cold_tokens": 19953,
+      "QODEC_correct": 17,
+      "RAW_cold_tokens": 25656,
+      "RAW_correct": 23,
+      "any_substitution": false,
+      "family": "Qwen",
+      "hard_regression_count": 11,
+      "model": "Qwen3.5-27B-Anko",
+      "n_cells": 33,
+      "principal_classification": "MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS",
+      "qodec_parse_failure_rate": 0.0,
+      "token_win_cold": true
+    }
+  },
+  "principal_classification": "MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS",
+  "principal_model": "Gemma-4-31B-it",
+  "record": "o7.l1.representation-ab-panel/v1"
+}

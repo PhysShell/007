@@ -1,0 +1,100 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qa1-why-active",
+      "answer": "The current solution is considered active because Round 0 is CLOSED, with the plane-coder, plane-reviewer, and plane-record all FROZEN, establishing a stable state.",
+      "cited_observation_ids": [
+        "obs-round0-closed"
+      ],
+      "current_state_observation_ids": [
+        "obs-round0-closed"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qa2-supporting",
+      "answer": "The solution is supported by the evidence head CI status, the reviewer window, and the window invariant check.",
+      "cited_observation_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-reviewer-window",
+        "obs-window-invariant"
+      ],
+      "current_state_observation_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-reviewer-window",
+        "obs-window-invariant"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-evidence-head-ci-empty",
+          "kind": "supports"
+        }
+      ]
+    },
+    {
+      "question_id": "qa3-superseded",
+      "answer": "The current lock supersedes prior versions (v5, v4, v3) and the profiler fail-closed decision supersedes a prior defect; additionally, the repo authority supersedes the reviewer's acceptance claim and the resolved durability supersedes an unresolved state.",
+      "cited_observation_ids": [
+        "obs-lock-supersession-chain",
+        "obs-profiler-fail-closed",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-durability-resolved"
+      ],
+      "current_state_observation_ids": [
+        "obs-lock-supersession-chain",
+        "obs-profiler-fail-closed",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-durability-resolved"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-profiler-fail-closed",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-repo-authority-04108e7",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-reviewer-durability-resolved",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-round0-closed",
+          "kind": "supersedes"
+        }
+      ]
+    },
+    {
+      "question_id": "qa4-wrong-agent-claims",
+      "answer": "The reviewer's relayed acceptance claim is not authoritative, and a prior reviewer profile digest disagreement was identified as non-reproducible due to a literal input path difference.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-digest-disagreement"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-digest-disagreement"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-repo-authority-04108e7",
+          "kind": "supersedes"
+        }
+      ]
+    },
+    {
+      "question_id": "qa5-repo-authority",
+      "answer": "The authoritative repository outcome is the frozen plane-record at evidence head 04108e7, with PR #16 open, draft, and unmerged.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "cited_relations": []
+    }
+  ]
+}
+```

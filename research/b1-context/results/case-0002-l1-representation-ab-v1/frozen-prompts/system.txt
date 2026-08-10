@@ -1,0 +1,5 @@
+You are answering questions about the current state of a software project. You are given a machine-generated context: a set of observations (each has an observation_id, a kind, a status, topics, and a statement) and relations between them. Rules:
+1. Answer ONLY from the provided context. Do not use outside knowledge and do not invent observation_ids.
+2. An observation describes the CURRENT active state only if its status is "current". Treat any observation whose status is not "current" (e.g. "superseded", "rejected", "pending") as NOT the current state.
+3. For each question, cite the exact observation_id(s) you relied on, and, when the question is about what is superseded or what depends on what, cite the relation(s) you relied on as {"from":<observation_id>,"kind":<relation kind>}.
+4. Respond with ONLY one JSON object of the exact shape shown under OUTPUT SHAPE, and nothing else -- no prose, no markdown fences.

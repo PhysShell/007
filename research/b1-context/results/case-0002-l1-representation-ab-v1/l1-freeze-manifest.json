@@ -1,0 +1,308 @@
+{
+  "acceptance_rule": {
+    "hard_regression": {
+      "any_new_fabricated_claim": true,
+      "any_new_required_witness_loss": true,
+      "any_new_stale_as_current_error": true,
+      "meaning": "a hard regression is any QODEC_VALID (task,question,replicate) cell with stale_as_current_error / unsupported_or_fabricated_claim / missing_required_witness that the paired RAW_VALID cell did not have"
+    },
+    "quality_noninferior": {
+      "meaning": "QODEC total answer_correct count over all cells >= RAW total, and no hard regression",
+      "no_hard_regression": true,
+      "total_correctness_score_not_lower": true
+    }
+  },
+  "arm_order_schedule": {
+    "case-0002-assess-change-impact-on-oracle-topology|rep0": [
+      "RAW_VALID",
+      "QODEC_VALID"
+    ],
+    "case-0002-assess-change-impact-on-oracle-topology|rep1": [
+      "QODEC_VALID",
+      "RAW_VALID"
+    ],
+    "case-0002-assess-change-impact-on-oracle-topology|rep2": [
+      "RAW_VALID",
+      "QODEC_VALID"
+    ],
+    "case-0002-audit-r21-evidence-provenance|rep0": [
+      "QODEC_VALID",
+      "RAW_VALID"
+    ],
+    "case-0002-audit-r21-evidence-provenance|rep1": [
+      "RAW_VALID",
+      "QODEC_VALID"
+    ],
+    "case-0002-audit-r21-evidence-provenance|rep2": [
+      "QODEC_VALID",
+      "RAW_VALID"
+    ],
+    "case-0002-resume-product-integration|rep0": [
+      "RAW_VALID",
+      "QODEC_VALID"
+    ],
+    "case-0002-resume-product-integration|rep1": [
+      "QODEC_VALID",
+      "RAW_VALID"
+    ],
+    "case-0002-resume-product-integration|rep2": [
+      "RAW_VALID",
+      "QODEC_VALID"
+    ]
+  },
+  "case_role": "development",
+  "classification_rule": {
+    "decision_tree": [
+      "if any attempt has model_reported != model_requested -> PROVIDER_QUALIFICATION_FAILED",
+      "elif no successful attempts / all transport-refused -> LIVE_RUN_OPERATIONAL_REFUSAL",
+      "elif qodec_parse_failure_rate >= 0.5 -> MODEL_CANNOT_USE_QODEC_REPRESENTATION",
+      "elif hard_regression_count > 0 or qodec_correct < raw_correct -> MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS",
+      "elif qodec_correct > raw_correct and token_win -> MODEL_QUALITY_GAIN_WITH_TOKEN_WIN",
+      "elif qodec_correct == raw_correct and token_win -> MODEL_PARITY_WITH_TOKEN_WIN",
+      "else -> MODEL_PARITY_WITHOUT_TOKEN_WIN"
+    ],
+    "note": "evaluated in cmd_classify; thresholds frozen here before any call",
+    "qodec_parse_failure_rate_threshold": 0.5,
+    "token_win_definition": "aggregate qodec cold_input_tokens (o200k) < raw cold_input_tokens (o200k)"
+  },
+  "frozen_producers": {
+    "adapter": "f8fa87e349c48de0678ccc4a4ba4be14463dfc85",
+    "evaluator": "58a7a111",
+    "l0_qualified_head": "fa93d63636bf53892edbd02fec01ab619ffc1071",
+    "q1r_authoritative_eval": "sha256:fc76d210277f328cc685e61b80df4214319f612333ea49c7e9126d51becce791",
+    "qodec_qa": "6a5d40304d5997fd9ba6325521f3e212eba4aa75"
+  },
+  "generalization_claim_allowed": false,
+  "gold_status_map": {
+    "obs-authority-model": "current",
+    "obs-evidence-head-ci-empty": "current",
+    "obs-lock-supersession-chain": "current",
+    "obs-metadata-head": "current",
+    "obs-next-permitted-step": "current",
+    "obs-oracle-topology-constraint": "current",
+    "obs-output-path-dependence": "current",
+    "obs-plane-coder": "current",
+    "obs-plane-record-frozen": "current",
+    "obs-plane-record-not-frozen-v6": "superseded",
+    "obs-plane-reviewer": "current",
+    "obs-profiler-fail-closed": "current",
+    "obs-profiler-prior-defect": "superseded",
+    "obs-relay-rule": "current",
+    "obs-repo-authority-04108e7": "current",
+    "obs-reviewer-acceptance-claim": "pending",
+    "obs-reviewer-digest-disagreement": "current",
+    "obs-reviewer-durability-resolved": "current",
+    "obs-reviewer-durability-unresolved-v6": "superseded",
+    "obs-reviewer-window": "current",
+    "obs-round0-closed": "current",
+    "obs-source-data-origin": "current",
+    "obs-v3-binding-error": "rejected",
+    "obs-window-invariant": "current"
+  },
+  "holdout_evidence": false,
+  "notation": {
+    "bytes": 1051,
+    "sha256": "sha256:9d11406e732e4725b1abf4d318187b19dba4319467819993dea4d68539e2b5b1",
+    "tokens_o200k": 261
+  },
+  "output_shape": "{\"answers\":[{\"question_id\":\"<id>\",\"answer\":\"<one or two sentences>\",\"cited_observation_ids\":[\"obs-...\"],\"current_state_observation_ids\":[\"obs-...\"],\"cited_relations\":[{\"from\":\"obs-...\",\"kind\":\"...\"}]}]}",
+  "panel": [
+    {
+      "family": "Google",
+      "key_file": "/home/tandem/.config/o7-research/arli-gemma.key",
+      "model": "Gemma-4-31B-it",
+      "name": "gemma",
+      "principal": true
+    },
+    {
+      "family": "Zhipu",
+      "key_file": "/home/tandem/.config/o7-research/arli-glm47.key",
+      "model": "GLM-4.7",
+      "name": "glm47"
+    },
+    {
+      "family": "DeepSeek",
+      "key_file": "/home/tandem/.config/o7-research/arli-deepseek.key",
+      "model": "DeepSeek-V4-Flash-0731",
+      "name": "deepseek"
+    },
+    {
+      "family": "Qwen",
+      "key_file": "/home/tandem/.config/o7-research/arli-qwen.key",
+      "model": "Qwen3.5-27B-Anko",
+      "name": "qwen"
+    }
+  ],
+  "provider_surfaces": {
+    "api_style": "openai-chat",
+    "endpoint_authority": "https://api.arliai.com/v1/chat/completions",
+    "max_tokens": 8000,
+    "provider": "arliai",
+    "qualification_identity": "fa93d63636bf53892edbd02fec01ab619ffc1071",
+    "repetitions": 3,
+    "retry_policy": "at most 1 transport retry on before-response failure; after-headers loss is not retried",
+    "seed": null,
+    "substitution_check": "each key is pinned to one model; model_requested set to the pinned model; verified reported==requested, rlen==0",
+    "temperature": 0,
+    "thinking_disabled_at_key_level": true,
+    "timeout_s": 200.0,
+    "transport": "provider_matrix.send_json @ L0-qualified head fa93d63 (https-only, no-redirect, bounded read, credential-safe)"
+  },
+  "purpose": "Determine whether a real qualified model can use the cheaper Qodec representation of an already-valid semantic context (case-0002 Q1R) without material quality loss. Development A/B; not a generalization holdout.",
+  "qodec_binary_sha256": "sha256:0a0996f3378fd1a3f9c1b637591507ca02d0491c55962a5d5ee291e752cf089b",
+  "record": "o7.l1.representation-ab-freeze/v1",
+  "scorer": {
+    "alias_glyphs_frozen": [
+      "\u4e32",
+      "\u4ef6",
+      "\u503c",
+      "\u51fd",
+      "\u5217",
+      "\u540d",
+      "\u56fe",
+      "\u5757",
+      "\u5c42",
+      "\u5f15",
+      "\u6570",
+      "\u6807",
+      "\u6811",
+      "\u70b9",
+      "\u7801",
+      "\u7c7b",
+      "\u7ec4",
+      "\u8282",
+      "\u884c",
+      "\u8868",
+      "\u8bb0",
+      "\u8bd5",
+      "\u8def",
+      "\u94fe",
+      "\u9519",
+      "\u952e"
+    ],
+    "answer_correct_rule": "required_evidence_used AND required_relation_evidence_used AND NOT missing_required_witness AND NOT stale_as_current_error AND NOT unsupported_or_fabricated_claim AND NOT contradicts_gold AND NOT representation_parse_failure AND NOT refusal AND NOT malformed_output",
+    "axes": [
+      "answer_correct",
+      "required_evidence_used",
+      "required_relation_evidence_used",
+      "missing_required_witness",
+      "stale_as_current_error",
+      "unsupported_or_fabricated_claim",
+      "contradicts_gold",
+      "representation_parse_failure",
+      "refusal",
+      "malformed_output"
+    ],
+    "blind_to_arm": true,
+    "kind": "deterministic rule-based; no LLM judge",
+    "version": "o7.l1.deterministic-scorer/v1"
+  },
+  "system_prompt": "You are answering questions about the current state of a software project. You are given a machine-generated context: a set of observations (each has an observation_id, a kind, a status, topics, and a statement) and relations between them. Rules:\n1. Answer ONLY from the provided context. Do not use outside knowledge and do not invent observation_ids.\n2. An observation describes the CURRENT active state only if its status is \"current\". Treat any observation whose status is not \"current\" (e.g. \"superseded\", \"rejected\", \"pending\") as NOT the current state.\n3. For each question, cite the exact observation_id(s) you relied on, and, when the question is about what is superseded or what depends on what, cite the relation(s) you relied on as {\"from\":<observation_id>,\"kind\":<relation kind>}.\n4. Respond with ONLY one JSON object of the exact shape shown under OUTPUT SHAPE, and nothing else -- no prose, no markdown fences.",
+  "system_prompt_sha256": "sha256:4d3117da21f517c03e1bfb687fcd31a36f11a1ff60142aeb26f426db5a4d3765",
+  "tasks": [
+    {
+      "context_present_observation_ids": [
+        "obs-metadata-head",
+        "obs-next-permitted-step",
+        "obs-plane-record-frozen",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-durability-resolved",
+        "obs-round0-closed"
+      ],
+      "n_questions": 4,
+      "qodec_encoded_bytes": 4016,
+      "qodec_encoded_sha256": "sha256:d5686474c594f10b77ab01043446bdd47df67272d024aa7c4b1649c3eaf57d84",
+      "qodec_user_prompt_sha256": "sha256:8cfeb621370a2328b262bb87416a1ec228108c84274108c3b2af8f44d786ed20",
+      "question_ids": [
+        "qr1-current-state",
+        "qr2-blocking",
+        "qr3-next-step",
+        "qr4-authority"
+      ],
+      "questions_file": "questions-resume-v0.yaml",
+      "raw_context_bytes": 6584,
+      "raw_context_sha256": "sha256:ce84029962ba3b35d45736b39b22e84fdfe37fa826bce3394bc7a4a773c8c350",
+      "raw_user_prompt_sha256": "sha256:48e9e16456d1107cf6d2b9f22f4dcae98af43fb840c9bd54a16ef5fc31a4dc80",
+      "task_id": "case-0002-resume-product-integration",
+      "tokens_o200k": {
+        "context_only_qodec": 1191,
+        "context_only_raw": 1795,
+        "qodec_cold_input": 1826,
+        "qodec_warm_input": 1565,
+        "raw_cold_input": 2156
+      }
+    },
+    {
+      "context_present_observation_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-lock-supersession-chain",
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence",
+        "obs-plane-coder",
+        "obs-profiler-fail-closed",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-digest-disagreement",
+        "obs-reviewer-durability-resolved",
+        "obs-reviewer-window",
+        "obs-round0-closed",
+        "obs-window-invariant"
+      ],
+      "n_questions": 5,
+      "qodec_encoded_bytes": 7582,
+      "qodec_encoded_sha256": "sha256:14b3d4bb89d4c94f175389dc0bce39fa3c589d543a898951888035c0059d787a",
+      "qodec_user_prompt_sha256": "sha256:7b4ad250eded0299ea1e3c32bffb9bba3c96aaa4d18114c4eb1534a03a3bdfa1",
+      "question_ids": [
+        "qa1-why-active",
+        "qa2-supporting",
+        "qa3-superseded",
+        "qa4-wrong-agent-claims",
+        "qa5-repo-authority"
+      ],
+      "questions_file": "questions-audit-v0.yaml",
+      "raw_context_bytes": 11548,
+      "raw_context_sha256": "sha256:79af64e570a92f63a4eb2d01e937475ce6684e5af599221b10041b2c1a78e656",
+      "raw_user_prompt_sha256": "sha256:8dad7f0d89f211ef46107eb4deb4c859a3a09cc819c089282797e0d3d6b32c3a",
+      "task_id": "case-0002-audit-r21-evidence-provenance",
+      "tokens_o200k": {
+        "context_only_qodec": 2070,
+        "context_only_raw": 3153,
+        "qodec_cold_input": 2729,
+        "qodec_warm_input": 2468,
+        "raw_cold_input": 3538
+      }
+    },
+    {
+      "context_present_observation_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence",
+        "obs-plane-coder",
+        "obs-profiler-fail-closed",
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-digest-disagreement",
+        "obs-reviewer-window",
+        "obs-window-invariant"
+      ],
+      "n_questions": 2,
+      "qodec_encoded_bytes": 5466,
+      "qodec_encoded_sha256": "sha256:47d93b9abb5c08278bf09b9ab82bc93f6ec64ef73f4dfc121ecd7bf23422e123",
+      "qodec_user_prompt_sha256": "sha256:01ed55e680935a46e264ef68cd384d5d397059de1d48bb3439e642a4d1cf1b94",
+      "question_ids": [
+        "qi1-dependencies",
+        "qi2-rereview"
+      ],
+      "questions_file": "questions-impact-v0.yaml",
+      "raw_context_bytes": 9330,
+      "raw_context_sha256": "sha256:91dbefb1bcc2dfc11179e12eda4068037fd987faccbaf7e23ba235638db7afba",
+      "raw_user_prompt_sha256": "sha256:f6d3b4676a2b36b0ccafa12cf8baabfe6e471e7d04a06b46db87750ba4ca9e1f",
+      "task_id": "case-0002-assess-change-impact-on-oracle-topology",
+      "tokens_o200k": {
+        "context_only_qodec": 1498,
+        "context_only_raw": 2534,
+        "qodec_cold_input": 2096,
+        "qodec_warm_input": 1835,
+        "raw_cold_input": 2858
+      }
+    }
+  ]
+}

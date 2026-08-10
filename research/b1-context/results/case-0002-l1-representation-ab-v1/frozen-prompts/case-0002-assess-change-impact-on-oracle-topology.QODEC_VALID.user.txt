@@ -1,0 +1,56 @@
+The payload is encoded as a `%q1` container. Format: first line
+`%q1 <codec> ...` (parameters), then legend lines `<alias>=<phrase>`
+(each alias is a short stand-in for that exact phrase), then a
+`%q1 body` line, then the body. `%q1 xN` after a line means that line
+occurs N times in total. A `toon` body is a table: first line is a JSON
+array of keys, each following line is one object, cells are JSON values
+joined by the separator named in the header. A `grep` body is grouped
+matcher output: a marker line names a file path and the lines after it
+are `line:text` hits in that file (a bare marker starts verbatim
+lines). A `diag` body line starting with an alias expands to: the head
+after the alias, then that alias's legend template with each slot
+placeholder filled by the sep-joined values in order. A `tmpl` body
+line starting with an alias is its legend template with the slot
+placeholders filled by the sep-joined values that follow the alias.
+Mentally decode the body via the legend before answering; never emit
+alias characters in answers.
+
+CONTEXT (Qodec %q1 encoded -- decode it via the legend before answering):
+%q1 mine n=26
+码=","provenance":[{"digest":"sha256:14cfb81f5ea7b0fb567aec1f49a612040539f3a653ecb25218b09c102db62b76","source_class":"repo_record","source_id":"source-lock-v6","source_pointer":"SOURCE-LOCK-v6.yaml#
+引=","provenance":[{"digest":"sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139","source_class":"repo_record","source_id":"plane-record","source_pointer":"plane-record.json#
+路=","reason":"not_selected"},{"observation_id":"obs-
+类=base_selected","selection_score":1.0,"statement":"
+函="}],"selection_reason":"qodec-project:
+值="observation_id":"obs-
+错=.","status":"current","topics":["
+试="},{"from":"obs-oracle-topology-constraint","kind":"depends_on","to":"obs-
+件={"authority":"controller_or_repo_record","kind":"
+组="]},{"authority":"deterministic_derivative","kind":"evidence",值
+标=repo-authority-04108e7
+记=","reason":"ineligible"}
+链=","kind":"supports","to":"obs-
+节=oracle-topology
+层="},{"from":"obs-
+块=reviewer-
+表=r21-evidence"
+行=evidence head 04108e7
+列=函 all_current_target,类
+键=":"o7.b1.qodec-project-arm/v0"
+名=","kind":"supersedes","to":"obs-
+数=chatgpt-export.json'
+串=output-path-dependence
+图=块acceptance-claim
+树=measurement"]},件decision",值
+点=":"case-0002
+%q1 body
+{"cutoff":{"identity点 Round 0 CLOSED — plane-record frozen 2026-08-05T08:52:33Z, bound to qodec metadata head 427b677","raw_source_digest":"sha256:3e33addf358f486c39d72e01b6e9d13d025672f6ecabf4425453d29a4939e139","raw_source_id点-round0-source-lock"},"fixture_id点","omitted":[{值authority-model路lock-supersession-chain路metadata-head路next-permitted-step路plane-record-frozen路plane-record-not-frozen-v6记,{值plane-reviewer路profiler-prior-defect记,{值relay-rule路图记,{值块durability-resolved路块durability-unresolved-v6记,{值round0-closed路source-data-origin路v3-binding-error记],"produced_by键,"relations":[{"from":"obs-evidence-head-ci-empty链标试串试标试window-invariant层串","kind":"blocks","to":"obs-节-constraint层profiler-fail-closed名profiler-prior-defect层标名图层标链next-permitted-step层块window链图"}],"schema":"o7.b1.context/v0","selected":[件evidence",值evidence-head-ci-empty引ci_frozen函 类The 行 carries no CI run: check-runs 0, workflow runs 0, combined status pending — a frozen-empty result recorded from the plane-record, not inferred. Baseline 3ba3a38 and product head 940c7629 each have 11 check-runs, combined status success, 3 workflow runs错表,"节"]},件constraint",值节-constraint引r21_evidence_material + evidence-head-chain函 all_current_source,类The chosen R21 constraint routes against what the oracle table targets, not against what it may target, with routing derived once and the ledger asked before the verdict. The evidence chain (16 commits 3ba3a38..04108e7) freezes the preservation run, its inputs, its allowed-outcomes envelope and its comparison错节","表]},件risk",值串码output_identity列The profiler output embeds the literal input path, so any recorded expectation must name the path argument, not only the corpus; canonical arguments are '数 and 'claude-session.window-r21.jsonl'. Recorded rather than fixed in this revision错measurement","节"]},{"authority":"platform_capture","kind":"evidence",值plane-coder码source_planes.plane-coder函 类plane-coder is the Claude Code coder session, frozen by record-prefix through record 17111 (17112 records, sha256 8392de80...); the whole-file digest is unstable (append-only), so only the prefix digest is authoritative错source-planes","树profiler-fail-closed码fail_closed_evidence函 类Both JSONL tools were hardened to fail closed on unreadable input; well-formed blobs reproduced every published count byte-for-byte, so the measurement contract is unchanged错树标引PR16+evidence_head_04108e7列The authoritative record of R21 acceptance is the frozen plane-record — 行 with its frozen CI and evidence artifacts and PR #16 state — not the reviewer's relayed acceptance. Product head is 940c7629; PR #16 is open, draft, unmerged错表,"product-integration","节组块digest-disagreement码reviewer_digest_disagreement函 类The one value that did not reproduce was the reviewer profile digest; the exact cause is the literal input path serialised into the report ('/tmp/数 vs '数, a five-byte diff on one field), with zero differing measured values. Status CLOSED错measurement组块window码windows.reviewer函 类The reviewer window runs from node 264366ab (review at accepted head 3ba3a38, discovery that R21 is needed) to node d5b0a463 (exact-head acceptance of 行): 258 nodes, reproduced independently by both parties错表,"块acceptance组window-invariant码window_invariant.result列window_invariant v0 computed (not asserted) that the window blob is exactly the anchored slice of the prefix blob: exit 0, byte_identical true, every check passed, output digest 881f1b3b..错measurement"]}],"selector":{"adapter_impl_digest":"sha256:3dd51b9f03854be87ee7682fd57a2451bf49f77ad4daca3a065fa4b1cbe2d2e0","qodec_implementation_sha256":"sha256:657237a941679e27e709fba2a18d78c4693d8ddb89f7645761cc602c7a4984dc","qodec_project_version":"qodec.project/v0","selector_id键},"selectors":{"anchor_observation_ids":[],"anchor_rationale":{},"excluded_topics":[],"preferred_topics":["measurement","表],"required_kinds":["constraint","evidence","risk"],"required_topics":["节"]},"task_id点-assess-change-impact-on-节"}
+
+QUESTIONS:
+- question_id: qi1-dependencies
+  text: What depends on the chosen constraint?
+- question_id: qi2-rereview
+  text: What must be re-reviewed if the constraint changes?
+
+OUTPUT SHAPE:
+{"answers":[{"question_id":"<id>","answer":"<one or two sentences>","cited_observation_ids":["obs-..."],"current_state_observation_ids":["obs-..."],"cited_relations":[{"from":"obs-...","kind":"..."}]}]}

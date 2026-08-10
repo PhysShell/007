@@ -1,0 +1,39 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qi1-dependencies",
+      "answer": "The observation 'obs-profiler-fail-closed' depends on the chosen constraint 'obs-节-constraint'.",
+      "cited_observation_ids": [
+        "obs-节-constraint",
+        "obs-profiler-fail-closed"
+      ],
+      "current_state_observation_ids": [
+        "obs-节-constraint",
+        "obs-profiler-fail-closed"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-profiler-fail-closed",
+          "kind": "depends_on"
+        }
+      ]
+    },
+    {
+      "question_id": "qi2-rereview",
+      "answer": "If the constraint changes, the profiler-fail-closed evidence (obs-profiler-fail-closed) must be re-reviewed as it depends on the constraint.",
+      "cited_observation_ids": [
+        "obs-节-constraint",
+        "obs-profiler-fail-closed"
+      ],
+      "current_state_observation_ids": [
+        "obs-节-constraint",
+        "obs-profiler-fail-closed"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-profiler-fail-closed",
+          "kind": "depends_on"
+      ]
+    }
+```
