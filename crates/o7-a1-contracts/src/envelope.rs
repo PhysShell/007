@@ -73,6 +73,10 @@ pub enum EnvelopeError {
         #[source]
         source: RefError,
     },
+    #[error("the serialized envelope is {actual} bytes, exceeding the FD-1.4 maximum {max}")]
+    AboveByteCeiling { actual: usize, max: u64 },
+    #[error("the envelope could not be serialized to check its size")]
+    Unserializable,
 }
 
 /// The wire form of [`EnvelopeV1`]: identical fields, no cross-field rules.
@@ -269,6 +273,22 @@ impl EnvelopeV1 {
             created_at: f.created_at,
         };
         candidate.validate()?;
+        // FD-1.4 bounds the *stored object*, and `parse_artifact` enforces it
+        // on the way in. A producer-side constructor that skipped it would mean
+        // "admitted" depended on which door you came through: `new` would mint
+        // an envelope that a conforming peer must reject, and the producer
+        // would hold it as valid until someone else refused it.
+        //
+        // The cost is one serialization per construction. An envelope is
+        // bounded at 1 MiB, and the alternative is a type whose invariant is
+        // weaker than the one its own admission path enforces.
+        let encoded = serde_json::to_vec(&candidate).map_err(|_| EnvelopeError::Unserializable)?;
+        if encoded.len() as u64 > <Self as WireArtifact>::MAX_BYTES {
+            return Err(EnvelopeError::AboveByteCeiling {
+                actual: encoded.len(),
+                max: <Self as WireArtifact>::MAX_BYTES,
+            });
+        }
         Ok(candidate)
     }
 

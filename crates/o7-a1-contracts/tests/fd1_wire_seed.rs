@@ -960,19 +960,46 @@ fn an_oversized_but_otherwise_valid_envelope_is_refused_by_the_byte_bound() {
             .expect("each ref is individually admissible")
         })
         .collect();
-    let env = rebuilt(&controller_envelope(), |f| {
-        f.artifact_refs = ArtifactRefs::new(refs).expect("exactly at the ref-count bound");
-    });
-    let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
-    assert!(bytes.len() as u64 > MAX_CONTROL_ARTIFACT_BYTES * 14);
+    let fields = EnvelopeFieldsV1 {
+        artifact_refs: ArtifactRefs::new(refs).expect("exactly at the ref-count bound"),
+        ..controller_fields()
+    };
 
+    // Every field is admissible and every cross-field rule passes; the only
+    // rule this breaks is the FD-1.4 byte ceiling, which no field can see.
+    // The producer-side constructor enforces it too, so `new` and
+    // `parse_artifact` agree on what "admitted" means — before this, a
+    // producer could mint a 15 MB envelope that every conforming peer would
+    // refuse, and hold it as valid until someone else said no.
+    assert!(matches!(
+        EnvelopeV1::new(fields),
+        Err(EnvelopeError::AboveByteCeiling { .. })
+    ));
+
+    // The same document on the wire is refused by the admission path.
+    let mut value = serde_json::to_value(controller_envelope()).expect("fixture must serialize");
+    let one = serde_json::json!({
+        "kind": "diff",
+        "media_type": format!("text/x-diff;p={}", "a".repeat(60_000)),
+        "digest": digest("blob").as_str(),
+        "size": 1,
+    });
+    if let Some(map) = value.as_object_mut() {
+        map.insert(
+            "artifact_refs".to_owned(),
+            serde_json::Value::Array(vec![one.clone(); MAX_ARTIFACT_REFS]),
+        );
+    }
+    let bytes = value.to_string().into_bytes();
+    assert!(bytes.len() as u64 > MAX_CONTROL_ARTIFACT_BYTES * 14);
     assert!(matches!(
         parse_artifact::<EnvelopeV1>(&bytes),
         Err(ParseError::PayloadTooLarge { .. })
     ));
 
     // The rejection is the byte bound and not some other rule: the same
-    // construction with few enough refs to fit under the ceiling is admitted.
+    // construction with few enough refs to fit under the ceiling is admitted
+    // on both routes.
     let small = rebuilt(&controller_envelope(), |f| {
         f.artifact_refs = ArtifactRefs::new(vec![ArtifactRef::new(
             ArtifactKindV1::Diff,
@@ -985,11 +1012,6 @@ fn an_oversized_but_otherwise_valid_envelope_is_refused_by_the_byte_bound() {
     });
     let small = serde_json::to_vec(&small).expect("fixture must serialize");
     assert!(parse_artifact::<EnvelopeV1>(&small).is_ok());
-
-    // Two assertions this test used to carry are deliberately gone, and both
-    // for the same reason: each isolated the rejecting layer by pointing a
-    // caller-supplied ceiling at the document, and a ceiling a caller can
-    // choose is the defect, not the instrument for measuring it.
 }
 
 /// Admission is a **postcondition**, and it survives editing.
