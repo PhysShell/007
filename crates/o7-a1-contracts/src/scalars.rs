@@ -418,13 +418,63 @@ impl<T, const MAX: usize> TryFrom<Vec<T>> for BoundedVec<T, MAX> {
     }
 }
 
+impl<T, const MAX: usize> BoundedVec<T, MAX> {
+    /// The effective cap: the schema's own `MAX`, never above the global FD-1.4
+    /// array maximum.
+    const fn cap() -> usize {
+        if MAX < MAX_ARRAY_LEN {
+            MAX
+        } else {
+            MAX_ARRAY_LEN
+        }
+    }
+}
+
 impl<'de, T: Deserialize<'de>, const MAX: usize> Deserialize<'de> for BoundedVec<T, MAX> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let items = Vec::<T>::deserialize(deserializer)?;
-        Self::new(items).map_err(serde::de::Error::custom)
+        // Deserializing the whole sequence and *then* checking the cap would let
+        // an oversized array allocate every element — including its owned
+        // strings — before being refused. FD-1.4 wants a parse-time rejection,
+        // and a rejection that happens after the memory is spent is only a
+        // report. So the visitor stops one element past the cap, and the
+        // capacity hint is clamped so a declared length cannot preallocate
+        // either.
+        struct BoundedSeq<T, const MAX: usize>(PhantomData<T>);
+
+        impl<'de, T: Deserialize<'de>, const MAX: usize> serde::de::Visitor<'de> for BoundedSeq<T, MAX> {
+            type Value = BoundedVec<T, MAX>;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(
+                    f,
+                    "a sequence of at most {} entries",
+                    BoundedVec::<T, MAX>::cap()
+                )
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de>,
+            {
+                let cap = BoundedVec::<T, MAX>::cap();
+                let hint = seq.size_hint().unwrap_or(0);
+                let mut items: Vec<T> = Vec::with_capacity(if hint < cap { hint } else { cap });
+                while let Some(item) = seq.next_element::<T>()? {
+                    if items.len() >= cap {
+                        return Err(serde::de::Error::custom(format!(
+                            "a bounded collection must have <= {cap} entries"
+                        )));
+                    }
+                    items.push(item);
+                }
+                Ok(BoundedVec(items))
+            }
+        }
+
+        deserializer.deserialize_seq(BoundedSeq::<T, MAX>(PhantomData))
     }
 }
 

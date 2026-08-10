@@ -51,13 +51,49 @@ pub fn typed_media_type(kind: ArtifactKindV1, version: u32) -> String {
 /// envelope bytes **plus** stored payload bytes. One ref therefore covers the
 /// whole artifact, and FD-1.5 charges the true cost of a resolution before
 /// reading either half.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ArtifactRef {
     pub kind: ArtifactKindV1,
     pub media_type: String,
     pub digest: WireDigest,
     pub size: u64,
+}
+
+/// The wire form of [`ArtifactRef`], for the same reason `EnvelopeV1` has one:
+/// its rules relate `kind` to `media_type` and to `size`, so no single field can
+/// enforce them, and a derived `Deserialize` would let
+/// `serde_json::from_str::<ArtifactRef>` build a `work_order` ref declaring
+/// `text/x-diff` and a zero size.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ArtifactRefWire {
+    kind: ArtifactKindV1,
+    media_type: String,
+    digest: WireDigest,
+    size: u64,
+}
+
+impl From<ArtifactRefWire> for ArtifactRef {
+    fn from(w: ArtifactRefWire) -> Self {
+        Self {
+            kind: w.kind,
+            media_type: w.media_type,
+            digest: w.digest,
+            size: w.size,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let r = Self::from(ArtifactRefWire::deserialize(deserializer)?);
+        r.validate().map_err(serde::de::Error::custom)?;
+        Ok(r)
+    }
 }
 
 impl ArtifactRef {

@@ -72,12 +72,6 @@ pub enum EnvelopeError {
     },
 }
 
-/// §3.0 — the common envelope, v1.
-///
-/// `first_observed_at` is deliberately **not** here: it is controller-owned and
-/// recorded on the acceptance record (FD-5.4). Neither is anything the payload
-/// owns — "payloads never restate an envelope-owned field" (FD-5.3), and the
-/// converse holds too.
 /// The wire form of [`EnvelopeV1`]: identical fields, no cross-field rules.
 ///
 /// Private, and the only thing serde ever deserializes. `EnvelopeV1`'s own
@@ -164,6 +158,12 @@ impl<'de> Deserialize<'de> for EnvelopeV1 {
     }
 }
 
+/// §3.0 — the common envelope, v1.
+///
+/// `first_observed_at` is deliberately **not** here: it is controller-owned and
+/// recorded on the acceptance record (FD-5.4). Neither is anything the payload
+/// owns — "payloads never restate an envelope-owned field" (FD-5.3), and the
+/// converse holds too.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnvelopeV1 {

@@ -704,3 +704,40 @@ fn an_interaction_manifest_is_typed_for_media_type_and_large_for_size() {
     };
     assert!(right.validate().is_ok());
 }
+
+/// `ArtifactRef` had the same shape of hole `EnvelopeV1` did: its rules relate
+/// `kind` to `media_type` and `size`, so a derived `Deserialize` admitted a
+/// reference no validator would.
+#[test]
+fn a_reference_cannot_be_deserialized_past_its_own_rules() {
+    let zero_sized = r#"{"kind":"diff","media_type":"text/x-diff","digest":"0000000000000000000000000000000000000000000000000000000000000000","size":0}"#;
+    assert!(serde_json::from_str::<ArtifactRef>(zero_sized).is_err());
+
+    let wrong_media = r#"{"kind":"work_order","media_type":"text/x-diff","digest":"0000000000000000000000000000000000000000000000000000000000000000","size":1}"#;
+    assert!(serde_json::from_str::<ArtifactRef>(wrong_media).is_err());
+
+    let ok = format!(
+        r#"{{"kind":"work_order","media_type":"{}","digest":"{}","size":1}}"#,
+        typed_media_type(ArtifactKindV1::WorkOrder, 1),
+        digest("order").as_str()
+    );
+    assert!(serde_json::from_str::<ArtifactRef>(&ok).is_ok());
+}
+
+/// FD-1.4 wants a parse-time *rejection*, not a report filed after the memory
+/// is spent: an oversized array must not be fully materialised before its cap is
+/// checked.
+#[test]
+fn an_oversized_reference_array_is_refused_without_materialising_it() {
+    // Far beyond both MAX_ARTIFACT_REFS and the global array bound. If the cap
+    // were checked after collecting, this would allocate every entry first.
+    let one = format!(
+        r#"{{"kind":"diff","media_type":"text/x-diff","digest":"{}","size":1}}"#,
+        digest("blob").as_str()
+    );
+    let many = vec![one.as_str(); 50_000].join(",");
+    let json = format!(r#"[{many}]"#);
+
+    assert!(serde_json::from_str::<ArtifactRefs>(&json).is_err());
+    assert!(ArtifactRefs::new(Vec::new()).is_ok());
+}
