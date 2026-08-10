@@ -253,9 +253,33 @@ impl Timestamp {
 /// RFC 3339 permits `t`/`z` in lower case and allows a numeric offset; "UTC"
 /// narrows the offset to zero. `-00:00` is accepted by the grammar but RFC 3339
 /// gives it the meaning "offset unknown", which is not the same claim as UTC, so
-/// it is refused here rather than silently read as `+00:00`. A `60` second is
-/// *not* refused: RFC 3339 permits the leap second, and rejecting it would be
-/// this implementation inventing a bound again.
+/// it is refused here rather than silently read as `+00:00`.
+///
+/// # The one thing deliberately not checked: the leap-second schedule
+///
+/// `second == 60` is accepted at `23:59` on **any** date, so
+/// `2026-08-09T23:59:60Z` parses even though no leap second was announced for
+/// that day. That is a stated limit, not an oversight, and the alternatives are
+/// both worse:
+///
+/// - *Validate against the schedule.* Leap seconds are announced by the IERS
+///   roughly six months ahead, so the table is mutable data that this crate
+///   would have to carry. A frozen contract implementation embedding it starts
+///   **rejecting valid future artifacts** the moment the table goes stale —
+///   a failure that arrives silently, years later, in the admission path.
+/// - *Refuse `:60` outright.* Then `2016-12-31T23:59:60Z`, a real instant and a
+///   valid RFC 3339 UTC timestamp, is inadmissible. That is the `ZeroSize`
+///   mistake: a bound the contract does not state, refusing what peers may
+///   legitimately emit.
+///
+/// So the residue is a small set of strings that are well-formed, in range, and
+/// at the only clock position a leap second can occupy, but whose date had no
+/// leap second. FD-5.4 makes `created_at` metadata: excluded from every framing,
+/// authorizing nothing, ordering nothing. Admitting one costs nothing that this
+/// contract can express; refusing a real one costs an artifact.
+///
+/// This is a judgement between two contract-consistent readings rather than a
+/// derivation from the contract, which is why it is written down here.
 fn is_rfc3339_utc(s: &str) -> bool {
     /// `d` is any ASCII digit, `T` is the date/time separator in either case,
     /// every other byte matches itself.
@@ -779,7 +803,11 @@ mod tests {
             "2026-08-09T20:00:00.123456Z",
             "2026-08-09T20:00:00+00:00",
             // RFC 3339 permits the leap second, at the one clock position it
-            // occurs: 23:59:60 UTC.
+            // occurs: 23:59:60 UTC. The second of these had no announced leap
+            // second on its date and is admitted anyway — see the note on
+            // `is_rfc3339_utc`. Asserted rather than left implicit, so that
+            // narrowing it later is a deliberate change to a recorded decision
+            // and not a silent tightening.
             "2016-12-31T23:59:60Z",
             "2026-08-09T23:59:60Z",
             "2024-02-29T00:00:00Z",
