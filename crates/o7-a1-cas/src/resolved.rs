@@ -55,57 +55,30 @@
 //! a plain fact, and none returns a type that asserts anything about how it was
 //! obtained.
 //!
-//! Used *inside* its session, the same code compiles and resolves — so the
-//! failure below is the escape and not a broken example. The pair is the point:
-//! a `compile_fail` test that fails for an unrelated reason passes just as
-//! greenly as one that fails for the right one.
+//! # The executable form of this gate is on hold
 //!
-//! ```
-//! use o7_a1_cas::{MemoryStore, OpaqueSlot, ResolutionSession};
-//! use o7_a1_contracts::{ArtifactKindV1, ArtifactRef, BudgetPolicy};
+//! Until this slice, the brand was pinned by a `compile_fail` doctest paired
+//! with a positive one: carrying a resolved value out of
+//! `ResolutionSession::enter` did not compile, and the same code inside the
+//! session did. A doctest compiles as an external crate, so both went away when
+//! the proof types became crate-private — the stronger guarantee (downstream
+//! cannot name these types at all) removed the weaker one's test.
 //!
-//! let policy = BudgetPolicy {
-//!     max_provider_turns: 1,
-//!     max_wall_time_seconds: 1,
-//!     evidence_budget_bytes: 1024,
-//!     closure_object_budget: 8,
-//! };
-//! let mut store = MemoryStore::new();
-//! let digest = store.put(b"diff".to_vec());
-//! let r = ArtifactRef::new(ArtifactKindV1::Diff, "text/x-diff", digest, 4).unwrap();
-//! let slot = OpaqueSlot::new(ArtifactKindV1::Diff, "text/x-diff");
-//!
-//! // The evidence is observed inside the session that paid for it, and only a
-//! // brand-free summary leaves.
-//! let size = ResolutionSession::enter(&policy, |s| {
-//!     s.resolve_opaque(&slot, &r, &store).unwrap().size()
-//! })
-//! .unwrap();
-//! assert_eq!(size, 4);
-//! ```
-//!
-//! A resolved artifact cannot escape its session:
-//!
-//! ```compile_fail
-//! use o7_a1_cas::{OpaqueSlot, ResolutionSession, MemoryStore, ResolvedArtifact};
-//! use o7_a1_contracts::{ArtifactKindV1, ArtifactRef, BudgetPolicy};
-//!
-//! let policy = BudgetPolicy {
-//!     max_provider_turns: 1,
-//!     max_wall_time_seconds: 1,
-//!     evidence_budget_bytes: 1024,
-//!     closure_object_budget: 8,
-//! };
-//! let mut store = MemoryStore::new();
-//! let digest = store.put(b"diff".to_vec());
-//! let r = ArtifactRef::new(ArtifactKindV1::Diff, "text/x-diff", digest, 4).unwrap();
-//! let slot = OpaqueSlot::new(ArtifactKindV1::Diff, "text/x-diff");
-//!
-//! // The brand is universally quantified, so the closure's return type cannot
-//! // mention it: carrying the proof out of the session does not compile.
-//! let escaped: ResolvedOpaque<'_> =
-//!     ResolutionSession::enter(&policy, |s| s.resolve_opaque(&slot, &r, &store).unwrap()).unwrap();
-//! ```
+//! That is a real loss of an executable check, recorded rather than absorbed.
+//! It returns with the public surface in the typed-slot slice, where there is
+//! again something outside the crate for a value to escape *to*. What still
+//! holds meanwhile is the compiler: `'brand` is invariant and universally
+//! quantified, so the internal code compiles only because nothing escapes.
+
+// This module has no non-test consumer yet, and that is the shape of the
+// slice rather than an oversight: the resolution entry points are
+// crate-private until a §3 payload schema can declare its own slots, and
+// nothing inside this crate declares one. The alternative to this attribute
+// is publishing the API to satisfy a lint, which is precisely the
+// caller-authored authority route this slice exists to remove — a warning
+// must not get to choose the public surface. It comes off in the typed-slot
+// slice, when the resolver acquires a caller.
+#![allow(dead_code)]
 
 use std::marker::PhantomData;
 
@@ -113,6 +86,14 @@ use o7_a1_contracts::{ArtifactKindV1, WireDigest};
 
 /// Rank-0 bytes this session read, checked against their reference, and
 /// charged for.
+///
+/// The *proof* for this class is complete — FD-2.1 rank 0 is terminal and
+/// FD-2.5 forbids parsing or promoting such bytes, so there is nothing further
+/// to establish. It is nonetheless crate-private, because a complete proof
+/// algorithm and a correctly wired authority to request it are different
+/// things: the slot expectation still comes from a call site rather than from
+/// a consuming schema (FD-2.5), and a public entry point would make that the
+/// weaker of two routes the moment schema-derived slots exist.
 ///
 /// Private fields, no public constructor, no `Deserialize`, no `Default`, no
 /// conversion from a reference. The only site that mints one is
@@ -123,7 +104,7 @@ use o7_a1_contracts::{ArtifactKindV1, WireDigest};
 /// variant of one struct with optional fields, because the two prove different
 /// things. Unifying the result must not unify the proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedOpaque<'brand> {
+pub(crate) struct ResolvedOpaque<'brand> {
     kind: ArtifactKindV1,
     media_type: String,
     digest: WireDigest,
@@ -157,13 +138,13 @@ impl<'brand> ResolvedOpaque<'brand> {
     /// FD-1.8 — the kind this object was resolved *as*, which is the slot's
     /// expectation and not the sender's declaration (FD-2.5).
     #[must_use]
-    pub fn kind(&self) -> ArtifactKindV1 {
+    pub(crate) fn kind(&self) -> ArtifactKindV1 {
         self.kind
     }
 
     /// FD-1.7 — the media type the slot expected and the reference declared.
     #[must_use]
-    pub fn media_type(&self) -> &str {
+    pub(crate) fn media_type(&self) -> &str {
         &self.media_type
     }
 
@@ -172,19 +153,19 @@ impl<'brand> ResolvedOpaque<'brand> {
     /// Brand-free, and that is correct: a digest is a fact. Outside the session
     /// it means "these bytes hash to this", not "this session verified it".
     #[must_use]
-    pub fn digest(&self) -> &WireDigest {
+    pub(crate) fn digest(&self) -> &WireDigest {
         &self.digest
     }
 
     /// The verified stored bytes.
     #[must_use]
-    pub fn bytes(&self) -> &[u8] {
+    pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
     }
 
     /// The stored size, which resolution proved equal to the declared size.
     #[must_use]
-    pub fn size(&self) -> u64 {
+    pub(crate) fn size(&self) -> u64 {
         self.bytes.len() as u64
     }
 
@@ -192,65 +173,7 @@ impl<'brand> ResolvedOpaque<'brand> {
     /// `(ref.kind, ref.digest)`, never the digest alone. The same bytes reached
     /// through two different typed slots are two nodes (FD-2.5).
     #[must_use]
-    pub fn identity(&self) -> (ArtifactKindV1, &str) {
+    pub(crate) fn identity(&self) -> (ArtifactKindV1, &str) {
         (self.kind, self.digest.as_str())
-    }
-}
-
-/// One surface over both proof classes, and no more than that.
-///
-/// The unification is deliberately shallow. `identity` and `stored_size` are
-/// genuinely common — a closure deduplicates and accounts over both kinds of
-/// node without caring which it holds — so they live here. Everything a class
-/// *proved* stays behind its own type, reachable only by naming the class:
-///
-/// ```text
-/// ResolvedOpaque      bytes hash to a digest, and the slot expected bytes
-/// ResolvedEnvelope    an admitted envelope frames to a digest, binds a
-///                     payload beneath it, and the two halves sum to the
-///                     declared size
-/// ```
-///
-/// Written as an enum rather than a struct with optional fields on purpose.
-/// `envelope: Option<EnvelopeV1>` would answer "is there an envelope?" with
-/// `None` for an opaque resolution, which reads as *no* rather than *wrong
-/// question* — and a caller that treats a missing proof as an absent one is how
-/// a boundary gets walked around by code that never meant to.
-///
-/// Unifying the result must not unify the proof.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResolvedArtifact<'brand> {
-    /// FD-2.1 rank 0: terminal bytes, never parsed, never promoted.
-    Opaque(ResolvedOpaque<'brand>),
-    /// One of the eleven message kinds, stored as two byte strings (FD-1.8).
-    ///
-    /// Boxed because the envelope proof is much the larger of the two, and an
-    /// enum sized for its biggest variant would make every opaque node in a
-    /// closure pay for the envelope case it is not.
-    Envelope(Box<crate::ResolvedEnvelope<'brand>>),
-}
-
-impl<'brand> ResolvedArtifact<'brand> {
-    /// FD-1.5 — `(kind, digest)`, the identity a closure deduplicates by.
-    ///
-    /// Common to both classes because deduplication is: "the same bytes
-    /// referenced through two different typed slots are two distinct nodes"
-    /// (FD-2.5) is a statement about the pair, whatever the pair describes.
-    #[must_use]
-    pub fn identity(&self) -> (o7_a1_contracts::ArtifactKindV1, &str) {
-        match self {
-            Self::Opaque(o) => o.identity(),
-            Self::Envelope(e) => e.identity(),
-        }
-    }
-
-    /// The stored size resolution proved — one object's bytes for an opaque
-    /// node, both halves for an envelope-bearing one (FD-1.8).
-    #[must_use]
-    pub fn stored_size(&self) -> u64 {
-        match self {
-            Self::Opaque(o) => o.size(),
-            Self::Envelope(e) => e.stored_size(),
-        }
     }
 }

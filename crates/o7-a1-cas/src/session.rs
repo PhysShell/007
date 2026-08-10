@@ -25,6 +25,16 @@
 //! campaign policy)`." Both halves are held here, computed once at
 //! [`ResolutionSession::enter`], so no per-call site gets to pick.
 
+// This module has no non-test consumer yet, and that is the shape of the
+// slice rather than an oversight: the resolution entry points are
+// crate-private until a §3 payload schema can declare its own slots, and
+// nothing inside this crate declares one. The alternative to this attribute
+// is publishing the API to satisfy a lint, which is precisely the
+// caller-authored authority route this slice exists to remove — a warning
+// must not get to choose the public surface. It comes off in the typed-slot
+// slice, when the resolver acquires a caller.
+#![allow(dead_code)]
+
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::marker::PhantomData;
@@ -34,7 +44,7 @@ use o7_a1_contracts::{
     MessageKindV1, ParseError, WireDigest, MESSAGE_KIND_VERSION_V1,
 };
 
-use crate::envelope::{admit_envelope, ResolvedEnvelope};
+use crate::envelope::{admit_envelope, ResolvedEnvelopeStorage};
 use crate::resolved::ResolvedOpaque;
 use crate::store::BackingStore;
 
@@ -46,7 +56,7 @@ use crate::store::BackingStore;
 /// resolver checks the stored object against *this*, not against what the
 /// sender declared.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OpaqueSlot {
+pub(crate) struct OpaqueSlot {
     kind: ArtifactKindV1,
     media_type: String,
 }
@@ -57,7 +67,7 @@ impl OpaqueSlot {
     /// at construction, because the slot is declared by a schema and the
     /// refusal belongs where the contract states it (FD-2.5).
     #[must_use]
-    pub fn new(kind: ArtifactKindV1, media_type: impl Into<String>) -> Self {
+    pub(crate) fn new(kind: ArtifactKindV1, media_type: impl Into<String>) -> Self {
         Self {
             kind,
             media_type: media_type.into(),
@@ -65,12 +75,12 @@ impl OpaqueSlot {
     }
 
     #[must_use]
-    pub fn kind(&self) -> ArtifactKindV1 {
+    pub(crate) fn kind(&self) -> ArtifactKindV1 {
         self.kind
     }
 
     #[must_use]
-    pub fn media_type(&self) -> &str {
+    pub(crate) fn media_type(&self) -> &str {
         &self.media_type
     }
 }
@@ -99,7 +109,7 @@ impl OpaqueSlot {
 /// weaker of two routes to one authority-relevant answer, and the weaker route
 /// is the one that decides.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnvelopeSlot {
+pub(crate) struct EnvelopeSlot {
     kind: MessageKindV1,
     media_type: String,
 }
@@ -112,7 +122,7 @@ impl EnvelopeSlot {
     /// cannot name the other twenty-eight is a better statement of that than a
     /// runtime refusal.
     #[must_use]
-    pub fn new(kind: MessageKindV1) -> Self {
+    pub(crate) fn new(kind: MessageKindV1) -> Self {
         Self {
             kind,
             // FD-1.7, computed once here so no call site can disagree with it.
@@ -121,17 +131,17 @@ impl EnvelopeSlot {
     }
 
     #[must_use]
-    pub fn message_kind(&self) -> MessageKindV1 {
+    pub(crate) fn message_kind(&self) -> MessageKindV1 {
         self.kind
     }
 
     #[must_use]
-    pub fn kind(&self) -> ArtifactKindV1 {
+    pub(crate) fn kind(&self) -> ArtifactKindV1 {
         self.kind.artifact_kind()
     }
 
     #[must_use]
-    pub fn media_type(&self) -> &str {
+    pub(crate) fn media_type(&self) -> &str {
         &self.media_type
     }
 }
@@ -293,7 +303,7 @@ impl<'brand> ResolutionSession<'brand> {
     /// # Errors
     /// [`ResolveError`], always closed. A resolution that fails yields no value
     /// at all, never a partially accepted one.
-    pub fn resolve_opaque(
+    pub(crate) fn resolve_opaque(
         &self,
         slot: &OpaqueSlot,
         reference: &ArtifactRef,
@@ -366,12 +376,12 @@ impl<'brand> ResolutionSession<'brand> {
     ///
     /// # Errors
     /// [`ResolveError`], always closed and never partial.
-    pub fn resolve_envelope(
+    pub(crate) fn resolve_envelope_storage(
         &self,
         slot: &EnvelopeSlot,
         reference: &ArtifactRef,
         store: &dyn BackingStore,
-    ) -> Result<ResolvedEnvelope<'brand>, ResolveError> {
+    ) -> Result<ResolvedEnvelopeStorage<'brand>, ResolveError> {
         // FD-2.5: the slot's expectation, not the sender's declaration.
         if reference.kind() != slot.kind() {
             return Err(ResolveError::WrongKindForSlot {
@@ -430,7 +440,7 @@ impl<'brand> ResolutionSession<'brand> {
             });
         }
 
-        Ok(ResolvedEnvelope::mint(
+        Ok(ResolvedEnvelopeStorage::mint(
             envelope,
             framed,
             stored_payload.bytes().to_vec(),

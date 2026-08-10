@@ -11,15 +11,17 @@
 //! [`o7_a1_cas::ResolvedOpaque`], because "this does not compile" is not
 //! expressible as a runtime assertion.
 
-// Fixtures are valid by construction; one that is not should fail loudly.
+// Fixtures are valid by construction; one that is not should fail loudly
+// rather than be papered over with a substituted value. Same allowance, and the
+// same reason, as `tests/fd1_wire_seed.rs` in o7-a1-contracts.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::marker::PhantomData;
 
-use o7_a1_cas::{
-    BackingStore, EnvelopeSlot, MemoryStore, OpaqueSlot, RawObject, ResolutionSession,
-    ResolveError, ResolvedArtifact, ResolvedEnvelope, ResolvedOpaque,
-};
+use crate::envelope::ResolvedEnvelopeStorage;
+use crate::resolved::ResolvedOpaque;
+use crate::session::{EnvelopeSlot, OpaqueSlot, ResolutionSession, ResolveError};
+use crate::store::{BackingStore, MemoryStore, RawObject};
 use o7_a1_contracts::{
     typed_media_type, AdapterVersion, ArtifactKindV1, ArtifactRef, ArtifactRefs, BudgetPolicy,
     CommitId, EnvelopeFieldsV1, EnvelopeV1, EnvelopeVersion, Id, MessageKindV1, MessageKindVersion,
@@ -169,11 +171,7 @@ fn resolution_evidence_has_no_transportable_form() {
         ),
         (
             "ResolvedEnvelope",
-            Probe::<ResolvedEnvelope<'static>>(PhantomData).holds(),
-        ),
-        (
-            "ResolvedArtifact",
-            Probe::<ResolvedArtifact<'static>>(PhantomData).holds(),
+            Probe::<ResolvedEnvelopeStorage<'static>>(PhantomData).holds(),
         ),
     ] {
         assert!(!holds, "{label} must not be Serialize");
@@ -208,22 +206,22 @@ fn nothing_outside_the_resolver_can_mint_evidence() {
         "nor may raw bytes"
     );
     assert!(
-        !Convert::<ArtifactRef, ResolvedEnvelope<'static>>(PhantomData).holds(),
+        !Convert::<ArtifactRef, ResolvedEnvelopeStorage<'static>>(PhantomData).holds(),
         "and none of it for the envelope class either"
     );
     assert!(
-        !Convert::<EnvelopeV1, ResolvedEnvelope<'static>>(PhantomData).holds(),
+        !Convert::<EnvelopeV1, ResolvedEnvelopeStorage<'static>>(PhantomData).holds(),
         "an admitted envelope is still not a resolved one: admission is step 1's \
          proof, resolution is this session's"
     );
     // Unifying the result must not unify the proof: the enum is reachable from
     // either class, and neither class is reachable from the other.
     assert!(
-        !Convert::<ResolvedOpaque<'static>, ResolvedEnvelope<'static>>(PhantomData).holds(),
+        !Convert::<ResolvedOpaque<'static>, ResolvedEnvelopeStorage<'static>>(PhantomData).holds(),
         "an opaque resolution must not become an envelope one"
     );
     assert!(
-        !Convert::<ResolvedEnvelope<'static>, ResolvedOpaque<'static>>(PhantomData).holds(),
+        !Convert::<ResolvedEnvelopeStorage<'static>, ResolvedOpaque<'static>>(PhantomData).holds(),
         "nor the reverse"
     );
     // `Default` is the quietest constructor of all: it takes no arguments, so
@@ -581,7 +579,7 @@ fn an_envelope_bearing_artifact_resolves_both_of_its_halves() {
 
     ResolutionSession::enter(&policy(), |session| {
         let resolved = session
-            .resolve_envelope(&work_order_slot(), &reference, &store)
+            .resolve_envelope_storage(&work_order_slot(), &reference, &store)
             .expect("an honest envelope reference must resolve");
         assert_eq!(resolved.envelope(), &envelope);
         assert_eq!(resolved.framed_digest(), &framed);
@@ -589,13 +587,6 @@ fn an_envelope_bearing_artifact_resolves_both_of_its_halves() {
         // FD-1.8: the declared size is both halves, and resolution proved it.
         assert_eq!(resolved.stored_size(), size);
         assert!(size > PAYLOAD.len() as u64, "the envelope half must count");
-        // The unified surface reports what is common, and nothing else.
-        let unified = ResolvedArtifact::Envelope(Box::new(resolved));
-        assert_eq!(
-            unified.identity(),
-            (ArtifactKindV1::WorkOrder, framed.as_str())
-        );
-        assert_eq!(unified.stored_size(), size);
     })
     .unwrap();
 }
@@ -626,7 +617,7 @@ fn the_kind_must_agree_with_the_slot_the_reference_and_the_bytes() {
     ResolutionSession::enter(&policy(), |session| {
         assert!(
             matches!(
-                session.resolve_envelope(&work_order_slot(), &lying, &store),
+                session.resolve_envelope_storage(&work_order_slot(), &lying, &store),
                 Err(ResolveError::EnvelopeKindMismatch {
                     expected: "work_order",
                     actual: "review_request",
@@ -680,7 +671,7 @@ fn the_stored_envelope_must_frame_to_the_referenced_digest() {
     .unwrap();
     ResolutionSession::enter(&policy(), |session| {
         assert!(matches!(
-            session.resolve_envelope(&work_order_slot(), &reference, &swapped),
+            session.resolve_envelope_storage(&work_order_slot(), &reference, &swapped),
             Err(ResolveError::FramedDigestMismatch)
         ));
     })
@@ -725,7 +716,7 @@ fn the_payload_half_is_verified_too() {
 
     ResolutionSession::enter(&policy(), |session| {
         assert!(matches!(
-            session.resolve_envelope(&work_order_slot(), &reference, &corrupt),
+            session.resolve_envelope_storage(&work_order_slot(), &reference, &corrupt),
             Err(ResolveError::PayloadDigestMismatch)
         ));
     })
@@ -744,7 +735,7 @@ fn the_payload_half_is_verified_too() {
     }
     ResolutionSession::enter(&policy(), |session| {
         assert!(matches!(
-            session.resolve_envelope(
+            session.resolve_envelope_storage(
                 &work_order_slot(),
                 &reference,
                 &EnvelopeOnly {
@@ -779,7 +770,7 @@ fn the_declared_size_must_equal_both_halves_together() {
 
     ResolutionSession::enter(&policy(), |session| {
         assert!(matches!(
-            session.resolve_envelope(&work_order_slot(), &under, &store),
+            session.resolve_envelope_storage(&work_order_slot(), &under, &store),
             Err(ResolveError::HalvesSizeMismatch { declared, stored })
                 if declared == PAYLOAD.len() as u64 && stored == size
         ));
@@ -834,7 +825,7 @@ fn the_envelope_half_goes_through_the_one_admission_path() {
     ResolutionSession::enter(&policy(), |session| {
         assert!(
             matches!(
-                session.resolve_envelope(&work_order_slot(), &reference, &store),
+                session.resolve_envelope_storage(&work_order_slot(), &reference, &store),
                 Err(ResolveError::EnvelopeInadmissible { .. })
             ),
             "a cross-field violation must be refused by step 1's admission path"

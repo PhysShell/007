@@ -2,7 +2,7 @@
 name = "o7-a1-cas"
 version = "0.1.0"
 edition = "2021"
-description = "007 A1 step 2: the owned CAS read boundary and the resolution proof boundary. An ArtifactRef is a claim; a ResolvedArtifact is a claim this session paid to verify."
+description = "007 A1 step 2, lower layer: the owned CAS write/read boundary, the accounting session, and the FD-1.8 storage-integrity proof. Typed-slot resolution (FD-2.5) needs the §3 payload schemas and is a later slice, so nothing here is publicly claimed to be a resolved artifact."
 publish = false
 
 [lib]

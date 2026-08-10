@@ -47,7 +47,9 @@
 //!        │                                    bound the closure
 //!        │                                    read, then verify against the ref
 //!        ▼
-//!   ResolvedArtifact<'brand>                  evidence, bound to the session
+//!   ResolvedOpaque<'brand>                    rank-0 bytes, complete (FD-2.1)
+//!   ResolvedEnvelopeStorage<'brand>           FD-1.8 integrity, both halves
+//!                                             — storage only, see below
 //! ```
 //!
 //! [`store::RawObject`] sits deliberately outside that arrow: it is what a
@@ -56,21 +58,73 @@
 //! is what makes the negative tests possible without a second production API.
 //! Forge the input, never the verdict.
 //!
-//! # What is not here yet
+//! # What this slice claims, and what it does not
 //!
-//! Typed and envelope-bearing resolution, `immediate_refs`, the rank-edge rule,
-//! and closure traversal. Rank-0 opaque resolution is complete for its class
-//! (FD-2.1 rank 0 is terminal; FD-2.5 forbids parsing or promoting such bytes),
-//! and the boundary is built before the traversal that will run through it on
-//! purpose: a traversal written first would spend a while returning unverified
-//! values, and the first test to cover it would record that as the norm.
+//! It claims the **lower layer of the resolver**, finished:
+//!
+//! ```text
+//! bounded structural admission     o7-a1-contracts::scan  (refuses mid-parse)
+//! owned CAS write/read boundary    put / put_envelope / BackingStore
+//! accounting session               dedup, declared-size charging, bounds
+//! FD-1.8 storage integrity         both halves of an envelope-bearing artifact
+//! ```
+//!
+//! It does **not** claim `ArtifactRef -> fully resolved typed A1 artifact`.
+//! FD-1.5 orders resolution as *verify the stored object against the ref*, then
+//! "if the slot expects a typed object: parse it under that slot's schema". The
+//! first half is done for both classes; the second cannot be, because no §3
+//! payload schema exists yet — step 1 built the envelope and stopped, so
+//! `WorkOrderV1` and its ten siblings are as absent as `InteractionManifestV1`.
+//!
+//! Rather than publish a resolver that satisfies FD-1.8 while quietly not
+//! satisfying FD-2.5, the proof types, the slot types and the resolution entry
+//! points are crate-private. A partially discharged proof is a fine
+//! intermediate value and a bad public capability.
+//!
+//! # Why the slots are not public either
+//!
+//! FD-2.5 fixes each slot's `kind` and media type "by the schemas in §3", so a
+//! slot is the side of the comparison that is *not* untrusted. A public
+//! `Slot::new(kind, media_type)` hands that to the call site. It looks harmless
+//! today because only tests call it — and that is the whole shape of the
+//! problem, because when schema-derived slots arrive there would be two routes
+//! to one authority-relevant answer:
+//!
+//! ```text
+//! parsed parent schema -> schema-derived slot -> resolve      strong
+//! caller               -> Slot::new(...)      -> resolve      weak
+//! ```
+//!
+//! and the weak one makes the strong one optional. Step 1 spent eight review
+//! rounds on that exact shape. An intermediate state needed to build something
+//! does not have to become a public state of the system.
+//!
+//! Not here at all: `immediate_refs`, the rank-edge rule, and closure
+//! traversal. The boundary is built before the traversal that will run through
+//! it on purpose — a traversal written first spends a while returning
+//! unverified values, and the first test to cover it records that as the norm.
 
 mod envelope;
 mod resolved;
 mod session;
 mod store;
 
-pub use envelope::ResolvedEnvelope;
-pub use resolved::{ResolvedArtifact, ResolvedOpaque};
-pub use session::{EffectiveLimits, EnvelopeSlot, OpaqueSlot, ResolutionSession, ResolveError};
+#[cfg(test)]
+mod tests;
+
+// The public surface of this slice, and deliberately no more.
+//
+// The CAS substrate and the accounting session are finished and useful on their
+// own terms. Everything that *mints or requests a proof* — the slot types, the
+// resolution entry points, and the proof-bearing values themselves — is
+// crate-private until a consuming §3 schema can declare its own slots.
+//
+// That is not modesty about an unfinished feature. FD-2.5 fixes a slot's kind
+// and media type "by the schemas in §3", so a caller-authored slot is authority
+// handed to the call site. Publishing one now would mean that when
+// schema-derived slots arrive there are two routes to the same
+// authority-relevant answer, and the weaker one decides. Step 1 spent eight
+// rounds learning that an intermediate state needed to build something does not
+// have to become a public state of the system.
+pub use session::{EffectiveLimits, ResolutionSession, ResolveError};
 pub use store::{BackingStore, MemoryStore, PutError, RawObject};

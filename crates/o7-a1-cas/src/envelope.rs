@@ -44,22 +44,41 @@
 //! `RawObject -> serde -> looks typed` route here: this crate holds no second
 //! opinion about what an envelope is.
 
+// This module has no non-test consumer yet, and that is the shape of the
+// slice rather than an oversight: the resolution entry points are
+// crate-private until a §3 payload schema can declare its own slots, and
+// nothing inside this crate declares one. The alternative to this attribute
+// is publishing the API to satisfy a lint, which is precisely the
+// caller-authored authority route this slice exists to remove — a warning
+// must not get to choose the public surface. It comes off in the typed-slot
+// slice, when the resolver acquires a caller.
+#![allow(dead_code)]
+
 use o7_a1_contracts::{parse_artifact, ArtifactKindV1, EnvelopeV1, WireDigest};
 
 use std::marker::PhantomData;
 
-/// An envelope-bearing artifact this session resolved: both halves read, both
+/// **Storage integrity only**, and the name says so: both halves read, both
 /// verified against the reference, and the whole charged for.
 ///
-/// Distinct from [`crate::ResolvedOpaque`] on purpose. The two are unified by
-/// [`crate::ResolvedArtifact`] for the things that are genuinely common —
-/// identity, size — and by nothing else, because an opaque resolution proves
-/// bytes hash to a digest while this proves an admitted envelope frames to one
-/// and binds the payload beneath it. A single struct with optional fields would
-/// let a caller ask an opaque resolution for its envelope and get `None`, which
-/// reads as "no envelope" rather than "wrong question".
+/// # What this does not prove
+///
+/// FD-1.5 freezes the order as *verify the stored object against the ref*, and
+/// then "if the slot expects a typed object: parse it under that slot's
+/// schema". This type is the first half. The payload is verified to be the
+/// bytes the envelope binds and is otherwise **unexamined** — no §3 payload
+/// schema exists yet to examine it under.
+///
+/// So an `EnvelopeSlot` expectation is not yet fully discharged, and calling
+/// this a resolved artifact would claim FD-2.5 typed-slot resolution that has
+/// not happened. It is crate-private for the same reason: a partially
+/// discharged proof is a fine intermediate value and a bad public capability.
+///
+/// The name is the point. `ResolvedEnvelope` promised the whole of FD-2.5 for
+/// this class; `ResolvedEnvelopeStorage` promises FD-1.8, which is what it
+/// has.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResolvedEnvelope<'brand> {
+pub(crate) struct ResolvedEnvelopeStorage<'brand> {
     envelope: EnvelopeV1,
     framed_digest: WireDigest,
     payload: Vec<u8>,
@@ -67,7 +86,7 @@ pub struct ResolvedEnvelope<'brand> {
     brand: PhantomData<fn(&'brand ()) -> &'brand ()>,
 }
 
-impl<'brand> ResolvedEnvelope<'brand> {
+impl<'brand> ResolvedEnvelopeStorage<'brand> {
     pub(crate) fn mint(
         envelope: EnvelopeV1,
         framed_digest: WireDigest,
@@ -86,13 +105,13 @@ impl<'brand> ResolvedEnvelope<'brand> {
     /// The admitted envelope. It went through `parse_artifact`, so it carries
     /// step 1's guarantees unchanged rather than a re-derived subset.
     #[must_use]
-    pub fn envelope(&self) -> &EnvelopeV1 {
+    pub(crate) fn envelope(&self) -> &EnvelopeV1 {
         &self.envelope
     }
 
     /// FD-1.2 — the framed identity, verified equal to the reference's digest.
     #[must_use]
-    pub fn framed_digest(&self) -> &WireDigest {
+    pub(crate) fn framed_digest(&self) -> &WireDigest {
         &self.framed_digest
     }
 
@@ -103,21 +122,21 @@ impl<'brand> ResolvedEnvelope<'brand> {
     /// object, and what that payload *means* is the consuming schema's
     /// question, not this boundary's.
     #[must_use]
-    pub fn payload(&self) -> &[u8] {
+    pub(crate) fn payload(&self) -> &[u8] {
         &self.payload
     }
 
     /// FD-1.8 — the two halves, which resolution proved sum to the declared
     /// `size`.
     #[must_use]
-    pub fn stored_size(&self) -> u64 {
+    pub(crate) fn stored_size(&self) -> u64 {
         self.envelope_bytes
             .saturating_add(self.payload.len() as u64)
     }
 
     /// FD-1.5 — `(kind, digest)`, the identity a closure deduplicates by.
     #[must_use]
-    pub fn identity(&self) -> (ArtifactKindV1, &str) {
+    pub(crate) fn identity(&self) -> (ArtifactKindV1, &str) {
         (
             self.envelope.message_kind().artifact_kind(),
             self.framed_digest.as_str(),
