@@ -64,7 +64,11 @@ implementation_probe:
 ```
 
 **The design input is reachable, but only just — and that is an obligation
-(post-closure review).** External review reported that `37502e3` is absent from
+(post-closure review).** *This paragraph records the finding as it stood when it
+was made; the obligation below is now SATISFIED and the reachability it
+describes has since been widened by a preservation ref. It is kept unrewritten,
+because a defect narrated as though it had always been fixed is not a record of
+anything.* External review reported that `37502e3` is absent from
 the repository. Checked: the object *does* exist and resolves, so every
 derivation citing it stands — but it is reachable **only** from the side branch
 `claude/a1-contract-freeze`, is not an ancestor of `main`, and
@@ -80,20 +84,32 @@ OBLIGATION — the design-input evidence MUST remain reachable through a STABLE
              mechanically verifiable, before claude/a1-contract-freeze may be
              deleted.
 
-  intended ref:    refs/tags/a1-f-v2-phase-g-design-input-v1
-  intended target: 37502e3ce5c397a7437445aafb88c13d84ba4ac0
-  precedent:       refs/tags/n2d0-durable-evidence-v1 (same mechanism)
+  ref:       refs/tags/a1-f-v2-phase-g-design-input-v1
+  target:    37502e3ce5c397a7437445aafb88c13d84ba4ac0
+  precedent: refs/tags/n2d0-durable-evidence-v1 (same mechanism)
 
-  status: OPEN — the ref is NOT yet created. This session's push scope
-          returns HTTP 403 on refs/tags/*, and no tag-creation operation is
-          available to it. The ref must be pushed by a maintainer, after
-          which this block becomes SATISFIED in a one-line record commit.
+  status: SATISFIED — the ref exists on origin and was verified independently,
+          not accepted on report:
 
-GUARD, in force while the status above is OPEN:
+            1. ref present on origin                      PASS
+            2. exact target == 37502e3ce5c397a...         PASS
+               object type == commit (lightweight)        PASS
+            3. crates/o7-a1-protocol/src/edges.rs
+               resolves THROUGH the ref, 20336 bytes      PASS
+               and carries 53 `e(` rows — the exact
+               prototype row count this document cites    PASS
+
+          Created by the maintainer as a plain ref; no release object was
+          minted, so no spurious "project release" entity exists.
+
+GUARD — DISCHARGED. In force only while the status above was OPEN:
 
   Until refs/tags/a1-f-v2-phase-g-design-input-v1 exists and is verified to
   target 37502e3ce5c397a7437445aafb88c13d84ba4ac0, claude/a1-contract-freeze
   MUST NOT be deleted or included in automated branch cleanup.
+
+  Its condition is now met. The carrying branch is no longer required for
+  evidence reachability and may be deleted or garbage-collected normally.
 ```
 
 The guard is a temporary condition, not a process reminder. Evidence
