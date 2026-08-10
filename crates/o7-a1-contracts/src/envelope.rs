@@ -730,9 +730,12 @@ impl EnvelopeV1 {
 }
 
 impl FromDocument for EnvelopeV1 {
-    fn from_document(value: serde_json::Value) -> Result<Self, crate::json::ParseError> {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, crate::json::ParseError> {
+        // Straight from the slice: the structural scan already ran over these
+        // same bytes and produced no value, so there is no intermediate
+        // representation for this step to disagree with.
         let wire: EnvelopeWireV1 =
-            serde_json::from_value(value).map_err(|e| crate::json::ParseError::SchemaMismatch {
+            serde_json::from_slice(bytes).map_err(|e| crate::json::ParseError::SchemaMismatch {
                 category: crate::json::classify(&e),
             })?;
         // Wire -> fields -> checked construction. There is no route, on any

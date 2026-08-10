@@ -54,6 +54,7 @@ mod json;
 mod kind;
 mod refs;
 mod scalars;
+mod scan;
 
 pub use bounds::{
     BudgetPolicy, BudgetPolicyError, MAX_ARRAY_LEN, MAX_ARTIFACT_REFS, MAX_CONTROL_ARTIFACT_BYTES,

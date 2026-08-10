@@ -39,6 +39,22 @@
 //! [`crate::ResolutionSession::enter`], so a resolved value cannot leave the
 //! session that minted it and two sessions' values are not interchangeable.
 //!
+//! # What may leave, and what may not
+//!
+//! The lifetime on the value is not the whole rule, because a projection can
+//! walk around it: a method returning some brand-free `VerifiedHandle` would
+//! carry the verdict out while satisfying the borrow checker. So the rule is
+//! about authority, not about data:
+//!
+//! > The brand may disappear from data. It may not disappear from authority.
+//!
+//! Copying a digest, a kind, a size or even the bytes out is fine — outside the
+//! session those are raw facts and inputs again, exactly what they were before
+//! anything was verified. What must not leave is a value whose *meaning* is
+//! still "resolved". Every accessor below is audited against that: each returns
+//! a plain fact, and none returns a type that asserts anything about how it was
+//! obtained.
+//!
 //! Used *inside* its session, the same code compiles and resolves — so the
 //! failure below is the escape and not a broken example. The pair is the point:
 //! a `compile_fail` test that fails for an unrelated reason passes just as
@@ -147,6 +163,9 @@ impl<'brand> ResolvedArtifact<'brand> {
     }
 
     /// FD-1.1 — the digest the stored bytes were verified against.
+    ///
+    /// Brand-free, and that is correct: a digest is a fact. Outside the session
+    /// it means "these bytes hash to this", not "this session verified it".
     #[must_use]
     pub fn digest(&self) -> &WireDigest {
         &self.digest

@@ -89,6 +89,19 @@ impl<T: serde::Serialize> Probe<T> {
     }
 }
 
+struct DefaultProbe<T>(PhantomData<T>);
+trait NotDefault {
+    fn holds(&self) -> bool {
+        false
+    }
+}
+impl<T> NotDefault for DefaultProbe<T> {}
+impl<T: Default> DefaultProbe<T> {
+    fn holds(&self) -> bool {
+        true
+    }
+}
+
 struct Convert<A, B>(PhantomData<(A, B)>);
 trait NoConversion {
     fn holds(&self) -> bool {
@@ -123,15 +136,23 @@ fn a_reference_does_not_convert_into_a_resolution() {
     assert!(Convert::<&str, String>(PhantomData).holds());
 }
 
-/// Property 3: evidence has no serialized form, so it cannot be written down in
-/// one accounting context and read back in another.
+/// Property 3: evidence has no transportable representation.
 ///
-/// A `Serialize` here would reopen the cross-session hole through a side door:
-/// the value could not escape by lifetime, but its contents could travel and be
-/// reassembled. Step 1 removed `Serialize` from `EnvelopeV1` for the neighbouring
-/// reason; this is the same rule one layer out.
+/// A `Serialize` alone is not yet a bypass — without a `Deserialize` or a
+/// public constructor there is nothing to read the bytes back into, so the
+/// brand still holds. What it *does* create is a portable rendering of a
+/// proof-bearing object, which is a standing invitation for someone later to
+/// add the obvious matching door and call it symmetry. The right shape for this
+/// type is:
+///
+/// ```text
+/// observable while borrowed
+/// not transportable as proof
+/// ```
+///
+/// so the absence is asserted now rather than defended later.
 #[test]
-fn resolution_evidence_has_no_serialized_form() {
+fn resolution_evidence_has_no_transportable_form() {
     assert!(
         !Probe::<ResolvedArtifact<'static>>(PhantomData).holds(),
         "ResolvedArtifact must not be Serialize"
@@ -140,6 +161,38 @@ fn resolution_evidence_has_no_serialized_form() {
         Probe::<String>(PhantomData).holds(),
         "the probe must report an implemented bound as true"
     );
+}
+
+/// The three routes that must not exist, named individually because "there is
+/// no way to forge one" is the kind of claim that stays true only while
+/// somebody keeps checking.
+///
+/// The third is the one to watch. `From<ArtifactRef>` and `From<RawObject>`
+/// look like design mistakes; a `new_for_test` or `assume_resolved` does not —
+/// it looks like pragmatism, and it arrives with the words "only for tests",
+/// which is how the previous step acquired a diagnostic lever that a later
+/// round had to remove.
+#[test]
+fn nothing_outside_the_resolver_can_mint_evidence() {
+    assert!(
+        !Convert::<ArtifactRef, ResolvedArtifact<'static>>(PhantomData).holds(),
+        "a claim must not convert into a proof"
+    );
+    assert!(
+        !Convert::<RawObject, ResolvedArtifact<'static>>(PhantomData).holds(),
+        "untrusted store bytes must not convert into a proof"
+    );
+    assert!(
+        !Convert::<Vec<u8>, ResolvedArtifact<'static>>(PhantomData).holds(),
+        "nor may raw bytes"
+    );
+    // `Default` is the quietest constructor of all: it takes no arguments, so
+    // it can never have checked anything.
+    assert!(
+        !DefaultProbe::<ResolvedArtifact<'static>>(PhantomData).holds(),
+        "ResolvedArtifact must not be Default"
+    );
+    assert!(DefaultProbe::<Vec<u8>>(PhantomData).holds());
 }
 
 // ---------------------------------------------------------------------------
