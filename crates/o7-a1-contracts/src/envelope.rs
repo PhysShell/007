@@ -26,6 +26,7 @@ use crate::kind::{MessageKindV1, ProducerRole};
 use crate::refs::{ArtifactRef, RefError};
 use crate::scalars::{
     AdapterVersion, CommitId, Digest256, FrozenVersion, Id, ModelIdentity, Optional, Timestamp,
+    WireDigest,
 };
 
 /// FD-1.6 — the frozen envelope framing and field set.
@@ -96,13 +97,13 @@ pub struct EnvelopeV1 {
     #[serde(default, skip_serializing_if = "Optional::is_absent")]
     pub model_identity: Optional<ModelIdentity>,
     #[serde(default, skip_serializing_if = "Optional::is_absent")]
-    pub prompt_digest: Optional<Digest256>,
+    pub prompt_digest: Optional<WireDigest>,
     #[serde(default, skip_serializing_if = "Optional::is_absent")]
-    pub tool_policy_digest: Optional<Digest256>,
-    pub contract_digest: Digest256,
+    pub tool_policy_digest: Optional<WireDigest>,
+    pub contract_digest: WireDigest,
     #[serde(default, skip_serializing_if = "Optional::is_absent")]
     pub expected_input_head: Optional<CommitId>,
-    pub payload_digest: Digest256,
+    pub payload_digest: WireDigest,
     pub artifact_refs: Vec<ArtifactRef>,
     #[serde(default, skip_serializing_if = "Optional::is_absent")]
     pub provider_execution_receipt_ref: Optional<ArtifactRef>,
@@ -133,8 +134,8 @@ impl EnvelopeV1 {
             .frame_str(self.producer_execution_id.as_str())
             .frame_str(self.producer_adapter_version.as_str())
             .frame_optional_str(self.model_identity.as_ref().map(ModelIdentity::as_str))
-            .frame_optional_str(self.prompt_digest.as_ref().map(Digest256::as_str))
-            .frame_optional_str(self.tool_policy_digest.as_ref().map(Digest256::as_str))
+            .frame_optional_str(self.prompt_digest.as_ref().map(WireDigest::as_str))
+            .frame_optional_str(self.tool_policy_digest.as_ref().map(WireDigest::as_str))
             .frame_str(self.contract_digest.as_str())
             .frame_optional_str(self.expected_input_head.as_ref().map(CommitId::as_str))
             .frame_str(self.payload_digest.as_str())
@@ -209,7 +210,7 @@ impl EnvelopeV1 {
     /// is over the exact stored bytes.
     #[must_use]
     pub fn binds_payload(&self, payload_bytes: &[u8]) -> bool {
-        Digest256::of_bytes(payload_bytes) == self.payload_digest
+        WireDigest::of_bytes(payload_bytes) == self.payload_digest
     }
 
     /// FD-1.8 — the `size` a ref to this artifact must declare: stored envelope

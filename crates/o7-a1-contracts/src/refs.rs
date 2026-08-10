@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bounds::{MAX_CONTROL_ARTIFACT_BYTES, MAX_EVIDENCE_BLOB_BYTES, MAX_STRING_BYTES};
 use crate::kind::ArtifactKindV1;
-use crate::scalars::Digest256;
+use crate::scalars::WireDigest;
 
 /// A malformed reference.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -26,6 +26,11 @@ pub enum RefError {
         kind: &'static str,
         actual: u64,
         max: u64,
+    },
+    #[error("a typed {kind} artifact must declare media_type {expected:?} (FD-1.7)")]
+    WrongMediaType {
+        kind: &'static str,
+        expected: String,
     },
 }
 
@@ -51,7 +56,7 @@ pub fn typed_media_type(kind: ArtifactKindV1, version: u32) -> String {
 pub struct ArtifactRef {
     pub kind: ArtifactKindV1,
     pub media_type: String,
-    pub digest: Digest256,
+    pub digest: WireDigest,
     pub size: u64,
 }
 
@@ -70,6 +75,21 @@ impl ArtifactRef {
         }
         if self.size == 0 {
             return Err(RefError::ZeroSize);
+        }
+        // FD-1.7: a typed A1 artifact's media type is fixed by its kind and
+        // version, and it is part of the envelope framing — so a ref that
+        // declares `text/x-diff` for a `work_order` names a different reference
+        // than the artifact it claims to point at (FD-2.5). Evidence blobs and
+        // imported A0 objects "carry their own concrete type" and are not
+        // constrained here.
+        if self.kind.is_envelope_bearing() || self.kind.is_typed_payload() {
+            let expected = typed_media_type(self.kind, crate::envelope::MESSAGE_KIND_VERSION_V1);
+            if self.media_type != expected {
+                return Err(RefError::WrongMediaType {
+                    kind: self.kind.name(),
+                    expected,
+                });
+            }
         }
         let max = self.max_size();
         if self.size > max {
@@ -133,8 +153,8 @@ impl ArtifactRef {
 mod tests {
     use super::*;
 
-    fn digest() -> Digest256 {
-        Digest256::of_bytes(b"payload")
+    fn digest() -> WireDigest {
+        WireDigest::of_bytes(b"payload")
     }
 
     fn evidence_ref(size: u64) -> ArtifactRef {

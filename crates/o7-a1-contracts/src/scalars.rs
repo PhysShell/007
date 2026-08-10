@@ -50,6 +50,8 @@ pub enum ScalarError {
     AbbreviatedCommitId { actual: usize },
     #[error("a CommitId must be lowercase hex; a non-hex byte appears at offset {offset}")]
     NonHexCommitId { offset: usize },
+    #[error("a Digest256 must be exactly 64 lowercase hex chars, got a {actual}-byte string")]
+    MalformedDigest { actual: usize },
 }
 
 /// §3 — "opaque non-empty UTF-8 string, never parsed for meaning", ≤ 256 bytes.
@@ -220,6 +222,71 @@ impl Timestamp {
 }
 
 impl<'de> Deserialize<'de> for Timestamp {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(&raw).map_err(serde::de::Error::custom)
+    }
+}
+
+/// A [`Digest256`] as it appears on the wire.
+///
+/// **Not a second digest type.** It holds the same `o7_run::event::Digest256`,
+/// computes nothing of its own, and hands the identical value to every framing.
+/// It exists for one reason: that type's `Deserialize` forwards
+/// `DigestFormatError`, whose `Display` quotes the rejected string. A rejected
+/// artifact is untrusted input, and AGENTS.md makes credential leakage a P0, so
+/// `serde_json::from_slice::<EnvelopeV1>` on a payload whose `contract_digest`
+/// is a stolen token must not produce an error containing it.
+///
+/// The wrapper is therefore a redacting deserializer, not a parallel model —
+/// which is the distinction FD-2.4 draws when it imports a kind rather than
+/// redefining it.
+///
+/// Note that `o7-run`'s own `DigestFormatError` still carries the rejected value
+/// for its own callers; narrowing that is a change to another crate's public
+/// error type and belongs to its own slice, not to this one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
+pub struct WireDigest(Digest256);
+
+impl WireDigest {
+    /// # Errors
+    /// [`ScalarError::MalformedDigest`], which names the shape expected and not
+    /// the value received.
+    pub fn parse(s: &str) -> Result<Self, ScalarError> {
+        Digest256::parse(s)
+            .map(Self)
+            .map_err(|_| ScalarError::MalformedDigest { actual: s.len() })
+    }
+
+    /// Hash bytes into a wire digest — the FD-1.1 form.
+    #[must_use]
+    pub fn of_bytes(bytes: &[u8]) -> Self {
+        Self(Digest256::of_bytes(bytes))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// The underlying `o7-run` digest, for code that already speaks that type.
+    #[must_use]
+    pub fn inner(&self) -> &Digest256 {
+        &self.0
+    }
+}
+
+impl From<Digest256> for WireDigest {
+    fn from(d: Digest256) -> Self {
+        Self(d)
+    }
+}
+
+impl<'de> Deserialize<'de> for WireDigest {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,

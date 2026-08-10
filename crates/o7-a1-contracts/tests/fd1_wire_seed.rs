@@ -21,18 +21,18 @@ use o7_a1_contracts::bounds::{
     MAX_ARTIFACT_REFS, MAX_CONTROL_ARTIFACT_BYTES, MAX_REACHABLE_CLOSURE_BYTES,
 };
 use o7_a1_contracts::{
-    parse_artifact, parse_payload, typed_media_type, validate_document, AdapterVersion,
-    ArtifactKindV1, ArtifactRef, BudgetPolicy, BudgetPolicyError, CommitId, Digest256,
-    EnvelopeError, EnvelopeV1, EnvelopeVersion, Id, MessageKindV1, MessageKindVersion,
-    ModelIdentity, Optional, ParseError, ProducerRole, Timestamp,
+    parse_artifact, typed_media_type, validate_document, AdapterVersion, ArtifactKindV1,
+    ArtifactRef, BudgetPolicy, BudgetPolicyError, CommitId, EnvelopeError, EnvelopeV1,
+    EnvelopeVersion, Id, MessageKindV1, MessageKindVersion, ModelIdentity, Optional, ParseError,
+    ProducerRole, Timestamp, WireDigest,
 };
 
 fn id(s: &str) -> Id {
     Id::parse(s).expect("fixture id")
 }
 
-fn digest(seed: &str) -> Digest256 {
-    Digest256::of_bytes(seed.as_bytes())
+fn digest(seed: &str) -> WireDigest {
+    WireDigest::of_bytes(seed.as_bytes())
 }
 
 fn adapter(s: &str) -> AdapterVersion {
@@ -73,7 +73,7 @@ fn controller_envelope() -> EnvelopeV1 {
         tool_policy_digest: Optional::absent(),
         contract_digest: digest("contract"),
         expected_input_head: CommitId::parse(&"a".repeat(40)).ok().into(),
-        payload_digest: Digest256::of_bytes(b"{}"),
+        payload_digest: WireDigest::of_bytes(b"{}"),
         artifact_refs: vec![],
         provider_execution_receipt_ref: Optional::absent(),
         created_at: Timestamp::parse("2026-08-09T20:00:00Z").expect("fixture timestamp"),
@@ -138,7 +138,7 @@ fn an_unknown_envelope_field_is_rejected_at_parse_time() {
     }
     let bytes = value.to_string().into_bytes();
     assert!(matches!(
-        parse_payload::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES),
+        parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES),
         Err(ParseError::SchemaMismatch { .. })
     ));
 }
@@ -152,7 +152,7 @@ fn an_unrecognised_enum_variant_fails_closed() {
         map.insert("message_kind".to_owned(), serde_json::json!("future_kind"));
     }
     let bytes = value.to_string().into_bytes();
-    assert!(parse_payload::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +169,7 @@ fn an_explicit_null_in_an_optional_field_is_rejected() {
     }
     let bytes = value.to_string().into_bytes();
     assert!(matches!(
-        parse_payload::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES),
+        parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES),
         Err(ParseError::ExplicitNull { .. })
     ));
 }
@@ -180,7 +180,7 @@ fn the_same_optional_field_absent_is_accepted() {
     let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
     assert!(!String::from_utf8_lossy(&bytes).contains("causation_id"));
     let parsed: EnvelopeV1 =
-        parse_payload(&bytes, MAX_CONTROL_ARTIFACT_BYTES).expect("absent optional must parse");
+        parse_artifact(&bytes, MAX_CONTROL_ARTIFACT_BYTES).expect("absent optional must parse");
     assert_eq!(parsed, env);
 }
 
@@ -364,7 +364,7 @@ fn every_framed_field_changes_the_identity() {
     assert_ne!(d, role.framed_digest(), "producer_role");
 
     let mut payload = base.clone();
-    payload.payload_digest = Digest256::of_bytes(b"other");
+    payload.payload_digest = WireDigest::of_bytes(b"other");
     assert_ne!(d, payload.framed_digest(), "payload_digest");
 
     let mut contract = base.clone();
@@ -406,7 +406,7 @@ fn a_ref_under_a_different_declared_media_type_is_a_different_reference() {
 #[test]
 fn the_envelope_binds_the_exact_stored_payload_bytes() {
     let mut env = controller_envelope();
-    env.payload_digest = Digest256::of_bytes(br#"{"status":"candidate_produced"}"#);
+    env.payload_digest = WireDigest::of_bytes(br#"{"status":"candidate_produced"}"#);
     assert!(env.binds_payload(br#"{"status":"candidate_produced"}"#));
     // FD-1.1: bytes are the artifact. A re-serialized payload with different
     // whitespace is a *different* payload, not an equivalent one.
@@ -424,23 +424,32 @@ fn a_ref_to_an_envelope_bearing_artifact_charges_both_halves() {
 // suite while the defect was live, which is the more useful thing to record.
 // ---------------------------------------------------------------------------
 
-/// The advertised parse entry point must run the cross-field rules, not only
-/// the schema. Previously `parse_payload` returned `Ok` for a provider envelope
-/// with no receipt ref, so a caller who trusted the entry point held an artifact
-/// the contract forbids.
+/// The admission path must run the cross-field rules, not only the schema.
+///
+/// No single field of this envelope is wrong — a provider report with no receipt
+/// ref is refused only by a rule that reads `producer_role` and
+/// `provider_execution_receipt_ref` together. There is deliberately no public
+/// helper that stops before that rule: the earlier `parse_payload` was one, and
+/// a comment recommending the safer sibling is not an admission boundary.
 #[test]
 fn the_admission_path_enforces_cross_field_rules() {
     let mut env = coder_envelope();
     env.provider_execution_receipt_ref = Optional::absent();
     let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
 
-    // The schema alone cannot see this: no single field is wrong.
-    assert!(parse_payload::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_ok());
-    // The admission path can.
     assert!(matches!(
         parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES),
         Err(ParseError::Invalid { .. })
     ));
+
+    // The same envelope with its receipt ref restored is admissible, so the
+    // rejection above is the cross-field rule and not some unrelated defect in
+    // the fixture.
+    assert!(parse_artifact::<EnvelopeV1>(
+        &serde_json::to_vec(&coder_envelope()).expect("fixture must serialize"),
+        MAX_CONTROL_ARTIFACT_BYTES
+    )
+    .is_ok());
 }
 
 /// Reaching the typed schema through a different door must not weaken it.
@@ -534,4 +543,88 @@ fn a_typed_non_envelope_ref_is_bounded_as_a_control_artifact() {
         env.validate(),
         Err(EnvelopeError::BadReceiptRef { .. })
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Regressions for the second review round, on 2617370.
+// ---------------------------------------------------------------------------
+
+/// P0. `Digest256`'s own `Deserialize` forwards an error whose `Display` quotes
+/// the rejected string, so a malformed digest on the wire put payload content
+/// into a serde error — reachable directly, without the admission path.
+#[test]
+fn a_malformed_digest_never_quotes_itself_on_any_path() {
+    const SECRET: &str = "ghp_not_a_digest_but_definitely_a_secret";
+
+    let bytes = envelope_json_with("contract_digest", serde_json::json!(SECRET));
+
+    let admitted = parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES)
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(!admitted.is_empty(), "a malformed digest must be rejected");
+    assert!(
+        !admitted.contains("ghp_"),
+        "admission path leaked: {admitted}"
+    );
+
+    // The direct door is the one that was leaking.
+    let direct = serde_json::from_slice::<EnvelopeV1>(&bytes)
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(!direct.is_empty(), "a malformed digest must be rejected");
+    assert!(
+        !direct.contains("ghp_"),
+        "direct deserialization leaked: {direct}"
+    );
+
+    // And a well-formed digest still parses, so the rejection above is the
+    // shape check rather than the field being unusable.
+    let good = envelope_json_with(
+        "contract_digest",
+        serde_json::json!(WireDigest::of_bytes(b"contract").as_str()),
+    );
+    assert!(parse_artifact::<EnvelopeV1>(&good, MAX_CONTROL_ARTIFACT_BYTES).is_ok());
+}
+
+/// FD-1.7: a typed A1 artifact's media type is fixed by its kind and version,
+/// and media type is part of the envelope framing — so a ref declaring
+/// `text/x-diff` for a `work_order` names a different reference than the
+/// artifact it claims to point at.
+#[test]
+fn a_typed_ref_must_declare_its_frozen_media_type() {
+    let mut env = controller_envelope();
+    env.artifact_refs = vec![ArtifactRef {
+        kind: ArtifactKindV1::WorkOrder,
+        media_type: "text/x-diff".to_owned(),
+        digest: digest("order"),
+        size: 10,
+    }];
+    let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
+    assert!(matches!(
+        parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES),
+        Err(ParseError::Invalid { .. })
+    ));
+
+    // The same ref with its frozen media type is admissible.
+    env.artifact_refs = vec![ArtifactRef {
+        kind: ArtifactKindV1::WorkOrder,
+        media_type: typed_media_type(ArtifactKindV1::WorkOrder, 1),
+        digest: digest("order"),
+        size: 10,
+    }];
+    let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_ok());
+
+    // An evidence blob keeps its own concrete type: FD-1.7 constrains typed A1
+    // artifacts, not blobs.
+    env.artifact_refs = vec![ArtifactRef {
+        kind: ArtifactKindV1::Diff,
+        media_type: "text/x-diff".to_owned(),
+        digest: digest("blob"),
+        size: 10,
+    }];
+    let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_ok());
 }

@@ -24,11 +24,16 @@
 //!                     provider role
 //! ```
 //!
-//! [`parse_artifact`] runs all three. The typed layer is deliberately *also*
-//! strict on its own, so a caller reaching a wire type through a different door
-//! — `serde_json::from_str` — still cannot construct one that violates a
-//! per-field rule. Only the byte-level rules and the cross-field rules need the
-//! admission path, and both are properties no individual field can check.
+//! [`parse_artifact`] runs all three, and it is the **only** public way to turn
+//! bytes into a wire type. There is deliberately no public helper that stops
+//! after the schema: a documented "prefer the other one" is a convention, and a
+//! convention is what the first version of this module already tried and lost.
+//!
+//! The typed layer is *also* strict on its own, so a caller reaching a wire type
+//! through a different door — `serde_json::from_str` — still cannot construct
+//! one that violates a per-field rule. Only the byte-level rules and the
+//! cross-field rules need the admission path, and both are properties no
+//! individual field can check.
 //!
 //! # Errors never carry payload content
 //!
@@ -80,8 +85,11 @@ pub enum ParseError {
 /// The cross-field rules of a wire artifact — the ones no single field can
 /// check, because they relate two fields to each other.
 ///
-/// Implemented by every envelope-bearing type so [`parse_artifact`] can enforce
-/// them without each caller remembering to.
+/// Every A1 wire type implements this, including the ones that have no such
+/// rules: those return `Ok(())` explicitly, which states "this type has no
+/// cross-field obligations" instead of leaving it to be inferred from a missing
+/// impl. Requiring the trait is what lets [`parse_artifact`] be the single
+/// public entry point.
 pub trait WireArtifact: Sized {
     /// # Errors
     /// A human-readable reason. Implementations must not quote payload content.
@@ -131,23 +139,26 @@ pub fn parse_artifact<T: DeserializeOwned + WireArtifact>(
     bytes: &[u8],
     max_bytes: u64,
 ) -> Result<T, ParseError> {
-    let parsed: T = parse_payload(bytes, max_bytes)?;
+    let parsed: T = parse_typed(bytes, max_bytes)?;
     parsed
         .validate_wire()
         .map_err(|reason| ParseError::Invalid { reason })?;
     Ok(parsed)
 }
 
-/// Document rules, then the typed schema — for payloads that have no cross-field
-/// rules of their own.
+/// Document rules, then the typed schema — **crate-internal**.
 ///
-/// Prefer [`parse_artifact`] for anything implementing [`WireArtifact`]: this
-/// function cannot know that a type has cross-field obligations, and silently
-/// skipping them is exactly the gap an admission path exists to close.
+/// This is the half of admission that stops before the cross-field rules, and
+/// it is not public for the same reason `validate()` is no longer something a
+/// caller must remember: an unchecked door with a comment on it is still a door.
+/// [`parse_artifact`] is the public entry point.
 ///
 /// # Errors
 /// [`ParseError`] from either the document rules or the schema.
-pub fn parse_payload<T: DeserializeOwned>(bytes: &[u8], max_bytes: u64) -> Result<T, ParseError> {
+pub(crate) fn parse_typed<T: DeserializeOwned>(
+    bytes: &[u8],
+    max_bytes: u64,
+) -> Result<T, ParseError> {
     let value = validate_document(bytes, max_bytes)?;
     serde_json::from_value(value).map_err(|e| ParseError::SchemaMismatch {
         category: classify(&e),
@@ -345,7 +356,7 @@ mod tests {
             known: u32,
         }
         let unknown_field = format!(r#"{{"known":1,"{SECRET_KEY}":"{SECRET_VALUE}"}}"#);
-        let err = parse_payload::<Strict>(unknown_field.as_bytes(), MAX_CONTROL_ARTIFACT_BYTES)
+        let err = parse_typed::<Strict>(unknown_field.as_bytes(), MAX_CONTROL_ARTIFACT_BYTES)
             .err()
             .map(|e| e.to_string())
             .unwrap_or_default();

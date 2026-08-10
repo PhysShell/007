@@ -59,10 +59,10 @@ pub use envelope::{
     ENVELOPE_VERSION_V1, MESSAGE_KIND_VERSION_V1,
 };
 pub use framing::Preimage;
-pub use json::{parse_artifact, parse_payload, validate_document, ParseError, WireArtifact};
+pub use json::{parse_artifact, validate_document, ParseError, WireArtifact};
 pub use kind::{ArtifactKindV1, MessageKindV1, ProducerRole};
 pub use refs::{typed_media_type, ArtifactRef, RefError};
 pub use scalars::{
     AdapterVersion, BoundedText, CommitId, Digest256, FrozenVersion, Id, ModelIdentity, Optional,
-    ScalarError, Text, Timestamp,
+    ScalarError, Text, Timestamp, WireDigest,
 };
