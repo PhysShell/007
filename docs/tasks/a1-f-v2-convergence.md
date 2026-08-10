@@ -502,18 +502,26 @@ determines ranks, edges, imported roots, closure and digest domains.
 ```yaml
 phase_g:
   document: docs/tasks/a1-f-v2-phase-g.md
-  status:   DECIDED, independent review not yet performed
-  evidence: 37502e3 edge registry, 53 edges, in/out degree derived by script
+  status:   DECIDED (revision G-R1), awaiting re-review
+  review_1: CHANGES_REQUESTED — four P1s, all accepted; the central
+            conclusion changed from 13 envelope kinds to 11
+  evidence: 37502e3 edge registry — 59 entries (53 envelope-source + 6 A2
+            transition) plus a global AnyCommittedEnvelope causation rule;
+            metric is "specific V0 consumer in-degree" with an explicit
+            exclusion rule, derived by script
   result:
-    envelope_bearing_kinds: 13   # v1's eleven, + CampaignRunBinding,
-                                 # + ProviderInvocationReceipt
-    kept_as_support:  InteractionManifest, ScopeContractV1, CampaignEventPayload
+    envelope_bearing_kinds: 11   # v1 unchanged — KEEP_V1_MODEL won the
+                                 # boundary question
+    new_support_authority: CampaignRunBinding   # REQUIRED_V0, not a message
+    kept_as_support:  ProviderInvocationReceipt, InteractionManifest,
+                      ScopeContractV1, CampaignEventPayload
     out_of_v0:        ArtifactImported, RunArtifactSource,
                       EstablishedNonDispatchEvidence
-    edge_model:       exact registry authoritative, rank derived
+    edge_model:       exact registry authoritative; derived rank defined over
+                      the Intra kind-level subgraph only
     wrapper_boundary: PARSED_BUT_GRAPH_TERMINAL
-    e_v0_4:           class half decided (manifest = typed support object);
-                      envelope-size bound explicitly deferred to the v2 draft
+    e_v0_4:           class only (manifest = typed support object); ALL
+                      numeric bounds deferred to the v2 wire/bounds draft
 ```
 
 The scope statement below is retained as written, so the decision can be checked

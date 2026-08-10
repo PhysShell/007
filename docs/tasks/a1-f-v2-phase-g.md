@@ -1,6 +1,9 @@
 # A1-F v2 — Phase G: graph adjudication
 
-**Status: DECIDED — AWAITING INDEPENDENT REVIEW.**
+**Status: DECIDED (revision G-R1) — AWAITING RE-REVIEW.**
+
+The first pass failed independent review on four P1s, including its central
+conclusion. See §9 for what changed and why. The count is no longer 13.
 
 Phase G is one decision, written and reviewed on its own, before any v2 drafting.
 The node set determines ranks, edges, imported roots, closure and digest domains;
@@ -53,8 +56,36 @@ does not need an identity, whatever its schema looks like.
 
 ## 2. Evidence: the reference graph of the design input
 
-Mechanically derived from `crates/o7-a1-protocol/src/edges.rs` at `37502e3` —
-53 edges, counted by script rather than read off by eye.
+Mechanically derived from `crates/o7-a1-protocol/src/edges.rs` at `37502e3`.
+The metric needs a name and an exclusion rule, or an independent reviewer runs
+"the same" script and gets a different number — which, after the 141-row
+episode, would be a particularly avoidable way to repeat a lesson.
+
+```text
+registry total                                59 entries
+  envelope-source edges          e(...)       53
+  A2 attention-transition edges  t(...)        6
+plus, in the registry KAT, one global rule:
+  GLOBAL | causation.blob_ref | AnyCommittedEnvelope | Causal
+
+specific V0 consumer in-degree(X) :=
+  count of envelope-source edges whose target is exactly Envelope(K::X)
+
+  EXCLUDING
+    - the 6 A2 transition-source edges          (not V0)
+    - the global AnyCommittedEnvelope causation rule and any open target
+      (AnyCommittedEnvelope, AnyImportableCas) — generic reachability is
+      not evidence that a specific consumer needs this object
+    - edges whose only consumer is a POST-V0 feature (see §3.1)
+```
+
+The open-target exclusion matters for honesty, not only for arithmetic: as a
+prototype envelope kind, `ArtifactImported` is formally reachable through the
+global causation rule, so its raw in-degree is not zero. Its *specific consumer*
+in-degree is. The conclusion in §3.4 is unchanged, but it now rests on a metric
+that says what it counts.
+
+The table below is specific V0 consumer in-degree.
 
 | Candidate kind | out | **in** | referencing kinds |
 |---|---:|---:|---|
@@ -71,8 +102,8 @@ Mechanically derived from `crates/o7-a1-protocol/src/edges.rs` at `37502e3` —
 | `HumanAttentionRequest` | 5 | 1 | — |
 | `HumanCommandRequest` | 1 | 1 | HumanDecision |
 | `HumanDecision` | 3 | 0 | — |
-| **`CampaignRunBinding`** | 5 | **3** | CandidateAdmissionReceipt, ProviderInvocationReceipt ×2 (one `Causal`) |
-| **`ArtifactImported`** | 2 | **0** | **nothing** |
+| **`CampaignRunBinding`** | 5 | **2** | CandidateAdmissionReceipt, ProviderInvocationReceipt — both `Intra`, both controller-produced. A third raw in-edge, `safe_redrive.prior_run_binding_ref` (`Causal`), is excluded: its only consumer is POST-V0 (§3.1) |
+| **`ArtifactImported`** | 2 | **0** | **no specific consumer** (formally reachable only through the global open-target causation rule, which the metric excludes) |
 
 External wrapper in-degree: `CandidateStateReceipt` 6, `CandidateMaterialization`
 3, `WorktreeMaterialization` 2, `RunContractCandidateState` 2,
@@ -81,56 +112,80 @@ External wrapper in-degree: `CandidateStateReceipt` 6, `CandidateMaterialization
 
 ## 3. Q1 + Q2 — node universe, and the envelope/support boundary
 
-### 3.1 `CampaignRunBinding` → **PROMOTE to envelope-bearing**
+### 3.1 `CampaignRunBinding` → existence **REQUIRED_V0**, classification **TYPED SUPPORT AUTHORITY**
 
-Existence was never the question: three consumers reference it, and it is the
-only object that bridges logical campaign/round/role to physical
-execution/conversation/run/attempt plus the input state actually materialized.
+Existence was never the question: it is the only object bridging logical
+campaign/round/role to physical execution/conversation/run/attempt plus the input
+state actually materialized, and V0 needs that bridge.
 
-Classification is settled by two facts the schema alone would not have shown:
+Classification is a different question, and the first pass answered it with two
+arguments that do not survive checking:
 
-- One of its in-edges is **`Causal`**, not `Intra`:
-  `ProviderInvocationReceipt.cause.safe_redrive.prior_run_binding_ref`. A later
-  round reaches back to a binding from an earlier one. Cross-round reachability
-  is independent replay addressability, which is test 4.
-- It is referenced from **two distinct producer lanes** — a controller-accepted
-  admission receipt and a provider-execution receipt. An object referenced across
-  lanes needs an identity that neither lane owns, which is test 1.
+- **The `Causal` SafeRedrive edge cannot count.**
+  `ProviderInvocationReceipt.cause.safe_redrive.prior_run_binding_ref` is the
+  only cross-round in-edge, and SafeRedriveV2 is POST-V0 (§3.5). Using it as
+  V0 promotion evidence lets a post-V0 consumer determine pre-V0 wire ontology,
+  which is backwards.
+- **"Two distinct producer lanes" is factually wrong.** `required_producer()` at
+  `37502e3` (`edges.rs:538-541`) classifies `CoderReport` as `Provider("coder")`,
+  `ReviewerReport` as `Provider("reviewer")`, `HumanCommandRequest` as `Human`,
+  and *everything else*, including both `CandidateAdmissionReceipt` and
+  `ProviderInvocationReceipt`, as `Controller`. Both referencing kinds are one
+  lane.
 
-Tests 1, 2, 4 and 5 pass. Test 3 passes in the narrow but real sense that a
-campaign must not accumulate two bindings for one execution.
+What remains is specific V0 consumer in-degree **2**, both `Intra`, both
+controller-produced. The envelope-specific question is then:
 
-### 3.2 `ProviderInvocationReceipt` → **PROMOTE to envelope-bearing**
+```text
+Which V0 invariant requires of CampaignRunBinding
+    a message_id, envelope causation/lineage, and an
+    acceptance/idempotency lifecycle
+that cannot be provided by
+    typed support identity + the exact edge registry
+    + a controller uniqueness invariant?
+```
 
-This reverses a v1 classification, so the burden is highest here. It is met by
-v1's own rules rather than by the prototype.
+No such invariant was found. Content identity suffices, since it is referenced by
+digest. "One binding per execution" is enforceable when the *referencing*
+artifact is accepted — a controller invariant, not a message lifecycle. Its
+lineage is carried in-band, which is exactly what a support object is entitled to
+do (§3.2 explains why that is not a defect).
 
-- **In-degree 3, from three distinct kinds** spanning coder, reviewer and human
-  lanes. A support object referenced by three unrelated consumers is doing an
-  identity's job without an identity.
-- **v1 forces the receipt to violate FD-5.3.** The frozen receipt carries
-  `campaign_id` and `round_id` in its own payload (§3.12), and FD-11 then spends
-  two of its twelve congruence predicates checking that those in-band copies
-  equal the envelope's. FD-5.3 says exactly the opposite: "Payloads never restate
-  an envelope-owned field — two copies of one fact in one artifact is a
-  divergence waiting for a maintainer." The receipt restates two, and the only
-  reason is that it has no envelope to put them in. Promotion removes the
-  duplication and lets FD-5's lineage rules apply once, in one place.
-- **No cycle is created.** The concern behind v1's FD-2.3 was an acceptance
-  pointer *inside* the receipt, and that rule is untouched: the receipt still
-  carries no reference to any artifact accepted from it. Traced through the
-  registry, `CoderReport → PIR → {InteractionManifest, CampaignRunBinding} →
-  {External, CAS}` terminates. Acyclicity survives.
-- Under promotion the receipt's own envelope has `producer_role = controller` and
-  therefore, per FD-11, carries no receipt reference of its own. The receipt is a
-  controller artifact describing a provider execution — which is what it always
-  was, now stated in the type system instead of in prose.
+Independently addressable graph authority is not the same thing as an
+envelope-bearing message, and v1 already demonstrates the difference: the
+execution receipt and the interaction manifest participate in the evidence DAG,
+carry typed refs and are replay-addressable, without envelopes of their own.
 
-**This is the single decision in Phase G most deserving of adversarial review.**
-It changes a frozen classification, and its strongest counter-argument is
-conservatism: v1 works today with the receipt as a support object, and FD-11's
-congruence predicates already paper over the duplication. If the reviewer thinks
-the FD-5.3 argument is post-hoc, that is the place to say so.
+**Disposition:** a new typed support authority in v2. Promotion remains available
+if a later phase produces the envelope-specific invariant this one could not.
+
+### 3.2 `ProviderInvocationReceipt` → **KEEP_V1_MODEL** (support object)
+
+The first pass promoted it. The argument was wrong, and it is worth recording
+exactly how, because the error is a general one.
+
+**Withdrawn: the FD-5.3 argument.** The claim was that v1 forces the receipt to
+violate FD-5.3 by carrying `campaign_id` and `round_id` in its own payload. It
+does not. FD-5.3 governs *payloads of envelope-bearing artifacts* — "payloads
+never restate an envelope-owned field". The receipt has no envelope by
+construction, so those fields are not restating anything; they are its own
+provenance.
+
+**Withdrawn: "promotion removes two congruence predicates".** It does not. FD-11
+checks `report.envelope.campaign_id == receipt.campaign_id` to prove the receipt
+belongs to the same campaign and round as the report being accepted. That is
+cross-object provenance congruence. After promotion it would simply read
+`receipt.envelope.campaign_id` — the obligation survives verbatim. The first pass
+mistook a cross-object equality proof for intra-object denormalization. Those are
+different things, and one of them is not a defect at all.
+
+**Insufficient on its own: in-degree 3.** A content-addressed support object may
+have any number of consumers, and v1 demonstrates exactly that. Being referenced
+is not being a message.
+
+No envelope-specific invariant remains. Under this document's own default rule,
+the disposition is `KEEP_V1_MODEL`: the receipt stays a support object, and the
+frozen classification stands.
 
 ### 3.3 `InteractionManifest` → **KEEP as a typed support object**
 
@@ -157,12 +212,13 @@ envelope-bearing message needed?        NOT PROVEN
 ```
 
 An import mechanism can exist as a controller procedure whose product is an
-ordinary CAS object with a recorded provenance, without minting a node. And the
-shape being proposed — a record standing between raw bytes and an accepted
-artifact — is the `ArtifactAcceptance` object v1 examined and refused, because it
-sits between ranks 3 and 4 and forces re-ranking (FD-2.3). Refusing it once on
-reasoning and then admitting it later on a naming change would be the same
-decision with worse provenance.
+ordinary CAS object with a recorded provenance, without minting a node.
+
+v1's refusal of `ArtifactAcceptance` (FD-2.3) is worth remembering here as a
+**caution against speculative nodes**, and not as proof: the two objects do the
+same thing to a graph but not the same thing to a system, and treating the
+resemblance as identity would import a conclusion instead of an argument. The
+disposition rests on the absent consumer alone, which is sufficient.
 
 Consequence: `RunArtifactSource`, whose only in-edge comes from
 `ArtifactImported`, leaves the V0 wrapper set with it.
@@ -182,12 +238,12 @@ never the *barrier*.
 ### 3.6 Result — the v2 node universe
 
 ```text
-envelope-bearing kinds: 13
-  the eleven v1 kinds, plus
-  + CampaignRunBinding          (3.1, promoted on cross-lane + Causal in-edges)
-  + ProviderInvocationReceipt   (3.2, promoted on in-degree + FD-5.3 conflict)
+envelope-bearing kinds: 11
+  the eleven v1 kinds, unchanged — KEEP_V1_MODEL on the boundary question
 
-typed support objects:
+typed support objects / authorities:
+  + CampaignRunBinding          (3.1, REQUIRED_V0, new support authority)
+    ProviderInvocationReceipt   (3.2, kept — promotion argument withdrawn)
     InteractionManifest         (3.3, kept)
     ScopeContractV1             (v1, unchanged)
     CampaignEventPayload        (v1, unchanged)
@@ -198,8 +254,16 @@ out of V0:
     EstablishedNonDispatchEvidence (3.5, post-V0)
 ```
 
-Thirteen is not eleven and not fifteen. It is what the consumers support: two
-objects earned promotion, one did not, and one has no consumer at all.
+**Eleven.** The envelope boundary of the frozen contract survives adjudication
+unchanged, and V0 gains one new object that is an authority without being a
+message.
+
+The first pass reached thirteen. It got there by promoting two objects on
+arguments that did not survive checking (§3.1, §3.2) — and the shape of that
+error is worth keeping in view, because both promotions were reached after
+reading a fifteen-variant enum. `KEEP_V1_MODEL` was declared the legitimate
+default at the top of this document; the discipline is only real when the default
+actually wins something.
 
 ## 4. Q3 — edge and rank model
 
@@ -216,10 +280,21 @@ Frozen for v2:
 ```text
 authority:  a closed per-kind allowed-edge registry — exact source, exact
             field-path tag, exact target, edge class
-derived:    rank, computable from the registry, retained as a checkable
-            property and as review shorthand, never as the rule
-acyclicity: proved over the registry, not asserted from rank monotonicity
+
+derived_rank :=
+    topological level over the closed INTRA message-kind subgraph.
+    No global rank is defined over Causal edges, and none can be: the full
+    graph does not topologically sort, because cross-round causal references
+    are acyclic per instance rather than per kind.
+    Retained as a checkable property and as review shorthand, never as the rule.
+
+acyclicity: Intra   — proved by kind-level topological sort of the registry
+            Causal  — proved per instance by create-before-reference
+            never asserted from rank monotonicity
 ```
+
+The first pass wrote "rank, computable from the registry", which is too wide by
+exactly the amount that matters.
 
 The registry's two edge classes are adopted as they stand: `Intra` (within one
 round's derivation flow, must topologically sort at kind level) and `Causal`
@@ -287,22 +362,30 @@ accounting and all-or-nothing rejection are untouched by Phase G.
 
 E-V0-4 has two halves. Only one is a taxonomy question.
 
-**In scope — the manifest's class.** FD-1.4 lists `manifest` among the 64 MiB
-evidence blobs while also bounding "any typed A1 payload" at 1 MiB, and §3.12.1
-makes `InteractionManifestV1` a typed object. It is bounded at both figures at
-once. §3.3 settles the class: it is a **typed support object**, therefore it takes
-the control-artifact bound and `manifest` leaves the evidence-blob list. If 4096
-interaction entries cannot fit 1 MiB in practice, the correct response is to
-revisit `MAX_INTERACTION_SEQUENCE` or the manifest's own shape — not to reclassify
-an object to suit a number.
+**In scope — the manifest's class, and nothing else.** §3.3 settles it: a
+**typed support object, not envelope-bearing**. That is the whole of Phase G's
+mandate here.
 
-**Out of scope — the envelope-size bound.** FD-1.4 bounds payloads and blobs and
-never bounds stored envelope bytes, while FD-1.8 defines an envelope-bearing ref's
-size as envelope + payload together, so no maximum for that sum is derivable. That
-is arithmetic between two frozen decisions, not a question about which objects
-exist. It goes to the v2 draft with §3.6 as its input. Phase G deliberately does
-not invent a number, because inventing one here is how a graph adjudication
-quietly becomes a wire-format revision.
+**Out of scope — every number.** The first pass went one step further and
+concluded that the class implies the bound: typed support object, therefore the
+1 MiB control-artifact bound, therefore `manifest` leaves the evidence-blob list.
+That does not follow. Class and size are orthogonal — a support object may carry
+its own per-kind hard bound, and the design input does exactly that, giving the
+manifest 2 MiB. Deciding the bound from the class would have been Phase G quietly
+amending FD-1.4, which is the failure this section was written to name and then
+committed anyway.
+
+So all of it defers to v2 wire/bounds drafting, together with the envelope-size
+seam:
+
+```text
+is the manifest 1 MiB, 64 MiB, or a per-kind bound of its own?
+does MAX_INTERACTION_SEQUENCE change instead?
+what bounds stored envelope bytes, given FD-1.8 sums envelope + payload?
+```
+
+Phase G supplies the classification these questions need and answers none of
+them.
 
 `E-V0-1`, `E-V0-2` and `E-V0-3` are **not** Phase G material at all. They are
 convergence inputs about the checked-parse boundary, scalar bounds and
@@ -321,19 +404,62 @@ the failure this phase exists to prevent.
 - whether the import mechanism of §3.4 exists as a controller procedure — only
   that it does not exist as a node.
 
-## 8. For the independent reviewer
+## 8. For the independent reviewer (revision G-R1)
 
-Attack these four, in this order:
+The first review found the central conclusion wrong. Attack these, in order:
 
-1. **§3.2, the receipt promotion.** It reverses a frozen classification. Is the
-   FD-5.3 duplication argument load-bearing, or reasoning assembled after the
-   prototype had already promoted it? Does any cycle appear that the registry
-   trace missed?
-2. **§3.4, `ArtifactImported` as NOT PROVEN.** Zero in-degree is strong evidence,
-   but the design input is a prototype: is there a real V0 import consumer that
-   simply has not been wired yet, which would make this a premature refusal?
-3. **§4, rank demoted to derived.** Does anything in v1 depend on rank being
-   normative in a way the edge registry cannot express?
-4. **§3.6, the count.** Thirteen should be checked as a conclusion, not as a
-   compromise between eleven and fifteen. If any of the four adjudications is
-   wrong, the number is wrong with it.
+1. **§3.1, `CampaignRunBinding` as support rather than message.** The promotion
+   arguments are withdrawn, but the negative is now the load-bearing claim: *no*
+   V0 invariant needs a `message_id`, envelope causation and an acceptance
+   lifecycle here. A single counterexample overturns it. Idempotency of binding
+   creation is the most likely place to find one.
+2. **§3.2, `ProviderInvocationReceipt` staying a support object.** Same shape: is
+   there an envelope-specific invariant that neither pass has looked for?
+3. **§2, the metric.** `specific V0 consumer in-degree` now has an explicit
+   exclusion rule. Re-derive it independently and check the numbers — that is
+   what the previous round's exclusions were missing.
+4. **§3.4, `ArtifactImported` as NOT PROVEN.** Zero specific-consumer degree is
+   strong, but the design input is a prototype: is there a real V0 import
+   consumer merely unwired, which would make this premature?
+5. **§4, derived rank over the Intra subgraph only.** Does anything need a rank
+   across Causal edges, which by construction cannot have one?
+
+## 9. Revision record
+
+### G-R1 — first independent review, four P1s
+
+`CHANGES_REQUESTED` on the first pass. All four accepted; the central conclusion
+changed from thirteen envelope kinds to eleven.
+
+1. **Evidence accounting was imprecise.** "53 edges" named the envelope-source
+   projection, not the registry, which holds 59 entries plus a global
+   `AnyCommittedEnvelope` causation rule. §2 now defines *specific V0 consumer
+   in-degree* with an explicit exclusion rule, so an independent reviewer running
+   "the same" script arrives at the same numbers. Raw in-degree for
+   `ArtifactImported` is not zero; its specific-consumer degree is.
+2. **`CampaignRunBinding`'s promotion evidence did not hold.** The `Causal`
+   in-edge belongs to SafeRedrive, which is POST-V0 — letting it decide V0 wire
+   ontology is backwards. And "two producer lanes" was simply false:
+   `required_producer()` classifies both referencing kinds as `Controller`.
+   Re-adjudicated as a typed support authority.
+3. **`ProviderInvocationReceipt`'s promotion argument was wrong.** FD-5.3
+   governs payloads of envelope-bearing artifacts; the receipt has none, so its
+   `campaign_id`/`round_id` restate nothing. And FD-11's two congruence
+   predicates survive promotion unchanged, because they prove cross-object
+   provenance rather than police intra-object duplication. Reverted to
+   `KEEP_V1_MODEL`.
+4. **E-V0-4 drifted from taxonomy into bounds.** Class does not imply size — the
+   design input gives the manifest its own 2 MiB bound — so concluding "typed
+   support object, therefore 1 MiB, therefore out of the evidence-blob list" was
+   Phase G amending FD-1.4 one paragraph after warning against exactly that. All
+   numeric resolution deferred.
+
+Also: derived rank narrowed to the `Intra` kind-level subgraph, since the full
+graph does not topologically sort; and the `ArtifactAcceptance` analogy demoted
+from proof to caution.
+
+The pattern behind items 2 and 3 is one error, not two. The script proved
+correctly *who references whom*; the document then took one step further and
+treated "is referenced" as "is a message". Being referenced is a property of the
+graph. Being a message is a claim about identity, lifecycle and acceptance, and it
+has to be argued separately every time.
