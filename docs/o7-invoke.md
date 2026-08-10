@@ -218,6 +218,7 @@ Classification matrix (normative):
 | any other 4xx (request rejected — nothing was generated) | `BLOCKED_PROVIDER` | `http_request_rejected` |
 | 5xx | `BLOCKED_PROVIDER` | `http_5xx` |
 | body exceeds `MAX_ARLIAI_RESPONSE_BYTES` | `BLOCKED_PROVIDER` | `response_too_large` |
+| 2xx body contains the request credential verbatim | `BLOCKED_PROVIDER` | `credential_reflected` |
 | any other non-2xx (1xx, non-standard codes) | `BLOCKED_PROVIDER` | `http_status_unclassified` |
 | DNS / TLS / connection refused / reset | `BLOCKED_PROVIDER` | `transport` |
 | timeout (`--timeout-secs`) | `BLOCKED_TIMEOUT` | `timeout` |
@@ -332,22 +333,32 @@ process memory:
 
   ```text
   artifacts this code composes      the key is never placed there — structural
-  stdout.raw (2xx provider body)    verbatim provider bytes; a provider that
-                                    echoed the credential back would land it
-                                    here, and this layer does not detect it
-  stdout.raw (non-2xx)              empty — the diagnostic channel, where such
-                                    an echo realistically occurs, is not
-                                    persisted at all (amendment above)
+  stdout.raw (non-2xx)              empty — the diagnostic channel, where an
+                                    echo realistically occurs, is not persisted
+                                    at all (amendment above)
+  stdout.raw (2xx), verbatim echo   refused: the body is not written, the run
+                                    classifies BLOCKED_PROVIDER
+                                    (error_kind: credential_reflected)
+  stdout.raw (2xx), transformed     out of reach of a byte comparison; see the
+                                    threat boundary below
   ```
 
-  The realistic accident — a validator echoing request context into an
-  error body — is closed by the amendment. What remains is a provider
-  deliberately or accidentally embedding the credential in a *successful*
-  completion body, which no scan can settle in general: base64, hex, or a
-  per-character split all defeat a byte comparison, and this backend is
+  Two of the three are closed by mechanism rather than by wording. The
+  realistic accident — a validator echoing request context into an error
+  body — is closed by the amendment above. The verbatim echo on a
+  successful response is closed by a **containment check**: the key is
+  still in hand at that point, so `run_arliai` tests the 2xx body for the
+  exact credential bytes and, on a match, refuses — no `stdout.raw`, no
+  `result.json`, a `BLOCKED_PROVIDER` outcome, and a `stderr.log` line that
+  names the condition without quoting either the body or the key.
+
+  What remains is a provider embedding the credential in a successful body
+  in *transformed* form, which no scan settles in general: base64, hex, or
+  a per-character split all defeat a byte comparison, and this backend is
   not the place for a DLP engine. That residual is a property of trusting
-  the provider with a bearer token at all, and it is stated rather than
-  argued away. `docs/tasks/mg-c-model-gate.md` §8.6 carries the same
+  the provider with a bearer token at all — it is the boundary of the
+  promise, stated rather than argued away, and not a gap the containment
+  check was supposed to cover. `docs/tasks/mg-c-model-gate.md` §8.6 carries the same
   boundary for the brokered path.
 - It is added to `strip_provider_api_keys`, so a `claude`/`codex`
   subprocess never inherits it either.

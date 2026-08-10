@@ -437,12 +437,45 @@ fn run_arliai(a: &InvokeArgs) -> Result<()> {
     let stderr_path = a.out.join("stderr.log");
     let result_path = a.out.join("result.json");
 
+    // Defense in depth on the one path that still relays provider bytes:
+    // a 2xx body is written to `stdout.raw` verbatim, so if the provider
+    // echoed the `Authorization` value back, that write would put the key
+    // in a run record — the exact P0 of AGENTS.md rule 1. The key is still
+    // in hand here, so the verbatim case is checkable and is refused rather
+    // than accepted as residual. Transformed echoes (base64, hex, a
+    // per-character split) are out of reach of any byte comparison and stay
+    // named as residual in docs/o7-invoke.md; this is not a DLP engine.
+    let credential_reflected = matches!(
+        &outcome,
+        ArliOutcome::Http { status, body }
+            if (200..300).contains(status) && contains_subslice(body, api_key.as_bytes())
+    );
+
     // Classification first: the run-dir evidence split below needs the
     // `error_kind` so a non-2xx `stderr.log` can name the classification
     // without carrying the provider's diagnostic body.
-    let (status, structured, error_kind) = classify_arli(&outcome, &validator);
+    let (status, structured, error_kind) = if credential_reflected {
+        (
+            InvokeStatus::BlockedProvider,
+            None,
+            Some("credential_reflected"),
+        )
+    } else {
+        classify_arli(&outcome, &validator)
+    };
 
-    let (raw_body, stderr_text) = arli_run_dir_evidence(&outcome, error_kind, a.timeout_secs);
+    let (raw_body, stderr_text) = if credential_reflected {
+        // No body, no extracted value, and a message that names the
+        // condition without quoting either the body or the key.
+        (
+            &[][..],
+            "arliai response contained the request credential verbatim; the body is not \
+             persisted and the call is refused (docs/o7-invoke.md, key handling)\n"
+                .to_owned(),
+        )
+    } else {
+        arli_run_dir_evidence(&outcome, error_kind, a.timeout_secs)
+    };
     std::fs::write(&stdout_path, raw_body)?;
     std::fs::write(&stderr_path, stderr_text)?;
 
@@ -486,6 +519,20 @@ fn run_arliai(a: &InvokeArgs) -> Result<()> {
         std::process::exit(1);
     }
     Ok(())
+}
+
+/// Exact byte-substring search — the containment check that keeps a
+/// verbatim credential echo out of `stdout.raw`.
+///
+/// Deliberately the least clever thing that closes the realistic case: no
+/// normalization, no decoding, no entropy heuristics. An empty needle
+/// returns `false` rather than matching everything, so a misconfiguration
+/// upstream of this call can never turn every response into a refusal.
+fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return false;
+    }
+    haystack.windows(needle.len()).any(|w| w == needle)
 }
 
 /// What one arliai outcome contributes to the run dir: the `stdout.raw`
@@ -1450,6 +1497,39 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The verbatim-credential containment check that guards the one
+    /// remaining path where provider bytes reach an artifact.
+    #[test]
+    fn credential_containment_is_exact_and_never_matches_on_empty() {
+        let key = "sk-live-DEADBEEF";
+        let echoed = br#"{"choices":[{"message":{"content":"you sent Bearer sk-live-DEADBEEF"}}]}"#;
+        assert!(
+            contains_subslice(echoed, key.as_bytes()),
+            "a verbatim echo must be detected"
+        );
+
+        let clean = br#"{"choices":[{"message":{"content":"{\"ok\": true}"}}]}"#;
+        assert!(
+            !contains_subslice(clean, key.as_bytes()),
+            "an ordinary body must not trip the check"
+        );
+
+        // An empty needle must not match everything: a misconfiguration
+        // upstream would otherwise refuse every single response.
+        assert!(!contains_subslice(clean, b""));
+        // A needle longer than the body is simply absent, not a panic.
+        assert!(!contains_subslice(b"short", key.as_bytes()));
+        // Boundary positions still match.
+        assert!(contains_subslice(b"sk-live-DEADBEEF tail", key.as_bytes()));
+        assert!(contains_subslice(b"head sk-live-DEADBEEF", key.as_bytes()));
+        // A transformed echo is out of scope by construction, and the test
+        // pins that so nobody mistakes this for a DLP check.
+        assert!(
+            !contains_subslice(b"c2stbGl2ZS1ERUFEQkVFRg==", key.as_bytes()),
+            "base64 is deliberately not detected; see docs/o7-invoke.md"
+        );
     }
 
     /// The run-dir evidence split (docs/o7-invoke.md, "a non-2xx body is
