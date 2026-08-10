@@ -7,11 +7,36 @@
   by satisfying a ratified requirement.
 - **Ratification:** the maintainer ratified **§3, REQ-1 … REQ-11, and only
   those**, in an interactive session on **2026-08-10**, under rule 3's carve-out.
-  - **Ratified design revision:** `219953efac10bf689738a4749cbcc09e02df737c`.
-    Per rule 4 the ratification is bound to that revision: if any requirement is
-    reworded, the new wording is not covered and that requirement returns to
-    `pending`. Editorial changes elsewhere in this file do not disturb it — the
-    binding is to the text of §3 at that revision.
+  - **Ratified design revision**, bound by three identities rather than one,
+    following `docs/architecture/prior-art-the-grid.md` §1.3 — a commit ID alone
+    depends on that commit staying reachable, and the thing actually ratified is
+    the text, not the container:
+
+    ```text
+    H  ratified head   219953efac10bf689738a4749cbcc09e02df737c
+                       the revision the maintainer ratified against
+
+    B  file blob       e75d842bdf11d22bae5ff9f88858da51c1e97cc2
+                       sha256:b8f40d033c5c6e0b41cec242b024e62dad58439bd3676cf99e39cbe698c39560
+                       docs/memory-plane-record.md at H — 1119 lines, 57844 bytes
+
+    S  ratified text   sha256:cb2c12a6c9a97061c762299d7358c2cb3d297eb266320fc019c95caeeb3ad089
+                       §3 alone, from "## 3. Requirements" to the line before
+                       "## 4. Candidate architecture" — 58 lines, 6317 bytes.
+                       Byte-identical at H and at every later revision of this
+                       branch, which is what makes the ratification checkable
+                       without resolving H at all.
+
+    M  incorporation   recorded when this lands on main
+    ```
+
+    Per rule 4 the ratification is bound to that text: if any requirement is
+    reworded, `S` changes, the new wording is not covered, and that requirement
+    returns to `pending`. Editorial changes elsewhere in this file leave `S`
+    intact and do not disturb it. `H` must stay reachable from `main` — this
+    branch is merged with a merge commit, as every prior PR in this repository
+    was; a squash would collapse the history `H` names, and `S` is the anchor
+    that survives it.
   - **Not ratified by that decision:** §4 candidate architecture; the proposed
     resolutions C-1 … C-4 in §5; §6, which is non-normative by construction.
   - **How the decision was reached, with the roles kept apart:** four review
@@ -919,12 +944,18 @@ re-derive its own result; a manifest that carries two independently-settable
 copies of one argument is worse.
 
 ```text
+recomputed = recompute_partition_digests(imported records)
+                                       ↑ from the records themselves,
+                                         never read back from the manifest
+
 HANDOFF_ACCEPTED  iff  schema_version_equal
                    AND canonicalization_version_equal
-                   AND exact_manifest_valid
-                   AND required_goals_equal
-                   AND active_invariants_equal
-                   AND decisions_preserved
+                   AND recomputed.goal_state_digest        == manifest.goal_…
+                   AND recomputed.decision_state_digest    == manifest.decision_…
+                   AND recomputed.invariant_state_digest   == manifest.invariant_…
+                   AND recomputed.evidence_state_digest    == manifest.evidence_…
+                   AND recomputed.failure_registry_digest  == manifest.failure_…
+                   AND recomputed.canonical_state_digest   == manifest.canonical_…
                    AND evidence_refs_resolvable
                    AND artifact_digests_valid          ← all deterministic
 
@@ -932,12 +963,22 @@ SemanticContinuityAssessment → PASS / WARN / INCONCLUSIVE
                                                        ← never gates
 ```
 
-**v0 is same-schema, same-canonicalization only, and says so.** REQ-1 is checked
-by byte-level manifest equality; the word *compatible* would quietly widen that
-into an undefined compatibility relation, which in a document this strict is a
-promise with no semantics behind it. A version mismatch in v0 is not a failed
-handoff — it is `HANDOFF_MIGRATION_REQUIRED`, a distinct outcome with no
-migration path implemented yet.
+**The comparison is manifest-against-recomputation, never manifest-against-
+manifest.** A handoff that carries the manifest and loses the goal, decision,
+invariant, evidence or failure-registry records behind it produces two identical
+receipts over two different states, and a byte comparison of the receipts
+accepts it. REQ-1 rules that out by name — its oracle recomputes the canonical
+identities *from the imported records* — so the predicate does the same, and
+covers the failure registry alongside the other four partitions because REQ-1
+counts failure-lifecycle state as normative state.
+
+**v0 is same-schema, same-canonicalization only, and says so.** Within one
+schema and canonicalization version, the recomputed identities are compared
+byte-for-byte; the word *compatible* would quietly widen that into an undefined
+compatibility relation, which in a document this strict is a promise with no
+semantics behind it. A version mismatch in v0 is not a failed handoff — it is
+`HANDOFF_MIGRATION_REQUIRED`, a distinct outcome with no migration path
+implemented yet.
 
 When cross-version handoff is actually needed, it gets its own object rather
 than a loosening of the predicate:
