@@ -1,0 +1,120 @@
+{
+  "agreement_with_original": {
+    "meaning": "every semantic result reproduced exactly from a clean tree; only the two execution-identity fields changed, which is precisely the defect being fixed",
+    "non_identity_semantic_differences": 0,
+    "original_receipt_sha256": "sha256:d0afbfab2e20bd3247c43059c11d26aa780b6a053f036c0e2c71ff8a6256e1da",
+    "qualification_evidence_json": "BYTE-IDENTICAL to the committed artifact",
+    "receipt_fields_differing": [
+      "identity.commit",
+      "identity.tree"
+    ],
+    "replayed_receipt_sha256": "sha256:4d3e9eac2a4badd85bde573c36b647f21c8946598c103f84b395cd65e06b2d3c"
+  },
+  "execution_identity": {
+    "evaluator_module": "research/b1-context/tools/o7b1/evaluate_v2.py",
+    "evaluator_module_sha256": "sha256:9341a890b7828fc603fdfd70825ab1111e321fb04fb4a40653865663e35e581b",
+    "execution_checkout_commit": "d3661fe8aa58a3c2a6b1fca00b5430ce8f92e698",
+    "execution_checkout_tree": "d37f681ad6c75658b9293084d45bb54d3afd9b0e",
+    "porcelain_before_run": "",
+    "reuses_unmodified_evaluator_sha256": "sha256:d5e8bc06e90f81db8574bd7111c9a19865cb0f37d801e689aaaa35a6f2c523a0",
+    "worktree_clean_before_run": true
+  },
+  "not_modified_by_this_replay": {
+    "evaluator_contracts_tests": "unchanged",
+    "note": "the committed receipt d0afbfab is deliberately left in place: it is part of the tree this replay attests, and rewriting it would change the very thing being certified. This document supersedes its identity claim without editing it.",
+    "rev3_contracts_and_evaluator_58a7a111": "unchanged",
+    "rev4_semantics_in_d3661fe": "unchanged, not one byte"
+  },
+  "purpose": "Establish an authoritative execution identity for the rev4 evaluator boundary by replaying its entire qualification suite from a clean checkout of the commit that actually contains the code.",
+  "record": "o7.b1.h2-evaluator-boundary-clean-replay-receipt/v1",
+  "replayed_results": {
+    "C1_Q1R_relation_groundedness": {
+      "C1": {
+        "groundedness": "PASS",
+        "topology": [
+          "right_strict_superset",
+          "incomparable",
+          "incomparable"
+        ],
+        "ungrounded": 0
+      },
+      "Q1R": {
+        "groundedness": "PASS",
+        "topology": [
+          "right_strict_superset",
+          "incomparable",
+          "incomparable"
+        ],
+        "ungrounded": 0
+      }
+    },
+    "boundary_closed": true,
+    "classification": "TASK_DEPENDENCE_RETIRED_AS_NON_NORMATIVE_SHAPE_METRIC",
+    "contract_schema_validation": "PASS",
+    "historical_witnesses": {
+      "h1": "rev3 PASS -> rev4 PASS",
+      "h2": "rev3 FAIL[task_dependence] -> rev4 PASS (false shape failure removed)",
+      "h3": "rev3 FAIL[projection_validity] -> rev4 FAIL[projection_validity] (preserved)"
+    },
+    "metamorphic_projection_invariance": "PASS",
+    "negative_controls": "PASS",
+    "negative_controls_detail": {
+      "NC1_required_observation_removed": {
+        "failed_gating_axes": [
+          "question_observation_support"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC2_relation_witnesses_removed": {
+        "failed_gating_axes": [
+          "relation_support"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC3_stale_presented_as_current": {
+        "failed_gating_axes": [
+          "projection_validity",
+          "stale_state_safety"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC4_ineligible_record_included": {
+        "failed_gating_axes": [
+          "projection_validity",
+          "stale_state_safety"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC5_fabricated_relation": {
+        "failed_gating_axes": [
+          "projection_validity"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      },
+      "NC6_record_budget_exceeded": {
+        "failed_gating_axes": [
+          "projection_validity"
+        ],
+        "ok": true,
+        "overall": "FAIL"
+      }
+    },
+    "synthetic_suite": "PASS (141 tests)"
+  },
+  "verdict": {
+    "H2_boundary_authoritative_qualification": "CLOSED (clean replay at d3661fe)",
+    "H2_boundary_semantic_design": "CLOSED",
+    "H2_semantics": "TASK_DEPENDENCE_RETIRED_AS_NON_NORMATIVE_SHAPE_METRIC",
+    "real_source_holdout": "not opened by this receipt; requires separate authorization"
+  },
+  "why_this_exists": {
+    "consequence": "d0afbfab was semantically valid but NON-AUTHORITATIVE for execution identity: a module sha pins bytes, it does not make a prior commit into a reproducible execution tree, and the rev4 contract itself requires execution_checkout_commit / execution_checkout_tree.",
+    "defect": "The original receipt d0afbfab recorded identity.commit = d60ede621a0d6dd228c694e8efa0b0d74b36e45c, the parent commit, because the suite was executed from a dirty worktree before rev4 was committed. evaluate_v2.py does not exist in that tree.",
+    "resolution": "this replay, run from a clean checkout of d3661fe with `git status --porcelain` empty before execution"
+  }
+}
