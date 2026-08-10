@@ -545,12 +545,26 @@ the deterministic stage consumes it:
 ```text
 AdvisoryInputSnapshot {
     items[]                a sequence — the order the retrieval emitted them
-                           is kept, and is framed in that order (§4.0.2)
+                           is kept, and is framed in that order (§4.0.2).
+                           Each item carries `item_id`, the `content_digest`
+                           of what it actually says, and its `source_revision`
+                           where it has one
     provenance[]           which channel proposed each item
     retrieval_identity     retriever + version + embedding model identity
     snapshot_digest        framed per §4.0.2, never a serialization
 }
 ```
+
+**An id is a locator, not content.** The snapshot must commit what each item
+*says*, not merely which item was chosen: the same `item_id` — a re-resolvable
+symbol, a memory entry — can carry different bytes at a later revision, and a
+digest over ids, channels and ranks alone would be identical across both. `C`
+would then receive one recorded `advisory_input_snapshot_digest` and render two
+different contexts, which is REQ-9 failing on the argument that was added
+specifically to close it. This is also what
+`docs/task-aware-context-generator.md` already says in its own IR requirements,
+where re-resolvable identity and content hash are separate properties of an
+item; freezing one without the other freezes the wrong half.
 
 ```text
 retrieve                 may vary between runs
@@ -669,7 +683,10 @@ advisory_input_snapshot_digest      domain b"o7-memory-advisory-snapshot\0v1\0"
     frame(embedding_model_identity)      — foreign bytes, framed as they arrive
     frame(items count as u64-le), each in the order the retrieval emitted
         them, and for each:
-        frame(item_id) frame(provenance channel name) frame(rank as u32-le)
+        frame(item_id)
+        frame(content_digest)                — what the item actually says
+        frame(source_revision, or the empty string when the item has none)
+        frame(provenance channel name) frame(rank as u32-le)
 
 model_budget_profile_digest         domain b"o7-memory-budget-profile\0v1\0"
     frame(tokenizer_id) frame(total_budget as u64-le)
