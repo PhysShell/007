@@ -1046,9 +1046,16 @@ brochure.
    uses. Guard: if a state has no consumer that behaves differently because of
    it, delete the state.
 6. **This document overlaps two drafts that are themselves pending, and three of
-   the conflicts are already visible.** Nothing here reconciles them; ratifying
-   any of the three documents makes the following a required consistency pass,
-   named now so it is not rediscovered later:
+   the conflicts are already visible.** They were named here before ratification
+   and resolved after it, in that order — the pass could not run earlier without
+   importing a pending proposal into ratified surroundings.
+
+   **Status: C-1, C-2 and C-3 are closed** by `a92a707`, `1257669` and `4f746b6`
+   on this branch, each a single-purpose commit. Each fix carries the ratified
+   requirement that compels it and explicitly declines to import the candidate
+   types from §4. **C-4 remains open** and is deliberately not in that series:
+   it changes §4 itself rather than the neighbouring drafts, so it belongs to a
+   later branch.
 
    | # | Conflict | Where | Proposed resolution |
    |---|---|---|---|
@@ -1126,7 +1133,7 @@ The order that keeps governance clean, and the reason for each step:
 2. record the exact ratified revision      rule 4: a ratification binds a
    DONE — 219953e, this commit              revision, not a title
 3. C-1 / C-2 / C-3 consistency pass        only now may the two neighbouring
-   UNBLOCKED                                drafts be changed — before this,
+   DONE — a92a707, 1257669, 4f746b6         drafts be changed — before this,
                                            editing them would import a pending
                                            proposal into ratified surroundings
 4. C-4: re-express §4 digests as explicit  the frozen A1 discipline wins;
