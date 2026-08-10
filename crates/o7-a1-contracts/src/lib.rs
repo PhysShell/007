@@ -5,16 +5,18 @@
 //!
 //! ```text
 //! contract   docs/q-deck/a1-authority-contracts.md
-//! blob       7db92f1b3dc9d7040da074956a0b3f2f200174c8
-//!            sha256:9d26ee3ffbe5cb680075526833bdfef297372c6897b0f40afc6986cd0c7def45
+//! blob       3b26849cc39a3391aaed46cca56be3b6715afabb          (post-S1)
+//!            sha256:1a0739752a5a2f7b34bcbc8f2d600615f823c76ad8c3a91d603c4921c848175d
 //! ```
 //!
-//! The binding is to those **bytes**, not to a branch or a head. That is a
-//! learned distinction rather than a stylistic one: while the contract was in
-//! review, commit `8ee8666` moved the A1-F branch head without changing a byte
-//! of the contract, so "the latest head" would have named an object that moves
-//! independently of what is being implemented. See
-//! `docs/architecture/prior-art-the-grid.md` §1.3.
+//! The binding is to those **bytes**, not to a branch or a head — a distinction
+//! twice demonstrated rather than merely asserted. First, `8ee8666` moved the
+//! A1-F branch head without changing a byte of the contract, so "the latest
+//! head" names an object that moves independently of what is implemented
+//! (`docs/architecture/prior-art-the-grid.md` §1.3). Second, **S1 changed the
+//! bytes without moving any protocol version** — §7.2 fires on payload shape,
+//! envelope, rank or reducer semantics, and S1 touched none of them, so the blob
+//! is the only thing that distinguishes the pre-S1 contract from this one.
 //!
 //! # What this crate is
 //!

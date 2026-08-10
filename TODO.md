@@ -37,8 +37,14 @@ Current authoritative state:
   Complete wire schemas for all eleven message kinds, the provider execution
   receipt, interaction manifest, `ScopeContractV1`, `CampaignStateV1`, and
   `CampaignEventV1` with its eleven payload schemas. Design input: issue #95.
+- **A1-F S1** (first §7 supersede, PR #126, merged `288cf84`): FD-1.4 had
+  classified `InteractionManifestV1` under both the 1 MiB typed-object bound and
+  the 64 MiB "manifest" bound. Decision: **64 MiB**; it stays a typed A1 object
+  for FD-1.7 media types and its FD-2 rank. No version gate fired — the blob and
+  therefore `contract_digest` changed, and nothing else did.
 - **Next: A1-V0** (§5 of that doc) — task: `docs/tasks/a1-v0.md`, bound to the
-  contract blob `7db92f1`, not to a branch head. The A1-F PR has merged. One
+  contract blob `3b26849` (post-S1), not to a branch head. The A1-F PR has
+  merged. One
   real coder/reviewer/human corrective loop — coder on the claude CLI, reviewer
   on `--engine arliai` (read-only, no tool surface), controller sealing and
   folding, merge manual. Acceptance = one live corrective cycle + a full campaign

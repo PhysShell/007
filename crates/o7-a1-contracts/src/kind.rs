@@ -298,10 +298,10 @@ impl ArtifactKindV1 {
     /// evidence-blob one.
     ///
     /// Deliberately *not* the same set as [`Self::is_typed_artifact`]:
-    /// `interaction_manifest` is a typed artifact for FD-1.7 media-type
-    /// purposes, but FD-1.4 names "manifest" in its evidence-blob line, so it
-    /// keeps the larger size bound. Two questions, two classifications —
-    /// collapsing them is what let a manifest ref declare any media type at all.
+    /// `interaction_manifest` is a typed artifact for FD-1.7 media-type purposes
+    /// and keeps its FD-2 rank, but S1 (§7 supersede, §9) fixes its size bound at
+    /// the evidence maximum. Two questions, two classifications — collapsing them
+    /// is what let a manifest ref declare any media type at all.
     #[must_use]
     pub fn has_control_size_bound(self) -> bool {
         matches!(

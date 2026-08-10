@@ -157,20 +157,19 @@ impl ArtifactRef {
     ///   what the contract permits for a typed object;
     /// - **everything else** — evidence blobs and imported A0 objects.
     ///
-    /// `interaction_manifest` is deliberately in the last group **for size
-    /// only**: FD-1.4 names "manifest" explicitly in its evidence-blob line, and
-    /// its 4096 permitted `interaction_sequence` entries would sit uncomfortably
-    /// against a 1 MiB ceiling. It remains a typed artifact for FD-1.7, so its
-    /// media type is still fixed — the size bound and the media type are
-    /// different questions and use different classifications
-    /// ([`ArtifactKindV1::has_control_size_bound`] and
-    /// [`ArtifactKindV1::is_typed_artifact`]).
+    /// `interaction_manifest` is in the last group **for size only**, and that is
+    /// now normative rather than a reading: FD-1.4 originally classified it under
+    /// both bounds at once, and **S1** — the first §7 supersede — resolved it to
+    /// 64 MiB while keeping it a typed A1 object for FD-1.7 and FD-2. One
+    /// manifest covers a whole execution, indexing up to 256 dispatches and 4096
+    /// `interaction_sequence` entries in total (§3.12, §3.12.1), which is not the
+    /// shape the typed-object ceiling was written for.
     ///
-    /// The FD-1.4 text is internally ambiguous here — the same section calls any
-    /// typed A1 payload a control artifact while listing "manifest" as an
-    /// evidence blob — so this reading is recorded rather than assumed, and is a
-    /// candidate for a §7 clarification before closure resolution charges bytes
-    /// against it.
+    /// Hence two predicates and not one: the size bound and the media type are
+    /// different questions ([`ArtifactKindV1::has_control_size_bound`] and
+    /// [`ArtifactKindV1::is_typed_artifact`]). A classification used for more
+    /// than one purpose is correct only until the purposes disagree, and this is
+    /// the object where they do.
     #[must_use]
     fn max_size(&self) -> u64 {
         if self.kind.is_envelope_bearing() {
