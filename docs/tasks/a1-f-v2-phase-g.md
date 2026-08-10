@@ -1,6 +1,6 @@
 # A1-F v2 — Phase G: graph adjudication
 
-**Status: DECIDED (revision G-R8) — AWAITING RE-REVIEW.**
+**Status: DECIDED (revision G-R9) — AWAITING RE-REVIEW.**
 
 Seven review rounds. G-R1 moved the count from 13 to 11; G-R2 corrected the
 binding lifecycle and the rank domain; G-R3 attempted the exact edge universe
@@ -11,9 +11,12 @@ three things an exact registry could finally expose — a flat extractor that
 never saw a nested schema, a bound external contract this document had quietly
 redefined, and an open target miscounted as a closure terminal; G-R8 closes the
 two specification holes left between the graph and any implementation of it: the
-field↔edge realization contract, and the meta-target's membership. The registry
-is 69 exact semantic edges over a 41-slot frozen baseline (§4.2), unchanged by
-G-R8 — no row moved. Field-path spelling remains owed to the v2 draft. See §9.
+field↔edge realization contract, and the meta-target's membership; G-R9 gives
+both a checkable carrier — a required machine-checked realization ledger, and a
+replay-checkable `COMMITTED` predicate — and rejects one invariant §8 had
+proposed. The registry is 69 exact semantic edges over a 41-slot frozen baseline
+(§4.2), unchanged by G-R8 and G-R9 alike — no row has moved in either. Field-path
+spelling remains owed to the v2 draft. See §9.
 
 Phase G is one decision, written and reviewed on its own, before any v2 drafting.
 The node set determines ranks, edges, imported roots, closure and digest domains;
@@ -1221,12 +1224,56 @@ members := exactly the eleven envelope-bearing message kinds of FD-1.9
 
 resolution
     check the concrete ref.kind is a member                  (FD-2.5, fail closed)
-    check the referenced artifact is already canonically COMMITTED
-        before the CampaignFeedItem is accepted
+    check COMMITTED(target, N) for the emitting event's sequence N   (below)
     resolve that concrete message as a normal typed target
     continue traversal through its own admitted edges
     charge it, and its closure, against the FD-1.5 budget
 ```
+
+**`COMMITTED`, defined (G-R9).** Row 69's instance-level acyclicity rests on this
+predicate, so leaving it as a word would have left the only unproved edge in the
+registry resting on prose. It is defined without reference to `CampaignStateV1`,
+and therefore without Phase G drafting any reducer policy:
+
+```text
+COMMITTED(target, before_event_sequence = N)  iff
+
+    target.kind is a member of AnyCommittedEnvelope           (the list above)
+AND there exists an already accepted canonical event E with E.sequence < N
+AND the exact (target.kind, target.digest) occurs in the resolved closure of E
+AND that closure passed normal integrity / schema / budget resolution
+
+For CampaignFeedItemEmitted at sequence N:
+    every subject_ref target MUST satisfy COMMITTED(target, N)
+```
+
+Three properties make this the right shape rather than merely a definition.
+
+*It is checkable before `fold`.* FD-14.2 puts sequence contiguity in
+`verify_wire` and closure resolution in `resolve_event`, both strictly ahead of
+the reducer. So the predicate reads only things those two stages already
+compute, and `fold` stays pure, total, clock-free and I/O-free. Phase G decides
+nothing about transitions by defining it.
+
+*It is replay-checkable.* No clock, no `created_at`, no mutable store
+observation, no "we think the blob was written first". Strictly-earlier position
+in canonical history plus closure membership, both recomputable from the log and
+CAS — which is the same standard FD-8 holds replay to.
+
+*It is what the `Causal` class actually claims.* `Causal` edges are proved
+acyclic per instance by create-before-reference (§4), and until now row 69 had
+no witness for that at all. With the predicate, the target provably existed in
+canonical history strictly earlier than the referencing event, so a mutual or
+self-referential feed cycle is unrepresentable rather than merely unlikely.
+
+It also disposes of the `HumanCommandRequest` question §8 raised. An untrusted
+rank-3 kind is admissible here because `COMMITTED` requires it to have entered
+canonical history already — an accepted request appears in the closure of an
+earlier `HumanDecisionRecorded`, a rejected one in that of an earlier
+`HumanCommandRejected`. FD-4 separates canonical evidence from transition
+authority: the feed item observes the request, and only `HumanDecision`
+authorizes anything. What `COMMITTED` forbids is exactly the dangerous reading —
+a feed item pointing at an arbitrary human payload nobody has accepted.
 
 **The membership had to be enumerated, not named (G-R8).** G-R7 defined the
 meta-target's *semantics* and left its *extension* undefined, which §4.2.1's own
@@ -1277,7 +1324,8 @@ dropped the feed edge from its own accounting:
 ```
 
 Event kinds are never targets (§4.1.4); the other two carry the create-before-
-reference arguments given in this subsection and in §4.2.5's membership rule.
+reference arguments given in this subsection and by the `COMMITTED` predicate
+of §4.2.5.
 
 **That thirteenth is a correction, not an addition.** G-R5 filed it `Intra`.
 §4 defines `Intra` as *within one round's derivation flow* and `Causal` as
@@ -1327,14 +1375,88 @@ FROZEN — the realization contract
    eleven separate edges (§4.2.5).
 ```
 
-Clause 2 is the one that has to be *true*, not merely desirable, and it is: over
-the 69 rows there are 69 distinct `(source, target)` pairs, so the selection is a
-total function and no occurrence can be ambiguous. Expanding the meta-target to
-its eleven members introduces no clash either. That was checked, not assumed —
-had any pair appeared twice under two classes, an occurrence would have had two
-admissible readings and clause 2 would have been a wish.
+**Where clause 2's two halves come from.** *Uniqueness* is a fact about the
+admitted domain: over the 69 rows there are 69 distinct `(source, target)` pairs,
+and expanding the meta-target to its eleven members adds no clash, so no
+occurrence has two admissible readings today. *Totality* is not supplied by that
+count and was overstated in G-R8 — it comes from clause 1 plus fail-closed
+rejection: a field declares its set, and a target outside that set is refused
+rather than left unmatched. The two halves have different sources and are now
+named separately.
 
-What changed here is the quantifier, not the graph. No registry row moves.
+**Global `(source, target)` uniqueness is NOT frozen as an invariant (G-R9).**
+§8 asked whether it should be. It should not, and the counterexample is already
+in this project's own design input rather than hypothetical — `37502e3`
+carries both:
+
+```text
+ProviderInvocationReceipt -> CampaignRunBinding   Intra
+    via campaign_run_binding_ref.blob_ref                  (edges.rs:324-329)
+
+ProviderInvocationReceipt -> CampaignRunBinding   Causal
+    via cause.safe_redrive.prior_run_binding_ref           (edges.rs:336-341)
+```
+
+The second is POST-V0 (§3.5), which is the only reason the 69 rows are pair-
+distinct today. Freezing the global invariant would pre-forbid a SafeRedrive
+shape that has already been designed — Phase G quietly deciding a POST-V0
+question under cover of a proof convenience, which is the failure mode §3.1 was
+corrected for in G-R2.
+
+The uniqueness that *is* frozen is per-field:
+
+```text
+FROZEN — within ONE concrete field declaration,
+         (source kind, concrete target kind) selects exactly ONE
+         semantic edge and therefore exactly one class.
+
+NOT FROZEN — two different fields of the same source may reference the same
+         target kind under different classes. The 69/69 pair-distinctness of
+         the V0 registry is a sanity fact about V0, not a law about registries.
+```
+
+**The ledger this obligation needs to be checkable (G-R9).** Clause 1 says the
+v2 draft *must declare* each field's edge set, and §8 asked what enforces that.
+Nothing did. Several rounds went into stopping the wire layer from inventing
+relations, and the last joint between registry and wire was left to a human
+reading a document — which is the same class of gap as the rank rule this layer
+replaced, one level up.
+
+Phase G cannot build the artefact, because field paths do not exist yet. It can
+and does make it a required output:
+
+```text
+FROZEN — V2 WIRE REALIZATION LEDGER, a REQUIRED acceptance artefact of the
+         v2 drafting phase, not an optional aid
+
+For every recursively discovered ArtifactRef-valued wire field:
+    source semantic kind
+    concrete field path
+    complete allowed target set
+    edge class for each target
+    the corresponding §4.2.4 registry edge(s)
+
+The ledger MUST be mechanically checked against:
+    1. the v2 schemas   — field completeness, by the SAME recursive extraction
+                          §4.1.1 now uses, since a flat pass already missed a
+                          slot once
+    2. §4.2.4           — every ledger target is an admitted edge
+    3. §4.2.5           — meta-target entries expand to the declared members
+    4. §4.2.4, reverse  — no admitted edge that the frozen graph requires has
+                          silently lost its wire realization
+
+No ArtifactRef-valued field may exist outside the ledger.
+No ledger target may exist outside the semantic registry.
+```
+
+The format is a v2 drafting decision — YAML, a Rust const table, generated
+Markdown over a machine-readable source, anything that a checker can read.
+What Phase G freezes is that exactly one normative, machine-checked ledger
+exists, so that a violation of §4.2.6 is something a build enumerates rather
+than something a reviewer happens to notice.
+
+What changed in G-R9 is the quantifier's enforcement and one rejected invariant.
+No registry row moves.
 
 ## 5. Q4 + Q5 — imported roots, closure, and the typed external boundary
 
@@ -1457,43 +1579,111 @@ the failure this phase exists to prevent.
 - whether the import mechanism of §3.4 exists as a controller procedure — only
   that it does not exist as a node.
 
-## 8. For the independent reviewer (revision G-R8)
+## 8. For the independent reviewer (revision G-R9)
 
-G-R8 changed no semantic edge. Everything in §2–§5 that a previous round
-approved stays approved; the two changes are specification-level, in §4.2.5
-(meta-target membership) and §4.2.6 (the realization contract), plus three
-consistency repairs. Attack these:
+G-R9 changed no semantic edge, no node, and no disposition — the same scope
+discipline as G-R8, one level narrower. Two additions (§4.2.5's `COMMITTED`
+predicate, §4.2.6's realization ledger), one rejected invariant, one wording
+repair. Everything else stands as approved through G-R8. Attack these:
 
-1. **Clause 2 of the realization contract (§4.2.6).** It requires
-   `(source, concrete target)` to select exactly one admitted edge, which holds
-   today because the 69 rows have 69 distinct pairs. That is a property of the
-   *current* registry, not a theorem about registries. Is it an invariant Phase G
-   should freeze — no two edges may share a `(source, target)` pair, differing
-   only in class — or does some legitimate future relation need both classes
-   between the same two kinds?
-2. **Clause 1 and who checks it.** A field must *declare* its complete edge set.
-   Nothing yet says where that declaration lives or what validates it against
-   §4.2.4. Is a drafting-time obligation with no artefact enough, or does this
-   need a machine-checked table the v2 draft is diffed against?
-3. **The meta-target membership (§4.2.5).** Eleven members, taken from FD-1.9's
-   closed message group plus §3's `KEEP_V1_MODEL` on the envelope boundary.
-   Check both halves: that FD-1.9's group is exactly those eleven, and that
-   "committed envelope" is the right reading of it — `HumanCommandRequest` is
-   untrusted rank 3, and a feed item referencing one is admitted by this list.
-4. **The `COMMITTED` precondition.** It is stated as a resolution-time check,
-   which makes the `Causal` witness machine-checkable. But "canonically
-   committed" is not defined here, and the obvious candidate — present in the
-   event log at a lower sequence — is a reducer property this document has been
-   careful not to draft. Is the precondition checkable at V0 as written?
-5. **The FD-11 cycle argument (§4.2.3).** It excludes the reviewer's *own*
-   receipt structurally. It does not exclude a *prior* execution's receipt, which
-   reason 1 excludes only on "no V0 consumer demonstrated". If a V0 finding
-   legitimately cites the coder's execution receipt, reason 1 is the whole
-   defence and it is weaker than it looks.
-6. **The Causal breakdown (§4.2.5).** 11 + 1 + 1 = 13, rows 47–57, 22, 69.
-   G-R7 published 12 + 1 and lost the feed edge. Re-derive from the table.
+1. **`COMMITTED` and the word "accepted" (§4.2.5).** The predicate quantifies
+   over "an already accepted canonical event E with `E.sequence < N`". At
+   `resolve_event` time for sequence N, are events at lower sequence *known
+   accepted*, or only known well-formed? If `fold` can still reject an event at
+   sequence `N-1` after its closure resolved, the witness is weaker than it
+   reads, and the predicate should quantify over resolved-and-folded history
+   instead.
+2. **`COMMITTED`'s cost.** It requires knowing the resolved closure of earlier
+   events, which a strictly streaming resolver does not retain. Is that a
+   memory obligation V0 can carry, or does it need a bounded index — and if the
+   latter, is that an FD-1.5 concern this document should have named?
+3. **The ledger's reverse check (§4.2.6, item 4).** "No admitted edge that the
+   frozen graph *requires* has silently lost its wire realization" — but the
+   registry does not mark which edges are required versus permitted. Six of the
+   nine open surfaces have no admitted target at all; three others are narrowed.
+   Is "required" derivable from §4.2.4 as it stands, or does the ledger need a
+   requiredness column the registry cannot supply?
+4. **The rejected invariant.** Global `(source, target)` uniqueness is refused
+   on a POST-V0 counterexample (`edges.rs:324-329` vs `336-341`). Check that the
+   two really are the same `(source, target)` under v2's names, given §4.1.5
+   leaves `ProviderInvocationReceipt` versus `ProviderExecutionReceipt` an open
+   supersede question. If the renaming resolves them apart, the counterexample
+   weakens.
+5. **Per-field uniqueness as the replacement.** It is frozen for *one concrete
+   field declaration*. A repeated field — `findings[].evidence_refs` — has many
+   occurrences under one declaration. Confirm the rule binds per occurrence
+   within the declaration, not per declaration, or an array field could carry
+   two classes to one target kind.
+6. **The V0 sanity fact.** 69/69 pair-distinctness is now explicitly *not* an
+   invariant. Then nothing checks it. Should the ledger check assert it for V0
+   anyway, so that a v2 draft accidentally introducing a second class between an
+   existing pair is caught rather than silently permitted?
 
 ## 9. Revision record
+
+### G-R9 — ninth independent review, two P1s
+
+`CHANGES_REQUESTED`, narrower than G-R8 and by the same rule: no registry row,
+no node, no disposition. The reviewer confirmed from the commit itself that
+G-R8 moved nothing — so 56/13, 47 typed nodes, 26 `Intra` typed→typed and Kahn
+47/47 remain *the same proof*, not a new proof of a similar graph — and approved
+the membership enumeration, `HumanCommandRequest`'s place in it, the receipt
+exclusion, and the corrected `Causal` arithmetic.
+
+**P1-21 — clause 1 was correct and unenforceable.** §4.2.6 required the v2 draft
+to *declare* each field's admitted edge set, and nothing said where that
+declaration lives or what checks it. Several rounds went into stopping the wire
+layer from inventing relations; the last joint between registry and wire was
+then left to a human reading a document, which is the rank rule's failure mode
+one level up. Phase G cannot build the artefact — field paths do not exist yet —
+so it freezes it as a **required acceptance artefact of v2 drafting**: one
+normative, machine-checked wire realization ledger, keyed by concrete field
+path, checked four ways against the v2 schemas (by the same recursive extraction
+§4.1.1 now uses), against §4.2.4 forward and reverse, and against the
+meta-target's declared members. No `ArtifactRef`-valued field outside the
+ledger; no ledger target outside the registry. Format is a drafting decision;
+existence is not.
+
+**Global `(source, target)` uniqueness rejected as an invariant.** §8 had asked
+whether to freeze it. The counterexample is in this project's own design input
+rather than hypothetical: `37502e3` carries `ProviderInvocationReceipt →
+CampaignRunBinding` twice — `Intra` via `campaign_run_binding_ref.blob_ref`
+(`edges.rs:324-329`) and `Causal` via `cause.safe_redrive.prior_run_binding_ref`
+(`edges.rs:336-341`). Only the POST-V0 status of the second makes the 69 rows
+pair-distinct today. Freezing the invariant would have pre-forbidden an
+already-designed SafeRedrive shape — Phase G deciding a POST-V0 question under
+cover of a proof convenience, which is precisely what G-R2 corrected in §3.1.
+What is frozen instead is per-field: within one field declaration, `(source
+kind, concrete target kind)` selects exactly one edge and therefore one class.
+69/69 is recorded as a V0 sanity fact.
+
+**P1-22 — `COMMITTED` was the load-bearing word in an undefined state.** Row
+69's instance-level acyclicity rested on it, so it was a proof predicate, not a
+term of art awaiting the draft. G-R8 hesitated to define it because the obvious
+reading — earlier position in the event log — looked like drafting reducer
+policy. It is not: FD-14.2 puts sequence contiguity in `verify_wire` and closure
+resolution in `resolve_event`, both strictly ahead of `fold`. So the predicate
+is defined without reference to `CampaignStateV1` at all — *there exists an
+already accepted canonical event E with `E.sequence < N` whose resolved closure
+contains the exact `(kind, digest)`* — and it is checkable pre-`fold`,
+replay-checkable with no clock and no mutable-store observation, and it finally
+gives row 69 the create-before-reference witness its class has been claiming.
+
+It also settles the `HumanCommandRequest` question §8 raised against the
+membership list. An untrusted rank-3 kind is admissible because `COMMITTED`
+requires it to be in canonical history already — accepted, in the closure of an
+earlier `HumanDecisionRecorded`; rejected, in that of an earlier
+`HumanCommandRejected`. FD-4 keeps canonical evidence and transition authority
+apart, so the feed item observes and only `HumanDecision` authorizes. The
+dangerous reading — a feed item pointing at an arbitrary unaccepted human
+payload — is exactly what the predicate forbids.
+
+**One P2.** G-R8 wrote that 69 distinct `(source, target)` pairs make selection
+*a total function*, which overstates what a distinctness count proves.
+Uniqueness comes from the count; totality comes from clause 1 plus fail-closed
+rejection of an unlisted target. The two halves have different sources and are
+now named separately — a small thing, except that this document's whole method
+is not to let an argument borrow strength from an adjacent one.
 
 ### G-R8 — eighth independent review, two P1s
 

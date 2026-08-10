@@ -502,7 +502,7 @@ determines ranks, edges, imported roots, closure and digest domains.
 ```yaml
 phase_g:
   document: docs/tasks/a1-f-v2-phase-g.md
-  status:   DECIDED (revision G-R8), awaiting re-review
+  status:   DECIDED (revision G-R9), awaiting re-review
   review_1: CHANGES_REQUESTED — four P1s, all accepted; the central
             conclusion changed from 13 envelope kinds to 11
   review_2: CHANGES_REQUESTED — two P1s, both accepted; the count was not
@@ -569,6 +569,27 @@ phase_g:
             machine-checkable. Also: the receipt exclusion now rests on FD-11's
             payload_digest == final_normalized_output_ref.digest, which makes a
             self-citation a content-address CYCLE rather than merely unneeded
+  review_9: CHANGES_REQUESTED — two P1s, both accepted; again NO registry row,
+            node or disposition changed, so the Kahn result stays the SAME
+            proof rather than a new proof of a similar graph. (a) the
+            "field declares its admitted edge set" clause had no checkable
+            carrier — frozen now as a REQUIRED acceptance artefact of v2
+            drafting: one normative machine-checked wire realization ledger,
+            keyed by concrete field path, checked against the v2 schemas by the
+            same recursive extraction, against the registry forward AND reverse,
+            and against the meta-target members; no ArtifactRef field outside
+            the ledger, no ledger target outside the registry; (b) COMMITTED was
+            the load-bearing word in row 69's acyclicity witness and is now
+            defined WITHOUT CampaignStateV1 — an already accepted canonical
+            event E with E.sequence < N whose resolved closure holds the exact
+            (kind, digest) — which FD-14.2 makes checkable in verify_wire /
+            resolve_event, strictly ahead of fold, and replay-checkable with no
+            clock. Also: global (source,target) uniqueness REJECTED as an
+            invariant — 37502e3 already carries ProviderInvocationReceipt ->
+            CampaignRunBinding twice, Intra and Causal, so freezing it would
+            pre-forbid a designed POST-V0 SafeRedrive shape; per-field
+            occurrence uniqueness frozen instead, and 69/69 recorded as a V0
+            sanity fact
   evidence: 37502e3 edge registry — 59 entries (53 envelope-source + 6 A2
             transition) plus a global AnyCommittedEnvelope causation rule;
             metric is "specific V0 consumer in-degree" with an explicit
@@ -614,7 +635,10 @@ phase_g:
                       not per field) — adding an unlisted relation reopens or
                       supersedes Phase G. AnyCommittedEnvelope's members are the
                       eleven envelope kinds of FD-1.9, declared once as a
-                      meta-target expansion
+                      meta-target expansion. Global (source,target) uniqueness
+                      is NOT an invariant; per-field occurrence uniqueness is.
+                      A machine-checked WIRE REALIZATION LEDGER is a required
+                      acceptance artefact of the v2 drafting phase
     open_surfaces:    9 of the 41 frozen slots name no target kind. Each now has
                       a disposition: ReviewRequest.evidence_refs, ReviewerReport
                       .findings[].evidence_refs and ReviewVerdict.findings[]
