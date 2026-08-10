@@ -495,7 +495,30 @@ next content work is the graph adjudication of section 7 and nothing else.
 
 ## 7. Phase G — graph adjudication
 
-**NOT STARTED.** Recorded here only so its scope cannot drift later. Phase G is
+**DECIDED — AWAITING INDEPENDENT REVIEW.** Written as a standalone decision in
+`docs/tasks/a1-f-v2-phase-g.md`, before any v2 drafting, because the node set
+determines ranks, edges, imported roots, closure and digest domains.
+
+```yaml
+phase_g:
+  document: docs/tasks/a1-f-v2-phase-g.md
+  status:   DECIDED, independent review not yet performed
+  evidence: 37502e3 edge registry, 53 edges, in/out degree derived by script
+  result:
+    envelope_bearing_kinds: 13   # v1's eleven, + CampaignRunBinding,
+                                 # + ProviderInvocationReceipt
+    kept_as_support:  InteractionManifest, ScopeContractV1, CampaignEventPayload
+    out_of_v0:        ArtifactImported, RunArtifactSource,
+                      EstablishedNonDispatchEvidence
+    edge_model:       exact registry authoritative, rank derived
+    wrapper_boundary: PARSED_BUT_GRAPH_TERMINAL
+    e_v0_4:           class half decided (manifest = typed support object);
+                      envelope-size bound explicitly deferred to the v2 draft
+```
+
+The scope statement below is retained as written, so the decision can be checked
+against the mandate it was given rather than against a mandate rewritten to fit
+the answer. Phase G is
 written and independently reviewed *before* the main v2 draft, because the node
 set determines ranks, edges, imported roots, closure and digest domains;
 drafting v2 while the node set is open means drafting it twice.
