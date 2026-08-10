@@ -25,6 +25,17 @@ superseded_baseline:
   document_blob: 7db92f1b3dc9d7040da074956a0b3f2f200174c8
   status:        ACCEPTED / CLOSED / FROZEN
   rounds:        R1, R2, R3, R4, R5, R5.1, R5.2
+  role:          the incorporation snapshot. Every inventory row in this
+                 document was extracted from THIS blob.
+
+current_v1_authority:
+  final_head:     9b42aa5
+  document_blob:  3b26849cc39a3391aaed46cca56be3b6715afabb
+  superseded_by:  S1 — FD-1.4 only, the first §7 application after merge
+  graph_delta:    NONE — five graph-sensitive derivations re-run against this
+                  blob are byte-identical to the incorporation snapshot
+                  (Phase G §0). The inventory below therefore stands against
+                  current authority and is not re-extracted.
 
 prototype_design_input:
   reviewed_commit: 37502e3ce5c397a7437445aafb88c13d84ba4ac0
@@ -40,7 +51,11 @@ prototype_final_input:
 The blob digest was verified against git, not transcribed:
 `git rev-parse b84e9419...:docs/q-deck/a1-authority-contracts.md` yields
 `7db92f1b3dc9d7040da074956a0b3f2f200174c8`. Every inventory row below was
-extracted from **that blob** by script, not retyped.
+extracted from **that blob** by script, not retyped. A1-F has since been superseded
+once, by S1; the current authoritative blob is `3b26849c`, and the delta between
+the two was *proved* graph-empty rather than assumed (Phase G §0). Both anchors
+are kept, because rewriting an inventory's provenance to match a later snapshot
+is how a document stops being able to say what it was actually checked against.
 
 Pinning the prototype in two states is deliberate: the inventory does not depend
 on the prototype at all, so a mechanical Rust tail must not block it — and
@@ -502,7 +517,7 @@ determines ranks, edges, imported roots, closure and digest domains.
 ```yaml
 phase_g:
   document: docs/tasks/a1-f-v2-phase-g.md
-  status:   DECIDED (revision G-R9), awaiting re-review
+  status:   DECIDED (revision G-R10), awaiting re-review
   review_1: CHANGES_REQUESTED — four P1s, all accepted; the central
             conclusion changed from 13 envelope kinds to 11
   review_2: CHANGES_REQUESTED — two P1s, both accepted; the count was not
@@ -590,6 +605,25 @@ phase_g:
             pre-forbid a designed POST-V0 SafeRedrive shape; per-field
             occurrence uniqueness frozen instead, and 69/69 recorded as a V0
             sanity fact
+  review_10: CHANGES_REQUESTED — three P1s, zero rows changed again. (a)
+            COMMITTED's checkability argument used the wrong stage boundary:
+            FD-14.4 lets an event pass verify_wire AND resolve_event and still
+            be rejected by fold, so it now quantifies over accepted_prefix(N) —
+            acceptance completed — with the rejected event excluded and its
+            TransitionRejected admitted only once itself accepted; the storage
+            question is answered by making COMMITTED a semantic predicate whose
+            optional CommittedEnvelopeIndex is derived, recomputable and outside
+            FD-1.5; (b) the realization ledger asked for "required" edges, which
+            conflated schema capability with runtime cardinality — every registry
+            row needs a carrier, no requiredness column — and it was scoped to
+            ArtifactRef fields only, leaving the eleven structurally-carried
+            event->payload edges (rows 58-68) outside it, so rows are now keyed
+            by carrier_kind (artifact_ref | event_payload_digest); (c) AUTHORITY
+            FRESHNESS: A1-F was superseded by S1 after incorporation, so current
+            authority is blob 3b26849c at head 9b42aa5, not 7db92f1b. Both
+            anchors recorded; five graph-sensitive derivations re-run against
+            3b26849c are byte-identical, so S1 GRAPH DELTA = NONE and the nine
+            earlier rounds are not retconned. Branch synced to main
   evidence: 37502e3 edge registry — 59 entries (53 envelope-source + 6 A2
             transition) plus a global AnyCommittedEnvelope causation rule;
             metric is "specific V0 consumer in-degree" with an explicit
@@ -610,7 +644,9 @@ phase_g:
                       a controller obligation, not a promotion argument, and
                       not an entry in the edge registry
     exact_edge_universe: baseline is the FROZEN contract, not the prototype —
-                      41 ArtifactRef slots extracted from blob 7db92f1b by a
+                      41 ArtifactRef slots extracted from blob 7db92f1b (and
+                      re-verified identical against current authority 3b26849c)
+                      by a
                       RECURSIVE extractor (a flat one missed
                       ReviewVerdictV1.findings[].evidence_refs, reachable only
                       through "as §3.5"); the 59
@@ -629,10 +665,11 @@ phase_g:
                       carried as a visible row. Acyclicity checked by machine
                       over the 47 typed nodes (26 Intra typed->typed edges).
                       Phase G closes edge MEANING; the v2 draft owes the
-                      field-path spelling, and every field must realize exactly
-                      one admitted edge FROM THAT FIELD'S DECLARED SET (the
-                      cardinality is many-to-many; uniqueness is per occurrence,
-                      not per field) — adding an unlisted relation reopens or
+                      field-path spelling, and every ArtifactRef OCCURRENCE must
+                      select exactly one admitted relation from its FIELD'S
+                      complete declared set — field-to-edge realization is
+                      many-to-many, exact contract in Phase G §4.2.6 — and
+                      adding an unlisted relation reopens or
                       supersedes Phase G. AnyCommittedEnvelope's members are the
                       eleven envelope kinds of FD-1.9, declared once as a
                       meta-target expansion. Global (source,target) uniqueness
