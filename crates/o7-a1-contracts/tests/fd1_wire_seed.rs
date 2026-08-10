@@ -108,14 +108,14 @@ fn an_unsupported_envelope_version_is_refused() {
     let bytes = envelope_json_with("envelope_version", serde_json::json!(2));
     assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
     // ...and through every other door as well.
-    assert!(serde_json::from_slice::<EnvelopeV1>(&bytes).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
 }
 
 #[test]
 fn an_unsupported_message_kind_version_is_refused() {
     let bytes = envelope_json_with("message_kind_version", serde_json::json!(7));
     assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
-    assert!(serde_json::from_slice::<EnvelopeV1>(&bytes).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
 }
 
 /// A serialized controller envelope with one member replaced.
@@ -258,7 +258,7 @@ fn too_many_artifact_refs_are_rejected() {
     }
     let bytes = value.to_string().into_bytes();
     assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
-    assert!(serde_json::from_slice::<EnvelopeV1>(&bytes).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
 }
 
 // ---------------------------------------------------------------------------
@@ -460,7 +460,7 @@ fn the_admission_path_enforces_cross_field_rules() {
     // a schema mismatch rather than a separate post-parse verdict — earlier,
     // and on every route rather than only this one.
     assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
-    assert!(serde_json::from_slice::<EnvelopeV1>(&bytes).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
 
     // The same envelope with its receipt ref restored is admissible, so the
     // rejection above is the cross-field rule and not some unrelated defect in
@@ -479,11 +479,11 @@ fn the_admission_path_enforces_cross_field_rules() {
 fn raw_deserialization_cannot_bypass_the_per_field_rules() {
     // Explicit null in a genuinely optional field.
     let nulled = envelope_json_with("causation_id", serde_json::Value::Null);
-    assert!(serde_json::from_slice::<EnvelopeV1>(&nulled).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&nulled, MAX_CONTROL_ARTIFACT_BYTES).is_err());
 
     // A version the contract froze.
     let versioned = envelope_json_with("envelope_version", serde_json::json!(2));
-    assert!(serde_json::from_slice::<EnvelopeV1>(&versioned).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&versioned, MAX_CONTROL_ARTIFACT_BYTES).is_err());
 
     // A schema-specific text bound: §3.0 caps producer_adapter_version at 128
     // bytes, well under the global 65536-byte string bound.
@@ -491,7 +491,7 @@ fn raw_deserialization_cannot_bypass_the_per_field_rules() {
         "producer_adapter_version",
         serde_json::json!("x".repeat(129)),
     );
-    assert!(serde_json::from_slice::<EnvelopeV1>(&long_adapter).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&long_adapter, MAX_CONTROL_ARTIFACT_BYTES).is_err());
 
     // And model_identity at 256.
     let mut provider = serde_json::to_value(coder_envelope()).expect("fixture must serialize");
@@ -501,13 +501,17 @@ fn raw_deserialization_cannot_bypass_the_per_field_rules() {
             serde_json::json!("x".repeat(257)),
         );
     }
-    assert!(serde_json::from_str::<EnvelopeV1>(&provider.to_string()).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(
+        provider.to_string().as_bytes(),
+        MAX_CONTROL_ARTIFACT_BYTES
+    )
+    .is_err());
 
     // An unknown field, and an unrecognised enum variant.
     let unknown = envelope_json_with("shadow_authority", serde_json::json!(true));
-    assert!(serde_json::from_slice::<EnvelopeV1>(&unknown).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&unknown, MAX_CONTROL_ARTIFACT_BYTES).is_err());
     let future = envelope_json_with("message_kind", serde_json::json!("future_kind"));
-    assert!(serde_json::from_slice::<EnvelopeV1>(&future).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&future, MAX_CONTROL_ARTIFACT_BYTES).is_err());
 }
 
 /// A rejected artifact is untrusted input. AGENTS.md makes credential leakage a
@@ -589,7 +593,7 @@ fn a_malformed_digest_never_quotes_itself_on_any_path() {
     );
 
     // The direct door is the one that was leaking.
-    let direct = serde_json::from_slice::<EnvelopeV1>(&bytes)
+    let direct = parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES)
         .err()
         .map(|e| e.to_string())
         .unwrap_or_default();
@@ -624,7 +628,7 @@ fn a_typed_ref_must_declare_its_frozen_media_type() {
     .expect("one ref is within the bound");
     let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
     assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
-    assert!(serde_json::from_slice::<EnvelopeV1>(&bytes).is_err());
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
 
     // The same ref with its frozen media type is admissible.
     env.artifact_refs = ArtifactRefs::new(vec![ArtifactRef {
@@ -661,25 +665,33 @@ fn a_typed_ref_must_declare_its_frozen_media_type() {
 fn the_public_and_wire_envelope_forms_do_not_drift() {
     for env in [controller_envelope(), coder_envelope()] {
         let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
-        let back: EnvelopeV1 =
-            serde_json::from_slice(&bytes).expect("a serialized envelope must deserialize");
+        let back: EnvelopeV1 = parse_artifact(&bytes, MAX_CONTROL_ARTIFACT_BYTES)
+            .expect("a serialized envelope must be admissible");
         assert_eq!(back, env);
         assert_eq!(back.framed_digest(), env.framed_digest());
     }
 }
 
-/// Every route from bytes to an `EnvelopeV1` enforces the cross-field rules —
-/// including the two serde entry points no admission function can intercept.
+/// There is exactly one route from bytes to an `EnvelopeV1`, and it enforces
+/// the cross-field rules.
+///
+/// The earlier form of this test asserted the same thing about *three* serde
+/// entry points, because `EnvelopeV1` implemented `Deserialize` and each door
+/// had to be checked. Those doors are gone: `serde_json::from_slice::<EnvelopeV1>`
+/// no longer compiles. A rule enforced by the absence of an API needs no test
+/// to keep it true, which is why this one now only has to check the rule.
 #[test]
-fn no_deserialization_route_admits_a_provider_envelope_without_its_receipt() {
+fn the_only_admission_route_rejects_a_provider_envelope_without_its_receipt() {
     let mut env = coder_envelope();
     env.provider_execution_receipt_ref = Optional::absent();
-    let value = serde_json::to_value(&env).expect("fixture must serialize");
-    let bytes = value.to_string().into_bytes();
+    let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
 
     assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
-    assert!(serde_json::from_slice::<EnvelopeV1>(&bytes).is_err());
-    assert!(serde_json::from_value::<EnvelopeV1>(value).is_err());
+
+    // The same envelope with its receipt restored is admissible, so the
+    // rejection is the cross-field rule and not a broken fixture.
+    let good = serde_json::to_vec(&coder_envelope()).expect("fixture must serialize");
+    assert!(parse_artifact::<EnvelopeV1>(&good, MAX_CONTROL_ARTIFACT_BYTES).is_ok());
 }
 
 /// FD-1.9 classifies `interaction_manifest` as a typed non-envelope object, so
@@ -714,41 +726,88 @@ fn an_interaction_manifest_is_typed_for_media_type_and_large_for_size() {
     assert!(manifest_of(MAX_EVIDENCE_BLOB_BYTES + 1).validate().is_err());
 }
 
-/// `ArtifactRef` had the same shape of hole `EnvelopeV1` did: its rules relate
-/// `kind` to `media_type` and `size`, so a derived `Deserialize` admitted a
-/// reference no validator would.
+/// `ArtifactRef` had the same shape of hole `EnvelopeV1` did, and it is closed
+/// the same way: the type does not deserialize at all, so a ref reaches memory
+/// only inside an artifact admitted through `parse_artifact`.
 #[test]
-fn a_reference_cannot_be_deserialized_past_its_own_rules() {
-    let zero_sized = r#"{"kind":"diff","media_type":"text/x-diff","digest":"0000000000000000000000000000000000000000000000000000000000000000","size":0}"#;
-    assert!(serde_json::from_str::<ArtifactRef>(zero_sized).is_err());
+fn a_reference_cannot_reach_an_envelope_past_its_own_rules() {
+    let with_ref = |r: serde_json::Value| {
+        let mut v = serde_json::to_value(controller_envelope()).expect("fixture must serialize");
+        if let Some(map) = v.as_object_mut() {
+            map.insert("artifact_refs".to_owned(), serde_json::json!([r]));
+        }
+        v.to_string().into_bytes()
+    };
 
-    let wrong_media = r#"{"kind":"work_order","media_type":"text/x-diff","digest":"0000000000000000000000000000000000000000000000000000000000000000","size":1}"#;
-    assert!(serde_json::from_str::<ArtifactRef>(wrong_media).is_err());
+    // A typed kind declaring an evidence-blob media type (FD-1.7).
+    let wrong_media = with_ref(serde_json::json!({
+        "kind": "work_order",
+        "media_type": "text/x-diff",
+        "digest": digest("order").as_str(),
+        "size": 1
+    }));
+    assert!(parse_artifact::<EnvelopeV1>(&wrong_media, MAX_CONTROL_ARTIFACT_BYTES).is_err());
 
-    let ok = format!(
-        r#"{{"kind":"work_order","media_type":"{}","digest":"{}","size":1}}"#,
-        typed_media_type(ArtifactKindV1::WorkOrder, 1),
-        digest("order").as_str()
+    // An unknown member on the ref itself.
+    let unknown = with_ref(serde_json::json!({
+        "kind": "diff",
+        "media_type": "text/x-diff",
+        "digest": digest("d").as_str(),
+        "size": 1,
+        "path": "/etc/passwd"
+    }));
+    assert!(parse_artifact::<EnvelopeV1>(&unknown, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+
+    // And the well-formed one is admitted, including at size 0 — FD-1.8 states
+    // no lower bound, and an empty diff is a real object with a real digest.
+    let ok = with_ref(serde_json::json!({
+        "kind": "diff",
+        "media_type": "text/x-diff",
+        "digest": digest("empty").as_str(),
+        "size": 0
+    }));
+    assert!(parse_artifact::<EnvelopeV1>(&ok, MAX_CONTROL_ARTIFACT_BYTES).is_ok());
+}
+
+/// An envelope carrying a raw `artifact_refs` array, so the array rules can be
+/// exercised on the only route that exists.
+fn envelope_with_raw_refs(refs_json: &str) -> Vec<u8> {
+    let v = serde_json::to_value(controller_envelope()).expect("fixture must serialize");
+    let mut text = v.to_string();
+    let marker = r#""artifact_refs":[]"#;
+    let at = text
+        .find(marker)
+        .expect("fixture carries an empty refs array");
+    text.replace_range(
+        at..at + marker.len(),
+        &format!(r#""artifact_refs":{refs_json}"#),
     );
-    assert!(serde_json::from_str::<ArtifactRef>(&ok).is_ok());
+    text.into_bytes()
+}
+
+fn one_ref_json() -> String {
+    format!(
+        r#"{{"kind":"diff","media_type":"text/x-diff","digest":"{}","size":1}}"#,
+        digest("blob").as_str()
+    )
 }
 
 /// FD-1.4 wants a parse-time *rejection*, not a report filed after the memory
 /// is spent: an oversized array must not be fully materialised before its cap is
 /// checked.
+///
+/// 50,000 entries is past the **global** FD-1.4 array bound as well, so the
+/// document walk refuses it before any typed schema is reached. That ordering is
+/// the point: the cheapest layer that can refuse it does.
 #[test]
 fn an_oversized_reference_array_is_refused_without_materialising_it() {
-    // Far beyond both MAX_ARTIFACT_REFS and the global array bound. If the cap
-    // were checked after collecting, this would allocate every entry first.
-    let one = format!(
-        r#"{{"kind":"diff","media_type":"text/x-diff","digest":"{}","size":1}}"#,
-        digest("blob").as_str()
-    );
-    let many = vec![one.as_str(); 50_000].join(",");
-    let json = format!(r#"[{many}]"#);
+    let many = vec![one_ref_json(); 50_000].join(",");
+    let bytes = envelope_with_raw_refs(&format!("[{many}]"));
 
-    assert!(serde_json::from_str::<ArtifactRefs>(&json).is_err());
-    assert!(ArtifactRefs::new(Vec::new()).is_ok());
+    assert!(matches!(
+        parse_artifact::<EnvelopeV1>(&bytes, MAX_EVIDENCE_BLOB_BYTES),
+        Err(ParseError::ArrayTooLong { .. })
+    ));
 }
 
 /// The overflow element must cost nothing to refuse.
@@ -757,27 +816,79 @@ fn an_oversized_reference_array_is_refused_without_materialising_it() {
 /// before comparing against the cap, so a single oversized `media_type` on that
 /// entry was allocated anyway. A bound that allocates what it is about to reject
 /// is not a bound.
+///
+/// 257 entries sits under the global 4096 array bound, so the document walk
+/// passes and `BoundedVec`'s own cap is what fires — which is the layer under
+/// test.
 #[test]
 fn the_element_past_the_cap_is_never_materialised() {
-    let valid = format!(
-        r#"{{"kind":"diff","media_type":"text/x-diff","digest":"{}","size":1}}"#,
-        digest("blob").as_str()
-    );
-    let mut entries = vec![valid; MAX_ARTIFACT_REFS];
+    let mut entries = vec![one_ref_json(); MAX_ARTIFACT_REFS];
     // The overflowing entry carries a large string and is also individually
     // invalid; neither should be reached.
     entries.push(format!(
-        r#"{{"kind":"diff","media_type":"{}","digest":"{}","size":0}}"#,
+        r#"{{"kind":"diff","media_type":"{}","digest":"{}","size":1,"extra":true}}"#,
         "x".repeat(60_000),
         digest("blob").as_str()
     ));
-    let json = format!("[{}]", entries.join(","));
-
-    assert!(serde_json::from_str::<ArtifactRefs>(&json).is_err());
+    let over = envelope_with_raw_refs(&format!("[{}]", entries.join(",")));
+    assert!(matches!(
+        parse_artifact::<EnvelopeV1>(&over, MAX_EVIDENCE_BLOB_BYTES),
+        Err(ParseError::SchemaMismatch { .. })
+    ));
 
     // Exactly at the cap is still admissible, so the rejection above is the
     // overflow and not the batch size.
-    let at_cap_entries: Vec<String> = entries.iter().take(MAX_ARTIFACT_REFS).cloned().collect();
-    let at_cap = format!("[{}]", at_cap_entries.join(","));
-    assert!(serde_json::from_str::<ArtifactRefs>(&at_cap).is_ok());
+    let at_cap = envelope_with_raw_refs(&format!(
+        "[{}]",
+        entries
+            .iter()
+            .take(MAX_ARTIFACT_REFS)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(",")
+    ));
+    assert!(parse_artifact::<EnvelopeV1>(&at_cap, MAX_EVIDENCE_BLOB_BYTES).is_ok());
+}
+
+/// Regression for the two findings that shared a door.
+///
+/// This envelope is individually flawless: 256 refs is exactly the FD-1.4 limit,
+/// every ref is valid, every media type is under the string bound, and the
+/// cross-field rules pass. It is 15 MB. The only rule it breaks is the byte
+/// bound — a property of the byte string that **no field of the value can
+/// know** — so the earlier `serde_json::from_slice::<EnvelopeV1>` returned `Ok`
+/// on it, 15× over a 1 MiB ceiling.
+///
+/// That door also returned `serde_json`'s own error, whose `Display` quotes the
+/// unknown field name and the unrecognised enum value verbatim (AGENTS.md P0).
+/// One reviewer found each half; both were the same public `Deserialize`.
+///
+/// The door is gone: `serde_json::from_slice::<EnvelopeV1>(&bytes)` does not
+/// compile, and neither does it for `ArtifactRef` or `ArtifactRefs`. That is not
+/// assertable at runtime — the compiler is the assertion — so what this test
+/// pins is the rule the door was bypassing.
+#[test]
+fn an_oversized_but_otherwise_valid_envelope_is_refused_by_the_byte_bound() {
+    let mut env = controller_envelope();
+    let refs: Vec<ArtifactRef> = (0..MAX_ARTIFACT_REFS)
+        .map(|i| ArtifactRef {
+            kind: ArtifactKindV1::Diff,
+            media_type: format!("text/x-diff;p={}", "a".repeat(60_000)),
+            digest: digest(&format!("blob-{i}")),
+            size: 1,
+        })
+        .collect();
+    env.artifact_refs = ArtifactRefs::new(refs).expect("exactly at the ref-count bound");
+    let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
+    assert!(bytes.len() as u64 > MAX_CONTROL_ARTIFACT_BYTES * 14);
+
+    assert!(matches!(
+        parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES),
+        Err(ParseError::PayloadTooLarge { .. })
+    ));
+
+    // And it is refused *before* the document is walked or any ref is built:
+    // raising the bound past the document admits the very same bytes, so the
+    // rejection above is the byte bound and nothing else.
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_EVIDENCE_BLOB_BYTES).is_ok());
 }

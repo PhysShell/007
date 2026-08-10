@@ -7,11 +7,15 @@
 //!
 //! # Constraints live in the types, not in a validation step someone must run
 //!
-//! Every type here rejects an inadmissible value **at deserialization**, so
-//! there is no path — including `serde_json::from_str` on a wire type — that
-//! produces a value violating its §3 constraint. A rule enforced only by a
-//! separate `validate()` call is a rule that holds until the first caller
-//! forgets, and a wire contract does not get to depend on that.
+//! Every type here rejects an inadmissible value **at deserialization**, so no
+//! wire artifact can carry a field violating its §3 constraint. A rule enforced
+//! only by a separate `validate()` call is a rule that holds until the first
+//! caller forgets, and a wire contract does not get to depend on that.
+//!
+//! These are field types, so they keep their public `Deserialize`: their bounds
+//! are properties of the value itself. The *artifact* types do not, because
+//! their remaining rules — the document byte bound and the cross-field checks —
+//! are not properties any value can inspect.
 //!
 //! # Errors never echo payload content
 //!
@@ -38,6 +42,8 @@ pub const MAX_TIMESTAMP_BYTES: usize = 64;
 /// No variant carries the rejected value.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ScalarError {
+    #[error("a Timestamp must be an RFC 3339 UTC instant")]
+    NotRfc3339Utc,
     #[error("an Id must be a non-empty UTF-8 string")]
     EmptyId,
     #[error("an Id must be <= {MAX_ID_BYTES} bytes, got {actual}")]
@@ -205,14 +211,26 @@ pub struct Timestamp(String);
 
 impl Timestamp {
     /// # Errors
-    /// [`ScalarError::TextTooLong`] above [`MAX_TIMESTAMP_BYTES`]; the value is
-    /// otherwise opaque.
+    /// [`ScalarError::TextTooLong`] above [`MAX_TIMESTAMP_BYTES`], or
+    /// [`ScalarError::NotRfc3339Utc`] if the value is not an RFC 3339 UTC
+    /// instant.
+    ///
+    /// The shape *is* checked even though the value authorizes nothing. §3's
+    /// scalar table says "RFC 3339 UTC", and a length-only check would admit
+    /// `"not-a-time"` — an artifact every conforming peer must reject, which
+    /// makes it an interoperability defect rather than a harmless one. What is
+    /// deliberately not done is parsing into a calendar type: the field is
+    /// metadata (FD-5.4), and a rich type would invite exactly the ordering
+    /// reasoning that rule forbids.
     pub fn parse(s: &str) -> Result<Self, ScalarError> {
         if s.len() > MAX_TIMESTAMP_BYTES {
             return Err(ScalarError::TextTooLong {
                 actual: s.len(),
                 max: MAX_TIMESTAMP_BYTES,
             });
+        }
+        if !is_rfc3339_utc(s) {
+            return Err(ScalarError::NotRfc3339Utc);
         }
         Ok(Self(s.to_owned()))
     }
@@ -221,6 +239,42 @@ impl Timestamp {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+}
+
+/// `YYYY-MM-DDTHH:MM:SS`, an optional fractional part, then a UTC designator.
+///
+/// RFC 3339 permits `t`/`z` in lower case and allows a numeric offset; "UTC"
+/// narrows the offset to zero. `-00:00` is accepted by the grammar but RFC 3339
+/// gives it the meaning "offset unknown", which is not the same claim as UTC, so
+/// it is refused here rather than silently read as `+00:00`.
+fn is_rfc3339_utc(s: &str) -> bool {
+    /// `d` is any ASCII digit, `T` is the date/time separator in either case,
+    /// every other byte matches itself.
+    const SHAPE: &[u8] = b"dddd-dd-ddTdd:dd:dd";
+
+    let Some((stamp, rest)) = s.as_bytes().split_at_checked(SHAPE.len()) else {
+        return false;
+    };
+    let shaped = stamp.iter().zip(SHAPE).all(|(c, k)| match *k {
+        b'd' => c.is_ascii_digit(),
+        b'T' => *c == b'T' || *c == b't',
+        other => *c == other,
+    });
+    if !shaped {
+        return false;
+    }
+    // An optional fraction, which RFC 3339 requires to have at least one digit.
+    let rest = match rest.strip_prefix(b".") {
+        Some(frac) => {
+            let n = frac.iter().take_while(|c| c.is_ascii_digit()).count();
+            match frac.split_at_checked(n) {
+                Some((_, tail)) if n > 0 => tail,
+                _ => return false,
+            }
+        }
+        None => rest,
+    };
+    matches!(rest, [b'Z'] | [b'z'] | [b'+', b'0', b'0', b':', b'0', b'0'])
 }
 
 impl<'de> Deserialize<'de> for Timestamp {
@@ -240,8 +294,8 @@ impl<'de> Deserialize<'de> for Timestamp {
 /// It exists for one reason: that type's `Deserialize` forwards
 /// `DigestFormatError`, whose `Display` quotes the rejected string. A rejected
 /// artifact is untrusted input, and AGENTS.md makes credential leakage a P0, so
-/// `serde_json::from_slice::<EnvelopeV1>` on a payload whose `contract_digest`
-/// is a stolen token must not produce an error containing it.
+/// admitting a payload whose `contract_digest` is a stolen token must not
+/// produce an error containing it.
 ///
 /// The wrapper is therefore a redacting deserializer, not a parallel model —
 /// which is the distinction FD-2.4 draws when it imports a kind rather than
@@ -346,9 +400,9 @@ impl<'de, const V: u32> Deserialize<'de> for FrozenVersion<V> {
 /// A container bound is neither a byte-level rule nor a cross-field rule, so it
 /// belongs in neither the admission path nor `validate()`: it is a property of
 /// the field itself, and a field's properties are enforced by its type. Before
-/// this existed, `serde_json::from_slice::<EnvelopeV1>` could build an envelope
-/// with more `artifact_refs` than FD-1.4 permits, because the count was checked
-/// only by a validator that path never reaches.
+/// this existed, the count was checked only by a validator, so any route that
+/// skipped it could build an envelope with more `artifact_refs` than FD-1.4
+/// permits.
 ///
 /// The bound is also capped by the global FD-1.4 array maximum, so no schema can
 /// widen it by choosing a larger `MAX`.
@@ -357,6 +411,14 @@ impl<'de, const V: u32> Deserialize<'de> for FrozenVersion<V> {
 pub struct BoundedVec<T, const MAX: usize>(Vec<T>);
 
 impl<T, const MAX: usize> BoundedVec<T, MAX> {
+    /// Convert every element into `U`, preserving the bound.
+    ///
+    /// Infallible by construction: the length is unchanged and was already
+    /// within the cap, so nothing is re-checked and nothing is skipped.
+    pub(crate) fn map_into<U: From<T>>(self) -> BoundedVec<U, MAX> {
+        BoundedVec(self.0.into_iter().map(U::from).collect())
+    }
+
     /// # Errors
     /// [`ScalarError::TooManyEntries`] above `MAX` (or above the global FD-1.4
     /// array bound, whichever is smaller).
@@ -538,6 +600,11 @@ impl<T> Optional<T> {
     pub fn as_ref(&self) -> Option<&T> {
         self.0.as_ref()
     }
+
+    /// Convert a present value into `U`, preserving absence.
+    pub(crate) fn map_into<U: From<T>>(self) -> Optional<U> {
+        Optional(self.0.map(U::from), PhantomData)
+    }
 }
 
 impl<T> From<Option<T>> for Optional<T> {
@@ -651,6 +718,38 @@ mod tests {
         assert!(
             serde_json::from_str::<ModelIdentity>(&format!("\"{}\"", "x".repeat(257))).is_err()
         );
+    }
+
+    #[test]
+    fn a_timestamp_must_be_an_rfc3339_utc_instant() {
+        // §3's scalar table says "RFC 3339 UTC". A length-only check admitted
+        // `"not-a-time"` — an artifact every conforming peer must reject, so
+        // accepting it was an interoperability defect and not mere laxity.
+        for ok in [
+            "2026-08-09T20:00:00Z",
+            "2026-08-09t20:00:00z",
+            "2026-08-09T20:00:00.123456Z",
+            "2026-08-09T20:00:00+00:00",
+        ] {
+            assert!(Timestamp::parse(ok).is_ok(), "{ok} must be admissible");
+        }
+        for bad in [
+            "not-a-time",
+            "",
+            "2026-08-09",
+            "2026-08-09T20:00:00",
+            "2026-08-09T20:00:00.Z",
+            // A real instant, but not UTC — and `-00:00` is RFC 3339 for
+            // "offset unknown", which is a different claim than zero offset.
+            "2026-08-09T20:00:00+02:00",
+            "2026-08-09T20:00:00-00:00",
+        ] {
+            assert_eq!(
+                Timestamp::parse(bad),
+                Err(ScalarError::NotRfc3339Utc),
+                "{bad} must be refused"
+            );
+        }
     }
 
     #[test]

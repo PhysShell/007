@@ -19,8 +19,6 @@ pub enum RefError {
     EmptyMediaType,
     #[error("media_type must be <= {MAX_STRING_BYTES} bytes, got {actual}")]
     MediaTypeTooLong { actual: usize },
-    #[error("size must be > 0: a zero-sized reference names no bytes")]
-    ZeroSize,
     #[error("declared size {actual} exceeds the FD-1.4 maximum {max} for {kind}")]
     SizeAboveBound {
         kind: &'static str,
@@ -60,14 +58,15 @@ pub struct ArtifactRef {
     pub size: u64,
 }
 
-/// The wire form of [`ArtifactRef`], for the same reason `EnvelopeV1` has one:
-/// its rules relate `kind` to `media_type` and to `size`, so no single field can
-/// enforce them, and a derived `Deserialize` would let
-/// `serde_json::from_str::<ArtifactRef>` build a `work_order` ref declaring
-/// `text/x-diff` and a zero size.
+/// The wire form of [`ArtifactRef`], and the only form that deserializes.
+///
+/// `ArtifactRef`'s rules relate `kind` to `media_type` and to `size`, so no
+/// single field can enforce them. It therefore does not implement `Deserialize`
+/// at all: a ref arrives only as part of an artifact admitted through
+/// [`crate::parse_artifact`], which is where the cross-field check runs.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ArtifactRefWire {
+pub(crate) struct ArtifactRefWire {
     kind: ArtifactKindV1,
     media_type: String,
     digest: WireDigest,
@@ -85,17 +84,6 @@ impl From<ArtifactRefWire> for ArtifactRef {
     }
 }
 
-impl<'de> Deserialize<'de> for ArtifactRef {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let r = Self::from(ArtifactRefWire::deserialize(deserializer)?);
-        r.validate().map_err(serde::de::Error::custom)?;
-        Ok(r)
-    }
-}
-
 impl ArtifactRef {
     /// # Errors
     /// [`RefError`] if the media type is empty or over-long, or the declared
@@ -109,9 +97,16 @@ impl ArtifactRef {
                 actual: self.media_type.len(),
             });
         }
-        if self.size == 0 {
-            return Err(RefError::ZeroSize);
-        }
+        // No lower bound on `size`. FD-1.8 defines it as "that object's own
+        // stored size" and states no minimum, and a zero-byte object is a real
+        // thing in a CAS: an empty diff, an empty gate log, a provider that
+        // wrote nothing. Such an object has a perfectly good content digest
+        // (`e3b0c442…`), so refusing its ref would make a conforming peer's
+        // artifact inadmissible on a rule this contract does not contain.
+        //
+        // Rejecting it looked like defensive hygiene and was in fact a bound
+        // invented by the implementation — the failure mode this whole crate
+        // exists to prevent, pointed the other way.
         // FD-1.7: a typed A1 artifact's media type is fixed by its kind and
         // version, and it is part of the envelope framing — so a ref that
         // declares `text/x-diff` for a `work_order` names a different reference
@@ -222,15 +217,19 @@ mod tests {
         let json = serde_json::to_string(&evidence_ref(1)).unwrap_or_default();
         assert!(!json.contains("path"), "{json}");
         assert!(!json.contains("url"), "{json}");
-        assert!(serde_json::from_str::<ArtifactRef>(
+        assert!(serde_json::from_str::<ArtifactRefWire>(
             r#"{"kind":"diff","media_type":"text/x-diff","digest":"0000000000000000000000000000000000000000000000000000000000000000","size":1,"path":"/etc/passwd"}"#
         )
         .is_err());
     }
 
     #[test]
-    fn a_zero_sized_reference_is_refused() {
-        assert_eq!(evidence_ref(0).validate(), Err(RefError::ZeroSize));
+    fn a_zero_sized_reference_is_admissible() {
+        // FD-1.8 states no lower bound on `size`, and an empty diff or an empty
+        // gate log is a real CAS object with a real digest. The previous
+        // `ZeroSize` rejection was a bound this implementation invented, which
+        // would have made a conforming peer's artifact inadmissible.
+        assert_eq!(evidence_ref(0).validate(), Ok(()));
     }
 
     #[test]
@@ -333,7 +332,7 @@ mod tests {
 
     #[test]
     fn an_unknown_ref_field_fails_closed() {
-        assert!(serde_json::from_str::<ArtifactRef>(
+        assert!(serde_json::from_str::<ArtifactRefWire>(
             r#"{"kind":"diff","media_type":"text/x-diff","digest":"0000000000000000000000000000000000000000000000000000000000000000","size":1,"extra":true}"#
         )
         .is_err());

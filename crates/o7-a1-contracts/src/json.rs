@@ -29,11 +29,19 @@
 //! after the schema: a documented "prefer the other one" is a convention, and a
 //! convention is what the first version of this module already tried and lost.
 //!
-//! The typed layer is *also* strict on its own, so a caller reaching a wire type
-//! through a different door — `serde_json::from_str` — still cannot construct
-//! one that violates a per-field rule. Only the byte-level rules and the
-//! cross-field rules need the admission path, and both are properties no
-//! individual field can check.
+//! **There is no second door.** No A1 wire artifact implements `Deserialize`, so
+//! `serde_json::from_slice::<EnvelopeV1>` does not compile; the wire mirrors that
+//! do implement it are private. That is stronger than it first looks, because
+//! two of the three layers cannot be enforced by a value's own type:
+//! `max_bytes` is a property of the byte string, not of the value, and the
+//! cross-field rules relate fields no single field can see.
+//!
+//! An earlier revision kept a public `Deserialize` and relied on every per-field
+//! rule living in the field's own type. That closed the per-field axis and left
+//! two others open: a 15 MiB envelope deserialized fine because no field knows
+//! the document's size, and the returned `serde_json::Error` quoted the
+//! offending field name and enum value in its `Display`. Two reviewers found the
+//! two holes independently, on the same door.
 //!
 //! # Errors never carry payload content
 //!
@@ -44,7 +52,6 @@
 //! and location instead of a message that would quote the unknown field or the
 //! unrecognised enum variant.
 
-use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::bounds::{MAX_ARRAY_LEN, MAX_JSON_DEPTH, MAX_STRING_BYTES};
@@ -91,6 +98,25 @@ pub enum ParseError {
 /// impl. Requiring the trait is what lets [`parse_artifact`] be the single
 /// public entry point.
 pub trait WireArtifact: Sized {
+    /// Build the artifact from an already document-validated JSON value.
+    ///
+    /// This exists so that no A1 wire artifact implements [`Deserialize`]
+    /// itself. A public `Deserialize` is a second entry point, and a second
+    /// entry point is a bypass: it skips the caller-supplied byte bound (which
+    /// no value-level type can know) and it returns `serde_json`'s own error,
+    /// whose `Display` quotes the unknown field name and the unrecognised enum
+    /// value verbatim — a credential arriving as either is then copied into an
+    /// error string, which AGENTS.md P0 forbids. Both were found on this PR, by
+    /// two reviewers, on the same door.
+    ///
+    /// Implementations deserialize their **private** wire mirror and convert.
+    ///
+    /// # Errors
+    /// [`ParseError::SchemaMismatch`], carrying the serde error *category* and
+    /// never its text.
+    #[doc(hidden)]
+    fn from_document(value: Value) -> Result<Self, ParseError>;
+
     /// # Errors
     /// A human-readable reason. Implementations must not quote payload content.
     fn validate_wire(&self) -> Result<(), String>;
@@ -135,40 +161,19 @@ pub fn validate_document(bytes: &[u8], max_bytes: u64) -> Result<Value, ParseErr
 ///
 /// # Errors
 /// [`ParseError`] from any of the three layers.
-pub fn parse_artifact<T: DeserializeOwned + WireArtifact>(
-    bytes: &[u8],
-    max_bytes: u64,
-) -> Result<T, ParseError> {
-    let parsed: T = parse_typed(bytes, max_bytes)?;
+pub fn parse_artifact<T: WireArtifact>(bytes: &[u8], max_bytes: u64) -> Result<T, ParseError> {
+    let value = validate_document(bytes, max_bytes)?;
+    let parsed = T::from_document(value)?;
     parsed
         .validate_wire()
         .map_err(|reason| ParseError::Invalid { reason })?;
     Ok(parsed)
 }
 
-/// Document rules, then the typed schema — **crate-internal**.
-///
-/// This is the half of admission that stops before the cross-field rules, and
-/// it is not public for the same reason `validate()` is no longer something a
-/// caller must remember: an unchecked door with a comment on it is still a door.
-/// [`parse_artifact`] is the public entry point.
-///
-/// # Errors
-/// [`ParseError`] from either the document rules or the schema.
-pub(crate) fn parse_typed<T: DeserializeOwned>(
-    bytes: &[u8],
-    max_bytes: u64,
-) -> Result<T, ParseError> {
-    let value = validate_document(bytes, max_bytes)?;
-    serde_json::from_value(value).map_err(|e| ParseError::SchemaMismatch {
-        category: classify(&e),
-    })
-}
-
 /// The serde error *category*, which describes the failure without quoting the
 /// input that caused it. `serde_json`'s `Display` embeds the unknown field name
 /// and the unrecognised enum variant verbatim, so it is never propagated.
-fn classify(e: &serde_json::Error) -> &'static str {
+pub(crate) fn classify(e: &serde_json::Error) -> &'static str {
     match e.classify() {
         serde_json::error::Category::Io => "io",
         serde_json::error::Category::Syntax => "syntax",
@@ -355,8 +360,18 @@ mod tests {
             #[allow(dead_code)]
             known: u32,
         }
+        impl WireArtifact for Strict {
+            fn from_document(value: Value) -> Result<Self, ParseError> {
+                serde_json::from_value(value).map_err(|e| ParseError::SchemaMismatch {
+                    category: classify(&e),
+                })
+            }
+            fn validate_wire(&self) -> Result<(), String> {
+                Ok(())
+            }
+        }
         let unknown_field = format!(r#"{{"known":1,"{SECRET_KEY}":"{SECRET_VALUE}"}}"#);
-        let err = parse_typed::<Strict>(unknown_field.as_bytes(), MAX_CONTROL_ARTIFACT_BYTES)
+        let err = parse_artifact::<Strict>(unknown_field.as_bytes(), MAX_CONTROL_ARTIFACT_BYTES)
             .err()
             .map(|e| e.to_string())
             .unwrap_or_default();

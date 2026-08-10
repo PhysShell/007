@@ -9,13 +9,16 @@
 //!
 //! # What the type refuses, and what validation refuses
 //!
-//! Everything a single field can establish is refused by that field's own type,
-//! on every deserialization path: the frozen versions, the closed enums, the
-//! scalar bounds, and explicit `null`. What remains for [`EnvelopeV1::validate`]
-//! is only what relates two fields to each other — provider evidence required
-//! iff the producer is a provider role — plus the collection bounds. That split
-//! is deliberate: a rule that lives only in a validator holds until the first
-//! caller forgets to call it.
+//! Everything a single field can establish is refused by that field's own type:
+//! the frozen versions, the closed enums, the scalar bounds, and explicit
+//! `null`. What remains for [`EnvelopeV1::validate`] is only what relates two
+//! fields to each other — provider evidence required iff the producer is a
+//! provider role — plus the collection bounds.
+//!
+//! `EnvelopeV1` deliberately does **not** implement `Deserialize`. Bytes become
+//! an envelope only through [`crate::parse_artifact`], which owns the two rules
+//! no value-level type can enforce: the caller-supplied byte bound, and the
+//! cross-field rules. A public `Deserialize` was tried and lost both.
 
 use serde::{Deserialize, Serialize};
 
@@ -23,14 +26,14 @@ use crate::bounds::MAX_ARTIFACT_REFS;
 use crate::framing::Preimage;
 use crate::json::WireArtifact;
 use crate::kind::{MessageKindV1, ProducerRole};
-use crate::refs::{ArtifactRef, RefError};
+use crate::refs::{ArtifactRef, ArtifactRefWire, RefError};
 use crate::scalars::{
     AdapterVersion, BoundedVec, CommitId, Digest256, FrozenVersion, Id, ModelIdentity, Optional,
     Timestamp, WireDigest,
 };
 
-/// `artifact_refs`, bounded by FD-1.4 at deserialization rather than by a
-/// validator a direct `serde_json::from_slice` never reaches.
+/// `artifact_refs`, bounded by FD-1.4 in the field's own type rather than by a
+/// validator a caller has to remember.
 pub type ArtifactRefs = BoundedVec<ArtifactRef, MAX_ARTIFACT_REFS>;
 
 /// FD-1.6 — the frozen envelope framing and field set.
@@ -74,11 +77,11 @@ pub enum EnvelopeError {
 
 /// The wire form of [`EnvelopeV1`]: identical fields, no cross-field rules.
 ///
-/// Private, and the only thing serde ever deserializes. `EnvelopeV1`'s own
-/// `Deserialize` goes through it and then runs [`EnvelopeV1::validate`], so
-/// **every** route from bytes to an `EnvelopeV1` enforces the cross-field rules
-/// — including `serde_json::from_slice`, which no admission function can
-/// intercept.
+/// Private, and the only thing serde ever deserializes. `EnvelopeV1` itself has
+/// no `Deserialize`, so this is not merely the preferred route from bytes to an
+/// envelope — it is the only one that exists, and it runs inside
+/// [`crate::parse_artifact`] where the byte bound and
+/// [`EnvelopeV1::validate`] both apply.
 ///
 /// The duplication is the price of that guarantee. `From` below is written
 /// field by field, so a field added to one struct and not the other fails to
@@ -112,9 +115,9 @@ struct EnvelopeWireV1 {
     #[serde(default)]
     expected_input_head: Optional<CommitId>,
     payload_digest: WireDigest,
-    artifact_refs: ArtifactRefs,
+    artifact_refs: BoundedVec<ArtifactRefWire, MAX_ARTIFACT_REFS>,
     #[serde(default)]
-    provider_execution_receipt_ref: Optional<ArtifactRef>,
+    provider_execution_receipt_ref: Optional<ArtifactRefWire>,
     created_at: Timestamp,
 }
 
@@ -140,21 +143,10 @@ impl From<EnvelopeWireV1> for EnvelopeV1 {
             contract_digest: w.contract_digest,
             expected_input_head: w.expected_input_head,
             payload_digest: w.payload_digest,
-            artifact_refs: w.artifact_refs,
-            provider_execution_receipt_ref: w.provider_execution_receipt_ref,
+            artifact_refs: w.artifact_refs.map_into(),
+            provider_execution_receipt_ref: w.provider_execution_receipt_ref.map_into(),
             created_at: w.created_at,
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for EnvelopeV1 {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let envelope = Self::from(EnvelopeWireV1::deserialize(deserializer)?);
-        envelope.validate().map_err(serde::de::Error::custom)?;
-        Ok(envelope)
     }
 }
 
@@ -307,6 +299,14 @@ impl EnvelopeV1 {
 }
 
 impl WireArtifact for EnvelopeV1 {
+    fn from_document(value: serde_json::Value) -> Result<Self, crate::json::ParseError> {
+        let wire: EnvelopeWireV1 =
+            serde_json::from_value(value).map_err(|e| crate::json::ParseError::SchemaMismatch {
+                category: crate::json::classify(&e),
+            })?;
+        Ok(Self::from(wire))
+    }
+
     fn validate_wire(&self) -> Result<(), String> {
         // `EnvelopeError` names field names and roles, both of which are frozen
         // protocol vocabulary rather than payload content.
