@@ -76,12 +76,45 @@ research/b2-t/packet/items.md          the 41 items
 research/b2-t/packet-key.json          UNBLINDING KEY — deliberately NOT in packet/
 ```
 
-`packet-key.json` carries the `item_id → round/number` mapping, the seed, and
-`packet_items_sha256 = 6ec7b050e62ca32fb90608f624285565d795cfefa69759dd5233188acd2f37c6`
-over the item list. It must not reach the classifier and is opened only after the
+`packet-key.json` carries the `item_id → round/number` mapping, the seed, and two
+digests. It must not reach the classifier and is opened only after the
 classification output is recorded. Its separate location is deliberate: the key
 being one directory away from the packet is the difference between a mistake and
 a habit.
+
+### Digests, with their preimages stated
+
+"A digest over the item list" is not an identification — a reader cannot tell
+whether the preimage is the file's bytes, the concatenated bodies, a JSON array,
+or any of those after newline normalisation. Both are therefore written out:
+
+```text
+packet_items_sha256
+  6ec7b050e62ca32fb90608f624285565d795cfefa69759dd5233188acd2f37c6
+  preimage: UTF-8 bytes of json.dumps(items, ensure_ascii=False,
+            sort_keys=True), items being the ordered list of
+            {"item_id", "text"} objects item_001..item_041, text the
+            verbatim body with no trailing newline.
+            NOT the bytes of items.md.
+
+packet_items_md_sha256
+  9e367e84b3ea26f093733fa7973b7113fcdbd7996735d8b2fa34aaf17b2f923f
+  preimage: raw blob bytes of research/b2-t/packet/items.md as committed,
+            no decoding, no newline normalisation.
+            Verify: sha256sum research/b2-t/packet/items.md
+
+packet_items_md_git_blob
+  91ec34bb8102347f4bc60fef6b8be2083c72635d
+  Verify: git hash-object research/b2-t/packet/items.md
+```
+
+The first is the content digest and is invariant under changes to the file's
+framing — it was computed before the packet title was neutralised and still
+matches, which is exactly the property wanted from it. The second and third
+identify the artefact as shipped and are checkable with one command each.
+
+Both were recomputed from the committed `items.md` and agree; the 41 items
+reparsed out of the file are identical to the ones the builder hashed.
 
 ## 3. What the classifier is told
 

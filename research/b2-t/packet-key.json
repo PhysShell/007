@@ -210,5 +210,9 @@
    "round": "R4",
    "number": 6
   }
- ]
+ ],
+ "packet_items_sha256_preimage": "UTF-8 bytes of json.dumps(items, ensure_ascii=False, sort_keys=True) where items is the ordered list of {\"item_id\", \"text\"} objects, item_001..item_041, text being the verbatim finding body with no trailing newline. NOT the bytes of items.md. Recompute: parse items.md, rebuild that list, re-serialise with those exact flags.",
+ "packet_items_md_sha256": "9e367e84b3ea26f093733fa7973b7113fcdbd7996735d8b2fa34aaf17b2f923f",
+ "packet_items_md_sha256_preimage": "raw blob bytes of research/b2-t/packet/items.md as committed, no decoding and no newline normalisation. Verify: sha256sum research/b2-t/packet/items.md",
+ "packet_items_md_git_blob": "91ec34bb8102347f4bc60fef6b8be2083c72635d"
 }
