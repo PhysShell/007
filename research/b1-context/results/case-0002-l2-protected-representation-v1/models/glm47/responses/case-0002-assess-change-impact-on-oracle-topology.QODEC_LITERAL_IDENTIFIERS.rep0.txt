@@ -1,0 +1,41 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qi1-dependencies",
+      "answer": "The output path dependence blocks the chosen constraint.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-output-path-dependence",
+          "kind": "blocks"
+        }
+      ]
+    },
+    {
+      "question_id": "qi2-rereview",
+      "answer": "The repo authority observation supports the next permitted step.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7",
+        "obs-next-permitted-step"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-repo-authority-04108e7",
+          "kind": "supports"
+        }
+      ]
+    }
+  ]
+}
+```

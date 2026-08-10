@@ -1,0 +1,102 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qa1-why-active",
+      "answer": "The current solution is considered active because Round 0 is closed with all planes frozen, and the authoritative record of R21 acceptance is the frozen plane-record.",
+      "cited_observation_ids": [
+        "obs-round0-closed",
+        "obs-repo-authority-04108e7"
+      ],
+      "current_state_observation_ids": [
+        "obs-round0-closed",
+        "obs-repo-authority-04108e7"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qa2-supporting",
+      "answer": "The evidence head with no CI run supports the repo authority, and the reviewer window supports the reviewer acceptance claim.",
+      "cited_observation_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-reviewer-window"
+      ],
+      "current_state_observation_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-reviewer-window"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-evidence-head-ci-empty",
+          "kind": "supports"
+        },
+        {
+          "from": "obs-reviewer-window",
+          "kind": "supports"
+        }
+      ]
+    },
+    {
+      "question_id": "qa3-superseded",
+      "answer": "The current lock supersedes prior defects and claims, including the reviewer acceptance claim and the prior plane record state.",
+      "cited_observation_ids": [
+        "obs-profiler-fail-closed",
+        "obs-repo-authority-04108e7",
+        "obs-round0-closed"
+      ],
+      "current_state_observation_ids": [
+        "obs-profiler-fail-closed",
+        "obs-repo-authority-04108e7",
+        "obs-round0-closed"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-profiler-fail-closed",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-repo-authority-04108e7",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-round0-closed",
+          "kind": "supersedes"
+        }
+      ]
+    },
+    {
+      "question_id": "qa4-wrong-agent-claims",
+      "answer": "The reviewer's relayed acceptance claim is not authoritative, and the prior reviewer durability issue was unresolved.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-durability-resolved"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7",
+        "obs-reviewer-durability-resolved"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-repo-authority-04108e7",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-reviewer-durability-resolved",
+          "kind": "supersedes"
+        }
+      ]
+    },
+    {
+      "question_id": "qa5-repo-authority",
+      "answer": "The authoritative repository outcome is the frozen plane-record at evidence head 04108e7, not the reviewer's relayed acceptance.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "cited_relations": []
+    }
+  ]
+}
+```

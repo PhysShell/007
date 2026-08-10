@@ -1,0 +1,40 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qi1-dependencies",
+      "answer": "The observation obs-output-path-dependence blocks the chosen constraint (obs-oracle-topology-constraint).",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-output-path-dependence",
+          "kind": "blocks"
+        }
+      ]
+    },
+    {
+      "question_id": "qi2-rereview",
+      "answer": "Based on the provided relations, there is no explicit mention of what must be re-reviewed if the constraint changes, though obs-oracle-topology-constraint depends on obs-output-path-dependence, obs-repo-authority-04108e7, and obs-window-invariant.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-oracle-topology-constraint",
+          "kind": "depends_on"
+        }
+      ]
+    }
+  ]
+}
+```

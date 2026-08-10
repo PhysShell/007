@@ -1,0 +1,46 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qi1-dependencies",
+      "answer": "The output path dependence blocks the chosen R21 constraint.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-output-path-dependence",
+          "kind": "blocks"
+        }
+      ]
+    },
+    {
+      "question_id": "qi2-rereview",
+      "answer": "If the chosen R21 constraint changes, the output path dependence and the repo authority (evidence head 04108e7) and window invariant may be affected, as the constraint depends on them.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence",
+        "obs-repo-authority-04108e7",
+        "obs-window-invariant"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence",
+        "obs-repo-authority-04108e7",
+        "obs-window-invariant"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-oracle-topology-constraint",
+          "kind": "depends_on"
+        }
+      ]
+    }
+  ]
+}
+```

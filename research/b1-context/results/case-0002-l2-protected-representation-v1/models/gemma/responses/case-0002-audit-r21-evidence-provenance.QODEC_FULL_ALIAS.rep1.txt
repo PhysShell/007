@@ -1,0 +1,85 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qa1-why-active",
+      "answer": "The current state is considered active because Round 0 is CLOSED, as the plane-coder, plane-reviewer, and plane-record are all FROZEN.",
+      "cited_observation_ids": [
+        "obs-round0-closed"
+      ],
+      "current_state_observation_ids": [
+        "obs-round0-closed"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qa2-supporting",
+      "answer": "The current state is supported by the observation that the CI is frozen and empty (obs-evidence-head-ci-empty) and the reviewer window (obs-reviewer-window).",
+      "cited_observation_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-reviewer-window"
+      ],
+      "current_state_observation_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-reviewer-window"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-evidence-head-ci-empty",
+          "kind": "supports"
+        },
+        {
+          "from": "obs-reviewer-window",
+          "kind": "supports"
+        }
+      ]
+    },
+    {
+      "question_id": "qa3-superseded",
+      "answer": "The following are superseded: obs-profiler-prior-defect, obs-reviewer-acceptance-claim, and obs-plane-record-not-frozen-v6.",
+      "cited_observation_ids": [
+        "obs-profiler-prior-defect",
+        "obs-reviewer-acceptance-claim",
+        "obs-plane-record-not-frozen-v6"
+      ],
+      "current_state_observation_ids": [],
+      "cited_relations": [
+        {
+          "from": "obs-profiler-fail-closed",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-repo-authority-04108e7",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-round0-closed",
+          "kind": "supersedes"
+        }
+      ]
+    },
+    {
+      "question_id": "qa4-wrong-agent-claims",
+      "answer": "The reviewer's relayed acceptance is not authoritative; the authoritative record is the frozen plane-record including its frozen CI, evidence artifacts, and PR #16 state.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qa5-repo-authority",
+      "answer": "The authoritative record of R21 acceptance is the frozen plane-record (obs-repo-authority-04108e7).",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "cited_relations": []
+    }
+  ]
+}
+```

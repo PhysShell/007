@@ -1,0 +1,307 @@
+{
+  "ablation_purity": {
+    "new_binary_empty_protection_vs_frozen_L1_full_alias": "BYTE-IDENTICAL on all 3 tasks",
+    "notation_identical_to_L1": true,
+    "prompts_unchanged": true,
+    "scorer": "imported from l1_ab, not restated",
+    "single_factor": "which source spans may be aliased"
+  },
+  "all_models_noninferior_vs_raw": false,
+  "case_role": "development",
+  "caveats": [
+    "DECODING: reasoning disabled at the provider key level for every model and every arm, identically, exactly as in L1. The question asked is therefore whether the representation is directly legible without a deliberation subsidy; a large reasoning budget was not tested and was operationally infeasible (it produced provider gateway 502s in L1).",
+    "SCALE: development ablation -- 3 tasks, 11 questions, N=3, 132 paired cells per arm per family. A development signal, not a significance test; strength comes from the consistent direction across four independent families and from the mechanism axes going to exactly zero.",
+    "PROVIDER IDENTITY: provider routing identity was verified by the qualified boundary (requested == reported on every attempt, no substitution), but underlying community-hosted weights were not independently attested; model self-identification was inconsistent and is treated as non-authoritative output. This is a limit of provider identity assurance, not a substitution failure.",
+    "STRUCTURAL: both Qodec arms are byte-lossless (exact decode roundtrip verified on all three protected encodings). Every difference measured here is model comprehension, not fidelity.",
+    "ABSOLUTE BASELINE: RAW correctness is modest (12-22 of 33) because these are small/mid open models with reasoning off. The load-bearing quantities are within-model relative differences."
+  ],
+  "finding": "Identifier protection eliminated referential corruption completely and did not restore parity. Across 4 model families x 132 paired cells per arm, protecting every observation identity drove fabricated/garbled identifiers from 19 to 0 and leaked legend glyphs from 23 to 0 -- exactly the RAW baseline of zero on both axes -- and recovered most of the correctness gap (FULL_ALIAS 48 -> PROTECTED 64, RAW 70). But no model reached zero paired hard regressions, so non-inferiority fails everywhere, and the residual deficit sits almost entirely in missing_required_witness (RAW 57, PROTECTED 68, FULL_ALIAS 75): the model still reads the compressed grammar less thoroughly than raw JSON even when every identifier is literal. GLM-4.7 is the decisive witness that the residual is NOT about identifiers -- its FULL_ALIAS arm had zero fabrications and zero glyph leaks yet still lost 17 -> 14, and protection moved it only to 15 with hard regressions unchanged at 6.",
+  "freeze_manifest_sha256": "sha256:affaa897baed7cb21640c867d1f8652ead0c65e63c8e4a9a45367bc330aa9928",
+  "frozen": {
+    "adapter": "f8fa87e349c48de0678ccc4a4ba4be14463dfc85",
+    "l1_007_commit": "40edf6dc4ad6e96ecc81e7a71ce1b0765c369a3b",
+    "l1_classification": "MODEL_QUALITY_REGRESSION_DESPITE_STRUCTURAL_PASS",
+    "notation_sha256": "sha256:9d11406e732e4725b1abf4d318187b19dba4319467819993dea4d68539e2b5b1",
+    "provider_boundary": "fa93d63636bf53892edbd02fec01ab619ffc1071",
+    "q1r_authoritative_eval": "sha256:fc76d210277f328cc685e61b80df4214319f612333ea49c7e9126d51becce791",
+    "q1r_producer_qodec_qa": "6a5d40304d5997fd9ba6325521f3e212eba4aa75"
+  },
+  "generalization_claim_allowed": false,
+  "harness_sha256": "sha256:26a7535096a4c0689e2560e053f2dc8823db67c777973917bb247f6295ea31c2",
+  "holdout_evidence": false,
+  "mechanism_classification": "IDENTIFIER_PROTECTION_PARTIALLY_RESCUES",
+  "mechanism_reading": {
+    "interpretation": "the %q1 grammar imposes a reading cost beyond identifier aliasing; protection removes the corruption failure mode but not the thoroughness one",
+    "models_exceeding_raw_correct_count": [
+      "deepseek (20 vs 19)",
+      "gemma (13 vs 12)"
+    ],
+    "models_still_below_raw": [
+      "glm47 (15 vs 17)",
+      "qwen (16 vs 22)"
+    ],
+    "note": "two models exceed RAW on total correct yet still fail non-inferiority, because the paired rule counts a cell that newly lost a witness as a hard regression even when another cell gained one -- which is the rule working as intended",
+    "referential_fidelity": "RESTORED to the RAW baseline (fabrication 19->0, glyph leak 23->0, all 4 models)",
+    "residual_deficit_axis": "missing_required_witness (RAW 57 / PROTECTED 68 / FULL_ALIAS 75)"
+  },
+  "next_step_per_protocol": "IDENTIFIER_PROTECTION_PARTIALLY_RESCUES -> do NOT proceed to the real-source holdout, and do not build qodec project v1. The protected-span capability is qualified and keeps 76.5% of the token win, so it is worth keeping; but the remaining barrier is the decoding grammar's reading cost, not identifier aliasing, and that is a different intervention. No notation was tuned after seeing these outputs.",
+  "per_model": {
+    "deepseek": {
+      "QODEC_FULL_ALIAS": {
+        "answer_correct": 7,
+        "contradicts_gold": 2,
+        "malformed_output": 0,
+        "missing_required_witness": 20,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 12,
+        "required_relation_evidence_used": 28,
+        "stale_as_current_error": 2,
+        "unsupported_or_fabricated_claim": 11
+      },
+      "QODEC_LITERAL_IDENTIFIERS": {
+        "answer_correct": 20,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 13,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_relation_evidence_used": 33,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "RAW_VALID": {
+        "answer_correct": 19,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 14,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_relation_evidence_used": 33,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "family": "DeepSeek",
+      "hard_regressions_vs_RAW": {
+        "QODEC_FULL_ALIAS": 14,
+        "QODEC_LITERAL_IDENTIFIERS": 2
+      },
+      "model": "DeepSeek-V4-Flash-0731",
+      "noninferior_protected_vs_raw": false
+    },
+    "gemma": {
+      "QODEC_FULL_ALIAS": {
+        "answer_correct": 11,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 19,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 11,
+        "required_relation_evidence_used": 27,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 2
+      },
+      "QODEC_LITERAL_IDENTIFIERS": {
+        "answer_correct": 13,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 20,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_relation_evidence_used": 30,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "RAW_VALID": {
+        "answer_correct": 12,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 18,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_relation_evidence_used": 30,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "family": "Google",
+      "hard_regressions_vs_RAW": {
+        "QODEC_FULL_ALIAS": 5,
+        "QODEC_LITERAL_IDENTIFIERS": 3
+      },
+      "model": "Gemma-4-31B-it",
+      "noninferior_protected_vs_raw": false
+    },
+    "glm47": {
+      "QODEC_FULL_ALIAS": {
+        "answer_correct": 14,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 19,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_relation_evidence_used": 30,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "QODEC_LITERAL_IDENTIFIERS": {
+        "answer_correct": 15,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 18,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_relation_evidence_used": 31,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "RAW_VALID": {
+        "answer_correct": 17,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 15,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_relation_evidence_used": 27,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "family": "Zhipu",
+      "hard_regressions_vs_RAW": {
+        "QODEC_FULL_ALIAS": 6,
+        "QODEC_LITERAL_IDENTIFIERS": 6
+      },
+      "model": "GLM-4.7",
+      "noninferior_protected_vs_raw": false
+    },
+    "qwen": {
+      "QODEC_FULL_ALIAS": {
+        "answer_correct": 16,
+        "contradicts_gold": 2,
+        "malformed_output": 0,
+        "missing_required_witness": 17,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_relation_evidence_used": 30,
+        "stale_as_current_error": 2,
+        "unsupported_or_fabricated_claim": 6
+      },
+      "QODEC_LITERAL_IDENTIFIERS": {
+        "answer_correct": 16,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 17,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_relation_evidence_used": 33,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "RAW_VALID": {
+        "answer_correct": 22,
+        "contradicts_gold": 0,
+        "malformed_output": 0,
+        "missing_required_witness": 10,
+        "n": 33,
+        "refusal": 0,
+        "representation_parse_failure": 0,
+        "required_relation_evidence_used": 31,
+        "stale_as_current_error": 0,
+        "unsupported_or_fabricated_claim": 0
+      },
+      "family": "Qwen",
+      "hard_regressions_vs_RAW": {
+        "QODEC_FULL_ALIAS": 11,
+        "QODEC_LITERAL_IDENTIFIERS": 7
+      },
+      "model": "Qwen3.5-27B-Anko",
+      "noninferior_protected_vs_raw": false
+    }
+  },
+  "pooled": {
+    "QODEC_FULL_ALIAS": {
+      "answer_correct": 48,
+      "contradicts_gold": 4,
+      "malformed_output": 0,
+      "missing_required_witness": 75,
+      "refusal": 0,
+      "representation_parse_failure": 23,
+      "required_relation_evidence_used": 115,
+      "stale_as_current_error": 4,
+      "unsupported_or_fabricated_claim": 19
+    },
+    "QODEC_LITERAL_IDENTIFIERS": {
+      "answer_correct": 64,
+      "contradicts_gold": 0,
+      "malformed_output": 0,
+      "missing_required_witness": 68,
+      "refusal": 0,
+      "representation_parse_failure": 0,
+      "required_relation_evidence_used": 127,
+      "stale_as_current_error": 0,
+      "unsupported_or_fabricated_claim": 0
+    },
+    "RAW_VALID": {
+      "answer_correct": 70,
+      "contradicts_gold": 0,
+      "malformed_output": 0,
+      "missing_required_witness": 57,
+      "refusal": 0,
+      "representation_parse_failure": 0,
+      "required_relation_evidence_used": 121,
+      "stale_as_current_error": 0,
+      "unsupported_or_fabricated_claim": 0
+    },
+    "cells_per_arm": {
+      "QODEC_FULL_ALIAS": 132,
+      "QODEC_LITERAL_IDENTIFIERS": 132,
+      "RAW_VALID": 132
+    }
+  },
+  "product_classification": "PROTECTED_REPRESENTATION_REGRESSION_WITH_TOKEN_WIN",
+  "provider_integrity": {
+    "any_substitution": false
+  },
+  "qb_qualification": {
+    "committed_007": "0815169",
+    "committed_before_any_result": true,
+    "evidence": "the QB commit contains no l2-receipt.json; the run stood at 74/108 cells when it landed",
+    "producer": "89d06be445877df5a10d6c48f5586796125a0c79",
+    "qualification": "PASS",
+    "receipt_sha256": "sha256:02edfdb8e4d8778a96d41d2bb1da8ba9bcf6d8eb23db360c261e3ab389657653",
+    "tree": "c2c4d461bd44965c55e1ebede72bb77486025a28",
+    "workflow_run": 31407935615
+  },
+  "record": "o7.b1.l2-protected-ablation-receipt/v1",
+  "referential_error_totals": {
+    "QODEC_FULL_ALIAS": 117,
+    "QODEC_LITERAL_IDENTIFIERS": 68,
+    "RAW_VALID": 57,
+    "axes": [
+      "unsupported_or_fabricated_claim",
+      "representation_parse_failure",
+      "missing_required_witness"
+    ]
+  },
+  "token_economics": {
+    "FULL_ALIAS_cold": 6651,
+    "PROTECTED_cold": 7097,
+    "PROTECTED_cold_all_reps": 21291,
+    "RAW_cold": 8552,
+    "RAW_cold_all_reps": 25656,
+    "full_alias_saving": 1901,
+    "reading": "~1.0 protection keeps almost all compression gain; ~0.5 half survives; ~0 identifier protection consumes the gain; <0 protected is dearer than RAW",
+    "residual_cold_saving": 1455,
+    "retained_saving_fraction": 0.7654,
+    "token_win_cold": true
+  }
+}

@@ -1,0 +1,42 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qi1-dependencies",
+      "answer": "The output path dependence blocks the chosen R21 constraint.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-output-path-dependence",
+          "kind": "blocks"
+        }
+      ]
+    },
+    {
+      "question_id": "qi2-rereview",
+      "answer": "If the chosen R21 constraint changes, the output path dependence would be affected as it blocks the constraint.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-output-path-dependence",
+          "kind": "blocks"
+        }
+      ]
+    }
+  ]
+}
+```

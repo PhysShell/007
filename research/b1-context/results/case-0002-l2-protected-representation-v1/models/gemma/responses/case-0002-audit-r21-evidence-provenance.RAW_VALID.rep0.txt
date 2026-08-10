@@ -1,0 +1,74 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qa1-why-active",
+      "answer": "The current state is characterized by Round 0 being CLOSED, with plane-coder, plane-reviewer, and plane-record all being FROZEN.",
+      "cited_observation_ids": [
+        "obs-round0-closed"
+      ],
+      "current_state_observation_ids": [
+        "obs-round0-closed"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qa2-supporting",
+      "answer": "The authoritative record of R21 acceptance is supported by the frozen plane-record (evidence head 04108e7), which includes frozen CI and evidence artifacts and the state of PR #16.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qa3-superseded",
+      "answer": "SOURCE-LOCK v6 supersedes v5, v5 supersedes v4, and v4 supersedes v3; additionally, the frozen plane-record (obs-repo-authority-04108e7) supersedes the reviewer's acceptance claim, and the closure of Round 0 supersedes the state where the plane record was not frozen.",
+      "cited_observation_ids": [
+        "obs-lock-supersession-chain",
+        "obs-repo-authority-04108e7",
+        "obs-round0-closed"
+      ],
+      "current_state_observation_ids": [
+        "obs-lock-supersession-chain",
+        "obs-repo-authority-04108e7",
+        "obs-round0-closed"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-repo-authority-04108e7",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-round0-closed",
+          "kind": "supersedes"
+        }
+      ]
+    },
+    {
+      "question_id": "qa4-wrong-agent-claims",
+      "answer": "The reviewer's relayed acceptance is not authoritative; the authoritative record is the frozen plane-record (evidence head 04108e7).",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qa5-repo-authority",
+      "answer": "The authoritative record of R21 acceptance is the frozen plane-record, specifically evidence head 04108e7 with its frozen CI and evidence artifacts and PR #16 state.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "cited_relations": []
+    }
+  ]
+}
+```

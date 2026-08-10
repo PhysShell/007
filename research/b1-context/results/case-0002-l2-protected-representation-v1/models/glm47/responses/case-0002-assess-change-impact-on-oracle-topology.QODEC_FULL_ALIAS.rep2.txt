@@ -1,0 +1,42 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qi1-dependencies",
+      "answer": "The profiler-fail-closed observation depends on the chosen constraint.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-profiler-fail-closed"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-profiler-fail-closed"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-profiler-fail-closed",
+          "kind": "depends_on"
+        }
+      ]
+    },
+    {
+      "question_id": "qi2-rereview",
+      "answer": "The profiler-fail-closed observation must be re-reviewed if the constraint changes.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-profiler-fail-closed"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-profiler-fail-closed"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-profiler-fail-closed",
+          "kind": "depends_on"
+        }
+      ]
+    }
+  ]
+}
+```

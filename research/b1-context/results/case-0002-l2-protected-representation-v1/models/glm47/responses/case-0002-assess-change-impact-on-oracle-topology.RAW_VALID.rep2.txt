@@ -1,0 +1,47 @@
+```json
+{
+  "answers": [
+    {
+      "question_id": "qi1-dependencies",
+      "answer": "The chosen constraint (obs-oracle-topology-constraint) has no outgoing dependency relations in the provided context, so nothing is explicitly listed as depending on it.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qi2-rereview",
+      "answer": "The constraint (obs-oracle-topology-constraint) depends on the repo authority (obs-repo-authority-04108e7), the output path dependence (obs-output-path-dependence), and the window invariant (obs-window-invariant), so these components must be re-reviewed if the constraint changes.",
+      "cited_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-repo-authority-04108e7",
+        "obs-output-path-dependence",
+        "obs-window-invariant"
+      ],
+      "current_state_observation_ids": [
+        "obs-oracle-topology-constraint",
+        "obs-repo-authority-04108e7",
+        "obs-output-path-dependence",
+        "obs-window-invariant"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-oracle-topology-constraint",
+          "kind": "depends_on"
+        },
+        {
+          "from": "obs-oracle-topology-constraint",
+          "kind": "depends_on"
+        },
+        {
+          "from": "obs-oracle-topology-constraint",
+          "kind": "depends_on"
+        }
+      ]
+    }
+  ]
+}
+```

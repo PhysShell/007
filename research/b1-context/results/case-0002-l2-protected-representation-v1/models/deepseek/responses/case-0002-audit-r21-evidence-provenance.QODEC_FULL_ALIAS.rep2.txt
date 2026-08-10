@@ -1,0 +1,109 @@
+Here is the JSON object with the answers based solely on the provided context:
+
+```json
+{
+  "answers": [
+    {
+      "question_id": "qa1-why-active",
+      "answer": "The current solution is active because the plane-record is frozen and the round is CLOSED, with the authoritative record bound to the qodec metadata head 427b677, and the reviewer durability issue has been resolved by importing the reviewer export into the durable private CAS.",
+      "cited_observation_ids": [
+        "obs-round0-closed",
+        "obs-reviewer-durability-resolved"
+      ],
+      "current_state_observation_ids": [
+        "obs-round0-closed",
+        "obs-reviewer-durability-resolved"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qa2-supporting",
+      "answer": "The records that support the current solution are the evidence head CI empty (frozen-empty result), the oracle topology constraint (routing derived once), the output path dependence (profiler output embeds literal input path), the profiler fail-closed evidence, the reviewer window (258 nodes reproduced independently), and the window invariant (byte-identical slice).",
+      "cited_observation_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence",
+        "obs-profiler-fail-closed",
+        "obs-reviewer-window",
+        "obs-window-invariant"
+      ],
+      "current_state_observation_ids": [
+        "obs-evidence-head-ci-empty",
+        "obs-oracle-topology-constraint",
+        "obs-output-path-dependence",
+        "obs-profiler-fail-closed",
+        "obs-reviewer-window",
+        "obs-window-invariant"
+      ],
+      "cited_relations": []
+    },
+    {
+      "question_id": "qa3-superseded",
+      "answer": "Superseded items include the lock-supersession-chain (SOURCE-LOCK v6 supersedes v5, v5 supersedes v4, v4 supersedes v3), the reviewer-durability-unresolved-v6, the plane-record-not-frozen-v6, the reviewer-acceptance-claim, and the profiler-prior-defect.",
+      "cited_observation_ids": [
+        "obs-lock-supersession-chain",
+        "obs-reviewer-durability-unresolved-v6",
+        "obs-plane-record-not-frozen-v6",
+        "obs-reviewer-acceptance-claim",
+        "obs-profiler-prior-defect"
+      ],
+      "current_state_observation_ids": [],
+      "cited_relations": [
+        {
+          "from": "obs-lock-supersession-chain",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-reviewer-durability-resolved",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-round0-closed",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-repo-authority-04108e7",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-repo-authority-04108e7",
+          "kind": "supersedes"
+        }
+      ]
+    },
+    {
+      "question_id": "qa4-wrong-agent-claims",
+      "answer": "The reviewer's relayed acceptance claim is not authoritative and is superseded; the reviewer profile digest disagreement was caused by a literal input path serialised into the report, and the reviewer durability was left unresolved by the frozen lock, but these are now resolved or superseded.",
+      "cited_observation_ids": [
+        "obs-reviewer-acceptance-claim",
+        "obs-reviewer-digest-disagreement",
+        "obs-reviewer-durability-unresolved-v6"
+      ],
+      "current_state_observation_ids": [
+        "obs-reviewer-digest-disagreement"
+      ],
+      "cited_relations": [
+        {
+          "from": "obs-repo-authority-04108e7",
+          "kind": "supersedes"
+        },
+        {
+          "from": "obs-reviewer-durability-resolved",
+          "kind": "supersedes"
+        }
+      ]
+    },
+    {
+      "question_id": "qa5-repo-authority",
+      "answer": "The repository outcome that is the authority is the frozen plane-record with its frozen CI and evidence artifacts and PR #16 state, where product head is 940c7629 and PR #16 is open, draft, and unmerged.",
+      "cited_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "current_state_observation_ids": [
+        "obs-repo-authority-04108e7"
+      ],
+      "cited_relations": []
+    }
+  ]
+}
+```
