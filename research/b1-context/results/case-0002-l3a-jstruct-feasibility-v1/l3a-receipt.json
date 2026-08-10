@@ -1,0 +1,109 @@
+{
+  "JSTRUCT": {
+    "aggregate_cold_tokens": 7730,
+    "dictionary_or_legend_required": false,
+    "identifier_literal_count": 72,
+    "identifier_total_count": 72,
+    "notation_block_required": false,
+    "per_task_tokens": {
+      "case-0002-assess-change-impact-on-oracle-topology": 2586,
+      "case-0002-audit-r21-evidence-provenance": 3191,
+      "case-0002-resume-product-integration": 1953
+    },
+    "roundtrip": "PASS"
+  },
+  "L3A_FEASIBLE": true,
+  "RAW": {
+    "aggregate_cold_tokens": 8552,
+    "per_task_tokens": {
+      "case-0002-assess-change-impact-on-oracle-topology": 2858,
+      "case-0002-audit-r21-evidence-provenance": 3538,
+      "case-0002-resume-product-integration": 2156
+    }
+  },
+  "case_role": "development",
+  "context_only_saving_fraction": 0.1243,
+  "frozen_inputs": {
+    "b1_serialization_unchanged": true,
+    "l1_007_commit": "40edf6dc4ad6e96ecc81e7a71ce1b0765c369a3b",
+    "source": "exact frozen Q1R contexts used by L1 and L2 (canonical, no trailing LF)"
+  },
+  "gate": {
+    "aggregate_cold_saving_vs_RAW": ">= 5%",
+    "all_observation_identifiers_literal": true,
+    "every_task_not_worse_than_raw": true,
+    "no_dictionary_or_legend": true,
+    "roundtrip": "PASS"
+  },
+  "generalization_claim_allowed": false,
+  "holdout_evidence": false,
+  "no_model_calls_made": true,
+  "per_task": {
+    "case-0002-assess-change-impact-on-oracle-topology": {
+      "context_only": {
+        "jstruct_tokens": 2226,
+        "raw_tokens": 2534,
+        "saving_fraction": 0.1215
+      },
+      "identifiers_literal": 24,
+      "identifiers_total": 24,
+      "input_sha256": "sha256:7d74ae61a8daf4d3a812ba2b11b6275005c6e9398dd0c9abe070538d5618e35d",
+      "jstruct_cold_tokens": 2586,
+      "jstruct_sha256": "sha256:e7a316e907d0c56d2042990ebd0aabe49ed45615eaf578285b75abc7c2c9227e",
+      "not_worse_than_raw": true,
+      "raw_cold_tokens": 2858,
+      "roundtrip_exact": true,
+      "saving_fraction": 0.0952
+    },
+    "case-0002-audit-r21-evidence-provenance": {
+      "context_only": {
+        "jstruct_tokens": 2770,
+        "raw_tokens": 3153,
+        "saving_fraction": 0.1215
+      },
+      "identifiers_literal": 24,
+      "identifiers_total": 24,
+      "input_sha256": "sha256:3271cfa86d6a370762dfaf4e83342311a8934ca2629d76e6ca233d76d8553a91",
+      "jstruct_cold_tokens": 3191,
+      "jstruct_sha256": "sha256:371fb0bdd3680255c8826481e129035836c3239d3d7d95902be9d6279fcb17e3",
+      "not_worse_than_raw": true,
+      "raw_cold_tokens": 3538,
+      "roundtrip_exact": true,
+      "saving_fraction": 0.0981
+    },
+    "case-0002-resume-product-integration": {
+      "context_only": {
+        "jstruct_tokens": 1556,
+        "raw_tokens": 1795,
+        "saving_fraction": 0.1331
+      },
+      "identifiers_literal": 24,
+      "identifiers_total": 24,
+      "input_sha256": "sha256:94fb8cd62b58a5823fb3c1a974177b5273c1ebc2800d499e0cab417bfac5a156",
+      "jstruct_cold_tokens": 1953,
+      "jstruct_sha256": "sha256:e866dc206a8a1d67e947e775af8aa6aa1aa1e6e38cabbe929cac41fed2b35323",
+      "not_worse_than_raw": true,
+      "raw_cold_tokens": 2156,
+      "roundtrip_exact": true,
+      "saving_fraction": 0.0942
+    }
+  },
+  "producer": {
+    "branch": "experiment/deep-protected-spans-v0",
+    "codec": "jstruct",
+    "exact_head": "0d5097a7142ae8e617c28aadc9dc6de70b1627f1",
+    "exact_tree": "e5ec86fa7178dec668a29c4072945c95eca23a90",
+    "repo": "PhysShell/qodec"
+  },
+  "producer_binary_sha256": "sha256:6611c706a546d7736dfa7c1072e4aa7367d6303763eb2ebb50c37ae6d0941378",
+  "purpose": "Determine whether exact Q1R compact JSON contains a useful reader-safe structural token win once phrase aliasing is forbidden. Model-free.",
+  "record": "o7.b1.l3a-jstruct-feasibility-receipt/v1",
+  "reference_l2_economics": {
+    "FULL_ALIAS_cold": 6651,
+    "PROTECTED_DEEP_cold": 7097,
+    "RAW_cold": 8552,
+    "note": "L1/L2 arms, same cold definition; both required a 261-token notation block"
+  },
+  "saving_fraction": 0.0961,
+  "verdict": "L3A_FEASIBLE \u2014 stop and return for L3B authorization"
+}
