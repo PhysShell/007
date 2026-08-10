@@ -21,9 +21,10 @@ use o7_a1_contracts::bounds::{
     MAX_ARTIFACT_REFS, MAX_CONTROL_ARTIFACT_BYTES, MAX_REACHABLE_CLOSURE_BYTES,
 };
 use o7_a1_contracts::{
-    parse_payload, typed_media_type, validate_document, ArtifactKindV1, ArtifactRef, BudgetPolicy,
-    BudgetPolicyError, CommitId, Digest256, EnvelopeError, EnvelopeV1, Id, MessageKindV1,
-    ParseError, ProducerRole, Text, Timestamp,
+    parse_artifact, parse_payload, typed_media_type, validate_document, AdapterVersion,
+    ArtifactKindV1, ArtifactRef, BudgetPolicy, BudgetPolicyError, CommitId, Digest256,
+    EnvelopeError, EnvelopeV1, EnvelopeVersion, Id, MessageKindV1, MessageKindVersion,
+    ModelIdentity, Optional, ParseError, ProducerRole, Timestamp,
 };
 
 fn id(s: &str) -> Id {
@@ -34,8 +35,12 @@ fn digest(seed: &str) -> Digest256 {
     Digest256::of_bytes(seed.as_bytes())
 }
 
-fn text(s: &str) -> Text {
-    Text::parse(s).expect("fixture text")
+fn adapter(s: &str) -> AdapterVersion {
+    AdapterVersion::parse(s).expect("fixture adapter version")
+}
+
+fn model(s: &str) -> ModelIdentity {
+    ModelIdentity::parse(s).expect("fixture model identity")
 }
 
 fn receipt_ref() -> ArtifactRef {
@@ -50,27 +55,27 @@ fn receipt_ref() -> ArtifactRef {
 /// A controller-produced envelope: no provider fields, no receipt ref.
 fn controller_envelope() -> EnvelopeV1 {
     EnvelopeV1 {
-        envelope_version: 1,
+        envelope_version: EnvelopeVersion::default(),
         message_kind: MessageKindV1::WorkOrder,
-        message_kind_version: 1,
+        message_kind_version: MessageKindVersion::default(),
         message_id: id("msg-1"),
         root_goal_id: id("goal-1"),
         task_id: id("task-1"),
         campaign_id: id("camp-1"),
-        round_id: Some(id("round-1")),
-        causation_id: None,
+        round_id: Optional::present(id("round-1")),
+        causation_id: Optional::absent(),
         correlation_id: id("corr-1"),
         producer_role: ProducerRole::Controller,
         producer_execution_id: id("exec-controller-1"),
-        producer_adapter_version: text("o7-controller/0.1.0"),
-        model_identity: None,
-        prompt_digest: None,
-        tool_policy_digest: None,
+        producer_adapter_version: adapter("o7-controller/0.1.0"),
+        model_identity: Optional::absent(),
+        prompt_digest: Optional::absent(),
+        tool_policy_digest: Optional::absent(),
         contract_digest: digest("contract"),
-        expected_input_head: CommitId::parse(&"a".repeat(40)).ok(),
+        expected_input_head: CommitId::parse(&"a".repeat(40)).ok().into(),
         payload_digest: Digest256::of_bytes(b"{}"),
         artifact_refs: vec![],
-        provider_execution_receipt_ref: None,
+        provider_execution_receipt_ref: Optional::absent(),
         created_at: Timestamp::parse("2026-08-09T20:00:00Z").expect("fixture timestamp"),
     }
 }
@@ -81,10 +86,10 @@ fn coder_envelope() -> EnvelopeV1 {
         message_kind: MessageKindV1::CoderReport,
         producer_role: ProducerRole::Coder,
         producer_execution_id: id("exec-coder-1"),
-        model_identity: Some(text("claude-opus-5")),
-        prompt_digest: Some(digest("prompt")),
-        tool_policy_digest: Some(digest("tool-policy")),
-        provider_execution_receipt_ref: Some(receipt_ref()),
+        model_identity: Optional::present(model("claude-opus-5")),
+        prompt_digest: Optional::present(digest("prompt")),
+        tool_policy_digest: Optional::present(digest("tool-policy")),
+        provider_execution_receipt_ref: Optional::present(receipt_ref()),
         ..controller_envelope()
     }
 }
@@ -94,24 +99,31 @@ fn coder_envelope() -> EnvelopeV1 {
 //      "refused, never best-effort parsed (FD-1.6)"
 // ---------------------------------------------------------------------------
 
+// The version is a type, so an unsupported one has no in-memory
+// representation: the only way to attempt it is over the wire, which is also
+// the only way it ever arrives.
 #[test]
 fn an_unsupported_envelope_version_is_refused() {
-    let mut env = controller_envelope();
-    env.envelope_version = 2;
-    assert!(matches!(
-        env.validate(),
-        Err(EnvelopeError::UnsupportedEnvelopeVersion { actual: 2 })
-    ));
+    let bytes = envelope_json_with("envelope_version", serde_json::json!(2));
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    // ...and through every other door as well.
+    assert!(serde_json::from_slice::<EnvelopeV1>(&bytes).is_err());
 }
 
 #[test]
 fn an_unsupported_message_kind_version_is_refused() {
-    let mut env = controller_envelope();
-    env.message_kind_version = 7;
-    assert!(matches!(
-        env.validate(),
-        Err(EnvelopeError::UnsupportedMessageKindVersion { actual: 7, .. })
-    ));
+    let bytes = envelope_json_with("message_kind_version", serde_json::json!(7));
+    assert!(parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_err());
+    assert!(serde_json::from_slice::<EnvelopeV1>(&bytes).is_err());
+}
+
+/// A serialized controller envelope with one member replaced.
+fn envelope_json_with(key: &str, value: serde_json::Value) -> Vec<u8> {
+    let mut v = serde_json::to_value(controller_envelope()).expect("fixture must serialize");
+    if let Some(map) = v.as_object_mut() {
+        map.insert(key.to_owned(), value);
+    }
+    v.to_string().into_bytes()
 }
 
 // ---------------------------------------------------------------------------
@@ -263,7 +275,7 @@ fn a_campaign_budget_above_the_hard_maximum_is_refused() {
 #[test]
 fn a_provider_artifact_without_a_receipt_ref_is_rejected() {
     let mut env = coder_envelope();
-    env.provider_execution_receipt_ref = None;
+    env.provider_execution_receipt_ref = Optional::absent();
     assert!(matches!(
         env.validate(),
         Err(EnvelopeError::MissingProviderField {
@@ -276,7 +288,7 @@ fn a_provider_artifact_without_a_receipt_ref_is_rejected() {
 #[test]
 fn a_controller_artifact_carrying_a_receipt_ref_is_rejected() {
     let mut env = controller_envelope();
-    env.provider_execution_receipt_ref = Some(receipt_ref());
+    env.provider_execution_receipt_ref = Optional::present(receipt_ref());
     assert!(matches!(
         env.validate(),
         Err(EnvelopeError::ForbiddenProviderField {
@@ -289,7 +301,7 @@ fn a_controller_artifact_carrying_a_receipt_ref_is_rejected() {
 #[test]
 fn a_controller_artifact_carrying_provider_evidence_is_rejected() {
     let mut env = controller_envelope();
-    env.model_identity = Some(text("claude-opus-5"));
+    env.model_identity = Optional::present(model("claude-opus-5"));
     assert!(matches!(
         env.validate(),
         Err(EnvelopeError::ForbiddenProviderField {
@@ -329,7 +341,7 @@ fn a_different_expected_input_head_is_a_different_identity() {
     // *possible* to decide.
     let env = controller_envelope();
     let mut moved = env.clone();
-    moved.expected_input_head = CommitId::parse(&"b".repeat(40)).ok();
+    moved.expected_input_head = CommitId::parse(&"b".repeat(40)).ok().into();
     assert_eq!(env.payload_digest, moved.payload_digest);
     assert_ne!(env.framed_digest(), moved.framed_digest());
 }
@@ -360,7 +372,7 @@ fn every_framed_field_changes_the_identity() {
     assert_ne!(d, contract.framed_digest(), "contract_digest");
 
     let mut round = base.clone();
-    round.round_id = None;
+    round.round_id = Optional::absent();
     assert_ne!(d, round.framed_digest(), "round_id absent vs present");
 
     let mut refs = base.clone();
@@ -405,4 +417,121 @@ fn the_envelope_binds_the_exact_stored_payload_bytes() {
 fn a_ref_to_an_envelope_bearing_artifact_charges_both_halves() {
     // FD-1.8: size = stored envelope bytes + stored payload bytes.
     assert_eq!(EnvelopeV1::ref_size(400, 1024), 1424);
+}
+
+// ---------------------------------------------------------------------------
+// Regressions for the review of b2ba165. Each of these passed the old test
+// suite while the defect was live, which is the more useful thing to record.
+// ---------------------------------------------------------------------------
+
+/// The advertised parse entry point must run the cross-field rules, not only
+/// the schema. Previously `parse_payload` returned `Ok` for a provider envelope
+/// with no receipt ref, so a caller who trusted the entry point held an artifact
+/// the contract forbids.
+#[test]
+fn the_admission_path_enforces_cross_field_rules() {
+    let mut env = coder_envelope();
+    env.provider_execution_receipt_ref = Optional::absent();
+    let bytes = serde_json::to_vec(&env).expect("fixture must serialize");
+
+    // The schema alone cannot see this: no single field is wrong.
+    assert!(parse_payload::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES).is_ok());
+    // The admission path can.
+    assert!(matches!(
+        parse_artifact::<EnvelopeV1>(&bytes, MAX_CONTROL_ARTIFACT_BYTES),
+        Err(ParseError::Invalid { .. })
+    ));
+}
+
+/// Reaching the typed schema through a different door must not weaken it.
+/// `serde_json::from_str` bypasses `validate_document` by construction, so every
+/// per-field rule has to live in the field's own type.
+#[test]
+fn raw_deserialization_cannot_bypass_the_per_field_rules() {
+    // Explicit null in a genuinely optional field.
+    let nulled = envelope_json_with("causation_id", serde_json::Value::Null);
+    assert!(serde_json::from_slice::<EnvelopeV1>(&nulled).is_err());
+
+    // A version the contract froze.
+    let versioned = envelope_json_with("envelope_version", serde_json::json!(2));
+    assert!(serde_json::from_slice::<EnvelopeV1>(&versioned).is_err());
+
+    // A schema-specific text bound: §3.0 caps producer_adapter_version at 128
+    // bytes, well under the global 65536-byte string bound.
+    let long_adapter = envelope_json_with(
+        "producer_adapter_version",
+        serde_json::json!("x".repeat(129)),
+    );
+    assert!(serde_json::from_slice::<EnvelopeV1>(&long_adapter).is_err());
+
+    // And model_identity at 256.
+    let mut provider = serde_json::to_value(coder_envelope()).expect("fixture must serialize");
+    if let Some(map) = provider.as_object_mut() {
+        map.insert(
+            "model_identity".to_owned(),
+            serde_json::json!("x".repeat(257)),
+        );
+    }
+    assert!(serde_json::from_str::<EnvelopeV1>(&provider.to_string()).is_err());
+
+    // An unknown field, and an unrecognised enum variant.
+    let unknown = envelope_json_with("shadow_authority", serde_json::json!(true));
+    assert!(serde_json::from_slice::<EnvelopeV1>(&unknown).is_err());
+    let future = envelope_json_with("message_kind", serde_json::json!("future_kind"));
+    assert!(serde_json::from_slice::<EnvelopeV1>(&future).is_err());
+}
+
+/// A rejected artifact is untrusted input. AGENTS.md makes credential leakage a
+/// P0, so no rejection may quote what it refused.
+#[test]
+fn a_rejected_artifact_never_appears_in_the_error() {
+    const SECRET: &str = "ghp_secret_that_must_not_reach_a_log";
+
+    let mut messages: Vec<String> = Vec::new();
+
+    let unknown_field = envelope_json_with(SECRET, serde_json::json!(SECRET));
+    if let Err(e) = parse_artifact::<EnvelopeV1>(&unknown_field, MAX_CONTROL_ARTIFACT_BYTES) {
+        messages.push(e.to_string());
+    }
+
+    let bad_variant = envelope_json_with("message_kind", serde_json::json!(SECRET));
+    if let Err(e) = parse_artifact::<EnvelopeV1>(&bad_variant, MAX_CONTROL_ARTIFACT_BYTES) {
+        messages.push(e.to_string());
+    }
+
+    let bad_scalar = envelope_json_with("message_id", serde_json::json!(SECRET.repeat(20)));
+    if let Err(e) = parse_artifact::<EnvelopeV1>(&bad_scalar, MAX_CONTROL_ARTIFACT_BYTES) {
+        messages.push(e.to_string());
+    }
+
+    let nulled_under_secret_key = format!(r#"{{"{SECRET}":null}}"#).into_bytes();
+    if let Err(e) = validate_document(&nulled_under_secret_key, MAX_CONTROL_ARTIFACT_BYTES) {
+        messages.push(e.to_string());
+    }
+
+    assert_eq!(messages.len(), 4, "every case must actually be rejected");
+    for message in messages {
+        assert!(!message.contains("ghp_"), "error leaked content: {message}");
+    }
+}
+
+/// A typed non-envelope A1 payload is bounded as a control artifact, not as an
+/// evidence blob. Previously a ref could declare a 64 MiB execution receipt and
+/// pass validation.
+#[test]
+fn a_typed_non_envelope_ref_is_bounded_as_a_control_artifact() {
+    let oversized = ArtifactRef {
+        kind: ArtifactKindV1::ProviderExecutionReceipt,
+        media_type: typed_media_type(ArtifactKindV1::ProviderExecutionReceipt, 1),
+        digest: digest("receipt"),
+        size: MAX_CONTROL_ARTIFACT_BYTES + 1,
+    };
+    assert!(oversized.validate().is_err());
+
+    let mut env = coder_envelope();
+    env.provider_execution_receipt_ref = Optional::present(oversized);
+    assert!(matches!(
+        env.validate(),
+        Err(EnvelopeError::BadReceiptRef { .. })
+    ));
 }

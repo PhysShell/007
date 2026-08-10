@@ -55,11 +55,14 @@ pub mod scalars;
 
 pub use bounds::{BudgetPolicy, BudgetPolicyError};
 pub use envelope::{
-    EnvelopeError, EnvelopeV1, CAMPAIGN_PROTOCOL_VERSION_V1, ENVELOPE_VERSION_V1,
-    MESSAGE_KIND_VERSION_V1,
+    EnvelopeError, EnvelopeV1, EnvelopeVersion, MessageKindVersion, CAMPAIGN_PROTOCOL_VERSION_V1,
+    ENVELOPE_VERSION_V1, MESSAGE_KIND_VERSION_V1,
 };
 pub use framing::Preimage;
-pub use json::{parse_payload, validate_document, ParseError};
+pub use json::{parse_artifact, parse_payload, validate_document, ParseError, WireArtifact};
 pub use kind::{ArtifactKindV1, MessageKindV1, ProducerRole};
 pub use refs::{typed_media_type, ArtifactRef, RefError};
-pub use scalars::{CommitId, Digest256, Id, ScalarError, Text, Timestamp};
+pub use scalars::{
+    AdapterVersion, BoundedText, CommitId, Digest256, FrozenVersion, Id, ModelIdentity, Optional,
+    ScalarError, Text, Timestamp,
+};

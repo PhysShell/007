@@ -6,14 +6,27 @@
 //! provider output bytes**, and the controller "never edits, re-orders,
 //! re-encodes, or enriches the body". This crate therefore never constructs a
 //! payload — it attaches, validates, and hashes.
+//!
+//! # What the type refuses, and what validation refuses
+//!
+//! Everything a single field can establish is refused by that field's own type,
+//! on every deserialization path: the frozen versions, the closed enums, the
+//! scalar bounds, and explicit `null`. What remains for [`EnvelopeV1::validate`]
+//! is only what relates two fields to each other — provider evidence required
+//! iff the producer is a provider role — plus the collection bounds. That split
+//! is deliberate: a rule that lives only in a validator holds until the first
+//! caller forgets to call it.
 
 use serde::{Deserialize, Serialize};
 
 use crate::bounds::MAX_ARTIFACT_REFS;
 use crate::framing::Preimage;
+use crate::json::WireArtifact;
 use crate::kind::{MessageKindV1, ProducerRole};
 use crate::refs::{ArtifactRef, RefError};
-use crate::scalars::{CommitId, Digest256, Id, Text, Timestamp};
+use crate::scalars::{
+    AdapterVersion, CommitId, Digest256, FrozenVersion, Id, ModelIdentity, Optional, Timestamp,
+};
 
 /// FD-1.6 — the frozen envelope framing and field set.
 pub const ENVELOPE_VERSION_V1: u32 = 1;
@@ -22,13 +35,15 @@ pub const MESSAGE_KIND_VERSION_V1: u32 = 1;
 /// FD-1.6 — the reducer semantics of FD-14.
 pub const CAMPAIGN_PROTOCOL_VERSION_V1: u32 = 1;
 
-/// An envelope that violates §3.0 or FD-1.6.
+/// The envelope version as a type: no value of it represents an unsupported
+/// version, so a deserialized envelope cannot carry one.
+pub type EnvelopeVersion = FrozenVersion<ENVELOPE_VERSION_V1>;
+/// The message-kind version as a type, for the same reason.
+pub type MessageKindVersion = FrozenVersion<MESSAGE_KIND_VERSION_V1>;
+
+/// An envelope whose fields are individually admissible but jointly are not.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum EnvelopeError {
-    #[error("unsupported envelope_version {actual}: a reader must refuse it, never parse it as well as it can")]
-    UnsupportedEnvelopeVersion { actual: u32 },
-    #[error("unsupported message_kind_version {actual} for {kind}")]
-    UnsupportedMessageKindVersion { kind: &'static str, actual: u32 },
     #[error("{field} is required for producer_role {role}")]
     MissingProviderField {
         field: &'static str,
@@ -63,34 +78,34 @@ pub enum EnvelopeError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EnvelopeV1 {
-    pub envelope_version: u32,
+    pub envelope_version: EnvelopeVersion,
     pub message_kind: MessageKindV1,
-    pub message_kind_version: u32,
+    pub message_kind_version: MessageKindVersion,
     pub message_id: Id,
     pub root_goal_id: Id,
     pub task_id: Id,
     pub campaign_id: Id,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub round_id: Option<Id>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub causation_id: Option<Id>,
+    #[serde(default, skip_serializing_if = "Optional::is_absent")]
+    pub round_id: Optional<Id>,
+    #[serde(default, skip_serializing_if = "Optional::is_absent")]
+    pub causation_id: Optional<Id>,
     pub correlation_id: Id,
     pub producer_role: ProducerRole,
     pub producer_execution_id: Id,
-    pub producer_adapter_version: Text,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub model_identity: Option<Text>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub prompt_digest: Option<Digest256>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub tool_policy_digest: Option<Digest256>,
+    pub producer_adapter_version: AdapterVersion,
+    #[serde(default, skip_serializing_if = "Optional::is_absent")]
+    pub model_identity: Optional<ModelIdentity>,
+    #[serde(default, skip_serializing_if = "Optional::is_absent")]
+    pub prompt_digest: Optional<Digest256>,
+    #[serde(default, skip_serializing_if = "Optional::is_absent")]
+    pub tool_policy_digest: Optional<Digest256>,
     pub contract_digest: Digest256,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub expected_input_head: Option<CommitId>,
+    #[serde(default, skip_serializing_if = "Optional::is_absent")]
+    pub expected_input_head: Optional<CommitId>,
     pub payload_digest: Digest256,
     pub artifact_refs: Vec<ArtifactRef>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub provider_execution_receipt_ref: Option<ArtifactRef>,
+    #[serde(default, skip_serializing_if = "Optional::is_absent")]
+    pub provider_execution_receipt_ref: Optional<ArtifactRef>,
     pub created_at: Timestamp,
 }
 
@@ -104,9 +119,9 @@ impl EnvelopeV1 {
     #[must_use]
     pub fn framed_digest(&self) -> Digest256 {
         let mut p = Preimage::new(b"o7-a1-envelope\0v1\0");
-        p.frame_u32(self.envelope_version)
+        p.frame_u32(self.envelope_version.get())
             .frame_str(self.message_kind.name())
-            .frame_u32(self.message_kind_version)
+            .frame_u32(self.message_kind_version.get())
             .frame_str(self.message_id.as_str())
             .frame_str(self.root_goal_id.as_str())
             .frame_str(self.task_id.as_str())
@@ -117,7 +132,7 @@ impl EnvelopeV1 {
             .frame_str(self.producer_role.name())
             .frame_str(self.producer_execution_id.as_str())
             .frame_str(self.producer_adapter_version.as_str())
-            .frame_optional_str(self.model_identity.as_ref().map(Text::as_str))
+            .frame_optional_str(self.model_identity.as_ref().map(ModelIdentity::as_str))
             .frame_optional_str(self.prompt_digest.as_ref().map(Digest256::as_str))
             .frame_optional_str(self.tool_policy_digest.as_ref().map(Digest256::as_str))
             .frame_str(self.contract_digest.as_str())
@@ -138,33 +153,21 @@ impl EnvelopeV1 {
         p.digest()
     }
 
-    /// §3.0 and FD-1.6 structural validation.
+    /// §3.0 cross-field validation: the rules no single field can see.
     ///
     /// # Errors
-    /// [`EnvelopeError`] for an unsupported version, a provider-only field on a
-    /// non-provider role (or missing on a provider role), or a bad ref.
+    /// [`EnvelopeError`] for provider-only evidence on a non-provider role (or
+    /// missing on a provider role), too many refs, or a bad ref.
     pub fn validate(&self) -> Result<(), EnvelopeError> {
-        if self.envelope_version != ENVELOPE_VERSION_V1 {
-            return Err(EnvelopeError::UnsupportedEnvelopeVersion {
-                actual: self.envelope_version,
-            });
-        }
-        if self.message_kind_version != MESSAGE_KIND_VERSION_V1 {
-            return Err(EnvelopeError::UnsupportedMessageKindVersion {
-                kind: self.message_kind.name(),
-                actual: self.message_kind_version,
-            });
-        }
-
         let role = self.producer_role;
         let provider = role.is_provider_role();
         for (field, present) in [
-            ("model_identity", self.model_identity.is_some()),
-            ("prompt_digest", self.prompt_digest.is_some()),
-            ("tool_policy_digest", self.tool_policy_digest.is_some()),
+            ("model_identity", self.model_identity.is_present()),
+            ("prompt_digest", self.prompt_digest.is_present()),
+            ("tool_policy_digest", self.tool_policy_digest.is_present()),
             (
                 "provider_execution_receipt_ref",
-                self.provider_execution_receipt_ref.is_some(),
+                self.provider_execution_receipt_ref.is_present(),
             ),
         ] {
             match (provider, present) {
@@ -193,7 +196,7 @@ impl EnvelopeV1 {
             r.validate()
                 .map_err(|source| EnvelopeError::BadRef { index, source })?;
         }
-        if let Some(r) = &self.provider_execution_receipt_ref {
+        if let Some(r) = self.provider_execution_receipt_ref.as_ref() {
             r.validate()
                 .map_err(|source| EnvelopeError::BadReceiptRef { source })?;
         }
@@ -214,5 +217,13 @@ impl EnvelopeV1 {
     #[must_use]
     pub fn ref_size(envelope_bytes: u64, payload_bytes: u64) -> u64 {
         envelope_bytes.saturating_add(payload_bytes)
+    }
+}
+
+impl WireArtifact for EnvelopeV1 {
+    fn validate_wire(&self) -> Result<(), String> {
+        // `EnvelopeError` names field names and roles, both of which are frozen
+        // protocol vocabulary rather than payload content.
+        self.validate().map_err(|e| e.to_string())
     }
 }

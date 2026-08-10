@@ -84,14 +84,34 @@ impl ArtifactRef {
 
     /// The FD-1.4 per-object maximum that applies to this ref's target.
     ///
-    /// An envelope-bearing artifact's `size` covers envelope **and** payload
-    /// (FD-1.8), so the control-artifact bound applies to the payload half and
-    /// the envelope is allowed on top of it; the evidence-blob bound applies to
-    /// everything else.
+    /// FD-1.4 bounds "control artifact payload (any typed A1 payload)" at 1 MiB
+    /// and "single evidence blob" at 64 MiB, so which bound applies is decided
+    /// by what the referenced object *is*:
+    ///
+    /// - **envelope-bearing** — the ref's `size` covers envelope **and** payload
+    ///   (FD-1.8) and both halves are typed A1 payloads, so the bound is twice
+    ///   the control-artifact maximum. Derived from that constant rather than
+    ///   written as a literal: an allowance that happens to equal 1 MiB today
+    ///   because some unrelated constant does is not a bound, it is a
+    ///   coincidence;
+    /// - **typed non-envelope A1 payload** — the execution receipt, the scope
+    ///   contract and a campaign event payload are typed A1 payloads and get the
+    ///   control-artifact maximum. Without this they would inherit 64 MiB and a
+    ///   closure resolution could be charged, and then read, sixty-four times
+    ///   what the contract permits for a typed object;
+    /// - **everything else** — evidence blobs and imported A0 objects.
+    ///
+    /// `interaction_manifest` is deliberately in the last group: FD-1.4 names
+    /// "manifest" explicitly in its evidence-blob line, and its 4096 permitted
+    /// `interaction_sequence` entries would sit uncomfortably against a 1 MiB
+    /// ceiling. That reading is worth re-checking against the contract if the
+    /// manifest schema ever grows a tighter obligation.
     #[must_use]
     fn max_size(&self) -> u64 {
         if self.kind.is_envelope_bearing() {
-            MAX_CONTROL_ARTIFACT_BYTES.saturating_add(MAX_EVIDENCE_BLOB_BYTES.min(1 << 20))
+            MAX_CONTROL_ARTIFACT_BYTES.saturating_mul(2)
+        } else if self.kind.is_typed_payload() {
+            MAX_CONTROL_ARTIFACT_BYTES
         } else {
             MAX_EVIDENCE_BLOB_BYTES
         }
@@ -151,6 +171,61 @@ mod tests {
             evidence_ref(MAX_EVIDENCE_BLOB_BYTES + 1).validate(),
             Err(RefError::SizeAboveBound { .. })
         ));
+    }
+
+    fn ref_of(kind: ArtifactKindV1, size: u64) -> ArtifactRef {
+        ArtifactRef {
+            kind,
+            media_type: typed_media_type(kind, 1),
+            digest: digest(),
+            size,
+        }
+    }
+
+    #[test]
+    fn an_envelope_bearing_ref_is_bounded_by_both_halves() {
+        // FD-1.8: size covers envelope + payload, each a typed A1 payload.
+        let max = MAX_CONTROL_ARTIFACT_BYTES * 2;
+        assert!(ref_of(ArtifactKindV1::WorkOrder, max).validate().is_ok());
+        assert!(matches!(
+            ref_of(ArtifactKindV1::WorkOrder, max + 1).validate(),
+            Err(RefError::SizeAboveBound { .. })
+        ));
+    }
+
+    #[test]
+    fn a_typed_non_envelope_payload_gets_the_control_bound_not_the_blob_bound() {
+        // Without this, a ref could declare a 64 MiB execution receipt and the
+        // resolver would charge and then read sixty-four times what FD-1.4
+        // permits for a typed object.
+        for kind in [
+            ArtifactKindV1::ProviderExecutionReceipt,
+            ArtifactKindV1::ScopeContract,
+            ArtifactKindV1::CampaignEventPayload,
+        ] {
+            assert!(
+                ref_of(kind, MAX_CONTROL_ARTIFACT_BYTES).validate().is_ok(),
+                "{kind:?} should be admissible at the control bound"
+            );
+            assert!(
+                matches!(
+                    ref_of(kind, MAX_CONTROL_ARTIFACT_BYTES + 1).validate(),
+                    Err(RefError::SizeAboveBound { .. })
+                ),
+                "{kind:?} must be refused above the control bound"
+            );
+        }
+    }
+
+    #[test]
+    fn an_interaction_manifest_keeps_the_evidence_bound() {
+        // FD-1.4 names "manifest" in its evidence-blob line; recorded as a test
+        // so the reading is visible rather than implied by an absent branch.
+        assert!(
+            ref_of(ArtifactKindV1::InteractionManifest, MAX_EVIDENCE_BLOB_BYTES)
+                .validate()
+                .is_ok()
+        );
     }
 
     #[test]

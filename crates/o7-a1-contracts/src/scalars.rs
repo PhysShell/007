@@ -4,14 +4,38 @@
 //! `o7_run::event::Digest256::of_bytes` as *the* form for an A1 payload digest,
 //! and a parallel type would be a second spelling of one truth — the failure
 //! FD-2.4 rejects for imported kinds, applied to a scalar.
+//!
+//! # Constraints live in the types, not in a validation step someone must run
+//!
+//! Every type here rejects an inadmissible value **at deserialization**, so
+//! there is no path — including `serde_json::from_str` on a wire type — that
+//! produces a value violating its §3 constraint. A rule enforced only by a
+//! separate `validate()` call is a rule that holds until the first caller
+//! forgets, and a wire contract does not get to depend on that.
+//!
+//! # Errors never echo payload content
+//!
+//! A rejected artifact is untrusted input, and AGENTS.md forbids agent output
+//! that may contain secrets from reaching logs or error strings. So these errors
+//! report *shape* — lengths, positions, expectations — and never the offending
+//! value. An error that quotes what it refused is a channel for moving the thing
+//! it refused somewhere it is written down.
 
-use serde::{Deserialize, Serialize};
+use std::marker::PhantomData;
+
+use serde::{Deserialize, Serialize, Serializer};
 
 use crate::bounds::{MAX_ID_BYTES, MAX_STRING_BYTES};
 
 pub use o7_run::event::{Digest256, DigestFormatError};
 
+/// §3 — RFC 3339 timestamps are metadata only; this is a generous shape bound,
+/// not a calendar check (FD-5.4).
+pub const MAX_TIMESTAMP_BYTES: usize = 64;
+
 /// A scalar that violates its §3 constraint.
+///
+/// No variant carries the rejected value.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ScalarError {
     #[error("an Id must be a non-empty UTF-8 string")]
@@ -22,10 +46,10 @@ pub enum ScalarError {
     TextTooLong { actual: usize, max: usize },
     #[error("a CommitId must be a non-empty full object id, never abbreviated")]
     EmptyCommitId,
-    #[error("a CommitId must not be abbreviated: {value:?} is {actual} chars, expected 40 or 64")]
-    AbbreviatedCommitId { value: String, actual: usize },
-    #[error("a CommitId must be lowercase hex: {value:?}")]
-    NonHexCommitId { value: String },
+    #[error("a CommitId must not be abbreviated: got {actual} chars, expected 40 or 64")]
+    AbbreviatedCommitId { actual: usize },
+    #[error("a CommitId must be lowercase hex; a non-hex byte appears at offset {offset}")]
+    NonHexCommitId { offset: usize },
 }
 
 /// §3 — "opaque non-empty UTF-8 string, never parsed for meaning", ≤ 256 bytes.
@@ -65,25 +89,26 @@ impl<'de> Deserialize<'de> for Id {
     }
 }
 
-/// §3 — UTF-8 string, ≤ 65536 bytes unless a schema states a tighter bound.
+/// §3 — UTF-8 string bounded by `MAX` bytes.
+///
+/// The bound is a type parameter rather than a runtime argument so a
+/// schema-specific limit — `producer_adapter_version` at 128 bytes,
+/// `model_identity` at 256 (§3.0) — is enforced by the field's own type on every
+/// deserialization path, not by a validator a caller may skip.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
-pub struct Text(String);
+pub struct BoundedText<const MAX: usize>(String);
 
-impl Text {
+impl<const MAX: usize> BoundedText<MAX> {
     /// # Errors
-    /// [`ScalarError::TextTooLong`] above the FD-1.4 string bound.
+    /// [`ScalarError::TextTooLong`] above `MAX` (or above the global FD-1.4
+    /// string bound, whichever is smaller).
     pub fn parse(s: &str) -> Result<Self, ScalarError> {
-        Self::parse_bounded(s, MAX_STRING_BYTES)
-    }
-
-    /// Parse with a schema-specific tighter bound, e.g. `producer_adapter_version`
-    /// at 128 bytes or `model_identity` at 256 (§3.0).
-    ///
-    /// # Errors
-    /// [`ScalarError::TextTooLong`] above `max`.
-    pub fn parse_bounded(s: &str, max: usize) -> Result<Self, ScalarError> {
-        let max = max.min(MAX_STRING_BYTES);
+        let max = if MAX < MAX_STRING_BYTES {
+            MAX
+        } else {
+            MAX_STRING_BYTES
+        };
         if s.len() > max {
             return Err(ScalarError::TextTooLong {
                 actual: s.len(),
@@ -99,7 +124,7 @@ impl Text {
     }
 }
 
-impl<'de> Deserialize<'de> for Text {
+impl<'de, const MAX: usize> Deserialize<'de> for BoundedText<MAX> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -108,6 +133,16 @@ impl<'de> Deserialize<'de> for Text {
         Self::parse(&raw).map_err(serde::de::Error::custom)
     }
 }
+
+/// §3 — `Text`: UTF-8 string, ≤ 65536 bytes unless a schema states tighter.
+pub type Text = BoundedText<MAX_STRING_BYTES>;
+
+/// §3.0 — `producer_adapter_version`, ≤ 128 bytes.
+pub type AdapterVersion = BoundedText<128>;
+
+/// §3.0 — `model_identity`, ≤ 256 bytes. "Logical identity for routing/policy,
+/// **not** runtime evidence."
+pub type ModelIdentity = BoundedText<256>;
 
 /// §3 — "full object id, the repository's object-format width", never
 /// abbreviated (`docs/decision-and-admission-protocol.md` §4).
@@ -128,17 +163,13 @@ impl CommitId {
         }
         if s.len() != 40 && s.len() != 64 {
             return Err(ScalarError::AbbreviatedCommitId {
-                value: s.to_owned(),
                 actual: s.chars().count(),
             });
         }
-        if !s
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        {
-            return Err(ScalarError::NonHexCommitId {
-                value: s.to_owned(),
-            });
+        for (offset, b) in s.bytes().enumerate() {
+            if !(b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+                return Err(ScalarError::NonHexCommitId { offset });
+            }
         }
         Ok(Self(s.to_owned()))
     }
@@ -161,22 +192,22 @@ impl<'de> Deserialize<'de> for CommitId {
 
 /// §3 — RFC 3339 UTC, metadata only (FD-5.4), excluded from every framing.
 ///
-/// Deliberately not parsed into a calendar type. It authorizes nothing, it is
-/// never compared for ordering by anything in A1, and giving it a rich type
-/// would invite exactly the reasoning FD-5.4 forbids.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// Deliberately not parsed into a calendar type. It authorizes nothing, nothing
+/// in A1 orders by it, and a rich type would invite exactly the reasoning FD-5.4
+/// forbids.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct Timestamp(String);
 
 impl Timestamp {
     /// # Errors
-    /// [`ScalarError::TextTooLong`] above a generous fixed bound; the value is
+    /// [`ScalarError::TextTooLong`] above [`MAX_TIMESTAMP_BYTES`]; the value is
     /// otherwise opaque.
     pub fn parse(s: &str) -> Result<Self, ScalarError> {
-        if s.len() > 64 {
+        if s.len() > MAX_TIMESTAMP_BYTES {
             return Err(ScalarError::TextTooLong {
                 actual: s.len(),
-                max: 64,
+                max: MAX_TIMESTAMP_BYTES,
             });
         }
         Ok(Self(s.to_owned()))
@@ -188,6 +219,147 @@ impl Timestamp {
     }
 }
 
+impl<'de> Deserialize<'de> for Timestamp {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(&raw).map_err(serde::de::Error::custom)
+    }
+}
+
+/// FD-1.6 — a version field frozen at exactly `V`.
+///
+/// "An unrecognized value of any of them is refused; the artifact is never
+/// parsed 'as well as we can'." Making that a type rather than a check means a
+/// deserialized artifact **cannot** carry an unsupported version: there is no
+/// value of this type that represents one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct FrozenVersion<const V: u32>;
+
+impl<const V: u32> FrozenVersion<V> {
+    /// The frozen value, for framing (FD-1.2 frames it as `to_le_bytes`).
+    pub const VALUE: u32 = V;
+
+    #[must_use]
+    pub fn get(self) -> u32 {
+        V
+    }
+}
+
+impl<const V: u32> Serialize for FrozenVersion<V> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_u32(V)
+    }
+}
+
+impl<'de, const V: u32> Deserialize<'de> for FrozenVersion<V> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = u32::deserialize(deserializer)?;
+        if raw == V {
+            Ok(Self)
+        } else {
+            // The number is the peer's own version claim, not payload content:
+            // safe to name, and useless to withhold.
+            Err(serde::de::Error::custom(format!(
+                "unsupported version {raw}, expected {V}: refused rather than parsed as well as we can (FD-1.6)"
+            )))
+        }
+    }
+}
+
+/// FD-1.3 — an optional A1 field: **absent, or carrying a value**.
+///
+/// "Explicit JSON `null` is rejected at parse time. There is no field in this
+/// contract where `null` and absent mean different things, because that
+/// distinction has never once been worth what it costs."
+///
+/// `Option<T>` cannot express that: serde maps `null` to `None`, so a type using
+/// it silently accepts the one encoding the contract forbids. This type has no
+/// representation for `null`, which is why the rejection cannot be bypassed by
+/// reaching the typed schema through a different door.
+///
+/// Use with `#[serde(default, skip_serializing_if = "Optional::is_absent")]`:
+/// serde then supplies the default when the key is absent and calls this
+/// deserializer only when the key is present — so a `null` token here always
+/// means an explicit null was written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Optional<T>(Option<T>, PhantomData<T>);
+
+impl<T> Default for Optional<T> {
+    fn default() -> Self {
+        Self(None, PhantomData)
+    }
+}
+
+impl<T> Optional<T> {
+    #[must_use]
+    pub fn absent() -> Self {
+        Self(None, PhantomData)
+    }
+
+    #[must_use]
+    pub fn present(value: T) -> Self {
+        Self(Some(value), PhantomData)
+    }
+
+    #[must_use]
+    pub fn is_absent(&self) -> bool {
+        self.0.is_none()
+    }
+
+    #[must_use]
+    pub fn is_present(&self) -> bool {
+        self.0.is_some()
+    }
+
+    #[must_use]
+    pub fn as_ref(&self) -> Option<&T> {
+        self.0.as_ref()
+    }
+}
+
+impl<T> From<Option<T>> for Optional<T> {
+    fn from(v: Option<T>) -> Self {
+        Self(v, PhantomData)
+    }
+}
+
+impl<T: Serialize> Serialize for Optional<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match &self.0 {
+            // Only reachable when a caller serializes without
+            // `skip_serializing_if`; emitting a null would produce bytes this
+            // crate refuses to read back, so the write side fails instead.
+            None => Err(serde::ser::Error::custom(
+                "an absent optional is omitted, never written as null (FD-1.3)",
+            )),
+            Some(v) => v.serialize(serializer),
+        }
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Optional<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // `Option<T>` maps a null token to `None`. Because the field carries
+        // `#[serde(default)]`, an absent key never reaches this function — so
+        // `None` here can only mean an explicit null was on the wire.
+        match Option::<T>::deserialize(deserializer)? {
+            Some(v) => Ok(Self::present(v)),
+            None => Err(serde::de::Error::custom(
+                "explicit JSON null is rejected (FD-1.3): an optional field is absent or carries a value",
+            )),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,9 +368,8 @@ mod tests {
     fn an_id_is_bounded_and_non_empty() {
         assert_eq!(Id::parse(""), Err(ScalarError::EmptyId));
         assert!(Id::parse("m-1").is_ok());
-        let long = "x".repeat(MAX_ID_BYTES + 1);
         assert!(matches!(
-            Id::parse(&long),
+            Id::parse(&"x".repeat(MAX_ID_BYTES + 1)),
             Err(ScalarError::IdTooLong { .. })
         ));
         assert!(Id::parse(&"x".repeat(MAX_ID_BYTES)).is_ok());
@@ -206,12 +377,11 @@ mod tests {
 
     #[test]
     fn a_commit_id_may_not_be_abbreviated() {
-        let full = "a".repeat(40);
-        assert!(CommitId::parse(&full).is_ok());
+        assert!(CommitId::parse(&"a".repeat(40)).is_ok());
         assert!(CommitId::parse(&"a".repeat(64)).is_ok());
         assert!(matches!(
             CommitId::parse("a4a9f97"),
-            Err(ScalarError::AbbreviatedCommitId { .. })
+            Err(ScalarError::AbbreviatedCommitId { actual: 7 })
         ));
     }
 
@@ -219,21 +389,89 @@ mod tests {
     fn a_commit_id_must_be_lowercase_hex() {
         assert!(matches!(
             CommitId::parse(&"A".repeat(40)),
-            Err(ScalarError::NonHexCommitId { .. })
+            Err(ScalarError::NonHexCommitId { offset: 0 })
         ));
         assert!(matches!(
-            CommitId::parse(&"z".repeat(40)),
-            Err(ScalarError::NonHexCommitId { .. })
+            CommitId::parse(&format!("{}z{}", "a".repeat(10), "a".repeat(29))),
+            Err(ScalarError::NonHexCommitId { offset: 10 })
         ));
     }
 
+    // AGENTS.md P0: nothing that may carry a secret reaches an error string. A
+    // rejected value is untrusted input, so the error names shape only.
     #[test]
-    fn text_honours_a_schema_specific_tighter_bound() {
-        assert!(Text::parse_bounded(&"x".repeat(128), 128).is_ok());
-        assert!(matches!(
-            Text::parse_bounded(&"x".repeat(129), 128),
-            Err(ScalarError::TextTooLong { max: 128, .. })
-        ));
+    fn a_scalar_error_never_quotes_the_rejected_value() {
+        let secret = "ghp_totally_a_secret_value_that_must_not_be_logged";
+        for message in [
+            CommitId::parse(secret).err().map(|e| e.to_string()),
+            Id::parse(&secret.repeat(20)).err().map(|e| e.to_string()),
+            Text::parse(&secret.repeat(2000))
+                .err()
+                .map(|e| e.to_string()),
+            Timestamp::parse(&secret.repeat(4))
+                .err()
+                .map(|e| e.to_string()),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert!(
+                !message.contains("ghp_"),
+                "error leaked the rejected value: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bounded_text_enforces_its_schema_specific_limit_on_the_wire() {
+        assert!(
+            serde_json::from_str::<AdapterVersion>(&format!("\"{}\"", "x".repeat(128))).is_ok()
+        );
+        assert!(
+            serde_json::from_str::<AdapterVersion>(&format!("\"{}\"", "x".repeat(129))).is_err()
+        );
+        assert!(serde_json::from_str::<ModelIdentity>(&format!("\"{}\"", "x".repeat(256))).is_ok());
+        assert!(
+            serde_json::from_str::<ModelIdentity>(&format!("\"{}\"", "x".repeat(257))).is_err()
+        );
+    }
+
+    #[test]
+    fn a_timestamp_is_bounded_on_the_wire_not_only_through_parse() {
+        let long = format!("\"{}\"", "x".repeat(MAX_TIMESTAMP_BYTES + 1));
+        assert!(serde_json::from_str::<Timestamp>(&long).is_err());
+        assert!(serde_json::from_str::<Timestamp>("\"2026-08-09T20:00:00Z\"").is_ok());
+    }
+
+    #[test]
+    fn a_frozen_version_refuses_any_other_value() {
+        assert!(serde_json::from_str::<FrozenVersion<1>>("1").is_ok());
+        assert!(serde_json::from_str::<FrozenVersion<1>>("2").is_err());
+        assert!(serde_json::from_str::<FrozenVersion<1>>("0").is_err());
+        assert_eq!(
+            serde_json::to_string(&FrozenVersion::<1>).unwrap_or_default(),
+            "1"
+        );
+    }
+
+    #[test]
+    fn an_optional_rejects_an_explicit_null() {
+        #[derive(Debug, Deserialize)]
+        struct Holder {
+            #[serde(default)]
+            field: Optional<String>,
+        }
+        let absent: Holder = serde_json::from_str("{}").unwrap_or_else(|_| Holder {
+            field: Optional::present("wrong".to_owned()),
+        });
+        assert!(absent.field.is_absent());
+
+        let present: Holder = serde_json::from_str(r#"{"field":"v"}"#).unwrap_or_else(|_| Holder {
+            field: Optional::absent(),
+        });
+        assert!(present.field.is_present());
+
+        assert!(serde_json::from_str::<Holder>(r#"{"field":null}"#).is_err());
     }
 
     #[test]

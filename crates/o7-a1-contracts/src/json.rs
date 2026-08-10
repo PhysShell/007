@@ -1,16 +1,43 @@
-//! FD-1.3 encoding and null policy, and the document-level half of FD-1.4.
+//! FD-1.3 encoding and null policy, the document-level half of FD-1.4, and the
+//! crate's single admission path.
 //!
 //! These rules are stated once, globally, because the contract states them once,
 //! globally: "One uniform null policy, everywhere in A1", and the FD-1.4 bounds
 //! on depth, array length and string length apply to *any* array and *any*
-//! string field. Enforcing them as a single pass over the document — before any
-//! typed deserialization — means a new payload schema inherits them by existing,
-//! rather than by an author remembering a `#[serde(...)]` attribute on each
-//! optional field.
+//! string field.
 //!
 //! The rejection is always total. FD-1.4: "Exceeding any bound is a parse-time
 //! rejection, never a truncation. A truncated artifact that still parses is the
 //! failure mode these bounds exist to forbid."
+//!
+//! # Two layers, and why neither is sufficient alone
+//!
+//! ```text
+//! validate_document   byte- and value-level rules that only the raw bytes
+//!                     can establish: UTF-8, no BOM, payload byte bound,
+//!                     nesting depth, array length, string length
+//! the typed schema    everything a field's own type can refuse: closed
+//!                     enums, unknown fields, frozen versions, scalar
+//!                     bounds, and explicit null via `Optional`
+//! validate_wire       cross-field rules no single field can see, e.g.
+//!                     provider evidence required iff the role is a
+//!                     provider role
+//! ```
+//!
+//! [`parse_artifact`] runs all three. The typed layer is deliberately *also*
+//! strict on its own, so a caller reaching a wire type through a different door
+//! — `serde_json::from_str` — still cannot construct one that violates a
+//! per-field rule. Only the byte-level rules and the cross-field rules need the
+//! admission path, and both are properties no individual field can check.
+//!
+//! # Errors never carry payload content
+//!
+//! AGENTS.md makes credential leakage a P0, and a rejected artifact is untrusted
+//! input that may contain anything. So a `ParseError` reports position and
+//! shape, never the offending key or value: object members appear in paths as
+//! `*` rather than by name, and a schema mismatch reports the serde *category*
+//! and location instead of a message that would quote the unknown field or the
+//! unrecognised enum variant.
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -18,14 +45,20 @@ use serde_json::Value;
 use crate::bounds::{MAX_ARRAY_LEN, MAX_JSON_DEPTH, MAX_STRING_BYTES};
 
 /// A payload that is refused at ingest.
+///
+/// No variant carries payload content — see the module note.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ParseError {
     #[error("payload bytes are not valid UTF-8")]
     NotUtf8,
     #[error("payload begins with a UTF-8 BOM")]
     LeadingBom,
-    #[error("payload is not well-formed JSON: {message}")]
-    NotJson { message: String },
+    #[error("payload is not well-formed JSON ({category}) at line {line}, column {column}")]
+    NotJson {
+        category: &'static str,
+        line: usize,
+        column: usize,
+    },
     #[error("payload top-level value is not an object")]
     NotAnObject,
     #[error("explicit JSON null at {path}: an optional field is absent or carries a value")]
@@ -38,16 +71,29 @@ pub enum ParseError {
     StringTooLong { path: String, actual: usize },
     #[error("payload exceeds its {max}-byte bound at {actual} bytes")]
     PayloadTooLarge { actual: usize, max: u64 },
-    #[error("payload does not match the schema of its declared kind: {message}")]
-    SchemaMismatch { message: String },
+    #[error("payload does not match the schema of its declared kind ({category})")]
+    SchemaMismatch { category: &'static str },
+    #[error("artifact is structurally invalid: {reason}")]
+    Invalid { reason: String },
+}
+
+/// The cross-field rules of a wire artifact — the ones no single field can
+/// check, because they relate two fields to each other.
+///
+/// Implemented by every envelope-bearing type so [`parse_artifact`] can enforce
+/// them without each caller remembering to.
+pub trait WireArtifact: Sized {
+    /// # Errors
+    /// A human-readable reason. Implementations must not quote payload content.
+    fn validate_wire(&self) -> Result<(), String>;
 }
 
 /// Validate stored payload bytes as an A1 JSON document, without yet knowing
 /// which schema they claim to satisfy.
 ///
-/// Applies, in order: UTF-8, no BOM, well-formed JSON with no trailing data,
-/// top-level object, then a single walk enforcing the null policy and the
-/// document-level bounds.
+/// Applies, in order: the byte bound, UTF-8, no BOM, well-formed JSON with no
+/// trailing data, top-level object, then a single walk enforcing nesting depth,
+/// array length and string length.
 ///
 /// # Errors
 /// [`ParseError`] for the first violation found.
@@ -65,7 +111,9 @@ pub fn validate_document(bytes: &[u8], max_bytes: u64) -> Result<Value, ParseErr
         return Err(ParseError::LeadingBom);
     }
     let value: Value = serde_json::from_str(text).map_err(|e| ParseError::NotJson {
-        message: e.to_string(),
+        category: classify(&e),
+        line: e.line(),
+        column: e.column(),
     })?;
     if !value.is_object() {
         return Err(ParseError::NotAnObject);
@@ -74,18 +122,48 @@ pub fn validate_document(bytes: &[u8], max_bytes: u64) -> Result<Value, ParseErr
     Ok(value)
 }
 
-/// Validate the document and then deserialize it under a typed schema.
+/// The full admission path: document rules, then the typed schema, then the
+/// artifact's cross-field rules.
 ///
-/// The typed layer carries `#[serde(deny_unknown_fields)]` and closed enums
-/// (FD-1.6), so an unknown field or an unrecognised variant fails here.
+/// # Errors
+/// [`ParseError`] from any of the three layers.
+pub fn parse_artifact<T: DeserializeOwned + WireArtifact>(
+    bytes: &[u8],
+    max_bytes: u64,
+) -> Result<T, ParseError> {
+    let parsed: T = parse_payload(bytes, max_bytes)?;
+    parsed
+        .validate_wire()
+        .map_err(|reason| ParseError::Invalid { reason })?;
+    Ok(parsed)
+}
+
+/// Document rules, then the typed schema — for payloads that have no cross-field
+/// rules of their own.
+///
+/// Prefer [`parse_artifact`] for anything implementing [`WireArtifact`]: this
+/// function cannot know that a type has cross-field obligations, and silently
+/// skipping them is exactly the gap an admission path exists to close.
 ///
 /// # Errors
 /// [`ParseError`] from either the document rules or the schema.
 pub fn parse_payload<T: DeserializeOwned>(bytes: &[u8], max_bytes: u64) -> Result<T, ParseError> {
     let value = validate_document(bytes, max_bytes)?;
     serde_json::from_value(value).map_err(|e| ParseError::SchemaMismatch {
-        message: e.to_string(),
+        category: classify(&e),
     })
+}
+
+/// The serde error *category*, which describes the failure without quoting the
+/// input that caused it. `serde_json`'s `Display` embeds the unknown field name
+/// and the unrecognised enum variant verbatim, so it is never propagated.
+fn classify(e: &serde_json::Error) -> &'static str {
+    match e.classify() {
+        serde_json::error::Category::Io => "io",
+        serde_json::error::Category::Syntax => "syntax",
+        serde_json::error::Category::Data => "data",
+        serde_json::error::Category::Eof => "eof",
+    }
 }
 
 fn walk(value: &Value, path: &str, depth: usize) -> Result<(), ParseError> {
@@ -116,13 +194,16 @@ fn walk(value: &Value, path: &str, depth: usize) -> Result<(), ParseError> {
                 });
             }
             for (i, item) in items.iter().enumerate() {
+                // An array index is a position, not content: safe to name.
                 walk(item, &format!("{path}[{i}]"), depth + 1)?;
             }
             Ok(())
         }
         Value::Object(map) => {
-            for (k, v) in map {
-                walk(v, &format!("{path}.{k}"), depth + 1)?;
+            for v in map.values() {
+                // An object member name is untrusted payload content, so the
+                // path records that a member was traversed, not which one.
+                walk(v, &format!("{path}.*"), depth + 1)?;
             }
             Ok(())
         }
@@ -225,5 +306,60 @@ mod tests {
             validate_document(&big, 8),
             Err(ParseError::PayloadTooLarge { max: 8, .. })
         ));
+    }
+
+    // AGENTS.md P0. A rejected payload is untrusted input; an error that quotes
+    // it is a channel for moving a secret into a log.
+    #[test]
+    fn an_error_never_quotes_an_object_key_or_value() {
+        const SECRET_KEY: &str = "ghp_secret_key_name";
+        const SECRET_VALUE: &str = "ghp_secret_field_value";
+
+        let null_under_secret_key = format!(r#"{{"{SECRET_KEY}":null}}"#);
+        let long_string_under_secret_key = format!(
+            r#"{{"{SECRET_KEY}":"{}"}}"#,
+            "x".repeat(MAX_STRING_BYTES + 1)
+        );
+        let secret_value_in_array =
+            format!(r#"{{"a":[{}]}}"#, vec!["1"; MAX_ARRAY_LEN + 1].join(","));
+
+        for message in [
+            check(&null_under_secret_key).err().map(|e| e.to_string()),
+            check(&long_string_under_secret_key)
+                .err()
+                .map(|e| e.to_string()),
+            check(&secret_value_in_array).err().map(|e| e.to_string()),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            assert!(!message.contains("ghp_"), "error leaked content: {message}");
+        }
+
+        // The schema layer is the other half: serde's own Display embeds the
+        // unknown field name and the unrecognised enum variant verbatim.
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Strict {
+            #[allow(dead_code)]
+            known: u32,
+        }
+        let unknown_field = format!(r#"{{"known":1,"{SECRET_KEY}":"{SECRET_VALUE}"}}"#);
+        let err = parse_payload::<Strict>(unknown_field.as_bytes(), MAX_CONTROL_ARTIFACT_BYTES)
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
+        assert!(!err.contains("ghp_"), "schema error leaked content: {err}");
+        assert!(err.contains("data"), "category should be reported: {err}");
+    }
+
+    #[test]
+    fn a_syntax_error_reports_position_without_the_source_text() {
+        let err = check(r#"{"a":"ghp_secret" "#)
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
+        assert!(!err.contains("ghp_"), "{err}");
+        assert!(err.contains("line"), "{err}");
     }
 }

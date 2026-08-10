@@ -226,6 +226,71 @@ impl ArtifactKindV1 {
         }
     }
 
+    /// Every kind, exhaustively.
+    ///
+    /// The length is written out so a new variant fails to compile until this
+    /// array is updated — the point being that the spelling tests below cannot
+    /// silently stop covering a kind. A renamed variant whose `name()` and serde
+    /// spelling drift apart makes two conforming implementations compute
+    /// different digests, which is precisely the failure FD-1.2 frames names to
+    /// avoid.
+    pub const ALL: [Self; 39] = [
+        Self::WorkOrder,
+        Self::CoderReport,
+        Self::CandidateReceipt,
+        Self::ReviewRequest,
+        Self::ReviewerReport,
+        Self::ReviewVerdict,
+        Self::CorrectiveDirective,
+        Self::CampaignFeedItem,
+        Self::HumanAttentionRequest,
+        Self::HumanCommandRequest,
+        Self::HumanDecision,
+        Self::ProviderExecutionReceipt,
+        Self::InteractionManifest,
+        Self::ScopeContract,
+        Self::CampaignEventPayload,
+        Self::CandidateState,
+        Self::CandidatePatch,
+        Self::Worktree,
+        Self::Policy,
+        Self::Task,
+        Self::Diff,
+        Self::GateLog,
+        Self::SandboxReport,
+        Self::ProviderSession,
+        Self::CommandBinding,
+        Self::ContractDocument,
+        Self::VerifierRegistry,
+        Self::CanonicalProviderRequest,
+        Self::RawProviderBytes,
+        Self::NormalizedOutput,
+        Self::ProviderMessage,
+        Self::ToolArguments,
+        Self::ToolResult,
+        Self::UsageRecord,
+        Self::CostRecord,
+        Self::DiagnosticLog,
+        Self::CiObservation,
+        Self::TerminationObservation,
+        Self::DetailDocument,
+    ];
+
+    /// Whether this kind names a **typed A1 payload** that carries no envelope
+    /// of its own — the execution receipt (§3.12), the scope contract (§3.13),
+    /// and a campaign event payload (§3.15).
+    ///
+    /// These are bounded by FD-1.4's control-artifact maximum, not by the
+    /// evidence-blob maximum. `interaction_manifest` is excluded: FD-1.4 names
+    /// "manifest" in its evidence-blob line.
+    #[must_use]
+    pub fn is_typed_payload(self) -> bool {
+        matches!(
+            self,
+            Self::ProviderExecutionReceipt | Self::ScopeContract | Self::CampaignEventPayload
+        )
+    }
+
     /// Whether a ref of this kind names an envelope-bearing artifact, which
     /// FD-1.8 stores as **two** byte strings and charges accordingly.
     #[must_use]
@@ -275,6 +340,32 @@ mod tests {
         ] {
             let json = serde_json::to_string(&role).unwrap_or_default();
             assert_eq!(json, format!("\"{}\"", role.name()));
+        }
+        // All 39, not only the eleven message kinds: the four typed
+        // non-envelope kinds and the fourteen evidence blobs are framed by name
+        // too, so a drift between `name()` and the serde spelling in any of them
+        // splits digests between implementations.
+        for kind in ArtifactKindV1::ALL {
+            let json = serde_json::to_string(&kind).unwrap_or_default();
+            assert_eq!(json, format!("\"{}\"", kind.name()));
+        }
+    }
+
+    #[test]
+    fn every_artifact_kind_appears_exactly_once_in_all() {
+        let mut names: Vec<&str> = ArtifactKindV1::ALL.iter().map(|k| k.name()).collect();
+        names.sort_unstable();
+        let unique = names.len();
+        names.dedup();
+        assert_eq!(names.len(), unique, "a kind is listed twice in ALL");
+        // Round-tripping every spelling proves ALL is not merely internally
+        // consistent but complete against the serde surface.
+        for kind in ArtifactKindV1::ALL {
+            let json = format!("\"{}\"", kind.name());
+            assert_eq!(
+                serde_json::from_str::<ArtifactKindV1>(&json).ok(),
+                Some(kind)
+            );
         }
     }
 
