@@ -517,7 +517,7 @@ determines ranks, edges, imported roots, closure and digest domains.
 ```yaml
 phase_g:
   document: docs/tasks/a1-f-v2-phase-g.md
-  status:   DECIDED (revision G-R11), awaiting re-review
+  status:   DECIDED (revision G-R12), awaiting re-review
   review_1: CHANGES_REQUESTED — four P1s, all accepted; the central
             conclusion changed from 13 envelope kinds to 11
   review_2: CHANGES_REQUESTED — two P1s, both accepted; the count was not
@@ -642,7 +642,32 @@ phase_g:
             since only an absence assertion catches a wire schema that grew a
             field nobody declared. P2: §6 still asked whether the manifest bound
             is 1 or 64 MiB; S1 decided it at 64 MiB, now recorded as the
-            KEEP_V1_MODEL baseline v2 drafting starts from
+            baseline v2 drafting starts from
+  review_12: CHANGES_REQUESTED — two P1s, zero rows/nodes/dispositions, both in
+            text G-R11 wrote and both the same species: a repair that removed one
+            ambiguity by inventing vocabulary of its own. (a) "completed
+            canonical acceptance" and "acceptance linearization point" are not
+            frozen A1 concepts, and two conforming implementations could disagree
+            about the first without contradicting anything frozen — so the
+            predicate now uses the boundary already frozen below it: FD-4 makes
+            acceptance a controller act recorded as a canonical event and FD-5.4
+            makes canonical APPEND ORDER the ordering primitive, so the witness
+            must be in the accepted canonical log prefix BEFORE
+            CampaignFeedItemEmitted is appended. Tentative objects, early-reserved
+            sequence numbers and in-flight candidates are irrelevant because none
+            is in the prefix; the evidence-only guard seam stays untouched. The
+            "attempted event ... rejected" sentence is narrowed to the
+            authority-bearing case FD-14.4 actually establishes; (b) the presence
+            map was exact over the WRONG DOMAIN — quantified over "the 21 v1
+            event kinds", so a v2 schema with a 22nd kind would never be
+            quantified over at all. Since event kind is semantic source identity,
+            that is an unnoticed NODE. The gate is now ordered: exact set equality
+            between the v2 event-kind universe and Phase G's 21 semantic event
+            kinds FIRST, then the presence map, then the carrier checks — the
+            RHS generated from the same dataset that produces the typed-node
+            universe, so this is not a second registry. P2: §6's 64 MiB baseline
+            re-sourced away from KEEP_V1_MODEL (whose §1 framing is about
+            classifications, not numbers) to plain inherited authority
   evidence: 37502e3 edge registry — 59 entries (53 envelope-source + 6 A2
             transition) plus a global AnyCommittedEnvelope causation rule;
             metric is "specific V0 consumer in-degree" with an explicit
