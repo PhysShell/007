@@ -1,11 +1,28 @@
 # Memory Plane for 007 — evidence record, requirements, candidate architecture
 
-- **Status:** design input · **agent-authored and `pending`**
+- **Status:** split. **§3 (REQ-1 … REQ-11) is ratified**; everything else in this
+  document remains agent-authored and **`pending`**
   (`docs/evidence-and-decision-discipline.md` rule 3). This document is **not an
-  approved architecture**. Nothing here is normative authority, and nothing here
-  may be cited to justify a further autonomous decision.
-- **Date:** 2026-08-09. External claims are bound to the versions named in §1 and
-  are `STALE` the moment those move (rule 4).
+  approved architecture**: §4 has no authority, and no part of it acquires any
+  by satisfying a ratified requirement.
+- **Ratification:** the maintainer ratified **§3, REQ-1 … REQ-11, and only
+  those**, in an interactive session on **2026-08-10**, under rule 3's carve-out.
+  - **Ratified design revision:** `219953efac10bf689738a4749cbcc09e02df737c`.
+    Per rule 4 the ratification is bound to that revision: if any requirement is
+    reworded, the new wording is not covered and that requirement returns to
+    `pending`. Editorial changes elsewhere in this file do not disturb it — the
+    binding is to the text of §3 at that revision.
+  - **Not ratified by that decision:** §4 candidate architecture; the proposed
+    resolutions C-1 … C-4 in §5; §6, which is non-normative by construction.
+  - **How the decision was reached, with the roles kept apart:** four review
+    rounds, the last two requirements-only (see the round notes below). The
+    final round produced a reviewer verdict of `PASS` with a **recommendation**
+    to ratify — a recommendation is not authority under rule 3, and the
+    `PROPOSED → RATIFIED` transition was made by the human maintainer, not by
+    the agent that authored the document or by the one that reviewed it.
+- **Date:** 2026-08-09; ratification record added 2026-08-10. External claims are
+  bound to the versions named in §1 and are `STALE` the moment those move
+  (rule 4).
 - **Scope:** the normative half of agent memory — what an agent is *obliged* to
   know before an action is admissible, and how that obligation survives a
   session boundary. The advisory half (embeddings, similarity recall, drift) is
@@ -1087,25 +1104,29 @@ not with an architecture note.
 ```text
 Source / factual record (§1)             RECORDED, revision-bound (rule 4)
 Demo evidence assessment (§2)            RECORDED — not qualifying evidence
-REQ-1 … REQ-11 (§3)                      PROPOSED — pending ratification
+REQ-1 … REQ-11 (§3)                      RATIFIED — maintainer, 2026-08-10,
+                                           bound to 219953e (see the header)
 Candidate architecture (§4)              CANDIDATE — not adopted, not built
 Open risks (§5)                          RECORDED
 Semvec evaluation (§6)                   NON-NORMATIVE, optional, fenced
 ```
 
-Per rule 3, everything marked `PROPOSED` or `CANDIDATE` above is agent-authored
-and stays `pending` until a human ratifies or rejects it, and may not be cited
-as authority for a further autonomous decision in the meantime.
+REQ-1 … REQ-11 are now normative and may be cited as authority. Everything still
+marked `CANDIDATE` or `RECORDED` above is agent-authored, stays `pending` under
+rule 3, and may not be cited to justify a further autonomous decision — **and a
+§4 construct does not inherit authority from satisfying a ratified requirement.**
+Requirements constrain architectures; they do not bless the first architecture
+that happens to meet them.
 
 The order that keeps governance clean, and the reason for each step:
 
 ```text
 1. ratify or reject REQ-1..11              requirements are cheap to argue
-                                           about and expensive to retrofit
+   DONE — maintainer, 2026-08-10            about and expensive to retrofit
 2. record the exact ratified revision      rule 4: a ratification binds a
-                                           revision, not a title
+   DONE — 219953e, this commit              revision, not a title
 3. C-1 / C-2 / C-3 consistency pass        only now may the two neighbouring
-                                           drafts be changed — before this,
+   UNBLOCKED                                drafts be changed — before this,
                                            editing them would import a pending
                                            proposal into ratified surroundings
 4. C-4: re-express §4 digests as explicit  the frozen A1 discipline wins;
