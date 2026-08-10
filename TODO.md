@@ -111,13 +111,18 @@ Domain hands: `--repo <STS source root>` + `--findings <STS-210 findings.json>` 
 - **`--dry-run` FIRST** — prints files + call count (cost estimate for ~198 ids).
   `--max-files N` to batch.
 - STS **source must be local** on this box (whole-file context).
-- **Do not source counts from `OwnAudit/sts_audit/`.** That directory holds two
-  mutually inconsistent snapshots: `health-report.md` (15803 findings, four
-  tools) carries an *empty* commit field and `generated: ?`, while
-  `health-report.json` beside it is a different run (commit `59e284ba`, two
-  tools, 10247 raw → 7436 clusters). The canonical current audit lives in
-  `OwnAudit/artifacts/`, which is not committed. Any number quoted from
-  `sts_audit/` is unversioned and should not be cited as evidence.
+- **Do not cite aggregate counts from `OwnAudit/sts_audit/` as if the directory
+  were one canonical audit snapshot.** It is not one snapshot and it has no
+  directory-level canonical aggregate. `health-report.md` (15803 findings, four
+  tools) is unversioned — empty commit field, `generated: ?`. `health-report.json`
+  beside it *is* bound to commit `59e284ba`, but represents a different two-tool
+  run (10247 raw → 7436 clusters, 36 high-confidence). `PLAN.md` quotes a third
+  set again. The current STS-210 audit lives in `OwnAudit/artifacts/`, which is
+  not committed. Any quantitative claim must name the specific source
+  artifact/run it was derived from.
+- The committed per-tool SARIF under `sts_audit/` *is* usable as a raw
+  measurement substrate — it carries locations and parses. Aggregates are what
+  cannot be trusted here, not the underlying findings.
 - Overwrites the oracle overlay at that `--out`. Domain's report merges only the
   overlay whose `generated_from` == current `findings.json` (staleness guard).
 - **Perf:** the per-file `claude` calls are independent — add a bounded `--jobs N`
