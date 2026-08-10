@@ -550,6 +550,83 @@ precisely because an acceptance-like node sits between ranks 3 and 4 and forces
 re-ranking (FD-2.3). If it returns, its necessity must follow from a real V0
 import consumer. Schema symmetry gets no vote.
 
+## 7a. Implementation-derived adjudication input
+
+The first implementation attempt (`o7-a1-contracts`, PR #124 at `b2ba165`) was
+written contract-preserving against blob `7db92f1b` and, in one step, surfaced
+four facts that six rounds of contract review did not. They are recorded here as
+**input**, not as dispositions: three are implementation-level and one is a
+contract seam that cannot be repaired inside a contract-preserving PR without
+quietly authoring a new FD by hand.
+
+PR #124 is reclassified accordingly:
+
+```yaml
+pr_124:
+  commit: b2ba165f16b6ea092b6c305fde2c85893fc787a5
+  role:   EMPIRICAL IMPLEMENTATION PROBE for frozen A1-F v1
+  not:    accepted A1-V0 step 1
+  step_2: NOT AUTHORIZED
+  merge:  NOT AUTHORIZED
+  reason: it implements v1, while the sanctioned line is
+          INVENTORY ADMITTED -> Phase G -> v2 convergence -> freeze -> A1-V0
+```
+
+| ID | Finding | Level | Verified against |
+|---|---|---|---|
+| `E-V0-1` | An unchecked public `Deserialize` defeats the intended parse boundary | implementation | `json.rs:84-89`, `envelope.rs:63-65` |
+| `E-V0-2` | Schema-specific `Text` bounds disappear behind a generic `Text` | implementation | frozen lines 1193-1194, 1575 |
+| `E-V0-3` | `CommitId` needs repository-object-format context to be checkable | implementation + wording | frozen line 1166 |
+| `E-V0-4` | FD-1.4 and FD-1.8 do not jointly determine `ArtifactRef` max size | **contract** | frozen FD-1.4 block, FD-1.8 block |
+
+**E-V0-1.** `parse_payload` is `validate_document` followed by
+`serde_json::from_value`; it never calls `validate()`. And because `EnvelopeV1`
+derives `Deserialize` publicly, `serde_json::from_str::<EnvelopeV1>` bypasses the
+whole pre-deserialization walk — null policy, depth, array and string bounds, BOM
+policy. PR #124's own review question 3 ("can the global rules be bypassed by
+parse ordering?") therefore answers **NO**. The shape this wants is the one this
+project keeps rediscovering: a wire type that deserializes, a validation step,
+and a checked type with no public unchecked constructor. The same applies to
+`ArtifactRef`.
+
+**E-V0-2.** The frozen envelope table bounds `producer_adapter_version` at 128
+bytes and `model_identity` at 256; both are carried as the generic `Text`, which
+admits 65536, and `validate()` does not narrow them. An acceptance gap, not a
+test gap.
+
+**E-V0-3.** The frozen scalar is "full object id, the repository's
+object-format width". The implementation accepts 40 *or* 64 unconditionally,
+which means a 40-hex id passes in a SHA-256 repository merely because another
+repository format exists where it would be valid. Wire syntax and resolved
+validity want separating: a wire claim (lowercase hex, candidate full width)
+versus a checked value (width equals the bound repository's object format). A
+step with no repository context should not pretend to have proved the second
+half.
+
+**E-V0-4 — the contract seam.** FD-1.4 bounds *payloads* and *evidence blobs*.
+It never bounds stored **envelope** bytes. FD-1.8, added in R5.2, then defines a
+ref to an envelope-bearing artifact as covering `stored envelope bytes + stored
+payload bytes`. No maximum for that sum is derivable from the frozen text: the
+implementation's `1 MiB + min(64 MiB, 1 MiB)` is invented, and so is any other
+number one might propose, including a tidy `2 * MAX_CONTROL_ARTIFACT_BYTES`.
+
+A second seam sits beside it. FD-1.4 lists `manifest` among the 64 MiB evidence
+blobs while also bounding "any typed A1 payload" at 1 MiB, and §3.12.1 makes
+`InteractionManifestV1` a typed A1 object. The manifest is therefore bounded at
+1 MiB and at 64 MiB simultaneously.
+
+Both halves are traceable to this document's own history: the FD-1.4 list dates
+from the original freeze, the FD-1.8 summing rule from R5.2, and no round
+reconciled them. That is precisely why this is convergence input rather than a
+bug report — a contract-preserving PR that "fixed" it would be writing a new FD
+under a commit message that claims to preserve the old one.
+
+Phase G and the v2 draft own the repair. Candidate shapes, recorded without
+choosing between them: bound the envelope explicitly; or define ref size over
+the payload only and carry the envelope's own size separately; or classify
+typed non-envelope objects out of the evidence-blob list and give them the
+control-artifact bound.
+
 ## 8. Version schedule
 
 ```text
