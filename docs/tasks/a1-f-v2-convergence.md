@@ -517,7 +517,7 @@ determines ranks, edges, imported roots, closure and digest domains.
 ```yaml
 phase_g:
   document: docs/tasks/a1-f-v2-phase-g.md
-  status:   DECIDED (revision G-R10), awaiting re-review
+  status:   DECIDED (revision G-R11), awaiting re-review
   review_1: CHANGES_REQUESTED — four P1s, all accepted; the central
             conclusion changed from 13 envelope kinds to 11
   review_2: CHANGES_REQUESTED — two P1s, both accepted; the count was not
@@ -624,6 +624,25 @@ phase_g:
             anchors recorded; five graph-sensitive derivations re-run against
             3b26849c are byte-identical, so S1 GRAPH DELTA = NONE and the nine
             earlier rounds are not retconned. Branch synced to main
+  review_11: CHANGES_REQUESTED — two P1s, zero rows, all findings inside prose
+            G-R10 itself wrote; S1 freshness closed outright. (a) COMMITTED had
+            the right SET reached by an invented pipeline: the per-class
+            decomposition invoked an "evidence acceptance" stage the frozen
+            contract does not define — and evidence-only is not guard-free, since
+            §3.15.1 gives CoderReportReceived/ReviewerReportReceived guards while
+            FD-14.4 states rejection only for authority-bearing events — and the
+            "every event below N has completed" justification made a graph
+            predicate hostage to an implementation's concurrency strategy. Now
+            "completed canonical acceptance", undecomposed, with a live admission
+            rule at the feed event's acceptance linearization point; gaplessness
+            then supplies the replay witness E.sequence < Feed.sequence;
+            (b) the structural completeness check could not see an ABSENCE —
+            replaced by an exact 21-kind presence map (exactly one carrier for
+            each of the 11 payload-bearing kinds, exactly zero for the other 10),
+            since only an absence assertion catches a wire schema that grew a
+            field nobody declared. P2: §6 still asked whether the manifest bound
+            is 1 or 64 MiB; S1 decided it at 64 MiB, now recorded as the
+            KEEP_V1_MODEL baseline v2 drafting starts from
   evidence: 37502e3 edge registry — 59 entries (53 envelope-source + 6 A2
             transition) plus a global AnyCommittedEnvelope causation rule;
             metric is "specific V0 consumer in-degree" with an explicit

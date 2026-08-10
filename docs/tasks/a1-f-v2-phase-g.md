@@ -1,8 +1,8 @@
 # A1-F v2 — Phase G: graph adjudication
 
-**Status: DECIDED (revision G-R10) — AWAITING RE-REVIEW.**
+**Status: DECIDED (revision G-R11) — AWAITING RE-REVIEW.**
 
-Ten review rounds. G-R1 moved the count from 13 to 11; G-R2 corrected the
+Eleven review rounds. G-R1 moved the count from 13 to 11; G-R2 corrected the
 binding lifecycle and the rank domain; G-R3 attempted the exact edge universe
 and measured it against the wrong baseline; G-R4 rebuilt it on the frozen
 contract but stopped at node *classes*; G-R5 added the missing layer, a semantic
@@ -16,10 +16,12 @@ both a checkable carrier — a required machine-checked realization ledger, and 
 replay-checkable `COMMITTED` predicate — and rejects one invariant §8 had
 proposed; G-R10 corrects that predicate's stage boundary, generalizes the ledger
 to structural carriers, and rebinds the document to current v1 authority after
-S1, whose graph delta is proved empty. The registry is 69 exact semantic edges
-over a 41-slot frozen baseline (§4.2), unchanged by G-R8, G-R9 and G-R10 alike —
-no row has moved in any of the three. Field-path spelling remains owed to the v2
-draft. See §9.
+S1, whose graph delta is proved empty; G-R11 removes the implementation
+assumptions G-R10 smuggled into the predicate and makes the structural check an
+exact presence map. The registry is 69 exact semantic edges over a 41-slot frozen
+baseline (§4.2) and **no row has moved since G-R7** — G-R8 through G-R11 changed
+only the contracts around it. Field-path spelling remains owed to the v2 draft.
+See §9.
 
 Phase G is one decision, written and reviewed on its own, before any v2 drafting.
 The node set determines ranks, edges, imported roots, closure and digest domains;
@@ -1288,43 +1290,68 @@ registry resting on prose. It is defined without reference to `CampaignStateV1`,
 and therefore without Phase G drafting any reducer policy:
 
 ```text
-accepted_prefix(N) :=
-    canonical events E with E.sequence < N whose own ACCEPTANCE completed
-      authority-bearing: verify_wire + resolve_event + seed/fold acceptance
-      evidence-only:     verify_wire + resolve_event + evidence acceptance
+accepted_history_before(N) :=
+    canonical events E such that
+        E has completed CANONICAL ACCEPTANCE
+    AND E.sequence < N
 
-    An attempted event that resolved and was then REJECTED by fold is NOT in
-    accepted_prefix(N). The TransitionRejected event recording that rejection
-    may be, once itself canonically accepted.
+    An attempted event that resolved and was then rejected has NOT completed
+    canonical acceptance. The TransitionRejected event recording that rejection
+    has, once itself canonically accepted.
 
 COMMITTED(target, before_event_sequence = N)  iff
 
     target.kind is a member of AnyCommittedEnvelope           (the list above)
-AND there exists E in accepted_prefix(N)
+AND there exists E in accepted_history_before(N)
 AND the exact (target.kind, target.digest) occurs in resolved_closure(E)
 AND that closure passed normal integrity / schema / budget resolution
 
-For CampaignFeedItemEmitted at sequence N:
-    every subject_ref target MUST satisfy COMMITTED(target, N)
+Live admission rule:
+    CampaignFeedItemEmitted may be canonically accepted only if every
+    subject_ref satisfies COMMITTED against the canonical history already
+    accepted at the feed event's acceptance linearization point.
 ```
 
 Three properties make this the right shape rather than merely a definition.
 
-*It is checkable before `fold(N)` — but not for the reason G-R9 gave.* G-R9
-argued that the predicate is checkable because `verify_wire` and `resolve_event`
-precede `fold`, and that it reads only what those two stages compute. **That was
-wrong.** FD-14.4 is explicit that an authority-bearing event may pass
-`verify_wire`, pass `resolve_event`, and still be rejected by `fold`, with an
-evidence-only `TransitionRejected` appended instead. So "everything successfully
-resolved before N" is a strictly larger set than "everything accepted before N",
-and quantifying over the former would let a rejected event's closure supply a
-`COMMITTED` witness — precisely the smuggling this predicate exists to prevent.
+*Resolution is not acceptance.* G-R9 defined the predicate over events that had
+merely resolved, arguing that `verify_wire` and `resolve_event` precede `fold`.
+FD-14.4 is explicit that an authority-bearing event may pass both and still be
+rejected by `fold`, with an evidence-only `TransitionRejected` appended instead.
+So *resolved before N* is strictly larger than *accepted before N*, and
+quantifying over the former would let a rejected event's closure supply a
+witness — precisely the smuggling this predicate exists to prevent.
 
-The correct argument is about the *prefix*, not the stage order: when event N is
-processed, every event below N has already run to completion, so
-`accepted_prefix(N)` is fully determined before `fold(N)` begins. `fold` still
-stays pure, total, clock-free and I/O-free, and Phase G still decides nothing
-about transitions.
+*The repair is a concept, not a pipeline (G-R11).* G-R10 fixed the set but
+over-specified how membership is reached: it decomposed acceptance per event
+class — `verify_wire + resolve_event + seed/fold` for authority-bearing,
+`... + evidence acceptance` for evidence-only — and justified checkability by
+asserting that when event N is processed, every event below N has run to
+completion. Both overreach.
+
+*"Evidence acceptance" is not a stage the frozen contract defines*, and
+evidence-only does not mean guard-free: frozen §3.15.1 gives
+`CoderReportReceived` the guard *an active coder execution exists* and
+`ReviewerReportReceived` its reviewer counterpart, while FD-14.4 spells out
+rejection semantics only for authority-bearing events. That is a live reducer
+seam, and Phase G has no business resolving it in order to define a graph
+predicate. The two-branch decomposition is removed; `completed canonical
+acceptance` is the whole condition.
+
+*The completion assumption was an implementation constraint in disguise.* The
+frozen contract fixes a gapless 0-based `sequence` (§3.15), chain continuity and
+folded-state congruence — it does not forbid an implementation from reserving a
+sequence number, preparing a tentative event, or holding several candidates in
+flight. G-R10's "every event below N has already run to completion" would have
+made `COMMITTED` depend on that, which is exactly backwards: the predicate
+should be indifferent to it. Restated as an admission rule at the feed event's
+**acceptance linearization point**, so an implementation may juggle futures as
+freely as it likes and still cannot use an unfinished event as a witness.
+
+Once both events are canonically accepted, gaplessness does the rest:
+`E.sequence < Feed.sequence` is a replay witness recomputable from the log.
+`fold` stays pure, total, clock-free and I/O-free, and Phase G decides nothing
+about transitions, locking or concurrency.
 
 *It is replay-checkable.* No clock, no `created_at`, no mutable store
 observation, no "we think the blob was written first". Strictly-earlier position
@@ -1531,8 +1558,7 @@ The ledger MUST be mechanically checked:
     forward                every wire carrier maps only to §4.2.4 edge(s)
     reverse                every §4.2.4 edge has >= 1 wire carrier
     ArtifactRef complete   recursive schema extraction == artifact_ref carriers
-    structural complete    event payload discriminants/digests
-                                            == event_payload_digest carriers
+    structural complete    the 21-kind PRESENCE MAP below, exactly
     meta-target            its expansion == the eleven frozen members (§4.2.5)
 
 Several carriers for one edge stay legal (the NormalizedOutput case).
@@ -1563,6 +1589,37 @@ edges carried **structurally**, by `event_payload_digest` rather than by an
 `ArtifactRef` — the reconciliation at the end of §4.2.4 has said so since G-R6. A
 ledger that cannot see them cannot discharge the reverse check it is being asked
 to run. Hence `carrier_kind`, and two completeness checks instead of one.
+
+**The structural check is an exact presence map, not a scan (G-R11).** §8 asked
+whether "event payload discriminants/digests == carriers" distinguishes *this
+kind has no payload* from *this kind's carrier is missing from the ledger*. It
+does not, and the distinction is the whole point of the check. The frozen
+contract supplies an exact oracle — §3.15's `event_payload_digest` is required
+**iff the kind carries a payload (§3.15.2)**, and §3.15.2 says eleven kinds do —
+so the checker builds a total function over all 21 event kinds rather than a
+list of what it happened to find:
+
+```text
+expected_payload(event_kind) :=
+    the concrete PayloadVariant     for the 11 payload-bearing kinds
+    NONE                            for the other 10
+
+expected_payload(k) = P     =>  EXACTLY ONE ledger carrier
+                                    CampaignEvent(k)
+                                      --event_payload_digest-->  P
+expected_payload(k) = NONE  =>  EXACTLY ZERO event_payload_digest carriers for k
+```
+
+Exactly-one and exactly-zero, not "every row found is well-formed". The reason
+this is a gate rather than a nicety: if a future wire schema wrongly permitted
+`event_payload_digest` on one of the ten payload-free kinds and the drafter
+simply did not add a ledger row for it, the forward registry check would see
+nothing — there is no offending row to inspect — and the reverse check would
+still pass, because every registry edge still has its carrier. Only a check that
+asserts *absence* catches a schema that grew a field nobody declared. This is
+the same exact-set standard as the recursive `ArtifactRef` completeness check,
+applied to the other carrier kind, and it is the last joint between schema and
+graph.
 
 
 The format is a v2 drafting decision — YAML, a Rust const table, generated
@@ -1667,16 +1724,37 @@ amending FD-1.4, which is the failure this section was written to name and then
 committed anyway.
 
 So all of it defers to v2 wire/bounds drafting, together with the envelope-size
-seam:
+seam.
+
+**What changed underneath this, and must be recorded (G-R11).** When §6 was
+written, the manifest's bound was genuinely open. It is not any more: **S1** gave
+`InteractionManifestV1` the 64 MiB evidence bound in FD-1.4, on the grain
+argument that there is one manifest per *execution* rather than per dispatch, so
+a single manifest indexes up to 256 dispatches and 4096 `interaction_sequence`
+entries in total. Leaving §6 asserting that current authority has not decided
+this would be false about the document Phase G is superseding.
 
 ```text
-is the manifest 1 MiB, 64 MiB, or a per-kind bound of its own?
+Phase G does not choose the v2 manifest bound.
+
+Current v1 baseline after S1:   InteractionManifestV1 <= 64 MiB
+
+KEEP_V1_MODEL therefore starts v2 drafting AT 64 MiB. A different v2 bound
+remains a wire/bounds supersede decision and requires an explicit argument.
+```
+
+The open questions this section hands on are therefore:
+
+```text
+keep the S1 64 MiB baseline, or explicitly supersede it?
 does MAX_INTERACTION_SEQUENCE change instead?
 what bounds stored envelope bytes, given FD-1.8 sums envelope + payload?
 ```
 
 Phase G supplies the classification these questions need and answers none of
-them.
+them. Note that S1's own reasoning — *"size and typedness are separate
+questions"* — is precisely the argument this section made from the other
+direction, which is some evidence the classification was right.
 
 `E-V0-1`, `E-V0-2` and `E-V0-3` are **not** Phase G material at all. They are
 convergence inputs about the checked-parse boundary, scalar bounds and
@@ -1695,46 +1773,111 @@ the failure this phase exists to prevent.
 - whether the import mechanism of §3.4 exists as a controller procedure — only
   that it does not exist as a node.
 
-## 8. For the independent reviewer (revision G-R10)
+## 8. For the independent reviewer (revision G-R11)
 
-Zero-row round again: no semantic edge, node or disposition moved. Three
-corrections (§4.2.5's stage boundary, §4.2.6's ledger, §0's authority binding),
-one stale-wording repair in §4.1.3, one deferral in §6 that S1 has since
-answered. Attack these:
+Zero-row round, and the narrowest yet: three edits, all in text the previous
+round wrote. §4.2.5's `COMMITTED` loses two overreaches, §4.2.6's structural
+check becomes an exact presence map, §6 records the bound S1 has since decided.
+Attack these:
 
-1. **`accepted_prefix(N)` and concurrency.** The definition assumes every event
-   below N has run to completion before N is processed, which is true of
-   `replay(log)` as FD-14.2 defines it. Is it true of *live* admission, where an
-   event may be appended while an earlier one is still being folded? If a
-   controller can append at N while N-1 is in flight, `accepted_prefix(N)` is
-   not determined and the witness is not either.
-2. **`accepted_prefix` for evidence-only events.** The definition gives them
-   "verify + resolve + evidence acceptance", but FD-14.3/FD-14.4 give
-   evidence-only events no guard to fail. Is "evidence acceptance" a real
-   distinct step, or does it collapse to resolution — in which case an
-   evidence-only event's closure is always a valid witness and the two-branch
-   definition is one branch pretending to be two?
-3. **The `CommittedEnvelopeIndex` claim.** Asserted as outside FD-1.5 because
-   FD-1.5 bounds a single event's closure and declines a cumulative campaign
-   ceiling. Verify that reading of FD-1.5 directly; if any bound there *is*
-   cumulative across the campaign, the index falls inside it and this document
-   owes a bound it has not given.
-4. **The ledger's structural-completeness check.** "Event payload discriminants
-   / digests == `event_payload_digest` carriers" presumes exactly one structural
-   carrier per event kind. Eleven of the 21 kinds carry a payload; the other ten
-   carry none. Does the check distinguish *has no payload* from *payload carrier
-   missing from the ledger*, or does it pass vacuously for the ten?
-5. **§0's freshness claim.** Five derivations re-run against `3b26849c`, all
-   identical. That is a check of the derivations Phase G happens to run, not of
-   everything S1 could have touched. Is there a graph-relevant property of the
-   contract that none of those five would have caught?
-6. **§6 and the manifest bound.** S1 gave `InteractionManifestV1` the 64 MiB
-   evidence bound. §6 had deferred every manifest number to v2 drafting. The
-   document now says the v2 draft inherits 64 MiB as its baseline rather than an
-   open question — is that a correct reading of §7.2's supersede scope, or has
-   Phase G just adopted a bound by narration?
+1. **"Completed canonical acceptance" as a primitive.** `COMMITTED` now rests on
+   it without defining it, deliberately — defining it per event class is what
+   G-R10 got wrong. Is leaving it undefined *safe*, or has Phase G moved the
+   ambiguity rather than removed it? The test: can two conforming
+   implementations disagree about whether a given event has completed canonical
+   acceptance, while both satisfy every frozen rule?
+2. **The acceptance linearization point.** The live admission rule quantifies
+   over history accepted *at* that point. Frozen §3.15 gives a gapless `sequence`
+   but no explicit linearization semantics. Is "linearization point" a term this
+   document may use without drafting it, or is it the concurrency assumption
+   G-R10 was told to remove, wearing better clothes?
+3. **The presence map's oracle.** It reads `event_payload_digest` as required
+   *iff the kind carries a payload*, and §3.15.2's "eleven kinds carry a
+   payload". Verify both against `3b26849c`, and check the enumeration matches
+   rows 58–68 exactly — a twelfth payload kind, or a tenth payload-free one,
+   breaks the exactly-one/exactly-zero split.
+4. **The presence map's scope.** It is defined over the 21 *v1* event kinds. If
+   the v2 draft adds an event kind, the map is stale and the check passes
+   vacuously for it. Should the ledger gate be keyed to the v2 kind set instead,
+   and if so, what stops that from becoming a second registry?
+5. **§6 and `KEEP_V1_MODEL` on a number.** The section now says v2 drafting
+   *starts at* 64 MiB. §1's default is `KEEP_V1_MODEL` for support objects —
+   does it extend to bounds, or has Phase G given a number a default it was not
+   entitled to give?
+6. **Whether anything else went stale the same way.** §6's staleness was found
+   only because S1 touched FD-1.4. Are there other live statements in this
+   document that were true against `7db92f1b` and are now false against
+   `3b26849c`? The §0 derivation check covers graph shape, not prose.
 
 ## 9. Revision record
+
+### G-R11 — eleventh independent review, two P1s
+
+`CHANGES_REQUESTED`, zero rows, and the smallest round in the track: every
+finding is in prose G-R10 itself wrote. The reviewer verified across both G-R10
+commits that the semantic registry is untouched, and closed the S1 freshness
+question outright — checking current `main`'s blob, the actual S1 patch scope,
+and the five re-run derivations together, rather than accepting any one of them
+alone.
+
+**P1-26 — the right set, reached by an invented pipeline.** G-R10 correctly
+replaced *resolved* with *accepted*, then over-specified how acceptance happens.
+Two overreaches, both removed:
+
+*The per-class decomposition.* `accepted_prefix` distinguished
+`verify_wire + resolve_event + seed/fold` for authority-bearing events from
+`... + evidence acceptance` for evidence-only ones. **"Evidence acceptance" is
+not a stage the frozen contract defines**, and evidence-only does not mean
+guard-free — frozen §3.15.1 gives `CoderReportReceived` the guard *an active
+coder execution exists* and `ReviewerReportReceived` its reviewer counterpart,
+while FD-14.4 states rejection semantics only for authority-bearing events. That
+is an open reducer seam, and Phase G was resolving it as a side effect of
+defining a graph predicate. Now: *completed canonical acceptance*, undecomposed.
+
+*The completion assumption.* G-R10 justified checkability by asserting that when
+event N is processed, every event below N has run to completion. The frozen
+contract fixes a gapless 0-based `sequence`, chain continuity and folded-state
+congruence — it does not forbid reserving a sequence number, preparing a
+tentative event, or holding candidates in flight. Making `COMMITTED` depend on
+that would have made a graph predicate hostage to an implementation's
+concurrency strategy. Restated as an admission rule at the feed event's
+acceptance linearization point: an implementation may juggle futures as freely
+as it likes and still cannot use an unfinished event as a witness. Once both
+events are canonically accepted, gaplessness supplies the replay witness —
+`E.sequence < Feed.sequence`, recomputable from the log.
+
+The `CommittedEnvelopeIndex` and FD-1.5 readings were checked and approved: the
+index may be absent entirely, since canonical history can be re-scanned.
+
+**P1-27 — the structural check could not see an absence.** §8 had asked whether
+"event payload discriminants/digests == carriers" distinguishes *this kind has no
+payload* from *this kind's carrier is missing*. It did not. The frozen contract
+supplies an exact oracle — `event_payload_digest` is required **iff the kind
+carries a payload**, and §3.15.2 fixes that at eleven kinds — so the checker now
+builds a total function over all 21 event kinds: exactly one carrier for each of
+the eleven, exactly zero for the other ten.
+
+Why this is a gate and not a nicety, in the reviewer's construction: if a future
+wire schema wrongly permitted `event_payload_digest` on one of the ten
+payload-free kinds and the drafter simply omitted a ledger row, the forward
+registry check sees nothing — there is no offending row — and the reverse check
+still passes, because every registry edge still has its carrier. Only a check
+that asserts *absence* catches a schema that grew a field nobody declared. The
+`ArtifactRef` side has had exact-set completeness since G-R7; the structural side
+has it now, and that is the last joint between schema and graph.
+
+**One P2 that mattered.** §6 still asked *"is the manifest 1 MiB, 64 MiB, or a
+per-kind bound of its own?"* and said Phase G answers none of it. True when
+written; false since S1, which gave `InteractionManifestV1` the 64 MiB evidence
+bound on exactly the grain argument §6's classification implies — one manifest
+per execution, indexing up to 256 dispatches and 4096 sequence entries in total.
+Leaving that question open in live text would have asserted something false
+about the document Phase G is superseding. §6 now records 64 MiB as the
+`KEEP_V1_MODEL` baseline v2 drafting starts from, with a different bound
+available as an explicit supersede — which is the difference between recording a
+decision and adopting one by narration. §6's classification decision is
+unchanged, and S1's own *"size and typedness are separate questions"* is this
+section's argument arriving from the other side.
 
 ### G-R10 — tenth independent review, three P1s
 
