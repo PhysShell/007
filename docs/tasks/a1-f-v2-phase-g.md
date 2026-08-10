@@ -1,9 +1,9 @@
 # A1-F v2 — Phase G: graph adjudication
 
-**Status: DECIDED (revision G-R1) — AWAITING RE-REVIEW.**
+**Status: DECIDED (revision G-R2) — AWAITING RE-REVIEW.**
 
-The first pass failed independent review on four P1s, including its central
-conclusion. See §9 for what changed and why. The count is no longer 13.
+Two review rounds. G-R1 corrected four P1s and moved the count from 13 to 11;
+G-R2 corrected two more, neither of which moved it. See §9.
 
 Phase G is one decision, written and reviewed on its own, before any v2 drafting.
 The node set determines ranks, edges, imported roots, closure and digest domains;
@@ -105,10 +105,13 @@ The table below is specific V0 consumer in-degree.
 | **`CampaignRunBinding`** | 5 | **2** | CandidateAdmissionReceipt, ProviderInvocationReceipt — both `Intra`, both controller-produced. A third raw in-edge, `safe_redrive.prior_run_binding_ref` (`Causal`), is excluded: its only consumer is POST-V0 (§3.1) |
 | **`ArtifactImported`** | 2 | **0** | **no specific consumer** (formally reachable only through the global open-target causation rule, which the metric excludes) |
 
-External wrapper in-degree: `CandidateStateReceipt` 6, `CandidateMaterialization`
-3, `WorktreeMaterialization` 2, `RunContractCandidateState` 2,
+External wrapper **raw explicit in-degree** — a deliberately different metric,
+counted without the V0 exclusions so that POST-V0 references stay visible:
+`CandidateStateReceipt` 6, `CandidateMaterialization` 3,
+`WorktreeMaterialization` 2, `RunContractCandidateState` 2,
 `RunArtifactSource` 1 (from `ArtifactImported` alone),
-`EstablishedNonDispatchEvidence` 1 (from the SafeRedrive cause alone).
+`EstablishedNonDispatchEvidence` 1 (from the SafeRedrive cause alone — a POST-V0
+reference, which is exactly why this column is not the V0 metric).
 
 ## 3. Q1 + Q2 — node universe, and the envelope/support boundary
 
@@ -146,10 +149,56 @@ that cannot be provided by
 ```
 
 No such invariant was found. Content identity suffices, since it is referenced by
-digest. "One binding per execution" is enforceable when the *referencing*
-artifact is accepted — a controller invariant, not a message lifecycle. Its
-lineage is carried in-band, which is exactly what a support object is entitled to
-do (§3.2 explains why that is not a defect).
+digest, and its lineage is carried in-band, which is exactly what a support
+object is entitled to do (§3.2 explains why that is not a defect).
+
+**Uniqueness, corrected.** G-R1 wrote that "one binding per execution" is
+enforceable when the *referencing* artifact is accepted. That is the wrong
+authority point, and wrong in the direction this project exists to avoid. The
+design input allocates `run_id`/`attempt_id` durably *before* provider dispatch,
+and the binding is the source of that physical identity, so the real order is:
+
+```text
+allocate execution E -> construct binding B -> PROVIDER DISPATCH
+                                            -> ... later ...
+                                            -> ProviderInvocationReceipt
+                                            -> CandidateAdmissionReceipt
+```
+
+Checking uniqueness only when a later referencing artifact is accepted checks it
+after the side effect has already happened. Two bindings for one execution could
+both clear the pre-dispatch stretch, and rejecting one of them afterwards repairs
+nothing. That is the exact inversion of R1's "durable acceptance before provider
+invocation".
+
+The invariant Phase G requires, without choosing an event schema for it:
+
+```text
+Pre-dispatch binding admission
+
+Before the first provider dispatch for execution E, the controller durably
+establishes exactly one binding identity B for E.
+
+  E + same B       -> idempotent replay
+  E + different B  -> conflict, fail closed, NO provider dispatch
+
+After a restart, E resolves to the same B before the execution may continue.
+```
+
+Where that authority point lives — a campaign event, reducer state, or another
+controller-owned durable record — is a v2 drafting decision, not a Phase G one.
+What Phase G fixes is that it must exist and must precede dispatch.
+
+**This is a controller/reducer lifecycle obligation and is not, by itself, a
+reason to promote the binding to a message.** Requiring durable pre-dispatch
+admission says the *controller* must hold state before acting; it says nothing
+about the binding needing a `message_id`, envelope causation, or an acceptance
+lifecycle of its own.
+
+**Reopening trigger, recorded so it cannot be quietly skipped:** if the v2 draft
+turns out to be unable to express pre-dispatch binding admission without giving
+the binding a message lifecycle, this adjudication reopens. No present evidence
+suggests it will.
 
 Independently addressable graph authority is not the same thing as an
 envelope-bearing message, and v1 already demonstrates the difference: the
@@ -199,8 +248,10 @@ that appear together in one paragraph are not thereby the same kind of thing.
 
 ### 3.4 `ArtifactImported` → **NOT PROVEN — out of A1-V0**
 
-In-degree **zero**. No V0 object references it; its only edges are outgoing, to
-`AnyImportableCas` and to `RunArtifactSource`.
+**Specific V0 consumer in-degree = 0** (§2). No V0 object references it; its only
+edges are outgoing, to `AnyImportableCas` and to `RunArtifactSource`. Its *raw*
+degree is not zero — the global open-target causation rule formally reaches it —
+which is why the metric is named rather than assumed.
 
 Three questions were kept separate, and only the first two are answered here:
 
@@ -282,26 +333,59 @@ authority:  a closed per-kind allowed-edge registry — exact source, exact
             field-path tag, exact target, edge class
 
 derived_rank :=
-    topological level over the closed INTRA message-kind subgraph.
+    topological level over the closed INTRA A1 TYPED-NODE subgraph, where the
+    typed nodes are:
+      - envelope-bearing message kinds, and
+      - typed support objects / authorities that participate in the graph
+        (ProviderInvocationReceipt, InteractionManifest, CampaignRunBinding,
+         ScopeContract, CampaignEventPayload)
+    Graph-terminal external wrapper and CAS targets terminate traversal.
+
     No global rank is defined over Causal edges, and none can be: the full
     graph does not topologically sort, because cross-round causal references
     are acyclic per instance rather than per kind.
     Retained as a checkable property and as review shorthand, never as the rule.
 
-acyclicity: Intra   — proved by kind-level topological sort of the registry
+acyclicity: Intra   — proved by topological sort over the typed-node subgraph
             Causal  — proved per instance by create-before-reference
             never asserted from rank monotonicity
 ```
 
-The first pass wrote "rank, computable from the registry", which is too wide by
-exactly the amount that matters.
+Two rounds of narrowing, in opposite directions, and the second is the one worth
+explaining. The first pass wrote "rank, computable from the registry", which is
+too wide. G-R1 then narrowed it to the *message-kind* subgraph, which is too
+narrow — and wrong precisely because of what G-R1 had just decided. The three
+demoted objects are not terminals: `ProviderInvocationReceipt` has out-degree 9,
+`CampaignRunBinding` 5, `InteractionManifest` 3. A chain like
+
+```text
+CoderReport [message] -> ProviderInvocationReceipt [support]
+                           |-> InteractionManifest [support]
+                           `-> CampaignRunBinding  [support] -> External / CAS
+```
+
+would fall out of the proof entirely if the domain were messages only. Frozen v1
+had this right and is the precedent: its ranks put `InteractionManifestV1` at 1
+and `ProviderExecutionReceiptV1` at 2, beneath the reports — a ladder over the
+whole typed reference graph, not over envelopes.
+
+Consequence for the registry: a typed support object must be admissible as an
+edge **source**, not only as a target. The concrete shape of that is v2 drafting,
+not Phase G.
+
+Deciding an object is not a message does not make it stop being a node. Naming
+the two classes separately is what makes that mistake visible instead of
+structural.
 
 The registry's two edge classes are adopted as they stand: `Intra` (within one
 round's derivation flow, must topologically sort at kind level) and `Causal`
 (crossing rounds, chains or attention lineage; instance-acyclic by
-create-before-reference). The distinction is load-bearing — §3.1's promotion
-turned on an edge being `Causal` — and rank cannot express it at all, which is
-independent evidence for this change.
+create-before-reference). The distinction is load-bearing and rank cannot
+express it at all, which is independent evidence for this change: the two classes
+are proved acyclic by different arguments — kind-level topological sort versus
+per-instance create-before-reference — and a single scalar cannot carry two proof
+obligations. (G-R1's earlier justification, that §3.1's promotion turned on a
+`Causal` edge, died with that promotion and is not reused here.)
 
 One open target is sanctioned, unchanged from the design input's rationale:
 `AnyCommittedEnvelope`, for `CampaignFeedItem` causation. `AnyImportableCas`
@@ -404,15 +488,17 @@ the failure this phase exists to prevent.
 - whether the import mechanism of §3.4 exists as a controller procedure — only
   that it does not exist as a node.
 
-## 8. For the independent reviewer (revision G-R1)
+## 8. For the independent reviewer (revision G-R2)
 
-The first review found the central conclusion wrong. Attack these, in order:
+The count survived the second review. Attack these, in order:
 
-1. **§3.1, `CampaignRunBinding` as support rather than message.** The promotion
-   arguments are withdrawn, but the negative is now the load-bearing claim: *no*
-   V0 invariant needs a `message_id`, envelope causation and an acceptance
-   lifecycle here. A single counterexample overturns it. Idempotency of binding
-   creation is the most likely place to find one.
+1. **§3.1, `CampaignRunBinding` as support rather than message.** The negative is
+   the load-bearing claim: *no* V0 invariant needs a `message_id`, envelope
+   causation and an acceptance lifecycle here. One counterexample overturns it.
+   G-R2 already found the near miss — binding uniqueness had been placed after
+   dispatch — and repaired it as a controller obligation rather than a promotion.
+   Is that repair sufficient, or does durable pre-dispatch admission smuggle in a
+   message lifecycle under another name?
 2. **§3.2, `ProviderInvocationReceipt` staying a support object.** Same shape: is
    there an envelope-specific invariant that neither pass has looked for?
 3. **§2, the metric.** `specific V0 consumer in-degree` now has an explicit
@@ -425,6 +511,41 @@ The first review found the central conclusion wrong. Attack these, in order:
    across Causal edges, which by construction cannot have one?
 
 ## 9. Revision record
+
+### G-R2 — second independent review, two P1s
+
+`CHANGES_REQUESTED`; the central conclusion of eleven envelope kinds was not
+challenged and is unchanged. Both findings accepted.
+
+1. **Binding uniqueness was enforced too late.** G-R1 delegated "one binding per
+   execution" to the acceptance of a later referencing artifact — after the
+   provider dispatch that the binding exists to identify. Two bindings for one
+   execution could both clear the pre-dispatch stretch, and a post-factum
+   rejection repairs nothing. Replaced by a **pre-dispatch binding admission**
+   invariant: exactly one binding identity established durably before the first
+   dispatch, same-B replay idempotent, different-B a fail-closed conflict with no
+   dispatch, and the same resolution after restart. Recorded explicitly as a
+   controller/reducer obligation that is *not* a reason to promote, with a
+   reopening trigger if the v2 draft cannot express it without a message
+   lifecycle.
+2. **Derived rank was defined over the wrong graph.** G-R1 narrowed it to the
+   `Intra` *message-kind* subgraph, one paragraph after demoting three objects
+   that are not terminals — `ProviderInvocationReceipt` (out-degree 9),
+   `CampaignRunBinding` (5), `InteractionManifest` (3). Half the receipt chain
+   would have fallen out of the acyclicity proof. Widened to the `Intra` **typed-node**
+   subgraph, following frozen v1's own precedent, where rank 1 was the manifest
+   and rank 2 the receipt. Consequence recorded: a typed support object must be
+   admissible as an edge source, not only as a target.
+
+Tails: `ArtifactImported` now reads *specific V0 consumer in-degree = 0* rather
+than a bare "in-degree zero"; the external wrapper column is labelled as raw
+explicit degree, a deliberately different metric that keeps POST-V0 references
+visible; and §4's justification no longer cites the promotion G-R1 cancelled.
+
+The characteristic error this round: having correctly decided an object is not a
+message, the document nearly forgot it is still a node — and still a pre-dispatch
+authority. Which is a fair demonstration of why the two classes needed separate
+names in the first place.
 
 ### G-R1 — first independent review, four P1s
 

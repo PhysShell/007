@@ -502,9 +502,11 @@ determines ranks, edges, imported roots, closure and digest domains.
 ```yaml
 phase_g:
   document: docs/tasks/a1-f-v2-phase-g.md
-  status:   DECIDED (revision G-R1), awaiting re-review
+  status:   DECIDED (revision G-R2), awaiting re-review
   review_1: CHANGES_REQUESTED — four P1s, all accepted; the central
             conclusion changed from 13 envelope kinds to 11
+  review_2: CHANGES_REQUESTED — two P1s, both accepted; the count was not
+            challenged and did not move
   evidence: 37502e3 edge registry — 59 entries (53 envelope-source + 6 A2
             transition) plus a global AnyCommittedEnvelope causation rule;
             metric is "specific V0 consumer in-degree" with an explicit
@@ -518,7 +520,11 @@ phase_g:
     out_of_v0:        ArtifactImported, RunArtifactSource,
                       EstablishedNonDispatchEvidence
     edge_model:       exact registry authoritative; derived rank defined over
-                      the Intra kind-level subgraph only
+                      the Intra TYPED-NODE subgraph (messages + typed support
+                      objects), never over Causal edges
+    binding_lifecycle: pre-dispatch binding admission required — one binding
+                      identity established durably before the first dispatch;
+                      a controller obligation, not a promotion argument
     wrapper_boundary: PARSED_BUT_GRAPH_TERMINAL
     e_v0_4:           class only (manifest = typed support object); ALL
                       numeric bounds deferred to the v2 wire/bounds draft
