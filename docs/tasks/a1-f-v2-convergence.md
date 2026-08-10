@@ -515,7 +515,8 @@ next content work is the graph adjudication of section 7 and nothing else.
 
 ## 7. Phase G — graph adjudication
 
-**DECIDED — AWAITING INDEPENDENT REVIEW.** Written as a standalone decision in
+**APPROVED / CLOSED — `FD-v2-GRAPH` complete** (at `b853a2e`, ceremony `1b82a88`,
+after twelve corrective rounds). Written as a standalone decision in
 `docs/tasks/a1-f-v2-phase-g.md`, before any v2 drafting, because the node set
 determines ranks, edges, imported roots, closure and digest domains.
 
@@ -894,15 +895,33 @@ control-artifact bound.
 ```text
 envelope_version = 2            decided: the envelope changes fundamentally
 campaign_protocol_version       open: 2 iff reducer/event semantics change
-message_kind_version per kind   OUTPUT of Phase G, not an input — until the
-                                node set is final, it is unknown whose payload
-                                changed shape
+message_kind_version per kind   REQUIRED OUTPUT OF ENVELOPE V2, not of Phase G.
+                                Phase G closed the NODE SET; it deliberately
+                                left payload shapes to v2 drafting (phase-g §7)
+                                and recorded no version values. Until a kind's
+                                payload shape is drafted, whether its version
+                                moves is unknown — so a closed Phase G is NOT
+                                evidence that this obligation is discharged.
 ```
 
-## 9. What this revision deliberately does not contain
+## 9. What the inventory-admission revision deliberately did not contain
+
+**Historical scope statement, retained.** This list describes the ledger as it
+stood at inventory admission (§6), when Phase G had not yet been written. It is
+kept because the admission verdict was given against *that* scope, and rewriting
+it would make the admission unreviewable. Two of its lines have since been
+superseded by §7, which is what the closure of Phase G means:
+
+```text
+"no Phase G decisions"      SUPERSEDED — §7 now records the Phase G result and
+                            its APPROVED / CLOSED verdict
+"no dispositions"           STILL TRUE — the 47 + 141 disposition columns
+                            remain open, and Envelope v2 adjudicates only those
+                            rows a specific design decision consumes
+```
 
 - no dispositions;
-- no Phase G decisions;
+- no Phase G decisions *(superseded — see above)*;
 - no edits to `docs/q-deck/a1-authority-contracts.md`;
 - no content carried over from the types prototype;
 - no improved wording of matrix rows. They are copied as a forensic examiner

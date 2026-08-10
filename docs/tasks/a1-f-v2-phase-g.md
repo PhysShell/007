@@ -51,14 +51,40 @@ current_v1_authority:
   s1_graph_delta: NONE — proved mechanically, see below
 
 design_input:
-  commit: 37502e3ce5c397a7437445aafb88c13d84ba4ac0
-  crate:  crates/o7-a1-protocol
-  role:   EVIDENCE. Never authority.
+  commit:      37502e3ce5c397a7437445aafb88c13d84ba4ac0
+  crate:       crates/o7-a1-protocol
+  role:        EVIDENCE. Never authority.
+  reachable_from: refs/heads/claude/a1-contract-freeze  (a side branch)
+  NOT reachable from main, and `crates/o7-a1-protocol` does not exist on main
+  preservation: REQUIRED — see below
 
 implementation_probe:
   pr:     124 @ b2ba165
   role:   EVIDENCE for E-V0-4 only (see section 6)
 ```
+
+**The design input is reachable, but only just — and that is an obligation
+(post-closure review).** External review reported that `37502e3` is absent from
+the repository. Checked: the object *does* exist and resolves, so every
+derivation citing it stands — but it is reachable **only** from the side branch
+`claude/a1-contract-freeze`, is not an ancestor of `main`, and
+`crates/o7-a1-protocol` appears nowhere in `main`'s tree. The distinction
+matters and the finding survives it: the derivations were correct, and a third
+party cloning `main` cannot reproduce them. Delete that branch and the 59-row
+projection, the wrapper shapes, and the counterexample that rejected global
+`(source, target)` uniqueness all lose their cited source.
+
+```text
+OBLIGATION — the design-input evidence MUST be preserved at an immutable ref
+             before claude/a1-contract-freeze may be deleted.
+
+A lightweight tag over 37502e3 is sufficient and is the intended mechanism;
+this document then cites the tag rather than a deletable branch head.
+```
+
+Recording it here rather than silently retargeting the citation, because the
+citation is not wrong — the reachability guarantee behind it is simply weaker
+than a frozen document should rest on.
 
 **Authority freshness, checked rather than assumed (G-R10).** Nine rounds of
 this document were argued about provenance while its own declared authority
