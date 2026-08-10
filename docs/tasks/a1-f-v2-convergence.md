@@ -502,7 +502,7 @@ determines ranks, edges, imported roots, closure and digest domains.
 ```yaml
 phase_g:
   document: docs/tasks/a1-f-v2-phase-g.md
-  status:   DECIDED (revision G-R5), awaiting re-review
+  status:   DECIDED (revision G-R6), awaiting re-review
   review_1: CHANGES_REQUESTED — four P1s, all accepted; the central
             conclusion changed from 13 envelope kinds to 11
   review_2: CHANGES_REQUESTED — two P1s, both accepted; the count was not
@@ -520,9 +520,21 @@ phase_g:
             CampaignTerminalErrorPayloadV1.evidence_refs carries rank <= 4),
             and its 40 KEEP dispositions conflated a reference SURFACE with a
             semantic relation. Closed by a new layer: the semantic edge
-            registry, 50 exact edges (39 Intra / 11 Causal), acyclicity
-            machine-checked over the 17 typed nodes, field paths still owed
-            to the v2 draft
+            registry, field paths still owed to the v2 draft
+  review_6: CHANGES_REQUESTED — four P1s, all accepted; the new LAYER was
+            approved and every finding landed inside it. (a) stripping rank
+            from the 8 open surfaces never re-admitted the V0 edges they must
+            carry — frozen ReviewRequestV1.evidence_refs is required and its
+            ordering normative (contract, diff, deterministic evidence), and
+            the registry gave ReviewRequest none of the three; (b) sources
+            keyed on the log root / "the payload" could not reject
+            CoderReportReceived.source_ref -> ReviewVerdict, leaving the wire
+            to fix an admission the registry claims to own; (c)
+            CorrectiveDirective -> ReviewVerdict was Intra though frozen
+            §3.15.1 gives CorrectiveDirectiveIssued a NEW active_round_id;
+            (d) two distinct A0 wrapper kinds were merged, and the directive's
+            input-state edges were unearned since CampaignRunBinding is
+            already the execution-to-input-state authority
   evidence: 37502e3 edge registry — 59 entries (53 envelope-source + 6 A2
             transition) plus a global AnyCommittedEnvelope causation rule;
             metric is "specific V0 consumer in-degree" with an explicit
@@ -548,14 +560,27 @@ phase_g:
                       name, 38 do not). The 40 slots split 32 EXACT / 8 OPEN,
                       and only the exact ones become semantic edges: a generic
                       ArtifactRef-valued field creates no graph authority
-    semantic_registry: 50 edges, exact source kind -> exact target kind + class
-                      (39 Intra / 11 Causal), no wildcard and no class row.
-                      CampaignEventV1.source_ref is one field and eleven
-                      semantic edges, per frozen 3.15.1. Acyclicity checked by
-                      machine over the 17 typed nodes. Phase G closes edge
-                      MEANING; the v2 draft owes the field-path spelling, and
-                      every field must realize exactly one admitted edge —
-                      adding an unlisted relation reopens or supersedes Phase G
+    semantic_registry: 63 edges, exact source kind -> exact target kind + class
+                      (50 Intra / 13 Causal). Sources are DISCRIMINATED: the
+                      registry is keyed on CampaignEvent(<event_kind>) and on
+                      <PayloadVariant>, never on the log root or "the payload",
+                      because frozen 3.15.1/3.15.2 fix targets per variant. All
+                      21 frozen event kinds appear. No wildcard source and no
+                      class row; exactly one sanctioned open TARGET
+                      (AnyCommittedEnvelope, for CampaignFeedItem causation),
+                      carried as a visible row. Acyclicity checked by machine
+                      over the 47 typed nodes (26 Intra typed->typed edges).
+                      Phase G closes edge MEANING; the v2 draft owes the
+                      field-path spelling, and every field must realize exactly
+                      one admitted edge — adding an unlisted relation reopens or
+                      supersedes Phase G
+    open_surfaces:    8 of the 40 frozen slots name no target kind. Each now has
+                      a disposition: ReviewRequest.evidence_refs NARROWED to
+                      three admitted targets (ContractDocument, Diff, GateLog —
+                      forced by frozen 3.4's required field and normative
+                      ordering); CampaignFeedItem.subject_refs SANCTIONED OPEN;
+                      the other six have NO admitted target, which is a real V0
+                      restriction rather than a deferral
     campaign_event:   source-only log root, never an ArtifactRef target; its
                       payload is a legitimate target and is traversed by the
                       closure resolver under artifact-closure bounds
