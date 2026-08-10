@@ -1,0 +1,214 @@
+{
+ "_warning": "UNBLINDING KEY. Must not reach the classifier. Open only after classification output is recorded.",
+ "source": "docs/q-deck/a1-authority-contracts.md §9, frozen corpus of §2",
+ "shuffle_seed": 20260810,
+ "packet_items_sha256": "6ec7b050e62ca32fb90608f624285565d795cfefa69759dd5233188acd2f37c6",
+ "n": 41,
+ "mapping": [
+  {
+   "item_id": "item_001",
+   "round": "R2",
+   "number": 1
+  },
+  {
+   "item_id": "item_002",
+   "round": "R5",
+   "number": 3
+  },
+  {
+   "item_id": "item_003",
+   "round": "R3",
+   "number": 7
+  },
+  {
+   "item_id": "item_004",
+   "round": "R5.1",
+   "number": 2
+  },
+  {
+   "item_id": "item_005",
+   "round": "R4",
+   "number": 3
+  },
+  {
+   "item_id": "item_006",
+   "round": "R1",
+   "number": 6
+  },
+  {
+   "item_id": "item_007",
+   "round": "R5.2",
+   "number": 3
+  },
+  {
+   "item_id": "item_008",
+   "round": "R5",
+   "number": 6
+  },
+  {
+   "item_id": "item_009",
+   "round": "R1",
+   "number": 4
+  },
+  {
+   "item_id": "item_010",
+   "round": "R3",
+   "number": 2
+  },
+  {
+   "item_id": "item_011",
+   "round": "R3",
+   "number": 6
+  },
+  {
+   "item_id": "item_012",
+   "round": "R5",
+   "number": 5
+  },
+  {
+   "item_id": "item_013",
+   "round": "R5.1",
+   "number": 1
+  },
+  {
+   "item_id": "item_014",
+   "round": "R5.1",
+   "number": 4
+  },
+  {
+   "item_id": "item_015",
+   "round": "R1",
+   "number": 2
+  },
+  {
+   "item_id": "item_016",
+   "round": "R5",
+   "number": 2
+  },
+  {
+   "item_id": "item_017",
+   "round": "R2",
+   "number": 4
+  },
+  {
+   "item_id": "item_018",
+   "round": "R3",
+   "number": 3
+  },
+  {
+   "item_id": "item_019",
+   "round": "R2",
+   "number": 5
+  },
+  {
+   "item_id": "item_020",
+   "round": "R4",
+   "number": 1
+  },
+  {
+   "item_id": "item_021",
+   "round": "R4",
+   "number": 4
+  },
+  {
+   "item_id": "item_022",
+   "round": "R4",
+   "number": 5
+  },
+  {
+   "item_id": "item_023",
+   "round": "R4",
+   "number": 2
+  },
+  {
+   "item_id": "item_024",
+   "round": "R4",
+   "number": 7
+  },
+  {
+   "item_id": "item_025",
+   "round": "R5",
+   "number": 1
+  },
+  {
+   "item_id": "item_026",
+   "round": "R5.2",
+   "number": 2
+  },
+  {
+   "item_id": "item_027",
+   "round": "R3",
+   "number": 4
+  },
+  {
+   "item_id": "item_028",
+   "round": "R5.1",
+   "number": 5
+  },
+  {
+   "item_id": "item_029",
+   "round": "R2",
+   "number": 3
+  },
+  {
+   "item_id": "item_030",
+   "round": "R5",
+   "number": 4
+  },
+  {
+   "item_id": "item_031",
+   "round": "R1",
+   "number": 1
+  },
+  {
+   "item_id": "item_032",
+   "round": "R2",
+   "number": 6
+  },
+  {
+   "item_id": "item_033",
+   "round": "R1",
+   "number": 3
+  },
+  {
+   "item_id": "item_034",
+   "round": "R5.1",
+   "number": 3
+  },
+  {
+   "item_id": "item_035",
+   "round": "R3",
+   "number": 5
+  },
+  {
+   "item_id": "item_036",
+   "round": "R1",
+   "number": 5
+  },
+  {
+   "item_id": "item_037",
+   "round": "R2",
+   "number": 2
+  },
+  {
+   "item_id": "item_038",
+   "round": "R5.2",
+   "number": 1
+  },
+  {
+   "item_id": "item_039",
+   "round": "R3",
+   "number": 1
+  },
+  {
+   "item_id": "item_040",
+   "round": "R5.2",
+   "number": 4
+  },
+  {
+   "item_id": "item_041",
+   "round": "R4",
+   "number": 6
+  }
+ ]
+}
