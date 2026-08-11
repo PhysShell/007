@@ -186,6 +186,18 @@ def _target_swap():
     return s, l
 
 
+@case("duplicate structural carrier for one event kind", 1, {"2": "FAIL"})
+def _duplicate_structural():
+    # G-R11 requires EXACTLY one carrier per payload-bearing kind. Set-based
+    # membership collapses duplicates and reads two as one.
+    s, l = faithful()
+    dup = next(c for c in l["carriers"]
+               if c["carrier_kind"] == STRUCTURAL
+               and c["source"] == "CampaignEvent(CampaignCreated)")
+    l["carriers"].append({**dup, "path": dup["path"] + "::dup"})
+    return s, l
+
+
 @case("meta-target narrowed to one member by the schema", 1, {"3": "FAIL"})
 def _meta_narrowed():
     # A subject_refs field permitting only WorkOrder is NOT a faithful

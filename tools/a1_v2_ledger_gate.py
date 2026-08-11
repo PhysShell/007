@@ -15,7 +15,8 @@ The five steps run in the order frozen by Phase G 4.2.6:
 
     1. event-kind universe equality      schema.event_kinds == graph.event_kinds
     2. payload presence map              schema.payload_presence == graph map,
-                                         AND structural carriers == schema
+                                         AND exactly-one / exactly-zero
+                                         structural carriers per event kind
     3. per-field ArtifactRef capability  each field's source and complete
                                          target domain == its carriers'
     4. forward carrier coverage          every carrier is graph-admitted
@@ -171,15 +172,23 @@ def main() -> int:
             got = presence.get(kind, "<absent from schema>")
             if want != got:
                 bad.append(f"{kind}: schema={got!r} frozen={want!r}")
-        declared_struct = {c["source"] for c in carriers
-                           if c.get("carrier_kind") == "event_payload_digest"}
+        # EXACT CARDINALITY, not set membership. Frozen G-R11: exactly one
+        # carrier for each of the eleven payload-bearing kinds, exactly zero for
+        # the other ten. Collapsing carriers into a set would let two identical
+        # structural rows for one event kind read as one — a hole in precisely
+        # the exact-count contract G-R11 and G-R12 exist to enforce.
+        struct_count: dict[str, int] = {}
+        for c in carriers:
+            if c.get("carrier_kind") == "event_payload_digest":
+                struct_count[c["source"]] = struct_count.get(c["source"], 0) + 1
         schema_struct = {f"CampaignEvent({k})" for k in schema.get("structural_commitments") or []}
-        if declared_struct != schema_struct:
-            miss = sorted(schema_struct - declared_struct)
-            extra = sorted(declared_struct - schema_struct)
-            bad.append(f"structural carriers vs schema: unledgered={miss[:2]} phantom={extra[:2]}")
+        for src in sorted(set(struct_count) | schema_struct):
+            want = 1 if src in schema_struct else 0
+            got = struct_count.get(src, 0)
+            if got != want:
+                bad.append(f"{src}: {got} structural carriers, expected exactly {want}")
         r.add("2. payload presence map", not bad,
-              f"{n_bearing} one / {n_free} zero, structural carriers agree" if not bad
+              f"{n_bearing} one / {n_free} zero, structural carrier counts exact" if not bad
               else "; ".join(bad[:3]))
 
     # ---- 3. recursive ArtifactRef extraction, per-field capability -----------

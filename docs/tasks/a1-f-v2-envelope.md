@@ -1,14 +1,18 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R2) — AWAITING RE-REVIEW.**
+**Status: DRAFTING (revision E-R3) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
-five P1s that followed — including E-1's false derivability claim. E-R2 closes
+five P1s that followed — including E-1's false derivability claim. E-R2 closed
 the trust joint itself: the middle term is now extracted rather than asserted,
 per-field capability replaces a bare path list, the meta-target obeys frozen
-clause 5, and a `--graph` override can no longer bypass its own preflight. Three
-revisions, no graph change in any of them: the frozen registry is a hard input
-here, not a subject.
+clause 5, and a `--graph` override can no longer bypass its own preflight. E-R3
+makes step 2 count rather than deduplicate, and rebases onto current `main`.
+Four revisions, no graph change in any of them: the frozen registry is a hard
+input here, not a subject.
+
+**The gate is intentionally RED**, because Envelope v2 has drafted no schema.
+What is up for review is the proof machinery, not the completion of the phase.
 
 **E-1 is settled as of E-R1** and is not reopened below. Everything since has
 been about the machine that decides when the gate may go green.
@@ -168,7 +172,7 @@ With nothing drafted, both preflights pass and all five steps are OWED:
 RESULT: FAIL — Envelope v2 is not realized
 ```
 
-`tools/tests/test_a1_v2_ledger_gate.py` — **17 cases, 17 as specified.** Thirteen
+`tools/tests/test_a1_v2_ledger_gate.py` — **18 cases, 18 as specified.** Fourteen
 mutate one thing and assert which step catches it; four exercise the preflight
 itself, which E-R1 added and left undefended.
 
@@ -187,6 +191,7 @@ itself, which E-R1 added and left undefended.
 | an admitted edge left with no carrier | step 5 |
 | **forged graph passed via `--graph`** | **preflight, no steps run** |
 | **hand-filled schema facts** | **preflight** |
+| **duplicate structural carrier for one event kind** | **step 2** |
 | **Phase G source blob mismatch** | **extractor `--check`** |
 | real artifacts | both preflights pass |
 
@@ -376,6 +381,33 @@ two FDs partial is the honest state of a first substantive decision.
 
 ## 7. Revision record
 
+### E-R3 — third independent review, one P1 and a staleness fix
+
+**P1-10 — step 2 deduplicated where it had to count.** Frozen G-R11 requires
+*exactly one* carrier for each of the eleven payload-bearing kinds and *exactly
+zero* for the other ten. The implementation built a `set` of carrier sources, so
+two identical structural rows for `CampaignEvent(CampaignCreated)` collapsed into
+one and passed. Small, and located precisely inside the exact-cardinality
+contract that G-R11 and G-R12 exist to enforce. Step 2 now counts per source;
+the corpus gains *duplicate structural carrier for one event kind*. 18/18.
+
+**Staleness.** The branch was 17 commits behind `main`. Verified before
+rebasing: those commits touch only `docs/o7-invoke.md`,
+`docs/tasks/mg-c-model-gate.md` and `src/invoke.rs`, and both pinned blobs —
+A1 authority `3b26849c` and Phase G `450380ff` — are unchanged, so this is a
+rebase and a re-run rather than any re-adjudication. Opening a review on a
+knowingly stale base, one round after G-R10 caught exactly that, would have been
+performance art.
+
+**Carried as an open review target, not fixed.** `A1_V2_GATE_HARNESS=1` is still
+a runtime preflight bypass, merely moved from a CLI flag into an environment
+variable. It is not a false-green in ordinary invocation, but it is a bypass
+living in the acceptance executable. The right shape is to lift steps 1–5 into
+an importable function the corpus calls directly, leaving no bypass in the
+shipped path at all. Recorded in §8 rather than done, because it is a
+refactor of the machine under review and belongs after the mechanism review, not
+inside it.
+
 ### E-R2 — second independent review, three P1s and two P2s
 
 All five accepted. Every one sits in the *trust joint* rather than in a design
@@ -526,7 +558,12 @@ one grows on top.
    Phase G's document changes at all — including a supersede that Phase G's own
    rules permit. Is "re-pin deliberately" enough of a procedure, or does a
    supersede need a recorded ceremony here the way it does in the contract?
-6. **Whether this is now PR-ready.** The gate is RED by content and green by
-   construction; the suggestion was to open a draft PR at exactly this point.
-   Is the mechanism stable enough that external review would be reviewing the
-   machine rather than a moving target?
+6. **The harness bypass.** `A1_V2_GATE_HARNESS=1` skips both preflights. It is
+   a test seam, not a false-green path — but it ships inside the acceptance
+   executable. The intended repair is to lift steps 1–5 into an importable
+   function the corpus calls directly, so the shipped gate contains no bypass.
+   Is that the right shape, and should it land before any v2 schema does?
+7. **Exact cardinality elsewhere.** Step 2 now counts structural carriers.
+   Steps 4 and 5 still work on sets of triples. Is there a place where duplicate
+   `artifact_ref` carriers for one edge should also be a defect rather than a
+   no-op?
