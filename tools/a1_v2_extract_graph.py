@@ -32,16 +32,27 @@ OUT = REPO / "docs/tasks/a1-f-v2-graph.json"
 # authority it claims to derive from has moved underneath it.
 PINNED_BLOB = "450380ff0d1f8ec08f783968f08bc6b3942f44a5"
 
-MESSAGE_KINDS = [
-    "WorkOrder", "CoderReport", "CandidateReceipt", "ReviewRequest",
-    "ReviewerReport", "ReviewVerdict", "CorrectiveDirective", "CampaignFeedItem",
-    "HumanAttentionRequest", "HumanCommandRequest", "HumanDecision",
-]
-TYPED_SUPPORTS = [
-    "ProviderExecutionReceipt", "InteractionManifest", "ScopeContract",
-    "CampaignRunBinding",
-]
-META_TARGETS = {"AnyCommittedEnvelope": MESSAGE_KINDS}
+def _camel(snake: str) -> str:
+    return "".join(w.capitalize() for w in snake.split("_"))
+
+
+def parse_meta_members(text: str) -> list[str]:
+    """The eleven members, read from 4.2.5's frozen membership block."""
+    m = re.search(r"members := exactly the eleven envelope-bearing message kinds"
+                  r".*?\n\n(.*?)\n\nresolution", text, re.S)
+    assert m, "membership block not found in the Phase G document"
+    members = [_camel(t) for t in re.findall(r"[a-z][a-z_]+", m.group(1))]
+    assert len(members) == 11, f"expected 11 meta-target members, found {len(members)}"
+    return members
+
+
+def parse_typed_supports(text: str) -> list[str]:
+    """The four typed supports, read from 4.2.5's typed-universe sentence."""
+    m = re.search(r"four typed\s+supports \((.*?)\)", text, re.S)
+    assert m, "typed-supports enumeration not found in the Phase G document"
+    supports = re.findall(r"`(\w+)`", m.group(1))
+    assert len(supports) == 4, f"expected 4 typed supports, found {len(supports)}"
+    return supports
 
 
 def git_blob_sha(data: bytes) -> str:
@@ -50,7 +61,15 @@ def git_blob_sha(data: bytes) -> str:
 
 def extract(source: Path) -> dict:
     raw = source.read_bytes()
-    lines = raw.decode("utf-8").split("\n")
+    text = raw.decode("utf-8")
+    lines = text.split("\n")
+
+    # Derived from the document, not transcribed. A hand-kept copy of a frozen
+    # set is a second registry, and this one is load-bearing: the meta-target
+    # members decide what a subject_refs field is allowed to carry.
+    message_kinds = parse_meta_members(text)
+    typed_supports = parse_typed_supports(text)
+    meta_targets = {"AnyCommittedEnvelope": message_kinds}
 
     start = next(i for i, l in enumerate(lines)
                  if l.startswith("| # | source semantic kind"))
@@ -84,16 +103,16 @@ def extract(source: Path) -> dict:
     bearing = sum(1 for v in expected_payload.values() if v)
     assert bearing == 11 and len(expected_payload) - bearing == 10, "presence map is not 11/10"
 
-    typed = (set(MESSAGE_KINDS) | set(TYPED_SUPPORTS)
+    typed = (set(message_kinds) | set(typed_supports)
              | {p + "Payload" for p in payload_variants}
              | {f"CampaignEvent({k})" for k in event_kinds})
     nodes = set()
     for e in edges:
         nodes |= {e["source"], e["target"]}
-    terminal = sorted(nodes - typed - set(META_TARGETS))
+    terminal = sorted(nodes - typed - set(meta_targets))
     assert len(typed) == 47, f"expected 47 typed nodes, found {len(typed)}"
     assert len(terminal) == 20, f"expected 20 terminal kinds, found {len(terminal)}"
-    assert not (set(META_TARGETS) & {e["source"] for e in edges}), \
+    assert not (set(meta_targets) & {e["source"] for e in edges}), \
         "a meta-target appears as an edge SOURCE; it is a target-position union only"
 
     return {
@@ -104,12 +123,12 @@ def extract(source: Path) -> dict:
         "source_blob": git_blob_sha(raw),
         "pinned_blob": PINNED_BLOB,
         "status": "APPROVED / CLOSED",
-        "message_kinds": MESSAGE_KINDS,
-        "typed_supports": TYPED_SUPPORTS,
+        "message_kinds": message_kinds,
+        "typed_supports": typed_supports,
         "event_kinds": event_kinds,
         "payload_variants": payload_variants,
         "expected_payload": expected_payload,
-        "meta_targets": META_TARGETS,
+        "meta_targets": meta_targets,
         "terminal_kinds": terminal,
         "edges": edges,
     }

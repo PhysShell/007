@@ -16,7 +16,8 @@ The five steps run in the order frozen by Phase G 4.2.6:
     1. event-kind universe equality      schema.event_kinds == graph.event_kinds
     2. payload presence map              schema.payload_presence == graph map,
                                          AND structural carriers == schema
-    3. recursive ArtifactRef extraction  schema.artifact_ref_paths == carriers
+    3. per-field ArtifactRef capability  each field's source and complete
+                                         target domain == its carriers'
     4. forward carrier coverage          every carrier is graph-admitted
     5. reverse carrier coverage          every graph edge has >= 1 carrier
 
@@ -26,8 +27,11 @@ would not collide with anything - it would simply drop out of the proof.
 
 Fails closed. An undeclared side is a FAILURE, never a pass.
 
+Both non-ledger terms are re-derived by a preflight bound to the very path the
+gate then reads, so an override cannot be checked against one artifact and read
+from another. There is no --skip-preflight flag; the corpus uses an env var.
+
 Usage:  python3 tools/a1_v2_ledger_gate.py [--graph P] [--schema P] [--ledger P]
-                                           [--skip-preflight]
 Exit:   0 = every step passed;  1 = at least one step failed or is owed.
 """
 
@@ -35,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -43,7 +48,19 @@ REPO = Path(__file__).resolve().parents[1]
 GRAPH = REPO / "docs/tasks/a1-f-v2-graph.json"
 SCHEMA = REPO / "docs/tasks/a1-f-v2-schema-facts.json"
 LEDGER = REPO / "docs/tasks/a1-f-v2-realization-ledger.json"
-EXTRACTOR = REPO / "tools/a1_v2_extract_graph.py"
+GRAPH_EXTRACTOR = REPO / "tools/a1_v2_extract_graph.py"
+SCHEMA_EXTRACTOR = REPO / "tools/a1_v2_extract_schema.py"
+
+
+def _harness() -> bool:
+    """Test-harness escape, deliberately NOT a command-line flag.
+
+    A documented --skip-preflight is an invitation: in six months somebody
+    adds it to CI to make the checks faster, which is the traditional way of
+    optimising a check by deleting it. The corpus sets this env var; nothing
+    a human types at a prompt does.
+    """
+    return os.environ.get("A1_V2_GATE_HARNESS") == "1"
 
 Key = tuple[str, str, str]
 
@@ -69,31 +86,16 @@ class Report:
         return 1 if self.failed else 0
 
 
-def admitted_keys(graph: dict) -> set[Key]:
-    """Edges admitted at carrier level, with meta-targets expanded.
+def edge_keys(graph: dict) -> set[Key]:
+    """The frozen edges, EXACTLY as written.
 
-    A meta-target is a union in TARGET position. Expanding edge
-    (S -> M, class) yields (S -> member, class) for each member. It never
-    yields (M -> member): the meta-target is not a source and has no
-    out-edges (the extractor asserts this).
-    """
-    meta = graph["meta_targets"]
-    out: set[Key] = set()
-    for e in graph["edges"]:
-        src, tgt, cls = e["source"], e["target"], e["class"]
-        if tgt in meta:
-            for member in meta[tgt]:
-                out.add((src, member, cls))
-        else:
-            out.add((src, tgt, cls))
-    return out
-
-
-def required_keys(graph: dict) -> set[Key]:
-    """Edges that must each have >= 1 carrier.
-
-    A meta-target edge is satisfied by a carrier to ANY of its members, so it
-    is required as the un-expanded relation and checked against the expansion.
+    Phase G 4.2.6 clause 5: a meta-target is declared ONCE as a meta-target
+    expansion, never as eleven separate edges. So a carrier realizing row 69
+    carries the relation `CampaignFeedItem -Causal-> AnyCommittedEnvelope`
+    itself; it does not decompose into eleven member carriers, and a carrier to
+    a single member is NOT that relation. Expansion belongs one level down, in
+    step 3, where the field's permitted target domain is compared against the
+    union's members.
     """
     return {(e["source"], e["target"], e["class"]) for e in graph["edges"]}
 
@@ -103,22 +105,29 @@ def main() -> int:
     ap.add_argument("--graph", default=str(GRAPH))
     ap.add_argument("--schema", default=str(SCHEMA))
     ap.add_argument("--ledger", default=str(LEDGER))
-    ap.add_argument("--skip-preflight", action="store_true")
     args = ap.parse_args()
 
     r = Report()
 
-    # ---- preflight: the frozen side must be derivable, not merely present ----
-    if args.skip_preflight:
-        r.add("preflight: graph extract", True, "skipped (test harness)")
-    else:
-        p = subprocess.run([sys.executable, str(EXTRACTOR), "--check"],
-                           capture_output=True, text=True)
-        r.add("preflight: graph extract", p.returncode == 0,
-              "committed graph == derived from Phase G"
-              if p.returncode == 0 else (p.stderr.strip().split("\n")[0] or "mismatch"))
-        if p.returncode != 0:
-            return r.emit()  # every step below would be measured against a forged ruler
+    # ---- preflight: both non-ledger terms must be DERIVABLE, not merely present.
+    # Each --check is bound to the very path the gate then reads. Checking the
+    # default artifact and then reading an overridden one would re-open exactly
+    # the hole the preflight exists to close.
+    if not _harness():
+        for label, tool, out, ok_msg in (
+            ("preflight: graph extract", GRAPH_EXTRACTOR, args.graph,
+             "committed graph == derived from Phase G"),
+            ("preflight: schema extract", SCHEMA_EXTRACTOR, args.schema,
+             "committed facts == derived from the v2 schema source"),
+        ):
+            p = subprocess.run([sys.executable, str(tool), "--check", "--out", out],
+                               capture_output=True, text=True)
+            r.add(label, p.returncode == 0,
+                  ok_msg if p.returncode == 0
+                  else (p.stderr.strip().split("\n")[0] or "mismatch"))
+            if p.returncode != 0:
+                # Every step below would be measured against a forged ruler.
+                return r.emit()
 
     graph = json.loads(Path(args.graph).read_text())
     schema = json.loads(Path(args.schema).read_text())
@@ -126,6 +135,7 @@ def main() -> int:
 
     carriers = ledger.get("carriers", [])
     frozen_kinds = set(graph["event_kinds"])
+    meta = graph["meta_targets"]
     expected_payload = graph["expected_payload"]
     drafted = bool(schema.get("extracted_from"))
 
@@ -172,22 +182,46 @@ def main() -> int:
               f"{n_bearing} one / {n_free} zero, structural carriers agree" if not bad
               else "; ".join(bad[:3]))
 
-    # ---- 3. recursive ArtifactRef extraction ---------------------------------
-    schema_paths = set(schema.get("artifact_ref_paths") or [])
-    carrier_paths = {c["path"] for c in carriers if c.get("carrier_kind") == "artifact_ref"}
+    # ---- 3. recursive ArtifactRef extraction, per-field capability -----------
+    # Phase G 4.2.6 clause 1: a field declares the COMPLETE set of edges it may
+    # realize. A bare path list cannot express that — two fields can swap their
+    # targets and every global triple still appears somewhere, so steps 4 and 5
+    # both pass while each field realizes the wrong relation.
+    schema_fields = {f["path"]: f for f in (schema.get("artifact_ref_fields") or [])}
+    by_path: dict[str, list[dict]] = {}
+    for c in carriers:
+        if c.get("carrier_kind") == "artifact_ref":
+            by_path.setdefault(c["path"], []).append(c)
     if not drafted:
-        r.add("3. recursive ArtifactRef extraction", False,
-              "no v2 schema extracted; nothing to extract paths from", owed=True)
+        r.add("3. per-field ArtifactRef capability", False,
+              "no v2 schema extracted; nothing to extract fields from", owed=True)
     else:
-        missing = sorted(schema_paths - carrier_paths)
-        phantom = sorted(carrier_paths - schema_paths)
-        ok = not missing and not phantom
-        r.add("3. recursive ArtifactRef extraction", ok,
-              f"{len(schema_paths)} schema fields == {len(carrier_paths)} carrier paths" if ok
-              else f"unledgered fields={missing[:2]} phantom carriers={phantom[:2]}")
+        bad = []
+        for path in sorted(set(schema_fields) | set(by_path)):
+            f, cs = schema_fields.get(path), by_path.get(path, [])
+            if f is None:
+                bad.append(f"{path}: carrier for a field the extractor never saw")
+                continue
+            if not cs:
+                bad.append(f"{path}: schema field with no carrier")
+                continue
+            wrong_src = {c["source"] for c in cs} - {f["source_semantic_kind"]}
+            if wrong_src:
+                bad.append(f"{path}: carrier source {sorted(wrong_src)} != schema "
+                           f"{f['source_semantic_kind']}")
+            declared: set[str] = set()
+            for c in cs:
+                declared |= set(meta.get(c["target"], [c["target"]]))
+            allowed = set(f.get("allowed_concrete_target_kinds") or [])
+            if declared != allowed:
+                bad.append(f"{path}: target domain {sorted(declared)[:3]} != schema "
+                           f"{sorted(allowed)[:3]}")
+        r.add("3. per-field ArtifactRef capability", not bad,
+              f"{len(schema_fields)} fields, source and target domain agree" if not bad
+              else "; ".join(bad[:2]))
 
     # ---- 4. forward carrier coverage -----------------------------------------
-    admitted = admitted_keys(graph)
+    admitted = edge_keys(graph)
     unadmitted = [f'{c["source"]} -{c.get("class")}-> {c["target"]}'
                   for c in carriers
                   if (c["source"], c["target"], c.get("class")) not in admitted]
@@ -199,15 +233,9 @@ def main() -> int:
               else f"unlisted relations: {unadmitted[:2]} -> reopen/supersede Phase G")
 
     # ---- 5. reverse carrier coverage -----------------------------------------
-    meta = graph["meta_targets"]
     carried = {(c["source"], c["target"], c.get("class")) for c in carriers}
-    uncovered = []
-    for src, tgt, cls in sorted(required_keys(graph)):
-        if tgt in meta:
-            if not any((src, m, cls) in carried for m in meta[tgt]):
-                uncovered.append(f"{src} -{cls}-> {tgt}")
-        elif (src, tgt, cls) not in carried:
-            uncovered.append(f"{src} -{cls}-> {tgt}")
+    uncovered = [f"{src} -{cls}-> {tgt}" for src, tgt, cls in sorted(edge_keys(graph))
+                 if (src, tgt, cls) not in carried]
     total = len(graph["edges"])
     if uncovered:
         r.add("5. reverse carrier coverage", False,

@@ -12,6 +12,7 @@ Run: python3 tools/tests/test_a1_v2_ledger_gate.py
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -26,28 +27,34 @@ REF = "artifact_ref"
 
 
 def faithful() -> tuple[dict, dict]:
-    """A schema + ledger that faithfully realize the frozen graph."""
-    carriers, paths, struct = [], [], []
+    """A schema + ledger that faithfully realize the frozen graph.
+
+    Row 69 gets ONE carrier whose target is the meta-target itself — Phase G
+    4.2.6 clause 5: declared once as a meta-target expansion, never as eleven
+    separate edges. The expansion appears only in that field's permitted target
+    domain.
+    """
+    carriers, fields, struct = [], [], []
     for e in GRAPH["edges"]:
         src, tgt, cls = e["source"], e["target"], e["class"]
-        targets = GRAPH["meta_targets"].get(tgt, [tgt])
-        for concrete in targets:
-            is_struct = src.startswith("CampaignEvent(") and concrete.endswith("Payload")
-            path = f"synthetic::{e['n']}::{concrete}"
-            carriers.append({"source": src, "target": concrete, "class": cls,
-                             "carrier_kind": STRUCTURAL if is_struct else REF,
-                             "path": path})
-            if is_struct:
-                struct.append(src[len("CampaignEvent("):-1])
-            else:
-                paths.append(path)
+        is_struct = src.startswith("CampaignEvent(") and tgt.endswith("Payload")
+        path = f"synthetic::{e['n']}"
+        carriers.append({"source": src, "target": tgt, "class": cls,
+                         "carrier_kind": STRUCTURAL if is_struct else REF,
+                         "path": path})
+        if is_struct:
+            struct.append(src[len("CampaignEvent("):-1])
+        else:
+            fields.append({"path": path, "source_semantic_kind": src,
+                           "allowed_concrete_target_kinds":
+                               sorted(GRAPH["meta_targets"].get(tgt, [tgt]))})
     schema = {
         "extracted_from": "synthetic://v2-schemas@test",
         "extractor": "synthetic",
         "event_kinds": list(GRAPH["event_kinds"]),
         "payload_presence": dict(GRAPH["expected_payload"]),
         "structural_commitments": sorted(set(struct)),
-        "artifact_ref_paths": sorted(set(paths)),
+        "artifact_ref_fields": fields,
     }
     return schema, {"carriers": carriers}
 
@@ -57,10 +64,10 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
         sp, lp = Path(d) / "s.json", Path(d) / "l.json"
         sp.write_text(json.dumps(schema))
         lp.write_text(json.dumps(ledger))
+        env = {**os.environ, "A1_V2_GATE_HARNESS": "1"}
         p = subprocess.run(
-            [sys.executable, str(GATE), "--schema", str(sp), "--ledger", str(lp),
-             "--skip-preflight"],
-            capture_output=True, text=True)
+            [sys.executable, str(GATE), "--schema", str(sp), "--ledger", str(lp)],
+            capture_output=True, text=True, env=env)
     steps = {}
     for line in p.stdout.split("\n"):
         s = line.strip()
@@ -88,7 +95,7 @@ def _faithful():
 @case("nothing declared at all", 1, {"1": "OWED", "2": "OWED", "3": "OWED", "4": "OWED", "5": "OWED"})
 def _empty():
     return ({"extracted_from": None, "event_kinds": [], "payload_presence": {},
-             "structural_commitments": [], "artifact_ref_paths": []}, {"carriers": []})
+             "structural_commitments": [], "artifact_ref_fields": []}, {"carriers": []})
 
 
 @case("schema grows a 22nd event kind", 1, {"1": "FAIL"})
@@ -121,7 +128,9 @@ def _unlisted_relation():
     s, l = faithful()
     l["carriers"].append({"source": "CoderReport", "target": "ReviewVerdict",
                           "class": "Intra", "carrier_kind": REF, "path": "synthetic::rogue"})
-    s["artifact_ref_paths"] = sorted(s["artifact_ref_paths"] + ["synthetic::rogue"])
+    s["artifact_ref_fields"].append({"path": "synthetic::rogue",
+                                     "source_semantic_kind": "CoderReport",
+                                     "allowed_concrete_target_kinds": ["ReviewVerdict"]})
     return s, l
 
 
@@ -142,54 +151,140 @@ def _missing_carrier():
     drop = next(c for c in l["carriers"]
                 if c["source"] == "WorkOrder" and c["target"] == "ScopeContract")
     l["carriers"].remove(drop)
-    s["artifact_ref_paths"] = [p for p in s["artifact_ref_paths"] if p != drop["path"]]
+    s["artifact_ref_fields"] = [f for f in s["artifact_ref_fields"]
+                                if f["path"] != drop["path"]]
     return s, l
 
 
 @case("schema field with no carrier declared", 1, {"3": "FAIL"})
 def _unledgered_field():
     s, l = faithful()
-    s["artifact_ref_paths"] = sorted(s["artifact_ref_paths"] + ["synthetic::undeclared_field"])
+    s["artifact_ref_fields"].append({"path": "synthetic::undeclared",
+                                     "source_semantic_kind": "WorkOrder",
+                                     "allowed_concrete_target_kinds": ["ScopeContract"]})
     return s, l
 
 
 @case("carrier path the schema extractor never saw", 1, {"3": "FAIL"})
 def _phantom_path():
     s, l = faithful()
-    c = dict(l["carriers"][0])
-    c["path"] = "synthetic::phantom"
+    c = dict(l["carriers"][0]); c["path"] = "synthetic::phantom"
     l["carriers"].append(c)
     return s, l
 
 
-@case("meta-target realized via a member (must be admitted)", 0, {"4": "PASS", "5": "PASS"})
-def _meta_ok():
-    # CampaignFeedItem -Causal-> AnyCommittedEnvelope is satisfied by a carrier
-    # to any member. faithful() already expands it to all eleven; keep one.
+@case("two fields swap their targets (globals still balance)", 1, {"3": "FAIL"})
+def _target_swap():
+    # The attack a bare path list cannot see: both frozen triples still exist
+    # somewhere, so steps 4 and 5 pass while each field carries the wrong one.
     s, l = faithful()
-    keep = [c for c in l["carriers"]
-            if not (c["source"] == "CampaignFeedItem" and c["class"] == "Causal")]
-    one = next(c for c in l["carriers"]
-               if c["source"] == "CampaignFeedItem" and c["target"] == "WorkOrder")
-    l["carriers"] = keep + [one]
-    s["artifact_ref_paths"] = sorted({c["path"] for c in l["carriers"]
-                                      if c["carrier_kind"] == REF})
+    a = next(c for c in l["carriers"] if c["source"] == "WorkOrder"
+             and c["target"] == "CandidateStateReceiptRef")
+    b = next(c for c in l["carriers"] if c["source"] == "WorkOrder"
+             and c["target"] == "CandidateMaterializationRef")
+    a["path"], b["path"] = b["path"], a["path"]
     return s, l
 
 
-@case("meta-target realized to a NON-member", 1, {"4": "FAIL"})
-def _meta_non_member():
+@case("meta-target narrowed to one member by the schema", 1, {"3": "FAIL"})
+def _meta_narrowed():
+    # A subject_refs field permitting only WorkOrder is NOT a faithful
+    # realization of a union of eleven kinds.
     s, l = faithful()
-    c = {"source": "CampaignFeedItem", "target": "ScopeContract", "class": "Causal",
-         "carrier_kind": REF, "path": "synthetic::meta_bad"}
-    l["carriers"].append(c)
-    s["artifact_ref_paths"] = sorted(s["artifact_ref_paths"] + [c["path"]])
+    f = next(f for f in s["artifact_ref_fields"]
+             if f["source_semantic_kind"] == "CampaignFeedItem")
+    f["allowed_concrete_target_kinds"] = ["WorkOrder"]
     return s, l
+
+
+@case("meta-target realized as eleven separate carriers", 1, {"4": "FAIL", "5": "FAIL"})
+def _meta_decomposed():
+    # Frozen clause 5 forbids this: declared ONCE, never as eleven edges.
+    s, l = faithful()
+    row69 = next(c for c in l["carriers"] if c["target"] == "AnyCommittedEnvelope")
+    l["carriers"].remove(row69)
+    for m in GRAPH["meta_targets"]["AnyCommittedEnvelope"]:
+        l["carriers"].append({**row69, "target": m, "path": f"{row69['path']}::{m}"})
+    f = next(f for f in s["artifact_ref_fields"] if f["path"] == row69["path"])
+    s["artifact_ref_fields"].remove(f)
+    for m in GRAPH["meta_targets"]["AnyCommittedEnvelope"]:
+        s["artifact_ref_fields"].append(
+            {"path": f"{row69['path']}::{m}", "source_semantic_kind": "CampaignFeedItem",
+             "allowed_concrete_target_kinds": [m]})
+    return s, l
+
+
+# ---------------------------------------------------------------------------
+# Preflight corpus. These run WITHOUT the harness escape, because the preflight
+# is exactly what they test. E-R1 added the protection and shipped no regression
+# for it, so the check existed while nothing defended it.
+# ---------------------------------------------------------------------------
+
+GRAPH_PATH = REPO / "docs/tasks/a1-f-v2-graph.json"
+SCHEMA_PATH = REPO / "docs/tasks/a1-f-v2-schema-facts.json"
+GRAPH_EXTRACTOR = REPO / "tools/a1_v2_extract_graph.py"
+PHASE_G = REPO / "docs/tasks/a1-f-v2-phase-g.md"
+
+
+def run_real(graph: Path, schema: Path) -> tuple[int, str]:
+    ledger = REPO / "docs/tasks/a1-f-v2-realization-ledger.json"
+    p = subprocess.run(
+        [sys.executable, str(GATE), "--graph", str(graph), "--schema", str(schema),
+         "--ledger", str(ledger)],
+        capture_output=True, text=True)
+    return p.returncode, p.stdout
+
+
+def preflight_cases() -> list[tuple[str, bool]]:
+    out = []
+    with tempfile.TemporaryDirectory() as d:
+        d = Path(d)
+
+        # 1. A forged graph passed via --graph. E-R1's preflight checked the
+        #    DEFAULT artifact and then read the override, so this bypassed it.
+        forged = json.loads(GRAPH_PATH.read_text())
+        forged["edges"][0]["class"] = "Causal"
+        fg = d / "forged-graph.json"
+        fg.write_text(json.dumps(forged, indent=2) + "\n")
+        code, txt = run_real(fg, SCHEMA_PATH)
+        out.append(("forged graph via --graph is rejected",
+                    code == 1 and "preflight: graph extract" in txt
+                    and " FAIL " in txt.split("preflight: graph extract")[1].split("\n")[0]
+                    and "1. event-kind" not in txt))
+
+        # 2. Hand-filled schema facts: the middle term must come from an
+        #    extractor, not a keyboard.
+        forged_schema = json.loads(SCHEMA_PATH.read_text())
+        forged_schema["extracted_from"] = "wishful://thinking"
+        forged_schema["event_kinds"] = list(GRAPH["event_kinds"])
+        fs = d / "forged-schema.json"
+        fs.write_text(json.dumps(forged_schema, indent=2) + "\n")
+        code, txt = run_real(GRAPH_PATH, fs)
+        out.append(("hand-filled schema facts are rejected",
+                    code == 1 and "preflight: schema extract" in txt
+                    and " FAIL " in txt.split("preflight: schema extract")[1].split("\n")[0]))
+
+        # 3. The Phase G source itself moving: the extractor must notice that the
+        #    authority it claims to derive from is no longer the pinned blob.
+        moved = d / "phase-g-moved.md"
+        moved.write_text(PHASE_G.read_text() + "\n<!-- authority drifted -->\n")
+        p = subprocess.run([sys.executable, str(GRAPH_EXTRACTOR), "--check",
+                            "--source", str(moved), "--out", str(GRAPH_PATH)],
+                           capture_output=True, text=True)
+        out.append(("Phase G source blob mismatch is rejected", p.returncode == 1))
+
+        # 4. Control: the real artifacts must still pass their preflights, or the
+        #    three cases above would be proving nothing.
+        code, txt = run_real(GRAPH_PATH, SCHEMA_PATH)
+        out.append(("real artifacts pass both preflights",
+                    "preflight: graph extract" in txt and "preflight: schema extract" in txt
+                    and txt.count(" PASS ") >= 2))
+    return out
 
 
 def main() -> int:
     failures = 0
-    print(f"gate mutation corpus — {len(CASES)} cases\n" + "=" * 76)
+    print(f"gate mutation corpus — {len(CASES)} step cases + preflight\n" + "=" * 76)
     for name, fn, want_exit, want_steps in CASES:
         schema, ledger = fn()
         code, steps = run(schema, ledger)
@@ -203,8 +298,14 @@ def main() -> int:
         ok = not problems
         failures += 0 if ok else 1
         print(f"  [{'ok' if ok else 'XX'}] {name:<58} {'' if ok else '; '.join(problems)}")
+    print("-" * 76)
+    pre = preflight_cases()
+    for name, ok in pre:
+        failures += 0 if ok else 1
+        print(f"  [{'ok' if ok else 'XX'}] {name}")
+    total = len(CASES) + len(pre)
     print("=" * 76)
-    print(f"{len(CASES) - failures}/{len(CASES)} cases behaved as specified")
+    print(f"{total - failures}/{total} cases behaved as specified")
     return 1 if failures else 0
 
 
