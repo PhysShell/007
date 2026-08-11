@@ -133,6 +133,23 @@ impl<'a> Scanner<'a> {
 
     fn value(&mut self) -> Result<(), ParseError> {
         self.skip_whitespace();
+        // FD-1.4 bounds *nesting depth*, and the walk this replaced counted it
+        // per **value**: the root at depth 1, every child one deeper, scalars
+        // included. Checking only when a container is pushed counts frames
+        // instead, which admits a scalar leaf one level past the bound — 32
+        // nested objects put their leaf at depth 33 and the walk refused it.
+        //
+        // So the check is here, at the entry to every value, which is where the
+        // walk had it. Both reviewers found this independently, and the
+        // differential corpus missed it because it tested MAX + 1 containers
+        // (refused either way) and never the exact boundary.
+        let depth = self.stack.len() + 1;
+        if depth > MAX_JSON_DEPTH {
+            return Err(match self.mode {
+                Mode::Admit => ParseError::DepthExceeded { path: self.path() },
+                Mode::Probe => ParseError::NotAnObject,
+            });
+        }
         match self.peek() {
             Some(b'{') => self.object(),
             Some(b'[') => self.array(),
@@ -155,7 +172,7 @@ impl<'a> Scanner<'a> {
 
     fn object(&mut self) -> Result<(), ParseError> {
         self.bump(); // '{'
-        self.push(Frame::Object)?;
+        self.push(Frame::Object);
         self.skip_whitespace();
         if self.peek() == Some(b'}') {
             self.bump();
@@ -195,7 +212,7 @@ impl<'a> Scanner<'a> {
 
     fn array(&mut self) -> Result<(), ParseError> {
         self.bump(); // '['
-        self.push(Frame::Array { index: 0 })?;
+        self.push(Frame::Array { index: 0 });
         self.skip_whitespace();
         if self.peek() == Some(b']') {
             self.bump();
@@ -411,22 +428,15 @@ impl<'a> Scanner<'a> {
         Ok(())
     }
 
-    fn push(&mut self, frame: Frame) -> Result<(), ParseError> {
-        // Checked before pushing, so the stack itself is the bound: a document
-        // nested a million deep costs 32 frames and a refusal, not a million
-        // frames or a blown native stack.
-        if self.stack.len() >= MAX_JSON_DEPTH {
-            // Bounded in both modes: the scanner recurses, so an unbounded
-            // probe would trade a heap bound for a native-stack one. In probe
-            // mode the document is already known not to be a top-level object,
-            // so `NotAnObject` is the verdict regardless of what lies deeper.
-            return Err(match self.mode {
-                Mode::Admit => ParseError::DepthExceeded { path: self.path() },
-                Mode::Probe => ParseError::NotAnObject,
-            });
-        }
+    /// Open a container. The depth bound is enforced by [`Self::value`], which
+    /// runs on entry to every value including this one, so the stack cannot
+    /// exceed [`MAX_JSON_DEPTH`] frames and the recursion is bounded with it.
+    ///
+    /// Deliberately not a second depth check: two places deciding one bound is
+    /// how the frame count and the value depth came to disagree in the first
+    /// place.
+    fn push(&mut self, frame: Frame) {
         self.stack.push(frame);
-        Ok(())
     }
 
     fn peek(&self) -> Option<u8> {

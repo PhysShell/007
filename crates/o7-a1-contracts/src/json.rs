@@ -515,6 +515,19 @@ mod tests {
     /// and when one does, the other must still be a structural refusal rather
     /// than something unrelated.
     ///
+    /// **Two divergences are declared rather than compared**, each with its own
+    /// test rather than an exemption buried here:
+    ///
+    /// - *error precedence* (this paragraph): the old path ran whole-document
+    ///   syntax first, the new one reports the first violation in document
+    ///   order.
+    /// - *duplicate member names*: the old path deduped them inside
+    ///   `serde_json::Value` before any rule ran, and admitted the artifact.
+    ///   The new path refuses it. That is an accept/reject change, argued and
+    ///   pinned in `duplicate_member_names_are_refused_which_the_walk_did_not_do`
+    ///   — so documents containing duplicates are kept out of the corpus
+    ///   passed to this function.
+    ///
     /// The comparison is against the **pipeline**, not against the scan alone.
     /// The scan is a structural gate, not a second complete JSON parser: it
     /// deliberately does not re-implement serde's numeric policy, so
@@ -855,7 +868,117 @@ mod tests {
         }
     }
 
-    /// FD-1.4 asks for a parse-time rejection. The witness that this one *is*
+    /// FD-1.4 bounds nesting depth, and the walk this replaced counted it per
+    /// **value**: the root at depth 1, every child one deeper, scalars
+    /// included.
+    ///
+    /// The first streaming version counted container *frames* instead, which
+    /// admitted a scalar leaf one level past the bound. The differential missed
+    /// it because the corpus tested `MAX + 1` containers — refused either way —
+    /// and never the exact boundary. Both reviewers found it independently,
+    /// which is the more useful fact about it: an off-by-one at a bound is
+    /// invisible to a corpus that only samples well past the bound.
+    #[test]
+    fn the_depth_bound_counts_values_as_the_walk_did() {
+        let nested = |containers: usize| {
+            format!(
+                "{}1{}",
+                r#"{"a":"#.repeat(containers),
+                "}".repeat(containers)
+            )
+        };
+        // 31 containers put the scalar at depth 32: admissible.
+        assert!(check(&nested(MAX_JSON_DEPTH - 1)).is_ok());
+        // 32 put it at depth 33: refused, because the leaf counts.
+        assert!(matches!(
+            check(&nested(MAX_JSON_DEPTH)),
+            Err(ParseError::DepthExceeded { .. })
+        ));
+        assert!(matches!(
+            check(&nested(MAX_JSON_DEPTH + 1)),
+            Err(ParseError::DepthExceeded { .. })
+        ));
+        // And the walk agrees at each of the three, which is the property that
+        // was actually violated.
+        for containers in [MAX_JSON_DEPTH - 1, MAX_JSON_DEPTH, MAX_JSON_DEPTH + 1] {
+            agree(&nested(containers));
+        }
+    }
+
+    /// Duplicate member names are refused, and that **is** a change to the
+    /// admission set — declared here rather than arriving as a side effect.
+    ///
+    /// The walk this replaced admitted them. `validate_document` materialised a
+    /// `serde_json::Value` first, whose object map silently keeps the last
+    /// duplicate, so `{"known":null,"known":1}` reached the typed schema as
+    /// `{"known":1}` and was admitted with the null never seen.
+    ///
+    /// Three reasons the stricter behaviour is the correct one, rather than a
+    /// convenience of the new parser:
+    ///
+    /// - **FD-1.3** rejects an explicit `null` *everywhere*. The bytes contain
+    ///   one. It went unseen only because a JSON library discarded it before
+    ///   the rule ran; applying the rule to the document rather than to a
+    ///   library's reduction of it is the rule as written.
+    /// - **FD-1.2** computes envelope identity by framing *fields*, and says
+    ///   that removes the whole class of "semantically identical,
+    ///   digest-unequal" failures. RFC 8259 leaves duplicate-name handling
+    ///   unspecified, so first-wins and last-wins are both conforming — and two
+    ///   implementations would frame different fields from identical bytes.
+    ///   Admitting duplicates reopens exactly the class FD-1.2 closes.
+    /// - **FD-1.6** fails closed on anything ambiguous by design.
+    ///
+    /// The refusal comes from two layers depending on the spelling: the scan
+    /// refuses a shadowed null because the null is genuinely present, and the
+    /// typed schema refuses a plain duplicate as a duplicate field. Both are
+    /// refusals of the artifact, which is what matters. Detecting duplicates in
+    /// the scan itself would need per-object name tracking, whose cost scales
+    /// with member count rather than depth — trading the O(depth) property for
+    /// a tidier error is a bad exchange.
+    #[test]
+    fn duplicate_member_names_are_refused_which_the_walk_did_not_do() {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Dup {
+            #[allow(dead_code)]
+            known: u32,
+        }
+        impl FromDocument for Dup {
+            fn from_bytes(bytes: &[u8]) -> Result<Self, ParseError> {
+                serde_json::from_slice(bytes).map_err(|e| ParseError::SchemaMismatch {
+                    category: classify(&e),
+                })
+            }
+        }
+        impl WireArtifact for Dup {
+            const MAX_BYTES: u64 = MAX_CONTROL_ARTIFACT_BYTES;
+
+            fn validate_wire(&self) -> Result<(), String> {
+                Ok(())
+            }
+        }
+
+        // A shadowed null: refused by the scan, because FD-1.3 is about the
+        // document and the document contains a null.
+        assert!(matches!(
+            check(r#"{"known":null,"known":1}"#),
+            Err(ParseError::ExplicitNull { .. })
+        ));
+        // A plain duplicate: the scan has no opinion, the typed schema refuses.
+        assert!(check(r#"{"known":2,"known":1}"#).is_ok());
+        // Either way the artifact is refused, which is the level that matters.
+        for document in [r#"{"known":null,"known":1}"#, r#"{"known":2,"known":1}"#] {
+            assert!(
+                parse_artifact::<Dup>(document.as_bytes()).is_err(),
+                "a duplicate member must not yield an artifact: {document}"
+            );
+        }
+        // The single-member document is admitted, so the refusals above are the
+        // duplication and not the schema refusing everything.
+        assert!(parse_artifact::<Dup>(br#"{"known":1}"#).is_ok());
+    }
+
+    /// FD-1.4 asks for a parse-time rejection.    /// FD-1.4 asks for a parse-time rejection. The witness that this one *is*
     /// one: everything after the offending point is garbage, so a scanner that
     /// reached it would report a syntax error instead.
     ///

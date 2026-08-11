@@ -7,9 +7,16 @@
 //! few positive tests exist to prove the boundary is not simply refusing
 //! everything.
 //!
-//! The compile-time half lives in `compile_fail` doctests on
-//! [`o7_a1_cas::ResolvedOpaque`], because "this does not compile" is not
-//! expressible as a runtime assertion.
+//! The compile-time half is currently **unmechanised**. A `compile_fail`
+//! doctest used to pin the brand — a resolved value cannot leave the session
+//! that paid for it — and it went away when the proof types became
+//! crate-private, because a doctest compiles as an external crate and can no
+//! longer name them (see `resolved.rs`). It returns with the public surface in
+//! the typed-slot slice.
+//!
+//! Stated here because this file is where a later reader looks for the
+//! coverage: a note claiming a gate that does not exist is how a recorded loss
+//! becomes an absorbed one.
 
 // Fixtures are valid by construction; one that is not should fail loudly
 // rather than be papered over with a substituted value. Same allowance, and the
