@@ -167,11 +167,10 @@ impl<'a> Scanner<'a> {
             if self.peek() != Some(b'"') {
                 return Err(self.syntax());
             }
-            // A member name is scanned and discarded. FD-1.4 bounds "any single
-            // string field"; the current admission has always applied that to
+            // A member name is measured and discarded. FD-1.4 bounds "any
+            // single string field"; the admission this replaced applied that to
             // values, and widening it to keys here would be a bound this
             // implementation invented rather than one the contract states.
-            // A member name is measured but not bounded (see below).
             self.scan_string()?;
             self.skip_whitespace();
             if self.peek() != Some(b':') {
