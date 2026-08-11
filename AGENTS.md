@@ -49,16 +49,45 @@ when a change *adds an `#[allow(...)]`*; see rule 4.
    may have echoed. Auth for the CLI engines is external (`claude login` /
    `codex login`) and never read or stored. The one exception is a
    **maintainer-ratified credential-policy exception** — an explicit policy
-   extension, not documentation catching up — for `o7 invoke --engine
-   arliai` (a direct HTTPS API with no vendor CLI to delegate auth to):
-   `ARLIAI_API_KEY` is read at call time into one function-local owned
-   value, with only a borrowed trimmed view passed to the HTTP layer —
-   never held in any struct, artifact, run record, or error string; it is
-   stripped from every provider subprocess environment, and dispatch
-   refuses fail-closed when the `log` facade's max level admits TRACE
-   (HTTP wire logging). The normative contract is `docs/o7-invoke.md`
-   ("Key handling"); any change that widens where that key can flow is a
-   P0 finding.
+   extension, not documentation catching up — scoped to exactly two
+   consumers of a direct HTTPS API that has no vendor CLI to delegate auth
+   to:
+
+   ```text
+   o7 invoke --engine arliai      ratified
+   o7-model-gate                  ratified (MG-C; not yet implemented)
+   ```
+
+   In **both**, `ARLIAI_API_KEY` is read at call time into one
+   function-local owned value, with only a borrowed trimmed view passed to
+   the HTTP layer — never held in any struct, artifact, run record, or
+   error string; it is stripped from every provider subprocess
+   environment, and dispatch refuses fail-closed when the `log` facade's
+   max level admits TRACE (HTTP wire logging). `o7-model-gate` carries two
+   further constraints that come with its being a long-lived process: the
+   provider credential is **forbidden in its environment in every mode**
+   (a resident secret is the widening this rule exists to prevent, and the
+   gate refuses to start if it finds one), and the call-scoped lifetime
+   above is not relaxed into daemon-lifetime ownership.
+
+   **Scope of "never … artifact, run record".** It holds without
+   qualification for everything this code *composes* — `meta.json`,
+   `stderr.log`, `result.json`, error strings, prompts. It cannot hold
+   unconditionally for provider bytes we relay: a 2xx body reaches
+   `stdout.raw` verbatim because that is what the schema re-validation
+   judges. Two of the three cases are closed by mechanism — a non-2xx
+   diagnostic body is not persisted at all, and a **verbatim** credential
+   echo in a 2xx body is refused (`BLOCKED_PROVIDER` /
+   `credential_reflected`). What remains is a provider embedding the
+   credential in *transformed* form in a successful body, which no byte
+   comparison settles; that is the stated boundary of the promise, not a
+   gap to be closed by wording.
+
+   Normative contracts: `docs/o7-invoke.md` ("Key handling") for the
+   direct path, `docs/tasks/mg-c-model-gate.md` §8 and §8.6 for the gate.
+   Any change that widens where that key can flow — including any new
+   process able to read it — is a P0 finding and needs its own
+   ratification, not an inference from this one.
 
 2. **Verdict semantics.** `PASS` / `FAIL` / `ERROR` are three distinct states:
    `FAIL` means the gate ran and the target failed it; `ERROR` means the
