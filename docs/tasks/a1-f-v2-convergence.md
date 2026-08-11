@@ -138,11 +138,11 @@ adjudication and belongs to Phase G. Mechanical means complete.
 | `FD-1.1` | 113 | The artifact model | | | | |
 | `FD-1.2` | 130 | Envelope digests are computed by field framing, not by JSON | | | | |
 | `FD-1.3` | 189 | Encoding and null policy | | | | |
-| `FD-1.4` | 200 | Per-object bounds (protocol hard maxima) | **KEEP + EXTEND** | envelope maximum required for FD-1.5 declared-size-before-read | none by itself; the value lands with the v2 envelope field set | Envelope v2 **E-1**: the frozen scalar bounds become the inputs of a *derived* `max_envelope_bytes`. S1 already resolved this block's manifest double-bound. |
+| `FD-1.4` | 200 | Per-object bounds (protocol hard maxima) | **PARTIAL** | E-1 obliges a finite protocol-hard envelope maximum; the VALUE is still owed | none yet | Envelope v2 **E-1**. Not discharged: bounded field values do NOT bound stored document bytes (FD-1.3 leaves whitespace/key order free and never rewrites content), so the maximum is derivable only under an encoding profile v2 has not chosen. S1 separately resolved this block's manifest double-bound. |
 | `FD-1.5` | 219 | Aggregate bounds (evidence closure) | | | | |
 | `FD-1.6` | 341 | Unknown fields and versions | | | | |
 | `FD-1.7` | 364 | Media types | | | | |
-| `FD-1.8` | 370 | Artifact refs, and what they identify | **KEEP verbatim** | the summing rule survives unchanged; E-1 supplies the maximum it lacked | none | Envelope v2 **E-1**. Splitting `size` back into halves was rejected: R5.2 added the summing rule precisely because a half-sized ref undercharges what the resolver reads. |
+| `FD-1.8` | 370 | Artifact refs, and what they identify | **PARTIAL** | size half consumed: the summing rule survives verbatim and E-1 supplies its missing maximum | none | Envelope v2 **E-1**. Splitting `size` back into halves was rejected: R5.2 added the summing rule precisely because a half-sized ref undercharges what the resolver reads. The DIGEST/identity half of this FD stays OPEN for the Envelope-v2 digest decision. |
 | `FD-1.9` | 398 | `ArtifactKindV1` — the complete closed set | | | | |
 | `FD-2.1` | 418 | Rank rule | | | | |
 | `FD-2.2` | 434 | Lineage and causation are identifiers, not digests | | | | |
@@ -332,7 +332,7 @@ Y is the negative-test budget of A1-V0, and part of its definition of done.
 | V1-N114 | 2287 | any V1 event clearing an `unresolved` execution short of a terminal transition | contract violation — only `CANCEL` or supersede end it (FD-14.7a) | `FD-14.7a` | | | | |
 | V1-N115 | 2288 | a `HumanCommandRequest` whose `producer_execution_id` names a provider execution | rejected — the human case is the controller's ingress identity (FD-10) | `FD-10` | | | | |
 | V1-N116 | 2289 | an `ArtifactRef` to a message kind whose `size` covers only the envelope | rejected — `size` is envelope + payload together (FD-1.8) | `FD-1.8` | **KEEP** | | | Envelope v2 **E-1** preserves the FD-1.8 rule this row tests, and now bounds the sum. Proof coordinate deliberately EMPTY: it depends on v2 wire types that do not exist yet. |
-| V1-N117 | 2290 | an `ArtifactRef` whose `digest` is the payload digest rather than the envelope digest | rejected (FD-1.8) | `FD-1.8` | **KEEP** | | | Envelope v2 **E-1** preserves the FD-1.8 rule this row tests, and now bounds the sum. Proof coordinate deliberately EMPTY: it depends on v2 wire types that do not exist yet. |
+| V1-N117 | 2290 | an `ArtifactRef` whose `digest` is the payload digest rather than the envelope digest | rejected (FD-1.8) | `FD-1.8` | | | | |
 | V1-N118 | 2291 | a closure of small envelopes over large payloads sized by envelopes alone | rejected; the true cost is charged before reading (FD-1.5, FD-1.8) | `FD-1.5`, `FD-1.8` | **KEEP** | | | Envelope v2 **E-1** preserves the FD-1.8 rule this row tests, and now bounds the sum. Proof coordinate deliberately EMPTY: it depends on v2 wire types that do not exist yet. |
 | V1-N119 | 2292 | an event declaring itself authority-bearing against its kind | impossible — class is a function of `event_kind`, not a field (FD-14.3) | `FD-14.3` | | | | |
 | V1-N120 | 2293 | `GateResultsAccepted` whose `bound_head` ≠ `current_candidate_head` | guard fails; `TransitionRejected`, neither counter advances (§3.15, FD-13) | `FD-13` | | | | |

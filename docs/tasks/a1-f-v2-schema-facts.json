@@ -1,0 +1,19 @@
+{
+  "_comment": "SCHEMA FACTS. The output of deterministic extraction over the ACTUAL Envelope v2 schemas. This is the middle term of the three-way proof: authority (graph.json) <-> actual schema (this file) <-> declared realization (the ledger). It must be produced by an extractor reading the v2 schemas, never hand-written and never copied from graph.json - a right-hand side copied onto the left proves nothing.",
+
+  "extracted_from": null,
+  "extractor": null,
+  "_extraction_note": "extracted_from names the v2 schema source (path + blob) and extractor names the tool that read it. Both null means Envelope v2 has drafted no schema yet, which the gate reports as OWED. The gate must never infer these facts from the frozen graph.",
+
+  "event_kinds": [],
+  "_event_kinds_note": "The event-kind set the v2 SCHEMA defines. Step 1 compares it to the frozen 21. A twenty-second kind, or a dropped one, fails here - which is the point: event kind is semantic source identity, so an unnoticed kind is an unnoticed node.",
+
+  "payload_presence": {},
+  "_payload_presence_note": "Total function over every schema event kind: the concrete payload variant, or null for a payload-free kind. Step 2 compares it to the frozen 11-one/10-zero map. This is the check that catches a schema growing event_payload_digest on a payload-free kind EVEN IF the drafter never adds a ledger row for it - the original G-R12 failure mode, which a ledger-only check cannot see.",
+
+  "structural_commitments": [],
+  "_structural_commitments_note": "Event kinds whose v2 schema actually carries an event_payload_digest commitment. Step 2 also requires these to match the declared structural carriers.",
+
+  "artifact_ref_paths": [],
+  "_artifact_ref_paths_note": "Every ArtifactRef-valued field path found by RECURSIVE extraction over the v2 schemas, including fields reachable only through a cross-schema type reference. A flat extractor already missed one slot in v1 (ReviewVerdictV1.findings via 'as 3.5'). Step 3 compares this to the ledger's artifact_ref carrier paths."
+}

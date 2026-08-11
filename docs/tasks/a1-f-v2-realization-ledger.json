@@ -1,18 +1,11 @@
 {
-  "_comment": "V2 WIRE REALIZATION LEDGER. Required acceptance artefact of Envelope v2 (Phase G 4.2.6). One row per SEMANTIC EDGE CARRIER. Checked by tools/a1_v2_ledger_gate.py against docs/tasks/a1-f-v2-graph.json.",
-  "schema_status": "DRAFTING",
-
-  "event_kinds": [],
-  "_event_kinds_note": "The event-kind set DECLARED BY THE V2 SCHEMA. Empty means not yet declared, which the gate reports as owed. It must never be inferred from the frozen graph: the gate exists to catch a v2 schema that adds a 22nd kind or drops one, and a right-hand side copied onto the left proves nothing.",
-
-  "artifact_ref_fields": [],
-  "_artifact_ref_fields_note": "Every ArtifactRef-valued field path found by RECURSIVE extraction over the v2 schemas, including fields reachable only through a cross-schema type reference. A flat extractor already missed one slot in v1 (ReviewVerdictV1.findings via 'as 3.5'); this list is the extractor's output, and the gate checks it against the declared artifact_ref carriers.",
+  "_comment": "V2 WIRE REALIZATION LEDGER. Required acceptance artefact of Envelope v2 (Phase G 4.2.6). One row per SEMANTIC EDGE CARRIER. This file declares ONLY realization; the schema's own facts live in a1-f-v2-schema-facts.json, so the gate can compare three independent things instead of checking one file against itself.",
 
   "carriers": [],
   "_carriers_schema": {
     "source": "exact source semantic kind, e.g. WorkOrder or CampaignEvent(WorkOrderIssued)",
-    "target": "exact target semantic kind, or a sanctioned meta-target",
-    "class": "Intra | Causal",
+    "target": "exact CONCRETE target semantic kind (a meta-target is expanded to its members here)",
+    "class": "Intra | Causal - part of edge identity, not decoration",
     "carrier_kind": "artifact_ref | event_payload_digest",
     "path": "concrete v2 wire field path, or the structural commitment that carries it"
   },
