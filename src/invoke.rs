@@ -437,26 +437,47 @@ fn run_arliai(a: &InvokeArgs) -> Result<()> {
     let stderr_path = a.out.join("stderr.log");
     let result_path = a.out.join("result.json");
 
-    // stdout.raw = the raw HTTP response body, byte-for-byte (the analogue
-    // of a CLI backend's raw stdout); stderr.log = transport/timeout detail.
-    let (raw_body, stderr_text): (&[u8], String) = match &outcome {
-        ArliOutcome::Http { body, .. } => (body.as_slice(), String::new()),
-        ArliOutcome::TimedOut => (
-            &[],
-            format!("arliai call timed out after {}s\n", a.timeout_secs),
-        ),
-        ArliOutcome::Redirect { detail } | ArliOutcome::Transport { detail } => {
-            (&[], format!("{detail}\n"))
-        }
-        ArliOutcome::TooLarge { limit } => (
-            &[],
-            format!("arliai response body exceeded the {limit}-byte bound\n"),
-        ),
+    // Defense in depth on the one path that still relays provider bytes:
+    // a 2xx body is written to `stdout.raw` verbatim, so if the provider
+    // echoed the `Authorization` value back, that write would put the key
+    // in a run record — the exact P0 of AGENTS.md rule 1. The key is still
+    // in hand here, so the verbatim case is checkable and is refused rather
+    // than accepted as residual. Transformed echoes (base64, hex, a
+    // per-character split) are out of reach of any byte comparison and stay
+    // named as residual in docs/o7-invoke.md; this is not a DLP engine.
+    let credential_reflected = matches!(
+        &outcome,
+        ArliOutcome::Http { status, body }
+            if (200..300).contains(status) && contains_subslice(body, api_key.as_bytes())
+    );
+
+    // Classification first: the run-dir evidence split below needs the
+    // `error_kind` so a non-2xx `stderr.log` can name the classification
+    // without carrying the provider's diagnostic body.
+    let (status, structured, error_kind) = if credential_reflected {
+        (
+            InvokeStatus::BlockedProvider,
+            None,
+            Some("credential_reflected"),
+        )
+    } else {
+        classify_arli(&outcome, &validator)
+    };
+
+    let (raw_body, stderr_text) = if credential_reflected {
+        // No body, no extracted value, and a message that names the
+        // condition without quoting either the body or the key.
+        (
+            &[][..],
+            "arliai response contained the request credential verbatim; the body is not \
+             persisted and the call is refused (docs/o7-invoke.md, key handling)\n"
+                .to_owned(),
+        )
+    } else {
+        arli_run_dir_evidence(&outcome, error_kind, a.timeout_secs)
     };
     std::fs::write(&stdout_path, raw_body)?;
     std::fs::write(&stderr_path, stderr_text)?;
-
-    let (status, structured, error_kind) = classify_arli(&outcome, &validator);
 
     let structured_output_path = if structured.is_some() {
         Some(result_path.clone())
@@ -498,6 +519,78 @@ fn run_arliai(a: &InvokeArgs) -> Result<()> {
         std::process::exit(1);
     }
     Ok(())
+}
+
+/// Exact byte-substring search — the containment check that keeps a
+/// verbatim credential echo out of `stdout.raw`.
+///
+/// Deliberately the least clever thing that closes the realistic case: no
+/// normalization, no decoding, no entropy heuristics. An empty needle
+/// returns `false` rather than matching everything, so a misconfiguration
+/// upstream of this call can never turn every response into a refusal.
+fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
+    if needle.is_empty() || needle.len() > haystack.len() {
+        return false;
+    }
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+/// What one arliai outcome contributes to the run dir: the `stdout.raw`
+/// bytes and the `stderr.log` text. Pure over the outcome so the split is
+/// unit-testable without a socket or a run dir.
+///
+/// The load-bearing rule is the `docs/o7-invoke.md` amendment, "a non-2xx
+/// body is not canonical run evidence":
+///
+/// ```text
+/// 2xx      stdout.raw = the exact provider body, byte-for-byte
+/// non-2xx  stdout.raw is empty; the status and its classification go to
+///          stderr.log, the diagnostic body is not persisted anywhere
+/// ```
+///
+/// A non-2xx body is the provider's diagnostic channel, and diagnostics are
+/// where a server echoes request context back at the caller — this endpoint
+/// is on record doing exactly that (the `400` echoing
+/// `body.response_format…json_schema.name`). This backend sends
+/// `Authorization` on every call, and `AGENTS.md` rule 1 counts writing
+/// provider output into a run record without considering what it may have
+/// echoed as a P0. Nothing needed that body either: `classify_arli` decides
+/// every non-2xx case from the status alone, so persisting it bought
+/// convenience at the price of one more place an echoed credential could
+/// land.
+fn arli_run_dir_evidence<'a>(
+    outcome: &'a ArliOutcome,
+    error_kind: Option<&'static str>,
+    timeout_secs: u64,
+) -> (&'a [u8], String) {
+    const EMPTY: &[u8] = &[];
+    match outcome {
+        // The only path on which a provider body enters the run dir.
+        ArliOutcome::Http { status, body } if (200..300).contains(status) => {
+            (body.as_slice(), String::new())
+        }
+        // Non-2xx: status + classification only. The body is deliberately
+        // dropped, and no part of it is formatted into this text.
+        ArliOutcome::Http { status, .. } => (
+            EMPTY,
+            format!(
+                "arliai responded {status} ({}); the diagnostic body is not canonical run \
+                 evidence and is not persisted (docs/o7-invoke.md)\n",
+                error_kind.unwrap_or("unclassified")
+            ),
+        ),
+        ArliOutcome::TimedOut => (
+            EMPTY,
+            format!("arliai call timed out after {timeout_secs}s\n"),
+        ),
+        ArliOutcome::Redirect { detail } | ArliOutcome::Transport { detail } => {
+            (EMPTY, format!("{detail}\n"))
+        }
+        ArliOutcome::TooLarge { limit } => (
+            EMPTY,
+            format!("arliai response body exceeded the {limit}-byte bound\n"),
+        ),
+    }
 }
 
 /// Terminal status for an arliai call — the code form of the normative
@@ -1404,6 +1497,145 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The verbatim-credential containment check that guards the one
+    /// remaining path where provider bytes reach an artifact.
+    #[test]
+    fn credential_containment_is_exact_and_never_matches_on_empty() {
+        let key = "sk-live-DEADBEEF";
+        let echoed = br#"{"choices":[{"message":{"content":"you sent Bearer sk-live-DEADBEEF"}}]}"#;
+        assert!(
+            contains_subslice(echoed, key.as_bytes()),
+            "a verbatim echo must be detected"
+        );
+
+        let clean = br#"{"choices":[{"message":{"content":"{\"ok\": true}"}}]}"#;
+        assert!(
+            !contains_subslice(clean, key.as_bytes()),
+            "an ordinary body must not trip the check"
+        );
+
+        // An empty needle must not match everything: a misconfiguration
+        // upstream would otherwise refuse every single response.
+        assert!(!contains_subslice(clean, b""));
+        // A needle longer than the body is simply absent, not a panic.
+        assert!(!contains_subslice(b"short", key.as_bytes()));
+        // Boundary positions still match.
+        assert!(contains_subslice(b"sk-live-DEADBEEF tail", key.as_bytes()));
+        assert!(contains_subslice(b"head sk-live-DEADBEEF", key.as_bytes()));
+        // A transformed echo is out of scope by construction, and the test
+        // pins that so nobody mistakes this for a DLP check.
+        assert!(
+            !contains_subslice(b"c2stbGl2ZS1ERUFEQkVFRg==", key.as_bytes()),
+            "base64 is deliberately not detected; see docs/o7-invoke.md"
+        );
+    }
+
+    /// The run-dir evidence split (docs/o7-invoke.md, "a non-2xx body is
+    /// not canonical run evidence"): a 2xx body is persisted byte-for-byte,
+    /// every non-2xx body is dropped entirely.
+    ///
+    /// The negative half is the point. A provider diagnostic is where an
+    /// echoed `Authorization` would surface, so these cases assert that no
+    /// byte of the diagnostic reaches either artifact — not merely that
+    /// `stdout.raw` is empty, since a "helpful" detail string quoting the
+    /// body would reopen the same surface through `stderr.log`.
+    #[test]
+    fn arliai_non_2xx_body_never_enters_the_run_dir() {
+        // A body shaped like the leak this rule exists to prevent.
+        let secretish =
+            b"{\"detail\":\"upstream rejected Authorization: Bearer sk-live-DEADBEEF\"}";
+
+        for (status, kind) in [
+            (400u16, Some("http_request_rejected")),
+            (401, Some("auth")),
+            (403, Some("auth")),
+            (429, Some("usage_limit")),
+            (500, Some("http_5xx")),
+            (599, Some("http_status_unclassified")),
+        ] {
+            let outcome = ArliOutcome::Http {
+                status,
+                body: secretish.to_vec(),
+            };
+            let (raw, stderr) = arli_run_dir_evidence(&outcome, kind, 120);
+
+            assert!(
+                raw.is_empty(),
+                "status {status}: a non-2xx diagnostic body must not reach stdout.raw"
+            );
+            assert!(
+                !stderr.contains("sk-live-DEADBEEF") && !stderr.contains("Bearer"),
+                "status {status}: the diagnostic body must not be quoted into stderr.log \
+                 (got: {stderr})"
+            );
+            assert!(
+                stderr.contains(&status.to_string()),
+                "status {status}: stderr.log must still name the status"
+            );
+        }
+
+        // 2xx keeps the exact bytes — this is the path the local schema
+        // re-validation judges, so it must stay byte-for-byte.
+        let body = b"{\"choices\":[{\"message\":{\"content\":\"{}\"}}]}".to_vec();
+        let outcome = ArliOutcome::Http {
+            status: 200,
+            body: body.clone(),
+        };
+        let (raw, stderr) = arli_run_dir_evidence(&outcome, None, 120);
+        assert_eq!(
+            raw,
+            body.as_slice(),
+            "a 2xx body must be persisted verbatim"
+        );
+        assert!(stderr.is_empty(), "a 2xx response leaves stderr.log empty");
+
+        // A genuinely empty 2xx body stays distinguishable from "no body":
+        // both write nothing, but only the 2xx path is the body channel.
+        let empty_2xx = ArliOutcome::Http {
+            status: 204,
+            body: Vec::new(),
+        };
+        let (raw, stderr) = arli_run_dir_evidence(&empty_2xx, None, 120);
+        assert!(raw.is_empty());
+        assert!(stderr.is_empty());
+    }
+
+    /// The non-HTTP outcomes are untouched by the amendment: they never had
+    /// a body to persist, and each keeps its own bounded `stderr.log` line.
+    #[test]
+    fn arliai_non_http_outcomes_do_not_regress() {
+        let (raw, stderr) = arli_run_dir_evidence(&ArliOutcome::TimedOut, Some("timeout"), 42);
+        assert!(raw.is_empty());
+        assert!(stderr.contains("42"), "timeout detail names the deadline");
+
+        // `let` bindings, not temporaries: the returned slice borrows the
+        // outcome, which is exactly the property that keeps a 2xx body from
+        // being copied on its way to disk.
+        let transport = ArliOutcome::Transport {
+            detail: "dns failure".to_owned(),
+        };
+        let (raw, stderr) = arli_run_dir_evidence(&transport, Some("transport"), 120);
+        assert!(raw.is_empty());
+        assert!(stderr.contains("dns failure"));
+
+        let redirect = ArliOutcome::Redirect {
+            detail: "refused redirect".to_owned(),
+        };
+        let (raw, stderr) = arli_run_dir_evidence(&redirect, Some("redirect"), 120);
+        assert!(raw.is_empty());
+        assert!(stderr.contains("refused redirect"));
+
+        let too_large = ArliOutcome::TooLarge {
+            limit: invoke_arliai::MAX_RESPONSE_BYTES,
+        };
+        let (raw, stderr) = arli_run_dir_evidence(&too_large, Some("response_too_large"), 120);
+        assert!(
+            raw.is_empty(),
+            "an over-limit body is deliberately not kept"
+        );
+        assert!(stderr.contains(&invoke_arliai::MAX_RESPONSE_BYTES.to_string()));
     }
 
     /// The full normative classification matrix for the arliai backend

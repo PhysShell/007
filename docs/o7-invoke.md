@@ -218,6 +218,7 @@ Classification matrix (normative):
 | any other 4xx (request rejected — nothing was generated) | `BLOCKED_PROVIDER` | `http_request_rejected` |
 | 5xx | `BLOCKED_PROVIDER` | `http_5xx` |
 | body exceeds `MAX_ARLIAI_RESPONSE_BYTES` | `BLOCKED_PROVIDER` | `response_too_large` |
+| 2xx body contains the request credential verbatim | `BLOCKED_PROVIDER` | `credential_reflected` |
 | any other non-2xx (1xx, non-standard codes) | `BLOCKED_PROVIDER` | `http_status_unclassified` |
 | DNS / TLS / connection refused / reset | `BLOCKED_PROVIDER` | `transport` |
 | timeout (`--timeout-secs`) | `BLOCKED_TIMEOUT` | `timeout` |
@@ -247,12 +248,60 @@ ambiguous.
 
 Same run-dir contract (`--out` absent-or-empty, refused otherwise):
 
-- `stdout.raw` — the **raw HTTP response body**, byte-for-byte, whatever
-  the status, for every response within the `MAX_ARLIAI_RESPONSE_BYTES`
-  bound. The analogue of a CLI backend's raw stdout: the unmodified
-  provider evidence. Two outcomes leave it empty: transport failures (no
-  body existed) and an over-limit response (the body is deliberately not
-  persisted; the size message goes to `stderr.log`).
+- `stdout.raw` — the **raw HTTP response body**, byte-for-byte, for a **2xx**
+  response within the `MAX_ARLIAI_RESPONSE_BYTES` bound. The analogue of a CLI
+  backend's raw stdout: the unmodified provider evidence, and the input the
+  local schema re-validation judges. It is empty for transport failures (no
+  body existed), for an over-limit response (the body is deliberately not
+  persisted; the size message goes to `stderr.log`), and — see the amendment
+  below — for every **non-2xx** response.
+
+#### Amendment: a non-2xx body is not canonical run evidence
+
+**Status: contract amended and implemented.**
+
+The rule above previously read "whatever the status". It does not any more, and
+the reason is the credential boundary rather than tidiness.
+
+A non-2xx body is the provider's **diagnostic channel**, and diagnostics are
+where servers echo request context back at the caller. That is not speculative
+for this endpoint: the request-shape arbitration recorded above observed a
+`400` whose body echoed the request's own field path (`{'loc': ('body',
+'response_format',…,'json_schema','name'), 'msg': 'Field required'}`). A
+diagnostic that echoes request headers rather than request fields is the same
+mechanism, and this backend sends `Authorization` on every call.
+
+Meanwhile nothing needs that body. The classification matrix above decides
+every non-2xx case from the **status code alone** — `401`/`403` → `BLOCKED_AUTH`,
+`402`/`429` → `BLOCKED_USAGE`, `408` → `BLOCKED_TIMEOUT`, other `4xx` →
+`http_request_rejected`, `5xx` → `http_5xx`. `extract_content` is never reached.
+So persisting the diagnostic body bought convenience while widening the set of
+places an echoed credential could land — and `AGENTS.md` rule 1 counts the
+indirect path (writing provider output into a run record without considering
+what it may have echoed) as a P0, not as a lesser concern.
+
+The amended contract:
+
+```text
+2xx      stdout.raw = the exact provider body      (canonical evidence)
+non-2xx  stdout.raw is empty
+         status + error_kind remain the evidence   (meta.json)
+         the diagnostic body is not persisted
+```
+
+`stderr.log` may carry a bounded, non-body detail for non-2xx (the status and
+its classification), never the body itself.
+
+**Implementation.** `arli_run_dir_evidence` (`src/invoke.rs`) owns the split
+and is pure over the outcome, so both halves are unit-tested without a socket:
+a 2xx body is persisted byte-for-byte, and every non-2xx case asserts that no
+byte of the diagnostic reaches `stdout.raw` *or* `stderr.log` — the second half
+matters because a detail string quoting the body would reopen the same surface
+through the other artifact.
+
+First consumer of the amended rule: `docs/tasks/mg-c-model-gate.md` (stage
+MG-C), which inherits it rather than defining a second, divergent evidence
+semantics for gate-brokered calls.
 - `stderr.log` — transport/timeout/over-limit detail; empty on an
   in-bound HTTP response.
 - `result.json` — the extracted (normalized) content value, written only
@@ -273,8 +322,44 @@ process memory:
   value; only a borrowed, trimmed view of it is passed into the one
   function that sets the `Authorization` header. The load-bearing
   properties: it is **never stored in any struct**, never formatted into
-  any error/log/artifact string, and never reaches `meta.json` or the
-  run dir.
+  any error/log/artifact string, and never reaches `meta.json`.
+- **Scope of "never reaches the run dir".** The claim holds without
+  qualification for everything *this code writes*: `meta.json`,
+  `stderr.log`, `result.json`, error strings, and the whole prompt path.
+  It cannot hold unconditionally for `stdout.raw`, which is the provider's
+  own bytes rather than ours — a 2xx body is relayed verbatim because that
+  is what the schema re-validation judges, and nothing here decodes it. So
+  the honest statement is:
+
+  ```text
+  artifacts this code composes      the key is never placed there — structural
+  stdout.raw (non-2xx)              empty — the diagnostic channel, where an
+                                    echo realistically occurs, is not persisted
+                                    at all (amendment above)
+  stdout.raw (2xx), verbatim echo   refused: the body is not written, the run
+                                    classifies BLOCKED_PROVIDER
+                                    (error_kind: credential_reflected)
+  stdout.raw (2xx), transformed     out of reach of a byte comparison; see the
+                                    threat boundary below
+  ```
+
+  Two of the three are closed by mechanism rather than by wording. The
+  realistic accident — a validator echoing request context into an error
+  body — is closed by the amendment above. The verbatim echo on a
+  successful response is closed by a **containment check**: the key is
+  still in hand at that point, so `run_arliai` tests the 2xx body for the
+  exact credential bytes and, on a match, refuses — no `stdout.raw`, no
+  `result.json`, a `BLOCKED_PROVIDER` outcome, and a `stderr.log` line that
+  names the condition without quoting either the body or the key.
+
+  What remains is a provider embedding the credential in a successful body
+  in *transformed* form, which no scan settles in general: base64, hex, or
+  a per-character split all defeat a byte comparison, and this backend is
+  not the place for a DLP engine. That residual is a property of trusting
+  the provider with a bearer token at all — it is the boundary of the
+  promise, stated rather than argued away, and not a gap the containment
+  check was supposed to cover. `docs/tasks/mg-c-model-gate.md` §8.6 carries the same
+  boundary for the brokered path.
 - It is added to `strip_provider_api_keys`, so a `claude`/`codex`
   subprocess never inherits it either.
 - HTTP-client wire logging is the classic leak path for exactly this kind

@@ -42,9 +42,44 @@ Current authoritative state:
   the 64 MiB "manifest" bound. Decision: **64 MiB**; it stays a typed A1 object
   for FD-1.7 media types and its FD-2 rank. No version gate fired — the blob and
   therefore `contract_digest` changed, and nothing else did.
-- **Next: A1-V0** (§5 of that doc) — task: `docs/tasks/a1-v0.md`, bound to the
-  contract blob `3b26849` (post-S1), not to a branch head. The A1-F PR has
-  merged. One
+- **A1-F v2 convergence, Phase G — `FD-v2-GRAPH`: APPROVED / CLOSED** at
+  `b853a2e`, ceremony commit `1b82a88`, after twelve corrective rounds.
+  Normative source: `docs/tasks/a1-f-v2-phase-g.md`; ledger
+  `docs/tasks/a1-f-v2-convergence.md`. Adjudicated contract-first against
+  current authority blob `3b26849` (post-S1; the S1 graph delta was *proved*
+  NONE, not taken from S1's own summary). The frozen result: a **semantic edge
+  registry of 69 exact edges** — 56 `Intra` / 13 `Causal`, exact source and
+  target kinds, discriminated by event kind and payload variant — over a
+  **47-node typed universe**, acyclicity machine-checked (Kahn 47/47 over 26
+  `Intra` typed→typed edges). Baseline is a **41-slot** frozen `ArtifactRef`
+  inventory by recursive extraction (a flat pass missed a slot reachable only
+  through `as §3.5`), split **32 exact / 9 open**, under the rule that a generic
+  `ArtifactRef` field creates no graph authority. Eleven envelope-bearing
+  message kinds, unchanged (`KEEP_V1_MODEL`); `CampaignRunBinding` added as
+  typed support authority with pre-dispatch binding admission; `ArtifactImported`
+  out of V0. Terminals are 20 kinds plus **one open meta-target**
+  (`AnyCommittedEnvelope` = the eleven FD-1.9 message kinds), which resolves
+  through and is charged against the FD-1.5 budget instead of terminating
+  traversal. Uniqueness is **per-field occurrence**; global `(source, target)`
+  uniqueness was **rejected** as an invariant, since the design input already
+  carries one pair under two classes. The one `Causal` edge with no event-log
+  source is witnessed by **`COMMITTED`** over the accepted canonical log prefix —
+  replay-checkable, no clock, no new reducer policy. Owed to the v2 draft:
+  field-path spelling, plus **one machine-checked wire realization ledger**
+  (event-kind universe equality → the 11/10 payload presence map →
+  forward/reverse carrier coverage) as the registry↔wire joint.
+- **Next in the v2 convergence: Envelope v2.** The ledger's disposition columns
+  (47 frozen decisions + 141 §5.4 rows) remain open — Phase G closed the graph,
+  not the migration.
+- **A1-V0 — gated behind the v2 freeze, not the immediate next step.** The
+  sanctioned line is recorded in the convergence ledger §7 and is
+  `INVENTORY ADMITTED → Phase G → v2 convergence → freeze → A1-V0`; PR #124 was
+  reclassified an implementation probe for exactly this reason (it implements
+  v1 while the sanctioned line runs through v2). So A1-V0 is **not** parallel
+  work and **not** started against v1 — it is the acceptance milestone *after*
+  the v2 convergence freezes. Task: `docs/tasks/a1-v0.md` (§5 of the contract),
+  bound to contract blob `3b26849` (post-S1), not to a branch head; that binding
+  moves when v2 freezes. The A1-F PR has merged. One
   real coder/reviewer/human corrective loop — coder on the claude CLI, reviewer
   on `--engine arliai` (read-only, no tool surface), controller sealing and
   folding, merge manual. Acceptance = one live corrective cycle + a full campaign

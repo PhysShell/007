@@ -19,13 +19,17 @@ differ, this document is authoritative.
 
 Corrective rounds R1, R2, R3, R4, R5, R5.1, and R5.2 are recorded in §9.
 
-**Superseded once since incorporation: S1 (§9), which corrects FD-1.4 and
-nothing else.** S1 is the first application of §7 after the merge, as distinct
-from the R-rounds, which were pre-incorporation corrections. It changes this
-document's blob and therefore its `contract_digest`; it changes no
-`envelope_version`, no `message_kind_version`, and no
+**Superseded twice since incorporation: S1 and S2 (§9).** S1 corrects FD-1.4
+and nothing else; S2 corrects FD-1.3 and nothing else, requiring member names to
+be unique within every A1 JSON object. Both are applications of §7 after the
+merge, as distinct from the R-rounds, which were pre-incorporation corrections.
+
+Each changes this document's blob and therefore its `contract_digest`. Neither
+changes any `envelope_version`, `message_kind_version`, or
 `campaign_protocol_version`, because no payload shape, envelope, rank, or
-reducer semantics moved (§7.2).
+reducer semantics moved (§7.2). **An implementation is bound to the current
+blob, not to a version number**, so a consumer still bound to a superseded blob
+is bound to superseded authority however conformant its behaviour looks.
 
 What the freeze covers: the wire schema of every message kind — field names,
 types, required/optional status, null policy, bounds, and the authority that
@@ -204,6 +208,27 @@ One uniform null policy, everywhere in A1: **an optional field is either absent
 or carries a value. Explicit JSON `null` is rejected at parse time.** There is no
 field in this contract where `null` and absent mean different things, because
 that distinction has never once been worth what it costs.
+
+**Member names are unique within every JSON object, and a duplicate name is
+rejected at parse time. No first-wins or last-wins interpretation is
+permitted.** (S2, §9.)
+
+RFC 8259 says names *should* be unique and leaves the behaviour undefined when
+they are not, so first-wins and last-wins are both conforming readings of the
+same bytes. That is tolerable for a document format and not for this one: FD-1.2
+computes an envelope's identity by framing its **fields**, so two conforming A1
+implementations reading identical stored bytes would frame different fields and
+compute different digests. Admitting a duplicate reopens precisely the class of
+failure FD-1.2 exists to close, on the one input an attacker fully controls.
+
+Note the interaction with the null policy above, because it is the reason this
+rule had to be stated rather than left implied. In `{"x": null, "x": 1}` the null
+is physically present in the stored bytes, so the null policy already refuses the
+document — but only for an implementation that examines the bytes. One that
+reduces the document through a JSON library first may never see it, since the
+library has already discarded the shadowed member. The uniqueness rule makes both
+implementations refuse the same document for the same reason, which is what the
+null policy meant all along.
 
 **FD-1.4 Per-object bounds (protocol hard maxima).**
 
@@ -2185,6 +2210,8 @@ outcome.
 | unsupported `envelope_version`, `message_kind_version`, or `campaign_protocol_version` | refused, never best-effort parsed (FD-1.6) |
 | unknown field present | rejected at parse time (FD-1.6) |
 | explicit JSON `null` in an optional field | rejected (FD-1.3) |
+| duplicate member name in any object, at any depth — the required test must include a **nested** object and not only the top-level one | rejected at parse time; never first-wins or last-wins (FD-1.3, S2). A top-level-only case does not discharge this row: some deserializers refuse top-level duplicates on their own, so passing it can mean the document layer was never exercised at all |
+| duplicate member name where one occurrence is `null` | rejected; an implementation that reduces the document through a JSON library before applying the null policy will not see the null and must not be admitted on that basis (FD-1.3, S2) |
 | payload exceeding a per-object bound | rejected, never truncated (FD-1.4) |
 | `artifact_refs` whose declared sizes exceed `max_direct_referenced_bytes` | rejected before any read (FD-1.5) |
 | a closure exceeding `max_reachable_closure_bytes`/`_objects` | whole resolution rejected, never partially accepted (FD-1.5) |
@@ -2428,11 +2455,104 @@ accepted exact head   b61540a   (after R5.1, following a final exact-head pass)
 amended pre-merge     R5.2       (four P1s from external review on PR #123)
 frozen baseline       the merged head of PR #123
 superseded            S1 — FD-1.4 only, the first §7 application after merge
+                      S2 — FD-1.3 only, member-name uniqueness
 status                ACCEPTED / CLOSED / FROZEN
 rounds                R1, R2, R3, R4, R5, R5.1, R5.2 — every finding corrected
                       forward; no round amended an earlier one in place
 next                  A1-V0 (§5), and not before this document merges
 ```
+
+### S2 — FD-1.3 said nothing about duplicate member names
+
+The second supersede under §7, and the first one raised by an *implementation
+review* rather than by an implementer stuck between two readings.
+
+```text
+replaces      FD-1.3 only
+reason        the null policy and the unknown-field policy together left one
+              ambiguity unaddressed: a JSON object carrying the same member
+              name twice. RFC 8259 leaves the behaviour undefined, so
+              first-wins and last-wins are both conforming
+decision      member names are unique within every A1 JSON object; a duplicate
+              is rejected at parse time; no first-wins or last-wins reading is
+              permitted
+no change to  envelope_version, message_kind_version, campaign_protocol_version
+              — no payload shape, field set, framing, rank or reducer semantics
+              moved. This changes an admission rule, exactly as S1 did
+effect        this document's blob changes, so contract_digest changes; there is
+              no in-flight campaign to migrate (§7)
+```
+
+**How it surfaced.** A1-V0 step 2 replaced the document layer's materialising
+walk with a streaming scan, under an explicit promise to change *when* a
+structural bound fires and never *which* documents are admitted. External review
+found a class of documents where that promise broke.
+
+Grounded exactly, so the claim survives the implementation changing:
+
+```text
+old materialising path
+    a6625bc6473e3029a3309ddd7f2795ce57516a60 (merged, PR #124)
+    crates/o7-a1-contracts/src/json.rs::validate_document
+    builds a serde_json::Value, then walks it. The object map keeps the LAST
+    duplicate, so a shadowed member is discarded before any rule runs.
+
+reviewed streaming path
+    777e2fbe38f98668d15d8378f23f4298af2b963b (PR #132)
+    crates/o7-a1-contracts/src/scan.rs
+    crates/o7-a1-contracts/src/json.rs
+    streams the bytes and never reduces them, so the null is seen.
+
+observed property
+    for a schema with one known member `known`:
+    {"known": null, "known": 1}   old artifact admission = admit
+                                  streaming artifact admission = reject
+    {"known": 2, "known": 1}      old artifact admission = admit
+                                  streaming artifact admission = reject
+```
+
+`777e2fb` is the revision the finding was made on: the exact head both external
+reviewers read on PR #132. The divergence is documented and witnessed by test in
+the follow-up commit `f1b9ce9847dab390541c2b97faded43add6d7d58` on the same
+branch, but provenance belongs to the revision where it was found, not to the
+one where it was written down.
+
+The two spellings are refused by different layers — the scan refuses the
+shadowed null because the null is genuinely present, the typed schema refuses
+the plain duplicate as a repeated field. Both refuse the artifact, which is the
+level this row is stated at.
+
+The second case is the one this supersede exists for: no rule in `B1` refuses
+it, and an implementation that did would have been enforcing a rule the contract
+does not contain.
+
+**Why that is a contract gap rather than an implementation choice.** The
+shadowed-null case does follow from FD-1.3 as already written — the null is
+present, and the rule says explicit null is rejected. The plain case,
+`{"known": 2, "known": 1}`, does not follow from anything: FD-1.6 governs *unknown*
+fields and versions, not ambiguity in general, and no other decision addresses
+it. An implementation refusing it would have been enforcing a rule the contract
+does not contain, which is the same defect as inventing a bound — the mistake
+FD-1.8's `size` lower bound was corrected for during A1-V0 step 1.
+
+So the argument from FD-1.2 is strong enough to *justify a supersede* and not
+strong enough to *be* the contract. Ratifying "this already follows from B1"
+would have quietly widened the frozen admission set by reasoning, which is the
+one thing §7 exists to prevent. The implementation is right; it simply needed
+authority, and this is that authority.
+
+**Scope discipline.** The rule is stated for A1 JSON objects generally rather
+than per-schema, because the failure is a property of the encoding and not of
+any one payload. It adds no field, moves no bound, and names no new type.
+
+What that does **not** mean is that a conforming implementation needs no change.
+Every consumer bound to `B1` must rebind to `B2`, because an implementation is
+bound to exact contract bytes and not to a version number (§7, and the Status
+section above). An implementation whose parser already refuses duplicates needs
+no change *to its duplicate-detection logic* — and still needs the rebind, or it
+goes on validating campaigns against superseded authority while looking
+conformant. One that deduped silently has a defect it can now see, and the same
+rebind to do.
 
 ### S1 — FD-1.4 classified `InteractionManifestV1` under two bounds at once
 
