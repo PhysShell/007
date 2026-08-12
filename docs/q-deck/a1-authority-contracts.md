@@ -2210,7 +2210,7 @@ outcome.
 | unsupported `envelope_version`, `message_kind_version`, or `campaign_protocol_version` | refused, never best-effort parsed (FD-1.6) |
 | unknown field present | rejected at parse time (FD-1.6) |
 | explicit JSON `null` in an optional field | rejected (FD-1.3) |
-| duplicate member name in any object, at any depth | rejected at parse time; never first-wins or last-wins (FD-1.3, S2) |
+| duplicate member name in any object, at any depth — the required test must include a **nested** object and not only the top-level one | rejected at parse time; never first-wins or last-wins (FD-1.3, S2). A top-level-only case does not discharge this row: some deserializers refuse top-level duplicates on their own, so passing it can mean the document layer was never exercised at all |
 | duplicate member name where one occurrence is `null` | rejected; an implementation that reduces the document through a JSON library before applying the null policy will not see the null and must not be admitted on that basis (FD-1.3, S2) |
 | payload exceeding a per-object bound | rejected, never truncated (FD-1.4) |
 | `artifact_refs` whose declared sizes exceed `max_direct_referenced_bytes` | rejected before any read (FD-1.5) |
@@ -2486,23 +2486,41 @@ effect        this document's blob changes, so contract_digest changes; there is
 **How it surfaced.** A1-V0 step 2 replaced the document layer's materialising
 walk with a streaming scan, under an explicit promise to change *when* a
 structural bound fires and never *which* documents are admitted. External review
-found one document where that promise broke.
+found a class of documents where that promise broke.
 
 Grounded exactly, so the claim survives the implementation changing:
 
 ```text
-old behaviour   crates/o7-a1-contracts/src/json.rs::validate_document
-                at a6625bc6473e3029a3309ddd7f2795ce57516a60 (merged, PR #124)
-                builds a serde_json::Value, then walks it. The object map keeps
-                the LAST duplicate, so a shadowed member is discarded before any
-                rule runs.
-observed        parse_artifact admits {"x": null, "x": 1} and {"x": 2, "x": 1}
-                at that revision — the first because the null is gone before the
-                FD-1.3 check, the second because nothing examines duplicates
-new behaviour   crates/o7-a1-contracts/src/scan.rs, introduced on the A1-V0
-                step-2 branch (PR #132), streams the bytes and never reduces
-                them, so the null is seen and the document refused
+old materialising path
+    a6625bc6473e3029a3309ddd7f2795ce57516a60 (merged, PR #124)
+    crates/o7-a1-contracts/src/json.rs::validate_document
+    builds a serde_json::Value, then walks it. The object map keeps the LAST
+    duplicate, so a shadowed member is discarded before any rule runs.
+
+reviewed streaming path
+    777e2fbe38f98668d15d8378f23f4298af2b963b (PR #132)
+    crates/o7-a1-contracts/src/scan.rs
+    crates/o7-a1-contracts/src/json.rs
+    streams the bytes and never reduces them, so the null is seen.
+
+observed property
+    for a schema with one known member `known`:
+    {"known": null, "known": 1}   old artifact admission = admit
+                                  streaming artifact admission = reject
+    {"known": 2, "known": 1}      old artifact admission = admit
+                                  streaming artifact admission = reject
 ```
+
+`777e2fb` is the revision the finding was made on: the exact head both external
+reviewers read on PR #132. The divergence is documented and witnessed by test in
+the follow-up commit `f1b9ce9847dab390541c2b97faded43add6d7d58` on the same
+branch, but provenance belongs to the revision where it was found, not to the
+one where it was written down.
+
+The two spellings are refused by different layers — the scan refuses the
+shadowed null because the null is genuinely present, the typed schema refuses
+the plain duplicate as a repeated field. Both refuse the artifact, which is the
+level this row is stated at.
 
 The second case is the one this supersede exists for: no rule in `B1` refuses
 it, and an implementation that did would have been enforcing a rule the contract
@@ -2511,7 +2529,7 @@ does not contain.
 **Why that is a contract gap rather than an implementation choice.** The
 shadowed-null case does follow from FD-1.3 as already written — the null is
 present, and the rule says explicit null is rejected. The plain case,
-`{"x": 2, "x": 1}`, does not follow from anything: FD-1.6 governs *unknown*
+`{"known": 2, "known": 1}`, does not follow from anything: FD-1.6 governs *unknown*
 fields and versions, not ambiguity in general, and no other decision addresses
 it. An implementation refusing it would have been enforcing a rule the contract
 does not contain, which is the same defect as inventing a bound — the mistake
