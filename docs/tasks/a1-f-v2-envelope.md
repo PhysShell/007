@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R4) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R5) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -10,8 +10,9 @@ clause 5, and a `--graph` override can no longer bypass its own preflight. E-R3
 makes step 2 count rather than deduplicate, and rebases onto current `main`.
 E-R4 answers §8.5: moving `PINNED_BLOB` is now a ceremony that consumes an
 already-authorized Phase G supersede, and a pin failure never authorizes its own
-repair. Five revisions, no graph change in any of them: the frozen registry is a
-hard input here, not a subject.
+repair. E-R5 scopes two of E-R4's claims to what their witness actually
+observes. Six revisions, no graph change in any of them: the frozen registry is
+a hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -245,7 +246,7 @@ never a work item whose resolution is to make it stop printing. The extractor
 now says so in the failure text, because the failure text is the only thing a
 future reader is guaranteed to encounter at the moment of temptation.
 
-Points 4 and 7 are machine-checked. `PIN_HISTORY` is append-only evidence,
+Points 4 and 7 have a mechanical witness, stated at exactly its own reach.
 `ORIGINAL_BLOB` is never edited, and `pin_chain_defect` refuses extraction when
 a pin arrived without its paperwork, when paperwork was filed that moved no pin,
 when an entry omits any of the three required fields, or when the recorded chain
@@ -253,6 +254,23 @@ does not actually run from the original blob to the pinned one. Both artifacts
 carry it: `graph.json` now emits `original_blob` and `pin_history`, so a re-pin
 is a visible structural change to the derived artifact rather than one token in
 a source file.
+
+Two words in that sentence would grow stronger semantics than the witness has,
+so neither is used:
+
+- **`PIN_HISTORY` is append-only *by contract*.** The extractor enforces chain
+  integrity of the *observed* history, not historical immutability of prior
+  entries. An editor can rewrite an old entry, repair the following links, and
+  present a perfectly valid chain. Proving otherwise needs an external frozen
+  witness — git history, or a countersigned record — which this floor does not
+  have and is not given here.
+- **The joint-validity property is over states, not over authoring.** What is
+  actually enforced is that *the pin and its transition record must be jointly
+  valid in every accepted checked state* — tree-state joint validity. It is not
+  git-commit atomicity: a pin moved in commit A and its paperwork filed in
+  commit B leaves a HEAD that passes, because the extractor observes a tree and
+  never observes how that tree was assembled. Point 7 remains the requirement on
+  whoever performs the ceremony; the machine holds only the weaker half.
 
 Points 1, 2, 3 and 5 are not machine-checked here and are not claimed to be.
 Legitimacy is a contract act; this floor cannot decide it and should not
@@ -445,6 +463,44 @@ two FDs partial is the honest state of a first substantive decision.
 
 ## 7. Revision record
 
+### E-R5 — two adjectives that outran their witness
+
+A precision round. No machinery changed; two claims did, because both said more
+than the mechanism observes.
+
+**"Append-only."** `pin_chain_defect` reads one snapshot of `PIN_HISTORY`.
+Chain integrity of the observed history is not historical immutability of prior
+entries: an editor can rewrite an old entry, repair the following links, and
+present a valid chain. Now stated as *append-only by contract*, with the gap
+named — proving the stronger property needs an external frozen witness (git
+history, a countersigned record) that this floor does not have.
+
+**"Land atomically, in one commit."** That remains the requirement on whoever
+performs the ceremony, and point 7 keeps its wording. What the machine holds is
+the weaker half: *the pin and its transition record must be jointly valid in
+every accepted checked state*. Tree-state joint validity, not commit atomicity —
+a pin moved in commit A and papered in commit B leaves a HEAD that passes,
+because the extractor observes a tree and never observes how it was assembled.
+
+E-R4's record above keeps its original wording, including "Points 4 and 7 are
+made mechanical", as the evidence of what was overclaimed. The live text in §2.5
+and the extractor's own docstring are what got corrected.
+
+Neither point weakens the ceremony. They stop two attractive adjectives from
+quietly acquiring semantics the code does not implement — which is the same
+failure as an assertion dressed as a derivation, only smaller and better
+camouflaged.
+
+**Deliberately not done: §8.5.** The residual — `superseding_authority` is a
+string nothing resolves, so the ceremony proves an authority was *named*, not
+that it exists — stays open and unsolved on purpose. It is bounded, documented,
+and does not invalidate the current pin. Closing it before external review would
+destroy a probe worth more than the fix: whether an independent reviewer finds
+that seam without being handed it. Given that the standing epistemic weakness
+here is correlated authorship of implementation and mutations alike, one
+deliberate unresolved seam is more informative than polishing the artifact until
+its own author can no longer imagine an objection to it.
+
 ### E-R4 — the re-pin ceremony, answering §8.5
 
 Not a review round. §8.5 asked whether *"re-pin deliberately"* was enough of a
@@ -631,7 +687,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R4)
+## 8. For the independent reviewer (revision E-R5)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before

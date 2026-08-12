@@ -44,9 +44,12 @@ PINNED_BLOB = "450380ff0d1f8ec08f783968f08bc6b3942f44a5"
 # re-pin visible: with no history recorded, PINNED_BLOB must still be this.
 ORIGINAL_BLOB = "450380ff0d1f8ec08f783968f08bc6b3942f44a5"
 
-# Re-pin evidence, append-only. One entry per legitimate supersede, each naming
-# the blob it replaced, the blob it installed, and the Phase G supersede that
-# authorized the move. Empty means the original pin has never moved.
+# Re-pin evidence, append-only BY CONTRACT. One entry per legitimate supersede,
+# each naming the blob it replaced, the blob it installed, and the Phase G
+# supersede that authorized the move. Empty means the original pin has never
+# moved. Append-only is the rule for whoever edits this list, not a property
+# proved below: the check sees one snapshot, so a rewritten old entry with
+# repaired links reads as a valid chain.
 PIN_HISTORY: list[dict[str, str]] = []
 
 PIN_FIELDS = ("old_blob", "new_blob", "superseding_authority")
@@ -62,6 +65,14 @@ def pin_chain_defect(pinned: str, history: list[dict]) -> str | None:
     pin, and whether the recorded chain actually runs from the original blob to
     the pinned one. A re-pin thus cannot be a one-token edit; it is a structured
     change that names what it replaced and on whose authority.
+
+    Its reach is ONE SNAPSHOT, and the claim is scoped to match: the pin and its
+    transition record must be jointly valid in every accepted checked state.
+    That is tree-state joint validity - NOT commit atomicity, and NOT historical
+    immutability. A pin moved in one commit and papered in the next leaves a
+    passing HEAD, and a rewritten old entry with repaired links reads as a valid
+    chain. Catching either needs an external frozen witness (git history, a
+    countersigned record) that this floor does not have and is not given.
 
     It does not defend against an editor who rewrites this file's own constants.
     Nothing self-hosted can. It makes the attempt legible in a diff, which is
