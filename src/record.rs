@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use o7_sandbox_protocol::provenance::{self, PolicyProvenance, SchemaSupport};
 use serde::{Deserialize, Serialize};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -239,6 +240,71 @@ pub const CANDIDATE_PATCH_FILE: &str = "candidate.patch";
 pub const PARENT_CANDIDATE_RECEIPT_FILE: &str = "parent_candidate_receipt.json";
 pub const PARENT_CANDIDATE_PATCH_FILE: &str = "parent_candidate.patch";
 
+/// The run record's policy-derivation audit artifact (`docs/policy-provenance.md`).
+///
+/// Deliberately NOT referenced by any canonical event: an artifact referenced by a
+/// digest-chained event is, by construction, something replay verifies — and verifying it
+/// would make it load-bearing. It is written beside the record, joined to the policy it
+/// explains by that policy's own digest, and read only by audit.
+pub const POLICY_PROVENANCE_FILE: &str = "policy-provenance.json";
+
+/// What a record dir yielded for [`POLICY_PROVENANCE_FILE`].
+///
+/// There is no `Result` here on purpose. A reader that can return `Err` invites a caller to
+/// `?` it into a path that decides something, and the first such caller silently promotes an
+/// audit artifact into a trust dependency. Every outcome below — including "the file is
+/// corrupt" — is a DIAGNOSTIC a caller may report and must not gate on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProvenanceRead {
+    /// A well-formed record. `explains()` says whether it is about the policy you hold.
+    Present(Box<PolicyProvenance>),
+    /// No artifact was produced for this run. Expected for every record written before this
+    /// artifact existed, and for any run whose policy derivation was never recorded.
+    Missing,
+    /// The artifact exists but could not be read or parsed, with a human-readable reason.
+    /// Worth surfacing to an operator; never worth changing a verdict over.
+    Malformed(String),
+    /// The artifact parsed, but declares a schema this build does not understand — a record
+    /// written by a newer o7. Kept distinct from [`Self::Malformed`] because "from the future"
+    /// and "corrupt" call for different operator responses, and because a v1 reader must not
+    /// report a v999 document as one it understood.
+    UnsupportedVersion { found: u32 },
+}
+
+/// Read a record dir's provenance artifact for audit.
+///
+/// Total by construction: absent → [`ProvenanceRead::Missing`], unreadable or unparseable →
+/// [`ProvenanceRead::Malformed`], a newer schema → [`ProvenanceRead::UnsupportedVersion`].
+/// None is an error, because no decision depends on this.
+#[must_use]
+pub fn read_policy_provenance(dir: &Path) -> ProvenanceRead {
+    let path = dir.join(POLICY_PROVENANCE_FILE);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return ProvenanceRead::Missing,
+        Err(e) => return ProvenanceRead::Malformed(format!("reading {}: {e}", path.display())),
+    };
+    // Version FIRST, from an envelope that tolerates unknown fields — `PolicyProvenance` is
+    // `deny_unknown_fields`, so a genuine future schema would fail the strict parse and be
+    // reported as corruption if the version were only read afterwards.
+    match provenance::probe_schema_version(&text) {
+        SchemaSupport::Unreadable(reason) => {
+            ProvenanceRead::Malformed(format!("parsing {}: {reason}", path.display()))
+        }
+        SchemaSupport::Unsupported { found } => ProvenanceRead::UnsupportedVersion { found },
+        SchemaSupport::Supported => match serde_json::from_str::<PolicyProvenance>(&text) {
+            Ok(provenance) => ProvenanceRead::Present(Box::new(provenance)),
+            // The version is one this build claims to understand, so a parse failure here is
+            // real corruption rather than a schema this reader was never going to read.
+            Err(e) => ProvenanceRead::Malformed(format!(
+                "parsing {}: {}",
+                path.display(),
+                provenance::redacted_parse_failure(&e)
+            )),
+        },
+    }
+}
+
 /// A run record directory in `007`'s private store: `runs/<target>/<run-id>/`.
 pub struct RunRecord {
     pub dir: PathBuf,
@@ -325,6 +391,21 @@ impl RunRecord {
     pub fn write_json<T: Serialize>(&self, name: &str, v: &T) -> Result<()> {
         std::fs::write(self.dir.join(name), serde_json::to_string_pretty(v)?)?;
         Ok(())
+    }
+
+    /// Write the run's [`PolicyProvenance`] audit artifact.
+    ///
+    /// The ARTIFACT is non-load-bearing (nothing on the verdict/replay path reads it — see
+    /// [`read_policy_provenance`]); the WRITE is not. A record dir that cannot be written to
+    /// is an ordinary infrastructure failure and stays a hard error here, exactly like every
+    /// other writer on this struct. "Non-load-bearing" is a statement about what may depend
+    /// on the artifact's CONTENTS, never a licence to swallow `ENOSPC`.
+    ///
+    /// # Errors
+    /// Any I/O or serialization failure writing the artifact.
+    pub fn write_policy_provenance(&self, provenance: &PolicyProvenance) -> Result<()> {
+        self.write_json(POLICY_PROVENANCE_FILE, provenance)
+            .with_context(|| format!("writing {POLICY_PROVENANCE_FILE}"))
     }
 
     pub fn write_meta(&self, meta: &RunMeta) -> Result<()> {
@@ -415,5 +496,218 @@ mod durability_tests {
         .write_durable(&rec)
         .unwrap();
         assert!(rec.dir.join(COMMAND_BINDING_FILE).exists());
+    }
+}
+
+/// The record-dir half of the provenance contract (`docs/policy-provenance.md`): the artifact
+/// round-trips, and neither its absence nor its corruption is representable as an error.
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+mod provenance_tests {
+    use super::*;
+    use o7_sandbox_protocol::provenance::{CliOption, PolicySource, PolicySources};
+    use o7_sandbox_protocol::{NetworkPolicy, SandboxPolicy};
+    use std::time::Duration;
+
+    fn policy() -> SandboxPolicy {
+        SandboxPolicy {
+            worktree: PathBuf::from("/srv/o7/wt/run-1"),
+            allow_exec: vec![PathBuf::from("/usr/bin/git")],
+            network: NetworkPolicy::DenyAll,
+            env_allowlist: vec!["PATH".into()],
+            timeout: Duration::from_secs(30),
+        }
+    }
+
+    fn provenance() -> PolicyProvenance {
+        let opt = |s: &str| PolicySource::Cli {
+            option: CliOption::parse(s).unwrap(),
+        };
+        PolicyProvenance::describe(
+            &policy(),
+            &PolicySources {
+                worktree: opt("--worktree"),
+                allow_exec: opt("--allow-exec"),
+                network: PolicySource::Default {},
+                env_allowlist: opt("--allow-env"),
+                timeout: opt("--timeout"),
+            },
+        )
+    }
+
+    #[test]
+    fn a_written_provenance_artifact_reads_back_identically() {
+        let runs = tempfile::tempdir().unwrap();
+        let rec = RunRecord::create(runs.path(), "target", "run-1").unwrap();
+        let written = provenance();
+        rec.write_policy_provenance(&written).unwrap();
+
+        match read_policy_provenance(&rec.dir) {
+            ProvenanceRead::Present(read) => {
+                assert_eq!(*read, written);
+                assert!(read.explains(&policy()));
+                assert!(read.missing_fields().is_empty());
+            }
+            other => panic!("expected a present artifact, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_absent_artifact_reads_as_missing_not_as_an_error() {
+        let runs = tempfile::tempdir().unwrap();
+        let rec = RunRecord::create(runs.path(), "target", "run-1").unwrap();
+        assert_eq!(read_policy_provenance(&rec.dir), ProvenanceRead::Missing);
+    }
+
+    #[test]
+    fn a_corrupt_artifact_reads_as_a_diagnostic_not_as_an_error() {
+        let runs = tempfile::tempdir().unwrap();
+        let rec = RunRecord::create(runs.path(), "target", "run-1").unwrap();
+
+        for corruption in [
+            "{ not json at all",
+            "{}",
+            // A leaf that the constructors forbid must not survive the parse either: serde is
+            // a validating parser here, so a hand-edited secret-bearing artifact is Malformed.
+            r#"{"schema_version":1,"policy_digest":"aa","fields":{}}"#,
+            r#"{"schema_version":1,"policy_digest":"0000000000000000000000000000000000000000000000000000000000000000","fields":{"network":{"source":"environment","name":"FOO=secret"}}}"#,
+        ] {
+            std::fs::write(rec.dir.join(POLICY_PROVENANCE_FILE), corruption).unwrap();
+            assert!(
+                matches!(
+                    read_policy_provenance(&rec.dir),
+                    ProvenanceRead::Malformed(_)
+                ),
+                "{corruption} must read as Malformed"
+            );
+        }
+    }
+
+    /// Corrective round: a record from a newer o7 is neither "understood" nor "corrupt". A v1
+    /// reader reporting a v999 document as `Present` would be claiming to have read a schema
+    /// it has never seen; folding it into `Malformed` would tell an operator to look for
+    /// corruption that isn't there.
+    #[test]
+    fn a_newer_schema_version_is_reported_as_such_not_as_understood() {
+        let runs = tempfile::tempdir().unwrap();
+        let rec = RunRecord::create(runs.path(), "target", "run-1").unwrap();
+
+        let mut value = serde_json::to_value(provenance()).unwrap();
+        if let Some(object) = value.as_object_mut() {
+            object.insert("schema_version".into(), serde_json::json!(999));
+        }
+        std::fs::write(
+            rec.dir.join(POLICY_PROVENANCE_FILE),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            read_policy_provenance(&rec.dir),
+            ProvenanceRead::UnsupportedVersion { found: 999 }
+        );
+    }
+
+    /// Second review round, at the seam where the classification is actually observed. The
+    /// version is read from a tolerant envelope BEFORE the strict parse, so a future document
+    /// whose shape this build has never seen is still reported as a future document — not as
+    /// corruption, which is what a parse-then-classify order would have said about every real
+    /// schema evolution.
+    #[test]
+    fn a_future_record_whose_shape_is_unknown_still_reads_as_a_future_version() {
+        let runs = tempfile::tempdir().unwrap();
+        let rec = RunRecord::create(runs.path(), "target", "run-1").unwrap();
+
+        for (label, body) in [
+            (
+                "a shape this build has never seen",
+                r#"{"schema_version":999,"completely_new_future_shape":{"aliens":true}}"#
+                    .to_owned(),
+            ),
+            (
+                "a plausible v2: today's fields plus one more",
+                format!(
+                    r#"{{"schema_version":2,"policy_digest":"{}","fields":{{}},"new_v2_field":"x"}}"#,
+                    "0".repeat(64)
+                ),
+            ),
+        ] {
+            std::fs::write(rec.dir.join(POLICY_PROVENANCE_FILE), &body).unwrap();
+            match read_policy_provenance(&rec.dir) {
+                ProvenanceRead::UnsupportedVersion { .. } => {}
+                other => panic!("{label} must read as UnsupportedVersion, got {other:?}"),
+            }
+        }
+
+        // A supported version still gets the strict parse, so smuggling stays Malformed rather
+        // than being waved through by the preflight.
+        std::fs::write(
+            rec.dir.join(POLICY_PROVENANCE_FILE),
+            format!(
+                r#"{{"schema_version":1,"policy_digest":"{}","fields":{{}},"leaked_env":"FOO=bar"}}"#,
+                "0".repeat(64)
+            ),
+        )
+        .unwrap();
+        assert!(matches!(
+            read_policy_provenance(&rec.dir),
+            ProvenanceRead::Malformed(_)
+        ));
+    }
+
+    /// Third review round (Codex P0), at the seam where the diagnostic actually reaches an
+    /// operator. A malformed artifact is the likeliest place for a credential to be sitting —
+    /// a smuggled `NAME=VALUE` is a rejection, by construction — so the `Malformed` string must
+    /// describe the failure without reproducing what failed.
+    #[test]
+    fn a_malformed_artifacts_diagnostic_never_reproduces_its_contents() {
+        const SECRET: &str = "sk-live-DEADBEEF";
+        let runs = tempfile::tempdir().unwrap();
+        let rec = RunRecord::create(runs.path(), "target", "run-1").unwrap();
+        let digest = "0".repeat(64);
+
+        for (label, body) in [
+            (
+                "a credential smuggled into a name field",
+                format!(
+                    r#"{{"schema_version":1,"policy_digest":"{digest}","fields":{{"network":{{"source":"environment","name":"ARLIAI_API_KEY={SECRET}"}}}}}}"#
+                ),
+            ),
+            (
+                "a credential in an unknown field",
+                format!(
+                    r#"{{"schema_version":1,"policy_digest":"{digest}","fields":{{}},"leaked":"{SECRET}"}}"#
+                ),
+            ),
+            (
+                // Placed where serde's OWN message would quote it back.
+                "a credential where a number was expected",
+                format!(r#"{{"schema_version":"{SECRET}"}}"#),
+            ),
+        ] {
+            std::fs::write(rec.dir.join(POLICY_PROVENANCE_FILE), &body).unwrap();
+            match read_policy_provenance(&rec.dir) {
+                ProvenanceRead::Malformed(reason) => assert!(
+                    !reason.contains(SECRET),
+                    "{label}: the diagnostic reproduced the artifact's contents: {reason}"
+                ),
+                other => panic!("{label} must read as Malformed, got {other:?}"),
+            }
+        }
+    }
+
+    /// A truncated artifact is a diagnostic, but a record dir that cannot be written to is
+    /// still a hard failure — "non-load-bearing" constrains what may depend on the contents,
+    /// not whether I/O errors are reported.
+    #[test]
+    fn a_write_failure_is_still_a_hard_error() {
+        let runs = tempfile::tempdir().unwrap();
+        let rec = RunRecord {
+            dir: runs.path().join("does-not-exist"),
+        };
+        assert!(
+            rec.write_policy_provenance(&provenance()).is_err(),
+            "writing into a nonexistent record dir must fail loudly"
+        );
     }
 }
