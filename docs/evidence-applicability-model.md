@@ -2,7 +2,7 @@
 
 Status: **proposed vocabulary — not ratified, no schema implied** · Scope: how a
 future `judge`/`gate` record distinguishes what a contract promises, whether it
-applies, what was observed, and whether it matters.
+applies, what was observed, whether the two agree, and whether it matters.
 
 This document introduces no implementation and mandates no migration. It is the
 durable residue of a design discussion, recorded so later work does not
@@ -15,9 +15,10 @@ and a narrower instance of that document's recurring failure:
 
 > A signal from a lower layer is not a semantic fact of the upper layer.
 
-Here the lower-layer signal is *a contract's text*, and the upper-layer fact is
-*a property of the case in front of you*. The two are separated by a step that
-is almost never written down: whether the contract covers this case at all.
+Here the lower-layer signals are *a contract's text* and *a measurement*, and
+the upper-layer fact is *a property of the case in front of you*. Two steps
+separate them, and neither is usually written down: whether the contract covers
+this case, and whether the measurement is allowed to speak about the contract.
 
 ## 1. Why this exists
 
@@ -30,18 +31,20 @@ The failure, stated once:
 ```text
 contract says X          ≠  X holds for the case being evaluated
 observation found none   ≠  none can occur
-observer returned clean   ≠  observer ran
+observation found one    ≠  the contract permits it
+observer returned clean  ≠  observer ran
 ```
 
-Each line is a distinct loss, and each was produced live during the discussion
-by an author who had just finished arguing against that exact loss (§7).
+The third line is the one that costs most, and the one an earlier draft of this
+document got wrong (§8, counterexample 6).
 
 ## 2. The model
 
 ```text
 CONTRACT
   authority        who issues it, at what level (standard / implementation
-                   spec / project convention), at which revision
+                   spec / project convention)
+  revision         the exact artifact read — commit or content digest
   scope            what objects and situations the contract speaks about
         │
         ▼
@@ -49,46 +52,85 @@ APPLICABILITY      yes | no | unknown
                    does this contract cover the case being evaluated?
         │
         ▼
-COULD              yes | no | unknown
-  derivation       how the verdict was reached (witness / contract / neither)
+POSITION           ruled_out | not_ruled_out | silent | undetermined
+                   what the applicable contract says about the behaviour
         │
-        ▼
+        ├───────────────────────────┐
+        ▼                           │
 OBSERVATION        observed | clean | not_evaluated | error
   scope            required for observed and clean
-        │
-        ▼
+        │                           │
+        └─────────────┬─────────────┘
+                      ▼
+CONFORMANCE        conforms | conflicts | unknown        (derived, §7)
+                      │
+                      ▼
 CONSEQUENTIAL      yes | no | unknown
   consumer         which gate or decision the difference would change
 ```
 
-Each floor answers a different question, and no floor may answer for its
+Each node answers a different question, and no node may answer for its
 neighbour:
 
-| Floor | Question |
+| Node | Question |
 | --- | --- |
-| Contract | What is promised, by whom, at what authority? |
+| Contract | What is promised, by whom, at what authority, in which revision? |
 | Applicability | Does that promise reach this case? |
-| Could | Is the behaviour of interest permitted? |
+| Position | What does the applicable contract say about this behaviour? |
 | Observation | What did a particular measurement find? |
+| Conformance | Do the position and the observation agree? |
 | Consequential | Does the difference change a consumer's decision? |
 
-## 3. The binding rule
+**On the name.** In the discussion this node was called `COULD`. The name is
+retired deliberately: "could" reads as both *is permitted to* and *has been
+seen to*, and that ambiguity is exactly what let an earlier draft define the
+node normatively in one section and settle it with a witness in the next. The
+lineage is recorded here so the earlier vocabulary stays traceable.
 
-> **A contract cannot justify `COULD=no` unless its applicability to the
-> evaluated case has independently been established as `yes`.**
+## 3. Position and observation are independent
 
-`COULD=yes` is cheap: one valid witness settles it. `COULD=no` is expensive: it
-needs a closed contract *and* a demonstrated hit inside that contract's scope.
-`COULD=unknown` is the correct initial state, not a defect of the analysis.
+Three rules, and they are the core of the document.
 
-The asymmetry matters because the cheap direction is the safe one. Without the
-rule, the expensive verdict is reachable by the cheap route — read a strong
-sentence, skip the scope check, record `no`.
+> **1. A contract cannot justify `position=ruled_out` unless its applicability
+> to the evaluated case has independently been established as `yes`.**
 
-## 4. `unknown` carries its reason
+> **2. An observation settles `OBSERVATION` and nothing else. A witness never
+> establishes a position.**
 
-`unknown` collapses faster than any other value, because three unrelated states
-all render as the same word:
+> **3. A position is never revised by an observation.** An observation that
+> contradicts an applicable position produces `conformance=conflicts` — a
+> finding, not a correction.
+
+Rule 3 is what makes the most valuable state in the model expressible at all:
+
+```text
+position    = ruled_out       an applicable contract forbids the behaviour
+observation = observed        the behaviour happened anyway
+conformance = conflicts       the implementation violates its own contract
+```
+
+A model that lets a witness set the position cannot represent that; the witness
+silently overwrites the norm, and a genuine compiler or runtime bug is recorded
+as "well, apparently it's allowed". This is the same collapse the document is
+about, and it is the one an earlier draft committed.
+
+A conflict has exactly two honest resolutions, and choosing between them is real
+work: either the implementation is defective, or `applicability=yes` was
+established wrongly. It is never resolved by weakening the contract to fit the
+observation.
+
+The cost asymmetry sits on the position, not on the evidence:
+
+```text
+position = not_ruled_out   cheap: the contract addresses this and permits it
+position = ruled_out       expensive: a closed contract, plus a demonstrated
+                           hit inside its scope
+position = undetermined    the correct initial state, not a defect
+```
+
+## 4. `unknown` carries its reason — and two of the three now have fields
+
+An earlier draft observed that `unknown` collapses three unrelated states:
 
 ```text
 not_investigated          nobody has looked yet
@@ -96,29 +138,41 @@ applicability_unresolved  the contract may or may not reach this case
 contract_silent           an applicable contract makes no such guarantee
 ```
 
-They prescribe different next actions, which is the whole reason to keep them
-apart:
+After the §2 split, two of them stop being reasons and become values in
+different nodes:
 
 ```text
-not_investigated          → look
-applicability_unresolved  → establish scope, or find a contract that covers it
-contract_silent           → this source will never answer; find another, or test
+not_investigated          →  position = undetermined
+contract_silent           →  position = silent
+applicability_unresolved  →  applicability = unknown  (reason still required)
 ```
 
-A state that does not change the next action is decoration. These three do, so:
-**`unknown` must retain provenance.** This is a normative requirement on any
-future representation, not a request for three enums today.
+That is the improvement worth noticing: the collapse is prevented by the shape
+of the record rather than by a required comment. Where a reason is still the
+only carrier — `applicability=unknown`, `consequential=unknown` — it remains a
+normative requirement on any future representation, because the states still
+prescribe different next actions:
+
+```text
+position = undetermined       → look
+applicability = unknown       → establish scope, or find a covering contract
+position = silent             → this source will never answer; find another,
+                                or settle it empirically and record it as
+                                observation only
+```
+
+A state that does not change the next action is decoration. These do.
 
 ## 5. `not_applicable` is not `unknown`
 
 ```text
-COULD = unknown              we do not know the answer
+position = undetermined      we do not know the answer
 applicability = no           this source cannot produce an answer
 ```
 
-Epistemically distinct, and again distinguished by the next action: the first is
-answerable by more work against the same source, the second is not. Encoding the
-second inside `COULD` hides that, and makes a dead end look like a backlog item.
+Distinguished, again, by the next action: the first is answerable by more work
+against the same source, the second is not. Encoding the second inside the
+position hides that, and makes a dead end look like a backlog item.
 
 ## 6. Observation state — the part with a consumer today
 
@@ -154,65 +208,97 @@ may not use file-absence to mean anything, because absence has too many
 preimages: not evaluated, never invoked, runner died, upload failed, format
 retired.
 
-## 7. Motivating counterexamples
+## 7. Conformance is derived, never asserted
 
-Five inferences produced during the source discussion, each of which lost a
-boundary this model makes structural. They are recorded as a **counterexample
-corpus**, not as a measurement:
+`CONFORMANCE` is a function of position and observation. It is written down
+because the join is where the interesting states live, not because anyone sets
+it by hand.
 
-> These five failures are not an estimate of an error rate. They are a
-> counterexample corpus showing that prose discipline alone does not enforce the
+| Position | Observation | Conformance | |
+| --- | --- | --- | --- |
+| `ruled_out` | `observed` | **conflicts** | the implementation violates a contract that applies to it |
+| `ruled_out` | `clean` | conforms | |
+| `not_ruled_out` | `observed` | conforms | permitted, and exercised |
+| `not_ruled_out` | `clean` | conforms | permitted, not exercised *here* — position unchanged |
+| `silent` | any | unknown | nothing to conform to |
+| `undetermined` | any | unknown | no position yet |
+| any | `not_evaluated`, `error` | unknown | nothing measured |
+
+Row 4 is the negative-evidence trap, and the table is how it stops being a
+matter of author discipline: a `clean` observation cannot move a
+`not_ruled_out` position toward `ruled_out`, because conformance reads both and
+writes neither.
+
+## 8. Motivating counterexamples
+
+Inferences produced during the source discussion, each of which lost a boundary
+this model makes structural. They are recorded as a **counterexample corpus**,
+not as a measurement:
+
+> These failures are not an estimate of an error rate. They are a counterexample
+> corpus showing that prose discipline alone does not enforce the
 > scope/applicability separation, even when the author is explicitly watching for
 > that failure mode. Fields are therefore justified as structural constraints,
 > not as reminders.
 
 ```text
-1  observation      → guarantee          one passing witness read as a language guarantee
-2  single target    → architecture class one ISA datapoint read as an ISA-class law
-3  visible freedom  → normative scope    where freedom was visible read as where it exists
-4  pointer caveat   → contract exclusion a hedge read as a scope withdrawal
+1  observation      → guarantee            one passing witness read as a language guarantee
+2  single target    → architecture class   one ISA datapoint read as an ISA-class law
+3  visible freedom  → normative scope      where freedom was visible read as where it exists
+4  pointer caveat   → contract exclusion   a hedge read as a scope withdrawal
 5  "may violate"    → "explicitly refuses" hedged wording read as categorical
+6  witness          → contractual position an earlier draft of THIS document, §3
+7  missing revision → applicability_unknown an earlier draft of THIS document, §11
 ```
 
 Their use is as a mutation corpus for the representation itself:
 
-> If the schema lets any of these five be recorded without a missing required
-> field or absent provenance, the schema is still too permissive.
+> If the schema lets any of these be recorded without a missing required field
+> or absent provenance, the schema is still too permissive.
 
-Note that 4 and 5 are the same underlying case, caught at two different
-strengths — which is why applicability earns its own node rather than living as
-a caveat inside `COULD`.
+4 and 5 are the same underlying case caught at two different strengths — which
+is why applicability earns its own node rather than living as a caveat. 6 and 7
+were produced *while writing the document that forbids them*, which is the
+strongest available argument that the separations must be fields.
 
-## 8. First fixture
+## 9. First fixture
 
 The case that motivated the applicability node. It is a good first fixture
 precisely because it cannot be recorded as a single verdict — an implementation
-that allows `contract → COULD=no` without the intermediate step cannot express
+that allows `contract → ruled_out` without the intermediate step cannot express
 it at all.
 
-Contract: the .NET runtime memory model, which states under *Side-effects and
-optimizations of memory accesses* that its assumption "applies to all reads and
-writes - volatile or not", and derives from it `Reads cannot be introduced` and
-`A read cannot be re-done`. Authority: implementation specification, issued by
-`dotnet/runtime`; explicitly stronger than the ECMA-335 model it cites as weak.
+Contract: the .NET runtime memory model (pinned in §11), which states under
+*Side-effects and optimizations of memory accesses* that its assumption "applies
+to all reads and writes - volatile or not", and derives from it `Reads cannot be
+introduced` and `A read cannot be re-done`. Authority: implementation
+specification, issued by `dotnet/runtime`; explicitly stronger than the ECMA-335
+model it cites as weak.
 
 ```text
-CASE A   runtime-managed ordinary memory, managed references
+CASE A   runtime-managed ordinary memory, managed references,
+         NOT PROVEN THREAD-LOCAL (potentially cross-thread)
          applicability = yes
-         COULD         = no        derivation: contract
+         position      = ruled_out
+         condition:    the same contract permits duplicating and removing
+                       accesses where an optimizer has PROVEN the data is
+                       reachable by a single thread. The position holds only
+                       while that proof is unavailable — which is the normal
+                       case for memory a second party writes, but is a
+                       condition of the record, not a background assumption.
 
 CASE B   ordinary coherent shared mapping via unmanaged access
          applicability = unknown   reason: applicability_unresolved
-         COULD         = unknown   derivation: none admissible
+         position      = undetermined
          toward-covered: the rule is stated over all reads and writes
          toward-excluded: nothing on the introduction axis — the unmanaged
                           caveat is hedged ("may violate") and its only
                           example concerns alignment and atomicity
-         → insufficient for no; insufficient for yes
+         → insufficient for ruled_out; insufficient for not_ruled_out
 
 CASE C   device / incoherent memory
          applicability = no        the contract declares this outside its model
-         COULD         = unknown   derivation: none — needs a different contract
+         position      = undetermined — needs a different contract
 ```
 
 Case B also shows why one scenario can need two contract lookups on two axes,
@@ -221,55 +307,75 @@ resolved independently:
 | Axis | Source | Status |
 | --- | --- | --- |
 | introduced / repeated access | the runtime memory model | applicability unresolved |
-| aggregate snapshot atomicity | the accessor's public API docs | contract silent |
+| aggregate snapshot atomicity | the accessor's public API docs | position silent |
 
 Merging the axes is how a caveat about atomicity gets applied to a question
 about read introduction — counterexample 4 above.
 
-## 9. What applies now
+## 10. What applies now
 
 ```text
 applies now      §6 execution state, for judge/gate:
                  clean ≠ not_evaluated; clean requires a recorded scope
 
-proposed         §2 the model, §3 the binding rule, §4 unknown-with-reason,
-                 §5 applicability vs unknown
+proposed         §2 the model, §3 the three rules, §4 unknown-with-reason,
+                 §5 applicability vs undetermined, §7 derived conformance
 
-deferred         materialising authority and applicability as fields — do this
-                 when the first inference actually derives COULD from a
-                 contract, using §8 as the fixture, and not before
+deferred         materialising contract, applicability, position and
+                 conformance as fields — do this when the first inference
+                 actually derives a position from a contract, using §9 as the
+                 fixture, and not before
 ```
 
 The order is deliberate. Building the full vocabulary into a schema ahead of a
 consumer produces an ontology whose fields nobody is obliged to fill correctly,
 which is the failure this document is about, one level up.
 
-## 10. Provenance of the claims in this document
+## 11. Provenance of the claims in this document
 
 Per rule 4 of [`evidence-and-decision-discipline.md`](evidence-and-decision-discipline.md),
-the factual claims here about external artifacts are bound to this document's
-revision, and each is an `OBSERVED` record with a scope — not a standing fact.
+factual claims about external artifacts need a revision anchor of their own.
+This document's commit binds the *text of the claim*; it does not capture the
+*artifact the claim is about*, so each external source is pinned by commit and
+content digest:
 
 ```text
-.NET memory model     dotnet/runtime, docs/design/specs/Memory-model.md
-                      read 2026-08-12 from the moving ref `main` — UNPINNED
-kernel READ_ONCE      torvalds/linux, include/asm-generic/rwonce.h and
-                      tools/include/linux/compiler.h
-                      read 2026-08-12 from the moving ref `master` — UNPINNED
-compiler behaviour    gcc 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1),
-                      clang 18.1.3, x86-64, -O2
+.NET memory model
+  dotnet/runtime  docs/design/specs/Memory-model.md
+  commit 633ab1a41439ad2405ba2eb241295ba1842fcf5a
+  blob   5c727e6ec30de20fbc3e1a9b09a4803b64cd6c28
+
+kernel READ_ONCE, enforced contract
+  torvalds/linux  include/asm-generic/rwonce.h
+  commit f5bbbfec59b4e2fb7520a91de3df8a6174325d6a
+  blob   52b969c7cef9359e997e1e24df247f59187ccd59
+
+kernel READ_ONCE, tools/ copy
+  torvalds/linux  tools/include/linux/compiler.h
+  commit f5bbbfec59b4e2fb7520a91de3df8a6174325d6a
+  blob   f40bd2b04c29872ff1ee10442a8615f59c42f78d
+
+compiler behaviour (OBSERVED, one toolchain, one target)
+  gcc 13.3.0 (Ubuntu 13.3.0-6ubuntu2~24.04.1), clang 18.1.3, x86-64, -O2
 ```
 
-The two repository references were read from moving branches, so they identify a
-file but not a revision — by this document's own §4 that is
-`applicability_unresolved` for any later reader, and re-verification is required
-before citing them. The observation that motivates it: the same project, at the
-same commit, carries two different `READ_ONCE` contracts in two directories —
-one restricting to native word size by static assertion, one falling back to
-`memcpy` — so "the kernel guarantees X" is not a proposition until the header is
-named.
+The blob digests were verified by hashing the content fetched at each pinned
+commit; the commit ids were the branch heads at the time of writing, but it is
+the pin that binds, not the branch.
 
-The compiler observations are `OBSERVED` on one toolchain and one target. Under
-§3 they establish `COULD=yes` for the transformations they exhibit, and nothing
-at all about other toolchains — the direction counterexamples 1 and 2 went
-wrong.
+The rule this section is an instance of:
+
+```text
+missing contract revision   ≠  applicability unknown
+missing contract revision   →  grounding incomplete; inadmissible as
+                               contract evidence
+```
+
+Those are independent axes. Applicability asks *whether this contract covers
+this case*; a revision anchor asks *which artifact was read at all*. An earlier
+draft of this document conflated them — counterexample 7 — which is the same
+shape as `clean` without a scope: not weak evidence, but a malformed record.
+
+The compiler observations carry no contract. Under rule 2 of §3 they establish
+`observation=observed` for the transformations they exhibit, and no position
+whatsoever — the direction counterexamples 1 and 2 went wrong.
