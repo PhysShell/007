@@ -130,6 +130,29 @@ reintroduce a shape the constructors forbid. The bound is structural, not a sani
 this artifact ever needs its output scrubbed before writing, the design has already
 failed.**
 
+Errors are part of this, not an exception to it. `ProvenanceError` carries no rejected input
+and neither does the reader's `Malformed` string, which describes a parse failure by category
+and position (`redacted_parse_failure`) rather than by quoting it. The inputs these paths
+reject are precisely the ones most likely to hold a credential — a smuggled `NAME=VALUE` is a
+rejection by construction — and `AGENTS.md` is normative here: a provider credential is never
+composed by trusted code into `meta.json`, `stderr.log`, `result.json`, prompts, or **error
+strings**. An artifact that refuses to store a secret but echoes it into an operator log has
+simply moved the leak.
+
+### What the grammars do not claim
+
+They make payload *shapes* unrepresentable. They cannot tell a secret from an identifier that
+happens to look like one: `sk-live-DEADBEEF` is a legal filename, so no grammar over filenames
+rejects it without also rejecting legitimate files. A "looks credential-ish" heuristic would
+buy nothing — `sk-live-DEADBEEF.toml` walks past it — while trading a checkable structural
+claim for a guess.
+
+That residual is a **caller contract**, stated here before the production caller exists: a
+`ConfigLocator` must be *derived* — the path o7 itself resolved and opened, made relative to
+its `ConfigAnchor` root — never a string that reached o7 from anywhere a credential could also
+come from. Provenance records where o7 read a value; it is not a field a caller fills in
+freehand.
+
 Note what is *not* lost by omitting arguments and values: the effective values are already
 in the policy itself, canonically and digest-bound. Provenance adds the coordinate, not a
 second copy of the data.

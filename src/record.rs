@@ -288,15 +288,19 @@ pub fn read_policy_provenance(dir: &Path) -> ProvenanceRead {
     // `deny_unknown_fields`, so a genuine future schema would fail the strict parse and be
     // reported as corruption if the version were only read afterwards.
     match provenance::probe_schema_version(&text) {
-        SchemaSupport::Unreadable(e) => {
-            ProvenanceRead::Malformed(format!("parsing {}: {e}", path.display()))
+        SchemaSupport::Unreadable(reason) => {
+            ProvenanceRead::Malformed(format!("parsing {}: {reason}", path.display()))
         }
         SchemaSupport::Unsupported { found } => ProvenanceRead::UnsupportedVersion { found },
         SchemaSupport::Supported => match serde_json::from_str::<PolicyProvenance>(&text) {
             Ok(provenance) => ProvenanceRead::Present(Box::new(provenance)),
             // The version is one this build claims to understand, so a parse failure here is
             // real corruption rather than a schema this reader was never going to read.
-            Err(e) => ProvenanceRead::Malformed(format!("parsing {}: {e}", path.display())),
+            Err(e) => ProvenanceRead::Malformed(format!(
+                "parsing {}: {}",
+                path.display(),
+                provenance::redacted_parse_failure(&e)
+            )),
         },
     }
 }
@@ -649,6 +653,47 @@ mod provenance_tests {
             read_policy_provenance(&rec.dir),
             ProvenanceRead::Malformed(_)
         ));
+    }
+
+    /// Third review round (Codex P0), at the seam where the diagnostic actually reaches an
+    /// operator. A malformed artifact is the likeliest place for a credential to be sitting —
+    /// a smuggled `NAME=VALUE` is a rejection, by construction — so the `Malformed` string must
+    /// describe the failure without reproducing what failed.
+    #[test]
+    fn a_malformed_artifacts_diagnostic_never_reproduces_its_contents() {
+        const SECRET: &str = "sk-live-DEADBEEF";
+        let runs = tempfile::tempdir().unwrap();
+        let rec = RunRecord::create(runs.path(), "target", "run-1").unwrap();
+        let digest = "0".repeat(64);
+
+        for (label, body) in [
+            (
+                "a credential smuggled into a name field",
+                format!(
+                    r#"{{"schema_version":1,"policy_digest":"{digest}","fields":{{"network":{{"source":"environment","name":"ARLIAI_API_KEY={SECRET}"}}}}}}"#
+                ),
+            ),
+            (
+                "a credential in an unknown field",
+                format!(
+                    r#"{{"schema_version":1,"policy_digest":"{digest}","fields":{{}},"leaked":"{SECRET}"}}"#
+                ),
+            ),
+            (
+                // Placed where serde's OWN message would quote it back.
+                "a credential where a number was expected",
+                format!(r#"{{"schema_version":"{SECRET}"}}"#),
+            ),
+        ] {
+            std::fs::write(rec.dir.join(POLICY_PROVENANCE_FILE), &body).unwrap();
+            match read_policy_provenance(&rec.dir) {
+                ProvenanceRead::Malformed(reason) => assert!(
+                    !reason.contains(SECRET),
+                    "{label}: the diagnostic reproduced the artifact's contents: {reason}"
+                ),
+                other => panic!("{label} must read as Malformed, got {other:?}"),
+            }
+        }
     }
 
     /// A truncated artifact is a diagnostic, but a record dir that cannot be written to is

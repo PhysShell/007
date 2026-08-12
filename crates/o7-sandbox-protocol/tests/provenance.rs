@@ -10,8 +10,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use o7_sandbox_protocol::provenance::{
-    probe_schema_version, CliOption, ConfigAnchor, ConfigLocator, EnvName, PolicyField, PolicyKey,
-    PolicyProvenance, PolicySource, PolicySources, SchemaSupport, PROVENANCE_SCHEMA_VERSION,
+    probe_schema_version, redacted_parse_failure, CliOption, ConfigAnchor, ConfigLocator, EnvName,
+    PolicyField, PolicyKey, PolicyProvenance, PolicySource, PolicySources, SchemaSupport,
+    PROVENANCE_SCHEMA_VERSION,
 };
 use o7_sandbox_protocol::{NetworkPolicy, SandboxPolicy};
 
@@ -378,4 +379,58 @@ fn a_future_schema_is_classified_by_version_not_by_whether_it_fits_todays_shape(
             "{bad:?} must probe as Unreadable"
         );
     }
+}
+
+/// Third review round (Codex P0). The leaf validators used to carry the rejected input and
+/// `Display` it — and the inputs they reject are precisely the ones most likely to hold a
+/// credential, since a smuggled `NAME=VALUE` is a rejection. `read_policy_provenance` then
+/// composed that text into an operator-facing diagnostic, which `AGENTS.md` forbids in as many
+/// words: a provider credential is never composed by trusted code into `meta.json`,
+/// `stderr.log`, `result.json`, prompts, or ERROR STRINGS.
+#[test]
+fn a_rejected_input_is_never_echoed_back_through_the_error() {
+    const SECRET: &str = "sk-live-DEADBEEF";
+
+    let echoes = |text: String| text.contains(SECRET);
+
+    assert!(!echoes(
+        EnvName::parse(&format!("ARLIAI_API_KEY={SECRET}"))
+            .unwrap_err()
+            .to_string()
+    ));
+    assert!(!echoes(
+        ConfigLocator::parse(&format!("/home/alice/{SECRET}/o7.toml"))
+            .unwrap_err()
+            .to_string()
+    ));
+    assert!(!echoes(
+        CliOption::parse(&format!("--token={SECRET}"))
+            .unwrap_err()
+            .to_string()
+    ));
+    assert!(!echoes(
+        PolicyKey::parse(&format!("TOKEN.{SECRET}"))
+            .unwrap_err()
+            .to_string()
+    ));
+
+    // The same on the untrusted deserialize path, where the validator's message is what serde
+    // wraps and surfaces.
+    let via_serde = serde_json::from_str::<PolicySource>(&format!(
+        r#"{{"source":"environment","name":"ARLIAI_API_KEY={SECRET}"}}"#
+    ))
+    .unwrap_err()
+    .to_string();
+    assert!(!echoes(via_serde));
+
+    // And where serde ITSELF would quote the offending text (`invalid type: string "..."`):
+    // the reader describes such a failure by category and position instead.
+    let type_mismatch =
+        serde_json::from_str::<PolicyProvenance>(&format!(r#"{{"schema_version":"{SECRET}"}}"#))
+            .unwrap_err();
+    assert!(echoes(type_mismatch.to_string()), "serde itself does echo");
+    assert!(
+        !echoes(redacted_parse_failure(&type_mismatch)),
+        "...which is exactly why the reader must not use serde's own message"
+    );
 }

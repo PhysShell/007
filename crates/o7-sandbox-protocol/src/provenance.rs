@@ -56,6 +56,20 @@
 //! The bound is structural, not a sanitizer. If this module ever needs to scrub its own output
 //! before writing it, the design has already failed.
 //!
+//! # What the grammars do NOT claim
+//!
+//! They make payload SHAPES unrepresentable. They do not, and cannot, tell a secret from an
+//! identifier that happens to look like one: `sk-live-DEADBEEF` is a perfectly legal filename,
+//! so no grammar over filenames rejects it without also rejecting legitimate files. Adding a
+//! "looks credential-ish" heuristic would buy nothing — `sk-live-DEADBEEF.toml` walks straight
+//! past it — while trading a checkable structural claim for a guess.
+//!
+//! That residual is closed by a CALLER CONTRACT instead, and it is worth stating before the
+//! production caller exists: a [`ConfigLocator`] must be DERIVED — the path o7 itself resolved
+//! and opened, made relative to its [`ConfigAnchor`] root — never a string that reached o7 from
+//! somewhere a credential could also come from. Provenance records where o7 read a value; it is
+//! not a field a caller fills in freehand.
+//!
 //! [`SandboxPolicy::digest`]: crate::policy::SandboxPolicy::digest
 
 use std::collections::BTreeMap;
@@ -82,22 +96,33 @@ const MAX_CONFIG_LOCATOR: usize = 256;
 
 /// Why a provenance leaf could not be built. Every variant means the same thing: the input
 /// was a payload where an identifier was required.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+///
+/// NO VARIANT CARRIES THE REJECTED INPUT. That is not tidiness — echoing it would defeat the
+/// module's whole point through a side channel. The inputs these errors reject are precisely
+/// the ones most likely to hold a credential (an `ARLIAI_API_KEY=sk-live-...` smuggled into a
+/// name field is a rejection, and would then have been reproduced verbatim in the error text,
+/// which `read_policy_provenance` composes into an operator-facing diagnostic). `AGENTS.md`
+/// makes that normative for this repo: a provider credential is never composed by trusted code
+/// into `meta.json`, `stderr.log`, `result.json`, prompts, or ERROR STRINGS.
+///
+/// Each variant therefore names the grammar it expected and nothing else. The caller already
+/// knows what it passed; on the deserialize path serde supplies the field and position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ProvenanceError {
-    #[error("{0:?} is not a long option of the form `--lower-kebab` (max {MAX_CLI_OPTION} chars)")]
-    CliOption(String),
-    #[error("{0:?} is not a dotted lower_snake config key (max {MAX_POLICY_KEY} chars)")]
-    PolicyKey(String),
-    /// Notably rejects anything containing `=`, so `NAME=VALUE` cannot pose as a name.
-    #[error("{0:?} is not a POSIX-portable environment variable NAME (max {MAX_ENV_NAME} chars)")]
-    EnvName(String),
+    #[error("not a long option of the form `--lower-kebab` (max {MAX_CLI_OPTION} chars)")]
+    CliOption,
+    #[error("not a dotted lower_snake config key (max {MAX_POLICY_KEY} chars)")]
+    PolicyKey,
+    /// Rejects anything containing `=`, so `NAME=VALUE` cannot pose as a name.
+    #[error("not a POSIX-portable environment variable NAME (max {MAX_ENV_NAME} chars)")]
+    EnvName,
     /// Rejects `=`, `\\`, `:`, whitespace, control characters, and non-ASCII by construction:
     /// the segment charset is an allowlist, not a denylist of known-bad shapes.
     #[error(
-        "{0:?} is not a config locator: `/`-separated non-empty segments over [A-Za-z0-9._-], \
+        "not a config locator: `/`-separated non-empty segments over [A-Za-z0-9._-], \
          none of them `.` or `..`, at most {MAX_CONFIG_LOCATOR} chars"
     )]
-    ConfigLocator(String),
+    ConfigLocator,
 }
 
 /// A long CLI option NAME (`--allow-exec`) — never the argument passed to it.
@@ -110,7 +135,7 @@ impl CliOption {
     /// # Errors
     /// [`ProvenanceError::CliOption`] if the string is not that shape.
     pub fn parse(value: &str) -> Result<Self, ProvenanceError> {
-        let err = || ProvenanceError::CliOption(value.to_owned());
+        let err = || ProvenanceError::CliOption;
         if value.len() > MAX_CLI_OPTION {
             return Err(err());
         }
@@ -144,7 +169,7 @@ impl PolicyKey {
     /// # Errors
     /// [`ProvenanceError::PolicyKey`] if any segment is empty or outside `[a-z_][a-z0-9_]*`.
     pub fn parse(value: &str) -> Result<Self, ProvenanceError> {
-        let err = || ProvenanceError::PolicyKey(value.to_owned());
+        let err = || ProvenanceError::PolicyKey;
         if value.is_empty() || value.len() > MAX_POLICY_KEY {
             return Err(err());
         }
@@ -178,7 +203,7 @@ impl EnvName {
     /// # Errors
     /// [`ProvenanceError::EnvName`] otherwise — including anything containing `=`.
     pub fn parse(value: &str) -> Result<Self, ProvenanceError> {
-        let err = || ProvenanceError::EnvName(value.to_owned());
+        let err = || ProvenanceError::EnvName;
         if value.is_empty() || value.len() > MAX_ENV_NAME {
             return Err(err());
         }
@@ -238,7 +263,7 @@ impl ConfigLocator {
     /// `/`, a `.` or `..` segment, any character outside `[A-Za-z0-9._-]`, or an over-long
     /// locator.
     pub fn parse(value: &str) -> Result<Self, ProvenanceError> {
-        let err = || ProvenanceError::ConfigLocator(value.to_owned());
+        let err = || ProvenanceError::ConfigLocator;
         if value.is_empty() || value.len() > MAX_CONFIG_LOCATOR {
             return Err(err());
         }
@@ -289,6 +314,24 @@ validating_deserialize!(PolicyKey, PolicyKey::parse);
 validating_deserialize!(EnvName, EnvName::parse);
 validating_deserialize!(ConfigLocator, ConfigLocator::parse);
 
+/// Describe a `serde_json` failure by CATEGORY and POSITION, never by the text that failed.
+///
+/// `serde_json`'s own messages quote the offending input (`invalid type: string "sk-live-..."`),
+/// so composing one into an operator diagnostic reopens the channel
+/// [`ProvenanceError`] was just closed against — and a malformed provenance file is exactly
+/// where a credential would be sitting. Line and column locate the fault precisely enough to
+/// fix it; the bytes themselves are already in the file, and do not need a second home in a
+/// log.
+#[must_use]
+pub fn redacted_parse_failure(error: &serde_json::Error) -> String {
+    format!(
+        "{:?} error at line {}, column {} (the offending text is deliberately not echoed)",
+        error.classify(),
+        error.line(),
+        error.column()
+    )
+}
+
 /// The minimal envelope every provenance document presents, whatever schema it was written
 /// to. Deliberately NOT `deny_unknown_fields`: reading a document whose other fields this
 /// build has never heard of is its entire job.
@@ -337,7 +380,7 @@ pub fn probe_schema_version(text: &str) -> SchemaSupport {
         Ok(envelope) => SchemaSupport::Unsupported {
             found: envelope.schema_version,
         },
-        Err(e) => SchemaSupport::Unreadable(e.to_string()),
+        Err(e) => SchemaSupport::Unreadable(redacted_parse_failure(&e)),
     }
 }
 
