@@ -76,7 +76,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
 
 # Pinned deliberately. Bump it in the same commit that adds or removes a case,
 # so the number is a reviewed claim rather than a readout of whatever survived.
-EXPECTED_TOTAL = 43
+EXPECTED_TOTAL = 44
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
@@ -483,6 +483,10 @@ def preflight_cases() -> list[tuple[str, bool]]:
                         ' "path": "p"}], "carriers": []}\n')
         nonstd = d / "nonstd.json"
         nonstd.write_text('{"carriers": [], "x": NaN}\n')
+        surro = d / "surro.json"
+        surro.write_text('{"carriers": [{"source": "\\ud800", "target": "ScopeContract",'
+                         ' "class": "Intra", "carrier_kind": "nonsense",'
+                         ' "path": "p"}]}\n')
         deep = d / "deep.json"
         deep.write_text("[" * 2000 + "]" * 2000)
         for label, ledger_arg in (("malformed JSON", bad), ("missing file", d / "nope.json"),
@@ -490,6 +494,7 @@ def preflight_cases() -> list[tuple[str, bool]]:
                                   ("invalid UTF-8", utf8),
                                   ("a duplicate `carriers` member", dupe),
                                   ("a non-standard JSON constant", nonstd),
+                                  ("an unpaired surrogate in a value", surro),
                                   ("nesting deeper than the parser reads", deep),
                                   ("non-object top level", shaped),
                                   ("carriers not a list of rows", rows),

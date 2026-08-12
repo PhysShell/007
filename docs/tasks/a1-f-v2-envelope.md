@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R19) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R20) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -29,8 +29,9 @@ holds end to end, on both sides of the checking logic**; **E-R16 applies it to
 the path that obtains the inputs at all, and **E-R17 carries that validation
 down to the fields the verifier indexes**; E-R18 requires the container to be
 *present*; **E-R19 stops the JSON parser resolving anything on the gate's
-behalf.** Twenty revisions, no graph change in any of them: the frozen registry
-is a hard input here, not a subject.
+behalf**, and **E-R20 refutes E-R19's own claim to have reached the bottom.**
+Twenty-one revisions, no graph change in any of them: the frozen registry is a
+hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -200,7 +201,7 @@ With nothing drafted, both preflights pass and all five steps are OWED:
 RESULT: FAIL — Envelope v2 is not realized
 ```
 
-`tools/tests/test_a1_v2_ledger_gate.py` — **43 cases, 43 as specified**, and the
+`tools/tests/test_a1_v2_ledger_gate.py` — **44 cases, 44 as specified**, and the
 total is **pinned** rather than derived: `EXPECTED_TOTAL` must be bumped in the
 commit that changes it, because a runner that counts whatever survived would
 print a clean `42/42` after a case was deleted. Twenty-two mutate one thing and
@@ -514,6 +515,45 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### E-R20 — the claim to have reached the bottom, refuted on the next commit
+
+**P1 (Codex, against `fd2c78e`).** E-R19 asserted the sequence had bottomed out,
+on the reasoning that *below `strict_json` there are only bytes, and reading them
+is covered*. That claim was published in the review request as the thing to
+attack. It survived one commit.
+
+`"\ud800"` is a well-formed JSON escape. The bytes decode, `json.loads` accepts
+it, and it becomes a non-empty Python `str` that passes every shape check this
+gate performs. It then kills `Report.emit()` on the way out, because a lone
+surrogate cannot be encoded back to UTF-8:
+
+```text
+UnicodeEncodeError: 'utf-8' codec can't encode character '\ud800'
+exit 1, no RESULT line
+```
+
+Exit 1 is `FAIL`. Ninth instance of the family, fifth consecutive round found
+one layer below the previous repair.
+
+**What was actually wrong with the reasoning.** Below `strict_json` are not
+bytes — they are **decoded values**, and a value's content can break a stage
+*further downstream* than the one validating it. The loader was asking *can I
+read this?* when the question that matters is *can this be read, judged, and
+reported on?* **Reachability of the output path is part of whether evidence is
+readable at all**, and nothing had said so.
+
+`strict_json` now walks the parsed structure and rejects any string that cannot
+be encoded back to UTF-8. Corpus 43 → 44.
+
+**On the pattern, now that it has five instances and a refuted prediction.**
+Each repair was correct at the level it addressed. Each stopped at the boundary
+the reported witness happened to touch. Asking *what is the next dimension over?*
+worked once, in E-R18, and failed here — the author's answer to that question is
+drawn from the same model that drew the boundary, so it extends the boundary by
+one step rather than escaping it. That is not a defect of diligence and more
+diligence will not fix it. It is the reason the external pass has produced
+**nine P1s and three Majors while the 44-case corpus has produced none.**
 
 ### E-R19 — the mechanism was inside `json.loads` the whole time
 
@@ -1533,7 +1573,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R19)
+## 8. For the independent reviewer (revision E-R20)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before

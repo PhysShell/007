@@ -173,9 +173,37 @@ def strict_json(raw: bytes) -> dict:
     def reject_constant(c: str) -> object:
         raise ValueError(f"non-standard JSON constant {c}")
 
-    return json.loads(raw.decode("utf-8"),
-                      object_pairs_hook=reject_duplicates,
-                      parse_constant=reject_constant)
+    obj = json.loads(raw.decode("utf-8"),
+                     object_pairs_hook=reject_duplicates,
+                     parse_constant=reject_constant)
+
+    # And the STRINGS the parser produced. `"\ud800"` is a well-formed escape:
+    # the bytes decode, json accepts it, and it becomes a non-empty Python str
+    # that passes every shape check — then kills Report.emit() on the way out,
+    # because a lone surrogate cannot be encoded back to UTF-8. Exit 1, no
+    # RESULT, through the code reserved for FAIL.
+    #
+    # E-R19 claimed this sequence bottomed out because "below strict_json there
+    # are only bytes". Below it are DECODED VALUES, and their content can break
+    # a stage further downstream than the one being validated. Reachability of
+    # the output path is part of whether evidence is readable at all.
+    def encodable(value: object) -> bool:
+        if isinstance(value, str):
+            try:
+                value.encode("utf-8")
+            except UnicodeEncodeError:
+                return False
+            return True
+        if isinstance(value, dict):
+            return all(encodable(k) and encodable(v) for k, v in value.items())
+        if isinstance(value, list):
+            return all(encodable(v) for v in value)
+        return True
+
+    if not encodable(obj):
+        raise ValueError("contains an unpaired surrogate; the value cannot be "
+                         "written back out, so it cannot be reported on either")
+    return obj
 
 
 def run_steps(graph: dict, schema: dict, ledger: dict, r: Report | None = None) -> Report:
