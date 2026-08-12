@@ -432,9 +432,38 @@ def main() -> int:
             # Every step below would be measured against a forged ruler.
             return r.emit()
 
-    run_steps(json.loads(Path(args.graph).read_text()),
-              json.loads(Path(args.schema).read_text()),
-              json.loads(Path(args.ledger).read_text()), r)
+    # ---- loading is part of obtaining a judgement, so its failures are ERROR --
+    # An unreadable, unparseable or wrongly-shaped artifact produced an uncaught
+    # exception: no RESULT line at all, and Python's default exit status of 1 —
+    # which this contract assigns to "the gate ran and the realization failed
+    # it". A consumer parsing the exit code was told the target had been
+    # measured and had lost. Report.__doc__ rule 2 already said crashes, I/O
+    # failures and malformed input share ERROR's terminal semantics; the rule
+    # was written one revision before the path that needed it.
+    loaded = {}
+    for name, path in (("graph", args.graph), ("schema", args.schema),
+                       ("ledger", args.ledger)):
+        try:
+            obj = json.loads(Path(path).read_text())
+        except OSError as exc:
+            r.add(f"load: {name}", False, f"unreadable: {exc}", error=True)
+            return r.emit()
+        except json.JSONDecodeError as exc:
+            r.add(f"load: {name}", False, f"not JSON: {exc}", error=True)
+            return r.emit()
+        if not isinstance(obj, dict):
+            r.add(f"load: {name}", False,
+                  f"top level is {type(obj).__name__}, expected an object", error=True)
+            return r.emit()
+        loaded[name] = obj
+
+    carriers = loaded["ledger"].get("carriers", [])
+    if not isinstance(carriers, list) or not all(isinstance(c, dict) for c in carriers):
+        r.add("load: ledger", False,
+              "`carriers` must be a list of objects, one row per carrier", error=True)
+        return r.emit()
+
+    run_steps(loaded["graph"], loaded["schema"], loaded["ledger"], r)
     return r.emit()
 
 

@@ -450,6 +450,27 @@ def preflight_cases() -> list[tuple[str, bool]]:
                     and " ERROR " in line and "VERIFIER PREMISE INVALIDATED" in line
                     and "Do NOT alter the authority" in line))
 
+        # 3f. Artifact loading through the EXECUTABLE path. An unreadable,
+        #     unparseable or wrongly-shaped artifact used to raise, printing no
+        #     RESULT and exiting 1 — the code this contract assigns to FAIL, so
+        #     a consumer read "measured and lost" for a run that never began.
+        bad = d / "bad.json"
+        bad.write_text("{")
+        shaped = d / "array.json"
+        shaped.write_text("[]\n")
+        rows = d / "rows.json"
+        rows.write_text('{"carriers": "not a list"}\n')
+        for label, ledger_arg in (("malformed JSON", bad), ("missing file", d / "nope.json"),
+                                  ("non-object top level", shaped),
+                                  ("carriers not a list of rows", rows)):
+            p = subprocess.run(
+                [sys.executable, str(GATE), "--graph", str(GRAPH_PATH),
+                 "--schema", str(SCHEMA_PATH), "--ledger", str(ledger_arg)],
+                capture_output=True, text=True)
+            out.append((f"ledger {label} is ERROR with a RESULT line",
+                        p.returncode == 2 and "RESULT: ERROR" in p.stdout
+                        and " ERROR " in p.stdout))
+
         # 4. Control: the real artifacts must still pass their preflights, or the
         #    cases above would be proving nothing.
         code, txt = run_real(GRAPH_PATH, SCHEMA_PATH)

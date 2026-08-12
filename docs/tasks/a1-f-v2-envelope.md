@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R15) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R16) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -25,9 +25,9 @@ untouched steps against the criterion and finds the same species on the schema
 term.** E-R13 names the mechanism that produces all three species and turns the
 audit into a refutation surface. **E-R14 separates `ERROR` from `FAIL`**, the
 same demotion surviving in the verdict vocabulary; **E-R15 finds the criterion
-holds end to end, on both sides of the checking logic**. Sixteen revisions, no
-graph change in any of them: the frozen registry is a hard input here, not a
-subject.
+holds end to end, on both sides of the checking logic**; **E-R16 applies it to
+the path that obtains the inputs at all.** Seventeen revisions, no graph change
+in any of them: the frozen registry is a hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -197,7 +197,7 @@ With nothing drafted, both preflights pass and all five steps are OWED:
 RESULT: FAIL — Envelope v2 is not realized
 ```
 
-`tools/tests/test_a1_v2_ledger_gate.py` — **31 cases, 31 as specified.** Twenty-two
+`tools/tests/test_a1_v2_ledger_gate.py` — **35 cases, 35 as specified.** Twenty-two
 mutate one thing and assert which step catches it; six exercise the preflight
 itself, which E-R1 added and left undefended; two exercise the pin evidence of
 §2.5. The corpus **imports `run_steps`**; it no longer asks the executable to
@@ -504,6 +504,50 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### E-R16 — the rule written one revision before the path that needed it
+
+**P1 (CodeRabbit, against `35eacf9`).** Artifact loading was outside the verdict
+contract. An unreadable, unparseable or wrongly-shaped artifact raised an
+uncaught exception. Reproduced, all three shapes:
+
+```text
+malformed JSON       exit=1, no RESULT line
+missing file         exit=1, no RESULT line
+non-object top level exit=1, no RESULT line
+```
+
+Exit `1` is this contract's code for `FAIL — Envelope v2 is not realized`. A
+consumer parsing the exit status was told **the gate ran and the target lost**,
+for a run that never began. And there was no `RESULT` line at all, so the only
+machine-readable signal was the one that lied.
+
+**Located on the chain before repairing it.** The loss is on `judgment validity
+→ terminal semantic state → exit code`, the same arrow as E-R14 — but the cause
+is the mirror image. E-R14 collapsed a **detected** invalid ruler into `FAIL`;
+this collapsed an **undetected** failure to obtain the inputs into `FAIL`, by
+inheriting Python's default exit status. Same arrow, opposite direction of
+travel, and only one of them had been closed.
+
+Loading now reports `ERROR` and exits 2, with top-level shape validated and
+`carriers` required to be a list of rows. Corpus 31 → 35, all four cases
+exercising the **executable** path rather than `run_steps`, because the defect
+lived in the part of the program the in-process seam does not touch.
+
+**The uncomfortable part, and the reason this is recorded rather than quietly
+fixed.** E-R15 put this rule in the `Report` docstring one revision earlier, in
+these words: *do not merge `ERROR` into a generic infrastructure-error bucket —
+a crash, malformed input, an invalidated premise and an unverifiable preflight
+share the terminal semantics that matter.* The rule named crashes and malformed
+input explicitly. It was written by an author who, at that moment, was looking
+at the premise path and the preflight path, and did not look ten lines further
+down at the three `json.loads` calls.
+
+So a correctly stated general rule, in the right file, adjacent to the code,
+still did not cause its author to apply it. That is §8.7's lesson a second time
+and in a harsher form: writing the question down did not answer it, and here
+writing the *answer* down did not apply it. What closed the gap was a reader who
+did not already know what the code meant.
 
 ### E-R15 — the criterion holds on both sides of the checking logic
 
@@ -1364,7 +1408,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R15)
+## 8. For the independent reviewer (revision E-R16)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before
