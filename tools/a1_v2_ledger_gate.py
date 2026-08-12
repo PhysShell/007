@@ -69,6 +69,24 @@ class Report:
     which blames the target for a defect of the machinery: the same demotion
     E-R10 removed from the premise's diagnostic text, still present in the
     verdict vocabulary one floor up.
+
+    TWO RULES THAT MUST SURVIVE ANY REFACTOR OF THIS CLASS:
+
+    1. ERROR DOMINATES FAIL. A failed sub-check under an invalidated ruler is
+       evidence about EXECUTION, not evidence that the target failed the gate.
+       The observation stays in the report — it is true, and diagnostics need
+       it — but it may not contribute to the terminal verdict, because the
+       premise licensing the measurement is void. Let FAIL win here and ERROR
+       becomes a decorative side-channel while FAIL keeps exercising authority
+       it no longer has.
+
+    2. ERROR IS NOT AN INFRASTRUCTURE-ERROR BUCKET. Do not later merge it with
+       crashes, I/O failures or malformed input on the grounds that "something
+       went wrong". Those may deserve different diagnostics, but if none of
+       them permits a valid judgement they share the terminal semantics that
+       matter to a caller: NO AUTHORITATIVE CLAIM ABOUT REALIZATION WAS
+       PRODUCED — do not repair the target on the strength of this result.
+       ERROR is an epistemic state, not a process outcome.
     """
 
     def __init__(self) -> None:

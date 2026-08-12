@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R14) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R15) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -24,8 +24,9 @@ found from outside after the taxonomy predicted them. **E-R12 audits the
 untouched steps against the criterion and finds the same species on the schema
 term.** E-R13 names the mechanism that produces all three species and turns the
 audit into a refutation surface. **E-R14 separates `ERROR` from `FAIL`**, the
-same demotion surviving in the verdict vocabulary. Fifteen revisions, no graph
-change in any of them: the frozen registry is a hard input here, not a
+same demotion surviving in the verdict vocabulary; **E-R15 finds the criterion
+holds end to end, on both sides of the checking logic**. Sixteen revisions, no
+graph change in any of them: the frozen registry is a hard input here, not a
 subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
@@ -235,6 +236,15 @@ disarm.
 
 Every emphasised row is a defect a previous revision of this gate could not
 catch while claiming to.
+
+**What this number is, precisely.** The corpus is a **contract-relative
+regression witness**. It establishes stability against known cases *under the
+currently accepted oracle*. It neither establishes the oracle's adequacy nor
+supplies independent evidence for the semantic correctness of its expected
+verdicts. A shared authoring model can cause the corpus to **ratify the same
+defect it is intended to guard against** — which has now happened three times
+here (§7, E-R15). Read `31/31` as *every registered witness produces the result
+currently specified for it*, and nothing more.
 
 ### 2.5 Re-pinning the authority blob is a ceremony, not an edit
 
@@ -494,6 +504,102 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### E-R15 — the criterion holds on both sides of the checking logic
+
+Not a finding. What E-R14 turns out to have been an instance of.
+
+**The judgment state space was already ternary** — *judgment valid and
+satisfied*, *judgment valid and violated*, *judgment not obtainable* — and the
+caller-facing vocabulary projected it onto two. That is the E-R9 criterion one
+floor **above** the checks rather than below them:
+
+> **the caller-facing verdict was less discriminating than the judgment state it
+> claimed to represent.**
+
+So `FAIL — Envelope v2 is not realized` was not merely misleading wording. It
+was a **false machine-readable fact**: the detail line knew the ruler was
+invalid while the API result asserted the target had been measured and had
+failed. Callers parse `RESULT`; repairing only the prose would have been
+lipstick on a protocol bug.
+
+The dominance rule, stated hard because a weaker form makes `ERROR` decorative:
+
+> **A failed sub-check under an invalidated ruler is evidence about execution,
+> not evidence that the target failed the gate.**
+
+The 70th-edge case is the clean witness precisely because both facts coexist —
+the premise is invalidated **and** step 5 observes an uncarried edge. The error
+would be to treat them as competing findings and ask which wins. They live at
+different levels: step 5 truthfully reports what it observed, and the terminal
+evaluator must still say `ERROR`, because those observations are no longer
+licensed to decide realization. My first corpus assertion said `errored and not
+failed`, which would have discarded a real downstream observation merely because
+it cannot support the final verdict — making the data fit the state machine.
+
+#### The second chain
+
+The instrument is not specific to translating authority into verification. The
+same question applies at every arrow of the **consumption** chain:
+
+```text
+step observations -> judgment validity -> terminal semantic state
+                                       -> exit code / RESULT -> caller
+```
+
+*Can two states that matter to the consumer collapse into one representation?*
+They did:
+
+```text
+realization failed a valid ruler   ─┐
+invalid ruler, realization unjudged ┴─> FAIL
+```
+
+Pure projection loss. So the full chain the criterion governs runs end to end:
+
+```text
+authority -> admitted evidence -> verifier representation -> judgment
+          -> emitted verdict -> consumer
+```
+
+The same analytical instrument found information loss on **both** sides of the
+actual checking logic. That is a stronger result than another P1.
+
+#### `ERROR` is an epistemic state, not a process outcome
+
+Recorded here and in the `Report` docstring, because it is the sort of rule a
+future refactor tidies away: **do not merge `ERROR` into a generic
+infrastructure-error bucket.** A crash, malformed input, an invalidated premise
+and an unverifiable preflight may deserve different diagnostics, but if none of
+them permits a valid judgement they share the terminal semantics that matter —
+*no authoritative claim about realization was produced; do not repair the target
+on the strength of this result.*
+
+What E-R14 actually closed, then, is more fundamental than a diagnostics hole:
+the gate can now say **"I do not know"** without lying and calling that
+knowledge a failure.
+
+#### The corpus statement, final form
+
+> The corpus is a **contract-relative regression witness**. It establishes
+> stability against known cases under the currently accepted oracle. It neither
+> establishes the oracle's adequacy nor supplies independent evidence for the
+> semantic correctness of its expected verdicts. **A shared authoring model can
+> cause the corpus to ratify the same defect it is intended to guard against.**
+
+Three failure modes of one epistemic dependency, all witnessed here:
+
+| | what the shared model did |
+|---|---|
+| **E-R1** | encoded a clause-5 violation as an expected **PASS** |
+| **E-R6 – E-R11** | omitted the observation distinctions the author could not see, so no mutation existed to catch them |
+| **E-R14** | encoded the wrong verdict semantics as four expected **FAIL**s |
+
+Before E-R14: implementation A, oracle A, 31/31. After: implementation B,
+oracle B, 31/31. **A and B disagree on the externally visible contract.** The
+green number was preserved across a change in what it means, which is the
+cleanest available demonstration that a regression suite can be entirely green
+while guarding yesterday's misconception with admirable discipline.
 
 ### E-R14 — `ERROR` is not `FAIL`
 
@@ -1258,7 +1364,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R14)
+## 8. For the independent reviewer (revision E-R15)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before
