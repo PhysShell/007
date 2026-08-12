@@ -76,7 +76,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
 
 # Pinned deliberately. Bump it in the same commit that adds or removes a case,
 # so the number is a reviewed claim rather than a readout of whatever survived.
-EXPECTED_TOTAL = 44
+EXPECTED_TOTAL = 46
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
@@ -345,6 +345,7 @@ def _meta_decomposed():
 
 GRAPH_PATH = REPO / "docs/tasks/a1-f-v2-graph.json"
 SCHEMA_PATH = REPO / "docs/tasks/a1-f-v2-schema-facts.json"
+LEDGER_PATH = REPO / "docs/tasks/a1-f-v2-realization-ledger.json"
 GRAPH_EXTRACTOR = REPO / "tools/a1_v2_extract_graph.py"
 PHASE_G = REPO / "docs/tasks/a1-f-v2-phase-g.md"
 
@@ -354,7 +355,7 @@ def run_real(graph: Path, schema: Path) -> tuple[int, str]:
     p = subprocess.run(
         [sys.executable, str(GATE), "--graph", str(graph), "--schema", str(schema),
          "--ledger", str(ledger)],
-        capture_output=True, text=True)
+        capture_output=True, text=True, encoding="utf-8", errors="replace")
     return p.returncode, p.stdout
 
 
@@ -394,7 +395,7 @@ def preflight_cases() -> list[tuple[str, bool]]:
         moved.write_text(PHASE_G.read_text() + "\n<!-- authority drifted -->\n")
         p = subprocess.run([sys.executable, str(GRAPH_EXTRACTOR), "--check",
                             "--source", str(moved), "--out", str(GRAPH_PATH)],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
         out.append(("Phase G source blob mismatch is rejected", p.returncode == 1))
 
         # 3a. A re-pin that arrives WITHOUT its evidence. This is the shape the
@@ -430,7 +431,7 @@ def preflight_cases() -> list[tuple[str, bool]]:
 
         # 3d. The retired harness env var must be inert, not merely undocumented.
         p = subprocess.run([sys.executable, str(GATE), "--graph", str(fg)],
-                           capture_output=True, text=True,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace",
                            env={**os.environ, "A1_V2_GATE_HARNESS": "1"})
         out.append(("A1_V2_GATE_HARNESS=1 no longer bypasses the preflight",
                     p.returncode == 2 and "preflight: graph extract" in p.stdout
@@ -504,10 +505,33 @@ def preflight_cases() -> list[tuple[str, bool]]:
             p = subprocess.run(
                 [sys.executable, str(GATE), "--graph", str(GRAPH_PATH),
                  "--schema", str(SCHEMA_PATH), "--ledger", str(ledger_arg)],
-                capture_output=True, text=True)
+                capture_output=True, text=True, encoding="utf-8", errors="replace")
             out.append((f"ledger {label} is ERROR with a RESULT line",
                         p.returncode == 2 and "RESULT: ERROR" in p.stdout
                         and " ERROR " in p.stdout))
+
+        # 3g. The report must not depend on the codec stdout happens to carry.
+        #     Under LC_ALL=C every verdict string raised UnicodeEncodeError on
+        #     its em dash: the run died mid-line with a truncated `RESULT: ` and
+        #     Python's exit 1, which this contract reserves for FAIL. The gate's
+        #     own prose decided the verdict, not the evidence.
+        ascii_env = {**os.environ, "LC_ALL": "C", "LANG": "C", "PYTHONUTF8": "0"}
+        p = subprocess.run(
+            [sys.executable, str(GATE), "--graph", str(GRAPH_PATH),
+             "--schema", str(SCHEMA_PATH), "--ledger", str(LEDGER_PATH)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env=ascii_env)
+        out.append(("an ASCII stdout codec still yields a full RESULT line",
+                    p.returncode == 1 and "RESULT: FAIL" in p.stdout
+                    and "Envelope v2 is not realized" in p.stdout))
+
+        p = subprocess.run(
+            [sys.executable, str(GATE), "--graph", str(GRAPH_PATH),
+             "--schema", str(SCHEMA_PATH), "--ledger", str(bad)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env=ascii_env)
+        out.append(("ERROR survives an ASCII stdout codec",
+                    p.returncode == 2 and "RESULT: ERROR" in p.stdout))
 
         # 4. Control: the real artifacts must still pass their preflights, or the
         #    cases above would be proving nothing.

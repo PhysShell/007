@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R20) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R21) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -29,9 +29,10 @@ holds end to end, on both sides of the checking logic**; **E-R16 applies it to
 the path that obtains the inputs at all, and **E-R17 carries that validation
 down to the fields the verifier indexes**; E-R18 requires the container to be
 *present*; **E-R19 stops the JSON parser resolving anything on the gate's
-behalf**, and **E-R20 refutes E-R19's own claim to have reached the bottom.**
-Twenty-one revisions, no graph change in any of them: the frozen registry is a
-hard input here, not a subject.
+behalf**, **E-R20 refutes E-R19's own claim to have reached the bottom**, and **E-R21
+finds the verdict was never a function of the evidence alone.** Twenty-two
+revisions, no graph change in any of them: the frozen registry is a hard input
+here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -201,7 +202,7 @@ With nothing drafted, both preflights pass and all five steps are OWED:
 RESULT: FAIL — Envelope v2 is not realized
 ```
 
-`tools/tests/test_a1_v2_ledger_gate.py` — **44 cases, 44 as specified**, and the
+`tools/tests/test_a1_v2_ledger_gate.py` — **46 cases, 46 as specified**, and the
 total is **pinned** rather than derived: `EXPECTED_TOTAL` must be bumped in the
 commit that changes it, because a runner that counts whatever survived would
 print a clean `42/42` after a case was deleted. Twenty-two mutate one thing and
@@ -515,6 +516,45 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### E-R21 — the verdict depended on the environment, not the evidence
+
+**P1 (Codex, against `f4378fb`).** E-R20 validated that input strings encode to
+UTF-8. Wrong frame: reportability does not depend on the **input's** codec, it
+depends on the **output's** — and `stdout`'s codec is chosen by the environment.
+
+```text
+LC_ALL=C PYTHONUTF8=0 python3 tools/a1_v2_ledger_gate.py
+UnicodeEncodeError: 'ascii' codec can't encode character '\u2014'
+exit 1, output truncated at "RESULT: "
+```
+
+Every verdict string in the gate contains an em dash, so **every** `FAIL` and
+`ERROR` died mid-line under an ASCII locale, leaving Python's exit 1 — the code
+this contract reserves for `FAIL`. The gate's own prose, not the evidence,
+decided the verdict. Tenth instance, sixth consecutive round one layer below the
+previous repair.
+
+**The adjacent check, done before shipping, found a second one.** The extractors
+print too. `stderr` survives by accident — Python defaults it to
+`backslashreplace` — but `a1_v2_extract_schema.py` writes a non-ASCII message on
+its **success** path to `stdout`. Under an ASCII locale a correct extractor would
+crash, and the preflight would report `ERROR` on artifacts that are exactly
+right: a false negative pointed at the target.
+
+**And the repair created a third, in the same commit.** Making the child write
+deterministic UTF-8 left the *parent* decoding it with `text=True`, i.e. with the
+locale codec — so `LC_ALL=C` then killed the preflight while decoding a correct
+child. Writing deterministically and reading by locale is one defect with the
+arrow reversed. Both sides are now pinned to UTF-8 explicitly.
+
+That third one is worth more than the other two. It was not inherited from an
+earlier revision; **it was introduced by the fix for the finding, and caught
+only because the fix was tested under the same hostile condition rather than the
+default one.** The pattern this document has been recording is not merely that
+repairs stop one level short — it is that a repair can *create* the next
+instance, so "I fixed the reported case" and "the class is closed" are unrelated
+claims. Corpus 44 → 46, both new cases running the executable under `LC_ALL=C`.
 
 ### E-R20 — the claim to have reached the bottom, refuted on the next commit
 
@@ -1573,7 +1613,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R20)
+## 8. For the independent reviewer (revision E-R21)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before

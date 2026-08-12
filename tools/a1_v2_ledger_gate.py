@@ -53,6 +53,30 @@ GRAPH_EXTRACTOR = REPO / "tools/a1_v2_extract_graph.py"
 SCHEMA_EXTRACTOR = REPO / "tools/a1_v2_extract_schema.py"
 
 
+def _say(text: str, *, err: bool = False) -> None:
+    """Write a report line as explicit UTF-8 bytes.
+
+    `print` encodes with whatever codec stdout happens to carry. Under an ASCII
+    locale (LC_ALL=C, PYTHONUTF8=0) every verdict string in this file raised
+    UnicodeEncodeError on the em dash it contains — the run died mid-line with a
+    truncated `RESULT: ` and Python's exit 1, which this contract reserves for
+    FAIL. The gate's own prose, not the evidence, decided the verdict.
+
+    E-R20 validated that INPUT strings encode to UTF-8. That was the wrong
+    frame: reportability does not depend on the input's codec, it depends on the
+    OUTPUT's, and stdout's codec is chosen by the environment. Encoding
+    explicitly makes the report independent of it. (stderr survives by luck —
+    Python defaults it to backslashreplace — which is not a property to rely on.)
+    """
+    stream = sys.stderr if err else sys.stdout
+    buf = getattr(stream, "buffer", None)
+    if buf is None:
+        stream.write(text + "\n")
+        return
+    stream.flush()
+    buf.write((text + "\n").encode("utf-8"))
+    buf.flush()
+
 Key = tuple[str, str, str]
 
 
@@ -113,11 +137,11 @@ class Report:
         return 2 if self.errored else (1 if self.failed else 0)
 
     def emit(self) -> int:
-        print("A1-F v2 wire realization gate")
-        print("=" * 76)
+        _say("A1-F v2 wire realization gate")
+        _say("=" * 76)
         for line in self.lines:
-            print(line)
-        print("=" * 76)
+            _say(line)
+        _say("=" * 76)
         if self.errored:
             verdict = ("ERROR — no trustworthy answer; the realization was NOT "
                        "judged. Repair the verifier, not the target.")
@@ -125,7 +149,7 @@ class Report:
             verdict = "FAIL — Envelope v2 is not realized"
         else:
             verdict = "PASS"
-        print("RESULT:", verdict)
+        _say(f"RESULT: {verdict}")
         return self.exit_code()
 
 
@@ -498,8 +522,14 @@ def main() -> int:
         ("preflight: schema extract", SCHEMA_EXTRACTOR, args.schema,
          "committed facts == derived from the v2 schema source"),
     ):
+        # encoding is pinned on BOTH sides. _say makes the child write UTF-8;
+        # `text=True` alone would have the PARENT decode it with the locale
+        # codec, so under LC_ALL=C the preflight died decoding a correct child.
+        # Writing deterministically and reading by locale is the same defect
+        # with the arrow reversed — it appeared in this very commit.
         p = subprocess.run([sys.executable, str(tool), "--check", "--out", out],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
         r.add(label, p.returncode == 0,
               ok_msg if p.returncode == 0
               else (p.stderr.strip().split("\n")[0] or "mismatch"),

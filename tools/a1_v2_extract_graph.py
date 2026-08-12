@@ -218,6 +218,30 @@ def extract(source: Path) -> dict:
     }
 
 
+def _say(text: str, *, err: bool = False) -> None:
+    """Write a report line as explicit UTF-8 bytes.
+
+    `print` encodes with whatever codec stdout happens to carry. Under an ASCII
+    locale (LC_ALL=C, PYTHONUTF8=0) every verdict string in this file raised
+    UnicodeEncodeError on the em dash it contains — the run died mid-line with a
+    truncated `RESULT: ` and Python's exit 1, which this contract reserves for
+    FAIL. The gate's own prose, not the evidence, decided the verdict.
+
+    E-R20 validated that INPUT strings encode to UTF-8. That was the wrong
+    frame: reportability does not depend on the input's codec, it depends on the
+    OUTPUT's, and stdout's codec is chosen by the environment. Encoding
+    explicitly makes the report independent of it. (stderr survives by luck —
+    Python defaults it to backslashreplace — which is not a property to rely on.)
+    """
+    stream = sys.stderr if err else sys.stdout
+    buf = getattr(stream, "buffer", None)
+    if buf is None:
+        stream.write(text + "\n")
+        return
+    stream.flush()
+    buf.write((text + "\n").encode("utf-8"))
+    buf.flush()
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--write", action="store_true")
@@ -233,28 +257,28 @@ def main() -> int:
 
     if args.write:
         Path(args.out).write_text(text)
-        print(f"wrote {args.out}: {len(derived['edges'])} edges, "
+        _say(f"wrote {args.out}: {len(derived['edges'])} edges, "
               f"{len(derived['event_kinds'])} event kinds")
         if derived["source_blob"] != PINNED_BLOB:
-            print(f"NOTE: source blob {derived['source_blob']} != pinned {PINNED_BLOB}")
+            _say(f"NOTE: source blob {derived['source_blob']} != pinned {PINNED_BLOB}")
         return 0
 
     committed = Path(args.out).read_text()
     if committed != text:
-        print("EXTRACT MISMATCH — the committed graph is not what the Phase G "
-              "document derives to.", file=sys.stderr)
-        print(f"  source blob : {derived['source_blob']}", file=sys.stderr)
-        print(f"  pinned blob : {PINNED_BLOB}", file=sys.stderr)
+        _say("EXTRACT MISMATCH — the committed graph is not what the Phase G "
+              "document derives to.", err=True)
+        _say(f"  source blob : {derived['source_blob']}", err=True)
+        _say(f"  pinned blob : {PINNED_BLOB}", err=True)
         return 1
     if derived["source_blob"] != PINNED_BLOB:
-        print(f"AUTHORITY MOVED — {SOURCE.name} is blob {derived['source_blob']}, "
-              f"pinned {PINNED_BLOB}.", file=sys.stderr)
-        print("This failure is EVIDENCE OF DRIFT, NOT AUTHORIZATION TO RE-PIN. "
+        _say(f"AUTHORITY MOVED — {SOURCE.name} is blob {derived['source_blob']}, "
+              f"pinned {PINNED_BLOB}.", err=True)
+        _say("This failure is EVIDENCE OF DRIFT, NOT AUTHORIZATION TO RE-PIN. "
               "A re-pin is legitimate only once Phase G has superseded the "
               "pinned artifact by its own mechanism; the ceremony is in "
-              "docs/tasks/a1-f-v2-envelope.md 2.5.", file=sys.stderr)
+              "docs/tasks/a1-f-v2-envelope.md 2.5.", err=True)
         return 1
-    print(f"extract OK: committed graph == derived, source blob {PINNED_BLOB}")
+    _say(f"extract OK: committed graph == derived, source blob {PINNED_BLOB}")
     return 0
 
 

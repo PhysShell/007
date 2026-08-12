@@ -91,6 +91,30 @@ def extract() -> dict:
     )
 
 
+def _say(text: str, *, err: bool = False) -> None:
+    """Write a report line as explicit UTF-8 bytes.
+
+    `print` encodes with whatever codec stdout happens to carry. Under an ASCII
+    locale (LC_ALL=C, PYTHONUTF8=0) every verdict string in this file raised
+    UnicodeEncodeError on the em dash it contains — the run died mid-line with a
+    truncated `RESULT: ` and Python's exit 1, which this contract reserves for
+    FAIL. The gate's own prose, not the evidence, decided the verdict.
+
+    E-R20 validated that INPUT strings encode to UTF-8. That was the wrong
+    frame: reportability does not depend on the input's codec, it depends on the
+    OUTPUT's, and stdout's codec is chosen by the environment. Encoding
+    explicitly makes the report independent of it. (stderr survives by luck —
+    Python defaults it to backslashreplace — which is not a property to rely on.)
+    """
+    stream = sys.stderr if err else sys.stdout
+    buf = getattr(stream, "buffer", None)
+    if buf is None:
+        stream.write(text + "\n")
+        return
+    stream.flush()
+    buf.write((text + "\n").encode("utf-8"))
+    buf.flush()
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--write", action="store_true")
@@ -103,15 +127,15 @@ def main() -> int:
     text = json.dumps(extract(), indent=2) + "\n"
     if args.write:
         Path(args.out).write_text(text)
-        print(f"wrote {args.out} (schema source: {SCHEMA_SOURCE or 'none yet'})")
+        _say(f"wrote {args.out} (schema source: {SCHEMA_SOURCE or 'none yet'})")
         return 0
 
     if Path(args.out).read_text() != text:
-        print("SCHEMA FACTS MISMATCH — the committed facts are not what the "
+        _say("SCHEMA FACTS MISMATCH — the committed facts are not what the "
               "extractor derives. Facts must come from a schema, not from a "
-              "keyboard.", file=sys.stderr)
+              "keyboard.", err=True)
         return 1
-    print(f"schema facts OK (schema source: {SCHEMA_SOURCE or 'none yet — steps 1-3 are OWED'})")
+    _say(f"schema facts OK (schema source: {SCHEMA_SOURCE or 'none yet — steps 1-3 are OWED'})")
     return 0
 
 
