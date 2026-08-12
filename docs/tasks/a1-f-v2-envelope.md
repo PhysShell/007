@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R18) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R19) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -28,8 +28,8 @@ same demotion surviving in the verdict vocabulary; **E-R15 finds the criterion
 holds end to end, on both sides of the checking logic**; **E-R16 applies it to
 the path that obtains the inputs at all, and **E-R17 carries that validation
 down to the fields the verifier indexes**; E-R18 requires the container to be
-*present*, and declares the one premise next to it rather than leaving it
-silent. Nineteen revisions, no graph change in any of them: the frozen registry
+*present*; **E-R19 stops the JSON parser resolving anything on the gate's
+behalf.** Twenty revisions, no graph change in any of them: the frozen registry
 is a hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
@@ -200,11 +200,18 @@ With nothing drafted, both preflights pass and all five steps are OWED:
 RESULT: FAIL — Envelope v2 is not realized
 ```
 
-`tools/tests/test_a1_v2_ledger_gate.py` — **39 cases, 39 as specified.** Twenty-two
-mutate one thing and assert which step catches it; six exercise the preflight
-itself, which E-R1 added and left undefended; two exercise the pin evidence of
-§2.5. The corpus **imports `run_steps`**; it no longer asks the executable to
-disarm.
+`tools/tests/test_a1_v2_ledger_gate.py` — **43 cases, 43 as specified**, and the
+total is **pinned** rather than derived: `EXPECTED_TOTAL` must be bumped in the
+commit that changes it, because a runner that counts whatever survived would
+print a clean `42/42` after a case was deleted. Twenty-two mutate one thing and
+assert which step catches it; twenty-one run the executable itself — seven on
+the preflight and its retired bypasses, two on the pin evidence of §2.5, twelve
+on artifact loading. The corpus **imports `run_steps`**; it no longer asks the
+executable to disarm.
+
+(The breakdown had read *22 + 6 + 2* for nine revisions while the total was
+incremented past it — an arithmetic claim nobody, including its author, ever
+added up.)
 
 | Mutation | Caught by |
 |---|---|
@@ -507,6 +514,51 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### E-R19 — the mechanism was inside `json.loads` the whole time
+
+Three findings from CodeRabbit against `bea5806`, all reproduced.
+
+**Invalid UTF-8 escaped the loader.** `UnicodeDecodeError` is a `ValueError`,
+not an `OSError`, and `json.JSONDecodeError` is a different `ValueError`
+subclass — so catching those two by name let decoding failures through:
+
+```text
+b'{"carriers":[]}\xff'  ->  exit 1, no RESULT line
+```
+
+Seventh instance of the family, and `RecursionError` on deeply nested input was
+an eighth. Both now `ERROR`.
+
+**The parser was resolving conflicts.** This is the one worth recording. `json.loads`
+accepts duplicate members and silently keeps the **last**:
+
+```text
+{"carriers": [ …valid rows… ], "carriers": []}   ->  {"carriers": []}
+```
+
+A ledger could therefore declare its carriers and then erase them, and the gate
+would judge the erasure. That is **exactly E-R12's defect** — contradictory
+facts resolved by document order — one layer below where E-R12 fixed it, in a
+library rather than in this file. `normalization-before-validation`, the
+mechanism §7 (E-R13) named as the thing that *produces* the three species, was
+running inside the standard library on this gate's behalf the entire time, and
+naming it did not make its author look there.
+
+Loading now uses `strict_json`: explicit UTF-8 decode, duplicate members
+rejected, `NaN`/`Infinity` rejected as the non-JSON they are. A document that
+says two things is not evidence for either.
+
+**The corpus could shrink silently.** `total` was derived from the list lengths,
+so deleting a case would have printed a clean `N/N` and exited 0 — the
+regression protection weakening with no failing check, which is the same shape
+as the artifact claims this whole document is about, aimed at the evidence
+rather than at the target. `EXPECTED_TOTAL` is now pinned and must be bumped in
+the commit that changes it, so the number is a reviewed claim rather than a
+readout.
+
+The same report also caught that §2.4's breakdown had read *22 + 6 + 2* for nine
+revisions while the total was incremented past it to 39. Corpus 39 → 43.
 
 ### E-R18 — presence is not type, and the premise next door
 
@@ -1481,7 +1533,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R18)
+## 8. For the independent reviewer (revision E-R19)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before

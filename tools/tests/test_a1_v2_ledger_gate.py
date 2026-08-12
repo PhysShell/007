@@ -74,6 +74,10 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
     return r.exit_code(), r.steps
 
 
+# Pinned deliberately. Bump it in the same commit that adds or removes a case,
+# so the number is a reviewed claim rather than a readout of whatever survived.
+EXPECTED_TOTAL = 43
+
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
 
@@ -471,8 +475,22 @@ def preflight_cases() -> list[tuple[str, bool]]:
                             ' "path": "p"}]}\n')
         nokey = d / "nokey.json"
         nokey.write_text("{}\n")
+        utf8 = d / "utf8.json"
+        utf8.write_bytes(b'{"carriers":[]}\xff')
+        dupe = d / "dupe.json"
+        dupe.write_text('{"carriers": [{"source": "WorkOrder", "target": "ScopeContract",'
+                        ' "class": "Intra", "carrier_kind": "artifact_ref",'
+                        ' "path": "p"}], "carriers": []}\n')
+        nonstd = d / "nonstd.json"
+        nonstd.write_text('{"carriers": [], "x": NaN}\n')
+        deep = d / "deep.json"
+        deep.write_text("[" * 2000 + "]" * 2000)
         for label, ledger_arg in (("malformed JSON", bad), ("missing file", d / "nope.json"),
                                   ("no `carriers` key at all", nokey),
+                                  ("invalid UTF-8", utf8),
+                                  ("a duplicate `carriers` member", dupe),
+                                  ("a non-standard JSON constant", nonstd),
+                                  ("nesting deeper than the parser reads", deep),
                                   ("non-object top level", shaped),
                                   ("carriers not a list of rows", rows),
                                   ("a row with no fields at all", empty_row),
@@ -517,6 +535,11 @@ def main() -> int:
         failures += 0 if ok else 1
         print(f"  [{'ok' if ok else 'XX'}] {name}")
     total = len(CASES) + len(pre)
+    if total != EXPECTED_TOTAL:
+        print(f"  [XX] CORPUS SIZE {total} != {EXPECTED_TOTAL}. `total` is derived "
+              "from the lists, so a deleted case would otherwise print a clean "
+              "N/N and exit 0 — the suite shrinking without a failing check.")
+        failures += 1
     print("=" * 76)
     print(f"{total - failures}/{total} cases behaved as specified")
     return 1 if failures else 0

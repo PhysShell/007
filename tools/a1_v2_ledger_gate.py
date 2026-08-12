@@ -143,6 +143,41 @@ def edge_keys(graph: dict) -> set[Key]:
     return {(e["source"], e["target"], e["class"]) for e in graph["edges"]}
 
 
+def strict_json(raw: bytes) -> dict:
+    """Decode an artifact without letting the PARSER resolve anything.
+
+    `json.loads` is itself an instance of the mechanism 7 (E-R13) names —
+    normalization before validation — and it had been doing three things on this
+    gate's behalf, unasked:
+
+      * duplicate members: `{"carriers": [...], "carriers": []}` silently keeps
+        the LAST, so a ledger could carry valid rows and then erase them. That is
+        E-R12's contradictory-facts-resolved-by-list-order defect one layer down,
+        in a library rather than in this file.
+      * non-standard constants: NaN / Infinity are accepted by default and are
+        not JSON.
+      * decoding: `read_text()` guesses nothing but raises UnicodeDecodeError,
+        which is a ValueError, not an OSError, and so escaped the loader.
+
+    Raises ValueError (including JSONDecodeError) or UnicodeDecodeError.
+    """
+    def reject_duplicates(pairs: list[tuple[str, object]]) -> dict:
+        seen: set[str] = set()
+        for k, _ in pairs:
+            if k in seen:
+                raise ValueError(f"duplicate member {k!r}; a document that says "
+                                 "two things is not evidence for either")
+            seen.add(k)
+        return dict(pairs)
+
+    def reject_constant(c: str) -> object:
+        raise ValueError(f"non-standard JSON constant {c}")
+
+    return json.loads(raw.decode("utf-8"),
+                      object_pairs_hook=reject_duplicates,
+                      parse_constant=reject_constant)
+
+
 def run_steps(graph: dict, schema: dict, ledger: dict, r: Report | None = None) -> Report:
     """Steps 1-5 over three already-loaded terms.
 
@@ -457,12 +492,20 @@ def main() -> int:
     for name, path in (("graph", args.graph), ("schema", args.schema),
                        ("ledger", args.ledger)):
         try:
-            obj = json.loads(Path(path).read_text())
+            obj = strict_json(Path(path).read_bytes())
         except OSError as exc:
-            r.add(f"load: {name}", False, f"unreadable: {exc}", error=True)
+            r.add(f"load: {name}", False,
+                  f"unreadable: {exc.strerror or type(exc).__name__}", error=True)
             return r.emit()
-        except json.JSONDecodeError as exc:
-            r.add(f"load: {name}", False, f"not JSON: {exc}", error=True)
+        except UnicodeDecodeError:
+            r.add(f"load: {name}", False, "not valid UTF-8", error=True)
+            return r.emit()
+        except RecursionError:
+            r.add(f"load: {name}", False,
+                  "nested beyond what the parser can read", error=True)
+            return r.emit()
+        except ValueError as exc:
+            r.add(f"load: {name}", False, f"not usable JSON: {exc}", error=True)
             return r.emit()
         if not isinstance(obj, dict):
             r.add(f"load: {name}", False,
