@@ -71,7 +71,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
     The seam is now an import, which cannot be switched on by accident.
     """
     r = gate.run_steps(GRAPH, schema, ledger)
-    return (1 if r.failed else 0), r.steps
+    return r.exit_code(), r.steps
 
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
@@ -366,9 +366,10 @@ def preflight_cases() -> list[tuple[str, bool]]:
         fg = d / "forged-graph.json"
         fg.write_text(json.dumps(forged, indent=2) + "\n")
         code, txt = run_real(fg, SCHEMA_PATH)
-        out.append(("forged graph via --graph is rejected",
-                    code == 1 and "preflight: graph extract" in txt
-                    and " FAIL " in txt.split("preflight: graph extract")[1].split("\n")[0]
+        out.append(("forged graph via --graph is ERROR, not FAIL",
+                    code == 2 and "preflight: graph extract" in txt
+                    and " ERROR " in txt.split("preflight: graph extract")[1].split("\n")[0]
+                    and "was NOT judged" in txt
                     and "1. event-kind" not in txt))
 
         # 2. Hand-filled schema facts: the middle term must come from an
@@ -379,9 +380,9 @@ def preflight_cases() -> list[tuple[str, bool]]:
         fs = d / "forged-schema.json"
         fs.write_text(json.dumps(forged_schema, indent=2) + "\n")
         code, txt = run_real(GRAPH_PATH, fs)
-        out.append(("hand-filled schema facts are rejected",
-                    code == 1 and "preflight: schema extract" in txt
-                    and " FAIL " in txt.split("preflight: schema extract")[1].split("\n")[0]))
+        out.append(("hand-filled schema facts are ERROR, not FAIL",
+                    code == 2 and "preflight: schema extract" in txt
+                    and " ERROR " in txt.split("preflight: schema extract")[1].split("\n")[0]))
 
         # 3. The Phase G source itself moving: the extractor must notice that the
         #    authority it claims to derive from is no longer the pinned blob.
@@ -428,8 +429,8 @@ def preflight_cases() -> list[tuple[str, bool]]:
                            capture_output=True, text=True,
                            env={**os.environ, "A1_V2_GATE_HARNESS": "1"})
         out.append(("A1_V2_GATE_HARNESS=1 no longer bypasses the preflight",
-                    p.returncode == 1 and "preflight: graph extract" in p.stdout
-                    and " FAIL " in p.stdout.split("preflight: graph extract")[1].split("\n")[0]))
+                    p.returncode == 2 and "preflight: graph extract" in p.stdout
+                    and " ERROR " in p.stdout.split("preflight: graph extract")[1].split("\n")[0]))
 
         # 3e. An authority shape step 3's key cannot represent must be DECLARED
         #     as a verifier premise failure, never silently accepted and never
@@ -441,8 +442,12 @@ def preflight_cases() -> list[tuple[str, bool]]:
         schema, ledger = faithful()
         rep = gate.run_steps(widened, schema, ledger)
         line = next((x for x in rep.lines if "premise" in x), "")
-        out.append(("an authority shape step 3 cannot represent is declared, not accepted",
-                    rep.failed and "VERIFIER PREMISE INVALIDATED" in line
+        out.append(("an authority shape step 3 cannot represent is ERROR, not FAIL",
+                    # step 5 also fails here (the widened graph has a 70th
+                    # edge nothing carries) — ERROR must DOMINATE, because no
+                    # step verdict is trustworthy once the premise is void.
+                    rep.errored and rep.exit_code() == 2
+                    and " ERROR " in line and "VERIFIER PREMISE INVALIDATED" in line
                     and "Do NOT alter the authority" in line))
 
         # 4. Control: the real artifacts must still pass their preflights, or the

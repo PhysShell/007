@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R13) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R14) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -23,8 +23,10 @@ the layer it belongs in. **E-R11 closes the family's other two species**, both
 found from outside after the taxonomy predicted them. **E-R12 audits the
 untouched steps against the criterion and finds the same species on the schema
 term.** E-R13 names the mechanism that produces all three species and turns the
-audit into a refutation surface. Fourteen revisions, no graph change in any of
-them: the frozen registry is a hard input here, not a subject.
+audit into a refutation surface. **E-R14 separates `ERROR` from `FAIL`**, the
+same demotion surviving in the verdict vocabulary. Fifteen revisions, no graph
+change in any of them: the frozen registry is a hard input here, not a
+subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -124,6 +126,7 @@ file is rejected.
 ### 2.2 What each step actually compares
 
 ```text
+0. observations well-formed  (BEFORE any comparison; see 2.6)
 1. schema.event_kinds        == graph.event_kinds
 2. schema.payload_presence   == graph.expected_payload
    AND schema.structural_commitments == the 11 payload-bearing kinds OF THAT MAP
@@ -491,6 +494,51 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### E-R14 — `ERROR` is not `FAIL`
+
+**P1 (Codex, against `442eedb`).** `AGENTS.md` rule 2 is binding and explicit:
+`PASS` / `FAIL` / `ERROR` are three distinct states — *`FAIL` means the gate ran
+and the target failed it; `ERROR` means the harness could not obtain a
+trustworthy answer.* This gate had two.
+
+So when `run_steps` detected that **its own** step-3 premise was invalidated, it
+reported `FAIL` and `emit` concluded:
+
+```text
+RESULT: FAIL — Envelope v2 is not realized
+```
+
+The realization had not been judged at all. The same for a failed preflight: if
+the committed graph is not what Phase G derives to, the ruler is not the
+authority and no answer obtained downstream means anything.
+
+**This is the E-R10 defect surviving one floor up.** E-R10 fixed the premise's
+*diagnostic text* — it says `Do NOT alter the authority` — and left the *verdict
+vocabulary* still blaming the target for a defect of the machinery. A reader who
+trusts the RESULT line over the detail line gets exactly the wrong instruction,
+and the RESULT line is the one a caller parses.
+
+Now three verdicts and three exit codes:
+
+| condition | verdict | exit |
+|---|---|---|
+| every step satisfied | `PASS` | 0 |
+| the gate ran, the realization failed it | `FAIL — Envelope v2 is not realized` | 1 |
+| premise invalidated, or preflight unverifiable | `ERROR — no trustworthy answer; the realization was NOT judged. Repair the verifier, not the target.` | 2 |
+
+**`ERROR` dominates.** The corpus case makes the point: a widened graph that
+invalidates the premise *also* leaves a 70th edge uncarried, so step 5 fails
+too — and the verdict is still `ERROR`, because once the premise is void no step
+verdict is trustworthy enough to report. A gate that announced `FAIL` there
+would be reporting a measurement it had just declared itself unable to make.
+
+Corpus 31, with four cases re-specified from `FAIL` to `ERROR`: those
+assertions had been encoding the defect as expected behaviour, which is the
+third time in this branch a corpus case has certified the very conflation it
+was written to guard.
+
+`graph.json` unchanged; zero rows, zero nodes, zero edges.
 
 ### E-R13 — normalization-before-validation, and a refutation surface
 
@@ -1210,7 +1258,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R13)
+## 8. For the independent reviewer (revision E-R14)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before

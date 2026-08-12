@@ -57,19 +57,42 @@ Key = tuple[str, str, str]
 
 
 class Report:
+    """Three distinct verdicts, per AGENTS.md rule 2.
+
+    FAIL   the gate ran and the target failed it.
+    ERROR  the gate could not obtain a trustworthy answer at all.
+
+    The distinction is not decoration. A preflight failure means the ruler is
+    not the authority, and an invalidated premise means this verifier cannot
+    represent the authority it was handed — in neither case has the realization
+    been judged. Reporting either as FAIL says "Envelope v2 is not realized",
+    which blames the target for a defect of the machinery: the same demotion
+    E-R10 removed from the premise's diagnostic text, still present in the
+    verdict vocabulary one floor up.
+    """
+
     def __init__(self) -> None:
         self.failed = False
+        self.errored = False
         self.lines: list[str] = []
         self.steps: dict[str, str] = {}
 
-    def add(self, label: str, ok: bool, detail: str, owed: bool = False) -> None:
+    def add(self, label: str, ok: bool, detail: str, owed: bool = False,
+            error: bool = False) -> None:
         if not ok:
-            self.failed = True
-        status = "PASS" if ok else ("OWED" if owed else "FAIL")
+            if error:
+                self.errored = True
+            else:
+                self.failed = True
+        status = "PASS" if ok else ("ERROR" if error else ("OWED" if owed else "FAIL"))
         self.lines.append(f"  {label:<37} {status}   {detail}")
         n = label.split(".")[0]
         if n.isdigit():
             self.steps[n] = status
+
+    def exit_code(self) -> int:
+        """0 only on PASS. ERROR takes 2 so callers can tell the two apart."""
+        return 2 if self.errored else (1 if self.failed else 0)
 
     def emit(self) -> int:
         print("A1-F v2 wire realization gate")
@@ -77,8 +100,15 @@ class Report:
         for line in self.lines:
             print(line)
         print("=" * 76)
-        print("RESULT:", "FAIL — Envelope v2 is not realized" if self.failed else "PASS")
-        return 1 if self.failed else 0
+        if self.errored:
+            verdict = ("ERROR — no trustworthy answer; the realization was NOT "
+                       "judged. Repair the verifier, not the target.")
+        elif self.failed:
+            verdict = "FAIL — Envelope v2 is not realized"
+        else:
+            verdict = "PASS"
+        print("RESULT:", verdict)
+        return self.exit_code()
 
 
 def edge_keys(graph: dict) -> set[Key]:
@@ -127,7 +157,7 @@ def run_steps(graph: dict, schema: dict, ledger: dict, r: Report | None = None) 
     ambiguous = sorted(p for p, cs in pair_class.items() if len(cs) > 1)
     if ambiguous:
         src, tgt = ambiguous[0]
-        r.add("premise: step 3 key adequacy", False,
+        r.add("premise: step 3 key adequacy", False, error=True, detail=
               f"VERIFIER PREMISE INVALIDATED — {src} -> {tgt} carries "
               f"{sorted(pair_class[(src, tgt)])}; step 3 assumes class is "
               "functionally determined by (source, target). Revise step 3 or "
@@ -378,7 +408,8 @@ def main() -> int:
                            capture_output=True, text=True)
         r.add(label, p.returncode == 0,
               ok_msg if p.returncode == 0
-              else (p.stderr.strip().split("\n")[0] or "mismatch"))
+              else (p.stderr.strip().split("\n")[0] or "mismatch"),
+              error=p.returncode != 0)
         if p.returncode != 0:
             # Every step below would be measured against a forged ruler.
             return r.emit()
