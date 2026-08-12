@@ -384,6 +384,20 @@ def preflight_cases() -> list[tuple[str, bool]]:
                     p.returncode == 1 and "preflight: graph extract" in p.stdout
                     and " FAIL " in p.stdout.split("preflight: graph extract")[1].split("\n")[0]))
 
+        # 3e. An authority shape step 3's key cannot represent must be DECLARED
+        #     as a verifier premise failure, never silently accepted and never
+        #     reported as a defect of the authority.
+        widened = json.loads(GRAPH_PATH.read_text())
+        e0 = dict(widened["edges"][0])
+        e0["class"] = "Causal" if e0["class"] == "Intra" else "Intra"
+        widened["edges"].append(e0)
+        schema, ledger = faithful()
+        rep = gate.run_steps(widened, schema, ledger)
+        line = next((x for x in rep.lines if "premise" in x), "")
+        out.append(("an authority shape step 3 cannot represent is declared, not accepted",
+                    rep.failed and "VERIFIER PREMISE INVALIDATED" in line
+                    and "Do NOT alter the authority" in line))
+
         # 4. Control: the real artifacts must still pass their preflights, or the
         #    cases above would be proving nothing.
         code, txt = run_real(GRAPH_PATH, SCHEMA_PATH)

@@ -107,6 +107,32 @@ def run_steps(graph: dict, schema: dict, ledger: dict, r: Report | None = None) 
     """
     r = r or Report()
 
+    # ---- premise: step 3's key must be as discriminating as the norm ---------
+    # Step 3 keys field capability by (source, target domain) and never looks at
+    # class. That coarser representation is lossless only while class is
+    # functionally determined by (source, target). The frozen registry has always
+    # satisfied this and nothing declared it, so the guard was a property of the
+    # DATA rather than of the check.
+    #
+    # This is a COMPATIBILITY PREMISE OF THIS VERIFIER, not a constraint on
+    # Phase G. A supersede admitting (X, Y, A) and (X, Y, B) is a legitimate
+    # authoritative shape; what it invalidates is this representation. The check
+    # therefore lives here and not in the extractor — extraction failing would
+    # mean "the authority is invalid", which is the demotion this whole document
+    # exists to prevent, arriving through a schema assumption instead of through
+    # a derivability claim.
+    pair_class: dict[tuple[str, str], set[str]] = {}
+    for e in graph["edges"]:
+        pair_class.setdefault((e["source"], e["target"]), set()).add(e["class"])
+    ambiguous = sorted(p for p, cs in pair_class.items() if len(cs) > 1)
+    if ambiguous:
+        src, tgt = ambiguous[0]
+        r.add("premise: step 3 key adequacy", False,
+              f"VERIFIER PREMISE INVALIDATED — {src} -> {tgt} carries "
+              f"{sorted(pair_class[(src, tgt)])}; step 3 assumes class is "
+              "functionally determined by (source, target). Revise step 3 or "
+              "supersede the verifier contract. Do NOT alter the authority.")
+
     carriers = ledger.get("carriers", [])
     frozen_kinds = set(graph["event_kinds"])
     meta = graph["meta_targets"]

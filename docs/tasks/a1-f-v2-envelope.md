@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R9) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R10) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -18,8 +18,9 @@ checks that vanish under `PYTHONOPTIMIZE`. **E-R7 closes the same wound one
 level deeper**: E-R6 bound the requirement's sources to the frozen map and left
 its targets free. **E-R8 binds the last unchecked column of a structural row,
 its path.** E-R9 names the family all three belong to and pins one latent
-instance of it. Ten revisions, no graph change in any of them: the frozen
-registry is a hard input here, not a subject.
+instance of it; E-R10 turns that into a design criterion and moves the pin to
+the layer it belongs in. Eleven revisions, no graph change in any of them: the
+frozen registry is a hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -188,7 +189,7 @@ With nothing drafted, both preflights pass and all five steps are OWED:
 RESULT: FAIL — Envelope v2 is not realized
 ```
 
-`tools/tests/test_a1_v2_ledger_gate.py` — **26 cases, 26 as specified.** Eighteen
+`tools/tests/test_a1_v2_ledger_gate.py` — **27 cases, 27 as specified.** Eighteen
 mutate one thing and assert which step catches it; six exercise the preflight
 itself, which E-R1 added and left undefended; two exercise the pin evidence of
 §2.5. The corpus **imports `run_steps`**; it no longer asks the executable to
@@ -482,6 +483,60 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### E-R10 — a design criterion, and a premise moved to its own layer
+
+**The criterion, promoted from reviewer heuristic to a rule every acceptance
+predicate here must satisfy:**
+
+> **Every acceptance predicate must be at least as discriminating as the
+> normative distinction it claims to enforce — or explicitly declare and pin the
+> authority property that makes its coarser representation lossless.**
+
+The second half matters more than the first, and is what stops E-R9 from
+degenerating into *we found a class of error, so add dimensions everywhere*. A
+verifier that carries the full normative identity at every step is not
+automatically better; a week later it is checking its own imagined schema rather
+than the frozen authority. Coarser representations stay legitimate. What is not
+legitimate is a coarser representation whose losslessness is **silent**.
+
+That also explains the three sub-species as three distinct information-losing
+operations rather than a list that happened to reach three: projection loss
+drops a coordinate of identity; role substitution keeps the coordinates and
+erases semantic role; multiplicity collapse keeps identity and erases
+cardinality. One question — *can two normatively distinct states collapse into
+one state the verifier observes?* — covers all three.
+
+**The premise moved from the extractor to the gate.** E-R9 pinned *class is
+functionally determined by (source, target)* inside `extract`, which was the
+wrong layer, and wrong in the exact way this document keeps being about. If a
+legitimate supersede ever admits `(X, Y, A)` and `(X, Y, B)`, an extractor
+failure would mean **the authority cannot be derived** — the authority
+demoted to satisfy an implementation, arriving through a schema assumption
+instead of through a derivability claim. Same defect as E-1's, with a false
+moustache.
+
+The premise now lives in the verifier, fails the verifier, and says what it
+means:
+
+```text
+VERIFIER PREMISE INVALIDATED — <X> -> <Y> carries ['Causal', 'Intra'];
+step 3 assumes class is functionally determined by (source, target).
+Revise step 3 or supersede the verifier contract.
+Do NOT alter the authority.
+```
+
+The last line is the load-bearing one. A supersede admitting such a pair is a
+legitimate authoritative shape; what it invalidates is **this representation**.
+Corpus 26 → 27, with a case asserting that shape is *declared*, never silently
+accepted and never reported as a defect of the authority.
+
+**On the epistemics, stated plainly.** The residual-risk wording promises no
+closure, and should not. Author-written mutation cases can exhibit witnesses;
+they cannot establish the absence of projection errors, because the same mental
+model chooses both the representation and the mutation. A case count is a
+record of what has been survived, not a bound on what remains — which is why
+§2.4's number is a fact about the corpus and not a claim about the gate.
 
 ### E-R9 — the family, named; and one latent instance pinned
 
@@ -949,7 +1004,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R9)
+## 8. For the independent reviewer (revision E-R10)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before
@@ -989,6 +1044,14 @@ one grows on top.
    var exported once in a shell disarms every later invocation in it. The
    recorded repair — lift steps 1–5 into an importable function — is done, and
    the variable is now inert with a regression pinning it.
+9. **The criterion, applied to the four steps nobody has audited.** Every
+   acceptance predicate must be at least as discriminating as the distinction it
+   enforces, or declare and pin the authority property that makes its coarser
+   representation lossless (§7, E-R10). Step 3 now does the second. Steps 1, 4
+   and 5 have never been examined against either half. Which of them uses a
+   representation coarser than its norm, and does anything declare why that is
+   safe?
+
 8. **Attack identity preservation, not mutations.** Three P1s in a row were
    one family (§7, E-R9): the verifier's observation granularity was weaker than
    the authority's subject. Walk `normative object → extracted key →
