@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R12) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R13) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -22,8 +22,9 @@ instance of it; E-R10 turns that into a design criterion and moves the pin to
 the layer it belongs in. **E-R11 closes the family's other two species**, both
 found from outside after the taxonomy predicted them. **E-R12 audits the
 untouched steps against the criterion and finds the same species on the schema
-term.** Thirteen revisions, no graph change in any of them: the frozen registry
-is a hard input here, not a subject.
+term.** E-R13 names the mechanism that produces all three species and turns the
+audit into a refutation surface. Fourteen revisions, no graph change in any of
+them: the frozen registry is a hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -490,6 +491,95 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### E-R13 — normalization-before-validation, and a refutation surface
+
+**A boundary earlier than the one E-R10 named:**
+
+```text
+raw observations -> well-formed evidence -> normative representation
+                                                 -> acceptance predicate
+```
+
+The preservation criterion applies only *after* the first arrow. Before it,
+`set()` and `{path: fact}` look innocent — one of them is mathematically the
+norm's own shape — because they normalise the input before anything has
+established that the input may be normalised.
+
+> **A representation may be coarser than the raw evidence only after the
+> distinctions it discards have been proven semantically irrelevant, or invalid,
+> at the well-formedness boundary.**
+
+**`normalization-before-validation`** is recorded as the *mechanism*, not a
+fourth species. The taxonomy says **what information was lost**; this says
+**where it was destroyed**, and it can produce all three:
+
+| construct | produces |
+|---|---|
+| `set(...)` | multiplicity collapse |
+| dict overwrite `{k: v}` | multiplicity collapse **+ contradictory-state erasure** |
+| a projection key | projection loss |
+| filter/dispatch on selected spellings | role substitution |
+
+**Step 1 was not wrong, and sets are not the villain.** `required_kind_set ==
+observed_kind_set` answers exactly the normative question *which kinds exist*.
+The defect was upstream: `["A", "A"] → {"A"}` silently rewrote *the schema
+declares A twice* into *the schema declares A*. The projection was right; the
+**admission** to it was not. Blaming the mathematics would have been the wrong
+lesson and the more comfortable one.
+
+**The contradictory-path witness is the stronger of the two**, because
+`{f["path"]: f}` did more than erase multiplicity: it introduced **order-dependent
+conflict resolution where no resolution policy exists**. `P → X` and `P → Y` did
+not become an error; they became *P → whichever came last*. Worth recording that
+the first probe appeared to show step 3 catching it — reordering the rows showed
+the verdict tracked list order, not the contradiction. An accidental downstream
+collision, wearing the costume of an enforced invariant, which survives review
+under the industry's proudest sentence: *the test passes*.
+
+#### The admissibility rule
+
+A coarser representation is admissible **iff**:
+
+1. the input is already **well-formed**; **and**
+2. every distinction discarded is **irrelevant to this step's normative
+   quantifier**; **or**
+3. an **explicit checked premise** makes that distinction impossible in the
+   admitted authority.
+
+Step 5 passes by (2). Step 3 passes by (3). E-R3, E-R7, E-R8 and E-R11 each
+failed one of them.
+
+#### The refutation surface
+
+`step × dimension → verdict`, over the four dimensions this branch has supplied
+witnesses for. Every cell is a falsifiable claim:
+
+| | identity coordinates | path / provenance | semantic role | multiplicity |
+|---|---|---|---|---|
+| **well-formedness** | — | PRESERVED | PRESERVED (closed universe) | PRESERVED |
+| **1** universe equality | PRESERVED | IRRELEVANT-BY-NORM | IRRELEVANT-BY-NORM | IRRELEVANT-BY-NORM¹ |
+| **2** presence + carriers | PRESERVED `(src,tgt)` | PRESERVED (E-R8) | PRESERVED | PRESERVED (exact 1/0) |
+| **3** field capability | PRESERVED; class **LOSSLESS-BY-PREMISE** (E-R10) | PRESERVED¹ | PRESERVED (filtered, universe closed) | IRRELEVANT-BY-NORM¹ |
+| **4** forward coverage | PRESERVED (triple) | IRRELEVANT-BY-NORM² | **AUTHORITY-UNDECIDED**³ | IRRELEVANT-BY-NORM¹ |
+| **5** reverse coverage | PRESERVED | IRRELEVANT-BY-NORM | IRRELEVANT-BY-NORM | IRRELEVANT-BY-NORM⁴ |
+
+1. Admissible **only** because well-formedness rejects the duplicate first. This
+   is clause 1 doing the work, not clause 2 alone.
+2. Path validity is established for every row before this step — structural rows
+   by step 2, `artifact_ref` rows by step 3.
+3. Whether an **additional** `artifact_ref` carrier on a payload-bearing pair is
+   admissible is not answered by the frozen text.
+4. The norm quantifies **existence**, not count. Membership loses nothing
+   *relative to the norm* — the positive case the criterion exists to permit.
+
+**`AUTHORITY-UNDECIDED` is a completed analysis, not a gap in it.** The frozen
+text does not answer, so the verifier does not answer either. A preservation
+table that resolved its own empty cell would be an analysis tool voting itself
+legislative power on the grounds that it noticed something — which is the E-1
+error with better manners. It is closed by Phase G or not at all.
+
+No mechanism changed in this revision. Corpus 31; `graph.json` unchanged.
 
 ### E-R12 — the audit, and what twelve revisions were actually about
 
@@ -1120,7 +1210,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R12)
+## 8. For the independent reviewer (revision E-R13)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before
@@ -1160,11 +1250,13 @@ one grows on top.
    var exported once in a shell disarms every later invocation in it. The
    recorded repair — lift steps 1–5 into an importable function — is done, and
    the variable is now inert with a regression pinning it.
-9. **The preservation tables of §7 (E-R12) are claims, not proofs.** Each row
-   asserts either *this step's subject really is this coarse* or *a pinned
-   premise makes the projection lossless*. Both are attackable, and one row is
-   openly owed. The table exists so a reader can refute a cell rather than
-   re-derive the gate. Which cell is wrong?
+9. **§7 (E-R13) is now a refutation surface: `step × dimension → verdict`.**
+   Every cell is one of four claims — `PRESERVED`, `IRRELEVANT-BY-NORM`,
+   `LOSSLESS-BY-PREMISE`, `AUTHORITY-UNDECIDED` — and each is falsifiable by a
+   single witness. The job is not to re-read five hundred lines and feel uneasy.
+   It is to find **one false cell**, and the cheapest refutation is a state pair
+   the authority distinguishes and that cell claims the step does too.
+   `AUTHORITY-UNDECIDED` cannot be refuted by argument, only closed by Phase G.
 
 8. **Attack identity preservation, not mutations.** Three P1s in a row were
    one family (§7, E-R9): the verifier's observation granularity was weaker than
