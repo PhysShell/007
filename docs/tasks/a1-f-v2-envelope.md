@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R3) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R4) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -8,8 +8,10 @@ the trust joint itself: the middle term is now extracted rather than asserted,
 per-field capability replaces a bare path list, the meta-target obeys frozen
 clause 5, and a `--graph` override can no longer bypass its own preflight. E-R3
 makes step 2 count rather than deduplicate, and rebases onto current `main`.
-Four revisions, no graph change in any of them: the frozen registry is a hard
-input here, not a subject.
+E-R4 answers §8.5: moving `PINNED_BLOB` is now a ceremony that consumes an
+already-authorized Phase G supersede, and a pin failure never authorizes its own
+repair. Five revisions, no graph change in any of them: the frozen registry is a
+hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -172,9 +174,10 @@ With nothing drafted, both preflights pass and all five steps are OWED:
 RESULT: FAIL — Envelope v2 is not realized
 ```
 
-`tools/tests/test_a1_v2_ledger_gate.py` — **18 cases, 18 as specified.** Fourteen
+`tools/tests/test_a1_v2_ledger_gate.py` — **20 cases, 20 as specified.** Fourteen
 mutate one thing and assert which step catches it; four exercise the preflight
-itself, which E-R1 added and left undefended.
+itself, which E-R1 added and left undefended; two exercise the pin evidence of
+§2.5.
 
 | Mutation | Caught by |
 |---|---|
@@ -193,10 +196,71 @@ itself, which E-R1 added and left undefended.
 | **hand-filled schema facts** | **preflight** |
 | **duplicate structural carrier for one event kind** | **step 2** |
 | **Phase G source blob mismatch** | **extractor `--check`** |
+| **`PINNED_BLOB` edited with no evidence** | **extractor, at extraction** |
+| **pin evidence that binds nothing** | **extractor, at extraction** |
 | real artifacts | both preflights pass |
 
 Every emphasised row is a defect a previous revision of this gate could not
 catch while claiming to.
+
+### 2.5 Re-pinning the authority blob is a ceremony, not an edit
+
+`PINNED_BLOB` fails the run whenever the Phase G document changes at all —
+including a change Phase G's own rules permit. So the pin needs a defined way to
+move, because **legitimate supersession is an expected lifecycle event**, not an
+anomaly. Left undefined, the first supersede meets a red check and a one-token
+fix, and the property collapses into *the hash changed, therefore update the
+hash*.
+
+The layering that keeps it from collapsing:
+
+> **Phase G supersede decides legitimacy → the re-pin binds the implementation
+> to the new legitimate authority → the unchanged adversarial corpus verifies
+> the binding did not alter behaviour.**
+
+`PINNED_BLOB` sits in the middle floor only. It is an **evidence-binding
+update, not a new authority decision** — so the procedure must *consume* an
+already-authorized Phase G supersede rather than duplicate the supersede
+ceremony. A re-pin that argues its own legitimacy is a second authority, and two
+authorities over one frozen graph is the defect the pin exists to prevent.
+
+**A re-pin is permitted only when all seven hold:**
+
+1. the currently pinned Phase G artifact has been **legitimately superseded**;
+2. the supersede relation is **recorded by Phase G's own normative mechanism** —
+   not by this document, and not by the pin;
+3. the new authoritative blob identity is **derived from that superseding
+   artifact**, not from whatever the working tree happens to contain;
+4. the pin change records **old blob id / new blob id / superseding authority
+   reference**;
+5. `tools/a1_v2_extract_graph.py --check` passes against the new authority;
+6. the frozen mutation corpus is **rerun unchanged** — unchanged is the point:
+   a corpus edited in the same commit proves the new authority against a ruler
+   cut to fit it;
+7. the re-pin and its evidence **land atomically**, in one commit.
+
+**And the constraint that carries the whole thing: a pin failure must never
+itself authorize the re-pin.** `AUTHORITY MOVED` is evidence of drift. It is
+never a work item whose resolution is to make it stop printing. The extractor
+now says so in the failure text, because the failure text is the only thing a
+future reader is guaranteed to encounter at the moment of temptation.
+
+Points 4 and 7 are machine-checked. `PIN_HISTORY` is append-only evidence,
+`ORIGINAL_BLOB` is never edited, and `pin_chain_defect` refuses extraction when
+a pin arrived without its paperwork, when paperwork was filed that moved no pin,
+when an entry omits any of the three required fields, or when the recorded chain
+does not actually run from the original blob to the pinned one. Both artifacts
+carry it: `graph.json` now emits `original_blob` and `pin_history`, so a re-pin
+is a visible structural change to the derived artifact rather than one token in
+a source file.
+
+Points 1, 2, 3 and 5 are not machine-checked here and are not claimed to be.
+Legitimacy is a contract act; this floor cannot decide it and should not
+pretend to. Nor does any of this defend against an editor who rewrites the
+extractor's own constants — nothing self-hosted can. What the mechanism buys is
+that the attempt must be **legible in a diff**: a re-pin can no longer look like
+a typo fix, and a reviewer is handed the three facts they would otherwise have
+to ask for.
 
 ## 3. E-1 — the envelope size bound
 
@@ -381,6 +445,43 @@ two FDs partial is the honest state of a first substantive decision.
 
 ## 7. Revision record
 
+### E-R4 — the re-pin ceremony, answering §8.5
+
+Not a review round. §8.5 asked whether *"re-pin deliberately"* was enough of a
+procedure for `PINNED_BLOB`, or whether a supersede needs a recorded ceremony
+here the way it does in the contract. The answer is the second, with a
+constraint attached: **yes, because legitimate supersession is an expected
+lifecycle event — but the procedure must consume an already-authorized Phase G
+supersede rather than duplicate the supersede ceremony. `PINNED_BLOB` is an
+evidence-binding update, not a new authority decision.**
+
+That distinction is the whole content of §2.5. Three floors: Phase G supersede
+decides legitimacy, the re-pin binds the implementation to the result, the
+unchanged corpus verifies the binding changed no behaviour. The pin owns only
+the middle one.
+
+The load-bearing constraint is that **a pin failure must never itself authorize
+the re-pin** — otherwise the safety property degrades into *hash changed,
+therefore update hash*, which is checksum theatre. `AUTHORITY MOVED` now says
+this in the failure text itself, since that text is what a future reader meets
+at the moment of temptation, and a rule recorded only in a document three
+directories away is a rule recorded for the innocent.
+
+Points 4 and 7 of the ceremony are made mechanical rather than left as prose:
+`ORIGINAL_BLOB` (never edited) plus append-only `PIN_HISTORY` plus
+`pin_chain_defect`, which refuses extraction outright for a pin without
+paperwork, paperwork without a pin, a missing field, or a chain that does not
+run from the original blob to the pinned one. `graph.json` gained `original_blob`
+and `pin_history`, so the evidence rides in the derived artifact. Corpus 18 → 20.
+
+Points 1, 2, 3 and 5 stay human, and §2.5 says so plainly. Legitimacy is decided
+by Phase G's mechanism, not by an extractor, and a check that claimed otherwise
+would be asserting authority it does not hold — the same error E-1's derivability
+claim made in E-R0, one floor down.
+
+Zero rows, zero nodes, zero edges. The frozen registry is untouched, as in every
+revision here.
+
 ### E-R3 — third independent review, one P1 and a staleness fix
 
 **P1-10 — step 2 deduplicated where it had to count.** Frozen G-R11 requires
@@ -530,7 +631,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R2)
+## 8. For the independent reviewer (revision E-R4)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before
@@ -554,10 +655,13 @@ one grows on top.
 4. **The corpus authors the mutations and the gate in the same idiom.** Thirteen
    step cases came from the same mental model as the code they test. Which
    plausible v2 drafting error is still uncovered?
-5. **Blob pinning and the next legitimate move.** `PINNED_BLOB` fails the run if
-   Phase G's document changes at all — including a supersede that Phase G's own
-   rules permit. Is "re-pin deliberately" enough of a procedure, or does a
-   supersede need a recorded ceremony here the way it does in the contract?
+5. **Blob pinning — answered in E-R4, now open one level down.** §2.5 records
+   the ceremony, and makes points 4 and 7 mechanical. Points 1–3 stay human by
+   design: legitimacy is a Phase G act. The residual question is whether the
+   *reference* in point 4 should be checkable rather than free text — today
+   `superseding_authority` is a string nothing resolves, so the ceremony proves
+   that an authority was named, not that it exists. What would make it
+   resolvable without this floor re-deciding legitimacy?
 6. **The harness bypass.** `A1_V2_GATE_HARNESS=1` skips both preflights. It is
    a test seam, not a false-green path — but it ships inside the acceptance
    executable. The intended repair is to lift steps 1–5 into an importable

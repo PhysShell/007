@@ -9,6 +9,14 @@ cannot relax a gate by editing its right-hand side.
 The source document is pinned by blob, not by path alone. A path can be
 rewritten in place; a blob cannot.
 
+Moving that pin is a defined ceremony, not an edit (see the Envelope v2 document
+2.5). PINNED_BLOB is an EVIDENCE-BINDING update, not a new authority decision:
+legitimacy is decided one floor up, by Phase G superseding its own artifact
+through its own normative mechanism, and the re-pin merely binds this
+implementation to the result. A --check failure is therefore evidence of drift
+and never authorization to re-pin; otherwise the property degrades into "the
+hash changed, so update the hash".
+
 Usage:
     python3 tools/a1_v2_extract_graph.py --write     # regenerate the artifact
     python3 tools/a1_v2_extract_graph.py --check     # verify committed == derived
@@ -31,6 +39,48 @@ OUT = REPO / "docs/tasks/a1-f-v2-graph.json"
 # Phase G as merged in PR #128. Recorded so the extractor notices if the
 # authority it claims to derive from has moved underneath it.
 PINNED_BLOB = "450380ff0d1f8ec08f783968f08bc6b3942f44a5"
+
+# The original pin, which is never edited. It is what makes an undocumented
+# re-pin visible: with no history recorded, PINNED_BLOB must still be this.
+ORIGINAL_BLOB = "450380ff0d1f8ec08f783968f08bc6b3942f44a5"
+
+# Re-pin evidence, append-only. One entry per legitimate supersede, each naming
+# the blob it replaced, the blob it installed, and the Phase G supersede that
+# authorized the move. Empty means the original pin has never moved.
+PIN_HISTORY: list[dict[str, str]] = []
+
+PIN_FIELDS = ("old_blob", "new_blob", "superseding_authority")
+
+
+def pin_chain_defect(pinned: str, history: list[dict]) -> str | None:
+    """Is the pin's evidence well-formed? Returns the defect, or None.
+
+    This checks BINDING, not legitimacy. Whether Phase G may be superseded at
+    all is not decidable here and is not attempted: that is a contract act,
+    recorded by Phase G's own mechanism. What is decidable here is whether a pin
+    arrived without its paperwork, whether paperwork was filed that moved no
+    pin, and whether the recorded chain actually runs from the original blob to
+    the pinned one. A re-pin thus cannot be a one-token edit; it is a structured
+    change that names what it replaced and on whose authority.
+
+    It does not defend against an editor who rewrites this file's own constants.
+    Nothing self-hosted can. It makes the attempt legible in a diff, which is
+    where the defence actually lives.
+    """
+    for i, e in enumerate(history):
+        missing = [f for f in PIN_FIELDS if not e.get(f)]
+        if missing:
+            return f"pin history entry {i} does not record {missing}"
+        prev = history[i - 1]["new_blob"] if i else ORIGINAL_BLOB
+        if e["old_blob"] != prev:
+            return (f"pin history entry {i} replaces {e['old_blob']}, but the "
+                    f"blob in force at that point was {prev}")
+    installed = history[-1]["new_blob"] if history else ORIGINAL_BLOB
+    if pinned != installed:
+        return (f"PINNED_BLOB is {pinned}, but the recorded evidence installs "
+                f"{installed} — a re-pin and its evidence must land together")
+    return None
+
 
 def _camel(snake: str) -> str:
     return "".join(w.capitalize() for w in snake.split("_"))
@@ -60,6 +110,9 @@ def git_blob_sha(data: bytes) -> str:
 
 
 def extract(source: Path) -> dict:
+    defect = pin_chain_defect(PINNED_BLOB, PIN_HISTORY)
+    assert defect is None, f"PIN EVIDENCE DEFECT — {defect}"
+
     raw = source.read_bytes()
     text = raw.decode("utf-8")
     lines = text.split("\n")
@@ -122,6 +175,8 @@ def extract(source: Path) -> dict:
         "source_document": str(SOURCE.relative_to(REPO)),
         "source_blob": git_blob_sha(raw),
         "pinned_blob": PINNED_BLOB,
+        "original_blob": ORIGINAL_BLOB,
+        "pin_history": PIN_HISTORY,
         "status": "APPROVED / CLOSED",
         "message_kinds": message_kinds,
         "typed_supports": typed_supports,
@@ -164,7 +219,11 @@ def main() -> int:
         return 1
     if derived["source_blob"] != PINNED_BLOB:
         print(f"AUTHORITY MOVED — {SOURCE.name} is blob {derived['source_blob']}, "
-              f"pinned {PINNED_BLOB}. Re-pin deliberately or stop.", file=sys.stderr)
+              f"pinned {PINNED_BLOB}.", file=sys.stderr)
+        print("This failure is EVIDENCE OF DRIFT, NOT AUTHORIZATION TO RE-PIN. "
+              "A re-pin is legitimate only once Phase G has superseded the "
+              "pinned artifact by its own mechanism; the ceremony is in "
+              "docs/tasks/a1-f-v2-envelope.md 2.5.", file=sys.stderr)
         return 1
     print(f"extract OK: committed graph == derived, source blob {PINNED_BLOB}")
     return 0

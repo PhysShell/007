@@ -285,6 +285,27 @@ def preflight_cases() -> list[tuple[str, bool]]:
                            capture_output=True, text=True)
         out.append(("Phase G source blob mismatch is rejected", p.returncode == 1))
 
+        # 3a. A re-pin that arrives WITHOUT its evidence. This is the shape the
+        #     ceremony exists to stop: a --check failure tempts exactly one
+        #     one-token edit, and that edit must not be enough on its own.
+        sys.path.insert(0, str(REPO / "tools"))
+        import a1_v2_extract_graph as xg  # noqa: E402
+        out.append(("bare PINNED_BLOB edit is rejected as unevidenced",
+                    xg.pin_chain_defect("f" * 40, []) is not None))
+
+        # 3b. Evidence filed for a pin that never moved, and a chain that does
+        #     not run from the original blob. Both are paperwork without a fact.
+        orphan = [{"old_blob": xg.ORIGINAL_BLOB, "new_blob": "a" * 40,
+                   "superseding_authority": "Phase G supersede, hypothetical"}]
+        broken = [{"old_blob": "b" * 40, "new_blob": "a" * 40,
+                   "superseding_authority": "Phase G supersede, hypothetical"}]
+        incomplete = [{"old_blob": xg.ORIGINAL_BLOB, "new_blob": "a" * 40}]
+        out.append(("pin evidence that binds nothing is rejected",
+                    xg.pin_chain_defect(xg.ORIGINAL_BLOB, orphan) is not None
+                    and xg.pin_chain_defect("a" * 40, broken) is not None
+                    and xg.pin_chain_defect("a" * 40, incomplete) is not None
+                    and xg.pin_chain_defect("a" * 40, orphan) is None))
+
         # 4. Control: the real artifacts must still pass their preflights, or the
         #    three cases above would be proving nothing.
         code, txt = run_real(GRAPH_PATH, SCHEMA_PATH)
