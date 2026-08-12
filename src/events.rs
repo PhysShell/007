@@ -681,4 +681,169 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// `policy-provenance.json` is NON-LOAD-BEARING: present, absent, corrupt, or actively
+    /// lying about which policy it explains, it must not move the independently recomputed
+    /// verdict by a single bit.
+    ///
+    /// This is what makes the artifact safe to add. The previous test proves the opposite
+    /// property for a canonical artifact — tampering with `gate/unit.log` makes replay fail
+    /// loudly, because that artifact IS referenced by a digest-chained event. Provenance is
+    /// deliberately not, and this test is where "deliberately" becomes a property of the
+    /// system rather than a claim in a doc comment.
+    #[test]
+    fn provenance_is_not_a_verdict_input() {
+        use crate::record::POLICY_PROVENANCE_FILE;
+        use o7_sandbox_protocol::provenance::{
+            CliOption, PolicyProvenance, PolicySource, PolicySources,
+        };
+        use o7_sandbox_protocol::{NetworkPolicy, SandboxPolicy};
+        use std::path::PathBuf;
+        use std::time::Duration;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
+        std::fs::create_dir_all(dir.join("gate")).unwrap();
+        std::fs::write(dir.join("task.md"), b"do the thing").unwrap();
+        std::fs::write(dir.join("diff.patch"), b"").unwrap();
+        std::fs::write(dir.join("gate/unit.log"), b"ok\n").unwrap();
+
+        let m = GateManifest::parse(
+            r#"
+            [[gate]]
+            name = "unit"
+            cmd = "true"
+            "#,
+        )
+        .unwrap();
+        let contract = build_contract(&m).unwrap();
+        let task = artifact(ArtifactKind::Task, "task.md", b"do the thing");
+        let diff = artifact(ArtifactKind::Diff, "diff.patch", b"");
+        let steps = [StepVerdict {
+            name: "unit".into(),
+            required: true,
+            verdict: Verdict::Pass,
+            exit_code: Some(0),
+            log: "gate/unit.log".into(),
+            waived: None,
+        }];
+        let events = build_events(
+            "test-run",
+            contract,
+            &task,
+            &diff,
+            &agent_ok(),
+            &steps,
+            &dir,
+        )
+        .unwrap();
+        let verdict = canonical_verdict(&events).unwrap();
+        std::fs::write(dir.join(EVENTS_FILE), to_jsonl(&events).unwrap()).unwrap();
+        let meta = RunMeta {
+            schema: 1,
+            kind: "run".into(),
+            run_id: "test-run".into(),
+            target: "t".into(),
+            repo: "r".into(),
+            base_commit: "c".into(),
+            engine: "claude".into(),
+            model: "m".into(),
+            verdict,
+            steps: steps.to_vec(),
+            agent_exit_code: Some(0),
+            session_id: None,
+            cost_usd: None,
+            started_at: None,
+            finished_at: None,
+        };
+        std::fs::write(
+            dir.join("meta.json"),
+            serde_json::to_string_pretty(&meta).unwrap(),
+        )
+        .unwrap();
+
+        let policy = SandboxPolicy {
+            worktree: PathBuf::from("/srv/o7/wt/run-1"),
+            allow_exec: vec![PathBuf::from("/usr/bin/git")],
+            network: NetworkPolicy::DenyAll,
+            env_allowlist: vec!["PATH".into()],
+            timeout: Duration::from_secs(30),
+        };
+        let sources = |flag: &str| PolicySources {
+            worktree: PolicySource::Cli {
+                option: CliOption::parse(flag).unwrap(),
+            },
+            allow_exec: PolicySource::Default,
+            network: PolicySource::Default,
+            env_allowlist: PolicySource::Default,
+            timeout: PolicySource::Default,
+        };
+
+        // Baseline: no provenance artifact at all.
+        let baseline = replay_record(&dir).unwrap();
+
+        let same = |label: &str| {
+            let report = replay_record(&dir)
+                .unwrap_or_else(|e| panic!("replay must still succeed with {label}: {e}"));
+            assert_eq!(
+                report.verdict, baseline.verdict,
+                "verdict moved with {label}"
+            );
+            assert_eq!(
+                report.final_event_digest, baseline.final_event_digest,
+                "chain anchor moved with {label}"
+            );
+            assert_eq!(
+                report.normalized_state_digest, baseline.normalized_state_digest,
+                "reduced state moved with {label}"
+            );
+        };
+
+        // 1. A well-formed record for this run.
+        std::fs::write(
+            dir.join(POLICY_PROVENANCE_FILE),
+            serde_json::to_string_pretty(&PolicyProvenance::describe(
+                &policy,
+                &sources("--worktree"),
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        same("a valid provenance artifact");
+
+        // 2. A record describing a DIFFERENT derivation of the same policy.
+        std::fs::write(
+            dir.join(POLICY_PROVENANCE_FILE),
+            serde_json::to_string_pretty(&PolicyProvenance::describe(
+                &policy,
+                &sources("--work-dir"),
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        same("a different derivation");
+
+        // 3. A record whose digest claims a policy this run never had — the artifact is
+        //    wrong, and being wrong still buys it no influence.
+        let mut other = policy.clone();
+        other.timeout = Duration::from_secs(31);
+        std::fs::write(
+            dir.join(POLICY_PROVENANCE_FILE),
+            serde_json::to_string_pretty(&PolicyProvenance::describe(
+                &other,
+                &sources("--worktree"),
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        same("a mismatched provenance artifact");
+
+        // 4. Corrupt bytes.
+        std::fs::write(dir.join(POLICY_PROVENANCE_FILE), b"{ truncated").unwrap();
+        same("a corrupt provenance artifact");
+
+        // 5. Removed again.
+        std::fs::remove_file(dir.join(POLICY_PROVENANCE_FILE)).unwrap();
+        same("no provenance artifact");
+    }
 }
