@@ -185,6 +185,8 @@ pub enum ResolveError {
     PayloadDigestMismatch,
     #[error("the reference declares {declared} bytes; the two stored halves are {stored}")]
     HalvesSizeMismatch { declared: u64, stored: u64 },
+    #[error("this resolution already failed; FD-1.5 resolution is all-or-nothing")]
+    SessionPoisoned,
 }
 
 /// FD-1.5 — `min(hard maximum, campaign policy)`, computed once.
@@ -212,6 +214,22 @@ struct Accounting {
     seen: HashSet<(ArtifactKindV1, String)>,
     bytes: u64,
     objects: u32,
+    /// Set by the first failed resolution and never cleared.
+    ///
+    /// FD-1.5 states the traversal as a single loop that REJECTs on failure:
+    /// "Resolution is all-or-nothing … never partially accepted". There is no
+    /// state in that algorithm where one reference failed and the traversal
+    /// continues, so there must be no such state here.
+    ///
+    /// Recording the failure is not defensive tidiness. Deduplication happens
+    /// *before* accounting, so a reference that is charged and then fails
+    /// integrity leaves `(kind, digest)` in `seen` — and a later reference with
+    /// the same identity but a larger declared `size` would take the dedup
+    /// shortcut and never be charged the difference. A peer could then declare
+    /// one byte, absorb the integrity error, re-declare honestly, and resolve a
+    /// hundred-byte object against a one-byte charge. Ending the resolution
+    /// makes the second call unreachable rather than making it safe.
+    poisoned: bool,
 }
 
 /// One resolution, and the accounting authority for it.
@@ -309,6 +327,15 @@ impl<'brand> ResolutionSession<'brand> {
         reference: &ArtifactRef,
         store: &dyn BackingStore,
     ) -> Result<ResolvedOpaque<'brand>, ResolveError> {
+        self.attempt(|| self.resolve_opaque_inner(slot, reference, store))
+    }
+
+    fn resolve_opaque_inner(
+        &self,
+        slot: &OpaqueSlot,
+        reference: &ArtifactRef,
+        store: &dyn BackingStore,
+    ) -> Result<ResolvedOpaque<'brand>, ResolveError> {
         // FD-2.5: "The resolver checks the stored object against the *slot's*
         // expectation, not against the sender's declaration."
         if reference.kind() != slot.kind() {
@@ -382,6 +409,15 @@ impl<'brand> ResolutionSession<'brand> {
         reference: &ArtifactRef,
         store: &dyn BackingStore,
     ) -> Result<ResolvedEnvelopeStorage<'brand>, ResolveError> {
+        self.attempt(|| self.resolve_envelope_storage_inner(slot, reference, store))
+    }
+
+    fn resolve_envelope_storage_inner(
+        &self,
+        slot: &EnvelopeSlot,
+        reference: &ArtifactRef,
+        store: &dyn BackingStore,
+    ) -> Result<ResolvedEnvelopeStorage<'brand>, ResolveError> {
         // FD-2.5: the slot's expectation, not the sender's declaration.
         if reference.kind() != slot.kind() {
             return Err(ResolveError::WrongKindForSlot {
@@ -446,6 +482,23 @@ impl<'brand> ResolutionSession<'brand> {
             stored_payload.bytes().to_vec(),
             stored_envelope.stored_size(),
         ))
+    }
+
+    /// One reference's turn through FD-1.5's loop: refuse if the resolution has
+    /// already been rejected, and reject it if this turn fails.
+    ///
+    /// This is the single route both resolve methods take, for the same reason
+    /// the rest of this crate is shaped the way it is: two entry points each
+    /// remembering to end the resolution is two places to forget.
+    fn attempt<T>(&self, f: impl FnOnce() -> Result<T, ResolveError>) -> Result<T, ResolveError> {
+        if self.state.borrow().poisoned {
+            return Err(ResolveError::SessionPoisoned);
+        }
+        let outcome = f();
+        if outcome.is_err() {
+            self.state.borrow_mut().poisoned = true;
+        }
+        outcome
     }
 
     /// Deduplicate, then account, then bound — in that order, and against the

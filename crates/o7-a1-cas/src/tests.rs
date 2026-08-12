@@ -270,6 +270,9 @@ fn the_slot_expectation_wins_over_the_senders_declaration() {
     let mut store = MemoryStore::new();
     store.put(b"log".to_vec());
 
+    // One session per probe: FD-1.5 ends a resolution at its first failure, so
+    // a test that reused one would be exercising a state the contract does not
+    // have.
     ResolutionSession::enter(&policy(), |session| {
         // A reference claiming a different kind than the slot expects.
         let wrong_kind = honest_ref(ArtifactKindV1::GateLog, "text/x-diff", b"log");
@@ -277,14 +280,20 @@ fn the_slot_expectation_wins_over_the_senders_declaration() {
             session.resolve_opaque(&diff_slot(), &wrong_kind, &store),
             Err(ResolveError::WrongKindForSlot { .. })
         ));
+    })
+    .unwrap();
 
+    ResolutionSession::enter(&policy(), |session| {
         // ...and one claiming a different media type for the right kind.
         let wrong_media = honest_ref(ArtifactKindV1::Diff, "application/octet-stream", b"log");
         assert!(matches!(
             session.resolve_opaque(&diff_slot(), &wrong_media, &store),
             Err(ResolveError::WrongMediaTypeForSlot { .. })
         ));
+    })
+    .unwrap();
 
+    ResolutionSession::enter(&policy(), |session| {
         // The same bytes through the matching slot are admissible, so the two
         // refusals are the expectation and not a broken fixture.
         let honest = honest_ref(ArtifactKindV1::Diff, "text/x-diff", b"log");
@@ -453,14 +462,13 @@ fn the_declared_size_is_charged_before_the_object_is_read() {
     .unwrap();
 }
 
-/// A refused resolution must leave no trace a later one could mistake for
-/// payment — neither a charge nor a dedup entry that would make the same object
-/// look already paid for.
+/// A resolution refused before accounting must leave no trace a later one could
+/// mistake for payment — neither a charge nor a dedup entry that would make the
+/// same object look already paid for.
 #[test]
 fn a_refused_resolution_charges_nothing() {
     let mut store = MemoryStore::new();
     store.put(b"real".to_vec());
-    let reference = honest_ref(ArtifactKindV1::Diff, "text/x-diff", b"real");
 
     ResolutionSession::enter(&policy(), |session| {
         // Refused by the slot rule, before any accounting.
@@ -470,20 +478,82 @@ fn a_refused_resolution_charges_nothing() {
             .is_err());
         assert_eq!(session.charged_objects(), 0);
         assert_eq!(session.charged_bytes(), 0);
+    })
+    .unwrap();
+}
 
-        // Refused by integrity, after accounting: the charge stands, because
-        // the closure genuinely reached that object. What must not happen is
-        // the object being admitted.
+/// FD-1.5 states the traversal as one loop that REJECTs on failure —
+/// "Resolution is all-or-nothing … never partially accepted" — so there is no
+/// state in which one reference failed and the resolution continues.
+///
+/// The earlier revision of this test asserted the opposite, that "the failed
+/// read did not poison the session", and it passed because both of its
+/// references declared the same size. Deduplication runs *before* accounting,
+/// so that assertion held only for the one route where the declared size never
+/// varies. [`an_understated_size_cannot_buy_a_free_dedup_entry`] is the route it
+/// did not cover.
+#[test]
+fn a_resolution_is_over_at_its_first_failure() {
+    let mut store = MemoryStore::new();
+    store.put(b"real".to_vec());
+    let reference = honest_ref(ArtifactKindV1::Diff, "text/x-diff", b"real");
+
+    ResolutionSession::enter(&policy(), |session| {
         let corrupt = HostileStore(b"nope".to_vec());
-        assert!(session
-            .resolve_opaque(&diff_slot(), &reference, &corrupt)
-            .is_err());
+        assert!(matches!(
+            session.resolve_opaque(&diff_slot(), &reference, &corrupt),
+            Err(ResolveError::DigestMismatch)
+        ));
+        // The charge stands — the closure genuinely reached that object — and
+        // the resolution does not.
+        assert_eq!(session.charged_objects(), 1);
+        assert!(matches!(
+            session.resolve_opaque(&diff_slot(), &reference, &store),
+            Err(ResolveError::SessionPoisoned)
+        ));
+    })
+    .unwrap();
+}
 
-        // And the honest resolution still succeeds afterwards: the failed read
-        // did not poison the session.
-        assert!(session
-            .resolve_opaque(&diff_slot(), &reference, &store)
-            .is_ok());
+/// The failure the rejection rule exists to make unreachable.
+///
+/// A peer declares one byte for a hundred-byte object. The reference is charged
+/// its declared size *before* the read (FD-1.5), the read then refuses it on
+/// size — and `(kind, digest)` is now in `seen`. Were the session usable
+/// afterwards, the same object re-declared honestly would take the dedup
+/// shortcut, skip the remaining ninety-nine bytes, and resolve against a
+/// one-byte charge. Witnessed before the fix: `charged_bytes() == 1` for a
+/// hundred-byte object.
+#[test]
+fn an_understated_size_cannot_buy_a_free_dedup_entry() {
+    let mut store = MemoryStore::new();
+    let bytes = vec![b'x'; 100];
+    store.put(bytes.clone());
+    let digest_of = WireDigest::of_bytes(&bytes);
+    let understated =
+        ArtifactRef::new(ArtifactKindV1::Diff, "text/x-diff", digest_of.clone(), 1).unwrap();
+    let honest = ArtifactRef::new(ArtifactKindV1::Diff, "text/x-diff", digest_of, 100).unwrap();
+
+    ResolutionSession::enter(&policy(), |session| {
+        assert!(matches!(
+            session.resolve_opaque(&diff_slot(), &understated, &store),
+            Err(ResolveError::SizeMismatch {
+                declared: 1,
+                stored: 100
+            })
+        ));
+        assert!(
+            matches!(
+                session.resolve_opaque(&diff_slot(), &honest, &store),
+                Err(ResolveError::SessionPoisoned)
+            ),
+            "the honest re-declaration must not ride the failed reference's dedup entry"
+        );
+        assert_eq!(
+            session.charged_bytes(),
+            1,
+            "and nothing may resolve against that one byte"
+        );
     })
     .unwrap();
 }
@@ -538,6 +608,15 @@ const PAYLOAD: &[u8] = br#"{"status":"candidate_produced"}"#;
 /// constructor. Nothing here is a shortcut: the fixture is an admitted
 /// envelope, exactly what a producer would hold.
 fn work_order(kind: MessageKindV1) -> EnvelopeV1 {
+    work_order_at(kind, "2026-08-09T20:00:00Z")
+}
+
+/// The same envelope with a different producer observation.
+///
+/// `created_at` is the one field FD-1.2 leaves out of the framing (FD-5.4), so
+/// this is the only way to build two envelopes that share an identity and
+/// differ in bytes.
+fn work_order_at(kind: MessageKindV1, created_at: &str) -> EnvelopeV1 {
     EnvelopeV1::new(EnvelopeFieldsV1 {
         envelope_version: EnvelopeVersion::default(),
         message_kind: kind,
@@ -560,9 +639,66 @@ fn work_order(kind: MessageKindV1) -> EnvelopeV1 {
         payload_digest: WireDigest::of_bytes(PAYLOAD),
         artifact_refs: ArtifactRefs::empty(),
         provider_execution_receipt_ref: Optional::absent(),
-        created_at: Timestamp::parse("2026-08-09T20:00:00Z").unwrap(),
+        created_at: Timestamp::parse(created_at).unwrap(),
     })
     .expect("the envelope fixture must be admissible")
+}
+
+/// FD-5.4, frozen: "the FIRST accepted occurrence is stored canonically,
+/// verbatim … a redelivery NEVER mutates the stored envelope", and §5.4 makes
+/// redelivery-with-a-different-`created_at` a required negative test.
+///
+/// `created_at` is excluded from the framing, so one framed digest can arrive
+/// attached to several serializations of different length. The write path
+/// keyed by that digest therefore has to be first-writer-wins: an unconditional
+/// insert lets a redelivery change what a key maps to, and the reference the
+/// caller was already handed — carrying the first occurrence's size — starts
+/// failing `HalvesSizeMismatch` against a corruption the write boundary
+/// introduced itself. Witnessed before the fix: the stored envelope grew from
+/// 640 bytes to 650 under an unchanged digest.
+#[test]
+fn a_redelivery_never_mutates_the_stored_envelope() {
+    let mut store = MemoryStore::new();
+    let first = work_order(MessageKindV1::WorkOrder);
+    let (framed, size) = store.put_envelope(&first, PAYLOAD.to_vec()).unwrap();
+
+    // Same envelope, later observation, deliberately a longer spelling.
+    let redelivered = work_order_at(MessageKindV1::WorkOrder, "2026-12-31T23:59:59.999999999Z");
+    assert_ne!(
+        first, redelivered,
+        "the fixture must actually differ, or this proves nothing"
+    );
+    let (again, size_again) = store.put_envelope(&redelivered, PAYLOAD.to_vec()).unwrap();
+
+    assert_eq!(
+        framed, again,
+        "created_at is not framed, so the identity is unchanged (FD-1.2)"
+    );
+    assert_eq!(
+        size, size_again,
+        "the store must still hold the first accepted occurrence"
+    );
+
+    // The reference handed out before the redelivery still resolves, which is
+    // the property the caller actually depends on.
+    let reference = ArtifactRef::new(
+        ArtifactKindV1::WorkOrder,
+        typed_media_type(ArtifactKindV1::WorkOrder, 1),
+        framed,
+        size,
+    )
+    .unwrap();
+    ResolutionSession::enter(&policy(), |session| {
+        let resolved = session
+            .resolve_envelope_storage(&work_order_slot(), &reference, &store)
+            .expect("a reference issued before the redelivery must still resolve");
+        assert_eq!(
+            resolved.envelope(),
+            &first,
+            "reads must return the first occurrence, not the later timestamp"
+        );
+    })
+    .unwrap();
 }
 
 fn work_order_slot() -> EnvelopeSlot {

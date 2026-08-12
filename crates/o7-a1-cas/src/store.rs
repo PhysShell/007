@@ -156,12 +156,31 @@ impl MemoryStore {
         let envelope_bytes = envelope.to_wire_bytes().map_err(PutError::Encoding)?;
 
         let framed = envelope.framed_digest();
-        let size = EnvelopeV1::ref_size(envelope_bytes.len() as u64, payload.len() as u64);
+        let payload_len = payload.len() as u64;
         self.objects
-            .insert(envelope.payload_digest().as_str().to_owned(), payload);
-        self.objects
-            .insert(framed.as_str().to_owned(), envelope_bytes);
-        Ok((framed, size))
+            .entry(envelope.payload_digest().as_str().to_owned())
+            .or_insert(payload);
+        // FD-5.4 — "the FIRST accepted occurrence is stored canonically,
+        // verbatim … a redelivery NEVER mutates the stored envelope".
+        //
+        // This is not idempotence for its own sake. `created_at` is excluded
+        // from the framing (FD-1.2), so one framed digest can arrive attached
+        // to several serializations that differ in bytes and in length. An
+        // unconditional insert therefore lets a redelivery change what a key
+        // maps to — the size a caller was already handed stops matching the
+        // store, and their reference starts failing `HalvesSizeMismatch` for a
+        // corruption the write path introduced. The size returned here is the
+        // size of the bytes the store actually holds, which after a redelivery
+        // is the first occurrence's, not this call's.
+        let stored_envelope_len = self
+            .objects
+            .entry(framed.as_str().to_owned())
+            .or_insert(envelope_bytes)
+            .len() as u64;
+        Ok((
+            framed,
+            EnvelopeV1::ref_size(stored_envelope_len, payload_len),
+        ))
     }
 
     /// How many objects this store holds.
