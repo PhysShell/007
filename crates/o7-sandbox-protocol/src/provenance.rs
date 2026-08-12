@@ -41,10 +41,17 @@
 //!
 //! - [`EnvName`] accepts a POSIX-portable variable NAME and rejects `=`, so the `NAME=VALUE`
 //!   shape cannot be smuggled through the name field;
-//! - [`ConfigLocator`] accepts a record-relative path and rejects absolute paths and `..`, so
-//!   a locator cannot carry `/home/alice/customer-secret/...` into a public artifact;
+//! - [`ConfigLocator`] accepts a `/`-separated locator over an ASCII allowlist, anchored by an
+//!   explicit [`ConfigAnchor`], so it can carry neither `/home/alice/customer-secret/...` nor
+//!   a segment that is really an assignment;
 //! - [`PolicyKey`] names a key, [`CliOption`] names a long flag — neither takes the argument
 //!   that was passed to it.
+//!
+//! Known fields are only half of it. Serde accepts UNKNOWN fields by default, so every
+//! representation here is `deny_unknown_fields`: without it a hand-written
+//! `{"source":"environment","name":"PATH","value":"sk-live-…"}` parses cleanly, drops the
+//! secret on the floor, and gets reported as a well-formed record — an armoured door beside an
+//! open window.
 //!
 //! The bound is structural, not a sanitizer. If this module ever needs to scrub its own output
 //! before writing it, the design has already failed.
@@ -54,7 +61,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::num::NonZeroU32;
-use std::path::{Component, Path};
 
 use serde::{Deserialize, Deserializer, Serialize};
 
@@ -85,9 +91,11 @@ pub enum ProvenanceError {
     /// Notably rejects anything containing `=`, so `NAME=VALUE` cannot pose as a name.
     #[error("{0:?} is not a POSIX-portable environment variable NAME (max {MAX_ENV_NAME} chars)")]
     EnvName(String),
+    /// Rejects `=`, `\\`, `:`, whitespace, control characters, and non-ASCII by construction:
+    /// the segment charset is an allowlist, not a denylist of known-bad shapes.
     #[error(
-        "{0:?} is not a record-relative config locator: it must be relative, free of `.`/`..`, \
-         non-empty, valid UTF-8, and at most {MAX_CONFIG_LOCATOR} chars"
+        "{0:?} is not a config locator: `/`-separated non-empty segments over [A-Za-z0-9._-], \
+         none of them `.` or `..`, at most {MAX_CONFIG_LOCATOR} chars"
     )]
     ConfigLocator(String),
 }
@@ -189,41 +197,64 @@ impl EnvName {
     }
 }
 
-/// A record-relative locator for the config file a value came from — a coordinate, not the
-/// file. Absolute paths are rejected precisely because an absolute host path is itself
-/// disclosure: `/home/alice/customer-secret/o7.toml` leaks in a public artifact even though
-/// no file content was copied.
+/// What a [`ConfigLocator`] is relative TO.
+///
+/// A relative path with no declared anchor answers "where did this come from?" with
+/// "somewhere around here, probably" — which is not an answer an audit artifact may give.
+/// One variant, because 007 has exactly one config root today; the same shape as
+/// [`NetworkPolicy::DenyAll`](crate::policy::NetworkPolicy), and a second one is added when a
+/// second config root actually exists, not in anticipation of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigAnchor {
+    /// The TARGET repository root — the repo `o7 run --repo` points at, whose `.007/gate.toml`
+    /// supplies the run's manifest. NOT the run record directory: no config lives there.
+    TargetRepo,
+}
+
+/// A locator for the config file a value came from — a coordinate, not the file. Meaningful
+/// only together with a [`ConfigAnchor`], which is why [`PolicySource::Config`] carries both.
+///
+/// # Grammar
+///
+/// A platform `Path` is the wrong grammar for an audit artifact and was the wrong grammar
+/// here: `Component::Normal` accepts nearly any byte string, so `ANTHROPIC_API_KEY=sk-live-…`
+/// parsed as a perfectly good single-component "relative path", and `C:\Users\alice\secret\`
+/// is not a Windows prefix on Linux — just a relative component with backslashes in the name.
+/// Both sailed through an is-absolute plus reject-`..` check.
+///
+/// So this is a PORTABLE grammar, not a path: `/`-separated segments over `[A-Za-z0-9._-]`,
+/// each non-empty and neither `.` nor `..`. That admits `.007/gate.toml` and rejects `=`,
+/// `\`, `:`, spaces, control characters, and non-ASCII by construction — the charset is an
+/// allowlist, so a shape nobody anticipated is refused rather than accepted by default.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct ConfigLocator(String);
 
 impl ConfigLocator {
-    /// Parse a relative, dot-free, UTF-8 path, canonicalized to `/`-joined components.
+    /// Parse a `/`-separated locator over the portable segment charset.
     ///
     /// # Errors
-    /// [`ProvenanceError::ConfigLocator`] for an absolute path, any `.`/`..`/root/prefix
-    /// component, an empty path, non-UTF-8, or an over-long locator.
-    pub fn parse(value: &Path) -> Result<Self, ProvenanceError> {
-        let err = || ProvenanceError::ConfigLocator(value.to_string_lossy().into_owned());
-        if value.is_absolute() {
+    /// [`ProvenanceError::ConfigLocator`] for an empty locator, a leading/trailing/doubled
+    /// `/`, a `.` or `..` segment, any character outside `[A-Za-z0-9._-]`, or an over-long
+    /// locator.
+    pub fn parse(value: &str) -> Result<Self, ProvenanceError> {
+        let err = || ProvenanceError::ConfigLocator(value.to_owned());
+        if value.is_empty() || value.len() > MAX_CONFIG_LOCATOR {
             return Err(err());
         }
-        let mut parts: Vec<&str> = Vec::new();
-        for component in value.components() {
-            match component {
-                Component::Normal(part) => parts.push(part.to_str().ok_or_else(err)?),
-                // `.`, `..`, `/`, and Windows prefixes are all rejected: each either escapes
-                // the record dir or makes the locator non-canonical.
-                _ => return Err(err()),
+        for segment in value.split('/') {
+            // An empty segment covers the leading `/` (absolute), a trailing `/`, and `//`.
+            if segment.is_empty() || segment == "." || segment == ".." {
+                return Err(err());
+            }
+            if !segment
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
+            {
+                return Err(err());
             }
         }
-        if parts.is_empty() {
-            return Err(err());
-        }
-        let joined = parts.join("/");
-        if joined.len() > MAX_CONFIG_LOCATOR {
-            return Err(err());
-        }
-        Ok(ConfigLocator(joined))
+        Ok(ConfigLocator(value.to_owned()))
     }
 
     #[must_use]
@@ -256,21 +287,34 @@ macro_rules! validating_deserialize {
 validating_deserialize!(CliOption, CliOption::parse);
 validating_deserialize!(PolicyKey, PolicyKey::parse);
 validating_deserialize!(EnvName, EnvName::parse);
-validating_deserialize!(ConfigLocator, |s: &str| ConfigLocator::parse(Path::new(s)));
+validating_deserialize!(ConfigLocator, ConfigLocator::parse);
 
 /// Where one policy value came from. Every variant names its source; no variant can carry the
 /// source's CONTENTS.
+///
+/// `deny_unknown_fields` is part of that guarantee, not tidiness. Serde accepts unknown fields
+/// by default, so without it `{"source":"environment","name":"PATH","value":"sk-live-…"}`
+/// deserializes happily into `Environment { name: "PATH" }` with the secret silently dropped —
+/// and a reader would then report the file as well-formed. The leaf newtypes make a payload
+/// unrepresentable in a KNOWN field; this makes it unrepresentable in an unknown one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "source", rename_all = "snake_case")]
+#[serde(tag = "source", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PolicySource {
     /// The value nobody asked for — the built-in safe default (e.g. deny-all networking).
-    Default,
+    ///
+    /// An empty STRUCT variant, not a unit variant, and the difference is load-bearing: under
+    /// internal tagging serde deserializes a unit variant by ignoring the rest of the map, so
+    /// `deny_unknown_fields` does not reach it and `{"source":"default","raw":"sk-live-…"}`
+    /// would parse. The wire form is identical either way (`{"source":"default"}`); only the
+    /// unknown-field behaviour differs.
+    Default {},
     /// Set by a long CLI option. The option is named; its argument is not recorded (it is
     /// already visible in the effective policy itself, canonically and digest-bound).
     Cli { option: CliOption },
-    /// Set by a config file, identified by a record-relative locator plus the key path and
-    /// optionally the line — a coordinate into the file, never an excerpt of it.
+    /// Set by a config file, identified by an anchor plus a locator relative to it, the key
+    /// path, and optionally the line — a coordinate into the file, never an excerpt of it.
     Config {
+        anchor: ConfigAnchor,
         file: ConfigLocator,
         key: PolicyKey,
         #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -325,7 +369,10 @@ pub struct PolicySources {
 /// a check anything performs before executing. Nothing consults this struct to decide what to
 /// enforce; see the module docs for the one-way dependency this preserves.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PolicyProvenance {
+    /// The schema this record claims. NOT validated on deserialize — see
+    /// [`Self::is_supported_version`] for why the check lives at the reader instead.
     pub schema_version: u32,
     /// The digest of the effective policy this explains.
     pub policy_digest: Digest256,
@@ -372,6 +419,20 @@ impl PolicyProvenance {
             policy_digest: policy.digest(),
             fields,
         }
+    }
+
+    /// Whether this record's declared schema is the one this build understands.
+    ///
+    /// Deliberately a QUERY rather than a deserialize-time rejection. Parsing a v999 document
+    /// into a v1 struct succeeds whenever the fields happen to line up, and silently reporting
+    /// it as understood is the actual defect: a v1 reader would be claiming to have read a
+    /// document written to a schema it has never seen. Rejecting at parse would instead
+    /// collapse "from the future" into "corrupt", losing the distinction an operator needs.
+    /// So the type parses version-agnostically and the reader classifies — which keeps the
+    /// whole thing diagnostic, exactly like every other outcome here.
+    #[must_use]
+    pub fn is_supported_version(&self) -> bool {
+        self.schema_version == PROVENANCE_SCHEMA_VERSION
     }
 
     /// The recorded origin of one field, if this record has one.
@@ -455,9 +516,7 @@ mod tests {
     #[test]
     fn a_config_locator_cannot_carry_an_absolute_host_path() {
         assert_eq!(
-            ConfigLocator::parse(Path::new(".007/gate.toml"))
-                .unwrap()
-                .as_str(),
+            ConfigLocator::parse(".007/gate.toml").unwrap().as_str(),
             ".007/gate.toml"
         );
         for bad in [
@@ -467,7 +526,7 @@ mod tests {
             "",
         ] {
             assert!(
-                ConfigLocator::parse(Path::new(bad)).is_err(),
+                ConfigLocator::parse(bad).is_err(),
                 "{bad:?} must not parse as a record-relative locator"
             );
         }
@@ -501,7 +560,7 @@ mod tests {
         // Structural check on the wire shape: the object keys are exactly the identifying
         // ones. A future variant that adds a contents-bearing field fails here.
         let cases = [
-            (PolicySource::Default, vec!["source"]),
+            (PolicySource::Default {}, vec!["source"]),
             (
                 PolicySource::Cli {
                     option: CliOption::parse("--allow-exec").unwrap(),
@@ -510,11 +569,12 @@ mod tests {
             ),
             (
                 PolicySource::Config {
-                    file: ConfigLocator::parse(Path::new(".007/gate.toml")).unwrap(),
+                    anchor: ConfigAnchor::TargetRepo,
+                    file: ConfigLocator::parse(".007/gate.toml").unwrap(),
                     key: PolicyKey::parse("sandbox.timeout_ms").unwrap(),
                     line: NonZeroU32::new(17),
                 },
-                vec!["source", "file", "key", "line"],
+                vec!["source", "anchor", "file", "key", "line"],
             ),
             (
                 PolicySource::Environment {

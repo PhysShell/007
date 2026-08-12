@@ -6,12 +6,12 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::num::NonZeroU32;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use o7_sandbox_protocol::provenance::{
-    CliOption, ConfigLocator, EnvName, PolicyField, PolicyKey, PolicyProvenance, PolicySource,
-    PolicySources, PROVENANCE_SCHEMA_VERSION,
+    CliOption, ConfigAnchor, ConfigLocator, EnvName, PolicyField, PolicyKey, PolicyProvenance,
+    PolicySource, PolicySources, PROVENANCE_SCHEMA_VERSION,
 };
 use o7_sandbox_protocol::{NetworkPolicy, SandboxPolicy};
 
@@ -34,7 +34,7 @@ fn cli_sources() -> PolicySources {
     PolicySources {
         worktree: opt("--worktree"),
         allow_exec: opt("--allow-exec"),
-        network: PolicySource::Default,
+        network: PolicySource::Default {},
         env_allowlist: opt("--allow-env"),
         timeout: opt("--timeout"),
     }
@@ -43,14 +43,15 @@ fn cli_sources() -> PolicySources {
 /// Derivation B: the same values, reached from a config file and the ambient environment.
 fn config_sources() -> PolicySources {
     let at = |key: &str, line: u32| PolicySource::Config {
-        file: ConfigLocator::parse(Path::new(".007/gate.toml")).unwrap(),
+        anchor: ConfigAnchor::TargetRepo,
+        file: ConfigLocator::parse(".007/gate.toml").unwrap(),
         key: PolicyKey::parse(key).unwrap(),
         line: NonZeroU32::new(line),
     };
     PolicySources {
         worktree: at("sandbox.worktree", 4),
         allow_exec: at("sandbox.allow_exec", 9),
-        network: PolicySource::Default,
+        network: PolicySource::Default {},
         env_allowlist: PolicySource::Environment {
             name: EnvName::parse("PATH").unwrap(),
         },
@@ -88,11 +89,11 @@ fn the_same_effective_policy_digests_identically_under_different_derivations() {
     // networking in either case.
     assert_eq!(
         from_cli.source(PolicyField::Network),
-        Some(&PolicySource::Default)
+        Some(&PolicySource::Default {})
     );
     assert_eq!(
         from_config.source(PolicyField::Network),
-        Some(&PolicySource::Default)
+        Some(&PolicySource::Default {})
     );
 }
 
@@ -157,7 +158,8 @@ fn the_serialized_artifact_is_byte_stable_and_round_trips() {
 #[test]
 fn an_unknown_config_line_is_omitted_rather_than_nulled() {
     let source = PolicySource::Config {
-        file: ConfigLocator::parse(Path::new("o7.toml")).unwrap(),
+        anchor: ConfigAnchor::TargetRepo,
+        file: ConfigLocator::parse("o7.toml").unwrap(),
         key: PolicyKey::parse("sandbox.network").unwrap(),
         line: None,
     };
@@ -167,5 +169,145 @@ fn an_unknown_config_line_is_omitted_rather_than_nulled() {
         serde_json::from_str::<PolicySource>(&text).unwrap(),
         source,
         "an omitted line round-trips back to None"
+    );
+}
+
+/// Corrective round. The leaf newtypes only ever policed KNOWN fields; serde accepts unknown
+/// ones by default, so every representation below could carry a payload beside a valid
+/// identifier and have it silently dropped — leaving a reader to call the file well-formed.
+/// `deny_unknown_fields` closes that, and `Default` had to become an empty STRUCT variant to
+/// be covered at all: under internal tagging serde deserializes a unit variant by ignoring the
+/// rest of the map, so the attribute never reached it.
+#[test]
+fn a_payload_beside_a_valid_identifier_is_rejected_not_silently_dropped() {
+    for (label, json) in [
+        (
+            "environment + value",
+            r#"{"source":"environment","name":"PATH","value":"sk-live-secret"}"#,
+        ),
+        (
+            "cli + argument",
+            r#"{"source":"cli","option":"--allow-exec","argument":"/etc/shadow"}"#,
+        ),
+        (
+            "config + contents",
+            r#"{"source":"config","anchor":"target_repo","file":"o7.toml","key":"a","contents":"[secrets]\ntoken=…"}"#,
+        ),
+        (
+            "config + value",
+            r#"{"source":"config","anchor":"target_repo","file":"o7.toml","key":"a","value":"sk-live"}"#,
+        ),
+        (
+            "default + arbitrary payload",
+            r#"{"source":"default","raw":"sk-live-secret"}"#,
+        ),
+    ] {
+        assert!(
+            serde_json::from_str::<PolicySource>(json).is_err(),
+            "{label} must be rejected, not parsed with the payload dropped"
+        );
+    }
+
+    // ...and the same at the top level.
+    let digest = "0".repeat(64);
+    assert!(
+        serde_json::from_str::<PolicyProvenance>(&format!(
+            r#"{{"schema_version":1,"policy_digest":"{digest}","fields":{{}},"leaked_env":"FOO=bar"}}"#
+        ))
+        .is_err(),
+        "an unknown top-level field must be rejected"
+    );
+
+    // The legitimate shapes still parse — this closes a hole, it does not close the door.
+    for json in [
+        r#"{"source":"default"}"#,
+        r#"{"source":"cli","option":"--allow-exec"}"#,
+        r#"{"source":"environment","name":"PATH"}"#,
+        r#"{"source":"config","anchor":"target_repo","file":".007/gate.toml","key":"sandbox.timeout_ms","line":17}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<PolicySource>(json).is_ok(),
+            "{json} is a legitimate source and must still parse"
+        );
+    }
+}
+
+/// Corrective round. `Component::Normal` accepts nearly any byte string, so a platform `Path`
+/// was never a grammar — `FOO=secret` was a perfectly good one-component "relative path", and
+/// a Windows-shaped path is not a `Prefix` on Linux, just a name containing backslashes. The
+/// replacement is an ASCII allowlist over `/`-separated segments.
+#[test]
+fn a_config_locator_is_an_identifier_grammar_not_a_platform_path() {
+    for bad in [
+        "ANTHROPIC_API_KEY=sk-live-secret", // an assignment posing as a filename
+        r"C:\Users\alice\secret\o7.toml",   // not a Prefix on Linux — just backslashes
+        r"\\server\share\secret\o7.toml",
+        "foo\nsecret",
+        "has space",
+        "a:b",
+        "/home/alice/customer-secret/o7.toml",
+        "../../etc/o7.toml",
+        "./o7.toml",
+        "foo//bar",
+        "foo/",
+        "..",
+        "",
+    ] {
+        assert!(
+            ConfigLocator::parse(bad).is_err(),
+            "{bad:?} must not parse as a config locator"
+        );
+    }
+
+    for good in [".007/gate.toml", "o7.toml", "a/b/c-d_e.2.toml"] {
+        assert!(
+            ConfigLocator::parse(good).is_ok(),
+            "{good:?} is a legitimate locator"
+        );
+    }
+
+    // The untrusted deserialize path enforces the same grammar.
+    assert!(serde_json::from_str::<ConfigLocator>(r#""FOO=secret""#).is_err());
+    assert!(serde_json::from_str::<ConfigLocator>(r#""/etc/passwd""#).is_err());
+    assert!(serde_json::from_str::<ConfigLocator>(r#"".007/gate.toml""#).is_ok());
+}
+
+/// Corrective round. A locator relative to nothing in particular answers "where did this come
+/// from?" with "somewhere around here" — so the anchor is explicit and travels with it.
+#[test]
+fn a_config_source_declares_what_its_locator_is_relative_to() {
+    let source = PolicySource::Config {
+        anchor: ConfigAnchor::TargetRepo,
+        file: ConfigLocator::parse(".007/gate.toml").unwrap(),
+        key: PolicyKey::parse("sandbox.timeout_ms").unwrap(),
+        line: NonZeroU32::new(17),
+    };
+    let value = serde_json::to_value(&source).unwrap();
+    assert_eq!(
+        value.get("anchor").and_then(serde_json::Value::as_str),
+        Some("target_repo")
+    );
+    // An anchorless config source is not representable.
+    assert!(serde_json::from_str::<PolicySource>(
+        r#"{"source":"config","file":"o7.toml","key":"a"}"#
+    )
+    .is_err());
+}
+
+/// Corrective round. A v1 reader must not report a document written to a schema it has never
+/// seen as one it understood.
+#[test]
+fn an_unsupported_schema_version_is_visible_rather_than_assumed_understood() {
+    let provenance = PolicyProvenance::describe(&effective_policy(), &cli_sources());
+    assert!(provenance.is_supported_version());
+
+    let mut text = serde_json::to_value(&provenance).unwrap();
+    if let Some(object) = text.as_object_mut() {
+        object.insert("schema_version".into(), serde_json::json!(999));
+    }
+    let future: PolicyProvenance = serde_json::from_value(text).unwrap();
+    assert!(
+        !future.is_supported_version(),
+        "a v999 document must not claim to be understood by a v1 reader"
     );
 }

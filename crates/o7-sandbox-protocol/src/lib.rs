@@ -34,8 +34,8 @@ pub use policy::{
     MIN_TIMEOUT,
 };
 pub use provenance::{
-    CliOption, ConfigLocator, EnvName, PolicyField, PolicyKey, PolicyProvenance, PolicySource,
-    PolicySources, ProvenanceError, PROVENANCE_SCHEMA_VERSION,
+    CliOption, ConfigAnchor, ConfigLocator, EnvName, PolicyField, PolicyKey, PolicyProvenance,
+    PolicySource, PolicySources, ProvenanceError, PROVENANCE_SCHEMA_VERSION,
 };
 pub use report::{ReportError, SandboxReport};
 pub use request::{EnvEntry, LaunchRequest, RequestFrameError, StdinKind, MAX_REQUEST_BYTES};

@@ -773,10 +773,10 @@ mod tests {
             worktree: PolicySource::Cli {
                 option: CliOption::parse(flag).unwrap(),
             },
-            allow_exec: PolicySource::Default,
-            network: PolicySource::Default,
-            env_allowlist: PolicySource::Default,
-            timeout: PolicySource::Default,
+            allow_exec: PolicySource::Default {},
+            network: PolicySource::Default {},
+            env_allowlist: PolicySource::Default {},
+            timeout: PolicySource::Default {},
         };
 
         // Baseline: no provenance artifact at all.

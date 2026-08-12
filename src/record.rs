@@ -264,12 +264,18 @@ pub enum ProvenanceRead {
     /// The artifact exists but could not be read or parsed, with a human-readable reason.
     /// Worth surfacing to an operator; never worth changing a verdict over.
     Malformed(String),
+    /// The artifact parsed, but declares a schema this build does not understand — a record
+    /// written by a newer o7. Kept distinct from [`Self::Malformed`] because "from the future"
+    /// and "corrupt" call for different operator responses, and because a v1 reader must not
+    /// report a v999 document as one it understood.
+    UnsupportedVersion { found: u32 },
 }
 
 /// Read a record dir's provenance artifact for audit.
 ///
 /// Total by construction: absent → [`ProvenanceRead::Missing`], unreadable or unparseable →
-/// [`ProvenanceRead::Malformed`]. Neither is an error, because no decision depends on this.
+/// [`ProvenanceRead::Malformed`], a newer schema → [`ProvenanceRead::UnsupportedVersion`].
+/// None is an error, because no decision depends on this.
 #[must_use]
 pub fn read_policy_provenance(dir: &Path) -> ProvenanceRead {
     let path = dir.join(POLICY_PROVENANCE_FILE);
@@ -279,6 +285,11 @@ pub fn read_policy_provenance(dir: &Path) -> ProvenanceRead {
         Err(e) => return ProvenanceRead::Malformed(format!("reading {}: {e}", path.display())),
     };
     match serde_json::from_str::<PolicyProvenance>(&text) {
+        Ok(provenance) if !provenance.is_supported_version() => {
+            ProvenanceRead::UnsupportedVersion {
+                found: provenance.schema_version,
+            }
+        }
         Ok(provenance) => ProvenanceRead::Present(Box::new(provenance)),
         Err(e) => ProvenanceRead::Malformed(format!("parsing {}: {e}", path.display())),
     }
@@ -507,7 +518,7 @@ mod provenance_tests {
             &PolicySources {
                 worktree: opt("--worktree"),
                 allow_exec: opt("--allow-exec"),
-                network: PolicySource::Default,
+                network: PolicySource::Default {},
                 env_allowlist: opt("--allow-env"),
                 timeout: opt("--timeout"),
             },
@@ -560,6 +571,31 @@ mod provenance_tests {
                 "{corruption} must read as Malformed"
             );
         }
+    }
+
+    /// Corrective round: a record from a newer o7 is neither "understood" nor "corrupt". A v1
+    /// reader reporting a v999 document as `Present` would be claiming to have read a schema
+    /// it has never seen; folding it into `Malformed` would tell an operator to look for
+    /// corruption that isn't there.
+    #[test]
+    fn a_newer_schema_version_is_reported_as_such_not_as_understood() {
+        let runs = tempfile::tempdir().unwrap();
+        let rec = RunRecord::create(runs.path(), "target", "run-1").unwrap();
+
+        let mut value = serde_json::to_value(provenance()).unwrap();
+        if let Some(object) = value.as_object_mut() {
+            object.insert("schema_version".into(), serde_json::json!(999));
+        }
+        std::fs::write(
+            rec.dir.join(POLICY_PROVENANCE_FILE),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            read_policy_provenance(&rec.dir),
+            ProvenanceRead::UnsupportedVersion { found: 999 }
+        );
     }
 
     /// A truncated artifact is a diagnostic, but a record dir that cannot be written to is

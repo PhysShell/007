@@ -50,8 +50,15 @@ Two consequences follow, and they are not in tension:
   depend on the artifact's *contents*; it is not a licence to swallow `ENOSPC`.
 
 Reading is correspondingly total: `read_policy_provenance` returns
-`Present`/`Missing`/`Malformed` and never `Result`, because a reader that can return `Err`
-invites a caller to `?` it into a path that decides something.
+`Present`/`Missing`/`Malformed`/`UnsupportedVersion` and never `Result`, because a reader that
+can return `Err` invites a caller to `?` it into a path that decides something.
+
+`UnsupportedVersion` is separate from `Malformed` on purpose. `schema_version` is not enforced
+at parse: a v999 document deserializes into the v1 struct whenever the fields happen to line
+up, and rejecting it at parse would collapse "written by a newer o7" into "corrupt". Neither
+may a v1 reader report it as `Present` — that would be claiming to have understood a schema it
+has never seen. So the type parses version-agnostically and the reader classifies, which keeps
+every outcome diagnostic.
 
 There is deliberately **no `provenance_digest`**. Anything that gets a digest eventually
 gets checked, and a check is a trust dependency. If provenance ever becomes part of a
@@ -72,11 +79,32 @@ length-bounded newtype whose grammar admits an identifier and rejects a payload:
 | Leaf | Accepts | Rejects |
 | --- | --- | --- |
 | `EnvName` | a POSIX-portable variable NAME | anything containing `=` — the `NAME=VALUE` shape is unrepresentable |
-| `ConfigLocator` | a record-relative path | absolute paths (`/home/alice/customer-secret/…` is itself disclosure) and `..` |
+| `ConfigLocator` | `/`-separated segments over `[A-Za-z0-9._-]`, none of them `.` or `..` | `=`, `\`, `:`, whitespace, control characters, non-ASCII, absolute paths, traversal |
 | `PolicyKey` | a dotted `lower_snake` key path | the value stored under it |
 | `CliOption` | a long flag name | the argument passed to it |
 
-Each re-validates on the untrusted deserialize path, so a hand-edited artifact cannot
+`ConfigLocator` is a portable grammar rather than a platform path, and that is a correction,
+not a preference. `Component::Normal` accepts nearly any byte string, so an is-absolute plus
+reject-`..` check let `ANTHROPIC_API_KEY=sk-live-…` through as a perfectly good
+single-component "relative path"; `C:\Users\alice\secret\o7.toml` is not a Windows prefix
+on Linux either, just a name containing backslashes. The charset is now an allowlist, so a
+shape nobody anticipated is refused rather than accepted by default.
+
+A locator also means nothing without an anchor, so `PolicySource::Config` carries a
+`ConfigAnchor` — one variant today (`TargetRepo`: the repo `o7 run --repo` points at, whose
+`.007/gate.toml` supplies the manifest), the same shape as `NetworkPolicy::DenyAll`. A second
+anchor is added when a second config root exists, not in anticipation of one.
+
+Restricting KNOWN fields is only half the job. Serde accepts UNKNOWN fields by default, so
+every representation is `deny_unknown_fields`: without it,
+`{"source":"environment","name":"PATH","value":"sk-live-…"}` parses cleanly into
+`Environment { name: "PATH" }`, drops the secret on the floor, and is then reported as a
+well-formed record — an armoured door beside an open window. `PolicySource::Default` is an
+empty *struct* variant for the same reason: under internal tagging serde deserializes a unit
+variant by ignoring the rest of the map, so the attribute would never have reached it. The
+wire form is unchanged (`{"source":"default"}`).
+
+Each leaf re-validates on the untrusted deserialize path, so a hand-edited artifact cannot
 reintroduce a shape the constructors forbid. The bound is structural, not a sanitizer: **if
 this artifact ever needs its output scrubbed before writing, the design has already
 failed.**
