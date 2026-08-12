@@ -205,6 +205,27 @@ or carries a value. Explicit JSON `null` is rejected at parse time.** There is n
 field in this contract where `null` and absent mean different things, because
 that distinction has never once been worth what it costs.
 
+**Member names are unique within every JSON object, and a duplicate name is
+rejected at parse time. No first-wins or last-wins interpretation is
+permitted.** (S2, §9.)
+
+RFC 8259 says names *should* be unique and leaves the behaviour undefined when
+they are not, so first-wins and last-wins are both conforming readings of the
+same bytes. That is tolerable for a document format and not for this one: FD-1.2
+computes an envelope's identity by framing its **fields**, so two conforming A1
+implementations reading identical stored bytes would frame different fields and
+compute different digests. Admitting a duplicate reopens precisely the class of
+failure FD-1.2 exists to close, on the one input an attacker fully controls.
+
+Note the interaction with the null policy above, because it is the reason this
+rule had to be stated rather than left implied. In `{"x": null, "x": 1}` the null
+is physically present in the stored bytes, so the null policy already refuses the
+document — but only for an implementation that examines the bytes. One that
+reduces the document through a JSON library first may never see it, since the
+library has already discarded the shadowed member. The uniqueness rule makes both
+implementations refuse the same document for the same reason, which is what the
+null policy meant all along.
+
 **FD-1.4 Per-object bounds (protocol hard maxima).**
 
 ```text
@@ -2428,11 +2449,63 @@ accepted exact head   b61540a   (after R5.1, following a final exact-head pass)
 amended pre-merge     R5.2       (four P1s from external review on PR #123)
 frozen baseline       the merged head of PR #123
 superseded            S1 — FD-1.4 only, the first §7 application after merge
+                      S2 — FD-1.3 only, member-name uniqueness
 status                ACCEPTED / CLOSED / FROZEN
 rounds                R1, R2, R3, R4, R5, R5.1, R5.2 — every finding corrected
                       forward; no round amended an earlier one in place
 next                  A1-V0 (§5), and not before this document merges
 ```
+
+### S2 — FD-1.3 said nothing about duplicate member names
+
+The second supersede under §7, and the first one raised by an *implementation
+review* rather than by an implementer stuck between two readings.
+
+```text
+replaces      FD-1.3 only
+reason        the null policy and the unknown-field policy together left one
+              ambiguity unaddressed: a JSON object carrying the same member
+              name twice. RFC 8259 leaves the behaviour undefined, so
+              first-wins and last-wins are both conforming
+decision      member names are unique within every A1 JSON object; a duplicate
+              is rejected at parse time; no first-wins or last-wins reading is
+              permitted
+no change to  envelope_version, message_kind_version, campaign_protocol_version
+              — no payload shape, field set, framing, rank or reducer semantics
+              moved. This changes an admission rule, exactly as S1 did
+effect        this document's blob changes, so contract_digest changes; there is
+              no in-flight campaign to migrate (§7)
+```
+
+**How it surfaced.** A1-V0 step 2 replaced the document layer's materialising
+walk with a streaming scan, under an explicit promise to change *when* a
+structural bound fires and never *which* documents are admitted. External review
+found one document where that promise broke: `{"x": null, "x": 1}`. The old path
+built a `serde_json::Value` first, whose object map silently keeps the last
+duplicate, so the null was gone before any rule ran and the artifact was
+admitted. The streaming scan sees the null, because the null is in the bytes, and
+refuses it.
+
+**Why that is a contract gap rather than an implementation choice.** The
+shadowed-null case does follow from FD-1.3 as already written — the null is
+present, and the rule says explicit null is rejected. The plain case,
+`{"x": 2, "x": 1}`, does not follow from anything: FD-1.6 governs *unknown*
+fields and versions, not ambiguity in general, and no other decision addresses
+it. An implementation refusing it would have been enforcing a rule the contract
+does not contain, which is the same defect as inventing a bound — the mistake
+FD-1.8's `size` lower bound was corrected for during A1-V0 step 1.
+
+So the argument from FD-1.2 is strong enough to *justify a supersede* and not
+strong enough to *be* the contract. Ratifying "this already follows from B1"
+would have quietly widened the frozen admission set by reasoning, which is the
+one thing §7 exists to prevent. The implementation is right; it simply needed
+authority, and this is that authority.
+
+**Scope discipline.** The rule is stated for A1 JSON objects generally rather
+than per-schema, because the failure is a property of the encoding and not of
+any one payload. It adds no field, moves no bound, and names no new type: an
+implementation that already refused duplicates needs no change, and one that
+deduped silently has a defect it can now see.
 
 ### S1 — FD-1.4 classified `InteractionManifestV1` under two bounds at once
 
