@@ -7,6 +7,8 @@
 
 use std::fs;
 
+use nix::errno::Errno;
+
 /// Identifies a process by PID, its process group, and its kernel start-time
 /// (jiffies since boot) to disambiguate a reused PID.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -47,8 +49,10 @@ impl ProcessIdentity {
     /// cannot positively resolve — an ERROR, never an empty/short set (cleanup must
     /// never treat "unknown" as "gone"). Concretely:
     ///   * a top-level `/proc` read failure, or a directory-ENTRY I/O error, propagates;
-    ///   * a per-PID `stat` read that fails with `NotFound` is a confirmed exit race
-    ///     and is the ONLY thing skipped (the PID vanished, so it is genuinely gone);
+    ///   * a per-PID `stat` read that fails with a CONFIRMED exit race — `ENOENT` or
+    ///     `ESRCH`, the two ways Linux procfs reports a vanished PID, see
+    ///     [`is_confirmed_proc_exit_race`] — is the ONLY thing skipped (the PID
+    ///     vanished, so it is genuinely gone);
     ///   * any other `stat` I/O error (EACCES, EIO, …) propagates — the scanner cannot
     ///     distinguish such a PID from a live member, so it must not drop it;
     ///   * a `stat` that reads successfully but does not parse is a membership failure
@@ -78,7 +82,7 @@ impl ProcessIdentity {
             let raw = match source.stat(pid) {
                 Ok(raw) => raw,
                 // A confirmed exit race is the ONLY safe skip: the PID is gone.
-                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) if is_confirmed_proc_exit_race(&err) => continue,
                 // Any other error ("permission denied", "input/output error", …) is
                 // NOT proof the PID exited. Fail closed rather than drop a live member.
                 Err(err) => return Err(err),
@@ -120,11 +124,16 @@ pub(crate) trait ProcSource {
     /// Any I/O error encountered listing the table or iterating its entries.
     fn pids(&self) -> std::io::Result<Vec<i32>>;
 
-    /// The raw `/proc/<pid>/stat` contents. A `NotFound` error means the PID exited
-    /// between listing and reading (a benign exit race).
+    /// The raw `/proc/<pid>/stat` contents.
+    ///
+    /// A PID that exited between listing and reading (a benign exit race) surfaces as
+    /// one of TWO errnos, not one — see [`is_confirmed_proc_exit_race`], which is the
+    /// authority on that classification. Do not treat [`std::io::ErrorKind`] as the
+    /// authority here: `ESRCH` has no dedicated kind and lands in `Uncategorized`
+    /// alongside errors (`EIO`, …) that are not exits at all.
     ///
     /// # Errors
-    /// Any I/O error reading the entry (including `NotFound` for an exited PID).
+    /// Any I/O error reading the entry, including the exit-race errnos above.
     fn stat(&self, pid: i32) -> std::io::Result<String>;
 }
 
@@ -194,10 +203,35 @@ fn is_terminal_state(state: char) -> bool {
     matches!(state, 'Z' | 'X' | 'x')
 }
 
+/// Whether a `/proc/<pid>` access error PROVES the PID is gone, as opposed to leaving
+/// its group membership unresolved.
+///
+/// Linux procfs reports that one condition two different ways, depending on when the
+/// task dies relative to the access:
+///
+///   * `ENOENT` — the entry was already gone when the read tried to open it;
+///   * `ESRCH` — the entry was opened while the task was alive, and the task died
+///     before the read completed.
+///
+/// Both are proof of exit, so both are safe to skip. `ESRCH` is additionally sound to
+/// skip rather than merely convenient: the kernel documents that operations on such a
+/// descriptor "never act on any new process that the kernel may, through chance, have
+/// also assigned the process ID `<pid>`" (`Documentation/filesystems/proc.rst`), which
+/// rules out the PID-reuse hazard that would otherwise demand failing closed.
+///
+/// Deliberately NOT written as a check for [`std::io::ErrorKind::Uncategorized`]. That
+/// is the bucket for every errno `std` does not map — `EIO` lands there too — and it
+/// carries no "the process is gone" meaning. Only these two specific errnos do, so the
+/// match is on the errno itself. The name says *proc* and *exit* on purpose: this is
+/// not a general "file is missing" predicate and must not be reused as one.
+fn is_confirmed_proc_exit_race(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::NotFound || err.raw_os_error() == Some(Errno::ESRCH as i32)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::{parse_stat, ProcSource, ProcessIdentity};
+    use super::{is_confirmed_proc_exit_race, parse_stat, ProcSource, ProcessIdentity};
     use std::collections::BTreeMap;
     use std::io;
 
@@ -223,10 +257,11 @@ mod tests {
         }
     }
 
-    /// EIO / ENOENT / EACCES as raw errnos, so injected `stat` faults are the exact
-    /// `io::Error`s a real `/proc` read would yield.
+    /// EIO / ENOENT / ESRCH / EACCES as raw errnos, so injected `stat` faults are the
+    /// exact `io::Error`s a real `/proc` read would yield.
     const EIO: i32 = 5;
     const ENOENT: i32 = 2;
+    const ESRCH: i32 = 3;
     const EACCES: i32 = 13;
 
     /// A scriptable `stat` outcome for one PID.
@@ -372,6 +407,45 @@ mod tests {
         let member = members.first().unwrap();
         assert_eq!(member.pid, 100);
         assert_eq!(member.process_group, 4242);
+    }
+
+    #[test]
+    fn esrch_is_the_same_confirmed_exit_race_as_enoent() {
+        // The OTHER way Linux procfs reports a vanished PID: the entry was opened while
+        // the task was alive and the task died before the read completed. pid 300 is
+        // gone exactly as surely as an ENOENT one, so the scan skips it and succeeds
+        // rather than reporting a membership failure (issue #137).
+        let source = FakeProc::new(vec![100, 300, 400])
+            .with_stat(100, 4242, 111)
+            .with_stat_errno(300, ESRCH)
+            .with_stat(400, 9999, 222);
+        let members = ProcessIdentity::enumerate_group_with(&source, 4242).unwrap();
+        assert_eq!(members.len(), 1, "ESRCH is an exit race, not a failure");
+        assert_eq!(members.first().unwrap().pid, 100);
+    }
+
+    #[test]
+    fn exit_race_classifier_discriminates_within_uncategorized() {
+        // The regression guard for the shape of the fix. `ESRCH` and `EIO` BOTH land in
+        // `ErrorKind::Uncategorized` — std maps neither — so a classifier written as
+        // `kind() == Uncategorized` would pass the ESRCH test above while silently
+        // turning every unreadable live member into "gone" and gutting the fail-closed
+        // policy. Only the errno itself separates them.
+        let esrch = io::Error::from_raw_os_error(ESRCH);
+        let eio = io::Error::from_raw_os_error(EIO);
+        assert_eq!(
+            esrch.kind(),
+            eio.kind(),
+            "precondition: both errnos are unmapped by std, so kind cannot separate them"
+        );
+        assert!(is_confirmed_proc_exit_race(&esrch));
+        assert!(!is_confirmed_proc_exit_race(&eio));
+        assert!(is_confirmed_proc_exit_race(&io::Error::from_raw_os_error(
+            ENOENT
+        )));
+        assert!(!is_confirmed_proc_exit_race(&io::Error::from_raw_os_error(
+            EACCES
+        )));
     }
 
     #[test]
