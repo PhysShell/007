@@ -469,7 +469,10 @@ def preflight_cases() -> list[tuple[str, bool]]:
         mistyped.write_text('{"carriers": [{"source": 1, "target": "ScopeContract",'
                             ' "class": "Intra", "carrier_kind": "artifact_ref",'
                             ' "path": "p"}]}\n')
+        nokey = d / "nokey.json"
+        nokey.write_text("{}\n")
         for label, ledger_arg in (("malformed JSON", bad), ("missing file", d / "nope.json"),
+                                  ("no `carriers` key at all", nokey),
                                   ("non-object top level", shaped),
                                   ("carriers not a list of rows", rows),
                                   ("a row with no fields at all", empty_row),

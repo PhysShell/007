@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R17) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R18) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -27,8 +27,10 @@ audit into a refutation surface. **E-R14 separates `ERROR` from `FAIL`**, the
 same demotion surviving in the verdict vocabulary; **E-R15 finds the criterion
 holds end to end, on both sides of the checking logic**; **E-R16 applies it to
 the path that obtains the inputs at all, and **E-R17 carries that validation
-down to the fields the verifier indexes.** Eighteen revisions, no graph change
-in any of them: the frozen registry is a hard input here, not a subject.
+down to the fields the verifier indexes**; E-R18 requires the container to be
+*present*, and declares the one premise next to it rather than leaving it
+silent. Nineteen revisions, no graph change in any of them: the frozen registry
+is a hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -198,7 +200,7 @@ With nothing drafted, both preflights pass and all five steps are OWED:
 RESULT: FAIL — Envelope v2 is not realized
 ```
 
-`tools/tests/test_a1_v2_ledger_gate.py` — **38 cases, 38 as specified.** Twenty-two
+`tools/tests/test_a1_v2_ledger_gate.py` — **39 cases, 39 as specified.** Twenty-two
 mutate one thing and assert which step catches it; six exercise the preflight
 itself, which E-R1 added and left undefended; two exercise the pin evidence of
 §2.5. The corpus **imports `run_steps`**; it no longer asks the executable to
@@ -505,6 +507,37 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### E-R18 — presence is not type, and the premise next door
+
+**P1 (Codex, against `bea5806`).** `.get("carriers", [])` turned an *absent*
+required container into a valid empty declaration:
+
+```text
+{}   ->  five OWED steps, exit 1, RESULT: FAIL — Envelope v2 is not realized
+```
+
+A judgement pronounced against the target by a ledger that supplied no
+observation at all. `"carriers": []` is a different statement — it *declares*
+no carriers, which is what the committed artifact says and precisely what the
+`OWED` verdict exists to report. Presence is now required; type-checking a
+container said nothing about whether it was ever declared.
+
+**Sixth instance of the same pattern, and this time the adjacent dimension was
+checked before shipping.** `run_steps` indexes `graph["event_kinds"]`,
+`["meta_targets"]`, `["expected_payload"]` and `["edges"]` directly — the same
+class of reliance, one artifact over. Through `main()` it is genuinely
+guaranteed: the preflight requires the file to be byte-identical to what the
+extractor derives, and the extractor constructs all four. So the honest move is
+not another validation loop but E-R10's own rule — **declare the premise instead
+of relying on it silently**, which is now written where the indexing happens,
+together with the statement that `run_steps` is not the fail-closed boundary and
+`main()` is.
+
+That is the first round in this sequence where the question *what is the next
+dimension over?* was asked before a reviewer asked it. It produced a declared
+premise rather than a sixth patch, which is the outcome the criterion was
+written to produce. Corpus 38 → 39.
 
 ### E-R17 — the same fix, one level short
 
@@ -1448,7 +1481,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R17)
+## 8. For the independent reviewer (revision E-R18)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before

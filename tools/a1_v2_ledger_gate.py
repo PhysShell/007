@@ -155,6 +155,19 @@ def run_steps(graph: dict, schema: dict, ledger: dict, r: Report | None = None) 
     """
     r = r or Report()
 
+    # ---- premise: `graph` carries the keys indexed below ---------------------
+    # run_steps indexes graph["event_kinds"], ["meta_targets"], ["expected_payload"]
+    # and ["edges"] directly. Through main() that is guaranteed, not hoped: the
+    # preflight requires the file to be byte-identical to what the extractor
+    # derives, and the extractor constructs all four. Declared rather than
+    # re-checked here, because a silent reliance is exactly what 2.5 and E-R10
+    # forbid — and stated rather than assumed, because the LEDGER's absent-key
+    # case (E-R18) was the same reliance one artifact over.
+    #
+    # As an importable function this is a CONTRACT ON THE CALLER: run_steps is
+    # not the fail-closed boundary. main() is. The corpus calls run_steps with
+    # dicts it constructs itself, which is why it may.
+
     # ---- premise: step 3's key must be as discriminating as the norm ---------
     # Step 3 keys field capability by (source, target domain) and never looks at
     # class. That coarser representation is lossless only while class is
@@ -464,7 +477,18 @@ def main() -> int:
     # not a carrier that fails the gate; it is not an observation at all, and the
     # container-level shape failures above are already ERROR, so treating an
     # unreadable ROW as FAIL would have been arbitrary as well as wrong.
-    carriers = loaded["ledger"].get("carriers", [])
+    # PRESENCE, not merely type. `.get("carriers", [])` turned an absent required
+    # container into a valid empty declaration, so `{}` reported five OWED steps
+    # and exited 1 — a judgement pronounced against the target by a ledger that
+    # supplied no observation at all. An explicit `"carriers": []` is different:
+    # it declares "no carriers", which is what the committed artifact says and
+    # what the OWED verdict is for.
+    if "carriers" not in loaded["ledger"]:
+        r.add("load: ledger", False,
+              "no `carriers` key; an absent container is not an empty declaration",
+              error=True)
+        return r.emit()
+    carriers = loaded["ledger"]["carriers"]
     if not isinstance(carriers, list):
         r.add("load: ledger", False,
               "`carriers` must be a list of rows", error=True)
