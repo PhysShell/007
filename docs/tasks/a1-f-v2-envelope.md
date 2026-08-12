@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R10) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R11) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -19,8 +19,9 @@ level deeper**: E-R6 bound the requirement's sources to the frozen map and left
 its targets free. **E-R8 binds the last unchecked column of a structural row,
 its path.** E-R9 names the family all three belong to and pins one latent
 instance of it; E-R10 turns that into a design criterion and moves the pin to
-the layer it belongs in. Eleven revisions, no graph change in any of them: the
-frozen registry is a hard input here, not a subject.
+the layer it belongs in. **E-R11 closes the family's other two species**, both
+found from outside after the taxonomy predicted them. Twelve revisions, no graph
+change in any of them: the frozen registry is a hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -189,7 +190,7 @@ With nothing drafted, both preflights pass and all five steps are OWED:
 RESULT: FAIL — Envelope v2 is not realized
 ```
 
-`tools/tests/test_a1_v2_ledger_gate.py` — **27 cases, 27 as specified.** Eighteen
+`tools/tests/test_a1_v2_ledger_gate.py` — **29 cases, 29 as specified.** Twenty
 mutate one thing and assert which step catches it; six exercise the preflight
 itself, which E-R1 added and left undefended; two exercise the pin evidence of
 §2.5. The corpus **imports `run_steps`**; it no longer asks the executable to
@@ -216,6 +217,8 @@ disarm.
 | **payload edges relabelled as `artifact_ref` carriers** | **step 2** |
 | **payload digest moved onto a sibling edge of the same source** | **step 2** |
 | **structural carrier path the schema never declared** | **step 2** |
+| **carrier declaring an invented third role** | **well-formedness** |
+| **the same carrier occurrence declared twice** | **well-formedness** |
 | **`PINNED_BLOB` edited with no evidence** | **extractor, at extraction** |
 | **frozen checks under `PYTHONOPTIMIZE=1`** | **extractor, explicit raise** |
 | **the retired harness env var** | **inert — preflight runs anyway** |
@@ -483,6 +486,51 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### E-R11 — the other two species, both predicted and both present
+
+Two P1s from Codex against `ef0200a`, arriving one round after §7 named three
+information-losing operations and claimed each had been witnessed at least once.
+Both were the two whose only witnesses were historical. Reproduced before
+acceptance:
+
+```text
+invented carrier_kind      -> (0, all five PASS)
+duplicate artifact_ref row -> (0, all five PASS)   ledger rows: 70
+```
+
+**Role substitution.** `carrier_kind` is a **closed** choice in frozen §4.2.6.
+Step 2 filters for `event_payload_digest`, step 3 filters for `artifact_ref`, so
+a misspelled or invented third role fell through both — and step 4 admitted the
+row on its `(source, target, class)` triple alone, which is the coordinate set
+that survives when the role is erased. A carrier with no role, a nonexistent
+path, and a green gate.
+
+**Multiplicity collapse.** Step 3 unions target domains and steps 4/5 compare
+sets, so a byte-for-byte duplicate reduced to one observation. Seventy rows, a
+sixty-nine-edge graph, `PASS`. Frozen §4.2.6 does allow several carriers for one
+edge — the `NormalizedOutput` case — but that permits two *different* field
+occurrences, not two declarations of one.
+
+Both now fail a **ledger well-formedness** check that runs before the five
+frozen steps rather than inside them: the role must be one of the two admitted
+values, and no `(source, target, class, carrier_kind, path)` row may be declared
+twice. Placed before coverage, because a row whose role is unknown is not a
+carrier whose coverage can be assessed. The five steps keep their frozen order
+and numbering. Corpus 27 → 29.
+
+**What this round is actually evidence of.** §7 named three species and offered a
+witness for each; two of those witnesses were old defects already repaired, so
+the claim that the species were *live* rested on nothing. One round later both
+turned out to be present in current code. The taxonomy was not a tidy
+retrospective classification — it described where to look, an outside reader
+looked there, and the defects were there.
+
+It also closes §8.7, which asked *is there a place where duplicate `artifact_ref`
+carriers should be a defect rather than a no-op?* That question sat in this
+document for two revisions, correctly worded, next to code where the answer was
+yes. Writing a question down is not attacking it, and an author who has written
+the question is measurably not the person who will answer it.
 
 ### E-R10 — a design criterion, and a premise moved to its own layer
 
@@ -1004,7 +1052,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R10)
+## 8. For the independent reviewer (revision E-R11)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before
@@ -1062,7 +1110,9 @@ one grows on top.
    three rounds and is the least trustworthy region of this gate; steps 1, 3, 4
    and 5 have had one author and no such pass.
 
-7. **Exact cardinality elsewhere.** Step 2 now counts structural carriers.
-   Steps 4 and 5 still work on sets of triples. Is there a place where duplicate
-   `artifact_ref` carriers for one edge should also be a defect rather than a
-   no-op?
+7. **Answered from outside, in E-R11.** This asked whether duplicate
+   `artifact_ref` carriers should be a defect rather than a no-op. They were a
+   no-op: a byte-for-byte duplicate row collapsed under step 3's set union and
+   steps 4/5's membership, so a seventy-row ledger passed against a sixty-nine
+   edge graph. Asked here for two revisions and closed only when Codex supplied
+   the witness — writing the question down is not the same as attacking it.

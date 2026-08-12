@@ -258,6 +258,30 @@ def _structural_path_phantom():
     return s, l
 
 
+@case("carrier declaring an invented third role", 1, {"1": "PASS"})
+def _unknown_carrier_kind():
+    # Role substitution. carrier_kind is a CLOSED choice; steps 2 and 3 each
+    # filter for one exact spelling, so a misspelling fell through both and step
+    # 4 admitted the row on its triple alone — role gone, path unverified, PASS.
+    s, l = faithful()
+    c = dict(next(x for x in l["carriers"] if x["carrier_kind"] == REF))
+    c["carrier_kind"], c["path"] = "artifactref", "synthetic::nowhere"
+    l["carriers"].append(c)
+    return s, l
+
+
+@case("the same carrier occurrence declared twice", 1, {"1": "PASS"})
+def _duplicate_ref_row():
+    # Multiplicity collapse. Step 3 unions domains and steps 4/5 compare sets,
+    # so a byte-for-byte duplicate reduced to one observation and a seventy-row
+    # ledger passed against a sixty-nine-edge graph. Several carriers for one
+    # edge stay legal; two declarations of ONE field occurrence do not.
+    s, l = faithful()
+    l["carriers"].append(dict(next(x for x in l["carriers"]
+                                   if x["carrier_kind"] == REF)))
+    return s, l
+
+
 @case("meta-target narrowed to one member by the schema", 1, {"3": "FAIL"})
 def _meta_narrowed():
     # A subject_refs field permitting only WorkOrder is NOT a faithful

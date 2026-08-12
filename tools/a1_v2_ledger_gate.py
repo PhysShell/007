@@ -134,6 +134,40 @@ def run_steps(graph: dict, schema: dict, ledger: dict, r: Report | None = None) 
               "supersede the verifier contract. Do NOT alter the authority.")
 
     carriers = ledger.get("carriers", [])
+
+    # ---- ledger well-formedness: closed role, distinct rows ------------------
+    # Two information-losing operations lived here, one per remaining species of
+    # the family named in 7 (E-R9).
+    #
+    # ROLE SUBSTITUTION. carrier_kind is a CLOSED choice in frozen 4.2.6. Steps 2
+    # and 3 each filter for one exact spelling, so a misspelled or invented third
+    # role fell through both, and step 4 admitted the row on its triple alone —
+    # a carrier with no role, an unverified path, and a PASS.
+    #
+    # MULTIPLICITY COLLAPSE. Step 3 unions target domains and steps 4/5 compare
+    # sets, so a byte-for-byte duplicate row reduced to one observation: a
+    # seventy-row ledger for a sixty-nine-edge graph reported PASS. Frozen 4.2.6
+    # allows several carriers for one edge (the NormalizedOutput case) — it does
+    # not make two declarations of the SAME concrete field occurrence into two
+    # carriers.
+    known_kinds = {"artifact_ref", "event_payload_digest"}
+    ill: list[str] = []
+    row_count: dict[tuple, int] = {}
+    for c in carriers:
+        kind = c.get("carrier_kind")
+        if kind not in known_kinds:
+            ill.append(f'{c.get("source")} -> {c.get("target")}: carrier_kind '
+                       f'{kind!r} is not one of {sorted(known_kinds)}')
+        row = (c.get("source"), c.get("target"), c.get("class"), kind, c.get("path"))
+        row_count[row] = row_count.get(row, 0) + 1
+    for row, n in sorted(row_count.items(), key=lambda kv: str(kv[0])):
+        if n > 1:
+            ill.append(f"{row[0]} -{row[2]}-> {row[1]} at {row[4]!r}: declared "
+                       f"{n} times as one carrier occurrence")
+    if carriers:
+        r.add("ledger well-formedness", not ill,
+              f"{len(carriers)} rows, closed roles, no repeated occurrence" if not ill
+              else "; ".join(ill[:2]))
     frozen_kinds = set(graph["event_kinds"])
     meta = graph["meta_targets"]
     expected_payload = graph["expected_payload"]
