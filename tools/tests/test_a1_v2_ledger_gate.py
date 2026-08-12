@@ -282,6 +282,29 @@ def _duplicate_ref_row():
     return s, l
 
 
+@case("schema declaring one event kind twice", 1, {"1": "PASS"})
+def _duplicate_event_kind():
+    # Step 1's norm is SET equality, so `set(...)` matched the norm — but only
+    # after silently normalising an observation that says the schema defines one
+    # event kind twice. Well-formedness first, then the comparison.
+    s, l = faithful()
+    s["event_kinds"] = s["event_kinds"] + [s["event_kinds"][0]]
+    return s, l
+
+
+@case("two contradictory schema facts for one field path", 1, {"1": "PASS"})
+def _contradictory_field_facts():
+    # Step 3 indexes facts by path, so the LAST row won: with the correct fact
+    # last, a schema containing a contradictory claim passed all five steps.
+    # The verdict depended on list order, which is silent resolution rather
+    # than detection.
+    s, l = faithful()
+    bad = dict(s["artifact_ref_fields"][0])
+    bad["allowed_concrete_target_kinds"] = ["ScopeContract"]
+    s["artifact_ref_fields"] = [bad] + s["artifact_ref_fields"]
+    return s, l
+
+
 @case("meta-target narrowed to one member by the schema", 1, {"3": "FAIL"})
 def _meta_narrowed():
     # A subject_refs field permitting only WorkOrder is NOT a faithful

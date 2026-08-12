@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R11) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R12) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -20,8 +20,10 @@ its targets free. **E-R8 binds the last unchecked column of a structural row,
 its path.** E-R9 names the family all three belong to and pins one latent
 instance of it; E-R10 turns that into a design criterion and moves the pin to
 the layer it belongs in. **E-R11 closes the family's other two species**, both
-found from outside after the taxonomy predicted them. Twelve revisions, no graph
-change in any of them: the frozen registry is a hard input here, not a subject.
+found from outside after the taxonomy predicted them. **E-R12 audits the
+untouched steps against the criterion and finds the same species on the schema
+term.** Thirteen revisions, no graph change in any of them: the frozen registry
+is a hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -190,7 +192,7 @@ With nothing drafted, both preflights pass and all five steps are OWED:
 RESULT: FAIL — Envelope v2 is not realized
 ```
 
-`tools/tests/test_a1_v2_ledger_gate.py` — **29 cases, 29 as specified.** Twenty
+`tools/tests/test_a1_v2_ledger_gate.py` — **31 cases, 31 as specified.** Twenty-two
 mutate one thing and assert which step catches it; six exercise the preflight
 itself, which E-R1 added and left undefended; two exercise the pin evidence of
 §2.5. The corpus **imports `run_steps`**; it no longer asks the executable to
@@ -218,6 +220,8 @@ disarm.
 | **payload digest moved onto a sibling edge of the same source** | **step 2** |
 | **structural carrier path the schema never declared** | **step 2** |
 | **carrier declaring an invented third role** | **well-formedness** |
+| **schema declaring one event kind twice** | **well-formedness** |
+| **two contradictory schema facts for one field path** | **well-formedness** |
 | **the same carrier occurrence declared twice** | **well-formedness** |
 | **`PINNED_BLOB` edited with no evidence** | **extractor, at extraction** |
 | **frozen checks under `PYTHONOPTIMIZE=1`** | **extractor, explicit raise** |
@@ -486,6 +490,70 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### E-R12 — the audit, and what twelve revisions were actually about
+
+**The dominant failure mode of this branch, stated as a conclusion:**
+
+> **It was not incorrect authority, and it was not incorrect artifact
+> generation. It was loss of normative distinctions during verification.**
+
+`graph.json` is byte-identical across all thirteen revisions. Six P1s and three
+Majors changed only *which invalid states the verifier could tell apart from
+valid ones*. That is unusually direct evidence for the claim: had the problem
+been the authority or the derivation, the derived artifact would have moved.
+
+**The layering rule E-R11 earned:**
+
+> **Establish observation well-formedness before asking whether the observations
+> satisfy the authority.**
+
+An unknown `carrier_kind` is not *coverage = false*; it is not a valid
+observation at all. A duplicate row is not something later set membership should
+quietly normalise. Without the rule, the five frozen steps reason over malformed
+evidence and every `set()` and `{k: v}` becomes an accidental sanitiser.
+
+#### The audit: preservation tables for the steps nobody had examined
+
+For each step: the normative distinction, what encodes it, the representation
+used, and whether the distinction survives — with *why*, or with the pinned
+premise that makes a coarser view lossless. The four dimensions are the ones
+this branch has now supplied witnesses for: **identity coordinates, path /
+provenance, semantic role, multiplicity.**
+
+| step | norm | representation | preserved? |
+|---|---|---|---|
+| **1** | exact set equality of event kinds | `set(schema.event_kinds)` | **Subject genuinely is a set** — set equality *is* the norm. But the observation was a list, and `set()` silently normalised a schema defining one kind twice. **Fixed:** well-formedness first. |
+| **3** | a field declares the complete set of edges it may realize | `{f["path"]: f}`, source + target domain | **Was lossy twice.** Class omitted — coarser, now covered by a pinned premise (E-R10). And indexing by path let two contradictory facts resolve by **list order**: correct fact last, gate green. **Fixed:** well-formedness first. |
+| **4** | every carrier maps only to §4.2.4 edges | `(source, target, class) ∈ admitted` | **Identity preserved exactly.** Role not observed here — legitimate only because well-formedness closes the role universe and step 2 binds the digest pairs. **One row owed:** whether an *additional* `artifact_ref` carrier on a payload-bearing pair is admissible is not decided by the frozen text, so this gate neither permits nor forbids it deliberately. |
+| **5** | every edge has **>= 1** carrier | set membership over triples | **Lossless because the subject really is coarser.** The norm quantifies existence, not count; multiplicity and path are outside what it distinguishes. This is the positive case the criterion is meant to permit. |
+
+The audit found the same species again, on the term that had no well-formedness
+check at all — the **schema facts**. A kind declared twice collapsed under
+`set()`; two contradictory facts for one path resolved by list order, and with
+the correct fact last the gate passed while the middle term contained a
+contradiction. Both now fail *schema facts well-formedness*. Corpus 29 → 31.
+
+#### What E-R11 did and did not establish
+
+It did **not** show the taxonomy is complete. It showed something narrower and
+better: all three named species have explanatory power, and the two that lacked
+current-code witnesses **produced them prospectively** on the next targeted
+review. Prediction, then payout — not three labels fitted to old bugs. Nobody has
+discovered the periodic table of verifier defects here.
+
+#### What the corpus can and cannot establish
+
+**Zero of the nine external findings came from the 31 author-written cases.**
+That does not make the corpus useless; it fixes its meaning precisely:
+
+> The corpus establishes **regression against known adversarial shapes**. It
+> cannot establish **adequacy of the author's own observation model**, because
+> the same model chooses the representation and the mutation.
+
+That boundary is now demonstrated rather than argued. §8.7 is the sharpest
+instance: the correct question sat written down, in this document, for two
+revisions, beside the code where the answer was yes.
 
 ### E-R11 — the other two species, both predicted and both present
 
@@ -1052,7 +1120,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R11)
+## 8. For the independent reviewer (revision E-R12)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before
@@ -1092,13 +1160,11 @@ one grows on top.
    var exported once in a shell disarms every later invocation in it. The
    recorded repair — lift steps 1–5 into an importable function — is done, and
    the variable is now inert with a regression pinning it.
-9. **The criterion, applied to the four steps nobody has audited.** Every
-   acceptance predicate must be at least as discriminating as the distinction it
-   enforces, or declare and pin the authority property that makes its coarser
-   representation lossless (§7, E-R10). Step 3 now does the second. Steps 1, 4
-   and 5 have never been examined against either half. Which of them uses a
-   representation coarser than its norm, and does anything declare why that is
-   safe?
+9. **The preservation tables of §7 (E-R12) are claims, not proofs.** Each row
+   asserts either *this step's subject really is this coarse* or *a pinned
+   premise makes the projection lossless*. Both are attackable, and one row is
+   openly owed. The table exists so a reader can refute a cell rather than
+   re-derive the gate. Which cell is wrong?
 
 8. **Attack identity preservation, not mutations.** Three P1s in a row were
    one family (§7, E-R9): the verifier's observation granularity was weaker than

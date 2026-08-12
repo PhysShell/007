@@ -164,6 +164,27 @@ def run_steps(graph: dict, schema: dict, ledger: dict, r: Report | None = None) 
         if n > 1:
             ill.append(f"{row[0]} -{row[2]}-> {row[1]} at {row[4]!r}: declared "
                        f"{n} times as one carrier occurrence")
+    # The same rule on the OTHER observed term. Step 1's norm is set equality and
+    # step 3 indexes facts by path, so `set(...)` and `{f["path"]: f}` were
+    # silently normalising the middle term: a kind defined twice collapsed to
+    # one, and two contradictory facts for one path resolved by LIST ORDER —
+    # correct fact last, gate green. Neither is a judgement about the authority;
+    # both are malformed observations, and an observation that cannot be read
+    # unambiguously must not be reduced to one that can.
+    schema_ill: list[str] = []
+    kind_n: dict[str, int] = {}
+    for k in schema.get("event_kinds") or []:
+        kind_n[k] = kind_n.get(k, 0) + 1
+    schema_ill += [f"event kind {k!r} declared {n} times" for k, n in sorted(kind_n.items()) if n > 1]
+    path_n: dict[str, int] = {}
+    for f in schema.get("artifact_ref_fields") or []:
+        path_n[f.get("path")] = path_n.get(f.get("path"), 0) + 1
+    schema_ill += [f"field path {q!r} has {n} fact rows" for q, n in sorted(path_n.items(), key=str) if n > 1]
+    if schema.get("event_kinds") or schema.get("artifact_ref_fields"):
+        r.add("schema facts well-formedness", not schema_ill,
+              f'{len(kind_n)} kinds, {len(path_n)} field paths, each declared once'
+              if not schema_ill else "; ".join(schema_ill[:2]))
+
     if carriers:
         r.add("ledger well-formedness", not ill,
               f"{len(carriers)} rows, closed roles, no repeated occurrence" if not ill
