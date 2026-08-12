@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use o7_sandbox_protocol::provenance::PolicyProvenance;
+use o7_sandbox_protocol::provenance::{self, PolicyProvenance, SchemaSupport};
 use serde::{Deserialize, Serialize};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -284,14 +284,20 @@ pub fn read_policy_provenance(dir: &Path) -> ProvenanceRead {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return ProvenanceRead::Missing,
         Err(e) => return ProvenanceRead::Malformed(format!("reading {}: {e}", path.display())),
     };
-    match serde_json::from_str::<PolicyProvenance>(&text) {
-        Ok(provenance) if !provenance.is_supported_version() => {
-            ProvenanceRead::UnsupportedVersion {
-                found: provenance.schema_version,
-            }
+    // Version FIRST, from an envelope that tolerates unknown fields — `PolicyProvenance` is
+    // `deny_unknown_fields`, so a genuine future schema would fail the strict parse and be
+    // reported as corruption if the version were only read afterwards.
+    match provenance::probe_schema_version(&text) {
+        SchemaSupport::Unreadable(e) => {
+            ProvenanceRead::Malformed(format!("parsing {}: {e}", path.display()))
         }
-        Ok(provenance) => ProvenanceRead::Present(Box::new(provenance)),
-        Err(e) => ProvenanceRead::Malformed(format!("parsing {}: {e}", path.display())),
+        SchemaSupport::Unsupported { found } => ProvenanceRead::UnsupportedVersion { found },
+        SchemaSupport::Supported => match serde_json::from_str::<PolicyProvenance>(&text) {
+            Ok(provenance) => ProvenanceRead::Present(Box::new(provenance)),
+            // The version is one this build claims to understand, so a parse failure here is
+            // real corruption rather than a schema this reader was never going to read.
+            Err(e) => ProvenanceRead::Malformed(format!("parsing {}: {e}", path.display())),
+        },
     }
 }
 
@@ -596,6 +602,53 @@ mod provenance_tests {
             read_policy_provenance(&rec.dir),
             ProvenanceRead::UnsupportedVersion { found: 999 }
         );
+    }
+
+    /// Second review round, at the seam where the classification is actually observed. The
+    /// version is read from a tolerant envelope BEFORE the strict parse, so a future document
+    /// whose shape this build has never seen is still reported as a future document — not as
+    /// corruption, which is what a parse-then-classify order would have said about every real
+    /// schema evolution.
+    #[test]
+    fn a_future_record_whose_shape_is_unknown_still_reads_as_a_future_version() {
+        let runs = tempfile::tempdir().unwrap();
+        let rec = RunRecord::create(runs.path(), "target", "run-1").unwrap();
+
+        for (label, body) in [
+            (
+                "a shape this build has never seen",
+                r#"{"schema_version":999,"completely_new_future_shape":{"aliens":true}}"#
+                    .to_owned(),
+            ),
+            (
+                "a plausible v2: today's fields plus one more",
+                format!(
+                    r#"{{"schema_version":2,"policy_digest":"{}","fields":{{}},"new_v2_field":"x"}}"#,
+                    "0".repeat(64)
+                ),
+            ),
+        ] {
+            std::fs::write(rec.dir.join(POLICY_PROVENANCE_FILE), &body).unwrap();
+            match read_policy_provenance(&rec.dir) {
+                ProvenanceRead::UnsupportedVersion { .. } => {}
+                other => panic!("{label} must read as UnsupportedVersion, got {other:?}"),
+            }
+        }
+
+        // A supported version still gets the strict parse, so smuggling stays Malformed rather
+        // than being waved through by the preflight.
+        std::fs::write(
+            rec.dir.join(POLICY_PROVENANCE_FILE),
+            format!(
+                r#"{{"schema_version":1,"policy_digest":"{}","fields":{{}},"leaked_env":"FOO=bar"}}"#,
+                "0".repeat(64)
+            ),
+        )
+        .unwrap();
+        assert!(matches!(
+            read_policy_provenance(&rec.dir),
+            ProvenanceRead::Malformed(_)
+        ));
     }
 
     /// A truncated artifact is a diagnostic, but a record dir that cannot be written to is

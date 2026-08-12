@@ -10,8 +10,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use o7_sandbox_protocol::provenance::{
-    CliOption, ConfigAnchor, ConfigLocator, EnvName, PolicyField, PolicyKey, PolicyProvenance,
-    PolicySource, PolicySources, PROVENANCE_SCHEMA_VERSION,
+    probe_schema_version, CliOption, ConfigAnchor, ConfigLocator, EnvName, PolicyField, PolicyKey,
+    PolicyProvenance, PolicySource, PolicySources, SchemaSupport, PROVENANCE_SCHEMA_VERSION,
 };
 use o7_sandbox_protocol::{NetworkPolicy, SandboxPolicy};
 
@@ -310,4 +310,72 @@ fn an_unsupported_schema_version_is_visible_rather_than_assumed_understood() {
         !future.is_supported_version(),
         "a v999 document must not claim to be understood by a v1 reader"
     );
+}
+
+/// Second review round. Classifying by version AFTER a strict parse only ever recognised a
+/// future document that happened to fit the v1 shape: `deny_unknown_fields` made a genuine v2
+/// — same fields plus a new one — fail to deserialize, so every real schema evolution was
+/// reported as corruption. The version is now read from a tolerant envelope first.
+#[test]
+fn a_future_schema_is_classified_by_version_not_by_whether_it_fits_todays_shape() {
+    let digest = "0".repeat(64);
+
+    // The case the distinction exists for: a future document whose SHAPE this build has never
+    // seen. Nothing here parses as v1, and that must not be mistaken for corruption.
+    assert_eq!(
+        probe_schema_version(
+            r#"{"schema_version":999,"completely_new_future_shape":{"aliens":true}}"#
+        ),
+        SchemaSupport::Unsupported { found: 999 }
+    );
+    // A plausible v2: today's fields plus one more.
+    assert_eq!(
+        probe_schema_version(&format!(
+            r#"{{"schema_version":2,"policy_digest":"{digest}","fields":{{}},"new_v2_field":"x"}}"#
+        )),
+        SchemaSupport::Unsupported { found: 2 }
+    );
+    // A future version that happens to fit today's shape lands in the same bucket — the
+    // classification no longer depends on that accident either way.
+    assert_eq!(
+        probe_schema_version(&format!(
+            r#"{{"schema_version":999,"policy_digest":"{digest}","fields":{{}}}}"#
+        )),
+        SchemaSupport::Unsupported { found: 999 }
+    );
+
+    // The supported version earns a strict parse; the envelope decides nothing else.
+    assert_eq!(
+        probe_schema_version(
+            &serde_json::to_string(&PolicyProvenance::describe(
+                &effective_policy(),
+                &cli_sources()
+            ))
+            .unwrap()
+        ),
+        SchemaSupport::Supported
+    );
+    // Notably: a v1 document carrying a payload still probes as Supported and is then caught
+    // by the strict parse. The preflight widens what is CLASSIFIABLE, never what is accepted.
+    let smuggling = format!(
+        r#"{{"schema_version":1,"policy_digest":"{digest}","fields":{{}},"leaked_env":"FOO=bar"}}"#
+    );
+    assert_eq!(probe_schema_version(&smuggling), SchemaSupport::Supported);
+    assert!(serde_json::from_str::<PolicyProvenance>(&smuggling).is_err());
+
+    // Anything that is not a JSON document with a numeric `schema_version` is unreadable —
+    // distinct from "a version I don't know".
+    for bad in [
+        r#"{"policy_digest":"x"}"#,    // no version at all
+        r#"{"schema_version":"two"}"#, // not a number
+        r#"{"schema_version":-1}"#,    // not a u32
+        "{ truncated",
+        "[]",
+        "",
+    ] {
+        assert!(
+            matches!(probe_schema_version(bad), SchemaSupport::Unreadable(_)),
+            "{bad:?} must probe as Unreadable"
+        );
+    }
 }

@@ -53,12 +53,33 @@ Reading is correspondingly total: `read_policy_provenance` returns
 `Present`/`Missing`/`Malformed`/`UnsupportedVersion` and never `Result`, because a reader that
 can return `Err` invites a caller to `?` it into a path that decides something.
 
-`UnsupportedVersion` is separate from `Malformed` on purpose. `schema_version` is not enforced
-at parse: a v999 document deserializes into the v1 struct whenever the fields happen to line
-up, and rejecting it at parse would collapse "written by a newer o7" into "corrupt". Neither
-may a v1 reader report it as `Present` — that would be claiming to have understood a schema it
-has never seen. So the type parses version-agnostically and the reader classifies, which keeps
-every outcome diagnostic.
+`UnsupportedVersion` is separate from `Malformed` on purpose, and the ORDER of the two checks
+is what makes that separation real. `PolicyProvenance` is `deny_unknown_fields`, so a genuine
+future v2 — today's fields plus a new one — fails to deserialize. Classifying after a strict
+parse would therefore have recognised only a future document that happened to fit the current
+shape, and reported every real schema evolution as corruption:
+
+```text
+future version, v1-compatible shape  →  UnsupportedVersion   (the accident)
+future version, genuinely new shape  →  Malformed            (the case that matters)
+```
+
+So the reader runs a version preflight — `probe_schema_version`, reading a `schema_version`
+envelope that tolerates unknown fields — and only a supported version earns the strict parse:
+
+```text
+bytes
+  ↓ envelope parse
+schema_version?
+  ├─ missing / not a u32  → Malformed
+  ├─ != supported         → UnsupportedVersion { found }
+  └─ == supported
+          ↓ strict parse
+     Present / Malformed
+```
+
+The preflight widens what is CLASSIFIABLE, never what is accepted: a v1 document carrying a
+payload probes as supported and is then rejected by the strict parse, exactly as before.
 
 There is deliberately **no `provenance_digest`**. Anything that gets a digest eventually
 gets checked, and a check is a trust dependency. If provenance ever becomes part of a

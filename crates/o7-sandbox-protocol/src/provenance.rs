@@ -289,6 +289,58 @@ validating_deserialize!(PolicyKey, PolicyKey::parse);
 validating_deserialize!(EnvName, EnvName::parse);
 validating_deserialize!(ConfigLocator, ConfigLocator::parse);
 
+/// The minimal envelope every provenance document presents, whatever schema it was written
+/// to. Deliberately NOT `deny_unknown_fields`: reading a document whose other fields this
+/// build has never heard of is its entire job.
+#[derive(Deserialize)]
+struct VersionEnvelope {
+    schema_version: u32,
+}
+
+/// What a document's declared schema says about whether this build can read it — the answer
+/// to [`probe_schema_version`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SchemaSupport {
+    /// The version this build understands. A strict parse is meaningful, and its failure is
+    /// then real corruption.
+    Supported,
+    /// A version this build does not know. Its SHAPE is unknown too, so no strict parse
+    /// should be attempted against it.
+    Unsupported { found: u32 },
+    /// Not a JSON document carrying a numeric `schema_version` at all.
+    Unreadable(String),
+}
+
+/// Classify a provenance document by its declared schema version, WITHOUT parsing it.
+///
+/// Order matters, and getting it wrong is subtle. `PolicyProvenance` is
+/// `deny_unknown_fields`, which is what stops a payload riding along beside a valid
+/// identifier — but it also means a genuine future v2 (same fields plus a new one) fails to
+/// deserialize. Classifying after a strict parse therefore only ever recognises a future
+/// document that happens to fit the CURRENT shape, and reports every real schema evolution as
+/// corruption:
+///
+/// ```text
+/// future version, v1-compatible shape  →  UnsupportedVersion   (the accident)
+/// future version, genuinely new shape  →  Malformed            (the case that matters)
+/// ```
+///
+/// So the version is read first, from an envelope that tolerates anything, and only a
+/// supported version earns a strict parse. "Written by a newer o7" and "corrupt" then stay
+/// distinct for the documents an operator will actually meet.
+#[must_use]
+pub fn probe_schema_version(text: &str) -> SchemaSupport {
+    match serde_json::from_str::<VersionEnvelope>(text) {
+        Ok(envelope) if envelope.schema_version == PROVENANCE_SCHEMA_VERSION => {
+            SchemaSupport::Supported
+        }
+        Ok(envelope) => SchemaSupport::Unsupported {
+            found: envelope.schema_version,
+        },
+        Err(e) => SchemaSupport::Unreadable(e.to_string()),
+    }
+}
+
 /// Where one policy value came from. Every variant names its source; no variant can carry the
 /// source's CONTENTS.
 ///
@@ -423,13 +475,10 @@ impl PolicyProvenance {
 
     /// Whether this record's declared schema is the one this build understands.
     ///
-    /// Deliberately a QUERY rather than a deserialize-time rejection. Parsing a v999 document
-    /// into a v1 struct succeeds whenever the fields happen to line up, and silently reporting
-    /// it as understood is the actual defect: a v1 reader would be claiming to have read a
-    /// document written to a schema it has never seen. Rejecting at parse would instead
-    /// collapse "from the future" into "corrupt", losing the distinction an operator needs.
-    /// So the type parses version-agnostically and the reader classifies — which keeps the
-    /// whole thing diagnostic, exactly like every other outcome here.
+    /// Only meaningful for a document that already parsed — which, thanks to
+    /// `deny_unknown_fields`, means one that happened to fit the v1 shape. Classify by
+    /// [`probe_schema_version`] BEFORE parsing, not by this afterwards; see that function for
+    /// why the order matters.
     #[must_use]
     pub fn is_supported_version(&self) -> bool {
         self.schema_version == PROVENANCE_SCHEMA_VERSION
