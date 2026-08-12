@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R16) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R17) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -26,7 +26,8 @@ term.** E-R13 names the mechanism that produces all three species and turns the
 audit into a refutation surface. **E-R14 separates `ERROR` from `FAIL`**, the
 same demotion surviving in the verdict vocabulary; **E-R15 finds the criterion
 holds end to end, on both sides of the checking logic**; **E-R16 applies it to
-the path that obtains the inputs at all.** Seventeen revisions, no graph change
+the path that obtains the inputs at all, and **E-R17 carries that validation
+down to the fields the verifier indexes.** Eighteen revisions, no graph change
 in any of them: the frozen registry is a hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
@@ -197,7 +198,7 @@ With nothing drafted, both preflights pass and all five steps are OWED:
 RESULT: FAIL — Envelope v2 is not realized
 ```
 
-`tools/tests/test_a1_v2_ledger_gate.py` — **35 cases, 35 as specified.** Twenty-two
+`tools/tests/test_a1_v2_ledger_gate.py` — **38 cases, 38 as specified.** Twenty-two
 mutate one thing and assert which step catches it; six exercise the preflight
 itself, which E-R1 added and left undefended; two exercise the pin evidence of
 §2.5. The corpus **imports `run_steps`**; it no longer asks the executable to
@@ -504,6 +505,45 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### E-R17 — the same fix, one level short
+
+**P1 (CodeRabbit, against `7a65d20`).** E-R16 validated that `carriers` is a
+list of objects and stopped there. A row that is an object but carries none of
+the fields the verifier indexes therefore passed the loader:
+
+```text
+{"carriers": [{}]}     -> KeyError: 'source', exit 1, no RESULT line
+```
+
+Exit 1 is `FAIL`. The same lie E-R16 had just repaired, one level deeper, in the
+code that repaired it.
+
+**Verdict class, decided rather than copied from the report.** A row missing
+`source` is not a carrier that fails the gate — it is not an observation at all,
+so no judgement about realization is available from it. The container-level
+shape failures introduced in E-R16 are already `ERROR`; calling an unreadable
+*row* `FAIL` would have been arbitrary as well as wrong. Note the boundary this
+sits on, from E-R13: `raw observations → well-formed evidence`. Both belong on
+the left of that arrow. By contrast an unknown `carrier_kind` stays `FAIL`,
+because that row *is* readable and makes a claim — an invalid one, which is a
+defect of the target rather than an absence of evidence.
+
+Every row must now carry `source`, `target`, `class`, `carrier_kind` and `path`
+as non-empty strings, checked before `run_steps` sees the ledger. A non-string
+`source` also no longer produces `FAIL` — it did not crash, it simply flowed
+through and lost, which was a judgement pronounced on something that was never
+a well-formed observation. Corpus 35 → 38, all through the executable path.
+
+**This is E-R7's pattern again, and it is the fifth instance.** E-R6 bound
+sources and not targets; E-R7 bound the pair and not the path; E-R16 bound the
+container and not the rows. Each repair was correct at the level it addressed
+and stopped exactly where the reported witness stopped. The reviewer supplies a
+witness; the author fixes the witness; the dimension one step further in stays
+open until someone supplies the next witness. Recording it because the pattern
+has now survived being named twice — in E-R7 and again in E-R9 — which is
+itself the finding: naming a recurring error did not stop its author from
+committing it two revisions later.
 
 ### E-R16 — the rule written one revision before the path that needed it
 
@@ -1408,7 +1448,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R16)
+## 8. For the independent reviewer (revision E-R17)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before

@@ -457,11 +457,32 @@ def main() -> int:
             return r.emit()
         loaded[name] = obj
 
+    # Shape validation goes all the way DOWN to the fields the verifier indexes.
+    # E-R16 validated the container — a list of objects — and stopped there, so
+    # `{"carriers": [{}]}` passed the loader and raised KeyError inside step 2:
+    # exit 1, no RESULT, the same lie one level deeper. A row missing `source` is
+    # not a carrier that fails the gate; it is not an observation at all, and the
+    # container-level shape failures above are already ERROR, so treating an
+    # unreadable ROW as FAIL would have been arbitrary as well as wrong.
     carriers = loaded["ledger"].get("carriers", [])
-    if not isinstance(carriers, list) or not all(isinstance(c, dict) for c in carriers):
+    if not isinstance(carriers, list):
         r.add("load: ledger", False,
-              "`carriers` must be a list of objects, one row per carrier", error=True)
+              "`carriers` must be a list of rows", error=True)
         return r.emit()
+    required = ("source", "target", "class", "carrier_kind", "path")
+    for i, c in enumerate(carriers):
+        if not isinstance(c, dict):
+            r.add("load: ledger", False,
+                  f"carrier row {i} is {type(c).__name__}, expected an object", error=True)
+            return r.emit()
+        bad = [f for f in required
+               if f not in c or not isinstance(c[f], str) or not c[f]]
+        if bad:
+            r.add("load: ledger", False,
+                  f"carrier row {i} lacks readable {bad}; every row the verifier "
+                  f"indexes must carry all of {list(required)} as non-empty strings",
+                  error=True)
+            return r.emit()
 
     run_steps(loaded["graph"], loaded["schema"], loaded["ledger"], r)
     return r.emit()

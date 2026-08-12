@@ -460,9 +460,21 @@ def preflight_cases() -> list[tuple[str, bool]]:
         shaped.write_text("[]\n")
         rows = d / "rows.json"
         rows.write_text('{"carriers": "not a list"}\n')
+        empty_row = d / "emptyrow.json"
+        empty_row.write_text('{"carriers": [{}]}\n')
+        partial = d / "partial.json"
+        partial.write_text('{"carriers": [{"source": "WorkOrder", "target": "ScopeContract",'
+                           ' "class": "Intra", "carrier_kind": "artifact_ref"}]}\n')
+        mistyped = d / "mistyped.json"
+        mistyped.write_text('{"carriers": [{"source": 1, "target": "ScopeContract",'
+                            ' "class": "Intra", "carrier_kind": "artifact_ref",'
+                            ' "path": "p"}]}\n')
         for label, ledger_arg in (("malformed JSON", bad), ("missing file", d / "nope.json"),
                                   ("non-object top level", shaped),
-                                  ("carriers not a list of rows", rows)):
+                                  ("carriers not a list of rows", rows),
+                                  ("a row with no fields at all", empty_row),
+                                  ("a row missing `path`", partial),
+                                  ("a row whose `source` is not a string", mistyped)):
             p = subprocess.run(
                 [sys.executable, str(GATE), "--graph", str(GRAPH_PATH),
                  "--schema", str(SCHEMA_PATH), "--ledger", str(ledger_arg)],
