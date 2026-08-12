@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R7) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R8) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -16,8 +16,9 @@ reviewer** — a full green over a realization carrying none of the eleven
 structural digests, plus three Majors from CodeRabbit including `assert`-guarded
 checks that vanish under `PYTHONOPTIMIZE`. **E-R7 closes the same wound one
 level deeper**: E-R6 bound the requirement's sources to the frozen map and left
-its targets free. Eight revisions, no graph change in any of them: the frozen
-registry is a hard input here, not a subject.
+its targets free. **E-R8 binds the last unchecked column of a structural row,
+its path.** Nine revisions, no graph change in any of them: the frozen registry
+is a hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -122,6 +123,7 @@ file is rejected.
    AND schema.structural_commitments == the 11 payload-bearing kinds OF THAT MAP
    AND declared structural carriers, keyed by (source, TARGET) == exactly 1 for
        each frozen (CampaignEvent(k), P) pair, and exactly 0 everywhere else
+   AND each structural row's PATH == the path the schema commits for that kind
 3. per FIELD: source kind and COMPLETE target domain == its carriers'
 4. every (source, target, class) carrier is a frozen edge, exactly
 5. every frozen (source, target, class) has >= 1 carrier, exactly
@@ -185,7 +187,7 @@ With nothing drafted, both preflights pass and all five steps are OWED:
 RESULT: FAIL — Envelope v2 is not realized
 ```
 
-`tools/tests/test_a1_v2_ledger_gate.py` — **25 cases, 25 as specified.** Seventeen
+`tools/tests/test_a1_v2_ledger_gate.py` — **26 cases, 26 as specified.** Eighteen
 mutate one thing and assert which step catches it; six exercise the preflight
 itself, which E-R1 added and left undefended; two exercise the pin evidence of
 §2.5. The corpus **imports `run_steps`**; it no longer asks the executable to
@@ -211,6 +213,7 @@ disarm.
 | **schema commits no structural digests at all** | **step 2** |
 | **payload edges relabelled as `artifact_ref` carriers** | **step 2** |
 | **payload digest moved onto a sibling edge of the same source** | **step 2** |
+| **structural carrier path the schema never declared** | **step 2** |
 | **`PINNED_BLOB` edited with no evidence** | **extractor, at extraction** |
 | **frozen checks under `PYTHONOPTIMIZE=1`** | **extractor, explicit raise** |
 | **the retired harness env var** | **inert — preflight runs anyway** |
@@ -478,6 +481,38 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### E-R8 — the column nothing checked
+
+**P1 (Codex, against `4eee8ec`) — a structural carrier's `path` was verified by
+nothing.** Step 2 counted `(source, target)`. Step 3 only ever inspects
+`artifact_ref` rows. Steps 4 and 5 compare `(source, target, class)` and ignore
+paths entirely. So the one column that says *where in the wire this digest
+actually lives* fell between all five steps:
+
+```text
+every structural path := "synthetic::does-not-exist"
+exit 0  {'1': 'PASS', '2': 'PASS', '3': 'PASS', '4': 'PASS', '5': 'PASS'}
+```
+
+Frozen §4.2.6 lists *concrete carrier path* as a column of a ledger row. A
+column nothing checks is not evidence — it is a comment with a schema around it,
+which is the `_note` fields of E-R0 wearing a different hat.
+
+`structural_commitments` was a bare list of event kinds, which could only ever
+prove the digest existed *somewhere*. It is now a map **kind → concrete carrier
+path**, extracted from the schema like every other fact, and step 2 requires each
+structural row's path to equal the path the schema commits for that kind. Corpus
+25 → 26.
+
+**Three P1s in a row, all in step 2, all the same shape.** E-R6: the requirement
+read its right-hand side from the term under test. E-R7: the requirement bound
+sources but not targets. E-R8: the requirement bound the relation but not the
+column that locates it. Each repair was correct and each left an adjacent
+dimension unbound, because the author verified the thing just fixed rather than
+re-deriving what the frozen sentence actually quantifies over. That is worth
+recording as a pattern rather than three incidents — and all three were found
+from outside, each on the commit that had just closed the previous one.
 
 ### E-R7 — the same wound, one level deeper
 
@@ -847,7 +882,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R7)
+## 8. For the independent reviewer (revision E-R8)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before

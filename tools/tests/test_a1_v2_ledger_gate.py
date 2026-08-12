@@ -36,7 +36,7 @@ def faithful() -> tuple[dict, dict]:
     separate edges. The expansion appears only in that field's permitted target
     domain.
     """
-    carriers, fields, struct = [], [], []
+    carriers, fields, struct = [], [], {}
     for e in GRAPH["edges"]:
         src, tgt, cls = e["source"], e["target"], e["class"]
         is_struct = src.startswith("CampaignEvent(") and tgt.endswith("Payload")
@@ -45,7 +45,7 @@ def faithful() -> tuple[dict, dict]:
                          "carrier_kind": STRUCTURAL if is_struct else REF,
                          "path": path})
         if is_struct:
-            struct.append(src[len("CampaignEvent("):-1])
+            struct[src[len("CampaignEvent("):-1]] = path
         else:
             fields.append({"path": path, "source_semantic_kind": src,
                            "allowed_concrete_target_kinds":
@@ -55,7 +55,7 @@ def faithful() -> tuple[dict, dict]:
         "extractor": "synthetic",
         "event_kinds": list(GRAPH["event_kinds"]),
         "payload_presence": dict(GRAPH["expected_payload"]),
-        "structural_commitments": sorted(set(struct)),
+        "structural_commitments": dict(sorted(struct.items())),
         "artifact_ref_fields": fields,
     }
     return schema, {"carriers": carriers}
@@ -92,7 +92,7 @@ def _faithful():
 @case("nothing declared at all", 1, {"1": "OWED", "2": "OWED", "3": "OWED", "4": "OWED", "5": "OWED"})
 def _empty():
     return ({"extracted_from": None, "event_kinds": [], "payload_presence": {},
-             "structural_commitments": [], "artifact_ref_fields": []}, {"carriers": []})
+             "structural_commitments": {}, "artifact_ref_fields": []}, {"carriers": []})
 
 
 @case("schema grows a 22nd event kind", 1, {"1": "FAIL"})
@@ -201,7 +201,7 @@ def _no_structural_commitments():
     # declares a correct payload_presence but commits no event_payload_digest
     # is not permitted to lower the bar to zero.
     s, l = faithful()
-    s["structural_commitments"] = []
+    s["structural_commitments"] = {}
     return s, l
 
 
@@ -212,7 +212,7 @@ def _payloads_as_refs():
     # ZERO the expected count, and the eleven payload edges re-declared as
     # artifact_ref carriers satisfied steps 3, 4 and 5 on their own.
     s, l = faithful()
-    s["structural_commitments"] = []
+    s["structural_commitments"] = {}
     for c in l["carriers"]:
         if c["carrier_kind"] == STRUCTURAL:
             c["carrier_kind"] = REF
@@ -242,6 +242,19 @@ def _digest_substitution():
     s["artifact_ref_fields"].append(
         {"path": struct["path"], "source_semantic_kind": src,
          "allowed_concrete_target_kinds": [struct["target"]]})
+    return s, l
+
+
+@case("structural carrier path the schema never declared", 1, {"2": "FAIL"})
+def _structural_path_phantom():
+    # Found by independent review of 4eee8ec. Steps 4 and 5 ignore paths and
+    # step 3 only inspects artifact_ref rows, so the path column on a structural
+    # carrier was checked by nothing: every digest could name a path that does
+    # not exist and all five steps passed.
+    s, l = faithful()
+    for c in l["carriers"]:
+        if c["carrier_kind"] == STRUCTURAL:
+            c["path"] = "synthetic::does-not-exist"
     return s, l
 
 

@@ -174,7 +174,8 @@ def run_steps(graph: dict, schema: dict, ledger: dict, r: Report | None = None) 
         # the eleven structural digests the contract requires.
         required_pairs = {(f"CampaignEvent({k})", v) for k, v in expected_payload.items() if v}
         required_sources = {s for s, _ in required_pairs}
-        schema_struct = {f"CampaignEvent({k})" for k in schema.get("structural_commitments") or []}
+        struct_decl = schema.get("structural_commitments") or {}
+        schema_struct = {f"CampaignEvent({k})" for k in struct_decl}
         if schema_struct != required_sources:
             missing = sorted(s[len("CampaignEvent("):-1] for s in required_sources - schema_struct)
             extra = sorted(s[len("CampaignEvent("):-1] for s in schema_struct - required_sources)
@@ -189,6 +190,21 @@ def run_steps(graph: dict, schema: dict, ledger: dict, r: Report | None = None) 
             if got != want:
                 bad.append(f"{src} --event_payload_digest--> {tgt}: {got} carriers, "
                            f"expected exactly {want}")
+        # And the PATH. Steps 4 and 5 ignore paths and step 3 only ever looks at
+        # artifact_ref rows, so a structural carrier's path was the one ledger
+        # column nothing checked: every digest could name `does-not-exist` and
+        # all five steps passed. Frozen 4.2.6 lists the concrete carrier path as
+        # part of a ledger row, and a column nothing checks is not evidence.
+        for c in carriers:
+            if c.get("carrier_kind") != "event_payload_digest":
+                continue
+            src = c["source"]
+            kind = src[len("CampaignEvent("):-1] if src.startswith("CampaignEvent(") else src
+            want_path = struct_decl.get(kind)
+            if want_path is None:
+                bad.append(f"{src}: structural carrier for a kind the schema does not commit")
+            elif c.get("path") != want_path:
+                bad.append(f"{src}: structural path {c.get('path')!r} != schema {want_path!r}")
         r.add("2. payload presence map", not bad,
               f"{n_bearing} one / {n_free} zero, structural carrier counts exact" if not bad
               else "; ".join(bad[:3]))

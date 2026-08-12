@@ -55,6 +55,14 @@ NOTES = {
         "event_payload_digest on a payload-free kind EVEN IF no ledger row is "
         "ever written for it."
     ),
+    "_structural_commitments_note": (
+        "Map of payload-bearing event kind -> the CONCRETE wire path that "
+        "carries its event_payload_digest. A bare list of kinds proved the "
+        "digest existed somewhere and left its path unverified, so a ledger "
+        "could name a nonexistent carrier path for all eleven and still pass "
+        "every step. Frozen 4.2.6 lists the concrete carrier path as a ledger "
+        "column; a column nothing checks is not evidence."
+    ),
     "_artifact_ref_fields_note": (
         "Per-field CAPABILITY, not merely a path list: each entry records which "
         "source kind the field belongs to and the complete set of concrete "
@@ -74,7 +82,7 @@ def extract() -> dict:
             "extractor": "tools/a1_v2_extract_schema.py",
             "event_kinds": [],
             "payload_presence": {},
-            "structural_commitments": [],
+            "structural_commitments": {},
             "artifact_ref_fields": [],
         }
     raise NotImplementedError(
