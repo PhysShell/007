@@ -150,10 +150,19 @@ def run_steps(graph: dict, schema: dict, ledger: dict, r: Report | None = None) 
         # the other ten. Collapsing carriers into a set would let two identical
         # structural rows for one event kind read as one — a hole in precisely
         # the exact-count contract G-R11 and G-R12 exist to enforce.
-        struct_count: dict[str, int] = {}
+        # Keyed by (source, TARGET). Counting by source alone bound the digest to
+        # an event kind but not to its payload, and eleven of the twenty-one
+        # kinds carry more than one frozen edge — so a ledger could move the
+        # digest onto a sibling edge of the same source and keep the count at
+        # one. `CampaignEvent(HumanCommandRejected)` has rows 56 and 64; swapping
+        # which one carried the digest passed all five steps while the required
+        # relation --event_payload_digest--> HumanCommandRejectedPayload did not
+        # exist. The frozen requirement is a PAIR, so the key must be the pair.
+        struct_count: dict[tuple[str, str], int] = {}
         for c in carriers:
             if c.get("carrier_kind") == "event_payload_digest":
-                struct_count[c["source"]] = struct_count.get(c["source"], 0) + 1
+                key = (c["source"], c["target"])
+                struct_count[key] = struct_count.get(key, 0) + 1
         # The REQUIREMENT comes from the frozen presence map, never from the
         # schema. Frozen 4.2.6: `expected_payload(k) = P => EXACTLY ONE ledger
         # carrier CampaignEvent(k) --event_payload_digest--> P`. Deriving `want`
@@ -163,19 +172,23 @@ def run_steps(graph: dict, schema: dict, ledger: dict, r: Report | None = None) 
         # relabelling all eleven payload edges as artifact_ref then passed steps
         # 3, 4 and 5 as well — a full green on a realization carrying none of
         # the eleven structural digests the contract requires.
-        required_struct = {f"CampaignEvent({k})" for k, v in expected_payload.items() if v}
+        required_pairs = {(f"CampaignEvent({k})", v) for k, v in expected_payload.items() if v}
+        required_sources = {s for s, _ in required_pairs}
         schema_struct = {f"CampaignEvent({k})" for k in schema.get("structural_commitments") or []}
-        if schema_struct != required_struct:
-            missing = sorted(s[len("CampaignEvent("):-1] for s in required_struct - schema_struct)
-            extra = sorted(s[len("CampaignEvent("):-1] for s in schema_struct - required_struct)
+        if schema_struct != required_sources:
+            missing = sorted(s[len("CampaignEvent("):-1] for s in required_sources - schema_struct)
+            extra = sorted(s[len("CampaignEvent("):-1] for s in schema_struct - required_sources)
             bad.append(f"schema commits structural digests for {len(schema_struct)} kinds, "
-                       f"frozen map requires {len(required_struct)}: "
+                       f"frozen map requires {len(required_sources)}: "
                        f"missing={missing[:3]} extra={extra[:3]}")
-        for src in sorted(required_struct | schema_struct | set(struct_count)):
-            want = 1 if src in required_struct else 0
-            got = struct_count.get(src, 0)
+        # want=1 catches a required pair left uncarried; want=0 catches the
+        # carrier kind appearing on any edge the frozen map does not name.
+        for src, tgt in sorted(required_pairs | set(struct_count)):
+            want = 1 if (src, tgt) in required_pairs else 0
+            got = struct_count.get((src, tgt), 0)
             if got != want:
-                bad.append(f"{src}: {got} structural carriers, expected exactly {want}")
+                bad.append(f"{src} --event_payload_digest--> {tgt}: {got} carriers, "
+                           f"expected exactly {want}")
         r.add("2. payload presence map", not bad,
               f"{n_bearing} one / {n_free} zero, structural carrier counts exact" if not bad
               else "; ".join(bad[:3]))

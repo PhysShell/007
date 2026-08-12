@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R6) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R7) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -14,8 +14,10 @@ repair. E-R5 scopes two of E-R4's claims to what their witness actually
 observes. **E-R6 repairs the first defect found by a genuinely independent
 reviewer** — a full green over a realization carrying none of the eleven
 structural digests, plus three Majors from CodeRabbit including `assert`-guarded
-checks that vanish under `PYTHONOPTIMIZE`. Seven revisions, no graph change in
-any of them: the frozen registry is a hard input here, not a subject.
+checks that vanish under `PYTHONOPTIMIZE`. **E-R7 closes the same wound one
+level deeper**: E-R6 bound the requirement's sources to the frozen map and left
+its targets free. Eight revisions, no graph change in any of them: the frozen
+registry is a hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -118,7 +120,8 @@ file is rejected.
 1. schema.event_kinds        == graph.event_kinds
 2. schema.payload_presence   == graph.expected_payload
    AND schema.structural_commitments == the 11 payload-bearing kinds OF THAT MAP
-   AND declared structural carriers   == exactly 1 / exactly 0, per THAT MAP
+   AND declared structural carriers, keyed by (source, TARGET) == exactly 1 for
+       each frozen (CampaignEvent(k), P) pair, and exactly 0 everywhere else
 3. per FIELD: source kind and COMPLETE target domain == its carriers'
 4. every (source, target, class) carrier is a frozen edge, exactly
 5. every frozen (source, target, class) has >= 1 carrier, exactly
@@ -182,7 +185,7 @@ With nothing drafted, both preflights pass and all five steps are OWED:
 RESULT: FAIL — Envelope v2 is not realized
 ```
 
-`tools/tests/test_a1_v2_ledger_gate.py` — **24 cases, 24 as specified.** Sixteen
+`tools/tests/test_a1_v2_ledger_gate.py` — **25 cases, 25 as specified.** Seventeen
 mutate one thing and assert which step catches it; six exercise the preflight
 itself, which E-R1 added and left undefended; two exercise the pin evidence of
 §2.5. The corpus **imports `run_steps`**; it no longer asks the executable to
@@ -207,6 +210,7 @@ disarm.
 | **Phase G source blob mismatch** | **extractor `--check`** |
 | **schema commits no structural digests at all** | **step 2** |
 | **payload edges relabelled as `artifact_ref` carriers** | **step 2** |
+| **payload digest moved onto a sibling edge of the same source** | **step 2** |
 | **`PINNED_BLOB` edited with no evidence** | **extractor, at extraction** |
 | **frozen checks under `PYTHONOPTIMIZE=1`** | **extractor, explicit raise** |
 | **the retired harness env var** | **inert — preflight runs anyway** |
@@ -474,6 +478,42 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### E-R7 — the same wound, one level deeper
+
+**P1 (CodeRabbit, against `4a5ad37`) — step 2 bound the digest to an event kind
+but not to its payload.** E-R6 had just moved the requirement's right-hand side
+to the frozen map. It moved the *sources* and left the *targets* free:
+`struct_count` was keyed by `source` alone, and eleven of the twenty-one kinds
+carry more than one frozen edge.
+
+`CampaignEvent(HumanCommandRejected)` holds row 56 (`→ HumanCommandRequest`,
+`Causal`) and row 64 (`→ HumanCommandRejectedPayload`, `Intra`). Swap which one
+declares the digest, adjust the field facts to match, and:
+
+```text
+exit 0  {'1': 'PASS', '2': 'PASS', '3': 'PASS', '4': 'PASS', '5': 'PASS'}
+digest now points at: HumanCommandRequest | contract requires: HumanCommandRejectedPayload
+```
+
+Step 2 counted one digest for that source and was satisfied. Steps 4 and 5 saw
+two admitted edges, both carried, and were satisfied — they compare
+`(source, target, class)` and never look at `carrier_kind`, so a digest and an
+`ArtifactRef` are interchangeable to them. Nothing in the gate held the frozen
+sentence *`expected_payload(k) = P` ⇒ EXACTLY ONE `CampaignEvent(k)
+--event_payload_digest--> P`*, whose subject is a **pair**.
+
+`struct_count` is now keyed by `(source, target)` and compared against the
+frozen pairs: `want = 1` catches a required pair left uncarried, `want = 0`
+catches the carrier kind appearing on any edge the frozen map does not name.
+Corpus 24 → 25.
+
+**Two rounds, one lesson.** E-R6 fixed *where the requirement comes from* and
+did not ask *what the requirement is a requirement about*. A repair that
+narrows an authority leak by one dimension while leaving another open is the
+characteristic shape of fixing a finding rather than fixing a defect — and it
+was found immediately, by the same reviewer, on the commit that claimed to have
+closed it. The corpus now pins the pair, not the count.
 
 ### E-R6 — first external review: one P1 and three Majors, all confirmed
 
@@ -807,7 +847,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R6)
+## 8. For the independent reviewer (revision E-R7)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before

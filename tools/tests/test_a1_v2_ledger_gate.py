@@ -222,6 +222,29 @@ def _payloads_as_refs():
     return s, l
 
 
+@case("payload digest moved onto a sibling edge of the same source", 1, {"2": "FAIL"})
+def _digest_substitution():
+    # Found by independent review of 4a5ad37. Counting structural carriers by
+    # SOURCE bound the digest to an event kind but not to its payload, and
+    # eleven kinds carry more than one frozen edge. Rows 56 and 64 share the
+    # source CampaignEvent(HumanCommandRejected); swapping which one carried the
+    # digest kept the count at one and passed all five steps, while the required
+    # relation --event_payload_digest--> HumanCommandRejectedPayload was absent.
+    s, l = faithful()
+    src = "CampaignEvent(HumanCommandRejected)"
+    struct = next(c for c in l["carriers"]
+                  if c["carrier_kind"] == STRUCTURAL and c["source"] == src)
+    sibling = next(c for c in l["carriers"]
+                   if c["carrier_kind"] == REF and c["source"] == src)
+    struct["carrier_kind"], sibling["carrier_kind"] = REF, STRUCTURAL
+    s["artifact_ref_fields"] = [f for f in s["artifact_ref_fields"]
+                                if f["path"] != sibling["path"]]
+    s["artifact_ref_fields"].append(
+        {"path": struct["path"], "source_semantic_kind": src,
+         "allowed_concrete_target_kinds": [struct["target"]]})
+    return s, l
+
+
 @case("meta-target narrowed to one member by the schema", 1, {"3": "FAIL"})
 def _meta_narrowed():
     # A subject_refs field permitting only WorkOrder is NOT a faithful
