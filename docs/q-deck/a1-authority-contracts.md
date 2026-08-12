@@ -19,13 +19,17 @@ differ, this document is authoritative.
 
 Corrective rounds R1, R2, R3, R4, R5, R5.1, and R5.2 are recorded in §9.
 
-**Superseded once since incorporation: S1 (§9), which corrects FD-1.4 and
-nothing else.** S1 is the first application of §7 after the merge, as distinct
-from the R-rounds, which were pre-incorporation corrections. It changes this
-document's blob and therefore its `contract_digest`; it changes no
-`envelope_version`, no `message_kind_version`, and no
+**Superseded twice since incorporation: S1 and S2 (§9).** S1 corrects FD-1.4
+and nothing else; S2 corrects FD-1.3 and nothing else, requiring member names to
+be unique within every A1 JSON object. Both are applications of §7 after the
+merge, as distinct from the R-rounds, which were pre-incorporation corrections.
+
+Each changes this document's blob and therefore its `contract_digest`. Neither
+changes any `envelope_version`, `message_kind_version`, or
 `campaign_protocol_version`, because no payload shape, envelope, rank, or
-reducer semantics moved (§7.2).
+reducer semantics moved (§7.2). **An implementation is bound to the current
+blob, not to a version number**, so a consumer still bound to a superseded blob
+is bound to superseded authority however conformant its behaviour looks.
 
 What the freeze covers: the wire schema of every message kind — field names,
 types, required/optional status, null policy, bounds, and the authority that
@@ -2206,6 +2210,8 @@ outcome.
 | unsupported `envelope_version`, `message_kind_version`, or `campaign_protocol_version` | refused, never best-effort parsed (FD-1.6) |
 | unknown field present | rejected at parse time (FD-1.6) |
 | explicit JSON `null` in an optional field | rejected (FD-1.3) |
+| duplicate member name in any object, at any depth | rejected at parse time; never first-wins or last-wins (FD-1.3, S2) |
+| duplicate member name where one occurrence is `null` | rejected; an implementation that reduces the document through a JSON library before applying the null policy will not see the null and must not be admitted on that basis (FD-1.3, S2) |
 | payload exceeding a per-object bound | rejected, never truncated (FD-1.4) |
 | `artifact_refs` whose declared sizes exceed `max_direct_referenced_bytes` | rejected before any read (FD-1.5) |
 | a closure exceeding `max_reachable_closure_bytes`/`_objects` | whole resolution rejected, never partially accepted (FD-1.5) |
@@ -2480,11 +2486,27 @@ effect        this document's blob changes, so contract_digest changes; there is
 **How it surfaced.** A1-V0 step 2 replaced the document layer's materialising
 walk with a streaming scan, under an explicit promise to change *when* a
 structural bound fires and never *which* documents are admitted. External review
-found one document where that promise broke: `{"x": null, "x": 1}`. The old path
-built a `serde_json::Value` first, whose object map silently keeps the last
-duplicate, so the null was gone before any rule ran and the artifact was
-admitted. The streaming scan sees the null, because the null is in the bytes, and
-refuses it.
+found one document where that promise broke.
+
+Grounded exactly, so the claim survives the implementation changing:
+
+```text
+old behaviour   crates/o7-a1-contracts/src/json.rs::validate_document
+                at a6625bc6473e3029a3309ddd7f2795ce57516a60 (merged, PR #124)
+                builds a serde_json::Value, then walks it. The object map keeps
+                the LAST duplicate, so a shadowed member is discarded before any
+                rule runs.
+observed        parse_artifact admits {"x": null, "x": 1} and {"x": 2, "x": 1}
+                at that revision — the first because the null is gone before the
+                FD-1.3 check, the second because nothing examines duplicates
+new behaviour   crates/o7-a1-contracts/src/scan.rs, introduced on the A1-V0
+                step-2 branch (PR #132), streams the bytes and never reduces
+                them, so the null is seen and the document refused
+```
+
+The second case is the one this supersede exists for: no rule in `B1` refuses
+it, and an implementation that did would have been enforcing a rule the contract
+does not contain.
 
 **Why that is a contract gap rather than an implementation choice.** The
 shadowed-null case does follow from FD-1.3 as already written — the null is
@@ -2503,9 +2525,16 @@ authority, and this is that authority.
 
 **Scope discipline.** The rule is stated for A1 JSON objects generally rather
 than per-schema, because the failure is a property of the encoding and not of
-any one payload. It adds no field, moves no bound, and names no new type: an
-implementation that already refused duplicates needs no change, and one that
-deduped silently has a defect it can now see.
+any one payload. It adds no field, moves no bound, and names no new type.
+
+What that does **not** mean is that a conforming implementation needs no change.
+Every consumer bound to `B1` must rebind to `B2`, because an implementation is
+bound to exact contract bytes and not to a version number (§7, and the Status
+section above). An implementation whose parser already refuses duplicates needs
+no change *to its duplicate-detection logic* — and still needs the rebind, or it
+goes on validating campaigns against superseded authority while looking
+conformant. One that deduped silently has a defect it can now see, and the same
+rebind to do.
 
 ### S1 — FD-1.4 classified `InteractionManifestV1` under two bounds at once
 
