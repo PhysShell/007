@@ -172,6 +172,16 @@ def extract(source: Path) -> dict:
     _require(len(edges) == 69, f"expected 69 edges, found {len(edges)}")
     _require(cls["Intra"] == 56 and cls["Causal"] == 13, f"class split moved: {dict(cls)}")
     _require(len({(e["source"], e["target"], e["class"]) for e in edges}) == 69, "duplicate edge")
+    # Step 3 of the gate keys field capability by (source, target domain) and
+    # never looks at class — a projection of a three-field identity onto two.
+    # It is lossless ONLY while no (source, target) pair carries two classes.
+    # That has always been true of the frozen registry and nothing pinned it, so
+    # the guard was an accident of the data rather than a property of the check.
+    # Declared here: if a supersede ever admits such a pair, extraction stops
+    # loudly instead of step 3 going quietly blind.
+    _require(len({(e["source"], e["target"]) for e in edges}) == len(edges),
+             "a (source, target) pair carries two classes; step 3 keys capability "
+             "without class and would no longer distinguish them")
 
     event_kinds = sorted({re.fullmatch(r"CampaignEvent\((\w+)\)", e["source"]).group(1)
                           for e in edges if e["source"].startswith("CampaignEvent(")})

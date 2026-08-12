@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R8) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R9) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -17,8 +17,9 @@ structural digests, plus three Majors from CodeRabbit including `assert`-guarded
 checks that vanish under `PYTHONOPTIMIZE`. **E-R7 closes the same wound one
 level deeper**: E-R6 bound the requirement's sources to the frozen map and left
 its targets free. **E-R8 binds the last unchecked column of a structural row,
-its path.** Nine revisions, no graph change in any of them: the frozen registry
-is a hard input here, not a subject.
+its path.** E-R9 names the family all three belong to and pins one latent
+instance of it. Ten revisions, no graph change in any of them: the frozen
+registry is a hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -482,6 +483,72 @@ two FDs partial is the honest state of a first substantive decision.
 
 ## 7. Revision record
 
+### E-R9 — the family, named; and one latent instance pinned
+
+Not a finding. A generalisation of three, plus the one thing it immediately
+turned up.
+
+**The failure class.** E-R6, E-R7 and E-R8 are not three omissions. They are one
+defect shape:
+
+> **An authority can be correct while the verifier's observation granularity is
+> weaker than the authority's subject.**
+
+The frozen sentence quantifies over some normative object. The predicate
+projects that object onto a weaker key. Where the projection is non-injective,
+two normatively distinct states become one observed state, and the check reports
+on the projection while appearing to report on the norm. E-R7 is the clean
+demonstration: `struct_count` keyed by `source` collapsed row 56 and row 64 of
+`CampaignEvent(HumanCommandRejected)`, so a swap preserved `struct_count == 1`
+while the required pair no longer existed.
+
+That reframes what E-R6 accomplished. It closed *where does the requirement come
+from* and never asked *what is the identity of one requirement*. Two different
+questions; answering the first is not evidence about the second.
+
+**The chain to audit, and the single question at each link:**
+
+```text
+normative object -> extracted key -> multiplicity/counting -> comparison
+                                                              predicate
+                                                                 -> accepted witness
+
+at every arrow:  can two normatively DISTINCT objects collapse into one state
+                 the verifier observes?
+```
+
+Three named sub-species, each already witnessed here at least once:
+
+| | shape | witnessed |
+|---|---|---|
+| **Projection loss** | identity is `(A,B,C)`, the check indexes `(A,B)` | E-R7 (target dropped), E-R8 (path dropped) |
+| **Role substitution** | coordinates agree, but the verifier treats values of different roles as interchangeable | E-R7 — steps 4/5 never inspect `carrier_kind`, so a digest and an `ArtifactRef` are the same thing to them |
+| **Multiplicity collapse** | existence or set membership checked where the norm requires exactly one, or requires distinguishing two identical-looking carriers | E-R3 (step 2 deduplicated where G-R11 counts) |
+
+**What the lens found immediately: step 3 has a latent projection loss.** Step 3
+keys field capability by `(path → source, target domain)` and never looks at
+class — a three-field identity projected onto two. It is lossless *only* while no
+frozen `(source, target)` pair carries two classes. That has always been true of
+the registry, and **nothing pinned it**: the extractor asserts uniqueness of
+`(source, target, class)` triples, which happily permits one pair with two
+classes. The guard was a property of the data, not of the check.
+
+Not exploitable today — a mis-classed carrier still fails steps 4 and 5, which
+key on the full triple. But if a supersede ever admits such a pair, step 3 would
+go blind with no diagnostic anywhere. The extractor now declares the dependency
+and stops loudly if it breaks. Deliberately **not** widened speculatively: the
+repair makes an implicit assumption explicit, which is the honest move when the
+check is correct *given* an unstated premise.
+
+**Residual risk, stated hard.** E-R7 does more than close a second P1: it refutes
+the hypothesis that what remained after E-R6 was local omissions. The residual
+risk for this gate now explicitly includes **semantic projection errors between
+the frozen authority and the verifier's representation of it** — a class, not a
+backlog. It is not closed by any number of mutation cases written by the author,
+because the author's mental model is what chooses the key in the first place.
+
+Corpus unchanged at 26; `graph.json` unchanged; zero rows, zero edges.
+
 ### E-R8 — the column nothing checked
 
 **P1 (Codex, against `4eee8ec`) — a structural carrier's `path` was verified by
@@ -882,7 +949,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R8)
+## 8. For the independent reviewer (revision E-R9)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before
@@ -922,6 +989,16 @@ one grows on top.
    var exported once in a shell disarms every later invocation in it. The
    recorded repair — lift steps 1–5 into an importable function — is done, and
    the variable is now inert with a regression pinning it.
+8. **Attack identity preservation, not mutations.** Three P1s in a row were
+   one family (§7, E-R9): the verifier's observation granularity was weaker than
+   the authority's subject. Walk `normative object → extracted key →
+   multiplicity → comparison predicate → accepted witness`, and at each arrow
+   ask only: *can two normatively distinct objects collapse into one state the
+   verifier observes?* Look specifically for projection loss, role substitution
+   and multiplicity collapse. Step 2's right-hand side has moved three times in
+   three rounds and is the least trustworthy region of this gate; steps 1, 3, 4
+   and 5 have had one author and no such pass.
+
 7. **Exact cardinality elsewhere.** Step 2 now counts structural carriers.
    Steps 4 and 5 still work on sets of triples. Is there a place where duplicate
    `artifact_ref` carriers for one edge should also be a defect rather than a
