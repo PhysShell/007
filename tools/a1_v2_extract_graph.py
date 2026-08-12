@@ -93,6 +93,25 @@ def pin_chain_defect(pinned: str, history: list[dict]) -> str | None:
     return None
 
 
+class ExtractDefect(RuntimeError):
+    """A frozen fact the Phase G document must satisfy did not hold."""
+
+
+def _require(condition: object, message: str) -> None:
+    """Every structural check below MUST use this, never `assert`.
+
+    Python strips `assert` when -O is set or PYTHONOPTIMIZE is non-empty. That
+    made the whole of this module optional: with PYTHONOPTIMIZE=1 a drafter
+    could edit PINNED_BLOB, leave PIN_HISTORY empty, run --write then --check,
+    and be told `extract OK` - the exact one-token re-pin the ceremony in
+    docs/tasks/a1-f-v2-envelope.md 2.5 exists to block. The 69-edge, 56/13,
+    21/11 and 47/20 facts evaporated with it. A check that an environment
+    variable can delete is not a check.
+    """
+    if not condition:
+        raise ExtractDefect(message)
+
+
 def _camel(snake: str) -> str:
     return "".join(w.capitalize() for w in snake.split("_"))
 
@@ -101,18 +120,18 @@ def parse_meta_members(text: str) -> list[str]:
     """The eleven members, read from 4.2.5's frozen membership block."""
     m = re.search(r"members := exactly the eleven envelope-bearing message kinds"
                   r".*?\n\n(.*?)\n\nresolution", text, re.S)
-    assert m, "membership block not found in the Phase G document"
+    _require(m, "membership block not found in the Phase G document")
     members = [_camel(t) for t in re.findall(r"[a-z][a-z_]+", m.group(1))]
-    assert len(members) == 11, f"expected 11 meta-target members, found {len(members)}"
+    _require(len(members) == 11, f"expected 11 meta-target members, found {len(members)}")
     return members
 
 
 def parse_typed_supports(text: str) -> list[str]:
     """The four typed supports, read from 4.2.5's typed-universe sentence."""
     m = re.search(r"four typed\s+supports \((.*?)\)", text, re.S)
-    assert m, "typed-supports enumeration not found in the Phase G document"
+    _require(m, "typed-supports enumeration not found in the Phase G document")
     supports = re.findall(r"`(\w+)`", m.group(1))
-    assert len(supports) == 4, f"expected 4 typed supports, found {len(supports)}"
+    _require(len(supports) == 4, f"expected 4 typed supports, found {len(supports)}")
     return supports
 
 
@@ -122,7 +141,7 @@ def git_blob_sha(data: bytes) -> str:
 
 def extract(source: Path) -> dict:
     defect = pin_chain_defect(PINNED_BLOB, PIN_HISTORY)
-    assert defect is None, f"PIN EVIDENCE DEFECT — {defect}"
+    _require(defect is None, f"PIN EVIDENCE DEFECT — {defect}")
 
     raw = source.read_bytes()
     text = raw.decode("utf-8")
@@ -147,25 +166,25 @@ def extract(source: Path) -> dict:
 
     # Structural assertions. These are the frozen numbers; if the document ever
     # disagrees with them the extractor stops rather than emitting a quieter graph.
-    assert edges, "no registry table found"
-    assert [e["n"] for e in edges] == list(range(1, len(edges) + 1)), "row numbers not contiguous"
+    _require(edges, "no registry table found")
+    _require([e["n"] for e in edges] == list(range(1, len(edges) + 1)), "row numbers not contiguous")
     cls = collections.Counter(e["class"] for e in edges)
-    assert len(edges) == 69, f"expected 69 edges, found {len(edges)}"
-    assert cls["Intra"] == 56 and cls["Causal"] == 13, f"class split moved: {dict(cls)}"
-    assert len({(e["source"], e["target"], e["class"]) for e in edges}) == 69, "duplicate edge"
+    _require(len(edges) == 69, f"expected 69 edges, found {len(edges)}")
+    _require(cls["Intra"] == 56 and cls["Causal"] == 13, f"class split moved: {dict(cls)}")
+    _require(len({(e["source"], e["target"], e["class"]) for e in edges}) == 69, "duplicate edge")
 
     event_kinds = sorted({re.fullmatch(r"CampaignEvent\((\w+)\)", e["source"]).group(1)
                           for e in edges if e["source"].startswith("CampaignEvent(")})
     payload_variants = sorted({e["target"][:-len("Payload")] for e in edges
                                if e["source"].startswith("CampaignEvent(")
                                and e["target"].endswith("Payload")})
-    assert len(event_kinds) == 21, f"expected 21 event kinds, found {len(event_kinds)}"
-    assert len(payload_variants) == 11, f"expected 11 payload variants, found {len(payload_variants)}"
+    _require(len(event_kinds) == 21, f"expected 21 event kinds, found {len(event_kinds)}")
+    _require(len(payload_variants) == 11, f"expected 11 payload variants, found {len(payload_variants)}")
 
     expected_payload = {k: (k + "Payload" if k in payload_variants else None)
                         for k in event_kinds}
     bearing = sum(1 for v in expected_payload.values() if v)
-    assert bearing == 11 and len(expected_payload) - bearing == 10, "presence map is not 11/10"
+    _require(bearing == 11 and len(expected_payload) - bearing == 10, "presence map is not 11/10")
 
     typed = (set(message_kinds) | set(typed_supports)
              | {p + "Payload" for p in payload_variants}
@@ -174,10 +193,9 @@ def extract(source: Path) -> dict:
     for e in edges:
         nodes |= {e["source"], e["target"]}
     terminal = sorted(nodes - typed - set(meta_targets))
-    assert len(typed) == 47, f"expected 47 typed nodes, found {len(typed)}"
-    assert len(terminal) == 20, f"expected 20 terminal kinds, found {len(terminal)}"
-    assert not (set(meta_targets) & {e["source"] for e in edges}), \
-        "a meta-target appears as an edge SOURCE; it is a target-position union only"
+    _require(len(typed) == 47, f"expected 47 typed nodes, found {len(typed)}")
+    _require(len(terminal) == 20, f"expected 20 terminal kinds, found {len(terminal)}")
+    _require(not (set(meta_targets) & {e["source"] for e in edges}), "a meta-target appears as an edge SOURCE; it is a target-position union only")
 
     return {
         "_comment": ("Frozen graph of FD-v2-GRAPH. GENERATED by "

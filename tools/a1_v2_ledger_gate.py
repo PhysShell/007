@@ -30,7 +30,8 @@ Fails closed. An undeclared side is a FAILURE, never a pass.
 
 Both non-ledger terms are re-derived by a preflight bound to the very path the
 gate then reads, so an override cannot be checked against one artifact and read
-from another. There is no --skip-preflight flag; the corpus uses an env var.
+from another. There is NO bypass of any kind - no flag, no environment variable.
+The corpus imports run_steps() instead of asking the executable to disarm.
 
 Usage:  python3 tools/a1_v2_ledger_gate.py [--graph P] [--schema P] [--ledger P]
 Exit:   0 = every step passed;  1 = at least one step failed or is owed.
@@ -40,7 +41,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -53,16 +53,6 @@ GRAPH_EXTRACTOR = REPO / "tools/a1_v2_extract_graph.py"
 SCHEMA_EXTRACTOR = REPO / "tools/a1_v2_extract_schema.py"
 
 
-def _harness() -> bool:
-    """Test-harness escape, deliberately NOT a command-line flag.
-
-    A documented --skip-preflight is an invitation: in six months somebody
-    adds it to CI to make the checks faster, which is the traditional way of
-    optimising a check by deleting it. The corpus sets this env var; nothing
-    a human types at a prompt does.
-    """
-    return os.environ.get("A1_V2_GATE_HARNESS") == "1"
-
 Key = tuple[str, str, str]
 
 
@@ -70,12 +60,16 @@ class Report:
     def __init__(self) -> None:
         self.failed = False
         self.lines: list[str] = []
+        self.steps: dict[str, str] = {}
 
     def add(self, label: str, ok: bool, detail: str, owed: bool = False) -> None:
         if not ok:
             self.failed = True
         status = "PASS" if ok else ("OWED" if owed else "FAIL")
         self.lines.append(f"  {label:<37} {status}   {detail}")
+        n = label.split(".")[0]
+        if n.isdigit():
+            self.steps[n] = status
 
     def emit(self) -> int:
         print("A1-F v2 wire realization gate")
@@ -101,38 +95,17 @@ def edge_keys(graph: dict) -> set[Key]:
     return {(e["source"], e["target"], e["class"]) for e in graph["edges"]}
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--graph", default=str(GRAPH))
-    ap.add_argument("--schema", default=str(SCHEMA))
-    ap.add_argument("--ledger", default=str(LEDGER))
-    args = ap.parse_args()
+def run_steps(graph: dict, schema: dict, ledger: dict, r: Report | None = None) -> Report:
+    """Steps 1-5 over three already-loaded terms.
 
-    r = Report()
-
-    # ---- preflight: both non-ledger terms must be DERIVABLE, not merely present.
-    # Each --check is bound to the very path the gate then reads. Checking the
-    # default artifact and then reading an overridden one would re-open exactly
-    # the hole the preflight exists to close.
-    if not _harness():
-        for label, tool, out, ok_msg in (
-            ("preflight: graph extract", GRAPH_EXTRACTOR, args.graph,
-             "committed graph == derived from Phase G"),
-            ("preflight: schema extract", SCHEMA_EXTRACTOR, args.schema,
-             "committed facts == derived from the v2 schema source"),
-        ):
-            p = subprocess.run([sys.executable, str(tool), "--check", "--out", out],
-                               capture_output=True, text=True)
-            r.add(label, p.returncode == 0,
-                  ok_msg if p.returncode == 0
-                  else (p.stderr.strip().split("\n")[0] or "mismatch"))
-            if p.returncode != 0:
-                # Every step below would be measured against a forged ruler.
-                return r.emit()
-
-    graph = json.loads(Path(args.graph).read_text())
-    schema = json.loads(Path(args.schema).read_text())
-    ledger = json.loads(Path(args.ledger).read_text())
+    The corpus imports and calls THIS, which is why the shipped gate carries no
+    preflight bypass of any kind. The previous shape kept an A1_V2_GATE_HARNESS
+    env var that skipped both preflights and added no report line, so a harness
+    run was textually indistinguishable from a proven PASS - and an env var set
+    once in a shell survives every later invocation in it. A test seam that can
+    silently disarm the acceptance executable is not a test seam.
+    """
+    r = r or Report()
 
     carriers = ledger.get("carriers", [])
     frozen_kinds = set(graph["event_kinds"])
@@ -181,9 +154,25 @@ def main() -> int:
         for c in carriers:
             if c.get("carrier_kind") == "event_payload_digest":
                 struct_count[c["source"]] = struct_count.get(c["source"], 0) + 1
+        # The REQUIREMENT comes from the frozen presence map, never from the
+        # schema. Frozen 4.2.6: `expected_payload(k) = P => EXACTLY ONE ledger
+        # carrier CampaignEvent(k) --event_payload_digest--> P`. Deriving `want`
+        # from schema.structural_commitments let the term under test lower its
+        # own bar: a schema with a correct presence map that commits no
+        # structural digests made zero carriers the expected count, and a ledger
+        # relabelling all eleven payload edges as artifact_ref then passed steps
+        # 3, 4 and 5 as well — a full green on a realization carrying none of
+        # the eleven structural digests the contract requires.
+        required_struct = {f"CampaignEvent({k})" for k, v in expected_payload.items() if v}
         schema_struct = {f"CampaignEvent({k})" for k in schema.get("structural_commitments") or []}
-        for src in sorted(set(struct_count) | schema_struct):
-            want = 1 if src in schema_struct else 0
+        if schema_struct != required_struct:
+            missing = sorted(s[len("CampaignEvent("):-1] for s in required_struct - schema_struct)
+            extra = sorted(s[len("CampaignEvent("):-1] for s in schema_struct - required_struct)
+            bad.append(f"schema commits structural digests for {len(schema_struct)} kinds, "
+                       f"frozen map requires {len(required_struct)}: "
+                       f"missing={missing[:3]} extra={extra[:3]}")
+        for src in sorted(required_struct | schema_struct | set(struct_count)):
+            want = 1 if src in required_struct else 0
             got = struct_count.get(src, 0)
             if got != want:
                 bad.append(f"{src}: {got} structural carriers, expected exactly {want}")
@@ -253,6 +242,40 @@ def main() -> int:
     else:
         r.add("5. reverse carrier coverage", True, f"all {total} edges carried")
 
+    return r
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--graph", default=str(GRAPH))
+    ap.add_argument("--schema", default=str(SCHEMA))
+    ap.add_argument("--ledger", default=str(LEDGER))
+    args = ap.parse_args()
+
+    r = Report()
+
+    # ---- preflight: both non-ledger terms must be DERIVABLE, not merely present.
+    # Unconditional. Each --check is bound to the very path the gate then reads;
+    # checking the default artifact and then reading an overridden one would
+    # re-open exactly the hole the preflight exists to close.
+    for label, tool, out, ok_msg in (
+        ("preflight: graph extract", GRAPH_EXTRACTOR, args.graph,
+         "committed graph == derived from Phase G"),
+        ("preflight: schema extract", SCHEMA_EXTRACTOR, args.schema,
+         "committed facts == derived from the v2 schema source"),
+    ):
+        p = subprocess.run([sys.executable, str(tool), "--check", "--out", out],
+                           capture_output=True, text=True)
+        r.add(label, p.returncode == 0,
+              ok_msg if p.returncode == 0
+              else (p.stderr.strip().split("\n")[0] or "mismatch"))
+        if p.returncode != 0:
+            # Every step below would be measured against a forged ruler.
+            return r.emit()
+
+    run_steps(json.loads(Path(args.graph).read_text()),
+              json.loads(Path(args.schema).read_text()),
+              json.loads(Path(args.ledger).read_text()), r)
     return r.emit()
 
 

@@ -1,6 +1,6 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R5) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: DRAFTING (revision E-R6) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -11,8 +11,11 @@ makes step 2 count rather than deduplicate, and rebases onto current `main`.
 E-R4 answers §8.5: moving `PINNED_BLOB` is now a ceremony that consumes an
 already-authorized Phase G supersede, and a pin failure never authorizes its own
 repair. E-R5 scopes two of E-R4's claims to what their witness actually
-observes. Six revisions, no graph change in any of them: the frozen registry is
-a hard input here, not a subject.
+observes. **E-R6 repairs the first defect found by a genuinely independent
+reviewer** — a full green over a realization carrying none of the eleven
+structural digests, plus three Majors from CodeRabbit including `assert`-guarded
+checks that vanish under `PYTHONOPTIMIZE`. Seven revisions, no graph change in
+any of them: the frozen registry is a hard input here, not a subject.
 
 **The gate is intentionally RED**, because Envelope v2 has drafted no schema.
 What is up for review is the proof machinery, not the completion of the phase.
@@ -114,7 +117,8 @@ file is rejected.
 ```text
 1. schema.event_kinds        == graph.event_kinds
 2. schema.payload_presence   == graph.expected_payload
-   AND declared structural carriers == schema.structural_commitments
+   AND schema.structural_commitments == the 11 payload-bearing kinds OF THAT MAP
+   AND declared structural carriers   == exactly 1 / exactly 0, per THAT MAP
 3. per FIELD: source kind and COMPLETE target domain == its carriers'
 4. every (source, target, class) carrier is a frozen edge, exactly
 5. every frozen (source, target, class) has >= 1 carrier, exactly
@@ -155,10 +159,13 @@ followed by five steps measured against the forgery. That is a literal bypass of
 the protection E-R1 had just added. Each preflight now passes `--out` the same
 path the gate reads.
 
-`--skip-preflight` is also gone as a documented flag. The corpus uses an
-environment variable instead, on the reasoning that a documented skip is an
-invitation: within a year somebody adds it to CI to make the checks faster,
-which is the customary way of optimising a check by deleting it.
+`--skip-preflight` is gone as a documented flag, on the reasoning that a
+documented skip is an invitation: within a year somebody adds it to CI to make
+the checks faster, which is the customary way of optimising a check by deleting
+it. E-R3 moved it into an environment variable, which is the same invitation
+with worse ergonomics — **E-R6 removed it entirely.** Steps 1–5 are now an
+importable `run_steps()`, the corpus calls that, and the shipped executable
+contains no bypass of any kind.
 
 ### 2.4 It fails closed, and the corpus is executable
 
@@ -175,10 +182,11 @@ With nothing drafted, both preflights pass and all five steps are OWED:
 RESULT: FAIL — Envelope v2 is not realized
 ```
 
-`tools/tests/test_a1_v2_ledger_gate.py` — **20 cases, 20 as specified.** Fourteen
-mutate one thing and assert which step catches it; four exercise the preflight
+`tools/tests/test_a1_v2_ledger_gate.py` — **24 cases, 24 as specified.** Sixteen
+mutate one thing and assert which step catches it; six exercise the preflight
 itself, which E-R1 added and left undefended; two exercise the pin evidence of
-§2.5.
+§2.5. The corpus **imports `run_steps`**; it no longer asks the executable to
+disarm.
 
 | Mutation | Caught by |
 |---|---|
@@ -197,7 +205,11 @@ itself, which E-R1 added and left undefended; two exercise the pin evidence of
 | **hand-filled schema facts** | **preflight** |
 | **duplicate structural carrier for one event kind** | **step 2** |
 | **Phase G source blob mismatch** | **extractor `--check`** |
+| **schema commits no structural digests at all** | **step 2** |
+| **payload edges relabelled as `artifact_ref` carriers** | **step 2** |
 | **`PINNED_BLOB` edited with no evidence** | **extractor, at extraction** |
+| **frozen checks under `PYTHONOPTIMIZE=1`** | **extractor, explicit raise** |
+| **the retired harness env var** | **inert — preflight runs anyway** |
 | **pin evidence that binds nothing** | **extractor, at extraction** |
 | real artifacts | both preflights pass |
 
@@ -463,6 +475,114 @@ two FDs partial is the honest state of a first substantive decision.
 
 ## 7. Revision record
 
+### E-R6 — first external review: one P1 and three Majors, all confirmed
+
+Four findings from two reviewers who did not write the gate. Every one was
+reproduced before acceptance; none was taken on report.
+
+#### P1 (Codex) — step 2 let the term under test set its own requirement
+
+**P1 (Codex, against `a10d845`) — step 2 let the term under test set its own
+requirement.** The count of structural carriers was compared against
+`schema.structural_commitments`. So a schema declaring a **correct**
+`payload_presence` while committing no `event_payload_digest` made *zero* the
+expected count, and a ledger re-declaring all eleven payload edges as
+`artifact_ref` carriers then satisfied steps 3, 4 and 5 on their own merits.
+
+Verified before acceptance, by running it:
+
+```text
+exit 0  {'1': 'PASS', '2': 'PASS', '3': 'PASS', '4': 'PASS', '5': 'PASS'}
+```
+
+A full green over a realization carrying **none** of the eleven structural
+digests the contract requires. Frozen 4.2.6 is unambiguous about where the
+requirement lives — *`expected_payload(k) = P` ⇒ EXACTLY ONE ledger carrier
+`CampaignEvent(k) --event_payload_digest--> P`* — and `expected_payload` is the
+frozen map, not a schema self-declaration. `required_struct` is now derived from
+it, and the schema's own commitments became a *third* term that must agree with
+the frozen map rather than define it. Corpus 20 → 22.
+
+Three things about this one are worth keeping.
+
+**It is the same defect, three floors down.** E-R1's was *the gate checked the
+ledger against itself*; E-R2's was *the frozen right-hand side taken on trust*.
+This is that shape again, in the one sub-clause of one step where it had
+survived four revisions of me looking for exactly it.
+
+**§2.2 documented it in plain sight.** The line read `AND declared structural
+carriers == schema.structural_commitments`. That is the defect, written out, in
+the section explaining what each step compares — read four times by its author
+without registering, because it describes what the code does and the author knew
+what the code did. It is now written as what the *contract* requires.
+
+**It is the answer to §8.4, and the answer arrived from outside.** That question
+asked which plausible v2 drafting error the corpus still missed, on the
+reasoning that the mutations and the gate shared one mental model. The uncovered
+error turned out to be *model the payload as an `ArtifactRef` field rather than
+the structural digest* — not exotic, not adversarial, a thing a drafter does on
+a Tuesday. Twenty-two mutation cases written by the gate's own author did not
+contain it; an independent reader found it within minutes of the PR leaving
+draft. That is the correlated-authorship weakness demonstrated rather than
+merely conceded, and it is worth more than the fix.
+
+#### Major (CodeRabbit) — `assert` made every frozen check optional
+
+Python strips `assert` under `-O` / `PYTHONOPTIMIZE`. Sixteen of them carried
+the pin evidence and every structural fact. Reproduced:
+
+```text
+PYTHONOPTIMIZE=1  ->  extract SUCCEEDED with unevidenced pin -> ffffffff
+```
+
+One environment variable deleted the entire ceremony of §2.5 two revisions after
+writing it, plus the 69-edge, 56/13, 21/11 and 47/20 facts — and `--check` then
+printed `extract OK`. All sixteen are now `_require(...)` raising
+`ExtractDefect`. The corpus pins it: *frozen checks survive PYTHONOPTIMIZE=1*.
+
+There is an uncomfortable symmetry here. E-R4 built a ceremony so a re-pin could
+not be a one-token edit, and shipped it guarded by a statement the interpreter
+discards on request. The mechanism was sound and its enforcement was optional,
+which is the failure mode this whole document is about, expressed in the
+grammar of the language rather than in the design.
+
+#### Major (CodeRabbit) — the harness skip was invisible in the report
+
+`A1_V2_GATE_HARNESS=1` skipped both preflights **and added no report line**, so
+a harness run was textually indistinguishable from a proven PASS; an env var
+exported once in a shell disarms every later invocation in it. §8.6 carried the
+weaker version of this — *a bypass that ships in the acceptance executable* —
+and the recorded repair, deferred until after mechanism review, is now done:
+steps 1–5 are an importable `run_steps()`, the corpus calls it directly, and the
+executable contains no bypass at all. The variable is inert, with a regression
+pinning that.
+
+#### Major (CodeRabbit) — the ledger template taught the defect
+
+`_carriers_schema.target` read *"exact CONCRETE target semantic kind (a
+meta-target is expanded to its members here)"*. That instructs precisely the
+mutation frozen clause 5 forbids and the corpus rejects — the template a drafter
+copies from contradicted the contract it was there to serve. Corrected to state
+that a meta-target is declared once, verbatim, with expansion checked only in
+step 3.
+
+#### Minor (CodeRabbit) — a preamble that hid its own exceptions
+
+`a1-f-v2-convergence.md` §4 said the disposition columns are *"empty by
+construction in this revision"* while `V1-N116` and `V1-N118` carry KEEP. An
+auditor trusting the preamble skips the only two rows holding a disposition.
+Now stated with its two exceptions.
+
+#### What the round is evidence of
+
+Corpus 20 → 24. Four defects, none found by twenty-two adversarial cases written
+by the gate's own author, all found within the hour by readers who did not write
+it. Two of them — `assert` under `-O`, and a skip that leaves no trace — are not
+subtle; they are invisible from inside, because the author knows what the code
+means and reads intent rather than text. That is the correlated-authorship
+weakness demonstrated rather than conceded, and it is the argument for review
+before the field set lands, not after.
+
 ### E-R5 — two adjectives that outran their witness
 
 A precision round. No machinery changed; two claims did, because both said more
@@ -687,7 +807,7 @@ specified.
 **Not disputed:** the S1 correction of §4 was independently confirmed against
 blob `3b26849c`.
 
-## 8. For the independent reviewer (revision E-R5)
+## 8. For the independent reviewer (revision E-R6)
 
 The mechanism is now the object worth reviewing, and it is reviewable
 independently of any field set — which is the argument for looking at it before
@@ -708,9 +828,12 @@ one grows on top.
    names a concrete feed target anywhere. Does anything then check that a
    *runtime* `subject_refs` occurrence carries a member and not an arbitrary
    kind, or does that check now live only in the resolver?
-4. **The corpus authors the mutations and the gate in the same idiom.** Thirteen
-   step cases came from the same mental model as the code they test. Which
-   plausible v2 drafting error is still uncovered?
+4. **Answered, in the worst way available — see E-R6.** This asked which
+   plausible v2 drafting error the corpus still missed, on the reasoning that
+   its mutations and the gate shared one mental model. Codex found one within
+   minutes of the PR leaving draft: modelling payloads as `ArtifactRef` fields
+   instead of the structural digest exited 0. The question stands for whoever
+   reads this next, now with a worked example of what it catches.
 5. **Blob pinning — answered in E-R4, now open one level down.** §2.5 records
    the ceremony, and makes points 4 and 7 mechanical. Points 1–3 stay human by
    design: legitimacy is a Phase G act. The residual question is whether the
@@ -718,11 +841,12 @@ one grows on top.
    `superseding_authority` is a string nothing resolves, so the ceremony proves
    that an authority was named, not that it exists. What would make it
    resolvable without this floor re-deciding legitimacy?
-6. **The harness bypass.** `A1_V2_GATE_HARNESS=1` skips both preflights. It is
-   a test seam, not a false-green path — but it ships inside the acceptance
-   executable. The intended repair is to lift steps 1–5 into an importable
-   function the corpus calls directly, so the shipped gate contains no bypass.
-   Is that the right shape, and should it land before any v2 schema does?
+6. **Answered in E-R6, and it was worse than recorded.** CodeRabbit's point
+   was sharper than the one carried here: the skip emitted *no report line*, so
+   a harness run was textually indistinguishable from a proven PASS, and an env
+   var exported once in a shell disarms every later invocation in it. The
+   recorded repair — lift steps 1–5 into an importable function — is done, and
+   the variable is now inert with a regression pinning it.
 7. **Exact cardinality elsewhere.** Step 2 now counts structural carriers.
    Steps 4 and 5 still work on sets of triples. Is there a place where duplicate
    `artifact_ref` carriers for one edge should also be a defect rather than a

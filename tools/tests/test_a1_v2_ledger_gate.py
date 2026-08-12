@@ -20,6 +20,8 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 GATE = REPO / "tools/a1_v2_ledger_gate.py"
+sys.path.insert(0, str(REPO / "tools"))
+import a1_v2_ledger_gate as gate  # noqa: E402
 GRAPH = json.loads((REPO / "docs/tasks/a1-f-v2-graph.json").read_text())
 
 STRUCTURAL = "event_payload_digest"
@@ -60,21 +62,16 @@ def faithful() -> tuple[dict, dict]:
 
 
 def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
-    with tempfile.TemporaryDirectory() as d:
-        sp, lp = Path(d) / "s.json", Path(d) / "l.json"
-        sp.write_text(json.dumps(schema))
-        lp.write_text(json.dumps(ledger))
-        env = {**os.environ, "A1_V2_GATE_HARNESS": "1"}
-        p = subprocess.run(
-            [sys.executable, str(GATE), "--schema", str(sp), "--ledger", str(lp)],
-            capture_output=True, text=True, env=env)
-    steps = {}
-    for line in p.stdout.split("\n"):
-        s = line.strip()
-        if s and s[0].isdigit() and "." in s[:3]:
-            n = s.split(".")[0]
-            steps[n] = "PASS" if " PASS " in line else ("OWED" if " OWED " in line else "FAIL")
-    return p.returncode, steps
+    """Call the steps directly.
+
+    Previously this shelled out with A1_V2_GATE_HARNESS=1 to skip the
+    preflights. That env var no longer exists: it skipped both preflights
+    while adding no report line, so a harness run read exactly like a proven
+    PASS, and a shell that exported it once disarmed every later invocation.
+    The seam is now an import, which cannot be switched on by accident.
+    """
+    r = gate.run_steps(GRAPH, schema, ledger)
+    return (1 if r.failed else 0), r.steps
 
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
@@ -198,6 +195,33 @@ def _duplicate_structural():
     return s, l
 
 
+@case("schema commits no structural digests at all", 1, {"2": "FAIL"})
+def _no_structural_commitments():
+    # The requirement is keyed off the FROZEN presence map. A schema that
+    # declares a correct payload_presence but commits no event_payload_digest
+    # is not permitted to lower the bar to zero.
+    s, l = faithful()
+    s["structural_commitments"] = []
+    return s, l
+
+
+@case("payload edges relabelled as artifact_ref carriers", 1, {"2": "FAIL"})
+def _payloads_as_refs():
+    # Found by independent review of a10d845, and it was a full green: with
+    # `want` read from the schema, dropping the structural commitments made
+    # ZERO the expected count, and the eleven payload edges re-declared as
+    # artifact_ref carriers satisfied steps 3, 4 and 5 on their own.
+    s, l = faithful()
+    s["structural_commitments"] = []
+    for c in l["carriers"]:
+        if c["carrier_kind"] == STRUCTURAL:
+            c["carrier_kind"] = REF
+            s["artifact_ref_fields"].append(
+                {"path": c["path"], "source_semantic_kind": c["source"],
+                 "allowed_concrete_target_kinds": [c["target"]]})
+    return s, l
+
+
 @case("meta-target narrowed to one member by the schema", 1, {"3": "FAIL"})
 def _meta_narrowed():
     # A subject_refs field permitting only WorkOrder is NOT a faithful
@@ -306,8 +330,26 @@ def preflight_cases() -> list[tuple[str, bool]]:
                     and xg.pin_chain_defect("a" * 40, incomplete) is not None
                     and xg.pin_chain_defect("a" * 40, orphan) is None))
 
+        # 3c. PYTHONOPTIMIZE strips `assert`. The frozen checks - pin evidence,
+        #     69 edges, 56/13, 21/11, 47/20 - were all asserts, so one env var
+        #     deleted the entire ceremony of 2.5 and reported `extract OK`.
+        probe = ("import sys; sys.path.insert(0, %r); import a1_v2_extract_graph as x; "
+                 "x.PINNED_BLOB = 'f' * 40; x.extract(x.SOURCE)" % str(REPO / "tools"))
+        p = subprocess.run([sys.executable, "-c", probe], capture_output=True,
+                           text=True, env={**os.environ, "PYTHONOPTIMIZE": "1"})
+        out.append(("frozen checks survive PYTHONOPTIMIZE=1",
+                    p.returncode != 0 and "PIN EVIDENCE DEFECT" in p.stderr))
+
+        # 3d. The retired harness env var must be inert, not merely undocumented.
+        p = subprocess.run([sys.executable, str(GATE), "--graph", str(fg)],
+                           capture_output=True, text=True,
+                           env={**os.environ, "A1_V2_GATE_HARNESS": "1"})
+        out.append(("A1_V2_GATE_HARNESS=1 no longer bypasses the preflight",
+                    p.returncode == 1 and "preflight: graph extract" in p.stdout
+                    and " FAIL " in p.stdout.split("preflight: graph extract")[1].split("\n")[0]))
+
         # 4. Control: the real artifacts must still pass their preflights, or the
-        #    three cases above would be proving nothing.
+        #    cases above would be proving nothing.
         code, txt = run_real(GRAPH_PATH, SCHEMA_PATH)
         out.append(("real artifacts pass both preflights",
                     "preflight: graph extract" in txt and "preflight: schema extract" in txt

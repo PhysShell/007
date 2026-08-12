@@ -182,7 +182,11 @@ not by semantic name. Two people will independently invent
 column may be added later; it is never the identity.
 
 `semantic_disposition`, `proof_disposition`, `v2_oracle` and `rationale` are
-**empty by construction** in this revision.
+**empty by construction** in this revision, with exactly two exceptions:
+`V1-N116` and `V1-N118` carry `semantic_disposition` = **KEEP**, consumed by
+Envelope v2 **E-1**. Their proof coordinate stays empty, pending v2 wire types.
+An auditor who trusts this sentence unqualified would skip the only two rows
+that hold a disposition.
 
 Legend, for later use — two independent coordinates:
 
