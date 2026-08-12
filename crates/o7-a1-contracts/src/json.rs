@@ -978,7 +978,7 @@ mod tests {
         assert!(parse_artifact::<Dup>(br#"{"known":1}"#).is_ok());
     }
 
-    /// FD-1.4 asks for a parse-time rejection.    /// FD-1.4 asks for a parse-time rejection. The witness that this one *is*
+    /// FD-1.4 asks for a parse-time rejection. The witness that this one *is*
     /// one: everything after the offending point is garbage, so a scanner that
     /// reached it would report a syntax error instead.
     ///
