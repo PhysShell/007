@@ -1,13 +1,19 @@
 //! `o7-a1-cas` — A1-V0 step 2: the owned CAS read boundary and the resolution
 //! proof boundary.
 //!
-//! Normative source, unchanged from step 1 and not derived from this code:
+//! Normative source, not derived from this code:
 //!
 //! ```text
 //! contract   docs/q-deck/a1-authority-contracts.md
-//! blob  B1   3b26849cc39a3391aaed46cca56be3b6715afabb          (post-S1)
+//! blob  B2   e22539ddf4f7c9ab260e16835eef8ef18abbe726          (post-S2, PR #135)
+//! superseded 3b26849cc39a3391aaed46cca56be3b6715afabb          (B1, post-S1)
 //! step 1     a6625bc6473e3029a3309ddd7f2795ce57516a60          (PR #124)
 //! ```
+//!
+//! S2 added the FD-1.3 member-name uniqueness rule, which this crate inherits
+//! through `o7-a1-contracts` rather than implementing itself: nothing here parses
+//! A1 JSON. The binding is recorded anyway, because a crate bound to a superseded
+//! blob is bound to superseded authority whatever its own code does.
 //!
 //! Task: `docs/tasks/a1-v0-step-2.md`. Relevant sections: FD-1.5 (closure and
 //! its bounds, frozen as an algorithm), FD-1.8 (what a reference identifies),
