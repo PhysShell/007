@@ -76,7 +76,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
 
 # Pinned deliberately. Bump it in the same commit that adds or removes a case,
 # so the number is a reviewed claim rather than a readout of whatever survived.
-EXPECTED_TOTAL = 54
+EXPECTED_TOTAL = 55
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
@@ -412,6 +412,7 @@ def preflight_cases() -> list[tuple[str, bool]]:
         #     one-token edit, and that edit must not be enough on its own.
         sys.path.insert(0, str(REPO / "tools"))
         import a1_v2_extract_graph as xg  # noqa: E402
+        gate_xg = xg
         out.append(("bare PINNED_BLOB edit is rejected as unevidenced",
                     xg.pin_chain_defect("f" * 40, []) is not None))
 
@@ -607,6 +608,51 @@ def preflight_cases() -> list[tuple[str, bool]]:
                     xg.authority_ref_defect({**VALID_LOCATOR,
                         "anchor": "Created by the maintainer as a plain ref; "
                                   "no release object was"}) is None))
+
+        # 3o. NO LAZY FETCH. In a partial clone `git cat-file` will fetch a
+        #     promised object it does not have; GIT_TERMINAL_PROMPT does not stop
+        #     it. This builds a real promisor clone over file:// and asks for a
+        #     blob genuinely absent from its object database — the `old_blob`
+        #     case, since after a supersede that is exactly the object that has
+        #     left the tree. The control arm proves the hazard is present, so
+        #     the witness cannot pass vacuously.
+        lazy = d / "lazy"
+        origin, clone = lazy / "origin", lazy / "clone"
+        origin.mkdir(parents=True)
+        def g(*args, cwd, **kw):
+            return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
+                                  text=True, encoding="utf-8", errors="replace", **kw)
+        g("init", "-q", ".", cwd=origin)
+        for k, v in (("user.email", "t@t"), ("user.name", "t"),
+                     ("uploadpack.allowFilter", "true"),
+                     ("uploadpack.allowAnySHA1InWant", "true")):
+            g("config", k, v, cwd=origin)
+        (origin / "f.txt").write_text("SUPERSEDED-AUTHORITY-TEXT\n")
+        g("add", "f.txt", cwd=origin); g("commit", "-qm", "old", cwd=origin)
+        old_blob = g("hash-object", "f.txt", cwd=origin).stdout.strip()
+        (origin / "f.txt").write_text("CURRENT-AUTHORITY-TEXT\n")
+        g("add", "f.txt", cwd=origin); g("commit", "-qm", "new", cwd=origin)
+        # TWO clones. The control arm lazily fetches, which would leave the blob
+        # local and make the witness pass for the wrong reason — the same
+        # ordering mistake that made the first hand-run of this experiment
+        # report nothing.
+        for name in ("clone", "control"):
+            g("clone", "-q", "--filter=blob:none", "--no-local",
+              f"file://{origin}", str(lazy / name), cwd=lazy)
+        control = lazy / "control"
+
+        present = g("cat-file", "--batch-all-objects", "--batch-check=%(objectname)",
+                    cwd=clone).stdout
+        absent_locally = bool(old_blob) and old_blob not in present
+        # control, on its OWN clone: without the guard git reaches the promisor
+        # remote and succeeds — proving the hazard is real in this fixture.
+        fetched = subprocess.run(["git", "-C", str(control), "cat-file", "-t", old_blob],
+                                 capture_output=True, text=True,
+                                 env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+        # witness, on an untouched clone: the extractor refuses without fetching.
+        refused = gate_xg._local_object(old_blob, repo=clone) is None
+        out.append(("a promised-but-absent object is refused, not fetched",
+                    absent_locally and fetched.returncode == 0 and refused))
 
         # 4. Control: the real artifacts must still pass their preflights, or the
         #    cases above would be proving nothing.

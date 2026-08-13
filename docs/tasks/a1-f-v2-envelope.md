@@ -395,8 +395,22 @@ historical blob is simply not present, and establishing absence would need the
 network. A resolver built to improve provenance must not begin by lying about
 provenance. Both are `ERROR`; only the diagnostic differs.
 
-**No network, ever.** `git cat-file` reads the local object database and does
-not fetch. A deterministic extractor that occasionally goes to the internet for
+**No network, ever — enforced, not assumed.** In a partial clone
+(`remote.<name>.promisor=true`, e.g. `--filter=blob:none`) `git cat-file` will
+**lazily fetch** a promised object it does not have, and `GIT_TERMINAL_PROMPT`
+does not stop it — it only suppresses credential prompting. `GIT_NO_LAZY_FETCH=1`
+is set on every lookup. Demonstrated against a local `file://` promisor remote,
+asking for a blob genuinely absent from the object database:
+
+```text
+without the guard   local-before=0   cat-file -t -> "blob"   (fetched over the wire)
+with the guard      local-before=0   fatal: could not fetch 0680074c…
+```
+
+This is the `old_blob` case exactly: after a supersede, the object proving
+provenance is the one that has left the tree. Without the guard, the resolver
+would have gone to the network to prove the authority of the thing whose
+provenance it exists to establish. A deterministic extractor that occasionally goes to the internet for
 proof of its own authority would be an elegant way to lose the property
 entirely.
 
@@ -649,11 +663,28 @@ own bytes. The reviewer's framing was the useful part — *the locator does not
 identify one location* — which is the step-5 property restated, not a counting
 nicety.
 
+**Second P1 during review, found independently by both reviewers — the
+no-network claim was false.** The docstring said `git cat-file` "does not
+fetch". In a promisor partial clone it does. `GIT_NO_LAZY_FETCH=1` now enforces
+what the comment had merely asserted, which is the same defect shape this branch
+has been cataloguing: *a claim stronger than the implementation guarantees*,
+written by the author of both.
+
+Two things about the investigation are worth keeping. CodeRabbit's report stated
+this checkout **is** a promisor clone; it is not — `remote.origin.promisor` is
+unset here — so the specific environmental fact was wrong while the defect was
+real, and verifying rather than accepting kept the record accurate. And my first
+two attempts to reproduce it **proved nothing**: the control arm lazily fetched
+the blob, leaving it local, so the guarded arm then "passed" against an object
+that was no longer missing. The corpus witness therefore uses two independent
+clones, and asserts the control arm succeeds — a test whose hazard is not
+demonstrated is a test that can pass vacuously.
+
 **One existing witness was rewritten, not preserved.** *"pin evidence that binds
 nothing is rejected"* constructed entries with the retired free-text field; the
 locator's shape changed, so the case now uses a valid locator and continues to
 test chain linkage rather than locator shape. Claiming the previous corpus was
-untouched would have been false. Corpus 46 → 54.
+untouched would have been false. Corpus 46 → 55.
 
 **Zero-delta witness.** `docs/tasks/a1-f-v2-graph.json` is byte-identical before
 and after — `5c69fde8a97ded1f5d34a65560d4973ebe59f0c6` — as it must be while

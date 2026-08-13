@@ -66,20 +66,38 @@ AUTHORITY_REF_FIELDS = ("blob", "path_hint", "anchor")
 _OID = re.compile(r"[0-9a-f]{40}")
 
 
-def _local_object(oid: str) -> tuple[str, bytes] | None:
-    """Look the object up in the LOCAL object database. Never the network.
+# The guard that makes "local only" true rather than assumed. In a partial clone
+# (`remote.<name>.promisor=true`, e.g. `--filter=blob:none`) `git cat-file` will
+# LAZILY FETCH a promised object it does not have. GIT_TERMINAL_PROMPT only
+# suppresses credential prompting; it does not stop that fetch.
+#
+# Demonstrated, not assumed — against a local file:// promisor remote, asking for
+# a blob genuinely absent from the object database:
+#
+#     without the guard   local-before=0   cat-file -t -> "blob"   (fetched)
+#     with the guard      local-before=0   fatal: could not fetch …
+#
+# This matters precisely for `old_blob`, the half of a re-pin record that proves
+# provenance: after a supersede it is exactly the object that has left the tree.
+GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1"}
 
-    `git cat-file` does not fetch, and nothing here may: a deterministic
-    extractor that occasionally goes to the internet for proof of its own
-    authority would be an elegant way to lose the whole property.
+
+def _local_object(oid: str, repo: Path = REPO) -> tuple[str, bytes] | None:
+    """Look the object up in the LOCAL object database, without fetching.
+
+    A deterministic extractor that occasionally goes to the internet for proof
+    of its own authority would be an elegant way to lose the whole property —
+    and until EB-R1's review this docstring claimed that outcome was impossible
+    while the code permitted it in any partial clone. The claim is now enforced
+    by GIT_ENV rather than asserted.
     """
-    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    kind = subprocess.run(["git", "-C", str(REPO), "cat-file", "-t", oid],
+    env = {**os.environ, **GIT_ENV}
+    kind = subprocess.run(["git", "-C", str(repo), "cat-file", "-t", oid],
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", env=env)
     if kind.returncode != 0:
         return None
-    body = subprocess.run(["git", "-C", str(REPO), "cat-file", kind.stdout.strip(), oid],
+    body = subprocess.run(["git", "-C", str(repo), "cat-file", kind.stdout.strip(), oid],
                           capture_output=True, env=env)
     return kind.stdout.strip(), body.stdout
 
