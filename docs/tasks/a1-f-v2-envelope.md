@@ -1,7 +1,7 @@
 # A1-F v2 — Envelope v2
 
-**Status: VERIFIER LAYER CLOSED at `47b8371` (merged in #134). One post-closure
-correction applied: PC-1.**
+**Status: VERIFIER LAYER CLOSED at `47b8371` (merged in #134). Post-closure
+correction PC-1 applied. Evidence-binding series open: EB-R1.**
 
 The E-R sequence is the *verifier* revision sequence and it ends at E-R21.
 Post-closure corrections are numbered separately and carry **implementation
@@ -332,6 +332,76 @@ so neither is used:
   never observes how that tree was assembled. Point 7 remains the requirement on
   whoever performs the ceremony; the machine holds only the weaker half.
 
+#### 2.5.1 What `superseding_authority` must be, and what resolving it proves
+
+Point 4 required the entry to *record* an authority reference. A free-text string
+records that an authority was **named**, not that it **exists** — so the locator
+is now structured, and mechanically resolvable without deciding anything:
+
+```yaml
+superseding_authority:
+  blob:      <immutable git blob oid>     # the ONLY identity
+  path_hint: docs/tasks/a1-f-v2-phase-g.md
+  anchor:    <exact text, occurring once inside those bytes>
+```
+
+`path_hint` is named for what it is. A blob does not carry its own path; proving
+`path → blob` would need a commit and a tree as well. Calling the field `path`
+would dress a decoration as a checkable coordinate, which is the species of
+overclaim this document exists to catch. Identity is the blob; `anchor` selects
+one place inside it.
+
+**The mechanical contract, in full — five steps and then it stops:**
+
+```text
+1. locator shape is well-formed
+2. blob oid resolves LOCALLY
+3. the resolved object is a blob
+4. its bytes decode as UTF-8
+5. the anchor occurs EXACTLY ONCE
+=> REFERENTIAL PASS
+```
+
+**What it must never check**, each of which would put a small self-appointed
+lawyer inside the extractor: that the anchor says "supersede"; that `blob`
+equals the entry's `new_blob`; that `path_hint` names the blob in some tree;
+that `old_blob` was legitimately superseded; that `new_blob` is legitimate
+authority. All of those are Phase G's floor.
+
+**Hence the negative control**, which is deliberately uncomfortable: a locator
+citing a real blob and a unique anchor that authorizes *nothing* — the corpus
+uses a note about a git tag — is required to **PASS**. If that case ever starts
+failing, the resolver has appointed itself Phase G. It is the only test here
+that proves an absence of adjudication rather than a presence of checking.
+
+**Two failure states, kept apart on epistemic grounds:**
+
+```text
+MALFORMED LOCATOR              shape, oid syntax, object type, encoding
+UNRESOLVABLE IN THIS CHECKOUT  well-formed oid, git cannot supply it locally
+```
+
+The second is **not** "absent from the repository". CI checks out with the
+`actions/checkout` default — no workflow here sets `fetch-depth` — so a real
+historical blob is simply not present, and establishing absence would need the
+network. A resolver built to improve provenance must not begin by lying about
+provenance. Both are `ERROR`; only the diagnostic differs.
+
+**No network, ever.** `git cat-file` reads the local object database and does
+not fetch. A deterministic extractor that occasionally goes to the internet for
+proof of its own authority would be an elegant way to lose the property
+entirely.
+
+**The shallow-checkout consequence is recorded, not pre-solved.** After a real
+supersede, `new_blob` is the working tree's content and resolves; `old_blob` has
+left the tree and is reachable only through history — so it will *not* resolve
+under a default checkout. That is a genuine future requirement, and the fix
+belongs to the runner or checkout policy at the time it is needed, consumed by
+an actual re-pin. Setting `fetch-depth: 0` today, for a consumer that does not
+exist, would turn a future requirement into a present infrastructure habit — the
+same shape of unexamined premise this branch has spent twenty-two rounds
+removing.
+
 Points 1, 2, 3 and 5 are not machine-checked here and are not claimed to be.
 Legitimacy is a contract act; this floor cannot decide it and should not
 pretend to. Nor does any of this defend against an editor who rewrites the
@@ -522,6 +592,55 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### EB-R1 — `superseding_authority` becomes resolvable, and stays non-adjudicating
+
+**A new series.** Not `E-R22` (the verifier revision sequence ended at E-R21 and
+the layer is closed at `47b8371`) and not `PC-2` (post-closure corrections carry
+implementation delta zero; this one changes code). Evidence-binding work gets
+its own numbering because it has its own trust boundary.
+
+**What §8.5 actually asked.** `PIN_HISTORY` required `superseding_authority`, and
+`pin_chain_defect` checked it for non-emptiness. So the ceremony proved an
+authority had been **named**, never that the named thing **exists**. The fix is
+to make the reference resolvable — and to stop precisely there.
+
+`superseding_authority` is now a three-field locator (§2.5.1); `blob` is the
+only identity, `path_hint` is honestly labelled decoration, `anchor` selects one
+place inside the immutable bytes. `authority_ref_defect` performs the five-step
+referential contract and nothing beyond it, and `pin_chain_defect` calls it for
+every non-empty history entry.
+
+**The case that matters is the one that passes.** A locator citing a real blob
+and a unique anchor that authorizes nothing — the corpus uses a note about a git
+tag — must return `REFERENTIAL PASS`. Every other test here proves the checker
+*checks*; only this one proves it does not **adjudicate**. Written as a required
+witness so that a future well-meaning tightening has to delete an explicit test
+rather than quietly add a condition.
+
+**Two failure states, not one.** `MALFORMED LOCATOR` versus `UNRESOLVABLE IN
+THIS CHECKOUT`, and the second says so in those words: the diagnostic asserts
+that git cannot supply the object *here*, not that it is absent from the
+repository. No workflow in this repo sets `fetch-depth`, so the default shallow
+checkout guarantees this state will occur — on `old_blob`, which is exactly the
+half of the record that proves provenance. A resolver built to improve provenance
+must not open by misdescribing it.
+
+**Deliberately not done:** no `fetch-depth: 0`. The requirement is real and
+future; installing infrastructure now for a consumer that does not exist is how
+unexamined premises get in. It is recorded in §2.5.1 as a precondition to be met
+by a runner or checkout policy when a re-pin actually consumes it.
+
+**One existing witness was rewritten, not preserved.** *"pin evidence that binds
+nothing is rejected"* constructed entries with the retired free-text field; the
+locator's shape changed, so the case now uses a valid locator and continues to
+test chain linkage rather than locator shape. Claiming the previous corpus was
+untouched would have been false. Corpus 46 → 53.
+
+**Zero-delta witness.** `docs/tasks/a1-f-v2-graph.json` is byte-identical before
+and after — `5c69fde8a97ded1f5d34a65560d4973ebe59f0c6` — as it must be while
+`PIN_HISTORY` is empty. Phase G, `PINNED_BLOB`, `ORIGINAL_BLOB`, the semantic
+registry, steps 1–5 and gate semantics are all unchanged.
 
 ### PC-1 — the residual was false, not the authority incomplete
 

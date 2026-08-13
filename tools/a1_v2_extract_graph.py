@@ -28,7 +28,9 @@ import argparse
 import collections
 import hashlib
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -53,6 +55,102 @@ ORIGINAL_BLOB = "450380ff0d1f8ec08f783968f08bc6b3942f44a5"
 PIN_HISTORY: list[dict[str, str]] = []
 
 PIN_FIELDS = ("old_blob", "new_blob", "superseding_authority")
+
+# The locator's three fields. `blob` is the ONLY identity: a blob does not
+# contain its own path, so proving `path_hint -> blob` would need a commit and a
+# tree as well. `path_hint` is therefore named for what it is — a hint to a
+# human — rather than dressed as a coordinate this layer can check. `anchor`
+# selects a place inside the immutable bytes.
+AUTHORITY_REF_FIELDS = ("blob", "path_hint", "anchor")
+
+_OID = re.compile(r"[0-9a-f]{40}")
+
+
+def _local_object(oid: str) -> tuple[str, bytes] | None:
+    """Look the object up in the LOCAL object database. Never the network.
+
+    `git cat-file` does not fetch, and nothing here may: a deterministic
+    extractor that occasionally goes to the internet for proof of its own
+    authority would be an elegant way to lose the whole property.
+    """
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+    kind = subprocess.run(["git", "-C", str(REPO), "cat-file", "-t", oid],
+                          capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", env=env)
+    if kind.returncode != 0:
+        return None
+    body = subprocess.run(["git", "-C", str(REPO), "cat-file", kind.stdout.strip(), oid],
+                          capture_output=True, env=env)
+    return kind.stdout.strip(), body.stdout
+
+
+def authority_ref_defect(ref: object) -> str | None:
+    """Can the cited bytes, and a place within them, be identified? Nothing else.
+
+    This is REFERENTIAL validation. It answers exactly one question:
+
+        can I identify exactly the cited bytes, and one location inside them?
+
+    It NEVER answers:
+
+        do those bytes authorize the re-pin?
+
+    So it deliberately does not check that the anchor says "supersede", that
+    `blob` equals the entry's `new_blob`, that `path_hint` names the blob in any
+    tree, that `old_blob` was legitimately superseded, or that `new_blob` is
+    legitimate authority. Adding any one of those would put a small self-
+    appointed lawyer inside this extractor, which is the layer violation §2.5
+    exists to prevent — and the reason a *resolvable but normatively meaningless*
+    anchor is required to PASS.
+
+    Two failure states are distinguished, because conflating them would have
+    this resolver lie about provenance in the course of improving it:
+
+        MALFORMED LOCATOR          shape, oid syntax, object type, encoding
+        UNRESOLVABLE IN THIS       the oid is well-formed and git cannot supply
+        CHECKOUT                   the object locally
+
+    The second does NOT mean the object is absent from the repository. Under the
+    shallow clone CI uses by default, a perfectly real historical blob is simply
+    not here, and proving absence would require the network.
+    """
+    if not isinstance(ref, dict):
+        return (f"MALFORMED LOCATOR — superseding_authority is "
+                f"{type(ref).__name__}, expected an object")
+    missing = [f for f in AUTHORITY_REF_FIELDS if f not in ref]
+    extra = sorted(k for k in ref if k not in AUTHORITY_REF_FIELDS)
+    if missing or extra:
+        return (f"MALFORMED LOCATOR — fields missing={missing} unexpected={extra}; "
+                f"expected exactly {list(AUTHORITY_REF_FIELDS)}")
+    bad_type = [f for f in AUTHORITY_REF_FIELDS
+                if not isinstance(ref[f], str) or not ref[f]]
+    if bad_type:
+        return f"MALFORMED LOCATOR — {bad_type} must be non-empty strings"
+    if not _OID.fullmatch(ref["blob"]):
+        return (f"MALFORMED LOCATOR — blob {ref['blob']!r} is not a 40-character "
+                "hex object id")
+
+    found = _local_object(ref["blob"])
+    if found is None:
+        return (f"UNRESOLVABLE IN THIS CHECKOUT — object {ref['blob']} is not in "
+                "the local object database. This does NOT assert the object is "
+                "absent from the repository; establishing that would need the "
+                "network, which this extractor never uses.")
+    kind, raw = found
+    if kind != "blob":
+        return f"MALFORMED LOCATOR — {ref['blob']} is a {kind}, not a blob"
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return f"MALFORMED LOCATOR — blob {ref['blob']} is not valid UTF-8"
+
+    hits = text.count(ref["anchor"])
+    if hits == 0:
+        return f"ANCHOR NOT FOUND — the cited text does not occur in {ref['blob']}"
+    if hits > 1:
+        return (f"ANCHOR AMBIGUOUS — the cited text occurs {hits} times in "
+                f"{ref['blob']}; a locator must select one place")
+    return None
 
 
 def pin_chain_defect(pinned: str, history: list[dict]) -> str | None:
@@ -82,6 +180,9 @@ def pin_chain_defect(pinned: str, history: list[dict]) -> str | None:
         missing = [f for f in PIN_FIELDS if not e.get(f)]
         if missing:
             return f"pin history entry {i} does not record {missing}"
+        ref_defect = authority_ref_defect(e["superseding_authority"])
+        if ref_defect is not None:
+            return f"pin history entry {i} authority reference: {ref_defect}"
         prev = history[i - 1]["new_blob"] if i else ORIGINAL_BLOB
         if e["old_blob"] != prev:
             return (f"pin history entry {i} replaces {e['old_blob']}, but the "

@@ -76,7 +76,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
 
 # Pinned deliberately. Bump it in the same commit that adds or removes a case,
 # so the number is a reviewed claim rather than a readout of whatever survived.
-EXPECTED_TOTAL = 46
+EXPECTED_TOTAL = 53
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
@@ -344,6 +344,15 @@ def _meta_decomposed():
 # ---------------------------------------------------------------------------
 
 GRAPH_PATH = REPO / "docs/tasks/a1-f-v2-graph.json"
+
+# A locator that resolves: the frozen Phase G blob, and a string occurring in it
+# exactly once. `path_hint` is decoration by design — a blob does not carry its
+# own path, so this layer cannot check it and does not pretend to.
+VALID_LOCATOR = {
+    "blob": "450380ff0d1f8ec08f783968f08bc6b3942f44a5",
+    "path_hint": "docs/tasks/a1-f-v2-phase-g.md",
+    "anchor": "FROZEN \u2014 the realization contract",
+}
 SCHEMA_PATH = REPO / "docs/tasks/a1-f-v2-schema-facts.json"
 LEDGER_PATH = REPO / "docs/tasks/a1-f-v2-realization-ledger.json"
 GRAPH_EXTRACTOR = REPO / "tools/a1_v2_extract_graph.py"
@@ -409,9 +418,9 @@ def preflight_cases() -> list[tuple[str, bool]]:
         # 3b. Evidence filed for a pin that never moved, and a chain that does
         #     not run from the original blob. Both are paperwork without a fact.
         orphan = [{"old_blob": xg.ORIGINAL_BLOB, "new_blob": "a" * 40,
-                   "superseding_authority": "Phase G supersede, hypothetical"}]
+                   "superseding_authority": VALID_LOCATOR}]
         broken = [{"old_blob": "b" * 40, "new_blob": "a" * 40,
-                   "superseding_authority": "Phase G supersede, hypothetical"}]
+                   "superseding_authority": VALID_LOCATOR}]
         incomplete = [{"old_blob": xg.ORIGINAL_BLOB, "new_blob": "a" * 40}]
         out.append(("pin evidence that binds nothing is rejected",
                     xg.pin_chain_defect(xg.ORIGINAL_BLOB, orphan) is not None
@@ -532,6 +541,63 @@ def preflight_cases() -> list[tuple[str, bool]]:
             env=ascii_env)
         out.append(("ERROR survives an ASCII stdout codec",
                     p.returncode == 2 and "RESULT: ERROR" in p.stdout))
+
+        # ---- EB-R1: referential validation of superseding_authority -----------
+        # The locator answers ONE question: can the cited bytes, and one place
+        # inside them, be identified? It must never answer "do these bytes
+        # authorize the re-pin?" — hence case 3n below, which is meant to look
+        # slightly blasphemous.
+        head_commit = subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"],
+                                     capture_output=True, text=True).stdout.strip()
+
+        # 3h. Malformed locator: wrong type, wrong field set, wrong oid syntax.
+        out.append(("malformed authority locator is rejected",
+                    all(xg.authority_ref_defect(r) is not None and
+                        "MALFORMED LOCATOR" in xg.authority_ref_defect(r)
+                        for r in ("a string",
+                                  {"blob": xg.PINNED_BLOB, "anchor": "x"},
+                                  {**VALID_LOCATOR, "extra": "x"},
+                                  {**VALID_LOCATOR, "blob": "not-a-hex-oid"},
+                                  {**VALID_LOCATOR, "anchor": ""}))))
+
+        # 3i. Syntactically valid oid that git cannot supply HERE. The diagnostic
+        #     must not claim the object is absent from the repository — under the
+        #     shallow clone CI uses by default, a real historical blob is simply
+        #     not present, and proving absence needs the network.
+        absent = xg.authority_ref_defect({**VALID_LOCATOR, "blob": "d" * 40})
+        out.append(("unresolvable oid says CHECKOUT, not absence",
+                    absent is not None
+                    and "UNRESOLVABLE IN THIS CHECKOUT" in absent
+                    and "does NOT assert the object is absent" in absent))
+
+        # 3j. Right oid, wrong object type.
+        wrong_type = xg.authority_ref_defect({**VALID_LOCATOR, "blob": head_commit})
+        out.append(("an oid resolving to a non-blob is rejected",
+                    wrong_type is not None and "not a blob" in wrong_type))
+
+        # 3k. Anchor absent from the cited bytes.
+        gone = xg.authority_ref_defect({**VALID_LOCATOR, "anchor": "no such text here"})
+        out.append(("an anchor absent from the blob is rejected",
+                    gone is not None and "ANCHOR NOT FOUND" in gone))
+
+        # 3l. Anchor present more than once: a locator must select ONE place.
+        many = xg.authority_ref_defect({**VALID_LOCATOR, "anchor": "one level down"})
+        out.append(("an ambiguous anchor is rejected",
+                    many is not None and "ANCHOR AMBIGUOUS" in many))
+
+        # 3m. Normal positive: a real, authority-shaped, unique anchor.
+        out.append(("a well-formed authority locator resolves",
+                    xg.authority_ref_defect(VALID_LOCATOR) is None))
+
+        # 3n. NEGATIVE CONTROL, and the most important case here. The anchor
+        #     resolves and is unique, and authorizes precisely nothing — it is a
+        #     note about a git tag. Referential validation MUST pass, because
+        #     legitimacy is not its floor. If this ever starts failing, the
+        #     resolver has quietly appointed itself Phase G.
+        out.append(("a resolvable but normatively inert anchor still PASSES",
+                    xg.authority_ref_defect({**VALID_LOCATOR,
+                        "anchor": "Created by the maintainer as a plain ref; "
+                                  "no release object was"}) is None))
 
         # 4. Control: the real artifacts must still pass their preflights, or the
         #    cases above would be proving nothing.
