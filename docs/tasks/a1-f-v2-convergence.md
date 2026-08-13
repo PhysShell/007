@@ -34,13 +34,24 @@ superseded_baseline:
                  document was extracted from THIS blob.
 
 current_v1_authority:
-  final_head:     9b42aa5
-  document_blob:  3b26849cc39a3391aaed46cca56be3b6715afabb
-  superseded_by:  S1 — FD-1.4 only, the first §7 application after merge
-  graph_delta:    NONE — five graph-sensitive derivations re-run against this
-                  blob are byte-identical to the incorporation snapshot
-                  (Phase G §0). The inventory below therefore stands against
-                  current authority and is not re-extracted.
+  document_blob:  e22539ddf4f7c9ab260e16835eef8ef18abbe726   # post-S2, PR #135
+  sha256:         2de682894cd2084444b5d7d6c5db8807a80f08a3d41541e9c00caf92462d1e1a
+  superseded:     B1 3b26849cc39a3391aaed46cca56be3b6715afabb (head 9b42aa5)
+                  by S2 — FD-1.3 only: member names unique within every A1 JSON
+                  object. S2 changes an admission rule and touches no kind,
+                  rank, edge or payload variant, so no graph delta is expected —
+                  but unlike S1 that has NOT been re-run and proved, and this
+                  field will not claim it was
+  adjudicated_against: 3b26849c — every row below was checked against THAT blob,
+                  and that anchor is not rewritten to match a later one (below)
+  graph_delta_S1: NONE — five graph-sensitive derivations re-run against
+                  3b26849c are byte-identical to the incorporation snapshot
+                  (Phase G §0). Proved, not assumed.
+  graph_delta_S2: NOT RE-RUN. The inventory below therefore stands against B1
+                  with a proof, and against B2 with an argument. Naming the two
+                  differently is the point: S1's delta was proved *because*
+                  Phase G refused to take it from S1's own summary, and reusing
+                  that word here would spend the proof on a check nobody ran.
 
 prototype_design_input:
   reviewed_commit: 37502e3ce5c397a7437445aafb88c13d84ba4ac0
@@ -56,11 +67,13 @@ prototype_final_input:
 The blob digest was verified against git, not transcribed:
 `git rev-parse b84e9419...:docs/q-deck/a1-authority-contracts.md` yields
 `7db92f1b3dc9d7040da074956a0b3f2f200174c8`. Every inventory row below was
-extracted from **that blob** by script, not retyped. A1-F has since been superseded
-once, by S1; the current authoritative blob is `3b26849c`, and the delta between
-the two was *proved* graph-empty rather than assumed (Phase G §0). Both anchors
-are kept, because rewriting an inventory's provenance to match a later snapshot
-is how a document stops being able to say what it was actually checked against.
+extracted from **that blob** by script, not retyped. A1-F has since been
+superseded twice — by S1 and then by S2 — and the current authoritative blob is
+`e22539dd`. The `B0 -> B1` delta was *proved* graph-empty rather than assumed
+(Phase G §0); the `B1 -> B2` delta has not been re-run, and is argued from S2
+touching no kind, rank, edge or payload variant. All three anchors are kept,
+because rewriting an inventory's provenance to match a later snapshot is how a
+document stops being able to say what it was actually checked against.
 
 Pinning the prototype in two states is deliberate: the inventory does not depend
 on the prototype at all, so a mechanical Rust tail must not block it — and

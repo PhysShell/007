@@ -61,8 +61,10 @@ hard_input:
 
 current_v1_authority:
   document: docs/q-deck/a1-authority-contracts.md
-  blob:     3b26849cc39a3391aaed46cca56be3b6715afabb
-  rounds:   R1..R5.2, then S1 (FD-1.4 only)
+  blob:     e22539ddf4f7c9ab260e16835eef8ef18abbe726   # post-S2, PR #135
+  rounds:   R1..R5.2, then S1 (FD-1.4 only), then S2 (FD-1.3 only)
+  prior:    3b26849cc39a3391aaed46cca56be3b6715afabb   # B1, the blob this
+            # document was written against; superseded, kept as the anchor
 
 design_input:
   ref:    refs/tags/a1-f-v2-phase-g-design-input-v1

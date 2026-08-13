@@ -45,10 +45,18 @@ historical_graph_baseline:
           Every derivation in G-R1..G-R9 was conducted against THIS blob.
 
 current_v1_authority:
-  final_head: 9b42aa5
-  blob:       3b26849cc39a3391aaed46cca56be3b6715afabb
-  role:       what A1-F actually says on main today, after S1
+  blob:       e22539ddf4f7c9ab260e16835eef8ef18abbe726
+  role:       what A1-F actually says on main today, after S1 and then S2
+  adjudicated_against: 3b26849cc39a3391aaed46cca56be3b6715afabb (head 9b42aa5)
+              — B1, the blob every derivation below was closed against. Kept as
+              the anchor; this document is not re-adjudicated by editing a field
   s1_graph_delta: NONE — proved mechanically, see below
+  s2_graph_delta: NOT RE-RUN — S2 (FD-1.3, member-name uniqueness) changes an
+              admission rule and moves no kind, rank, edge or payload variant,
+              so a delta is not expected. P1-25 below is the record of what
+              happens when an authority input goes stale beneath a closed
+              argument, so the honest entry here is the unproved one rather
+              than a second NONE borrowed from the first.
 
 design_input:
   commit:      37502e3ce5c397a7437445aafb88c13d84ba4ac0
