@@ -1,0 +1,12 @@
+{
+  "_comment": "V2 WIRE REALIZATION LEDGER. Required acceptance artefact of Envelope v2 (Phase G 4.2.6). One row per SEMANTIC EDGE CARRIER. This file declares ONLY realization; the schema's own facts live in a1-f-v2-schema-facts.json, so the gate can compare three independent things instead of checking one file against itself.",
+  "carriers": [],
+  "_carriers_schema": {
+    "source": "exact source semantic kind, e.g. WorkOrder or CampaignEvent(WorkOrderIssued)",
+    "target": "exact target semantic kind AS FROZEN. A meta-target such as AnyCommittedEnvelope is declared ONCE, verbatim, and is NEVER expanded into its members here (frozen clause 5); the member expansion is checked only in step 3, against the field's permitted target domain.",
+    "class": "Intra | Causal - part of edge identity, not decoration",
+    "carrier_kind": "artifact_ref | event_payload_digest",
+    "path": "concrete v2 wire field path, or the structural commitment that carries it"
+  },
+  "_carriers_note": "Realization is many-to-many: one field may carry several admitted edges, and several fields may carry one edge. Uniqueness is per OCCURRENCE - (source kind, concrete target kind) selects exactly one admitted edge from that field's declared set."
+}
