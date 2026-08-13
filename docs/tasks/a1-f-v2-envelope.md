@@ -407,6 +407,20 @@ without the guard   local-before=0   cat-file -t -> "blob"   (fetched over the w
 with the guard      local-before=0   fatal: could not fetch 0680074c…
 ```
 
+**Resolution is a property of the repository, never of the caller.** "Local"
+is a claim about an object database, and it is false the moment the invoker gets
+to choose which database that is. `git -C <repo> cat-file` honours ambient
+`GIT_DIR`, `GIT_OBJECT_DIRECTORY` and `GIT_ALTERNATE_OBJECT_DIRECTORIES`, and
+with the last of these set, a blob written only into an unrelated repository
+resolves against `<repo>` and returns its bytes. So git's environment is
+**constructed from an allowlist** — `PATH`, `HOME`, and the two guards above —
+rather than inherited. This is not a hardening flourish adjacent to the
+contract; it *is* the contract. An answer that a caller can steer establishes
+nothing about provenance whatever its diagnostic says, and it fails silently, in
+`PASS`, which is the worst place for it. The same construction is what keeps
+`ARLIAI_API_KEY` out of a process that has no business reading it (AGENTS.md
+invariant 1); a denylist would have closed that and left the redirect open.
+
 This is the `old_blob` case exactly: after a supersede, the object proving
 provenance is the one that has left the tree. Without the guard, the resolver
 would have gone to the network to prove the authority of the thing whose
@@ -680,11 +694,65 @@ that was no longer missing. The corpus witness therefore uses two independent
 clones, and asserts the control arm succeeds — a test whose hazard is not
 demonstrated is a test that can pass vacuously.
 
+**P0 during review (Codex) — the child environment was inherited, so the
+extractor's inputs were undeclared.** Both `git cat-file` calls were spawned
+with `{**os.environ, **GIT_ENV}`. Reproduced before acceptance: 135 ambient
+variables reached the child, `ARLIAI_API_KEY` among them. AGENTS.md invariant 1
+rules that any new process able to read that key is a P0, and object lookup
+needs no credential at all — so the severity is the repository's own, not a
+judgement call.
+
+Reproducing it surfaced a **second, unreported hazard on the same line**, and
+this one goes to the property EB-R1 exists to establish. With
+`GIT_ALTERNATE_OBJECT_DIRECTORIES` set ambiently, `git -C <repo> cat-file`
+answers with objects that are **not in `<repo>`**: a blob written only into an
+unrelated repository resolved, and its bytes came back. `GIT_DIR` and
+`GIT_OBJECT_DIRECTORY` are the same hazard spelled differently. That makes
+*which bytes answer a provenance question* a choice belonging to whoever invokes
+the extractor. A resolver whose answer is caller-parameterizable is not
+establishing provenance; it is reporting a preference.
+
+The two hazards demand different fixes and only one of them survives both: a
+denylist of credential names closes the first and leaves the second wide open,
+because the redirection family is open-ended in exactly the way a remembered
+list of names cannot cover. The environment is therefore **constructed** —
+`GIT_ENV_ALLOW = ("PATH", "HOME")` plus the `GIT_ENV` guards, and nothing else.
+`PATH` finds git; `HOME` lets git read the global config where CI records
+`safe.directory`. Neither can add an object directory.
+
+Three witnesses, because closing one hazard by name would leave the other open,
+and because a helper that is written but never wired in passes its own unit test
+perfectly. (3p) the constructed mapping has exactly the allowed key set; (3q)
+the **child process** receives no ambient variable — via a `/bin/sh` shim, not a
+python one, since a python child sets `LC_CTYPE` on *itself* through PEP 538
+legacy-locale coercion and that would read as a leak it is not; (3r) the hazard
+closed at the level of the **answer** — the alien object does not resolve while
+the pinned blob still does.
+
+Two method notes. The first draft of (3r) handed its control arm all of
+`os.environ`, so the control failed on the unrelated bogus `GIT_DIR` in the same
+fixture rather than on the redirect — the mirror image of the vacuous-pass
+mistake recorded two paragraphs above, and just as empty. The control now runs
+the constructed environment plus exactly one inherited variable, so the single
+difference between the arms is the pass-through itself. And the first
+reproduction harness leaked its own dump path to the shim through the very
+channel under test; when the fix landed, the harness broke instead of the
+witness reporting. A test that travels through the defect it is testing cannot
+observe its removal.
+
+**Residual, recorded and not fixed here.** The gate's preflight spawns the
+extractor with an inherited environment (`tools/a1_v2_ledger_gate.py:530`). It
+predates EB-R1, it is not what was reported, and sanitizing a *python* child has
+a materially different risk profile — `PYTHONPATH`, `VIRTUAL_ENV`, `TMPDIR` are
+load-bearing there in a way nothing is for `cat-file`. Folding it in would mean
+shipping an unwitnessed environment change inside a change about environment
+witnesses. It is open, it is stated, and it is not counted as closed.
+
 **One existing witness was rewritten, not preserved.** *"pin evidence that binds
 nothing is rejected"* constructed entries with the retired free-text field; the
 locator's shape changed, so the case now uses a valid locator and continues to
 test chain linkage rather than locator shape. Claiming the previous corpus was
-untouched would have been false. Corpus 46 → 55.
+untouched would have been false. Corpus 46 → 58.
 
 **Zero-delta witness.** `docs/tasks/a1-f-v2-graph.json` is byte-identical before
 and after — `5c69fde8a97ded1f5d34a65560d4973ebe59f0c6` — as it must be while

@@ -81,6 +81,37 @@ _OID = re.compile(r"[0-9a-f]{40}")
 # provenance: after a supersede it is exactly the object that has left the tree.
 GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1"}
 
+# The child environment is CONSTRUCTED, not inherited. Copying `os.environ`
+# wholesale made 135 ambient variables part of this extractor's input surface
+# without declaring any of them, and two separate hazards rode on that — both
+# demonstrated before this allowlist was written, neither assumed:
+#
+#   1. Credential widening. `ARLIAI_API_KEY`, exported in the shell that runs
+#      the extractor, reached both `git cat-file` processes. AGENTS.md
+#      invariant 1 rules that any new process able to read that key is a P0.
+#      Object lookup needs no credential at all.
+#   2. Object-store redirection. With `GIT_ALTERNATE_OBJECT_DIRECTORIES` set
+#      ambiently, `git -C <repo> cat-file` answers with objects that are NOT in
+#      <repo>: a blob written only into an unrelated repository resolved, and
+#      its bytes came back. `GIT_DIR` and `GIT_OBJECT_DIRECTORY` are the same
+#      hazard spelled differently. That makes *which bytes answer a provenance
+#      question* a choice of whoever invokes the extractor — the one property
+#      this layer exists to hold.
+#
+# Hazard 2 is why this is an allowlist and not a denylist of credential names:
+# a denylist strips the names someone remembered, and the redirection family is
+# open-ended in exactly that way. `PATH` is needed to find git at all, `HOME`
+# so git can read the global config where CI records `safe.directory`. Neither
+# can add an object directory. Nothing else is passed.
+GIT_ENV_ALLOW = ("PATH", "HOME")
+
+
+def _git_env() -> dict[str, str]:
+    """Build git's environment from GIT_ENV_ALLOW plus GIT_ENV. Never inherit."""
+    env = {name: os.environ[name] for name in GIT_ENV_ALLOW if name in os.environ}
+    env.update(GIT_ENV)
+    return env
+
 
 def _local_object(oid: str, repo: Path = REPO) -> tuple[str, bytes] | None:
     """Look the object up in the LOCAL object database, without fetching.
@@ -90,8 +121,12 @@ def _local_object(oid: str, repo: Path = REPO) -> tuple[str, bytes] | None:
     and until EB-R1's review this docstring claimed that outcome was impossible
     while the code permitted it in any partial clone. The claim is now enforced
     by GIT_ENV rather than asserted.
+
+    "Local" is a claim about an object database, so it is also false if the
+    caller gets to choose which database that is; `_git_env` is what keeps the
+    answer a property of `repo`.
     """
-    env = {**os.environ, **GIT_ENV}
+    env = _git_env()
     kind = subprocess.run(["git", "-C", str(repo), "cat-file", "-t", oid],
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", env=env)

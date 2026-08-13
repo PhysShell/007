@@ -76,7 +76,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
 
 # Pinned deliberately. Bump it in the same commit that adds or removes a case,
 # so the number is a reviewed claim rather than a readout of whatever survived.
-EXPECTED_TOTAL = 55
+EXPECTED_TOTAL = 58
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
@@ -653,6 +653,92 @@ def preflight_cases() -> list[tuple[str, bool]]:
         refused = gate_xg._local_object(old_blob, repo=clone) is None
         out.append(("a promised-but-absent object is refused, not fetched",
                     absent_locally and fetched.returncode == 0 and refused))
+
+        # An object database that is NOT this repository's, holding bytes this
+        # repository has never seen. It is the bait for 3r.
+        alien = d / "alien"
+        alien.mkdir()
+        g("init", "-q", ".", cwd=alien)
+        (alien / "a.txt").write_text("ALIEN AUTHORITY BYTES\n")
+        alien_oid = g("hash-object", "-w", "a.txt", cwd=alien).stdout.strip()
+        alien_objects = alien / ".git/objects"
+
+        # 3p..3r. THE CHILD ENVIRONMENT IS CONSTRUCTED, NOT INHERITED. Copying
+        #     `os.environ` into the two `git cat-file` calls made every ambient
+        #     variable an undeclared input to this extractor. Two hazards rode
+        #     on that, and they need separate witnesses because closing one by
+        #     name would leave the other open.
+        HOSTILE = {"ARLIAI_API_KEY": "sk-secret-witness",
+                   "GIT_DIR": str(alien / ".git"),
+                   "GIT_OBJECT_DIRECTORY": str(alien_objects),
+                   "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(alien_objects)}
+        saved = {k: os.environ.get(k) for k in HOSTILE}
+        os.environ.update(HOSTILE)
+        try:
+            # 3p. The constructed mapping carries the allowlist and the guards,
+            #     and nothing else — asserted as an exact key set, so a later
+            #     `env.update(os.environ)` cannot slip back in unnoticed.
+            built = xg._git_env()
+            allowed = ({k for k in xg.GIT_ENV_ALLOW if k in os.environ}
+                       | set(xg.GIT_ENV))
+            out.append(("git's environment is built from an allowlist",
+                        set(built) == allowed
+                        and all(built[k] == v for k, v in xg.GIT_ENV.items())))
+
+            # 3q. What the CHILD PROCESS actually receives. 3p alone would pass
+            #     vacuously if `_git_env` were written and never wired in, which
+            #     is precisely the shape of the defect it replaces. The shim is
+            #     /bin/sh, not python: a python child sets `LC_CTYPE` on itself
+            #     via PEP 538 legacy-locale coercion, which would look like a
+            #     leak and is not one.
+            shim, dump = d / "shim", d / "child-env.txt"
+            shim.mkdir()
+            (shim / "git").write_text("#!/bin/sh\nenv > '%s'\nexit 1\n" % dump)
+            (shim / "git").chmod(0o755)
+            path_saved = os.environ["PATH"]
+            os.environ["PATH"] = f"{shim}:{path_saved}"
+            try:
+                xg._local_object("0" * 40)
+            finally:
+                os.environ["PATH"] = path_saved
+            child = {line.split("=", 1)[0]
+                     for line in dump.read_text().splitlines() if "=" in line}
+            out.append(("no ambient variable reaches the git child process",
+                        bool(child) and not (child & set(HOSTILE))))
+
+            # 3r. The hazard closed at the level of the ANSWER, not of a
+            #     variable listing. `GIT_ALTERNATE_OBJECT_DIRECTORIES` makes
+            #     `git -C <repo> cat-file` resolve objects that are not in
+            #     <repo> at all — so whoever invokes the extractor could choose
+            #     which bytes answer a provenance question. The control arm runs
+            #     the same lookup with the ambient variable honoured and MUST
+            #     succeed, or the fixture would be proving nothing; and the
+            #     pinned blob must still resolve, or the fix would have bought
+            #     its determinism by breaking resolution.
+            #
+            #     The control arm is the CONSTRUCTED environment plus exactly
+            #     one inherited variable, so the single difference between the
+            #     two arms is the pass-through itself. Handing it all of
+            #     `os.environ` instead made it fail on the unrelated `GIT_DIR`
+            #     above — a control that fails for the wrong reason witnesses
+            #     nothing, the same way a control that passes for the wrong
+            #     reason does not.
+            leaked = subprocess.run(
+                ["git", "-C", str(REPO), "cat-file", "-t", alien_oid],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                env={**xg._git_env(),
+                     "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(alien_objects)})
+            redirected = xg._local_object(alien_oid)
+            pinned = xg._local_object(xg.PINNED_BLOB)
+            out.append(("an ambient object-store redirect cannot answer for the repo",
+                        leaked.returncode == 0 and redirected is None
+                        and pinned is not None and pinned[0] == "blob"))
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
 
         # 4. Control: the real artifacts must still pass their preflights, or the
         #    cases above would be proving nothing.
