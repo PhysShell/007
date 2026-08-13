@@ -1,0 +1,324 @@
+//! The owned CAS read boundary, and the one write path that admits bytes to it.
+//!
+//! # Why the read trait returns an untrusted type
+//!
+//! A backing store is not trusted. It can be a disk that lost a byte, a peer
+//! that wrote the wrong object under a digest, or — in a test — a deliberately
+//! hostile implementation built to feed the resolver garbage. So
+//! [`BackingStore::get`] returns [`RawObject`]: bytes, and *only* bytes, with no
+//! claim attached about whether they match anything.
+//!
+//! This is what lets the negative tests exist without a parallel production API.
+//! A test that needs a digest mismatch implements this trait and returns
+//! whatever it likes; what it cannot do is return a
+//! [`crate::ResolvedArtifact`], because nothing in this module can produce one.
+//! Forge the input, never the verdict.
+
+use std::collections::HashMap;
+
+use o7_a1_contracts::{EnvelopeError, EnvelopeV1, WireDigest};
+
+/// A write the owned CAS refused, having changed nothing.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PutError {
+    #[error("the payload does not hash to the envelope's payload_digest")]
+    PayloadNotBound,
+    #[error("the envelope could not be encoded: {0}")]
+    Encoding(#[source] EnvelopeError),
+}
+
+/// Bytes as a backing store handed them over: **untrusted**.
+///
+/// Deliberately constructible by anyone from anything. It carries no claim, so
+/// there is nothing to forge — a `RawObject` asserts only "some store returned
+/// these bytes", which is exactly what an unverified read is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawObject(Vec<u8>);
+
+impl RawObject {
+    /// Wrap bytes a store returned. Available to hostile fixtures on purpose.
+    #[must_use]
+    pub fn from_backing_store(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
+    /// The bytes, still unverified.
+    #[must_use]
+    pub fn bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    /// The number of bytes actually stored, as opposed to the number an
+    /// `ArtifactRef` *declared*. FD-1.5 accounts the declared size before any
+    /// read; FD-1.8 then requires the two to agree, and a disagreement is an
+    /// integrity failure rather than a rounding error.
+    #[must_use]
+    pub fn stored_size(&self) -> u64 {
+        self.0.len() as u64
+    }
+}
+
+/// Read access to 007-owned content-addressed storage.
+///
+/// One method, returning an untrusted type. Everything that turns bytes into
+/// something an authority decision may rest on lives behind
+/// [`crate::ResolutionSession`].
+pub trait BackingStore {
+    /// The object stored under `digest`, or `None` if this store has no such
+    /// object. A store that returns bytes not hashing to `digest` is not
+    /// breaking this contract — it is exercising the case the resolver exists
+    /// to catch.
+    fn get(&self, digest: &WireDigest) -> Option<RawObject>;
+}
+
+/// An in-memory owned CAS.
+///
+/// The **production write path** is [`Self::put`], and it computes the digest
+/// from the bytes rather than accepting one. There is deliberately no
+/// `insert(digest, bytes)`: a store that lets a caller choose the key is a store
+/// where "content-addressed" is a naming convention. A test that needs that
+/// behaviour implements [`BackingStore`] itself and stays on the untrusted side
+/// of the boundary.
+#[derive(Debug, Default)]
+pub struct MemoryStore {
+    objects: HashMap<String, Vec<u8>>,
+}
+
+impl MemoryStore {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Admit bytes to the store, returning the digest they hash to.
+    ///
+    /// FD-1.1 names `Digest256::of_bytes` as *the* form for A1 digests, and
+    /// this is the only way an object enters this store, so no object in it
+    /// ever sits under a key nobody computed.
+    pub fn put(&mut self, bytes: Vec<u8>) -> WireDigest {
+        let digest = WireDigest::of_bytes(&bytes);
+        self.objects.insert(digest.as_str().to_owned(), bytes);
+        digest
+    }
+
+    /// Admit an envelope-bearing artifact: both halves, each under the key a
+    /// reference will name.
+    ///
+    /// The asymmetry is FD-1.8's, not a convenience. A payload is keyed by its
+    /// content digest; an **envelope is keyed by its framed digest** (FD-1.2),
+    /// because that is what `ArtifactRef.digest` means for this class. A
+    /// content-addressed `put` is therefore the wrong write path for an
+    /// envelope, and offering only that would have quietly made every
+    /// envelope-bearing reference unresolvable.
+    ///
+    /// The bytes come from [`o7_a1_contracts::EnvelopeV1::to_wire_bytes`] —
+    /// step 1's single checked producer encoder. This crate does not get a
+    /// second opinion about how an envelope is spelled.
+    ///
+    /// # Why the payload is checked here, and not left to the resolver
+    ///
+    /// The first version of this method wrote the payload under
+    /// `envelope.payload_digest()` without checking that the bytes hash to it.
+    /// That is `insert(caller_chosen_digest, bytes)` — the operation [`Self::put`]
+    /// exists to make impossible — in a respectable disguise, because the digest
+    /// arrived through an *admitted* `EnvelopeV1` rather than as an argument. An
+    /// admitted envelope proves its own fields are coherent. It proves nothing
+    /// about some bytes a caller hands over alongside it.
+    ///
+    /// The resolver would have caught the result as `PayloadDigestMismatch`,
+    /// and that is no comfort: the owned-CAS write boundary would have created
+    /// the corruption the resolver then has to detect. A store whose contents
+    /// can disagree with their own keys is not content-addressed, whatever the
+    /// write path is called.
+    ///
+    /// So both fallible checks run **before any mutation**, and a refused call
+    /// leaves the store byte-for-byte unchanged. Deliberately not
+    /// `put(payload)` followed by comparing digests: that mutates first and
+    /// learns second.
+    ///
+    /// Returns the reference this artifact must be named by: its framed digest
+    /// and the size of both halves together.
+    ///
+    /// # Errors
+    /// [`PutError::PayloadNotBound`] if the payload does not hash to the
+    /// envelope's `payload_digest` (FD-1.1), or [`PutError::Encoding`] if the
+    /// envelope cannot be encoded under its own FD-1.4 ceiling.
+    pub fn put_envelope(
+        &mut self,
+        envelope: &EnvelopeV1,
+        payload: Vec<u8>,
+    ) -> Result<(WireDigest, u64), PutError> {
+        // Every fallible step first. Nothing below this point can fail, so
+        // there is no state in which one half landed and the other did not.
+        if !envelope.binds_payload(&payload) {
+            return Err(PutError::PayloadNotBound);
+        }
+        let envelope_bytes = envelope.to_wire_bytes().map_err(PutError::Encoding)?;
+
+        let framed = envelope.framed_digest();
+        let payload_len = payload.len() as u64;
+        self.objects
+            .entry(envelope.payload_digest().as_str().to_owned())
+            .or_insert(payload);
+        // FD-5.4 — "the FIRST accepted occurrence is stored canonically,
+        // verbatim … a redelivery NEVER mutates the stored envelope".
+        //
+        // This is not idempotence for its own sake. `created_at` is excluded
+        // from the framing (FD-1.2), so one framed digest can arrive attached
+        // to several serializations that differ in bytes and in length. An
+        // unconditional insert therefore lets a redelivery change what a key
+        // maps to — the size a caller was already handed stops matching the
+        // store, and their reference starts failing `HalvesSizeMismatch` for a
+        // corruption the write path introduced. The size returned here is the
+        // size of the bytes the store actually holds, which after a redelivery
+        // is the first occurrence's, not this call's.
+        let stored_envelope_len = self
+            .objects
+            .entry(framed.as_str().to_owned())
+            .or_insert(envelope_bytes)
+            .len() as u64;
+        Ok((
+            framed,
+            EnvelopeV1::ref_size(stored_envelope_len, payload_len),
+        ))
+    }
+
+    /// How many objects this store holds.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.objects.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.objects.is_empty()
+    }
+}
+
+impl BackingStore for MemoryStore {
+    fn get(&self, digest: &WireDigest) -> Option<RawObject> {
+        self.objects
+            .get(digest.as_str())
+            .map(|bytes| RawObject::from_backing_store(bytes.clone()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use o7_a1_contracts::{
+        AdapterVersion, ArtifactRefs, CommitId, EnvelopeFieldsV1, EnvelopeVersion, Id,
+        MessageKindV1, MessageKindVersion, Optional, ProducerRole, Timestamp,
+    };
+
+    /// An admitted controller envelope binding `payload`.
+    fn envelope_binding(payload: &[u8]) -> EnvelopeV1 {
+        let parse = |s: &str| Id::parse(s).unwrap_or_else(|_| unreachable());
+        EnvelopeV1::new(EnvelopeFieldsV1 {
+            envelope_version: EnvelopeVersion::default(),
+            message_kind: MessageKindV1::WorkOrder,
+            message_kind_version: MessageKindVersion::default(),
+            message_id: parse("msg-1"),
+            root_goal_id: parse("goal-1"),
+            task_id: parse("task-1"),
+            campaign_id: parse("camp-1"),
+            round_id: Optional::absent(),
+            causation_id: Optional::absent(),
+            correlation_id: parse("corr-1"),
+            producer_role: ProducerRole::Controller,
+            producer_execution_id: parse("exec-1"),
+            producer_adapter_version: AdapterVersion::parse("o7-controller/0.1.0")
+                .unwrap_or_else(|_| unreachable()),
+            model_identity: Optional::absent(),
+            prompt_digest: Optional::absent(),
+            tool_policy_digest: Optional::absent(),
+            contract_digest: WireDigest::of_bytes(b"contract"),
+            expected_input_head: CommitId::parse(&"a".repeat(40)).ok().into(),
+            payload_digest: WireDigest::of_bytes(payload),
+            artifact_refs: ArtifactRefs::empty(),
+            provider_execution_receipt_ref: Optional::absent(),
+            created_at: Timestamp::parse("2026-08-09T20:00:00Z").unwrap_or_else(|_| unreachable()),
+        })
+        .unwrap_or_else(|_| unreachable())
+    }
+
+    /// A fixture that is invalid by construction should fail loudly rather than
+    /// be papered over, and this crate denies `expect`/`unwrap` everywhere.
+    fn unreachable() -> ! {
+        std::process::abort()
+    }
+
+    #[test]
+    fn the_write_path_computes_the_key_it_stores_under() {
+        let mut store = MemoryStore::new();
+        let digest = store.put(b"evidence".to_vec());
+        assert_eq!(digest, WireDigest::of_bytes(b"evidence"));
+        assert_eq!(
+            store.get(&digest).map(|o| o.bytes().to_vec()),
+            Some(b"evidence".to_vec())
+        );
+    }
+
+    /// The write boundary must not create the corruption the resolver exists
+    /// to detect.
+    ///
+    /// The regression: `put_envelope` wrote the payload under
+    /// `envelope.payload_digest()` without checking the bytes hashed to it,
+    /// which is `insert(caller_chosen_digest, bytes)` reached through an
+    /// admitted envelope's field rather than through an argument. The resolver
+    /// would have refused the result later; the store would still have held
+    /// bytes disagreeing with their own key.
+    ///
+    /// What is asserted is **absence of side effects**, not just the error: a
+    /// version that stored the payload and then noticed would return the same
+    /// `Err` and leave the store poisoned.
+    #[test]
+    fn a_refused_envelope_write_leaves_the_store_untouched() {
+        let payload = br#"{"status":"candidate_produced"}"#;
+        let envelope = envelope_binding(payload);
+
+        let mut store = MemoryStore::new();
+        store.put(b"something already here".to_vec());
+        let before = store.len();
+
+        // Same envelope, different payload: the digest it declares is now a
+        // key the caller effectively chose for unrelated bytes.
+        assert_eq!(
+            store.put_envelope(&envelope, b"different".to_vec()),
+            Err(PutError::PayloadNotBound)
+        );
+        assert_eq!(store.len(), before, "a refused write must store nothing");
+        assert_eq!(
+            store.get(envelope.payload_digest()),
+            None,
+            "and must not leave bytes under a key they do not hash to"
+        );
+        assert_eq!(
+            store.get(&envelope.framed_digest()),
+            None,
+            "nor half of the artifact"
+        );
+
+        // The honest write succeeds, so the refusal above is the binding check
+        // and not a method that refuses everything.
+        // No `expect` here: this crate denies it, and a fixture that fails
+        // should abort loudly rather than earn an allow attribute.
+        let Ok((framed, size)) = store.put_envelope(&envelope, payload.to_vec()) else {
+            unreachable()
+        };
+        assert_eq!(store.len(), before + 2, "both halves, and only both");
+        assert!(size > payload.len() as u64);
+        assert!(store.get(&framed).is_some());
+        assert!(store.get(envelope.payload_digest()).is_some());
+    }
+
+    #[test]
+    fn an_absent_object_is_absent_rather_than_empty() {
+        // A missing object and a zero-byte object are different facts, and
+        // FD-1.8 admits refs to the latter — so they must not collapse.
+        let mut store = MemoryStore::new();
+        let empty = store.put(Vec::new());
+        assert_eq!(store.get(&empty).map(|o| o.stored_size()), Some(0));
+        assert_eq!(store.get(&WireDigest::of_bytes(b"never stored")), None);
+    }
+}

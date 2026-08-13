@@ -1031,6 +1031,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "o7-a1-cas"
+version = "0.1.0"
+dependencies = [
+ "o7-a1-contracts",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "o7-a1-contracts"
 version = "0.1.0"
 dependencies = [
