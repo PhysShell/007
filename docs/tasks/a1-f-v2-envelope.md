@@ -1,6 +1,12 @@
 # A1-F v2 — Envelope v2
 
-**Status: DRAFTING (revision E-R21) — DRAFT PR OPEN FOR MECHANISM REVIEW.**
+**Status: VERIFIER LAYER CLOSED at `47b8371` (merged in #134). One post-closure
+correction applied: PC-1.**
+
+The E-R sequence is the *verifier* revision sequence and it ends at E-R21.
+Post-closure corrections are numbered separately and carry **implementation
+delta zero** by construction — otherwise "closed" would come to mean "closed,
+except for the next four commits".
 
 E-R0 established the ledger and its gate and recorded **E-1**. E-R1 repaired the
 five P1s that followed — including E-1's false derivability claim. E-R2 closed
@@ -516,6 +522,83 @@ two FDs partial is the honest state of a first substantive decision.
 - any disposition beyond the five of §5.
 
 ## 7. Revision record
+
+### PC-1 — the residual was false, not the authority incomplete
+
+**Post-closure correction. Implementation delta zero:** Phase G unchanged, blob
+`450380ff` unchanged, `PINNED_BLOB` and `PIN_HISTORY` unchanged, `graph.json`
+unchanged, verifier unchanged, corpus unchanged. Nothing is re-pinned, because
+nothing about the authority moved.
+
+**The finding.**
+
+> The residual was false, not the authority incomplete. Phase G §4.2.1 and
+> §4.2.6 already permit multiple carriers of one admitted semantic edge; the
+> payload reconciliation identifies the required structural carrier's origin,
+> not an exclusive carrier kind. Step 4's omission of `carrier_kind` is
+> therefore `IRRELEVANT-BY-NORM`, not `AUTHORITY-UNDECIDED`.
+
+**Verified against the artifact, not accepted on report.** Four frozen
+statements decide it, and they are not in tension:
+
+- §4.2.1, line 958: *"A generic ArtifactRef-valued field creates no graph
+  authority."* The prohibition is aimed at **inventing a semantic relation**,
+  not at adding a carrier for an admitted one.
+- §4.2.6 opens: *"The relation is many-to-many. Uniqueness is real, but it lives
+  one level down, on the **occurrence** rather than the field"* — and cites
+  `final_normalized_output_ref` / `dispatches[].normalized_output_ref` as *"two
+  fields on one edge, which the reconciliation already states in writing."*
+- FROZEN clause 3: *"Several fields MAY realize the same admitted edge."*
+- FROZEN clause 4 forbids only a relation **absent from §4.2.4**.
+  `CampaignEvent(k) → KPayload` is rows 58–68; it is present.
+
+The presence map's *exactly one* is scoped by its own wording to
+`--event_payload_digest-->` carriers — *"EXACTLY ZERO **such** carriers"* — so it
+constrains the structural carrier's count and says nothing about an
+`artifact_ref` on the same pair.
+
+**What misled the earlier reading.** G-R10's sentence that rows 58–68 are
+carried structurally *"rather than by an ArtifactRef"* sits in the passage
+reconciling where those eleven registry rows **come from**: frozen payload
+structure (§3.15.2) rather than frozen `ArtifactRef` slots. It explains their
+provenance. It does not impose an exclusive carrier kind, and it is not in a
+FROZEN block.
+
+**So the disputed case was already decided.** An additional
+`CampaignEvent(k) --artifact_ref--> KPayload` introduces no new
+`(source, target, class)`; it is a second carrier of an already admitted edge.
+The structural digest stays required and stays exactly one; the extra carrier is
+admissible, must declare that target in its field capability, must appear in the
+ledger, and must pass step 4 against the registry.
+
+**Why the cell is `IRRELEVANT-BY-NORM`.** Step 4 answers *does every carrier
+denote an admitted semantic edge?* Its normative identity is
+`(source, target, class)`. `carrier_kind` is not part of the distinction Phase G
+asks **this** predicate to preserve — role is constrained earlier, by
+well-formedness closing the vocabulary, and step 2 separately fixes the exact
+structural commitment. That is clause 2 of the admissibility rule (§7, E-R10) in
+its positive form: a coarser representation is legitimate because the discarded
+distinction lies outside this step's normative quantifier.
+
+**Why no clarifying supersede either.** Editing Phase G to say this more plainly
+would move the authoritative blob, trigger the §2.5 ceremony, and stage a new
+Phase G act where the old act already contained the answer — bureaucracy
+producing events faster than the system produces decisions.
+
+**On the method.** This is the preservation table being falsified, in the
+direction nobody was watching. Six rounds trained us to suspect the verifier of
+insufficient strictness; here the *table* attributed to the authority a
+restriction the authority never imposed. A claim structure that can only fail in
+the expected direction is not falsifiable, and this one failed in the other.
+
+Corrected cell:
+
+```text
+Step 4 × semantic role     AUTHORITY-UNDECIDED  ->  IRRELEVANT-BY-NORM
+```
+
+The tables in E-R12 and E-R13 keep their original wording, as every superseded
+claim in this document does; the correction lives here.
 
 ### E-R21 — the verdict depended on the environment, not the evidence
 
@@ -1659,7 +1742,10 @@ one grows on top.
    single witness. The job is not to re-read five hundred lines and feel uneasy.
    It is to find **one false cell**, and the cheapest refutation is a state pair
    the authority distinguishes and that cell claims the step does too.
-   `AUTHORITY-UNDECIDED` cannot be refuted by argument, only closed by Phase G.
+   **One cell has since been refuted, in the direction nobody was watching: see
+   PC-1.** The table had attributed to the authority a restriction the authority
+   never imposed, so `AUTHORITY-UNDECIDED` turned out to be falsifiable by
+   *reading Phase G more carefully*, not only by a Phase G act.
 
 8. **Attack identity preservation, not mutations.** Three P1s in a row were
    one family (§7, E-R9): the verifier's observation granularity was weaker than
