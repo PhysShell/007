@@ -358,9 +358,17 @@ one place inside it.
 2. blob oid resolves LOCALLY
 3. the resolved object is a blob
 4. its bytes decode as UTF-8
-5. the anchor occurs EXACTLY ONCE
+5. the anchor occurs EXACTLY ONCE, counted by START POSITION
 => REFERENTIAL PASS
 ```
+
+Step 5 counts *overlapping* start positions, not `str.count`. "Exactly once" is
+a claim about **where** the anchor occurs, and non-overlapping counting answers
+a different question: in `aaa`, `count("aa")` is 1 while two distinct start
+positions exist. The frozen Phase G blob contains a real instance — a run of 51
+spaces, in which a 50-space anchor counts once and starts twice — so this was
+not hypothetical, and an ambiguous locator did resolve as unique until EB-R1's
+review caught it.
 
 **What it must never check**, each of which would put a small self-appointed
 lawyer inside the extractor: that the anchor says "supersede"; that `blob`
@@ -631,11 +639,21 @@ future; installing infrastructure now for a consumer that does not exist is how
 unexamined premises get in. It is recorded in §2.5.1 as a precondition to be met
 by a runner or checkout policy when a re-pin actually consumes it.
 
+**P1 during review (CodeRabbit) — `str.count` answered the wrong question.**
+Step 5 used `text.count(anchor)`, which reports non-overlapping matches, so an
+anchor occupying two distinct start positions counted as one and resolved as
+unique. Not hypothetical: the frozen Phase G blob has a run of 51 spaces, and a
+50-space anchor counts once while starting twice. Step 5 now counts start
+positions, and the corpus carries that exact witness drawn from the authority's
+own bytes. The reviewer's framing was the useful part — *the locator does not
+identify one location* — which is the step-5 property restated, not a counting
+nicety.
+
 **One existing witness was rewritten, not preserved.** *"pin evidence that binds
 nothing is rejected"* constructed entries with the retired free-text field; the
 locator's shape changed, so the case now uses a valid locator and continues to
 test chain linkage rather than locator shape. Claiming the previous corpus was
-untouched would have been false. Corpus 46 → 53.
+untouched would have been false. Corpus 46 → 54.
 
 **Zero-delta witness.** `docs/tasks/a1-f-v2-graph.json` is byte-identical before
 and after — `5c69fde8a97ded1f5d34a65560d4973ebe59f0c6` — as it must be while

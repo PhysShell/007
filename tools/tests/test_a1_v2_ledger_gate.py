@@ -76,7 +76,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
 
 # Pinned deliberately. Bump it in the same commit that adds or removes a case,
 # so the number is a reviewed claim rather than a readout of whatever survived.
-EXPECTED_TOTAL = 53
+EXPECTED_TOTAL = 54
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
@@ -584,6 +584,15 @@ def preflight_cases() -> list[tuple[str, bool]]:
         many = xg.authority_ref_defect({**VALID_LOCATOR, "anchor": "one level down"})
         out.append(("an ambiguous anchor is rejected",
                     many is not None and "ANCHOR AMBIGUOUS" in many))
+
+        # 3l-bis. Overlapping occurrences. `str.count` reports non-overlapping
+        #     matches, so an anchor can occupy two distinct start positions and
+        #     still "count" once. This witness is drawn from the frozen blob
+        #     itself: a run of 51 spaces, in which a 50-space anchor counted
+        #     once and started twice, and therefore resolved as unique.
+        overlap = xg.authority_ref_defect({**VALID_LOCATOR, "anchor": " " * 50})
+        out.append(("an anchor overlapping itself is rejected",
+                    overlap is not None and "ANCHOR AMBIGUOUS" in overlap))
 
         # 3m. Normal positive: a real, authority-shaped, unique anchor.
         out.append(("a well-formed authority locator resolves",

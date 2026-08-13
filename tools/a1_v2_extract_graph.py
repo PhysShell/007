@@ -144,7 +144,16 @@ def authority_ref_defect(ref: object) -> str | None:
     except UnicodeDecodeError:
         return f"MALFORMED LOCATOR — blob {ref['blob']} is not valid UTF-8"
 
-    hits = text.count(ref["anchor"])
+    # OVERLAPPING start positions, not `str.count`. "exactly once" is a claim
+    # about WHERE the anchor occurs, and `count` reports non-overlapping matches
+    # only: in "aaa" it reports one occurrence of "aa" while two distinct start
+    # positions exist. The frozen Phase G blob contains a real instance — a run
+    # of 51 spaces, in which a 50-space anchor counts once and starts twice — so
+    # an ambiguous locator would have resolved as unique.
+    hits, at = 0, text.find(ref["anchor"])
+    while at != -1:
+        hits += 1
+        at = text.find(ref["anchor"], at + 1)
     if hits == 0:
         return f"ANCHOR NOT FOUND — the cited text does not occur in {ref['blob']}"
     if hits > 1:
