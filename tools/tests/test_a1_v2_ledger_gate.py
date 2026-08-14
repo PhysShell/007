@@ -97,7 +97,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
 
 # Pinned deliberately. Bump it in the same commit that adds or removes a case,
 # so the number is a reviewed claim rather than a readout of whatever survived.
-EXPECTED_TOTAL = 63
+EXPECTED_TOTAL = 66
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
@@ -380,12 +380,28 @@ GRAPH_EXTRACTOR = REPO / "tools/a1_v2_extract_graph.py"
 PHASE_G = REPO / "docs/tasks/a1-f-v2-phase-g.md"
 
 
-def run_real(graph: Path, schema: Path) -> tuple[int, str]:
+def gate_env(**extra: str) -> dict[str, str]:
+    """Environment for a gate child spawned by this corpus.
+
+    `run_real` reproduces the gate-invocation path rather than owning an
+    independent one, so it is held to the property EC-R1 installs there instead
+    of quietly running under an inherited environment. HOME is present because
+    the gate projects it onward to the graph extractor, which needs it to read
+    `safe.directory`; nothing else is.
+    """
+    env = {k: os.environ[k] for k in ("HOME",) if k in os.environ}
+    env.update(extra)
+    return env
+
+
+def run_real(graph: Path, schema: Path, env: dict[str, str] | None = None,
+             isolated: bool = True) -> tuple[int, str]:
     ledger = REPO / "docs/tasks/a1-f-v2-realization-ledger.json"
-    p = subprocess.run(
-        [sys.executable, str(GATE), "--graph", str(graph), "--schema", str(schema),
-         "--ledger", str(ledger)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
+    argv = [sys.executable] + (["-I"] if isolated else []) + [
+        str(GATE), "--graph", str(graph), "--schema", str(schema),
+        "--ledger", str(ledger)]
+    p = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", env=gate_env() if env is None else env)
     return p.returncode, p.stdout
 
 
@@ -943,6 +959,89 @@ def preflight_cases() -> list[tuple[str, bool]]:
         out.append(("the corpus's git environment is constructed, not inherited",
                     leak_free and set(built) <= {"PATH", "HOME"}
                     and named["GIT_TERMINAL_PROMPT"] == "0"))
+
+        # EC-R1 --------------------------------------------------------------
+        # The gate parent spawns two python extractor children. Until now it
+        # handed them the whole parent environment. Three witnesses, split so
+        # that one does not have to prove everything: capability, call site,
+        # execution. The split is the lesson from this branch's failed
+        # harnesses — a probe that must both reach its target and prove a
+        # negative can stop running and report success by silence.
+
+        # 5a. CAPABILITY, proved constructively rather than by absence. Two
+        #     secret-shaped variables, not one: if only `ARLIAI_API_KEY` were
+        #     checked, an implementation that removed that single name would
+        #     pass while remaining a credential denylist. The schema extractor
+        #     projects to the EMPTY set — it imports argparse/json/sys/pathlib,
+        #     spawns nothing, reads no environment — and an unknown tool
+        #     projects empty too, so a third extractor cannot inherit the parent
+        #     by omission.
+        secrets = {"ARLIAI_API_KEY": "sk-sentinel",
+                   "SOME_OTHER_TOKEN": "also-secret",
+                   "PYTHONPATH": str(d / "evil"), "TMPDIR": str(d / "evil"),
+                   "VIRTUAL_ENV": str(d / "evil")}
+        saved_env = {k: os.environ.get(k) for k in secrets}
+        os.environ.update(secrets)
+        try:
+            g_env = gate.preflight_env(gate.GRAPH_EXTRACTOR, os.environ)
+            s_env = gate.preflight_env(gate.SCHEMA_EXTRACTOR, os.environ)
+            u_env = gate.preflight_env(Path("a1_v2_extract_future.py"), os.environ)
+            out.append(("preflight children get only declared capabilities",
+                        not (set(g_env) & set(secrets))
+                        and set(g_env) <= {"HOME"} and s_env == {} and u_env == {}))
+        finally:
+            for k, v in saved_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+
+        # 5b. CALL SITE. 5a describes a function; this requires the gate to use
+        #     it. A projection helper that exists and is never passed is the
+        #     exact failure this branch already shipped once, one layer down.
+        #     Read from the gate's own source: the preflight spawn must pass
+        #     `env=preflight_env(...)` and must carry `-I`.
+        import ast
+        gate_src = ast.parse(GATE.read_text())
+        spawns = [n for n in ast.walk(gate_src)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                  and n.func.attr == "run" and n.args
+                  and isinstance(n.args[0], (ast.List, ast.Tuple))
+                  and any(isinstance(e, ast.Attribute) and e.attr == "executable"
+                          for e in n.args[0].elts)]
+        wired = []
+        for call in spawns:
+            argv_flags = {e.value for e in call.args[0].elts
+                          if isinstance(e, ast.Constant)}
+            env_kw = next((k.value for k in call.keywords if k.arg == "env"), None)
+            wired.append("-I" in argv_flags
+                         and isinstance(env_kw, ast.Call)
+                         and isinstance(env_kw.func, ast.Name)
+                         and env_kw.func.id == "preflight_env")
+        out.append(("the gate actually spawns through that projection",
+                    len(spawns) >= 1 and all(wired)))
+
+        # 5c. EXECUTION, and the preservation half of the contract. Removing
+        #     ambient state must not change the preflight result for the
+        #     committed artifacts. The control arm proves the fixture is
+        #     genuinely hostile: the SAME PYTHONPATH, handed to an extractor run
+        #     without isolation, hijacks it outright — a planted `json.py` is
+        #     imported before the extractor's first line.
+        evil = d / "evil"
+        evil.mkdir(exist_ok=True)
+        (evil / "json.py").write_text('raise SystemExit("HIJACKED")\n')
+        hostile = {**gate_env(), "ARLIAI_API_KEY": "sk-sentinel",
+                   "PYTHONPATH": str(evil), "TMPDIR": str(evil),
+                   "VIRTUAL_ENV": str(evil)}
+        hijacked = subprocess.run(
+            [sys.executable, str(REPO / "tools/a1_v2_extract_schema.py"),
+             "--check", "--out", str(SCHEMA_PATH)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env={**hostile})
+        code, txt = run_real(GRAPH_PATH, SCHEMA_PATH, env=hostile)
+        out.append(("preflights still PASS with ambient state removed",
+                    "HIJACKED" in hijacked.stdout + hijacked.stderr
+                    and txt.count(" PASS ") >= 2 and code == 1))
 
         # 4. Control: the real artifacts must still pass their preflights, or the
         #    cases above would be proving nothing.

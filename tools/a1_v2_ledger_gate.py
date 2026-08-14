@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -51,6 +52,53 @@ SCHEMA = REPO / "docs/tasks/a1-f-v2-schema-facts.json"
 LEDGER = REPO / "docs/tasks/a1-f-v2-realization-ledger.json"
 GRAPH_EXTRACTOR = REPO / "tools/a1_v2_extract_graph.py"
 SCHEMA_EXTRACTOR = REPO / "tools/a1_v2_extract_schema.py"
+
+# EC-R1. The preflight child's environment is PROJECTED from the parent's, one
+# NAMED capability at a time, and the projection is PER CHILD rather than shared.
+# The question this answers is not "which variables should we keep?" but "what
+# does THIS child require for its current executable contract?" — so a name
+# enters only after a witness that the contract fails without it.
+#
+# Both entries below were derived that way, and the derivation removed things a
+# reasonable person would have kept:
+#
+#   schema extractor — imports argparse/json/sys/pathlib and NOTHING else. It
+#     spawns no process, reads no `os.environ`, creates no temporary file. Its
+#     requirement is therefore the empty set, witnessed: it succeeds under
+#     `env -i`.
+#
+#   graph extractor — also stdlib-only, but it spawns git. It still needs no
+#     PATH: since the git resolver was pinned to absolute candidates it looks up
+#     no executable by name and synthesizes its own child's PATH. HOME is the
+#     one witnessed requirement, and the witness is specific — against a
+#     checkout owned by another uid, git refuses with "detected dubious
+#     ownership" unless it can read the global config where `safe.directory`
+#     lives. Without HOME the resolver returns None, which this repository's
+#     vocabulary renders as UNRESOLVABLE IN THIS CHECKOUT: a statement about the
+#     object's availability, standing in for a refusal about permission.
+#
+# TMPDIR, PYTHONPATH, VIRTUAL_ENV are absent deliberately. None is a capability
+# requirement here; PYTHONPATH in particular is a code-loading surface, and a
+# demonstrated one — a `json.py` planted on it hijacks the schema extractor
+# outright. Should a future extractor need temporary storage, that is a new
+# capability with a parent-created directory, not an inherited ambient path.
+PREFLIGHT_CAPABILITIES: dict[str, tuple[str, ...]] = {
+    GRAPH_EXTRACTOR.name: ("HOME",),
+    SCHEMA_EXTRACTOR.name: (),
+}
+
+
+def preflight_env(tool: Path, parent_env: "os._Environ[str] | dict[str, str]") -> dict[str, str]:
+    """Project the parent environment onto one child's declared capabilities.
+
+    Constructed, never inherited, and never a denylist: a denylist removes the
+    names someone remembered, which leaves every name nobody thought of. An
+    unknown tool projects to the empty set rather than to everything, so adding
+    a third extractor cannot grant it the parent's environment by omission.
+    """
+    return {name: parent_env[name]
+            for name in PREFLIGHT_CAPABILITIES.get(tool.name, ())
+            if name in parent_env}
 
 
 def _say(text: str, *, err: bool = False) -> None:
@@ -527,9 +575,19 @@ def main() -> int:
         # codec, so under LC_ALL=C the preflight died decoding a correct child.
         # Writing deterministically and reading by locale is the same defect
         # with the arrow reversed — it appeared in this very commit.
-        p = subprocess.run([sys.executable, str(tool), "--check", "--out", out],
+        # `-I` is a SECOND property, not a spelling of the first. The constructed
+        # env proves the child never receives a forbidden capability; `-I`
+        # proves Python's own startup and import machinery does not take ambient
+        # control back — it ignores every PYTHON* variable, drops user site, and
+        # keeps the script directory off sys.path. Neither subsumes the other:
+        # `-I` would not stop the child reading a credential out of os.environ,
+        # and a constructed env would not stop an interpreter told to import
+        # from elsewhere before this file's first line runs. The same shape as
+        # the GIT_ENV guards next to the object-id postcondition one floor down.
+        p = subprocess.run([sys.executable, "-I", str(tool), "--check", "--out", out],
                            capture_output=True, text=True,
-                           encoding="utf-8", errors="replace")
+                           encoding="utf-8", errors="replace",
+                           env=preflight_env(tool, os.environ))
         r.add(label, p.returncode == 0,
               ok_msg if p.returncode == 0
               else (p.stderr.strip().split("\n")[0] or "mismatch"),
