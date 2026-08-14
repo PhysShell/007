@@ -196,15 +196,42 @@ repository that does not exist. Both would satisfy a bare identity predicate.
 No byte-derived state may therefore be reported unless the observation was
 produced under all of:
 
+**This list is derived from the merged implementation, not from memory.** Four
+of the six findings against this document landed in this subsection, which is
+the one part written from recollection under review pressure rather than read
+off the code. The list below was produced by reading
+`tools/a1_v2_extract_graph.py` at `e70d019` and reporting what it actually does.
+
 ```text
-trusted executable       git resolved from pinned absolute candidates,
-                         never from an inherited PATH            (#143)
-constructed environment  no ambient variable reaches the child   (#141, #143)
-no lazy fetch            GIT_NO_LAZY_FETCH, no network access    (#141)
-pinned config scopes     system and global git configuration
-                         closed; the repository's own config
-                         is the only scope read                  (#143)
+trusted executable    git resolved from pinned absolute candidates,
+                      never from an inherited PATH                     (#143)
+constructed env       no ambient variable reaches the child;
+                      GIT_ENV_ALLOW is empty and PATH is synthesized   (#141, #143)
+no lazy fetch         GIT_NO_LAZY_FETCH=1, no network access           (#141)
+outer scopes closed   GIT_CONFIG_NOSYSTEM=1 and
+                      GIT_CONFIG_GLOBAL=/dev/null                      (#143)
+declared grant        exactly one command-scope key,
+                      -c safe.directory=<the repository being read>    (#143)
 ```
+
+**Command scope is read, by design, and an earlier draft of this list denied
+it.** That draft said the repository's own config was "the only scope read",
+which is false: `git --show-scope` reports `command` as a scope of its own, and
+the `-c safe.directory` grant that EC-R1 substituted for `HOME` lives in it.
+Under the frozen text as written, an implementation either kept the grant and
+became ineligible to report `RESOLVED`, or dropped it and could not resolve a
+foreign-owned checkout at all.
+
+The grant is not an exception to the prerequisites; it is one of them. It is
+narrow (one key), explicit (visible in argv), scoped to the single repository
+under examination, and supplied by this layer rather than inherited from
+anywhere. Those properties are what make it admissible, and an implementation
+that widened it — more keys, or a broader path — would be violating this list
+rather than satisfying it.
+
+The repository's own `local` and `worktree` scopes are read too, necessarily:
+without them the directory is not a repository. They need no exclusion, since
+configuration cannot add an object directory.
 
 ### 4.4 Prerequisites are not guards, and the difference is load-bearing
 
@@ -240,12 +267,24 @@ bytes from a **trusted** git reading a real object store say the store returned
 something other than what was asked for, and that is a licensed claim about the
 checkout.
 
-This is not a new position. The merged corpus already carries it as witness 3t —
-*"substituted object bytes abort even with the guard removed"* — which removes
-`GIT_NO_REPLACE_OBJECTS` deliberately and requires the abort anyway, precisely so
-the property does not degrade into enumerating known substitution tricks. The
-first draft of this contract contradicted a property that had already shipped and
-been independently reviewed twice.
+This is not a new position, and the artifact is named so it can be re-checked
+rather than taken from this document's summary of it:
+
+```text
+artifact   tools/tests/test_a1_v2_ledger_gate.py, case 3t (~L880-L900)
+introduced 2d372a7  ("EB-R1 review fix 4 — check the bytes against the name
+                     asked for")
+asserts    with GIT_NO_REPLACE_OBJECTS deliberately removed from GIT_ENV,
+           a substituted object still raises OBJECT IDENTITY VIOLATED
+```
+
+What the witness **asserts** is that one abort still happens without that one
+guard. The guard/prerequisite distinction in this section is an **inference**
+drawn from it — the witness is evidence for the principle, not a statement of
+it, and a reader who disagrees with the inference should be able to go and read
+the assertion. The first draft of this contract contradicted the asserted
+behaviour outright, which had already shipped and been independently reviewed
+twice.
 
 These are already-merged properties, not new work. Naming them here binds this
 contract to them, so that a future implementation cannot satisfy the letter of
