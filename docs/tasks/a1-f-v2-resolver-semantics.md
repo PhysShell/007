@@ -355,18 +355,33 @@ rule while repairing something else.
 
 The criterion that separates them is **what the postcondition can detect**:
 
+The classification is by **effect on the object id**, never by mechanism — one
+mechanism can land in more than one row, and `refs/replace` does:
+
 ```text
-PREREQUISITE   the interference can leave the object id MATCHING, so
-               recomputing it cannot reveal the interference
+GUARD          the substitution yields a DIFFERENT object id, so recomputing
+               it reveals the substitution
+               - refs/replace pointing at unrelated bytes
+               - an object file overwritten with a different valid object
+
+PREREQUISITE   the interference can leave the object id MATCHING, and the
+               resolver can exclude it by construction
                - counterfeit executable   (genuine bytes, correct hash)
                - lazy fetch               (correct bytes, from the network)
                - smudge/textconv filters  (pass-through leaves bytes identical)
 
-GUARD          the interference changes the bytes, so recomputing the object
-               id reveals it — see §4.3.2 for which hash property that needs,
-               and for which state actually needs it
-               - refs/replace substitution (substitute bytes, different hash)
+NEITHER        the interference leaves the object id MATCHING and no
+               construction at this layer excludes it
+               - refs/replace pointing at a PREPARED COLLIDING blob
+               -> not detectable, not excludable, and therefore outside what
+                  RESOLVED claims at all (§4.3.2)
 ```
+
+An earlier revision had only the first two rows and put `refs/replace` in the
+guard row unconditionally. That is false for the third case: a replace ref aimed
+at a colliding blob produces a matching id, so the postcondition sees nothing
+and no prerequisite removes it. The mechanism is the same; the effect on the id
+is what differs, and the effect is what classifies.
 
 A prerequisite is required precisely where the postcondition is blind. Where the
 postcondition can see, a guard is defence in depth and its failure is a finding
@@ -594,8 +609,10 @@ to that oid. With A's object file overwritten by a valid object for B:
 
 So the identity postcondition is not defence in depth over a check git already
 performs; it is the check. The replacement guard remains a **guard** under
-§4.3.1: its failure produces bytes that do not hash to the name, and the
-postcondition detects them.
+§4.3.1 for the substitutions the postcondition can see — those yielding a
+different object id. It is not a defence against a replace ref aimed at a
+prepared colliding blob, which yields a matching id; that case falls in
+§4.3.1's third row and outside what `RESOLVED` claims.
 
 ## 5. Explicit non-claims
 
@@ -672,7 +689,9 @@ Listed here so the implementation cannot choose the experiments that suit it.
 4. **Substituted bytes** (replace-style identity violation) →
    `IDENTITY_VIOLATION`, existing postcondition intact. The §4.3 prerequisites
    all hold throughout; only the §4.3.1 *guard* is removed, which is what makes
-   this witness reachable at all.
+   this witness reachable at all. The substitute must yield a **different**
+   object id — a prepared-collision substitution is §4.3.1's third row and is
+   not what this witness exercises.
 5. **A non-blob object that resolves** → `RESOLVED(kind, bytes)`; the *locator*
    layer, not the resolver, classifies the wrong type.
 6. **No witness may use `stderr` text as a semantic discriminator.** A witness
