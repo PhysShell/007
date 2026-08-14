@@ -95,8 +95,26 @@ _OID = re.compile(r"[0-9a-f]{40}")
 # or fetch — verified — so the reach is a local checkout, i.e. exactly the
 # reach of an ambient environment variable, and exactly the threat this layer
 # is about.
+# The fourth and fifth guards close git's CONFIGURATION scopes, which an empty
+# environment does not. Reproduced: with `/etc/gitconfig` carrying a setting,
+# `env -i git config --get user.name` returns it — the system scope is read from
+# a fixed path and owes nothing to the environment. `GIT_CONFIG_NOSYSTEM=1`
+# suppresses it.
+#
+# `GIT_CONFIG_GLOBAL=/dev/null` pins the remaining scope shut. This one is
+# CONSTRUCTION, not a repaired leak, and the difference is worth keeping
+# straight: git was tested here for a passwd-derived home when `HOME` is unset,
+# and it did not read one. The pin is there so the claim — the child's
+# configuration is exactly the scoped grant on the command line — is true by
+# construction rather than by which platform happened to run the test.
+#
+# The repository's OWN config is still read, necessarily: without it the
+# directory is not a repository. It cannot add an object directory (alternates
+# are a file in the object store, not a config key), and this layer already
+# asserts trust for exactly this path.
 GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1",
-           "GIT_NO_REPLACE_OBJECTS": "1"}
+           "GIT_NO_REPLACE_OBJECTS": "1",
+           "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
 
 # The child environment is CONSTRUCTED, not inherited. Copying `os.environ`
 # wholesale made 135 ambient variables part of this extractor's input surface

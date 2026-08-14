@@ -97,7 +97,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
 
 # Pinned deliberately. Bump it in the same commit that adds or removes a case,
 # so the number is a reviewed claim rather than a readout of whatever survived.
-EXPECTED_TOTAL = 68
+EXPECTED_TOTAL = 69
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
@@ -1084,6 +1084,37 @@ def preflight_cases() -> list[tuple[str, bool]]:
                     and xg.GIT_ENV_ALLOW == ()
                     and stripped is not None and stripped[0] == "blob"
                     and set(env_built) == {"PATH"} | set(xg.GIT_ENV)))
+
+        # 5f. AN EMPTY ENVIRONMENT DOES NOT EMPTY GIT'S CONFIGURATION. The
+        #     system scope is read from a fixed path and owes nothing to the
+        #     environment, so `env -i` leaves `/etc/gitconfig` fully in effect —
+        #     reproduced directly, and the reason the "only the scoped grant"
+        #     claim was false as first written. Both scopes are now pinned.
+        #
+        #     Witnessed through GIT_CONFIG_SYSTEM/GIT_CONFIG_GLOBAL rather than
+        #     by writing to /etc: a corpus that edits machine-level
+        #     configuration to make a point is a worse idea than the defect. The
+        #     control arms hand git the hostile file WITHOUT each guard and
+        #     require it to be read, so neither arm can pass by the file simply
+        #     being unreachable.
+        hostile_cfg = d / "hostile.gitconfig"
+        hostile_cfg.write_text("[user]\n\tname = HOSTILE-CONFIG-STATE\n")
+        def _cfg(env_extra):
+            return subprocess.run(
+                [GIT, "-C", str(REPO), "config", "--get", "user.name"],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace",
+                env={"PATH": str(Path(GIT).parent), **env_extra}).stdout.strip()
+        sys_leaks = _cfg({"GIT_CONFIG_SYSTEM": str(hostile_cfg)})
+        sys_guarded = _cfg({"GIT_CONFIG_SYSTEM": str(hostile_cfg),
+                            "GIT_CONFIG_NOSYSTEM": "1"})
+        glob_leaks = _cfg({"GIT_CONFIG_GLOBAL": str(hostile_cfg)})
+        glob_guarded = _cfg({"GIT_CONFIG_GLOBAL": os.devnull})
+        out.append(("git's config scopes are pinned, not merely unset",
+                    sys_leaks == "HOSTILE-CONFIG-STATE" and sys_guarded == ""
+                    and glob_leaks == "HOSTILE-CONFIG-STATE" and glob_guarded == ""
+                    and xg.GIT_ENV.get("GIT_CONFIG_NOSYSTEM") == "1"
+                    and xg.GIT_ENV.get("GIT_CONFIG_GLOBAL") == os.devnull))
 
         # 5e. `-I` DOES NOT IMPLY `-S`. It implies -E, -P and -s: PYTHON*
         #     variables, the script directory, and the USER site directory. The

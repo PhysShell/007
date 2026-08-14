@@ -255,7 +255,18 @@ env -i  git -c safe.directory=<repo> -C <foreign> cat-file -t <oid>  -> blob
 ```
 
 No home directory, no config file, no variable — and `GIT_ENV_ALLOW` is now
-empty. Asserting trust for exactly this path grants nothing an attacker would
+empty.
+
+**An empty environment does not empty git's configuration**, which is where the
+first version of that claim was wrong. The system scope is read from a fixed
+path and owes nothing to the environment: with a setting in `/etc/gitconfig`,
+`env -i git config --get user.name` returns it. `GIT_CONFIG_NOSYSTEM=1` closes
+it. `GIT_CONFIG_GLOBAL=/dev/null` pins the remaining scope, and that one is
+**construction rather than a repaired leak** — git was tested here for a
+passwd-derived home with `HOME` unset and did not read one, so the pin exists so
+that the claim holds by construction rather than by which platform ran the test.
+The repository's own config is still read, necessarily; it cannot add an object
+directory, and this layer already asserts trust for exactly that path. Asserting trust for exactly this path grants nothing an attacker would
 not already hold: `repo` defaults to the checkout containing the extractor's own
 source, so anyone who owns it owns the program too.
 
@@ -847,9 +858,20 @@ that I have assumed it covers* — answered against the assumption. The
 preservation claim had been true only on installations with no relevant system
 site customization, which is a weaker statement than the one written down.
 
-Both findings are the same shape as the whole effort: **the guarantee was
-narrower than its wording**, once by granting more than the witness required,
-once by assuming a flag covered more than it does.
+*CodeRabbit again, P1 on the fix — an empty environment is not an empty
+configuration.* `-c safe.directory=<repo>` adds one value; it does not close
+git's configuration scopes, and the system scope is read from a fixed path
+regardless of the environment. Reproduced. `GIT_CONFIG_NOSYSTEM=1` and
+`GIT_CONFIG_GLOBAL=/dev/null` join the guards. One half of that report did **not**
+reproduce and is recorded as not reproduced: git was tested for a passwd-derived
+home directory with `HOME` unset, and did not read one — the reviewer had
+correctly hedged it as conditional, and it stays a construction rather than a
+fixed leak.
+
+Every one of these is the same shape as the whole effort: **the guarantee was
+narrower than its wording** — once by granting more than the witness required,
+once by assuming a flag covered more than it does, once by assuming an empty
+environment implied an empty configuration.
 
 **A finding fell out of that witness, and it is not an environment problem.**
 Without `HOME`, `_local_object` returns `None` and the diagnostic reads
@@ -877,7 +899,7 @@ gate-invocation path rather than owning an independent one, so it now spawns
 through a constructed environment too. It is witness infrastructure, and is not
 being promoted into a second production security boundary.
 
-**Corpus 63 → 68.** `graph.json` byte-identical at `5c69fde8`; Phase G,
+**Corpus 63 → 69.** `graph.json` byte-identical at `5c69fde8`; Phase G,
 `PINNED_BLOB`, `PIN_HISTORY`, the semantic registry, steps 1–5 and gate
 semantics all unchanged; gate still exit 1.
 
