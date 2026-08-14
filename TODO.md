@@ -42,12 +42,45 @@ Current authoritative state:
   the 64 MiB "manifest" bound. Decision: **64 MiB**; it stays a typed A1 object
   for FD-1.7 media types and its FD-2 rank. No version gate fired — the blob and
   therefore `contract_digest` changed, and nothing else did.
+- **A1-F S2** (second §7 supersede, PR #135, merged `ae720c1`): FD-1.3 said
+  nothing about a JSON object carrying the same member name twice, and RFC 8259
+  leaves the behaviour undefined, so first-wins and last-wins were both
+  conforming readings of identical bytes — reopening the "semantically
+  identical, digest-unequal" class FD-1.2 exists to close. Decision: **member
+  names are unique within every A1 JSON object**, a duplicate is rejected at
+  parse time, no first-wins or last-wins reading is permitted. Two §5.4 rows
+  added, the nested case required explicitly. No version gate fired again, so
+  **the blob is the only thing distinguishing `B1` from `B2`** — an
+  implementation bound to a version number would not see S2 at all, while S2
+  changes the set of documents the contract admits.
+
+  ```text
+  B2  e22539ddf4f7c9ab260e16835eef8ef18abbe726   current authority
+      sha256:2de682894cd2084444b5d7d6c5db8807a80f08a3d41541e9c00caf92462d1e1a
+  B1  3b26849cc39a3391aaed46cca56be3b6715afabb   superseded by S2
+  B0  7db92f1b3dc9d7040da074956a0b3f2f200174c8   superseded by S1
+  ```
 - **A1-F v2 convergence, Phase G — `FD-v2-GRAPH`: APPROVED / CLOSED** at
   `b853a2e`, ceremony commit `1b82a88`, after twelve corrective rounds.
   Normative source: `docs/tasks/a1-f-v2-phase-g.md`; ledger
-  `docs/tasks/a1-f-v2-convergence.md`. Adjudicated contract-first against
-  current authority blob `3b26849` (post-S1; the S1 graph delta was *proved*
-  NONE, not taken from S1's own summary). The frozen result: a **semantic edge
+  `docs/tasks/a1-f-v2-convergence.md`. Adjudicated contract-first against blob
+  `3b26849`, the authority at that time (post-S1; the S1 graph delta was
+  *proved* NONE by re-running five derivations, not taken from S1's own
+  summary). S2 has since superseded that blob, and the `B1 -> B2` graph delta is
+  likewise **proved NONE** — by input identity rather than by a second re-run:
+  the diff touches Status, FD-1.3, §5.4, one acceptance-ledger line and the new
+  §9 record, and every section the five derivations read is byte-identical, so
+  37/5/11/11/11 stand unchanged; the section-digest manifest backing that is
+  filed in the ledger's §0.1 rather than asserted. Phase G is *not*
+  re-adjudicated against `B2`; its anchor remains `B1` and what is established
+  is the narrower claim that its graph conclusions remain current. **The Phase G
+  document itself is not edited by that finding and cannot be** — it is the
+  pinned source artifact behind `tools/a1_v2_extract_graph.py`
+  (`PINNED_BLOB = 450380ff`), so any edit, including fixing its own stale
+  authority pointer, trips `EXTRACT MISMATCH`. That pointer moves at the §2.5
+  re-pin ceremony and not before. One non-graph consequence **is** outstanding:
+  the convergence ledger's §4.1 extracts §5.4 row by row, and S2 added two rows
+  there, so that inventory is two short of `B2`. The frozen result: a **semantic edge
   registry of 69 exact edges** — 56 `Intra` / 13 `Causal`, exact source and
   target kinds, discriminated by event kind and payload variant — over a
   **47-node typed universe**, acyclicity machine-checked (Kahn 47/47 over 26
@@ -78,8 +111,11 @@ Current authoritative state:
   v1 while the sanctioned line runs through v2). So A1-V0 is **not** parallel
   work and **not** started against v1 — it is the acceptance milestone *after*
   the v2 convergence freezes. Task: `docs/tasks/a1-v0.md` (§5 of the contract),
-  bound to contract blob `3b26849` (post-S1), not to a branch head; that binding
-  moves when v2 freezes. The A1-F PR has merged. One
+  bound to contract blob `e22539dd` (post-S2, PR #135), not to a branch head;
+  that binding moves when v2 freezes. Steps 1 and 2 have merged (PR #124,
+  PR #132) and both crates carry that blob in their headers; the rebind from
+  `B1` happened in `85ac63c`, after S2 merged and not before, because a blob
+  does not exist to bind to until it does. One
   real coder/reviewer/human corrective loop — coder on the claude CLI, reviewer
   on `--engine arliai` (read-only, no tool surface), controller sealing and
   folding, merge manual. Acceptance = one live corrective cycle + a full campaign
