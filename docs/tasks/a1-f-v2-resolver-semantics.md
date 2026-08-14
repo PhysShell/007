@@ -193,45 +193,104 @@ object **over the network** and then returns bytes that hash correctly; and a
 caller-selected counterfeit `git` returns the genuine published bytes for a
 repository that does not exist. Both would satisfy a bare identity predicate.
 
-No byte-derived state may therefore be reported unless the observation was
-produced under all of:
+No byte-derived state may therefore be reported unless the observation satisfies
+every requirement below.
 
-**This list is derived from the merged implementation, not from memory.** Four
-of the six findings against this document landed in this subsection, which is
-the one part written from recollection under review pressure rather than read
-off the code. The list below was produced by reading
-`tools/a1_v2_extract_graph.py` at `e70d019` and reporting what it actually does.
+**These requirements are derived from §3's question, not from the
+implementation.** That is the second derivation of this subsection and the
+change is deliberate. The first version was written from recollection; when four
+findings landed here, it was re-derived by reading the merged extractor and
+reporting what that code does. A fifth finding landed anyway — a resolver can
+satisfy every property the current code has and still answer a different
+question — which falsified the diagnosis. Describing an implementation, however
+accurately, cannot establish what the implementation is *for*. So the list is
+now obtained by decomposing the question itself, and the code appears afterwards
+as something that satisfies it rather than as its definition.
+
+§3 asks: *can I, right now, without network access and inside the accepted trust
+boundary, obtain exact bytes corresponding to the cited OID?* Each clause of
+that sentence carries a requirement.
 
 ```text
-trusted executable    git resolved from pinned absolute candidates,
-                      never from an inherited PATH                     (#143)
-constructed env       no ambient variable reaches the child;
-                      GIT_ENV_ALLOW is empty and PATH is synthesized   (#141, #143)
-no lazy fetch         GIT_NO_LAZY_FETCH=1, no network access           (#141)
-outer scopes closed   GIT_CONFIG_NOSYSTEM=1 and
-                      GIT_CONFIG_GLOBAL=/dev/null                      (#143)
-declared grant        exactly one command-scope key,
-                      -c safe.directory=<the repository being read>    (#143)
+"I"                      the program that produced the answer is chosen by
+                         THIS layer — not by the caller, not by the
+                         repository under examination
+
+"exact bytes             the response is the object's STORED content, with NO
+ corresponding to        transformation applied, verified by recomputing the
+ the cited OID"          object id from the bytes received
+
+"without network         nothing in the lookup path performs network I/O:
+ access"                 not the object lookup itself, and not any program
+                         the lookup is able to invoke
+
+"inside the accepted     the repository under examination is the SUBJECT of
+ trust boundary"         the inquiry, so nothing it controls may execute or
+                         transform anything during the inquiry
 ```
 
-**Command scope is read, by design, and an earlier draft of this list denied
-it.** That draft said the repository's own config was "the only scope read",
-which is false: `git --show-scope` reports `command` as a scope of its own, and
-the `-c safe.directory` grant that EC-R1 substituted for `HOME` lives in it.
-Under the frozen text as written, an implementation either kept the grant and
-became ineligible to report `RESOLVED`, or dropped it and could not resolve a
-foreign-owned checkout at all.
+The last two overlap for a reason that only became visible under review, and it
+is the reason this derivation exists at all.
 
-The grant is not an exception to the prerequisites; it is one of them. It is
-narrow (one key), explicit (visible in argv), scoped to the single repository
-under examination, and supplied by this layer rather than inherited from
-anywhere. Those properties are what make it admissible, and an implementation
-that widened it — more keys, or a broader path — would be violating this list
-rather than satisfying it.
+**Repository configuration can execute programs, and an earlier draft said it
+could not matter.** That draft argued the repository's own `local` and
+`worktree` scopes need no exclusion "since configuration cannot add an object
+directory". Configuration cannot add an object directory — and it can run
+commands. With **every** guard of the previous list in place, a
+repository-defined `filter.<driver>.smudge` executed during
+`git cat-file --filters --path=…`:
 
-The repository's own `local` and `worktree` scopes are read too, necessarily:
-without them the directory is not a repository. They need no exclusion, since
-configuration cannot add an object directory.
+```text
+env -i  PATH=…  GIT_NO_LAZY_FETCH=1  GIT_NO_REPLACE_OBJECTS=1
+        GIT_CONFIG_NOSYSTEM=1  GIT_CONFIG_GLOBAL=/dev/null
+        git -c safe.directory=<repo> -C <repo> cat-file --filters --path=f.txt <oid>
+
+  -> smudge filter executed: YES        bytes unchanged, oid matches
+  -> raw `cat-file blob <oid>`:  smudge filter executed: no
+```
+
+A filter that passes bytes through unchanged and exits zero leaves the object id
+matching, so the frozen rule reports `RESOLVED` while an arbitrary program has
+run — a program the *subject of the inquiry* selected, which may have reached
+the network. Every environment prerequisite held throughout. The hole was never
+in the environment; it was in the assumption that the lookup command is a
+detail.
+
+**The lookup must therefore be a raw, non-transforming read**, and that is a
+requirement rather than an implementation preference. §10's exclusion of "git
+command choice" is narrowed accordingly: choosing *among raw reads* stays out of
+scope; whether the read is raw at all is in scope, and is this requirement.
+
+**How the merged implementation satisfies these** — recorded as satisfaction,
+not as definition, so a future change can be checked against the requirement
+rather than against a description of its predecessor:
+
+```text
+"I"                pinned absolute GIT_CANDIDATES; constructed child
+                   environment with GIT_ENV_ALLOW empty and PATH
+                   synthesized from the resolved binary        (#141, #143)
+exact bytes        raw `cat-file <type> <oid>`, no --filters, no
+                   --textconv; object id recomputed from the response  (#141)
+no network         GIT_NO_LAZY_FETCH=1, and no filter or conversion
+                   machinery is engaged that could invoke a program    (#141)
+trust boundary     system and global scopes closed via
+                   GIT_CONFIG_NOSYSTEM=1 and GIT_CONFIG_GLOBAL=/dev/null;
+                   exactly one command-scope key,
+                   -c safe.directory=<the repository being read>       (#143)
+```
+
+**On that command-scope key.** `git --show-scope` reports `command` as a scope
+of its own, so an earlier draft claiming the repository's config was "the only
+scope read" was false, and put an implementation in a bind: keep the grant and
+be ineligible to report `RESOLVED`, or drop it and fail on a foreign-owned
+checkout. The grant is not an exception to these requirements — it satisfies the
+`"I"` clause. It is narrow (one key), explicit (visible in argv), scoped to the
+single repository under examination, and supplied by this layer rather than
+inherited. An implementation that widened it would be violating the list.
+
+The repository's `local` and `worktree` scopes are still read, necessarily —
+without them the directory is not a repository. What the requirements forbid is
+not reading that configuration but letting it **choose what runs**.
 
 ### 4.4 Prerequisites are not guards, and the difference is load-bearing
 
@@ -388,6 +447,12 @@ Listed here so the implementation cannot choose the experiments that suit it.
    that distinguishes states by matching git's prose is testing git's release
    notes.
 
+7bis. **A lookup that engages filter or conversion machinery must not report
+   `RESOLVED`** — a repository-defined smudge filter that passes bytes through
+   unchanged leaves the object id matching, so this witness cannot be satisfied
+   by checking the returned bytes. It must observe that no repository-selected
+   program ran.
+
 7. **With any §4.3 prerequisite absent, NEITHER `RESOLVED` NOR
    `IDENTITY_VIOLATION` may be reported** — the outcome is
    `LOOKUP_UNOBTAINABLE`. Both arms are required: a witness that only checks
@@ -466,7 +531,7 @@ IN
 OUT
   tools/*.py
   corpus changes
-  git command choice
+  the choice AMONG raw lookup commands
   stderr parsing
   Phase G
   pin state
