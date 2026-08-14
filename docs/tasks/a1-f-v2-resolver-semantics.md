@@ -149,6 +149,9 @@ prevents it.
 
 ### 4.2 The states
 
+Every branch below presupposes §4.3. Where its prerequisites do not hold, the
+classification is not entered at all.
+
 ```text
 every git invocation exited zero
   AND kind and bytes were obtained
@@ -164,7 +167,24 @@ anything else
       -> LOOKUP_UNOBTAINABLE
 ```
 
-### 4.3 Prerequisites for `RESOLVED` (FROZEN)
+### 4.3 Prerequisites for ANY byte-derived state (FROZEN)
+
+**Checked before hashing, and gating both `RESOLVED` and `IDENTITY_VIOLATION`.**
+
+The first version of this section gated `RESOLVED` alone, which left the
+stronger state ungoverned. Review supplied the case: a counterfeit `git` exits
+zero twice and returns a plausible `kind` with arbitrary bytes that do not hash
+to the requested oid. Under a rule that gates only `RESOLVED`, that is
+classified `IDENTITY_VIOLATION`, and §6 renders it as *the checkout or the ruler
+is untrustworthy* — about a checkout that need not exist. The one thing actually
+established is that **an untrusted program returned mismatching bytes**, which
+is a statement about the program, not about any repository.
+
+Both byte-derived states are claims *about the object store*. Neither may be
+reached from bytes whose provenance was never established, so the prerequisites
+gate entry to the classification rather than one of its outcomes. If any
+prerequisite is absent there is no observation to classify, and the outcome is
+`LOOKUP_UNOBTAINABLE` — which is precisely what that state means.
 
 Hash equality alone does **not** establish the property §3 asks for. Two
 mechanisms already recorded in the envelope document produce hash-matching bytes
@@ -173,8 +193,8 @@ object **over the network** and then returns bytes that hash correctly; and a
 caller-selected counterfeit `git` returns the genuine published bytes for a
 repository that does not exist. Both would satisfy a bare identity predicate.
 
-`RESOLVED` may therefore be reported **only** when the observation was produced
-under all of:
+No byte-derived state may therefore be reported unless the observation was
+produced under all of:
 
 ```text
 trusted executable       git resolved from pinned absolute candidates,
@@ -191,12 +211,15 @@ no object substitution   GIT_NO_REPLACE_OBJECTS, plus the
 These are already-merged properties, not new work. Naming them here binds this
 contract to them, so that a future implementation cannot satisfy the letter of
 §4.2 while answering a weaker question than §3 asks. **This does not choose the
-git command** — that stays out of scope per §10. It forbids `RESOLVED` from
-floating free of the guarantees that make it mean anything.
+git command** — that stays out of scope per §10. It forbids the byte-derived
+states from floating free of the guarantees that make them mean anything.
 
-If any prerequisite cannot be established for a given lookup, the outcome is
-`LOOKUP_UNOBTAINABLE`: no trustworthy result was obtained, which is exactly what
-that state says.
+The merged implementation already holds every prerequisite, so the counterfeit
+scenario above is not reachable there today. The defect is in what this
+document would have *licensed*: an implementation could satisfy the frozen rule,
+drop a prerequisite, and issue the system's strongest accusation on the strength
+of output from an arbitrary program. A preregistration is judged by what it
+permits, not by what the current code happens to do.
 
 **The cause of a non-zero exit is not classified.** No branch of this rule reads
 `stderr`, matches on a message, or consults an exit code beyond
@@ -285,9 +308,13 @@ Listed here so the implementation cannot choose the experiments that suit it.
    that distinguishes states by matching git's prose is testing git's release
    notes.
 
-7. **A `RESOLVED` result must fail to be reported when any §4.3 prerequisite is
-   absent** — the promisor-fetch and counterfeit-executable constructions
-   already carried by the merged corpus, re-read as resolver-state witnesses
+7. **With any §4.3 prerequisite absent, NEITHER `RESOLVED` NOR
+   `IDENTITY_VIOLATION` may be reported** — the outcome is
+   `LOOKUP_UNOBTAINABLE`. Both arms are required: a witness that only checks
+   `RESOLVED` is not withheld would pass while the stronger accusation remained
+   reachable from untrusted bytes, which is the defect this witness exists for.
+   The promisor-fetch and counterfeit-executable constructions already carried
+   by the merged corpus supply the fixtures, re-read as resolver-state witnesses
    rather than as environment witnesses.
 
 **Witness 3 is the load-bearing one.** It mechanically refutes the implication
