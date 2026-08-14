@@ -434,6 +434,32 @@ says so: *do not re-pin, and do not edit the locator; the locator is the one
 part known to be intact.* An environment that substitutes object contents can
 produce no evidence, and the correct output is no verdict.
 
+**Which executable answers is part of the question.** While `PATH` was
+inherited and the command was the unqualified `git`, a counterfeit `git` first
+on `PATH` — printing the genuine published blob — satisfied the object-id check
+for a repository that does not exist. Recomputing the id proves the bytes match
+the name; it cannot prove they came from an object database, because the process
+reporting them was the caller's. A wrapper could equally fetch those bytes over
+the network, so this defeats the no-network property too. Git is therefore
+resolved from a pinned list of absolute locations and the child's `PATH` is
+synthesized from whichever answered. There is no fallback to `PATH` when none
+matches: the resolver aborts, because a silent fallback restores exactly the
+hole it closes, and because "git is somewhere else on this machine" is a
+declared configuration change rather than something a provenance resolver may
+guess.
+
+**The stated boundary.** This does not make the extractor self-validating, and
+claiming otherwise would be the same defect this series keeps finding. A program
+cannot verify the machine executing it: its interpreter, its own source bytes,
+and the OS beneath both are premises, not conclusions. The pin matters because
+of a real asymmetry — the gate's preflight spawns the extractor with
+`sys.executable`, an absolute path, so in that call the interpreter is trusted
+while `git` was not, and `git` was the last caller-controlled input left. Where
+the extractor is instead launched as `python3 tools/…` under a hostile `PATH`,
+the interpreter is already the caller's and nothing below it can recover the
+property. That premise is declared here, in the §2.5.1 sense: not closed, not
+disguised as closed.
+
 This is the `old_blob` case exactly: after a supersede, the object proving
 provenance is the one that has left the tree. Without the guard, the resolver
 would have gone to the network to prove the authority of the thing whose
@@ -787,6 +813,46 @@ deliberately and the abort is required anyway**, which is what keeps the two
 defenses independent. If 3t ever starts passing only with the guard present, the
 extractor has gone back to enumerating tricks and the family is open again.
 
+**P1 on that fix, again found independently by both reviewers — `PATH` chose
+the executable.** Two rounds in a row where the two reviewers converged on one
+mechanism, which is a stronger signal than either report alone. The identity
+check closed byte substitution and left open *who reports the bytes*:
+`GIT_ENV_ALLOW` still carried `PATH`, and the command was the unqualified
+`git`. Reproduced — a counterfeit `git` first on `PATH`, printing the genuine
+published blob, made `_local_object(PINNED_BLOB, repo=Path("/nonexistent"))`
+return 159462 bytes that satisfy the object-id check, for a repository that does
+not exist. Codex added the sharpening worth keeping: such a wrapper could fetch
+those bytes over the network, so this defeats the no-network property as well.
+
+Git is now resolved from `GIT_CANDIDATES`, a pinned list of absolute locations,
+and the child's `PATH` is synthesized from whichever answered. No fallback to
+`PATH`: the resolver aborts, since a silent fallback restores the hole it closes.
+
+**Witness 3q had to be rebuilt, and why that is the interesting part.** It
+installed its probe by prepending to `PATH` — which is how the reviewer reading
+it saw that `PATH` selected the executable. The witness that demonstrated one
+property was the disclosure of the next defect. It now installs the shim through
+`GIT_CANDIDATES`; a probe that reaches its target through the hole under test
+cannot survive the patch, and should not. Two smaller instances of the same
+lesson: with the child's `PATH` narrowed to the git directory, the 3q shim could
+no longer reach `env` (it uses the `export -p` builtin) and the 3u counterfeit
+could reach neither `touch` nor `cat` (it is python under an absolute
+interpreter). Each of those was a probe quietly depending on the surface it
+audits.
+
+3u's control arm reaches the *same* counterfeit through `GIT_CANDIDATES` and
+requires it to be **accepted**. That separates "this counterfeit cannot fool the
+check" — false, and not the claim — from "`PATH` cannot install it", which is.
+
+**The boundary is declared, not closed.** §2.5.1 now states it: a program cannot
+verify the machine executing it. The pin matters because of a real asymmetry —
+the preflight uses `sys.executable`, so the interpreter is trusted while `git`
+was not — and it buys nothing where the extractor is launched as `python3 tools/…`
+under a hostile `PATH`, since there the interpreter is already the caller's.
+Saying so is the point. Four rounds of this series have been the same defect
+wearing different clothes: *a claim stronger than the implementation
+guarantees.* A fix that quietly inherited that shape would belong on the list.
+
 **Residual, recorded and not fixed here.** The gate's preflight spawns the
 extractor with an inherited environment (`tools/a1_v2_ledger_gate.py:530`). It
 predates EB-R1, it is not what was reported, and sanitizing a *python* child has
@@ -799,7 +865,7 @@ witnesses. It is open, it is stated, and it is not counted as closed.
 nothing is rejected"* constructed entries with the retired free-text field; the
 locator's shape changed, so the case now uses a valid locator and continues to
 test chain linkage rather than locator shape. Claiming the previous corpus was
-untouched would have been false. Corpus 46 → 60.
+untouched would have been false. Corpus 46 → 61.
 
 **Zero-delta witness.** `docs/tasks/a1-f-v2-graph.json` is byte-identical before
 and after — `5c69fde8a97ded1f5d34a65560d4973ebe59f0c6` — as it must be while

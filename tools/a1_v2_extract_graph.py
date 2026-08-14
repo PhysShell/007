@@ -117,15 +117,48 @@ GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1",
 #
 # Hazard 2 is why this is an allowlist and not a denylist of credential names:
 # a denylist strips the names someone remembered, and the redirection family is
-# open-ended in exactly that way. `PATH` is needed to find git at all, `HOME`
-# so git can read the global config where CI records `safe.directory`. Neither
-# can add an object directory. Nothing else is passed.
-GIT_ENV_ALLOW = ("PATH", "HOME")
+# open-ended in exactly that way. `HOME` is passed so git can read the global
+# config where CI records `safe.directory`; it cannot add an object directory.
+# Nothing else is inherited.
+GIT_ENV_ALLOW = ("HOME",)
+
+# `PATH` is NOT among them, and that is a third hazard rather than tidiness.
+# While it was inherited, this module ran the unqualified command `git`, so the
+# executable that reported the bytes was chosen by whoever set `PATH`.
+# Demonstrated: a counterfeit `git` first on `PATH`, printing the genuine
+# published blob, made `_local_object(PINNED_BLOB, repo=Path("/nonexistent"))`
+# return 159462 bytes that satisfy the object-id check — for a repository that
+# does not exist. Recomputing the id proves the bytes match the name; it cannot
+# prove they came from an object database, because the process reporting them
+# was the caller's.
+#
+# The gate's preflight is what gives this teeth: it spawns this extractor with
+# `sys.executable`, an absolute path, so in that call the interpreter is trusted
+# while `git` was not. Git is therefore looked up in a pinned list of absolute
+# locations, and the child's `PATH` is set to the directory that answered —
+# never inherited, and never silently falling back to `PATH` when none matches,
+# since a silent fallback would restore exactly the hole it is closing.
+GIT_CANDIDATES = ("/usr/bin/git", "/bin/git",
+                  "/usr/local/bin/git", "/opt/homebrew/bin/git")
+
+
+def _git_binary() -> str:
+    """Resolve git from GIT_CANDIDATES. Never from `PATH`, never via `which`."""
+    for path in GIT_CANDIDATES:
+        if os.path.isfile(path) and os.access(path, os.X_OK):
+            return path
+    raise ExtractDefect(
+        "NO TRUSTED GIT — none of " + ", ".join(GIT_CANDIDATES) + " is "
+        "executable. This is not a reason to fall back to `PATH`: an object "
+        "lookup answered by a caller-selected executable is not evidence. If "
+        "git lives elsewhere here, that is a declared configuration change to "
+        "GIT_CANDIDATES, not something this resolver may guess.")
 
 
 def _git_env() -> dict[str, str]:
     """Build git's environment from GIT_ENV_ALLOW plus GIT_ENV. Never inherit."""
     env = {name: os.environ[name] for name in GIT_ENV_ALLOW if name in os.environ}
+    env["PATH"] = str(Path(_git_binary()).parent)
     env.update(GIT_ENV)
     return env
 
@@ -153,14 +186,14 @@ def _local_object(oid: str, repo: Path = REPO) -> tuple[str, bytes] | None:
     to the extractor itself: the check is as discriminating as the distinction
     it enforces, instead of enumerating the ways the distinction can be lost.
     """
-    env = _git_env()
-    kind = subprocess.run(["git", "-C", str(repo), "cat-file", "-t", oid],
+    env, git = _git_env(), _git_binary()
+    kind = subprocess.run([git, "-C", str(repo), "cat-file", "-t", oid],
                           capture_output=True, text=True, encoding="utf-8",
                           errors="replace", env=env)
     if kind.returncode != 0:
         return None
     kind = kind.stdout.strip()
-    body = subprocess.run(["git", "-C", str(repo), "cat-file", kind, oid],
+    body = subprocess.run([git, "-C", str(repo), "cat-file", kind, oid],
                           capture_output=True, env=env)
     # Not a locator defect and not "unresolvable": git answered, and answered
     # with bytes that are not the object asked for. No verdict computed on top

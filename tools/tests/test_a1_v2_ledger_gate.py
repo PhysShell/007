@@ -76,7 +76,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
 
 # Pinned deliberately. Bump it in the same commit that adds or removes a case,
 # so the number is a reviewed claim rather than a readout of whatever survived.
-EXPECTED_TOTAL = 60
+EXPECTED_TOTAL = 61
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
@@ -678,12 +678,18 @@ def preflight_cases() -> list[tuple[str, bool]]:
             # 3p. The constructed mapping carries the allowlist and the guards,
             #     and nothing else — asserted as an exact key set, so a later
             #     `env.update(os.environ)` cannot slip back in unnoticed.
+            #     `PATH` is present but SYNTHESIZED — it is the directory of the
+            #     pinned git binary, never the caller's. Asserting that it
+            #     differs from the ambient one is the point: an inherited PATH
+            #     chose the executable that reported the bytes.
             built = xg._git_env()
             allowed = ({k for k in xg.GIT_ENV_ALLOW if k in os.environ}
-                       | set(xg.GIT_ENV))
+                       | set(xg.GIT_ENV) | {"PATH"})
             out.append(("git's environment is built from an allowlist",
                         set(built) == allowed
-                        and all(built[k] == v for k, v in xg.GIT_ENV.items())))
+                        and all(built[k] == v for k, v in xg.GIT_ENV.items())
+                        and built["PATH"] == str(Path(xg._git_binary()).parent)
+                        and built["PATH"] != os.environ.get("PATH")))
 
             # 3q. What the CHILD PROCESS actually receives. 3p alone would pass
             #     vacuously if `_git_env` were written and never wired in, which
@@ -691,20 +697,79 @@ def preflight_cases() -> list[tuple[str, bool]]:
             #     /bin/sh, not python: a python child sets `LC_CTYPE` on itself
             #     via PEP 538 legacy-locale coercion, which would look like a
             #     leak and is not one.
+            #
+            #     The shim is installed by overriding GIT_CANDIDATES, not by
+            #     prepending to `PATH`. It used to go on `PATH` — which is how
+            #     the reviewer who read this witness saw that `PATH` selected
+            #     the executable, and made 3u necessary. A probe that reaches
+            #     its target through the hole under test cannot survive the
+            #     patch, and should not: 3u now owns that question.
+            #
+            #     `export -p`, not `env`: the child's PATH is now the git
+            #     directory alone, so the shim cannot reach coreutils. A probe
+            #     that needs the surface it is auditing is not a probe.
             shim, dump = d / "shim", d / "child-env.txt"
             shim.mkdir()
-            (shim / "git").write_text("#!/bin/sh\nenv > '%s'\nexit 1\n" % dump)
+            (shim / "git").write_text("#!/bin/sh\nexport -p > '%s'\nexit 1\n" % dump)
             (shim / "git").chmod(0o755)
-            path_saved = os.environ["PATH"]
-            os.environ["PATH"] = f"{shim}:{path_saved}"
+            candidates_saved = xg.GIT_CANDIDATES
+            xg.GIT_CANDIDATES = (str(shim / "git"),)
             try:
                 xg._local_object("0" * 40)
             finally:
-                os.environ["PATH"] = path_saved
-            child = {line.split("=", 1)[0]
-                     for line in dump.read_text().splitlines() if "=" in line}
+                xg.GIT_CANDIDATES = candidates_saved
+            child = {line[len("export "):].split("=", 1)[0]
+                     for line in dump.read_text().splitlines()
+                     if line.startswith("export ") and "=" in line}
             out.append(("no ambient variable reaches the git child process",
                         bool(child) and not (child & set(HOSTILE))))
+
+            # 3u. WHICH EXECUTABLE REPORTS THE BYTES. While `PATH` was
+            #     inherited and the command was the unqualified `git`, a
+            #     counterfeit git first on `PATH` — printing the genuine
+            #     published blob — satisfied the object-id check for
+            #     `repo=/nonexistent`. Recomputing the id proves the bytes match
+            #     the name; it cannot prove they came from an object database,
+            #     when the process reporting them is the caller's.
+            #
+            #     Control arm: the same counterfeit, reached through
+            #     GIT_CANDIDATES instead, DOES run and IS accepted. So the
+            #     witness separates "this counterfeit cannot fool the check"
+            #     (false, and not the claim) from "`PATH` cannot install it"
+            #     (the claim).
+            #     The counterfeit is a python script under an absolute
+            #     interpreter, for the same reason 3q dropped `env`: with the
+            #     child's PATH narrowed to the git directory, a /bin/sh shim
+            #     can reach neither `touch` nor `cat`.
+            fake, ran = d / "fake", d / "fake-ran"
+            fake.mkdir()
+            real = xg._local_object(xg.PINNED_BLOB)
+            (fake / "payload").write_bytes(real[1])
+            (fake / "git").write_text(
+                "#!%s\n"
+                "import sys, pathlib\n"
+                "pathlib.Path(%r).write_text('ran')\n"
+                "if '-t' in sys.argv: sys.stdout.write('blob\\n')\n"
+                "else: sys.stdout.buffer.write(pathlib.Path(%r).read_bytes())\n"
+                % (sys.executable, str(ran), str(fake / "payload")))
+            (fake / "git").chmod(0o755)
+            path_saved = os.environ["PATH"]
+            os.environ["PATH"] = f"{fake}:{path_saved}"
+            try:
+                via_path = xg._local_object(xg.PINNED_BLOB, repo=d / "nonexistent")
+                executed = ran.exists()
+                still_works = xg._local_object(xg.PINNED_BLOB)
+                xg.GIT_CANDIDATES = (str(fake / "git"),)
+                try:
+                    control = xg._local_object(xg.PINNED_BLOB, repo=d / "nonexistent")
+                finally:
+                    xg.GIT_CANDIDATES = candidates_saved
+            finally:
+                os.environ["PATH"] = path_saved
+            out.append(("PATH cannot choose the git that answers for the repo",
+                        via_path is None and not executed
+                        and still_works is not None
+                        and control is not None and ran.exists()))
 
             # 3r. The hazard closed at the level of the ANSWER, not of a
             #     variable listing. `GIT_ALTERNATE_OBJECT_DIRECTORIES` makes
