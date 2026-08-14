@@ -204,9 +204,48 @@ no lazy fetch            GIT_NO_LAZY_FETCH, no network access    (#141)
 pinned config scopes     system and global git configuration
                          closed; the repository's own config
                          is the only scope read                  (#143)
-no object substitution   GIT_NO_REPLACE_OBJECTS, plus the
-                         object-id postcondition below           (#141)
 ```
+
+### 4.4 Prerequisites are not guards, and the difference is load-bearing
+
+`GIT_NO_REPLACE_OBJECTS` is deliberately **absent** from the list above, and
+the first version of this document had it there — along with "the object-id
+postcondition", which made the rule circular: the postcondition that *detects*
+`IDENTITY_VIOLATION` cannot also be a precondition for reaching it.
+
+Review supplied the concrete contradiction. A replace-style substitution is
+possible only when the replacement guard is absent or ineffective; if that guard
+were a prerequisite, the frozen rule would demand `LOOKUP_UNOBTAINABLE` for
+exactly the case §7's witness 4 requires to be `IDENTITY_VIOLATION`. Two frozen
+sections, unimplementable together — the same failure as §4.1, one level up.
+
+The distinction the list must respect:
+
+```text
+PREREQUISITE   something that must hold for the observation to be ABOUT the
+               object store at all. Absent -> there is nothing to classify.
+               (trusted executable, constructed environment, no network,
+                pinned config scopes)
+
+GUARD          something that reduces the chance of one specific corruption,
+               and whose failure the postcondition is DESIGNED to catch.
+               Absent -> classification proceeds and detects it.
+               (GIT_NO_REPLACE_OBJECTS)
+```
+
+An untrusted executable and a missing replacement guard fail differently, which
+is why they belong in different categories. Mismatching bytes from a counterfeit
+`git` say nothing about any repository — possibly none was consulted. Mismatching
+bytes from a **trusted** git reading a real object store say the store returned
+something other than what was asked for, and that is a licensed claim about the
+checkout.
+
+This is not a new position. The merged corpus already carries it as witness 3t —
+*"substituted object bytes abort even with the guard removed"* — which removes
+`GIT_NO_REPLACE_OBJECTS` deliberately and requires the abort anyway, precisely so
+the property does not degrade into enumerating known substitution tricks. The
+first draft of this contract contradicted a property that had already shipped and
+been independently reviewed twice.
 
 These are already-merged properties, not new work. Naming them here binds this
 contract to them, so that a future implementation cannot satisfy the letter of
@@ -301,7 +340,9 @@ Listed here so the implementation cannot choose the experiments that suit it.
    damaged object whose header is also destroyed exercises nothing, because
    both commands fail immediately and no debris is produced to misclassify.
 4. **Substituted bytes** (replace-style identity violation) →
-   `IDENTITY_VIOLATION`, existing postcondition intact.
+   `IDENTITY_VIOLATION`, existing postcondition intact. The §4.3 prerequisites
+   all hold throughout; only the §4.4 *guard* is removed, which is what makes
+   this witness reachable at all.
 5. **A non-blob object that resolves** → `RESOLVED(kind, bytes)`; the *locator*
    layer, not the resolver, classifies the wrong type.
 6. **No witness may use `stderr` text as a semantic discriminator.** A witness
