@@ -158,9 +158,9 @@ collision premise from having to hold against a deliberate attack.
 ```text
 every git invocation exited zero
   AND kind and bytes were obtained
-  AND the replacement guard was in effect            (§4.3.2)
   AND recomputed object id == requested oid
       -> RESOLVED(kind, bytes)
+         (subject to the citation-scheme premise, §4.3.2)
 
 every git invocation exited zero
   AND bytes were obtained
@@ -299,7 +299,7 @@ assuming, and because it is the kind of thing that reads as settled once nobody
 writes it down. Whether the postcondition should hash the way git hashes belongs
 to the implementation branch; this document contains no code.
 
-### 4.3.2 The premise is needed for one state, not both
+### 4.3.2 Collision resistance is inherited, not introduced here
 
 A declared premise is weaker than this repository's admissibility rule requires,
 which asks for an explicit **checked** one — and the premise above is not
@@ -321,196 +321,52 @@ COMPLETENESS   if the postcondition reports no mismatch, there is none.
                -> RESOLVED rests on this
 ```
 
-So the replacement guard is a **prerequisite for `RESOLVED` only**:
+The soundness/completeness split above is correct and stays. What does **not**
+stay is the conclusion drawn from it in an earlier revision: that making the
+replacement guard a prerequisite for `RESOLVED` reduced the premise to accidental
+collisions. **That justification was false**, and review demonstrated it — the
+guard disables `refs/replace` and does nothing about the object database itself.
+An attacker who can write there substitutes colliding bytes directly, with no
+replace ref involved.
+
+Checking the claim produced a sharper fact, which had not been written down
+anywhere in this effort:
 
 ```text
-guard present, hash matches      -> RESOLVED
-guard absent,  hash matches      -> LOOKUP_UNOBTAINABLE
-                                    a colliding substitution cannot be ruled
-                                    out, and the premise that would rule it
-                                    out is unchecked
-guard absent,  hash differs      -> IDENTITY_VIOLATION
-                                    the mismatch was observed; soundness needs
-                                    no premise
-guard present, hash differs      -> IDENTITY_VIOLATION
+git cat-file DOES NOT VERIFY that the object stored at an oid's path hashes
+to that oid. Demonstrated: with the object file for A overwritten by a valid
+object for B,
+
+    cat-file blob <A>  ->  "SUBSTITUTED CONTENT ENTIRELY"
+    git fsck           ->  error: hash-path mismatch
 ```
 
-Witness 4 stands unchanged: it removes the guard and requires
-`IDENTITY_VIOLATION` for a substitution the check **detects**. Corpus case 3t,
-which asserts that the abort survives removing the guard, remains consistent —
-it exercises the detected case.
+So the identity postcondition is not defence in depth over some check git
+already performs. **It is the only thing standing between the object database
+and a false `RESOLVED`** — which is why its soundness matters so much, and why
+its completeness is worth exactly as much as the hash and no more.
 
-`RESOLVED` still rests on completeness in general, since content addressing does.
-What the guard removes is the channel by which an attacker could aim a collision
-at a specific citation. Without it the premise would have to hold against a
-**deliberate** collision rather than an accidental one, which is a far stronger
-assumption than the one this contract is willing to leave unchecked.
-
-This is the organising rule behind both §4.3 and §4.4, and it should have been
-stated before either list. Deriving from the question told me *what* to require;
-it did not tell me which requirements the identity check already covers, and
-that omission is what let a broader clause re-swallow the guard case.
-
-**Repository configuration can execute programs, and an earlier draft said it
-could not matter.** That draft argued the repository's own `local` and
-`worktree` scopes need no exclusion "since configuration cannot add an object
-directory". Configuration cannot add an object directory — and it can run
-commands. With **every** guard of the previous list in place, a
-repository-defined `filter.<driver>.smudge` executed during
-`git cat-file --filters --path=…`:
+The premise therefore cannot be discharged by any guard, and it is not this
+contract's to discharge. **It is inherited from the citation scheme itself.**
+§2.5.1 declares `blob` the ONLY identity of the cited bytes, and `PINNED_BLOB`
+names the authority by hash; both already rest entirely on collision resistance.
+If that assumption fails, the failure is not local to this resolver — the whole
+authority-pinning apparatus fails with it, and a resolver reporting
+`LOOKUP_UNOBTAINABLE` would not save anything, because the citation would no
+longer denote.
 
 ```text
-env -i  PATH=…  GIT_NO_LAZY_FETCH=1  GIT_NO_REPLACE_OBJECTS=1
-        GIT_CONFIG_NOSYSTEM=1  GIT_CONFIG_GLOBAL=/dev/null
-        git -c safe.directory=<repo> -C <repo> cat-file --filters --path=f.txt <oid>
+PREMISE (inherited from §2.5.1, not introduced here, not dischargeable here)
+    the object-id algorithm is collision resistant
 
-  -> smudge filter executed: YES        bytes unchanged, oid matches
-  -> raw `cat-file blob <oid>`:  smudge filter executed: no
+  consequences if false:  PINNED_BLOB does not name a unique artifact
+                          `blob` is not an identity
+                          this resolver cannot be repaired into soundness
 ```
 
-A filter that passes bytes through unchanged and exits zero leaves the object id
-matching, so the frozen rule reports `RESOLVED` while an arbitrary program has
-run — a program the *subject of the inquiry* selected, which may have reached
-the network. Every environment prerequisite held throughout. The hole was never
-in the environment; it was in the assumption that the lookup command is a
-detail.
-
-**The lookup must therefore be a raw, non-transforming read**, and that is a
-requirement rather than an implementation preference. §10's exclusion of "git
-command choice" is narrowed accordingly: choosing *among raw reads* stays out of
-scope; whether the read is raw at all is in scope, and is this requirement.
-
-**How the merged implementation satisfies these** — recorded as satisfaction,
-not as definition, so a future change can be checked against the requirement
-rather than against a description of its predecessor:
-
-All rows below are in `tools/a1_v2_extract_graph.py`, function `_local_object`
-and the module constants above it, as of `e70d019`. Each names the revision that
-introduced the property, so a later reader can re-check the predecessor rather
-than trust this summary of it:
-
-```text
-"I"              GIT_CANDIDATES, pinned absolute paths, no PATH lookup
-                     034f4f2  "pin which git answers"
-                 GIT_ENV_ALLOW = (), child PATH synthesized from the
-                 resolved binary
-                     1e7a4ae  "construct git's environment, never inherit it"
-                     cdaed35  "narrow the grant to its witness"  (allowlist -> empty)
-
-exact bytes      raw `cat-file <type> <oid>` — no --filters, no --textconv
-                     51b2d6a  resolver introduced with the raw form
-                 object id recomputed from the response and compared
-                     2d372a7  "check the bytes against the name asked for"
-
-no network       GIT_NO_LAZY_FETCH=1
-                     52574e4  "enforce no-network with GIT_NO_LAZY_FETCH"
-
-trust boundary   GIT_CONFIG_NOSYSTEM=1, GIT_CONFIG_GLOBAL=/dev/null
-                     e051882  "an empty environment is not an empty git
-                               configuration"
-                 exactly one command-scope key,
-                 -c safe.directory=<the repository being read>
-                     cdaed35  "narrow the grant to its witness"
-
-guard (not a    GIT_NO_REPLACE_OBJECTS=1, whose failure the identity
- prerequisite)   postcondition detects — see §4.3.1
-                     2d372a7  guard and postcondition added together
-```
-
-The raw form is the oldest of these and the only one never introduced by a
-review finding. It has been correct since `51b2d6a` by accident of drafting
-rather than by decision — which is why it is written down here as a requirement
-now, and why nothing in this document treats its survival as evidence that it
-was ever load-bearing on purpose.
-
-**On that command-scope key.** `git --show-scope` reports `command` as a scope
-of its own, so an earlier draft claiming the repository's config was "the only
-scope read" was false, and put an implementation in a bind: keep the grant and
-be ineligible to report `RESOLVED`, or drop it and fail on a foreign-owned
-checkout. The grant is not an exception to these requirements — it satisfies the
-`"I"` clause. It is narrow (one key), explicit (visible in argv), scoped to the
-single repository under examination, and supplied by this layer rather than
-inherited. An implementation that widened it would be violating the list.
-
-The repository's `local` and `worktree` scopes are still read, necessarily —
-without them the directory is not a repository. What the requirements forbid is
-not reading that configuration but letting it **choose what runs**.
-
-### 4.4 Prerequisites are not guards, and the difference is load-bearing
-
-`GIT_NO_REPLACE_OBJECTS` is deliberately **absent** from the list above, and
-the first version of this document had it there — along with "the object-id
-postcondition", which made the rule circular: the postcondition that *detects*
-`IDENTITY_VIOLATION` cannot also be a precondition for reaching it.
-
-Review supplied the concrete contradiction. A replace-style substitution is
-possible only when the replacement guard is absent or ineffective; if that guard
-were a prerequisite, the frozen rule would demand `LOOKUP_UNOBTAINABLE` for
-exactly the case §7's witness 4 requires to be `IDENTITY_VIOLATION`. Two frozen
-sections, unimplementable together — the same failure as §4.1, one level up.
-
-The distinction the list must respect:
-
-```text
-PREREQUISITE   something that must hold for the observation to be ABOUT the
-               object store at all. Absent -> there is nothing to classify.
-               (trusted executable, constructed environment, no network,
-                pinned config scopes)
-
-GUARD          something that reduces the chance of one specific corruption,
-               and whose failure the postcondition is DESIGNED to catch.
-               Absent -> classification proceeds and detects it.
-               (GIT_NO_REPLACE_OBJECTS)
-```
-
-An untrusted executable and a missing replacement guard fail differently, which
-is why they belong in different categories. Mismatching bytes from a counterfeit
-`git` say nothing about any repository — possibly none was consulted. Mismatching
-bytes from a **trusted** git reading a real object store say the store returned
-something other than what was asked for, and that is a licensed claim about the
-checkout.
-
-This is not a new position, and the artifact is named so it can be re-checked
-rather than taken from this document's summary of it:
-
-```text
-artifact   tools/tests/test_a1_v2_ledger_gate.py, case 3t (~L880-L900)
-introduced 2d372a7  ("EB-R1 review fix 4 — check the bytes against the name
-                     asked for")
-asserts    with GIT_NO_REPLACE_OBJECTS deliberately removed from GIT_ENV,
-           a substituted object still raises OBJECT IDENTITY VIOLATED
-```
-
-What the witness **asserts** is that one abort still happens without that one
-guard. The guard/prerequisite distinction in this section is an **inference**
-drawn from it — the witness is evidence for the principle, not a statement of
-it, and a reader who disagrees with the inference should be able to go and read
-the assertion. The first draft of this contract contradicted the asserted
-behaviour outright, which had already shipped and been independently reviewed
-twice.
-
-These are already-merged properties, not new work. Naming them here binds this
-contract to them, so that a future implementation cannot satisfy the letter of
-§4.2 while answering a weaker question than §3 asks. **This does not choose the
-git command** — that stays out of scope per §10. It forbids the byte-derived
-states from floating free of the guarantees that make them mean anything.
-
-The merged implementation already holds every prerequisite, so the counterfeit
-scenario above is not reachable there today. The defect is in what this
-document would have *licensed*: an implementation could satisfy the frozen rule,
-drop a prerequisite, and issue the system's strongest accusation on the strength
-of output from an arbitrary program. A preregistration is judged by what it
-permits, not by what the current code happens to do.
-
-**The cause of a non-zero exit is not classified.** No branch of this rule reads
-`stderr`, matches on a message, or consults an exit code beyond
-"did we obtain a trustworthy kind and bytes". Enumerating known failure
-messages is the instance-by-instance repair this effort has spent six rounds
-declining, and a resolver that classifies by diagnostic string inherits every
-future change to git's wording as a silent semantic change.
-
-`RESOLVED` carries `kind` because the resolver observed it. It does **not**
-judge whether that kind is the one the citation required.
+Recording it at this layer is therefore all this document can honestly do, and
+the replacement guard returns to being a **guard** under §4.4: its failure
+produces bytes that do not hash to the name, and the postcondition detects them.
 
 ## 5. Explicit non-claims
 
@@ -571,8 +427,7 @@ lawyer back inside the resolver, which §2.5.1 exists to prevent.
 Required before the contract can be called satisfied by any implementation.
 Listed here so the implementation cannot choose the experiments that suit it.
 
-1. **A healthy, present blob**, with every §4.3 prerequisite and the
-   replacement guard in effect → `RESOLVED`, with bytes hashing to the request.
+1. **A healthy, present blob** → `RESOLVED`, with bytes hashing to the request.
 2. **A well-formed OID this checkout does not supply** → `LOOKUP_UNOBTAINABLE`,
    and the emitted text contains no claim of absence.
 3. **An object entry that exists but yields no trustworthy object** — a
@@ -592,11 +447,11 @@ Listed here so the implementation cannot choose the experiments that suit it.
    that distinguishes states by matching git's prose is testing git's release
    notes.
 
-7ter. **With the replacement guard absent and the object id MATCHING, the
-   outcome is `LOOKUP_UNOBTAINABLE`, not `RESOLVED`** — the complement of
-   witness 4, which covers the same guard-off condition when the check *does*
-   fire. Together they establish that removing the guard costs the positive
-   claim while preserving the accusation, which is what §4.3.2 asserts.
+7ter. **Object-database substitution that the postcondition CAN see** — an
+   object file overwritten by a different valid object → `IDENTITY_VIOLATION`,
+   since `cat-file` performs no hash verification of its own. This is the
+   channel the postcondition exists for, and it is independent of
+   `refs/replace`.
 
 7bis. **A lookup that engages filter or conversion machinery must not report
    `RESOLVED`** — a repository-defined smudge filter that passes bytes through
