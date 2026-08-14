@@ -241,13 +241,98 @@ that sentence carries a requirement.
                          the identity check cannot detect
 ```
 
+**Repository configuration can execute programs, and an earlier draft said it
+could not matter.** That draft argued the repository's own `local` and
+`worktree` scopes need no exclusion "since configuration cannot add an object
+directory". Configuration cannot add an object directory — and it can run
+commands. With **every** guard of the previous list in place, a
+repository-defined `filter.<driver>.smudge` executed during
+`git cat-file --filters --path=…`:
+
+```text
+env -i  PATH=…  GIT_NO_LAZY_FETCH=1  GIT_NO_REPLACE_OBJECTS=1
+        GIT_CONFIG_NOSYSTEM=1  GIT_CONFIG_GLOBAL=/dev/null
+        git -c safe.directory=<repo> -C <repo> cat-file --filters --path=f.txt <oid>
+
+  -> smudge filter executed: YES        bytes unchanged, oid matches
+  -> raw `cat-file blob <oid>`:  smudge filter executed: no
+```
+
+A filter that passes bytes through unchanged and exits zero leaves the object id
+matching, so the frozen rule reports `RESOLVED` while an arbitrary program has
+run — a program the *subject of the inquiry* selected, which may have reached
+the network. Every environment prerequisite held throughout. The hole was never
+in the environment; it was in the assumption that the lookup command is a
+detail.
+
+**The lookup must therefore be a raw, non-transforming read**, and that is a
+requirement rather than an implementation preference. §10's exclusion of "git
+command choice" is narrowed accordingly: choosing *among raw reads* stays out of
+scope; whether the read is raw at all is in scope, and is this requirement.
+
+**How the merged implementation satisfies these** — recorded as satisfaction,
+not as definition, so a future change can be checked against the requirement
+rather than against a description of its predecessor:
+
+All rows below are in `tools/a1_v2_extract_graph.py`, function `_local_object`
+and the module constants above it, as of `e70d019`. Each names the revision that
+introduced the property, so a later reader can re-check the predecessor rather
+than trust this summary of it:
+
+```text
+"I"              GIT_CANDIDATES, pinned absolute paths, no PATH lookup
+                     034f4f2  "pin which git answers"
+                 GIT_ENV_ALLOW = (), child PATH synthesized from the
+                 resolved binary
+                     1e7a4ae  "construct git's environment, never inherit it"
+                     cdaed35  "narrow the grant to its witness"  (allowlist -> empty)
+
+exact bytes      raw `cat-file <type> <oid>` — no --filters, no --textconv
+                     51b2d6a  resolver introduced with the raw form
+                 object id recomputed from the response and compared
+                     2d372a7  "check the bytes against the name asked for"
+
+no network       GIT_NO_LAZY_FETCH=1
+                     52574e4  "enforce no-network with GIT_NO_LAZY_FETCH"
+
+trust boundary   GIT_CONFIG_NOSYSTEM=1, GIT_CONFIG_GLOBAL=/dev/null
+                     e051882  "an empty environment is not an empty git
+                               configuration"
+                 exactly one command-scope key,
+                 -c safe.directory=<the repository being read>
+                     cdaed35  "narrow the grant to its witness"
+
+guard (not a    GIT_NO_REPLACE_OBJECTS=1, whose failure the identity
+ prerequisite)   postcondition detects — see §4.3.1
+                     2d372a7  guard and postcondition added together
+```
+
+The raw form is the oldest of these and the only one never introduced by a
+review finding. It has been correct since `51b2d6a` by accident of drafting
+rather than by decision — which is why it is written down here as a requirement
+now, and why nothing in this document treats its survival as evidence that it
+was ever load-bearing on purpose.
+
+**On that command-scope key.** `git --show-scope` reports `command` as a scope
+of its own, so an earlier draft claiming the repository's config was "the only
+scope read" was false, and put an implementation in a bind: keep the grant and
+be ineligible to report `RESOLVED`, or drop it and fail on a foreign-owned
+checkout. The grant is not an exception to these requirements — it satisfies the
+`"I"` clause. It is narrow (one key), explicit (visible in argv), scoped to the
+single repository under examination, and supplied by this layer rather than
+inherited. An implementation that widened it would be violating the list.
+
+The repository's `local` and `worktree` scopes are still read, necessarily —
+without them the directory is not a repository. What the requirements forbid is
+not reading that configuration but letting it **choose what runs**.
+
 ### 4.3.1 What decides prerequisite from guard
 
 The trust-boundary clause is narrow on purpose, and the first version of it was
 not. It said *nothing the repository controls may execute or transform anything*
 — which swallows `refs/replace`, since a replace ref is repository-controlled
-and does substitute the bytes returned for a name. §4.3.1 below designates exactly
-that case a **guard** failure, classified by the identity postcondition, and §7's
+and does substitute the bytes returned for a name. This section designates exactly that
+case a **guard** failure, classified by the identity postcondition, and §7's
 witness 4 requires it to yield `IDENTITY_VIOLATION`. A blanket clause made those
 unsatisfiable — the same contradiction as finding 4, reintroduced by a broader
 rule while repairing something else.
@@ -313,6 +398,7 @@ future change to git's wording as a silent semantic change.
 `RESOLVED` carries `kind` because the resolver observed it. It does **not**
 judge whether that kind is the one the citation required.
 
+
 **This criterion rests on a premise, and the premise is stated rather than
 assumed.** "The bytes necessarily change, so recomputing the object id reveals
 it" is not a mechanical fact; it holds only if the object-id algorithm is
@@ -339,6 +425,8 @@ That asymmetry is recorded because it was found by checking rather than by
 assuming, and because it is the kind of thing that reads as settled once nobody
 writes it down. Whether the postcondition should hash the way git hashes belongs
 to the implementation branch; this document contains no code.
+
+
 
 ### 4.3.2 Collision resistance is inherited, not introduced here
 
@@ -468,7 +556,8 @@ lawyer back inside the resolver, which §2.5.1 exists to prevent.
 Required before the contract can be called satisfied by any implementation.
 Listed here so the implementation cannot choose the experiments that suit it.
 
-1. **A healthy, present blob** → `RESOLVED`, with bytes hashing to the request.
+1. **A healthy, present blob**, with every §4.3 prerequisite satisfied →
+   `RESOLVED`, with bytes hashing to the request.
 2. **A well-formed OID this checkout does not supply** → `LOOKUP_UNOBTAINABLE`,
    and the emitted text contains no claim of absence.
 3. **An object entry that exists but yields no trustworthy object** — a
