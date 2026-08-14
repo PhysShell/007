@@ -76,7 +76,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
 
 # Pinned deliberately. Bump it in the same commit that adds or removes a case,
 # so the number is a reviewed claim rather than a readout of whatever survived.
-EXPECTED_TOTAL = 58
+EXPECTED_TOTAL = 60
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
@@ -739,6 +739,61 @@ def preflight_cases() -> list[tuple[str, bool]]:
                     os.environ.pop(k, None)
                 else:
                     os.environ[k] = v
+
+        # 3s..3t. SUBSTITUTED OBJECT CONTENTS. `refs/replace/<oid>` makes
+        #     `cat-file` return different bytes for the requested oid — for the
+        #     type query as well as the content query — so an anchor can
+        #     validate against bytes whose id is not the locator's `blob`, and
+        #     `blob` stops being the identity of anything. Replace refs do not
+        #     arrive over a default clone or fetch (verified), so the reach is
+        #     a local checkout: the same reach as an ambient variable.
+        subst = d / "subst"
+        subst.mkdir()
+        g("init", "-q", ".", cwd=subst)
+        def _hash(text):
+            return subprocess.run(["git", "hash-object", "-w", "--stdin"],
+                                  cwd=str(subst), input=text, capture_output=True,
+                                  text=True, encoding="utf-8").stdout.strip()
+        authentic = _hash("AUTHENTIC AUTHORITY — anchor lives here\n")
+        forged = _hash("FORGED AUTHORITY — anchor lives here\n")
+        g("replace", "-f", authentic, forged, cwd=subst)
+
+        # 3s. Control arm proves the fixture poses the hazard: with replacement
+        #     honoured, git hands back the forged bytes for the authentic oid.
+        #     Guarded, the authentic bytes come back.
+        swapped = subprocess.run(
+            ["git", "-C", str(subst), "cat-file", "blob", authentic],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env={k: v for k, v in xg._git_env().items()
+                 if k != "GIT_NO_REPLACE_OBJECTS"})
+        guarded = xg._local_object(authentic, repo=subst)
+        out.append(("a replacement ref cannot answer for the object it replaces",
+                    "FORGED" in swapped.stdout
+                    and guarded is not None
+                    and guarded[1].decode().startswith("AUTHENTIC")))
+
+        # 3t. The guard and the identity check are INDEPENDENT, and this is the
+        #     one that matters. Each GIT_ENV guard closes one way git can answer
+        #     with something other than the cited object, and each was found one
+        #     at a time, by a reviewer, after the previous one shipped —
+        #     lazy fetch, then object-store redirect, then replacement refs.
+        #     Recomputing the object id closes the FAMILY: whatever substitutes
+        #     the bytes, the substitute does not hash to the name. So this case
+        #     removes the guard deliberately and requires the abort anyway. If
+        #     it ever starts passing only with the guard present, the extractor
+        #     is back to enumerating known tricks.
+        saved_guard = xg.GIT_ENV.pop("GIT_NO_REPLACE_OBJECTS")
+        try:
+            try:
+                xg._local_object(authentic, repo=subst)
+                caught = ""
+            except xg.ExtractDefect as e:
+                caught = str(e)
+        finally:
+            xg.GIT_ENV["GIT_NO_REPLACE_OBJECTS"] = saved_guard
+        out.append(("substituted object bytes abort even with the guard removed",
+                    "OBJECT IDENTITY VIOLATED" in caught
+                    and "do NOT edit the locator" in caught))
 
         # 4. Control: the real artifacts must still pass their preflights, or the
         #    cases above would be proving nothing.

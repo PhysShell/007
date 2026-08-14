@@ -421,6 +421,19 @@ nothing about provenance whatever its diagnostic says, and it fails silently, in
 `ARLIAI_API_KEY` out of a process that has no business reading it (AGENTS.md
 invariant 1); a denylist would have closed that and left the redirect open.
 
+**And the bytes are checked against the name they were asked for.** Guards close
+one route each — lazy fetch, ambient redirect, `refs/replace/<oid>` — and all
+three were found one at a time, by a reviewer, after the previous fix shipped.
+The resolver therefore recomputes the object id from what git returned and
+**aborts** if it differs from the cited `blob`. That is the E-R10 criterion
+turned on this layer itself: a check as discriminating as the distinction it
+enforces, rather than a list of the ways the distinction has been lost so far.
+The abort is not a locator defect and not "unresolvable" — those are statements
+about the citation, and this is a statement about the checkout. Its diagnostic
+says so: *do not re-pin, and do not edit the locator; the locator is the one
+part known to be intact.* An environment that substitutes object contents can
+produce no evidence, and the correct output is no verdict.
+
 This is the `old_blob` case exactly: after a supersede, the object proving
 provenance is the one that has left the tree. Without the guard, the resolver
 would have gone to the network to prove the authority of the thing whose
@@ -740,6 +753,40 @@ channel under test; when the fix landed, the harness broke instead of the
 witness reporting. A test that travels through the defect it is testing cannot
 observe its removal.
 
+**P1 on the fix, found independently by both reviewers — `refs/replace`, and
+the pattern behind three findings.** `refs/replace/<oid>` makes `cat-file`
+return substitute bytes for the requested oid, for the type query as well as the
+content query. Reproduced: `git replace -f <authentic> <forged>`, then
+`_local_object(authentic)` returned `FORGED AUTHORITY …`. So `blob` had stopped
+being the identity of anything — the single assumption §2.5.1 rests on. Reach
+verified rather than assumed: replace refs do not arrive over a default clone or
+fetch, so this needs a local checkout, which is exactly the reach of an ambient
+environment variable and exactly the threat model this layer already accepts.
+
+`GIT_NO_REPLACE_OBJECTS=1` joins the guards. But three findings in three rounds
+is a pattern, not three coincidences: lazy fetch, then object-store redirect,
+then replacement refs — each one a distinct way for git to answer with something
+other than the cited object, each found by a reviewer *after* the previous fix
+shipped, each closed by naming it. Enumerating known tricks is the losing side
+of that trade, and the E-R10 criterion says so in general terms: make the check
+as discriminating as the distinction, or keep patching.
+
+So `_local_object` now recomputes the object id from the bytes it received and
+aborts if it differs from the name it asked for. That closes the **family** —
+replacement ref, alternate store, or a mechanism nobody here has read about, the
+substitute does not hash to the name. It aborts rather than returning a value,
+because a checkout that substitutes object contents is not a bad locator and not
+an absent object; it is an environment in which no verdict means anything, and
+the diagnostic says so: *do not re-pin, and do not edit the locator — the
+locator is the one part known to be intact.*
+
+Two witnesses, and the second is the load-bearing one. (3s) with the guard, the
+authentic bytes come back, while the control arm without it gets the forged ones
+— the fixture demonstrably poses the hazard. (3t) **the guard is removed
+deliberately and the abort is required anyway**, which is what keeps the two
+defenses independent. If 3t ever starts passing only with the guard present, the
+extractor has gone back to enumerating tricks and the family is open again.
+
 **Residual, recorded and not fixed here.** The gate's preflight spawns the
 extractor with an inherited environment (`tools/a1_v2_ledger_gate.py:530`). It
 predates EB-R1, it is not what was reported, and sanitizing a *python* child has
@@ -752,7 +799,7 @@ witnesses. It is open, it is stated, and it is not counted as closed.
 nothing is rejected"* constructed entries with the retired free-text field; the
 locator's shape changed, so the case now uses a valid locator and continues to
 test chain linkage rather than locator shape. Claiming the previous corpus was
-untouched would have been false. Corpus 46 → 58.
+untouched would have been false. Corpus 46 → 60.
 
 **Zero-delta witness.** `docs/tasks/a1-f-v2-graph.json` is byte-identical before
 and after — `5c69fde8a97ded1f5d34a65560d4973ebe59f0c6` — as it must be while

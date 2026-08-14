@@ -79,7 +79,24 @@ _OID = re.compile(r"[0-9a-f]{40}")
 #
 # This matters precisely for `old_blob`, the half of a re-pin record that proves
 # provenance: after a supersede it is exactly the object that has left the tree.
-GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1"}
+#
+# `GIT_NO_REPLACE_OBJECTS=1` is the third guard, and it defends a different
+# thing: not *where* git looks, but *what it hands back for a given name*. A
+# `refs/replace/<oid>` ref makes `cat-file` return substitute bytes for the
+# requested oid, silently and for both the type and the content query.
+# Demonstrated:
+#
+#     git replace -f <authentic> <forged>
+#     cat-file blob <authentic>                    -> "FORGED AUTHORITY …"
+#     GIT_NO_REPLACE_OBJECTS=1 cat-file blob <..>  -> "AUTHENTIC AUTHORITY …"
+#
+# That is `blob` ceasing to be the identity of anything, which is the single
+# assumption §2.5.1 rests on. Replace refs do not arrive over a default clone
+# or fetch — verified — so the reach is a local checkout, i.e. exactly the
+# reach of an ambient environment variable, and exactly the threat this layer
+# is about.
+GIT_ENV = {"GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1",
+           "GIT_NO_REPLACE_OBJECTS": "1"}
 
 # The child environment is CONSTRUCTED, not inherited. Copying `os.environ`
 # wholesale made 135 ambient variables part of this extractor's input surface
@@ -125,6 +142,16 @@ def _local_object(oid: str, repo: Path = REPO) -> tuple[str, bytes] | None:
     "Local" is a claim about an object database, so it is also false if the
     caller gets to choose which database that is; `_git_env` is what keeps the
     answer a property of `repo`.
+
+    And the returned bytes are CHECKED AGAINST THE NAME THEY WERE ASKED FOR.
+    Each guard in GIT_ENV closes one way git can answer with something other
+    than the cited object, and each was found one at a time, by a reviewer,
+    after the previous one shipped. Recomputing the object id closes the
+    *family*: whatever mechanism substitutes bytes — a replacement ref, an
+    alternate object store, a future feature nobody here has read about — the
+    substitute does not hash to the name. This is the E-R10 criterion applied
+    to the extractor itself: the check is as discriminating as the distinction
+    it enforces, instead of enumerating the ways the distinction can be lost.
     """
     env = _git_env()
     kind = subprocess.run(["git", "-C", str(repo), "cat-file", "-t", oid],
@@ -132,9 +159,22 @@ def _local_object(oid: str, repo: Path = REPO) -> tuple[str, bytes] | None:
                           errors="replace", env=env)
     if kind.returncode != 0:
         return None
-    body = subprocess.run(["git", "-C", str(repo), "cat-file", kind.stdout.strip(), oid],
+    kind = kind.stdout.strip()
+    body = subprocess.run(["git", "-C", str(repo), "cat-file", kind, oid],
                           capture_output=True, env=env)
-    return kind.stdout.strip(), body.stdout
+    # Not a locator defect and not "unresolvable": git answered, and answered
+    # with bytes that are not the object asked for. No verdict computed on top
+    # of this checkout would mean anything, so it aborts rather than returning
+    # a value some caller might treat as merely absent.
+    got = hashlib.sha1(b"%s %d\0" % (kind.encode(), len(body.stdout))
+                       + body.stdout).hexdigest()
+    _require(got == oid,
+             f"OBJECT IDENTITY VIOLATED — asked git for {oid} and got bytes "
+             f"hashing to {got} ({kind}, {len(body.stdout)} bytes). This "
+             f"checkout substitutes object contents; nothing derived from it "
+             f"is evidence of anything. Do NOT re-pin, and do NOT edit the "
+             f"locator: the locator is the one part known to be intact.")
+    return kind, body.stdout
 
 
 def authority_ref_defect(ref: object) -> str | None:
