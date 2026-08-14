@@ -22,7 +22,28 @@ REPO = Path(__file__).resolve().parents[2]
 GATE = REPO / "tools/a1_v2_ledger_gate.py"
 sys.path.insert(0, str(REPO / "tools"))
 import a1_v2_ledger_gate as gate  # noqa: E402
+import a1_v2_extract_graph as _xg  # noqa: E402
 GRAPH = json.loads((REPO / "docs/tasks/a1-f-v2-graph.json").read_text())
+
+# Every git child THIS CORPUS spawns, under the same rule as the extractor's own
+# and for the same reason. Six git call sites were added here over four review
+# rounds; four of them inherited `os.environ`, so a corpus written to prove that
+# credentials stay out of git children was handing them to its own. The rule in
+# AGENTS.md is "any new process able to read it", with no exemption for test
+# scaffolding — and a harness is not a lower-trust place to leak a key than the
+# tool it tests. Witness 3v enforces this at every call site, including ones not
+# written yet, because a helper that exists is not a helper that is used.
+GIT = _xg._git_binary()
+
+
+def git_env(**extra: str) -> dict[str, str]:
+    """Constructed, never inherited. `extra` is for control arms that need one
+    specific variable back — pass it by name, so the exception is visible."""
+    env = {"PATH": str(Path(GIT).parent)}
+    if "HOME" in os.environ:
+        env["HOME"] = os.environ["HOME"]
+    env.update(extra)
+    return env
 
 STRUCTURAL = "event_payload_digest"
 REF = "artifact_ref"
@@ -76,7 +97,7 @@ def run(schema: dict, ledger: dict) -> tuple[int, dict[str, str]]:
 
 # Pinned deliberately. Bump it in the same commit that adds or removes a case,
 # so the number is a reviewed claim rather than a readout of whatever survived.
-EXPECTED_TOTAL = 61
+EXPECTED_TOTAL = 63
 
 CASES: list[tuple[str, object, int, dict[str, str]]] = []
 
@@ -548,8 +569,9 @@ def preflight_cases() -> list[tuple[str, bool]]:
         # inside them, be identified? It must never answer "do these bytes
         # authorize the re-pin?" — hence case 3n below, which is meant to look
         # slightly blasphemous.
-        head_commit = subprocess.run(["git", "-C", str(REPO), "rev-parse", "HEAD"],
-                                     capture_output=True, text=True).stdout.strip()
+        head_commit = subprocess.run([GIT, "-C", str(REPO), "rev-parse", "HEAD"],
+                                     capture_output=True, text=True,
+                                     env=git_env()).stdout.strip()
 
         # 3h. Malformed locator: wrong type, wrong field set, wrong oid syntax.
         out.append(("malformed authority locator is rejected",
@@ -620,8 +642,9 @@ def preflight_cases() -> list[tuple[str, bool]]:
         origin, clone = lazy / "origin", lazy / "clone"
         origin.mkdir(parents=True)
         def g(*args, cwd, **kw):
-            return subprocess.run(["git", *args], cwd=str(cwd), capture_output=True,
-                                  text=True, encoding="utf-8", errors="replace", **kw)
+            return subprocess.run([GIT, *args], cwd=str(cwd), capture_output=True,
+                                  text=True, encoding="utf-8", errors="replace",
+                                  env=git_env(), **kw)
         g("init", "-q", ".", cwd=origin)
         for k, v in (("user.email", "t@t"), ("user.name", "t"),
                      ("uploadpack.allowFilter", "true"),
@@ -646,9 +669,9 @@ def preflight_cases() -> list[tuple[str, bool]]:
         absent_locally = bool(old_blob) and old_blob not in present
         # control, on its OWN clone: without the guard git reaches the promisor
         # remote and succeeds — proving the hazard is real in this fixture.
-        fetched = subprocess.run(["git", "-C", str(control), "cat-file", "-t", old_blob],
+        fetched = subprocess.run([GIT, "-C", str(control), "cat-file", "-t", old_blob],
                                  capture_output=True, text=True,
-                                 env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+                                 env=git_env(GIT_TERMINAL_PROMPT="0"))
         # witness, on an untouched clone: the extractor refuses without fetching.
         refused = gate_xg._local_object(old_blob, repo=clone) is None
         out.append(("a promised-but-absent object is refused, not fetched",
@@ -789,7 +812,7 @@ def preflight_cases() -> list[tuple[str, bool]]:
             #     nothing, the same way a control that passes for the wrong
             #     reason does not.
             leaked = subprocess.run(
-                ["git", "-C", str(REPO), "cat-file", "-t", alien_oid],
+                [GIT, "-C", str(REPO), "cat-file", "-t", alien_oid],
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                 env={**xg._git_env(),
                      "GIT_ALTERNATE_OBJECT_DIRECTORIES": str(alien_objects)})
@@ -816,9 +839,10 @@ def preflight_cases() -> list[tuple[str, bool]]:
         subst.mkdir()
         g("init", "-q", ".", cwd=subst)
         def _hash(text):
-            return subprocess.run(["git", "hash-object", "-w", "--stdin"],
+            return subprocess.run([GIT, "hash-object", "-w", "--stdin"],
                                   cwd=str(subst), input=text, capture_output=True,
-                                  text=True, encoding="utf-8").stdout.strip()
+                                  text=True, encoding="utf-8",
+                                  env=git_env()).stdout.strip()
         authentic = _hash("AUTHENTIC AUTHORITY — anchor lives here\n")
         forged = _hash("FORGED AUTHORITY — anchor lives here\n")
         g("replace", "-f", authentic, forged, cwd=subst)
@@ -827,7 +851,7 @@ def preflight_cases() -> list[tuple[str, bool]]:
         #     honoured, git hands back the forged bytes for the authentic oid.
         #     Guarded, the authentic bytes come back.
         swapped = subprocess.run(
-            ["git", "-C", str(subst), "cat-file", "blob", authentic],
+            [GIT, "-C", str(subst), "cat-file", "blob", authentic],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
             env={k: v for k, v in xg._git_env().items()
                  if k != "GIT_NO_REPLACE_OBJECTS"})
@@ -859,6 +883,66 @@ def preflight_cases() -> list[tuple[str, bool]]:
         out.append(("substituted object bytes abort even with the guard removed",
                     "OBJECT IDENTITY VIOLATED" in caught
                     and "do NOT edit the locator" in caught))
+
+        # 3v. THIS CORPUS'S OWN GIT CHILDREN. Four review rounds of witnesses
+        #     about credentials and object stores added six git call sites here,
+        #     four of them inheriting `os.environ` — the corpus was committing
+        #     the defect it exists to detect.
+        #
+        #     Checking one sample call would prove nothing about the fifth, and
+        #     a `git_env` helper that exists is not a helper that is used. So
+        #     this reads THIS FILE'S OWN SOURCE and requires, of every
+        #     `subprocess.run` in it that spawns git: the executable is the
+        #     pinned `GIT`, never the ambient string "git", and `env=` is
+        #     passed. A call site added later fails this without anyone
+        #     remembering the rule — which is the only version of the rule that
+        #     survives the next round.
+        import ast
+        tree = ast.parse(Path(__file__).read_text())
+        offenders = []
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "run"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "subprocess"):
+                continue
+            argv = node.args[0] if node.args else None
+            if not isinstance(argv, (ast.List, ast.Tuple)) or not argv.elts:
+                continue
+            head = argv.elts[0]
+            spawns_git = ((isinstance(head, ast.Name) and head.id == "GIT")
+                          or (isinstance(head, ast.Constant)
+                              and head.value == "git"))
+            if not spawns_git:
+                continue
+            names = {k.arg for k in node.keywords}
+            if not (isinstance(head, ast.Name) and "env" in names):
+                offenders.append(node.lineno)
+        # The control is the count: if the walk matched nothing, an empty
+        # offender list would read exactly like compliance.
+        found = sum(1 for n in ast.walk(tree)
+                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                    and n.func.attr == "run" and n.args
+                    and isinstance(n.args[0], (ast.List, ast.Tuple))
+                    and n.args[0].elts
+                    and isinstance(n.args[0].elts[0], ast.Name)
+                    and n.args[0].elts[0].id == "GIT")
+        out.append(("every git child of this corpus gets a constructed env",
+                    found >= 6 and not offenders))
+
+        # 3w. And the construction excludes the credential while one is
+        #     exported — the property, not just the shape of the call.
+        os.environ["ARLIAI_API_KEY"] = "sk-secret-witness"
+        try:
+            built = git_env()
+            leak_free = "ARLIAI_API_KEY" not in built
+            named = git_env(GIT_TERMINAL_PROMPT="0")
+        finally:
+            os.environ.pop("ARLIAI_API_KEY", None)
+        out.append(("the corpus's git environment is constructed, not inherited",
+                    leak_free and set(built) <= {"PATH", "HOME"}
+                    and named["GIT_TERMINAL_PROMPT"] == "0"))
 
         # 4. Control: the real artifacts must still pass their preflights, or the
         #    cases above would be proving nothing.

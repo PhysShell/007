@@ -853,6 +853,40 @@ Saying so is the point. Four rounds of this series have been the same defect
 wearing different clothes: *a claim stronger than the implementation
 guarantees.* A fix that quietly inherited that shape would belong on the list.
 
+**P0 on that fix (CodeRabbit) — the corpus was committing the defect it
+exists to detect.** Four rounds of witnesses about credentials and object stores
+added six git call sites to `test_a1_v2_ledger_gate.py`, and four of them
+inherited `os.environ`. Verified rather than assumed: at the branch base the
+file spawned no git at all, so every one of them is mine. AGENTS.md says "any
+new process able to read it", with no exemption for test scaffolding, and a
+harness is not a lower-trust place to leak a key than the tool it tests.
+
+The uncomfortable part is not the leak, it is where it was. The corpus is the
+instrument these findings are measured with, and it was carrying the exact
+property it certifies as absent elsewhere. An instrument is not outside the
+system it measures.
+
+`git_env()` constructs the environment; control arms that need one variable back
+pass it **by name**, so every exception is visible at its call site rather than
+inherited wholesale. All six now use the pinned `GIT` binary as well.
+
+**The witness is a source-level check, not a sample.** Testing one call proves
+nothing about the fifth, and a helper that exists is not a helper that is used —
+that distinction is what the last four rounds were about. So 3v parses this
+file's own AST and requires, of every `subprocess.run` in it that spawns git,
+that the executable is the pinned `GIT` and that `env=` is passed. It also
+counts the matches, because an empty offender list from a walk that matched
+nothing reads exactly like compliance. A call site added next round fails
+without anyone remembering the rule, which is the only version of a rule that
+survives. 3w checks the property rather than the shape: with `ARLIAI_API_KEY`
+exported, the constructed environment does not contain it.
+
+**Residual widened, still not closed.** The residual below now covers *python*
+children in both places: the gate's preflight and this corpus's `run_real`.
+Same reasoning as before — `PYTHONPATH`, `VIRTUAL_ENV`, `TMPDIR` are load-bearing
+for a python child in a way nothing is for `cat-file` — and the same refusal to
+count it closed.
+
 **Residual, recorded and not fixed here.** The gate's preflight spawns the
 extractor with an inherited environment (`tools/a1_v2_ledger_gate.py:530`). It
 predates EB-R1, it is not what was reported, and sanitizing a *python* child has
@@ -865,7 +899,7 @@ witnesses. It is open, it is stated, and it is not counted as closed.
 nothing is rejected"* constructed entries with the retired free-text field; the
 locator's shape changed, so the case now uses a valid locator and continues to
 test chain linkage rather than locator shape. Claiming the previous corpus was
-untouched would have been false. Corpus 46 → 61.
+untouched would have been false. Corpus 46 → 63.
 
 **Zero-delta witness.** `docs/tasks/a1-f-v2-graph.json` is byte-identical before
 and after — `5c69fde8a97ded1f5d34a65560d4973ebe59f0c6` — as it must be while
