@@ -222,14 +222,26 @@ as something that satisfies it rather than as its definition.
 boundary, obtain exact bytes corresponding to the cited OID?* Each clause of
 that sentence carries a requirement.
 
+**Each requirement below is scoped by §4.3.1's criterion**, and the scoping is
+not decoration: three separate findings — 8, 13 and 16 — were the same defect,
+a prerequisite phrased broadly enough to swallow `refs/replace`, which §4.3.1
+classifies as a *detectable* guard. Broad phrasing of a requirement is how that
+keeps happening, so a requirement may exclude only interference the
+postcondition cannot see. Anything it can see belongs to §4.3.1 as a guard, and
+saying so inside each clause is what stops the next rewrite from reintroducing
+it.
+
 ```text
 "I"                      the program that produced the answer is chosen by
                          THIS layer — not by the caller, not by the
                          repository under examination
 
-"exact bytes             the response is the object's STORED content, with NO
- corresponding to        transformation applied, verified by recomputing the
- the cited OID"          object id from the bytes received
+"exact bytes             the response is not passed through machinery that can
+ corresponding to        alter content while leaving the object id MATCHING —
+ the cited OID"          filters, textconv, any conversion layer. Substitution
+                         that CHANGES the id is not excluded here: it is
+                         detectable, so §4.3.1 makes it a guard, not a
+                         prerequisite. The id is recomputed either way.
 
 "without network         nothing in the lookup path performs network I/O:
  access"                 not the object lookup itself, and not any program
@@ -428,7 +440,7 @@ to the implementation branch; this document contains no code.
 
 
 
-### 4.3.2 Collision resistance is inherited, not introduced here
+### 4.3.2 Collision resistance is entailed by the citation scheme
 
 A declared premise is weaker than this repository's admissibility rule requires,
 which asks for an explicit **checked** one — and the premise above is not
@@ -476,16 +488,38 @@ and a false `RESOLVED`** — which is why its soundness matters so much, and why
 its completeness is worth exactly as much as the hash and no more.
 
 The premise therefore cannot be discharged by any guard, and it is not this
-contract's to discharge. **It is inherited from the citation scheme itself.**
-§2.5.1 declares `blob` the ONLY identity of the cited bytes, and `PINNED_BLOB`
-names the authority by hash; both already rest entirely on collision resistance.
+contract's to discharge. It is **entailed by the citation scheme** — which is a
+weaker and more accurate claim than "inherited and already accepted", and the
+difference is worth keeping because an earlier draft made the stronger one.
+
+```text
+WHAT THE SOURCE SAYS
+  docs/tasks/a1-f-v2-envelope.md §2.5.1, introduced 51b2d6a:
+      blob:  <immutable git blob oid>     # the ONLY identity
+
+  It does NOT mention collision resistance, and says nothing about
+  PINNED_BLOB.
+
+WHAT THIS DOCUMENT INFERS
+  identifying an artifact solely by its hash presupposes that the hash
+  identifies it — so §2.5.1's rule cannot hold unless the algorithm is
+  collision resistant. The same reasoning applies to PINNED_BLOB
+  (tools/a1_v2_extract_graph.py), which names the authority by blob oid.
+
+  That inference is this document's. It is not a ratification recorded
+  anywhere else, and this is the first place the premise is written down.
+```
+
+Both of those rules do rest on collision resistance, but by entailment rather
+than by anyone having stated it.
 If that assumption fails, the failure is not local to this resolver — the whole
 authority-pinning apparatus fails with it, and a resolver reporting
 `LOOKUP_UNOBTAINABLE` would not save anything, because the citation would no
 longer denote.
 
 ```text
-PREMISE (inherited from §2.5.1, not introduced here, not dischargeable here)
+PREMISE (entailed by the citation scheme; first written down here,
+         not ratified elsewhere, and not dischargeable at this layer)
     the object-id algorithm is collision resistant
 
   consequences if false:  PINNED_BLOB does not name a unique artifact
