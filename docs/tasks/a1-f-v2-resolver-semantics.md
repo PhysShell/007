@@ -70,6 +70,31 @@ witness), and EC-R1 narrowed rather than removed it: `-c safe.directory` takes
 away the ordinary reason to reach that branch, so when it is reached, the
 misdescription is what remains.
 
+### 2.1 A second live defect, found by reviewing this document
+
+Reviewing the *contract* — with no implementation in the diff — surfaced a
+defect in code already merged on `main`. `_local_object` never checks the return
+status of the content command; it hashes whatever landed on stdout. Against a
+loose object truncated behind an intact header, git writes a partial prefix and
+exits 128, and the merged extractor reports:
+
+```text
+OBJECT IDENTITY VIOLATED — asked git for f91c0ba6… and got bytes hashing to
+2ae5ab1b… This checkout substitutes object contents; nothing derived from it is
+evidence of anything.
+```
+
+Nothing substituted anything. The object is damaged, and the strongest
+diagnostic in the system is issued as a false accusation — the same defect
+family as the one this document exists to correct, one state over: an
+observation rendered as a claim it does not support.
+
+**Not repaired here.** This document contains no code, and the repair belongs to
+the implementation branch under §4.1's success-before-identity ordering. It is
+recorded because the contradiction that produced it was not hypothetical, and
+because a preregistration that quietly dropped an inconvenient discovery would
+be worth less than no preregistration at all.
+
 ## 3. What the consumer actually needs
 
 §8.5's consumer does not need to know *why* an object could not be obtained. It
@@ -96,18 +121,82 @@ coarser representation of the existing rule, rather than a projection loss.
 
 Three states. Classification is by **mechanical observation only**.
 
+### 4.1 What counts as "supplied bytes"
+
+**A response counts only if the command that produced it completed
+successfully.** Mechanically: every git invocation in the lookup exits zero.
+Output written by a command that then failed is **not** a response — it is
+debris, and it is discarded unread rather than hashed.
+
+This is not a technicality; the first draft of this document omitted it and was
+thereby unimplementable. Review demonstrated the case: against a loose object
+truncated in its body but intact in its header,
+
 ```text
-git supplied kind + bytes
+cat-file -t <oid>      ->  "blob"   exit 0
+cat-file blob <oid>    ->           exit 128, after writing 163840 bytes to stdout
+```
+
+Those 163840 bytes necessarily hash to something other than the requested oid,
+so a rule that says *bytes were supplied and the hash differs* classifies a
+damaged object as `IDENTITY_VIOLATION` — while §7's witness 3 requires
+`LOOKUP_UNOBTAINABLE`. Both sections were frozen and they could not both be
+satisfied.
+
+The rule is therefore **success first, identity second**. Damage must not be
+able to manufacture an accusation of substitution, and that ordering is what
+prevents it.
+
+### 4.2 The states
+
+```text
+every git invocation exited zero
+  AND kind and bytes were obtained
   AND recomputed object id == requested oid
       -> RESOLVED(kind, bytes)
 
-git supplied bytes
+every git invocation exited zero
+  AND bytes were obtained
   AND recomputed object id != requested oid
       -> IDENTITY_VIOLATION
 
-no trustworthy kind+bytes result obtained
+anything else
       -> LOOKUP_UNOBTAINABLE
 ```
+
+### 4.3 Prerequisites for `RESOLVED` (FROZEN)
+
+Hash equality alone does **not** establish the property §3 asks for. Two
+mechanisms already recorded in the envelope document produce hash-matching bytes
+while violating it: an unguarded `cat-file` in a promisor clone fetches the
+object **over the network** and then returns bytes that hash correctly; and a
+caller-selected counterfeit `git` returns the genuine published bytes for a
+repository that does not exist. Both would satisfy a bare identity predicate.
+
+`RESOLVED` may therefore be reported **only** when the observation was produced
+under all of:
+
+```text
+trusted executable       git resolved from pinned absolute candidates,
+                         never from an inherited PATH            (#143)
+constructed environment  no ambient variable reaches the child   (#141, #143)
+no lazy fetch            GIT_NO_LAZY_FETCH, no network access    (#141)
+pinned config scopes     system and global git configuration
+                         closed; the repository's own config
+                         is the only scope read                  (#143)
+no object substitution   GIT_NO_REPLACE_OBJECTS, plus the
+                         object-id postcondition below           (#141)
+```
+
+These are already-merged properties, not new work. Naming them here binds this
+contract to them, so that a future implementation cannot satisfy the letter of
+§4.2 while answering a weaker question than §3 asks. **This does not choose the
+git command** — that stays out of scope per §10. It forbids `RESOLVED` from
+floating free of the guarantees that make it mean anything.
+
+If any prerequisite cannot be established for a given lookup, the outcome is
+`LOOKUP_UNOBTAINABLE`: no trustworthy result was obtained, which is exactly what
+that state says.
 
 **The cause of a non-zero exit is not classified.** No branch of this rule reads
 `stderr`, matches on a message, or consults an exit code beyond
@@ -182,7 +271,12 @@ Listed here so the implementation cannot choose the experiments that suit it.
 2. **A well-formed OID this checkout does not supply** → `LOOKUP_UNOBTAINABLE`,
    and the emitted text contains no claim of absence.
 3. **An object entry that exists but yields no trustworthy object** — a
-   deliberately damaged loose object → also `LOOKUP_UNOBTAINABLE`.
+   deliberately damaged loose object → also `LOOKUP_UNOBTAINABLE`, and
+   specifically **not** `IDENTITY_VIOLATION`. The construction must be the hard
+   one: a body truncated behind an intact header, so that `cat-file -t`
+   succeeds and the content command fails *after emitting a partial prefix*. A
+   damaged object whose header is also destroyed exercises nothing, because
+   both commands fail immediately and no debris is produced to misclassify.
 4. **Substituted bytes** (replace-style identity violation) →
    `IDENTITY_VIOLATION`, existing postcondition intact.
 5. **A non-blob object that resolves** → `RESOLVED(kind, bytes)`; the *locator*
@@ -190,6 +284,11 @@ Listed here so the implementation cannot choose the experiments that suit it.
 6. **No witness may use `stderr` text as a semantic discriminator.** A witness
    that distinguishes states by matching git's prose is testing git's release
    notes.
+
+7. **A `RESOLVED` result must fail to be reported when any §4.3 prerequisite is
+   absent** — the promisor-fetch and counterfeit-executable constructions
+   already carried by the merged corpus, re-read as resolver-state witnesses
+   rather than as environment witnesses.
 
 **Witness 3 is the load-bearing one.** It mechanically refutes the implication
 
