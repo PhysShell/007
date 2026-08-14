@@ -284,11 +284,55 @@ verified about this repository and toolchain:
 
 That asymmetry is recorded because it was found by checking rather than by
 assuming, and because it is the kind of thing that reads as settled once nobody
-writes it down. It is **not repaired here** — this document contains no code,
-and whether the postcondition should hash the way git hashes belongs to the
-implementation branch. What the contract owes is honesty about the conditional:
-every claim below that substitution "cannot" escape the identity check means
-*cannot, under the premise above*.
+writes it down. Whether the postcondition should hash the way git hashes belongs
+to the implementation branch; this document contains no code.
+
+### 4.3.2 The premise is needed for one state, not both
+
+A declared premise is weaker than this repository's admissibility rule requires,
+which asks for an explicit **checked** one — and the premise above is not
+checkable here: `git rev-parse --show-object-format` identifies the algorithm, it
+does not establish collision resistance, and demonstrating the known SHA-1
+attack needs collision material this environment does not have.
+
+The way out is not to weaken the rule, and not to reclassify the replacement
+guard wholesale. It is to notice that the two byte-derived states lean on
+**different properties of the same check**:
+
+```text
+SOUNDNESS      if the postcondition reports a mismatch, a mismatch is real.
+               Needs NO premise: a detection is a positive observation.
+               -> IDENTITY_VIOLATION rests on this
+
+COMPLETENESS   if the postcondition reports no mismatch, there is none.
+               True only if colliding byte sequences do not exist.
+               -> RESOLVED rests on this
+```
+
+So the replacement guard is a **prerequisite for `RESOLVED` only**:
+
+```text
+guard present, hash matches      -> RESOLVED
+guard absent,  hash matches      -> LOOKUP_UNOBTAINABLE
+                                    a colliding substitution cannot be ruled
+                                    out, and the premise that would rule it
+                                    out is unchecked
+guard absent,  hash differs      -> IDENTITY_VIOLATION
+                                    the mismatch was observed; soundness needs
+                                    no premise
+guard present, hash differs      -> IDENTITY_VIOLATION
+```
+
+Witness 4 stands unchanged: it removes the guard and requires
+`IDENTITY_VIOLATION` for a substitution the check **detects**. Corpus case 3t,
+which asserts that the abort survives removing the guard, remains consistent —
+it exercises the detected case.
+
+`RESOLVED` still rests on completeness in general, since content addressing does.
+What the guard removes is the channel by which an attacker could aim a collision
+at a specific citation. Without it the premise would have to hold against a
+**deliberate** collision rather than an accidental one, which is a far stronger
+assumption than the one this contract is willing to leave unchecked.
 
 This is the organising rule behind both §4.3 and §4.4, and it should have been
 stated before either list. Deriving from the question told me *what* to require;
@@ -534,6 +578,12 @@ Listed here so the implementation cannot choose the experiments that suit it.
 6. **No witness may use `stderr` text as a semantic discriminator.** A witness
    that distinguishes states by matching git's prose is testing git's release
    notes.
+
+7ter. **With the replacement guard absent and the object id MATCHING, the
+   outcome is `LOOKUP_UNOBTAINABLE`, not `RESOLVED`** — the complement of
+   witness 4, which covers the same guard-off condition when the check *does*
+   fire. Together they establish that removing the guard costs the positive
+   claim while preserving the accusation, which is what §4.3.2 asserts.
 
 7bis. **A lookup that engages filter or conversion machinery must not report
    `RESOLVED`** — a repository-defined smudge filter that passes bytes through
