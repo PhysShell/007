@@ -250,8 +250,8 @@ PREREQUISITE   the interference can leave the object id MATCHING, so
                - lazy fetch               (correct bytes, from the network)
                - smudge/textconv filters  (pass-through leaves bytes identical)
 
-GUARD          the interference necessarily changes the bytes, so recomputing
-               the object id DOES reveal it
+GUARD          the interference changes the bytes, so recomputing the object
+               id reveals it — UNDER THE PREMISE BELOW
                - refs/replace substitution (substitute bytes, different hash)
 ```
 
@@ -259,6 +259,36 @@ A prerequisite is required precisely where the postcondition is blind. Where the
 postcondition can see, a guard is defence in depth and its failure is a finding
 rather than a disqualification — which is what witness 4 exercises, and what
 corpus case 3t already asserts.
+
+**This criterion rests on a premise, and the premise is stated rather than
+assumed.** "The bytes necessarily change, so recomputing the object id reveals
+it" is not a mechanical fact; it holds only if the object-id algorithm is
+collision resistant. Two distinct byte sequences sharing an id would let a
+replace ref substitute content that hashes correctly, and the postcondition —
+the thing this whole classification leans on — would see nothing.
+
+```text
+PREMISE (declared, not proved here)
+    the repository's object-id algorithm is collision resistant for the
+    substitutions this contract classifies
+
+verified about this repository and toolchain:
+    object format          sha1        (git rev-parse --show-object-format)
+    postcondition digest   Python hashlib.sha1 — PLAIN SHA-1, no collision
+                           detection  (a1_v2_extract_graph.py:242)
+    git's own backend      not established here; git may hash with a
+                           collision-detecting variant, and if it does, the
+                           postcondition is strictly weaker than the tool it
+                           is checking
+```
+
+That asymmetry is recorded because it was found by checking rather than by
+assuming, and because it is the kind of thing that reads as settled once nobody
+writes it down. It is **not repaired here** — this document contains no code,
+and whether the postcondition should hash the way git hashes belongs to the
+implementation branch. What the contract owes is honesty about the conditional:
+every claim below that substitution "cannot" escape the identity check means
+*cannot, under the premise above*.
 
 This is the organising rule behind both §4.3 and §4.4, and it should have been
 stated before either list. Deriving from the question told me *what* to require;
@@ -471,8 +501,8 @@ applied one floor down.
 
 `IDENTITY_VIOLATION` preserves the existing family-level postcondition
 (recompute the object id; whatever substitutes the bytes, the substitute does
-not hash to the name). This preregistration does not weaken it and does not
-propose to.
+not hash to the name — under §4.3.1's declared collision-resistance premise).
+This preregistration does not weaken it and does not propose to.
 
 **`MALFORMED_LOCATOR` stays one floor up.** A resolver that successfully
 supplies a *commit* where a blob was cited has done its job perfectly: it
