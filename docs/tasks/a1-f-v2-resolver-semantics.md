@@ -150,11 +150,15 @@ prevents it.
 ### 4.2 The states
 
 Every branch below presupposes §4.3. Where its prerequisites do not hold, the
-classification is not entered at all.
+classification is not entered at all. The `RESOLVED` branch additionally
+requires the replacement guard, for the reason §4.3.2 gives: that state rests on
+the postcondition being **complete**, and the guard is what keeps an unchecked
+collision premise from having to hold against a deliberate attack.
 
 ```text
 every git invocation exited zero
   AND kind and bytes were obtained
+  AND the replacement guard was in effect            (§4.3.2)
   AND recomputed object id == requested oid
       -> RESOLVED(kind, bytes)
 
@@ -162,10 +166,18 @@ every git invocation exited zero
   AND bytes were obtained
   AND recomputed object id != requested oid
       -> IDENTITY_VIOLATION
+         (no guard condition: this branch rests on SOUNDNESS, and a
+          detected mismatch is a positive observation)
 
 anything else
       -> LOOKUP_UNOBTAINABLE
 ```
+
+This table is the single normative statement of the classification. §4.3.2's
+four-line grid is an exposition of the same rule, not a second one — an earlier
+revision left the two disagreeing about the guard-absent matching case, which is
+how the pattern of this document's defects usually presents: a repair made in
+one section and not propagated to the other place that states the same thing.
 
 ### 4.3 Prerequisites for ANY byte-derived state (FROZEN)
 
@@ -559,7 +571,8 @@ lawyer back inside the resolver, which §2.5.1 exists to prevent.
 Required before the contract can be called satisfied by any implementation.
 Listed here so the implementation cannot choose the experiments that suit it.
 
-1. **A healthy, present blob** → `RESOLVED`, with bytes hashing to the request.
+1. **A healthy, present blob**, with every §4.3 prerequisite and the
+   replacement guard in effect → `RESOLVED`, with bytes hashing to the request.
 2. **A well-formed OID this checkout does not supply** → `LOOKUP_UNOBTAINABLE`,
    and the emitted text contains no claim of absence.
 3. **An object entry that exists but yields no trustworthy object** — a
