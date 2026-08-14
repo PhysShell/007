@@ -65,12 +65,16 @@ Current authoritative state:
   Normative source: `docs/tasks/a1-f-v2-phase-g.md`; ledger
   `docs/tasks/a1-f-v2-convergence.md`. Adjudicated contract-first against blob
   `3b26849`, the authority at that time (post-S1; the S1 graph delta was
-  *proved* NONE, not taken from S1's own summary). S2 has since superseded that
-  blob and Phase G has **not** been re-adjudicated against `B2`: S2 changes an
-  admission rule and touches no kind, rank, edge or payload variant, so a graph
-  delta is not expected — but "not expected" is not "proved NONE", which is the
-  standard Phase G held itself to for S1. Recorded as owed, not as done. The
-  frozen result: a **semantic edge
+  *proved* NONE by re-running five derivations, not taken from S1's own
+  summary). S2 has since superseded that blob, and the `B1 -> B2` graph delta is
+  likewise **proved NONE** — by input identity rather than by a second re-run:
+  the diff touches Status, FD-1.3, §5.4, one acceptance-ledger line and the new
+  §9 record, and every section the five derivations read is byte-identical, so
+  37/5/11/11/11 stand unchanged. Phase G is *not* re-adjudicated against `B2`;
+  its anchor remains `B1` and what is established is the narrower claim that its
+  graph conclusions remain current. One non-graph consequence **is** outstanding:
+  the convergence ledger's §4.1 extracts §5.4 row by row, and S2 added two rows
+  there, so that inventory is two short of `B2`. The frozen result: a **semantic edge
   registry of 69 exact edges** — 56 `Intra` / 13 `Causal`, exact source and
   target kinds, discriminated by event kind and payload variant — over a
   **47-node typed universe**, acyclicity machine-checked (Kahn 47/47 over 26

@@ -50,13 +50,15 @@ current_v1_authority:
   adjudicated_against: 3b26849cc39a3391aaed46cca56be3b6715afabb (head 9b42aa5)
               — B1, the blob every derivation below was closed against. Kept as
               the anchor; this document is not re-adjudicated by editing a field
-  s1_graph_delta: NONE — proved mechanically, see below
-  s2_graph_delta: NOT RE-RUN — S2 (FD-1.3, member-name uniqueness) changes an
-              admission rule and moves no kind, rank, edge or payload variant,
-              so a delta is not expected. P1-25 below is the record of what
-              happens when an authority input goes stale beneath a closed
-              argument, so the honest entry here is the unproved one rather
-              than a second NONE borrowed from the first.
+  s1_graph_delta: NONE — proved mechanically by re-running the five
+              graph-sensitive derivations against B1 (G-R10, §0)
+  s2_graph_delta: NONE — proved mechanically by INPUT IDENTITY, not by a re-run.
+              The B1 -> B2 diff touches five regions and no other: Status,
+              FD-1.3, §5.4, one acceptance-ledger line, and the new §9 S2
+              record. Every section the five derivations read is byte-identical
+              between the two blobs, so a deterministic derivation over them
+              returns what it returned before — 37 / 5 / 11 / 11 / 11 stand
+              unchanged. See "S2 graph delta" below for the check itself.
 
 design_input:
   commit:      37502e3ce5c397a7437445aafb88c13d84ba4ac0
@@ -181,11 +183,77 @@ all five derivations byte-identical:  True
 ```
 
 So **S1 graph delta = NONE**, and the 41/32/9 inventory, the 69-row registry,
-56/13, 47 typed nodes, 26 `Intra` typed→typed and Kahn 47/47 all stand against
-current authority. Nine rounds are *not* rewritten as though they had happened
-against S1 — they happened against `7db92f1b`, both anchors are recorded, and
-the delta between them is proved empty. That is the honest shape, and it is
-cheaper than the alternative.
+56/13, 47 typed nodes, 26 `Intra` typed→typed and Kahn 47/47 all stand. Nine
+rounds are *not* rewritten as though they had happened against S1 — they
+happened against `7db92f1b`, both anchors are recorded, and the delta between
+them is proved empty. That is the honest shape, and it is cheaper than the
+alternative.
+
+**S2 graph delta, proved by input identity rather than by a re-run.** A1-F was
+superseded a second time by **S2** (FD-1.3, member-name uniqueness), so the same
+question arrives again: `3b26849c` → `e22539dd`.
+
+The extraction commands behind the table above are not preserved in the
+repository. Rebuilding an approximately-equivalent extractor today and calling
+the result a repetition of that measurement would be *weaker* than the original,
+not equal to it: the number would carry the authority of a script nobody can
+compare against the one that produced 37/5/11/11/11. A different check is
+available and is strictly stronger, because it needs no script at all.
+
+A derivation is a function of the bytes it reads. If those bytes are unchanged,
+its output is unchanged — no re-run can say more than that, and a re-run with an
+unverifiable extractor says less. So the check is on the inputs:
+
+```text
+B1  3b26849cc39a3391aaed46cca56be3b6715afabb
+B2  e22539ddf4f7c9ab260e16835eef8ef18abbe726
+
+complete change set, by section digest over all 66 sections:
+  ## Status                              rewritten (superseded twice)
+  FD-1.3                                 the member-name uniqueness rule
+  ### 5.4 Required negative tests        two rows added
+  ### Acceptance                         one line: "superseded  S2 — FD-1.3 only"
+  ### S2 — …duplicate member names       new §9 record
+  every other section                    byte-identical
+
+the five derivation inputs:
+                                        B1 vs B2
+  §3.0–§3.15.3 schema tables (21 sections)   identical
+  FD-1.9 message kinds                       identical
+  §3.15.1 event source_ref mappings          identical
+  §3.15.2 event payload schemas              identical
+  (FD-1.1–FD-1.9 compared individually;
+   FD-1.3 is the only one that moved)
+
+therefore, for any deterministic derivation over those inputs:
+                                        B1     B2
+  direct ArtifactRef schema rows          37     37
+  cross-schema type references             5      5
+  FD-1.9 message kinds                    11     11
+  §3.15.1 event source_ref mappings       11     11
+  §3.15.2 payload schemas                 11     11
+```
+
+Re-checkable without trusting this paragraph: extract both blobs with
+`git cat-file blob <sha> > B{1,2}.md`, split each on `^#{1,6} ` and on
+`^\*\*FD-1\.\d`, and compare per-part digests.
+
+So **S2 graph delta = NONE**, on the same standard S1 was held to and by a
+sharper instrument. What must not be read into it: Phase G is **not**
+re-adjudicated against `B2`. It was argued against `B1`, that anchor stands
+unedited, and what this establishes is the narrower and sufficient claim that
+its graph conclusions remain current under `B2`.
+
+The procedure recorded above for the next supersede is *authority diff →
+enumerate changed normative regions → enumerate live dependencies on those
+regions → re-evaluate exactly those*, and its last step is not discharged by the
+graph result. Running it for S2: the changed normative regions are **FD-1.3**
+and **§5.4**. Phase G's own live dependency on either is nil — §6's dependency
+was on FD-1.4, and nothing here reads the null policy or the negative-test
+matrix. The convergence ledger's is not: its §4.1 is a row-by-row extraction of
+§5.4 and is now two rows short of `B2`. Recorded there rather than fixed here,
+and recorded at all because "the graph is unaffected" and "nothing is affected"
+are different claims, and the second one is false.
 
 One thing S1 did decide that touches this document without touching the graph:
 FD-1.4 now gives `InteractionManifestV1` the 64 MiB evidence bound rather than

@@ -38,20 +38,35 @@ current_v1_authority:
   sha256:         2de682894cd2084444b5d7d6c5db8807a80f08a3d41541e9c00caf92462d1e1a
   superseded:     B1 3b26849cc39a3391aaed46cca56be3b6715afabb (head 9b42aa5)
                   by S2 — FD-1.3 only: member names unique within every A1 JSON
-                  object. S2 changes an admission rule and touches no kind,
-                  rank, edge or payload variant, so no graph delta is expected —
-                  but unlike S1 that has NOT been re-run and proved, and this
-                  field will not claim it was
+                  object
   adjudicated_against: 3b26849c — every row below was checked against THAT blob,
                   and that anchor is not rewritten to match a later one (below)
   graph_delta_S1: NONE — five graph-sensitive derivations re-run against
                   3b26849c are byte-identical to the incorporation snapshot
                   (Phase G §0). Proved, not assumed.
-  graph_delta_S2: NOT RE-RUN. The inventory below therefore stands against B1
-                  with a proof, and against B2 with an argument. Naming the two
-                  differently is the point: S1's delta was proved *because*
-                  Phase G refused to take it from S1's own summary, and reusing
-                  that word here would spend the proof on a check nobody ran.
+  graph_delta_S2: NONE — proved by input identity rather than by a re-run.
+                  B1 -> B2 changes Status, FD-1.3, §5.4, one acceptance-ledger
+                  line and the new §9 record, and nothing else across 66
+                  sections; every section the five derivations read is
+                  byte-identical, FD-1.9 and §3.15.1/§3.15.2 included. A
+                  deterministic derivation over unchanged bytes returns
+                  unchanged output, so 37/5/11/11/11 stand. Deliberately not a
+                  re-run: the original extractor is not preserved, and a
+                  rebuilt one would carry less authority than the check it
+                  claimed to repeat. See a1-f-v2-phase-g.md, "S2 graph delta".
+  s2_non_graph_dependency: §4.1 IS STALE, and separately from the graph.
+                  Phase G's recorded procedure for a supersede is "authority
+                  diff -> enumerate changed normative regions -> enumerate live
+                  dependencies on those regions -> re-evaluate exactly those".
+                  §5.4 is a changed region and §4.1 below is a row-by-row
+                  extraction of it, so the 141 V1-N rows are two short of B2:
+                  the plain duplicate-member row and the shadowed-null row.
+                  The "rows citing each decision" tally reads FD-1.3 = 1 and
+                  would read 3. Not filled in here — the disposition columns
+                  are v2 drafting work this document says is owed, and a closed
+                  adjudication should not grow rows by side effect. Recorded so
+                  that "S2 graph delta = NONE" is not read as "S2 touched
+                  nothing here", which is a different and false claim.
 
 prototype_design_input:
   reviewed_commit: 37502e3ce5c397a7437445aafb88c13d84ba4ac0
@@ -69,9 +84,10 @@ The blob digest was verified against git, not transcribed:
 `7db92f1b3dc9d7040da074956a0b3f2f200174c8`. Every inventory row below was
 extracted from **that blob** by script, not retyped. A1-F has since been
 superseded twice — by S1 and then by S2 — and the current authoritative blob is
-`e22539dd`. The `B0 -> B1` delta was *proved* graph-empty rather than assumed
-(Phase G §0); the `B1 -> B2` delta has not been re-run, and is argued from S2
-touching no kind, rank, edge or payload variant. All three anchors are kept,
+`e22539dd`. The `B0 -> B1` delta was *proved* graph-empty by re-running the five
+derivations (Phase G §0); the `B1 -> B2` delta is proved graph-empty by input
+identity — every section those derivations read is byte-identical across the two
+blobs. Both are proofs; only the instrument differs. All three anchors are kept,
 because rewriting an inventory's provenance to match a later snapshot is how a
 document stops being able to say what it was actually checked against.
 
