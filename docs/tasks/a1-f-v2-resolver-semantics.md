@@ -225,12 +225,45 @@ that sentence carries a requirement.
                          the lookup is able to invoke
 
 "inside the accepted     the repository under examination is the SUBJECT of
- trust boundary"         the inquiry, so nothing it controls may execute or
-                         transform anything during the inquiry
+ trust boundary"         the inquiry, so nothing it controls may select a
+                         program to run, or transform the response in a way
+                         the identity check cannot detect
 ```
 
-The last two overlap for a reason that only became visible under review, and it
-is the reason this derivation exists at all.
+### 4.3.1 What decides prerequisite from guard
+
+The trust-boundary clause is narrow on purpose, and the first version of it was
+not. It said *nothing the repository controls may execute or transform anything*
+— which swallows `refs/replace`, since a replace ref is repository-controlled
+and does substitute the bytes returned for a name. §4.4 designates exactly that
+case a **guard** failure, classified by the identity postcondition, and §7's
+witness 4 requires it to yield `IDENTITY_VIOLATION`. A blanket clause made those
+unsatisfiable — the same contradiction as finding 4, reintroduced by a broader
+rule while repairing something else.
+
+The criterion that separates them is **what the postcondition can detect**:
+
+```text
+PREREQUISITE   the interference can leave the object id MATCHING, so
+               recomputing it cannot reveal the interference
+               - counterfeit executable   (genuine bytes, correct hash)
+               - lazy fetch               (correct bytes, from the network)
+               - smudge/textconv filters  (pass-through leaves bytes identical)
+
+GUARD          the interference necessarily changes the bytes, so recomputing
+               the object id DOES reveal it
+               - refs/replace substitution (substitute bytes, different hash)
+```
+
+A prerequisite is required precisely where the postcondition is blind. Where the
+postcondition can see, a guard is defence in depth and its failure is a finding
+rather than a disqualification — which is what witness 4 exercises, and what
+corpus case 3t already asserts.
+
+This is the organising rule behind both §4.3 and §4.4, and it should have been
+stated before either list. Deriving from the question told me *what* to require;
+it did not tell me which requirements the identity check already covers, and
+that omission is what let a broader clause re-swallow the guard case.
 
 **Repository configuration can execute programs, and an earlier draft said it
 could not matter.** That draft argued the repository's own `local` and
@@ -265,19 +298,44 @@ scope; whether the read is raw at all is in scope, and is this requirement.
 not as definition, so a future change can be checked against the requirement
 rather than against a description of its predecessor:
 
+All rows below are in `tools/a1_v2_extract_graph.py`, function `_local_object`
+and the module constants above it, as of `e70d019`. Each names the revision that
+introduced the property, so a later reader can re-check the predecessor rather
+than trust this summary of it:
+
 ```text
-"I"                pinned absolute GIT_CANDIDATES; constructed child
-                   environment with GIT_ENV_ALLOW empty and PATH
-                   synthesized from the resolved binary        (#141, #143)
-exact bytes        raw `cat-file <type> <oid>`, no --filters, no
-                   --textconv; object id recomputed from the response  (#141)
-no network         GIT_NO_LAZY_FETCH=1, and no filter or conversion
-                   machinery is engaged that could invoke a program    (#141)
-trust boundary     system and global scopes closed via
-                   GIT_CONFIG_NOSYSTEM=1 and GIT_CONFIG_GLOBAL=/dev/null;
-                   exactly one command-scope key,
-                   -c safe.directory=<the repository being read>       (#143)
+"I"              GIT_CANDIDATES, pinned absolute paths, no PATH lookup
+                     034f4f2  "pin which git answers"
+                 GIT_ENV_ALLOW = (), child PATH synthesized from the
+                 resolved binary
+                     1e7a4ae  "construct git's environment, never inherit it"
+                     cdaed35  "narrow the grant to its witness"  (allowlist -> empty)
+
+exact bytes      raw `cat-file <type> <oid>` — no --filters, no --textconv
+                     51b2d6a  resolver introduced with the raw form
+                 object id recomputed from the response and compared
+                     2d372a7  "check the bytes against the name asked for"
+
+no network       GIT_NO_LAZY_FETCH=1
+                     52574e4  "enforce no-network with GIT_NO_LAZY_FETCH"
+
+trust boundary   GIT_CONFIG_NOSYSTEM=1, GIT_CONFIG_GLOBAL=/dev/null
+                     e051882  "an empty environment is not an empty git
+                               configuration"
+                 exactly one command-scope key,
+                 -c safe.directory=<the repository being read>
+                     cdaed35  "narrow the grant to its witness"
+
+guard (not a    GIT_NO_REPLACE_OBJECTS=1, whose failure the identity
+ prerequisite)   postcondition detects — see §4.3.1
+                     2d372a7  guard and postcondition added together
 ```
+
+The raw form is the oldest of these and the only one never introduced by a
+review finding. It has been correct since `51b2d6a` by accident of drafting
+rather than by decision — which is why it is written down here as a requirement
+now, and why nothing in this document treats its survival as evidence that it
+was ever load-bearing on purpose.
 
 **On that command-scope key.** `git --show-scope` reports `command` as a scope
 of its own, so an earlier draft claiming the repository's config was "the only
