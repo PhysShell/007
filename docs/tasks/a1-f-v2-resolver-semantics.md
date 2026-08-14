@@ -440,17 +440,15 @@ to the implementation branch; this document contains no code.
 
 
 
-### 4.3.2 Collision resistance is entailed by the citation scheme
+### 4.3.2 What RESOLVED actually rests on: second preimage, not collision
 
 A declared premise is weaker than this repository's admissibility rule requires,
-which asks for an explicit **checked** one — and the premise above is not
-checkable here: `git rev-parse --show-object-format` identifies the algorithm, it
-does not establish collision resistance, and demonstrating the known SHA-1
-attack needs collision material this environment does not have.
+which asks for an explicit **checked** one — and no cryptographic assumption is
+checkable inside a repository. `git rev-parse --show-object-format` identifies
+the algorithm; it establishes nothing about the algorithm's strength.
 
-The way out is not to weaken the rule, and not to reclassify the replacement
-guard wholesale. It is to notice that the two byte-derived states lean on
-**different properties of the same check**:
+Two byte-derived states lean on **different properties of the same check**, and
+only one of them needs a premise at all:
 
 ```text
 SOUNDNESS      if the postcondition reports a mismatch, a mismatch is real.
@@ -458,78 +456,103 @@ SOUNDNESS      if the postcondition reports a mismatch, a mismatch is real.
                -> IDENTITY_VIOLATION rests on this
 
 COMPLETENESS   if the postcondition reports no mismatch, there is none.
-               True only if colliding byte sequences do not exist.
+               Needs a premise about the hash.
                -> RESOLVED rests on this
 ```
 
-The soundness/completeness split above is correct and stays. What does **not**
-stay is the conclusion drawn from it in an earlier revision: that making the
-replacement guard a prerequisite for `RESOLVED` reduced the premise to accidental
-collisions. **That justification was false**, and review demonstrated it — the
-guard disables `refs/replace` and does nothing about the object database itself.
-An attacker who can write there substitutes colliding bytes directly, with no
-replace ref involved.
+**The premise was misnamed for several revisions, and naming it correctly
+resolves the dilemma it created.** An earlier draft called it collision
+resistance, then tried to discharge it by observing that §2.5.1's citation
+scheme assumes the same thing. That is not a discharge — another scheme
+depending on an assumption does not make the assumption true — and it left this
+document recording both that the algorithm is SHA-1 and that SHA-1 has a known
+attack, so a healthy present blob either failed witness 1 for want of an unmet
+premise or passed by treating an unchecked premise as true.
 
-Checking the claim produced a sharper fact, which had not been written down
-anywhere in this effort:
+`RESOLVED` does not need collision resistance. It needs the weaker property:
 
 ```text
-git cat-file DOES NOT VERIFY that the object stored at an oid's path hashes
-to that oid. Demonstrated: with the object file for A overwritten by a valid
-object for B,
+SECOND-PREIMAGE RESISTANCE, scoped to the cited oid
+    the attacker is given an EXISTING object and its id, and must produce
+    DIFFERENT bytes with that same id
 
-    cat-file blob <A>  ->  "SUBSTITUTED CONTENT ENTIRELY"
-    git fsck           ->  error: hash-path mismatch
+COLLISION RESISTANCE  (not what RESOLVED rests on)
+    the attacker chooses BOTH byte sequences freely, in advance
 ```
 
-So the identity postcondition is not defence in depth over some check git
-already performs. **It is the only thing standing between the object database
-and a false `RESOLVED`** — which is why its soundness matters so much, and why
-its completeness is worth exactly as much as the hash and no more.
+The distinction is decisive for SHA-1 in particular, because the two properties
+do not have the same status:
 
-The premise therefore cannot be discharged by any guard, and it is not this
-contract's to discharge. It is **entailed by the citation scheme** — which is a
-weaker and more accurate claim than "inherited and already accepted", and the
-difference is worth keeping because an earlier draft made the stronger one.
+```text
+collision resistance        BROKEN in practice
+                            identical-prefix (2017), chosen-prefix (2020)
+
+second-preimage resistance  no practical attack known against full SHA-1
+```
+
+A resolver is handed an oid that already exists and asked whether these bytes
+are that object. Forging that answer requires a **second preimage** — the
+property that still holds. Witness 1 is therefore satisfiable, and satisfiable
+on the property that is not broken rather than by quietly assuming the one that
+is.
+
+**Where collision resistance does bite, named rather than absorbed.** An
+adversary who *authored* an artifact before it was pinned could prepare a
+colliding pair in advance and pin the innocuous one. That is the choose-both
+case, and SHA-1 does not defend against it — but the attack is on **authorship
+and pinning**, one floor up in Phase G, not on a resolver reading an oid someone
+else already chose. This document neither defends against it nor claims to. It
+is recorded so the reader can see which threat lives at which layer, rather than
+finding a resolver silently carrying a premise belonging to another one.
+
+**What §2.5.1 says, and what this document infers, kept apart:**
 
 ```text
 WHAT THE SOURCE SAYS
   docs/tasks/a1-f-v2-envelope.md §2.5.1, introduced 51b2d6a:
       blob:  <immutable git blob oid>     # the ONLY identity
-
-  It does NOT mention collision resistance, and says nothing about
-  PINNED_BLOB.
+  It does NOT mention any hash property, and says nothing about PINNED_BLOB.
 
 WHAT THIS DOCUMENT INFERS
-  identifying an artifact solely by its hash presupposes that the hash
-  identifies it — so §2.5.1's rule cannot hold unless the algorithm is
-  collision resistant. The same reasoning applies to PINNED_BLOB
-  (tools/a1_v2_extract_graph.py), which names the authority by blob oid.
-
-  That inference is this document's. It is not a ratification recorded
-  anywhere else, and this is the first place the premise is written down.
+  identifying an existing artifact solely by its hash presupposes that a
+  second preimage cannot be produced for it. That inference is this
+  document's; it is not a ratification recorded anywhere else, and this is
+  the first place the premise is written down.
 ```
-
-Both of those rules do rest on collision resistance, but by entailment rather
-than by anyone having stated it.
-If that assumption fails, the failure is not local to this resolver — the whole
-authority-pinning apparatus fails with it, and a resolver reporting
-`LOOKUP_UNOBTAINABLE` would not save anything, because the citation would no
-longer denote.
 
 ```text
-PREMISE (entailed by the citation scheme; first written down here,
-         not ratified elsewhere, and not dischargeable at this layer)
-    the object-id algorithm is collision resistant
+PREMISE for RESOLVED (named here, not ratified elsewhere, not
+                      dischargeable inside a repository)
+    SECOND-PREIMAGE resistance of the object-id algorithm for the cited oid
+    -> SHA-1: no practical attack known
 
-  consequences if false:  PINNED_BLOB does not name a unique artifact
-                          `blob` is not an identity
-                          this resolver cannot be repaired into soundness
+NOT the premise, deliberately
+    collision resistance   -> SHA-1: broken in practice
+    applies to AUTHORSHIP and PINNING (Phase G), where both sequences can
+    be chosen in advance — not to a resolver handed an existing oid
+
+  if the RESOLVED premise fails:  `blob` is not an identity for an existing
+                                  object, and this resolver cannot be
+                                  repaired into soundness
 ```
 
-Recording it at this layer is therefore all this document can honestly do, and
-the replacement guard returns to being a **guard** under §4.3.1: its failure
-produces bytes that do not hash to the name, and the postcondition detects them.
+**The postcondition is the only verification in the path**, which is why its
+soundness carries so much and why its completeness is worth exactly what the
+hash is worth. Demonstrated, and not previously written down anywhere in this
+effort:
+
+```text
+git cat-file DOES NOT VERIFY that the object stored at an oid's path hashes
+to that oid. With A's object file overwritten by a valid object for B:
+
+    cat-file blob <A>  ->  "SUBSTITUTED CONTENT ENTIRELY"
+    git fsck           ->  error: hash-path mismatch
+```
+
+So the identity postcondition is not defence in depth over a check git already
+performs; it is the check. The replacement guard remains a **guard** under
+§4.3.1: its failure produces bytes that do not hash to the name, and the
+postcondition detects them.
 
 ## 5. Explicit non-claims
 
